@@ -12,14 +12,18 @@ const labels: Record<string, string> = {
   "due-payments": "Vencimientos",
   renewals: "Renovaciones",
   tasks: "Pendientes",
+  claims: "Siniestros",
   clients: "Clientes",
   policies: "Polizas",
+  quotes: "Cotizaciones",
+  insurers: "Aseguradoras",
   receipts: "Recibos",
   commissions: "Comisiones",
   documents: "Documentos",
   risks: "Riesgos",
   reports: "Reportes",
   settings: "Configuracion",
+  "data-quality": "Calidad de datos",
 };
 
 export function AppTopbar() {

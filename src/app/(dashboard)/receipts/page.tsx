@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { addDays, startOfMonth } from "date-fns";
-import { ArrowRight, CircleDollarSign, ReceiptText, ShieldAlert, BadgeCheck } from "lucide-react";
+import { ArrowRight, CircleDollarSign, Plus, ReceiptText, ShieldAlert, BadgeCheck } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
@@ -62,12 +62,20 @@ export default async function ReceiptsPage() {
           title="Receipts"
           description="Vista de recibos emitidos, cobrados y pendientes de conciliación."
           actions={
-            <Button asChild className="rounded-full">
-              <Link href="/due-payments">
-                Cobranza
-                <ArrowRight className="ml-2 size-4" />
-              </Link>
-            </Button>
+            <>
+              <Button asChild variant="outline" className="rounded-full bg-white/70">
+                <Link href="/receipts/new">
+                  <Plus className="mr-2 size-4" />
+                  Nuevo recibo
+                </Link>
+              </Button>
+              <Button asChild className="rounded-full">
+                <Link href="/due-payments">
+                  Cobranza
+                  <ArrowRight className="ml-2 size-4" />
+                </Link>
+              </Button>
+            </>
           }
         />
 

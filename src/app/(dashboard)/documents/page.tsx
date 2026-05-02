@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, FileDigit, FolderOpen, Link2, ShieldAlert } from "lucide-react";
+import { ArrowRight, FileDigit, FolderOpen, Link2, ShieldAlert, Download } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
+import { UploadForm } from "@/components/documents/upload-form";
 
 function associationLabel(document: {
   policy?: { policyNumber: string } | null;
@@ -109,7 +110,19 @@ export default async function DocumentsPage() {
               <TableBody>
                 {documents.slice(0, 10).map((document) => (
                   <TableRow key={document.id}>
-                    <TableCell className="font-medium">{document.fileName}</TableCell>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2">
+                        <span>{document.fileName}</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => window.open(`/api/documents/${document.id}/download`, '_blank')}
+                          className="h-6 w-6 p-0"
+                        >
+                          <Download className="size-3" />
+                        </Button>
+                      </div>
+                    </TableCell>
                     <TableCell>{document.documentType}</TableCell>
                     <TableCell>
                       <div className="flex flex-col">
@@ -173,6 +186,18 @@ export default async function DocumentsPage() {
               ))}
             </TableBody>
           </Table>
+        </SectionCard>
+
+        <SectionCard title="Subir Documento" description="Agrega nuevos archivos al sistema.">
+          <UploadForm 
+            onSuccess={(document) => {
+              // Refresh the page to show the new document
+              window.location.reload();
+            }}
+            onError={(error) => {
+              console.error('Upload failed:', error);
+            }}
+          />
         </SectionCard>
       </div>
     </main>

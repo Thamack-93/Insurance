@@ -3,6 +3,7 @@ import { BarChart3, ArrowRight, CalendarClock, CircleDollarSign, ShieldAlert, Cl
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { Button } from "@/components/ui/button";
+import { ExportButtons } from "@/components/reports/export-buttons";
 import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
 
@@ -20,14 +21,62 @@ export default async function ReportsPage() {
   const in60 = new Date(now);
   in60.setDate(in60.getDate() + 60);
 
-  const [activePolicies, dueReceipts, renewalsSoon, openTasks, risks, paidCommissions] = await Promise.all([
+  const [
+    activePolicies,
+    dueReceipts,
+    renewalsSoon,
+    openTasks,
+    risks,
+    paidCommissions,
+    clientsData,
+    policiesData,
+    receiptsData,
+    tasksData,
+  ] = await Promise.all([
     db.policy.count({ where: { status: "ACTIVE" } }),
     db.receipt.count({ where: { dueDate: { gte: now, lte: in60 }, status: { notIn: ["PAID", "CANCELLED"] } } }),
     db.policy.count({ where: { status: "ACTIVE", renewalDate: { gte: now, lte: in60 } } }),
     db.task.count({ where: { status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] } } }),
     db.alert.count({ where: { status: "OPEN" } }),
     db.commission.count({ where: { status: "PAID" } }),
+    db.client.findMany({
+      select: { id: true, fullName: true, email: true, phone: true, type: true, status: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+      take: 1000,
+    }),
+    db.policy.findMany({
+      select: {
+        id: true,
+        policyNumber: true,
+        policyType: true,
+        status: true,
+        premiumAmount: true,
+        currency: true,
+        startDate: true,
+        endDate: true,
+        renewalDate: true,
+      },
+      orderBy: { createdAt: "desc" },
+      take: 1000,
+    }),
+    db.receipt.findMany({
+      select: { id: true, receiptNumber: true, status: true, amount: true, currency: true, dueDate: true, paidDate: true },
+      orderBy: { dueDate: "desc" },
+      take: 1000,
+    }),
+    db.task.findMany({
+      select: { id: true, folio: true, title: true, taskType: true, status: true, priority: true, dueDate: true },
+      orderBy: { createdAt: "desc" },
+      take: 1000,
+    }),
   ]);
+
+  const exportData = [
+    { name: "Clientes", data: clientsData },
+    { name: "Polizas", data: policiesData },
+    { name: "Recibos", data: receiptsData },
+    { name: "Tareas", data: tasksData },
+  ];
 
   const reportCards: ReportCard[] = [
     {
@@ -82,12 +131,15 @@ export default async function ReportsPage() {
           title="Reports"
           description="Centro temprano de lectura ejecutiva para la operación, la cobranza y la calidad."
           actions={
-            <Button asChild className="rounded-full">
-              <Link href="/settings">
-                Ajustes
-                <ArrowRight className="ml-2 size-4" />
-              </Link>
-            </Button>
+            <>
+              <ExportButtons exports={exportData} />
+              <Button asChild className="rounded-full">
+                <Link href="/settings">
+                  Ajustes
+                  <ArrowRight className="ml-2 size-4" />
+                </Link>
+              </Button>
+            </>
           }
         />
 

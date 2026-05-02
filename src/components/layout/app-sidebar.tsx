@@ -4,8 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   AlertTriangle,
+  BadgeCheck,
   BarChart3,
   BriefcaseBusiness,
+  Building2,
+  Calculator,
   CalendarClock,
   CheckSquare,
   CircleDollarSign,
@@ -28,13 +31,17 @@ const navigation = [
   { label: "Vencimientos", href: "/due-payments", icon: CalendarClock },
   { label: "Renovaciones", href: "/renewals", icon: ShieldCheck },
   { label: "Pendientes", href: "/tasks", icon: CheckSquare },
+  { label: "Siniestros", href: "/claims", icon: AlertTriangle },
   { label: "Clientes", href: "/clients", icon: Users },
   { label: "Polizas", href: "/policies", icon: FolderKanban },
+  { label: "Cotizaciones", href: "/quotes", icon: Calculator },
+  { label: "Aseguradoras", href: "/insurers", icon: Building2 },
   { label: "Recibos", href: "/receipts", icon: ReceiptText },
   { label: "Comisiones", href: "/commissions", icon: CircleDollarSign },
   { label: "Documentos", href: "/documents", icon: FileText },
   { label: "Riesgos", href: "/risks", icon: AlertTriangle },
   { label: "Reportes", href: "/reports", icon: BarChart3 },
+  { label: "Calidad", href: "/data-quality", icon: BadgeCheck },
   { label: "Configuracion", href: "/settings", icon: Settings },
 ];
 

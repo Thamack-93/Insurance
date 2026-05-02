@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppTopbar } from "@/components/layout/app-topbar";
+import { CommandPaletteWrapper } from "@/components/command/command-palette-wrapper";
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
@@ -12,6 +13,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           <main className="mx-auto w-full max-w-[1560px] px-5 py-8 lg:px-8">{children}</main>
         </div>
       </div>
+      <CommandPaletteWrapper />
     </div>
   );
 }

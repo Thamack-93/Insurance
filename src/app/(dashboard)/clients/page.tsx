@@ -48,12 +48,17 @@ export default async function ClientsPage() {
           title="Clientes"
           description="Mapa de clientes, exposición de cartera y actividad operativa asociada."
           actions={
-            <Button asChild className="rounded-full">
-              <Link href="/policies">
-                Ver pólizas
-                <ArrowRight className="ml-2 size-4" />
-              </Link>
-            </Button>
+            <>
+              <Button asChild variant="outline" className="rounded-full bg-white/70">
+                <Link href="/clients/new">Nuevo cliente</Link>
+              </Button>
+              <Button asChild className="rounded-full">
+                <Link href="/policies">
+                  Ver pólizas
+                  <ArrowRight className="ml-2 size-4" />
+                </Link>
+              </Button>
+            </>
           }
         />
 

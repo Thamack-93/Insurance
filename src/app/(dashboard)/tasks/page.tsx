@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Clock3, Flame, MessageSquareWarning } from "lucide-react";
+import { ArrowRight, CheckCircle2, Clock3, Flame, MessageSquareWarning, Plus } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
@@ -75,12 +75,20 @@ export default async function TasksPage() {
           title="Tasks"
           description="Pendientes vivos, urgentes y bloqueos con cliente o aseguradora."
           actions={
-            <Button asChild className="rounded-full">
-              <Link href="/due-payments">
-                Cobranza
-                <ArrowRight className="ml-2 size-4" />
-              </Link>
-            </Button>
+            <>
+              <Button asChild variant="outline" className="rounded-full bg-white/70">
+                <Link href="/tasks/new">
+                  <Plus className="mr-2 size-4" />
+                  Nuevo pendiente
+                </Link>
+              </Button>
+              <Button asChild className="rounded-full">
+                <Link href="/due-payments">
+                  Cobranza
+                  <ArrowRight className="ml-2 size-4" />
+                </Link>
+              </Button>
+            </>
           }
         />
 
