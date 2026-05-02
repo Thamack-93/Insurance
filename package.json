@@ -16,7 +16,8 @@
     "list:renewals": "tsx scripts/list-renewals.ts",
     "list:tasks": "tsx scripts/list-open-tasks.ts",
     "export:due-payments": "tsx scripts/export-due-payments.ts",
-    "export:commissions": "tsx scripts/export-commissions.ts"
+    "export:commissions": "tsx scripts/export-commissions.ts",
+    "import:pdfs": "tsx scripts/import-pdfs.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
@@ -62,6 +63,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
+    "pdf-parse": "^2.4.5",
     "prisma": "^7.8.0",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",

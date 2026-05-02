@@ -114,12 +114,14 @@ export default async function DocumentsPage() {
                       <div className="flex items-center gap-2">
                         <span>{document.fileName}</span>
                         <Button
+                          asChild
                           variant="ghost"
                           size="sm"
-                          onClick={() => window.open(`/api/documents/${document.id}/download`, '_blank')}
                           className="h-6 w-6 p-0"
                         >
-                          <Download className="size-3" />
+                          <Link href={`/api/documents/${document.id}/download`} target="_blank">
+                            <Download className="size-3" />
+                          </Link>
                         </Button>
                       </div>
                     </TableCell>
@@ -189,15 +191,7 @@ export default async function DocumentsPage() {
         </SectionCard>
 
         <SectionCard title="Subir Documento" description="Agrega nuevos archivos al sistema.">
-          <UploadForm 
-            onSuccess={(document) => {
-              // Refresh the page to show the new document
-              window.location.reload();
-            }}
-            onError={(error) => {
-              console.error('Upload failed:', error);
-            }}
-          />
+          <UploadForm />
         </SectionCard>
       </div>
     </main>

@@ -2,6 +2,9 @@
 
 import { usePathname } from "next/navigation";
 import { Bell, CalendarDays, Command, Search } from "lucide-react";
+import { AppSidebar } from "./app-sidebar";
+import { CommandPaletteWrapper } from "@/components/command/command-palette-wrapper";
+import { SearchInput } from "@/components/search/search-input";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -45,10 +48,7 @@ export function AppTopbar() {
 
         <div className="mx-auto flex w-full max-w-2xl items-center gap-2 rounded-full border bg-white/80 px-3 py-1.5 shadow-sm">
           <Search className="size-4 text-muted-foreground" />
-          <Input
-            className="h-7 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
-            placeholder="Buscar clientes, polizas, recibos, pendientes..."
-          />
+          <SearchInput />
           <div className="hidden items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs text-muted-foreground sm:flex">
             <Command className="size-3" /> K
           </div>
@@ -64,4 +64,3 @@ export function AppTopbar() {
     </header>
   );
 }
-
