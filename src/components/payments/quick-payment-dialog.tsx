@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { CreditCard, DollarSign } from "lucide-react";
@@ -22,18 +24,17 @@ type QuickPaymentDialogProps = {
 };
 
 export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentDialogProps) {
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isPending, startTransition] = useTransition();
 
   const handleQuickPayment = async () => {
     setIsProcessing(true);
-    
     try {
       const response = await fetch("/api/payments/quick", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           receiptId: receipt.id,
           amount: receipt.amount,
@@ -42,17 +43,21 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
         }),
       });
 
-      if (response.ok) {
-        setIsOpen(false);
-        onPaymentComplete?.();
-        // Show success message
-        window.location.reload();
-      } else {
-        throw new Error("Error al procesar el pago");
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null);
+        const message = detail?.error ?? "No se pudo registrar el pago.";
+        throw new Error(message);
       }
+
+      toast.success(`Pago registrado para ${receipt.receiptNumber}.`);
+      setIsOpen(false);
+      onPaymentComplete?.();
+      startTransition(() => {
+        router.refresh();
+      });
     } catch (error) {
-      console.error("Quick payment error:", error);
-      // Show error message
+      const message = error instanceof Error ? error.message : "No se pudo registrar el pago.";
+      toast.error(message);
     } finally {
       setIsProcessing(false);
     }
@@ -74,7 +79,7 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
             Confirma el pago para el recibo {receipt.receiptNumber}
           </DialogDescription>
         </DialogHeader>
-        
+
         <div className="space-y-4">
           <div className="rounded-lg bg-stone-50 p-4">
             <div className="grid gap-3 text-sm">
@@ -104,7 +109,7 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
                 <div className="flex justify-between items-center">
                   <span className="text-lg font-semibold">Monto a pagar:</span>
                   <span className="text-lg font-bold text-green-600">
-                    {formatCurrency(receipt.amount)}
+                    {formatCurrency(receipt.amount, receipt.currency)}
                   </span>
                 </div>
               </div>
@@ -120,14 +125,16 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
           </div>
 
           <div className="flex gap-3">
-            <Button 
-              onClick={handleQuickPayment} 
-              disabled={isProcessing}
+            <Button
+              onClick={handleQuickPayment}
+              disabled={isProcessing || isPending}
               className="flex-1"
             >
-              {isProcessing ? "Procesando..." : `Pagar ${formatCurrency(receipt.amount)}`}
+              {isProcessing || isPending
+                ? "Procesando..."
+                : `Pagar ${formatCurrency(receipt.amount, receipt.currency)}`}
             </Button>
-            <Button variant="outline" onClick={() => setIsOpen(false)}>
+            <Button variant="outline" onClick={() => setIsOpen(false)} disabled={isProcessing}>
               Cancelar
             </Button>
           </div>

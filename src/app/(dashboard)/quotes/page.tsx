@@ -1,32 +1,84 @@
 import Link from "next/link";
-import { ArrowRight, Calculator, Clock, FileText, Plus, TrendingUp, CheckCircle } from "lucide-react";
+import { ArrowRight, Calculator, Clock, Plus, TrendingUp, CheckCircle } from "lucide-react";
+import type { Prisma } from "@prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { EmptyState } from "@/components/empty-states/empty-state";
+import { ListSearch } from "@/components/lists/list-search";
+import { Pagination } from "@/components/lists/pagination";
 import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 
-export default async function QuotesPage() {
+const PAGE_SIZE = 25;
+
+export default async function QuotesPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ q?: string; page?: string }>;
+}) {
+  const params = (await searchParams) ?? {};
+  const query = (params.q ?? "").trim().slice(0, 100);
+  const page = Math.max(1, Number(params.page) || 1);
+
   const db = getDb();
 
-  const quotes = await db.quote.findMany({
-    orderBy: { createdAt: "desc" },
-    include: {
-      client: true,
-      insurer: true,
-    },
-  });
+  const where: Prisma.QuoteWhereInput = query
+    ? {
+        OR: [
+          { policyType: { contains: query } },
+          { client: { fullName: { contains: query } } },
+          { insurer: { name: { contains: query } } },
+        ],
+      }
+    : {};
 
-  const activeQuotes = quotes.filter((q) => q.status !== "EXPIRED" && q.status !== "CANCELLED" && q.status !== "REJECTED");
-  const pendingQuotes = quotes.filter((q) => q.status === "REQUESTED" || q.status === "IN_PROGRESS");
-  const sentQuotes = quotes.filter((q) => q.status === "SENT");
-  const acceptedQuotes = quotes.filter((q) => q.status === "ACCEPTED");
-  const expiredQuotes = quotes.filter((q) => q.status === "EXPIRED");
+  const [
+    activeCount,
+    pendingCount,
+    sentCount,
+    acceptedCount,
+    expiredCount,
+    valueAgg,
+    filteredCount,
+    pagedQuotes,
+    pendingQuotes,
+    sentQuotes,
+  ] = await Promise.all([
+    db.quote.count({
+      where: { status: { notIn: ["EXPIRED", "CANCELLED", "REJECTED"] } },
+    }),
+    db.quote.count({ where: { status: { in: ["REQUESTED", "IN_PROGRESS"] } } }),
+    db.quote.count({ where: { status: "SENT" } }),
+    db.quote.count({ where: { status: "ACCEPTED" } }),
+    db.quote.count({ where: { status: "EXPIRED" } }),
+    db.quote.aggregate({ _sum: { quotedAmount: true } }),
+    db.quote.count({ where }),
+    db.quote.findMany({
+      where,
+      include: { client: true, insurer: true },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+    }),
+    db.quote.findMany({
+      where: { status: { in: ["REQUESTED", "IN_PROGRESS"] } },
+      include: { client: true },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    }),
+    db.quote.findMany({
+      where: { status: "SENT" },
+      include: { client: true },
+      orderBy: { sentDate: "desc" },
+      take: 5,
+    }),
+  ]);
 
-  const totalValue = quotes.reduce((sum, q) => sum + Number(q.quotedAmount ?? 0), 0);
+  const totalValue = Number(valueAgg._sum.quotedAmount ?? 0);
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
@@ -56,14 +108,14 @@ export default async function QuotesPage() {
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
             title="Activas"
-            value={activeQuotes.length}
-            description={`${pendingQuotes.length} pendientes · ${sentQuotes.length} enviadas`}
+            value={activeCount}
+            description={`${pendingCount} pendientes · ${sentCount} enviadas`}
             icon={Calculator}
             tone="blue"
           />
           <MetricCard
             title="Aceptadas"
-            value={acceptedQuotes.length}
+            value={acceptedCount}
             description="Convertidas a póliza."
             icon={CheckCircle}
             tone="emerald"
@@ -77,79 +129,117 @@ export default async function QuotesPage() {
           />
           <MetricCard
             title="Expiradas"
-            value={expiredQuotes.length}
+            value={expiredCount}
             description="Fuera de vigencia."
             icon={Clock}
             tone="rose"
           />
         </section>
 
-        <SectionCard title="Cotizaciones recientes" description="Listado completo de propuestas.">
-          {quotes.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-muted-foreground">
-              No hay cotizaciones registradas.
+        <SectionCard
+          title="Cotizaciones"
+          description="Listado completo de propuestas."
+          action={<ListSearch placeholder="Buscar por cliente, tipo o aseguradora..." />}
+        >
+          {filteredCount === 0 ? (
+            query ? (
+              <div className="p-4">
+                <EmptyState
+                  icon={Calculator}
+                  title="Sin resultados"
+                  description={`No encontramos cotizaciones que coincidan con "${query}".`}
+                />
+              </div>
+            ) : (
+              <div className="p-4">
+                <EmptyState
+                  icon={Calculator}
+                  title="Aún no hay cotizaciones"
+                  description="Captura tu primera propuesta para arrancar el embudo comercial."
+                  action="Nueva cotización"
+                  actionHref="/quotes/new"
+                />
+              </div>
+            )
+          ) : pagedQuotes.length === 0 ? (
+            <div className="p-4">
+              <EmptyState
+                icon={Calculator}
+                title="Página fuera de rango"
+                description="No hay cotizaciones en esta página. Vuelve al inicio del listado."
+                action="Volver al inicio"
+                actionHref={query ? `/quotes?q=${encodeURIComponent(query)}` : "/quotes"}
+              />
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-stone-50/70">
-                  <TableHead>Folio</TableHead>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Aseguradora</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Creada</TableHead>
-                  <TableHead className="text-right">Prima</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {quotes.slice(0, 20).map((quote) => (
-                  <TableRow key={quote.id}>
-                    <TableCell>
-                      <Link
-                        href={`/quotes/${quote.id}`}
-                        className="font-medium text-foreground hover:text-primary"
-                      >
-                        {quote.id.slice(0, 8)}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{quote.client.fullName}</TableCell>
-                    <TableCell>{quote.policyType}</TableCell>
-                    <TableCell>{quote.insurer?.name ?? "—"}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={quote.status} />
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                        <Clock className="size-3" />
-                        {formatDate(quote.createdAt)}
-                        <span className="text-xs">({daysSince(quote.createdAt)} d)</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {quote.quotedAmount ? formatCurrency(quote.quotedAmount) : "—"}
-                    </TableCell>
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-stone-50/70">
+                    <TableHead>Folio</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead>Aseguradora</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead>Creada</TableHead>
+                    <TableHead className="text-right">Prima</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-          {quotes.length > 20 && (
-            <div className="border-t border-stone-200/80 px-4 py-3 text-center text-sm text-muted-foreground">
-              Mostrando 20 de {quotes.length} cotizaciones
-            </div>
+                </TableHeader>
+                <TableBody>
+                  {pagedQuotes.map((quote) => (
+                    <TableRow key={quote.id}>
+                      <TableCell>
+                        <Link
+                          href={`/quotes/${quote.id}`}
+                          className="font-medium text-foreground hover:text-primary"
+                        >
+                          {quote.id.slice(0, 8)}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{quote.client.fullName}</TableCell>
+                      <TableCell>{quote.policyType}</TableCell>
+                      <TableCell>{quote.insurer?.name ?? "—"}</TableCell>
+                      <TableCell>
+                        <StatusBadge status={quote.status} />
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                          <Clock className="size-3" />
+                          {formatDate(quote.createdAt)}
+                          <span className="text-xs">({daysSince(quote.createdAt)} d)</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right font-medium">
+                        {quote.quotedAmount ? formatCurrency(quote.quotedAmount) : "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <Pagination
+                page={page}
+                pageSize={PAGE_SIZE}
+                total={filteredCount}
+                basePath="/quotes"
+                searchParams={{ q: query }}
+              />
+            </>
           )}
         </SectionCard>
 
         <section className="grid gap-6 xl:grid-cols-2">
           <SectionCard title="Pendientes de envío" description="Cotizaciones en preparación.">
             {pendingQuotes.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-muted-foreground">
-                No hay cotizaciones pendientes.
+              <div className="p-4">
+                <EmptyState
+                  icon={Calculator}
+                  title="Sin pendientes"
+                  description="No hay cotizaciones esperando ser enviadas."
+                />
               </div>
             ) : (
               <div className="divide-y divide-stone-200/80">
-                {pendingQuotes.slice(0, 5).map((quote) => (
+                {pendingQuotes.map((quote) => (
                   <div key={quote.id} className="flex items-center justify-between px-4 py-3">
                     <div>
                       <Link href={`/quotes/${quote.id}`} className="font-medium text-foreground hover:text-primary">
@@ -168,12 +258,16 @@ export default async function QuotesPage() {
 
           <SectionCard title="Enviadas recientemente" description="Esperando respuesta del cliente.">
             {sentQuotes.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-muted-foreground">
-                No hay cotizaciones enviadas.
+              <div className="p-4">
+                <EmptyState
+                  icon={Calculator}
+                  title="Aún sin envíos"
+                  description="Cuando envíes tu primera propuesta aparecerá aquí."
+                />
               </div>
             ) : (
               <div className="divide-y divide-stone-200/80">
-                {sentQuotes.slice(0, 5).map((quote) => (
+                {sentQuotes.map((quote) => (
                   <div key={quote.id} className="flex items-center justify-between px-4 py-3">
                     <div>
                       <Link href={`/quotes/${quote.id}`} className="font-medium text-foreground hover:text-primary">

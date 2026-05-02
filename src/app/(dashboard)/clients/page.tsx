@@ -1,44 +1,89 @@
 import Link from "next/link";
 import { ArrowRight, Building2, FileText, Users2, UserRound } from "lucide-react";
+import type { Prisma } from "@prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { EmptyState } from "@/components/empty-states/empty-state";
+import { ListSearch } from "@/components/lists/list-search";
+import { Pagination } from "@/components/lists/pagination";
 import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 
-export default async function ClientsPage() {
+const PAGE_SIZE = 25;
+
+export default async function ClientsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ q?: string; page?: string }>;
+}) {
+  const params = (await searchParams) ?? {};
+  const query = (params.q ?? "").trim().slice(0, 100);
+  const page = Math.max(1, Number(params.page) || 1);
+
   const db = getDb();
 
-  const clients = await db.client.findMany({
-    include: {
-      policies: { select: { premiumAmount: true, status: true } },
-      receipts: { select: { status: true } },
-      tasks: { select: { status: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  const where: Prisma.ClientWhereInput = query
+    ? {
+        OR: [
+          { fullName: { contains: query } },
+          { email: { contains: query } },
+          { phone: { contains: query } },
+          { rfc: { contains: query } },
+        ],
+      }
+    : {};
 
-  const activeClients = clients.filter((client) => client.status === "ACTIVE");
-  const companies = clients.filter((client) => client.type === "COMPANY");
-  const topByPortfolio = clients
+  const [
+    activeCount,
+    companiesCount,
+    noPolicyCount,
+    totalCount,
+    filteredCount,
+    pagedClients,
+    topPortfolio,
+  ] = await Promise.all([
+    db.client.count({ where: { status: "ACTIVE" } }),
+    db.client.count({ where: { type: "COMPANY" } }),
+    db.client.count({ where: { policies: { none: {} } } }),
+    db.client.count(),
+    db.client.count({ where }),
+    db.client.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      include: {
+        _count: { select: { policies: true, receipts: true, tasks: true } },
+      },
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+    }),
+    db.client.findMany({
+      where: { status: "ACTIVE" },
+      include: {
+        policies: { where: { status: "ACTIVE" }, select: { premiumAmount: true } },
+      },
+      take: 50,
+    }),
+  ]);
+
+  const topByPortfolio = topPortfolio
     .map((client) => ({
-      ...client,
-      activePolicies: client.policies.filter((policy) => policy.status === "ACTIVE").length,
-      totalPremium: client.policies
-        .filter((policy) => policy.status === "ACTIVE")
-        .reduce((sum, policy) => sum + toNumber(policy.premiumAmount), 0),
-      openTasks: client.tasks.filter((task) => task.status !== "RESOLVED" && task.status !== "CANCELLED" && task.status !== "ARCHIVED").length,
-      openReceipts: client.receipts.filter((receipt) => receipt.status !== "PAID" && receipt.status !== "CANCELLED").length,
+      id: client.id,
+      fullName: client.fullName,
+      type: client.type,
+      status: client.status,
+      activePolicies: client.policies.length,
+      totalPremium: client.policies.reduce(
+        (sum, policy) => sum + toNumber(policy.premiumAmount),
+        0
+      ),
     }))
     .sort((a, b) => b.totalPremium - a.totalPremium)
     .slice(0, 10);
-
-  const recentClients = clients.slice(0, 10);
-  const clientsWithoutPolicies = clients.filter((client) => client.policies.length === 0);
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
@@ -65,44 +110,147 @@ export default async function ClientsPage() {
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
             title="Clientes activos"
-            value={activeClients.length}
+            value={activeCount}
             description="Base vigente con seguimiento operativo."
             icon={Users2}
             tone="blue"
           />
           <MetricCard
             title="Empresas"
-            value={companies.length}
+            value={companiesCount}
             description="Cuentas corporativas en la base."
             icon={Building2}
             tone="emerald"
           />
           <MetricCard
             title="Sin pólizas"
-            value={clientsWithoutPolicies.length}
+            value={noPolicyCount}
             description="Clientes que aún no tienen cartera activa."
             icon={FileText}
             tone="amber"
           />
           <MetricCard
             title="Total de clientes"
-            value={clients.length}
+            value={totalCount}
             description="Incluye activos, inactivos y archivados."
             icon={UserRound}
             tone="rose"
           />
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
-          <SectionCard title="Top por cartera" description="Clientes ordenados por valor de prima activa.">
+        <SectionCard
+          title="Directorio"
+          description="Listado completo con búsqueda y paginación."
+          action={
+            <ListSearch placeholder="Buscar por nombre, email, teléfono o RFC..." />
+          }
+        >
+          {filteredCount === 0 ? (
+            query ? (
+              <div className="p-4">
+                <EmptyState
+                  icon={Users2}
+                  title="Sin resultados"
+                  description={`No encontramos clientes que coincidan con "${query}".`}
+                />
+              </div>
+            ) : (
+              <div className="p-4">
+                <EmptyState
+                  icon={Users2}
+                  title="Aún no hay clientes"
+                  description="Crea tu primer cliente para empezar a operar la cartera."
+                  action="Nuevo cliente"
+                  actionHref="/clients/new"
+                />
+              </div>
+            )
+          ) : pagedClients.length === 0 ? (
+            <div className="p-4">
+              <EmptyState
+                icon={Users2}
+                title="Página fuera de rango"
+                description="No hay clientes en esta página. Vuelve al inicio del listado."
+                action="Volver al inicio"
+                actionHref={query ? `/clients?q=${encodeURIComponent(query)}` : "/clients"}
+              />
+            </div>
+          ) : (
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-stone-50/70">
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead className="text-right">Pólizas</TableHead>
+                    <TableHead className="text-right">Recibos</TableHead>
+                    <TableHead className="text-right">Tareas</TableHead>
+                    <TableHead>Alta</TableHead>
+                    <TableHead>Estado</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pagedClients.map((client) => (
+                    <TableRow key={client.id}>
+                      <TableCell>
+                        <Link
+                          href={`/clients/${client.id}`}
+                          className="font-medium text-foreground hover:text-primary"
+                        >
+                          {client.fullName}
+                        </Link>
+                        <p className="text-xs text-muted-foreground">
+                          {client.email ?? "Sin email"} · {client.phone ?? "Sin teléfono"}
+                        </p>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="rounded-full">
+                          {client.type === "COMPANY" ? "Empresa" : "Persona"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">{client._count.policies}</TableCell>
+                      <TableCell className="text-right">{client._count.receipts}</TableCell>
+                      <TableCell className="text-right">{client._count.tasks}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {formatDate(client.createdAt)}
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge status={client.status} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <Pagination
+                page={page}
+                pageSize={PAGE_SIZE}
+                total={filteredCount}
+                basePath="/clients"
+                searchParams={{ q: query }}
+              />
+            </>
+          )}
+        </SectionCard>
+
+        <SectionCard
+          title="Top por cartera"
+          description="Clientes ordenados por valor de prima activa."
+        >
+          {topByPortfolio.length === 0 ? (
+            <div className="p-4">
+              <EmptyState
+                icon={FileText}
+                title="Sin pólizas activas"
+                description="Cuando registres pólizas activas, este ranking se llenará automáticamente."
+              />
+            </div>
+          ) : (
             <Table>
               <TableHeader>
                 <TableRow className="bg-stone-50/70">
                   <TableHead>Cliente</TableHead>
                   <TableHead>Tipo</TableHead>
-                  <TableHead>Pólizas</TableHead>
-                  <TableHead>Recibos</TableHead>
-                  <TableHead>Tareas</TableHead>
+                  <TableHead className="text-right">Pólizas activas</TableHead>
                   <TableHead className="text-right">Prima activa</TableHead>
                   <TableHead>Estado</TableHead>
                 </TableRow>
@@ -111,7 +259,10 @@ export default async function ClientsPage() {
                 {topByPortfolio.map((client) => (
                   <TableRow key={client.id}>
                     <TableCell>
-                      <Link href={`/clients/${client.id}`} className="font-medium text-foreground hover:text-primary">
+                      <Link
+                        href={`/clients/${client.id}`}
+                        className="font-medium text-foreground hover:text-primary"
+                      >
                         {client.fullName}
                       </Link>
                     </TableCell>
@@ -120,10 +271,10 @@ export default async function ClientsPage() {
                         {client.type === "COMPANY" ? "Empresa" : "Persona"}
                       </Badge>
                     </TableCell>
-                    <TableCell>{client.activePolicies}</TableCell>
-                    <TableCell>{client.openReceipts}</TableCell>
-                    <TableCell>{client.openTasks}</TableCell>
-                    <TableCell className="text-right font-medium">{formatCurrency(client.totalPremium)}</TableCell>
+                    <TableCell className="text-right">{client.activePolicies}</TableCell>
+                    <TableCell className="text-right font-medium">
+                      {formatCurrency(client.totalPremium)}
+                    </TableCell>
                     <TableCell>
                       <StatusBadge status={client.status} />
                     </TableCell>
@@ -131,29 +282,8 @@ export default async function ClientsPage() {
                 ))}
               </TableBody>
             </Table>
-          </SectionCard>
-
-          <SectionCard title="Clientes recientes" description="Alta más reciente y señal de actividad.">
-            <div className="divide-y divide-stone-200/80">
-              {recentClients.map((client) => (
-                <div key={client.id} className="flex items-start justify-between gap-4 px-4 py-4">
-                  <div className="min-w-0">
-                    <Link href={`/clients/${client.id}`} className="font-medium text-foreground hover:text-primary">
-                      {client.fullName}
-                    </Link>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {client.email ?? "Sin email"} · {client.phone ?? "Sin teléfono"}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Alta {formatDate(client.createdAt)} · {client.policies.length} pólizas
-                    </p>
-                  </div>
-                  <StatusBadge status={client.status} />
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-        </section>
+          )}
+        </SectionCard>
       </div>
     </main>
   );

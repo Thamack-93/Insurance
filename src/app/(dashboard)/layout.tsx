@@ -3,6 +3,7 @@ import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppTopbar } from "@/components/layout/app-topbar";
 import { SearchProvider } from "@/components/search/search-provider";
 import { CommandPaletteWrapper } from "@/components/command/command-palette-wrapper";
+import { ShortcutsHelp } from "@/components/shortcuts/shortcuts-help";
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
@@ -16,6 +17,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
         <CommandPaletteWrapper />
+        <ShortcutsHelp />
       </div>
     </SearchProvider>
   );

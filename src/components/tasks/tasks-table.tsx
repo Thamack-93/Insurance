@@ -1,16 +1,28 @@
 "use client";
 
 import { useTransition } from "react";
+import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
+import { ArrowUpCircle, Flag } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { BulkActionsProvider } from "@/components/bulk-actions/bulk-actions-provider";
-import { BulkActionsToolbar } from "@/components/bulk-actions/bulk-actions-toolbar";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { BulkActionsProvider, useBulkActions } from "@/components/bulk-actions/bulk-actions-provider";
 import { SelectableRow } from "@/components/bulk-actions/selectable-row";
 import { SelectAllHeader } from "@/components/bulk-actions/select-all-header";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
-import { bulkUpdateTaskStatus } from "@/app/(dashboard)/tasks/actions";
+import { bulkUpdateTaskStatus, bulkUpdateTaskPriority } from "@/app/(dashboard)/tasks/actions";
 
 const taskTypeLabels: Record<string, string> = {
   GENERAL: "General",
@@ -22,6 +34,21 @@ const taskTypeLabels: Record<string, string> = {
   COMMISSION: "Comisión",
   OTHER: "Otro",
 };
+
+const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "IN_PROGRESS", label: "En proceso" },
+  { value: "WAITING_CLIENT", label: "Esperando cliente" },
+  { value: "WAITING_INSURER", label: "Esperando aseguradora" },
+  { value: "RESOLVED", label: "Marcar resuelto" },
+  { value: "CANCELLED", label: "Cancelar" },
+];
+
+const PRIORITY_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "URGENT", label: "Urgente" },
+  { value: "HIGH", label: "Alta" },
+  { value: "MEDIUM", label: "Media" },
+  { value: "LOW", label: "Baja" },
+];
 
 export type TaskRow = {
   id: string;
@@ -41,36 +68,107 @@ export type TaskRow = {
 function TasksTableInner({ tasks }: { tasks: TaskRow[] }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const { selectedItems, hasSelection, clearSelection, getSelectedIds } = useBulkActions();
+  const allIds = tasks.map((t) => t.id);
+  const selectedCount = selectedItems.size;
 
-  const ids = tasks.map((t) => t.id);
-
-  const handleBulkStatus = (status: string) => {
+  const runBulk = (
+    fn: (ids: string[]) => Promise<{ ok: boolean; message?: string; error?: string }>,
+    successFallback: string
+  ) => {
+    const ids = getSelectedIds();
+    if (ids.length === 0) {
+      toast.error("Selecciona al menos un pendiente.");
+      return;
+    }
     startTransition(async () => {
-      const result = await bulkUpdateTaskStatus(ids, status);
+      const result = await fn(ids);
       if (result.ok) {
-        toast.success(result.message);
+        toast.success(result.message ?? successFallback);
+        flushSync(() => {
+          clearSelection();
+        });
         router.refresh();
-      } else if (!result.ok) {
-        toast.error(result.error);
+      } else {
+        toast.error(result.error ?? "No se pudo aplicar la acción.");
       }
     });
   };
 
-  const statusOptions = [
-    { value: "RESOLVED", label: "Marcar resuelto" },
-    { value: "CANCELLED", label: "Cancelar" },
-  ];
+  const handleStatus = (status: string) =>
+    runBulk((ids) => bulkUpdateTaskStatus(ids, status), "Estado actualizado.");
+
+  const handlePriority = (priority: string) =>
+    runBulk((ids) => bulkUpdateTaskPriority(ids, priority), "Prioridad actualizada.");
 
   return (
     <div className="flex flex-col gap-3">
-      <BulkActionsToolbar
-        onStatusChange={handleBulkStatus}
-        statusOptions={statusOptions}
-      />
+      {hasSelection ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-stone-50 px-4 py-3">
+          <div className="flex items-center gap-3">
+            <Badge variant="secondary" className="rounded-full">
+              {selectedCount} seleccionado{selectedCount !== 1 ? "s" : ""}
+            </Badge>
+            <Button variant="ghost" size="sm" onClick={clearSelection} disabled={isPending}>
+              Limpiar
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button variant="outline" size="sm" disabled={isPending} className="h-8 gap-1" />
+                }
+              >
+                <ArrowUpCircle className="size-3.5" />
+                Estado
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Cambiar estado</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {STATUS_OPTIONS.map((option) => (
+                    <DropdownMenuItem
+                      key={option.value}
+                      onClick={() => handleStatus(option.value)}
+                    >
+                      {option.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button variant="outline" size="sm" disabled={isPending} className="h-8 gap-1" />
+                }
+              >
+                <Flag className="size-3.5" />
+                Prioridad
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Cambiar prioridad</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {PRIORITY_OPTIONS.map((option) => (
+                    <DropdownMenuItem
+                      key={option.value}
+                      onClick={() => handlePriority(option.value)}
+                    >
+                      {option.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      ) : null}
       <Table>
         <TableHeader>
           <TableRow className="bg-stone-50/70">
-            <SelectAllHeader ids={ids} />
+            <SelectAllHeader ids={allIds} />
             <TableHead>Folio</TableHead>
             <TableHead>Título</TableHead>
             <TableHead>Cliente</TableHead>

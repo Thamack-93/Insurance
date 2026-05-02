@@ -64,6 +64,9 @@ Preferred communication style: Simple, everyday language.
 - `documents/` — DocumentCard, UploadForm
 - `bulk-actions/` — BulkActionsProvider (context), toolbar, selectable rows
 - `branding/` — PGLogo, PGIcon components
+- `lists/` — `Pagination` (Link-based, server-friendly with `safePage` clamping) + `ListSearch` (debounced `?q=` sync, listens to `pg:focus-list-search` event, exposes `data-list-search`)
+- `empty-states/` — `EmptyState` with optional `actionHref` for Link-based CTAs
+- `shortcuts/` — `useGlobalShortcuts` hook + `<ShortcutsHelp />` dialog
 - `ui/` — shadcn primitives
 
 ### Backend
@@ -213,3 +216,12 @@ Key scripts:
 - **base-ui `DropdownMenuTrigger` / `DialogTrigger`**: These render as `<button>` themselves. Use `render={<YourButton />}` prop — do NOT nest a `<Button>` as child.
 - **Server Actions to Client Components**: Never pass inline `async (values) => action(id, values)` — use `action.bind(null, id)` instead.
 - **`ControlledSelect`**: Reusable component in `src/components/forms/form-primitives.tsx`. Accepts `value`, `onValueChange`, `options: SelectOption[]`, `placeholder`. Always shows correct Spanish label for pre-loaded enum values.
+- **base-ui `DropdownMenuLabel` / `DropdownMenuSeparator`**: Must be wrapped inside a `<DropdownMenuGroup>`; otherwise base-ui throws "MenuGroupRootContext is missing".
+- **`useTransition` + selection clear**: When clearing UI state (e.g. bulk-action selection) inside an async transition callback before `router.refresh()`, the state update is batched into the transition and visually deferred. Wrap it in `flushSync(() => clearSelection())` so the toolbar disappears immediately.
+
+### Task #3 patterns (UX premium)
+
+- **List page contract**: each main listing (`clients`, `policies`, `insurers`, `claims`, `quotes`) accepts `searchParams: Promise<{ q?: string; page?: string }>`, sanitizes `q` with `.trim().slice(0, 100)`, runs Prisma `count` + `findMany` with `take: PAGE_SIZE (25) / skip: (page - 1) * PAGE_SIZE` in parallel with KPI aggregations, and renders three branches: empty (no data), no-search-match, page-out-of-range (when `pagedX.length === 0 && filteredCount > 0`). The `<SectionCard>` `action` prop hosts `<ListSearch>`, and `<Pagination>` is rendered after the table. Pagination clamps `safePage = min(max(1, page), totalPages)` so out-of-range URLs never display invalid ranges.
+- **Smart defaults**: `policies/new` pre-selects the most-used insurer among ACTIVE policies via `groupBy({ by: ['insurerId'], _count })`. `QuickPaymentDialog` uses `useTransition` + `router.refresh()` (no full reload) and shows sonner toasts on success/error.
+- **Bulk task actions**: `bulkUpdateTaskStatus` and `bulkUpdateTaskPriority` server actions in `src/app/(dashboard)/tasks/actions.ts` validate against `ALLOWED_STATUSES` / `ALLOWED_PRIORITIES` allowlists. The `TasksTable` toolbar reads real selected IDs via `useBulkActions().getSelectedIds()` and uses two `<DropdownMenu>` triggers (Estado/Prioridad) wrapped correctly with `<DropdownMenuGroup>`.
+- **Global shortcuts** (`src/components/shortcuts/use-global-shortcuts.ts`): `n` (contextual New), `/` (focus list search via `pg:focus-list-search` event), `g` + `d|c|p|t|r` (navigate to /dashboard, /clients, /policies, /tasks, /receipts), `?` (open shortcuts help). Ignored when focus is in `input/textarea/select/[contenteditable]/[role=textbox]`. Mounted once via `<ShortcutsHelp />` in `(dashboard)/layout.tsx`.

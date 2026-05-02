@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,11 +8,13 @@ export function EmptyState({
   title,
   description,
   action,
+  actionHref,
 }: {
   icon: LucideIcon;
   title: string;
   description: string;
   action?: string;
+  actionHref?: string;
 }) {
   return (
     <Card className="border-dashed bg-white/65">
@@ -21,7 +24,11 @@ export function EmptyState({
         </div>
         <h3 className="mt-5 text-lg font-semibold">{title}</h3>
         <p className="mt-2 max-w-md text-sm text-muted-foreground">{description}</p>
-        {action ? (
+        {action && actionHref ? (
+          <Button asChild className="mt-5 rounded-full" variant="outline">
+            <Link href={actionHref}>{action}</Link>
+          </Button>
+        ) : action ? (
           <Button className="mt-5 rounded-full" variant="outline">
             {action}
           </Button>
@@ -30,4 +37,3 @@ export function EmptyState({
     </Card>
   );
 }
-

@@ -1,33 +1,83 @@
 import Link from "next/link";
 import { ArrowRight, AlertTriangle, BadgeCheck, Clock, FileWarning, Plus, TrendingUp } from "lucide-react";
+import type { Prisma } from "@prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { EmptyState } from "@/components/empty-states/empty-state";
+import { ListSearch } from "@/components/lists/list-search";
+import { Pagination } from "@/components/lists/pagination";
 import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 
-export default async function ClaimsPage() {
+const PAGE_SIZE = 25;
+
+export default async function ClaimsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ q?: string; page?: string }>;
+}) {
+  const params = (await searchParams) ?? {};
+  const query = (params.q ?? "").trim().slice(0, 100);
+  const page = Math.max(1, Number(params.page) || 1);
+
   const db = getDb();
 
-  const claims = await db.claim.findMany({
-    orderBy: { createdAt: "desc" },
-    include: {
-      client: true,
-      policy: true,
-      insurer: true,
-    },
-  });
+  const where: Prisma.ClaimWhereInput = query
+    ? {
+        OR: [
+          { folio: { contains: query } },
+          { claimType: { contains: query } },
+          { client: { fullName: { contains: query } } },
+        ],
+      }
+    : {};
 
-  const openClaims = claims.filter((c) => c.status !== "RESOLVED" && c.status !== "CANCELLED");
-  const resolvedClaims = claims.filter((c) => c.status === "RESOLVED");
-  const inProgressClaims = claims.filter((c) => c.status === "IN_PROGRESS");
-  const waitingClaims = claims.filter((c) => c.status === "WAITING_CLIENT" || c.status === "WAITING_INSURER");
+  const [
+    openCount,
+    inProgressCount,
+    resolvedCount,
+    waitingCount,
+    claimedAgg,
+    paidAgg,
+    filteredCount,
+    pagedClaims,
+    waitingClaims,
+    resolvedRecent,
+  ] = await Promise.all([
+    db.claim.count({ where: { status: { notIn: ["RESOLVED", "CANCELLED"] } } }),
+    db.claim.count({ where: { status: "IN_PROGRESS" } }),
+    db.claim.count({ where: { status: "RESOLVED" } }),
+    db.claim.count({ where: { status: { in: ["WAITING_CLIENT", "WAITING_INSURER"] } } }),
+    db.claim.aggregate({ _sum: { amountClaimed: true } }),
+    db.claim.aggregate({ _sum: { amountPaid: true } }),
+    db.claim.count({ where }),
+    db.claim.findMany({
+      where,
+      include: { client: true, policy: true, insurer: true },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+    }),
+    db.claim.findMany({
+      where: { status: { in: ["WAITING_CLIENT", "WAITING_INSURER"] } },
+      include: { client: true, insurer: true },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    }),
+    db.claim.findMany({
+      where: { status: "RESOLVED" },
+      include: { client: true },
+      orderBy: { closedDate: "desc" },
+      take: 5,
+    }),
+  ]);
 
-  const totalClaimed = claims.reduce((sum, c) => sum + Number(c.amountClaimed ?? 0), 0);
-  const totalPaid = claims.reduce((sum, c) => sum + Number(c.amountPaid ?? 0), 0);
+  const totalClaimed = Number(claimedAgg._sum.amountClaimed ?? 0);
+  const totalPaid = Number(paidAgg._sum.amountPaid ?? 0);
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
@@ -57,14 +107,14 @@ export default async function ClaimsPage() {
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
             title="Abiertos"
-            value={openClaims.length}
-            description={`${inProgressClaims.length} en progreso, ${waitingClaims.length} en espera`}
+            value={openCount}
+            description={`${inProgressCount} en progreso, ${waitingCount} en espera`}
             icon={AlertTriangle}
             tone="amber"
           />
           <MetricCard
             title="Resueltos"
-            value={resolvedClaims.length}
+            value={resolvedCount}
             description="Siniestros cerrados exitosamente."
             icon={BadgeCheck}
             tone="emerald"
@@ -85,82 +135,117 @@ export default async function ClaimsPage() {
           />
         </section>
 
-        <SectionCard title="Siniestros recientes" description="Listado completo de reclamaciones.">
-          {claims.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-muted-foreground">
-              No hay siniestros registrados.
+        <SectionCard
+          title="Siniestros"
+          description="Listado completo de reclamaciones."
+          action={<ListSearch placeholder="Buscar por folio, tipo o cliente..." />}
+        >
+          {filteredCount === 0 ? (
+            query ? (
+              <div className="p-4">
+                <EmptyState
+                  icon={AlertTriangle}
+                  title="Sin resultados"
+                  description={`No encontramos siniestros que coincidan con "${query}".`}
+                />
+              </div>
+            ) : (
+              <div className="p-4">
+                <EmptyState
+                  icon={AlertTriangle}
+                  title="No hay siniestros registrados"
+                  description="Registra el primer reclamo cuando aparezca un caso operativo."
+                  action="Nuevo siniestro"
+                  actionHref="/claims/new"
+                />
+              </div>
+            )
+          ) : pagedClaims.length === 0 ? (
+            <div className="p-4">
+              <EmptyState
+                icon={AlertTriangle}
+                title="Página fuera de rango"
+                description="No hay siniestros en esta página. Vuelve al inicio del listado."
+                action="Volver al inicio"
+                actionHref={query ? `/claims?q=${encodeURIComponent(query)}` : "/claims"}
+              />
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-stone-50/70">
-                  <TableHead>Folio</TableHead>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Aseguradora</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Incidente</TableHead>
-                  <TableHead className="text-right">Reclamado</TableHead>
-                  <TableHead className="text-right">Pagado</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {claims.slice(0, 20).map((claim) => (
-                  <TableRow key={claim.id}>
-                    <TableCell>
-                      <Link
-                        href={`/claims/${claim.id}`}
-                        className="font-medium text-foreground hover:text-primary"
-                      >
-                        {claim.folio}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{claim.client.fullName}</TableCell>
-                    <TableCell>{claim.claimType}</TableCell>
-                    <TableCell>{claim.insurer.name}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={claim.status} />
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                        <Clock className="size-3" />
-                        {formatDate(claim.incidentDate)}
-                        <span className="text-xs">({daysSince(claim.incidentDate)} d)</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {claim.amountClaimed ? formatCurrency(claim.amountClaimed) : "—"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {claim.amountPaid ? formatCurrency(claim.amountPaid) : "—"}
-                    </TableCell>
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-stone-50/70">
+                    <TableHead>Folio</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead>Aseguradora</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead>Incidente</TableHead>
+                    <TableHead className="text-right">Reclamado</TableHead>
+                    <TableHead className="text-right">Pagado</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-          {claims.length > 20 && (
-            <div className="border-t border-stone-200/80 px-4 py-3 text-center text-sm text-muted-foreground">
-              Mostrando 20 de {claims.length} siniestros
-            </div>
+                </TableHeader>
+                <TableBody>
+                  {pagedClaims.map((claim) => (
+                    <TableRow key={claim.id}>
+                      <TableCell>
+                        <Link
+                          href={`/claims/${claim.id}`}
+                          className="font-medium text-foreground hover:text-primary"
+                        >
+                          {claim.folio}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{claim.client.fullName}</TableCell>
+                      <TableCell>{claim.claimType}</TableCell>
+                      <TableCell>{claim.insurer.name}</TableCell>
+                      <TableCell>
+                        <StatusBadge status={claim.status} />
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                          <Clock className="size-3" />
+                          {formatDate(claim.incidentDate)}
+                          <span className="text-xs">({daysSince(claim.incidentDate)} d)</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right font-medium">
+                        {claim.amountClaimed ? formatCurrency(claim.amountClaimed) : "—"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {claim.amountPaid ? formatCurrency(claim.amountPaid) : "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <Pagination
+                page={page}
+                pageSize={PAGE_SIZE}
+                total={filteredCount}
+                basePath="/claims"
+                searchParams={{ q: query }}
+              />
+            </>
           )}
         </SectionCard>
 
         <section className="grid gap-6 xl:grid-cols-2">
           <SectionCard title="En espera" description="Siniestros bloqueados a la espera de información.">
             {waitingClaims.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-muted-foreground">
-                No hay siniestros en espera.
+              <div className="p-4">
+                <EmptyState
+                  icon={BadgeCheck}
+                  title="Sin bloqueos"
+                  description="Todos los siniestros están avanzando o cerrados."
+                />
               </div>
             ) : (
               <div className="divide-y divide-stone-200/80">
-                {waitingClaims.slice(0, 5).map((claim) => (
+                {waitingClaims.map((claim) => (
                   <div key={claim.id} className="flex items-center justify-between px-4 py-3">
                     <div>
-                      <Link
-                        href={`/claims/${claim.id}`}
-                        className="font-medium text-foreground hover:text-primary"
-                      >
+                      <Link href={`/claims/${claim.id}`} className="font-medium text-foreground hover:text-primary">
                         {claim.folio}
                       </Link>
                       <p className="text-xs text-muted-foreground">
@@ -175,19 +260,20 @@ export default async function ClaimsPage() {
           </SectionCard>
 
           <SectionCard title="Recién resueltos" description="Últimos siniestros cerrados.">
-            {resolvedClaims.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-muted-foreground">
-                No hay siniestros resueltos.
+            {resolvedRecent.length === 0 ? (
+              <div className="p-4">
+                <EmptyState
+                  icon={BadgeCheck}
+                  title="Aún sin cierres"
+                  description="Cuando cierres tu primer siniestro aparecerá aquí."
+                />
               </div>
             ) : (
               <div className="divide-y divide-stone-200/80">
-                {resolvedClaims.slice(0, 5).map((claim) => (
+                {resolvedRecent.map((claim) => (
                   <div key={claim.id} className="flex items-center justify-between px-4 py-3">
                     <div>
-                      <Link
-                        href={`/claims/${claim.id}`}
-                        className="font-medium text-foreground hover:text-primary"
-                      >
+                      <Link href={`/claims/${claim.id}`} className="font-medium text-foreground hover:text-primary">
                         {claim.folio}
                       </Link>
                       <p className="text-xs text-muted-foreground">

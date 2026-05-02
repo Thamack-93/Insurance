@@ -157,17 +157,55 @@ export async function updateTask(id: string, values: TaskFormValues): Promise<Mu
   }
 }
 
+const ALLOWED_STATUSES = new Set([
+  "OPEN",
+  "IN_PROGRESS",
+  "WAITING_CLIENT",
+  "WAITING_INSURER",
+  "WAITING_DOCUMENT",
+  "SENT",
+  "RESOLVED",
+  "CANCELLED",
+  "ARCHIVED",
+]);
+
+const ALLOWED_PRIORITIES = new Set(["LOW", "MEDIUM", "HIGH", "URGENT"]);
+
 export async function bulkUpdateTaskStatus(ids: string[], status: string): Promise<MutationResult> {
   if (!ids.length) return errorResult("No hay pendientes seleccionados.");
+  if (!ALLOWED_STATUSES.has(status)) {
+    return errorResult("Estado no válido.");
+  }
   const db = getDb();
   try {
     await db.task.updateMany({
       where: { id: { in: ids } },
-      data: { status: status as any },
+      data: {
+        status: status as any,
+        closedDate: status === "RESOLVED" ? new Date() : null,
+      },
     });
     revalidatePaths(["/tasks", "/today", "/dashboard"]);
     return successResult("bulk", "", `${ids.length} pendiente${ids.length !== 1 ? "s" : ""} actualizado${ids.length !== 1 ? "s" : ""}.`);
   } catch (error) {
     return errorResult(error instanceof Error ? error.message : "No se pudo actualizar el estado.");
+  }
+}
+
+export async function bulkUpdateTaskPriority(ids: string[], priority: string): Promise<MutationResult> {
+  if (!ids.length) return errorResult("No hay pendientes seleccionados.");
+  if (!ALLOWED_PRIORITIES.has(priority)) {
+    return errorResult("Prioridad no válida.");
+  }
+  const db = getDb();
+  try {
+    await db.task.updateMany({
+      where: { id: { in: ids } },
+      data: { priority: priority as any },
+    });
+    revalidatePaths(["/tasks", "/today", "/dashboard"]);
+    return successResult("bulk", "", `${ids.length} pendiente${ids.length !== 1 ? "s" : ""} con nueva prioridad.`);
+  } catch (error) {
+    return errorResult(error instanceof Error ? error.message : "No se pudo actualizar la prioridad.");
   }
 }
