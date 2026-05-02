@@ -156,3 +156,18 @@ export async function updateTask(id: string, values: TaskFormValues): Promise<Mu
     return errorResult(error instanceof Error ? error.message : "No se pudo actualizar el pendiente.");
   }
 }
+
+export async function bulkUpdateTaskStatus(ids: string[], status: string): Promise<MutationResult> {
+  if (!ids.length) return errorResult("No hay pendientes seleccionados.");
+  const db = getDb();
+  try {
+    await db.task.updateMany({
+      where: { id: { in: ids } },
+      data: { status: status as any },
+    });
+    revalidatePaths(["/tasks", "/today", "/dashboard"]);
+    return successResult("bulk", "", `${ids.length} pendiente${ids.length !== 1 ? "s" : ""} actualizado${ids.length !== 1 ? "s" : ""}.`);
+  } catch (error) {
+    return errorResult(error instanceof Error ? error.message : "No se pudo actualizar el estado.");
+  }
+}

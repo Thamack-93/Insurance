@@ -21,11 +21,14 @@ import {
   BadgeCheck,
   Settings,
   Plus,
+  Clock,
 } from "lucide-react";
 import { CommandPalette } from "./command-palette";
+import { getRecentItems, type RecentItem } from "@/lib/recently-viewed";
 
 export function CommandPaletteWrapper() {
   const [open, setOpen] = useState(false);
+  const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
   const router = useRouter();
 
   const handleSelect = useCallback((href: string) => {
@@ -44,7 +47,27 @@ export function CommandPaletteWrapper() {
     return () => document.removeEventListener("keydown", down);
   }, []);
 
+  useEffect(() => {
+    if (open) {
+      setRecentItems(getRecentItems());
+    }
+  }, [open]);
+
+  const recentGroup = recentItems.length > 0
+    ? [{
+        label: "Vistos recientemente",
+        items: recentItems.map((item) => ({
+          id: `recent-${item.id}`,
+          label: item.label,
+          description: item.type,
+          icon: <Clock className="size-4" />,
+          onSelect: () => handleSelect(item.href),
+        })),
+      }]
+    : [];
+
   const groups = [
+    ...recentGroup,
     {
       label: "Vistas principales",
       items: [

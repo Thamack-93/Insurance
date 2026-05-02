@@ -50,9 +50,9 @@ export function SearchInput() {
   };
 
   return (
-    <div ref={containerRef} className="relative w-full max-w-md">
+    <div ref={containerRef} className="relative flex-1 min-w-0">
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
         <Input
           ref={inputRef}
           type="text"
@@ -61,7 +61,7 @@ export function SearchInput() {
           onChange={handleInputChange}
           onFocus={handleFocus}
           onKeyDown={handleKeyDown}
-          className="pl-10 pr-4"
+          className="pl-9 pr-3 border-0 shadow-none bg-transparent focus-visible:ring-0 h-8"
         />
       </div>
       {isOpen && <SearchResults />}

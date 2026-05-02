@@ -4,20 +4,9 @@ import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getDb } from "@/lib/db";
 import { daysUntil, formatDate, today } from "@/lib/dates";
-
-const taskTypeLabels: Record<string, string> = {
-  GENERAL: "General",
-  CLAIM: "Siniestro",
-  QUOTE: "Cotización",
-  RENEWAL: "Renovación",
-  PAYMENT: "Cobranza",
-  DOCUMENT: "Documento",
-  COMMISSION: "Comisión",
-  OTHER: "Otro",
-};
+import { TasksTable, type TaskRow } from "@/components/tasks/tasks-table";
 
 export default async function TasksPage() {
   const db = getDb();
@@ -28,7 +17,7 @@ export default async function TasksPage() {
       where: { status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] } },
       include: { client: true, policy: true, insurer: true },
       orderBy: [{ priority: "desc" }, { dueDate: "asc" }],
-      take: 10,
+      take: 50,
     }),
     db.task.findMany({
       where: {
@@ -49,9 +38,7 @@ export default async function TasksPage() {
       take: 10,
     }),
     db.task.findMany({
-      where: {
-        status: "WAITING_CLIENT",
-      },
+      where: { status: "WAITING_CLIENT" },
       include: { client: true, policy: true, insurer: true },
       orderBy: { dueDate: "asc" },
       take: 10,
@@ -66,6 +53,21 @@ export default async function TasksPage() {
   const urgentCount = allActiveTasks.filter((task) => task.priority === "URGENT").length;
   const dueSoonCount = allActiveTasks.filter((task) => task.dueDate && daysUntil(task.dueDate) <= 7).length;
   const overdueCount = allActiveTasks.filter((task) => task.dueDate && daysUntil(task.dueDate) < 0).length;
+
+  const taskRows: TaskRow[] = openTasks.map((task) => ({
+    id: task.id,
+    folio: task.folio,
+    title: task.title,
+    taskType: task.taskType,
+    priority: task.priority,
+    status: task.status,
+    dueDate: task.dueDate ? formatDate(task.dueDate) : null,
+    dueDays: task.dueDate ? daysUntil(task.dueDate) : null,
+    clientId: task.clientId,
+    clientName: task.client?.fullName ?? null,
+    policyId: task.policyId,
+    policyNumber: task.policy?.policyNumber ?? null,
+  }));
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
@@ -124,62 +126,8 @@ export default async function TasksPage() {
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-          <SectionCard title="Cola principal" description="Ordenada por prioridad y vencimiento.">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-stone-50/70">
-                  <TableHead>Folio</TableHead>
-                  <TableHead>Título</TableHead>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead>Póliza</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Vence</TableHead>
-                  <TableHead>Estado</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {openTasks.map((task) => (
-                  <TableRow key={task.id}>
-                    <TableCell className="font-medium">{task.folio}</TableCell>
-                    <TableCell className="max-w-[280px] truncate">{task.title}</TableCell>
-                    <TableCell>
-                      {task.client ? (
-                        <Link href={`/clients/${task.clientId}`} className="text-foreground hover:text-primary">
-                          {task.client.fullName}
-                        </Link>
-                      ) : (
-                        "Sin cliente"
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {task.policy ? (
-                        <Link href={`/policies/${task.policyId}`} className="text-foreground hover:text-primary">
-                          {task.policy.policyNumber}
-                        </Link>
-                      ) : (
-                        "Sin póliza"
-                      )}
-                    </TableCell>
-                    <TableCell>{taskTypeLabels[task.taskType] ?? task.taskType}</TableCell>
-                    <TableCell>
-                      {task.dueDate ? (
-                        <span className="text-sm text-muted-foreground">
-                          {formatDate(task.dueDate)} · {daysUntil(task.dueDate)} días
-                        </span>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">Sin fecha</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-2">
-                        <PriorityBadge priority={task.priority} />
-                        <StatusBadge status={task.status} />
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+          <SectionCard title="Cola principal" description="Ordenada por prioridad y vencimiento. Selecciona para acciones masivas.">
+            <TasksTable tasks={taskRows} />
           </SectionCard>
 
           <SectionCard title="Urgentes y vencidas" description="Casos que deberían moverse antes que el resto.">

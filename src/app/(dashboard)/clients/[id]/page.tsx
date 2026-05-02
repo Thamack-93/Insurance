@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { RecordPageView } from "@/components/recently-viewed/record-page-view";
 import { Mail, Phone, MapPin, BadgeInfo, FileText, ClipboardList, ShieldCheck } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
@@ -79,6 +80,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
+      <RecordPageView id={client.id} label={client.fullName} href={`/clients/${client.id}`} type="Cliente" />
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="CRM"
