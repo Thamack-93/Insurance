@@ -1,19 +1,16 @@
 import Link from "next/link";
 import {
-  CheckCircle2,
-  ClipboardPlus,
-  Contact,
+  CalendarClock,
+  CheckSquare,
+  CircleDollarSign,
   FileText,
-  FolderOpen,
-  PhoneCall,
   ReceiptText,
   ShieldCheck,
+  Siren,
 } from "lucide-react";
-import { QuickActionButton } from "@/components/actions/quick-action-button";
-import { RiskAlertCard } from "@/components/cards/risk-alert-card";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { PageHeader, SectionHeader } from "@/components/layout/page-header";
-import { ActivityTimeline } from "@/components/timeline/activity-timeline";
+import { MetricCard } from "@/components/pages-secondary/panels";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { getTodayData } from "@/lib/dashboard-queries";
@@ -24,73 +21,103 @@ import { cn } from "@/lib/utils";
 export default async function TodayPage() {
   const data = await getTodayData();
 
+  const dueTodayCount = data.paymentsDueToday.length;
+  const overdueCount = data.overduePayments.length;
+  const due7Count = data.paymentsDue7.length;
+  const renewalsCount = data.urgentRenewals.length;
+  const overdueTasksCount = data.overdueTasks.length;
+  const commissionsCount = data.commissionsToReview.length;
+
   return (
     <div className="space-y-8">
       <PageHeader
         eyebrow="Hoy"
-        title="Que tienes que hacer hoy"
-        description="Una bandeja operativa con pagos vencidos, renovaciones urgentes, clientes por contactar, comisiones y riesgos criticos."
+        title="Qué tienes que hacer hoy"
+        description="Una bandeja accionable: cobrar, renovar, resolver pendientes y revisar comisiones. Sin gráficos ni timeline."
         actions={
           <>
-            <QuickActionButton icon={PhoneCall} label="Marcar seguimiento" />
-            <QuickActionButton icon={ClipboardPlus} label="Crear pendiente" />
-            <QuickActionButton icon={CheckCircle2} label="Marcar recibo pagado" />
+            <Link
+              href="/receipts?tab=cobrar"
+              className={cn(buttonVariants({ variant: "outline" }), "rounded-full bg-white/80")}
+            >
+              <ReceiptText className="size-4" />
+              Cobrar recibos
+            </Link>
+            <Link href="/tasks/new" className={cn(buttonVariants(), "rounded-full")}>
+              <CheckSquare className="size-4" />
+              Crear pendiente
+            </Link>
           </>
         }
       />
 
-      <div className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
-        <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
-          <CardHeader>
-            <SectionHeader title="Pagos que requieren accion" description="Vencidos, de hoy y de los proximos 7 dias." />
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <PaymentGroup title="Vencidos" receipts={data.overduePayments} />
-            <PaymentGroup title="Vencen hoy" receipts={data.paymentsDueToday} />
-            <PaymentGroup title="Vencen en 7 dias" receipts={data.paymentsDue7} />
-          </CardContent>
-        </Card>
+      <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <MetricCard title="Vencidos" value={overdueCount} description="Recibos atrasados" icon={Siren} tone="rose" />
+        <MetricCard
+          title="Vencen hoy"
+          value={dueTodayCount}
+          description="Recibos del día"
+          icon={ReceiptText}
+          tone="amber"
+        />
+        <MetricCard title="Próx. 7 días" value={due7Count} description="Recibos por cobrar" icon={ReceiptText} tone="emerald" />
+        <MetricCard
+          title="Renovaciones"
+          value={renewalsCount}
+          description="Pólizas en 30 días"
+          icon={ShieldCheck}
+          tone="blue"
+        />
+        <MetricCard
+          title="Pendientes atrasados"
+          value={overdueTasksCount}
+          description="Tareas fuera de fecha"
+          icon={CheckSquare}
+          tone="rose"
+        />
+        <MetricCard
+          title="Comisiones"
+          value={commissionsCount}
+          description="Por revisar pronto"
+          icon={CircleDollarSign}
+          tone="emerald"
+        />
+      </section>
 
-        <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
-          <CardHeader>
-            <SectionHeader title="Acciones rapidas" description="Atajos para operar sin perder contexto." />
-          </CardHeader>
-          <CardContent className="grid gap-2">
-            <Link href="/tasks" className={cn(buttonVariants({ variant: "outline" }), "justify-start rounded-2xl bg-white/70")}>
-              <ClipboardPlus className="size-4" />
-              Crear pendiente
-            </Link>
-            <Link href="/policies" className={cn(buttonVariants({ variant: "outline" }), "justify-start rounded-2xl bg-white/70")}>
-              <ShieldCheck className="size-4" />
-              Ver poliza
-            </Link>
-            <Link href="/clients" className={cn(buttonVariants({ variant: "outline" }), "justify-start rounded-2xl bg-white/70")}>
-              <Contact className="size-4" />
-              Ver cliente
-            </Link>
-            <Link href="/documents" className={cn(buttonVariants({ variant: "outline" }), "justify-start rounded-2xl bg-white/70")}>
-              <FolderOpen className="size-4" />
-              Ver documentos
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
+      <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
+        <CardHeader>
+          <SectionHeader title="Por cobrar" description="Recibos vencidos, los de hoy y los próximos siete días." />
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <PaymentGroup title="Vencidos" tone="rose" receipts={data.overduePayments} />
+          <PaymentGroup title="Vencen hoy" tone="amber" receipts={data.paymentsDueToday} />
+          <PaymentGroup title="Vencen en 7 días" tone="emerald" receipts={data.paymentsDue7} />
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 xl:grid-cols-3">
         <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
           <CardHeader>
-            <SectionHeader title="Renovaciones urgentes" description="Polizas que vencen pronto." />
+            <SectionHeader title="Renovar" description="Pólizas que vencen pronto." />
           </CardHeader>
           <CardContent className="space-y-3">
-            {data.urgentRenewals.map((policy) => (
-              <Link key={policy.id} href={`/policies/${policy.id}`} className="block rounded-2xl border bg-white/70 p-4 hover:border-primary/20">
-                <p className="font-medium">{policy.policyNumber}</p>
-                <p className="mt-1 text-sm text-muted-foreground">{policy.client.fullName}</p>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Renovacion {policy.renewalDate ? formatDate(policy.renewalDate) : "sin fecha"}
-                </p>
-              </Link>
-            ))}
+            {data.urgentRenewals.length === 0 ? (
+              <EmptyRow icon={CalendarClock} message="Sin renovaciones urgentes." />
+            ) : (
+              data.urgentRenewals.map((policy) => (
+                <Link
+                  key={policy.id}
+                  href={`/policies/${policy.id}`}
+                  className="block rounded-2xl border bg-white/70 p-4 hover:border-primary/20"
+                >
+                  <p className="font-medium">{policy.policyNumber}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{policy.client.fullName}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Renovación {policy.renewalDate ? formatDate(policy.renewalDate) : "sin fecha"}
+                  </p>
+                </Link>
+              ))
+            )}
           </CardContent>
         </Card>
 
@@ -99,18 +126,28 @@ export default async function TodayPage() {
             <SectionHeader title="Pendientes atrasados" description="Tareas fuera de fecha." />
           </CardHeader>
           <CardContent className="space-y-3">
-            {data.overdueTasks.map((task) => (
-              <Link key={task.id} href="/tasks" className="block rounded-2xl border bg-white/70 p-4 hover:border-primary/20">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-medium">{task.title}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">{task.folio}</p>
+            {data.overdueTasks.length === 0 ? (
+              <EmptyRow icon={CheckSquare} message="Sin pendientes atrasados." />
+            ) : (
+              data.overdueTasks.map((task) => (
+                <Link
+                  key={task.id}
+                  href={`/tasks/${task.id}`}
+                  className="block rounded-2xl border bg-white/70 p-4 hover:border-primary/20"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium">{task.title}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{task.folio}</p>
+                    </div>
+                    <StatusBadge status={task.status} />
                   </div>
-                  <StatusBadge status={task.status} />
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">Inicio hace {daysSince(task.startDate)} dias</p>
-              </Link>
-            ))}
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Inicio hace {daysSince(task.startDate)} días
+                  </p>
+                </Link>
+              ))
+            )}
           </CardContent>
         </Card>
 
@@ -119,70 +156,54 @@ export default async function TodayPage() {
             <SectionHeader title="Comisiones por revisar" description="Esperadas o vencidas en el corto plazo." />
           </CardHeader>
           <CardContent className="space-y-3">
-            {data.commissionsToReview.map((commission) => (
-              <Link key={commission.id} href="/commissions" className="block rounded-2xl border bg-white/70 p-4 hover:border-primary/20">
-                <p className="font-medium">{formatCurrency(commission.actualAmount ?? commission.expectedAmount)}</p>
-                <p className="mt-1 text-sm text-muted-foreground">{commission.client.fullName}</p>
-                <p className="mt-2 text-xs text-muted-foreground">Esperada {formatDate(commission.expectedDate)}</p>
-              </Link>
-            ))}
+            {data.commissionsToReview.length === 0 ? (
+              <EmptyRow icon={CircleDollarSign} message="Sin comisiones pendientes." />
+            ) : (
+              data.commissionsToReview.map((commission) => (
+                <Link
+                  key={commission.id}
+                  href="/commissions"
+                  className="block rounded-2xl border bg-white/70 p-4 hover:border-primary/20"
+                >
+                  <p className="font-medium">
+                    {formatCurrency(commission.actualAmount ?? commission.expectedAmount)}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">{commission.client.fullName}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Esperada {formatDate(commission.expectedDate)}
+                  </p>
+                </Link>
+              ))
+            )}
           </CardContent>
         </Card>
       </div>
-
-      <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-        <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
-          <CardHeader>
-            <SectionHeader title="Riesgos criticos" description="Alertas deterministicas que conviene resolver primero." />
-          </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2">
-            {data.criticalRisks.map((risk) => (
-              <RiskAlertCard
-                key={`${risk.alertType}-${risk.entityId}`}
-                title={risk.title}
-                description={risk.description}
-                severity={risk.severity}
-                action={risk.suggestedAction}
-              />
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
-          <CardHeader>
-            <SectionHeader title="Ultimos movimientos" />
-          </CardHeader>
-          <CardContent>
-            <ActivityTimeline items={data.recentActivity} />
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
-        <CardHeader>
-          <SectionHeader title="Documentos faltantes" description="Huecos documentales que aumentan riesgo operativo." />
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {data.documentsMissing.map((risk) => (
-            <RiskAlertCard
-              key={`${risk.alertType}-${risk.entityId}`}
-              title={risk.title}
-              description={risk.description}
-              severity={risk.severity}
-              action={risk.suggestedAction}
-            />
-          ))}
-        </CardContent>
-      </Card>
     </div>
   );
 }
 
+function EmptyRow({ icon: Icon, message }: { icon: typeof CalendarClock; message: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded-2xl border border-dashed bg-white/50 p-4 text-sm text-muted-foreground">
+      <Icon className="size-4" />
+      {message}
+    </div>
+  );
+}
+
+const groupTone = {
+  rose: "border-rose-200/70 bg-rose-50/50 text-rose-700",
+  amber: "border-amber-200/70 bg-amber-50/50 text-amber-800",
+  emerald: "border-emerald-200/70 bg-emerald-50/50 text-emerald-700",
+} as const;
+
 function PaymentGroup({
   title,
+  tone,
   receipts,
 }: {
   title: string;
+  tone: keyof typeof groupTone;
   receipts: Array<{
     id: string;
     receiptNumber: string;
@@ -196,18 +217,24 @@ function PaymentGroup({
 }) {
   return (
     <section>
-      <div className="mb-2 flex items-center gap-2">
-        <ReceiptText className="size-4 text-primary" />
-        <h3 className="text-sm font-semibold">{title}</h3>
+      <div className={cn("mb-2 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold", groupTone[tone])}>
+        <ReceiptText className="size-3.5" />
+        {title}
+        <span className="rounded-full bg-white/80 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+          {receipts.length}
+        </span>
       </div>
       <div className="space-y-2">
         {receipts.length === 0 ? (
           <div className="rounded-2xl border border-dashed bg-white/50 p-4 text-sm text-muted-foreground">
-            No hay recibos en esta categoria.
+            Sin recibos en este grupo.
           </div>
         ) : (
           receipts.map((receipt) => (
-            <div key={receipt.id} className="flex flex-col gap-3 rounded-2xl border bg-white/70 p-4 md:flex-row md:items-center md:justify-between">
+            <div
+              key={receipt.id}
+              className="flex flex-col gap-3 rounded-2xl border bg-white/70 p-4 md:flex-row md:items-center md:justify-between"
+            >
               <div>
                 <p className="font-medium">{receipt.client.fullName}</p>
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -218,12 +245,21 @@ function PaymentGroup({
                 <div>
                   <p className="font-semibold">{formatCurrency(receipt.amount, receipt.currency)}</p>
                   <p className="text-xs text-muted-foreground">
-                    {formatDate(receipt.dueDate)} · {daysUntil(receipt.dueDate)} dias
+                    {formatDate(receipt.dueDate)} · {daysUntil(receipt.dueDate)} días
                   </p>
                 </div>
-                <Link href={`/policies/${receipt.policy.id}`} className={cn(buttonVariants({ variant: "outline", size: "sm" }), "rounded-full bg-white")}>
+                <Link
+                  href={`/receipts/${receipt.id}`}
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "rounded-full bg-white")}
+                >
                   <FileText className="size-3.5" />
-                  Poliza
+                  Recibo
+                </Link>
+                <Link
+                  href={`/receipts?tab=cobrar`}
+                  className={cn(buttonVariants({ size: "sm" }), "rounded-full")}
+                >
+                  Cobrar
                 </Link>
               </div>
             </div>

@@ -1,201 +1,335 @@
 import Link from "next/link";
 import { addDays, startOfMonth } from "date-fns";
-import { ArrowRight, CircleDollarSign, Plus, ReceiptText, ShieldAlert, BadgeCheck } from "lucide-react";
+import { ArrowRight, BadgeCheck, CircleDollarSign, Plus, ReceiptText, ShieldAlert } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { UrlTabs } from "@/components/ui/url-tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { QuickPaymentDialog } from "@/components/payments/quick-payment-dialog";
 import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 
-export default async function ReceiptsPage() {
+export default async function ReceiptsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ tab?: string }>;
+}) {
+  const params = (await searchParams) ?? {};
+  const initialTab = params.tab === "historico" ? "historico" : "cobrar";
+
   const db = getDb();
   const now = today();
   const in7 = addDays(now, 7);
   const monthStart = startOfMonth(now);
 
-  const [allReceipts, overdueReceipts, next7Receipts, paidThisMonth, withDocuments] = await Promise.all([
+  const [
+    allOpenReceipts,
+    overdueReceipts,
+    next7Receipts,
+    laterReceipts,
+    paidThisMonth,
+    paymentHistory,
+  ] = await Promise.all([
     db.receipt.findMany({
-      include: { client: true, policy: true, insurer: true, document: true },
-      orderBy: { dueDate: "asc" },
+      where: { status: { notIn: ["PAID", "CANCELLED"] } },
+      include: { client: true, policy: true, insurer: true },
     }),
     db.receipt.findMany({
       where: { dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
-      include: { client: true, policy: true, insurer: true, document: true },
+      include: { client: true, policy: true, insurer: true },
       orderBy: { dueDate: "asc" },
-      take: 10,
     }),
     db.receipt.findMany({
       where: { dueDate: { gte: now, lte: in7 }, status: { notIn: ["PAID", "CANCELLED"] } },
-      include: { client: true, policy: true, insurer: true, document: true },
+      include: { client: true, policy: true, insurer: true },
       orderBy: { dueDate: "asc" },
-      take: 10,
+    }),
+    db.receipt.findMany({
+      where: { dueDate: { gt: in7 }, status: { notIn: ["PAID", "CANCELLED"] } },
+      include: { client: true, policy: true, insurer: true },
+      orderBy: { dueDate: "asc" },
+      take: 30,
     }),
     db.receipt.findMany({
       where: { status: "PAID", paidDate: { gte: monthStart } },
-      include: { client: true, policy: true, insurer: true, document: true },
+      include: { client: true, policy: true, insurer: true },
       orderBy: { paidDate: "desc" },
-      take: 10,
     }),
-    db.receipt.findMany({
-      where: { documentId: { not: null } },
-      include: { client: true, policy: true, insurer: true, document: true },
-      orderBy: { dueDate: "desc" },
-      take: 10,
+    db.payment.findMany({
+      include: {
+        receipt: { select: { id: true, receiptNumber: true, dueDate: true } },
+        client: { select: { id: true, fullName: true } },
+        policy: { select: { id: true, policyNumber: true } },
+      },
+      orderBy: { paidDate: "desc" },
+      take: 50,
     }),
   ]);
 
-  const outstandingAmount = allReceipts
-    .filter((receipt) => receipt.status !== "PAID" && receipt.status !== "CANCELLED")
-    .reduce((sum, receipt) => sum + toNumber(receipt.amount), 0);
+  const outstandingAmount = allOpenReceipts.reduce((sum, receipt) => sum + toNumber(receipt.amount), 0);
   const overdueAmount = overdueReceipts.reduce((sum, receipt) => sum + toNumber(receipt.amount), 0);
-  const pendingCount = allReceipts.filter((receipt) => receipt.status === "PENDING").length;
   const paidAmountMonth = paidThisMonth.reduce((sum, receipt) => sum + toNumber(receipt.amount), 0);
+  const collectionRate =
+    allOpenReceipts.length + paidThisMonth.length > 0
+      ? Math.round((paidThisMonth.length / (allOpenReceipts.length + paidThisMonth.length)) * 100)
+      : 100;
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-        <PageHeader
-          eyebrow="Finanzas"
-          title="Recibos"
-          description="Vista de recibos emitidos, cobrados y pendientes de conciliación."
-          actions={
-            <>
-              <Button asChild variant="outline" className="rounded-full bg-white/70">
-                <Link href="/receipts/new">
-                  <Plus className="mr-2 size-4" />
-                  Nuevo recibo
-                </Link>
-              </Button>
-              <Button asChild className="rounded-full">
-                <Link href="/due-payments">
-                  Cobranza
-                  <ArrowRight className="ml-2 size-4" />
-                </Link>
-              </Button>
-            </>
-          }
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Finanzas"
+        title="Recibos y pagos"
+        description="Una sola vista para cobrar lo abierto y auditar lo cobrado."
+        actions={
+          <>
+            <Button asChild variant="outline" className="rounded-full bg-white/70">
+              <Link href="/receipts/new">
+                <Plus className="mr-2 size-4" />
+                Nuevo recibo
+              </Link>
+            </Button>
+            <Button asChild className="rounded-full">
+              <Link href="/due-payments">
+                Cobranza
+                <ArrowRight className="ml-2 size-4" />
+              </Link>
+            </Button>
+          </>
+        }
+      />
+
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          title="Saldo pendiente"
+          value={formatCurrency(outstandingAmount)}
+          description="Suma de recibos abiertos."
+          icon={CircleDollarSign}
+          tone="emerald"
         />
+        <MetricCard
+          title="Vencidos"
+          value={overdueReceipts.length}
+          description={formatCurrency(overdueAmount)}
+          icon={ShieldAlert}
+          tone="rose"
+        />
+        <MetricCard
+          title="Pagado este mes"
+          value={paidThisMonth.length}
+          description={formatCurrency(paidAmountMonth)}
+          icon={BadgeCheck}
+          tone="blue"
+        />
+        <MetricCard
+          title="Tasa de cobro"
+          value={`${collectionRate}%`}
+          description="Pagados vs. abiertos del mes."
+          icon={ReceiptText}
+          tone="amber"
+        />
+      </section>
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <MetricCard
-            title="Saldo pendiente"
-            value={formatCurrency(outstandingAmount)}
-            description="Suma de recibos abiertos."
-            icon={CircleDollarSign}
-            tone="emerald"
-          />
-          <MetricCard
+      <UrlTabs defaultValue={initialTab}>
+        <TabsList className="rounded-full bg-white/70 p-1">
+          <TabsTrigger value="cobrar" className="rounded-full px-4">
+            Cobrar
+          </TabsTrigger>
+          <TabsTrigger value="historico" className="rounded-full px-4">
+            Histórico
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="cobrar" className="space-y-4">
+          <ReceiptsToCollectGroup
             title="Vencidos"
-            value={overdueReceipts.length}
-            description={formatCurrency(overdueAmount)}
-            icon={ShieldAlert}
             tone="rose"
+            receipts={overdueReceipts}
+            emptyMessage="No hay recibos vencidos. ¡Cartera al día!"
           />
-          <MetricCard
-            title="Pendientes"
-            value={pendingCount}
-            description="Recibos aún no liquidados."
-            icon={ReceiptText}
+          <ReceiptsToCollectGroup
+            title="Próximos 7 días"
             tone="amber"
+            receipts={next7Receipts}
+            emptyMessage="Sin recibos por vencer en la próxima semana."
           />
-          <MetricCard
-            title="Pagado este mes"
-            value={paidThisMonth.length}
-            description={formatCurrency(paidAmountMonth)}
-            icon={BadgeCheck}
-            tone="blue"
+          <ReceiptsToCollectGroup
+            title="Próximos vencimientos"
+            tone="emerald"
+            receipts={laterReceipts}
+            emptyMessage="No hay recibos abiertos a futuro."
           />
-        </section>
+        </TabsContent>
 
-        <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-          <SectionCard title="Recibos abiertos" description="Primero los vencidos y luego los próximos siete días.">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-stone-50/70">
-                  <TableHead>Recibo</TableHead>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead>Póliza</TableHead>
-                  <TableHead>Vencimiento</TableHead>
-                  <TableHead className="text-right">Monto</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {[...overdueReceipts, ...next7Receipts].map((receipt) => (
-                  <TableRow key={receipt.id}>
-                    <TableCell className="font-medium">{receipt.receiptNumber}</TableCell>
-                    <TableCell>
-                      <Link href={`/clients/${receipt.clientId}`} className="text-foreground hover:text-primary">
-                        {receipt.client.fullName}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <Link href={`/policies/${receipt.policyId}`} className="text-foreground hover:text-primary">
-                        {receipt.policy.policyNumber}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-col">
-                        <span>{formatDate(receipt.dueDate)}</span>
-                        <StatusBadge status={receipt.status} className="mt-1 w-fit" />
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right font-medium">{formatCurrency(receipt.amount, receipt.currency)}</TableCell>
+        <TabsContent value="historico" className="space-y-6">
+          <SectionCard
+            title="Pagos registrados"
+            description="Últimos 50 pagos conciliados con su recibo origen."
+          >
+            {paymentHistory.length === 0 ? (
+              <div className="px-4 py-6 text-sm text-muted-foreground">Aún no hay pagos registrados.</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-stone-50/70">
+                    <TableHead>Recibo</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Póliza</TableHead>
+                    <TableHead>Fecha</TableHead>
+                    <TableHead>Método</TableHead>
+                    <TableHead className="text-right">Monto</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {paymentHistory.map((payment) => (
+                    <TableRow key={payment.id}>
+                      <TableCell className="font-medium">
+                        <Link href={`/receipts/${payment.receipt.id}`} className="hover:text-primary">
+                          {payment.receipt.receiptNumber}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{payment.client.fullName}</TableCell>
+                      <TableCell>
+                        <Link href={`/policies/${payment.policy.id}`} className="hover:text-primary">
+                          {payment.policy.policyNumber}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{formatDate(payment.paidDate)}</TableCell>
+                      <TableCell>{payment.paymentMethod ?? "Sin método"}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        {formatCurrency(payment.amount, payment.currency)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </SectionCard>
 
-          <SectionCard title="Comprobantes y pagos" description="Recibos con evidencia y pagos ya conciliados.">
-            <div className="divide-y divide-stone-200/80">
-              {withDocuments.slice(0, 10).map((receipt) => (
-                <div key={receipt.id} className="flex items-start justify-between gap-4 px-4 py-4">
-                  <div className="min-w-0">
-                    <Link href={`/policies/${receipt.policyId}`} className="font-medium text-foreground hover:text-primary">
-                      {receipt.receiptNumber}
-                    </Link>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {receipt.client.fullName} · {receipt.policy.policyNumber}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {receipt.document ? `Con comprobante ${receipt.document.fileName}` : "Sin comprobante principal"}
-                    </p>
-                  </div>
+          <SectionCard
+            title="Recibos cobrados este mes"
+            description="Confirmaciones registradas en el período actual."
+          >
+            {paidThisMonth.length === 0 ? (
+              <div className="px-4 py-6 text-sm text-muted-foreground">Aún no se han cobrado recibos este mes.</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-stone-50/70">
+                    <TableHead>Recibo</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Pago</TableHead>
+                    <TableHead>Método</TableHead>
+                    <TableHead className="text-right">Monto</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {paidThisMonth.slice(0, 30).map((receipt) => (
+                    <TableRow key={receipt.id}>
+                      <TableCell className="font-medium">
+                        <Link href={`/receipts/${receipt.id}`} className="hover:text-primary">
+                          {receipt.receiptNumber}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{receipt.client.fullName}</TableCell>
+                      <TableCell>{receipt.paidDate ? formatDate(receipt.paidDate) : "—"}</TableCell>
+                      <TableCell>{receipt.paymentMethod ?? "Sin método"}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        {formatCurrency(receipt.amount, receipt.currency)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </SectionCard>
+        </TabsContent>
+      </UrlTabs>
+    </div>
+  );
+}
+
+const groupTone = {
+  rose: "border-rose-200/70 bg-rose-50/40",
+  amber: "border-amber-200/70 bg-amber-50/40",
+  emerald: "border-emerald-200/70 bg-emerald-50/40",
+} as const;
+
+function ReceiptsToCollectGroup({
+  title,
+  tone,
+  receipts,
+  emptyMessage,
+}: {
+  title: string;
+  tone: keyof typeof groupTone;
+  receipts: Array<{
+    id: string;
+    receiptNumber: string;
+    dueDate: Date;
+    amount: unknown;
+    currency: string;
+    status: string;
+    client: { id: string; fullName: string };
+    policy: { id: string; policyNumber: string };
+    insurer: { name: string };
+  }>;
+  emptyMessage: string;
+}) {
+  return (
+    <SectionCard title={`${title} (${receipts.length})`}>
+      {receipts.length === 0 ? (
+        <div className="px-4 py-6 text-sm text-muted-foreground">{emptyMessage}</div>
+      ) : (
+        <div className={`divide-y divide-stone-200/80 border-l-4 ${groupTone[tone]}`}>
+          {receipts.map((receipt) => (
+            <div
+              key={receipt.id}
+              className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={`/receipts/${receipt.id}`}
+                    className="font-medium text-foreground hover:text-primary"
+                  >
+                    {receipt.receiptNumber}
+                  </Link>
+                  <Badge variant={receipt.dueDate < new Date() ? "destructive" : "secondary"}>
+                    {receipt.dueDate < new Date() ? "Vencido" : "Pendiente"}
+                  </Badge>
                   <StatusBadge status={receipt.status} />
                 </div>
-              ))}
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {receipt.client.fullName} · {receipt.policy.policyNumber} · {receipt.insurer.name}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">Vence {formatDate(receipt.dueDate)}</p>
+              </div>
+              <div className="flex items-center gap-3 md:text-right">
+                <div>
+                  <p className="font-semibold">{formatCurrency(receipt.amount, receipt.currency)}</p>
+                  <p className="text-xs text-muted-foreground">{receipt.currency}</p>
+                </div>
+                <QuickPaymentDialog
+                  receipt={{
+                    id: receipt.id,
+                    receiptNumber: receipt.receiptNumber,
+                    amount: toNumber(receipt.amount),
+                    currency: receipt.currency,
+                    dueDate: receipt.dueDate.toISOString().split("T")[0],
+                    client: { fullName: receipt.client.fullName },
+                    policy: { policyNumber: receipt.policy.policyNumber },
+                  }}
+                />
+              </div>
             </div>
-          </SectionCard>
-        </section>
-
-        <SectionCard title="Pagos cobrados este mes" description="Confirmaciones que ya entraron al flujo de caja.">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-stone-50/70">
-                <TableHead>Recibo</TableHead>
-                <TableHead>Cliente</TableHead>
-                <TableHead>Fecha</TableHead>
-                <TableHead>Método</TableHead>
-                <TableHead className="text-right">Monto</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paidThisMonth.map((receipt) => (
-                <TableRow key={receipt.id}>
-                  <TableCell className="font-medium">{receipt.receiptNumber}</TableCell>
-                  <TableCell>{receipt.client.fullName}</TableCell>
-                  <TableCell>{receipt.paidDate ? formatDate(receipt.paidDate) : "Sin fecha"}</TableCell>
-                  <TableCell>{receipt.paymentMethod ?? "Sin método"}</TableCell>
-                  <TableCell className="text-right font-medium">{formatCurrency(receipt.amount, receipt.currency)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </SectionCard>
-      </div>
-    </main>
+          ))}
+        </div>
+      )}
+    </SectionCard>
   );
 }

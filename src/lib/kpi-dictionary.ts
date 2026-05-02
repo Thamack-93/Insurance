@@ -46,14 +46,14 @@ export const KPI_DICTIONARY: Record<string, KpiDefinition> = {
     key: "saludDatos",
     etiqueta: "Salud de datos",
     definicion: "Indicador de completitud y consistencia del portafolio.",
-    ruta: "/data-quality",
+    ruta: "/risks?tab=completitud",
     categoria: "Calidad",
   },
   pagosPorVencer: {
     key: "pagosPorVencer",
     etiqueta: "Pagos por vencer",
     definicion: "Recibos pendientes o vencidos dentro del rango configurado.",
-    ruta: "/payments",
+    ruta: "/receipts?tab=cobrar",
     categoria: "Cobranza",
   },
   renovacionesPendientes: {
@@ -81,14 +81,14 @@ export const KPI_DICTIONARY: Record<string, KpiDefinition> = {
     key: "calidadClientes",
     etiqueta: "Calidad de clientes",
     definicion: "Puntaje de completitud por cliente.",
-    ruta: "/data-quality",
+    ruta: "/risks?tab=completitud",
     categoria: "Calidad",
   },
   calidadPolizas: {
     key: "calidadPolizas",
     etiqueta: "Calidad de pólizas",
     definicion: "Puntaje de completitud por póliza.",
-    ruta: "/data-quality",
+    ruta: "/risks?tab=completitud",
     categoria: "Calidad",
   },
 };

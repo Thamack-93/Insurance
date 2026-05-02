@@ -98,7 +98,7 @@ export function ControlledSelect({
 }) {
   const label = options.find((o) => o.value === value)?.label ?? "";
   return (
-    <Select value={value} onValueChange={onValueChange}>
+    <Select value={value} onValueChange={(next) => onValueChange(next ?? "")}>
       <SelectTrigger className={cn("h-10 w-full rounded-xl bg-white", className)}>
         <SelectValue placeholder={placeholder ?? "Selecciona una opción"}>
           {label || undefined}

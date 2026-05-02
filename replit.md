@@ -38,7 +38,21 @@ Preferred communication style: Simple, everyday language.
 - **Notifications**: Sonner toasts.
 - **Theming**: `next-themes` for dark/light mode support.
 
-**Layout pattern**: Fixed collapsible sidebar (`AppSidebar`) + topbar (`AppTopbar`) with global search. Dashboard lives under `src/app/(dashboard)/`. The root `page.tsx` redirects to `/dashboard`.
+**Layout pattern**: Sidebar (`AppSidebar`) with 6 collapsible sections (Operación, Cartera, Finanzas, Operación interna, Calidad, Sistema) — open/closed state persisted in `localStorage` (`pg.sidebar.openSections`); active route auto-opens its parent. Topbar (`AppTopbar`) with global search and ⌘K palette. Dashboard pages live under `src/app/(dashboard)/`. The root `page.tsx` redirects to `/dashboard`.
+
+**Canonical pages (post Task #2 consolidation)**:
+- `/dashboard` — strategic KPIs + charts + activity timeline + top-3 risk summary. NO duplicate "urgent payments" or "critical pending" cards (those belong to `/today`).
+- `/today` — actionable inbox: KPI strip + Por cobrar groups + Renovar + Pendientes atrasados + Comisiones. NO timeline, NO documents-missing card.
+- `/receipts` — unified Finanzas page with `?tab=cobrar|historico` (default `cobrar`). Cobrar tab groups open receipts by overdue/7d/later with `QuickPaymentDialog`. Histórico tab shows `Payment` records + paid-this-month receipts.
+- `/risks` — unified Calidad page with `?tab=hallazgos|completitud` (default `hallazgos`). Hallazgos tab uses `risk-engine`. Completitud tab uses `data-quality.ts` scores.
+- Tabs sync the URL via `UrlTabs` (`src/components/ui/url-tabs.tsx`) using `router.replace` with `scroll: false`.
+
+**Legacy URL redirects** (in `next.config.ts`):
+- `/payments` → `/receipts?tab=cobrar`
+- `/payments/new` → `/receipts?tab=cobrar` (semántica de pago rápido, no creación de recibo)
+- `/data-quality` → `/risks?tab=completitud`
+
+`src/app/(dashboard)/payments/actions.ts` is retained (no page route) because `src/app/api/payments/quick/route.ts` imports `createPayment` from it.
 
 **Component organization** (under `src/components/`):
 - `layout/` — sidebar, topbar

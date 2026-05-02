@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   AlertTriangle,
+  ArrowRight,
   CalendarClock,
   CheckSquare,
   CircleDollarSign,
@@ -19,33 +20,31 @@ import {
   DuePaymentsChart,
   RenewalsChart,
 } from "@/components/charts/dashboard-charts";
-import { StatusBadge } from "@/components/badges/status-badge";
-import { PageHeader, SectionHeader } from "@/components/layout/page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDashboardData } from "@/lib/dashboard-queries";
-import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
-import { policyTypeLabel } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
 export default async function DashboardPage() {
   const data = await getDashboardData();
+  const topRisks = data.sections.topRisks.slice(0, 3);
 
   return (
     <div className="space-y-8">
       <PageHeader
         eyebrow="Cockpit operativo"
         title="Tu cartera, en modo control."
-        description="Pagos, renovaciones, pendientes, comisiones y riesgos conectados para decidir en segundos que atender primero."
+        description="Una vista estratégica de KPIs, gráficos y actividad. Para lo accionable del día abre Hoy."
         actions={
           <>
             <Link href="/reports" className={cn(buttonVariants({ variant: "outline" }), "rounded-full bg-white/80")}>
               Generar reporte
             </Link>
             <Link href="/today" className={cn(buttonVariants(), "rounded-full")}>
-              Ver que hacer hoy
+              Ver qué hacer hoy
             </Link>
           </>
         }
@@ -53,7 +52,7 @@ export default async function DashboardPage() {
 
       <StatGrid>
         <KpiCard
-          title="Polizas activas"
+          title="Pólizas activas"
           value={data.kpis.activePolicies}
           description="Contratos vigentes en cartera"
           href="/policies"
@@ -61,7 +60,7 @@ export default async function DashboardPage() {
           tone="blue"
         />
         <KpiCard
-          title="Pagos prox. 60 dias"
+          title="Pagos próx. 60 días"
           value={data.kpis.duePayments60}
           description="Recibos pendientes por vencer"
           href="/due-payments"
@@ -72,14 +71,14 @@ export default async function DashboardPage() {
           title="Pagos vencidos"
           value={data.kpis.overduePayments}
           description="Requieren seguimiento inmediato"
-          href="/due-payments"
+          href="/today"
           icon={Siren}
           tone="red"
         />
         <KpiCard
-          title="Renovaciones 60 dias"
+          title="Renovaciones 60 días"
           value={data.kpis.renewals60}
-          description="Polizas por renovar pronto"
+          description="Pólizas por renovar pronto"
           href="/renewals"
           icon={CalendarClock}
           tone="amber"
@@ -95,8 +94,8 @@ export default async function DashboardPage() {
         <KpiCard
           title="Pendientes urgentes"
           value={data.kpis.urgentTasks}
-          description="Prioridad maxima"
-          href="/tasks"
+          description="Prioridad máxima"
+          href="/today"
           icon={AlertTriangle}
           tone="red"
         />
@@ -111,7 +110,7 @@ export default async function DashboardPage() {
         <KpiCard
           title="Riesgos detectados"
           value={data.kpis.risksDetected}
-          description="Alertas deterministicas"
+          description="Alertas determinísticas"
           href="/risks"
           icon={FileWarning}
           tone="amber"
@@ -122,83 +121,45 @@ export default async function DashboardPage() {
         <ChartCard title="Vencimientos por semana" description="Recibos abiertos agrupados por fecha de vencimiento.">
           <DuePaymentsChart data={data.charts.dueByWeek} />
         </ChartCard>
-        <ChartCard title="Renovaciones por semana" description="Polizas activas con renovacion cercana.">
+        <ChartCard title="Renovaciones por semana" description="Pólizas activas con renovación cercana.">
           <RenewalsChart data={data.charts.renewalsByWeek} />
         </ChartCard>
-        <ChartCard title="Distribucion por tipo" description="Mix de productos en cartera.">
+        <ChartCard title="Distribución por tipo" description="Mix de productos en cartera.">
           <DistributionChart data={data.charts.policyTypeDistribution} />
         </ChartCard>
-        <ChartCard title="Comisiones esperadas por mes" description="Ingreso esperado por fecha de comision.">
+        <ChartCard title="Comisiones esperadas por mes" description="Ingreso esperado por fecha de comisión.">
           <CommissionChart data={data.charts.commissionsByMonth} />
         </ChartCard>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+      <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
-          <CardHeader>
-            <SectionHeader title="Pagos urgentes" description="Vencidos o por vencer en los proximos 7 dias." />
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {data.sections.urgentPayments.map((receipt) => (
-              <Link
-                key={receipt.id}
-                href="/due-payments"
-                className="flex items-center justify-between gap-4 rounded-2xl border bg-white/70 p-4 transition hover:border-primary/20 hover:shadow-sm"
-              >
-                <div>
-                  <p className="font-medium">{receipt.client.fullName}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {receipt.policy.policyNumber} · {receipt.receiptNumber} · {policyTypeLabel(receipt.policy.policyType)}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="font-semibold">{formatCurrency(receipt.amount, receipt.currency)}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatDate(receipt.dueDate)} · {daysUntil(receipt.dueDate)} dias
-                  </p>
-                </div>
-              </Link>
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
-          <CardHeader>
-            <SectionHeader title="Pendientes criticos" description="Urgentes, atrasados o bloqueados." />
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {data.sections.criticalTasks.map((task) => (
-              <Link key={task.id} href="/tasks" className="block rounded-2xl border bg-white/70 p-4 transition hover:border-primary/20">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-medium">{task.title}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {task.folio} · {task.client?.fullName ?? "Sin cliente"}
-                    </p>
-                  </div>
-                  <StatusBadge status={task.status} />
-                </div>
-              </Link>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur xl:col-span-2">
-          <CardHeader>
+          <CardHeader className="flex-row items-center justify-between gap-3">
             <CardTitle className="text-lg">Riesgos principales</CardTitle>
+            <Link
+              href="/risks"
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "rounded-full bg-white/70")}
+            >
+              Ver todos
+              <ArrowRight className="ml-1 size-3.5" />
+            </Link>
           </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2">
-            {data.sections.topRisks.map((risk) => (
-              <RiskAlertCard
-                key={`${risk.alertType}-${risk.entityId}`}
-                title={risk.title}
-                description={risk.description}
-                severity={risk.severity}
-                action={risk.suggestedAction}
-              />
-            ))}
+          <CardContent className="grid gap-3 md:grid-cols-3">
+            {topRisks.length === 0 ? (
+              <p className="text-sm text-muted-foreground md:col-span-3">
+                No hay riesgos abiertos en este momento.
+              </p>
+            ) : (
+              topRisks.map((risk) => (
+                <RiskAlertCard
+                  key={`${risk.alertType}-${risk.entityId}`}
+                  title={risk.title}
+                  description={risk.description}
+                  severity={risk.severity}
+                  action={risk.suggestedAction}
+                />
+              ))
+            )}
           </CardContent>
         </Card>
 
