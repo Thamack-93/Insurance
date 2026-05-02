@@ -1,62 +1,85 @@
 import Link from "next/link";
-import { addDays, startOfMonth } from "date-fns";
+import { startOfMonth } from "date-fns";
 import { ArrowRight, BadgeCheck, CircleDollarSign, Plus, ReceiptText, ShieldAlert } from "lucide-react";
+import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { Button } from "@/components/ui/button";
 import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UrlTabs } from "@/components/ui/url-tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CollectableReceipts } from "@/components/receipts/collectable-receipts";
+import { EmptyState } from "@/components/empty-states/empty-state";
+import { ListSearch } from "@/components/lists/list-search";
+import { Pagination } from "@/components/lists/pagination";
+import { CollectableReceipts, type CollectableReceipt } from "@/components/receipts/collectable-receipts";
 import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 
+const PAGE_SIZE = 25;
+
 export default async function ReceiptsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ tab?: string }>;
+  searchParams?: Promise<{ tab?: string; q?: string; page?: string }>;
 }) {
   const params = (await searchParams) ?? {};
   const initialTab = params.tab === "historico" ? "historico" : "cobrar";
+  const query = (params.q ?? "").trim().slice(0, 100);
+  const page = Math.max(1, Number(params.page) || 1);
 
   const db = getDb();
   const now = today();
-  const in7 = addDays(now, 7);
   const monthStart = startOfMonth(now);
 
+  const baseWhere: Prisma.ReceiptWhereInput = {
+    status: { notIn: ["PAID", "CANCELLED"] },
+  };
+  const where: Prisma.ReceiptWhereInput = query
+    ? {
+        AND: [
+          baseWhere,
+          {
+            OR: [
+              { receiptNumber: { contains: query } },
+              { client: { fullName: { contains: query } } },
+              { policy: { policyNumber: { contains: query } } },
+              { insurer: { name: { contains: query } } },
+            ],
+          },
+        ],
+      }
+    : baseWhere;
+
   const [
-    allOpenReceipts,
-    overdueReceipts,
-    next7Receipts,
-    laterReceipts,
+    openCount,
+    overdueCount,
     paidThisMonth,
+    outstandingAgg,
+    overdueAgg,
+    filteredCount,
+    pagedReceipts,
     paymentHistory,
   ] = await Promise.all([
-    db.receipt.findMany({
-      where: { status: { notIn: ["PAID", "CANCELLED"] } },
-      include: { client: true, policy: true, insurer: true },
-    }),
-    db.receipt.findMany({
-      where: { dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
-      include: { client: true, policy: true, insurer: true },
-      orderBy: { dueDate: "asc" },
-    }),
-    db.receipt.findMany({
-      where: { dueDate: { gte: now, lte: in7 }, status: { notIn: ["PAID", "CANCELLED"] } },
-      include: { client: true, policy: true, insurer: true },
-      orderBy: { dueDate: "asc" },
-    }),
-    db.receipt.findMany({
-      where: { dueDate: { gt: in7 }, status: { notIn: ["PAID", "CANCELLED"] } },
-      include: { client: true, policy: true, insurer: true },
-      orderBy: { dueDate: "asc" },
-      take: 30,
-    }),
+    db.receipt.count({ where: baseWhere }),
+    db.receipt.count({ where: { ...baseWhere, dueDate: { lt: now } } }),
     db.receipt.findMany({
       where: { status: "PAID", paidDate: { gte: monthStart } },
       include: { client: true, policy: true, insurer: true },
       orderBy: { paidDate: "desc" },
+    }),
+    db.receipt.aggregate({ _sum: { amount: true }, where: baseWhere }),
+    db.receipt.aggregate({
+      _sum: { amount: true },
+      where: { ...baseWhere, dueDate: { lt: now } },
+    }),
+    db.receipt.count({ where }),
+    db.receipt.findMany({
+      where,
+      include: { client: true, policy: true, insurer: true },
+      orderBy: { dueDate: "asc" },
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
     }),
     db.payment.findMany({
       include: {
@@ -69,13 +92,25 @@ export default async function ReceiptsPage({
     }),
   ]);
 
-  const outstandingAmount = allOpenReceipts.reduce((sum, receipt) => sum + toNumber(receipt.amount), 0);
-  const overdueAmount = overdueReceipts.reduce((sum, receipt) => sum + toNumber(receipt.amount), 0);
+  const outstandingAmount = toNumber(outstandingAgg._sum.amount);
+  const overdueAmount = toNumber(overdueAgg._sum.amount);
   const paidAmountMonth = paidThisMonth.reduce((sum, receipt) => sum + toNumber(receipt.amount), 0);
   const collectionRate =
-    allOpenReceipts.length + paidThisMonth.length > 0
-      ? Math.round((paidThisMonth.length / (allOpenReceipts.length + paidThisMonth.length)) * 100)
+    openCount + paidThisMonth.length > 0
+      ? Math.round((paidThisMonth.length / (openCount + paidThisMonth.length)) * 100)
       : 100;
+
+  const collectableRows: CollectableReceipt[] = pagedReceipts.map((receipt) => ({
+    id: receipt.id,
+    receiptNumber: receipt.receiptNumber,
+    dueDate: receipt.dueDate.toISOString().split("T")[0],
+    amount: toNumber(receipt.amount),
+    currency: receipt.currency,
+    status: receipt.status,
+    client: { fullName: receipt.client.fullName },
+    policy: { policyNumber: receipt.policy.policyNumber },
+    insurer: { name: receipt.insurer.name },
+  }));
 
   return (
     <div className="space-y-6">
@@ -111,7 +146,7 @@ export default async function ReceiptsPage({
         />
         <MetricCard
           title="Vencidos"
-          value={overdueReceipts.length}
+          value={overdueCount}
           description={formatCurrency(overdueAmount)}
           icon={ShieldAlert}
           tone="rose"
@@ -143,28 +178,54 @@ export default async function ReceiptsPage({
         </TabsList>
 
         <TabsContent value="cobrar" className="space-y-4">
-          <CollectableReceipts
-            groups={[
-              {
-                title: "Vencidos",
-                tone: "rose",
-                emptyMessage: "No hay recibos vencidos. ¡Cartera al día!",
-                receipts: overdueReceipts.map(serializeReceiptForCollect),
-              },
-              {
-                title: "Próximos 7 días",
-                tone: "amber",
-                emptyMessage: "Sin recibos por vencer en la próxima semana.",
-                receipts: next7Receipts.map(serializeReceiptForCollect),
-              },
-              {
-                title: "Próximos vencimientos",
-                tone: "emerald",
-                emptyMessage: "No hay recibos abiertos a futuro.",
-                receipts: laterReceipts.map(serializeReceiptForCollect),
-              },
-            ]}
-          />
+          <SectionCard
+            title="Por cobrar"
+            description="Búsqueda y paginación sobre todos los recibos abiertos."
+            action={<ListSearch placeholder="Buscar por número, cliente, póliza o aseguradora..." />}
+          >
+            {filteredCount === 0 ? (
+              query ? (
+                <div className="p-4">
+                  <EmptyState
+                    icon={ReceiptText}
+                    title="Sin resultados"
+                    description={`No encontramos recibos que coincidan con "${query}".`}
+                  />
+                </div>
+              ) : (
+                <div className="p-4">
+                  <EmptyState
+                    icon={BadgeCheck}
+                    title="¡Cartera al día!"
+                    description="No hay recibos abiertos por cobrar."
+                    action="Nuevo recibo"
+                    actionHref="/receipts/new"
+                  />
+                </div>
+              )
+            ) : pagedReceipts.length === 0 ? (
+              <div className="p-4">
+                <EmptyState
+                  icon={ReceiptText}
+                  title="Página fuera de rango"
+                  description="No hay recibos en esta página. Vuelve al inicio del listado."
+                  action="Volver al inicio"
+                  actionHref={query ? `/receipts?tab=cobrar&q=${encodeURIComponent(query)}` : "/receipts?tab=cobrar"}
+                />
+              </div>
+            ) : (
+              <div className="space-y-3 px-4 py-4">
+                <CollectableReceipts receipts={collectableRows} />
+                <Pagination
+                  page={page}
+                  pageSize={PAGE_SIZE}
+                  total={filteredCount}
+                  basePath="/receipts"
+                  searchParams={{ tab: "cobrar", q: query }}
+                />
+              </div>
+            )}
+          </SectionCard>
         </TabsContent>
 
         <TabsContent value="historico" className="space-y-6">
@@ -173,7 +234,13 @@ export default async function ReceiptsPage({
             description="Últimos 50 pagos conciliados con su recibo origen."
           >
             {paymentHistory.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-muted-foreground">Aún no hay pagos registrados.</div>
+              <div className="p-4">
+                <EmptyState
+                  icon={ReceiptText}
+                  title="Aún no hay pagos registrados"
+                  description="Cuando registres un pago, aparecerá en este historial."
+                />
+              </div>
             ) : (
               <Table>
                 <TableHeader>
@@ -217,7 +284,13 @@ export default async function ReceiptsPage({
             description="Confirmaciones registradas en el período actual."
           >
             {paidThisMonth.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-muted-foreground">Aún no se han cobrado recibos este mes.</div>
+              <div className="p-4">
+                <EmptyState
+                  icon={BadgeCheck}
+                  title="Aún no se han cobrado recibos este mes"
+                  description="Cuando confirmes un pago, aparecerá aquí."
+                />
+              </div>
             ) : (
               <Table>
                 <TableHeader>
@@ -253,30 +326,4 @@ export default async function ReceiptsPage({
       </UrlTabs>
     </div>
   );
-}
-
-type DbReceipt = {
-  id: string;
-  receiptNumber: string;
-  dueDate: Date;
-  amount: unknown;
-  currency: string;
-  status: string;
-  client: { fullName: string };
-  policy: { policyNumber: string };
-  insurer: { name: string };
-};
-
-function serializeReceiptForCollect(receipt: DbReceipt) {
-  return {
-    id: receipt.id,
-    receiptNumber: receipt.receiptNumber,
-    dueDate: receipt.dueDate.toISOString().split("T")[0],
-    amount: toNumber(receipt.amount),
-    currency: receipt.currency,
-    status: receipt.status,
-    client: { fullName: receipt.client.fullName },
-    policy: { policyNumber: receipt.policy.policyNumber },
-    insurer: { name: receipt.insurer.name },
-  };
 }

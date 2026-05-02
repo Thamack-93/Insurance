@@ -9,7 +9,6 @@ import { BadgeCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { QuickPaymentDialog } from "@/components/payments/quick-payment-dialog";
 import { ConfirmDialog } from "@/components/drawers/confirm-dialog";
@@ -21,7 +20,7 @@ import { formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { bulkMarkReceiptsPaid } from "@/app/(dashboard)/receipts/actions";
 
-type CollectableReceipt = {
+export type CollectableReceipt = {
   id: string;
   receiptNumber: string;
   dueDate: string;
@@ -33,40 +32,30 @@ type CollectableReceipt = {
   insurer: { name: string };
 };
 
-type Group = {
-  title: string;
-  tone: "rose" | "amber" | "emerald";
-  receipts: CollectableReceipt[];
-  emptyMessage: string;
-};
+export function CollectableReceipts({ receipts }: { receipts: CollectableReceipt[] }) {
+  if (receipts.length === 0) return null;
 
-const GROUP_TONE = {
-  rose: "border-rose-200/70 bg-rose-50/40",
-  amber: "border-amber-200/70 bg-amber-50/40",
-  emerald: "border-emerald-200/70 bg-emerald-50/40",
-} as const;
-
-export function CollectableReceipts({ groups }: { groups: Group[] }) {
   return (
     <BulkActionsProvider>
-      <div className="space-y-4">
-        <BulkToolbar groups={groups} />
-        {groups.map((group) => (
-          <ReceiptsGroup key={group.title} group={group} />
-        ))}
+      <div className="space-y-3">
+        <BulkToolbar receipts={receipts} />
+        <div className="divide-y divide-stone-200/80 rounded-lg border border-stone-200/80 bg-white">
+          {receipts.map((receipt) => (
+            <ReceiptRow key={receipt.id} receipt={receipt} />
+          ))}
+        </div>
       </div>
     </BulkActionsProvider>
   );
 }
 
-function BulkToolbar({ groups }: { groups: Group[] }) {
+function BulkToolbar({ receipts }: { receipts: CollectableReceipt[] }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const { selectedItems, hasSelection, clearSelection, getSelectedIds, selectAll } =
     useBulkActions();
-
-  const allIds = groups.flatMap((g) => g.receipts.map((r) => r.id));
+  const allIds = receipts.map((r) => r.id);
   const selectedCount = selectedItems.size;
 
   const handleConfirm = async () => {
@@ -93,7 +82,6 @@ function BulkToolbar({ groups }: { groups: Group[] }) {
   };
 
   if (!hasSelection) {
-    if (allIds.length === 0) return null;
     return (
       <div className="flex items-center justify-end">
         <Button
@@ -102,7 +90,7 @@ function BulkToolbar({ groups }: { groups: Group[] }) {
           className="h-8 gap-2 text-xs text-muted-foreground"
           onClick={() => selectAll(allIds)}
         >
-          Seleccionar todos los pendientes ({allIds.length})
+          Seleccionar todos en esta página ({allIds.length})
         </Button>
       </div>
     );
@@ -146,24 +134,6 @@ function BulkToolbar({ groups }: { groups: Group[] }) {
         onConfirm={handleConfirm}
       />
     </>
-  );
-}
-
-function ReceiptsGroup({ group }: { group: Group }) {
-  return (
-    <SectionCard title={`${group.title} (${group.receipts.length})`}>
-      {group.receipts.length === 0 ? (
-        <div className="px-4 py-6 text-sm text-muted-foreground">{group.emptyMessage}</div>
-      ) : (
-        <div
-          className={`divide-y divide-stone-200/80 border-l-4 ${GROUP_TONE[group.tone]}`}
-        >
-          {group.receipts.map((receipt) => (
-            <ReceiptRow key={receipt.id} receipt={receipt} />
-          ))}
-        </div>
-      )}
-    </SectionCard>
   );
 }
 
