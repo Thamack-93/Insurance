@@ -5,7 +5,9 @@ import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ArrowUpCircle, Flag } from "lucide-react";
+import { useState } from "react";
+import { ArrowUpCircle, Flag, Trash2 } from "lucide-react";
+import { ConfirmDialog } from "@/components/drawers/confirm-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +24,7 @@ import { BulkActionsProvider, useBulkActions } from "@/components/bulk-actions/b
 import { SelectableRow } from "@/components/bulk-actions/selectable-row";
 import { SelectAllHeader } from "@/components/bulk-actions/select-all-header";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
-import { bulkUpdateTaskStatus, bulkUpdateTaskPriority } from "@/app/(dashboard)/tasks/actions";
+import { bulkUpdateTaskStatus, bulkUpdateTaskPriority, bulkDeleteTasks } from "@/app/(dashboard)/tasks/actions";
 
 const taskTypeLabels: Record<string, string> = {
   GENERAL: "General",
@@ -68,6 +70,7 @@ export type TaskRow = {
 function TasksTableInner({ tasks }: { tasks: TaskRow[] }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const { selectedItems, hasSelection, clearSelection, getSelectedIds } = useBulkActions();
   const allIds = tasks.map((t) => t.id);
   const selectedCount = selectedItems.size;
@@ -100,6 +103,29 @@ function TasksTableInner({ tasks }: { tasks: TaskRow[] }) {
 
   const handlePriority = (priority: string) =>
     runBulk((ids) => bulkUpdateTaskPriority(ids, priority), "Prioridad actualizada.");
+
+  const handleDelete = async () => {
+    const ids = getSelectedIds();
+    if (ids.length === 0) {
+      toast.error("Selecciona al menos un pendiente.");
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      startTransition(async () => {
+        const result = await bulkDeleteTasks(ids);
+        if (result.ok) {
+          toast.success(result.message ?? "Pendientes eliminados.");
+          flushSync(() => {
+            clearSelection();
+          });
+          router.refresh();
+        } else {
+          toast.error(result.error ?? "No se pudo eliminar.");
+        }
+        resolve();
+      });
+    });
+  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -162,6 +188,25 @@ function TasksTableInner({ tasks }: { tasks: TaskRow[] }) {
                 </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isPending}
+              className="h-8 gap-1 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => setConfirmDeleteOpen(true)}
+            >
+              <Trash2 className="size-3.5" />
+              Eliminar
+            </Button>
+            <ConfirmDialog
+              open={confirmDeleteOpen}
+              onOpenChange={setConfirmDeleteOpen}
+              title={`Eliminar ${selectedCount} pendiente${selectedCount !== 1 ? "s" : ""}`}
+              description="Esta acción es permanente y no se puede deshacer. ¿Quieres continuar?"
+              confirmLabel="Eliminar"
+              destructive
+              onConfirm={handleDelete}
+            />
           </div>
         </div>
       ) : null}

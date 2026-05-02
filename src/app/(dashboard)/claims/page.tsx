@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowRight, AlertTriangle, BadgeCheck, Clock, FileWarning, Plus, TrendingUp } from "lucide-react";
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";

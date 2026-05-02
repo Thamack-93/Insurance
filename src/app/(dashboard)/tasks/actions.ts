@@ -157,7 +157,7 @@ export async function updateTask(id: string, values: TaskFormValues): Promise<Mu
   }
 }
 
-const ALLOWED_STATUSES = new Set([
+const ALLOWED_STATUSES = [
   "OPEN",
   "IN_PROGRESS",
   "WAITING_CLIENT",
@@ -167,13 +167,23 @@ const ALLOWED_STATUSES = new Set([
   "RESOLVED",
   "CANCELLED",
   "ARCHIVED",
-]);
+] as const;
+type AllowedStatus = (typeof ALLOWED_STATUSES)[number];
 
-const ALLOWED_PRIORITIES = new Set(["LOW", "MEDIUM", "HIGH", "URGENT"]);
+const ALLOWED_PRIORITIES = ["LOW", "MEDIUM", "HIGH", "URGENT"] as const;
+type AllowedPriority = (typeof ALLOWED_PRIORITIES)[number];
+
+function isAllowedStatus(value: string): value is AllowedStatus {
+  return (ALLOWED_STATUSES as readonly string[]).includes(value);
+}
+
+function isAllowedPriority(value: string): value is AllowedPriority {
+  return (ALLOWED_PRIORITIES as readonly string[]).includes(value);
+}
 
 export async function bulkUpdateTaskStatus(ids: string[], status: string): Promise<MutationResult> {
   if (!ids.length) return errorResult("No hay pendientes seleccionados.");
-  if (!ALLOWED_STATUSES.has(status)) {
+  if (!isAllowedStatus(status)) {
     return errorResult("Estado no válido.");
   }
   const db = getDb();
@@ -181,7 +191,7 @@ export async function bulkUpdateTaskStatus(ids: string[], status: string): Promi
     await db.task.updateMany({
       where: { id: { in: ids } },
       data: {
-        status: status as any,
+        status,
         closedDate: status === "RESOLVED" ? new Date() : null,
       },
     });
@@ -194,18 +204,55 @@ export async function bulkUpdateTaskStatus(ids: string[], status: string): Promi
 
 export async function bulkUpdateTaskPriority(ids: string[], priority: string): Promise<MutationResult> {
   if (!ids.length) return errorResult("No hay pendientes seleccionados.");
-  if (!ALLOWED_PRIORITIES.has(priority)) {
+  if (!isAllowedPriority(priority)) {
     return errorResult("Prioridad no válida.");
   }
   const db = getDb();
   try {
     await db.task.updateMany({
       where: { id: { in: ids } },
-      data: { priority: priority as any },
+      data: { priority },
     });
     revalidatePaths(["/tasks", "/today", "/dashboard"]);
     return successResult("bulk", "", `${ids.length} pendiente${ids.length !== 1 ? "s" : ""} con nueva prioridad.`);
   } catch (error) {
     return errorResult(error instanceof Error ? error.message : "No se pudo actualizar la prioridad.");
+  }
+}
+
+export async function bulkDeleteTasks(ids: string[]): Promise<MutationResult> {
+  if (!ids.length) return errorResult("No hay pendientes seleccionados.");
+  const db = getDb();
+  try {
+    const targets = await db.task.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, folio: true, title: true, clientId: true, policyId: true },
+    });
+
+    if (targets.length === 0) {
+      return errorResult("Los pendientes ya no existen.");
+    }
+
+    await db.task.deleteMany({ where: { id: { in: targets.map((t) => t.id) } } });
+
+    await Promise.all(
+      targets.map((task) =>
+        writeActivityLog({
+          entityType: "Task",
+          entityId: task.id,
+          action: "TASK_DELETE",
+          oldValue: task,
+        })
+      )
+    );
+
+    revalidatePaths(["/tasks", "/today", "/dashboard", "/risks"]);
+    return successResult(
+      "bulk",
+      "",
+      `${targets.length} pendiente${targets.length !== 1 ? "s" : ""} eliminado${targets.length !== 1 ? "s" : ""}.`
+    );
+  } catch (error) {
+    return errorResult(error instanceof Error ? error.message : "No se pudieron eliminar los pendientes.");
   }
 }

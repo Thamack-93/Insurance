@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowRight, Calculator, Clock, Plus, TrendingUp, CheckCircle } from "lucide-react";
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
@@ -29,7 +29,6 @@ export default async function QuotesPage({
   const where: Prisma.QuoteWhereInput = query
     ? {
         OR: [
-          { policyType: { contains: query } },
           { client: { fullName: { contains: query } } },
           { insurer: { name: { contains: query } } },
         ],

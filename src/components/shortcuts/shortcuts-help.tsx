@@ -31,7 +31,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: ["/"], description: "Enfocar búsqueda de la lista" },
       { keys: ["⌘", "K"], description: "Abrir paleta de comandos" },
       { keys: ["?"], description: "Mostrar esta ayuda" },
-      { keys: ["Esc"], description: "Cerrar diálogos" },
+      { keys: ["Esc"], description: "Cerrar diálogos · en detalle, regresa al listado" },
     ],
   },
 ];

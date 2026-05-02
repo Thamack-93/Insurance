@@ -3,13 +3,11 @@ import { addDays, startOfMonth } from "date-fns";
 import { ArrowRight, BadgeCheck, CircleDollarSign, Plus, ReceiptText, ShieldAlert } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
-import { StatusBadge } from "@/components/badges/status-badge";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UrlTabs } from "@/components/ui/url-tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { QuickPaymentDialog } from "@/components/payments/quick-payment-dialog";
+import { CollectableReceipts } from "@/components/receipts/collectable-receipts";
 import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
@@ -145,23 +143,27 @@ export default async function ReceiptsPage({
         </TabsList>
 
         <TabsContent value="cobrar" className="space-y-4">
-          <ReceiptsToCollectGroup
-            title="Vencidos"
-            tone="rose"
-            receipts={overdueReceipts}
-            emptyMessage="No hay recibos vencidos. ¡Cartera al día!"
-          />
-          <ReceiptsToCollectGroup
-            title="Próximos 7 días"
-            tone="amber"
-            receipts={next7Receipts}
-            emptyMessage="Sin recibos por vencer en la próxima semana."
-          />
-          <ReceiptsToCollectGroup
-            title="Próximos vencimientos"
-            tone="emerald"
-            receipts={laterReceipts}
-            emptyMessage="No hay recibos abiertos a futuro."
+          <CollectableReceipts
+            groups={[
+              {
+                title: "Vencidos",
+                tone: "rose",
+                emptyMessage: "No hay recibos vencidos. ¡Cartera al día!",
+                receipts: overdueReceipts.map(serializeReceiptForCollect),
+              },
+              {
+                title: "Próximos 7 días",
+                tone: "amber",
+                emptyMessage: "Sin recibos por vencer en la próxima semana.",
+                receipts: next7Receipts.map(serializeReceiptForCollect),
+              },
+              {
+                title: "Próximos vencimientos",
+                tone: "emerald",
+                emptyMessage: "No hay recibos abiertos a futuro.",
+                receipts: laterReceipts.map(serializeReceiptForCollect),
+              },
+            ]}
           />
         </TabsContent>
 
@@ -253,83 +255,28 @@ export default async function ReceiptsPage({
   );
 }
 
-const groupTone = {
-  rose: "border-rose-200/70 bg-rose-50/40",
-  amber: "border-amber-200/70 bg-amber-50/40",
-  emerald: "border-emerald-200/70 bg-emerald-50/40",
-} as const;
+type DbReceipt = {
+  id: string;
+  receiptNumber: string;
+  dueDate: Date;
+  amount: unknown;
+  currency: string;
+  status: string;
+  client: { fullName: string };
+  policy: { policyNumber: string };
+  insurer: { name: string };
+};
 
-function ReceiptsToCollectGroup({
-  title,
-  tone,
-  receipts,
-  emptyMessage,
-}: {
-  title: string;
-  tone: keyof typeof groupTone;
-  receipts: Array<{
-    id: string;
-    receiptNumber: string;
-    dueDate: Date;
-    amount: unknown;
-    currency: string;
-    status: string;
-    client: { id: string; fullName: string };
-    policy: { id: string; policyNumber: string };
-    insurer: { name: string };
-  }>;
-  emptyMessage: string;
-}) {
-  return (
-    <SectionCard title={`${title} (${receipts.length})`}>
-      {receipts.length === 0 ? (
-        <div className="px-4 py-6 text-sm text-muted-foreground">{emptyMessage}</div>
-      ) : (
-        <div className={`divide-y divide-stone-200/80 border-l-4 ${groupTone[tone]}`}>
-          {receipts.map((receipt) => (
-            <div
-              key={receipt.id}
-              className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <Link
-                    href={`/receipts/${receipt.id}`}
-                    className="font-medium text-foreground hover:text-primary"
-                  >
-                    {receipt.receiptNumber}
-                  </Link>
-                  <Badge variant={receipt.dueDate < new Date() ? "destructive" : "secondary"}>
-                    {receipt.dueDate < new Date() ? "Vencido" : "Pendiente"}
-                  </Badge>
-                  <StatusBadge status={receipt.status} />
-                </div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {receipt.client.fullName} · {receipt.policy.policyNumber} · {receipt.insurer.name}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">Vence {formatDate(receipt.dueDate)}</p>
-              </div>
-              <div className="flex items-center gap-3 md:text-right">
-                <div>
-                  <p className="font-semibold">{formatCurrency(receipt.amount, receipt.currency)}</p>
-                  <p className="text-xs text-muted-foreground">{receipt.currency}</p>
-                </div>
-                <QuickPaymentDialog
-                  receipt={{
-                    id: receipt.id,
-                    receiptNumber: receipt.receiptNumber,
-                    amount: toNumber(receipt.amount),
-                    currency: receipt.currency,
-                    dueDate: receipt.dueDate.toISOString().split("T")[0],
-                    client: { fullName: receipt.client.fullName },
-                    policy: { policyNumber: receipt.policy.policyNumber },
-                  }}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </SectionCard>
-  );
+function serializeReceiptForCollect(receipt: DbReceipt) {
+  return {
+    id: receipt.id,
+    receiptNumber: receipt.receiptNumber,
+    dueDate: receipt.dueDate.toISOString().split("T")[0],
+    amount: toNumber(receipt.amount),
+    currency: receipt.currency,
+    status: receipt.status,
+    client: { fullName: receipt.client.fullName },
+    policy: { policyNumber: receipt.policy.policyNumber },
+    insurer: { name: receipt.insurer.name },
+  };
 }

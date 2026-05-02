@@ -13,6 +13,27 @@ const NEW_HREF_BY_PREFIX: Array<{ prefix: string; href: string }> = [
   { prefix: "/quotes", href: "/quotes/new" },
 ];
 
+const DETAIL_LIST_PREFIXES = [
+  "/clients",
+  "/policies",
+  "/tasks",
+  "/receipts",
+  "/insurers",
+  "/claims",
+  "/quotes",
+];
+
+function detailListingFor(pathname: string): string | null {
+  for (const prefix of DETAIL_LIST_PREFIXES) {
+    if (!pathname.startsWith(`${prefix}/`)) continue;
+    const rest = pathname.slice(prefix.length + 1);
+    // Only match a single id segment: skip /new, sub-routes (/edit, /pagos, ...) and empty.
+    if (rest === "" || rest === "new" || rest.includes("/")) return null;
+    return prefix;
+  }
+  return null;
+}
+
 const NAV_KEYS: Record<string, string> = {
   d: "/dashboard",
   h: "/today",
@@ -102,6 +123,19 @@ export function useGlobalShortcuts(onShowHelp: () => void) {
           leaderActive = false;
         }, 1200);
         return;
+      }
+
+      if (key === "Escape") {
+        // Don't fight any open dialogs/popups: only act when nothing else
+        // is open (no [data-state=open] in the document) and we're on a
+        // detail page like /clients/abc or /policies/abc.
+        const hasOpenOverlay = document.querySelector('[data-state="open"]');
+        if (hasOpenOverlay) return;
+        const listing = detailListingFor(pathname);
+        if (listing) {
+          event.preventDefault();
+          router.push(listing);
+        }
       }
     };
 
