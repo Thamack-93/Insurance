@@ -106,7 +106,7 @@ export function CommandPaletteWrapper() {
       groups={groups}
       placeholder="Buscar páginas, crear registros..."
       title="Command Palette"
-      description="Navegación rápida y acciones de PolicyDesk"
+      description="Navegación rápida y acciones de PG"
     />
   );
 }

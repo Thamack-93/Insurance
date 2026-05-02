@@ -19,8 +19,8 @@ export async function backupDatabase() {
     return null;
   }
 
-  const target = path.join(backupsDir, `policydesk-${timestamp()}.sqlite`);
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+  const target = path.join(backupsDir, `pg-${timestamp}.sqlite`);
   await fs.copyFile(databasePath, target);
   return target;
 }
-

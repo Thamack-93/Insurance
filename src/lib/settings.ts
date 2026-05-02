@@ -20,7 +20,7 @@ export type Settings = {
 };
 
 const defaultSettings: Settings = {
-  firmName: "PolicyDesk",
+  firmName: "PG",
   firmEmail: "",
   firmPhone: "",
   firmAddress: "",

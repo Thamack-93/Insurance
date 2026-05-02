@@ -61,7 +61,7 @@ export function ExportButtons({ exports }: { exports: ExportData[] }) {
         }
       });
 
-      XLSX.writeFile(workbook, `policydesk-report-${new Date().toISOString().split("T")[0]}.xlsx`);
+      XLSX.writeFile(workbook, `pg-report-${new Date().toISOString().split("T")[0]}.xlsx`);
     } finally {
       setIsExporting(false);
     }

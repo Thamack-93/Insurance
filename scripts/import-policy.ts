@@ -251,6 +251,27 @@ async function main() {
       const match = resolvePolicyMatch(policies, input.policyNumber);
 
       if (!match) {
+        if (!dryRun) {
+          await db.policy.create({
+            data: {
+              policyNumber: input.policyNumber,
+              clientId: client.id,
+              insurerId: insurer.id,
+              policyType: input.policyType,
+              status: input.status,
+              startDate: input.startDate,
+              endDate: input.endDate,
+              renewalDate: input.renewalDate,
+              premiumAmount: input.premiumAmount,
+              currency: input.currency,
+              paymentFrequency: input.paymentFrequency,
+              paymentPlan: input.paymentPlan,
+              insuredObject: input.insuredObject,
+              beneficiaryInfo: input.beneficiaryInfo,
+              notes: input.notes,
+            },
+          });
+        }
         created += 1;
         operations.push({
           Fila: index + 2,
@@ -275,6 +296,13 @@ async function main() {
           Renovacion: match.renewalDate ? formatDateShort(match.renewalDate) : "-",
         });
         continue;
+      }
+
+      if (!dryRun) {
+        await db.policy.update({
+          where: { id: match.id },
+          data,
+        });
       }
 
       updated += 1;

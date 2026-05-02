@@ -175,27 +175,36 @@ function detectDocumentType(text: string): "POLICY" | "RECEIPT" | "QUOTE" | "OTH
 
 function extractPolicyNumber(text: string): string | undefined {
   const patterns = [
-    // Specific patterns for Mexican insurers
+    // Priority patterns with context (most reliable)
+    /(?:P[ÓO]LIZA|No\.?\s*P[ÓO]LIZA|P[ÓO]LIZA\s+No\.?)[:\s]+(\d{7,10})/i,  // Banorte: 1008943
+    /(?:P[ÓO]LIZA|No\.?\s*P[ÓO]LIZA|P[ÓO]LIZA\s+No\.?)[:\s]+([A-Z]\d{1,2}\s*\d{7,10})/i,  // GNP: M9 43010017
+    /(?:P[ÓO]LIZA|No\.?\s*P[ÓO]LIZA|P[ÓO]LIZA\s+No\.?)[:\s]+(\d{4}[\-\s]?\d{4}[\-\s]?\d{4})/i,  // Long numeric: 0940367232
+    /(?:P[ÓO]LIZA|No\.?\s*P[ÓO]LIZA|P[ÓO]LIZA\s+No\.?)[:\s]+(\d{3}[\-\.]\d{3}[\-\.]\d{4})/i,  // Dash format: 000-000-0000
+    
+    // Fallback patterns for specific insurers
     /N[ÚU]M(?:ERO)?\.?\s*DE\s*P[ÓO]LIZA[\s:]*([A-Z]{0,3}[\s\-]?\d[\d\-\/\.]{5,20})/i,
     /(?:P[ÓO]LIZA|PÓLIZA DE SEGURO)\s+(?:NO\.?\s*)?([A-Z]{0,3}[\s\-]?\d[\d\-\/\.]{5,20})/i,
     /P[ÓO]LIZA\s*:?\s*([A-Z]{0,3}\d[\d\-]{5,15})/i,
-    // GNP pattern: typically letters + numbers like M9 43010017
-    /\b([A-Z]\d{1,2}\s+\d{7,9})\b/,
-    // Qualitas/AXA pattern: numeric with dashes like 0002-0003-2017
-    /\b(\d{3,4}[\-]\d{3,4}[\-]\d{4})\b/,
-    // General: avoid short sequences that look like dates
-    /\b([A-Z]*\d{8,12})\b/,
+    
+    // Standalone policy number patterns (when no "Poliza" prefix found nearby)
+    /\b([A-Z]\d{1,2}\s+\d{7,9})\b/,  // GNP: M9 43010017
+    /\b(\d{10,12})\b/,  // Long numeric policy numbers
+    /\b(\d{3,4}[\-]\d{3,4}[\-]\d{4})\b/,  // Dash format
+    /\b(\d{7,9})\b/,  // Short numeric (Banorte style)
   ];
   
   for (const pattern of patterns) {
     const match = text.match(pattern);
     if (match?.[1]) {
-      const num = match[1].trim();
+      const num = match[1].trim().replace(/\s+/g, ' ');
       // Exclude if it looks like a date (DD/MM/YYYY patterns)
       if (/^\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}$/.test(num)) continue;
       // Exclude if it looks like an RFC
       if (/^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i.test(num)) continue;
-      // Must have some substance
+      // Exclude common false positives (years, amounts)
+      if (/^(20\d{2}|19\d{2})$/.test(num)) continue;  // Years
+      if (/^\d{1,2}\.\d{2}$/.test(num)) continue;  // Amounts like 10.50
+      // Must have substance - policy numbers are typically 6+ chars
       if (num.length >= 6 && num.length <= 25) return num;
     }
   }
@@ -237,43 +246,57 @@ function calculateNameSimilarity(name1: string, name2: string): number {
 }
 
 function extractClientName(text: string, folderName: string): string {
+  // First, clean up the folder name to get the base client name
+  const cleanFolder = cleanFolderName(folderName);
+  
+  // Extract all potential client names from the text
   const patterns = [
-    /(?:CONTRATANTE|TITULAR|ASEGURADO(?:\s+PRINCIPAL)?|NOMBRE(?:\s+DEL)?\s*CLIENTE)[\s:]*([^\n]{5,80})/i,
-    /(?:NOMBRE|RAZ[ÓO]N\s+SOCIAL)(?:\s+DEL\s+ASEGURADO)?[\s:]*([^\n]{5,80})/i,
-    /(?:EL\s+)?ASEGURADO[\s:]*ES?[\s:]*([^\n]{5,80})/i,
+    // Standard client name patterns
+    /(?:CONTRATANTE|TITULAR|ASEGURADO(?:\s+PRINCIPAL)?|NOMBRE(?:\s+DEL)?\s*(?:CLIENTE|ASEGURADO|TITULAR))[\s:]+([A-Z][A-Z\s\.]{10,60})(?:\s*(?:R\.?F\.?C\.?|C\.?P\.?|DOMICILIO|TELEFONO|\n|\r))/i,
+    /(?:NOMBRE|RAZ[ÓO]N\s+SOCIAL)(?:\s+DEL\s+ASEGURADO)?[\s:]+([A-Z][A-Z\s\.]{10,60})(?:\s*(?:R\.?F\.?C\.?|C\.?P\.?|DOMICILIO|\n|\r))/i,
+    /(?:EL\s+)?ASEGURADO[\s:]*ES?[\s:]*([A-Z][A-Z\s\.]{10,60})(?:\s*(?:R\.?F\.?C\.?|C\.?P\.?|\n|\r))/i,
+    // Less strict patterns as fallback
+    /(?:CONTRATANTE|TITULAR|ASEGURADO)[\s:]+([A-Z][A-Z\s]{8,50})/i,
+    /(?:NOMBRE|RAZ[ÓO]N\s+SOCIAL)[\s:]+([A-Z][A-Z\s]{8,50})/i,
   ];
   
-  const extracted = extractWithPatterns(text, patterns);
+  let bestMatch: string | null = null;
+  let bestSimilarity = 0;
   
-  if (!extracted) {
-    // No name found in PDF, use folder name but clean it up
-    return cleanFolderName(folderName);
-  }
-  
-  // Clean up extracted name
-  let cleanExtracted = extracted
-    .replace(/\s+/g, " ")
-    .replace(/^[\s:.-]+/, "")
-    .replace(/[\s:.-]+$/, "")
-    .trim();
-  
-  // Compare with folder name
-  const similarity = calculateNameSimilarity(cleanExtracted, folderName);
-  
-  // If they're very different, the PDF name might be wrong or generic
-  // Use folder name if it's more specific
-  if (similarity < 0.3) {
-    // Check if extracted looks like a valid person/company name
-    const extractedWords = cleanExtracted.split(" ").filter(w => w.length > 2);
-    const folderWords = folderName.split(/[-_\s]/).filter(w => w.length > 2);
-    
-    // Prefer folder if it has more name components
-    if (folderWords.length >= extractedWords.length) {
-      return cleanFolderName(folderName);
+  for (const pattern of patterns) {
+    const matches = text.match(pattern);
+    if (matches?.[1]) {
+      let candidate = matches[1]
+        .replace(/\s+/g, " ")
+        .replace(/^[\s:.,-]+/, "")
+        .replace(/[\s:.,-]+$/, "")
+        .replace(/R\.?F\.?C\.?.*$/i, "")
+        .replace(/C\.?P\.?.*$/i, "")
+        .replace(/DOMICILIO.*$/i, "")
+        .trim();
+      
+      // Skip if it looks like generic text (all caps sentence)
+      if (candidate.length > 80) continue;
+      if (/^(NOS COMPLACE|VIGENCIA|DATOS|INFORME|SOLICITUD)/i.test(candidate)) continue;
+      
+      // Calculate similarity with folder name
+      const similarity = calculateNameSimilarity(candidate, cleanFolder);
+      
+      if (similarity > bestSimilarity) {
+        bestSimilarity = similarity;
+        bestMatch = candidate;
+      }
     }
   }
   
-  return cleanExtracted;
+  // If we found a good match in the PDF (similar to folder name), use it
+  if (bestMatch && bestSimilarity >= 0.4) {
+    return bestMatch;
+  }
+  
+  // If PDF extraction is poor or doesn't match folder, prefer folder name
+  // (since folder names were manually organized)
+  return cleanFolder;
 }
 
 function cleanFolderName(folderName: string): string {

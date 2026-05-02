@@ -59,7 +59,7 @@ export function SettingsForm({ initialSettings, updateSettings }: SettingsFormPr
                 id="firmName"
                 value={settings.firmName}
                 onChange={(e) => handleChange("firmName", e.target.value)}
-                placeholder="PolicyDesk"
+                placeholder="PG"
               />
             </div>
             <div className="space-y-2">

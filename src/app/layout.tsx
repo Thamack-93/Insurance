@@ -4,8 +4,11 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PolicyDesk",
+  title: "PG Insurance",
   description: "Cockpit local para operar una cartera de seguros.",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({

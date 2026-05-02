@@ -56,7 +56,7 @@ export function AppSidebar() {
             <ShieldCheck className="size-5" />
           </div>
           <div>
-            <p className="text-sm font-semibold tracking-tight">PolicyDesk</p>
+            <p className="text-sm font-semibold tracking-tight">PG</p>
             <p className="text-xs text-muted-foreground">Cockpit de seguros</p>
           </div>
         </Link>

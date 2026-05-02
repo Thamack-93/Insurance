@@ -37,7 +37,7 @@ export function AppTopbar() {
     <header className="sticky top-0 z-30 border-b border-border/70 bg-background/78 backdrop-blur-xl">
       <div className="flex h-16 items-center gap-4 px-5 lg:px-8">
         <div className="hidden items-center gap-2 text-sm text-muted-foreground md:flex">
-          <span>PolicyDesk</span>
+          <span>PG</span>
           {segments.map((segment) => (
             <span key={segment} className="flex items-center gap-2">
               <span>/</span>
