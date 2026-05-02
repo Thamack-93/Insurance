@@ -58,7 +58,7 @@ export default async function DuePaymentsPage() {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Cartera"
-          title="Due payments"
+          title="Cobros pendientes"
           description="Calendario de cobros y vencimientos para concentrar seguimiento comercial y financiero."
           actions={
             <Button asChild className="rounded-full">

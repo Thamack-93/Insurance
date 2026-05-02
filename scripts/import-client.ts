@@ -13,7 +13,7 @@ import {
   safeJson,
   toEnumValue,
   toStringValue,
-} from "./_shared";
+} from "./_shared.ts";
 
 const clientSchema = z.object({
   id: z.string().optional(),

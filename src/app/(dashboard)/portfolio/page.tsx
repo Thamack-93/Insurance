@@ -78,7 +78,7 @@ export default async function PortfolioPage() {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Cartera"
-          title="Portfolio"
+          title="Cartera"
           description="Vista ejecutiva de la cartera activa, su concentración y las renovaciones más cercanas."
           actions={
             <>

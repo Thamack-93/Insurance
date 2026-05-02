@@ -1,4 +1,4 @@
-import { daysSince, today } from "../src/lib/dates";
+import { daysSince, today } from "../src/lib/dates.ts";
 
 import {
   closeDb,
@@ -8,7 +8,7 @@ import {
   getFlag,
   parseCliArgs,
   printTable,
-} from "./_shared";
+} from "./_shared.ts";
 
 const priorityRank: Record<string, number> = {
   URGENT: 0,

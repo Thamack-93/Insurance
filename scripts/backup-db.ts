@@ -1,4 +1,4 @@
-import { backupDatabase } from "./_shared";
+import { backupDatabase } from "./_shared.ts";
 
 async function main() {
   const backup = await backupDatabase();
@@ -16,4 +16,3 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
-

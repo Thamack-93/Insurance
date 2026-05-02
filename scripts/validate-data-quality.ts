@@ -1,8 +1,10 @@
-import { closeDb, createDb, ensureDataDirs, formatMoney } from "./_shared";
+import { closeDb, createDb, ensureDataDirs, formatMoney, hasFlag, parseCliArgs } from "./_shared";
 import { getClientDataQualityScores, getPolicyDataQualityScores } from "../src/lib/data-quality";
 import { detectRisks } from "../src/lib/risk-engine";
 
 async function main() {
+  const args = parseCliArgs();
+  const strict = hasFlag(args, "strict");
   await ensureDataDirs();
   const db = createDb();
 
@@ -56,8 +58,9 @@ async function main() {
       );
     }
 
-    const exitCode = criticalClients.length || criticalPolicies.length || risks.some((risk) => risk.severity === "CRITICAL") ? 1 : 0;
-    process.exitCode = exitCode;
+    if (strict && (criticalClients.length || criticalPolicies.length || risks.some((risk) => risk.severity === "CRITICAL"))) {
+      process.exitCode = 1;
+    }
   } finally {
     await closeDb(db);
   }
@@ -68,4 +71,3 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
-

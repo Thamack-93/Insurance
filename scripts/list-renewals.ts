@@ -1,6 +1,6 @@
 import { addDays } from "date-fns";
 
-import { daysUntil, today } from "../src/lib/dates";
+import { daysUntil, today } from "../src/lib/dates.ts";
 
 import {
   closeDb,
@@ -13,7 +13,7 @@ import {
   parseCliArgs,
   printTable,
   summarizeByCurrency,
-} from "./_shared";
+} from "./_shared.ts";
 
 async function main() {
   const args = parseCliArgs();

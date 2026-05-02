@@ -61,7 +61,7 @@ export default async function RenewalsPage() {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Operación"
-          title="Renewals"
+          title="Renovaciones"
           description="Seguimiento de renovaciones próximas, vencidas y pólizas que aún no tienen fecha capturada."
           actions={
             <Button asChild className="rounded-full">

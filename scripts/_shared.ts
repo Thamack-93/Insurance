@@ -6,8 +6,8 @@ import path from "node:path";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import * as XLSX from "xlsx";
 
-import { PrismaClient } from "../src/generated/prisma/client";
-import { backupsDir, dataDir, databasePath, exportsDir } from "../src/lib/files";
+import { PrismaClient } from "../src/generated/prisma/client.ts";
+import { backupsDir, dataDir, databasePath, exportsDir } from "../src/lib/files.ts";
 
 export { backupsDir, dataDir, databasePath, exportsDir };
 

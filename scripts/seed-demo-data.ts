@@ -7,7 +7,7 @@ import type {
   QuoteStatus,
   TaskStatus,
   TaskType,
-} from "../src/generated/prisma/client";
+} from "../src/generated/prisma/client.ts";
 
 import {
   backupDatabase,
@@ -16,7 +16,7 @@ import {
   ensureDataDirs,
   parseCliArgs,
   toBooleanValue,
-} from "./_shared";
+} from "./_shared.ts";
 
 async function main() {
   const args = parseCliArgs();

@@ -30,7 +30,7 @@ export default async function CommissionsPage() {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Finanzas"
-          title="Commissions"
+          title="Comisiones"
           description="Seguimiento de ingreso esperado, cobrado y vencido por póliza."
           actions={
             <Button asChild className="rounded-full">

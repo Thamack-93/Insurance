@@ -13,7 +13,7 @@ import {
   toNumber,
   writeCsv,
   writeXlsx,
-} from "./_shared";
+} from "./_shared.ts";
 
 async function main() {
   const db = createDb();

@@ -46,7 +46,7 @@ export default async function RisksPage() {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Calidad"
-          title="Risks"
+          title="Riesgos"
           description="Señales de integridad y operación que conviene resolver antes de escalar."
           actions={
             <Button asChild className="rounded-full">

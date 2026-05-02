@@ -72,7 +72,7 @@ export default async function TasksPage() {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Operación"
-          title="Tasks"
+          title="Tareas"
           description="Pendientes vivos, urgentes y bloqueos con cliente o aseguradora."
           actions={
             <>

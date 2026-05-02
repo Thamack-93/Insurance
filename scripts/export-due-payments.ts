@@ -1,7 +1,7 @@
 import { addDays } from "date-fns";
 import path from "node:path";
 
-import { daysUntil, today } from "../src/lib/dates";
+import { daysUntil, today } from "../src/lib/dates.ts";
 
 import {
   closeDb,
@@ -18,7 +18,7 @@ import {
   toNumber,
   writeCsv,
   writeXlsx,
-} from "./_shared";
+} from "./_shared.ts";
 
 async function main() {
   const args = parseCliArgs();

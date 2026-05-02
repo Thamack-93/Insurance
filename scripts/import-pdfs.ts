@@ -635,12 +635,20 @@ async function main() {
   }
   
   // Deduplicate and resolve conflicts
-  const policyNumberMap = new Map<string, Array<{ index: number; insurer: string | undefined; type: string; file: string }>>();
+  const policyNumberMap = new Map<string, Array<{ index: number; insurer: string | undefined; type: string; file: string; rawPolicyNum: string }>>();
+  
+  function normalizePolicyNumber(num: string): string {
+    return num
+      .toUpperCase()
+      .replace(/\s+/g, "")  // Remove all spaces
+      .replace(/[-]/g, "")   // Remove dashes
+      .replace(/[.]/g, ""); // Remove periods
+  }
   
   scanned.forEach((item, index) => {
     const policyNum = item.parsed.policyData?.policyNumber;
     if (policyNum) {
-      const normalized = normalizeComparable(policyNum);
+      const normalized = normalizePolicyNumber(policyNum);
       if (!policyNumberMap.has(normalized)) {
         policyNumberMap.set(normalized, []);
       }
@@ -649,6 +657,7 @@ async function main() {
         insurer: item.parsed.insurerName,
         type: item.parsed.type,
         file: path.basename(item.filePath),
+        rawPolicyNum: policyNum,
       });
     }
   });

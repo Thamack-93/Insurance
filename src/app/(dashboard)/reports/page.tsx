@@ -128,7 +128,7 @@ export default async function ReportsPage() {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Analítica"
-          title="Reports"
+          title="Reportes"
           description="Centro temprano de lectura ejecutiva para la operación, la cobranza y la calidad."
           actions={
             <>

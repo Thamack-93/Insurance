@@ -52,7 +52,7 @@ export default async function DocumentsPage() {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Archivo"
-          title="Documents"
+          title="Documentos"
           description="Control de documentos locales, asociaciones y huecos de expediente."
           actions={
             <Button asChild className="rounded-full">

@@ -17,7 +17,7 @@ import {
   toNumberValue,
   toNumber,
   toStringValue,
-} from "./_shared";
+} from "./_shared.ts";
 
 const policySchema = z.object({
   policyNumber: z.string().min(2),
