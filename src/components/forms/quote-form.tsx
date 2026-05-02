@@ -17,13 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
+  ControlledSelect,
   FormActions,
   FormErrorBanner,
   FormField,
@@ -93,63 +87,63 @@ export function QuoteForm({
           <FormGrid>
             <FormSection title="Información de la cotización" description="Datos básicos de la propuesta.">
               <FormField label="Cliente" error={errors.clientId?.message} hint="Campo obligatorio">
-                <Select {...register("clientId")} defaultValue={defaultValues.clientId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecciona cliente" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {clientOptions.map((option: SelectOption) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Controller
+                  name="clientId"
+                  control={control}
+                  render={({ field }) => (
+                    <ControlledSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={clientOptions}
+                      placeholder="Selecciona cliente"
+                    />
+                  )}
+                />
               </FormField>
 
               <FormField label="Aseguradora" error={errors.insurerId?.message}>
-                <Select {...register("insurerId")} defaultValue={defaultValues.insurerId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecciona aseguradora (opcional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {insurerOptions.map((option: SelectOption) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Controller
+                  name="insurerId"
+                  control={control}
+                  render={({ field }) => (
+                    <ControlledSelect
+                      value={field.value || ""}
+                      onValueChange={field.onChange}
+                      options={insurerOptions}
+                      placeholder="Selecciona aseguradora (opcional)"
+                    />
+                  )}
+                />
               </FormField>
 
               <FormField label="Tipo de póliza" error={errors.policyType?.message} hint="Campo obligatorio">
-                <Select {...register("policyType")} defaultValue={defaultValues.policyType}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecciona tipo" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {policyTypeOptions.map((option: SelectOption) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Controller
+                  name="policyType"
+                  control={control}
+                  render={({ field }) => (
+                    <ControlledSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={policyTypeOptions}
+                      placeholder="Selecciona tipo"
+                    />
+                  )}
+                />
               </FormField>
 
               <FormField label="Estado" error={errors.status?.message} hint="Campo obligatorio">
-                <Select {...register("status")} defaultValue={defaultValues.status}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecciona estado" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {quoteStatusOptions.map((option: SelectOption) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Controller
+                  name="status"
+                  control={control}
+                  render={({ field }) => (
+                    <ControlledSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={quoteStatusOptions}
+                      placeholder="Selecciona estado"
+                    />
+                  )}
+                />
               </FormField>
             </FormSection>
 

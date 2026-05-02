@@ -39,7 +39,7 @@ export default async function EditClientPage({ params }: { params: Promise<{ id:
             notes: client.notes ?? "",
             status: client.status,
           }}
-          submitAction={async (values) => updateClient(client.id, values)}
+          submitAction={updateClient.bind(null, client.id)}
         />
       </div>
     </main>

@@ -5,27 +5,19 @@ import { useTransition } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { createTaskDefaults } from "@/lib/form-defaults";
 import {
   priorityOptions,
   taskStatusOptions,
   taskTypeOptions,
   type SelectOption,
 } from "@/lib/domain-options";
-import { formatDateInput } from "@/lib/form-utils";
 import { taskSchema, type TaskFormValues } from "@/lib/validations";
 import type { MutationResult } from "@/lib/mutation-utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
+  ControlledSelect,
   FormActions,
   FormErrorBanner,
   FormField,
@@ -108,18 +100,12 @@ export function TaskForm({
                   name="taskType"
                   control={control}
                   render={({ field }) => (
-                    <Select value={field.value} onValueChange={(value) => field.onChange(value)}>
-                      <SelectTrigger className="h-10 w-full rounded-xl bg-white">
-                        <SelectValue placeholder="Selecciona un tipo" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {taskTypeOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <ControlledSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={taskTypeOptions}
+                      placeholder="Selecciona un tipo"
+                    />
                   )}
                 />
               </FormField>
@@ -129,18 +115,12 @@ export function TaskForm({
                   name="status"
                   control={control}
                   render={({ field }) => (
-                    <Select value={field.value} onValueChange={(value) => field.onChange(value)}>
-                      <SelectTrigger className="h-10 w-full rounded-xl bg-white">
-                        <SelectValue placeholder="Selecciona un estado" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {taskStatusOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <ControlledSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={taskStatusOptions}
+                      placeholder="Selecciona un estado"
+                    />
                   )}
                 />
               </FormField>
@@ -150,18 +130,12 @@ export function TaskForm({
                   name="priority"
                   control={control}
                   render={({ field }) => (
-                    <Select value={field.value} onValueChange={(value) => field.onChange(value)}>
-                      <SelectTrigger className="h-10 w-full rounded-xl bg-white">
-                        <SelectValue placeholder="Selecciona una prioridad" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {priorityOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <ControlledSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={priorityOptions}
+                      placeholder="Selecciona una prioridad"
+                    />
                   )}
                 />
               </FormField>
@@ -187,18 +161,12 @@ export function TaskForm({
                   name="clientId"
                   control={control}
                   render={({ field }) => (
-                    <Select value={field.value || null} onValueChange={(value) => field.onChange(value ?? "")}>
-                      <SelectTrigger className="h-10 w-full rounded-xl bg-white">
-                        <SelectValue placeholder="Sin cliente" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {clientOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <ControlledSelect
+                      value={field.value || ""}
+                      onValueChange={(value) => field.onChange(value ?? "")}
+                      options={clientOptions}
+                      placeholder="Sin cliente"
+                    />
                   )}
                 />
               </FormField>
@@ -208,18 +176,12 @@ export function TaskForm({
                   name="policyId"
                   control={control}
                   render={({ field }) => (
-                    <Select value={field.value || null} onValueChange={(value) => field.onChange(value ?? "")}>
-                      <SelectTrigger className="h-10 w-full rounded-xl bg-white">
-                        <SelectValue placeholder="Sin póliza" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {policyOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <ControlledSelect
+                      value={field.value || ""}
+                      onValueChange={(value) => field.onChange(value ?? "")}
+                      options={policyOptions}
+                      placeholder="Sin póliza"
+                    />
                   )}
                 />
               </FormField>
@@ -229,18 +191,12 @@ export function TaskForm({
                   name="insurerId"
                   control={control}
                   render={({ field }) => (
-                    <Select value={field.value || null} onValueChange={(value) => field.onChange(value ?? "")}>
-                      <SelectTrigger className="h-10 w-full rounded-xl bg-white">
-                        <SelectValue placeholder="Sin aseguradora" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {insurerOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <ControlledSelect
+                      value={field.value || ""}
+                      onValueChange={(value) => field.onChange(value ?? "")}
+                      options={insurerOptions}
+                      placeholder="Sin aseguradora"
+                    />
                   )}
                 />
               </FormField>
@@ -254,18 +210,12 @@ export function TaskForm({
                   name="receiptId"
                   control={control}
                   render={({ field }) => (
-                    <Select value={field.value || null} onValueChange={(value) => field.onChange(value ?? "")}>
-                      <SelectTrigger className="h-10 w-full rounded-xl bg-white">
-                        <SelectValue placeholder="Sin recibo" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {receiptOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <ControlledSelect
+                      value={field.value || ""}
+                      onValueChange={(value) => field.onChange(value ?? "")}
+                      options={receiptOptions}
+                      placeholder="Sin recibo"
+                    />
                   )}
                 />
               </FormField>

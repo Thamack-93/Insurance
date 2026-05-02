@@ -184,7 +184,7 @@ export default async function TasksPage() {
 
           <SectionCard title="Urgentes y vencidas" description="Casos que deberían moverse antes que el resto.">
             <div className="divide-y divide-stone-200/80">
-              {[...urgentTasks, ...overdueTasks]
+              {[...new Map([...urgentTasks, ...overdueTasks].map((t) => [t.id, t])).values()]
                 .slice(0, 10)
                 .map((task) => (
                   <div key={task.id} className="flex items-start justify-between gap-4 px-4 py-4">

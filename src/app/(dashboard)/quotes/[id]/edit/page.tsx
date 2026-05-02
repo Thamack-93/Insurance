@@ -59,7 +59,7 @@ export default async function EditQuotePage({ params }: { params: Promise<{ id: 
           defaultValues={defaultValues}
           clientOptions={clientOptions}
           insurerOptions={insurerOptions}
-          submitAction={(values) => updateQuote(id, values)}
+          submitAction={updateQuote.bind(null, id)}
         />
       </div>
     </main>

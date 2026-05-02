@@ -2,27 +2,18 @@
 
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { createInsurerDefaults } from "@/lib/form-defaults";
-import {
-  entityStatusOptions,
-  type SelectOption,
-} from "@/lib/domain-options";
+import { entityStatusOptions } from "@/lib/domain-options";
 import { insurerSchema, type InsurerFormValues } from "@/lib/validations";
 import type { MutationResult } from "@/lib/mutation-utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
+  ControlledSelect,
   FormActions,
   FormErrorBanner,
   FormField,
@@ -51,6 +42,7 @@ export function InsurerForm({
   const [isPending, startTransition] = useTransition();
   const {
     register,
+    control,
     handleSubmit,
     setError,
     formState: { errors },
@@ -95,18 +87,18 @@ export function InsurerForm({
               </FormField>
 
               <FormField label="Estado" error={errors.status?.message} hint="Campo obligatorio">
-                <Select {...register("status")} defaultValue={defaultValues.status}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecciona estado" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {entityStatusOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Controller
+                  name="status"
+                  control={control}
+                  render={({ field }) => (
+                    <ControlledSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={entityStatusOptions}
+                      placeholder="Selecciona estado"
+                    />
+                  )}
+                />
               </FormField>
             </FormSection>
 

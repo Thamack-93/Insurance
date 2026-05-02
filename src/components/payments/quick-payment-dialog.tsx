@@ -60,11 +60,9 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger>
-        <Button size="sm" className="gap-2">
-          <CreditCard className="h-4 w-4" />
-          Pagar
-        </Button>
+      <DialogTrigger render={<Button size="sm" className="gap-2" />}>
+        <CreditCard className="h-4 w-4" />
+        Pagar
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>

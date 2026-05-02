@@ -9,15 +9,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { formatCurrency, toNumber } from "@/lib/money";
+import { ControlledSelect } from "@/components/forms/form-primitives";
+import { formatCurrency } from "@/lib/money";
 import { today, formatDate } from "@/lib/dates";
 
 const paymentSchema = z.object({
@@ -44,9 +38,16 @@ type PaymentFormProps = {
   onCancel?: () => void;
 };
 
+const paymentMethods = [
+  { value: "TRANSFER", label: "Transferencia bancaria" },
+  { value: "CASH", label: "Efectivo" },
+  { value: "CHECK", label: "Cheque" },
+  { value: "CARD", label: "Tarjeta de crédito/débito" },
+  { value: "OTHER", label: "Otro" },
+];
+
 export function PaymentForm({ receipts, onSubmit, onCancel }: PaymentFormProps) {
   const [isPending, startTransition] = useTransition();
-  const [selectedReceipt, setSelectedReceipt] = useState<string>("");
 
   const {
     register,
@@ -57,40 +58,39 @@ export function PaymentForm({ receipts, onSubmit, onCancel }: PaymentFormProps) 
   } = useForm<PaymentFormValues>({
     resolver: zodResolver(paymentSchema) as never,
     defaultValues: {
+      receiptId: "",
       paidDate: formatDate(today()),
       paymentMethod: "TRANSFER",
     },
   });
 
   const selectedReceiptId = watch("receiptId");
+  const selectedPaymentMethod = watch("paymentMethod");
   const selectedReceiptData = receipts.find(r => r.id === selectedReceiptId);
 
+  const receiptOptions = receipts.map(r => ({
+    value: r.id,
+    label: `${r.receiptNumber} – ${r.client.fullName} – ${formatCurrency(r.amount)}`,
+  }));
+
   const handleReceiptChange = (receiptId: string) => {
-    setSelectedReceipt(receiptId);
+    setValue("receiptId", receiptId);
     const receipt = receipts.find(r => r.id === receiptId);
     if (receipt) {
       setValue("amount", receipt.amount);
     }
   };
 
-  const onFormSubmit = (data: any) => {
+  const onFormSubmit = (data: PaymentFormValues) => {
     startTransition(async () => {
       try {
         await onSubmit(data);
         toast.success("Pago registrado exitosamente");
-      } catch (error) {
+      } catch {
         toast.error("Error al registrar el pago");
       }
     });
   };
-
-  const paymentMethods = [
-    { value: "TRANSFER", label: "Transferencia bancaria" },
-    { value: "CASH", label: "Efectivo" },
-    { value: "CHECK", label: "Cheque" },
-    { value: "CARD", label: "Tarjeta de crédito/débito" },
-    { value: "OTHER", label: "Otro" },
-  ];
 
   return (
     <Card>
@@ -105,21 +105,12 @@ export function PaymentForm({ receipts, onSubmit, onCancel }: PaymentFormProps) 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="receiptId">Recibo</Label>
-              <Select
-                value={selectedReceiptId}
-                onValueChange={(value) => handleReceiptChange(value ?? "")}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Seleccionar recibo" />
-                </SelectTrigger>
-                <SelectContent>
-                  {receipts.map((receipt) => (
-                    <SelectItem key={receipt.id} value={receipt.id}>
-                      {receipt.receiptNumber} - {receipt.client.fullName} - {formatCurrency(receipt.amount)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <ControlledSelect
+                value={selectedReceiptId || ""}
+                onValueChange={handleReceiptChange}
+                options={receiptOptions}
+                placeholder="Seleccionar recibo"
+              />
               {errors.receiptId && (
                 <p className="text-sm text-red-500">{errors.receiptId.message}</p>
               )}
@@ -161,21 +152,12 @@ export function PaymentForm({ receipts, onSubmit, onCancel }: PaymentFormProps) 
 
             <div className="space-y-2">
               <Label htmlFor="paymentMethod">Método de pago</Label>
-              <Select
-                value={watch("paymentMethod")}
+              <ControlledSelect
+                value={selectedPaymentMethod || ""}
                 onValueChange={(value) => setValue("paymentMethod", value ?? "")}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Seleccionar método" />
-                </SelectTrigger>
-                <SelectContent>
-                  {paymentMethods.map((method) => (
-                    <SelectItem key={method.value} value={method.value}>
-                      {method.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={paymentMethods}
+                placeholder="Seleccionar método"
+              />
               {errors.paymentMethod && (
                 <p className="text-sm text-red-500">{errors.paymentMethod.message}</p>
               )}

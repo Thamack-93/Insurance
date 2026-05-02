@@ -70,7 +70,7 @@ export default async function EditClaimPage({ params }: { params: Promise<{ id: 
           clientOptions={clientOptions}
           policyOptions={policyOptions}
           insurerOptions={insurerOptions}
-          submitAction={(values) => updateClaim(id, values)}
+          submitAction={updateClaim.bind(null, id)}
         />
       </div>
     </main>

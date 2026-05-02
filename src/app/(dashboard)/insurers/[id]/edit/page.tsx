@@ -42,7 +42,7 @@ export default async function EditInsurerPage({ params }: { params: Promise<{ id
           submitLabel="Guardar cambios"
           cancelHref={`/insurers/${id}`}
           defaultValues={defaultValues}
-          submitAction={(values) => updateInsurer(id, values)}
+          submitAction={updateInsurer.bind(null, id)}
         />
       </div>
     </main>

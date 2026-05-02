@@ -73,8 +73,20 @@ export default async function ReportsPage() {
 
   const exportData = [
     { name: "Clientes", data: clientsData },
-    { name: "Polizas", data: policiesData },
-    { name: "Recibos", data: receiptsData },
+    {
+      name: "Polizas",
+      data: policiesData.map((p) => ({
+        ...p,
+        premiumAmount: p.premiumAmount ? Number(p.premiumAmount) : null,
+      })),
+    },
+    {
+      name: "Recibos",
+      data: receiptsData.map((r) => ({
+        ...r,
+        amount: r.amount ? Number(r.amount) : null,
+      })),
+    },
     { name: "Tareas", data: tasksData },
   ];
 

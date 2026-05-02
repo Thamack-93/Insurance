@@ -6,6 +6,14 @@ import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import type { SelectOption } from "@/lib/domain-options";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export function FormGrid({
   children,
@@ -72,6 +80,38 @@ export function FormErrorBanner({ message }: { message?: string | null }) {
       <AlertCircle className="mt-0.5 size-4 shrink-0" />
       <p>{message}</p>
     </div>
+  );
+}
+
+export function ControlledSelect({
+  value,
+  onValueChange,
+  options,
+  placeholder,
+  className,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+  options: SelectOption[];
+  placeholder?: string;
+  className?: string;
+}) {
+  const label = options.find((o) => o.value === value)?.label ?? "";
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger className={cn("h-10 w-full rounded-xl bg-white", className)}>
+        <SelectValue placeholder={placeholder ?? "Selecciona una opción"}>
+          {label || undefined}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

@@ -69,7 +69,7 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
           policyOptions={policies.map((policy) => ({ value: policy.id, label: policy.policyNumber }))}
           insurerOptions={insurers.map((insurer) => ({ value: insurer.id, label: insurer.name }))}
           receiptOptions={receipts.map((receipt) => ({ value: receipt.id, label: receipt.receiptNumber }))}
-          submitAction={async (values) => updateTask(task.id, values)}
+          submitAction={updateTask.bind(null, task.id)}
         />
       </div>
     </main>

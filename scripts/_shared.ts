@@ -25,7 +25,7 @@ const defaultDatabaseUrl = `file:${databasePath}`;
 
 export function createDb() {
   const adapter = new PrismaBetterSqlite3({
-    url: process.env.DATABASE_URL ?? defaultDatabaseUrl,
+    url: defaultDatabaseUrl,
   });
 
   return new PrismaClient({ adapter });

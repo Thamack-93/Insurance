@@ -59,7 +59,7 @@ export default async function ReceiptsPage() {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Finanzas"
-          title="Receipts"
+          title="Recibos"
           description="Vista de recibos emitidos, cobrados y pendientes de conciliación."
           actions={
             <>

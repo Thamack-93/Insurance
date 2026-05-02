@@ -78,11 +78,11 @@ export function ExportButtons({ exports }: { exports: ExportData[] }) {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger>
-        <Button variant="outline" className="rounded-full bg-white/70" disabled={isExporting}>
-          <Download className="mr-2 size-4" />
-          {isExporting ? "Exportando..." : "Exportar"}
-        </Button>
+      <DropdownMenuTrigger
+        render={<Button variant="outline" className="rounded-full bg-white/70" disabled={isExporting} />}
+      >
+        <Download className="mr-2 size-4" />
+        {isExporting ? "Exportando..." : "Exportar"}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuItem onSelect={exportToExcel} disabled={isExporting}>

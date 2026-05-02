@@ -15,13 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
+  ControlledSelect,
   FormActions,
   FormErrorBanner,
   FormField,
@@ -96,18 +90,12 @@ export function ClientForm({
                   name="type"
                   control={control}
                   render={({ field }) => (
-                    <Select value={field.value} onValueChange={(value) => field.onChange(value)}>
-                      <SelectTrigger className="h-10 w-full rounded-xl bg-white">
-                        <SelectValue placeholder="Selecciona un tipo" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {clientTypeOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <ControlledSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={clientTypeOptions}
+                      placeholder="Selecciona un tipo"
+                    />
                   )}
                 />
               </FormField>
@@ -145,18 +133,12 @@ export function ClientForm({
                   name="status"
                   control={control}
                   render={({ field }) => (
-                    <Select value={field.value} onValueChange={(value) => field.onChange(value)}>
-                      <SelectTrigger className="h-10 w-full rounded-xl bg-white">
-                        <SelectValue placeholder="Selecciona un estado" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {entityStatusOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <ControlledSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={entityStatusOptions}
+                      placeholder="Selecciona un estado"
+                    />
                   )}
                 />
               </FormField>

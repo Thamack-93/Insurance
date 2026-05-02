@@ -60,7 +60,7 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
           })}
           clientOptions={clients.map((client) => ({ value: client.id, label: client.fullName }))}
           insurerOptions={insurers.map((insurer) => ({ value: insurer.id, label: insurer.name }))}
-          submitAction={async (values) => updatePolicy(policy.id, values)}
+          submitAction={updatePolicy.bind(null, policy.id)}
         />
       </div>
     </main>

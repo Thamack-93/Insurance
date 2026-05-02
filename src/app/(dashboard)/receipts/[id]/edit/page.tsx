@@ -51,7 +51,7 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
             value: policy.id,
             label: `${policy.policyNumber} · ${policy.client.fullName}`,
           }))}
-          submitAction={async (values) => updateReceipt(receipt.id, values)}
+          submitAction={updateReceipt.bind(null, receipt.id)}
         />
       </div>
     </main>

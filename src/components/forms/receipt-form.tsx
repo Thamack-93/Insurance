@@ -5,26 +5,18 @@ import { useTransition } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { createReceiptDefaults } from "@/lib/form-defaults";
 import {
   currencyOptions,
   receiptStatusOptions,
   type SelectOption,
 } from "@/lib/domain-options";
-import { formatDateInput } from "@/lib/form-utils";
 import { receiptSchema, type ReceiptFormValues } from "@/lib/validations";
 import type { MutationResult } from "@/lib/mutation-utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
+  ControlledSelect,
   FormActions,
   FormErrorBanner,
   FormField,
@@ -101,18 +93,12 @@ export function ReceiptForm({
                   name="policyId"
                   control={control}
                   render={({ field }) => (
-                    <Select value={field.value} onValueChange={(value) => field.onChange(value)}>
-                      <SelectTrigger className="h-10 w-full rounded-xl bg-white">
-                        <SelectValue placeholder="Selecciona una póliza" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {policyOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <ControlledSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={policyOptions}
+                      placeholder="Selecciona una póliza"
+                    />
                   )}
                 />
               </FormField>
@@ -126,18 +112,12 @@ export function ReceiptForm({
                   name="currency"
                   control={control}
                   render={({ field }) => (
-                    <Select value={field.value} onValueChange={(value) => field.onChange(value)}>
-                      <SelectTrigger className="h-10 w-full rounded-xl bg-white">
-                        <SelectValue placeholder="Selecciona una moneda" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {currencyOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <ControlledSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={currencyOptions}
+                      placeholder="Selecciona una moneda"
+                    />
                   )}
                 />
               </FormField>
@@ -147,18 +127,12 @@ export function ReceiptForm({
                   name="status"
                   control={control}
                   render={({ field }) => (
-                    <Select value={field.value} onValueChange={(value) => field.onChange(value)}>
-                      <SelectTrigger className="h-10 w-full rounded-xl bg-white">
-                        <SelectValue placeholder="Selecciona un estado" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {receiptStatusOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <ControlledSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={receiptStatusOptions}
+                      placeholder="Selecciona un estado"
+                    />
                   )}
                 />
               </FormField>

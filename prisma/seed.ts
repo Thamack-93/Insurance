@@ -6,7 +6,7 @@ import type { PaymentFrequency, Policy, Priority, Receipt, TaskStatus } from "..
 import { databasePath } from "../src/lib/files";
 
 const adapter = new PrismaBetterSqlite3({
-  url: process.env.DATABASE_URL ?? `file:${databasePath}`,
+  url: `file:${databasePath}`,
 });
 const prisma = new PrismaClient({ adapter });
 const baseDate = new Date("2026-05-01T00:00:00.000Z");
