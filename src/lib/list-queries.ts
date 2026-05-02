@@ -1,0 +1,246 @@
+import { addDays, endOfDay, startOfDay } from "date-fns";
+import { getDb } from "@/lib/db";
+import { daysUntil, today } from "@/lib/dates";
+import { toNumber } from "@/lib/money";
+import { statusLabels } from "@/lib/status";
+
+type ReceiptStatus = "PENDING" | "PAID" | "OVERDUE" | "CANCELLED";
+type PolicyStatus = "ACTIVE" | "EXPIRED" | "CANCELLED" | "RENEWED" | "PENDING";
+type TaskStatus =
+  | "OPEN"
+  | "IN_PROGRESS"
+  | "WAITING_CLIENT"
+  | "WAITING_INSURER"
+  | "WAITING_DOCUMENT"
+  | "SENT"
+  | "RESOLVED"
+  | "CANCELLED"
+  | "ARCHIVED";
+
+export type DateRange = {
+  from: Date;
+  to: Date;
+};
+
+export type DuePaymentsOptions = {
+  from?: Date;
+  to?: Date;
+  limit?: number;
+  statuses?: ReceiptStatus[];
+};
+
+export type RenewalOptions = {
+  from?: Date;
+  to?: Date;
+  limit?: number;
+  statuses?: PolicyStatus[];
+};
+
+export type OpenTasksOptions = {
+  from?: Date;
+  to?: Date;
+  limit?: number;
+  statuses?: TaskStatus[];
+};
+
+export type DuePaymentItem = {
+  id: string;
+  receiptNumber: string;
+  dueDate: Date;
+  status: ReceiptStatus;
+  amount: number;
+  currency: string;
+  daysUntilDue: number;
+  client: {
+    id: string;
+    fullName: string;
+  };
+  policy: {
+    id: string;
+    policyNumber: string;
+    policyType: string;
+  };
+  insurer: {
+    id: string;
+    name: string;
+  };
+};
+
+export type RenewalItem = {
+  id: string;
+  policyNumber: string;
+  policyType: string;
+  status: PolicyStatus;
+  renewalDate: Date | null;
+  premiumAmount: number;
+  currency: string;
+  daysUntilRenewal: number | null;
+  client: {
+    id: string;
+    fullName: string;
+  };
+  insurer: {
+    id: string;
+    name: string;
+  };
+};
+
+export type OpenTaskItem = {
+  id: string;
+  folio: string;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  priority: string;
+  startDate: Date;
+  dueDate: Date | null;
+  daysUntilDue: number | null;
+  client: {
+    id: string;
+    fullName: string;
+  } | null;
+  policy: {
+    id: string;
+    policyNumber: string;
+    policyType: string;
+  } | null;
+  insurer: {
+    id: string;
+    name: string;
+  } | null;
+  receipt: {
+    id: string;
+    receiptNumber: string;
+  } | null;
+};
+
+export async function getDuePayments(options: DuePaymentsOptions = {}) {
+  const db = getDb();
+  const range = resolveRange(options.from, options.to, 60);
+  const statuses = options.statuses ?? ["PENDING", "OVERDUE"];
+
+  const rows = await db.receipt.findMany({
+    where: {
+      dueDate: { gte: range.from, lte: range.to },
+      status: { in: statuses },
+    },
+    include: {
+      client: { select: { id: true, fullName: true } },
+      policy: { select: { id: true, policyNumber: true, policyType: true } },
+      insurer: { select: { id: true, name: true } },
+    },
+    orderBy: [{ dueDate: "asc" }, { receiptNumber: "asc" }],
+    take: options.limit,
+  });
+
+  return rows.map<DuePaymentItem>((row) => ({
+    id: row.id,
+    receiptNumber: row.receiptNumber,
+    dueDate: row.dueDate,
+    status: row.status as ReceiptStatus,
+    amount: toNumber(row.amount),
+    currency: row.currency,
+    daysUntilDue: daysUntil(row.dueDate),
+    client: row.client,
+    policy: row.policy,
+    insurer: row.insurer,
+  }));
+}
+
+export async function getRenewals(options: RenewalOptions = {}) {
+  const db = getDb();
+  const range = resolveRange(options.from, options.to, 60);
+  const statuses = options.statuses ?? ["ACTIVE"];
+
+  const rows = await db.policy.findMany({
+    where: {
+      renewalDate: { gte: range.from, lte: range.to },
+      status: { in: statuses },
+    },
+    include: {
+      client: { select: { id: true, fullName: true } },
+      insurer: { select: { id: true, name: true } },
+    },
+    orderBy: [{ renewalDate: "asc" }, { policyNumber: "asc" }],
+    take: options.limit,
+  });
+
+  return rows.map<RenewalItem>((row) => ({
+    id: row.id,
+    policyNumber: row.policyNumber,
+    policyType: row.policyType,
+    status: row.status as PolicyStatus,
+    renewalDate: row.renewalDate,
+    premiumAmount: toNumber(row.premiumAmount),
+    currency: row.currency,
+    daysUntilRenewal: row.renewalDate ? daysUntil(row.renewalDate) : null,
+    client: row.client,
+    insurer: row.insurer,
+  }));
+}
+
+export async function getOpenTasks(options: OpenTasksOptions = {}) {
+  const db = getDb();
+  const range = options.from || options.to ? resolveRange(options.from, options.to, 0) : null;
+  const statuses = options.statuses ?? [
+    "OPEN",
+    "IN_PROGRESS",
+    "WAITING_CLIENT",
+    "WAITING_INSURER",
+    "WAITING_DOCUMENT",
+    "SENT",
+  ];
+
+  const rows = await db.task.findMany({
+    where: {
+      status: { in: statuses },
+      ...(range
+        ? {
+            dueDate: {
+              gte: range.from,
+              lte: range.to,
+            },
+          }
+        : {}),
+    },
+    include: {
+      client: { select: { id: true, fullName: true } },
+      policy: { select: { id: true, policyNumber: true, policyType: true } },
+      insurer: { select: { id: true, name: true } },
+      receipt: { select: { id: true, receiptNumber: true } },
+    },
+    orderBy: [{ priority: "desc" }, { dueDate: "asc" }, { createdAt: "desc" }],
+    take: options.limit,
+  });
+
+  return rows.map<OpenTaskItem>((row) => ({
+    id: row.id,
+    folio: row.folio,
+    title: row.title,
+    description: row.description,
+    status: row.status as TaskStatus,
+    priority: row.priority,
+    startDate: row.startDate,
+    dueDate: row.dueDate,
+    daysUntilDue: row.dueDate ? daysUntil(row.dueDate) : null,
+    client: row.client,
+    policy: row.policy,
+    insurer: row.insurer,
+    receipt: row.receipt,
+  }));
+}
+
+function resolveRange(from?: Date, to?: Date, fallbackDays = 60): DateRange {
+  const start = from ? startOfDay(from) : today();
+  const end = to ? endOfDay(to) : endOfDay(addDays(start, fallbackDays));
+
+  if (end < start) {
+    throw new Error("El rango de fechas es inválido.");
+  }
+
+  return { from: start, to: end };
+}
+
+export function describeTaskStatus(status: string) {
+  return statusLabels[status] ?? status;
+}

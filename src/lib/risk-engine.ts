@@ -1,0 +1,162 @@
+import { addDays, subDays } from "date-fns";
+import { getDb } from "@/lib/db";
+import { today } from "@/lib/dates";
+
+export type RiskFinding = {
+  alertType: string;
+  severity: "INFO" | "WARNING" | "CRITICAL";
+  title: string;
+  description: string;
+  entityType: string;
+  entityId: string;
+  suggestedAction: string;
+};
+
+export async function detectRisks(): Promise<RiskFinding[]> {
+  const db = getDb();
+  const now = today();
+  const in60 = addDays(now, 60);
+  const olderThan15 = subDays(now, 15);
+
+  const [
+    policiesWithoutRenewal,
+    policiesWithoutPdf,
+    expiredPolicies,
+    overdueReceipts,
+    paidReceiptsWithoutProof,
+    overdueCommissions,
+    staleTasks,
+    clientsWithoutContact,
+    inconsistentPolicies,
+    orphanDocuments,
+    clientsWithoutActivePolicies,
+    renewalsWithoutTask,
+    policies,
+    receipts,
+  ] = await Promise.all([
+    db.policy.findMany({
+      where: { status: "ACTIVE", renewalDate: null },
+      take: 25,
+      select: { id: true, policyNumber: true },
+    }),
+    db.policy.findMany({
+      where: { status: "ACTIVE", documents: { none: { documentType: "POLICY" } } },
+      take: 25,
+      select: { id: true, policyNumber: true },
+    }),
+    db.policy.findMany({
+      where: { endDate: { lt: now }, status: { notIn: ["RENEWED", "CANCELLED"] } },
+      take: 25,
+      select: { id: true, policyNumber: true },
+    }),
+    db.receipt.findMany({
+      where: {
+        dueDate: { lt: now },
+        status: { notIn: ["PAID", "CANCELLED"] },
+        payments: { none: {} },
+      },
+      take: 25,
+      select: { id: true, receiptNumber: true },
+    }),
+    db.receipt.findMany({
+      where: { status: "PAID", documentId: null },
+      take: 25,
+      select: { id: true, receiptNumber: true },
+    }),
+    db.commission.findMany({
+      where: { expectedDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
+      take: 25,
+      select: { id: true, expectedAmount: true },
+    }),
+    db.task.findMany({
+      where: {
+        startDate: { lt: olderThan15 },
+        status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] },
+      },
+      take: 25,
+      select: { id: true, folio: true, title: true },
+    }),
+    db.client.findMany({
+      where: { OR: [{ phone: null }, { email: null }] },
+      take: 25,
+      select: { id: true, fullName: true },
+    }),
+    db.policy.findMany({
+      where: { OR: [{ endDate: { lt: new Date("2000-01-01") } }, { startDate: { gt: in60 } }] },
+      take: 25,
+      select: { id: true, policyNumber: true },
+    }),
+    db.document.findMany({
+      where: {
+        clientId: null,
+        policyId: null,
+        receiptId: null,
+        taskId: null,
+        claimId: null,
+        quoteId: null,
+      },
+      take: 25,
+      select: { id: true, fileName: true },
+    }),
+    db.client.findMany({
+      where: { policies: { none: { status: "ACTIVE" } } },
+      take: 25,
+      select: { id: true, fullName: true },
+    }),
+    db.policy.findMany({
+      where: {
+        status: "ACTIVE",
+        renewalDate: { gte: now, lte: in60 },
+        tasks: { none: { taskType: "RENEWAL", status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] } } },
+      },
+      take: 25,
+      select: { id: true, policyNumber: true },
+    }),
+    db.policy.findMany({ select: { id: true, policyNumber: true } }),
+    db.receipt.findMany({ select: { id: true, policyId: true, receiptNumber: true } }),
+  ]);
+
+  const duplicatePolicies = duplicatesBy(policies, (policy) => policy.policyNumber);
+  const duplicateReceipts = duplicatesBy(receipts, (receipt) => `${receipt.policyId}:${receipt.receiptNumber}`);
+
+  return [
+    ...policiesWithoutRenewal.map((policy) => risk("POLICY_MISSING_RENEWAL", "WARNING", "Poliza sin fecha de renovacion", policy.policyNumber, "Policy", policy.id, "Capturar fecha de renovacion.")),
+    ...policiesWithoutPdf.map((policy) => risk("POLICY_MISSING_PDF", "WARNING", "Poliza sin PDF", policy.policyNumber, "Policy", policy.id, "Subir documento de poliza.")),
+    ...expiredPolicies.map((policy) => risk("POLICY_EXPIRED", "CRITICAL", "Poliza vencida", policy.policyNumber, "Policy", policy.id, "Revisar renovacion o cancelacion.")),
+    ...overdueReceipts.map((receipt) => risk("RECEIPT_OVERDUE", "CRITICAL", "Recibo vencido sin pago", receipt.receiptNumber, "Receipt", receipt.id, "Contactar cliente y registrar seguimiento.")),
+    ...paidReceiptsWithoutProof.map((receipt) => risk("PAID_RECEIPT_WITHOUT_PROOF", "WARNING", "Recibo pagado sin comprobante", receipt.receiptNumber, "Receipt", receipt.id, "Subir comprobante de pago.")),
+    ...overdueCommissions.map((commission) => risk("COMMISSION_OVERDUE", "WARNING", "Comision vencida sin cobro", String(commission.expectedAmount), "Commission", commission.id, "Revisar cobranza con aseguradora.")),
+    ...staleTasks.map((task) => risk("STALE_TASK", "WARNING", "Pendiente abierto mas de 15 dias", `${task.folio} · ${task.title}`, "Task", task.id, "Actualizar o cerrar pendiente.")),
+    ...clientsWithoutContact.map((client) => risk("CLIENT_MISSING_CONTACT", "WARNING", "Cliente sin telefono o email", client.fullName, "Client", client.id, "Completar datos de contacto.")),
+    ...inconsistentPolicies.map((policy) => risk("INCONSISTENT_DATES", "CRITICAL", "Fechas inconsistentes", policy.policyNumber, "Policy", policy.id, "Corregir vigencia de poliza.")),
+    ...orphanDocuments.map((document) => risk("ORPHAN_DOCUMENT", "INFO", "Documento huerfano", document.fileName, "Document", document.id, "Asociar documento a una entidad.")),
+    ...clientsWithoutActivePolicies.map((client) => risk("CLIENT_WITHOUT_ACTIVE_POLICY", "INFO", "Cliente sin polizas activas", client.fullName, "Client", client.id, "Revisar si debe archivarse o reactivarse.")),
+    ...renewalsWithoutTask.map((policy) => risk("RENEWAL_WITHOUT_TASK", "WARNING", "Renovacion proxima sin pendiente", policy.policyNumber, "Policy", policy.id, "Crear pendiente de renovacion.")),
+    ...duplicatePolicies.map((policy) => risk("DUPLICATE_POLICY_NUMBER", "WARNING", "Numero de poliza duplicado", policy.policyNumber, "Policy", policy.id, "Verificar duplicado.")),
+    ...duplicateReceipts.map((receipt) => risk("DUPLICATE_RECEIPT_NUMBER", "WARNING", "Recibo duplicado", receipt.receiptNumber, "Receipt", receipt.id, "Verificar duplicado.")),
+  ];
+}
+
+function risk(
+  alertType: string,
+  severity: RiskFinding["severity"],
+  title: string,
+  description: string,
+  entityType: string,
+  entityId: string,
+  suggestedAction: string,
+): RiskFinding {
+  return { alertType, severity, title, description, entityType, entityId, suggestedAction };
+}
+
+function duplicatesBy<T>(items: T[], getKey: (item: T) => string) {
+  const seen = new Map<string, T[]>();
+
+  for (const item of items) {
+    const key = getKey(item);
+    seen.set(key, [...(seen.get(key) ?? []), item]);
+  }
+
+  return [...seen.values()].filter((group) => group.length > 1).flat();
+}
+

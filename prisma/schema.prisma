@@ -1,0 +1,499 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum ClientType {
+  PERSON
+  COMPANY
+}
+
+enum EntityStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum PolicyType {
+  AUTO
+  GMM
+  VIDA
+  DANOS
+  FIANZAS
+  HOGAR
+  RESPONSABILIDAD_CIVIL
+  EMPRESARIAL
+  ACCIDENTES
+  OTRO
+}
+
+enum PolicyStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  RENEWED
+  PENDING
+}
+
+enum PaymentFrequency {
+  MONTHLY
+  QUARTERLY
+  SEMIANNUAL
+  ANNUAL
+  SINGLE
+  OTHER
+}
+
+enum ReceiptStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum CommissionStatus {
+  EXPECTED
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum TaskType {
+  GENERAL
+  CLAIM
+  QUOTE
+  RENEWAL
+  PAYMENT
+  DOCUMENT
+  COMMISSION
+  OTHER
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_CLIENT
+  WAITING_INSURER
+  WAITING_DOCUMENT
+  SENT
+  RESOLVED
+  CANCELLED
+  ARCHIVED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum ClaimStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_CLIENT
+  WAITING_INSURER
+  RESOLVED
+  CANCELLED
+}
+
+enum QuoteStatus {
+  REQUESTED
+  IN_PROGRESS
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+enum DocumentType {
+  POLICY
+  RECEIPT
+  ENDORSEMENT
+  RENEWAL
+  ID
+  PAYMENT_PROOF
+  QUOTE
+  CLAIM
+  LETTER
+  OTHER
+}
+
+enum ReminderStatus {
+  ACTIVE
+  DONE
+  CANCELLED
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum AlertStatus {
+  OPEN
+  DISMISSED
+  RESOLVED
+}
+
+model Client {
+  id                     String       @id @default(cuid())
+  fullName               String
+  type                   ClientType   @default(PERSON)
+  email                  String?
+  phone                  String?
+  secondaryPhone         String?
+  rfc                    String?
+  address                String?
+  preferredContactMethod String?
+  notes                  String?
+  status                 EntityStatus @default(ACTIVE)
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+
+  policies    Policy[]
+  receipts    Receipt[]
+  payments    Payment[]
+  commissions Commission[]
+  tasks       Task[]
+  claims      Claim[]
+  quotes      Quote[]
+  documents   Document[]
+
+  @@index([fullName])
+  @@index([status])
+}
+
+model Insurer {
+  id             String       @id @default(cuid())
+  name           String
+  portalUrl      String?
+  agentPortalUrl String?
+  contactName    String?
+  contactEmail   String?
+  contactPhone   String?
+  notes          String?
+  status         EntityStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  policies    Policy[]
+  receipts    Receipt[]
+  commissions Commission[]
+  tasks       Task[]
+  claims      Claim[]
+  quotes      Quote[]
+
+  @@index([name])
+  @@index([status])
+}
+
+model Policy {
+  id              String           @id @default(cuid())
+  policyNumber    String
+  clientId        String
+  insurerId       String
+  policyType      PolicyType
+  status          PolicyStatus     @default(ACTIVE)
+  startDate       DateTime
+  endDate         DateTime
+  renewalDate     DateTime?
+  premiumAmount   Decimal
+  currency        String           @default("MXN")
+  paymentFrequency PaymentFrequency
+  paymentPlan     String?
+  insuredObject   String?
+  beneficiaryInfo String?
+  notes           String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  insurer     Insurer      @relation(fields: [insurerId], references: [id], onDelete: Restrict)
+  receipts    Receipt[]
+  payments    Payment[]
+  commissions Commission[]
+  tasks       Task[]
+  claims      Claim[]
+  documents   Document[]
+
+  @@index([policyNumber])
+  @@index([clientId])
+  @@index([insurerId])
+  @@index([policyType])
+  @@index([status])
+  @@index([renewalDate])
+  @@index([endDate])
+}
+
+model Receipt {
+  id              String        @id @default(cuid())
+  receiptNumber   String
+  policyId        String
+  clientId        String
+  insurerId       String
+  periodStartDate DateTime
+  periodEndDate   DateTime
+  dueDate         DateTime
+  amount          Decimal
+  currency        String        @default("MXN")
+  status          ReceiptStatus @default(PENDING)
+  paidDate        DateTime?
+  paymentMethod   String?
+  documentId      String?       @unique
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  policy     Policy     @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  client     Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  insurer    Insurer    @relation(fields: [insurerId], references: [id], onDelete: Restrict)
+  document   Document?  @relation("ReceiptPrimaryDocument", fields: [documentId], references: [id], onDelete: SetNull)
+  payments   Payment[]
+  commissions Commission[]
+  tasks      Task[]
+  documents  Document[] @relation("ReceiptDocuments")
+
+  @@index([receiptNumber])
+  @@index([policyId])
+  @@index([clientId])
+  @@index([insurerId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([policyId, receiptNumber])
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  receiptId     String
+  policyId      String
+  clientId      String
+  amount        Decimal
+  currency      String   @default("MXN")
+  paidDate      DateTime
+  paymentMethod String?
+  reference     String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  receipt Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  policy  Policy  @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  client  Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([receiptId])
+  @@index([policyId])
+  @@index([clientId])
+  @@index([paidDate])
+}
+
+model Commission {
+  id             String           @id @default(cuid())
+  policyId       String
+  receiptId      String?
+  clientId       String
+  insurerId      String
+  expectedAmount Decimal
+  actualAmount   Decimal?
+  percentage     Decimal?
+  status         CommissionStatus @default(EXPECTED)
+  expectedDate   DateTime
+  paidDate       DateTime?
+  notes          String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  policy  Policy   @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  receipt Receipt? @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  client  Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  insurer Insurer  @relation(fields: [insurerId], references: [id], onDelete: Restrict)
+
+  @@index([policyId])
+  @@index([receiptId])
+  @@index([clientId])
+  @@index([insurerId])
+  @@index([status])
+  @@index([expectedDate])
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  folio       String
+  clientId    String?
+  policyId    String?
+  insurerId   String?
+  receiptId   String?
+  title       String
+  description String?
+  taskType    TaskType   @default(GENERAL)
+  status      TaskStatus @default(OPEN)
+  priority    Priority   @default(MEDIUM)
+  startDate   DateTime   @default(now())
+  dueDate     DateTime?
+  closedDate  DateTime?
+  notes       String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  client    Client?    @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  policy    Policy?    @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  insurer   Insurer?   @relation(fields: [insurerId], references: [id], onDelete: SetNull)
+  receipt   Receipt?   @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  documents Document[]
+
+  @@index([folio])
+  @@index([clientId])
+  @@index([policyId])
+  @@index([insurerId])
+  @@index([receiptId])
+  @@index([status])
+  @@index([priority])
+  @@index([dueDate])
+}
+
+model Claim {
+  id            String      @id @default(cuid())
+  folio         String
+  clientId      String
+  policyId      String
+  insurerId     String
+  claimType     String
+  description   String?
+  status        ClaimStatus @default(OPEN)
+  incidentDate  DateTime
+  reportedDate  DateTime
+  closedDate    DateTime?
+  amountClaimed Decimal?
+  amountPaid    Decimal?
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  client    Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  policy    Policy     @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  insurer   Insurer    @relation(fields: [insurerId], references: [id], onDelete: Restrict)
+  documents Document[]
+
+  @@index([folio])
+  @@index([clientId])
+  @@index([policyId])
+  @@index([insurerId])
+  @@index([status])
+}
+
+model Quote {
+  id            String      @id @default(cuid())
+  clientId      String
+  insurerId     String?
+  policyType    PolicyType
+  status        QuoteStatus @default(REQUESTED)
+  requestedDate DateTime
+  sentDate      DateTime?
+  validUntil    DateTime?
+  quotedAmount  Decimal?
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  client    Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  insurer   Insurer?   @relation(fields: [insurerId], references: [id], onDelete: SetNull)
+  documents Document[]
+
+  @@index([clientId])
+  @@index([insurerId])
+  @@index([policyType])
+  @@index([status])
+  @@index([validUntil])
+}
+
+model Document {
+  id           String       @id @default(cuid())
+  clientId     String?
+  policyId     String?
+  receiptId    String?
+  taskId       String?
+  claimId      String?
+  quoteId      String?
+  documentType DocumentType @default(OTHER)
+  fileName     String
+  filePath     String
+  mimeType     String
+  uploadedAt   DateTime     @default(now())
+  notes        String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  client         Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  policy         Policy?  @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  receipt        Receipt? @relation("ReceiptDocuments", fields: [receiptId], references: [id], onDelete: SetNull)
+  task           Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  claim          Claim?   @relation(fields: [claimId], references: [id], onDelete: SetNull)
+  quote          Quote?   @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  primaryReceipt Receipt? @relation("ReceiptPrimaryDocument")
+
+  @@index([clientId])
+  @@index([policyId])
+  @@index([receiptId])
+  @@index([taskId])
+  @@index([claimId])
+  @@index([quoteId])
+  @@index([documentType])
+  @@index([uploadedAt])
+}
+
+model Reminder {
+  id           String         @id @default(cuid())
+  entityType   String
+  entityId     String
+  reminderDate DateTime
+  title        String
+  description  String?
+  status       ReminderStatus @default(ACTIVE)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([entityType, entityId])
+  @@index([reminderDate])
+  @@index([status])
+}
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  entityType  String
+  entityId    String
+  action      String
+  oldValue    String?
+  newValue    String?
+  createdAt   DateTime @default(now())
+  performedBy String   @default("local-user")
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@index([action])
+}
+
+model Alert {
+  id          String        @id @default(cuid())
+  alertType   String
+  severity    AlertSeverity
+  title       String
+  description String?
+  entityType  String
+  entityId    String
+  status      AlertStatus   @default(OPEN)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([alertType])
+  @@index([severity])
+  @@index([entityType, entityId])
+  @@index([status])
+  @@index([createdAt])
+}

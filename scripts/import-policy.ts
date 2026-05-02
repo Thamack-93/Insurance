@@ -1,0 +1,441 @@
+import { z } from "zod";
+
+import {
+  backupDatabase,
+  closeDb,
+  createDb,
+  formatDateShort,
+  getFlag,
+  normalizeKey,
+  parseCliArgs,
+  pickValue,
+  printTable,
+  readTabularInput,
+  safeJson,
+  toDateValue,
+  toEnumValue,
+  toNumberValue,
+  toNumber,
+  toStringValue,
+} from "./_shared";
+
+const policySchema = z.object({
+  policyNumber: z.string().min(2),
+  clientRef: z.string().min(1),
+  insurerRef: z.string().min(1),
+  policyType: z.enum([
+    "AUTO",
+    "GMM",
+    "VIDA",
+    "DANOS",
+    "FIANZAS",
+    "HOGAR",
+    "RESPONSABILIDAD_CIVIL",
+    "EMPRESARIAL",
+    "ACCIDENTES",
+    "OTRO",
+  ]),
+  status: z.enum(["ACTIVE", "EXPIRED", "CANCELLED", "RENEWED", "PENDING"]).default("ACTIVE"),
+  startDate: z.date(),
+  endDate: z.date(),
+  renewalDate: z.date().optional(),
+  premiumAmount: z.number().positive(),
+  currency: z.string().min(3).max(3).default("MXN"),
+  paymentFrequency: z.enum(["MONTHLY", "QUARTERLY", "SEMIANNUAL", "ANNUAL", "SINGLE", "OTHER"]),
+  paymentPlan: z.string().optional(),
+  insuredObject: z.string().optional(),
+  beneficiaryInfo: z.string().optional(),
+  notes: z.string().optional(),
+});
+
+type PolicyInput = z.infer<typeof policySchema>;
+
+type ExistingPolicy = {
+  id: string;
+  policyNumber: string;
+  clientId: string;
+  insurerId: string;
+  policyType: string;
+  status: string;
+  startDate: Date;
+  endDate: Date;
+  renewalDate: Date | null;
+  premiumAmount: unknown;
+  currency: string;
+  paymentFrequency: string;
+  paymentPlan: string | null;
+  insuredObject: string | null;
+  beneficiaryInfo: string | null;
+  notes: string | null;
+  client?: { id: string; fullName: string };
+  insurer?: { id: string; name: string };
+};
+
+type ClientRef = { id: string; fullName: string; email: string | null; rfc: string | null };
+type InsurerRef = { id: string; name: string; contactEmail: string | null };
+
+function textValue(value: unknown) {
+  return toStringValue(value);
+}
+
+function buildPolicyInput(row: Record<string, unknown>) {
+  return policySchema.parse({
+    policyNumber: textValue(pickValue(row, ["policyNumber", "numeroPoliza", "poliza"])) ?? "",
+    clientRef:
+      textValue(pickValue(row, ["clientId", "clienteId", "client", "cliente", "clientName", "clienteNombre"])) ?? "",
+    insurerRef:
+      textValue(
+        pickValue(row, ["insurerId", "aseguradoraId", "insurer", "aseguradora", "insurerName", "aseguradoraNombre"]),
+      ) ?? "",
+    policyType: toEnumValue(
+      pickValue(row, ["policyType", "tipoPoliza", "tipo"]),
+      [
+        "AUTO",
+        "GMM",
+        "VIDA",
+        "DANOS",
+        "FIANZAS",
+        "HOGAR",
+        "RESPONSABILIDAD_CIVIL",
+        "EMPRESARIAL",
+        "ACCIDENTES",
+        "OTRO",
+      ],
+    ) ?? "OTRO",
+    status: toEnumValue(pickValue(row, ["status", "estado"]), ["ACTIVE", "EXPIRED", "CANCELLED", "RENEWED", "PENDING"]) ?? "ACTIVE",
+    startDate: toDateValue(pickValue(row, ["startDate", "fechaInicio", "inicio"])) ?? new Date("invalid"),
+    endDate: toDateValue(pickValue(row, ["endDate", "fechaFin", "fin"])) ?? new Date("invalid"),
+    renewalDate: toDateValue(pickValue(row, ["renewalDate", "fechaRenovacion", "renovacion"])),
+    premiumAmount: toNumberValue(pickValue(row, ["premiumAmount", "prima", "montoPrima"])) ?? Number.NaN,
+    currency: (textValue(pickValue(row, ["currency", "moneda"])) ?? "MXN").toUpperCase(),
+    paymentFrequency: toEnumValue(
+      pickValue(row, ["paymentFrequency", "frecuenciaPago"]),
+      ["MONTHLY", "QUARTERLY", "SEMIANNUAL", "ANNUAL", "SINGLE", "OTHER"],
+    ) ?? "OTHER",
+    paymentPlan: textValue(pickValue(row, ["paymentPlan", "planPago"])),
+    insuredObject: textValue(pickValue(row, ["insuredObject", "objetoAsegurado"])),
+    beneficiaryInfo: textValue(pickValue(row, ["beneficiaryInfo", "beneficiarios"])),
+    notes: textValue(pickValue(row, ["notes", "notas", "comentarios"])),
+  });
+}
+
+function normalizeComparable(value: unknown) {
+  return normalizeKey(String(value ?? ""));
+}
+
+function resolveSingle<T>(items: T[], label: string) {
+  if (items.length > 1) {
+    throw new Error(`Coincidencia ambigua para ${label}.`);
+  }
+
+  return items[0] ?? null;
+}
+
+function resolveClient(clientRefs: ClientRef[], ref: string) {
+  const target = normalizeComparable(ref);
+  const matches = clientRefs.filter((client) =>
+    [client.id, client.fullName, client.email, client.rfc].some((value) => value && normalizeComparable(value) === target),
+  );
+  return resolveSingle(matches, `el cliente "${ref}"`);
+}
+
+function resolveInsurer(insurerRefs: InsurerRef[], ref: string) {
+  const target = normalizeComparable(ref);
+  const matches = insurerRefs.filter((insurer) =>
+    [insurer.id, insurer.name, insurer.contactEmail].some((value) => value && normalizeComparable(value) === target),
+  );
+  return resolveSingle(matches, `la aseguradora "${ref}"`);
+}
+
+function resolvePolicyMatch(policies: ExistingPolicy[], policyNumber: string) {
+  const target = normalizeComparable(policyNumber);
+  const matches = policies.filter((policy) => normalizeComparable(policy.policyNumber) === target);
+  return resolveSingle(matches, `la poliza "${policyNumber}"`);
+}
+
+function buildUpdateData(
+  existing: ExistingPolicy,
+  input: PolicyInput,
+  client: ClientRef,
+  insurer: InsurerRef,
+) {
+  const data: Record<string, unknown> = {};
+  const nextClientId = client.id;
+  const nextInsurerId = insurer.id;
+
+  const comparableEntries: Array<[keyof PolicyInput, keyof ExistingPolicy | string, unknown]> = [
+    ["clientRef", "clientId", nextClientId],
+    ["insurerRef", "insurerId", nextInsurerId],
+    ["policyType", "policyType", input.policyType],
+    ["status", "status", input.status],
+    ["startDate", "startDate", input.startDate],
+    ["endDate", "endDate", input.endDate],
+    ["renewalDate", "renewalDate", input.renewalDate ?? null],
+    ["premiumAmount", "premiumAmount", input.premiumAmount],
+    ["currency", "currency", input.currency],
+    ["paymentFrequency", "paymentFrequency", input.paymentFrequency],
+    ["paymentPlan", "paymentPlan", input.paymentPlan ?? null],
+    ["insuredObject", "insuredObject", input.insuredObject ?? null],
+    ["beneficiaryInfo", "beneficiaryInfo", input.beneficiaryInfo ?? null],
+    ["notes", "notes", input.notes ?? null],
+  ];
+
+  for (const [inputKey, existingKey, next] of comparableEntries) {
+    const current = existing[existingKey as keyof ExistingPolicy];
+    const same =
+      inputKey === "premiumAmount"
+        ? toNumber(current) === toNumber(next)
+        : current instanceof Date || next instanceof Date
+          ? String(new Date(current as Date | string).getTime()) === String(new Date(next as Date | string).getTime())
+          : normalizeComparable(current) === normalizeComparable(next);
+    if (same) continue;
+
+    if (inputKey === "clientRef") {
+      data.clientId = next;
+    } else if (inputKey === "insurerRef") {
+      data.insurerId = next;
+    } else {
+      data[inputKey] = next;
+    }
+  }
+
+  return data;
+}
+
+async function main() {
+  const args = parseCliArgs();
+  const dryRun = Boolean(args.flags["dry-run"] || args.flags["dryRun"]);
+  const inputPath = getFlag(args, "file") ?? args.positionals[0];
+
+  if (!inputPath) {
+    throw new Error("Debes indicar un archivo con --file o como primer argumento.");
+  }
+
+  const rows = await readTabularInput(inputPath);
+  const db = createDb();
+
+  const [policies, clientRefs, insurerRefs] = await Promise.all([
+    db.policy.findMany({
+      include: {
+        client: { select: { id: true, fullName: true } },
+        insurer: { select: { id: true, name: true } },
+      },
+    }),
+    db.client.findMany({
+      select: { id: true, fullName: true, email: true, rfc: true },
+    }),
+    db.insurer.findMany({
+      select: { id: true, name: true, contactEmail: true },
+    }),
+  ]);
+
+  const operations: Array<Record<string, unknown>> = [];
+  const errors: string[] = [];
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  for (const [index, row] of rows.entries()) {
+    try {
+      const input = buildPolicyInput(row);
+      const client = resolveClient(clientRefs, input.clientRef);
+      const insurer = resolveInsurer(insurerRefs, input.insurerRef);
+
+      if (!client) {
+        throw new Error(`No se encontro el cliente "${input.clientRef}".`);
+      }
+      if (!insurer) {
+        throw new Error(`No se encontro la aseguradora "${input.insurerRef}".`);
+      }
+
+      const match = resolvePolicyMatch(policies, input.policyNumber);
+
+      if (!match) {
+        created += 1;
+        operations.push({
+          Fila: index + 2,
+          Accion: "CREAR",
+          Poliza: input.policyNumber,
+          Cliente: client.fullName,
+          Aseguradora: insurer.name,
+          Renovacion: input.renewalDate ? formatDateShort(input.renewalDate) : "-",
+        });
+        continue;
+      }
+
+      const data = buildUpdateData(match, input, client, insurer);
+      if (!Object.keys(data).length) {
+        skipped += 1;
+        operations.push({
+          Fila: index + 2,
+          Accion: "SIN_CAMBIOS",
+          Poliza: match.policyNumber,
+          Cliente: match.client?.fullName ?? client.fullName,
+          Aseguradora: match.insurer?.name ?? insurer.name,
+          Renovacion: match.renewalDate ? formatDateShort(match.renewalDate) : "-",
+        });
+        continue;
+      }
+
+      updated += 1;
+      operations.push({
+        Fila: index + 2,
+        Accion: "ACTUALIZAR",
+        Poliza: input.policyNumber,
+        Cliente: client.fullName,
+        Aseguradora: insurer.name,
+        Renovacion: input.renewalDate ? formatDateShort(input.renewalDate) : "-",
+      });
+    } catch (error) {
+      errors.push(`Fila ${index + 2}: ${(error as Error).message}`);
+    }
+  }
+
+  console.log("Importacion de polizas");
+  console.log(`Archivo: ${inputPath}`);
+  console.log(`Filas leidas: ${rows.length}`);
+  console.log(`Nuevas: ${created}`);
+  console.log(`Actualizadas: ${updated}`);
+  console.log(`Sin cambios: ${skipped}`);
+  console.log(`Errores: ${errors.length}`);
+
+  if (errors.length) {
+    console.log("");
+    console.log("Errores detectados:");
+    for (const error of errors.slice(0, 10)) {
+      console.log(`- ${error}`);
+    }
+  }
+
+  printTable(dryRun ? "Vista previa" : "Cambios detectados", operations.slice(0, 20));
+
+  if (dryRun || (!created && !updated)) {
+    await closeDb(db);
+    if (errors.length) process.exitCode = 1;
+    return;
+  }
+
+  const backup = await backupDatabase();
+  if (backup) {
+    console.log("");
+    console.log(`Backup previo creado: ${backup}`);
+  }
+
+  for (const [index, row] of rows.entries()) {
+    try {
+      const input = buildPolicyInput(row);
+      const client = resolveClient(clientRefs, input.clientRef);
+      const insurer = resolveInsurer(insurerRefs, input.insurerRef);
+      if (!client) throw new Error(`No se encontro el cliente "${input.clientRef}".`);
+      if (!insurer) throw new Error(`No se encontro la aseguradora "${input.insurerRef}".`);
+
+      const match = resolvePolicyMatch(policies, input.policyNumber);
+
+      if (!match) {
+        const createdPolicy = await db.policy.create({
+          data: {
+            policyNumber: input.policyNumber,
+            clientId: client.id,
+            insurerId: insurer.id,
+            policyType: input.policyType,
+            status: input.status,
+            startDate: input.startDate,
+            endDate: input.endDate,
+            renewalDate: input.renewalDate,
+            premiumAmount: input.premiumAmount,
+            currency: input.currency,
+            paymentFrequency: input.paymentFrequency,
+            paymentPlan: input.paymentPlan,
+            insuredObject: input.insuredObject,
+            beneficiaryInfo: input.beneficiaryInfo,
+            notes: input.notes,
+          },
+          include: {
+            client: { select: { id: true, fullName: true } },
+            insurer: { select: { id: true, name: true } },
+          },
+        });
+
+        policies.push(createdPolicy);
+
+        await db.activityLog.create({
+          data: {
+            entityType: "Policy",
+            entityId: createdPolicy.id,
+            action: "IMPORT_CREATE",
+            oldValue: null,
+            newValue: safeJson(createdPolicy),
+            performedBy: "scripts/import-policy",
+          },
+        });
+
+        continue;
+      }
+
+      const data = buildUpdateData(match, input, client, insurer);
+      if (!Object.keys(data).length) continue;
+
+      const previousPolicy = { ...match };
+
+      const updatedPolicy = await db.policy.update({
+        where: { id: match.id },
+        data,
+        include: {
+          client: { select: { id: true, fullName: true } },
+          insurer: { select: { id: true, name: true } },
+        },
+      });
+
+      Object.assign(match, {
+        clientId: updatedPolicy.clientId,
+        insurerId: updatedPolicy.insurerId,
+        policyType: updatedPolicy.policyType,
+        status: updatedPolicy.status,
+        startDate: updatedPolicy.startDate,
+        endDate: updatedPolicy.endDate,
+        renewalDate: updatedPolicy.renewalDate,
+        premiumAmount: updatedPolicy.premiumAmount,
+        currency: updatedPolicy.currency,
+        paymentFrequency: updatedPolicy.paymentFrequency,
+        paymentPlan: updatedPolicy.paymentPlan,
+        insuredObject: updatedPolicy.insuredObject,
+        beneficiaryInfo: updatedPolicy.beneficiaryInfo,
+        notes: updatedPolicy.notes,
+        client: updatedPolicy.client,
+        insurer: updatedPolicy.insurer,
+      });
+
+      await db.activityLog.create({
+        data: {
+        entityType: "Policy",
+        entityId: updatedPolicy.id,
+        action: "IMPORT_UPDATE",
+        oldValue: safeJson(previousPolicy),
+        newValue: safeJson(updatedPolicy),
+        performedBy: "scripts/import-policy",
+      },
+      });
+    } catch (error) {
+      console.error(`Fila ${index + 2}: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+  }
+
+  console.log("");
+  console.log("Importacion completada.");
+  console.log(`Se procesaron ${rows.length} filas.`);
+  console.log(`Polizas creadas: ${created}`);
+  console.log(`Polizas actualizadas: ${updated}`);
+  console.log(`Polizas sin cambios: ${skipped}`);
+  if (dryRun) console.log("Modo simulacion activado: no se escribio nada.");
+
+  if (errors.length) process.exitCode = 1;
+
+  await closeDb(db);
+}
+
+main().catch((error) => {
+  console.error("Error al importar polizas.");
+  console.error(error);
+  process.exit(1);
+});
