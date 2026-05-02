@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Building2, FileText, Mail, Phone, ShieldCheck, TrendingUp } from "lucide-react";
+import { ArrowLeft, Building2, FileText, Pencil, ShieldCheck, TrendingUp } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
@@ -11,6 +11,7 @@ import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
+import { DeleteInsurerButton } from "@/components/insurers/delete-insurer-button";
 
 export default async function InsurerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -57,12 +58,21 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
           title={insurer.name}
           description="Detalle de aseguradora, cartera vinculada y métricas comerciales."
           actions={
-            <Button asChild variant="outline" className="rounded-full bg-white/70">
-              <Link href="/insurers">
-                <ArrowLeft className="mr-2 size-4" />
-                Volver
-              </Link>
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button asChild variant="outline" className="rounded-full bg-white/70">
+                <Link href={`/insurers/${id}/edit`}>
+                  <Pencil className="mr-2 size-4" />
+                  Editar
+                </Link>
+              </Button>
+              <DeleteInsurerButton id={id} name={insurer.name} />
+              <Button asChild variant="outline" className="rounded-full bg-white/70">
+                <Link href="/insurers">
+                  <ArrowLeft className="mr-2 size-4" />
+                  Volver
+                </Link>
+              </Button>
+            </div>
           }
         />
 

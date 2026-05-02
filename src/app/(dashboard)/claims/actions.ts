@@ -2,29 +2,39 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
+import { logError } from "@/lib/logger";
 import type { ClaimFormValues } from "@/lib/validations";
-import type { MutationResult } from "@/lib/mutation-utils";
+import {
+  errorResult,
+  revalidatePaths,
+  successResult,
+  type MutationResult,
+} from "@/lib/mutation-utils";
+
+function normalizeClaimInput(values: ClaimFormValues) {
+  return {
+    folio: values.folio.trim(),
+    clientId: values.clientId,
+    policyId: values.policyId,
+    insurerId: values.insurerId,
+    claimType: values.claimType.trim(),
+    description: values.description?.trim() || null,
+    status: values.status,
+    incidentDate: new Date(values.incidentDate),
+    reportedDate: new Date(values.reportedDate),
+    closedDate: values.closedDate ? new Date(values.closedDate) : null,
+    amountClaimed: values.amountClaimed ?? null,
+    amountPaid: values.amountPaid ?? null,
+    notes: values.notes?.trim() || null,
+  };
+}
 
 export async function createClaim(values: ClaimFormValues): Promise<MutationResult> {
   try {
     const db = getDb();
 
     const claim = await db.claim.create({
-      data: {
-        folio: values.folio,
-        clientId: values.clientId,
-        policyId: values.policyId,
-        insurerId: values.insurerId,
-        claimType: values.claimType,
-        description: values.description || null,
-        status: values.status,
-        incidentDate: new Date(values.incidentDate),
-        reportedDate: new Date(values.reportedDate),
-        closedDate: values.closedDate ? new Date(values.closedDate) : null,
-        amountClaimed: values.amountClaimed ? values.amountClaimed : null,
-        amountPaid: values.amountPaid ? values.amountPaid : null,
-        notes: values.notes || null,
-      },
+      data: normalizeClaimInput(values),
     });
 
     await writeActivityLog({
@@ -34,15 +44,19 @@ export async function createClaim(values: ClaimFormValues): Promise<MutationResu
       newValue: { folio: claim.folio },
     });
 
-    return {
-      ok: true,
-      id: claim.id,
-      redirectTo: `/claims/${claim.id}`,
-      message: "Siniestro creado exitosamente.",
-    };
+    revalidatePaths([
+      "/claims",
+      `/claims/${claim.id}`,
+      `/clients/${claim.clientId}`,
+      `/policies/${claim.policyId}`,
+      "/dashboard",
+      "/today",
+    ]);
+
+    return successResult(claim.id, `/claims/${claim.id}`, "Siniestro creado exitosamente.");
   } catch (error) {
-    console.error("Error creating claim:", error);
-    return { ok: false, error: "No se pudo crear el siniestro. Intenta de nuevo." };
+    logError("claims.createClaim", error);
+    return errorResult("No se pudo crear el siniestro. Intenta de nuevo.");
   }
 }
 
@@ -55,26 +69,12 @@ export async function updateClaim(id: string, values: ClaimFormValues): Promise<
     });
 
     if (!existingClaim) {
-      return { ok: false, error: "Siniestro no encontrado." };
+      return errorResult("Siniestro no encontrado.");
     }
 
     const claim = await db.claim.update({
       where: { id },
-      data: {
-        folio: values.folio,
-        clientId: values.clientId,
-        policyId: values.policyId,
-        insurerId: values.insurerId,
-        claimType: values.claimType,
-        description: values.description || null,
-        status: values.status,
-        incidentDate: new Date(values.incidentDate),
-        reportedDate: new Date(values.reportedDate),
-        closedDate: values.closedDate ? new Date(values.closedDate) : null,
-        amountClaimed: values.amountClaimed ? values.amountClaimed : null,
-        amountPaid: values.amountPaid ? values.amountPaid : null,
-        notes: values.notes || null,
-      },
+      data: normalizeClaimInput(values),
     });
 
     await writeActivityLog({
@@ -85,14 +85,18 @@ export async function updateClaim(id: string, values: ClaimFormValues): Promise<
       newValue: { folio: claim.folio },
     });
 
-    return {
-      ok: true,
-      id: claim.id,
-      redirectTo: `/claims/${claim.id}`,
-      message: "Siniestro actualizado exitosamente.",
-    };
+    revalidatePaths([
+      "/claims",
+      `/claims/${claim.id}`,
+      `/clients/${claim.clientId}`,
+      `/policies/${claim.policyId}`,
+      "/dashboard",
+      "/today",
+    ]);
+
+    return successResult(claim.id, `/claims/${claim.id}`, "Siniestro actualizado exitosamente.");
   } catch (error) {
-    console.error("Error updating claim:", error);
-    return { ok: false, error: "No se pudo actualizar el siniestro. Intenta de nuevo." };
+    logError("claims.updateClaim", error, { id });
+    return errorResult("No se pudo actualizar el siniestro. Intenta de nuevo.");
   }
 }

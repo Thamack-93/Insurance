@@ -3,6 +3,7 @@
 import { getDb } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { formatDate, today } from "@/lib/dates";
+import { logError } from "@/lib/logger";
 import { subMonths, subYears } from "date-fns";
 
 export interface ReportData {
@@ -118,7 +119,7 @@ export async function generateFinancialReport(
       data: report,
     };
   } catch (error) {
-    console.error("Error generating financial report:", error);
+    logError("reports.generateFinancialReport", error);
     throw error;
   }
 }
@@ -185,7 +186,7 @@ export async function generatePolicyTypeReport(
       data: report,
     };
   } catch (error) {
-    console.error("Error generating policy type report:", error);
+    logError("reports.generatePolicyTypeReport", error);
     throw error;
   }
 }
@@ -247,7 +248,7 @@ export async function generateClientPerformanceReport(
       data: report,
     };
   } catch (error) {
-    console.error("Error generating client performance report:", error);
+    logError("reports.generateClientPerformanceReport", error);
     throw error;
   }
 }
@@ -305,7 +306,7 @@ export async function generateMonthlyTrendsReport(year: number): Promise<ReportD
       data: monthlyData,
     };
   } catch (error) {
-    console.error("Error generating monthly trends report:", error);
+    logError("reports.generateMonthlyTrendsReport", error);
     throw error;
   }
 }
@@ -367,7 +368,7 @@ export async function generateInsurerPerformanceReport(
       data: report,
     };
   } catch (error) {
-    console.error("Error generating insurer performance report:", error);
+    logError("reports.generateInsurerPerformanceReport", error);
     throw error;
   }
 }
@@ -454,7 +455,7 @@ export async function getAvailableReportPeriods() {
       },
     };
   } catch (error) {
-    console.error("Error getting available report periods:", error);
+    logError("reports.getAvailableReportPeriods", error);
     return {
       available: false,
       message: "Error al obtener períodos disponibles",

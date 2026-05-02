@@ -1,20 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createPayment } from "@/app/(dashboard)/payments/actions";
+import { logError } from "@/lib/logger";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    
-    // Validate required fields
+
     if (!body.receiptId || !body.amount || !body.paidDate || !body.paymentMethod) {
-      return NextResponse.json(
-        { error: "Faltan campos requeridos" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Faltan campos requeridos" }, { status: 400 });
     }
 
-    // Create payment
-    const payment = await createPayment({
+    const result = await createPayment({
       receiptId: body.receiptId,
       amount: body.amount,
       paidDate: body.paidDate,
@@ -23,16 +19,18 @@ export async function POST(request: NextRequest) {
       notes: body.notes,
     });
 
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+
     return NextResponse.json({
       success: true,
-      payment,
+      paymentId: result.id,
+      redirectTo: result.redirectTo,
+      message: result.message,
     });
   } catch (error) {
-    console.error("Quick payment API error:", error);
-    
-    return NextResponse.json(
-      { error: "Error al procesar el pago" },
-      { status: 500 }
-    );
+    logError("api.payments.quick", error);
+    return NextResponse.json({ error: "Error al procesar el pago" }, { status: 500 });
   }
 }

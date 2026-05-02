@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -13,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ControlledSelect } from "@/components/forms/form-primitives";
 import { formatCurrency } from "@/lib/money";
 import { today, formatDate } from "@/lib/dates";
+import type { MutationResult } from "@/lib/mutation-utils";
 
 const paymentSchema = z.object({
   receiptId: z.string().min(1, "El recibo es requerido"),
@@ -34,8 +36,8 @@ type PaymentFormProps = {
     client: { fullName: string };
     policy: { policyNumber: string };
   }>;
-  onSubmit: (data: PaymentFormValues) => Promise<void>;
-  onCancel?: () => void;
+  submitAction: (data: PaymentFormValues) => Promise<MutationResult>;
+  cancelHref?: string;
 };
 
 const paymentMethods = [
@@ -46,13 +48,15 @@ const paymentMethods = [
   { value: "OTHER", label: "Otro" },
 ];
 
-export function PaymentForm({ receipts, onSubmit, onCancel }: PaymentFormProps) {
+export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormProps) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
   const {
     register,
     handleSubmit,
     setValue,
+    setError,
     watch,
     formState: { errors },
   } = useForm<PaymentFormValues>({
@@ -83,12 +87,14 @@ export function PaymentForm({ receipts, onSubmit, onCancel }: PaymentFormProps) 
 
   const onFormSubmit = (data: PaymentFormValues) => {
     startTransition(async () => {
-      try {
-        await onSubmit(data);
-        toast.success("Pago registrado exitosamente");
-      } catch {
-        toast.error("Error al registrar el pago");
+      const result = await submitAction(data);
+      if (!result.ok) {
+        setError("root", { message: result.error });
+        toast.error(result.error);
+        return;
       }
+      toast.success(result.message);
+      router.push(result.redirectTo || "/payments");
     });
   };
 
@@ -102,6 +108,12 @@ export function PaymentForm({ receipts, onSubmit, onCancel }: PaymentFormProps) 
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit(onFormSubmit)} className="space-y-6">
+          {errors.root?.message && (
+            <div className="rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+              {errors.root.message}
+            </div>
+          )}
+
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="receiptId">Recibo</Label>
@@ -210,8 +222,8 @@ export function PaymentForm({ receipts, onSubmit, onCancel }: PaymentFormProps) 
             <Button type="submit" disabled={isPending}>
               {isPending ? "Registrando..." : "Registrar pago"}
             </Button>
-            {onCancel && (
-              <Button type="button" variant="outline" onClick={onCancel}>
+            {cancelHref && (
+              <Button type="button" variant="outline" onClick={() => router.push(cancelHref)}>
                 Cancelar
               </Button>
             )}

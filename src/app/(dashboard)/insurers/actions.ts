@@ -2,23 +2,33 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
+import { logError } from "@/lib/logger";
 import type { InsurerFormValues } from "@/lib/validations";
-import type { MutationResult } from "@/lib/mutation-utils";
+import {
+  errorResult,
+  revalidatePaths,
+  successResult,
+  type MutationResult,
+} from "@/lib/mutation-utils";
+
+function normalizeInsurerInput(values: InsurerFormValues) {
+  return {
+    name: values.name.trim(),
+    portalUrl: values.portalUrl?.trim() || null,
+    contactName: values.contactName?.trim() || null,
+    contactEmail: values.contactEmail?.trim() || null,
+    contactPhone: values.contactPhone?.trim() || null,
+    notes: values.notes?.trim() || null,
+    status: values.status,
+  };
+}
 
 export async function createInsurer(values: InsurerFormValues): Promise<MutationResult> {
   try {
     const db = getDb();
 
     const insurer = await db.insurer.create({
-      data: {
-        name: values.name,
-        portalUrl: values.portalUrl || null,
-        contactName: values.contactName || null,
-        contactEmail: values.contactEmail || null,
-        contactPhone: values.contactPhone || null,
-        notes: values.notes || null,
-        status: values.status,
-      },
+      data: normalizeInsurerInput(values),
     });
 
     await writeActivityLog({
@@ -28,15 +38,12 @@ export async function createInsurer(values: InsurerFormValues): Promise<Mutation
       newValue: { name: insurer.name },
     });
 
-    return {
-      ok: true,
-      id: insurer.id,
-      redirectTo: `/insurers/${insurer.id}`,
-      message: "Aseguradora creada exitosamente.",
-    };
+    revalidatePaths(["/insurers", `/insurers/${insurer.id}`, "/dashboard"]);
+
+    return successResult(insurer.id, `/insurers/${insurer.id}`, "Aseguradora creada exitosamente.");
   } catch (error) {
-    console.error("Error creating insurer:", error);
-    return { ok: false, error: "No se pudo crear la aseguradora. Intenta de nuevo." };
+    logError("insurers.createInsurer", error);
+    return errorResult("No se pudo crear la aseguradora. Intenta de nuevo.");
   }
 }
 
@@ -49,20 +56,12 @@ export async function updateInsurer(id: string, values: InsurerFormValues): Prom
     });
 
     if (!existingInsurer) {
-      return { ok: false, error: "Aseguradora no encontrada." };
+      return errorResult("Aseguradora no encontrada.");
     }
 
     const insurer = await db.insurer.update({
       where: { id },
-      data: {
-        name: values.name,
-        portalUrl: values.portalUrl || null,
-        contactName: values.contactName || null,
-        contactEmail: values.contactEmail || null,
-        contactPhone: values.contactPhone || null,
-        notes: values.notes || null,
-        status: values.status,
-      },
+      data: normalizeInsurerInput(values),
     });
 
     await writeActivityLog({
@@ -73,14 +72,66 @@ export async function updateInsurer(id: string, values: InsurerFormValues): Prom
       newValue: { name: insurer.name },
     });
 
-    return {
-      ok: true,
-      id: insurer.id,
-      redirectTo: `/insurers/${insurer.id}`,
-      message: "Aseguradora actualizada exitosamente.",
-    };
+    revalidatePaths(["/insurers", `/insurers/${insurer.id}`, "/dashboard"]);
+
+    return successResult(insurer.id, `/insurers/${insurer.id}`, "Aseguradora actualizada exitosamente.");
   } catch (error) {
-    console.error("Error updating insurer:", error);
-    return { ok: false, error: "No se pudo actualizar la aseguradora. Intenta de nuevo." };
+    logError("insurers.updateInsurer", error, { id });
+    return errorResult("No se pudo actualizar la aseguradora. Intenta de nuevo.");
+  }
+}
+
+export async function deleteInsurer(id: string): Promise<MutationResult> {
+  try {
+    const db = getDb();
+
+    const existingInsurer = await db.insurer.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: {
+            policies: true,
+            receipts: true,
+            commissions: true,
+            claims: true,
+            quotes: true,
+          },
+        },
+      },
+    });
+
+    if (!existingInsurer) {
+      return errorResult("La aseguradora ya no existe.");
+    }
+
+    const counts = existingInsurer._count;
+    const blockers: string[] = [];
+    if (counts.policies > 0) blockers.push(`${counts.policies} póliza${counts.policies !== 1 ? "s" : ""}`);
+    if (counts.receipts > 0) blockers.push(`${counts.receipts} recibo${counts.receipts !== 1 ? "s" : ""}`);
+    if (counts.commissions > 0) blockers.push(`${counts.commissions} comisión${counts.commissions !== 1 ? "es" : ""}`);
+    if (counts.claims > 0) blockers.push(`${counts.claims} siniestro${counts.claims !== 1 ? "s" : ""}`);
+    if (counts.quotes > 0) blockers.push(`${counts.quotes} cotización${counts.quotes !== 1 ? "es" : ""}`);
+
+    if (blockers.length > 0) {
+      return errorResult(
+        `No se puede eliminar: la aseguradora tiene ${blockers.join(", ")} asociado${blockers.length > 1 ? "s" : ""}. Archívala o reasigna primero.`,
+      );
+    }
+
+    await db.insurer.delete({ where: { id } });
+
+    await writeActivityLog({
+      action: "DELETE_INSURER",
+      entityType: "Insurer",
+      entityId: id,
+      oldValue: { name: existingInsurer.name },
+    });
+
+    revalidatePaths(["/insurers", "/dashboard"]);
+
+    return successResult(id, "/insurers", "Aseguradora eliminada.");
+  } catch (error) {
+    logError("insurers.deleteInsurer", error, { id });
+    return errorResult("No se pudo eliminar la aseguradora. Intenta de nuevo.");
   }
 }

@@ -1,23 +1,45 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { getDb } from "@/lib/db";
-import { formatCurrency } from "@/lib/money";
 import { writeActivityLog } from "@/lib/activity-log";
 import { today } from "@/lib/dates";
+import { logError } from "@/lib/logger";
+import {
+  errorResult,
+  revalidatePaths,
+  successResult,
+  type MutationResult,
+} from "@/lib/mutation-utils";
 
-export async function createPayment(data: {
+export type CreatePaymentInput = {
   receiptId: string;
   amount: number;
   paidDate: string;
   paymentMethod: string;
   reference?: string;
   notes?: string;
-}) {
+};
+
+export async function createPayment(data: CreatePaymentInput): Promise<MutationResult> {
   const db = getDb();
-  
+
+  if (!data.receiptId) {
+    return errorResult("Selecciona un recibo para registrar el pago.");
+  }
+
+  if (!data.amount || data.amount <= 0) {
+    return errorResult("El monto del pago debe ser mayor a cero.");
+  }
+
+  if (!data.paidDate) {
+    return errorResult("Indica la fecha del pago.");
+  }
+
+  if (!data.paymentMethod) {
+    return errorResult("Selecciona un método de pago.");
+  }
+
   try {
-    // Get receipt details
     const receipt = await db.receipt.findUnique({
       where: { id: data.receiptId },
       include: {
@@ -28,14 +50,13 @@ export async function createPayment(data: {
     });
 
     if (!receipt) {
-      throw new Error("Recibo no encontrado");
+      return errorResult("El recibo no existe o fue eliminado.");
     }
 
     if (receipt.status === "PAID") {
-      throw new Error("Este recibo ya está pagado");
+      return errorResult("Este recibo ya está pagado.");
     }
 
-    // Create payment record
     const payment = await db.payment.create({
       data: {
         receiptId: data.receiptId,
@@ -50,7 +71,6 @@ export async function createPayment(data: {
       },
     });
 
-    // Update receipt status to PAID
     await db.receipt.update({
       where: { id: data.receiptId },
       data: {
@@ -60,7 +80,6 @@ export async function createPayment(data: {
       },
     });
 
-    // Log activity
     await writeActivityLog({
       action: "CREATE_PAYMENT",
       entityType: "PAYMENT",
@@ -78,11 +97,12 @@ export async function createPayment(data: {
       }),
     });
 
-    // Create task for policy renewal if applicable
     if (receipt.policy.endDate) {
       const renewalDate = new Date(receipt.policy.endDate);
       const todayDate = new Date(today());
-      const daysUntilRenewal = Math.ceil((renewalDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24));
+      const daysUntilRenewal = Math.ceil(
+        (renewalDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24),
+      );
 
       if (daysUntilRenewal <= 30 && daysUntilRenewal > 0) {
         await db.task.create({
@@ -102,20 +122,24 @@ export async function createPayment(data: {
       }
     }
 
-    revalidatePath("/payments");
-    revalidatePath("/receipts");
-    revalidatePath("/dashboard");
+    revalidatePaths([
+      "/payments",
+      "/receipts",
+      `/receipts/${receipt.id}`,
+      "/dashboard",
+      "/today",
+    ]);
 
-    return payment;
+    return successResult(payment.id, `/receipts/${receipt.id}`, "Pago registrado exitosamente.");
   } catch (error) {
-    console.error("Error creating payment:", error);
-    throw error;
+    logError("payments.createPayment", error, { receiptId: data.receiptId });
+    return errorResult("No se pudo registrar el pago. Intenta de nuevo.");
   }
 }
 
 export async function getPendingReceipts() {
   const db = getDb();
-  
+
   try {
     const receipts = await db.receipt.findMany({
       where: { status: "PENDING" },
@@ -144,25 +168,26 @@ export async function getPendingReceipts() {
       orderBy: { dueDate: "asc" },
     });
 
-    return receipts.map(receipt => ({
+    return receipts.map((receipt) => ({
       ...receipt,
       amount: Number(receipt.amount),
     }));
   } catch (error) {
-    console.error("Error fetching pending receipts:", error);
+    logError("payments.getPendingReceipts", error);
     return [];
   }
 }
 
 export async function getPaymentHistory(limit?: number) {
   const db = getDb();
-  
+
   try {
     const payments = await db.payment.findMany({
       take: limit || 50,
       include: {
         receipt: {
           select: {
+            id: true,
             receiptNumber: true,
             dueDate: true,
           },
@@ -185,24 +210,23 @@ export async function getPaymentHistory(limit?: number) {
       orderBy: { paidDate: "desc" },
     });
 
-    return payments.map(payment => ({
+    return payments.map((payment) => ({
       ...payment,
       amount: Number(payment.amount),
     }));
   } catch (error) {
-    console.error("Error fetching payment history:", error);
+    logError("payments.getPaymentHistory", error);
     return [];
   }
 }
 
 export async function getPaymentStats() {
   const db = getDb();
-  
+
   try {
-    // Total payments this month
     const currentMonth = new Date();
     currentMonth.setDate(1);
-    
+
     const totalPaymentsThisMonth = await db.payment.aggregate({
       where: {
         paidDate: {
@@ -217,12 +241,10 @@ export async function getPaymentStats() {
       },
     });
 
-    // Pending receipts count
     const pendingCount = await db.receipt.count({
       where: { status: "PENDING" },
     });
 
-    // Overdue receipts count
     const overdueCount = await db.receipt.count({
       where: {
         status: "PENDING",
@@ -239,7 +261,7 @@ export async function getPaymentStats() {
       overdueReceiptsCount: overdueCount,
     };
   } catch (error) {
-    console.error("Error fetching payment stats:", error);
+    logError("payments.getPaymentStats", error);
     return {
       totalPaymentsThisMonth: 0,
       paymentsCountThisMonth: 0,

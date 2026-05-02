@@ -2,25 +2,35 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
+import { logError } from "@/lib/logger";
 import type { QuoteFormValues } from "@/lib/validations";
-import type { MutationResult } from "@/lib/mutation-utils";
+import {
+  errorResult,
+  revalidatePaths,
+  successResult,
+  type MutationResult,
+} from "@/lib/mutation-utils";
+
+function normalizeQuoteInput(values: QuoteFormValues) {
+  return {
+    clientId: values.clientId,
+    insurerId: values.insurerId || null,
+    policyType: values.policyType,
+    status: values.status,
+    requestedDate: new Date(values.requestedDate),
+    sentDate: values.sentDate ? new Date(values.sentDate) : null,
+    validUntil: values.validUntil ? new Date(values.validUntil) : null,
+    quotedAmount: values.quotedAmount ?? null,
+    notes: values.notes?.trim() || null,
+  };
+}
 
 export async function createQuote(values: QuoteFormValues): Promise<MutationResult> {
   try {
     const db = getDb();
 
     const quote = await db.quote.create({
-      data: {
-        clientId: values.clientId,
-        insurerId: values.insurerId || null,
-        policyType: values.policyType,
-        status: values.status,
-        requestedDate: new Date(values.requestedDate),
-        sentDate: values.sentDate ? new Date(values.sentDate) : null,
-        validUntil: values.validUntil ? new Date(values.validUntil) : null,
-        quotedAmount: values.quotedAmount ? values.quotedAmount : null,
-        notes: values.notes || null,
-      },
+      data: normalizeQuoteInput(values),
     });
 
     await writeActivityLog({
@@ -30,15 +40,18 @@ export async function createQuote(values: QuoteFormValues): Promise<MutationResu
       newValue: { id: quote.id.slice(0, 8) },
     });
 
-    return {
-      ok: true,
-      id: quote.id,
-      redirectTo: `/quotes/${quote.id}`,
-      message: "Cotización creada exitosamente.",
-    };
+    revalidatePaths([
+      "/quotes",
+      `/quotes/${quote.id}`,
+      `/clients/${quote.clientId}`,
+      "/dashboard",
+      "/today",
+    ]);
+
+    return successResult(quote.id, `/quotes/${quote.id}`, "Cotización creada exitosamente.");
   } catch (error) {
-    console.error("Error creating quote:", error);
-    return { ok: false, error: "No se pudo crear la cotización. Intenta de nuevo." };
+    logError("quotes.createQuote", error);
+    return errorResult("No se pudo crear la cotización. Intenta de nuevo.");
   }
 }
 
@@ -51,22 +64,12 @@ export async function updateQuote(id: string, values: QuoteFormValues): Promise<
     });
 
     if (!existingQuote) {
-      return { ok: false, error: "Cotización no encontrada." };
+      return errorResult("Cotización no encontrada.");
     }
 
     const quote = await db.quote.update({
       where: { id },
-      data: {
-        clientId: values.clientId,
-        insurerId: values.insurerId || null,
-        policyType: values.policyType,
-        status: values.status,
-        requestedDate: new Date(values.requestedDate),
-        sentDate: values.sentDate ? new Date(values.sentDate) : null,
-        validUntil: values.validUntil ? new Date(values.validUntil) : null,
-        quotedAmount: values.quotedAmount ? values.quotedAmount : null,
-        notes: values.notes || null,
-      },
+      data: normalizeQuoteInput(values),
     });
 
     await writeActivityLog({
@@ -77,14 +80,17 @@ export async function updateQuote(id: string, values: QuoteFormValues): Promise<
       newValue: { id: quote.id.slice(0, 8) },
     });
 
-    return {
-      ok: true,
-      id: quote.id,
-      redirectTo: `/quotes/${quote.id}`,
-      message: "Cotización actualizada exitosamente.",
-    };
+    revalidatePaths([
+      "/quotes",
+      `/quotes/${quote.id}`,
+      `/clients/${quote.clientId}`,
+      "/dashboard",
+      "/today",
+    ]);
+
+    return successResult(quote.id, `/quotes/${quote.id}`, "Cotización actualizada exitosamente.");
   } catch (error) {
-    console.error("Error updating quote:", error);
-    return { ok: false, error: "No se pudo actualizar la cotización. Intenta de nuevo." };
+    logError("quotes.updateQuote", error, { id });
+    return errorResult("No se pudo actualizar la cotización. Intenta de nuevo.");
   }
 }
