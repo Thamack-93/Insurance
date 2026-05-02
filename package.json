@@ -17,7 +17,10 @@
     "list:tasks": "tsx scripts/list-open-tasks.ts",
     "export:due-payments": "tsx scripts/export-due-payments.ts",
     "export:commissions": "tsx scripts/export-commissions.ts",
-    "import:pdfs": "tsx scripts/import-pdfs.ts"
+    "import:pdfs": "tsx scripts/import-pdfs.ts",
+    "test": "playwright test",
+    "test:e2e": "playwright test tests/e2e",
+    "test:api": "playwright test tests/api"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
@@ -57,6 +60,7 @@
     "zod": "^4.4.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
