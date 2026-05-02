@@ -24,7 +24,7 @@ import {
   Clock,
 } from "lucide-react";
 import { CommandPalette } from "./command-palette";
-import { getRecentItems, type RecentItem } from "@/lib/recently-viewed";
+import { getRecentItems, RECENTLY_VIEWED_EVENT, type RecentItem } from "@/lib/recently-viewed";
 
 export function CommandPaletteWrapper() {
   const [open, setOpen] = useState(false);
@@ -43,8 +43,24 @@ export function CommandPaletteWrapper() {
         setOpen((open) => !open);
       }
     };
+    const openHandler = () => setOpen(true);
     document.addEventListener("keydown", down);
-    return () => document.removeEventListener("keydown", down);
+    window.addEventListener("pg:open-command-palette", openHandler);
+    return () => {
+      document.removeEventListener("keydown", down);
+      window.removeEventListener("pg:open-command-palette", openHandler);
+    };
+  }, []);
+
+  useEffect(() => {
+    setRecentItems(getRecentItems());
+    const handler = () => setRecentItems(getRecentItems());
+    window.addEventListener("storage", handler);
+    window.addEventListener(RECENTLY_VIEWED_EVENT, handler);
+    return () => {
+      window.removeEventListener("storage", handler);
+      window.removeEventListener(RECENTLY_VIEWED_EVENT, handler);
+    };
   }, []);
 
   useEffect(() => {

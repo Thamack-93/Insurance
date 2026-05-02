@@ -8,6 +8,7 @@ export type RecentItem = {
 
 const STORAGE_KEY = "pg_recently_viewed";
 const MAX_ITEMS = 8;
+export const RECENTLY_VIEWED_EVENT = "pg:recently-viewed-updated";
 
 export function getRecentItems(): RecentItem[] {
   if (typeof window === "undefined") return [];
@@ -28,5 +29,6 @@ export function recordRecentItem(item: Omit<RecentItem, "visitedAt">): void {
       ...existing,
     ].slice(0, MAX_ITEMS);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    window.dispatchEvent(new CustomEvent(RECENTLY_VIEWED_EVENT));
   } catch {}
 }

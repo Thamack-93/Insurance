@@ -46,9 +46,14 @@ export function AppTopbar() {
 
         <div className="mx-auto flex w-full max-w-2xl items-center gap-2 rounded-full border bg-background/90 px-3 py-1.5 shadow-sm">
           <SearchInput />
-          <div className="hidden items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs text-muted-foreground sm:flex shrink-0">
+          <button
+            type="button"
+            aria-label="Abrir paleta de comandos"
+            onClick={() => window.dispatchEvent(new CustomEvent("pg:open-command-palette"))}
+            className="hidden items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted/80 sm:flex shrink-0 cursor-pointer"
+          >
             <Command className="size-3" /> K
-          </div>
+          </button>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
