@@ -24,16 +24,19 @@ import { PageHeader } from "@/components/layout/page-header";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getDashboardData } from "@/lib/dashboard-queries";
+import { OnboardingChecklist } from "@/components/dashboard/onboarding-checklist";
+import { getDashboardData, getOnboardingStatus } from "@/lib/dashboard-queries";
 import { formatCurrency } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 export default async function DashboardPage() {
-  const data = await getDashboardData();
+  const [data, onboarding] = await Promise.all([getDashboardData(), getOnboardingStatus()]);
   const topRisks = data.sections.topRisks.slice(0, 3);
+  const showOnboarding = !onboarding.complete && !onboarding.dismissed;
 
   return (
     <div className="space-y-8">
+      {showOnboarding ? <OnboardingChecklist status={onboarding} /> : null}
       <PageHeader
         eyebrow="Cockpit operativo"
         title="Tu cartera, en modo control."

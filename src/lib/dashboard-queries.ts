@@ -180,6 +180,34 @@ export async function getDashboardData() {
   };
 }
 
+export type OnboardingStatus = {
+  insurers: number;
+  clients: number;
+  policies: number;
+  receipts: number;
+  dismissed: boolean;
+  complete: boolean;
+};
+
+export async function getOnboardingStatus(): Promise<OnboardingStatus> {
+  const db = getDb();
+  const [insurers, clients, policies, receipts, dismissedRow] = await Promise.all([
+    db.insurer.count(),
+    db.client.count(),
+    db.policy.count(),
+    db.receipt.count(),
+    db.systemSetting.findUnique({ where: { key: "onboardingDismissed" } }),
+  ]);
+  return {
+    insurers,
+    clients,
+    policies,
+    receipts,
+    dismissed: dismissedRow?.value === "true",
+    complete: insurers > 0 && clients > 0 && policies > 0 && receipts > 0,
+  };
+}
+
 export async function getTodayData() {
   const db = getDb();
   const now = today();
