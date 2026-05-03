@@ -28,7 +28,7 @@ export function DaysBadge({ days, className }: DaysBadgeProps) {
         className,
       )}
     >
-      {days}
+      {labelFor(days)}
     </span>
   );
 }

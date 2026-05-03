@@ -155,6 +155,7 @@ export function ControlledSelect({
   placeholder,
   className,
   id,
+  autoFocus,
   "aria-invalid": ariaInvalid,
   "aria-describedby": ariaDescribedBy,
   "aria-required": ariaRequired,
@@ -166,6 +167,7 @@ export function ControlledSelect({
   placeholder?: string;
   className?: string;
   id?: string;
+  autoFocus?: boolean;
   "aria-invalid"?: boolean;
   "aria-describedby"?: string;
   "aria-required"?: boolean;
@@ -181,6 +183,7 @@ export function ControlledSelect({
     <Select value={value} onValueChange={(next) => onValueChange(next ?? "")}>
       <SelectTrigger
         id={triggerId}
+        autoFocus={autoFocus}
         aria-invalid={invalid || undefined}
         aria-describedby={describedBy}
         aria-required={required || undefined}

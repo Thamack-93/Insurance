@@ -121,6 +121,7 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
                 onValueChange={handleReceiptChange}
                 options={receiptOptions}
                 placeholder="Seleccionar recibo"
+                autoFocus
               />
             </FormField>
 
@@ -140,7 +141,6 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
                 type="number"
                 step="0.01"
                 placeholder="0.00"
-                autoFocus
                 {...register("amount", { valueAsNumber: true })}
                 disabled={!!selectedReceiptData}
               />
