@@ -9,9 +9,13 @@ import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ControlledSelect } from "@/components/forms/form-primitives";
+import {
+  ControlledSelect,
+  FormErrorBanner,
+  FormField,
+  FormGrid,
+} from "@/components/forms/form-primitives";
 import { formatCurrency } from "@/lib/money";
 import { today, formatDate } from "@/lib/dates";
 import type { MutationResult } from "@/lib/mutation-utils";
@@ -70,16 +74,16 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
 
   const selectedReceiptId = watch("receiptId");
   const selectedPaymentMethod = watch("paymentMethod");
-  const selectedReceiptData = receipts.find(r => r.id === selectedReceiptId);
+  const selectedReceiptData = receipts.find((r) => r.id === selectedReceiptId);
 
-  const receiptOptions = receipts.map(r => ({
+  const receiptOptions = receipts.map((r) => ({
     value: r.id,
     label: `${r.receiptNumber} – ${r.client.fullName} – ${formatCurrency(r.amount)}`,
   }));
 
   const handleReceiptChange = (receiptId: string) => {
     setValue("receiptId", receiptId);
-    const receipt = receipts.find(r => r.id === receiptId);
+    const receipt = receipts.find((r) => r.id === receiptId);
     if (receipt) {
       setValue("amount", receipt.amount);
     }
@@ -108,91 +112,63 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit(onFormSubmit)} className="space-y-6">
-          {errors.root?.message && (
-            <div className="rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-              {errors.root.message}
-            </div>
-          )}
+          <FormErrorBanner message={errors.root?.message} />
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="receiptId">Recibo</Label>
+          <FormGrid>
+            <FormField label="Recibo" required error={errors.receiptId?.message}>
               <ControlledSelect
                 value={selectedReceiptId || ""}
                 onValueChange={handleReceiptChange}
                 options={receiptOptions}
                 placeholder="Seleccionar recibo"
               />
-              {errors.receiptId && (
-                <p className="text-sm text-destructive" role="alert">{errors.receiptId.message}</p>
-              )}
-            </div>
+            </FormField>
 
-            <div className="space-y-2">
-              <Label htmlFor="amount">Monto</Label>
+            <FormField
+              label="Monto"
+              htmlFor="amount"
+              required
+              error={errors.amount?.message}
+              hint={
+                selectedReceiptData
+                  ? `Monto original: ${formatCurrency(selectedReceiptData.amount)}`
+                  : undefined
+              }
+            >
               <Input
                 id="amount"
                 type="number"
                 step="0.01"
                 placeholder="0.00"
+                autoFocus
                 {...register("amount", { valueAsNumber: true })}
                 disabled={!!selectedReceiptData}
               />
-              {selectedReceiptData && (
-                <p className="text-sm text-muted-foreground">
-                  Monto original: {formatCurrency(selectedReceiptData.amount)}
-                </p>
-              )}
-              {errors.amount && (
-                <p className="text-sm text-destructive" role="alert">{errors.amount.message}</p>
-              )}
-            </div>
-          </div>
+            </FormField>
+          </FormGrid>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="paidDate">Fecha de pago</Label>
-              <Input
-                id="paidDate"
-                type="date"
-                {...register("paidDate")}
-              />
-              {errors.paidDate && (
-                <p className="text-sm text-destructive" role="alert">{errors.paidDate.message}</p>
-              )}
-            </div>
+          <FormGrid>
+            <FormField label="Fecha de pago" htmlFor="paidDate" required error={errors.paidDate?.message}>
+              <Input id="paidDate" type="date" {...register("paidDate")} />
+            </FormField>
 
-            <div className="space-y-2">
-              <Label htmlFor="paymentMethod">Método de pago</Label>
+            <FormField label="Método de pago" required error={errors.paymentMethod?.message}>
               <ControlledSelect
                 value={selectedPaymentMethod || ""}
                 onValueChange={(value) => setValue("paymentMethod", value ?? "")}
                 options={paymentMethods}
                 placeholder="Seleccionar método"
               />
-              {errors.paymentMethod && (
-                <p className="text-sm text-destructive" role="alert">{errors.paymentMethod.message}</p>
-              )}
-            </div>
-          </div>
+            </FormField>
+          </FormGrid>
 
-          <div className="space-y-2">
-            <Label htmlFor="reference">Referencia (opcional)</Label>
-            <Input
-              id="reference"
-              placeholder="Número de referencia, folio, etc."
-              {...register("reference")}
-            />
-          </div>
+          <FormField label="Referencia (opcional)" htmlFor="reference" error={errors.reference?.message}>
+            <Input id="reference" placeholder="Número de referencia, folio, etc." {...register("reference")} />
+          </FormField>
 
-          <div className="space-y-2">
-            <Label htmlFor="notes">Notas (opcional)</Label>
-            <Textarea
-              id="notes"
-              placeholder="Notas adicionales sobre el pago"
-              {...register("notes")}
-            />
-          </div>
+          <FormField label="Notas (opcional)" htmlFor="notes" error={errors.notes?.message}>
+            <Textarea id="notes" placeholder="Notas adicionales sobre el pago" {...register("notes")} />
+          </FormField>
 
           {selectedReceiptData && (
             <div className="rounded-lg bg-stone-50 p-4">

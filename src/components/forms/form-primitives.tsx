@@ -1,7 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { Children, cloneElement, isValidElement, useId, type ReactNode } from "react";
+import {
+  Children,
+  cloneElement,
+  createContext,
+  isValidElement,
+  useContext,
+  useId,
+  type ReactNode,
+} from "react";
 import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -23,6 +31,19 @@ export function FormGrid({
   className?: string;
 }) {
   return <div className={cn("grid gap-4 md:grid-cols-2", className)}>{children}</div>;
+}
+
+type FormFieldContextValue = {
+  fieldId: string;
+  describedBy?: string;
+  hasError: boolean;
+  required: boolean;
+};
+
+const FormFieldContext = createContext<FormFieldContextValue | null>(null);
+
+export function useFormField() {
+  return useContext(FormFieldContext);
 }
 
 export function FormField({
@@ -47,41 +68,47 @@ export function FormField({
   const errorId = error ? `${fieldId}-error` : undefined;
   const hintId = hint ? `${fieldId}-hint` : undefined;
   const describedBy = errorId ?? hintId;
+  const hasError = Boolean(error);
+  const isRequired = Boolean(required);
 
-  // Clone the first valid child element to inject id + aria-* on the actual control.
+  // Clone the first valid child element to inject id + aria-* on plain controls
+  // (e.g. <Input>, <Textarea>). For controls wrapped in <Controller>, the inner
+  // control reads the same data via useFormField() context below.
   const enhancedChildren = Children.map(children, (child, index) => {
     if (!isValidElement(child) || index !== 0) return child;
     const childProps = (child.props ?? {}) as Record<string, unknown>;
     return cloneElement(child as React.ReactElement<Record<string, unknown>>, {
       id: childProps.id ?? fieldId,
-      "aria-invalid": error ? true : (childProps["aria-invalid"] as boolean | undefined),
+      "aria-invalid": hasError ? true : (childProps["aria-invalid"] as boolean | undefined),
       "aria-describedby": describedBy ?? (childProps["aria-describedby"] as string | undefined),
-      "aria-required": required || (childProps["aria-required"] as boolean | undefined),
+      "aria-required": isRequired || (childProps["aria-required"] as boolean | undefined),
     });
   });
 
   return (
-    <div className={cn("space-y-2", className)}>
-      <Label htmlFor={fieldId}>
-        {label}
-        {required ? (
-          <span aria-hidden className="ml-1 text-destructive">
-            *
-          </span>
+    <FormFieldContext.Provider value={{ fieldId, describedBy, hasError, required: isRequired }}>
+      <div className={cn("space-y-2", className)}>
+        <Label htmlFor={fieldId}>
+          {label}
+          {required ? (
+            <span aria-hidden className="ml-1 text-destructive">
+              *
+            </span>
+          ) : null}
+        </Label>
+        {enhancedChildren}
+        {error ? (
+          <p id={errorId} role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
         ) : null}
-      </Label>
-      {enhancedChildren}
-      {error ? (
-        <p id={errorId} role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-      {!error && hint ? (
-        <p id={hintId} className="text-xs text-muted-foreground">
-          {hint}
-        </p>
-      ) : null}
-    </div>
+        {!error && hint ? (
+          <p id={hintId} className="text-xs text-muted-foreground">
+            {hint}
+          </p>
+        ) : null}
+      </div>
+    </FormFieldContext.Provider>
   );
 }
 
@@ -127,17 +154,39 @@ export function ControlledSelect({
   options,
   placeholder,
   className,
+  id,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
+  "aria-required": ariaRequired,
+  "aria-label": ariaLabel,
 }: {
   value: string;
   onValueChange: (value: string) => void;
   options: SelectOption[];
   placeholder?: string;
   className?: string;
+  id?: string;
+  "aria-invalid"?: boolean;
+  "aria-describedby"?: string;
+  "aria-required"?: boolean;
+  "aria-label"?: string;
 }) {
+  const field = useFormField();
+  const triggerId = id ?? field?.fieldId;
+  const invalid = ariaInvalid ?? field?.hasError ?? false;
+  const describedBy = ariaDescribedBy ?? field?.describedBy;
+  const required = ariaRequired ?? field?.required ?? false;
   const label = options.find((o) => o.value === value)?.label ?? "";
   return (
     <Select value={value} onValueChange={(next) => onValueChange(next ?? "")}>
-      <SelectTrigger className={cn("h-10 w-full rounded-xl bg-white", className)}>
+      <SelectTrigger
+        id={triggerId}
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
+        aria-required={required || undefined}
+        aria-label={ariaLabel}
+        className={cn("h-10 w-full rounded-xl bg-white", className)}
+      >
         <SelectValue placeholder={placeholder ?? "Selecciona una opción"}>
           {label || undefined}
         </SelectValue>
