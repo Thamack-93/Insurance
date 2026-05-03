@@ -6,6 +6,7 @@ import {
   startOfDay,
 } from "date-fns";
 import { es } from "date-fns/locale";
+import { resolveDateFnsPattern } from "@/lib/settings-runtime";
 
 export type UrgencyLevel = "overdue" | "urgent" | "soon" | "upcoming" | "future";
 
@@ -37,7 +38,8 @@ export function getUrgencyLevel(date: Date | string): UrgencyLevel {
   return "future";
 }
 
-export function formatDate(date: Date | string, pattern = "d MMM yyyy") {
-  return format(new Date(date), pattern, { locale: es });
+export function formatDate(date: Date | string, pattern?: string) {
+  const resolved = pattern ?? resolveDateFnsPattern();
+  return format(new Date(date), resolved, { locale: es });
 }
 

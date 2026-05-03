@@ -4,10 +4,16 @@ import { AppTopbar } from "@/components/layout/app-topbar";
 import { SearchProvider } from "@/components/search/search-provider";
 import { CommandPaletteWrapper } from "@/components/command/command-palette-wrapper";
 import { ShortcutsHelp } from "@/components/shortcuts/shortcuts-help";
+import { getSettings } from "@/lib/settings";
+import { RuntimeSettingsHydrator } from "@/components/settings/runtime-settings-hydrator";
 
-export default function DashboardLayout({ children }: { children: ReactNode }) {
+export default async function DashboardLayout({ children }: { children: ReactNode }) {
+  // Load settings once per request: hydrates the server runtime cache and
+  // is forwarded to the client so format helpers stay consistent on both sides.
+  const settings = await getSettings();
   return (
     <SearchProvider>
+      <RuntimeSettingsHydrator settings={settings} />
       <div className="min-h-screen">
         <div className="flex min-h-screen">
           <AppSidebar />

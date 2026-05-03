@@ -2,8 +2,10 @@
 
 import { getDb } from "@/lib/db";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { logError } from "@/lib/logger";
+import { setRuntimeSettings, THEME_COOKIE } from "@/lib/settings-runtime";
 
 export type Settings = {
   firmName: string;
@@ -51,7 +53,7 @@ export async function getSettings(): Promise<Settings> {
     }, {});
     
     // Merge with defaults
-    return {
+    const merged: Settings = {
       firmName: settingsMap.firmName ?? defaultSettings.firmName,
       firmEmail: settingsMap.firmEmail ?? defaultSettings.firmEmail,
       firmPhone: settingsMap.firmPhone ?? defaultSettings.firmPhone,
@@ -66,9 +68,12 @@ export async function getSettings(): Promise<Settings> {
       backupFrequency: settingsMap.backupFrequency ?? defaultSettings.backupFrequency,
       retentionDays: parseInt(settingsMap.retentionDays ?? String(defaultSettings.retentionDays)),
     };
+    setRuntimeSettings(merged);
+    return merged;
   } catch (error) {
     // If table doesn't exist yet, return defaults so the UI keeps working.
     logError("settings.getSettings", error);
+    setRuntimeSettings(defaultSettings);
     return defaultSettings;
   }
 }
@@ -89,7 +94,18 @@ export async function updateSettings(settings: Partial<Settings>): Promise<Mutat
       }),
     );
 
-    revalidatePath("/settings");
+    setRuntimeSettings(settings);
+
+    if (typeof settings.theme === "string") {
+      const cookieStore = await cookies();
+      cookieStore.set(THEME_COOKIE, settings.theme, {
+        path: "/",
+        maxAge: 60 * 60 * 24 * 365,
+        sameSite: "lax",
+      });
+    }
+
+    revalidatePath("/", "layout");
     return successResult("", "/settings", "Configuración guardada.");
   } catch (error) {
     logError("settings.updateSettings", error);

@@ -1,3 +1,5 @@
+import { getDefaultCurrency } from "@/lib/settings-runtime";
+
 export const DEFAULT_CURRENCY = "MXN";
 
 export function toNumber(value: unknown) {
@@ -9,11 +11,11 @@ export function toNumber(value: unknown) {
   return 0;
 }
 
-export function formatCurrency(amount: unknown, currency = DEFAULT_CURRENCY) {
+export function formatCurrency(amount: unknown, currency?: string) {
+  const resolvedCurrency = currency ?? getDefaultCurrency() ?? DEFAULT_CURRENCY;
   return new Intl.NumberFormat("es-MX", {
     style: "currency",
-    currency,
+    currency: resolvedCurrency,
     maximumFractionDigits: 0,
   }).format(toNumber(amount));
 }
-
