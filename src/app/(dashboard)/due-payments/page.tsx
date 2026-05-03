@@ -229,6 +229,92 @@ export default async function DuePaymentsPage({
           )}
         </SectionCard>
 
+        <section className="grid gap-6 xl:grid-cols-2">
+          <SectionCard
+            title="Plan de la semana"
+            description="Recibos a vencer en los próximos 7 días."
+          >
+            {next7Receipts.length === 0 ? (
+              <div className="p-4">
+                <EmptyState
+                  icon={Clock3}
+                  title="Sin cobros esta semana"
+                  description="No hay recibos pendientes en los próximos 7 días."
+                />
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-stone-50/70">
+                    <TableHead>Recibo</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Vencimiento</TableHead>
+                    <TableHead className="text-right">Monto</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {next7Receipts.map((receipt) => (
+                    <TableRow key={receipt.id}>
+                      <TableCell className="font-medium">{receipt.receiptNumber}</TableCell>
+                      <TableCell>
+                        <Link href={`/clients/${receipt.clientId}`} className="text-foreground hover:text-primary">
+                          {receipt.client.fullName}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{formatDate(receipt.dueDate)}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        {formatCurrency(receipt.amount, receipt.currency)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="Cobros entre 8 y 30 días"
+            description="Pipeline de cobranza de las próximas semanas."
+          >
+            {next30Receipts.length === 0 ? (
+              <div className="p-4">
+                <EmptyState
+                  icon={ReceiptText}
+                  title="Sin cobros en 8-30 días"
+                  description="No hay recibos pendientes en esa ventana."
+                />
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-stone-50/70">
+                    <TableHead>Recibo</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Vencimiento</TableHead>
+                    <TableHead className="text-right">Monto</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {next30Receipts.map((receipt) => (
+                    <TableRow key={receipt.id}>
+                      <TableCell className="font-medium">{receipt.receiptNumber}</TableCell>
+                      <TableCell>
+                        <Link href={`/clients/${receipt.clientId}`} className="text-foreground hover:text-primary">
+                          {receipt.client.fullName}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{formatDate(receipt.dueDate)}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        {formatCurrency(receipt.amount, receipt.currency)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </SectionCard>
+        </section>
+
         <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
           <SectionCard title="Recibos vencidos" description="Máxima prioridad operativa y de cobranza.">
             {overdueReceipts.length === 0 ? (

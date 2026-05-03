@@ -53,6 +53,7 @@ export default async function PortfolioPage({
     renewalSoonCount,
     dueReceipts,
     insurerDistribution,
+    topClientsRows,
   ] = await Promise.all([
     db.policy.count({ where }),
     db.policy.findMany({
@@ -84,7 +85,30 @@ export default async function PortfolioPage({
       _count: { _all: true },
       _sum: { premiumAmount: true },
     }),
+    db.policy.groupBy({
+      by: ["clientId"],
+      where: { status: "ACTIVE" },
+      _count: { _all: true },
+      _sum: { premiumAmount: true },
+      orderBy: { _sum: { premiumAmount: "desc" } },
+      take: 10,
+    }),
   ]);
+  const topClientIds = topClientsRows.map((row) => row.clientId);
+  const topClientNames = topClientIds.length
+    ? new Map(
+        (await db.client.findMany({
+          where: { id: { in: topClientIds } },
+          select: { id: true, fullName: true },
+        })).map((c) => [c.id, c.fullName] as const),
+      )
+    : new Map<string, string>();
+  const topClientsByExposure = topClientsRows.map((row) => ({
+    id: row.clientId,
+    name: topClientNames.get(row.clientId) ?? "—",
+    policies: row._count._all,
+    value: toNumber(row._sum.premiumAmount),
+  }));
 
   const portfolioValue = toNumber(portfolioAgg._sum.premiumAmount);
   const insurerIds = insurerDistribution.map((row) => row.insurerId);
@@ -279,6 +303,46 @@ export default async function PortfolioPage({
             )}
           </SectionCard>
 
+          <SectionCard
+            title="Clientes con mayor exposición"
+            description="Top 10 por prima activa acumulada."
+          >
+            {topClientsByExposure.length === 0 ? (
+              <div className="p-4">
+                <EmptyState
+                  icon={Users}
+                  title="Sin exposición activa"
+                  description="Cuando registres pólizas activas, verás aquí a tus clientes top."
+                />
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-stone-50/70">
+                    <TableHead>Cliente</TableHead>
+                    <TableHead className="text-right">Pólizas</TableHead>
+                    <TableHead className="text-right">Prima</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {topClientsByExposure.map((client) => (
+                    <TableRow key={client.id}>
+                      <TableCell className="font-medium">
+                        <Link href={`/clients/${client.id}`} className="text-foreground hover:text-primary">
+                          {client.name}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="text-right">{client.policies}</TableCell>
+                      <TableCell className="text-right font-medium">{formatCurrency(client.value)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </SectionCard>
+        </section>
+
+        <section className="grid gap-6">
           <SectionCard title="Recibos próximos" description="Cobros ya en el radar para las próximas semanas.">
             {dueReceipts.length === 0 ? (
               <div className="p-4">

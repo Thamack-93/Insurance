@@ -25,6 +25,7 @@ export async function getDashboardData() {
     upcomingReceipts,
     upcomingReceiptsForChart,
     upcomingRenewalPolicies,
+    upcomingRenewalsForChart,
     insurerDistributionRows,
     policyTypeDistributionRows,
     commissionsByMonthRows,
@@ -84,6 +85,14 @@ export async function getDashboardData() {
       include: { client: true, insurer: true },
       orderBy: { renewalDate: "asc" },
       take: 6,
+    }),
+    // Lightweight chart query — only the field we need, capped separately so the
+    // urgent renewals list size doesn't silently undercount the weekly chart.
+    db.policy.findMany({
+      where: { renewalDate: { gte: now, lte: in60 }, status: "ACTIVE" },
+      select: { renewalDate: true },
+      orderBy: { renewalDate: "asc" },
+      take: 500,
     }),
     db.policy.groupBy({
       by: ["insurerId"],
@@ -147,7 +156,7 @@ export async function getDashboardData() {
     },
     charts: {
       dueByWeek: groupDatesByWeek(upcomingReceiptsForChart, "dueDate"),
-      renewalsByWeek: groupDatesByWeek(upcomingRenewalPolicies, "renewalDate"),
+      renewalsByWeek: groupDatesByWeek(upcomingRenewalsForChart, "renewalDate"),
       policyTypeDistribution: policyTypeDistributionRows.map((row) => ({
         name: row.policyType,
         value: row._count.policyType,
