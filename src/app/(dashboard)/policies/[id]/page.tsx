@@ -131,14 +131,20 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                   {policyTypeLabel(policy.policyType)}
                 </Badge>
               </div>
-              <div className="rounded-2xl border bg-stone-50/70 p-4">
-                <p className="font-medium text-foreground">Cliente</p>
-                <Link href={`/clients/${policy.clientId}`} className="mt-1 block text-foreground hover:text-primary">
-                  {policy.client.fullName}
-                </Link>
-                <p className="mt-3 font-medium text-foreground">Aseguradora</p>
-                <p className="mt-1">{policy.insurer.name}</p>
-              </div>
+              <SectionCard title="Relaciones">
+                <div className="space-y-3 px-4 py-3 text-sm">
+                  <div>
+                    <p className="font-medium text-foreground">Cliente</p>
+                    <Link href={`/clients/${policy.clientId}`} className="mt-1 block text-foreground hover:text-primary">
+                      {policy.client.fullName}
+                    </Link>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Aseguradora</p>
+                    <p className="mt-1">{policy.insurer.name}</p>
+                  </div>
+                </div>
+              </SectionCard>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <p className="text-muted-foreground">Inicio</p>
@@ -157,14 +163,22 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                   <p className="font-medium">{frequencyLabels[policy.paymentFrequency] ?? policy.paymentFrequency}</p>
                 </div>
               </div>
-              <div className="rounded-2xl border bg-white/70 p-4 text-sm text-muted-foreground">
-                <p className="font-medium text-foreground">Objeto asegurado</p>
-                <p className="mt-1">{policy.insuredObject ?? "Sin capturar"}</p>
-                <p className="mt-3 font-medium text-foreground">Plan de pago</p>
-                <p className="mt-1">{policy.paymentPlan ?? "Sin capturar"}</p>
-                <p className="mt-3 font-medium text-foreground">Beneficiarios</p>
-                <p className="mt-1">{policy.beneficiaryInfo ?? "Sin capturar"}</p>
-              </div>
+              <SectionCard title="Detalle comercial">
+                <div className="space-y-3 px-4 py-3 text-sm text-muted-foreground">
+                  <div>
+                    <p className="font-medium text-foreground">Objeto asegurado</p>
+                    <p className="mt-1">{policy.insuredObject ?? "Sin capturar"}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Plan de pago</p>
+                    <p className="mt-1">{policy.paymentPlan ?? "Sin capturar"}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Beneficiarios</p>
+                    <p className="mt-1">{policy.beneficiaryInfo ?? "Sin capturar"}</p>
+                  </div>
+                </div>
+              </SectionCard>
               {policy.notes ? <p className="text-sm text-muted-foreground">{policy.notes}</p> : null}
             </div>
           </SectionCard>
@@ -222,50 +236,42 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             </div>
           </SectionCard>
 
-          <SectionCard title="Comisiones y tareas" description="Cobro esperado y flujo operativo en un solo vistazo.">
-            <div className="grid gap-6 lg:grid-cols-2">
-              <div className="rounded-2xl border border-stone-200/80 bg-white/70">
-                <div className="border-b border-stone-200/80 px-4 py-3">
-                  <h3 className="font-medium">Comisiones</h3>
-                </div>
-                <div className="divide-y divide-stone-200/80">
-                  {commissions.map((commission) => (
-                    <div key={commission.id} className="px-4 py-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="font-medium text-foreground">{formatCurrency(commission.expectedAmount, policy.currency)}</p>
-                        <StatusBadge status={commission.status} />
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {commission.expectedDate ? formatDate(commission.expectedDate) : "Sin fecha"} · {commission.insurer.name}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">{commission.receipt?.receiptNumber ?? "Sin recibo asociado"}</p>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <SectionCard title="Comisiones" description="Cobro esperado de la póliza.">
+              <div className="divide-y divide-stone-200/80">
+                {commissions.map((commission) => (
+                  <div key={commission.id} className="px-4 py-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-medium text-foreground">{formatCurrency(commission.expectedAmount, policy.currency)}</p>
+                      <StatusBadge status={commission.status} />
                     </div>
-                  ))}
-                </div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {commission.expectedDate ? formatDate(commission.expectedDate) : "Sin fecha"} · {commission.insurer.name}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">{commission.receipt?.receiptNumber ?? "Sin recibo asociado"}</p>
+                  </div>
+                ))}
               </div>
+            </SectionCard>
 
-              <div className="rounded-2xl border border-stone-200/80 bg-white/70">
-                <div className="border-b border-stone-200/80 px-4 py-3">
-                  <h3 className="font-medium">Tareas</h3>
-                </div>
-                <div className="divide-y divide-stone-200/80">
-                  {tasks.map((task) => (
-                    <div key={task.id} className="px-4 py-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="font-medium text-foreground">{task.folio}</p>
-                        <div className="flex gap-2">
-                          <PriorityBadge priority={task.priority} />
-                          <StatusBadge status={task.status} />
-                        </div>
+            <SectionCard title="Tareas" description="Flujo operativo abierto sobre la póliza.">
+              <div className="divide-y divide-stone-200/80">
+                {tasks.map((task) => (
+                  <div key={task.id} className="px-4 py-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-medium text-foreground">{task.folio}</p>
+                      <div className="flex gap-2">
+                        <PriorityBadge priority={task.priority} />
+                        <StatusBadge status={task.status} />
                       </div>
-                      <p className="mt-1 text-sm text-muted-foreground">{task.title}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{task.dueDate ? formatDate(task.dueDate) : "Sin fecha"}</p>
                     </div>
-                  ))}
-                </div>
+                    <p className="mt-1 text-sm text-muted-foreground">{task.title}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{task.dueDate ? formatDate(task.dueDate) : "Sin fecha"}</p>
+                  </div>
+                ))}
               </div>
-            </div>
-          </SectionCard>
+            </SectionCard>
+          </div>
         </section>
 
         <SectionCard title="Documentos" description="Archivos asociados a esta póliza.">

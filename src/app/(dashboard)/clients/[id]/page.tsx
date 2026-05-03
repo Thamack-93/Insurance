@@ -152,12 +152,18 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                   <span>{client.address ?? "Sin dirección"}</span>
                 </div>
               </div>
-              <div className="rounded-2xl border bg-stone-50/70 p-4 text-sm text-muted-foreground">
-                <p className="font-medium text-foreground">Preferencia de contacto</p>
-                <p className="mt-1">{client.preferredContactMethod ?? "No capturada"}</p>
-                <p className="mt-3 font-medium text-foreground">RFC</p>
-                <p className="mt-1">{client.rfc ?? "No capturado"}</p>
-              </div>
+              <SectionCard title="Datos fiscales y contacto">
+                <div className="space-y-3 px-4 py-3 text-sm text-muted-foreground">
+                  <div>
+                    <p className="font-medium text-foreground">Preferencia de contacto</p>
+                    <p className="mt-1">{client.preferredContactMethod ?? "No capturada"}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">RFC</p>
+                    <p className="mt-1">{client.rfc ?? "No capturado"}</p>
+                  </div>
+                </div>
+              </SectionCard>
               {client.notes ? <p className="text-sm text-muted-foreground">{client.notes}</p> : null}
             </div>
           </SectionCard>
@@ -274,57 +280,49 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             </div>
           </SectionCard>
 
-          <SectionCard title="Cotizaciones y documentos" description="Expediente comercial y archivo local.">
-            <div className="grid gap-6 lg:grid-cols-2">
-              <div className="rounded-2xl border border-stone-200/80 bg-white/70">
-                <div className="border-b border-stone-200/80 px-4 py-3">
-                  <h3 className="font-medium">Cotizaciones</h3>
-                </div>
-                <div className="divide-y divide-stone-200/80">
-                  {quotes.length === 0 ? (
-                    <div className="px-4 py-6 text-sm text-muted-foreground">Sin cotizaciones registradas.</div>
-                  ) : (
-                    quotes.map((quote) => (
-                      <div key={quote.id} className="px-4 py-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="font-medium text-foreground">{quote.policyType}</p>
-                          <Badge variant="outline" className="rounded-full">
-                            {quoteStatusLabels[quote.status] ?? quote.status}
-                          </Badge>
-                        </div>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {quote.insurer?.name ?? "Sin aseguradora"} · {formatDate(quote.requestedDate)}
-                        </p>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <SectionCard title="Cotizaciones" description="Expediente comercial.">
+              <div className="divide-y divide-stone-200/80">
+                {quotes.length === 0 ? (
+                  <div className="px-4 py-6 text-sm text-muted-foreground">Sin cotizaciones registradas.</div>
+                ) : (
+                  quotes.map((quote) => (
+                    <div key={quote.id} className="px-4 py-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="font-medium text-foreground">{quote.policyType}</p>
+                        <Badge variant="outline" className="rounded-full">
+                          {quoteStatusLabels[quote.status] ?? quote.status}
+                        </Badge>
                       </div>
-                    ))
-                  )}
-                </div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {quote.insurer?.name ?? "Sin aseguradora"} · {formatDate(quote.requestedDate)}
+                      </p>
+                    </div>
+                  ))
+                )}
               </div>
+            </SectionCard>
 
-              <div className="rounded-2xl border border-stone-200/80 bg-white/70">
-                <div className="border-b border-stone-200/80 px-4 py-3">
-                  <h3 className="font-medium">Documentos</h3>
-                </div>
-                <div className="divide-y divide-stone-200/80">
-                  {documents.length === 0 ? (
-                    <div className="px-4 py-6 text-sm text-muted-foreground">Sin documentos asociados.</div>
-                  ) : (
-                    documents.map((document) => (
-                      <div key={document.id} className="px-4 py-4">
-                        <p className="font-medium text-foreground">{document.fileName}</p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {document.documentType} · {formatDate(document.uploadedAt)}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {document.policy?.policyNumber ?? document.receipt?.receiptNumber ?? document.task?.folio ?? document.claim?.folio ?? document.quote?.id ?? "Sin asociación"}
-                        </p>
-                      </div>
-                    ))
-                  )}
-                </div>
+            <SectionCard title="Documentos" description="Archivo local del cliente.">
+              <div className="divide-y divide-stone-200/80">
+                {documents.length === 0 ? (
+                  <div className="px-4 py-6 text-sm text-muted-foreground">Sin documentos asociados.</div>
+                ) : (
+                  documents.map((document) => (
+                    <div key={document.id} className="px-4 py-4">
+                      <p className="font-medium text-foreground">{document.fileName}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {document.documentType} · {formatDate(document.uploadedAt)}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {document.policy?.policyNumber ?? document.receipt?.receiptNumber ?? document.task?.folio ?? document.claim?.folio ?? document.quote?.id ?? "Sin asociación"}
+                      </p>
+                    </div>
+                  ))
+                )}
               </div>
-            </div>
-          </SectionCard>
+            </SectionCard>
+          </div>
         </section>
       </div>
     </main>

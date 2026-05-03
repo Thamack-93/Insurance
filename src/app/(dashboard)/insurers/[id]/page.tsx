@@ -121,10 +121,9 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
                 )}
               </div>
 
-              <div className="rounded-2xl border bg-stone-50/70 p-4">
-                <p className="font-medium text-foreground">Nombre comercial</p>
-                <p className="mt-1">{insurer.name}</p>
-              </div>
+              <SectionCard title="Nombre comercial">
+                <p className="px-4 py-3 text-sm">{insurer.name}</p>
+              </SectionCard>
 
               <div className="grid gap-3">
                 {insurer.contactName && (
@@ -152,10 +151,9 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
               </div>
 
               {insurer.notes && (
-                <div className="rounded-2xl border bg-white/70 p-4 text-sm text-muted-foreground">
-                  <p className="font-medium text-foreground">Notas</p>
-                  <p className="mt-1">{insurer.notes}</p>
-                </div>
+                <SectionCard title="Notas">
+                  <p className="px-4 py-3 text-sm text-muted-foreground">{insurer.notes}</p>
+                </SectionCard>
               )}
 
               {insurer.portalUrl && (
