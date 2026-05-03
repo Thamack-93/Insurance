@@ -66,6 +66,12 @@ Tabs sync with the URL using `UrlTabs` and `router.replace({ scroll: false })`.
 
 **File Storage**: Local filesystem under `data/documents/`, with path safety enforced by `assertSafeDocumentPath()` in `src/lib/files.ts`.
 
+### Testing (Playwright)
+Playwright specs viven en `tests/` (`tests/api/`, `tests/e2e/`, helpers compartidos en `tests/helpers/`). Para que el loader de Playwright cargue el cliente Prisma generado (que usa `import.meta.url` y export ESM), dos archivos `package.json` marcan ámbitos como ES modules sin convertir todo el proyecto a ESM:
+- `tests/package.json` con `{"type":"module"}` → los specs y helpers se transpilan como ESM.
+- `src/generated/prisma/package.json` con `{"type":"module"}` → el cliente generado se carga como ESM (Next.js sigue usándolo igual). Aunque `src/generated/prisma/` está en `.gitignore`, este archivo se trackea vía la excepción `!/src/generated/prisma/package.json`. Además `npm run db:generate` y `scripts/post-merge.sh` lo recrean automáticamente tras `prisma generate`, por si el generador lo sobrescribe.
+Comandos: `npm test` (todos), `npm run test:api`, `npm run test:e2e`. Los specs requieren que el dev server esté disponible en `PORT` (default 5000); `playwright.config.ts` lo levanta con `webServer.reuseExistingServer: true`.
+
 ### CLI Scripts
 Scripts located in `scripts/` are run directly with `tsx` and share utilities via `scripts/_shared.ts`. Key scripts include `backup-db.ts`, `list-next-payments.ts`, `list-renewals.ts`, `list-open-tasks.ts`, various export scripts (`export-due-payments.ts`, `export-commissions.ts`), `validate-data-quality.ts`, import scripts (`import-client.ts`, `import-policy.ts`, `import-pdfs.ts`), and `seed-demo-data.ts`.
 **Script Rules**: All database interactions must use Prisma, mass writes require prior backup, imports need Zod validation, dry-run support, change reports, and `ActivityLog` entries, and exports go to `data/exports/`.
