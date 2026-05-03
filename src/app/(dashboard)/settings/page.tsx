@@ -5,8 +5,10 @@ import { BellRing, Database, Globe2, ShieldCheck, ArrowRight, Settings2 } from "
 import { today, formatDate } from "@/lib/dates";
 import Link from "next/link";
 import { getSettings, updateSettings } from "@/lib/settings";
+import { getOnboardingStatus } from "@/lib/dashboard-queries";
 import { SettingsForm } from "@/components/forms/settings-form";
 import { BackupsPanel } from "@/components/settings/backups-panel";
+import { OnboardingPanel } from "@/components/settings/onboarding-panel";
 import {
   createBackup,
   listBackupsAction,
@@ -15,8 +17,11 @@ import {
 
 export default async function SettingsPage() {
   const now = today();
-  const settings = await getSettings();
-  const initialBackups = await listBackupsAction();
+  const [settings, initialBackups, onboarding] = await Promise.all([
+    getSettings(),
+    listBackupsAction(),
+    getOnboardingStatus(),
+  ]);
 
   return (
     <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
@@ -70,6 +75,8 @@ export default async function SettingsPage() {
           initialSettings={settings} 
           updateSettings={updateSettings} 
         />
+
+        <OnboardingPanel initialDismissed={onboarding.dismissed} />
 
         <BackupsPanel
           initialBackups={initialBackups}

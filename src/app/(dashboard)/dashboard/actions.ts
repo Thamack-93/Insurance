@@ -5,18 +5,28 @@ import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 
-export async function dismissOnboarding(): Promise<MutationResult> {
+export async function setOnboardingDismissed(dismissed: boolean): Promise<MutationResult> {
   const db = getDb();
+  const value = dismissed ? "true" : "false";
   try {
     await db.systemSetting.upsert({
       where: { key: "onboardingDismissed" },
-      update: { value: "true" },
-      create: { key: "onboardingDismissed", value: "true" },
+      update: { value },
+      create: { key: "onboardingDismissed", value },
     });
     revalidatePath("/dashboard");
-    return successResult("", "/dashboard", "Guía ocultada.");
+    revalidatePath("/settings");
+    return successResult(
+      "",
+      "/dashboard",
+      dismissed ? "Guía ocultada." : "Guía reactivada.",
+    );
   } catch (error) {
-    logError("dashboard.dismissOnboarding", error);
-    return errorResult("No se pudo ocultar la guía. Intenta de nuevo.");
+    logError("dashboard.setOnboardingDismissed", error, { dismissed });
+    return errorResult("No se pudo actualizar la guía. Intenta de nuevo.");
   }
+}
+
+export async function dismissOnboarding(): Promise<MutationResult> {
+  return setOnboardingDismissed(true);
 }
