@@ -60,6 +60,7 @@ Tabs sync with the URL using `UrlTabs` and `router.replace({ scroll: false })`.
 - **Migrations**: `prisma/migrations/`.
 - **Database File**: `data/pg.sqlite`.
 - **Seed**: `prisma/seed.ts` for realistic demo data.
+- **Schema changes flow**: When editing `prisma/schema.prisma`, always create a migration with `npx prisma migrate dev --name <descripcion>` and commit it together with the schema. Never modify only the schema. The post-merge script runs `npm run db:check-drift` (`prisma migrate diff --exit-code`) and the merge fails if `schema.prisma` defines anything that no migration creates.
 
 **Core Entities**: Client, Insurer, Policy (various types), Receipt, Payment, Commission, Task, Claim, Quote, Document, ActivityLog, SystemSetting, Alert.
 
