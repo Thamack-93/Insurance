@@ -83,6 +83,16 @@ async function main() {
     },
   });
 
+  await prisma.user.upsert({
+    where: { email: "pedroagl93@gmail.com" },
+    update: { name: "Pedro Gomez" },
+    create: {
+      email: "pedroagl93@gmail.com",
+      name: "Pedro Gomez",
+      passwordHash: hashPassword("Peter@123"),
+    },
+  });
+
   const audit = { createdById: adminUser.id, updatedById: brokerUser.id };
 
   const insurers = await Promise.all(
