@@ -13,13 +13,14 @@ import type { LucideIcon } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { getDb } from "@/lib/db";
 import { cn } from "@/lib/utils";
 
 export type ActivityTimelineEntry = {
   id: string;
   entityType: string;
   action: string;
-  performedBy: string;
+  userId: string;
   createdAt: Date | string;
 };
 
@@ -92,14 +93,7 @@ function formatEntity(entityType: string) {
   return entityLabelMap[entityType] ?? entityType;
 }
 
-function formatPerformer(performedBy: string) {
-  if (!performedBy || performedBy === "local-ui" || performedBy === "local-user") {
-    return "Sistema";
-  }
-  return performedBy;
-}
-
-export function ActivityTimeline({
+export async function ActivityTimeline({
   entries,
   items,
   showEntity = false,
@@ -121,6 +115,17 @@ export function ActivityTimeline({
     );
   }
 
+  const ids = Array.from(new Set(data.map((d) => d.userId).filter(Boolean)));
+  let userMap = new Map<string, string>();
+  if (ids.length > 0) {
+    const db = getDb();
+    const users = await db.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true },
+    });
+    userMap = new Map(users.map((u) => [u.id, u.name]));
+  }
+
   return (
     <ol className={cn("divide-y divide-border/70", className)}>
       {data.map((entry) => {
@@ -129,6 +134,7 @@ export function ActivityTimeline({
         const date = new Date(entry.createdAt);
         const distance = formatDistanceToNow(date, { locale: es, addSuffix: true });
         const fullDate = format(date, "d 'de' MMMM yyyy, HH:mm", { locale: es });
+        const performer = userMap.get(entry.userId) ?? "Sistema";
 
         return (
           <li key={entry.id} className="flex items-start gap-3 px-4 py-3">
@@ -150,7 +156,7 @@ export function ActivityTimeline({
                 ) : null}
               </p>
               <p className="text-xs text-muted-foreground">
-                Por {formatPerformer(entry.performedBy)}
+                Por {performer}
                 <span className="mx-1.5 text-muted-foreground/60">·</span>
                 <Tooltip>
                   <TooltipTrigger className="cursor-help underline-offset-2 hover:underline">

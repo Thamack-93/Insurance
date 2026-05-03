@@ -2,6 +2,7 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
+import { getCurrentUserId } from "@/lib/auth";
 import { normalizeOptionalText, parseDateInput } from "@/lib/form-utils";
 import { policySchema, type PolicyFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
@@ -35,8 +36,9 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
 
   try {
     const db = getDb();
+    const userId = await getCurrentUserId();
     const policy = await db.policy.create({
-      data: normalizePolicyInput(parsed.data),
+      data: { ...normalizePolicyInput(parsed.data), createdById: userId, updatedById: userId },
     });
 
     await writeActivityLog({
@@ -78,9 +80,10 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
       return errorResult("La poliza ya no existe.");
     }
 
+    const userId = await getCurrentUserId();
     const policy = await db.policy.update({
       where: { id },
-      data: normalizePolicyInput(parsed.data),
+      data: { ...normalizePolicyInput(parsed.data), updatedById: userId },
     });
 
     await writeActivityLog({

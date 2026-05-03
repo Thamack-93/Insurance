@@ -2,6 +2,7 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
+import { getCurrentUserId } from "@/lib/auth";
 import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
 import { taskSchema, type TaskFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
@@ -84,8 +85,9 @@ export async function createTask(values: TaskFormValues): Promise<MutationResult
 
   try {
     const db = getDb();
+    const userId = await getCurrentUserId();
     const payload = await normalizeTaskInput(parsed.data);
-    const task = await db.task.create({ data: payload });
+    const task = await db.task.create({ data: { ...payload, createdById: userId, updatedById: userId } });
 
     await writeActivityLog({
       entityType: "Task",
@@ -126,10 +128,11 @@ export async function updateTask(id: string, values: TaskFormValues): Promise<Mu
       return errorResult("El pendiente ya no existe.");
     }
 
+    const userId = await getCurrentUserId();
     const payload = await normalizeTaskInput(parsed.data, previousTask.folio);
     const task = await db.task.update({
       where: { id },
-      data: payload,
+      data: { ...payload, updatedById: userId },
     });
 
     await writeActivityLog({

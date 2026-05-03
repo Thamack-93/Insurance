@@ -313,7 +313,7 @@ async function main() {
         oldValue: index % 2 === 0 ? "Pendiente" : null,
         newValue: index % 2 === 0 ? "Actualizado" : null,
         createdAt: subDays(base, index),
-        performedBy: "scripts/seed-demo-data",
+        userId: "system-user-0000",
       },
     });
     summary.logs += 1;

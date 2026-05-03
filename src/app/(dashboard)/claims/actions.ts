@@ -2,6 +2,7 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
+import { getCurrentUserId } from "@/lib/auth";
 import { logError } from "@/lib/logger";
 import type { ClaimFormValues } from "@/lib/validations";
 import {
@@ -33,8 +34,9 @@ export async function createClaim(values: ClaimFormValues): Promise<MutationResu
   try {
     const db = getDb();
 
+    const userId = await getCurrentUserId();
     const claim = await db.claim.create({
-      data: normalizeClaimInput(values),
+      data: { ...normalizeClaimInput(values), createdById: userId, updatedById: userId },
     });
 
     await writeActivityLog({
@@ -72,9 +74,10 @@ export async function updateClaim(id: string, values: ClaimFormValues): Promise<
       return errorResult("Siniestro no encontrado.");
     }
 
+    const userId = await getCurrentUserId();
     const claim = await db.claim.update({
       where: { id },
-      data: normalizeClaimInput(values),
+      data: { ...normalizeClaimInput(values), updatedById: userId },
     });
 
     await writeActivityLog({

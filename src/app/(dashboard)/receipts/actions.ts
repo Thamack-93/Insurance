@@ -2,6 +2,7 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
+import { getCurrentUserId } from "@/lib/auth";
 import { normalizeOptionalText, parseDateInput } from "@/lib/form-utils";
 import { receiptSchema, type ReceiptFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
@@ -48,8 +49,9 @@ export async function createReceipt(values: ReceiptFormValues): Promise<Mutation
 
   try {
     const db = getDb();
+    const userId = await getCurrentUserId();
     const payload = await normalizeReceiptInput(parsed.data);
-    const receipt = await db.receipt.create({ data: payload });
+    const receipt = await db.receipt.create({ data: { ...payload, createdById: userId, updatedById: userId } });
 
     await writeActivityLog({
       entityType: "Receipt",
@@ -90,10 +92,11 @@ export async function updateReceipt(id: string, values: ReceiptFormValues): Prom
       return errorResult("El recibo ya no existe.");
     }
 
+    const userId = await getCurrentUserId();
     const payload = await normalizeReceiptInput(parsed.data);
     const receipt = await db.receipt.update({
       where: { id },
-      data: payload,
+      data: { ...payload, updatedById: userId },
     });
 
     await writeActivityLog({
@@ -131,6 +134,7 @@ export async function bulkMarkReceiptsPaid(
   }
 
   const db = getDb();
+  const userId = await getCurrentUserId();
   const now = new Date();
 
   try {
@@ -167,12 +171,14 @@ export async function bulkMarkReceiptsPaid(
             currency: receipt.currency,
             paidDate: now,
             paymentMethod,
+            createdById: userId,
+            updatedById: userId,
           },
         });
 
         await db.receipt.update({
           where: { id: receipt.id },
-          data: { status: "PAID", paidDate: now, paymentMethod },
+          data: { status: "PAID", paidDate: now, paymentMethod, updatedById: userId },
         });
 
         await writeActivityLog({

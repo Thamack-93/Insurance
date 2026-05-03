@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, BadgeCheck, CalendarClock, Clock, FileText, History, Pencil, ShieldCheck } from "lucide-react";
 import { DeleteClaimButton } from "@/components/claims/delete-claim-button";
 import { PageHeader } from "@/components/layout/page-header";
+import { AuditByline } from "@/components/audit/audit-byline";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { getActivityForEntity } from "@/lib/activity-log";
@@ -69,6 +70,8 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
             </div>
           }
         />
+
+        <AuditByline createdById={claim.createdById} updatedById={claim.updatedById} />
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard

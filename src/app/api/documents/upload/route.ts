@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getDb } from "@/lib/db";
+import { getCurrentUserIdOrSystem } from "@/lib/auth";
 import { assertSafeDocumentPath, documentsDir } from "@/lib/files";
 import { logError } from "@/lib/logger";
 import { z } from "zod";
@@ -94,6 +95,7 @@ export async function POST(request: NextRequest) {
 
     // Save metadata to database
     const db = getDb();
+    const userId = await getCurrentUserIdOrSystem();
     const document = await db.document.create({
       data: {
         ...validatedData,
@@ -101,6 +103,8 @@ export async function POST(request: NextRequest) {
         filePath: `data/documents/${fileName}`,
         mimeType: file.type,
         uploadedAt: new Date(),
+        createdById: userId,
+        updatedById: userId,
       },
     });
 

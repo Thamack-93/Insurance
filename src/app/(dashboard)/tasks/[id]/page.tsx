@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, CalendarClock, CheckSquare, ClipboardList, FileText, MessageSquare } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
+import { AuditByline } from "@/components/audit/audit-byline";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -86,6 +87,8 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
             </>
           }
         />
+
+        <AuditByline createdById={task.createdById} updatedById={task.updatedById} />
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard

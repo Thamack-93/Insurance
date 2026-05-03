@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, BadgeCheck, Calculator, CalendarClock, FileText, Clock, Pencil } from "lucide-react";
 import { DeleteQuoteButton } from "@/components/quotes/delete-quote-button";
 import { PageHeader } from "@/components/layout/page-header";
+import { AuditByline } from "@/components/audit/audit-byline";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
@@ -64,6 +65,8 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
             </div>
           }
         />
+
+        <AuditByline createdById={quote.createdById} updatedById={quote.updatedById} />
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard

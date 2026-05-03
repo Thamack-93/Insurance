@@ -202,6 +202,7 @@ export async function sendRenewalReminders() {
             action: "SEND_RENEWAL_REMINDER",
             entityType: "POLICY",
             entityId: renewal.policyId,
+            userId: "system-user-0000",
             newValue: JSON.stringify({
               policyNumber: renewal.policyNumber,
               clientName: renewal.clientName,

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppTopbar } from "@/components/layout/app-topbar";
+import { UserMenu } from "@/components/layout/user-menu";
 import { SearchProvider } from "@/components/search/search-provider";
 import { CommandPaletteWrapper } from "@/components/command/command-palette-wrapper";
 import { ShortcutsHelp } from "@/components/shortcuts/shortcuts-help";
@@ -18,7 +19,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         <div className="flex min-h-screen">
           <AppSidebar />
           <div className="min-w-0 flex-1">
-            <AppTopbar />
+            <AppTopbar userMenu={<UserMenu />} />
             <main className="mx-auto w-full max-w-[1560px] px-5 py-8 lg:px-8">{children}</main>
           </div>
         </div>

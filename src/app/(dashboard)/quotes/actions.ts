@@ -2,6 +2,7 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
+import { getCurrentUserId } from "@/lib/auth";
 import { logError } from "@/lib/logger";
 import type { QuoteFormValues } from "@/lib/validations";
 import {
@@ -29,8 +30,9 @@ export async function createQuote(values: QuoteFormValues): Promise<MutationResu
   try {
     const db = getDb();
 
+    const userId = await getCurrentUserId();
     const quote = await db.quote.create({
-      data: normalizeQuoteInput(values),
+      data: { ...normalizeQuoteInput(values), createdById: userId, updatedById: userId },
     });
 
     await writeActivityLog({
@@ -67,9 +69,10 @@ export async function updateQuote(id: string, values: QuoteFormValues): Promise<
       return errorResult("Cotización no encontrada.");
     }
 
+    const userId = await getCurrentUserId();
     const quote = await db.quote.update({
       where: { id },
-      data: normalizeQuoteInput(values),
+      data: { ...normalizeQuoteInput(values), updatedById: userId },
     });
 
     await writeActivityLog({

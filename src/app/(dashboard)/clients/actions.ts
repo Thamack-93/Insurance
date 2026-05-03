@@ -2,6 +2,7 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
+import { getCurrentUserId } from "@/lib/auth";
 import { normalizeOptionalText } from "@/lib/form-utils";
 import { clientSchema, type ClientFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
@@ -30,8 +31,9 @@ export async function createClient(values: ClientFormValues): Promise<MutationRe
 
   try {
     const db = getDb();
+    const userId = await getCurrentUserId();
     const client = await db.client.create({
-      data: normalizeClientInput(parsed.data),
+      data: { ...normalizeClientInput(parsed.data), createdById: userId, updatedById: userId },
     });
 
     await writeActivityLog({
@@ -64,9 +66,10 @@ export async function updateClient(id: string, values: ClientFormValues): Promis
       return errorResult("El cliente ya no existe.");
     }
 
+    const userId = await getCurrentUserId();
     const client = await db.client.update({
       where: { id },
-      data: normalizeClientInput(parsed.data),
+      data: { ...normalizeClientInput(parsed.data), updatedById: userId },
     });
 
     await writeActivityLog({

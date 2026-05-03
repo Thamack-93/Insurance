@@ -268,7 +268,7 @@ async function main() {
             action: "IMPORT_CREATE",
             oldValue: null,
             newValue: safeJson(createdClient),
-            performedBy: "scripts/import-client",
+            userId: "system-user-0000",
           },
         });
 
@@ -305,7 +305,7 @@ async function main() {
           action: "IMPORT_UPDATE",
           oldValue: safeJson(previousClient),
           newValue: safeJson(updatedClient),
-          performedBy: "scripts/import-client",
+          userId: "system-user-0000",
         },
       });
     } catch (error) {

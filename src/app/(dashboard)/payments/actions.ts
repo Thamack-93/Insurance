@@ -2,6 +2,7 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
+import { getCurrentUserId } from "@/lib/auth";
 import { today } from "@/lib/dates";
 import { logError } from "@/lib/logger";
 import {
@@ -57,6 +58,7 @@ export async function createPayment(data: CreatePaymentInput): Promise<MutationR
       return errorResult("Este recibo ya está pagado.");
     }
 
+    const userId = await getCurrentUserId();
     const payment = await db.payment.create({
       data: {
         receiptId: data.receiptId,
@@ -68,6 +70,8 @@ export async function createPayment(data: CreatePaymentInput): Promise<MutationR
         paymentMethod: data.paymentMethod,
         reference: data.reference,
         notes: data.notes,
+        createdById: userId,
+        updatedById: userId,
       },
     });
 
@@ -77,6 +81,7 @@ export async function createPayment(data: CreatePaymentInput): Promise<MutationR
         status: "PAID",
         paidDate: new Date(data.paidDate),
         paymentMethod: data.paymentMethod,
+        updatedById: userId,
       },
     });
 

@@ -4,6 +4,7 @@ import { addDays, subDays } from "date-fns";
 import { PrismaClient } from "../src/generated/prisma/client";
 import type { PaymentFrequency, Policy, Priority, Receipt, TaskStatus } from "../src/generated/prisma/client";
 import { databasePath } from "../src/lib/files";
+import { hashPassword, SYSTEM_USER_ID } from "../src/lib/auth";
 
 const adapter = new PrismaBetterSqlite3({
   url: `file:${databasePath}`,
@@ -56,6 +57,33 @@ const priorities = ["LOW", "MEDIUM", "HIGH", "URGENT"] as const satisfies readon
 
 async function main() {
   await resetDatabase();
+
+  await prisma.user.create({
+    data: {
+      id: SYSTEM_USER_ID,
+      email: "system@policydesk.local",
+      name: "Sistema",
+      passwordHash: "!disabled",
+    },
+  });
+
+  const adminUser = await prisma.user.create({
+    data: {
+      email: "admin@policydesk.local",
+      name: "Admin Demo",
+      passwordHash: hashPassword("admin1234"),
+    },
+  });
+
+  const brokerUser = await prisma.user.create({
+    data: {
+      email: "broker@policydesk.local",
+      name: "Broker Demo",
+      passwordHash: hashPassword("broker1234"),
+    },
+  });
+
+  const audit = { createdById: adminUser.id, updatedById: brokerUser.id };
 
   const insurers = await Promise.all(
     [
@@ -111,6 +139,7 @@ async function main() {
           preferredContactMethod: index % 2 === 0 ? "WhatsApp" : "Email",
           notes: index === 3 ? "Cliente con seguimiento pendiente por renovacion." : "Cliente demo de cartera PolicyDesk.",
           status: index === 11 ? "INACTIVE" : "ACTIVE",
+          ...audit,
         },
       }),
     ),
@@ -144,6 +173,7 @@ async function main() {
           insuredObject: insuredObjectFor(policyTypes[index % policyTypes.length], index),
           beneficiaryInfo: index % 3 === 0 ? "Beneficiarios en expediente digital." : null,
           notes: index % 6 === 0 ? "Revisar condiciones especiales antes de renovacion." : null,
+          ...audit,
         },
       }),
     );
@@ -174,6 +204,7 @@ async function main() {
           paidDate: paid ? addDays(dueDate, index % 4) : null,
           paymentMethod: paid ? ["Transferencia", "Tarjeta", "SPEI"][index % 3] : null,
           notes: status === "OVERDUE" ? "Recibo vencido sin pago registrado." : null,
+          ...audit,
         },
       }),
     );
@@ -192,6 +223,7 @@ async function main() {
         paymentMethod: receipt.paymentMethod ?? "Transferencia",
         reference: `SPEI-${90000 + index}`,
         notes: index % 5 === 0 ? "Pago confirmado por cliente, comprobante pendiente." : null,
+        ...audit,
       },
     });
   }
@@ -216,6 +248,7 @@ async function main() {
           mimeType: "application/pdf",
           uploadedAt: subDays(baseDate, index * 2),
           notes: isOrphan ? "Documento demo sin asociacion para probar calidad de datos." : "Ruta simulada de documento local.",
+          ...audit,
         },
       }),
     );
@@ -272,6 +305,7 @@ async function main() {
         startDate,
         dueDate,
         notes: index % 4 === 0 ? "Requiere seguimiento hoy." : null,
+        ...audit,
       },
     });
   }
@@ -292,6 +326,7 @@ async function main() {
         closedDate: index === 3 ? subDays(baseDate, 2) : null,
         amountClaimed: 15000 + index * 12000,
         amountPaid: index === 3 ? 22000 : null,
+        ...audit,
       },
     });
   }
@@ -309,6 +344,7 @@ async function main() {
         validUntil: addDays(baseDate, [3, 7, -2, 15, 21, -5][index]),
         quotedAmount: 9800 + index * 2400,
         notes: "Cotizacion demo para seguimiento comercial.",
+        ...audit,
       },
     });
   }
@@ -365,7 +401,7 @@ async function main() {
         oldValue: index % 5 === 0 ? "Pendiente" : null,
         newValue: index % 5 === 0 ? "Actualizado" : null,
         createdAt: subDays(baseDate, index),
-        performedBy: "local-user",
+        userId: index % 2 === 0 ? adminUser.id : brokerUser.id,
       },
     });
   }
@@ -388,6 +424,7 @@ async function resetDatabase() {
   await prisma.policy.deleteMany();
   await prisma.client.deleteMany();
   await prisma.insurer.deleteMany();
+  await prisma.user.deleteMany();
 }
 
 function slug(value: string) {

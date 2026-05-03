@@ -4,6 +4,7 @@ import { RecordPageView } from "@/components/recently-viewed/record-page-view";
 import { ArrowLeft, FileClock, History, Pencil, ReceiptText, Repeat, Shield } from "lucide-react";
 import { DeletePolicyButton } from "@/components/policies/delete-policy-button";
 import { PageHeader } from "@/components/layout/page-header";
+import { AuditByline } from "@/components/audit/audit-byline";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { getActivityForEntity } from "@/lib/activity-log";
@@ -103,6 +104,8 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             </div>
           }
         />
+
+        <AuditByline createdById={policy.createdById} updatedById={policy.updatedById} />
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard

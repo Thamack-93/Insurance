@@ -1,5 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
+import { getCurrentUserIdOrSystem } from "@/lib/auth";
 
 export function safeJson(value: unknown, maxLength = 5000) {
   const text =
@@ -18,16 +19,17 @@ export async function writeActivityLog({
   action,
   oldValue,
   newValue,
-  performedBy = "local-ui",
+  userId,
 }: {
   entityType: string;
   entityId: string;
   action: string;
   oldValue?: unknown;
   newValue?: unknown;
-  performedBy?: string;
+  userId?: string;
 }) {
   const db = getDb();
+  const resolvedUserId = userId ?? (await getCurrentUserIdOrSystem());
 
   await db.activityLog.create({
     data: {
@@ -36,7 +38,7 @@ export async function writeActivityLog({
       action,
       oldValue: oldValue === undefined ? null : safeJson(oldValue),
       newValue: newValue === undefined ? null : safeJson(newValue),
-      performedBy,
+      userId: resolvedUserId,
     },
   });
 }
@@ -48,7 +50,7 @@ export type ActivityEntry = {
   action: string;
   oldValue: string | null;
   newValue: string | null;
-  performedBy: string;
+  userId: string;
   createdAt: Date;
 };
 

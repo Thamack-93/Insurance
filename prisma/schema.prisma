@@ -143,6 +143,34 @@ enum AlertStatus {
   RESOLVED
 }
 
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  createdClients     Client[]    @relation("ClientCreatedBy")
+  updatedClients     Client[]    @relation("ClientUpdatedBy")
+  createdPolicies    Policy[]    @relation("PolicyCreatedBy")
+  updatedPolicies    Policy[]    @relation("PolicyUpdatedBy")
+  createdReceipts    Receipt[]   @relation("ReceiptCreatedBy")
+  updatedReceipts    Receipt[]   @relation("ReceiptUpdatedBy")
+  createdPayments    Payment[]   @relation("PaymentCreatedBy")
+  updatedPayments    Payment[]   @relation("PaymentUpdatedBy")
+  createdClaims      Claim[]     @relation("ClaimCreatedBy")
+  updatedClaims      Claim[]     @relation("ClaimUpdatedBy")
+  createdQuotes      Quote[]     @relation("QuoteCreatedBy")
+  updatedQuotes      Quote[]     @relation("QuoteUpdatedBy")
+  createdTasks       Task[]      @relation("TaskCreatedBy")
+  updatedTasks       Task[]      @relation("TaskUpdatedBy")
+  createdDocuments   Document[]  @relation("DocumentCreatedBy")
+  updatedDocuments   Document[]  @relation("DocumentUpdatedBy")
+
+  @@index([email])
+}
+
 model Client {
   id                     String       @id @default(cuid())
   fullName               String
@@ -157,7 +185,11 @@ model Client {
   status                 EntityStatus @default(ACTIVE)
   createdAt              DateTime     @default(now())
   updatedAt              DateTime     @updatedAt
+  createdById            String?
+  updatedById            String?
 
+  createdBy   User?        @relation("ClientCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy   User?        @relation("ClientUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   policies    Policy[]
   receipts    Receipt[]
   payments    Payment[]
@@ -169,6 +201,8 @@ model Client {
 
   @@index([fullName])
   @@index([status])
+  @@index([createdById])
+  @@index([updatedById])
 }
 
 model Insurer {
@@ -214,9 +248,13 @@ model Policy {
   notes           String?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
+  createdById     String?
+  updatedById     String?
 
   client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   insurer     Insurer      @relation(fields: [insurerId], references: [id], onDelete: Restrict)
+  createdBy   User?        @relation("PolicyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy   User?        @relation("PolicyUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   receipts    Receipt[]
   payments    Payment[]
   commissions Commission[]
@@ -231,6 +269,8 @@ model Policy {
   @@index([status])
   @@index([renewalDate])
   @@index([endDate])
+  @@index([createdById])
+  @@index([updatedById])
 }
 
 model Receipt {
@@ -251,11 +291,15 @@ model Receipt {
   notes           String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+  createdById     String?
+  updatedById     String?
 
   policy     Policy     @relation(fields: [policyId], references: [id], onDelete: Cascade)
   client     Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
   insurer    Insurer    @relation(fields: [insurerId], references: [id], onDelete: Restrict)
   document   Document?  @relation("ReceiptPrimaryDocument", fields: [documentId], references: [id], onDelete: SetNull)
+  createdBy  User?      @relation("ReceiptCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy  User?      @relation("ReceiptUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   payments   Payment[]
   commissions Commission[]
   tasks      Task[]
@@ -269,6 +313,8 @@ model Receipt {
   @@index([dueDate])
   @@index([paidDate])
   @@index([policyId, receiptNumber])
+  @@index([createdById])
+  @@index([updatedById])
 }
 
 model Payment {
@@ -284,15 +330,21 @@ model Payment {
   notes         String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  createdById   String?
+  updatedById   String?
 
-  receipt Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
-  policy  Policy  @relation(fields: [policyId], references: [id], onDelete: Cascade)
-  client  Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  receipt   Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  policy    Policy  @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  client    Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdBy User?   @relation("PaymentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?   @relation("PaymentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([receiptId])
   @@index([policyId])
   @@index([clientId])
   @@index([paidDate])
+  @@index([createdById])
+  @@index([updatedById])
 }
 
 model Commission {
@@ -342,11 +394,15 @@ model Task {
   notes       String?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
+  createdById String?
+  updatedById String?
 
   client    Client?    @relation(fields: [clientId], references: [id], onDelete: SetNull)
   policy    Policy?    @relation(fields: [policyId], references: [id], onDelete: SetNull)
   insurer   Insurer?   @relation(fields: [insurerId], references: [id], onDelete: SetNull)
   receipt   Receipt?   @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  createdBy User?      @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?      @relation("TaskUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   documents Document[]
 
   @@index([folio])
@@ -357,6 +413,8 @@ model Task {
   @@index([status])
   @@index([priority])
   @@index([dueDate])
+  @@index([createdById])
+  @@index([updatedById])
 }
 
 model Claim {
@@ -376,10 +434,14 @@ model Claim {
   notes         String?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
+  createdById   String?
+  updatedById   String?
 
   client    Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
   policy    Policy     @relation(fields: [policyId], references: [id], onDelete: Cascade)
   insurer   Insurer    @relation(fields: [insurerId], references: [id], onDelete: Restrict)
+  createdBy User?      @relation("ClaimCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?      @relation("ClaimUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   documents Document[]
 
   @@index([folio])
@@ -387,6 +449,8 @@ model Claim {
   @@index([policyId])
   @@index([insurerId])
   @@index([status])
+  @@index([createdById])
+  @@index([updatedById])
 }
 
 model Quote {
@@ -402,9 +466,13 @@ model Quote {
   notes         String?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
+  createdById   String?
+  updatedById   String?
 
   client    Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
   insurer   Insurer?   @relation(fields: [insurerId], references: [id], onDelete: SetNull)
+  createdBy User?      @relation("QuoteCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?      @relation("QuoteUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   documents Document[]
 
   @@index([clientId])
@@ -412,6 +480,8 @@ model Quote {
   @@index([policyType])
   @@index([status])
   @@index([validUntil])
+  @@index([createdById])
+  @@index([updatedById])
 }
 
 model Document {
@@ -430,6 +500,8 @@ model Document {
   notes        String?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
+  createdById  String?
+  updatedById  String?
 
   client         Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
   policy         Policy?  @relation(fields: [policyId], references: [id], onDelete: SetNull)
@@ -438,6 +510,8 @@ model Document {
   claim          Claim?   @relation(fields: [claimId], references: [id], onDelete: SetNull)
   quote          Quote?   @relation(fields: [quoteId], references: [id], onDelete: SetNull)
   primaryReceipt Receipt? @relation("ReceiptPrimaryDocument")
+  createdBy      User?    @relation("DocumentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy      User?    @relation("DocumentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([clientId])
   @@index([policyId])
@@ -447,6 +521,8 @@ model Document {
   @@index([quoteId])
   @@index([documentType])
   @@index([uploadedAt])
+  @@index([createdById])
+  @@index([updatedById])
 }
 
 model SystemSetting {
@@ -476,19 +552,20 @@ model Reminder {
 }
 
 model ActivityLog {
-  id          String   @id @default(cuid())
-  entityType  String
-  entityId    String
-  action      String
-  oldValue    String?
-  newValue    String?
-  createdAt   DateTime @default(now())
-  performedBy String   @default("local-user")
+  id         String   @id @default(cuid())
+  entityType String
+  entityId   String
+  action     String
+  oldValue   String?
+  newValue   String?
+  createdAt  DateTime @default(now())
+  userId     String
 
   @@index([entityType, entityId])
   @@index([entityType, entityId, createdAt])
   @@index([createdAt])
   @@index([action])
+  @@index([userId])
 }
 
 model Alert {

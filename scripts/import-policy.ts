@@ -393,7 +393,7 @@ async function main() {
             action: "IMPORT_CREATE",
             oldValue: null,
             newValue: safeJson(createdPolicy),
-            performedBy: "scripts/import-policy",
+            userId: "system-user-0000",
           },
         });
 
@@ -440,7 +440,7 @@ async function main() {
         action: "IMPORT_UPDATE",
         oldValue: safeJson(previousPolicy),
         newValue: safeJson(updatedPolicy),
-        performedBy: "scripts/import-policy",
+        userId: "system-user-0000",
       },
       });
     } catch (error) {

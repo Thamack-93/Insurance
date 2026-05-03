@@ -36,6 +36,17 @@ Tabs sync with the URL using `UrlTabs` and `router.replace({ scroll: false })`.
 
 **Legacy URL Redirects**: `/payments` redirects to `/receipts?tab=cobrar`, `/payments/new` to `/receipts?tab=cobrar`, and `/data-quality` to `/risks?tab=completitud`.
 
+### Authentication & Audit
+- **Login**: `/login` page (server action `loginAction`) authenticates against `User` table. Passwords stored as `scrypt$<salt>$<hash>`.
+- **Sessions**: Stateless HMAC-signed token (`SHA-256`, edge-safe Web Crypto in `src/lib/session.ts`) stored in `pd_session` httpOnly cookie (30-day TTL). Secret comes from `AUTH_SECRET` env var (dev fallback baked in for local use).
+- **Middleware**: `src/middleware.ts` redirects unauthenticated requests on any non-public path to `/login?redirect=...`. Public prefixes: `/login`, `/api/auth`, `/_next`, `/favicon`, `/public`.
+- **Logout**: `POST /api/auth/logout` clears the cookie and redirects to `/login`.
+- **Per-user audit**: 8 entities (`Client`, `Policy`, `Receipt`, `Payment`, `Claim`, `Quote`, `Task`, `Document`) have `createdById` + `updatedById` FK columns to `User`. Server actions stamp these via `getCurrentUserId()`. `ActivityLog.userId` is non-null and is set automatically via `getCurrentUserIdOrSystem()` in `src/lib/activity-log.ts`.
+- **Detail pages**: render `<AuditByline createdById={...} updatedById={...} />` to show "Creado por X / Última edición por Y".
+- **Topbar**: `<UserMenu />` server component shows session name/email + a logout button.
+- **System user**: `system-user-0000` ("Sistema") owns all historic/seed/script-imported records.
+- **Seeded users** (created by `npm run db:seed`): `admin@policydesk.local` / `admin1234`, `broker@policydesk.local` / `broker1234`.
+
 ### Backend
 - **Runtime**: Next.js Server Components and Server Actions (`"use server"`).
 - **API routes**: Located under `src/app/api/`.

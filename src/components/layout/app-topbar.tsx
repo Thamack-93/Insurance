@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { Bell, CalendarDays, Command } from "lucide-react";
 import { SearchInput } from "@/components/search/search-input";
@@ -27,7 +28,7 @@ const labels: Record<string, string> = {
   "data-quality": "Calidad de datos",
 };
 
-export function AppTopbar() {
+export function AppTopbar({ userMenu }: { userMenu?: ReactNode }) {
   const pathname = usePathname();
   const segments = pathname.split("/").filter(Boolean);
 
@@ -74,6 +75,7 @@ export function AppTopbar() {
           >
             <Bell className="size-4" aria-hidden />
           </Button>
+          {userMenu}
         </div>
       </div>
     </header>

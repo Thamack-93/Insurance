@@ -4,6 +4,7 @@ import { RecordPageView } from "@/components/recently-viewed/record-page-view";
 import { Mail, Phone, MapPin, BadgeInfo, FileText, ClipboardList, History, Pencil, ShieldCheck } from "lucide-react";
 import { DeleteClientButton } from "@/components/clients/delete-client-button";
 import { PageHeader } from "@/components/layout/page-header";
+import { AuditByline } from "@/components/audit/audit-byline";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { getActivityForEntity } from "@/lib/activity-log";
@@ -105,6 +106,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             </div>
           }
         />
+
+        <AuditByline createdById={client.createdById} updatedById={client.updatedById} />
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
