@@ -67,7 +67,7 @@ export async function getSettings(): Promise<Settings> {
     };
   } catch (error) {
     // If table doesn't exist yet, return defaults
-    console.warn("SystemSetting table not found, returning defaults");
+    // SystemSetting table is optional; fall back to defaults silently.
     return defaultSettings;
   }
 }
@@ -105,7 +105,6 @@ export async function updateSettings(settings: Partial<Settings>): Promise<Mutat
     revalidatePath("/settings");
     return successResult("", "/settings", "Configuración guardada.");
   } catch (error) {
-    console.error("Failed to update settings:", error);
     return errorResult(
       "No se pudo guardar la configuración. Verifica la conexión a la base de datos.",
     );

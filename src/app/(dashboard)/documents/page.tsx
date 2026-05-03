@@ -1,13 +1,18 @@
 import Link from "next/link";
 import { ArrowRight, FileDigit, FolderOpen, Link2, ShieldAlert, Download } from "lucide-react";
+import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { EmptyState } from "@/components/empty-states/empty-state";
+import { ListSearch } from "@/components/lists/list-search";
+import { Pagination } from "@/components/lists/pagination";
 import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { UploadForm } from "@/components/documents/upload-form";
+import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 
 function associationLabel(document: {
   policy?: { policyNumber: string } | null;
@@ -26,26 +31,61 @@ function associationLabel(document: {
   );
 }
 
-export default async function DocumentsPage() {
+export default async function DocumentsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ q?: string; page?: string }>;
+}) {
   const db = getDb();
+  const params = (await searchParams) ?? {};
+  const query = (params.q ?? "").trim().slice(0, 100);
+  const page = Math.max(1, Number(params.page) || 1);
 
-  const documents = await db.document.findMany({
-    include: { client: true, policy: true, receipt: true, task: true, claim: true, quote: true },
-    orderBy: { uploadedAt: "desc" },
-  });
+  const where: Prisma.DocumentWhereInput = query
+    ? {
+        OR: [
+          { fileName: { contains: query } },
+          { client: { fullName: { contains: query } } },
+          { policy: { policyNumber: { contains: query } } },
+          { receipt: { receiptNumber: { contains: query } } },
+        ],
+      }
+    : {};
 
-  const orphanDocuments = documents.filter(
-    (document) =>
-      !document.clientId &&
-      !document.policyId &&
-      !document.receiptId &&
-      !document.taskId &&
-      !document.claimId &&
-      !document.quoteId,
-  );
-  const paymentProofs = documents.filter((document) => document.documentType === "PAYMENT_PROOF");
-  const policyDocs = documents.filter((document) => document.policyId);
-  const linkedDocuments = documents.length - orphanDocuments.length;
+  const [totalCount, filteredCount, pagedDocuments, totalDocs, orphanCount, paymentProofsCount, policyDocs] =
+    await Promise.all([
+      db.document.count(),
+      db.document.count({ where }),
+      db.document.findMany({
+        where,
+        include: { client: true, policy: true, receipt: true, task: true, claim: true, quote: true },
+        orderBy: { uploadedAt: "desc" },
+        skip: (page - 1) * DEFAULT_PAGE_SIZE,
+        take: DEFAULT_PAGE_SIZE,
+      }),
+      db.document.count(),
+      db.document.count({
+        where: {
+          AND: [
+            { clientId: null },
+            { policyId: null },
+            { receiptId: null },
+            { taskId: null },
+            { claimId: null },
+            { quoteId: null },
+          ],
+        },
+      }),
+      db.document.count({ where: { documentType: "PAYMENT_PROOF" } }),
+      db.document.findMany({
+        where: { policyId: { not: null } },
+        include: { policy: true },
+        orderBy: { uploadedAt: "desc" },
+        take: 10,
+      }),
+    ]);
+
+  const linkedDocuments = totalDocs - orphanCount;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
@@ -67,7 +107,7 @@ export default async function DocumentsPage() {
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
             title="Documentos"
-            value={documents.length}
+            value={totalCount}
             description="Total de archivos indexados."
             icon={FolderOpen}
             tone="blue"
@@ -80,117 +120,155 @@ export default async function DocumentsPage() {
             tone="emerald"
           />
           <MetricCard
-            title="Huerfanos"
-            value={orphanDocuments.length}
+            title="Huérfanos"
+            value={orphanCount}
             description="Sin vínculo a cliente, póliza o trámite."
             icon={ShieldAlert}
             tone="rose"
           />
           <MetricCard
             title="Comprobantes"
-            value={paymentProofs.length}
+            value={paymentProofsCount}
             description="Comprobantes de pago y soporte financiero."
             icon={FileDigit}
             tone="amber"
           />
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-          <SectionCard title="Documentos recientes" description="Últimas cargas del archivo local.">
+        <SectionCard
+          title="Documentos"
+          description="Listado paginado con búsqueda por archivo, tipo, cliente o póliza."
+          action={<ListSearch placeholder="Buscar por archivo, tipo, cliente o póliza..." />}
+        >
+          {filteredCount === 0 ? (
+            <div className="p-4">
+              <EmptyState
+                icon={FolderOpen}
+                title={query ? "Sin resultados" : "Sin documentos"}
+                description={
+                  query
+                    ? `No encontramos documentos que coincidan con "${query}".`
+                    : "Sube tu primer archivo en la sección de carga al final de la página."
+                }
+              />
+            </div>
+          ) : pagedDocuments.length === 0 ? (
+            <div className="p-4">
+              <EmptyState
+                icon={FolderOpen}
+                title="Página fuera de rango"
+                description="Vuelve al inicio del listado."
+                action="Volver al inicio"
+                actionHref={query ? `/documents?q=${encodeURIComponent(query)}` : "/documents"}
+              />
+            </div>
+          ) : (
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-stone-50/70">
+                    <TableHead>Archivo</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead>Cliente / Póliza</TableHead>
+                    <TableHead>Fecha</TableHead>
+                    <TableHead>Estado</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pagedDocuments.map((document) => (
+                    <TableRow key={document.id}>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          <span>{document.fileName}</span>
+                          <Button asChild variant="ghost" size="sm" className="h-6 w-6 p-0">
+                            <Link
+                              href={`/api/documents/${document.id}/download`}
+                              target="_blank"
+                              aria-label={`Descargar ${document.fileName}`}
+                            >
+                              <Download className="size-3" />
+                            </Link>
+                          </Button>
+                        </div>
+                      </TableCell>
+                      <TableCell>{document.documentType}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span>{document.client?.fullName ?? "Sin cliente"}</span>
+                          <span className="text-xs text-muted-foreground">{associationLabel(document)}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>{formatDate(document.uploadedAt)}</TableCell>
+                      <TableCell>
+                        <StatusBadge
+                          status={
+                            document.policyId ||
+                            document.receiptId ||
+                            document.taskId ||
+                            document.claimId ||
+                            document.quoteId
+                              ? "ACTIVE"
+                              : "ARCHIVED"
+                          }
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <Pagination
+                page={page}
+                pageSize={DEFAULT_PAGE_SIZE}
+                total={filteredCount}
+                basePath="/documents"
+                searchParams={{ q: query }}
+              />
+            </>
+          )}
+        </SectionCard>
+
+        <SectionCard title="Documentos por póliza" description="Archivos que ya cuelgan del expediente de póliza.">
+          {policyDocs.length === 0 ? (
+            <div className="p-4">
+              <EmptyState
+                icon={Link2}
+                title="Sin documentos por póliza"
+                description="Cuando asocies archivos a pólizas aparecerán aquí."
+              />
+            </div>
+          ) : (
             <Table>
               <TableHeader>
                 <TableRow className="bg-stone-50/70">
                   <TableHead>Archivo</TableHead>
+                  <TableHead>Póliza</TableHead>
                   <TableHead>Tipo</TableHead>
-                  <TableHead>Cliente / Póliza</TableHead>
                   <TableHead>Fecha</TableHead>
-                  <TableHead>Estado</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {documents.slice(0, 10).map((document) => (
+                {policyDocs.map((document) => (
                   <TableRow key={document.id}>
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        <span>{document.fileName}</span>
-                        <Button
-                          asChild
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                        >
-                          <Link href={`/api/documents/${document.id}/download`} target="_blank">
-                            <Download className="size-3" />
-                          </Link>
-                        </Button>
-                      </div>
+                    <TableCell className="font-medium">{document.fileName}</TableCell>
+                    <TableCell>
+                      {document.policy ? (
+                        <Link href={`/policies/${document.policyId}`} className="text-foreground hover:text-primary">
+                          {document.policy.policyNumber}
+                        </Link>
+                      ) : (
+                        "Sin póliza"
+                      )}
                     </TableCell>
                     <TableCell>{document.documentType}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-col">
-                        <span>{document.client?.fullName ?? "Sin cliente"}</span>
-                        <span className="text-xs text-muted-foreground">{associationLabel(document)}</span>
-                      </div>
-                    </TableCell>
                     <TableCell>{formatDate(document.uploadedAt)}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={document.policyId || document.receiptId || document.taskId || document.claimId || document.quoteId ? "ACTIVE" : "ARCHIVED"} />
-                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          </SectionCard>
-
-          <SectionCard title="Huerfanos" description="Archivos que conviene asociar para no perder contexto.">
-            <div className="divide-y divide-stone-200/80">
-              {orphanDocuments.length === 0 ? (
-                <div className="px-4 py-6 text-sm text-muted-foreground">No hay documentos huérfanos en este momento.</div>
-              ) : (
-                orphanDocuments.slice(0, 10).map((document) => (
-                  <div key={document.id} className="px-4 py-4">
-                    <p className="font-medium text-foreground">{document.fileName}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">{document.mimeType} · {formatDate(document.uploadedAt)}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{document.notes ?? "Sin notas"}</p>
-                  </div>
-                ))
-              )}
-            </div>
-          </SectionCard>
-        </section>
-
-        <SectionCard title="Documentos por póliza" description="Archivos que ya cuelgan del expediente de póliza.">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-stone-50/70">
-                <TableHead>Archivo</TableHead>
-                <TableHead>Póliza</TableHead>
-                <TableHead>Tipo</TableHead>
-                <TableHead>Fecha</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {policyDocs.slice(0, 10).map((document) => (
-                <TableRow key={document.id}>
-                  <TableCell className="font-medium">{document.fileName}</TableCell>
-                  <TableCell>
-                    {document.policy ? (
-                      <Link href={`/policies/${document.policyId}`} className="text-foreground hover:text-primary">
-                        {document.policy.policyNumber}
-                      </Link>
-                    ) : (
-                      "Sin póliza"
-                    )}
-                  </TableCell>
-                  <TableCell>{document.documentType}</TableCell>
-                  <TableCell>{formatDate(document.uploadedAt)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          )}
         </SectionCard>
 
-        <SectionCard title="Subir Documento" description="Agrega nuevos archivos al sistema.">
+        <SectionCard title="Subir documento" description="Agrega nuevos archivos al sistema.">
           <UploadForm />
         </SectionCard>
       </div>

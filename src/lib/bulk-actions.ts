@@ -63,7 +63,6 @@ export async function bulkDelete(
     revalidatePaths([redirectPath]);
     return successResult("", redirectPath, `${result.count} elementos eliminados.`);
   } catch (error) {
-    console.error("Bulk delete error:", error);
     return errorResult(
       "No fue posible eliminar los elementos. Verifica que no tengan dependencias.",
     );
@@ -99,7 +98,6 @@ export async function bulkUpdateStatus(
     revalidatePaths([redirectPath]);
     return successResult("", redirectPath, `Estado actualizado para ${result.count} elementos.`);
   } catch (error) {
-    console.error("Bulk update error:", error);
     return errorResult("No fue posible actualizar el estado de los elementos seleccionados.");
   }
 }
