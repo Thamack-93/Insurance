@@ -86,7 +86,7 @@ export default async function ActivityPage({
     : "Mostrando toda la actividad del sistema.";
 
   return (
-    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
+    <div className="flex flex-col gap-6">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <PageHeader
           eyebrow="Auditoría"
@@ -195,6 +195,6 @@ export default async function ActivityPage({
           />
         </SectionCard>
       </div>
-    </main>
+    </div>
   );
 }

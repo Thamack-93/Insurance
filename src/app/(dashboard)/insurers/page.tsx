@@ -71,7 +71,7 @@ export default async function InsurersPage({
   const totalPortfolioValue = toNumber(portfolioAgg._sum.premiumAmount ?? 0);
 
   return (
-    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
+    <div className="flex flex-col gap-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Catálogo"
@@ -95,7 +95,7 @@ export default async function InsurersPage({
           }
         />
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
             title="Aseguradoras activas"
             value={activeCount}
@@ -231,6 +231,6 @@ export default async function InsurersPage({
           )}
         </SectionCard>
       </div>
-    </main>
+    </div>
   );
 }

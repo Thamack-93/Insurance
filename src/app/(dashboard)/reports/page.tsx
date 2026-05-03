@@ -136,7 +136,7 @@ export default async function ReportsPage() {
   ];
 
   return (
-    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
+    <div className="flex flex-col gap-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Analítica"
@@ -155,7 +155,7 @@ export default async function ReportsPage() {
           }
         />
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard title="Pólizas activas" value={activePolicies} description="Base productiva actual." icon={BarChart3} tone="blue" />
           <MetricCard title="Cobranza 60 días" value={dueReceipts} description="Recibos en el radar." icon={CircleDollarSign} tone="emerald" />
           <MetricCard title="Renovaciones" value={renewalsSoon} description="Renovaciones activas del horizonte." icon={CalendarClock} tone="amber" />
@@ -192,6 +192,6 @@ export default async function ReportsPage() {
           </div>
         </SectionCard>
       </div>
-    </main>
+    </div>
   );
 }

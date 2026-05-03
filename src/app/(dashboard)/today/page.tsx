@@ -50,7 +50,7 @@ export default async function TodayPage() {
         }
       />
 
-      <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <MetricCard title="Vencidos" value={overdueCount} description="Recibos atrasados" icon={Siren} tone="rose" />
         <MetricCard
           title="Vencen hoy"

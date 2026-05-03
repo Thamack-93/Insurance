@@ -40,7 +40,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
               unreadAlertCount={unreadAlertCount}
               alerts={bellAlerts}
             />
-            <main className="mx-auto w-full max-w-[1560px] px-5 py-8 lg:px-8">{children}</main>
+            <main className="mx-auto w-full max-w-[1560px] px-3 py-6 sm:px-5 sm:py-8 lg:px-8">{children}</main>
           </div>
         </div>
         <CommandPaletteWrapper />

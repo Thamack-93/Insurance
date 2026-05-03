@@ -28,7 +28,7 @@ export default async function EditInsurerPage({ params }: { params: Promise<{ id
   });
 
   return (
-    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
+    <div className="flex flex-col gap-6">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
         <PageHeader
           eyebrow="Catálogo"
@@ -45,6 +45,6 @@ export default async function EditInsurerPage({ params }: { params: Promise<{ id
           submitAction={updateInsurer.bind(null, id)}
         />
       </div>
-    </main>
+    </div>
   );
 }

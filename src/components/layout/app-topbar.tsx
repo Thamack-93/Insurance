@@ -7,6 +7,7 @@ import { SearchInput } from "@/components/search/search-input";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { NotificationsBell, type BellAlert } from "@/components/notifications/notifications-bell";
+import { AppMobileSidebar } from "@/components/layout/app-mobile-sidebar";
 
 const labels: Record<string, string> = {
   dashboard: "Dashboard",
@@ -44,7 +45,8 @@ export function AppTopbar({
 
   return (
     <header className="sticky top-0 z-30 border-b border-border/70 bg-background/80 backdrop-blur-xl">
-      <div className="flex h-16 items-center gap-4 px-5 lg:px-8">
+      <div className="flex h-16 items-center gap-3 px-3 sm:px-5 lg:gap-4 lg:px-8">
+        <AppMobileSidebar />
         <div className="hidden items-center gap-2 text-sm text-muted-foreground md:flex shrink-0">
           <span>PG</span>
           {segments.map((segment) => (
