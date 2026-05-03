@@ -22,6 +22,27 @@ function FileTypeIcon({ mimeType }: { mimeType: string }) {
   return <FileIcon className="size-4 text-muted-foreground" />;
 }
 
+function Thumbnail({ doc }: { doc: DocumentListItem }) {
+  if (doc.mimeType.startsWith("image/")) {
+    return (
+      <div className="size-10 shrink-0 overflow-hidden rounded-md border bg-muted">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={`/api/documents/${doc.id}/download?inline=1`}
+          alt=""
+          loading="lazy"
+          className="size-full object-cover"
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="flex size-10 shrink-0 items-center justify-center rounded-md border bg-muted">
+      <FileTypeIcon mimeType={doc.mimeType} />
+    </div>
+  );
+}
+
 export function DocumentList({
   documents,
   showAssociation = false,
@@ -56,8 +77,8 @@ export function DocumentList({
         {documents.map((doc) => (
           <TableRow key={doc.id}>
             <TableCell className="font-medium">
-              <div className="flex items-center gap-2">
-                <FileTypeIcon mimeType={doc.mimeType} />
+              <div className="flex items-center gap-3">
+                <Thumbnail doc={doc} />
                 <span className="truncate">{doc.fileName}</span>
               </div>
             </TableCell>

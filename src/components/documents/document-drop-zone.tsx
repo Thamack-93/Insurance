@@ -45,16 +45,24 @@ type Props = {
 const ALLOWED_EXT = [".pdf", ".jpg", ".jpeg", ".png", ".webp", ".doc", ".docx"];
 const MAX_BYTES = 10 * 1024 * 1024;
 
-function uploadOne(
-  file: File,
+type BatchResult = {
+  ok: boolean;
+  rolledBack?: boolean;
+  results: Array<{ ok: boolean; fileName: string; error?: string }>;
+  error?: string;
+};
+
+function uploadBatch(
+  files: File[],
   documentType: string,
   associations: Associations,
   onProgress: (pct: number) => void,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<BatchResult> {
   return new Promise((resolve) => {
     const fd = new FormData();
-    fd.append("files", file);
+    for (const f of files) fd.append("files", f);
     fd.append("documentType", documentType);
+    fd.append("rollback", "1");
     Object.entries(associations).forEach(([k, v]) => {
       if (v) fd.append(k, v);
     });
@@ -67,18 +75,25 @@ function uploadOne(
     xhr.onload = () => {
       try {
         const json = JSON.parse(xhr.responseText || "{}");
+        const results: BatchResult["results"] = (json.results ?? []).map((r: any) => ({
+          ok: !!r.ok,
+          fileName: r.fileName,
+          error: r.error,
+        }));
         if (xhr.status >= 200 && xhr.status < 300) {
-          const r = json.results?.[0];
-          if (r && !r.ok) return resolve({ ok: false, error: r.error });
-          return resolve({ ok: true });
+          return resolve({ ok: true, results });
         }
-        const r = json.results?.[0];
-        resolve({ ok: false, error: r?.error || json.error || "No se pudo subir." });
+        resolve({
+          ok: false,
+          rolledBack: !!json.rolledBack,
+          results,
+          error: json.error,
+        });
       } catch {
-        resolve({ ok: false, error: "Respuesta no válida del servidor." });
+        resolve({ ok: false, results: [], error: "Respuesta no válida del servidor." });
       }
     };
-    xhr.onerror = () => resolve({ ok: false, error: "Error de red al subir." });
+    xhr.onerror = () => resolve({ ok: false, results: [], error: "Error de red al subir." });
     xhr.send(fd);
   });
 }
@@ -131,38 +146,60 @@ export function DocumentDropZone({
     if (queued.length === 0) return;
 
     setBusy(true);
+    const queuedIds = new Set(queued.map((q) => q.id));
+    setItems((prev) =>
+      prev.map((p) =>
+        queuedIds.has(p.id) ? { ...p, status: "uploading", error: undefined, progress: 0 } : p,
+      ),
+    );
+
+    // Single batched request: backend rolls back successful files if any fails.
+    const res = await uploadBatch(
+      queued.map((q) => q.file),
+      documentType,
+      associations,
+      (pct) => {
+        setItems((prev) => prev.map((p) => (queuedIds.has(p.id) ? { ...p, progress: pct } : p)));
+      },
+    );
+
+    const byName = new Map<string, { ok: boolean; error?: string }>();
+    for (const r of res.results) byName.set(r.fileName, { ok: r.ok, error: r.error });
+
     let okCount = 0;
     let failCount = 0;
-
-    await Promise.all(
-      queued.map(async (it) => {
-        setItems((prev) => prev.map((p) => (p.id === it.id ? { ...p, status: "uploading", error: undefined, progress: 0 } : p)));
-        const res = await uploadOne(it.file, documentType, associations, (pct) => {
-          setItems((prev) => prev.map((p) => (p.id === it.id ? { ...p, progress: pct } : p)));
-        });
-        if (res.ok) {
+    setItems((prev) =>
+      prev.map((p) => {
+        if (!queuedIds.has(p.id)) return p;
+        const r = byName.get(p.file.name);
+        if (r?.ok) {
           okCount++;
-          setItems((prev) => prev.map((p) => (p.id === it.id ? { ...p, status: "ok", progress: 100 } : p)));
-        } else {
-          failCount++;
-          setItems((prev) => prev.map((p) => (p.id === it.id ? { ...p, status: "error", error: res.error } : p)));
+          return { ...p, status: "ok", progress: 100 };
         }
+        failCount++;
+        return {
+          ...p,
+          status: "error",
+          error: r?.error ?? res.error ?? "No se pudo subir.",
+        };
       }),
     );
 
     setBusy(false);
 
-    if (okCount > 0) {
-      toast.success(
-        okCount === 1 ? "1 documento subido" : `${okCount} documentos subidos`,
-      );
-      onUploaded?.();
-      router.refresh();
-    }
-    if (failCount > 0) {
+    if (res.rolledBack) {
       toast.error(
-        failCount === 1 ? "1 documento falló" : `${failCount} documentos fallaron`,
+        "Se canceló todo el lote: ningún archivo se guardó porque al menos uno falló.",
       );
+    } else {
+      if (okCount > 0) {
+        toast.success(okCount === 1 ? "1 documento subido" : `${okCount} documentos subidos`);
+        onUploaded?.();
+        router.refresh();
+      }
+      if (failCount > 0) {
+        toast.error(failCount === 1 ? "1 documento falló" : `${failCount} documentos fallaron`);
+      }
     }
   };
 

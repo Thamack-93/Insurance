@@ -25,13 +25,23 @@ interface UploadFormProps {
   className?: string;
 }
 
-export function UploadForm({ 
-  onSuccess, 
-  onError, 
+const ALLOWED_TYPES = [
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+];
+const MAX_BYTES = 10 * 1024 * 1024;
+
+export function UploadForm({
+  onSuccess,
+  onError,
   associations = {},
-  className 
+  className,
 }: UploadFormProps) {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState<{
@@ -50,43 +60,32 @@ export function UploadForm({
   });
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      // Validate file type
-      const allowedTypes = [
-        "application/pdf",
-        "image/jpeg",
-        "image/png",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      ];
-
-      if (!allowedTypes.includes(selectedFile.type)) {
-        setError("Only PDF, JPG, PNG, and Word documents are allowed");
+    const selected = Array.from(e.target.files ?? []);
+    const valid: File[] = [];
+    for (const f of selected) {
+      if (!ALLOWED_TYPES.includes(f.type)) {
+        setError(`${f.name}: tipo no permitido (PDF, JPG, PNG, WebP o Word).`);
         return;
       }
-
-      // Validate file size (10MB)
-      if (selectedFile.size > 10 * 1024 * 1024) {
-        setError("File size must be less than 10MB");
+      if (f.size > MAX_BYTES) {
+        setError(`${f.name}: el archivo supera 10 MB.`);
         return;
       }
-
-      setFile(selectedFile);
-      setError(null);
+      valid.push(f);
     }
+    setFiles(valid);
+    setError(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!file) {
-      setError("Please select a file");
+
+    if (files.length === 0) {
+      setError("Selecciona al menos un archivo.");
       return;
     }
-
     if (!formData.documentType) {
-      setError("Please select a document type");
+      setError("Selecciona el tipo de documento.");
       return;
     }
 
@@ -95,12 +94,9 @@ export function UploadForm({
 
     try {
       const formDataToSend = new FormData();
-      formDataToSend.append("file", file);
-      
+      for (const f of files) formDataToSend.append("files", f);
       Object.entries(formData).forEach(([key, value]) => {
-        if (value) {
-          formDataToSend.append(key, value);
-        }
+        if (value) formDataToSend.append(key, value);
       });
 
       const response = await fetch("/api/documents/upload", {
@@ -111,17 +107,21 @@ export function UploadForm({
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || "Upload failed");
+        throw new Error(result.error || "No se pudo subir.");
       }
 
-      onSuccess?.(result.document);
-      
-      // Reset form
-      setFile(null);
+      // Multi or single response shapes both supported.
+      const docs = result.results
+        ? result.results.filter((r: any) => r.ok).map((r: any) => r.document)
+        : result.document
+          ? [result.document]
+          : [];
+      docs.forEach((d: any) => onSuccess?.(d));
+
+      setFiles([]);
       setFormData({ documentType: "", notes: "", ...associations });
-      
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Upload failed";
+      const errorMessage = err instanceof Error ? err.message : "No se pudo subir.";
       setError(errorMessage);
       onError?.(errorMessage);
     } finally {
@@ -134,10 +134,10 @@ export function UploadForm({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Upload className="size-5" />
-          Upload Document
+          Subir documentos
         </CardTitle>
         <CardDescription>
-          Upload PDFs, images, or Word documents. Max file size: 10MB.
+          PDF, JPG, PNG, WebP o Word. Máximo 10 MB por archivo. Puedes seleccionar varios.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -152,34 +152,36 @@ export function UploadForm({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="file">File</Label>
-            <div className="flex items-center gap-2">
-              <Input
-                id="file"
-                type="file"
-                onChange={handleFileChange}
-                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                disabled={uploading}
-                className="flex-1"
-              />
-              {file && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <FileText className="size-4" />
-                  {file.name}
-                </div>
-              )}
-            </div>
+            <Label htmlFor="file">Archivos</Label>
+            <Input
+              id="file"
+              type="file"
+              multiple
+              onChange={handleFileChange}
+              accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
+              disabled={uploading}
+            />
+            {files.length > 0 && (
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                {files.map((f) => (
+                  <li key={f.name} className="flex items-center gap-2">
+                    <FileText className="size-4" />
+                    {f.name} <span className="text-xs">({(f.size / 1024).toFixed(0)} KB)</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="documentType">Document Type</Label>
+            <Label htmlFor="documentType">Tipo de documento</Label>
             <Select
               value={formData.documentType}
-              onValueChange={(value) => setFormData(prev => ({ ...prev, documentType: value || "" }))}
+              onValueChange={(value) => setFormData((prev) => ({ ...prev, documentType: value || "" }))}
               disabled={uploading}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select document type" />
+                <SelectValue placeholder="Selecciona el tipo" />
               </SelectTrigger>
               <SelectContent>
                 {documentTypeOptions.map((option: { value: string; label: string }) => (
@@ -191,38 +193,24 @@ export function UploadForm({
             </Select>
           </div>
 
-          {associations.clientId && (
-            <div className="text-sm text-muted-foreground">
-              Will be associated with the selected client
-            </div>
-          )}
-
-          {associations.policyId && (
-            <div className="text-sm text-muted-foreground">
-              Will be associated with the selected policy
-            </div>
-          )}
-
-          {associations.receiptId && (
-            <div className="text-sm text-muted-foreground">
-              Will be associated with the selected receipt
-            </div>
-          )}
-
           <div className="space-y-2">
-            <Label htmlFor="notes">Notes (optional)</Label>
+            <Label htmlFor="notes">Notas (opcional)</Label>
             <Textarea
               id="notes"
               value={formData.notes}
-              onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-              placeholder="Add any additional notes about this document..."
+              onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
+              placeholder="Agrega notas sobre estos documentos..."
               disabled={uploading}
               rows={3}
             />
           </div>
 
-          <Button type="submit" disabled={uploading || !file} className="w-full">
-            {uploading ? "Uploading..." : "Upload Document"}
+          <Button type="submit" disabled={uploading || files.length === 0} className="w-full">
+            {uploading
+              ? "Subiendo..."
+              : files.length > 1
+                ? `Subir ${files.length} documentos`
+                : "Subir documento"}
           </Button>
         </form>
       </CardContent>

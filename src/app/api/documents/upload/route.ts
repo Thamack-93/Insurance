@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { writeFile } from "node:fs/promises";
+import { writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { getDb } from "@/lib/db";
 import { getCurrentUserIdOrSystem } from "@/lib/auth";
@@ -43,6 +43,7 @@ type UploadResult = {
   ok: boolean;
   fileName: string;
   document?: { id: string; fileName: string; documentType: string; uploadedAt: Date; mimeType: string };
+  savedPath?: string;
   error?: string;
 };
 
@@ -84,6 +85,7 @@ async function processFile(
     return {
       ok: true,
       fileName: file.name,
+      savedPath: safePath,
       document: {
         id: document.id,
         fileName: document.fileName,
@@ -128,10 +130,40 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = await getCurrentUserIdOrSystem();
+    const rollback = formData.get("rollback") === "1" || files.length > 1;
     const results = await Promise.all(files.map((f) => processFile(f, validatedData, userId)));
 
     const okCount = results.filter((r) => r.ok).length;
     const failCount = results.length - okCount;
+
+    // Atomic mode: if any file fails in a multi-upload, roll back successful ones
+    // by deleting their DB rows + files on disk.
+    if (rollback && failCount > 0 && okCount > 0) {
+      const db = getDb();
+      await Promise.all(
+        results
+          .map(async (r, idx) => {
+            if (!r.ok || !r.document) return;
+            try {
+              await db.document.delete({ where: { id: r.document.id } });
+              if (r.savedPath) {
+                await unlink(r.savedPath).catch(() => {});
+              }
+              results[idx] = {
+                ok: false,
+                fileName: r.fileName,
+                error: "Revertido por falla en otro archivo del lote.",
+              };
+            } catch (e) {
+              logError("api.documents.upload.rollback", e);
+            }
+          }),
+      );
+      return NextResponse.json(
+        { success: false, okCount: 0, failCount: results.length, rolledBack: true, results },
+        { status: 400 },
+      );
+    }
 
     // Backward-compat single-file response shape when only one file uploaded.
     if (files.length === 1) {
