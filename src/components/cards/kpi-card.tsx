@@ -14,17 +14,17 @@ type KpiCardProps = {
 };
 
 const toneMap = {
-  blue: "from-sky-500/14 to-cyan-400/5 text-sky-700",
-  green: "from-emerald-500/14 to-lime-400/5 text-emerald-700",
-  amber: "from-amber-500/18 to-orange-400/5 text-amber-800",
-  red: "from-red-500/14 to-rose-400/5 text-red-700",
-  slate: "from-slate-500/12 to-stone-400/5 text-slate-700",
+  blue: "from-sky-500/14 to-cyan-400/5 text-sky-700 dark:text-sky-300",
+  green: "from-emerald-500/14 to-lime-400/5 text-emerald-700 dark:text-emerald-300",
+  amber: "from-amber-500/18 to-orange-400/5 text-amber-800 dark:text-amber-200",
+  red: "from-red-500/14 to-rose-400/5 text-red-700 dark:text-red-300",
+  slate: "from-slate-500/12 to-stone-400/5 text-foreground/80",
 };
 
 export function KpiCard({ title, value, description, href, icon: Icon, tone = "slate" }: KpiCardProps) {
   return (
     <Link href={href} className="group block">
-      <Card className="overflow-hidden border-border/70 bg-card/82 shadow-sm  backdrop-blur transition duration-200 hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-xl hover:">
+      <Card className="overflow-hidden border-border/70 bg-card/85 shadow-sm backdrop-blur transition duration-200 hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-xl">
         <CardContent className="relative p-5">
           <div className={cn("absolute inset-x-0 top-0 h-24 bg-gradient-to-br", toneMap[tone])} />
           <div className="relative flex items-start justify-between gap-4">
