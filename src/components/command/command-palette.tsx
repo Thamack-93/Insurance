@@ -39,6 +39,9 @@ export type CommandPaletteProps = {
   description?: string
   placeholder?: string
   className?: string
+  inputValue?: string
+  onInputValueChange?: (value: string) => void
+  shouldFilter?: boolean
 }
 
 function CommandPalette({
@@ -49,11 +52,14 @@ function CommandPalette({
   description = "Busca páginas, acciones y accesos rápidos.",
   placeholder = "Escribe para buscar...",
   className,
+  inputValue,
+  onInputValueChange,
+  shouldFilter = true,
 }: CommandPaletteProps) {
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange} title={title} description={description} className={className}>
-      <Command shouldFilter={true}>
-        <CommandInput placeholder={placeholder} />
+      <Command shouldFilter={shouldFilter}>
+        <CommandInput placeholder={placeholder} value={inputValue} onValueChange={onInputValueChange} />
         <CommandList>
           <CommandEmpty>
             <div className="flex flex-col items-center gap-2 py-2">

@@ -3,13 +3,30 @@
 import { createContext, useContext, useState, useCallback } from "react";
 import { toast } from "sonner";
 
-type SearchResult = {
+export type SearchResultType =
+  | "client"
+  | "policy"
+  | "receipt"
+  | "task"
+  | "claim"
+  | "quote"
+  | "insurer"
+  | "document";
+
+export type SearchResultMatch = {
+  field: string;
+  fieldLabel: string;
+  snippet: string;
+};
+
+export type SearchResult = {
   id: string;
-  type: "client" | "policy" | "receipt" | "task" | "claim" | "quote" | "insurer";
+  type: SearchResultType;
   title: string;
   subtitle?: string;
+  parentLabel?: string;
   href: string;
-  data: any;
+  match?: SearchResultMatch;
 };
 
 type SearchContextType = {
@@ -36,13 +53,11 @@ export function SearchProvider({ children }: { children: React.ReactNode }) {
 
     setIsSearching(true);
     try {
-      // Fetch search results from API
       const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
       if (!response.ok) throw new Error("Search failed");
-
       const results: SearchResult[] = await response.json();
       setSearchResults(results);
-    } catch (error) {
+    } catch {
       setSearchResults([]);
       toast.error("No se pudo completar la búsqueda. Intenta de nuevo.");
     } finally {

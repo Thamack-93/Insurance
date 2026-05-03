@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   LayoutDashboard,
@@ -23,12 +23,49 @@ import {
   Plus,
   Clock,
 } from "lucide-react";
-import { CommandPalette } from "./command-palette";
+import { CommandPalette, type CommandPaletteGroup } from "./command-palette";
 import { getRecentItems, RECENTLY_VIEWED_EVENT, type RecentItem } from "@/lib/recently-viewed";
+import type { SearchResult, SearchResultType } from "@/components/search/search-provider";
+
+const dynamicEntityIcon: Record<SearchResultType, React.ReactNode> = {
+  client: <Users className="size-4" />,
+  policy: <FolderKanban className="size-4" />,
+  receipt: <ReceiptText className="size-4" />,
+  task: <CheckSquare className="size-4" />,
+  claim: <AlertTriangle className="size-4" />,
+  quote: <Calculator className="size-4" />,
+  insurer: <Building2 className="size-4" />,
+  document: <FileText className="size-4" />,
+};
+
+const dynamicEntityLabel: Record<SearchResultType, string> = {
+  client: "Clientes",
+  policy: "Pólizas",
+  receipt: "Recibos",
+  task: "Pendientes",
+  claim: "Siniestros",
+  quote: "Cotizaciones",
+  insurer: "Aseguradoras",
+  document: "Documentos",
+};
+
+const groupOrder: SearchResultType[] = [
+  "client",
+  "policy",
+  "receipt",
+  "claim",
+  "quote",
+  "task",
+  "insurer",
+  "document",
+];
 
 export function CommandPaletteWrapper() {
   const [open, setOpen] = useState(false);
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
+  const [inputValue, setInputValue] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   const router = useRouter();
 
   const handleSelect = useCallback((href: string) => {
@@ -40,7 +77,7 @@ export function CommandPaletteWrapper() {
     const down = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        setOpen((open) => !open);
+        setOpen((prev) => !prev);
       }
     };
     const openHandler = () => setOpen(true);
@@ -66,10 +103,72 @@ export function CommandPaletteWrapper() {
   useEffect(() => {
     if (open) {
       setRecentItems(getRecentItems());
+    } else {
+      setInputValue("");
+      setSearchResults([]);
     }
   }, [open]);
 
-  const recentGroup = recentItems.length > 0
+  // Debounced server search whenever the user types 2+ chars in the palette.
+  useEffect(() => {
+    const q = inputValue.trim();
+    if (q.length < 2) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
+    }
+    const ctrl = new AbortController();
+    setIsSearching(true);
+    const timer = setTimeout(() => {
+      fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: ctrl.signal })
+        .then((r) => (r.ok ? r.json() : []))
+        .then((data: SearchResult[]) => {
+          setSearchResults(Array.isArray(data) ? data : []);
+        })
+        .catch(() => {
+          if (!ctrl.signal.aborted) setSearchResults([]);
+        })
+        .finally(() => {
+          if (!ctrl.signal.aborted) setIsSearching(false);
+        });
+    }, 220);
+    return () => {
+      ctrl.abort();
+      clearTimeout(timer);
+    };
+  }, [inputValue]);
+
+  const dynamicGroups = useMemo<CommandPaletteGroup[]>(() => {
+    if (inputValue.trim().length < 2) return [];
+    const buckets = new Map<SearchResultType, SearchResult[]>();
+    for (const r of searchResults) {
+      const arr = buckets.get(r.type) ?? [];
+      arr.push(r);
+      buckets.set(r.type, arr);
+    }
+    const out: CommandPaletteGroup[] = [];
+    for (const t of groupOrder) {
+      const items = buckets.get(t);
+      if (!items?.length) continue;
+      out.push({
+        label: dynamicEntityLabel[t],
+        items: items.map((r) => ({
+          // Include the query and field text in the cmdk value so its filter
+          // never hides matches we already vetted server-side.
+          id: `search-${r.type}-${r.id}`,
+          label: r.title,
+          description: r.match?.snippet
+            ? `Coincidencia en ${r.match.fieldLabel}: “${r.match.snippet}”`
+            : r.subtitle,
+          icon: dynamicEntityIcon[t],
+          onSelect: () => handleSelect(r.href),
+        })),
+      });
+    }
+    return out;
+  }, [searchResults, inputValue, handleSelect]);
+
+  const recentGroup: CommandPaletteGroup[] = recentItems.length > 0
     ? [{
         label: "Vistos recientemente",
         items: recentItems.map((item) => ({
@@ -82,7 +181,7 @@ export function CommandPaletteWrapper() {
       }]
     : [];
 
-  const groups = [
+  const staticGroups: CommandPaletteGroup[] = [
     ...recentGroup,
     {
       label: "Operación",
@@ -144,14 +243,28 @@ export function CommandPaletteWrapper() {
     },
   ];
 
+  // When the user is searching (2+ chars), show server results instead of
+  // static navigation, and disable cmdk's local filter so we trust the server.
+  const isDynamic = inputValue.trim().length >= 2;
+  const groups = isDynamic
+    ? dynamicGroups.length > 0
+      ? dynamicGroups
+      : isSearching
+        ? [{ label: "Resultados", items: [{ id: "loading", label: "Buscando...", disabled: true }] }]
+        : [{ label: "Resultados", items: [{ id: "empty", label: "Sin resultados", disabled: true }] }]
+    : staticGroups;
+
   return (
     <CommandPalette
       open={open}
       onOpenChange={setOpen}
       groups={groups}
-      placeholder="Buscar páginas, crear registros..."
+      placeholder="Buscar páginas, clientes, pólizas, documentos..."
       title="Command Palette"
       description="Navegación rápida y acciones de PG"
+      inputValue={inputValue}
+      onInputValueChange={setInputValue}
+      shouldFilter={!isDynamic}
     />
   );
 }
