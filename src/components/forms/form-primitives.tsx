@@ -30,6 +30,7 @@ export function FormField({
   htmlFor,
   error,
   hint,
+  required,
   className,
   children,
 }: {
@@ -37,15 +38,42 @@ export function FormField({
   htmlFor?: string;
   error?: string;
   hint?: string;
+  required?: boolean;
   className?: string;
   children: ReactNode;
 }) {
+  const errorId = htmlFor && error ? `${htmlFor}-error` : undefined;
+  const hintId = htmlFor && hint ? `${htmlFor}-hint` : undefined;
+  const describedBy = errorId ?? hintId;
+
   return (
     <div className={cn("space-y-2", className)}>
-      <Label htmlFor={htmlFor}>{label}</Label>
-      {children}
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {!error && hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+      <Label htmlFor={htmlFor}>
+        {label}
+        {required ? (
+          <span aria-hidden className="ml-1 text-destructive">
+            *
+          </span>
+        ) : null}
+      </Label>
+      <div
+        data-slot="form-field-control"
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy}
+        aria-required={required || undefined}
+      >
+        {children}
+      </div>
+      {error ? (
+        <p id={errorId} role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      {!error && hint ? (
+        <p id={hintId} className="text-xs text-muted-foreground">
+          {hint}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -124,7 +124,7 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
                 placeholder="Seleccionar recibo"
               />
               {errors.receiptId && (
-                <p className="text-sm text-red-500">{errors.receiptId.message}</p>
+                <p className="text-sm text-destructive" role="alert">{errors.receiptId.message}</p>
               )}
             </div>
 
@@ -144,7 +144,7 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
                 </p>
               )}
               {errors.amount && (
-                <p className="text-sm text-red-500">{errors.amount.message}</p>
+                <p className="text-sm text-destructive" role="alert">{errors.amount.message}</p>
               )}
             </div>
           </div>
@@ -158,7 +158,7 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
                 {...register("paidDate")}
               />
               {errors.paidDate && (
-                <p className="text-sm text-red-500">{errors.paidDate.message}</p>
+                <p className="text-sm text-destructive" role="alert">{errors.paidDate.message}</p>
               )}
             </div>
 
@@ -171,7 +171,7 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
                 placeholder="Seleccionar método"
               />
               {errors.paymentMethod && (
-                <p className="text-sm text-red-500">{errors.paymentMethod.message}</p>
+                <p className="text-sm text-destructive" role="alert">{errors.paymentMethod.message}</p>
               )}
             </div>
           </div>

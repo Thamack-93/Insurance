@@ -12,6 +12,8 @@ export type RiskFinding = {
   suggestedAction: string;
 };
 
+const TAKE_LIMIT = 25;
+
 export async function detectRisks(): Promise<RiskFinding[]> {
   const db = getDb();
   const now = today();
@@ -31,22 +33,22 @@ export async function detectRisks(): Promise<RiskFinding[]> {
     orphanDocuments,
     clientsWithoutActivePolicies,
     renewalsWithoutTask,
-    policies,
-    receipts,
+    duplicatePolicyKeys,
+    duplicateReceiptKeys,
   ] = await Promise.all([
     db.policy.findMany({
       where: { status: "ACTIVE", renewalDate: null },
-      take: 25,
+      take: TAKE_LIMIT,
       select: { id: true, policyNumber: true },
     }),
     db.policy.findMany({
       where: { status: "ACTIVE", documents: { none: { documentType: "POLICY" } } },
-      take: 25,
+      take: TAKE_LIMIT,
       select: { id: true, policyNumber: true },
     }),
     db.policy.findMany({
       where: { endDate: { lt: now }, status: { notIn: ["RENEWED", "CANCELLED"] } },
-      take: 25,
+      take: TAKE_LIMIT,
       select: { id: true, policyNumber: true },
     }),
     db.receipt.findMany({
@@ -55,17 +57,17 @@ export async function detectRisks(): Promise<RiskFinding[]> {
         status: { notIn: ["PAID", "CANCELLED"] },
         payments: { none: {} },
       },
-      take: 25,
+      take: TAKE_LIMIT,
       select: { id: true, receiptNumber: true },
     }),
     db.receipt.findMany({
       where: { status: "PAID", documentId: null },
-      take: 25,
+      take: TAKE_LIMIT,
       select: { id: true, receiptNumber: true },
     }),
     db.commission.findMany({
       where: { expectedDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
-      take: 25,
+      take: TAKE_LIMIT,
       select: { id: true, expectedAmount: true },
     }),
     db.task.findMany({
@@ -73,17 +75,17 @@ export async function detectRisks(): Promise<RiskFinding[]> {
         startDate: { lt: olderThan15 },
         status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] },
       },
-      take: 25,
+      take: TAKE_LIMIT,
       select: { id: true, folio: true, title: true },
     }),
     db.client.findMany({
       where: { OR: [{ phone: null }, { email: null }] },
-      take: 25,
+      take: TAKE_LIMIT,
       select: { id: true, fullName: true },
     }),
     db.policy.findMany({
       where: { OR: [{ endDate: { lt: new Date("2000-01-01") } }, { startDate: { gt: in60 } }] },
-      take: 25,
+      take: TAKE_LIMIT,
       select: { id: true, policyNumber: true },
     }),
     db.document.findMany({
@@ -95,12 +97,12 @@ export async function detectRisks(): Promise<RiskFinding[]> {
         claimId: null,
         quoteId: null,
       },
-      take: 25,
+      take: TAKE_LIMIT,
       select: { id: true, fileName: true },
     }),
     db.client.findMany({
       where: { policies: { none: { status: "ACTIVE" } } },
-      take: 25,
+      take: TAKE_LIMIT,
       select: { id: true, fullName: true },
     }),
     db.policy.findMany({
@@ -109,15 +111,42 @@ export async function detectRisks(): Promise<RiskFinding[]> {
         renewalDate: { gte: now, lte: in60 },
         tasks: { none: { taskType: "RENEWAL", status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] } } },
       },
-      take: 25,
+      take: TAKE_LIMIT,
       select: { id: true, policyNumber: true },
     }),
-    db.policy.findMany({ select: { id: true, policyNumber: true } }),
-    db.receipt.findMany({ select: { id: true, policyId: true, receiptNumber: true } }),
+    // Duplicate detection now happens in the database via groupBy.
+    db.policy.groupBy({
+      by: ["policyNumber"],
+      _count: { policyNumber: true },
+      having: { policyNumber: { _count: { gt: 1 } } },
+    }),
+    db.receipt.groupBy({
+      by: ["policyId", "receiptNumber"],
+      _count: { receiptNumber: true },
+      having: { receiptNumber: { _count: { gt: 1 } } },
+    }),
   ]);
 
-  const duplicatePolicies = duplicatesBy(policies, (policy) => policy.policyNumber);
-  const duplicateReceipts = duplicatesBy(receipts, (receipt) => `${receipt.policyId}:${receipt.receiptNumber}`);
+  const duplicatePolicies = duplicatePolicyKeys.length
+    ? await db.policy.findMany({
+        where: { policyNumber: { in: duplicatePolicyKeys.map((row) => row.policyNumber) } },
+        select: { id: true, policyNumber: true },
+        take: TAKE_LIMIT * 2,
+      })
+    : [];
+
+  const duplicateReceipts = duplicateReceiptKeys.length
+    ? await db.receipt.findMany({
+        where: {
+          OR: duplicateReceiptKeys.map((row) => ({
+            policyId: row.policyId,
+            receiptNumber: row.receiptNumber,
+          })),
+        },
+        select: { id: true, receiptNumber: true },
+        take: TAKE_LIMIT * 2,
+      })
+    : [];
 
   return [
     ...policiesWithoutRenewal.map((policy) => risk("POLICY_MISSING_RENEWAL", "WARNING", "Poliza sin fecha de renovacion", policy.policyNumber, "Policy", policy.id, "Capturar fecha de renovacion.")),
@@ -148,15 +177,3 @@ function risk(
 ): RiskFinding {
   return { alertType, severity, title, description, entityType, entityId, suggestedAction };
 }
-
-function duplicatesBy<T>(items: T[], getKey: (item: T) => string) {
-  const seen = new Map<string, T[]>();
-
-  for (const item of items) {
-    const key = getKey(item);
-    seen.set(key, [...(seen.get(key) ?? []), item]);
-  }
-
-  return [...seen.values()].filter((group) => group.length > 1).flat();
-}
-

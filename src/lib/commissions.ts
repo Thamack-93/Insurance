@@ -270,44 +270,30 @@ export async function getOverdueCommissions() {
 
 export async function autoUpdateCommissionStatuses() {
   const db = getDb();
-  
+
   try {
     const todayDate = new Date(today());
-    
-    // Update EXPECTED commissions to PENDING if their receipts are paid
-    const pendingCommissions = await db.commission.findMany({
+
+    // Sequential transitions: a commission may need EXPECTED→PENDING→OVERDUE
+    // in the same run if its receipt was just paid AND it's already past due.
+    const pendingResult = await db.commission.updateMany({
       where: {
         status: "EXPECTED",
-        receipt: {
-          status: "PAID",
-        },
+        receipt: { status: "PAID" },
       },
-      include: {
-        receipt: true,
-      },
+      data: { status: "PENDING", updatedAt: new Date() },
     });
-
-    for (const commission of pendingCommissions) {
-      await updateCommissionStatus(commission.id, "PENDING");
-    }
-
-    // Update PENDING commissions to OVERDUE if past expected date
-    const overdueCommissions = await db.commission.findMany({
+    const overdueResult = await db.commission.updateMany({
       where: {
         status: "PENDING",
-        expectedDate: {
-          lt: todayDate,
-        },
+        expectedDate: { lt: todayDate },
       },
+      data: { status: "OVERDUE", updatedAt: new Date() },
     });
 
-    for (const commission of overdueCommissions) {
-      await updateCommissionStatus(commission.id, "OVERDUE");
-    }
-
     return {
-      updatedToPending: pendingCommissions.length,
-      updatedToOverdue: overdueCommissions.length,
+      updatedToPending: pendingResult.count,
+      updatedToOverdue: overdueResult.count,
     };
   } catch (error) {
     console.error("Error auto-updating commission statuses:", error);

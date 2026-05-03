@@ -2,6 +2,7 @@
 
 import { getDb } from "@/lib/db";
 import { revalidatePath } from "next/cache";
+import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 
 export type Settings = {
   firmName: string;
@@ -85,22 +86,28 @@ export async function updateSetting(key: keyof Settings, value: string | boolean
   revalidatePath("/settings");
 }
 
-export async function updateSettings(settings: Partial<Settings>): Promise<void> {
+export async function updateSettings(settings: Partial<Settings>): Promise<MutationResult> {
   const db = getDb();
-  
+
   try {
-    for (const [key, value] of Object.entries(settings)) {
-      const stringValue = String(value);
-      await db.systemSetting.upsert({
-        where: { key },
-        update: { value: stringValue },
-        create: { key, value: stringValue },
-      });
-    }
-    
+    const entries = Object.entries(settings);
+    await Promise.all(
+      entries.map(([key, value]) => {
+        const stringValue = String(value);
+        return db.systemSetting.upsert({
+          where: { key },
+          update: { value: stringValue },
+          create: { key, value: stringValue },
+        });
+      }),
+    );
+
     revalidatePath("/settings");
+    return successResult("", "/settings", "Configuración guardada.");
   } catch (error) {
     console.error("Failed to update settings:", error);
-    throw new Error("No se pudo guardar la configuración. La tabla de configuración no existe.");
+    return errorResult(
+      "No se pudo guardar la configuración. Verifica la conexión a la base de datos.",
+    );
   }
 }

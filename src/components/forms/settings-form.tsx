@@ -16,10 +16,11 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import type { Settings } from "@/lib/settings";
+import type { MutationResult } from "@/lib/mutation-utils";
 
 type SettingsFormProps = {
   initialSettings: Settings;
-  updateSettings: (settings: Partial<Settings>) => Promise<void>;
+  updateSettings: (settings: Partial<Settings>) => Promise<MutationResult>;
 };
 
 export function SettingsForm({ initialSettings, updateSettings }: SettingsFormProps) {
@@ -28,13 +29,13 @@ export function SettingsForm({ initialSettings, updateSettings }: SettingsFormPr
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     startTransition(async () => {
-      try {
-        await updateSettings(settings);
-        toast.success("Configuración guardada exitosamente");
-      } catch (error) {
-        toast.error("Error al guardar la configuración");
+      const result = await updateSettings(settings);
+      if (result.ok) {
+        toast.success(result.message);
+      } else {
+        toast.error(result.error);
       }
     });
   };

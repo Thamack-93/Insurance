@@ -1,9 +1,10 @@
 import { addDays, endOfMonth, format, startOfMonth } from "date-fns";
 import { es } from "date-fns/locale";
 import { getDb } from "@/lib/db";
-import { daysUntil, today } from "@/lib/dates";
+import { today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
 import { detectRisks } from "@/lib/risk-engine";
+import { DASHBOARD_LIST_LIMIT } from "@/lib/constants";
 
 export async function getDashboardData() {
   const db = getDb();
@@ -20,13 +21,17 @@ export async function getDashboardData() {
     renewals60,
     openTasks,
     urgentTasks,
-    commissions,
-    receipts,
-    policies,
-    insurers,
+    commissionsAggregateParts,
+    upcomingReceipts,
+    upcomingReceiptsForChart,
+    upcomingRenewalPolicies,
+    insurerDistributionRows,
+    policyTypeDistributionRows,
+    commissionsByMonthRows,
     recentActivity,
     openAlerts,
     risks,
+    criticalTasks,
   ] = await Promise.all([
     db.policy.count({ where: { status: "ACTIVE" } }),
     db.receipt.count({
@@ -47,45 +52,83 @@ export async function getDashboardData() {
         status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] },
       },
     }),
-    db.commission.findMany({
-      where: { status: { in: ["EXPECTED", "PENDING", "OVERDUE"] } },
-      include: { insurer: true, client: true, policy: true },
-    }),
+    // Per-row fallback: actualAmount when set, otherwise expectedAmount.
+    // We split into two aggregates to reproduce SUM(COALESCE(actualAmount, expectedAmount))
+    // without scanning every row in JS.
+    Promise.all([
+      db.commission.aggregate({
+        where: { status: { in: ["EXPECTED", "PENDING", "OVERDUE"] }, actualAmount: { not: null } },
+        _sum: { actualAmount: true },
+      }),
+      db.commission.aggregate({
+        where: { status: { in: ["EXPECTED", "PENDING", "OVERDUE"] }, actualAmount: null },
+        _sum: { expectedAmount: true },
+      }),
+    ]),
     db.receipt.findMany({
-      where: { status: { notIn: ["CANCELLED"] } },
+      where: { dueDate: { lte: in60 }, status: { notIn: ["CANCELLED"] } },
       include: { client: true, insurer: true, policy: true },
       orderBy: { dueDate: "asc" },
+      take: DASHBOARD_LIST_LIMIT,
     }),
-    db.policy.findMany({ include: { insurer: true, client: true } }),
-    db.insurer.findMany({ include: { policies: true } }),
+    // Lightweight chart query — only the field we need, capped separately so the
+    // urgent list size doesn't silently undercount the weekly chart.
+    db.receipt.findMany({
+      where: { dueDate: { lte: in60 }, status: { notIn: ["CANCELLED"] } },
+      select: { dueDate: true },
+      orderBy: { dueDate: "asc" },
+      take: 500,
+    }),
+    db.policy.findMany({
+      where: { renewalDate: { gte: now, lte: in60 }, status: "ACTIVE" },
+      include: { client: true, insurer: true },
+      orderBy: { renewalDate: "asc" },
+      take: 6,
+    }),
+    db.policy.groupBy({
+      by: ["insurerId"],
+      where: { status: "ACTIVE" },
+      _count: { insurerId: true },
+    }),
+    db.policy.groupBy({
+      by: ["policyType"],
+      _count: { policyType: true },
+    }),
+    db.commission.findMany({
+      where: { status: { in: ["EXPECTED", "PENDING", "OVERDUE"] } },
+      select: { expectedDate: true, expectedAmount: true, actualAmount: true },
+      take: 200,
+    }),
     db.activityLog.findMany({ orderBy: { createdAt: "desc" }, take: 8 }),
     db.alert.findMany({ where: { status: "OPEN" }, orderBy: { createdAt: "desc" }, take: 8 }),
     detectRisks(),
+    db.task.findMany({
+      where: {
+        OR: [{ priority: "URGENT" }, { dueDate: { lte: in7 } }],
+        status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] },
+      },
+      include: { client: true, policy: true, insurer: true },
+      orderBy: [{ priority: "desc" }, { dueDate: "asc" }],
+      take: 6,
+    }),
   ]);
 
-  const commissionsReceivable = commissions.reduce(
-    (sum, commission) => sum + toNumber(commission.actualAmount ?? commission.expectedAmount),
-    0,
+  const insurerIds = insurerDistributionRows.map((row) => row.insurerId);
+  const insurerNamesById = new Map(
+    insurerIds.length
+      ? (await db.insurer.findMany({ where: { id: { in: insurerIds } }, select: { id: true, name: true } })).map(
+          (insurer) => [insurer.id, insurer.name] as const,
+        )
+      : [],
   );
 
-  const urgentPayments = receipts
-    .filter((receipt) => receipt.status !== "PAID" && daysUntil(receipt.dueDate) <= 7)
-    .slice(0, 6);
+  const [actualSumAgg, expectedFallbackAgg] = commissionsAggregateParts;
+  const commissionsReceivable =
+    toNumber(actualSumAgg._sum.actualAmount) + toNumber(expectedFallbackAgg._sum.expectedAmount);
 
-  const urgentRenewals = policies
-    .filter((policy) => policy.renewalDate && daysUntil(policy.renewalDate) <= 60)
-    .sort((a, b) => Number(a.renewalDate) - Number(b.renewalDate))
+  const urgentPayments = upcomingReceipts
+    .filter((receipt) => receipt.status !== "PAID" && receipt.dueDate <= in7)
     .slice(0, 6);
-
-  const criticalTasks = await db.task.findMany({
-    where: {
-      OR: [{ priority: "URGENT" }, { dueDate: { lte: in7 } }],
-      status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] },
-    },
-    include: { client: true, policy: true, insurer: true },
-    orderBy: [{ priority: "desc" }, { dueDate: "asc" }],
-    take: 6,
-  });
 
   const documentsMissing = risks
     .filter((risk) => ["POLICY_MISSING_PDF", "PAID_RECEIPT_WITHOUT_PROOF"].includes(risk.alertType))
@@ -103,21 +146,21 @@ export async function getDashboardData() {
       risksDetected: risks.length,
     },
     charts: {
-      dueByWeek: groupDatesByWeek(receipts.filter((receipt) => receipt.dueDate <= in60), "dueDate"),
-      renewalsByWeek: groupDatesByWeek(
-        policies.filter((policy) => policy.renewalDate && policy.renewalDate <= in60),
-        "renewalDate",
-      ),
-      policyTypeDistribution: groupByCount(policies, (policy) => policy.policyType),
-      insurerDistribution: insurers.map((insurer) => ({
-        name: insurer.name,
-        value: insurer.policies.length,
+      dueByWeek: groupDatesByWeek(upcomingReceiptsForChart, "dueDate"),
+      renewalsByWeek: groupDatesByWeek(upcomingRenewalPolicies, "renewalDate"),
+      policyTypeDistribution: policyTypeDistributionRows.map((row) => ({
+        name: row.policyType,
+        value: row._count.policyType,
       })),
-      commissionsByMonth: groupCommissionsByMonth(commissions),
+      insurerDistribution: insurerDistributionRows.map((row) => ({
+        name: insurerNamesById.get(row.insurerId) ?? "—",
+        value: row._count.insurerId,
+      })),
+      commissionsByMonth: groupCommissionsByMonth(commissionsByMonthRows),
     },
     sections: {
       urgentPayments,
-      urgentRenewals,
+      urgentRenewals: upcomingRenewalPolicies,
       criticalTasks,
       recentActivity,
       documentsMissing,
@@ -134,7 +177,6 @@ export async function getTodayData() {
   const tomorrow = addDays(now, 1);
   const in7 = addDays(now, 7);
   const in30 = addDays(now, 30);
-  const risks = await detectRisks();
 
   const [
     paymentsDueToday,
@@ -145,6 +187,7 @@ export async function getTodayData() {
     clientsToContact,
     commissionsToReview,
     recentActivity,
+    risks,
   ] = await Promise.all([
     db.receipt.findMany({
       where: { dueDate: { gte: now, lt: tomorrow }, status: { notIn: ["PAID", "CANCELLED"] } },
@@ -180,9 +223,7 @@ export async function getTodayData() {
     db.client.findMany({
       where: {
         tasks: {
-          some: {
-            status: { in: ["OPEN", "WAITING_CLIENT"] },
-          },
+          some: { status: { in: ["OPEN", "WAITING_CLIENT"] } },
         },
       },
       take: 6,
@@ -197,6 +238,7 @@ export async function getTodayData() {
       take: 8,
     }),
     db.activityLog.findMany({ orderBy: { createdAt: "desc" }, take: 8 }),
+    detectRisks(),
   ]);
 
   return {
@@ -207,7 +249,9 @@ export async function getTodayData() {
     overdueTasks,
     clientsToContact,
     commissionsToReview,
-    documentsMissing: risks.filter((risk) => ["POLICY_MISSING_PDF", "PAID_RECEIPT_WITHOUT_PROOF"].includes(risk.alertType)).slice(0, 6),
+    documentsMissing: risks
+      .filter((risk) => ["POLICY_MISSING_PDF", "PAID_RECEIPT_WITHOUT_PROOF"].includes(risk.alertType))
+      .slice(0, 6),
     criticalRisks: risks.filter((risk) => risk.severity === "CRITICAL").slice(0, 6),
     recentActivity,
   };
@@ -221,17 +265,6 @@ function groupDatesByWeek<T extends Record<string, unknown>>(items: T[], field: 
     if (!date) continue;
     const label = format(date, "MMM d", { locale: es });
     buckets.set(label, (buckets.get(label) ?? 0) + 1);
-  }
-
-  return [...buckets.entries()].map(([name, value]) => ({ name, value }));
-}
-
-function groupByCount<T>(items: T[], getKey: (item: T) => string) {
-  const buckets = new Map<string, number>();
-
-  for (const item of items) {
-    const key = getKey(item);
-    buckets.set(key, (buckets.get(key) ?? 0) + 1);
   }
 
   return [...buckets.entries()].map(([name, value]) => ({ name, value }));

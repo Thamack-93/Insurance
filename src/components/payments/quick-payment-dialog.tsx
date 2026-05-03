@@ -95,7 +95,7 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
               <div className="border-t pt-3 mt-3">
                 <div className="flex justify-between items-center">
                   <span className="text-lg font-semibold">Monto a pagar:</span>
-                  <span className="text-lg font-bold text-green-600">
+                  <span className="text-lg font-bold text-emerald-700">
                     {formatCurrency(receipt.amount, receipt.currency)}
                   </span>
                 </div>

@@ -1,12 +1,22 @@
 "use server";
 
 import { getDb } from "./db";
-import { revalidatePath } from "next/cache";
 import { writeActivityLog } from "./activity-log";
+import { errorResult, revalidatePaths, successResult, type MutationResult } from "./mutation-utils";
+type AnyDb = ReturnType<typeof getDb>;
 
 type EntityType = "client" | "policy" | "receipt" | "task" | "claim" | "quote" | "insurer";
 
-const modelMap: Record<EntityType, string> = {
+type DelegateName =
+  | "client"
+  | "policy"
+  | "receipt"
+  | "task"
+  | "claim"
+  | "quote"
+  | "insurer";
+
+const modelMap: Record<EntityType, DelegateName> = {
   client: "client",
   policy: "policy",
   receipt: "receipt",
@@ -16,32 +26,47 @@ const modelMap: Record<EntityType, string> = {
   insurer: "insurer",
 };
 
-export async function bulkDelete(ids: string[], entityType: EntityType, redirectPath: string) {
+type BulkDelegate = {
+  deleteMany: (args: { where: { id: { in: string[] } } }) => Promise<{ count: number }>;
+  updateMany: (args: {
+    where: { id: { in: string[] } };
+    data: { status: string };
+  }) => Promise<{ count: number }>;
+};
+
+function getDelegate(db: AnyDb, entityType: EntityType): BulkDelegate {
+  return (db as unknown as Record<string, BulkDelegate>)[modelMap[entityType]];
+}
+
+export async function bulkDelete(
+  ids: string[],
+  entityType: EntityType,
+  redirectPath: string,
+): Promise<MutationResult> {
+  if (ids.length === 0) {
+    return errorResult("Selecciona al menos un elemento para eliminar.");
+  }
+
   const db = getDb();
-  const modelName = modelMap[entityType];
+  const delegate = getDelegate(db, entityType);
 
   try {
-    // @ts-ignore - Dynamic model access
-    await db[modelName].deleteMany({
-      where: {
-        id: {
-          in: ids,
-        },
-      },
-    });
+    const result = await delegate.deleteMany({ where: { id: { in: ids } } });
 
     await writeActivityLog({
       action: "BULK_DELETE",
       entityType: entityType.toUpperCase(),
       entityId: ids.join(","),
-      newValue: { count: ids.length },
+      newValue: { count: result.count },
     });
 
-    revalidatePath(redirectPath);
-    return { success: true, message: `${ids.length} elementos eliminados` };
+    revalidatePaths([redirectPath]);
+    return successResult("", redirectPath, `${result.count} elementos eliminados.`);
   } catch (error) {
     console.error("Bulk delete error:", error);
-    return { success: false, message: "Error al eliminar elementos" };
+    return errorResult(
+      "No fue posible eliminar los elementos. Verifica que no tengan dependencias.",
+    );
   }
 }
 
@@ -49,35 +74,32 @@ export async function bulkUpdateStatus(
   ids: string[],
   entityType: EntityType,
   status: string,
-  redirectPath: string
-) {
+  redirectPath: string,
+): Promise<MutationResult> {
+  if (ids.length === 0) {
+    return errorResult("Selecciona al menos un elemento para actualizar.");
+  }
+
   const db = getDb();
-  const modelName = modelMap[entityType];
+  const delegate = getDelegate(db, entityType);
 
   try {
-    // @ts-ignore - Dynamic model access
-    await db[modelName].updateMany({
-      where: {
-        id: {
-          in: ids,
-        },
-      },
-      data: {
-        status,
-      },
+    const result = await delegate.updateMany({
+      where: { id: { in: ids } },
+      data: { status },
     });
 
     await writeActivityLog({
       action: "BULK_UPDATE_STATUS",
       entityType: entityType.toUpperCase(),
       entityId: ids.join(","),
-      newValue: { status, count: ids.length },
+      newValue: { status, count: result.count },
     });
 
-    revalidatePath(redirectPath);
-    return { success: true, message: `Estado actualizado para ${ids.length} elementos` };
+    revalidatePaths([redirectPath]);
+    return successResult("", redirectPath, `Estado actualizado para ${result.count} elementos.`);
   } catch (error) {
     console.error("Bulk update error:", error);
-    return { success: false, message: "Error al actualizar elementos" };
+    return errorResult("No fue posible actualizar el estado de los elementos seleccionados.");
   }
 }

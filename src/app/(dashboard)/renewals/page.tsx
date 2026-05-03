@@ -3,22 +3,21 @@ import { ArrowRight, CalendarClock, CalendarCheck2, CircleAlert, ClipboardList }
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
+import { DaysBadge } from "@/components/badges/days-badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getRenewalStats, getUpcomingRenewals, createRenewalTasks, sendRenewalReminders } from "@/lib/renewals";
-import { daysUntil, formatDate, today } from "@/lib/dates";
-import { formatCurrency, toNumber } from "@/lib/money";
+import { formatDate } from "@/lib/dates";
+import { formatCurrency } from "@/lib/money";
 
 export default async function RenewalsPage() {
-  const now = today();
-  
-  // Auto-create renewal tasks and send reminders
-  await createRenewalTasks();
-  await sendRenewalReminders();
-  
-  // Get renewal statistics and upcoming renewals
-  const stats = await getRenewalStats();
-  const upcomingRenewals = await getUpcomingRenewals(60);
+  // Run automatic side-effects in parallel before reading stats.
+  await Promise.all([createRenewalTasks(), sendRenewalReminders()]);
+
+  const [stats, upcomingRenewals] = await Promise.all([
+    getRenewalStats(),
+    getUpcomingRenewals(60),
+  ]);
   
   // Filter renewals by priority
   const urgentRenewals = upcomingRenewals.filter(r => r.priority === "URGENT");
@@ -99,9 +98,7 @@ export default async function RenewalsPage() {
                     <TableCell>{formatDate(renewal.renewalDate)}</TableCell>
                     <TableCell className="text-right font-medium">{formatCurrency(renewal.premiumAmount)}</TableCell>
                     <TableCell>
-                      <span className="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium bg-red-100 text-red-800">
-                        {renewal.daysUntilRenewal}
-                      </span>
+                      <DaysBadge days={renewal.daysUntilRenewal} />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -171,17 +168,7 @@ export default async function RenewalsPage() {
                   <TableCell>{formatDate(renewal.renewalDate)}</TableCell>
                   <TableCell className="text-right font-medium">{formatCurrency(renewal.premiumAmount)}</TableCell>
                   <TableCell>
-                    <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                      renewal.daysUntilRenewal <= 0 
-                        ? 'bg-red-100 text-red-800'
-                        : renewal.daysUntilRenewal <= 15
-                        ? 'bg-orange-100 text-orange-800'
-                        : renewal.daysUntilRenewal <= 30
-                        ? 'bg-yellow-100 text-yellow-800'
-                        : 'bg-green-100 text-green-800'
-                    }`}>
-                      {renewal.daysUntilRenewal}
-                    </span>
+                    <DaysBadge days={renewal.daysUntilRenewal} />
                   </TableCell>
                   <TableCell>
                     <StatusBadge status={renewal.priority} />

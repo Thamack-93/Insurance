@@ -58,11 +58,21 @@ export function AppTopbar() {
 
         <div className="flex items-center gap-2 shrink-0">
           <ThemeToggle />
-          <Button variant="outline" size="icon" className="rounded-full bg-white/75 dark:bg-stone-800/75">
-            <CalendarDays className="size-4" />
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Abrir calendario"
+            className="rounded-full bg-white/75 dark:bg-stone-800/75"
+          >
+            <CalendarDays className="size-4" aria-hidden />
           </Button>
-          <Button variant="outline" size="icon" className="rounded-full bg-white/75 dark:bg-stone-800/75">
-            <Bell className="size-4" />
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Ver notificaciones"
+            className="rounded-full bg-white/75 dark:bg-stone-800/75"
+          >
+            <Bell className="size-4" aria-hidden />
           </Button>
         </div>
       </div>

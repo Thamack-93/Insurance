@@ -267,6 +267,7 @@ model Receipt {
   @@index([insurerId])
   @@index([status])
   @@index([dueDate])
+  @@index([paidDate])
   @@index([policyId, receiptNumber])
 }
 

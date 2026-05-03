@@ -6,31 +6,33 @@ import { StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getCommissionStats, getOverdueCommissions, autoUpdateCommissionStatuses } from "@/lib/commissions";
-import { formatDate, today } from "@/lib/dates";
+import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getDb } from "@/lib/db";
 
 export default async function CommissionsPage() {
-  const now = today();
-  
-  // Auto-update commission statuses
+  // Run side-effect first; downstream reads must see the new statuses.
   await autoUpdateCommissionStatuses();
-  
-  // Get commission statistics
-  const stats = await getCommissionStats();
-  const overdueCommissions = await getOverdueCommissions();
-  
-  const ratio = stats.totalExpected ? Math.round((stats.totalActual / stats.totalExpected) * 100) : 0;
-  
-  // Get all commissions for display
+
   const db = getDb();
-  const allCommissions = await db.commission.findMany({
-    include: { client: true, insurer: true, policy: true, receipt: true },
-    orderBy: [{ status: "asc" }, { expectedDate: "asc" }],
-  });
-  
-  const openCommissions = allCommissions.filter((c: any) => c.status !== "PAID" && c.status !== "CANCELLED");
-  const paidCommissions = allCommissions.filter((c: any) => c.status === "PAID");
+  const [stats, overdueCommissions, openCommissions, paidCommissions] = await Promise.all([
+    getCommissionStats(),
+    getOverdueCommissions(),
+    db.commission.findMany({
+      where: { status: { notIn: ["PAID", "CANCELLED"] } },
+      include: { client: true, insurer: true, policy: true, receipt: true },
+      orderBy: [{ status: "asc" }, { expectedDate: "asc" }],
+      take: 25,
+    }),
+    db.commission.findMany({
+      where: { status: "PAID" },
+      include: { client: true, insurer: true, policy: true, receipt: true },
+      orderBy: [{ paidDate: "desc" }, { expectedDate: "desc" }],
+      take: 25,
+    }),
+  ]);
+
+  const ratio = stats.totalExpected ? Math.round((stats.totalActual / stats.totalExpected) * 100) : 0;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
