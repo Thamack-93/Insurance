@@ -2,7 +2,8 @@
 
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
-import { setSessionCookie, verifyPassword } from "@/lib/auth";
+import { setSessionCookie, verifyPassword, SYSTEM_USER_ID } from "@/lib/auth";
+import { writeActivityLog } from "@/lib/activity-log";
 
 export type LoginResult = { ok: true } | { ok: false; error: string };
 
@@ -18,11 +19,30 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
   const db = getDb();
   const user = await db.user.findUnique({ where: { email } });
 
-  if (!user || !verifyPassword(password, user.passwordHash)) {
+  if (!user || user.id === SYSTEM_USER_ID || !verifyPassword(password, user.passwordHash)) {
     return { ok: false, error: "Correo o contraseña incorrectos." };
   }
 
-  await setSessionCookie({ userId: user.id, email: user.email, name: user.name });
+  if (!user.active) {
+    return { ok: false, error: "Tu cuenta está deshabilitada. Contacta al administrador." };
+  }
+
+  await db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+
+  await setSessionCookie({
+    userId: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+  });
+
+  await writeActivityLog({
+    entityType: "User",
+    entityId: user.id,
+    action: "USER_LOGIN",
+    userId: user.id,
+  });
+
   const safeRedirect = redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/dashboard";
   redirect(safeRedirect);
 }

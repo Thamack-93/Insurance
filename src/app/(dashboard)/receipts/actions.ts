@@ -2,7 +2,7 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
-import { getCurrentUserId } from "@/lib/auth";
+import { AuthError, getCurrentUserId, requireAdmin } from "@/lib/auth";
 import { normalizeOptionalText, parseDateInput } from "@/lib/form-utils";
 import { receiptSchema, type ReceiptFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
@@ -223,6 +223,7 @@ export async function bulkMarkReceiptsPaid(
 }
 export async function deleteReceipt(id: string): Promise<MutationResult> {
   try {
+    await requireAdmin();
     const db = getDb();
 
     const existingReceipt = await db.receipt.findUnique({
@@ -278,6 +279,7 @@ export async function deleteReceipt(id: string): Promise<MutationResult> {
 
     return successResult(id, "/receipts", "Recibo eliminado.");
   } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
     return errorResult(error instanceof Error ? error.message : "No se pudo eliminar el recibo.");
   }
 }

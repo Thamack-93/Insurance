@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { Search, ShieldCheck } from "lucide-react";
 import { SidebarNav } from "./sidebar-nav";
+import { getCurrentUser } from "@/lib/auth";
 
-export function AppSidebar() {
+export async function AppSidebar() {
+  const user = await getCurrentUser();
+  const isAdmin = !!user && user.active && user.role === "ADMIN";
   return (
     <aside className="sticky top-0 hidden h-screen w-72 shrink-0 border-r border-sidebar-border/80 bg-sidebar/85 p-4 backdrop-blur-xl lg:block">
       <div className="flex h-full flex-col">
@@ -24,7 +27,7 @@ export function AppSidebar() {
         </div>
 
         <div className="mt-5 flex min-h-0 flex-1 flex-col">
-          <SidebarNav />
+          <SidebarNav isAdmin={isAdmin} />
         </div>
 
         <div className="mt-auto rounded-3xl border bg-card/65 p-4 shadow-sm">

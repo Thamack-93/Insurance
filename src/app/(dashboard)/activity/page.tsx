@@ -7,6 +7,8 @@ import { Pagination } from "@/components/lists/pagination";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { Button } from "@/components/ui/button";
 import { getAllActivity } from "@/lib/activity-log";
+import { redirect } from "next/navigation";
+import { requireUser } from "@/lib/auth";
 
 const PAGE_SIZE = 25;
 
@@ -54,6 +56,10 @@ export default async function ActivityPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const user = await requireUser();
+  if (user.role !== "ADMIN") {
+    redirect("/dashboard");
+  }
   const sp = await searchParams;
   const entityType = typeof sp.entity === "string" && sp.entity ? sp.entity : undefined;
   const entityId = typeof sp.id === "string" && sp.id ? sp.id : undefined;

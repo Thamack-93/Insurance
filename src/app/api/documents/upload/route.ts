@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { getDb } from "@/lib/db";
-import { getCurrentUserIdOrSystem } from "@/lib/auth";
+import { AuthError, requireUser } from "@/lib/auth";
 import { assertSafeDocumentPath, documentsDir } from "@/lib/files";
 import { logError } from "@/lib/logger";
 import { z } from "zod";
@@ -129,7 +129,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Selecciona al menos un archivo para subir." }, { status: 400 });
     }
 
-    const userId = await getCurrentUserIdOrSystem();
+    const activeUser = await requireUser();
+    const userId = activeUser.id;
     const rollback = formData.get("rollback") === "1" || files.length > 1;
     const results = await Promise.all(files.map((f) => processFile(f, validatedData, userId)));
 
@@ -182,6 +183,13 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     logError("api.documents.upload", error);
+
+    if (error instanceof AuthError) {
+      return NextResponse.json(
+        { error: "Necesitas iniciar sesión para subir documentos." },
+        { status: error.status },
+      );
+    }
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(

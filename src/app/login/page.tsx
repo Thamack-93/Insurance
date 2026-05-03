@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { LoginForm } from "./login-form";
 
 export const metadata = {
@@ -14,8 +14,8 @@ export default async function LoginPage({
   const params = await searchParams;
   const redirectTo = params.redirect && params.redirect.startsWith("/") ? params.redirect : "/dashboard";
 
-  const session = await getSession();
-  if (session) {
+  const user = await getCurrentUser();
+  if (user && user.active) {
     redirect(redirectTo);
   }
 

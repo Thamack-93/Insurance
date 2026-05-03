@@ -64,6 +64,8 @@ async function main() {
       email: "system@policydesk.local",
       name: "Sistema",
       passwordHash: "!disabled",
+      role: "ADMIN",
+      active: false,
     },
   });
 
@@ -72,6 +74,8 @@ async function main() {
       email: "admin@policydesk.local",
       name: "Admin Demo",
       passwordHash: hashPassword("admin1234"),
+      role: "ADMIN",
+      active: true,
     },
   });
 
@@ -80,16 +84,20 @@ async function main() {
       email: "broker@policydesk.local",
       name: "Broker Demo",
       passwordHash: hashPassword("broker1234"),
+      role: "AGENT",
+      active: true,
     },
   });
 
   await prisma.user.upsert({
     where: { email: "pedroagl93@gmail.com" },
-    update: { name: "Pedro Gomez" },
+    update: { name: "Pedro Gomez", role: "ADMIN", active: true },
     create: {
       email: "pedroagl93@gmail.com",
       name: "Pedro Gomez",
       passwordHash: hashPassword("Peter@123"),
+      role: "ADMIN",
+      active: true,
     },
   });
 

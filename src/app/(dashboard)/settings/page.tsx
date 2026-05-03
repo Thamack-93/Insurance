@@ -1,7 +1,9 @@
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard } from "@/components/pages-secondary/panels";
 import { Button } from "@/components/ui/button";
-import { BellRing, Database, Globe2, ArrowRight, Settings2 } from "lucide-react";
+import { BellRing, Database, Globe2, ArrowRight, Settings2, KeyRound, Users } from "lucide-react";
+import { getCurrentUser } from "@/lib/auth";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { today, formatDate } from "@/lib/dates";
 import Link from "next/link";
 import { getSettings, updateSettings } from "@/lib/settings";
@@ -17,9 +19,11 @@ import {
 
 export default async function SettingsPage() {
   const now = today();
+  const liveUser = await getCurrentUser();
+  const isAdmin = !!liveUser && liveUser.active && liveUser.role === "ADMIN";
   const [settings, initialBackups, onboarding] = await Promise.all([
     getSettings(),
-    listBackupsAction(),
+    isAdmin ? listBackupsAction() : Promise.resolve([]),
     getOnboardingStatus(),
   ]);
 
@@ -40,6 +44,7 @@ export default async function SettingsPage() {
           }
         />
 
+        {isAdmin ? (
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard 
             title="Firma" 
@@ -70,20 +75,62 @@ export default async function SettingsPage() {
             tone="rose" 
           />
         </section>
+        ) : null}
 
-        <SettingsForm 
-          initialSettings={settings} 
-          updateSettings={updateSettings} 
-        />
+        <section className="grid gap-3 sm:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <KeyRound className="size-4" /> Mi cuenta
+              </CardTitle>
+              <CardDescription>Cambia tu contraseña y revisa tu rol.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild variant="outline" className="rounded-full">
+                <Link href="/settings/account">
+                  Ir a mi cuenta
+                  <ArrowRight className="ml-2 size-4" />
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+          {isAdmin ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Users className="size-4" /> Usuarios
+                </CardTitle>
+                <CardDescription>Invita y administra a tu equipo.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button asChild variant="outline" className="rounded-full">
+                  <Link href="/settings/users">
+                    Administrar usuarios
+                    <ArrowRight className="ml-2 size-4" />
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+          ) : null}
+        </section>
+
+        {isAdmin ? (
+          <SettingsForm
+            initialSettings={settings}
+            updateSettings={updateSettings}
+          />
+        ) : null}
 
         <OnboardingPanel initialDismissed={onboarding.dismissed} />
 
-        <BackupsPanel
-          initialBackups={initialBackups}
-          createBackup={createBackup}
-          restoreBackup={restoreBackup}
-          listBackups={listBackupsAction}
-        />
+        {isAdmin ? (
+          <BackupsPanel
+            initialBackups={initialBackups}
+            createBackup={createBackup}
+            restoreBackup={restoreBackup}
+            listBackups={listBackupsAction}
+          />
+        ) : null}
       </div>
     </div>
   );

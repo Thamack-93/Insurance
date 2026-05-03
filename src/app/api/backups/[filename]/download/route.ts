@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readFile } from "node:fs/promises";
 import { assertSafeBackupPath } from "@/lib/files";
+import { AuthError, requireAdmin } from "@/lib/auth";
 import { logError } from "@/lib/logger";
 
 export async function GET(
@@ -8,6 +9,7 @@ export async function GET(
   { params }: { params: Promise<{ filename: string }> },
 ) {
   try {
+    await requireAdmin();
     const { filename } = await params;
     const decoded = decodeURIComponent(filename);
     const safePath = assertSafeBackupPath(decoded);
@@ -23,6 +25,9 @@ export async function GET(
       headers,
     });
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     logError("api.backups.download", error);
 
     if (error instanceof Error && error.message.includes("Backup path must stay")) {

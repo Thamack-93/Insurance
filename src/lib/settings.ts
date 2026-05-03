@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { logError } from "@/lib/logger";
 import { setRuntimeSettings, THEME_COOKIE } from "@/lib/settings-runtime";
+import { AuthError, requireAdmin } from "@/lib/auth";
 
 export type Settings = {
   firmName: string;
@@ -82,6 +83,7 @@ export async function updateSettings(settings: Partial<Settings>): Promise<Mutat
   const db = getDb();
 
   try {
+    await requireAdmin();
     const entries = Object.entries(settings);
     await Promise.all(
       entries.map(([key, value]) => {
@@ -108,6 +110,7 @@ export async function updateSettings(settings: Partial<Settings>): Promise<Mutat
     revalidatePath("/", "layout");
     return successResult("", "/settings", "Configuración guardada.");
   } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
     logError("settings.updateSettings", error);
     return errorResult(
       "No se pudo guardar la configuración. Verifica la conexión a la base de datos.",

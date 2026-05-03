@@ -37,10 +37,19 @@ Tabs sync with the URL using `UrlTabs` and `router.replace({ scroll: false })`.
 **Legacy URL Redirects**: `/payments` redirects to `/receipts?tab=cobrar`, `/payments/new` to `/receipts?tab=cobrar`, and `/data-quality` to `/risks?tab=completitud`.
 
 ### Authentication & Audit
-- **Login**: `/login` page (server action `loginAction`) authenticates against `User` table. Passwords stored as `scrypt$<salt>$<hash>`.
-- **Sessions**: Stateless HMAC-signed token (`SHA-256`, edge-safe Web Crypto in `src/lib/session.ts`) stored in `pd_session` httpOnly cookie (30-day TTL). Secret comes from `AUTH_SECRET` env var (dev fallback baked in for local use).
+- **Login**: `/login` page (server action `loginAction`) authenticates against `User` table. Passwords stored as `scrypt$<salt>$<hash>`. Inactive users and the system user (`SYSTEM_USER_ID`) cannot log in. Successful logins update `User.lastLoginAt` and write a `USER_LOGIN` audit entry.
+- **Sessions**: Stateless HMAC-signed token (`SHA-256`, edge-safe Web Crypto in `src/lib/session.ts`) stored in `pd_session` httpOnly cookie (30-day TTL). The session payload includes `role` but is **not trusted** for authorization: the dashboard layout calls `requireUserOrRedirect()` which re-reads the user from the database on every request, so deactivations and role changes apply immediately (no need to wait for the token to expire). Secret comes from `SESSION_SECRET` env var in production (required, ≥32 chars, not the dev fallback — no fallback to `AUTH_SECRET` in production). In development `SESSION_SECRET` or `AUTH_SECRET` are accepted; the dev default is used if neither is set. — `instrumentation.ts` calls `assertSessionSecretAvailable()` so the server fails fast on misconfiguration.
 - **Middleware**: `src/middleware.ts` redirects unauthenticated requests on any non-public path to `/login?redirect=...`. Public prefixes: `/login`, `/api/auth`, `/_next`, `/favicon`, `/public`.
 - **Logout**: `POST /api/auth/logout` clears the cookie and redirects to `/login`.
+
+### Roles (Administrador / Agente)
+- `User.role` (`UserRole` enum: `ADMIN` / `AGENT`) and `User.active` flag (added in migration `20260503180000_user_roles`). Existing users were promoted to `ADMIN` on migration. Indexed on `role` and `active`.
+- `requireUser()` and `requireAdmin()` helpers in `src/lib/auth.ts` throw `AuthError` (401/403). Server actions catch `AuthError` and surface friendly Spanish errors via `errorResult()`.
+- **Admin-only**: deletes (`deleteClient`, `deletePolicy`, `deleteReceipt`, `deleteInsurer`), `updateSettings`, backups (`createBackup`, `restoreBackup`, `listBackupsAction`, `GET /api/backups/[filename]/download`), the activity audit page (`/activity`), and user administration (`/settings/users`).
+- **Agent-safe UI**: delete buttons on detail pages (`clients/[id]`, `policies/[id]`, `receipts/[id]`, `insurers/[id]`) are hidden for `AGENT`. Sidebar hides `Usuarios` and `Auditoría` entries via the `isAdmin` prop. The user menu renders the role next to the email.
+- **User administration** (`/settings/users`): list users, invite (auto-generates a 10-char alphanumeric temp password shown once in a dialog), change role, activate/deactivate, reset password. Guards: cannot remove the last active admin, cannot deactivate yourself, cannot change your own role if you are the last admin. Every change writes to `ActivityLog` with `entityType="User"`.
+- **Self-service** (`/settings/account`): change own password (8 chars min, must mix letters and numbers, must differ from current).
+- **Seeded users**: `admin@policydesk.local` / `admin1234` (ADMIN), `pedroagl93@gmail.com` / `Peter@123` (ADMIN), `broker@policydesk.local` / `broker1234` (AGENT).
 - **Per-user audit**: 8 entities (`Client`, `Policy`, `Receipt`, `Payment`, `Claim`, `Quote`, `Task`, `Document`) have `createdById` + `updatedById` FK columns to `User`. Server actions stamp these via `getCurrentUserId()`. `ActivityLog.userId` is non-null and is set automatically via `getCurrentUserIdOrSystem()` in `src/lib/activity-log.ts`.
 - **Detail pages**: render `<AuditByline createdById={...} updatedById={...} />` to show "Creado por X / Última edición por Y".
 - **Topbar**: `<UserMenu />` server component shows session name/email + a logout button.

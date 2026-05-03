@@ -1,20 +1,49 @@
 const encoder = new TextEncoder();
 
+export type UserRoleSession = "ADMIN" | "AGENT";
+
 export type SessionPayload = {
   userId: string;
   email: string;
   name: string;
+  role: UserRoleSession;
   exp: number;
 };
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 
+const DEV_SECRET = "policydesk-dev-secret-change-in-production-please-0123456789";
+
+function isProduction() {
+  return process.env.NODE_ENV === "production";
+}
+
 function getSecret(): string {
-  const secret = process.env.AUTH_SECRET;
+  if (isProduction()) {
+    // In production SESSION_SECRET must be set explicitly — no fallback
+    // to AUTH_SECRET so that misconfigured deployments fail fast.
+    const secret = process.env.SESSION_SECRET;
+    if (!secret || secret.length < 32 || secret === DEV_SECRET) {
+      throw new Error(
+        "SESSION_SECRET no está configurada o es la de desarrollo. Define una cadena fuerte (≥32 caracteres) en la variable de entorno SESSION_SECRET antes de iniciar la aplicación en producción.",
+      );
+    }
+    return secret;
+  }
+  // Development: accept SESSION_SECRET, fall back to AUTH_SECRET, then dev default.
+  const secret = process.env.SESSION_SECRET ?? process.env.AUTH_SECRET;
   if (secret && secret.length >= 16) {
     return secret;
   }
-  return "policydesk-dev-secret-change-in-production-please-0123456789";
+  return DEV_SECRET;
+}
+
+/**
+ * Validate the session secret eagerly. Call this once during server startup so
+ * deployments fail fast when AUTH_SECRET is missing or weak in production.
+ */
+export function assertSessionSecretAvailable(): void {
+  getSecret();
 }
 
 function base64UrlEncode(bytes: ArrayBuffer | Uint8Array): string {
@@ -81,6 +110,10 @@ export async function verifySessionToken(token: string | undefined | null): Prom
       return null;
     }
     if (!payload.userId || !payload.email) return null;
+    if (payload.role !== "ADMIN" && payload.role !== "AGENT") {
+      // Older tokens without a role default to AGENT for safety.
+      payload.role = "AGENT";
+    }
     return payload;
   } catch {
     return null;

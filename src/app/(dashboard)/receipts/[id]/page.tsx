@@ -12,12 +12,15 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DeleteReceiptButton } from "@/components/receipts/delete-receipt-button";
 import { getDb } from "@/lib/db";
+import { getCurrentUser } from "@/lib/auth";
 import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
 
 export default async function ReceiptDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const liveUser = await getCurrentUser();
+  const isAdmin = !!liveUser && liveUser.active && liveUser.role === "ADMIN";
   const db = getDb();
 
   const receipt = await db.receipt.findUnique({
@@ -66,7 +69,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/receipts/${receipt.id}/edit`}>Editar recibo</Link>
               </Button>
-              <DeleteReceiptButton id={receipt.id} receiptNumber={receipt.receiptNumber} />
+              {isAdmin ? <DeleteReceiptButton id={receipt.id} receiptNumber={receipt.receiptNumber} /> : null}
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href="/receipts">
                   <ArrowLeft className="mr-2 size-4" />

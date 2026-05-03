@@ -4,12 +4,23 @@ import path from "node:path";
 import { getDb } from "@/lib/db";
 import { assertSafeDocumentPath } from "@/lib/files";
 import { logError } from "@/lib/logger";
+import { AuthError, requireUser } from "@/lib/auth";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // Reject deactivated/unauthenticated users immediately.
+    try {
+      await requireUser();
+    } catch (authErr) {
+      if (authErr instanceof AuthError) {
+        return NextResponse.json({ error: "No autorizado." }, { status: authErr.status });
+      }
+      throw authErr;
+    }
+
     const { id } = await params;
 
     // Get document metadata from database

@@ -2,7 +2,7 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
-import { getCurrentUserId } from "@/lib/auth";
+import { AuthError, getCurrentUserId, requireAdmin } from "@/lib/auth";
 import { normalizeOptionalText } from "@/lib/form-utils";
 import { clientSchema, type ClientFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
@@ -89,6 +89,7 @@ export async function updateClient(id: string, values: ClientFormValues): Promis
 }
 export async function deleteClient(id: string): Promise<MutationResult> {
   try {
+    await requireAdmin();
     const db = getDb();
 
     const existingClient = await db.client.findUnique({
@@ -139,6 +140,7 @@ export async function deleteClient(id: string): Promise<MutationResult> {
 
     return successResult(id, "/clients", "Cliente eliminado.");
   } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
     return errorResult(error instanceof Error ? error.message : "No se pudo eliminar el cliente.");
   }
 }

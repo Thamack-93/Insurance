@@ -8,8 +8,13 @@ import { ShortcutsHelp } from "@/components/shortcuts/shortcuts-help";
 import { getSettings } from "@/lib/settings";
 import { RuntimeSettingsHydrator } from "@/components/settings/runtime-settings-hydrator";
 import { getUnreadAlertCount, getRecentAlerts } from "@/lib/notifications";
+import { requireUserOrRedirect } from "@/lib/auth";
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
+  // Re-validate the user against the database on every dashboard request so
+  // deactivations and role changes take effect immediately, rather than
+  // waiting for the signed session token to expire.
+  await requireUserOrRedirect();
   // Load settings once per request: hydrates the server runtime cache and
   // is forwarded to the client so format helpers stay consistent on both sides.
   const settings = await getSettings();

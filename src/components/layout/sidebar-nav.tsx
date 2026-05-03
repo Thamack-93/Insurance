@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -17,6 +17,7 @@ import {
   CircleDollarSign,
   FileText,
   FolderKanban,
+  History,
   Home,
   LayoutDashboard,
   ReceiptText,
@@ -27,7 +28,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type NavItem = { label: string; href: string; icon: LucideIcon };
+export type NavItem = { label: string; href: string; icon: LucideIcon; adminOnly?: boolean };
 export type NavSection = {
   id: string;
   label: string;
@@ -92,7 +93,11 @@ export const sections: NavSection[] = [
     id: "sistema",
     label: "Sistema",
     defaultOpen: false,
-    items: [{ label: "Configuración", href: "/settings", icon: Settings }],
+    items: [
+      { label: "Configuración", href: "/settings", icon: Settings },
+      { label: "Usuarios", href: "/settings/users", icon: Users, adminOnly: true },
+      { label: "Auditoría", href: "/activity", icon: History, adminOnly: true },
+    ],
   },
 ];
 
@@ -140,9 +145,26 @@ export function SidebarItem({
   );
 }
 
-export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
+export function SidebarNav({
+  onNavigate,
+  isAdmin = false,
+}: {
+  onNavigate?: () => void;
+  isAdmin?: boolean;
+}) {
   const pathname = usePathname();
   const [openMap, setOpenMap] = useState<Record<string, boolean>>(defaultOpenState);
+
+  const visibleSections = useMemo(
+    () =>
+      sections
+        .map((section) => ({
+          ...section,
+          items: section.items.filter((item) => (item.adminOnly ? isAdmin : true)),
+        }))
+        .filter((section) => section.items.length > 0),
+    [isAdmin],
+  );
 
   useEffect(() => {
     const stored = readStoredState();
@@ -175,7 +197,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <nav className="flex-1 space-y-3 overflow-y-auto pr-1">
-      {sections.map((section) => {
+      {visibleSections.map((section) => {
         const open = openMap[section.id] ?? section.defaultOpen ?? true;
         const sectionActive = section.items.some(
           (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),

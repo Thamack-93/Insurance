@@ -8,9 +8,20 @@ import {
   createSessionToken,
   verifySessionToken,
   type SessionPayload,
+  type UserRoleSession,
 } from "@/lib/session";
 
 const SCRYPT_KEYLEN = 64;
+
+export type UserRole = UserRoleSession;
+
+export class AuthError extends Error {
+  status: number;
+  constructor(message: string, status = 401) {
+    super(message);
+    this.status = status;
+  }
+}
 
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -70,16 +81,84 @@ export async function getCurrentUser() {
 }
 
 export async function getCurrentUserId(): Promise<string> {
-  const session = await getSession();
-  if (!session?.userId) {
-    throw new Error("No hay sesión activa.");
-  }
-  return session.userId;
+  // Re-reads the user from the database so inactive accounts are rejected
+  // immediately on any server action, not just on page navigation.
+  const user = await requireUser();
+  return user.id;
 }
 
 export async function getCurrentUserIdOrSystem(): Promise<string> {
   const session = await getSession();
-  return session?.userId ?? "system-user-0000";
+  if (!session?.userId) return SYSTEM_USER_ID;
+  try {
+    const user = await requireUser();
+    return user.id;
+  } catch {
+    return SYSTEM_USER_ID;
+  }
+}
+
+/**
+ * Returns the live, active user from the database. Throws AuthError if the
+ * session is missing or the user is no longer active.
+ */
+export async function requireUser() {
+  const session = await getSession();
+  if (!session) throw new AuthError("Necesitas iniciar sesión.", 401);
+  const db = getDb();
+  const user = await db.user.findUnique({ where: { id: session.userId } });
+  if (!user || !user.active || user.id === SYSTEM_USER_ID) {
+    throw new AuthError("Tu cuenta está deshabilitada.", 401);
+  }
+  return user;
+}
+
+/**
+ * Like requireUser() but also enforces ADMIN role. Throws AuthError(403) when
+ * the caller is authenticated but lacks privileges.
+ */
+export async function requireAdmin() {
+  const user = await requireUser();
+  if (user.role !== "ADMIN") {
+    throw new AuthError("Esta acción requiere permisos de administrador.", 403);
+  }
+  return user;
 }
 
 export const SYSTEM_USER_ID = "system-user-0000";
+
+/**
+ * Request-time gate for dashboard pages. Re-reads the user from the database on
+ * every request so deactivations and role changes take effect immediately
+ * (without waiting for the signed token to expire). If the session is missing
+ * or the user is no longer active, clears the cookie and redirects to /login.
+ */
+export async function requireUserOrRedirect() {
+  const { redirect } = await import("next/navigation");
+  try {
+    return await requireUser();
+  } catch (error) {
+    if (error instanceof AuthError) {
+      try {
+        await clearSessionCookie();
+      } catch {
+        // ignore — cookies may be read-only in some render contexts
+      }
+      redirect("/login");
+    }
+    throw error;
+  }
+}
+
+/**
+ * Like requireUserOrRedirect() but additionally enforces ADMIN role. Demoted
+ * admins are sent to /dashboard on their next request.
+ */
+export async function requireAdminOrRedirect() {
+  const { redirect } = await import("next/navigation");
+  const user = await requireUserOrRedirect();
+  if (user.role !== "ADMIN") {
+    redirect("/dashboard");
+  }
+  return user;
+}

@@ -11,6 +11,7 @@ import {
 } from "@/lib/backup";
 import { assertSafeBackupPath } from "@/lib/files";
 import { resetDb } from "@/lib/db";
+import { AuthError, requireAdmin } from "@/lib/auth";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { logError } from "@/lib/logger";
 
@@ -29,12 +30,14 @@ function toItem(entry: BackupEntry): BackupListItem {
 }
 
 export async function listBackupsAction(): Promise<BackupListItem[]> {
+  await requireAdmin();
   const entries = await listBackups();
   return entries.map(toItem);
 }
 
 export async function createBackup(): Promise<MutationResult> {
   try {
+    await requireAdmin();
     const target = await backupDatabase();
     if (!target) {
       return errorResult("No se encontró la base de datos para respaldar.");
@@ -46,6 +49,7 @@ export async function createBackup(): Promise<MutationResult> {
     const filename = target.split(/[\\/]/).pop() ?? target;
     return successResult(filename, "/settings", `Respaldo creado: ${filename}`);
   } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
     logError("settings.backups.create", error);
     return errorResult("No se pudo crear el respaldo. Intenta de nuevo.");
   }
@@ -53,6 +57,7 @@ export async function createBackup(): Promise<MutationResult> {
 
 export async function restoreBackup(filename: string): Promise<MutationResult> {
   try {
+    await requireAdmin();
     const safePath = assertSafeBackupPath(filename);
     await fs.access(safePath);
 
@@ -70,6 +75,7 @@ export async function restoreBackup(filename: string): Promise<MutationResult> {
     revalidatePath("/", "layout");
     return successResult(filename, "/settings", `Respaldo restaurado: ${filename}`);
   } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
     logError("settings.backups.restore", error, { filename });
     if (error instanceof Error && error.message.includes("Backup path must stay")) {
       return errorResult("Ruta de respaldo no válida.");

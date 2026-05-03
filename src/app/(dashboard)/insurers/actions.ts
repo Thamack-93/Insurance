@@ -2,6 +2,7 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
+import { AuthError, requireAdmin } from "@/lib/auth";
 import { logError } from "@/lib/logger";
 import type { InsurerFormValues } from "@/lib/validations";
 import {
@@ -83,6 +84,7 @@ export async function updateInsurer(id: string, values: InsurerFormValues): Prom
 
 export async function deleteInsurer(id: string): Promise<MutationResult> {
   try {
+    await requireAdmin();
     const db = getDb();
 
     const existingInsurer = await db.insurer.findUnique({
@@ -131,6 +133,7 @@ export async function deleteInsurer(id: string): Promise<MutationResult> {
 
     return successResult(id, "/insurers", "Aseguradora eliminada.");
   } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
     logError("insurers.deleteInsurer", error, { id });
     return errorResult("No se pudo eliminar la aseguradora. Intenta de nuevo.");
   }

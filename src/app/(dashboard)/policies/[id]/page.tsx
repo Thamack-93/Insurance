@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { DocumentDropZone } from "@/components/documents/document-drop-zone";
 import { DocumentList } from "@/components/documents/document-list";
 import { getDb } from "@/lib/db";
+import { getCurrentUser } from "@/lib/auth";
 import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
@@ -30,6 +31,8 @@ const frequencyLabels: Record<string, string> = {
 
 export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const liveUser = await getCurrentUser();
+  const isAdmin = !!liveUser && liveUser.active && liveUser.role === "ADMIN";
   const db = getDb();
 
   const policy = await db.policy.findUnique({
@@ -96,7 +99,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                   Editar
                 </Link>
               </Button>
-              <DeletePolicyButton id={id} policyNumber={policy.policyNumber} />
+              {isAdmin ? <DeletePolicyButton id={id} policyNumber={policy.policyNumber} /> : null}
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href="/policies">
                   <ArrowLeft className="mr-2 size-4" />
