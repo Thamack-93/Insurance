@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { today, daysUntil } from "@/lib/dates";
 import { addDays } from "date-fns";
 import { writeActivityLog } from "@/lib/activity-log";
+import { logError } from "@/lib/logger";
 
 export interface RenewalReminder {
   policyId: string;
@@ -93,7 +94,7 @@ export async function getUpcomingRenewals(daysAhead: number = 90) {
 
     return renewals;
   } catch (error) {
-    console.error("Error getting upcoming renewals:", error);
+    logError("renewals.getUpcomingRenewals", error, { daysAhead });
     return [];
   }
 }
@@ -152,7 +153,7 @@ export async function createRenewalTasks() {
 
     return { tasksCreated };
   } catch (error) {
-    console.error("Error creating renewal tasks:", error);
+    logError("renewals.createRenewalTasks", error);
     return { tasksCreated: 0 };
   }
 }
@@ -234,7 +235,7 @@ export async function sendRenewalReminders() {
 
     return { remindersSent: remindersSent.length };
   } catch (error) {
-    console.error("Error sending renewal reminders:", error);
+    logError("renewals.sendRenewalReminders", error);
     return { remindersSent: 0 };
   }
 }
@@ -328,7 +329,7 @@ export async function getRenewalStats() {
       averagePremium: renewalPolicies.length > 0 ? totalRenewalPremium / renewalPolicies.length : 0,
     };
   } catch (error) {
-    console.error("Error getting renewal stats:", error);
+    logError("renewals.getRenewalStats", error);
     return {
       overdueCount: 0,
       next30DaysCount: 0,

@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useCallback } from "react";
+import { toast } from "sonner";
 
 type SearchResult = {
   id: string;
@@ -38,12 +39,12 @@ export function SearchProvider({ children }: { children: React.ReactNode }) {
       // Fetch search results from API
       const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
       if (!response.ok) throw new Error("Search failed");
-      
+
       const results: SearchResult[] = await response.json();
       setSearchResults(results);
     } catch (error) {
-      console.error("Search error:", error);
       setSearchResults([]);
+      toast.error("No se pudo completar la búsqueda. Intenta de nuevo.");
     } finally {
       setIsSearching(false);
     }

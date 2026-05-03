@@ -5,6 +5,8 @@ import { toNumber } from "@/lib/money";
 import { today } from "@/lib/dates";
 import { addDays } from "date-fns";
 import { writeActivityLog } from "@/lib/activity-log";
+import { logError } from "@/lib/logger";
+import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 
 export interface CommissionCalculation {
   policyId: string;
@@ -18,9 +20,12 @@ export interface CommissionCalculation {
   status: "EXPECTED" | "PENDING" | "PAID" | "OVERDUE" | "CANCELLED";
 }
 
-export async function calculateCommissionsForPolicy(policyId: string, receiptId?: string) {
+export async function calculateCommissionsForPolicy(
+  policyId: string,
+  receiptId?: string,
+): Promise<MutationResult> {
   const db = getDb();
-  
+
   try {
     // Get policy details
     const policy = await db.policy.findUnique({
@@ -33,7 +38,7 @@ export async function calculateCommissionsForPolicy(policyId: string, receiptId?
     });
 
     if (!policy) {
-      throw new Error("Policy not found");
+      return errorResult("La póliza no existe o fue eliminada.");
     }
 
     // Get insurer commission rate (default to 10% if not set)
@@ -92,16 +97,24 @@ export async function calculateCommissionsForPolicy(policyId: string, receiptId?
       }
     }
 
-    return commissions;
+    return successResult(
+      policyId,
+      `/policies/${policyId}`,
+      `Se calcularon ${commissions.length} comisiones para la póliza.`,
+    );
   } catch (error) {
-    console.error("Error calculating commissions:", error);
-    throw error;
+    logError("commissions.calculateCommissionsForPolicy", error, { policyId, receiptId });
+    return errorResult("No se pudieron calcular las comisiones. Intenta de nuevo.");
   }
 }
 
-export async function updateCommissionStatus(commissionId: string, status: string, actualAmount?: number) {
+export async function updateCommissionStatus(
+  commissionId: string,
+  status: string,
+  actualAmount?: number,
+): Promise<MutationResult> {
   const db = getDb();
-  
+
   try {
     const commission = await db.commission.findUnique({
       where: { id: commissionId },
@@ -113,7 +126,7 @@ export async function updateCommissionStatus(commissionId: string, status: strin
     });
 
     if (!commission) {
-      throw new Error("Commission not found");
+      return errorResult("La comisión no existe o fue eliminada.");
     }
 
     const updateData: any = {
@@ -146,10 +159,14 @@ export async function updateCommissionStatus(commissionId: string, status: strin
       }),
     });
 
-    return updatedCommission;
+    return successResult(
+      updatedCommission.id,
+      `/commissions/${updatedCommission.id}`,
+      "Estado de comisión actualizado.",
+    );
   } catch (error) {
-    console.error("Error updating commission status:", error);
-    throw error;
+    logError("commissions.updateCommissionStatus", error, { commissionId, status });
+    return errorResult("No se pudo actualizar el estado de la comisión. Intenta de nuevo.");
   }
 }
 
@@ -201,7 +218,7 @@ export async function getCommissionStats(dateRange?: { start: Date; end: Date })
       })),
     };
   } catch (error) {
-    console.error("Error getting commission stats:", error);
+    logError("commissions.getCommissionStats", error);
     return {
       totalExpected: 0,
       totalActual: 0,
@@ -263,7 +280,7 @@ export async function getOverdueCommissions() {
       percentage: Number(commission.percentage),
     }));
   } catch (error) {
-    console.error("Error getting overdue commissions:", error);
+    logError("commissions.getOverdueCommissions", error);
     return [];
   }
 }
@@ -296,7 +313,7 @@ export async function autoUpdateCommissionStatuses() {
       updatedToOverdue: overdueResult.count,
     };
   } catch (error) {
-    console.error("Error auto-updating commission statuses:", error);
+    logError("commissions.autoUpdateCommissionStatuses", error);
     return {
       updatedToPending: 0,
       updatedToOverdue: 0,

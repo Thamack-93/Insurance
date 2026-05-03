@@ -3,6 +3,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getDb } from "@/lib/db";
 import { assertSafeDocumentPath, documentsDir } from "@/lib/files";
+import { logError } from "@/lib/logger";
 import { z } from "zod";
 
 const uploadSchema = z.object({
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest) {
     
     if (!file) {
       return NextResponse.json(
-        { error: "No file provided" },
+        { error: "Selecciona un archivo para subir." },
         { status: 400 }
       );
     }
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
 
     if (!allowedTypes.includes(file.type)) {
       return NextResponse.json(
-        { error: "File type not allowed" },
+        { error: "Tipo de archivo no permitido. Sube PDF, JPG, PNG o Word." },
         { status: 400 }
       );
     }
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
     const maxSize = 10 * 1024 * 1024; // 10MB
     if (file.size > maxSize) {
       return NextResponse.json(
-        { error: "File too large (max 10MB)" },
+        { error: "El archivo es demasiado grande (máximo 10 MB)." },
         { status: 400 }
       );
     }
@@ -114,17 +115,17 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error("Upload error:", error);
-    
+    logError("api.documents.upload", error);
+
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { error: "Invalid metadata", details: error.issues },
+        { error: "Los datos del documento no son válidos.", details: error.issues },
         { status: 400 }
       );
     }
 
     return NextResponse.json(
-      { error: "Upload failed" },
+      { error: "No se pudo subir el documento. Intenta de nuevo." },
       { status: 500 }
     );
   }

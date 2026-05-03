@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getDb } from "@/lib/db";
 import { assertSafeDocumentPath } from "@/lib/files";
+import { logError } from "@/lib/logger";
 
 export async function GET(
   request: NextRequest,
@@ -19,7 +20,7 @@ export async function GET(
 
     if (!document) {
       return NextResponse.json(
-        { error: "Document not found" },
+        { error: "El documento no existe o fue eliminado." },
         { status: 404 }
       );
     }
@@ -43,24 +44,24 @@ export async function GET(
     });
 
   } catch (error) {
-    console.error("Download error:", error);
-    
+    logError("api.documents.download", error);
+
     if (error instanceof Error && error.message.includes("Document path must stay inside")) {
       return NextResponse.json(
-        { error: "Invalid file path" },
+        { error: "Ruta de archivo no válida." },
         { status: 403 }
       );
     }
 
     if (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") {
       return NextResponse.json(
-        { error: "File not found on disk" },
+        { error: "El archivo ya no se encuentra disponible en el servidor." },
         { status: 404 }
       );
     }
 
     return NextResponse.json(
-      { error: "Download failed" },
+      { error: "No se pudo descargar el documento. Intenta de nuevo." },
       { status: 500 }
     );
   }

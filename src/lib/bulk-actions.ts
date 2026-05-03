@@ -3,6 +3,7 @@
 import { getDb } from "./db";
 import { writeActivityLog } from "./activity-log";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "./mutation-utils";
+import { logError } from "./logger";
 type AnyDb = ReturnType<typeof getDb>;
 
 type EntityType = "client" | "policy" | "receipt" | "task" | "claim" | "quote" | "insurer";
@@ -63,6 +64,7 @@ export async function bulkDelete(
     revalidatePaths([redirectPath]);
     return successResult("", redirectPath, `${result.count} elementos eliminados.`);
   } catch (error) {
+    logError("bulkActions.bulkDelete", error, { entityType, count: ids.length });
     return errorResult(
       "No fue posible eliminar los elementos. Verifica que no tengan dependencias.",
     );
@@ -98,6 +100,7 @@ export async function bulkUpdateStatus(
     revalidatePaths([redirectPath]);
     return successResult("", redirectPath, `Estado actualizado para ${result.count} elementos.`);
   } catch (error) {
+    logError("bulkActions.bulkUpdateStatus", error, { entityType, status, count: ids.length });
     return errorResult("No fue posible actualizar el estado de los elementos seleccionados.");
   }
 }

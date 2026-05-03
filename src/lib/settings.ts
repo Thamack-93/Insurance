@@ -3,6 +3,7 @@
 import { getDb } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
+import { logError } from "@/lib/logger";
 
 export type Settings = {
   firmName: string;
@@ -66,24 +67,33 @@ export async function getSettings(): Promise<Settings> {
       retentionDays: parseInt(settingsMap.retentionDays ?? String(defaultSettings.retentionDays)),
     };
   } catch (error) {
-    // If table doesn't exist yet, return defaults
-    // SystemSetting table is optional; fall back to defaults silently.
+    // If table doesn't exist yet, return defaults so the UI keeps working.
+    logError("settings.getSettings", error);
     return defaultSettings;
   }
 }
 
-export async function updateSetting(key: keyof Settings, value: string | boolean | number): Promise<void> {
+export async function updateSetting(
+  key: keyof Settings,
+  value: string | boolean | number,
+): Promise<MutationResult> {
   const db = getDb();
-  
-  const stringValue = String(value);
-  
-  await db.systemSetting.upsert({
-    where: { key },
-    update: { value: stringValue },
-    create: { key, value: stringValue },
-  });
-  
-  revalidatePath("/settings");
+
+  try {
+    const stringValue = String(value);
+
+    await db.systemSetting.upsert({
+      where: { key },
+      update: { value: stringValue },
+      create: { key, value: stringValue },
+    });
+
+    revalidatePath("/settings");
+    return successResult(key, "/settings", "Configuración guardada.");
+  } catch (error) {
+    logError("settings.updateSetting", error, { key });
+    return errorResult("No se pudo guardar la configuración. Intenta de nuevo.");
+  }
 }
 
 export async function updateSettings(settings: Partial<Settings>): Promise<MutationResult> {
@@ -105,6 +115,7 @@ export async function updateSettings(settings: Partial<Settings>): Promise<Mutat
     revalidatePath("/settings");
     return successResult("", "/settings", "Configuración guardada.");
   } catch (error) {
+    logError("settings.updateSettings", error);
     return errorResult(
       "No se pudo guardar la configuración. Verifica la conexión a la base de datos.",
     );
