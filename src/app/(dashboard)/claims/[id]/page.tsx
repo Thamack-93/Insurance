@@ -9,7 +9,8 @@ import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { getActivityForEntity } from "@/lib/activity-log";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DocumentDropZone } from "@/components/documents/document-drop-zone";
+import { DocumentList } from "@/components/documents/document-list";
 import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
@@ -172,30 +173,23 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
           </SectionCard>
 
           <SectionCard title="Documentos" description="Evidencia y archivos del siniestro.">
-            {claim.documents.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-muted-foreground">
-                No hay documentos asociados a este siniestro.
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/40">
-                    <TableHead>Archivo</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead>Fecha</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {claim.documents.map((document) => (
-                    <TableRow key={document.id}>
-                      <TableCell className="font-medium">{document.fileName}</TableCell>
-                      <TableCell>{document.documentType}</TableCell>
-                      <TableCell>{formatDate(document.uploadedAt)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
+            <div className="space-y-4 p-4">
+              <DocumentDropZone
+                associations={{ claimId: claim.id, clientId: claim.clientId, policyId: claim.policyId }}
+                defaultDocumentType="CLAIM"
+              />
+              <DocumentList
+                documents={claim.documents.map((d) => ({
+                  id: d.id,
+                  fileName: d.fileName,
+                  documentType: d.documentType,
+                  mimeType: d.mimeType,
+                  uploadedAt: d.uploadedAt,
+                }))}
+                emptyTitle="Sin documentos del siniestro"
+                emptyDescription="Sube fotos, oficios o evidencia desde aquí."
+              />
+            </div>
           </SectionCard>
         </section>
 

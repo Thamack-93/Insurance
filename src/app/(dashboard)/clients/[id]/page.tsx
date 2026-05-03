@@ -12,6 +12,8 @@ import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DocumentDropZone } from "@/components/documents/document-drop-zone";
+import { DocumentList } from "@/components/documents/document-list";
 import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
@@ -73,7 +75,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       where: { clientId: id },
       include: { policy: true, receipt: true, task: true, claim: true, quote: true },
       orderBy: { uploadedAt: "desc" },
-      take: 8,
+      take: 20,
     }),
     getActivityForEntity("Client", id, 20),
   ]);
@@ -320,22 +322,28 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             </SectionCard>
 
             <SectionCard title="Documentos" description="Archivo local del cliente.">
-              <div className="divide-y divide-stone-200/80">
-                {documents.length === 0 ? (
-                  <div className="px-4 py-6 text-sm text-muted-foreground">Sin documentos asociados.</div>
-                ) : (
-                  documents.map((document) => (
-                    <div key={document.id} className="px-4 py-4">
-                      <p className="font-medium text-foreground">{document.fileName}</p>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {document.documentType} · {formatDate(document.uploadedAt)}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {document.policy?.policyNumber ?? document.receipt?.receiptNumber ?? document.task?.folio ?? document.claim?.folio ?? document.quote?.id ?? "Sin asociación"}
-                      </p>
-                    </div>
-                  ))
-                )}
+              <div className="space-y-4 p-4">
+                <DocumentDropZone
+                  associations={{ clientId: id }}
+                  defaultDocumentType="ID"
+                />
+                <DocumentList
+                  showAssociation
+                  documents={documents.map((d) => ({
+                    id: d.id,
+                    fileName: d.fileName,
+                    documentType: d.documentType,
+                    mimeType: d.mimeType,
+                    uploadedAt: d.uploadedAt,
+                    associationLabel:
+                      d.policy?.policyNumber ??
+                      d.receipt?.receiptNumber ??
+                      d.task?.folio ??
+                      d.claim?.folio ??
+                      d.quote?.id ??
+                      "Cliente",
+                  }))}
+                />
               </div>
             </SectionCard>
           </div>

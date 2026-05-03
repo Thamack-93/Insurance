@@ -29,76 +29,49 @@ const uploadSchema = z.object({
   notes: z.string().optional(),
 });
 
-export async function POST(request: NextRequest) {
+const ALLOWED_TYPES = [
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+];
+const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+
+type UploadResult = {
+  ok: boolean;
+  fileName: string;
+  document?: { id: string; fileName: string; documentType: string; uploadedAt: Date; mimeType: string };
+  error?: string;
+};
+
+async function processFile(
+  file: File,
+  metadata: z.infer<typeof uploadSchema>,
+  userId: string,
+): Promise<UploadResult> {
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    return { ok: false, fileName: file.name, error: "Tipo de archivo no permitido (PDF, JPG, PNG, WebP o Word)." };
+  }
+  if (file.size > MAX_SIZE) {
+    return { ok: false, fileName: file.name, error: "El archivo es demasiado grande (máximo 10 MB)." };
+  }
+
   try {
-    const formData = await request.formData();
-    const file = formData.get("file") as File;
-    
-    if (!file) {
-      return NextResponse.json(
-        { error: "Selecciona un archivo para subir." },
-        { status: 400 }
-      );
-    }
-
-    // Validate file type and size
-    const allowedTypes = [
-      "application/pdf",
-      "image/jpeg",
-      "image/png",
-      "application/msword",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ];
-
-    if (!allowedTypes.includes(file.type)) {
-      return NextResponse.json(
-        { error: "Tipo de archivo no permitido. Sube PDF, JPG, PNG o Word." },
-        { status: 400 }
-      );
-    }
-
-    const maxSize = 10 * 1024 * 1024; // 10MB
-    if (file.size > maxSize) {
-      return NextResponse.json(
-        { error: "El archivo es demasiado grande (máximo 10 MB)." },
-        { status: 400 }
-      );
-    }
-
-    // Parse and validate metadata
-    const metadata = {
-      clientId: formData.get("clientId") as string || undefined,
-      policyId: formData.get("policyId") as string || undefined,
-      receiptId: formData.get("receiptId") as string || undefined,
-      taskId: formData.get("taskId") as string || undefined,
-      claimId: formData.get("claimId") as string || undefined,
-      quoteId: formData.get("quoteId") as string || undefined,
-      documentType: formData.get("documentType") as string,
-      notes: formData.get("notes") as string || undefined,
-    };
-
-    const validatedData = uploadSchema.parse(metadata);
-
-    // Generate unique filename
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
     const fileName = `${timestamp}-${sanitizedFileName}`;
-    
-    // Create file path
     const filePath = path.join(documentsDir, fileName);
     const safePath = assertSafeDocumentPath(filePath);
 
-    // Save file to disk
     const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-    await writeFile(safePath, buffer);
+    await writeFile(safePath, Buffer.from(bytes));
 
-    // Save metadata to database
     const db = getDb();
-    const userId = await getCurrentUserIdOrSystem();
     const document = await db.document.create({
       data: {
-        ...validatedData,
+        ...metadata,
         fileName: file.name,
         filePath: `data/documents/${fileName}`,
         mimeType: file.type,
@@ -108,29 +81,86 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json({
-      success: true,
+    return {
+      ok: true,
+      fileName: file.name,
       document: {
         id: document.id,
         fileName: document.fileName,
         documentType: document.documentType,
         uploadedAt: document.uploadedAt,
+        mimeType: document.mimeType,
       },
-    });
+    };
+  } catch (error) {
+    logError("api.documents.upload.file", error);
+    return { ok: false, fileName: file.name, error: "No se pudo guardar el archivo." };
+  }
+}
 
+export async function POST(request: NextRequest) {
+  try {
+    const formData = await request.formData();
+
+    const metadata = {
+      clientId: (formData.get("clientId") as string) || undefined,
+      policyId: (formData.get("policyId") as string) || undefined,
+      receiptId: (formData.get("receiptId") as string) || undefined,
+      taskId: (formData.get("taskId") as string) || undefined,
+      claimId: (formData.get("claimId") as string) || undefined,
+      quoteId: (formData.get("quoteId") as string) || undefined,
+      documentType: formData.get("documentType") as string,
+      notes: (formData.get("notes") as string) || undefined,
+    };
+    const validatedData = uploadSchema.parse(metadata);
+
+    // Accept either `files` (multi) or `file` (single, backward-compat).
+    const filesEntries = formData.getAll("files").filter((f): f is File => f instanceof File);
+    const singleFile = formData.get("file");
+    const files: File[] = filesEntries.length > 0
+      ? filesEntries
+      : singleFile instanceof File
+        ? [singleFile]
+        : [];
+
+    if (files.length === 0) {
+      return NextResponse.json({ error: "Selecciona al menos un archivo para subir." }, { status: 400 });
+    }
+
+    const userId = await getCurrentUserIdOrSystem();
+    const results = await Promise.all(files.map((f) => processFile(f, validatedData, userId)));
+
+    const okCount = results.filter((r) => r.ok).length;
+    const failCount = results.length - okCount;
+
+    // Backward-compat single-file response shape when only one file uploaded.
+    if (files.length === 1) {
+      const r = results[0];
+      if (!r.ok) {
+        return NextResponse.json({ error: r.error, results }, { status: 400 });
+      }
+      return NextResponse.json({ success: true, document: r.document, results });
+    }
+
+    return NextResponse.json({
+      success: failCount === 0,
+      okCount,
+      failCount,
+      results,
+    });
   } catch (error) {
     logError("api.documents.upload", error);
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: "Los datos del documento no son válidos.", details: error.issues },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     return NextResponse.json(
       { error: "No se pudo subir el documento. Intenta de nuevo." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

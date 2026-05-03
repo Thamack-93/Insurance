@@ -12,6 +12,8 @@ import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DocumentDropZone } from "@/components/documents/document-drop-zone";
+import { DocumentList } from "@/components/documents/document-list";
 import { getDb } from "@/lib/db";
 import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
@@ -291,28 +293,28 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         </section>
 
         <SectionCard title="Documentos" description="Archivos asociados a esta póliza.">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/40">
-                <TableHead>Archivo</TableHead>
-                <TableHead>Tipo</TableHead>
-                <TableHead>Fecha</TableHead>
-                <TableHead>Asociación</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {documents.map((document) => (
-                <TableRow key={document.id}>
-                  <TableCell className="font-medium">{document.fileName}</TableCell>
-                  <TableCell>{document.documentType}</TableCell>
-                  <TableCell>{formatDate(document.uploadedAt)}</TableCell>
-                  <TableCell>
-                    {document.receipt?.receiptNumber ?? document.task?.folio ?? document.claim?.folio ?? document.quote?.id ?? "Póliza"}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <div className="space-y-4 p-4">
+            <DocumentDropZone
+              associations={{ policyId: id, clientId: policy.clientId }}
+              defaultDocumentType="POLICY"
+            />
+            <DocumentList
+              showAssociation
+              documents={documents.map((d) => ({
+                id: d.id,
+                fileName: d.fileName,
+                documentType: d.documentType,
+                mimeType: d.mimeType,
+                uploadedAt: d.uploadedAt,
+                associationLabel:
+                  d.receipt?.receiptNumber ??
+                  d.task?.folio ??
+                  d.claim?.folio ??
+                  d.quote?.id ??
+                  "Póliza",
+              }))}
+            />
+          </div>
         </SectionCard>
 
         <SectionCard

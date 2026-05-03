@@ -32,10 +32,13 @@ export async function GET(
     // Read file from disk
     const fileBuffer = await readFile(safePath);
 
-    // Set appropriate headers
+    // Inline preview vs attachment download
+    const inline = request.nextUrl.searchParams.get("inline") === "1";
+    const disposition = inline ? "inline" : "attachment";
+
     const headers = new Headers();
     headers.set("Content-Type", document.mimeType);
-    headers.set("Content-Disposition", `attachment; filename="${document.fileName}"`);
+    headers.set("Content-Disposition", `${disposition}; filename="${document.fileName}"`);
     headers.set("Content-Length", fileBuffer.length.toString());
 
     return new NextResponse(fileBuffer, {
