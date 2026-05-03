@@ -2,7 +2,6 @@ import { addDays, endOfDay, startOfDay } from "date-fns";
 import { getDb } from "@/lib/db";
 import { daysUntil, today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
-import { statusLabels } from "@/lib/status";
 
 type ReceiptStatus = "PENDING" | "PAID" | "OVERDUE" | "CANCELLED";
 type PolicyStatus = "ACTIVE" | "EXPIRED" | "CANCELLED" | "RENEWED" | "PENDING";
@@ -241,6 +240,3 @@ function resolveRange(from?: Date, to?: Date, fallbackDays = 60): DateRange {
   return { from: start, to: end };
 }
 
-export function describeTaskStatus(status: string) {
-  return statusLabels[status] ?? status;
-}

@@ -73,29 +73,6 @@ export async function getSettings(): Promise<Settings> {
   }
 }
 
-export async function updateSetting(
-  key: keyof Settings,
-  value: string | boolean | number,
-): Promise<MutationResult> {
-  const db = getDb();
-
-  try {
-    const stringValue = String(value);
-
-    await db.systemSetting.upsert({
-      where: { key },
-      update: { value: stringValue },
-      create: { key, value: stringValue },
-    });
-
-    revalidatePath("/settings");
-    return successResult(key, "/settings", "Configuración guardada.");
-  } catch (error) {
-    logError("settings.updateSetting", error, { key });
-    return errorResult("No se pudo guardar la configuración. Intenta de nuevo.");
-  }
-}
-
 export async function updateSettings(settings: Partial<Settings>): Promise<MutationResult> {
   const db = getDb();
 

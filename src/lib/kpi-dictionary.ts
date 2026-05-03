@@ -94,7 +94,3 @@ export const KPI_DICTIONARY: Record<string, KpiDefinition> = {
 };
 
 export const KPI_LIST = Object.values(KPI_DICTIONARY);
-
-export function getKpiDefinition(key: string) {
-  return KPI_DICTIONARY[key];
-}

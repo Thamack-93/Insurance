@@ -1,5 +1,4 @@
 import {
-  addDays,
   differenceInCalendarDays,
   endOfDay,
   format,
@@ -28,11 +27,6 @@ export function isOverdue(date: Date | string) {
   return isBefore(endOfDay(new Date(date)), today());
 }
 
-export function isWithinNextDays(date: Date | string, days: number) {
-  const diff = daysUntil(date);
-  return diff >= 0 && diff <= days;
-}
-
 export function getUrgencyLevel(date: Date | string): UrgencyLevel {
   const diff = daysUntil(date);
 
@@ -41,10 +35,6 @@ export function getUrgencyLevel(date: Date | string): UrgencyLevel {
   if (diff <= 15) return "soon";
   if (diff <= 60) return "upcoming";
   return "future";
-}
-
-export function nextDays(days: number) {
-  return addDays(today(), days);
 }
 
 export function formatDate(date: Date | string, pattern = "d MMM yyyy") {
