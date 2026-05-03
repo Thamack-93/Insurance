@@ -486,6 +486,7 @@ model ActivityLog {
   performedBy String   @default("local-user")
 
   @@index([entityType, entityId])
+  @@index([entityType, entityId, createdAt])
   @@index([createdAt])
   @@index([action])
 }
