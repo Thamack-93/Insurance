@@ -9,7 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import * as XLSX from "xlsx";
+import * as XLSX from "@e965/xlsx";
 
 type ExportData = {
   name: string;

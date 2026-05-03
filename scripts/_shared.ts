@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import * as XLSX from "xlsx";
+import * as XLSX from "@e965/xlsx";
 
 import { PrismaClient } from "../src/generated/prisma/client.ts";
 import { backupsDir, dataDir, databasePath, exportsDir } from "../src/lib/files.ts";
