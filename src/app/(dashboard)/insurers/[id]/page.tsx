@@ -54,7 +54,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
   const openCommissions = commissions.filter((c) => c.status !== "PAID" && c.status !== "CANCELLED");
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
+    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Catálogo"
@@ -62,14 +62,14 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
           description="Detalle de aseguradora, cartera vinculada y métricas comerciales."
           actions={
             <div className="flex items-center gap-2">
-              <Button asChild variant="outline" className="rounded-full bg-white/70">
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/insurers/${id}/edit`}>
                   <Pencil className="mr-2 size-4" />
                   Editar
                 </Link>
               </Button>
               <DeleteInsurerButton id={id} name={insurer.name} />
-              <Button asChild variant="outline" className="rounded-full bg-white/70">
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href="/insurers">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
@@ -177,7 +177,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Póliza</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Tipo</TableHead>
@@ -210,7 +210,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
               </Table>
             )}
             {policies.length > 10 && (
-              <div className="border-t border-stone-200/80 px-4 py-3 text-center">
+              <div className="border-t border-border/70 px-4 py-3 text-center">
                 <Link href={`/policies?insurer=${id}`} className="text-sm text-primary hover:underline">
                   Ver todas las pólizas ({policies.length})
                 </Link>
@@ -295,7 +295,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
         >
           {activity.length === 0 ? (
             <div className="p-4">
-              <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 px-6 py-8 text-center text-sm text-muted-foreground">
+              <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
                 <History className="mx-auto mb-2 size-5 text-muted-foreground" />
                 Sin actividad registrada para esta aseguradora todavía.
               </div>

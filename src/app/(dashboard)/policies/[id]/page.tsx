@@ -78,7 +78,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
   const paymentsTotal = payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
+    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
       <RecordPageView id={policy.id} label={`${policy.policyNumber} · ${policy.client.fullName}`} href={`/policies/${policy.id}`} type="Póliza" />
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
@@ -87,14 +87,14 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           description={`${policy.client.fullName} · ${policy.insurer.name} · ${policyTypeLabel(policy.policyType)}`}
           actions={
             <div className="flex items-center gap-2">
-              <Button asChild variant="outline" className="rounded-full bg-white/70">
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/policies/${id}/edit`}>
                   <Pencil className="mr-2 size-4" />
                   Editar
                 </Link>
               </Button>
               <DeletePolicyButton id={id} policyNumber={policy.policyNumber} />
-              <Button asChild variant="outline" className="rounded-full bg-white/70">
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href="/policies">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
@@ -199,7 +199,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           <SectionCard title="Recibos" description="Calendario de cobro derivado de esta póliza.">
             <Table>
               <TableHeader>
-                <TableRow className="bg-stone-50/70">
+                <TableRow className="bg-muted/40">
                   <TableHead>Recibo</TableHead>
                   <TableHead>Vencimiento</TableHead>
                   <TableHead>Estado</TableHead>
@@ -226,7 +226,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           <SectionCard title="Pagos" description="Pagos reales vinculados a la póliza.">
             <Table>
               <TableHeader>
-                <TableRow className="bg-stone-50/70">
+                <TableRow className="bg-muted/40">
                   <TableHead>Fecha</TableHead>
                   <TableHead>Cliente</TableHead>
                   <TableHead>Referencia</TableHead>
@@ -244,7 +244,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                 ))}
               </TableBody>
             </Table>
-            <div className="border-t border-stone-200/80 px-4 py-3 text-sm text-muted-foreground">
+            <div className="border-t border-border/70 px-4 py-3 text-sm text-muted-foreground">
               Pagos acumulados: <span className="font-medium text-foreground">{formatCurrency(paymentsTotal, policy.currency)}</span>
             </div>
           </SectionCard>
@@ -290,7 +290,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         <SectionCard title="Documentos" description="Archivos asociados a esta póliza.">
           <Table>
             <TableHeader>
-              <TableRow className="bg-stone-50/70">
+              <TableRow className="bg-muted/40">
                 <TableHead>Archivo</TableHead>
                 <TableHead>Tipo</TableHead>
                 <TableHead>Fecha</TableHead>
@@ -326,7 +326,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         >
           {activity.length === 0 ? (
             <div className="p-4">
-              <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 px-6 py-8 text-center text-sm text-muted-foreground">
+              <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
                 <History className="mx-auto mb-2 size-5 text-muted-foreground" />
                 Sin actividad registrada para esta póliza todavía.
               </div>

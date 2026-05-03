@@ -38,7 +38,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="inline-flex min-w-7 items-center justify-center rounded-md border border-stone-300 bg-white px-1.5 py-0.5 text-[11px] font-medium text-foreground shadow-sm">
+    <kbd className="inline-flex min-w-7 items-center justify-center rounded-md border border-border bg-card px-1.5 py-0.5 text-[11px] font-medium text-foreground shadow-sm">
       {children}
     </kbd>
   );
@@ -65,7 +65,7 @@ export function ShortcutsHelp() {
                 {group.items.map((item) => (
                   <li
                     key={item.description}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-stone-200/80 bg-stone-50/60 px-3 py-2 text-sm"
+                    className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-sm"
                   >
                     <span className="text-foreground">{item.description}</span>
                     <span className="flex items-center gap-1">

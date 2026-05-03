@@ -19,7 +19,15 @@ import { policyTypeLabel } from "@/lib/status";
 type ChartPoint = { name: string; value: number };
 
 const CHART_HEIGHT = 256;
-const colors = ["#256f87", "#2f9e75", "#d19018", "#c84d3f", "#6f5aa8", "#64748b"];
+const colors = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+  "var(--muted-foreground)",
+];
+const GRID_STROKE = "var(--border)";
 
 export function DuePaymentsChart({ data }: { data: ChartPoint[] }) {
   return (
@@ -27,15 +35,15 @@ export function DuePaymentsChart({ data }: { data: ChartPoint[] }) {
       <AreaChart data={data}>
         <defs>
           <linearGradient id="dueGradient" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="5%" stopColor="#256f87" stopOpacity={0.28} />
-            <stop offset="95%" stopColor="#256f87" stopOpacity={0.02} />
+            <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.28} />
+            <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0.02} />
           </linearGradient>
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="#e7e0d4" />
+        <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
         <XAxis dataKey="name" tickLine={false} axisLine={false} fontSize={12} />
         <YAxis tickLine={false} axisLine={false} fontSize={12} />
         <Tooltip />
-        <Area type="monotone" dataKey="value" stroke="#256f87" fill="url(#dueGradient)" strokeWidth={2} />
+        <Area type="monotone" dataKey="value" stroke="var(--chart-1)" fill="url(#dueGradient)" strokeWidth={2} />
       </AreaChart>
     </ResponsiveContainer>
   );
@@ -45,11 +53,11 @@ export function RenewalsChart({ data }: { data: ChartPoint[] }) {
   return (
     <ResponsiveContainer width="100%" height={CHART_HEIGHT} debounce={1}>
       <BarChart data={data}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#e7e0d4" vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
         <XAxis dataKey="name" tickLine={false} axisLine={false} fontSize={12} />
         <YAxis tickLine={false} axisLine={false} fontSize={12} />
         <Tooltip />
-        <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="#2f9e75" />
+        <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="var(--chart-2)" />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -75,11 +83,11 @@ export function CommissionChart({ data }: { data: ChartPoint[] }) {
   return (
     <ResponsiveContainer width="100%" height={CHART_HEIGHT} debounce={1}>
       <BarChart data={data}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#e7e0d4" vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
         <XAxis dataKey="name" tickLine={false} axisLine={false} fontSize={12} />
         <YAxis tickLine={false} axisLine={false} fontSize={12} />
         <Tooltip />
-        <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="#d19018" />
+        <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="var(--chart-3)" />
       </BarChart>
     </ResponsiveContainer>
   );

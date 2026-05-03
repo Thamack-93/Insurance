@@ -122,7 +122,7 @@ export function FormSection({
   children: ReactNode;
 }) {
   return (
-    <section className="space-y-4 rounded-3xl border bg-white/70 p-5">
+    <section className="space-y-4 rounded-3xl border bg-card/70 p-5">
       <div>
         <h2 className="text-base font-semibold tracking-tight">{title}</h2>
         {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
@@ -188,7 +188,7 @@ export function ControlledSelect({
         aria-describedby={describedBy}
         aria-required={required || undefined}
         aria-label={ariaLabel}
-        className={cn("h-10 w-full rounded-xl bg-white", className)}
+        className={cn("h-10 w-full rounded-xl bg-card", className)}
       >
         <SelectValue placeholder={placeholder ?? "Selecciona una opción"}>
           {label || undefined}
@@ -215,8 +215,8 @@ export function FormActions({
   pending?: boolean;
 }) {
   return (
-    <div className="flex flex-wrap justify-end gap-2 border-t border-stone-200/80 pt-5">
-      <Button asChild type="button" variant="outline" className="rounded-full bg-white/80">
+    <div className="flex flex-wrap justify-end gap-2 border-t border-border/70 pt-5">
+      <Button asChild type="button" variant="outline" className="rounded-full bg-card/80">
         <Link href={cancelHref}>Cancelar</Link>
       </Button>
       <Button type="submit" className="rounded-full" disabled={pending}>

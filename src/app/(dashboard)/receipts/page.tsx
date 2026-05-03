@@ -120,7 +120,7 @@ export default async function ReceiptsPage({
         description="Una sola vista para cobrar lo abierto y auditar lo cobrado."
         actions={
           <>
-            <Button asChild variant="outline" className="rounded-full bg-white/70">
+            <Button asChild variant="outline" className="rounded-full bg-card/70">
               <Link href="/receipts/new">
                 <Plus className="mr-2 size-4" />
                 Nuevo recibo
@@ -168,7 +168,7 @@ export default async function ReceiptsPage({
       </section>
 
       <UrlTabs defaultValue={initialTab}>
-        <TabsList className="rounded-full bg-white/70 p-1">
+        <TabsList className="rounded-full bg-card/70 p-1">
           <TabsTrigger value="cobrar" className="rounded-full px-4">
             Cobrar
           </TabsTrigger>
@@ -244,7 +244,7 @@ export default async function ReceiptsPage({
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Recibo</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Póliza</TableHead>
@@ -294,7 +294,7 @@ export default async function ReceiptsPage({
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Recibo</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Pago</TableHead>

@@ -131,7 +131,7 @@ export default async function PortfolioPage({
     .slice(0, 10);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
+    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Cartera"
@@ -139,7 +139,7 @@ export default async function PortfolioPage({
           description="Vista ejecutiva de la cartera activa, su concentración y las renovaciones más cercanas."
           actions={
             <>
-              <Button asChild variant="outline" className="rounded-full bg-white/70">
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href="/renewals">Renovaciones</Link>
               </Button>
               <Button asChild className="rounded-full">
@@ -216,7 +216,7 @@ export default async function PortfolioPage({
             <>
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Póliza</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Aseguradora</TableHead>
@@ -284,7 +284,7 @@ export default async function PortfolioPage({
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Aseguradora</TableHead>
                     <TableHead className="text-right">Pólizas</TableHead>
                     <TableHead className="text-right">Valor</TableHead>
@@ -318,7 +318,7 @@ export default async function PortfolioPage({
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Cliente</TableHead>
                     <TableHead className="text-right">Pólizas</TableHead>
                     <TableHead className="text-right">Prima</TableHead>
@@ -355,7 +355,7 @@ export default async function PortfolioPage({
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Recibo</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Vencimiento</TableHead>

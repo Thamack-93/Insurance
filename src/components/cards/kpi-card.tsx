@@ -24,7 +24,7 @@ const toneMap = {
 export function KpiCard({ title, value, description, href, icon: Icon, tone = "slate" }: KpiCardProps) {
   return (
     <Link href={href} className="group block">
-      <Card className="overflow-hidden border-white/70 bg-white/82 shadow-sm shadow-stone-200/70 backdrop-blur transition duration-200 hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-xl hover:shadow-stone-200">
+      <Card className="overflow-hidden border-border/70 bg-card/82 shadow-sm  backdrop-blur transition duration-200 hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-xl hover:">
         <CardContent className="relative p-5">
           <div className={cn("absolute inset-x-0 top-0 h-24 bg-gradient-to-br", toneMap[tone])} />
           <div className="relative flex items-start justify-between gap-4">
@@ -32,7 +32,7 @@ export function KpiCard({ title, value, description, href, icon: Icon, tone = "s
               <p className="text-sm font-medium text-muted-foreground">{title}</p>
               <p className="mt-3 text-3xl font-semibold tracking-tight text-foreground">{value}</p>
             </div>
-            <div className={cn("rounded-2xl border bg-white/75 p-2.5 shadow-sm", toneMap[tone])}>
+            <div className={cn("rounded-2xl border bg-card/75 p-2.5 shadow-sm", toneMap[tone])}>
               <Icon className="size-5" />
             </div>
           </div>

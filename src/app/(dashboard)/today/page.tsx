@@ -37,7 +37,7 @@ export default async function TodayPage() {
           <>
             <Link
               href="/receipts?tab=cobrar"
-              className={cn(buttonVariants({ variant: "outline" }), "rounded-full bg-white/80")}
+              className={cn(buttonVariants({ variant: "outline" }), "rounded-full bg-card/80")}
             >
               <ReceiptText className="size-4" />
               Cobrar recibos
@@ -101,7 +101,7 @@ export default async function TodayPage() {
                 <Link
                   key={policy.id}
                   href={`/policies/${policy.id}`}
-                  className="block rounded-2xl border bg-white/70 p-4 hover:border-primary/20"
+                  className="block rounded-2xl border bg-card/70 p-4 hover:border-primary/20"
                 >
                   <p className="font-medium">{policy.policyNumber}</p>
                   <p className="mt-1 text-sm text-muted-foreground">{policy.client.fullName}</p>
@@ -123,7 +123,7 @@ export default async function TodayPage() {
                 <Link
                   key={task.id}
                   href={`/tasks/${task.id}`}
-                  className="block rounded-2xl border bg-white/70 p-4 hover:border-primary/20"
+                  className="block rounded-2xl border bg-card/70 p-4 hover:border-primary/20"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -150,7 +150,7 @@ export default async function TodayPage() {
                 <Link
                   key={commission.id}
                   href="/commissions"
-                  className="block rounded-2xl border bg-white/70 p-4 hover:border-primary/20"
+                  className="block rounded-2xl border bg-card/70 p-4 hover:border-primary/20"
                 >
                   <p className="font-medium">
                     {formatCurrency(commission.actualAmount ?? commission.expectedAmount)}
@@ -171,7 +171,7 @@ export default async function TodayPage() {
 
 function EmptyRow({ icon: Icon, message }: { icon: typeof CalendarClock; message: string }) {
   return (
-    <div className="flex items-center gap-2 rounded-2xl border border-dashed bg-white/50 p-4 text-sm text-muted-foreground">
+    <div className="flex items-center gap-2 rounded-2xl border border-dashed bg-card/50 p-4 text-sm text-muted-foreground">
       <Icon className="size-4" />
       {message}
     </div>
@@ -179,9 +179,9 @@ function EmptyRow({ icon: Icon, message }: { icon: typeof CalendarClock; message
 }
 
 const groupTone = {
-  rose: "border-rose-200/70 bg-rose-50/50 text-rose-700",
-  amber: "border-amber-200/70 bg-amber-50/50 text-amber-800",
-  emerald: "border-emerald-200/70 bg-emerald-50/50 text-emerald-700",
+  rose: "border-rose-200/70 bg-rose-50/50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300",
+  amber: "border-amber-200/70 bg-amber-50/50 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200",
+  emerald: "border-emerald-200/70 bg-emerald-50/50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300",
 } as const;
 
 function PaymentGroup({
@@ -207,20 +207,20 @@ function PaymentGroup({
       <div className={cn("mb-2 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold", groupTone[tone])}>
         <ReceiptText className="size-3.5" />
         {title}
-        <span className="rounded-full bg-white/80 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+        <span className="rounded-full bg-card/80 px-1.5 py-0.5 text-[11px] text-muted-foreground">
           {receipts.length}
         </span>
       </div>
       <div className="space-y-2">
         {receipts.length === 0 ? (
-          <div className="rounded-2xl border border-dashed bg-white/50 p-4 text-sm text-muted-foreground">
+          <div className="rounded-2xl border border-dashed bg-card/50 p-4 text-sm text-muted-foreground">
             Sin recibos en este grupo.
           </div>
         ) : (
           receipts.map((receipt) => (
             <div
               key={receipt.id}
-              className="flex flex-col gap-3 rounded-2xl border bg-white/70 p-4 md:flex-row md:items-center md:justify-between"
+              className="flex flex-col gap-3 rounded-2xl border bg-card/70 p-4 md:flex-row md:items-center md:justify-between"
             >
               <div>
                 <p className="font-medium">{receipt.client.fullName}</p>
@@ -237,7 +237,7 @@ function PaymentGroup({
                 </div>
                 <Link
                   href={`/receipts/${receipt.id}`}
-                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "rounded-full bg-white")}
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "rounded-full bg-card")}
                 >
                   <FileText className="size-3.5" />
                   Recibo

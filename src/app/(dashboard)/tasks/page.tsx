@@ -104,7 +104,7 @@ export default async function TasksPage({
   }));
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
+    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Operación"
@@ -112,7 +112,7 @@ export default async function TasksPage({
           description="Pendientes vivos, urgentes y bloqueos con cliente o aseguradora."
           actions={
             <>
-              <Button asChild variant="outline" className="rounded-full bg-white/70">
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href="/tasks/new">
                   <Plus className="mr-2 size-4" />
                   Nuevo pendiente

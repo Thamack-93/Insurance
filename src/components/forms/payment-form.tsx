@@ -171,7 +171,7 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
           </FormField>
 
           {selectedReceiptData && (
-            <div className="rounded-lg bg-stone-50 p-4">
+            <div className="rounded-lg bg-muted/40 p-4">
               <h4 className="font-medium mb-2">Resumen del recibo</h4>
               <div className="grid gap-2 text-sm">
                 <div className="flex justify-between">

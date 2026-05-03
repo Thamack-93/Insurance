@@ -42,13 +42,13 @@ export function Pagination({
   const nextPage = Math.min(totalPages, safePage + 1);
 
   const baseClass =
-    "inline-flex h-8 items-center gap-1 rounded-full border bg-white px-3 text-xs font-medium text-foreground transition hover:bg-stone-50";
+    "inline-flex h-8 items-center gap-1 rounded-full border bg-card px-3 text-xs font-medium text-foreground transition hover:bg-muted/40";
   const disabledClass = "pointer-events-none opacity-40";
 
   return (
     <div
       className={cn(
-        "flex items-center justify-between gap-3 border-t border-stone-200/80 px-4 py-3 text-xs text-muted-foreground",
+        "flex items-center justify-between gap-3 border-t border-border/70 px-4 py-3 text-xs text-muted-foreground",
         className
       )}
     >

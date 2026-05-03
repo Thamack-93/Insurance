@@ -65,7 +65,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   const daysActive = daysSince(task.startDate);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
+    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Operación"
@@ -73,11 +73,11 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
           description={task.title}
           actions={
             <>
-              <Button asChild variant="outline" className="rounded-full bg-white/70">
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/tasks/${task.id}/edit`}>Editar tarea</Link>
               </Button>
               <DeleteTaskButton id={task.id} folio={task.folio} />
-              <Button asChild variant="outline" className="rounded-full bg-white/70">
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href="/tasks">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
@@ -131,7 +131,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                 </Badge>
               </div>
 
-              <div className="rounded-2xl border bg-stone-50/70 p-4">
+              <div className="rounded-2xl border bg-muted/40 p-4">
                 <p className="font-medium text-foreground">Título</p>
                 <p className="mt-1">{task.title}</p>
                 {task.description ? (
@@ -197,7 +197,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
               ) : null}
 
               {task.notes ? (
-                <div className="rounded-2xl border bg-white/70 p-4 text-sm text-muted-foreground">
+                <div className="rounded-2xl border bg-card/70 p-4 text-sm text-muted-foreground">
                   <p className="font-medium text-foreground">Notas internas</p>
                   <p className="mt-1">{task.notes}</p>
                 </div>
@@ -213,7 +213,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Archivo</TableHead>
                     <TableHead>Tipo</TableHead>
                     <TableHead>Fecha</TableHead>
@@ -256,7 +256,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
 
         <SectionCard title="Comunicación" description="Resumen de interacciones relacionadas.">
           <div className="grid gap-4 p-4 md:grid-cols-2">
-            <div className="rounded-2xl border bg-white/70 p-4">
+            <div className="rounded-2xl border bg-card/70 p-4">
               <div className="flex items-center gap-3">
                 <MessageSquare className="size-4 text-muted-foreground" />
                 <p className="font-medium">Estado actual</p>
@@ -269,7 +269,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                     : "Este pendiente está activo y en seguimiento normal."}
               </p>
             </div>
-            <div className="rounded-2xl border bg-white/70 p-4">
+            <div className="rounded-2xl border bg-card/70 p-4">
               <div className="flex items-center gap-3">
                 <CalendarClock className="size-4 text-muted-foreground" />
                 <p className="font-medium">Próximos pasos</p>

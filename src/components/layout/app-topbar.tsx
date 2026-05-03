@@ -62,7 +62,7 @@ export function AppTopbar() {
             variant="outline"
             size="icon"
             aria-label="Abrir calendario"
-            className="rounded-full bg-white/75 dark:bg-stone-800/75"
+            className="rounded-full bg-card/75"
           >
             <CalendarDays className="size-4" aria-hidden />
           </Button>
@@ -70,7 +70,7 @@ export function AppTopbar() {
             variant="outline"
             size="icon"
             aria-label="Ver notificaciones"
-            className="rounded-full bg-white/75 dark:bg-stone-800/75"
+            className="rounded-full bg-card/75"
           >
             <Bell className="size-4" aria-hidden />
           </Button>

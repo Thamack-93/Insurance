@@ -52,7 +52,7 @@ export default async function RenewalsPage({
   const highPriorityRenewals = upcomingRenewals.filter((r: any) => r.priority === "HIGH");
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
+    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Operación"
@@ -112,7 +112,7 @@ export default async function RenewalsPage({
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Póliza</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Aseguradora</TableHead>
@@ -145,7 +145,7 @@ export default async function RenewalsPage({
 
           <SectionCard title="Acciones automáticas" description="Tareas y recordatorios generados.">
             <div className="space-y-4">
-              <div className="rounded-lg bg-stone-50 p-4">
+              <div className="rounded-lg bg-muted/40 p-4">
                 <h4 className="font-medium mb-2">Tareas creadas</h4>
                 <p className="text-sm text-muted-foreground">
                   Se han creado automáticamente {urgentRenewals.length + highPriorityRenewals.length} tareas de renovación.
@@ -155,14 +155,14 @@ export default async function RenewalsPage({
                 </Button>
               </div>
 
-              <div className="rounded-lg bg-stone-50 p-4">
+              <div className="rounded-lg bg-muted/40 p-4">
                 <h4 className="font-medium mb-2">Recordatorios enviados</h4>
                 <p className="text-sm text-muted-foreground">
                   {urgentRenewals.length + highPriorityRenewals.length} recordatorios automáticos enviados a clientes y agentes.
                 </p>
               </div>
 
-              <div className="rounded-lg bg-stone-50 p-4">
+              <div className="rounded-lg bg-muted/40 p-4">
                 <h4 className="font-medium mb-2">Próximas acciones</h4>
                 <ul className="text-sm text-muted-foreground space-y-1">
                   <li>• Contactar clientes urgentes hoy</li>
@@ -206,7 +206,7 @@ export default async function RenewalsPage({
             <>
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Póliza</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Aseguradora</TableHead>

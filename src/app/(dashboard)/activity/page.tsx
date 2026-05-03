@@ -86,14 +86,14 @@ export default async function ActivityPage({
     : "Mostrando toda la actividad del sistema.";
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
+    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <PageHeader
           eyebrow="Auditoría"
           title="Actividad del sistema"
           description="Historial cronológico de cambios, pagos, creaciones y eliminaciones."
           actions={
-            <Button asChild variant="outline" className="rounded-full bg-white/70">
+            <Button asChild variant="outline" className="rounded-full bg-card/70">
               <Link href="/dashboard">Volver al panel</Link>
             </Button>
           }
@@ -110,7 +110,7 @@ export default async function ActivityPage({
                 id="filter-entity"
                 name="entity"
                 defaultValue={entityType ?? ""}
-                className="h-9 rounded-md border border-stone-200 bg-white px-2 text-sm"
+                className="h-9 rounded-md border border-border bg-card px-2 text-sm"
               >
                 {ENTITY_OPTIONS.map((option) => (
                   <option key={option.value || "all"} value={option.value}>
@@ -125,7 +125,7 @@ export default async function ActivityPage({
                 id="filter-action"
                 name="action"
                 defaultValue={action ?? ""}
-                className="h-9 rounded-md border border-stone-200 bg-white px-2 text-sm"
+                className="h-9 rounded-md border border-border bg-card px-2 text-sm"
               >
                 {ACTION_OPTIONS.map((option) => (
                   <option key={option.value || "all"} value={option.value}>
@@ -141,7 +141,7 @@ export default async function ActivityPage({
                 type="date"
                 name="from"
                 defaultValue={fromRaw ?? ""}
-                className="h-9 rounded-md border border-stone-200 bg-white px-2 text-sm"
+                className="h-9 rounded-md border border-border bg-card px-2 text-sm"
               />
             </div>
             <div className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -151,7 +151,7 @@ export default async function ActivityPage({
                 type="date"
                 name="to"
                 defaultValue={toRaw ?? ""}
-                className="h-9 rounded-md border border-stone-200 bg-white px-2 text-sm"
+                className="h-9 rounded-md border border-border bg-card px-2 text-sm"
               />
             </div>
             {entityId ? <input type="hidden" name="id" value={entityId} /> : null}
@@ -163,7 +163,7 @@ export default async function ActivityPage({
                 asChild
                 type="button"
                 variant="outline"
-                className="h-9 rounded-full bg-white/70"
+                className="h-9 rounded-full bg-card/70"
               >
                 <Link href="/activity">Limpiar</Link>
               </Button>

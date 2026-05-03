@@ -29,18 +29,18 @@ type IconTone = {
 };
 
 const actionIconMap: Record<string, IconTone> = {
-  CREATE: { icon: FilePlus2, tone: "bg-emerald-50 text-emerald-700" },
-  UPDATE: { icon: FileSignature, tone: "bg-sky-50 text-sky-700" },
-  DELETE: { icon: Trash2, tone: "bg-rose-50 text-rose-700" },
-  PAY: { icon: Wallet, tone: "bg-amber-50 text-amber-800" },
-  PAID: { icon: Wallet, tone: "bg-amber-50 text-amber-800" },
-  CANCEL: { icon: CircleX, tone: "bg-stone-100 text-stone-700" },
-  CLOSE: { icon: CircleCheck, tone: "bg-emerald-50 text-emerald-700" },
-  REOPEN: { icon: PlayCircle, tone: "bg-sky-50 text-sky-700" },
-  RENEW: { icon: History, tone: "bg-violet-50 text-violet-700" },
+  CREATE: { icon: FilePlus2, tone: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
+  UPDATE: { icon: FileSignature, tone: "bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300" },
+  DELETE: { icon: Trash2, tone: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300" },
+  PAY: { icon: Wallet, tone: "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" },
+  PAID: { icon: Wallet, tone: "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" },
+  CANCEL: { icon: CircleX, tone: "bg-muted text-muted-foreground" },
+  CLOSE: { icon: CircleCheck, tone: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
+  REOPEN: { icon: PlayCircle, tone: "bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300" },
+  RENEW: { icon: History, tone: "bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300" },
 };
 
-const defaultIcon: IconTone = { icon: Activity, tone: "bg-stone-100 text-stone-700" };
+const defaultIcon: IconTone = { icon: Activity, tone: "bg-muted text-muted-foreground" };
 
 const actionLabelMap: Record<string, string> = {
   CREATE: "Creado",
@@ -122,7 +122,7 @@ export function ActivityTimeline({
   }
 
   return (
-    <ol className={cn("divide-y divide-stone-200/80", className)}>
+    <ol className={cn("divide-y divide-border/70", className)}>
       {data.map((entry) => {
         const { icon: Icon, tone } = lookupAction(entry.action);
         const actionLabel = formatActionLabel(entry.action);
@@ -151,7 +151,7 @@ export function ActivityTimeline({
               </p>
               <p className="text-xs text-muted-foreground">
                 Por {formatPerformer(entry.performedBy)}
-                <span className="mx-1.5 text-stone-300">·</span>
+                <span className="mx-1.5 text-muted-foreground/60">·</span>
                 <Tooltip>
                   <TooltipTrigger className="cursor-help underline-offset-2 hover:underline">
                     {distance}

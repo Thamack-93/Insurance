@@ -11,7 +11,7 @@ export function ChartCard({
   children: ReactNode;
 }) {
   return (
-    <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
+    <Card className="border-border/60 bg-card/85 shadow-sm backdrop-blur">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">{title}</CardTitle>
         {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}

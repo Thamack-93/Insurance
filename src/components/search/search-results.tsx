@@ -36,7 +36,7 @@ export function SearchResults() {
   }
 
   return (
-    <div className="absolute left-0 right-0 top-full mt-2 max-h-[400px] overflow-y-auto rounded-lg border bg-white shadow-lg z-50">
+    <div className="absolute left-0 right-0 top-full mt-2 max-h-[400px] overflow-y-auto rounded-lg border bg-popover shadow-lg z-50">
       <div className="p-3 border-b">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Search className="size-4" />
@@ -62,7 +62,7 @@ export function SearchResults() {
             return (
               <button
                 key={result.id}
-                className="w-full px-4 py-3 flex items-center gap-3 hover:bg-stone-50 transition-colors text-left"
+                className="w-full px-4 py-3 flex items-center gap-3 hover:bg-muted/40 transition-colors text-left"
                 onClick={() => {
                   router.push(result.href);
                   clearSearch();

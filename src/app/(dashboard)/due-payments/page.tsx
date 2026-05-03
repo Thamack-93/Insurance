@@ -105,7 +105,7 @@ export default async function DuePaymentsPage({
   const overdueAmount = toNumber(overdueAggregates._sum.amount);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
+    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Cartera"
@@ -183,7 +183,7 @@ export default async function DuePaymentsPage({
             <>
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Recibo</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Póliza</TableHead>
@@ -245,7 +245,7 @@ export default async function DuePaymentsPage({
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Recibo</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Vencimiento</TableHead>
@@ -287,7 +287,7 @@ export default async function DuePaymentsPage({
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Recibo</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Vencimiento</TableHead>
@@ -328,7 +328,7 @@ export default async function DuePaymentsPage({
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Recibo</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Vencimiento</TableHead>
@@ -367,7 +367,7 @@ export default async function DuePaymentsPage({
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Recibo</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Pago</TableHead>

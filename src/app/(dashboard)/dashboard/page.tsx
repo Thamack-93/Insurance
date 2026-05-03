@@ -40,7 +40,7 @@ export default async function DashboardPage() {
         description="Una vista estratégica de KPIs, gráficos y actividad. Para lo accionable del día abre Hoy."
         actions={
           <>
-            <Link href="/reports" className={cn(buttonVariants({ variant: "outline" }), "rounded-full bg-white/80")}>
+            <Link href="/reports" className={cn(buttonVariants({ variant: "outline" }), "rounded-full bg-card/80")}>
               Generar reporte
             </Link>
             <Link href="/today" className={cn(buttonVariants(), "rounded-full")}>
@@ -133,12 +133,12 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-        <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
+        <Card className="border-border/60 bg-card/85 shadow-sm backdrop-blur">
           <CardHeader className="flex-row items-center justify-between gap-3">
             <CardTitle className="text-lg">Riesgos principales</CardTitle>
             <Link
               href="/risks"
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "rounded-full bg-white/70")}
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "rounded-full bg-card/70")}
             >
               Ver todos
               <ArrowRight className="ml-1 size-3.5" />
@@ -163,7 +163,7 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
+        <Card className="border-border/60 bg-card/85 shadow-sm backdrop-blur">
           <CardHeader>
             <CardTitle className="text-lg">Actividad reciente</CardTitle>
           </CardHeader>

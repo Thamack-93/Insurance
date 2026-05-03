@@ -54,7 +54,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
   const remainingAmount = toNumber(receipt.amount) - paidAmount;
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
+    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Finanzas"
@@ -62,11 +62,11 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
           description={`${receipt.client.fullName} · ${receipt.policy.policyNumber} · ${receipt.insurer.name}`}
           actions={
             <>
-              <Button asChild variant="outline" className="rounded-full bg-white/70">
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/receipts/${receipt.id}/edit`}>Editar recibo</Link>
               </Button>
               <DeleteReceiptButton id={receipt.id} receiptNumber={receipt.receiptNumber} />
-              <Button asChild variant="outline" className="rounded-full bg-white/70">
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href="/receipts">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
@@ -117,7 +117,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                 </Badge>
               </div>
 
-              <div className="rounded-2xl border bg-stone-50/70 p-4">
+              <div className="rounded-2xl border bg-muted/40 p-4">
                 <p className="font-medium text-foreground">Cliente</p>
                 <Link href={`/clients/${receipt.clientId}`} className="mt-1 block text-foreground hover:text-primary">
                   {receipt.client.fullName}
@@ -153,7 +153,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
               </div>
 
               {receipt.notes ? (
-                <div className="rounded-2xl border bg-white/70 p-4 text-sm text-muted-foreground">
+                <div className="rounded-2xl border bg-card/70 p-4 text-sm text-muted-foreground">
                   <p className="font-medium text-foreground">Notas</p>
                   <p className="mt-1">{receipt.notes}</p>
                 </div>
@@ -169,7 +169,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Fecha de pago</TableHead>
                     <TableHead>Monto</TableHead>
                     <TableHead>Método</TableHead>
@@ -192,7 +192,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                 </TableBody>
               </Table>
             )}
-            <div className="border-t border-stone-200/80 px-4 py-3 text-sm">
+            <div className="border-t border-border/70 px-4 py-3 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Total pagado:</span>
                 <span className="font-medium">{formatCurrency(paidAmount, receipt.currency)}</span>
@@ -269,7 +269,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
           ) : (
             <Table>
               <TableHeader>
-                <TableRow className="bg-stone-50/70">
+                <TableRow className="bg-muted/40">
                   <TableHead>Recibo</TableHead>
                   <TableHead>Periodo</TableHead>
                   <TableHead>Vencimiento</TableHead>
@@ -316,7 +316,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
         >
           {activity.length === 0 ? (
             <div className="p-4">
-              <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 px-6 py-8 text-center text-sm text-muted-foreground">
+              <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
                 <History className="mx-auto mb-2 size-5 text-muted-foreground" />
                 Sin actividad registrada para este recibo todavía.
               </div>

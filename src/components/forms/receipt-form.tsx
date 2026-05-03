@@ -73,8 +73,8 @@ export function ReceiptForm({
   }
 
   return (
-    <Card className="border-white/70 bg-white/88 shadow-sm shadow-stone-200/70">
-      <CardHeader className="border-b border-stone-200/80">
+    <Card className="border-border/70 bg-card/88 shadow-sm ">
+      <CardHeader className="border-b border-border/70">
         <CardTitle>{title}</CardTitle>
         <p className="text-sm text-muted-foreground">{description}</p>
       </CardHeader>

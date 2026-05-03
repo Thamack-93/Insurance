@@ -43,7 +43,7 @@ export function DeleteReceiptButton({ id, receiptNumber }: DeleteReceiptButtonPr
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger
         render={
-          <Button variant="outline" className="rounded-full bg-white/70 text-destructive hover:text-destructive" />
+          <Button variant="outline" className="rounded-full bg-card/70 text-destructive hover:text-destructive" />
         }
       >
         <Trash2 className="mr-2 size-4" />

@@ -45,7 +45,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
   const daysOpen = daysSince(claim.reportedDate);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
+    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Operación"
@@ -53,14 +53,14 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
           description={`${claim.claimType} · ${claim.client.fullName}`}
           actions={
             <div className="flex items-center gap-2">
-              <Button asChild variant="outline" className="rounded-full bg-white/70">
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/claims/${claim.id}/edit`}>
                   <Pencil className="mr-2 size-4" />
                   Editar
                 </Link>
               </Button>
               <DeleteClaimButton id={claim.id} folio={claim.folio} />
-              <Button asChild variant="outline" className="rounded-full bg-white/70">
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href="/claims">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
@@ -109,7 +109,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
                 <span className="text-xs text-muted-foreground">Folio: {claim.folio}</span>
               </div>
 
-              <div className="rounded-2xl border bg-stone-50/70 p-4">
+              <div className="rounded-2xl border bg-muted/40 p-4">
                 <p className="font-medium text-foreground">Tipo de siniestro</p>
                 <p className="mt-1">{claim.claimType}</p>
                 {claim.description && (
@@ -160,7 +160,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
               </div>
 
               {claim.notes && (
-                <div className="rounded-2xl border bg-white/70 p-4 text-sm text-muted-foreground">
+                <div className="rounded-2xl border bg-card/70 p-4 text-sm text-muted-foreground">
                   <p className="font-medium text-foreground">Notas internas</p>
                   <p className="mt-1">{claim.notes}</p>
                 </div>
@@ -176,7 +176,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-stone-50/70">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Archivo</TableHead>
                     <TableHead>Tipo</TableHead>
                     <TableHead>Fecha</TableHead>
@@ -230,7 +230,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
         >
           {activity.length === 0 ? (
             <div className="p-4">
-              <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 px-6 py-8 text-center text-sm text-muted-foreground">
+              <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
                 <History className="mx-auto mb-2 size-5 text-muted-foreground" />
                 Sin actividad registrada para este siniestro todavía.
               </div>

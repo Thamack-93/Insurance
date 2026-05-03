@@ -130,7 +130,7 @@ function TasksTableInner({ tasks }: { tasks: TaskRow[] }) {
   return (
     <div className="flex flex-col gap-3">
       {hasSelection ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-stone-50 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/40 px-4 py-3">
           <div className="flex items-center gap-3">
             <Badge variant="secondary" className="rounded-full">
               {selectedCount} seleccionado{selectedCount !== 1 ? "s" : ""}
@@ -212,7 +212,7 @@ function TasksTableInner({ tasks }: { tasks: TaskRow[] }) {
       ) : null}
       <Table>
         <TableHeader>
-          <TableRow className="bg-stone-50/70">
+          <TableRow className="bg-muted/40">
             <SelectAllHeader ids={allIds} />
             <TableHead>Folio</TableHead>
             <TableHead>Título</TableHead>

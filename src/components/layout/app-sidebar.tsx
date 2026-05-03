@@ -145,7 +145,7 @@ export function AppSidebar() {
   return (
     <aside className="sticky top-0 hidden h-screen w-72 shrink-0 border-r border-sidebar-border/80 bg-sidebar/85 p-4 backdrop-blur-xl lg:block">
       <div className="flex h-full flex-col">
-        <Link href="/dashboard" className="flex items-center gap-3 rounded-3xl border bg-white/72 p-3 shadow-sm">
+        <Link href="/dashboard" className="flex items-center gap-3 rounded-3xl border bg-card/70 p-3 shadow-sm">
           <div className="grid size-11 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
             <ShieldCheck className="size-5" />
           </div>
@@ -155,7 +155,7 @@ export function AppSidebar() {
           </div>
         </Link>
 
-        <div className="mt-5 rounded-2xl border bg-white/55 p-2 text-sm text-muted-foreground">
+        <div className="mt-5 rounded-2xl border bg-card/55 p-2 text-sm text-muted-foreground">
           <div className="flex items-center gap-2 px-2 py-1.5">
             <Search className="size-4" />
             Buscar cliente, póliza, recibo...
@@ -200,7 +200,7 @@ export function AppSidebar() {
                           href={item.href}
                           className={cn(
                             "flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-sidebar-foreground/72 transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                            active && "bg-white text-primary shadow-sm ring-1 ring-border/70",
+                            active && "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm ring-1 ring-sidebar-border/70",
                           )}
                         >
                           <Icon className="size-4" />
@@ -215,7 +215,7 @@ export function AppSidebar() {
           })}
         </nav>
 
-        <div className="mt-auto rounded-3xl border bg-white/62 p-4 shadow-sm">
+        <div className="mt-auto rounded-3xl border bg-card/65 p-4 shadow-sm">
           <p className="text-sm font-semibold">Operaciones locales</p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
             SQLite, documentos privados y backups seguros en `data/`.

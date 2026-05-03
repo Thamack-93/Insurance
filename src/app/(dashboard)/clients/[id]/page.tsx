@@ -83,7 +83,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const activePremium = activePolicies.reduce((sum, policy) => sum + toNumber(policy.premiumAmount), 0);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
+    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
       <RecordPageView id={client.id} label={client.fullName} href={`/clients/${client.id}`} type="Cliente" />
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
@@ -92,14 +92,14 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           description={`${client.type === "COMPANY" ? "Empresa" : "Persona"} · expediente central del cliente y su actividad vinculada.`}
           actions={
             <div className="flex items-center gap-2">
-              <Button asChild variant="outline" className="rounded-full bg-white/70">
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/clients/${id}/edit`}>
                   <Pencil className="mr-2 size-4" />
                   Editar
                 </Link>
               </Button>
               <DeleteClientButton id={id} name={client.fullName} />
-              <Button asChild variant="outline" className="rounded-full bg-white/70">
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href="/clients">Volver a clientes</Link>
               </Button>
             </div>
@@ -184,7 +184,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           <SectionCard title="Pólizas" description="Cartera de este cliente, de la más viva a la más cercana.">
             <Table>
               <TableHeader>
-                <TableRow className="bg-stone-50/70">
+                <TableRow className="bg-muted/40">
                   <TableHead>Póliza</TableHead>
                   <TableHead>Aseguradora</TableHead>
                   <TableHead>Tipo</TableHead>
@@ -219,7 +219,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           <SectionCard title="Recibos" description="Cobranza histórica y pendientes.">
             <Table>
               <TableHeader>
-                <TableRow className="bg-stone-50/70">
+                <TableRow className="bg-muted/40">
                   <TableHead>Recibo</TableHead>
                   <TableHead>Póliza</TableHead>
                   <TableHead>Vencimiento</TableHead>
@@ -248,7 +248,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           <SectionCard title="Tareas" description="Pendientes que cuelgan del cliente.">
             <Table>
               <TableHeader>
-                <TableRow className="bg-stone-50/70">
+                <TableRow className="bg-muted/40">
                   <TableHead>Folio</TableHead>
                   <TableHead>Título</TableHead>
                   <TableHead>Prioridad</TableHead>
@@ -352,7 +352,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         >
           {activity.length === 0 ? (
             <div className="p-4">
-              <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 px-6 py-8 text-center text-sm text-muted-foreground">
+              <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
                 <History className="mx-auto mb-2 size-5 text-muted-foreground" />
                 Sin actividad registrada para este cliente todavía.
               </div>

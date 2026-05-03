@@ -136,7 +136,7 @@ export default async function ReportsPage() {
   ];
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
+    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Analítica"
@@ -176,10 +176,10 @@ export default async function ReportsPage() {
                 <Link
                   key={report.title}
                   href={report.href}
-                  className="group rounded-3xl border border-white/70 bg-white/80 p-5 shadow-sm shadow-stone-200/70 transition hover:-translate-y-0.5 hover:shadow-xl"
+                  className="group rounded-3xl border border-border/60 bg-card/85 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-xl"
                 >
                   <div className="flex items-start justify-between gap-4">
-                    <div className="rounded-2xl border bg-stone-50 p-3">
+                    <div className="rounded-2xl border bg-muted/40 p-3">
                       <Icon className="size-5 text-foreground/80" />
                     </div>
                     <ArrowRight className="size-4 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-primary" />

@@ -33,10 +33,10 @@ function riskHref(entityType: string, entityId: string) {
 
 function QualityBadge({ nivel }: { nivel: "Excelente" | "Bueno" | "Atención" | "Crítico" }) {
   const colors = {
-    Excelente: "bg-emerald-100 text-emerald-700 border-emerald-200",
-    Bueno: "bg-blue-100 text-blue-700 border-blue-200",
-    Atención: "bg-amber-100 text-amber-700 border-amber-200",
-    Crítico: "bg-rose-100 text-rose-700 border-rose-200",
+    Excelente: "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900/60",
+    Bueno: "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900/60",
+    Atención: "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:border-amber-900/60",
+    Crítico: "bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900/60",
   };
   return <Badge className={`${colors[nivel]} rounded-full`}>{nivel}</Badge>;
 }
@@ -46,7 +46,7 @@ function ScoreBar({ score }: { score: number }) {
     score >= 90 ? "bg-emerald-500" : score >= 75 ? "bg-blue-500" : score >= 50 ? "bg-amber-500" : "bg-rose-500";
   return (
     <div className="flex items-center gap-2">
-      <div className="h-2 w-24 overflow-hidden rounded-full bg-stone-200">
+      <div className="h-2 w-24 overflow-hidden rounded-full bg-muted">
         <div className={`h-full ${color}`} style={{ width: `${score}%` }} />
       </div>
       <span className="text-sm font-medium">{score}</span>
@@ -157,7 +157,7 @@ export default async function RisksPage({
       </section>
 
       <UrlTabs defaultValue={initialTab}>
-        <TabsList className="rounded-full bg-white/70 p-1">
+        <TabsList className="rounded-full bg-card/70 p-1">
           <TabsTrigger value="hallazgos" className="rounded-full px-4">
             Hallazgos
           </TabsTrigger>
@@ -244,7 +244,7 @@ export default async function RisksPage({
               ) : (
                 <Table>
                   <TableHeader>
-                    <TableRow className="bg-stone-50/70">
+                    <TableRow className="bg-muted/40">
                       <TableHead>Cliente</TableHead>
                       <TableHead>Score</TableHead>
                       <TableHead>Nivel</TableHead>
@@ -290,7 +290,7 @@ export default async function RisksPage({
               ) : (
                 <Table>
                   <TableHeader>
-                    <TableRow className="bg-stone-50/70">
+                    <TableRow className="bg-muted/40">
                       <TableHead>Póliza</TableHead>
                       <TableHead>Score</TableHead>
                       <TableHead>Nivel</TableHead>

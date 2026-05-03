@@ -39,7 +39,7 @@ export function CollectableReceipts({ receipts }: { receipts: CollectableReceipt
     <BulkActionsProvider>
       <div className="space-y-3">
         <BulkToolbar receipts={receipts} />
-        <div className="divide-y divide-stone-200/80 rounded-lg border border-stone-200/80 bg-white">
+        <div className="divide-y divide-border/70 rounded-lg border border-border/70 bg-card">
           {receipts.map((receipt) => (
             <ReceiptRow key={receipt.id} receipt={receipt} />
           ))}

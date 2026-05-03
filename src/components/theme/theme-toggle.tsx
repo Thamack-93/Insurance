@@ -10,7 +10,7 @@ export function ThemeToggle() {
     <Button
       variant="outline"
       size="icon"
-      className="relative rounded-full bg-white/75 dark:bg-stone-800/75"
+      className="relative rounded-full bg-card/75"
       onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
       aria-label="Cambiar tema"
     >

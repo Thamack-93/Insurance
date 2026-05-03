@@ -76,7 +76,7 @@ export function ClaimForm({
   }
 
   return (
-    <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
+    <Card className="border-border/70 bg-card/84 shadow-sm  backdrop-blur">
       <CardHeader>
         <CardTitle className="text-lg">{title}</CardTitle>
         <p className="text-sm text-muted-foreground">{description}</p>
