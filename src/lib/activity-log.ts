@@ -1,3 +1,4 @@
+import type { Prisma } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
 
 export function safeJson(value: unknown, maxLength = 5000) {
@@ -38,4 +39,73 @@ export async function writeActivityLog({
       performedBy,
     },
   });
+}
+
+export type ActivityEntry = {
+  id: string;
+  entityType: string;
+  entityId: string;
+  action: string;
+  oldValue: string | null;
+  newValue: string | null;
+  performedBy: string;
+  createdAt: Date;
+};
+
+export async function getActivityForEntity(
+  entityType: string,
+  entityId: string,
+  limit = 20,
+): Promise<ActivityEntry[]> {
+  const db = getDb();
+  return db.activityLog.findMany({
+    where: { entityType, entityId },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+}
+
+export type ActivityFilter = {
+  entityType?: string;
+  entityId?: string;
+  action?: string;
+  from?: Date;
+  to?: Date;
+};
+
+export async function getAllActivity({
+  filter = {},
+  page = 1,
+  pageSize = 25,
+}: {
+  filter?: ActivityFilter;
+  page?: number;
+  pageSize?: number;
+}): Promise<{ entries: ActivityEntry[]; total: number }> {
+  const db = getDb();
+  const where: Prisma.ActivityLogWhereInput = {};
+  if (filter.entityType) where.entityType = filter.entityType;
+  if (filter.entityId) where.entityId = filter.entityId;
+  if (filter.action) where.action = filter.action;
+  if (filter.from || filter.to) {
+    where.createdAt = {
+      ...(filter.from ? { gte: filter.from } : {}),
+      ...(filter.to ? { lte: filter.to } : {}),
+    };
+  }
+
+  const safePage = Math.max(1, page);
+  const skip = (safePage - 1) * pageSize;
+
+  const [entries, total] = await Promise.all([
+    db.activityLog.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: pageSize,
+      skip,
+    }),
+    db.activityLog.count({ where }),
+  ]);
+
+  return { entries, total };
 }

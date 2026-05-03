@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, BadgeCheck, CalendarClock, Clock, FileText, Pencil, ShieldCheck } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CalendarClock, Clock, FileText, History, Pencil, ShieldCheck } from "lucide-react";
 import { DeleteClaimButton } from "@/components/claims/delete-claim-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
+import { ActivityTimeline } from "@/components/timeline/activity-timeline";
+import { getActivityForEntity } from "@/lib/activity-log";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -30,11 +32,14 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
     notFound();
   }
 
-  const relatedClaims = await db.claim.findMany({
-    where: { policyId: claim.policyId, id: { not: id } },
-    orderBy: { createdAt: "desc" },
-    take: 5,
-  });
+  const [relatedClaims, activity] = await Promise.all([
+    db.claim.findMany({
+      where: { policyId: claim.policyId, id: { not: id } },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    }),
+    getActivityForEntity("Claim", id, 20),
+  ]);
 
   const isClosed = claim.status === "RESOLVED" || claim.status === "CANCELLED";
   const daysOpen = daysSince(claim.reportedDate);
@@ -210,6 +215,30 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
             </div>
           </SectionCard>
         )}
+
+        <SectionCard
+          title="Actividad"
+          description="Cambios y eventos recientes registrados para este siniestro."
+          action={
+            <Link
+              href={`/activity?entity=Claim&id=${id}`}
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              Ver todo el historial
+            </Link>
+          }
+        >
+          {activity.length === 0 ? (
+            <div className="p-4">
+              <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 px-6 py-8 text-center text-sm text-muted-foreground">
+                <History className="mx-auto mb-2 size-5 text-muted-foreground" />
+                Sin actividad registrada para este siniestro todavía.
+              </div>
+            </div>
+          ) : (
+            <ActivityTimeline entries={activity} />
+          )}
+        </SectionCard>
       </div>
     </main>
   );

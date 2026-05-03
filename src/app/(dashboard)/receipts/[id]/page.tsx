@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CircleDollarSign, FileText, ReceiptText, CalendarClock } from "lucide-react";
+import { ArrowLeft, CircleDollarSign, FileText, History, ReceiptText, CalendarClock } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
+import { ActivityTimeline } from "@/components/timeline/activity-timeline";
+import { getActivityForEntity } from "@/lib/activity-log";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,7 +28,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
     notFound();
   }
 
-  const [payments, commissions, documents, relatedReceipts] = await Promise.all([
+  const [payments, commissions, documents, relatedReceipts, activity] = await Promise.all([
     db.payment.findMany({
       where: { receiptId: id },
       orderBy: { paidDate: "desc" },
@@ -45,6 +47,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
       orderBy: { dueDate: "desc" },
       take: 5,
     }),
+    getActivityForEntity("Receipt", id, 20),
   ]);
 
   const paidAmount = payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
@@ -296,6 +299,30 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                 ))}
               </TableBody>
             </Table>
+          )}
+        </SectionCard>
+
+        <SectionCard
+          title="Actividad"
+          description="Cambios y eventos recientes registrados para este recibo."
+          action={
+            <Link
+              href={`/activity?entity=Receipt&id=${id}`}
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              Ver todo el historial
+            </Link>
+          }
+        >
+          {activity.length === 0 ? (
+            <div className="p-4">
+              <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 px-6 py-8 text-center text-sm text-muted-foreground">
+                <History className="mx-auto mb-2 size-5 text-muted-foreground" />
+                Sin actividad registrada para este recibo todavía.
+              </div>
+            </div>
+          ) : (
+            <ActivityTimeline entries={activity} />
           )}
         </SectionCard>
       </div>

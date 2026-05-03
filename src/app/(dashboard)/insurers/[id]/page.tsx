@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Building2, FileText, Pencil, ShieldCheck, TrendingUp } from "lucide-react";
+import { ArrowLeft, Building2, FileText, History, Pencil, ShieldCheck, TrendingUp } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
+import { ActivityTimeline } from "@/components/timeline/activity-timeline";
+import { getActivityForEntity } from "@/lib/activity-log";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,7 +27,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
     notFound();
   }
 
-  const [policies, claims, commissions] = await Promise.all([
+  const [policies, claims, commissions, activity] = await Promise.all([
     db.policy.findMany({
       where: { insurerId: id },
       include: { client: true },
@@ -43,6 +45,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
       orderBy: { expectedDate: "desc" },
       take: 10,
     }),
+    getActivityForEntity("Insurer", id, 20),
   ]);
 
   const activePolicies = policies.filter((p) => p.status === "ACTIVE");
@@ -277,6 +280,30 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
             )}
           </SectionCard>
         </section>
+
+        <SectionCard
+          title="Actividad"
+          description="Cambios y eventos recientes registrados para esta aseguradora."
+          action={
+            <Link
+              href={`/activity?entity=Insurer&id=${id}`}
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              Ver todo el historial
+            </Link>
+          }
+        >
+          {activity.length === 0 ? (
+            <div className="p-4">
+              <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 px-6 py-8 text-center text-sm text-muted-foreground">
+                <History className="mx-auto mb-2 size-5 text-muted-foreground" />
+                Sin actividad registrada para esta aseguradora todavía.
+              </div>
+            </div>
+          ) : (
+            <ActivityTimeline entries={activity} />
+          )}
+        </SectionCard>
       </div>
     </main>
   );

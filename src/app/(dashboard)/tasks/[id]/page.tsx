@@ -233,15 +233,24 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
           </SectionCard>
         </section>
 
-        <SectionCard title="Historial de actividad" description="Cambios y eventos registrados.">
+        <SectionCard
+          title="Actividad"
+          description="Cambios y eventos registrados para este pendiente."
+          action={
+            <Link
+              href={`/activity?entity=Task&id=${id}`}
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              Ver todo el historial
+            </Link>
+          }
+        >
           {activityLogs.length === 0 ? (
             <div className="px-4 py-6 text-sm text-muted-foreground">
               No hay actividad registrada para este pendiente.
             </div>
           ) : (
-            <div className="p-4">
-              <ActivityTimeline items={activityLogs} />
-            </div>
+            <ActivityTimeline entries={activityLogs} />
           )}
         </SectionCard>
 

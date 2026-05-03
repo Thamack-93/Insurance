@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RecordPageView } from "@/components/recently-viewed/record-page-view";
-import { ArrowLeft, FileClock, Pencil, ReceiptText, Repeat, Shield } from "lucide-react";
+import { ArrowLeft, FileClock, History, Pencil, ReceiptText, Repeat, Shield } from "lucide-react";
 import { DeletePolicyButton } from "@/components/policies/delete-policy-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
+import { ActivityTimeline } from "@/components/timeline/activity-timeline";
+import { getActivityForEntity } from "@/lib/activity-log";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,7 +38,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     notFound();
   }
 
-  const [receipts, payments, commissions, tasks, documents] = await Promise.all([
+  const [receipts, payments, commissions, tasks, documents, activity] = await Promise.all([
     db.receipt.findMany({
       where: { policyId: id },
       include: { client: true, insurer: true },
@@ -67,6 +69,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       orderBy: { uploadedAt: "desc" },
       take: 10,
     }),
+    getActivityForEntity("Policy", id, 20),
   ]);
 
   const openReceipts = receipts.filter((receipt) => receipt.status !== "PAID" && receipt.status !== "CANCELLED");
@@ -307,6 +310,30 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
               ))}
             </TableBody>
           </Table>
+        </SectionCard>
+
+        <SectionCard
+          title="Actividad"
+          description="Cambios y eventos recientes registrados para esta póliza."
+          action={
+            <Link
+              href={`/activity?entity=Policy&id=${id}`}
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              Ver todo el historial
+            </Link>
+          }
+        >
+          {activity.length === 0 ? (
+            <div className="p-4">
+              <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 px-6 py-8 text-center text-sm text-muted-foreground">
+                <History className="mx-auto mb-2 size-5 text-muted-foreground" />
+                Sin actividad registrada para esta póliza todavía.
+              </div>
+            </div>
+          ) : (
+            <ActivityTimeline entries={activity} />
+          )}
         </SectionCard>
       </div>
     </main>
