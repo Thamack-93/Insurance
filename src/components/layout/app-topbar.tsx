@@ -2,10 +2,11 @@
 
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
-import { Bell, CalendarDays, Command } from "lucide-react";
+import { CalendarDays, Command } from "lucide-react";
 import { SearchInput } from "@/components/search/search-input";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { Button } from "@/components/ui/button";
+import { NotificationsBell, type BellAlert } from "@/components/notifications/notifications-bell";
 
 const labels: Record<string, string> = {
   dashboard: "Dashboard",
@@ -26,9 +27,18 @@ const labels: Record<string, string> = {
   reports: "Reportes",
   settings: "Configuración",
   "data-quality": "Calidad de datos",
+  notifications: "Notificaciones",
 };
 
-export function AppTopbar({ userMenu }: { userMenu?: ReactNode }) {
+export function AppTopbar({
+  userMenu,
+  unreadAlertCount,
+  alerts,
+}: {
+  userMenu?: ReactNode;
+  unreadAlertCount: number;
+  alerts: BellAlert[];
+}) {
   const pathname = usePathname();
   const segments = pathname.split("/").filter(Boolean);
 
@@ -67,14 +77,7 @@ export function AppTopbar({ userMenu }: { userMenu?: ReactNode }) {
           >
             <CalendarDays className="size-4" aria-hidden />
           </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label="Ver notificaciones"
-            className="rounded-full bg-card/75"
-          >
-            <Bell className="size-4" aria-hidden />
-          </Button>
+          <NotificationsBell unreadCount={unreadAlertCount} alerts={alerts} />
           {userMenu}
         </div>
       </div>

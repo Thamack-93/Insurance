@@ -5,6 +5,7 @@ import { today, daysUntil } from "@/lib/dates";
 import { addDays } from "date-fns";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
+import { notify } from "@/lib/notifications";
 
 export interface RenewalReminder {
   policyId: string;
@@ -119,7 +120,7 @@ export async function createRenewalTasks() {
       });
 
       if (!existingTask && renewal.daysUntilRenewal <= 30) {
-        await db.task.create({
+        const task = await db.task.create({
           data: {
             folio: `TASK-RENEWAL-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             title: `Renovación de póliza ${renewal.policyNumber}`,
@@ -135,6 +136,15 @@ export async function createRenewalTasks() {
         });
 
         tasksCreated++;
+
+        await notify({
+          type: "RENEWAL_TASK_CREATED",
+          severity: renewal.priority === "URGENT" ? "CRITICAL" : "WARNING",
+          title: `Renovación próxima: ${renewal.policyNumber}`,
+          body: `${renewal.clientName} · ${renewal.daysUntilRenewal} día(s) para renovar`,
+          entityType: "Task",
+          entityId: task.id,
+        });
 
         // Log activity
         await writeActivityLog({

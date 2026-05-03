@@ -7,11 +7,27 @@ import { CommandPaletteWrapper } from "@/components/command/command-palette-wrap
 import { ShortcutsHelp } from "@/components/shortcuts/shortcuts-help";
 import { getSettings } from "@/lib/settings";
 import { RuntimeSettingsHydrator } from "@/components/settings/runtime-settings-hydrator";
+import { getUnreadAlertCount, getRecentAlerts } from "@/lib/notifications";
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
   // Load settings once per request: hydrates the server runtime cache and
   // is forwarded to the client so format helpers stay consistent on both sides.
   const settings = await getSettings();
+  const [unreadAlertCount, recentAlerts] = await Promise.all([
+    getUnreadAlertCount(),
+    getRecentAlerts(10),
+  ]);
+  const bellAlerts = recentAlerts.map((alert) => ({
+    id: alert.id,
+    alertType: alert.alertType,
+    severity: alert.severity,
+    title: alert.title,
+    description: alert.description,
+    entityType: alert.entityType,
+    entityId: alert.entityId,
+    createdAt: alert.createdAt.toISOString(),
+    readAt: alert.readAt ? alert.readAt.toISOString() : null,
+  }));
   return (
     <SearchProvider>
       <RuntimeSettingsHydrator settings={settings} />
@@ -19,7 +35,11 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         <div className="flex min-h-screen">
           <AppSidebar />
           <div className="min-w-0 flex-1">
-            <AppTopbar userMenu={<UserMenu />} />
+            <AppTopbar
+              userMenu={<UserMenu />}
+              unreadAlertCount={unreadAlertCount}
+              alerts={bellAlerts}
+            />
             <main className="mx-auto w-full max-w-[1560px] px-5 py-8 lg:px-8">{children}</main>
           </div>
         </div>
@@ -29,4 +49,3 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     </SearchProvider>
   );
 }
-

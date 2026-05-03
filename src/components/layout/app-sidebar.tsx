@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   BadgeCheck,
   BarChart3,
+  Bell,
   BriefcaseBusiness,
   Building2,
   Calculator,
@@ -78,6 +79,7 @@ const sections: NavSection[] = [
     label: "Calidad",
     defaultOpen: false,
     items: [
+      { label: "Notificaciones", href: "/notifications", icon: Bell },
       { label: "Riesgos y calidad", href: "/risks", icon: BadgeCheck },
       { label: "Reportes", href: "/reports", icon: BarChart3 },
     ],

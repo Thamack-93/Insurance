@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useMemo } from "react";
-import { normalize } from "@/lib/search";
+import { normalize } from "@/lib/search-utils";
 
 type HighlightProps = {
   text: string;

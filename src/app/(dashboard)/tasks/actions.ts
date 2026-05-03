@@ -3,6 +3,7 @@
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { getCurrentUserId } from "@/lib/auth";
+import { notify } from "@/lib/notifications";
 import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
 import { taskSchema, type TaskFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
@@ -96,6 +97,17 @@ export async function createTask(values: TaskFormValues): Promise<MutationResult
       newValue: task,
     });
 
+    if (task.priority === "HIGH" || task.priority === "URGENT") {
+      await notify({
+        type: "TASK_HIGH_PRIORITY",
+        severity: task.priority === "URGENT" ? "CRITICAL" : "WARNING",
+        title: `Pendiente ${task.priority === "URGENT" ? "urgente" : "alta prioridad"}: ${task.title}`,
+        body: task.description ?? null,
+        entityType: "Task",
+        entityId: task.id,
+      });
+    }
+
     revalidatePaths([
       "/tasks",
       "/today",
@@ -105,6 +117,7 @@ export async function createTask(values: TaskFormValues): Promise<MutationResult
       task.clientId ? `/clients/${task.clientId}` : "/clients",
       task.policyId ? `/policies/${task.policyId}` : "/policies",
       "/risks",
+      "/notifications",
     ]);
 
     return successResult(task.id, "/tasks", "Pendiente creado.");

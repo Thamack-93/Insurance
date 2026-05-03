@@ -577,6 +577,7 @@ model Alert {
   entityType  String
   entityId    String
   status      AlertStatus   @default(OPEN)
+  readAt      DateTime?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
@@ -585,4 +586,6 @@ model Alert {
   @@index([entityType, entityId])
   @@index([status])
   @@index([createdAt])
+  @@index([readAt])
+  @@index([status, readAt])
 }
