@@ -65,6 +65,7 @@ export function ListSearch({
         value={value}
         onChange={(event) => setValue(event.target.value)}
         placeholder={placeholder}
+        aria-label={placeholder}
         className="h-9 rounded-full pl-9 pr-9"
       />
       {value ? (
