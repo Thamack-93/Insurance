@@ -86,7 +86,7 @@ export async function getAllActivity({
   const where: Prisma.ActivityLogWhereInput = {};
   if (filter.entityType) where.entityType = filter.entityType;
   if (filter.entityId) where.entityId = filter.entityId;
-  if (filter.action) where.action = filter.action;
+  if (filter.action) where.action = { contains: filter.action };
   if (filter.from || filter.to) {
     where.createdAt = {
       ...(filter.from ? { gte: filter.from } : {}),
