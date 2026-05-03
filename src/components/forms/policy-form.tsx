@@ -89,7 +89,7 @@ export function PolicyForm({
           <FormSection title="Identidad de póliza" description="Relaciones y clasificación principal.">
             <FormGrid>
               <FormField label="Número de póliza" htmlFor="policyNumber" error={errors.policyNumber?.message}>
-                <Input id="policyNumber" {...register("policyNumber")} />
+                <Input id="policyNumber" autoFocus {...register("policyNumber")} />
               </FormField>
 
               <FormField label="Cliente" error={errors.clientId?.message}>

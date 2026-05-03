@@ -79,7 +79,7 @@ export function InsurerForm({
           <FormGrid>
             <FormSection title="Información general" description="Datos básicos de la aseguradora.">
               <FormField label="Nombre" error={errors.name?.message} hint="Campo obligatorio">
-                <Input {...register("name")} placeholder="Ej: AXA Seguros" />
+                <Input autoFocus {...register("name")} placeholder="Ej: AXA Seguros" />
               </FormField>
 
               <FormField label="Portal URL" error={errors.portalUrl?.message}>

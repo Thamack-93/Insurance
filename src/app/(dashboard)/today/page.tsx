@@ -9,10 +9,9 @@ import {
   Siren,
 } from "lucide-react";
 import { StatusBadge } from "@/components/badges/status-badge";
-import { PageHeader, SectionHeader } from "@/components/layout/page-header";
-import { MetricCard } from "@/components/pages-secondary/panels";
+import { PageHeader } from "@/components/layout/page-header";
+import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { getTodayData } from "@/lib/dashboard-queries";
 import { daysSince, daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
@@ -84,23 +83,17 @@ export default async function TodayPage() {
         />
       </section>
 
-      <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
-        <CardHeader>
-          <SectionHeader title="Por cobrar" description="Recibos vencidos, los de hoy y los próximos siete días." />
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <SectionCard title="Por cobrar" description="Recibos vencidos, los de hoy y los próximos siete días.">
+        <div className="space-y-4 p-4">
           <PaymentGroup title="Vencidos" tone="rose" receipts={data.overduePayments} />
           <PaymentGroup title="Vencen hoy" tone="amber" receipts={data.paymentsDueToday} />
           <PaymentGroup title="Vencen en 7 días" tone="emerald" receipts={data.paymentsDue7} />
-        </CardContent>
-      </Card>
+        </div>
+      </SectionCard>
 
       <div className="grid gap-4 xl:grid-cols-3">
-        <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
-          <CardHeader>
-            <SectionHeader title="Renovar" description="Pólizas que vencen pronto." />
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <SectionCard title="Renovar" description="Pólizas que vencen pronto.">
+          <div className="space-y-3 p-4">
             {data.urgentRenewals.length === 0 ? (
               <EmptyRow icon={CalendarClock} message="Sin renovaciones urgentes." />
             ) : (
@@ -118,14 +111,11 @@ export default async function TodayPage() {
                 </Link>
               ))
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
-        <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
-          <CardHeader>
-            <SectionHeader title="Pendientes atrasados" description="Tareas fuera de fecha." />
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <SectionCard title="Pendientes atrasados" description="Tareas fuera de fecha.">
+          <div className="space-y-3 p-4">
             {data.overdueTasks.length === 0 ? (
               <EmptyRow icon={CheckSquare} message="Sin pendientes atrasados." />
             ) : (
@@ -148,14 +138,11 @@ export default async function TodayPage() {
                 </Link>
               ))
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
-        <Card className="border-white/70 bg-white/84 shadow-sm shadow-stone-200/70 backdrop-blur">
-          <CardHeader>
-            <SectionHeader title="Comisiones por revisar" description="Esperadas o vencidas en el corto plazo." />
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <SectionCard title="Comisiones por revisar" description="Esperadas o vencidas en el corto plazo.">
+          <div className="space-y-3 p-4">
             {data.commissionsToReview.length === 0 ? (
               <EmptyRow icon={CircleDollarSign} message="Sin comisiones pendientes." />
             ) : (
@@ -175,8 +162,8 @@ export default async function TodayPage() {
                 </Link>
               ))
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
       </div>
     </div>
   );

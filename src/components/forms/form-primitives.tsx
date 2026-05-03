@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { Children, cloneElement, isValidElement, useId, type ReactNode } from "react";
 import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -42,13 +42,27 @@ export function FormField({
   className?: string;
   children: ReactNode;
 }) {
-  const errorId = htmlFor && error ? `${htmlFor}-error` : undefined;
-  const hintId = htmlFor && hint ? `${htmlFor}-hint` : undefined;
+  const generatedId = useId();
+  const fieldId = htmlFor ?? generatedId;
+  const errorId = error ? `${fieldId}-error` : undefined;
+  const hintId = hint ? `${fieldId}-hint` : undefined;
   const describedBy = errorId ?? hintId;
+
+  // Clone the first valid child element to inject id + aria-* on the actual control.
+  const enhancedChildren = Children.map(children, (child, index) => {
+    if (!isValidElement(child) || index !== 0) return child;
+    const childProps = (child.props ?? {}) as Record<string, unknown>;
+    return cloneElement(child as React.ReactElement<Record<string, unknown>>, {
+      id: childProps.id ?? fieldId,
+      "aria-invalid": error ? true : (childProps["aria-invalid"] as boolean | undefined),
+      "aria-describedby": describedBy ?? (childProps["aria-describedby"] as string | undefined),
+      "aria-required": required || (childProps["aria-required"] as boolean | undefined),
+    });
+  });
 
   return (
     <div className={cn("space-y-2", className)}>
-      <Label htmlFor={htmlFor}>
+      <Label htmlFor={fieldId}>
         {label}
         {required ? (
           <span aria-hidden className="ml-1 text-destructive">
@@ -56,14 +70,7 @@ export function FormField({
           </span>
         ) : null}
       </Label>
-      <div
-        data-slot="form-field-control"
-        aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy}
-        aria-required={required || undefined}
-      >
-        {children}
-      </div>
+      {enhancedChildren}
       {error ? (
         <p id={errorId} role="alert" className="text-sm text-destructive">
           {error}
@@ -104,8 +111,11 @@ export function FormErrorBanner({ message }: { message?: string | null }) {
   }
 
   return (
-    <div className="flex items-start gap-3 rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-      <AlertCircle className="mt-0.5 size-4 shrink-0" />
+    <div
+      role="alert"
+      className="flex items-start gap-3 rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+    >
+      <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden />
       <p>{message}</p>
     </div>
   );

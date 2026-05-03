@@ -82,7 +82,7 @@ export function ClientForm({
           <FormSection title="Perfil" description="Datos principales del expediente del cliente.">
             <FormGrid>
               <FormField label="Nombre completo" htmlFor="fullName" error={errors.fullName?.message}>
-                <Input id="fullName" {...register("fullName")} />
+                <Input id="fullName" autoFocus {...register("fullName")} />
               </FormField>
 
               <FormField label="Tipo" error={errors.type?.message}>

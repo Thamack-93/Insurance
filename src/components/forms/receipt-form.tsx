@@ -85,7 +85,7 @@ export function ReceiptForm({
           <FormSection title="Identidad financiera" description="El recibo representa una obligación de cobro.">
             <FormGrid>
               <FormField label="Número de recibo" htmlFor="receiptNumber" error={errors.receiptNumber?.message}>
-                <Input id="receiptNumber" {...register("receiptNumber")} />
+                <Input id="receiptNumber" autoFocus {...register("receiptNumber")} />
               </FormField>
 
               <FormField label="Póliza" error={errors.policyId?.message}>

@@ -88,7 +88,7 @@ export function ClaimForm({
           <FormGrid>
             <FormSection title="Información del siniestro" description="Datos básicos del reclamo.">
               <FormField label="Folio" error={errors.folio?.message} hint="Campo obligatorio">
-                <Input {...register("folio")} placeholder="Ej: SIN-2024-001" />
+                <Input autoFocus {...register("folio")} placeholder="Ej: SIN-2024-001" />
               </FormField>
 
               <FormField label="Tipo de siniestro" error={errors.claimType?.message} hint="Campo obligatorio">

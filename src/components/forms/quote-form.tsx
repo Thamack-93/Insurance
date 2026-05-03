@@ -149,7 +149,7 @@ export function QuoteForm({
 
             <FormSection title="Fechas" description="Timeline de la cotización.">
               <FormField label="Fecha de solicitud" error={errors.requestedDate?.message} hint="Campo obligatorio">
-                <Input {...register("requestedDate")} type="date" />
+                <Input autoFocus {...register("requestedDate")} type="date" />
               </FormField>
 
               <FormField label="Fecha de envío" error={errors.sentDate?.message}>

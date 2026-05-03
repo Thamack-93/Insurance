@@ -92,7 +92,7 @@ export function TaskForm({
           <FormSection title="Pendiente" description="Trabajo operativo, seguimiento o bloqueo a resolver.">
             <FormGrid>
               <FormField label="Título" htmlFor="title" error={errors.title?.message} className="md:col-span-2">
-                <Input id="title" {...register("title")} />
+                <Input id="title" autoFocus {...register("title")} />
               </FormField>
 
               <FormField label="Tipo" error={errors.taskType?.message}>
