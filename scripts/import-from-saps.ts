@@ -64,7 +64,7 @@ async function scanPdfs(basePath: string): Promise<Array<{ filePath: string; tex
           const parser = new PDFParse({ data: buffer });
           const textResult = await parser.getText();
           results.push({ filePath: fullPath, text: textResult.text, folderName });
-        } catch (e) {
+        } catch {
           // Skip failed PDFs
         }
       }

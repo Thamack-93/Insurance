@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, BadgeCheck, CalendarClock, Clock, FileText, History, Pencil, ShieldCheck } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CalendarClock, FileText, History, Pencil, ShieldCheck } from "lucide-react";
 import { DeleteClaimButton } from "@/components/claims/delete-claim-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { AuditByline } from "@/components/audit/audit-byline";

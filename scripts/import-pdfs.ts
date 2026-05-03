@@ -1,20 +1,15 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { PDFParse } from "pdf-parse";
-import { z } from "zod";
 import {
   backupDatabase,
   closeDb,
   createDb,
-  formatDateShort,
   normalizeKey,
   printTable,
-  safeJson,
   toDateValue,
   toEnumValue,
   toNumber,
-  toNumberValue,
-  toStringValue,
 } from "./_shared";
 
 const POLICY_TYPES = [
@@ -25,8 +20,6 @@ const POLICY_TYPES = [
 const POLICY_STATUSES = ["ACTIVE", "EXPIRED", "CANCELLED", "RENEWED", "PENDING"] as const;
 
 const PAYMENT_FREQUENCIES = ["MONTHLY", "QUARTERLY", "SEMIANNUAL", "ANNUAL", "SINGLE", "OTHER"] as const;
-
-const CURRENCIES = ["MXN", "USD"] as const;
 
 // Mexican Insurance Companies Database
 interface InsurerInfo {
@@ -764,7 +757,7 @@ async function main() {
     errors: 0,
   };
   
-  for (const { filePath, folderName, parsed } of scanned) {
+  for (const { filePath, parsed } of scanned) {
     try {
       console.log(`\nProcesando: ${path.basename(filePath)}`);
       

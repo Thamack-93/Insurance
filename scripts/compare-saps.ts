@@ -2,7 +2,6 @@
 
 import { getDb } from '../src/lib/db';
 import fs from 'fs';
-import path from 'path';
 
 interface SapsRecord {
   "No. de Póliza": string;

@@ -10,7 +10,7 @@ import { EmptyState } from "@/components/empty-states/empty-state";
 import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
 import { getDb } from "@/lib/db";
-import { daysUntil, formatDate, today } from "@/lib/dates";
+import { formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { addDays } from "date-fns";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";

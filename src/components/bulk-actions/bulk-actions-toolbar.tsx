@@ -18,7 +18,7 @@ export function BulkActionsToolbar({
   onStatusChange,
   statusOptions,
 }: BulkActionsToolbarProps) {
-  const { hasSelection, selectedItems, clearSelection, getSelectedIds } = useBulkActions();
+  const { hasSelection, selectedItems, clearSelection } = useBulkActions();
 
   if (!hasSelection) {
     return null;

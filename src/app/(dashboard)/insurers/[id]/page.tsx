@@ -51,7 +51,6 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
   const activePolicies = policies.filter((p) => p.status === "ACTIVE");
   const portfolioValue = activePolicies.reduce((sum, p) => sum + toNumber(p.premiumAmount), 0);
   const openClaims = claims.filter((c) => c.status !== "RESOLVED" && c.status !== "CANCELLED");
-  const openCommissions = commissions.filter((c) => c.status !== "PAID" && c.status !== "CANCELLED");
 
   return (
     <div className="flex flex-col gap-6">

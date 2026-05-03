@@ -20,7 +20,6 @@ export function RouteError({
 }: RouteErrorProps) {
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") {
-      // eslint-disable-next-line no-console
       console.error("Route error:", error);
     }
   }, [error]);

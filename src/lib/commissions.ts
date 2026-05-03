@@ -43,7 +43,6 @@ export async function calculateCommissionsForPolicy(
 
     // Get insurer commission rate (default to 10% if not set)
     const commissionRate = 0.10; // Could be stored in insurer settings
-    const premiumAmount = toNumber(policy.premiumAmount);
 
     // Calculate commission for each receipt or for the policy premium
     const receiptsToProcess = receiptId 
