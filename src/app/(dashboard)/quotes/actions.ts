@@ -94,3 +94,44 @@ export async function updateQuote(id: string, values: QuoteFormValues): Promise<
     return errorResult("No se pudo actualizar la cotización. Intenta de nuevo.");
   }
 }
+
+export async function deleteQuote(id: string): Promise<MutationResult> {
+  try {
+    const db = getDb();
+
+    const existingQuote = await db.quote.findUnique({
+      where: { id },
+    });
+
+    if (!existingQuote) {
+      return errorResult("La cotización ya no existe.");
+    }
+
+    if (existingQuote.status === "ACCEPTED") {
+      return errorResult(
+        "No se puede eliminar: la cotización está aceptada. Cámbiala de estado antes de eliminarla.",
+      );
+    }
+
+    await db.quote.delete({ where: { id } });
+
+    await writeActivityLog({
+      action: "DELETE_QUOTE",
+      entityType: "Quote",
+      entityId: id,
+      oldValue: { id: existingQuote.id.slice(0, 8), clientId: existingQuote.clientId },
+    });
+
+    revalidatePaths([
+      "/quotes",
+      `/clients/${existingQuote.clientId}`,
+      "/dashboard",
+      "/today",
+    ]);
+
+    return successResult(id, "/quotes", "Cotización eliminada.");
+  } catch (error) {
+    logError("quotes.deleteQuote", error, { id });
+    return errorResult("No se pudo eliminar la cotización. Intenta de nuevo.");
+  }
+}

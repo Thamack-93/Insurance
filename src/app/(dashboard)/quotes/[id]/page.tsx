@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, BadgeCheck, Calculator, CalendarClock, FileText, Clock } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Calculator, CalendarClock, FileText, Clock, Pencil } from "lucide-react";
+import { DeleteQuoteButton } from "@/components/quotes/delete-quote-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
@@ -46,12 +47,21 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           title={`Cotización ${quote.id.slice(0, 8)}`}
           description={`${quote.policyType} · ${quote.client.fullName}`}
           actions={
-            <Button asChild variant="outline" className="rounded-full bg-white/70">
-              <Link href="/quotes">
-                <ArrowLeft className="mr-2 size-4" />
-                Volver
-              </Link>
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button asChild variant="outline" className="rounded-full bg-white/70">
+                <Link href={`/quotes/${quote.id}/edit`}>
+                  <Pencil className="mr-2 size-4" />
+                  Editar
+                </Link>
+              </Button>
+              <DeleteQuoteButton id={quote.id} label={quote.id.slice(0, 8)} />
+              <Button asChild variant="outline" className="rounded-full bg-white/70">
+                <Link href="/quotes">
+                  <ArrowLeft className="mr-2 size-4" />
+                  Volver
+                </Link>
+              </Button>
+            </div>
           }
         />
 

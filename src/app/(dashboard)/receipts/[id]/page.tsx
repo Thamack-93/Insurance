@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/badges/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DeleteReceiptButton } from "@/components/receipts/delete-receipt-button";
 import { getDb } from "@/lib/db";
 import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
@@ -61,6 +62,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
               <Button asChild variant="outline" className="rounded-full bg-white/70">
                 <Link href={`/receipts/${receipt.id}/edit`}>Editar recibo</Link>
               </Button>
+              <DeleteReceiptButton id={receipt.id} receiptNumber={receipt.receiptNumber} />
               <Button asChild variant="outline" className="rounded-full bg-white/70">
                 <Link href="/receipts">
                   <ArrowLeft className="mr-2 size-4" />

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, BadgeCheck, CalendarClock, Clock, FileText, ShieldCheck } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CalendarClock, Clock, FileText, Pencil, ShieldCheck } from "lucide-react";
+import { DeleteClaimButton } from "@/components/claims/delete-claim-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
@@ -46,12 +47,21 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
           title={`Siniestro ${claim.folio}`}
           description={`${claim.claimType} · ${claim.client.fullName}`}
           actions={
-            <Button asChild variant="outline" className="rounded-full bg-white/70">
-              <Link href="/claims">
-                <ArrowLeft className="mr-2 size-4" />
-                Volver
-              </Link>
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button asChild variant="outline" className="rounded-full bg-white/70">
+                <Link href={`/claims/${claim.id}/edit`}>
+                  <Pencil className="mr-2 size-4" />
+                  Editar
+                </Link>
+              </Button>
+              <DeleteClaimButton id={claim.id} folio={claim.folio} />
+              <Button asChild variant="outline" className="rounded-full bg-white/70">
+                <Link href="/claims">
+                  <ArrowLeft className="mr-2 size-4" />
+                  Volver
+                </Link>
+              </Button>
+            </div>
           }
         />
 

@@ -100,3 +100,50 @@ export async function updateClaim(id: string, values: ClaimFormValues): Promise<
     return errorResult("No se pudo actualizar el siniestro. Intenta de nuevo.");
   }
 }
+
+export async function deleteClaim(id: string): Promise<MutationResult> {
+  try {
+    const db = getDb();
+
+    const existingClaim = await db.claim.findUnique({
+      where: { id },
+      include: { _count: { select: { documents: true } } },
+    });
+
+    if (!existingClaim) {
+      return errorResult("El siniestro ya no existe.");
+    }
+
+    if (existingClaim.status === "IN_PROGRESS" || existingClaim.status === "WAITING_INSURER") {
+      return errorResult(
+        "No se puede eliminar: el siniestro está en proceso. Ciérralo o cancélalo antes de eliminarlo.",
+      );
+    }
+
+    await db.claim.delete({ where: { id } });
+
+    await writeActivityLog({
+      action: "DELETE_CLAIM",
+      entityType: "Claim",
+      entityId: id,
+      oldValue: {
+        folio: existingClaim.folio,
+        clientId: existingClaim.clientId,
+        policyId: existingClaim.policyId,
+      },
+    });
+
+    revalidatePaths([
+      "/claims",
+      `/clients/${existingClaim.clientId}`,
+      `/policies/${existingClaim.policyId}`,
+      "/dashboard",
+      "/today",
+    ]);
+
+    return successResult(id, "/claims", "Siniestro eliminado.");
+  } catch (error) {
+    logError("claims.deleteClaim", error, { id });
+    return errorResult("No se pudo eliminar el siniestro. Intenta de nuevo.");
+  }
+}

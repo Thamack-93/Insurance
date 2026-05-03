@@ -256,3 +256,36 @@ export async function bulkDeleteTasks(ids: string[]): Promise<MutationResult> {
     return errorResult(error instanceof Error ? error.message : "No se pudieron eliminar los pendientes.");
   }
 }
+export async function deleteTask(id: string): Promise<MutationResult> {
+  try {
+    const db = getDb();
+
+    const existingTask = await db.task.findUnique({ where: { id } });
+
+    if (!existingTask) {
+      return errorResult("El pendiente ya no existe.");
+    }
+
+    await db.task.delete({ where: { id } });
+
+    await writeActivityLog({
+      entityType: "Task",
+      entityId: id,
+      action: "TASK_DELETE",
+      oldValue: existingTask,
+    });
+
+    revalidatePaths([
+      "/tasks",
+      "/today",
+      "/dashboard",
+      "/risks",
+      existingTask.clientId ? `/clients/${existingTask.clientId}` : "/clients",
+      existingTask.policyId ? `/policies/${existingTask.policyId}` : "/policies",
+    ]);
+
+    return successResult(id, "/tasks", "Pendiente eliminado.");
+  } catch (error) {
+    return errorResult(error instanceof Error ? error.message : "No se pudo eliminar el pendiente.");
+  }
+}

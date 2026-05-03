@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RecordPageView } from "@/components/recently-viewed/record-page-view";
-import { Mail, Phone, MapPin, BadgeInfo, FileText, ClipboardList, ShieldCheck } from "lucide-react";
+import { Mail, Phone, MapPin, BadgeInfo, FileText, ClipboardList, Pencil, ShieldCheck } from "lucide-react";
+import { DeleteClientButton } from "@/components/clients/delete-client-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
@@ -87,9 +88,18 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           title={client.fullName}
           description={`${client.type === "COMPANY" ? "Empresa" : "Persona"} · expediente central del cliente y su actividad vinculada.`}
           actions={
-            <Button asChild variant="outline" className="rounded-full bg-white/70">
-              <Link href="/clients">Volver a clientes</Link>
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button asChild variant="outline" className="rounded-full bg-white/70">
+                <Link href={`/clients/${id}/edit`}>
+                  <Pencil className="mr-2 size-4" />
+                  Editar
+                </Link>
+              </Button>
+              <DeleteClientButton id={id} name={client.fullName} />
+              <Button asChild variant="outline" className="rounded-full bg-white/70">
+                <Link href="/clients">Volver a clientes</Link>
+              </Button>
+            </div>
           }
         />
 

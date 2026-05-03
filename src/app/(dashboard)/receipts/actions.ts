@@ -215,3 +215,63 @@ export async function bulkMarkReceiptsPaid(
     return errorResult(error instanceof Error ? error.message : "No se pudieron marcar los recibos.");
   }
 }
+export async function deleteReceipt(id: string): Promise<MutationResult> {
+  try {
+    const db = getDb();
+
+    const existingReceipt = await db.receipt.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: {
+            payments: true,
+            commissions: true,
+          },
+        },
+      },
+    });
+
+    if (!existingReceipt) {
+      return errorResult("El recibo ya no existe.");
+    }
+
+    const counts = existingReceipt._count;
+    const blockers: string[] = [];
+    if (counts.payments > 0) blockers.push(`${counts.payments} pago${counts.payments !== 1 ? "s" : ""}`);
+    if (counts.commissions > 0) blockers.push(`${counts.commissions} comisión${counts.commissions !== 1 ? "es" : ""}`);
+
+    if (blockers.length > 0) {
+      return errorResult(
+        `No se puede eliminar: el recibo tiene ${blockers.join(", ")} asociado${blockers.length > 1 ? "s" : ""}. Cancela o elimina primero esos registros.`,
+      );
+    }
+
+    await db.receipt.delete({ where: { id } });
+
+    await writeActivityLog({
+      entityType: "Receipt",
+      entityId: id,
+      action: "RECEIPT_DELETE",
+      oldValue: {
+        receiptNumber: existingReceipt.receiptNumber,
+        policyId: existingReceipt.policyId,
+        clientId: existingReceipt.clientId,
+      },
+    });
+
+    revalidatePaths([
+      "/receipts",
+      "/due-payments",
+      `/policies/${existingReceipt.policyId}`,
+      `/clients/${existingReceipt.clientId}`,
+      "/dashboard",
+      "/today",
+      "/portfolio",
+      "/risks",
+    ]);
+
+    return successResult(id, "/receipts", "Recibo eliminado.");
+  } catch (error) {
+    return errorResult(error instanceof Error ? error.message : "No se pudo eliminar el recibo.");
+  }
+}

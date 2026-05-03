@@ -107,3 +107,62 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
     return errorResult(error instanceof Error ? error.message : "No se pudo actualizar la poliza.");
   }
 }
+export async function deletePolicy(id: string): Promise<MutationResult> {
+  try {
+    const db = getDb();
+
+    const existingPolicy = await db.policy.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: {
+            receipts: true,
+            payments: true,
+            commissions: true,
+            claims: true,
+          },
+        },
+      },
+    });
+
+    if (!existingPolicy) {
+      return errorResult("La poliza ya no existe.");
+    }
+
+    const counts = existingPolicy._count;
+    const blockers: string[] = [];
+    if (counts.receipts > 0) blockers.push(`${counts.receipts} recibo${counts.receipts !== 1 ? "s" : ""}`);
+    if (counts.payments > 0) blockers.push(`${counts.payments} pago${counts.payments !== 1 ? "s" : ""}`);
+    if (counts.commissions > 0) blockers.push(`${counts.commissions} comisión${counts.commissions !== 1 ? "es" : ""}`);
+    if (counts.claims > 0) blockers.push(`${counts.claims} siniestro${counts.claims !== 1 ? "s" : ""}`);
+
+    if (blockers.length > 0) {
+      return errorResult(
+        `No se puede eliminar: la póliza tiene ${blockers.join(", ")} asociado${blockers.length > 1 ? "s" : ""}. Cancélala o elimina primero esos registros.`,
+      );
+    }
+
+    await db.policy.delete({ where: { id } });
+
+    await writeActivityLog({
+      entityType: "Policy",
+      entityId: id,
+      action: "POLICY_DELETE",
+      oldValue: { policyNumber: existingPolicy.policyNumber, clientId: existingPolicy.clientId },
+    });
+
+    revalidatePaths([
+      "/policies",
+      `/clients/${existingPolicy.clientId}`,
+      "/dashboard",
+      "/today",
+      "/portfolio",
+      "/renewals",
+      "/risks",
+    ]);
+
+    return successResult(id, "/policies", "Póliza eliminada.");
+  } catch (error) {
+    return errorResult(error instanceof Error ? error.message : "No se pudo eliminar la póliza.");
+  }
+}

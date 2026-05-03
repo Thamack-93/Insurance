@@ -84,3 +84,58 @@ export async function updateClient(id: string, values: ClientFormValues): Promis
     return errorResult(error instanceof Error ? error.message : "No se pudo actualizar el cliente.");
   }
 }
+export async function deleteClient(id: string): Promise<MutationResult> {
+  try {
+    const db = getDb();
+
+    const existingClient = await db.client.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: {
+            policies: true,
+            receipts: true,
+            payments: true,
+            commissions: true,
+            claims: true,
+            quotes: true,
+          },
+        },
+      },
+    });
+
+    if (!existingClient) {
+      return errorResult("El cliente ya no existe.");
+    }
+
+    const counts = existingClient._count;
+    const blockers: string[] = [];
+    if (counts.policies > 0) blockers.push(`${counts.policies} póliza${counts.policies !== 1 ? "s" : ""}`);
+    if (counts.receipts > 0) blockers.push(`${counts.receipts} recibo${counts.receipts !== 1 ? "s" : ""}`);
+    if (counts.payments > 0) blockers.push(`${counts.payments} pago${counts.payments !== 1 ? "s" : ""}`);
+    if (counts.commissions > 0) blockers.push(`${counts.commissions} comisión${counts.commissions !== 1 ? "es" : ""}`);
+    if (counts.claims > 0) blockers.push(`${counts.claims} siniestro${counts.claims !== 1 ? "s" : ""}`);
+    if (counts.quotes > 0) blockers.push(`${counts.quotes} cotización${counts.quotes !== 1 ? "es" : ""}`);
+
+    if (blockers.length > 0) {
+      return errorResult(
+        `No se puede eliminar: el cliente tiene ${blockers.join(", ")} asociado${blockers.length > 1 ? "s" : ""}. Archívalo o elimina primero esos registros.`,
+      );
+    }
+
+    await db.client.delete({ where: { id } });
+
+    await writeActivityLog({
+      entityType: "Client",
+      entityId: id,
+      action: "CLIENT_DELETE",
+      oldValue: { fullName: existingClient.fullName },
+    });
+
+    revalidatePaths(["/clients", "/dashboard", "/today", "/portfolio", "/risks"]);
+
+    return successResult(id, "/clients", "Cliente eliminado.");
+  } catch (error) {
+    return errorResult(error instanceof Error ? error.message : "No se pudo eliminar el cliente.");
+  }
+}

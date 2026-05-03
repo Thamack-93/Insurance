@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RecordPageView } from "@/components/recently-viewed/record-page-view";
-import { ArrowLeft, FileClock, ReceiptText, Repeat, Shield } from "lucide-react";
+import { ArrowLeft, FileClock, Pencil, ReceiptText, Repeat, Shield } from "lucide-react";
+import { DeletePolicyButton } from "@/components/policies/delete-policy-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
@@ -82,12 +83,21 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           title={policy.policyNumber}
           description={`${policy.client.fullName} · ${policy.insurer.name} · ${policyTypeLabel(policy.policyType)}`}
           actions={
-            <Button asChild variant="outline" className="rounded-full bg-white/70">
-              <Link href="/policies">
-                <ArrowLeft className="mr-2 size-4" />
-                Volver
-              </Link>
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button asChild variant="outline" className="rounded-full bg-white/70">
+                <Link href={`/policies/${id}/edit`}>
+                  <Pencil className="mr-2 size-4" />
+                  Editar
+                </Link>
+              </Button>
+              <DeletePolicyButton id={id} policyNumber={policy.policyNumber} />
+              <Button asChild variant="outline" className="rounded-full bg-white/70">
+                <Link href="/policies">
+                  <ArrowLeft className="mr-2 size-4" />
+                  Volver
+                </Link>
+              </Button>
+            </div>
           }
         />
 

@@ -7,6 +7,7 @@ import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DeleteTaskButton } from "@/components/tasks/delete-task-button";
 import { getDb } from "@/lib/db";
 import { daysSince, daysUntil, formatDate } from "@/lib/dates";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
@@ -75,6 +76,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
               <Button asChild variant="outline" className="rounded-full bg-white/70">
                 <Link href={`/tasks/${task.id}/edit`}>Editar tarea</Link>
               </Button>
+              <DeleteTaskButton id={task.id} folio={task.folio} />
               <Button asChild variant="outline" className="rounded-full bg-white/70">
                 <Link href="/tasks">
                   <ArrowLeft className="mr-2 size-4" />
