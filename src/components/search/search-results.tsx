@@ -113,7 +113,7 @@ export function SearchResults() {
                         {result.subtitle && (
                           <p className="truncate text-xs text-muted-foreground">{result.subtitle}</p>
                         )}
-                        {result.match && result.match.field !== "fullName" && result.match.field !== "policyNumber" && result.match.field !== "name" && result.match.field !== "fileName" && (
+                        {result.match && (
                           <p className="truncate text-xs text-muted-foreground">
                             Coincidencia en {result.match.fieldLabel}: “
                             <Highlight text={result.match.snippet} query={searchQuery} />”

@@ -18,8 +18,10 @@ import { cn } from "@/lib/utils"
 
 export type CommandPaletteItem = {
   id: string
-  label: string
-  description?: string
+  label: React.ReactNode
+  /** Plain-text label used as the cmdk filter value. Defaults to `label` when string. */
+  searchValue?: string
+  description?: React.ReactNode
   shortcut?: string
   icon?: React.ReactNode
   onSelect?: () => void
@@ -73,7 +75,7 @@ function CommandPalette({
                 {group.items.map((item) => (
                   <CommandItem
                     key={item.id}
-                    value={item.label}
+                    value={item.searchValue ?? (typeof item.label === "string" ? item.label : item.id)}
                     disabled={item.disabled}
                     onSelect={item.onSelect}
                     className={cn("data-selected:bg-muted/80")}
@@ -82,7 +84,7 @@ function CommandPalette({
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <span className="truncate">{item.label}</span>
                       {item.description ? (
-                        <span className="truncate text-xs text-muted-foreground">{item.description}</span>
+                        <span className="block min-w-0 text-xs text-muted-foreground">{item.description}</span>
                       ) : null}
                     </span>
                     {item.shortcut ? <CommandShortcut>{item.shortcut}</CommandShortcut> : null}

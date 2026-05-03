@@ -179,7 +179,7 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
     rawSearch<QuoteRow>(
       "Quote",
       ["id", "policyType", "notes", "updatedAt"],
-      ["notes"],
+      ["id", "notes"],
       needle,
       5,
       `, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Quote"."clientId") AS "clientName"`,
@@ -266,7 +266,7 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
   }
 
   for (const q of quotes) {
-    const match = pickMatch(q, ["notes"], needle);
+    const match = pickMatch(q, ["id", "notes"], needle);
     results.push({
       id: q.id,
       type: "quote",

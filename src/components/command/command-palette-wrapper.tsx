@@ -26,6 +26,7 @@ import {
 import { CommandPalette, type CommandPaletteGroup } from "./command-palette";
 import { getRecentItems, RECENTLY_VIEWED_EVENT, type RecentItem } from "@/lib/recently-viewed";
 import type { SearchResult, SearchResultType } from "@/components/search/search-provider";
+import { Highlight } from "@/components/search/highlight";
 
 const dynamicEntityIcon: Record<SearchResultType, React.ReactNode> = {
   client: <Users className="size-4" />,
@@ -153,13 +154,20 @@ export function CommandPaletteWrapper() {
       out.push({
         label: dynamicEntityLabel[t],
         items: items.map((r) => ({
-          // Include the query and field text in the cmdk value so its filter
-          // never hides matches we already vetted server-side.
           id: `search-${r.type}-${r.id}`,
-          label: r.title,
-          description: r.match?.snippet
-            ? `Coincidencia en ${r.match.fieldLabel}: “${r.match.snippet}”`
-            : r.subtitle,
+          searchValue: `${r.title} ${r.subtitle ?? ""} ${r.match?.snippet ?? ""}`,
+          label: <Highlight text={r.title} query={inputValue} />,
+          description: (
+            <span className="flex flex-col gap-0.5">
+              {r.subtitle ? <span className="truncate">{r.subtitle}</span> : null}
+              {r.match ? (
+                <span className="truncate">
+                  Coincidencia en {r.match.fieldLabel}: “
+                  <Highlight text={r.match.snippet} query={inputValue} />”
+                </span>
+              ) : null}
+            </span>
+          ),
           icon: dynamicEntityIcon[t],
           onSelect: () => handleSelect(r.href),
         })),
