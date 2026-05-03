@@ -17,3 +17,22 @@ export function assertSafeDocumentPath(filePath: string) {
   return resolved;
 }
 
+export function assertSafeBackupPath(filename: string) {
+  if (!filename || filename.includes("/") || filename.includes("\\") || filename.includes("..")) {
+    throw new Error("Backup path must stay inside data/backups.");
+  }
+
+  if (!filename.endsWith(".sqlite")) {
+    throw new Error("Backup path must stay inside data/backups.");
+  }
+
+  const resolved = path.resolve(backupsDir, filename);
+  const allowed = path.resolve(backupsDir);
+
+  if (!resolved.startsWith(allowed + path.sep)) {
+    throw new Error("Backup path must stay inside data/backups.");
+  }
+
+  return resolved;
+}
+

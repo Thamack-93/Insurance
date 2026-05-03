@@ -18,4 +18,16 @@ export function getDb() {
   return globalForPrisma.prisma;
 }
 
+export async function resetDb() {
+  const existing = globalForPrisma.prisma;
+  globalForPrisma.prisma = undefined;
+  if (existing) {
+    try {
+      await existing.$disconnect();
+    } catch {
+      // best-effort: ignore disconnect failures
+    }
+  }
+}
+
 export const db = getDb();
