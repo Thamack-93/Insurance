@@ -55,6 +55,20 @@ npm run export:commissions
 3. Usar Prisma o scripts dedicados; nunca editar SQLite manualmente.
 4. Validar con seed, lint y build.
 
+## Cambios de schema (Prisma)
+
+Toda modificación de `prisma/schema.prisma` debe acompañarse de su migración en el mismo commit. Nunca editar el schema sin generar la migración correspondiente.
+
+```bash
+# 1. Editar prisma/schema.prisma
+# 2. Generar la migración
+npx prisma migrate dev --name <descripcion_breve>
+# 3. Verificar que no quede drift
+npm run db:check-drift
+```
+
+`npm run db:check-drift` ejecuta `prisma migrate diff --exit-code` y falla si el schema define algo que ninguna migración crea. El script `scripts/post-merge.sh` lo corre automáticamente tras cada merge: si detecta drift aborta el merge y pide generar la migración faltante.
+
 ## Documentacion
 
 - `docs/PRODUCT_AND_ARCHITECTURE_PLAN.md`
