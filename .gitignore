@@ -16,6 +16,10 @@
 /playwright-report
 /.cache/ms-playwright
 
+# local generated data
+/data/backups/*
+/data/exports/*
+
 # next.js
 /.next/
 /out/
@@ -86,4 +90,3 @@ Thumbs.db
 .env
 node_modules
 tsconfig.tsbuildinfo
-

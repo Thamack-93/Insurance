@@ -24,7 +24,7 @@ test.describe("Payment registration form (/payments/new)", () => {
     await page.goto("/payments/new");
 
     // Form must render.
-    await expect(page.getByRole("heading", { name: /registrar pago/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Registrar pago" })).toBeVisible();
 
     // Open the receipt selector and pick our seeded receipt.
     await page.getByRole("combobox").first().click();

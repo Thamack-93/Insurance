@@ -1,17 +1,7 @@
-import path from "node:path";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import { PrismaClient } from "../../src/generated/prisma/client";
+import { getDb } from "../../src/lib/db";
 
-const dbPath = path.join(process.cwd(), "data", "pg.sqlite");
-
-let cached: PrismaClient | null = null;
-
-export function getTestDb(): PrismaClient {
-  if (!cached) {
-    const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });
-    cached = new PrismaClient({ adapter });
-  }
-  return cached;
+export function getTestDb() {
+  return getDb();
 }
 
 export type SeededReceipt = {

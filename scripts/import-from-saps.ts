@@ -4,45 +4,62 @@ import fs from 'fs';
 import path from 'path';
 import { PDFParse } from 'pdf-parse';
 import { getDb } from '../src/lib/db';
+import { parse } from 'csv-parse/sync';
 
 interface SapsRecord {
   policyNumber: string;
   receiptNumber: string;
   clientName: string;
   insurerName: string;
+  policyType: string;
   vehicleDesc: string;
   serie: string;
-  startDate: string;
-  endDate: string;
+  startDate: string;  // Policy start date
+  endDate: string;    // Policy end date
+  receiptStartDate: string;  // Receipt specific dates
+  receiptEndDate: string;
   paymentFrequency: string;
-  status: string;
+  status: string;     // Payment status
+  primaNeta: string;
+  primaTotal: string;
 }
 
 function parseSapsCsv(csvPath: string): SapsRecord[] {
   const content = fs.readFileSync(csvPath, 'utf-8');
-  const lines = content.split('\n');
   
-  if (lines.length < 2) return [];
+  const rows = parse(content, {
+    skip_empty_lines: true,
+    from_line: 2, // Skip header
+  });
   
   const records: SapsRecord[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
+  
+  for (const row of rows) {
+    if (row.length < 30) continue;
     
-    const parts = line.split(',').map(p => p.replace(/^"|"$/g, '').trim());
-    if (parts.length < 10) continue;
+    // Clean premium values - remove line breaks and extra spaces
+    const cleanPrimaNeta = (row[27] || '').replace(/\n|\r|\s+/g, '').trim();
+    const cleanPrimaTotal = (row[28] || '').replace(/\n|\r|\s+/g, '').trim();
+    
+    // Clean insurer name - join multiline (column 18: Compañía)
+    const insurerName = (row[17] || '').replace(/\n|\r/g, ' ').trim();
     
     records.push({
-      policyNumber: parts[0]?.replace(/\s/g, '') || '',
-      receiptNumber: parts[1] || '',
-      clientName: parts[8] || '',
-      insurerName: parts[17] || '',
-      vehicleDesc: parts[9] || '',
-      serie: parts[11]?.replace(/\s/g, '') || '',
-      startDate: parts[19] || '',
-      endDate: parts[20] || '',
-      paymentFrequency: parts[23] || '',
-      status: parts[29] || '',
+      policyNumber: row[0]?.replace(/\s/g, '') || '',
+      receiptNumber: row[1] || '',
+      clientName: row[8] || '',
+      insurerName: insurerName,
+      policyType: row[7] || 'AUTO',  // Column 8: Tipo Póliza
+      vehicleDesc: row[9] || '',
+      serie: row[11]?.replace(/\s/g, '') || '',
+      startDate: row[19] || '',  // Column 20: Inicio Vigencia Póliza
+      endDate: row[20] || '',    // Column 21: Fin Vigencia
+      receiptStartDate: row[2] || '',  // Column 3: Ini Vigencia Rec
+      receiptEndDate: row[3] || '',    // Column 4: Fin Vigencia Rec
+      paymentFrequency: row[23] || '',  // Column 24: Frecuencia Pago
+      status: row[29] || '',     // Column 30: Estatus (Pagado/No pagado/Pendiente)
+      primaNeta: cleanPrimaNeta,
+      primaTotal: cleanPrimaTotal,
     });
   }
   
@@ -163,6 +180,29 @@ function mapPaymentFrequency(freq: string): string {
   if (upper.includes('SEMESTRAL')) return 'SEMIANNUAL';
   if (upper.includes('ANUAL')) return 'ANNUAL';
   return 'ANNUAL';
+}
+
+function mapPolicyType(sapsType: string): string {
+  const upper = sapsType.toUpperCase();
+  // Map SAPS policy types to Prisma PolicyType enum
+  if (upper.includes('AUTO') || upper.includes('VEHICULAR') || upper.includes('INDIVIDUAL') || upper.includes('FLOTILLA')) return 'AUTO';
+  if (upper.includes('GMM') || upper.includes('GASTOS') || upper.includes('MEDICO') || upper.includes('SALUD')) return 'GMM';
+  if (upper.includes('VIDA') || upper.includes('LIFE')) return 'VIDA';
+  if (upper.includes('DAÑOS') || upper.includes('DANOS') || upper.includes('PROPIEDAD')) return 'DANOS';
+  if (upper.includes('FIANZA') || upper.includes('FIELIDAD')) return 'FIANZAS';
+  if (upper.includes('HOGAR') || upper.includes('CASA') || upper.includes('RESIDENCIAL')) return 'HOGAR';
+  if (upper.includes('RESPONSABILIDAD') || upper.includes('RC')) return 'RESPONSABILIDAD_CIVIL';
+  if (upper.includes('EMPRESARIAL') || upper.includes('NEGOCIO')) return 'EMPRESARIAL';
+  if (upper.includes('ACCIDENTE') || upper.includes('PA')) return 'ACCIDENTES';
+  return 'AUTO'; // Default to AUTO
+}
+
+function parsePremium(premiumStr: string): number {
+  if (!premiumStr) return 0;
+  // Remove any non-numeric characters except decimal point
+  const cleaned = premiumStr.replace(/[^0-9.]/g, '');
+  const value = parseFloat(cleaned);
+  return isNaN(value) ? 0 : value;
 }
 
 async function main() {
@@ -305,16 +345,26 @@ async function main() {
         });
         updated++;
       } else {
+        // Log warning if dates couldn't be parsed
+        if (!startDate || !endDate) {
+          console.log(`  ⚠️ ${record.policyNumber}: Fechas inválidas - Inicio: ${record.startDate}, Fin: ${record.endDate}`);
+        }
+        
+        const premiumAmount = parsePremium(record.primaTotal);
+        if (premiumAmount === 0) {
+          console.log(`  ⚠️ ${record.policyNumber}: Prima inválida - ${record.primaTotal}`);
+        }
+        
         policy = await db.policy.create({
           data: {
             policyNumber: record.policyNumber,
             clientId: client.id,
             insurerId: insurer.id,
-            policyType: 'AUTO',
+            policyType: mapPolicyType(record.policyType) as any,
             startDate: startDate || new Date(),
             endDate: endDate || new Date(),
             status: record.status === 'CANCELADO' ? 'CANCELLED' : 'ACTIVE',
-            premiumAmount: 0,
+            premiumAmount: premiumAmount,
             paymentFrequency: mapPaymentFrequency(record.paymentFrequency) as any,
           }
         });
@@ -343,11 +393,88 @@ async function main() {
   
   console.log('');
   console.log('=' .repeat(80));
+  console.log('IMPORTANDO RECIBOS...');
+  console.log('=' .repeat(80));
+  
+  let receiptsCreated = 0;
+  let receiptsErrors = 0;
+  
+  // Import receipts from ALL SAPS records (not just unique policies)
+  for (const record of sapsRecords) {
+    try {
+      // Skip if no receipt number
+      if (!record.receiptNumber || record.receiptNumber.trim() === '') {
+        continue;
+      }
+      
+      // Find the policy
+      const policy = await db.policy.findFirst({
+        where: { policyNumber: record.policyNumber }
+      });
+      
+      if (!policy) {
+        console.log(`  ⚠️ Recibo ${record.receiptNumber}: Póliza ${record.policyNumber} no encontrada`);
+        receiptsErrors++;
+        continue;
+      }
+      
+      // Check if receipt already exists
+      const existingReceipt = await db.receipt.findFirst({
+        where: { 
+          policyId: policy.id,
+          receiptNumber: record.receiptNumber 
+        }
+      });
+      
+      if (existingReceipt) {
+        continue; // Skip duplicates
+      }
+      
+      // Parse receipt dates
+      const receiptStart = parseDate(record.receiptStartDate);
+      const receiptEnd = parseDate(record.receiptEndDate);
+      const premiumAmount = parsePremium(record.primaTotal);
+      
+      // Determine receipt status based on payment status
+      const isPaid = record.status.toUpperCase() === 'SI' || record.status.toUpperCase() === 'PAGADO';
+      
+      // Create receipt with required fields
+      await db.receipt.create({
+        data: {
+          policyId: policy.id,
+          clientId: policy.clientId,
+          insurerId: policy.insurerId,
+          receiptNumber: record.receiptNumber,
+          amount: premiumAmount,
+          periodStartDate: receiptStart || policy.startDate,
+          periodEndDate: receiptEnd || policy.endDate,
+          dueDate: receiptEnd || policy.endDate,
+          status: isPaid ? 'PAID' : 'PENDING',
+          currency: 'MXN',
+        }
+      });
+      
+      receiptsCreated++;
+      
+      if (receiptsCreated % 50 === 0) {
+        console.log(`  ${receiptsCreated} recibos creados...`);
+      }
+      
+    } catch (error) {
+      console.error(`  Error en recibo ${record.receiptNumber}:`, error);
+      receiptsErrors++;
+    }
+  }
+  
+  console.log('');
+  console.log('=' .repeat(80));
   console.log('RESUMEN DE IMPORTACIÓN');
   console.log('=' .repeat(80));
   console.log(`Pólizas creadas: ${created}`);
   console.log(`Pólizas actualizadas: ${updated}`);
-  console.log(`Errores: ${errors}`);
+  console.log(`Recibos creados: ${receiptsCreated}`);
+  console.log(`Errores en pólizas: ${errors}`);
+  console.log(`Errores en recibos: ${receiptsErrors}`);
   console.log('=' .repeat(80));
 }
 

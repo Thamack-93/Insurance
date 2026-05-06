@@ -13,6 +13,8 @@
 ## Scripts esperados
 
 - `npm run backup`
+- `npm run clean:cache`
+- `npm run clean:artifacts`
 - `npm run validate-data`
 - `npm run export:due-payments`
 - `npm run export:commissions`
@@ -60,6 +62,26 @@ Reglas:
 - Backup por script.
 - Backup antes de imports o deletes masivos.
 
+## Cache hygiene
+
+Estos comandos solo deben borrar artefactos regenerables:
+
+- `npm run clean:cache`
+- `npm run clean:artifacts`
+
+Consecuencias esperadas:
+
+- `next dev` recompila mas lento en la primera ejecucion despues de limpiar.
+- Playwright puede volver a descargar browsers si se limpia su cache externa con el flag opcional `--playwright`.
+- Los resultados de pruebas y los artefactos temporales desaparecen, pero no se toca la base ni los documentos.
+
+Lo que queda prohibido tocar:
+
+- `data/policydesk.sqlite`
+- `data/documents`
+- `data/backups` recientes
+- Cualquier archivo de importacion o exportacion que sea parte de una operacion activa
+
 ## Checklist antes de cambios grandes
 
 - Revisar `docs/PRODUCT_AND_ARCHITECTURE_PLAN.md`.
@@ -67,4 +89,3 @@ Reglas:
 - Entender relaciones afectadas.
 - Preferir scripts idempotentes.
 - Validar datos despues.
-
