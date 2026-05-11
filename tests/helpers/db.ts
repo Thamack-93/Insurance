@@ -1,7 +1,29 @@
-import { getDb } from "../../src/lib/db";
+import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { createHmac } from "node:crypto";
+import path from "node:path";
+import type { Page } from "@playwright/test";
+import { PrismaClient } from "../../src/generated/prisma/client";
+
+const databasePath = path.join(process.cwd(), "data", "pg.sqlite");
+
+const globalForTests = globalThis as unknown as {
+  prisma?: PrismaClient;
+};
+
+const SESSION_COOKIE_NAME = "pd_session";
+const TEST_SESSION_SECRET =
+  process.env.SESSION_SECRET ?? process.env.AUTH_SECRET ?? "policydesk-dev-secret-change-in-production-please-0123456789";
 
 export function getTestDb() {
-  return getDb();
+  if (!globalForTests.prisma) {
+    const adapter = new PrismaBetterSqlite3({
+      url: `file:${databasePath}`,
+    });
+
+    globalForTests.prisma = new PrismaClient({ adapter });
+  }
+
+  return globalForTests.prisma;
 }
 
 export type SeededReceipt = {
@@ -20,8 +42,9 @@ export async function seedPendingReceipt(prefix: string): Promise<SeededReceipt>
   const db = getTestDb();
 
   const policy = await db.policy.findFirst({
-    where: { status: "ACTIVE" },
+    where: { status: { not: "CANCELLED" } },
     include: { client: true, insurer: true },
+    orderBy: { createdAt: "asc" },
   });
 
   if (!policy) {
@@ -86,4 +109,48 @@ export async function cleanupRecentRenewalTasks(policyId: string, sinceMs: numbe
   } catch {
     // ignore
   }
+}
+
+export async function getAdminSessionCookie(): Promise<string> {
+  const db = getTestDb();
+  const admin = await db.user.findFirst({
+    where: {
+      active: true,
+      role: "ADMIN",
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  if (!admin) {
+    throw new Error("No active admin user found in the seeded database.");
+  }
+
+  const payload = {
+    userId: admin.id,
+    email: admin.email,
+    name: admin.name,
+    role: admin.role,
+    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30,
+  };
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signatureB64 = createHmac("sha256", TEST_SESSION_SECRET)
+    .update(payloadB64)
+    .digest("base64url");
+
+  return `${SESSION_COOKIE_NAME}=${payloadB64}.${signatureB64}`;
+}
+
+export async function authenticatePageAsAdmin(page: Page): Promise<void> {
+  const cookie = await getAdminSessionCookie();
+  const [name, ...rest] = cookie.split("=");
+  const value = rest.join("=");
+  const baseUrl = new URL(process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:5011").origin;
+
+  await page.context().addCookies([
+    {
+      name,
+      value,
+      url: baseUrl,
+    },
+  ]);
 }

@@ -7,9 +7,9 @@ import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import * as XLSX from "@e965/xlsx";
 
 import { PrismaClient } from "../src/generated/prisma/client.ts";
-import { backupsDir, dataDir, databasePath, exportsDir } from "../src/lib/files.ts";
+import { backupsDir, dataDir, databasePath, exportsDir, stagingDatabasePath, stagingDir } from "../src/lib/files.ts";
 
-export { backupsDir, dataDir, databasePath, exportsDir };
+export { backupsDir, dataDir, databasePath, exportsDir, stagingDatabasePath, stagingDir };
 
 export type CliArgs = {
   positionals: string[];
@@ -40,7 +40,7 @@ export async function ensureDir(dir: string) {
 }
 
 export async function ensureDataDirs() {
-  await Promise.all([ensureDir(dataDir), ensureDir(backupsDir), ensureDir(exportsDir)]);
+  await Promise.all([ensureDir(dataDir), ensureDir(backupsDir), ensureDir(exportsDir), ensureDir(stagingDir)]);
 }
 
 export function timestampForFile(date = new Date()) {
@@ -64,7 +64,7 @@ export async function backupDatabase() {
     return null;
   }
 
-  const target = path.join(backupsDir, `policydesk-${timestampForFile()}.sqlite`);
+  const target = path.join(backupsDir, `pg-${timestampForFile()}.sqlite`);
   await fs.copyFile(databasePath, target);
   return target;
 }

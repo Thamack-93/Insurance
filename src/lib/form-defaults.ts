@@ -2,6 +2,7 @@ import type { ClientFormValues, InsurerFormValues, ClaimFormValues, QuoteFormVal
 import type { PolicyFormValues } from "@/lib/validations";
 import type { ReceiptFormValues } from "@/lib/validations";
 import type { TaskFormValues } from "@/lib/validations";
+import { NO_REFERIDOR_VALUE } from "@/lib/constants";
 
 export function createClientDefaults(values?: Partial<ClientFormValues>): ClientFormValues {
   return {
@@ -13,6 +14,7 @@ export function createClientDefaults(values?: Partial<ClientFormValues>): Client
     rfc: values?.rfc ?? "",
     address: values?.address ?? "",
     preferredContactMethod: values?.preferredContactMethod ?? "",
+    referidorId: values?.referidorId ?? NO_REFERIDOR_VALUE,
     notes: values?.notes ?? "",
     status: values?.status ?? "ACTIVE",
   };

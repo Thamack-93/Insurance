@@ -33,6 +33,7 @@ lib/
   money.ts
   status.ts
   files.ts
+  master-folder.ts
   search.ts
   validations.ts
   dashboard-queries.ts
@@ -42,11 +43,15 @@ prisma/
   schema.prisma
   seed.ts
 data/
-  policydesk.sqlite
+  pg.sqlite
+  staging/
+    canonical.sqlite
   documents/
   backups/
   exports/
 scripts/
+  reconcile-master-folder.ts
+  canonical-staging.ts
 docs/
 ```
 
@@ -81,6 +86,8 @@ Scripts:
 - Usar Prisma.
 - Crear backup antes de cambios masivos.
 - Imprimir resumen claro.
+- La conciliacion de la carpeta maestra compara `/Users/pedrogomez/Desktop/Polizas Pedro/Clientes` contra `data/pg.sqlite` y solo escribe si se solicita explícitamente.
+- La conciliacion de cuatro fuentes y la limpieza de campos escriben en `data/staging/canonical.sqlite` y exportan workbook de revisión humana antes de cualquier promoción.
 
 ## Seguridad local
 
@@ -89,6 +96,9 @@ Scripts:
 - Backups con timestamp.
 - Operaciones destructivas requieren confirmacion o script dedicado.
 - Imports deben soportar dry-run y reporte.
+- `data/pg.sqlite` es la unica base activa del proyecto.
+- `data/staging/canonical.sqlite` es una base de trabajo regenerable y separada de la base real.
+- `Client.referidorId` modela cuentas agrupadoras o referidas y se usa para conservar trazabilidad comercial cuando un folder contiene expedientes de terceros.
 
 ## Performance
 
@@ -102,4 +112,3 @@ Scripts:
 - Unit tests para helpers de fechas, dinero, riesgo y calidad.
 - Integration smoke para Prisma seed y scripts.
 - Manual visual QA para dashboard, today, tablas y drawers.
-

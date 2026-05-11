@@ -20,7 +20,7 @@ PolicyDesk es un CRM/dashboard local-first para operar una cartera de seguros de
 
 ## Estructura local
 
-- Base de datos: `data/policydesk.sqlite`
+- Base de datos: `data/pg.sqlite`
 - Backups: `data/backups`
 - Documentos: `data/documents`
 - Exportaciones: `data/exports`
@@ -46,6 +46,7 @@ npm run list:renewals
 npm run list:tasks
 npm run export:due-payments
 npm run export:commissions
+npm run reconcile:master-folder
 ```
 
 ## Flujo de desarrollo
@@ -78,4 +79,3 @@ npm run db:check-drift
 - `docs/UI_SYSTEM.md`
 - `docs/CODEX_OPERATIONS.md`
 - `docs/AI_ROADMAP.md`
-

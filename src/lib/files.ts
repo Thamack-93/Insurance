@@ -1,10 +1,12 @@
 import path from "node:path";
 
 export const dataDir = path.join(process.cwd(), "data");
+export const stagingDir = path.join(dataDir, "staging");
 export const documentsDir = path.join(dataDir, "documents");
 export const backupsDir = path.join(dataDir, "backups");
 export const exportsDir = path.join(dataDir, "exports");
 export const databasePath = path.join(dataDir, "pg.sqlite");
+export const stagingDatabasePath = path.join(stagingDir, "canonical.sqlite");
 
 export function assertSafeDocumentPath(filePath: string) {
   const resolved = path.resolve(filePath);
@@ -12,6 +14,17 @@ export function assertSafeDocumentPath(filePath: string) {
 
   if (!resolved.startsWith(allowed)) {
     throw new Error("Document path must stay inside data/documents.");
+  }
+
+  return resolved;
+}
+
+export function assertSafeStagingPath(filePath: string) {
+  const resolved = path.resolve(filePath);
+  const allowed = path.resolve(stagingDir);
+
+  if (!resolved.startsWith(allowed)) {
+    throw new Error("Staging path must stay inside data/staging.");
   }
 
   return resolved;
@@ -35,4 +48,3 @@ export function assertSafeBackupPath(filename: string) {
 
   return resolved;
 }
-

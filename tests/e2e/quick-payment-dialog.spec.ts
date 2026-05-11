@@ -4,12 +4,13 @@ import {
   cleanupReceipt,
   cleanupRecentRenewalTasks,
   getTestDb,
+  authenticatePageAsAdmin,
   type SeededReceipt,
 } from "../helpers/db";
 
 test.describe("Quick payment dialog (/receipts cobrar tab)", () => {
-  let seeded: SeededReceipt;
-  let startedAt: number;
+  let seeded: SeededReceipt | undefined;
+  let startedAt = 0;
 
   test.beforeEach(async () => {
     startedAt = Date.now();
@@ -17,11 +18,14 @@ test.describe("Quick payment dialog (/receipts cobrar tab)", () => {
   });
 
   test.afterEach(async () => {
-    await cleanupReceipt(seeded.id);
-    await cleanupRecentRenewalTasks(seeded.policyId, startedAt);
+    if (seeded) {
+      await cleanupReceipt(seeded.id);
+      await cleanupRecentRenewalTasks(seeded.policyId, startedAt);
+    }
   });
 
   test("pays a receipt via the dialog, shows a toast and updates DB state", async ({ page }) => {
+    await authenticatePageAsAdmin(page);
     // Navigate filtered to the seeded receipt so it's visible on page 1.
     await page.goto(`/receipts?tab=cobrar&q=${encodeURIComponent(seeded.receiptNumber)}`);
 

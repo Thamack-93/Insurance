@@ -191,6 +191,7 @@ model Client {
   rfc                    String?
   address                String?
   preferredContactMethod String?
+  referidorId            String?
   notes                  String?
   status                 EntityStatus @default(ACTIVE)
   createdAt              DateTime     @default(now())
@@ -200,6 +201,8 @@ model Client {
 
   createdBy   User?        @relation("ClientCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   updatedBy   User?        @relation("ClientUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  referidor   Client?      @relation("ClientReferidor", fields: [referidorId], references: [id], onDelete: SetNull)
+  referidos   Client[]     @relation("ClientReferidor")
   policies    Policy[]
   receipts    Receipt[]
   payments    Payment[]
@@ -211,6 +214,7 @@ model Client {
 
   @@index([fullName])
   @@index([status])
+  @@index([referidorId])
   @@index([createdById])
   @@index([updatedById])
 }

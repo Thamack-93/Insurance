@@ -173,10 +173,12 @@ export async function getPendingReceipts() {
       orderBy: { dueDate: "asc" },
     });
 
-    return receipts.map((receipt) => ({
+    return receipts
+      .filter((receipt) => receipt.client && receipt.policy && receipt.insurer)
+      .map((receipt) => ({
       ...receipt,
       amount: Number(receipt.amount),
-    }));
+      }));
   } catch (error) {
     logError("payments.getPendingReceipts", error);
     return [];
@@ -215,10 +217,12 @@ export async function getPaymentHistory(limit?: number) {
       orderBy: { paidDate: "desc" },
     });
 
-    return payments.map((payment) => ({
-      ...payment,
-      amount: Number(payment.amount),
-    }));
+    return payments
+      .filter((payment) => payment.receipt && payment.client && payment.policy)
+      .map((payment) => ({
+        ...payment,
+        amount: Number(payment.amount),
+      }));
   } catch (error) {
     logError("payments.getPaymentHistory", error);
     return [];

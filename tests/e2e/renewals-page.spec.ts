@@ -1,22 +1,25 @@
 import { test, expect } from "@playwright/test";
-import { getTestDb, cleanupRecentRenewalTasks } from "../helpers/db";
+import { authenticatePageAsAdmin, getTestDb, cleanupRecentRenewalTasks } from "../helpers/db";
 import { addDays, addYears } from "date-fns";
 
 test.describe("Renewals Page (/renewals)", () => {
-  let policyId: string;
-  let startedAt: number;
+  let policyId = "";
+  let startedAt = 0;
 
   test.afterEach(async () => {
     const db = getTestDb();
-    await cleanupRecentRenewalTasks(policyId, startedAt);
-    await db.policy.deleteMany({ where: { id: policyId } });
+    if (policyId) {
+      await cleanupRecentRenewalTasks(policyId, startedAt);
+      await db.policy.deleteMany({ where: { id: policyId } });
+    }
   });
 
   test("displays renewal statistics", async ({ page }) => {
+    await authenticatePageAsAdmin(page);
     await page.goto("/renewals");
 
     // Wait for page to load
-    await expect(page.getByRole("heading", { name: "Renovaciones" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Renovaciones", exact: true })).toBeVisible();
 
     // Check for metric cards
     await expect(page.getByText("Vencidas").first()).toBeVisible();
@@ -53,6 +56,7 @@ test.describe("Renewals Page (/renewals)", () => {
     });
     policyId = policy.id;
 
+    await authenticatePageAsAdmin(page);
     await page.goto("/renewals");
 
     // Check for urgent renewals section
@@ -87,6 +91,7 @@ test.describe("Renewals Page (/renewals)", () => {
     });
     policyId = policy.id;
 
+    await authenticatePageAsAdmin(page);
     await page.goto("/renewals");
 
     // Search input should be visible

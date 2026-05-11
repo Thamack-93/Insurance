@@ -37,13 +37,27 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
   const client = await db.client.findUnique({
     where: { id },
+    include: {
+      referidor: {
+        select: {
+          id: true,
+          fullName: true,
+          status: true,
+        },
+      },
+      _count: {
+        select: {
+          referidos: true,
+        },
+      },
+    },
   });
 
   if (!client) {
     notFound();
   }
 
-  const [policies, receipts, tasks, claims, quotes, documents, activity] = await Promise.all([
+  const [policies, receipts, tasks, claims, quotes, documents, referidos, activity] = await Promise.all([
     db.policy.findMany({
       where: { clientId: id },
       include: { insurer: true },
@@ -79,6 +93,17 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       include: { policy: true, receipt: true, task: true, claim: true, quote: true },
       orderBy: { uploadedAt: "desc" },
       take: 20,
+    }),
+    db.client.findMany({
+      where: { referidorId: id },
+      select: {
+        id: true,
+        fullName: true,
+        type: true,
+        status: true,
+      },
+      orderBy: { fullName: "asc" },
+      take: 10,
     }),
     getActivityForEntity("Client", id, 20),
   ]);
@@ -182,6 +207,32 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                   <div>
                     <p className="font-medium text-foreground">RFC</p>
                     <p className="mt-1">{client.rfc ?? "No capturado"}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Referidor</p>
+                    {client.referidor ? (
+                      <Link href={`/clients/${client.referidor.id}`} className="mt-1 inline-flex items-center gap-2 text-foreground hover:text-primary">
+                        {client.referidor.fullName}
+                        <StatusBadge status={client.referidor.status} />
+                      </Link>
+                    ) : (
+                      <p className="mt-1">Sin referidor</p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Clientes referidos</p>
+                    <p className="mt-1">{client._count.referidos} cuenta{client._count.referidos === 1 ? "" : "s"}</p>
+                    {referidos.length > 0 ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {referidos.map((referido) => (
+                          <Link key={referido.id} href={`/clients/${referido.id}`}>
+                            <Badge variant="outline" className="rounded-full">
+                              {referido.fullName}
+                            </Badge>
+                          </Link>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </SectionCard>

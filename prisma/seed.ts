@@ -163,6 +163,22 @@ async function main() {
     ),
   );
 
+  const referralAssignments = [
+    { clientIndex: 0, referidorIndex: 1 },
+    { clientIndex: 2, referidorIndex: 1 },
+    { clientIndex: 5, referidorIndex: 4 },
+    { clientIndex: 11, referidorIndex: 10 },
+  ] as const;
+
+  for (const assignment of referralAssignments) {
+    await prisma.client.update({
+      where: { id: clients[assignment.clientIndex].id },
+      data: {
+        referidorId: clients[assignment.referidorIndex].id,
+      },
+    });
+  }
+
   const policies: Policy[] = [];
 
   for (let index = 0; index < 25; index += 1) {

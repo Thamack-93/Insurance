@@ -4,12 +4,13 @@ import {
   cleanupReceipt,
   cleanupRecentRenewalTasks,
   getTestDb,
+  authenticatePageAsAdmin,
 } from "../helpers/db";
 
 test.describe("Commissions Page (/commissions)", () => {
-  let receiptId: string;
-  let policyId: string;
-  let startedAt: number;
+  let receiptId = "";
+  let policyId = "";
+  let startedAt = 0;
 
   test.beforeEach(async () => {
     startedAt = Date.now();
@@ -20,16 +21,21 @@ test.describe("Commissions Page (/commissions)", () => {
 
   test.afterEach(async () => {
     const db = getTestDb();
-    await db.commission.deleteMany({ where: { policyId } });
-    await cleanupReceipt(receiptId);
-    await cleanupRecentRenewalTasks(policyId, startedAt);
+    if (policyId) {
+      await db.commission.deleteMany({ where: { policyId } });
+      await cleanupRecentRenewalTasks(policyId, startedAt);
+    }
+    if (receiptId) {
+      await cleanupReceipt(receiptId);
+    }
   });
 
   test("displays commission statistics", async ({ page }) => {
+    await authenticatePageAsAdmin(page);
     await page.goto("/commissions");
 
     // Wait for page to load - check for main title
-    await expect(page.getByRole("heading", { name: "Comisiones" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Comisiones", exact: true })).toBeVisible();
 
     // Check for metric cards
     await expect(page.getByText("Esperado").first()).toBeVisible();
@@ -37,6 +43,7 @@ test.describe("Commissions Page (/commissions)", () => {
   });
 
   test("shows open commissions list", async ({ page }) => {
+    await authenticatePageAsAdmin(page);
     // Create a commission by marking receipt as paid and creating commission directly
     const db = getTestDb();
     await db.receipt.update({

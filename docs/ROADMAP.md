@@ -18,7 +18,7 @@ Objetivo: crear la app local, schema, seed, layout premium, Dashboard y Hoy.
 Entregables:
 
 - Next.js + TypeScript + Tailwind + shadcn/ui.
-- Prisma + SQLite en `data/policydesk.sqlite`.
+- Prisma + SQLite en `data/pg.sqlite`.
 - Seed demo realista.
 - Layout con sidebar y topbar.
 - Dashboard operativo.
@@ -38,7 +38,7 @@ Objetivo: construir entidades base navegables.
 
 Entregables:
 
-- Clientes, aseguradoras, polizas, recibos y pendientes.
+- Clientes, aseguradoras, polizas, recibos, pendientes y la self-relation de `Referidor`.
 - Listados con TanStack Table.
 - Detail pages.
 - Formularios con React Hook Form + Zod.
@@ -147,4 +147,3 @@ Entregables:
 Definition of Done:
 
 - Cloud e IA pueden agregarse sin reescribir el MVP.
-

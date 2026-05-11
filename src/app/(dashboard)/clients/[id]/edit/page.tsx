@@ -3,15 +3,29 @@ import { updateClient } from "@/app/(dashboard)/clients/actions";
 import { ClientForm } from "@/components/forms/client-form";
 import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
+import { createClientDefaults } from "@/lib/form-defaults";
+import type { SelectOption } from "@/lib/domain-options";
 
 export default async function EditClientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const db = getDb();
-  const client = await db.client.findUnique({ where: { id } });
+  const [client, referidorClients] = await Promise.all([
+    db.client.findUnique({ where: { id } }),
+    db.client.findMany({
+      where: { id: { not: id } },
+      select: { id: true, fullName: true, type: true },
+      orderBy: [{ fullName: "asc" }],
+    }),
+  ]);
 
   if (!client) {
     notFound();
   }
+
+  const referidorOptions: SelectOption[] = referidorClients.map((item) => ({
+    value: item.id,
+    label: `${item.fullName} · ${item.type === "COMPANY" ? "Empresa" : "Persona"}`,
+  }));
 
   return (
     <div className="flex flex-col gap-6">
@@ -27,7 +41,7 @@ export default async function EditClientPage({ params }: { params: Promise<{ id:
           description="Los cambios se validan antes de guardar y se registran en ActivityLog."
           submitLabel="Guardar cambios"
           cancelHref={`/clients/${client.id}`}
-          defaultValues={{
+          defaultValues={createClientDefaults({
             fullName: client.fullName,
             type: client.type,
             email: client.email ?? "",
@@ -36,9 +50,11 @@ export default async function EditClientPage({ params }: { params: Promise<{ id:
             rfc: client.rfc ?? "",
             address: client.address ?? "",
             preferredContactMethod: client.preferredContactMethod ?? "",
+            referidorId: client.referidorId ?? "NONE",
             notes: client.notes ?? "",
             status: client.status,
-          }}
+          })}
+          referidorOptions={referidorOptions}
           submitAction={updateClient.bind(null, client.id)}
         />
       </div>

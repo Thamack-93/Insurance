@@ -29,10 +29,14 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  webServer: {
-    command: `npm run dev -- -p ${PORT}`,
-    url: BASE_URL,
-    reuseExistingServer: true,
-    timeout: 120_000,
-  },
+  ...(process.env.PLAYWRIGHT_SKIP_WEBSERVER
+    ? {}
+    : {
+        webServer: {
+          command: `npm run dev -- -p ${PORT}`,
+          url: BASE_URL,
+          reuseExistingServer: true,
+          timeout: 120_000,
+        },
+      }),
 });

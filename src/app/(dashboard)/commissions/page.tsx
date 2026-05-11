@@ -61,6 +61,8 @@ export default async function CommissionsPage({
   ]);
 
   const ratio = stats.totalExpected ? Math.round((stats.totalActual / stats.totalExpected) * 100) : 0;
+  const safeOpenCommissions = openCommissions.filter((commission: any) => commission.policy && commission.client && commission.insurer);
+  const safePaidCommissions = paidCommissions.filter((commission: any) => commission.policy && commission.client && commission.insurer);
 
   return (
     <div className="flex flex-col gap-6">
@@ -115,7 +117,7 @@ export default async function CommissionsPage({
           description="Listado paginado con búsqueda por póliza, cliente o aseguradora."
           action={<ListSearch placeholder="Buscar por póliza, cliente o aseguradora..." />}
         >
-          {openCount === 0 ? (
+          {safeOpenCommissions.length === 0 ? (
             <div className="p-4">
               <EmptyState
                 icon={HandCoins}
@@ -127,7 +129,7 @@ export default async function CommissionsPage({
                 }
               />
             </div>
-          ) : openCommissions.length === 0 ? (
+          ) : safeOpenCommissions.length === 0 ? (
             <div className="p-4">
               <EmptyState
                 icon={HandCoins}
@@ -151,7 +153,7 @@ export default async function CommissionsPage({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {openCommissions.map((commission: any) => (
+                  {safeOpenCommissions.map((commission: any) => (
                     <TableRow key={commission.id}>
                       <TableCell>
                         <Link href={`/policies/${commission.policyId}`} className="font-medium text-foreground hover:text-primary">
@@ -181,7 +183,7 @@ export default async function CommissionsPage({
         </SectionCard>
 
         <SectionCard title="Comisiones cobradas" description="Últimos cierres que ya entraron a caja.">
-          {paidCommissions.length === 0 ? (
+          {safePaidCommissions.length === 0 ? (
             <div className="p-4">
               <EmptyState
                 icon={BadgeCheck}
@@ -191,7 +193,7 @@ export default async function CommissionsPage({
             </div>
           ) : (
             <div className="divide-y divide-stone-200/80">
-              {paidCommissions.map((commission: any) => (
+              {safePaidCommissions.map((commission: any) => (
                 <div key={commission.id} className="flex items-start justify-between gap-4 px-4 py-4">
                   <div className="min-w-0">
                     <Link href={`/policies/${commission.policyId}`} className="font-medium text-foreground hover:text-primary">

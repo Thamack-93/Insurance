@@ -14,6 +14,7 @@ export const clientSchema = z.object({
   rfc: optionalText,
   address: optionalText,
   preferredContactMethod: optionalText,
+  referidorId: z.string().trim().optional().or(z.literal("")),
   notes: optionalText,
   status: z.enum(["ACTIVE", "INACTIVE", "ARCHIVED"]),
 });

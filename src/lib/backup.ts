@@ -23,7 +23,7 @@ export type BackupEntry = {
   createdAt: Date;
 };
 
-export async function backupDatabase(prefix = "policydesk") {
+export async function backupDatabase(prefix = "pg") {
   await fs.mkdir(backupsDir, { recursive: true });
 
   try {

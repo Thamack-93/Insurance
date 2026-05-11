@@ -1,22 +1,22 @@
+import { getDb } from "@/lib/db";
 import { PageHeader } from "@/components/layout/page-header";
 import { ClientForm } from "@/components/forms/client-form";
 import { createClient } from "@/app/(dashboard)/clients/actions";
-import type { ClientFormValues } from "@/lib/validations";
+import { createClientDefaults } from "@/lib/form-defaults";
+import type { SelectOption } from "@/lib/domain-options";
 
-const defaultValues: ClientFormValues = {
-  fullName: "",
-  type: "PERSON",
-  email: "",
-  phone: "",
-  secondaryPhone: "",
-  rfc: "",
-  address: "",
-  preferredContactMethod: "",
-  notes: "",
-  status: "ACTIVE",
-};
+export default async function NewClientPage() {
+  const db = getDb();
+  const clients = await db.client.findMany({
+    select: { id: true, fullName: true, type: true },
+    orderBy: [{ fullName: "asc" }],
+  });
 
-export default function NewClientPage() {
+  const referidorOptions: SelectOption[] = clients.map((client) => ({
+    value: client.id,
+    label: `${client.fullName} · ${client.type === "COMPANY" ? "Empresa" : "Persona"}`,
+  }));
+
   return (
     <div className="flex flex-col gap-6">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
@@ -31,7 +31,8 @@ export default function NewClientPage() {
           description="Este formulario crea el expediente base y registra el evento en ActivityLog."
           submitLabel="Crear cliente"
           cancelHref="/clients"
-          defaultValues={defaultValues}
+          defaultValues={createClientDefaults()}
+          referidorOptions={referidorOptions}
           submitAction={createClient}
         />
       </div>

@@ -100,17 +100,21 @@ export default async function ReceiptsPage({
       ? Math.round((paidThisMonth.length / (openCount + paidThisMonth.length)) * 100)
       : 100;
 
-  const collectableRows: CollectableReceipt[] = pagedReceipts.map((receipt) => ({
-    id: receipt.id,
-    receiptNumber: receipt.receiptNumber,
-    dueDate: receipt.dueDate.toISOString().split("T")[0],
-    amount: toNumber(receipt.amount),
-    currency: receipt.currency,
-    status: receipt.status,
-    client: { fullName: receipt.client.fullName },
-    policy: { policyNumber: receipt.policy.policyNumber },
-    insurer: { name: receipt.insurer.name },
-  }));
+  const collectableRows: CollectableReceipt[] = pagedReceipts
+    .filter((receipt) => receipt.client && receipt.policy && receipt.insurer)
+    .map((receipt) => ({
+      id: receipt.id,
+      receiptNumber: receipt.receiptNumber,
+      dueDate: receipt.dueDate.toISOString().split("T")[0],
+      amount: toNumber(receipt.amount),
+      currency: receipt.currency,
+      status: receipt.status,
+      client: { fullName: receipt.client.fullName },
+      policy: { policyNumber: receipt.policy.policyNumber },
+      insurer: { name: receipt.insurer.name },
+    }));
+
+  const safePaymentHistory = paymentHistory.filter((payment) => payment.receipt && payment.client && payment.policy);
 
   return (
     <div className="space-y-6">
@@ -254,7 +258,7 @@ export default async function ReceiptsPage({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paymentHistory.map((payment) => (
+                  {safePaymentHistory.map((payment) => (
                     <TableRow key={payment.id}>
                       <TableCell className="font-medium">
                         <Link href={`/receipts/${payment.receipt.id}`} className="hover:text-primary">
@@ -310,7 +314,7 @@ export default async function ReceiptsPage({
                           {receipt.receiptNumber}
                         </Link>
                       </TableCell>
-                      <TableCell>{receipt.client.fullName}</TableCell>
+                      <TableCell>{receipt.client?.fullName ?? "Cliente eliminado"}</TableCell>
                       <TableCell>{receipt.paidDate ? formatDate(receipt.paidDate) : "—"}</TableCell>
                       <TableCell>{receipt.paymentMethod ?? "Sin método"}</TableCell>
                       <TableCell className="text-right font-medium">

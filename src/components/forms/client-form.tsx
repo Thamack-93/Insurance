@@ -22,6 +22,8 @@ import {
   FormGrid,
   FormSection,
 } from "@/components/forms/form-primitives";
+import { NO_REFERIDOR_VALUE } from "@/lib/constants";
+import type { SelectOption } from "@/lib/domain-options";
 
 type ClientFormProps = {
   title: string;
@@ -29,6 +31,7 @@ type ClientFormProps = {
   submitLabel: string;
   cancelHref: string;
   defaultValues: ClientFormValues;
+  referidorOptions: SelectOption[];
   submitAction: (values: ClientFormValues) => Promise<MutationResult>;
 };
 
@@ -38,6 +41,7 @@ export function ClientForm({
   submitLabel,
   cancelHref,
   defaultValues,
+  referidorOptions,
   submitAction,
 }: ClientFormProps) {
   const router = useRouter();
@@ -152,6 +156,34 @@ export function ClientForm({
           <FormSection title="Notas" description="Contexto útil para la operación diaria.">
             <FormField label="Notas internas" htmlFor="notes" error={errors.notes?.message}>
               <Textarea id="notes" rows={5} {...register("notes")} />
+            </FormField>
+          </FormSection>
+
+          <FormSection
+            title="Agrupamiento comercial"
+            description="Selecciona un referidor cuando este cliente se administra a través de otra cuenta."
+          >
+            <FormField
+              label="Referidor"
+              htmlFor="referidorId"
+              error={errors.referidorId?.message}
+              hint="Opcional. Útil para carpetas agrupadoras y cuentas referidas."
+            >
+              <Controller
+                name="referidorId"
+                control={control}
+                render={({ field }) => (
+                  <ControlledSelect
+                    value={field.value ?? NO_REFERIDOR_VALUE}
+                    onValueChange={field.onChange}
+                    options={[
+                      { value: NO_REFERIDOR_VALUE, label: "Sin referidor" },
+                      ...referidorOptions,
+                    ]}
+                    placeholder="Sin referidor"
+                  />
+                )}
+              />
             </FormField>
           </FormSection>
 

@@ -28,10 +28,10 @@ test.describe("Commissions API", () => {
   });
 
   test.describe("POST /api/commissions/:id/status", () => {
-    let receiptId: string;
-    let policyId: string;
-    let commissionId: string;
-    let startedAt: number;
+    let receiptId = "";
+    let policyId = "";
+    let commissionId = "";
+    let startedAt = 0;
 
     test.beforeEach(async () => {
       startedAt = Date.now();
@@ -77,9 +77,13 @@ test.describe("Commissions API", () => {
 
     test.afterEach(async () => {
       const db = getTestDb();
-      await db.commission.deleteMany({ where: { policyId } });
-      await cleanupReceipt(receiptId);
-      await cleanupRecentRenewalTasks(policyId, startedAt);
+      if (policyId) {
+        await db.commission.deleteMany({ where: { policyId } });
+        await cleanupRecentRenewalTasks(policyId, startedAt);
+      }
+      if (receiptId) {
+        await cleanupReceipt(receiptId);
+      }
     });
 
     test("updates commission status to PAID", async ({ request }) => {

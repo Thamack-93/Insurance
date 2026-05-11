@@ -39,11 +39,12 @@ Stack obligatorio:
 
 Arquitectura local:
 
-- Base de datos: `data/policydesk.sqlite`
-- Backups: `data/backups`
+- Base de datos: `data/pg.sqlite`
+- Backups: `data/backups` (artefactos temporales, no una segunda base activa)
 - Documentos: `data/documents`
 - Exportaciones: `data/exports`
 - Prisma sera la unica via aceptada para leer o modificar SQLite.
+- `data/pg.sqlite` es la fuente de verdad activa; cualquier otro SQLite en el repo se considera obsoleto.
 - Los documentos sensibles nunca se guardan en `public`.
 - Scripts TypeScript viven en `scripts/` y deben crear backup antes de operaciones destructivas o masivas.
 
@@ -61,6 +62,7 @@ Data flow recomendado:
 - Lecturas: Server Components llaman queries de `lib/*-queries.ts`.
 - Mutaciones: Server Actions validan con Zod, escriben via Prisma, registran `ActivityLog` y revalidan rutas.
 - Documentos: API routes controlan upload/download/preview sin exponer rutas publicas.
+- Reconciliacion: la carpeta `/Users/pedrogomez/Desktop/Polizas Pedro/Clientes` es la fuente maestra read-only; los scripts comparan su evidencia contra `data/pg.sqlite` antes de escribir cualquier alta o correccion.
 - Scripts: usan Prisma y helpers compartidos; nunca SQL manual destructivo.
 
 ## 3. Modelo de datos completo
@@ -68,6 +70,7 @@ Data flow recomendado:
 Entidades principales:
 
 - `Client`: persona o empresa, contacto, RFC, estado, notas y relaciones comerciales.
+- `Client` tambien puede apuntar a otro `Client` mediante `referidor` cuando la cuenta se administra a traves de un agrupador comercial.
 - `Insurer`: aseguradora, portales, contacto y estado.
 - `Policy`: contrato central con vigencia, prima, renovacion, frecuencia y objeto asegurado.
 - `Receipt`: obligacion de pago/cobro ligada a poliza, cliente y aseguradora.
@@ -105,6 +108,7 @@ Invariantes iniciales:
 Relaciones clave:
 
 - Un cliente tiene muchas polizas, recibos, pagos, comisiones, tareas, siniestros, cotizaciones y documentos.
+- Un cliente puede tener un `referidor` opcional y a su vez muchos `referidos`.
 - Una aseguradora tiene muchas polizas, recibos, comisiones, tareas, siniestros y cotizaciones.
 - Una poliza pertenece a un cliente y aseguradora, y tiene recibos, pagos, comisiones, tareas, documentos, siniestros y actividad.
 - Un recibo pertenece a poliza, cliente y aseguradora; puede tener pagos, comision y documento opcional.
@@ -432,4 +436,3 @@ Lineamientos:
 - Skeletons y transiciones suaves.
 - Drawers para detalle sin perder contexto.
 - Nada de colores chillones ni layouts de ERP viejo.
-

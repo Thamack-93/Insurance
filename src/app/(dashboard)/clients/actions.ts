@@ -3,11 +3,13 @@
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { AuthError, getCurrentUserId, requireAdmin } from "@/lib/auth";
-import { normalizeOptionalText } from "@/lib/form-utils";
+import { normalizeOptionalText, optionalRelationId } from "@/lib/form-utils";
+import { NO_REFERIDOR_VALUE } from "@/lib/constants";
 import { clientSchema, type ClientFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 
 function normalizeClientInput(values: ClientFormValues) {
+  const referidorId = optionalRelationId(values.referidorId);
   return {
     fullName: values.fullName.trim(),
     type: values.type,
@@ -17,9 +19,78 @@ function normalizeClientInput(values: ClientFormValues) {
     rfc: normalizeOptionalText(values.rfc),
     address: normalizeOptionalText(values.address),
     preferredContactMethod: normalizeOptionalText(values.preferredContactMethod),
+    referidorId: referidorId && referidorId !== NO_REFERIDOR_VALUE ? referidorId : null,
     notes: normalizeOptionalText(values.notes),
     status: values.status,
   };
+}
+
+async function ensureValidReferidor(
+  db: ReturnType<typeof getDb>,
+  referidorId: string | null,
+  currentClientId?: string,
+) {
+  if (!referidorId) {
+    return null;
+  }
+
+  if (currentClientId && referidorId === currentClientId) {
+    throw new Error("Un cliente no puede ser su propio referidor.");
+  }
+
+  const referidor = await db.client.findUnique({
+    where: { id: referidorId },
+    select: { id: true, referidorId: true },
+  });
+
+  if (!referidor) {
+    throw new Error("El referidor seleccionado no existe.");
+  }
+
+  if (!currentClientId) {
+    return referidor.id;
+  }
+
+  const visited = new Set<string>([currentClientId]);
+  let cursor = referidor;
+  let depth = 0;
+
+  while (cursor.referidorId) {
+    if (visited.has(cursor.referidorId)) {
+      throw new Error("La relación de referidor generaría un ciclo.");
+    }
+
+    visited.add(cursor.referidorId);
+    const next = await db.client.findUnique({
+      where: { id: cursor.referidorId },
+      select: { id: true, referidorId: true },
+    });
+
+    if (!next) {
+      break;
+    }
+
+    cursor = next;
+    depth += 1;
+
+    if (depth > 20) {
+      throw new Error("La cadena de referidores es demasiado profunda.");
+    }
+  }
+
+  return referidor.id;
+}
+
+function collectRevalidatePaths(currentClientId: string, referidorIds: Array<string | null | undefined>) {
+  const paths = new Set<string>(["/clients", `/clients/${currentClientId}`, "/dashboard", "/today", "/portfolio", "/risks"]);
+
+  for (const id of referidorIds) {
+    if (id) {
+      paths.add(`/clients/${id}`);
+    }
+  }
+
+  return Array.from(paths);
 }
 
 export async function createClient(values: ClientFormValues): Promise<MutationResult> {
@@ -32,8 +103,10 @@ export async function createClient(values: ClientFormValues): Promise<MutationRe
   try {
     const db = getDb();
     const userId = await getCurrentUserId();
+    const normalized = normalizeClientInput(parsed.data);
+    normalized.referidorId = await ensureValidReferidor(db, normalized.referidorId);
     const client = await db.client.create({
-      data: { ...normalizeClientInput(parsed.data), createdById: userId, updatedById: userId },
+      data: { ...normalized, createdById: userId, updatedById: userId },
     });
 
     await writeActivityLog({
@@ -43,7 +116,7 @@ export async function createClient(values: ClientFormValues): Promise<MutationRe
       newValue: client,
     });
 
-    revalidatePaths(["/clients", `/clients/${client.id}`, "/dashboard", "/today", "/portfolio", "/risks"]);
+    revalidatePaths(collectRevalidatePaths(client.id, [client.referidorId]));
 
     return successResult(client.id, `/clients/${client.id}`, "Cliente creado.");
   } catch (error) {
@@ -67,9 +140,15 @@ export async function updateClient(id: string, values: ClientFormValues): Promis
     }
 
     const userId = await getCurrentUserId();
+    const normalized = normalizeClientInput(parsed.data);
+    normalized.referidorId = await ensureValidReferidor(db, normalized.referidorId, id);
     const client = await db.client.update({
       where: { id },
-      data: { ...normalizeClientInput(parsed.data), updatedById: userId },
+      data: { ...normalized, updatedById: userId },
+    });
+    const referidos = await db.client.findMany({
+      where: { referidorId: id },
+      select: { id: true },
     });
 
     await writeActivityLog({
@@ -80,7 +159,9 @@ export async function updateClient(id: string, values: ClientFormValues): Promis
       newValue: client,
     });
 
-    revalidatePaths(["/clients", `/clients/${client.id}`, "/dashboard", "/today", "/portfolio", "/risks"]);
+    revalidatePaths(
+      collectRevalidatePaths(client.id, [previousClient.referidorId, client.referidorId, ...referidos.map((item) => item.id)]),
+    );
 
     return successResult(client.id, `/clients/${client.id}`, "Cliente actualizado.");
   } catch (error) {
@@ -95,6 +176,8 @@ export async function deleteClient(id: string): Promise<MutationResult> {
     const existingClient = await db.client.findUnique({
       where: { id },
       include: {
+        referidor: { select: { id: true } },
+        referidos: { select: { id: true } },
         _count: {
           select: {
             policies: true,
@@ -136,7 +219,9 @@ export async function deleteClient(id: string): Promise<MutationResult> {
       oldValue: { fullName: existingClient.fullName },
     });
 
-    revalidatePaths(["/clients", "/dashboard", "/today", "/portfolio", "/risks"]);
+    revalidatePaths(
+      collectRevalidatePaths(id, [existingClient.referidor?.id, ...existingClient.referidos.map((client) => client.id)]),
+    );
 
     return successResult(id, "/clients", "Cliente eliminado.");
   } catch (error) {
