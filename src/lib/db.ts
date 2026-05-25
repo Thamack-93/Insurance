@@ -31,5 +31,3 @@ export async function resetDb() {
     }
   }
 }
-
-export const db = getDb();
