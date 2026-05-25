@@ -11,6 +11,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { areDocumentFilesEnabled } from "@/lib/deployment";
 
 type Props = {
   documentId: string;
@@ -18,6 +19,7 @@ type Props = {
   mimeType: string;
   triggerSize?: "sm" | "default";
   triggerLabel?: string;
+  disabled?: boolean;
 };
 
 export function DocumentPreviewDialog({
@@ -26,12 +28,22 @@ export function DocumentPreviewDialog({
   mimeType,
   triggerSize = "sm",
   triggerLabel = "Vista previa",
+  disabled = !areDocumentFilesEnabled(),
 }: Props) {
   const [open, setOpen] = useState(false);
   const inlineUrl = `/api/documents/${documentId}/download?inline=1`;
   const downloadUrl = `/api/documents/${documentId}/download`;
   const isPdf = mimeType === "application/pdf";
   const isImage = mimeType.startsWith("image/");
+
+  if (disabled) {
+    return (
+      <Button variant="outline" size={triggerSize} className="gap-1.5" disabled aria-label={`Vista previa de ${fileName} deshabilitada`}>
+        <Eye className="size-4" />
+        {triggerLabel}
+      </Button>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

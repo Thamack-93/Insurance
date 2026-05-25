@@ -8,8 +8,22 @@ import {
 } from "../helpers/db";
 
 test.describe("POST /api/payments/quick", () => {
-  test("returns 400 with friendly error when required fields are missing", async ({ request }) => {
+  test("returns 401 without session", async ({ request }) => {
     const response = await request.post("/api/payments/quick", {
+      data: {
+        receiptId: "any",
+        amount: 100,
+        paidDate: new Date().toISOString().split("T")[0],
+        paymentMethod: "TRANSFER",
+      },
+    });
+    expect(response.status()).toBe(401);
+  });
+
+  test("returns 400 with friendly error when required fields are missing", async ({ request }) => {
+    const authCookie = await getAdminSessionCookie();
+    const response = await request.post("/api/payments/quick", {
+      headers: { cookie: authCookie },
       data: {},
     });
 
@@ -21,7 +35,9 @@ test.describe("POST /api/payments/quick", () => {
   });
 
   test("returns 400 when receipt id is unknown", async ({ request }) => {
+    const authCookie = await getAdminSessionCookie();
     const response = await request.post("/api/payments/quick", {
+      headers: { cookie: authCookie },
       data: {
         receiptId: "non-existent-id-xxx",
         amount: 100,

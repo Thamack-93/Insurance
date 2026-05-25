@@ -142,7 +142,9 @@ export function useGlobalShortcuts(onShowHelp: () => void) {
     document.addEventListener("keydown", handler);
     return () => {
       document.removeEventListener("keydown", handler);
-      clearLeader();
+      if (leaderTimer !== null) {
+        window.clearTimeout(leaderTimer);
+      }
     };
   }, [router, pathname, onShowHelp]);
 }

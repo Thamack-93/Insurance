@@ -5,6 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { EmptyState } from "@/components/empty-states/empty-state";
 import { formatDate } from "@/lib/dates";
 import { DocumentPreviewDialog } from "@/components/documents/document-preview-dialog";
+import { areDocumentFilesEnabled } from "@/lib/deployment";
 
 export type DocumentListItem = {
   id: string;
@@ -29,7 +30,7 @@ function Thumbnail({ doc }: { doc: DocumentListItem }) {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={`/api/documents/${doc.id}/download?inline=1`}
-          alt=""
+          alt={`Vista previa de ${doc.fileName}`}
           loading="lazy"
           className="size-full object-cover"
         />
@@ -48,11 +49,13 @@ export function DocumentList({
   showAssociation = false,
   emptyTitle = "Sin documentos",
   emptyDescription = "Arrastra archivos al área de carga para empezar.",
+  disabled = !areDocumentFilesEnabled(),
 }: {
   documents: DocumentListItem[];
   showAssociation?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
+  disabled?: boolean;
 }) {
   if (documents.length === 0) {
     return (
@@ -90,18 +93,22 @@ export function DocumentList({
             )}
             <TableCell>{formatDate(doc.uploadedAt)}</TableCell>
             <TableCell className="text-right">
-              <div className="inline-flex items-center justify-end gap-2">
-                <DocumentPreviewDialog
-                  documentId={doc.id}
-                  fileName={doc.fileName}
-                  mimeType={doc.mimeType}
-                />
-                <Button asChild variant="ghost" size="sm" className="size-8 p-0" aria-label={`Descargar ${doc.fileName}`}>
-                  <Link href={`/api/documents/${doc.id}/download`} target="_blank">
-                    <Download className="size-4" />
-                  </Link>
-                </Button>
-              </div>
+              {disabled ? (
+                <span className="text-xs text-muted-foreground">Vista y descarga deshabilitadas</span>
+              ) : (
+                <div className="inline-flex items-center justify-end gap-2">
+                  <DocumentPreviewDialog
+                    documentId={doc.id}
+                    fileName={doc.fileName}
+                    mimeType={doc.mimeType}
+                  />
+                  <Button asChild variant="ghost" size="sm" className="size-8 p-0" aria-label={`Descargar ${doc.fileName}`}>
+                    <Link href={`/api/documents/${doc.id}/download`} target="_blank">
+                      <Download className="size-4" />
+                    </Link>
+                  </Button>
+                </div>
+              )}
             </TableCell>
           </TableRow>
         ))}

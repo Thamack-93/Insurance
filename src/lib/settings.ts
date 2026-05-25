@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { logError } from "@/lib/logger";
 import { setRuntimeSettings, THEME_COOKIE } from "@/lib/settings-runtime";
-import { AuthError, requireAdmin } from "@/lib/auth";
+import { AuthError, requireAdmin, requireUser } from "@/lib/auth";
 
 export type Settings = {
   firmName: string;
@@ -76,6 +76,32 @@ export async function getSettings(): Promise<Settings> {
     logError("settings.getSettings", error);
     setRuntimeSettings(defaultSettings);
     return defaultSettings;
+  }
+}
+
+/** Per-user theme preference (any role). Does not change firm-wide settings. */
+export async function updateUserTheme(theme: string): Promise<MutationResult> {
+  try {
+    const user = await requireUser();
+    const cookieStore = await cookies();
+    cookieStore.set(THEME_COOKIE, theme, {
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365,
+      sameSite: "lax",
+    });
+
+    const db = getDb();
+    await db.systemSetting.upsert({
+      where: { key: `theme:${user.id}` },
+      update: { value: theme },
+      create: { key: `theme:${user.id}`, value: theme },
+    });
+
+    return successResult("", "", "Tema guardado.");
+  } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
+    logError("settings.updateUserTheme", error);
+    return errorResult("No se pudo guardar el tema.");
   }
 }
 

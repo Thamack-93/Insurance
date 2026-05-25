@@ -4,14 +4,22 @@ import {
   cleanupReceipt,
   cleanupRecentRenewalTasks,
   getTestDb,
+  getAdminSessionCookie,
 } from "../helpers/db";
 
 test.describe("Commissions API", () => {
   test.describe("GET /api/commissions/stats", () => {
-    test("returns commission statistics", async ({ request }) => {
+    test("returns 401 without session", async ({ request }) => {
       const response = await request.get("/api/commissions/stats");
-      
-      // API may not exist yet - verify expected behavior
+      expect(response.status()).toBe(401);
+    });
+
+    test("returns commission statistics with session", async ({ request }) => {
+      const authCookie = await getAdminSessionCookie();
+      const response = await request.get("/api/commissions/stats", {
+        headers: { cookie: authCookie },
+      });
+
       if (response.status() === 404) {
         test.skip(true, "API endpoint not implemented");
         return;
@@ -19,7 +27,7 @@ test.describe("Commissions API", () => {
 
       expect(response.status()).toBe(200);
       const body = await response.json();
-      
+
       expect(body).toHaveProperty("totalExpected");
       expect(body).toHaveProperty("totalActual");
       expect(body).toHaveProperty("statusBreakdown");
@@ -39,14 +47,12 @@ test.describe("Commissions API", () => {
       receiptId = seeded.id;
       policyId = seeded.policyId;
 
-      // Create commission by marking receipt as paid and calculating
       const db = getTestDb();
       await db.receipt.update({
         where: { id: receiptId },
         data: { status: "PAID" },
       });
 
-      // Get receipt details for commission
       const receipt = await db.receipt.findUnique({
         where: { id: receiptId },
       });
@@ -55,14 +61,13 @@ test.describe("Commissions API", () => {
         throw new Error("Receipt not found");
       }
 
-      // Create commission directly
       await db.commission.create({
         data: {
           policyId,
           clientId: receipt.clientId,
           insurerId: receipt.insurerId,
           receiptId: receipt.id,
-          expectedAmount: Number(receipt.amount) * 0.1, // 10% commission
+          expectedAmount: Number(receipt.amount) * 0.1,
           percentage: 10,
           expectedDate: new Date(),
           status: "EXPECTED",
@@ -86,12 +91,20 @@ test.describe("Commissions API", () => {
       }
     });
 
-    test("updates commission status to PAID", async ({ request }) => {
+    test("returns 401 without session", async ({ request }) => {
       const response = await request.post(`/api/commissions/${commissionId}/status`, {
         data: { status: "PAID", actualAmount: 95 },
       });
+      expect(response.status()).toBe(401);
+    });
 
-      // API may not exist yet
+    test("updates commission status to PAID with session", async ({ request }) => {
+      const authCookie = await getAdminSessionCookie();
+      const response = await request.post(`/api/commissions/${commissionId}/status`, {
+        headers: { cookie: authCookie },
+        data: { status: "PAID", actualAmount: 95 },
+      });
+
       if (response.status() === 404) {
         test.skip(true, "API endpoint not implemented");
         return;

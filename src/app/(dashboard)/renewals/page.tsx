@@ -14,6 +14,7 @@ import {
   getUpcomingRenewals,
   createRenewalTasks,
   sendRenewalReminders,
+  type RenewalReminder,
 } from "@/lib/renewals";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
@@ -36,20 +37,19 @@ export default async function RenewalsPage({
     getUpcomingRenewals(60),
   ]);
 
-  const filtered = query
-    ? upcomingRenewals.filter((r: any) =>
-        [r.policyNumber, r.clientName, r.insurerName, r.policyType]
-          .filter(Boolean)
-          .some((field: string) => String(field).toLowerCase().includes(query)),
-      )
-    : upcomingRenewals;
+  const matchesQuery = (r: RenewalReminder) =>
+    [r.policyNumber, r.clientName, r.insurerName, r.policyType]
+      .filter(Boolean)
+      .some((field) => String(field).toLowerCase().includes(query));
+
+  const filtered = query ? upcomingRenewals.filter(matchesQuery) : upcomingRenewals;
 
   const totalFiltered = filtered.length;
   const start = (page - 1) * DEFAULT_PAGE_SIZE;
   const pagedRenewals = filtered.slice(start, start + DEFAULT_PAGE_SIZE);
 
-  const urgentRenewals = upcomingRenewals.filter((r: any) => r.priority === "URGENT");
-  const highPriorityRenewals = upcomingRenewals.filter((r: any) => r.priority === "HIGH");
+  const urgentRenewals = upcomingRenewals.filter((r) => r.priority === "URGENT");
+  const highPriorityRenewals = upcomingRenewals.filter((r) => r.priority === "HIGH");
 
   return (
     <div className="flex flex-col gap-6">
@@ -122,7 +122,7 @@ export default async function RenewalsPage({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {urgentRenewals.slice(0, 10).map((renewal: any) => (
+                  {urgentRenewals.slice(0, 10).map((renewal) => (
                     <TableRow key={renewal.policyId}>
                       <TableCell>
                         <Link href={`/policies/${renewal.policyId}`} className="font-medium text-foreground hover:text-primary">
@@ -218,7 +218,7 @@ export default async function RenewalsPage({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {pagedRenewals.map((renewal: any) => (
+                  {pagedRenewals.map((renewal) => (
                     <TableRow key={renewal.policyId}>
                       <TableCell>
                         <Link href={`/policies/${renewal.policyId}`} className="font-medium text-foreground hover:text-primary">

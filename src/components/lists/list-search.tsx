@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition, memo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,7 @@ export type ListSearchProps = {
   className?: string;
 };
 
-export function ListSearch({
+export const ListSearch = memo(function ListSearch({
   placeholder = "Buscar...",
   paramName = "q",
   className,
@@ -52,8 +52,7 @@ export function ListSearch({
       });
     }, 300);
     return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
+  }, [value, initial, searchParams, paramName, pathname, router]);
 
   return (
     <div className={cn("relative w-full md:max-w-xs", className)}>
@@ -85,4 +84,4 @@ export function ListSearch({
       ) : null}
     </div>
   );
-}
+});

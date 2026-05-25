@@ -27,14 +27,39 @@ PolicyDesk es un CRM/dashboard local-first para operar una cartera de seguros de
 
 Los documentos sensibles no se guardan en `public`.
 
+## Variables de entorno
+
+Copia `.env.example` a `.env.local` y ajusta los valores:
+
+| Variable | Requerida | Descripción |
+|----------|-----------|-------------|
+| `SESSION_SECRET` | Producción | Secreto HMAC para cookies de sesión (mín. 32 caracteres) |
+| `DATABASE_URL` | Producción | URL de Postgres hosted para el despliegue en Vercel |
+| `BACKUP_JOB_SECRET` | Opcional | Token Bearer para `POST /api/jobs/backup` (cron externo) |
+| `ENABLE_DOCUMENT_FILES` | Opcional | `false` para la demo desplegada sin PDFs |
+| `ENABLE_LOCAL_BACKUPS` | Opcional | `false` para ocultar respaldos SQLite locales en la demo |
+| `AUTH_SECRET` | Dev | Alias de `SESSION_SECRET` en desarrollo |
+
+### Respaldo automático (cron)
+
+La ruta `POST /api/jobs/backup` está exenta del middleware de sesión y solo acepta:
+
+```bash
+curl -X POST "http://localhost:5000/api/jobs/backup" \
+  -H "Authorization: Bearer $BACKUP_JOB_SECRET"
+```
+
+Activa **Respaldo automático** en Configuración para que el job respete la frecuencia y retención configuradas.
+
 ## Comandos
 
 ```bash
 npm install
 npm run db:migrate
-npm run db:seed
 npm run dev
 ```
+
+`npm run db:seed` queda solo para pruebas locales aisladas; no forma parte del despliegue hosted de esta versión.
 
 Scripts operativos:
 
@@ -46,15 +71,25 @@ npm run list:renewals
 npm run list:tasks
 npm run export:due-payments
 npm run export:commissions
-npm run reconcile:master-folder
 ```
 
 ## Flujo de desarrollo
 
-1. Revisar `docs/PRODUCT_AND_ARCHITECTURE_PLAN.md`.
-2. Ejecutar backup antes de cambios masivos.
-3. Usar Prisma o scripts dedicados; nunca editar SQLite manualmente.
-4. Validar con seed, lint y build.
+1. Ejecutar backup antes de cambios masivos.
+2. Usar Prisma o scripts dedicados; nunca editar SQLite manualmente.
+3. Validar con seed, lint y build.
+
+## Despliegue demo
+
+La ruta recomendada para una demo pública o compartida es:
+
+1. Crear una base gratuita de Postgres hosted.
+2. Migrar el snapshot real actual de `data/pg.sqlite` a esa base hosted.
+3. Configurar `DATABASE_URL` en el entorno de Vercel.
+4. Desplegar en [Vercel Hobby](https://vercel.com/pricing).
+5. Mantener `ENABLE_DOCUMENT_FILES=false` y `ENABLE_LOCAL_BACKUPS=false` para la primera versión.
+
+La demo queda enfocada en datos estructurados y no requiere PDFs ni almacenamiento de archivos en esta fase.
 
 ## Cambios de schema (Prisma)
 
@@ -72,10 +107,4 @@ npm run db:check-drift
 
 ## Documentacion
 
-- `docs/PRODUCT_AND_ARCHITECTURE_PLAN.md`
-- `docs/ROADMAP.md`
-- `docs/ARCHITECTURE.md`
-- `docs/DATA_MODEL.md`
-- `docs/UI_SYSTEM.md`
-- `docs/CODEX_OPERATIONS.md`
-- `docs/AI_ROADMAP.md`
+- `docs/DEPLOYMENT_VERCEL.md`

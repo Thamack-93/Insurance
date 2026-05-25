@@ -37,6 +37,12 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     <SearchProvider>
       <RuntimeSettingsHydrator settings={settings} />
       <div className="min-h-screen">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground"
+        >
+          Saltar al contenido principal
+        </a>
         <div className="flex min-h-screen">
           <AppSidebar />
           <div className="min-w-0 flex-1">
@@ -45,7 +51,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
               unreadAlertCount={unreadAlertCount}
               alerts={bellAlerts}
             />
-            <main className="mx-auto w-full max-w-[1560px] px-3 py-6 sm:px-5 sm:py-8 lg:px-8">{children}</main>
+            <main id="main-content" className="mx-auto w-full max-w-[1560px] px-3 py-6 sm:px-5 sm:py-8 lg:px-8">{children}</main>
           </div>
         </div>
         <CommandPaletteWrapper />

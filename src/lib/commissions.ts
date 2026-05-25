@@ -1,5 +1,6 @@
 "use server";
 
+import type { Prisma } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { today } from "@/lib/dates";
@@ -128,15 +129,13 @@ export async function updateCommissionStatus(
       return errorResult("La comisión no existe o fue eliminada.");
     }
 
-    const updateData: any = {
+    const updateData: Prisma.CommissionUpdateInput = {
       status,
       updatedAt: new Date(),
+      ...(actualAmount && status === "PAID"
+        ? { actualAmount, paidDate: new Date() }
+        : {}),
     };
-
-    if (actualAmount && status === "PAID") {
-      updateData.actualAmount = actualAmount;
-      updateData.paidDate = new Date();
-    }
 
     const updatedCommission = await db.commission.update({
       where: { id: commissionId },

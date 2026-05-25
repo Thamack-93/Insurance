@@ -47,15 +47,15 @@ export function AppTopbar({
     <header className="sticky top-0 z-30 border-b border-border/70 bg-background/80 backdrop-blur-xl">
       <div className="flex h-16 items-center gap-3 px-3 sm:px-5 lg:gap-4 lg:px-8">
         <AppMobileSidebar />
-        <div className="hidden items-center gap-2 text-sm text-muted-foreground md:flex shrink-0">
+        <nav aria-label="Breadcrumb" className="hidden shrink-0 items-center gap-2 text-sm text-muted-foreground md:flex">
           <span>PG</span>
           {segments.map((segment) => (
             <span key={segment} className="flex items-center gap-2">
-              <span>/</span>
+              <span aria-hidden>/</span>
               <span className="font-medium text-foreground">{labels[segment] ?? segment}</span>
             </span>
           ))}
-        </div>
+        </nav>
 
         <div className="mx-auto flex w-full max-w-2xl items-center gap-2 rounded-full border bg-background/90 px-3 py-1.5 shadow-sm">
           <SearchInput />

@@ -1,14 +1,19 @@
 import "dotenv/config";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { addDays, subDays } from "date-fns";
 import { PrismaClient } from "../src/generated/prisma/client";
 import type { PaymentFrequency, Policy, Priority, Receipt, TaskStatus } from "../src/generated/prisma/client";
 import { databasePath } from "../src/lib/files";
 import { hashPassword, SYSTEM_USER_ID } from "../src/lib/auth";
 
-const adapter = new PrismaBetterSqlite3({
-  url: `file:${databasePath}`,
-});
+const databaseUrl = process.env.DATABASE_URL?.trim();
+const adapter =
+  databaseUrl && /^postgres(ql)?:\/\//i.test(databaseUrl)
+    ? new PrismaPg({ connectionString: databaseUrl })
+    : new PrismaBetterSqlite3({
+        url: `file:${databasePath}`,
+      });
 const prisma = new PrismaClient({ adapter });
 const baseDate = new Date("2026-05-01T00:00:00.000Z");
 

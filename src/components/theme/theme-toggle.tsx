@@ -4,7 +4,7 @@ import { useTransition } from "react";
 import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
-import { updateSettings } from "@/lib/settings";
+import { updateUserTheme } from "@/lib/settings";
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
@@ -15,7 +15,7 @@ export function ThemeToggle() {
     setTheme(next);
     startTransition(async () => {
       try {
-        await updateSettings({ theme: next });
+        await updateUserTheme(next);
       } catch {
         // Persisting is best-effort from the toggle; the visible theme already updated.
       }

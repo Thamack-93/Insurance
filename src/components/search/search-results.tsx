@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { memo } from "react";
 import {
   Search,
   Users,
@@ -50,7 +51,7 @@ const groupOrder: SearchResultType[] = [
   "document",
 ];
 
-export function SearchResults() {
+export const SearchResults = memo(function SearchResults() {
   const { searchResults, isSearching, searchQuery, clearSearch } = useSearch();
   const router = useRouter();
 
@@ -137,4 +138,4 @@ export function SearchResults() {
       )}
     </div>
   );
-}
+});

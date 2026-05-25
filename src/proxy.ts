@@ -1,12 +1,23 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session";
 
-const PUBLIC_PREFIXES = ["/login", "/api/auth", "/_next", "/favicon", "/public", "/api/commissions", "/api/payments"];
+const PUBLIC_PREFIXES = [
+  "/login",
+  "/api/auth",
+  "/_next",
+  "/favicon",
+  "/public",
+  "/api/jobs/backup",
+];
 
-export async function middleware(request: NextRequest) {
+function isPublicPath(pathname: string): boolean {
+  return PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
+  if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
 

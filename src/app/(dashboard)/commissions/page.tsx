@@ -61,8 +61,11 @@ export default async function CommissionsPage({
   ]);
 
   const ratio = stats.totalExpected ? Math.round((stats.totalActual / stats.totalExpected) * 100) : 0;
-  const safeOpenCommissions = openCommissions.filter((commission: any) => commission.policy && commission.client && commission.insurer);
-  const safePaidCommissions = paidCommissions.filter((commission: any) => commission.policy && commission.client && commission.insurer);
+  type CommissionRow = (typeof openCommissions)[number];
+  const hasRelations = (commission: CommissionRow) =>
+    commission.policy && commission.client && commission.insurer;
+  const safeOpenCommissions = openCommissions.filter(hasRelations);
+  const safePaidCommissions = paidCommissions.filter(hasRelations);
 
   return (
     <div className="flex flex-col gap-6">

@@ -9,10 +9,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { documentTypeOptions } from "@/lib/domain-options";
+import { areDocumentFilesEnabled } from "@/lib/deployment";
 import { cn } from "@/lib/utils";
 
 interface UploadFormProps {
-  onSuccess?: (document: any) => void;
+  onSuccess?: (document: UploadDocument) => void;
   onError?: (error: string) => void;
   associations?: {
     clientId?: string;
@@ -23,6 +24,7 @@ interface UploadFormProps {
     quoteId?: string;
   };
   className?: string;
+  disabled?: boolean;
 }
 
 const ALLOWED_TYPES = [
@@ -35,11 +37,27 @@ const ALLOWED_TYPES = [
 ];
 const MAX_BYTES = 10 * 1024 * 1024;
 
+type UploadDocument = {
+  id: string;
+  fileName: string;
+  documentType: string;
+  uploadedAt: string | Date;
+  mimeType: string;
+};
+
+type UploadResponseResult = {
+  ok?: boolean;
+  document?: UploadDocument;
+  fileName?: string;
+  error?: string;
+};
+
 export function UploadForm({
   onSuccess,
   onError,
   associations = {},
   className,
+  disabled = !areDocumentFilesEnabled(),
 }: UploadFormProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -58,6 +76,27 @@ export function UploadForm({
     notes: "",
     ...associations,
   });
+
+  if (disabled) {
+    return (
+      <Card className={cn("w-full max-w-2xl", className)}>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Upload className="size-5" />
+            Subir documentos
+          </CardTitle>
+          <CardDescription>
+            La carga de archivos está desactivada en la demo publicada. Esta pantalla queda solo como metadata.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="rounded-xl border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
+            En esta versión no se subirán PDFs ni archivos al servidor.
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files ?? []);
@@ -104,7 +143,11 @@ export function UploadForm({
         body: formDataToSend,
       });
 
-      const result = await response.json();
+      const result = (await response.json()) as {
+        results?: UploadResponseResult[];
+        document?: UploadDocument;
+        error?: string;
+      };
 
       if (!response.ok) {
         throw new Error(result.error || "No se pudo subir.");
@@ -112,11 +155,11 @@ export function UploadForm({
 
       // Multi or single response shapes both supported.
       const docs = result.results
-        ? result.results.filter((r: any) => r.ok).map((r: any) => r.document)
+        ? result.results.filter((r) => r.ok && r.document).map((r) => r.document as UploadDocument)
         : result.document
           ? [result.document]
           : [];
-      docs.forEach((d: any) => onSuccess?.(d));
+      docs.forEach((d) => onSuccess?.(d));
 
       setFiles([]);
       setFormData({ documentType: "", notes: "", ...associations });

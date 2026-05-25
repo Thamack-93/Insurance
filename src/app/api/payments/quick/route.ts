@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createPayment } from "@/app/(dashboard)/payments/actions";
+import { AuthError, requireUser } from "@/lib/auth";
 import { logError } from "@/lib/logger";
 
 export async function POST(request: NextRequest) {
+  try {
+    await requireUser();
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
+  }
+
   try {
     const body = await request.json();
 

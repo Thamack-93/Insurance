@@ -1,67 +1,65 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { AuthError, requireUser } from "@/lib/auth";
+import { updateCommissionStatus } from "@/lib/commissions";
+import { logError } from "@/lib/logger";
 import type { CommissionStatus } from "@/generated/prisma/client";
+
+const VALID_STATUSES: CommissionStatus[] = ["EXPECTED", "PENDING", "PAID", "OVERDUE", "CANCELLED"];
 
 export async function POST(
   request: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> },
 ) {
   const params = await context.params;
+
   try {
-    const { status } = await request.json();
-    
+    await requireUser();
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
+  }
+
+  try {
+    const body = await request.json();
+    const { status, actualAmount } = body;
+
     if (!status || typeof status !== "string") {
       return NextResponse.json(
-        { error: "Status is required and must be a string" },
-        { status: 400 }
+        { error: "El estado es obligatorio." },
+        { status: 400 },
       );
     }
 
-    // Validate status is a valid CommissionStatus
-    const validStatuses: CommissionStatus[] = ["EXPECTED", "PENDING", "PAID", "OVERDUE", "CANCELLED"];
-    if (!validStatuses.includes(status as CommissionStatus)) {
+    if (!VALID_STATUSES.includes(status as CommissionStatus)) {
       return NextResponse.json(
-        { error: "Invalid status. Must be one of: " + validStatuses.join(", ") },
-        { status: 400 }
+        { error: `Estado inválido. Debe ser uno de: ${VALID_STATUSES.join(", ")}` },
+        { status: 400 },
       );
     }
 
-    const db = getDb();
-    
-    // Update commission status directly
-    const commission = await db.commission.update({
-      where: { id: params.id },
-      data: { 
-        status: status as CommissionStatus,
-        updatedAt: new Date(),
-        ...(status === "PAID" ? { paidDate: new Date() } : {}),
-      },
-      include: {
-        client: true,
-        insurer: true,
-        policy: true,
-        receipt: true,
-      },
-    });
+    const result = await updateCommissionStatus(
+      params.id,
+      status as CommissionStatus,
+      typeof actualAmount === "number" ? actualAmount : undefined,
+    );
+
+    if (!result.ok) {
+      const statusCode = result.error?.includes("no existe") ? 404 : 400;
+      return NextResponse.json({ error: result.error }, { status: statusCode });
+    }
 
     return NextResponse.json({
       success: true,
-      commission,
+      commissionId: result.id,
+      redirectTo: result.redirectTo,
     });
   } catch (error) {
-    console.error("Error updating commission status:", error);
-    
-    // Check if it's a "record not found" error
-    if (error instanceof Error && error.message.includes("No record was found for an update")) {
-      return NextResponse.json(
-        { error: "Commission not found" },
-        { status: 404 }
-      );
-    }
-    
+    logError("api.commissions.status", error, { commissionId: params.id });
     return NextResponse.json(
-      { error: "Failed to update commission status", details: error instanceof Error ? error.message : String(error) },
-      { status: 500 }
+      { error: "No se pudo actualizar el estado de la comisión." },
+      { status: 500 },
     );
   }
 }

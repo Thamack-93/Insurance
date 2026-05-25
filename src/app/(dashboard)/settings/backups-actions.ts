@@ -14,6 +14,7 @@ import { resetDb } from "@/lib/db";
 import { AuthError, requireAdmin } from "@/lib/auth";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { logError } from "@/lib/logger";
+import { areLocalBackupsEnabled } from "@/lib/deployment";
 
 export type BackupListItem = {
   filename: string;
@@ -31,6 +32,9 @@ function toItem(entry: BackupEntry): BackupListItem {
 
 export async function listBackupsAction(): Promise<BackupListItem[]> {
   await requireAdmin();
+  if (!areLocalBackupsEnabled()) {
+    return [];
+  }
   const entries = await listBackups();
   return entries.map(toItem);
 }
@@ -38,6 +42,9 @@ export async function listBackupsAction(): Promise<BackupListItem[]> {
 export async function createBackup(): Promise<MutationResult> {
   try {
     await requireAdmin();
+    if (!areLocalBackupsEnabled()) {
+      return errorResult("Los respaldos locales están deshabilitados en esta demo desplegada.");
+    }
     const target = await backupDatabase();
     if (!target) {
       return errorResult("No se encontró la base de datos para respaldar.");
@@ -58,6 +65,9 @@ export async function createBackup(): Promise<MutationResult> {
 export async function restoreBackup(filename: string): Promise<MutationResult> {
   try {
     await requireAdmin();
+    if (!areLocalBackupsEnabled()) {
+      return errorResult("Las restauraciones locales están deshabilitadas en esta demo desplegada.");
+    }
     const safePath = assertSafeBackupPath(filename);
     await fs.access(safePath);
 

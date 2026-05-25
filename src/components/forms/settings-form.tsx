@@ -240,9 +240,10 @@ export function SettingsForm({ initialSettings, updateSettings }: SettingsFormPr
             <div className="space-y-0.5">
               <Label>Respaldo automático</Label>
               <p className="text-sm text-muted-foreground">
-                Activa la copia periódica del archivo SQLite local. Requiere un cron externo apuntando a
-                <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">POST /api/jobs/backup</code>
-                con el secreto <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">BACKUP_JOB_SECRET</code>.
+                Activa la copia periódica del archivo SQLite local. Configura un cron externo con
+                <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">Authorization: Bearer $BACKUP_JOB_SECRET</code>
+                {" "}en <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">POST /api/jobs/backup</code>
+                (ruta pública en middleware; no requiere cookie de sesión).
               </p>
             </div>
             <Checkbox

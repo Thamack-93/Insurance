@@ -4,6 +4,7 @@ import path from "node:path";
 import { backupDatabase } from "@/lib/backup";
 import { backupsDir } from "@/lib/files";
 import { getSettings } from "@/lib/settings";
+import { areLocalBackupsEnabled } from "@/lib/deployment";
 import { logError } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
@@ -60,6 +61,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
+  if (!areLocalBackupsEnabled()) {
+    return NextResponse.json(
+      { ok: false, skipped: "backups_disabled_in_deployment" },
+      { status: 501 },
+    );
+  }
+
   const settings = await getSettings();
   if (!settings.autoBackup) {
     return NextResponse.json({
@@ -97,4 +105,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Backup failed" }, { status: 500 });
   }
 }
-

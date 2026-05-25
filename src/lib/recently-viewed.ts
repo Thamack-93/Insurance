@@ -30,5 +30,9 @@ export function recordRecentItem(item: Omit<RecentItem, "visitedAt">): void {
     ].slice(0, MAX_ITEMS);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
     window.dispatchEvent(new CustomEvent(RECENTLY_VIEWED_EVENT));
-  } catch {}
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.warn("[recently-viewed] failed to persist item", error);
+    }
+  }
 }

@@ -13,6 +13,7 @@ import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { UploadForm } from "@/components/documents/upload-form";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
+import { areDocumentFilesEnabled } from "@/lib/deployment";
 
 function associationLabel(document: {
   policy?: { policyNumber: string } | null;
@@ -37,6 +38,7 @@ export default async function DocumentsPage({
   searchParams?: Promise<{ q?: string; page?: string }>;
 }) {
   const db = getDb();
+  const documentsEnabled = areDocumentFilesEnabled();
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = Math.max(1, Number(params.page) || 1);
@@ -180,15 +182,17 @@ export default async function DocumentsPage({
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-2">
                           <span>{document.fileName}</span>
-                          <Button asChild variant="ghost" size="sm" className="h-6 w-6 p-0">
-                            <Link
-                              href={`/api/documents/${document.id}/download`}
-                              target="_blank"
-                              aria-label={`Descargar ${document.fileName}`}
-                            >
-                              <Download className="size-3" />
-                            </Link>
-                          </Button>
+                          {documentsEnabled ? (
+                            <Button asChild variant="ghost" size="sm" className="h-6 w-6 p-0">
+                              <Link
+                                href={`/api/documents/${document.id}/download`}
+                                target="_blank"
+                                aria-label={`Descargar ${document.fileName}`}
+                              >
+                                <Download className="size-3" />
+                              </Link>
+                            </Button>
+                          ) : null}
                         </div>
                       </TableCell>
                       <TableCell>{document.documentType}</TableCell>
@@ -269,7 +273,13 @@ export default async function DocumentsPage({
         </SectionCard>
 
         <SectionCard title="Subir documento" description="Agrega nuevos archivos al sistema.">
-          <UploadForm />
+          {documentsEnabled ? (
+            <UploadForm />
+          ) : (
+            <div className="rounded-2xl border border-dashed bg-muted/30 p-6 text-sm text-muted-foreground">
+              La carga de archivos está deshabilitada en la demo publicada. Esta sección queda como metadata del expediente.
+            </div>
+          )}
         </SectionCard>
       </div>
     </div>

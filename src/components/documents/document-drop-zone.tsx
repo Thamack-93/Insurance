@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { documentTypeOptions } from "@/lib/domain-options";
+import { areDocumentFilesEnabled } from "@/lib/deployment";
 import { cn } from "@/lib/utils";
 
 type Associations = {
@@ -40,6 +41,7 @@ type Props = {
   title?: string;
   description?: string;
   onUploaded?: () => void;
+  disabled?: boolean;
 };
 
 const ALLOWED_EXT = [".pdf", ".jpg", ".jpeg", ".png", ".webp", ".doc", ".docx"];
@@ -49,6 +51,12 @@ type BatchResult = {
   ok: boolean;
   rolledBack?: boolean;
   results: Array<{ ok: boolean; fileName: string; error?: string }>;
+  error?: string;
+};
+
+type UploadResponse = {
+  results?: Array<{ ok?: boolean; fileName?: string; error?: string }>;
+  rolledBack?: boolean;
   error?: string;
 };
 
@@ -74,10 +82,10 @@ function uploadBatch(
     };
     xhr.onload = () => {
       try {
-        const json = JSON.parse(xhr.responseText || "{}");
-        const results: BatchResult["results"] = (json.results ?? []).map((r: any) => ({
+        const json = JSON.parse(xhr.responseText || "{}") as UploadResponse;
+        const results: BatchResult["results"] = (json.results ?? []).map((r) => ({
           ok: !!r.ok,
-          fileName: r.fileName,
+          fileName: r.fileName ?? "archivo",
           error: r.error,
         }));
         if (xhr.status >= 200 && xhr.status < 300) {
@@ -105,6 +113,7 @@ export function DocumentDropZone({
   title = "Subir documentos",
   description = "Arrastra y suelta uno o varios archivos, o haz clic para elegirlos.",
   onUploaded,
+  disabled = !areDocumentFilesEnabled(),
 }: Props) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -204,6 +213,18 @@ export function DocumentDropZone({
   };
 
   const clearDone = () => setItems((prev) => prev.filter((it) => it.status !== "ok"));
+
+  if (disabled) {
+    return (
+      <div className={cn("rounded-2xl border border-dashed border-border bg-muted/30 p-6 text-center", className)}>
+        <Upload className="mx-auto size-6 text-muted-foreground" />
+        <p className="mt-3 text-sm font-medium text-foreground">{title}</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          La carga de archivos está deshabilitada en la demo publicada. Solo se mostrará metadata.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className={cn("space-y-4", className)}>

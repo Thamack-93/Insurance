@@ -168,6 +168,16 @@ export async function updateClient(id: string, values: ClientFormValues): Promis
     return errorResult(error instanceof Error ? error.message : "No se pudo actualizar el cliente.");
   }
 }
+export async function bulkArchiveClients(ids: string[]): Promise<MutationResult> {
+  const { bulkUpdateStatus } = await import("@/lib/bulk-actions");
+  try {
+    await requireAdmin();
+    return bulkUpdateStatus(ids, "client", "INACTIVE", "/clients");
+  } catch (error) {
+    return errorResult(error instanceof Error ? error.message : "No se pudo archivar los clientes.");
+  }
+}
+
 export async function deleteClient(id: string): Promise<MutationResult> {
   try {
     await requireAdmin();

@@ -15,6 +15,7 @@ import {
   YAxis,
 } from "recharts";
 import { policyTypeLabel } from "@/lib/status";
+import { ChartSrSummary } from "@/components/charts/chart-sr-summary";
 
 type ChartPoint = { name: string; value: number };
 
@@ -31,6 +32,8 @@ const GRID_STROKE = "var(--border)";
 
 export function DuePaymentsChart({ data }: { data: ChartPoint[] }) {
   return (
+    <div role="img" aria-label="Gráfica de vencimientos por semana">
+      <ChartSrSummary title="Vencimientos por semana" data={data} />
     <ResponsiveContainer width="100%" height={CHART_HEIGHT} debounce={1}>
       <AreaChart data={data}>
         <defs>
@@ -46,11 +49,14 @@ export function DuePaymentsChart({ data }: { data: ChartPoint[] }) {
         <Area type="monotone" dataKey="value" stroke="var(--chart-1)" fill="url(#dueGradient)" strokeWidth={2} />
       </AreaChart>
     </ResponsiveContainer>
+    </div>
   );
 }
 
 export function RenewalsChart({ data }: { data: ChartPoint[] }) {
   return (
+    <div role="img" aria-label="Gráfica de renovaciones por semana">
+      <ChartSrSummary title="Renovaciones por semana" data={data} />
     <ResponsiveContainer width="100%" height={CHART_HEIGHT} debounce={1}>
       <BarChart data={data}>
         <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
@@ -60,12 +66,15 @@ export function RenewalsChart({ data }: { data: ChartPoint[] }) {
         <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="var(--chart-2)" />
       </BarChart>
     </ResponsiveContainer>
+    </div>
   );
 }
 
 export function DistributionChart({ data }: { data: ChartPoint[] }) {
   const normalized = data.map((item) => ({ ...item, name: policyTypeLabel(item.name) }));
   return (
+    <div role="img" aria-label="Distribución de pólizas por tipo">
+      <ChartSrSummary title="Distribución por tipo de póliza" data={normalized} />
     <ResponsiveContainer width="100%" height={CHART_HEIGHT} debounce={1}>
       <PieChart>
         <Pie data={normalized} dataKey="value" nameKey="name" innerRadius={54} outerRadius={86} paddingAngle={3}>
@@ -76,11 +85,14 @@ export function DistributionChart({ data }: { data: ChartPoint[] }) {
         <Tooltip />
       </PieChart>
     </ResponsiveContainer>
+    </div>
   );
 }
 
 export function CommissionChart({ data }: { data: ChartPoint[] }) {
   return (
+    <div role="img" aria-label="Gráfica de comisiones por estado">
+      <ChartSrSummary title="Comisiones por estado" data={data} />
     <ResponsiveContainer width="100%" height={CHART_HEIGHT} debounce={1}>
       <BarChart data={data}>
         <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
@@ -90,5 +102,6 @@ export function CommissionChart({ data }: { data: ChartPoint[] }) {
         <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="var(--chart-3)" />
       </BarChart>
     </ResponsiveContainer>
+    </div>
   );
 }

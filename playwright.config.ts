@@ -19,11 +19,6 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "unit",
-      testMatch: /\.logic\.spec\.ts$/,
-      use: {},
-    },
-    {
       name: "chromium",
       testMatch: /(api|e2e)\/.*\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"] },

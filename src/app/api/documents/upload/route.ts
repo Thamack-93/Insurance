@@ -4,6 +4,7 @@ import path from "node:path";
 import { getDb } from "@/lib/db";
 import { AuthError, requireUser } from "@/lib/auth";
 import { assertSafeDocumentPath, documentsDir } from "@/lib/files";
+import { areDocumentFilesEnabled } from "@/lib/deployment";
 import { logError } from "@/lib/logger";
 import { z } from "zod";
 
@@ -102,6 +103,13 @@ async function processFile(
 
 export async function POST(request: NextRequest) {
   try {
+    if (!areDocumentFilesEnabled()) {
+      return NextResponse.json(
+        { error: "La carga de documentos está deshabilitada en este demo." },
+        { status: 501 },
+      );
+    }
+
     const formData = await request.formData();
 
     const metadata = {

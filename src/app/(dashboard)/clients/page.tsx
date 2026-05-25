@@ -6,10 +6,9 @@ import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ClientsListTable } from "@/components/clients/clients-list-table";
 import { EmptyState } from "@/components/empty-states/empty-state";
 import { ListSearch } from "@/components/lists/list-search";
-import { Pagination } from "@/components/lists/pagination";
 import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
@@ -176,59 +175,22 @@ export default async function ClientsPage({
               />
             </div>
           ) : (
-            <>
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/40">
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead className="text-right">Pólizas</TableHead>
-                    <TableHead className="text-right">Recibos</TableHead>
-                    <TableHead className="text-right">Tareas</TableHead>
-                    <TableHead>Alta</TableHead>
-                    <TableHead>Estado</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pagedClients.map((client) => (
-                    <TableRow key={client.id}>
-                      <TableCell>
-                        <Link
-                          href={`/clients/${client.id}`}
-                          className="font-medium text-foreground hover:text-primary"
-                        >
-                          {client.fullName}
-                        </Link>
-                        <p className="text-xs text-muted-foreground">
-                          {client.email ?? "Sin email"} · {client.phone ?? "Sin teléfono"}
-                        </p>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="rounded-full">
-                          {client.type === "COMPANY" ? "Empresa" : "Persona"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">{client._count.policies}</TableCell>
-                      <TableCell className="text-right">{client._count.receipts}</TableCell>
-                      <TableCell className="text-right">{client._count.tasks}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatDate(client.createdAt)}
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={client.status} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              <Pagination
-                page={page}
-                pageSize={PAGE_SIZE}
-                total={filteredCount}
-                basePath="/clients"
-                searchParams={{ q: query }}
-              />
-            </>
+            <ClientsListTable
+              clients={pagedClients.map((client) => ({
+                id: client.id,
+                fullName: client.fullName,
+                email: client.email,
+                phone: client.phone,
+                type: client.type,
+                status: client.status,
+                createdAt: client.createdAt.toISOString(),
+                _count: client._count,
+              }))}
+              page={page}
+              pageSize={PAGE_SIZE}
+              total={filteredCount}
+              query={query}
+            />
           )}
         </SectionCard>
 

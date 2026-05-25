@@ -16,14 +16,16 @@ import {
   listBackupsAction,
   restoreBackup,
 } from "./backups-actions";
+import { areLocalBackupsEnabled } from "@/lib/deployment";
 
 export default async function SettingsPage() {
   const now = today();
   const liveUser = await getCurrentUser();
   const isAdmin = !!liveUser && liveUser.active && liveUser.role === "ADMIN";
+  const backupsEnabled = areLocalBackupsEnabled();
   const [settings, initialBackups, onboarding] = await Promise.all([
     getSettings(),
-    isAdmin ? listBackupsAction() : Promise.resolve([]),
+    isAdmin && backupsEnabled ? listBackupsAction() : Promise.resolve([]),
     getOnboardingStatus(),
   ]);
 
@@ -123,13 +125,28 @@ export default async function SettingsPage() {
 
         <OnboardingPanel initialDismissed={onboarding.dismissed} />
 
-        {isAdmin ? (
+        {isAdmin && backupsEnabled ? (
           <BackupsPanel
             initialBackups={initialBackups}
             createBackup={createBackup}
             restoreBackup={restoreBackup}
             listBackups={listBackupsAction}
           />
+        ) : isAdmin ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Database className="size-4" /> Respaldos
+              </CardTitle>
+              <CardDescription>
+                Los respaldos locales están deshabilitados en la demo publicada. Esta sección
+                seguirá disponible solo en desarrollo local.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              En la versión desplegada se usará Postgres hosted y no archivos SQLite locales.
+            </CardContent>
+          </Card>
         ) : null}
       </div>
     </div>

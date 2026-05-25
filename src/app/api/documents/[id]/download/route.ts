@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getDb } from "@/lib/db";
 import { assertSafeDocumentPath } from "@/lib/files";
+import { areDocumentFilesEnabled } from "@/lib/deployment";
 import { logError } from "@/lib/logger";
 import { AuthError, requireUser } from "@/lib/auth";
 
@@ -11,6 +12,13 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    if (!areDocumentFilesEnabled()) {
+      return NextResponse.json(
+        { error: "La descarga de documentos está deshabilitada en este demo." },
+        { status: 501 },
+      );
+    }
+
     // Reject deactivated/unauthenticated users immediately.
     try {
       await requireUser();

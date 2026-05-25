@@ -1,16 +1,17 @@
 "use server";
 
+import type { Claim, Commission } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { formatDate, today } from "@/lib/dates";
 import { logError } from "@/lib/logger";
 import { subMonths, subYears } from "date-fns";
 
-export interface ReportData {
+export interface ReportData<T = unknown> {
   period: string;
   startDate: Date;
   endDate: Date;
-  data: any;
+  data: T;
 }
 
 export interface FinancialReport {
@@ -23,6 +24,13 @@ export interface FinancialReport {
   renewalRate: number;
   claimsRatio: number;
 }
+
+type PolicyTypeAggregate = {
+  count: number;
+  totalPremium: number;
+  claims: Claim[];
+  commissions: Commission[];
+};
 
 export interface PolicyReport {
   policyType: string;
@@ -161,11 +169,13 @@ export async function generatePolicyTypeReport(
       groups[type].claims.push(...policy.claims);
       groups[type].commissions.push(...policy.commissions);
       return groups;
-    }, {} as Record<string, any>);
+    }, {} as Record<string, PolicyTypeAggregate>);
 
     const report: PolicyReport[] = Object.entries(policyTypeGroups).map(([policyType, group]) => {
-      const claimsAmount = group.claims.reduce((sum: number, claim: any) => 
-        sum + toNumber(claim.amountClaimed || 0), 0);
+      const claimsAmount = group.claims.reduce(
+        (sum, claim) => sum + toNumber(claim.amountClaimed || 0),
+        0,
+      );
       const renewalRate = Math.random() * 30 + 70; // Placeholder calculation
 
       return {
