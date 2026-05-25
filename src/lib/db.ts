@@ -1,7 +1,5 @@
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
-import { databasePath } from "@/lib/files";
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
@@ -10,12 +8,11 @@ const globalForPrisma = globalThis as unknown as {
 export function getDb() {
   if (!globalForPrisma.prisma) {
     const connectionString = process.env.DATABASE_URL?.trim();
-    const adapter =
-      connectionString && /^postgres(ql)?:\/\//i.test(connectionString)
-        ? new PrismaPg({ connectionString })
-        : new PrismaBetterSqlite3({
-            url: `file:${databasePath}`,
-          });
+    if (!connectionString) {
+      throw new Error("DATABASE_URL is required to initialize Prisma.");
+    }
+
+    const adapter = new PrismaPg({ connectionString });
 
     globalForPrisma.prisma = new PrismaClient({ adapter });
   }

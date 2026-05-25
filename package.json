@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbo",
-    "build": "next build",
+    "build": "npm run db:generate && next build",
     "start": "next start",
     "lint": "eslint",
     "db:generate": "node -e \"require('node:fs').rmSync('src/generated/prisma',{recursive:true,force:true})\" && prisma generate && node -e \"require('node:fs').mkdirSync('src/generated/prisma',{recursive:true});require('node:fs').writeFileSync('src/generated/prisma/package.json','{\\\"type\\\":\\\"module\\\"}\\n')\"",
