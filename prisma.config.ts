@@ -1,8 +1,11 @@
+import "dotenv/config";
 import path from "node:path";
 import { defineConfig } from "prisma/config";
 
 const dbPath = path.join(process.cwd(), "data", "pg.sqlite");
+const shadowDbPath = path.join(process.cwd(), ".tmp", "prisma-shadow.sqlite");
 const databaseUrl = process.env.DATABASE_URL?.trim();
+const shadowDatabaseUrl = process.env.SHADOW_DATABASE_URL?.trim();
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
@@ -11,5 +14,6 @@ export default defineConfig({
   },
   datasource: {
     url: databaseUrl && /^postgres(ql)?:\/\//i.test(databaseUrl) ? databaseUrl : `file:${dbPath}`,
+    shadowDatabaseUrl: shadowDatabaseUrl || `file:${shadowDbPath}`,
   },
 });

@@ -10,7 +10,7 @@
     "db:generate": "node -e \"require('node:fs').rmSync('src/generated/prisma',{recursive:true,force:true})\" && prisma generate && node -e \"require('node:fs').mkdirSync('src/generated/prisma',{recursive:true});require('node:fs').writeFileSync('src/generated/prisma/package.json','{\\\"type\\\":\\\"module\\\"}\\n')\"",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
-    "db:check-drift": "prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma --exit-code",
+    "db:check-drift": "prisma migrate diff --from-migrations prisma/migrations --to-config-datasource --exit-code",
     "backup": "tsx scripts/backup-db.ts",
     "clean:cache": "node --import tsx scripts/clean-cache.ts cache",
     "clean:artifacts": "node --import tsx scripts/clean-cache.ts artifacts",
