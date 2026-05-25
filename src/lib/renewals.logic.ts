@@ -34,8 +34,7 @@ export function calculateRenewalPriority(
 
 export function shouldIncludeInRenewals(
   policyStatus: string,
-  renewalDate: Date | null,
-  today: Date = new Date()
+  renewalDate: Date | null
 ): boolean {
   if (policyStatus !== "ACTIVE") return false;
   if (!renewalDate) return false;

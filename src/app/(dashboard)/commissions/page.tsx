@@ -62,10 +62,17 @@ export default async function CommissionsPage({
 
   const ratio = stats.totalExpected ? Math.round((stats.totalActual / stats.totalExpected) * 100) : 0;
   type CommissionRow = (typeof openCommissions)[number];
-  const hasRelations = (commission: CommissionRow) =>
-    commission.policy && commission.client && commission.insurer;
+  type CommissionWithRelations = CommissionRow & {
+    policy: NonNullable<CommissionRow["policy"]>;
+    client: NonNullable<CommissionRow["client"]>;
+    insurer: NonNullable<CommissionRow["insurer"]>;
+    receipt: NonNullable<CommissionRow["receipt"]>;
+  };
+  const hasRelations = (commission: CommissionRow): commission is CommissionWithRelations =>
+    Boolean(commission.policy && commission.client && commission.insurer && commission.receipt);
   const safeOpenCommissions = openCommissions.filter(hasRelations);
   const safePaidCommissions = paidCommissions.filter(hasRelations);
+  const paidCount = stats.statusBreakdown.find(({ status }) => status === "PAID")?.count ?? 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -101,7 +108,7 @@ export default async function CommissionsPage({
           />
           <MetricCard
             title="Abiertas"
-            value={stats.totalCount - (stats.statusBreakdown.find((s: any) => s.status === "PAID")?.count || 0)}
+            value={stats.totalCount - paidCount}
             description="Todavía en espera de liquidación."
             icon={BadgeCheck}
             tone="amber"
@@ -156,7 +163,7 @@ export default async function CommissionsPage({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {safeOpenCommissions.map((commission: any) => (
+                  {safeOpenCommissions.map((commission) => (
                     <TableRow key={commission.id}>
                       <TableCell>
                         <Link href={`/policies/${commission.policyId}`} className="font-medium text-foreground hover:text-primary">
@@ -196,7 +203,7 @@ export default async function CommissionsPage({
             </div>
           ) : (
             <div className="divide-y divide-stone-200/80">
-              {safePaidCommissions.map((commission: any) => (
+              {safePaidCommissions.map((commission) => (
                 <div key={commission.id} className="flex items-start justify-between gap-4 px-4 py-4">
                   <div className="min-w-0">
                     <Link href={`/policies/${commission.policyId}`} className="font-medium text-foreground hover:text-primary">

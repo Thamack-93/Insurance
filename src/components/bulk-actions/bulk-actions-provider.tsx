@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useCallback } from "react";
 
-type BulkActionsContextType<T> = {
+type BulkActionsContextType = {
   selectedItems: Set<string>;
   isAllSelected: boolean;
   hasSelection: boolean;
@@ -12,7 +12,7 @@ type BulkActionsContextType<T> = {
   getSelectedIds: () => string[];
 };
 
-const BulkActionsContext = createContext<BulkActionsContextType<any> | undefined>(undefined);
+const BulkActionsContext = createContext<BulkActionsContextType | undefined>(undefined);
 
 export function BulkActionsProvider({
   children,
@@ -70,5 +70,5 @@ export function useBulkActions() {
   if (context === undefined) {
     throw new Error("useBulkActions must be used within a BulkActionsProvider");
   }
-  return context as BulkActionsContextType<any>;
+  return context;
 }
