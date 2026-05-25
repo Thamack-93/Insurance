@@ -1,6 +1,6 @@
 "use server";
 
-import type { Prisma } from "@/generated/prisma/client";
+import type { CommissionStatus, Prisma } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { today } from "@/lib/dates";
@@ -110,7 +110,7 @@ export async function calculateCommissionsForPolicy(
 
 export async function updateCommissionStatus(
   commissionId: string,
-  status: string,
+  status: CommissionStatus,
   actualAmount?: number,
 ): Promise<MutationResult> {
   const db = getDb();
