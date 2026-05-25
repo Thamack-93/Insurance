@@ -6,11 +6,11 @@ import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableHead, TableHeader, TableRow, TableCell } from "@/components/ui/table";
 import { ClientsListTable } from "@/components/clients/clients-list-table";
 import { EmptyState } from "@/components/empty-states/empty-state";
 import { ListSearch } from "@/components/lists/list-search";
 import { getDb } from "@/lib/db";
-import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 
 const PAGE_SIZE = 25;

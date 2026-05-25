@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 
 import { getDb } from '../src/lib/db';
-import { addDays, addMonths, format } from 'date-fns';
+import { addDays, format } from 'date-fns';
 
 async function main() {
   const db = getDb();

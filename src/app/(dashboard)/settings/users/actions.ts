@@ -26,8 +26,6 @@ export type AdminUserRow = {
   createdAt: string;
 };
 
-const ROLES: UserRole[] = ["ADMIN", "AGENT"];
-
 function isRole(value: unknown): value is UserRole {
   return value === "ADMIN" || value === "AGENT";
 }
@@ -299,4 +297,3 @@ export async function changeMyPassword(input: {
     return errorResult("No se pudo actualizar la contraseña.");
   }
 }
-

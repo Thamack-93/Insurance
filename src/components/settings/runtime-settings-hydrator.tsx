@@ -27,14 +27,7 @@ export function RuntimeSettingsHydrator({ settings }: { settings: Settings }) {
   // the layout and the dashboard layout passes down fresh values).
   useEffect(() => {
     setRuntimeSettings(settings);
-  }, [
-    settings.defaultCurrency,
-    settings.dateFormat,
-    settings.theme,
-    settings.autoBackup,
-    settings.backupFrequency,
-    settings.retentionDays,
-  ]);
+  }, [settings]);
 
   return null;
 }

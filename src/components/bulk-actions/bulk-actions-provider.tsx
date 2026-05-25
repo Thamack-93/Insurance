@@ -14,9 +14,9 @@ type BulkActionsContextType<T> = {
 
 const BulkActionsContext = createContext<BulkActionsContextType<any> | undefined>(undefined);
 
-export function BulkActionsProvider<T extends { id: string }>({ 
-  children 
-}: { 
+export function BulkActionsProvider({
+  children,
+}: {
   children: React.ReactNode;
 }) {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -65,10 +65,10 @@ export function BulkActionsProvider<T extends { id: string }>({
   );
 }
 
-export function useBulkActions<T extends { id: string }>() {
+export function useBulkActions() {
   const context = useContext(BulkActionsContext);
   if (context === undefined) {
     throw new Error("useBulkActions must be used within a BulkActionsProvider");
   }
-  return context as BulkActionsContextType<T>;
+  return context as BulkActionsContextType<any>;
 }
