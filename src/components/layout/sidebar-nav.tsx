@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -153,7 +153,10 @@ export function SidebarNav({
   isAdmin?: boolean;
 }) {
   const pathname = usePathname();
-  const [openMap, setOpenMap] = useState<Record<string, boolean>>(defaultOpenState);
+  const [openMap, setOpenMap] = useState<Record<string, boolean>>(() => {
+    const stored = readStoredState();
+    return stored ? { ...defaultOpenState(), ...stored } : defaultOpenState();
+  });
 
   const visibleSections = useMemo(
     () =>
@@ -166,22 +169,16 @@ export function SidebarNav({
     [isAdmin],
   );
 
-  useEffect(() => {
-    const stored = readStoredState();
-    if (stored) {
-      setOpenMap((prev) => ({ ...prev, ...stored }));
-    }
-  }, []);
-
-  useEffect(() => {
+  const effectiveOpenMap = useMemo(() => {
+    const next = { ...openMap };
     const activeSection = sections.find((section) =>
       section.items.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`)),
     );
-    if (activeSection && !openMap[activeSection.id]) {
-      setOpenMap((prev) => ({ ...prev, [activeSection.id]: true }));
+    if (activeSection) {
+      next[activeSection.id] = true;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
+    return next;
+  }, [openMap, pathname]);
 
   const toggleSection = (id: string) => {
     setOpenMap((prev) => {
@@ -198,7 +195,7 @@ export function SidebarNav({
   return (
     <nav className="flex-1 space-y-3 overflow-y-auto pr-1">
       {visibleSections.map((section) => {
-        const open = openMap[section.id] ?? section.defaultOpen ?? true;
+        const open = effectiveOpenMap[section.id] ?? section.defaultOpen ?? true;
         const sectionActive = section.items.some(
           (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
         );

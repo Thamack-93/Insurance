@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import {
   LayoutDashboard,
@@ -24,7 +24,7 @@ import {
   Clock,
 } from "lucide-react";
 import { CommandPalette, type CommandPaletteGroup } from "./command-palette";
-import { getRecentItems, RECENTLY_VIEWED_EVENT, type RecentItem } from "@/lib/recently-viewed";
+import { getRecentItems, RECENTLY_VIEWED_EVENT } from "@/lib/recently-viewed";
 import type { SearchResult, SearchResultType } from "@/components/search/search-provider";
 import { Highlight } from "@/components/search/highlight";
 
@@ -63,11 +63,24 @@ const groupOrder: SearchResultType[] = [
 
 export function CommandPaletteWrapper() {
   const [open, setOpen] = useState(false);
-  const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const router = useRouter();
+  const recentItems = useSyncExternalStore(
+    useCallback((onStoreChange) => {
+      if (typeof window === "undefined") return () => {};
+      const handler = () => onStoreChange();
+      window.addEventListener("storage", handler);
+      window.addEventListener(RECENTLY_VIEWED_EVENT, handler);
+      return () => {
+        window.removeEventListener("storage", handler);
+        window.removeEventListener(RECENTLY_VIEWED_EVENT, handler);
+      };
+    }, []),
+    () => getRecentItems(),
+    () => [],
+  );
 
   const handleSelect = useCallback((href: string) => {
     router.push(href);
@@ -91,35 +104,26 @@ export function CommandPaletteWrapper() {
   }, []);
 
   useEffect(() => {
-    setRecentItems(getRecentItems());
-    const handler = () => setRecentItems(getRecentItems());
-    window.addEventListener("storage", handler);
-    window.addEventListener(RECENTLY_VIEWED_EVENT, handler);
-    return () => {
-      window.removeEventListener("storage", handler);
-      window.removeEventListener(RECENTLY_VIEWED_EVENT, handler);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (open) {
-      setRecentItems(getRecentItems());
-    } else {
+    if (open) return;
+    queueMicrotask(() => {
       setInputValue("");
       setSearchResults([]);
-    }
+      setIsSearching(false);
+    });
   }, [open]);
 
   // Debounced server search whenever the user types 2+ chars in the palette.
   useEffect(() => {
     const q = inputValue.trim();
     if (q.length < 2) {
-      setSearchResults([]);
-      setIsSearching(false);
+      queueMicrotask(() => {
+        setSearchResults([]);
+        setIsSearching(false);
+      });
       return;
     }
     const ctrl = new AbortController();
-    setIsSearching(true);
+    queueMicrotask(() => setIsSearching(true));
     const timer = setTimeout(() => {
       fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: ctrl.signal })
         .then((r) => (r.ok ? r.json() : []))
