@@ -1,11 +1,48 @@
-import "dotenv/config";
+import fs from "node:fs";
 import path from "node:path";
 import { defineConfig } from "prisma/config";
 
-const dbPath = path.join(process.cwd(), "data", "pg.sqlite");
+const localEnvPath = path.join(process.cwd(), ".env.local");
 const shadowDbPath = path.join(process.cwd(), ".tmp", "prisma-shadow.sqlite");
+
+function loadLocalEnvFile(filePath: string) {
+  if (!fs.existsSync(filePath)) return;
+  const contents = fs.readFileSync(filePath, "utf8");
+  for (const line of contents.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex <= 0) continue;
+    const key = trimmed.slice(0, separatorIndex).trim();
+    if (!key || process.env[key] !== undefined) continue;
+    let value = trimmed.slice(separatorIndex + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
+}
+
+loadLocalEnvFile(localEnvPath);
+
 const databaseUrl = process.env.DATABASE_URL?.trim();
 const shadowDatabaseUrl = process.env.SHADOW_DATABASE_URL?.trim();
+const isPostgresUrl = databaseUrl ? /^postgres(ql)?:\/\//i.test(databaseUrl) : false;
+
+if (!databaseUrl) {
+  throw new Error(
+    "DATABASE_URL is required for Prisma config. Set a Postgres URL in the environment or .env.local.",
+  );
+}
+
+if (!isPostgresUrl) {
+  throw new Error(
+    "DATABASE_URL must point to Postgres for Prisma client generation. SQLite fallback is no longer supported in the Prisma runtime.",
+  );
+}
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
@@ -13,7 +50,7 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: databaseUrl && /^postgres(ql)?:\/\//i.test(databaseUrl) ? databaseUrl : `file:${dbPath}`,
+    url: databaseUrl,
     shadowDatabaseUrl: shadowDatabaseUrl || `file:${shadowDbPath}`,
   },
 });

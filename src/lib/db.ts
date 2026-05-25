@@ -11,6 +11,11 @@ export function getDb() {
     if (!connectionString) {
       throw new Error("DATABASE_URL is required to initialize Prisma.");
     }
+    if (!/^postgres(ql)?:\/\//i.test(connectionString)) {
+      throw new Error(
+        "DATABASE_URL must point to Postgres. SQLite fallback is not supported by the Prisma runtime client.",
+      );
+    }
 
     const adapter = new PrismaPg({ connectionString });
 
