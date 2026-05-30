@@ -7,11 +7,11 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import {
   priorityOptions,
-  taskStatusOptions,
-  taskTypeOptions,
+  workItemStatusOptions,
+  workItemTypeOptions,
   type SelectOption,
 } from "@/lib/domain-options";
-import { taskSchema, type TaskFormValues } from "@/lib/validations";
+import { workItemSchema, type WorkItemFormValues } from "@/lib/validations";
 import type { MutationResult } from "@/lib/mutation-utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -25,20 +25,20 @@ import {
   FormSection,
 } from "@/components/forms/form-primitives";
 
-type TaskFormProps = {
+type WorkItemFormProps = {
   title: string;
   description: string;
   submitLabel: string;
   cancelHref: string;
-  defaultValues: TaskFormValues;
+  defaultValues: WorkItemFormValues;
   clientOptions: SelectOption[];
   policyOptions: SelectOption[];
   insurerOptions: SelectOption[];
   receiptOptions: SelectOption[];
-  submitAction: (values: TaskFormValues) => Promise<MutationResult>;
+  submitAction: (values: WorkItemFormValues) => Promise<MutationResult>;
 };
 
-export function TaskForm({
+export function WorkItemForm({
   title,
   description,
   submitLabel,
@@ -49,7 +49,7 @@ export function TaskForm({
   insurerOptions,
   receiptOptions,
   submitAction,
-}: TaskFormProps) {
+}: WorkItemFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const {
@@ -58,12 +58,12 @@ export function TaskForm({
     handleSubmit,
     setError,
     formState: { errors },
-  } = useForm<TaskFormValues>({
-    resolver: zodResolver(taskSchema) as never,
+  } = useForm<WorkItemFormValues>({
+    resolver: zodResolver(workItemSchema) as never,
     defaultValues,
   });
 
-  async function onSubmit(values: TaskFormValues) {
+  async function onSubmit(values: WorkItemFormValues) {
     startTransition(async () => {
       const result = await submitAction(values);
 
@@ -103,7 +103,7 @@ export function TaskForm({
                     <ControlledSelect
                       value={field.value}
                       onValueChange={field.onChange}
-                      options={taskTypeOptions}
+                      options={workItemTypeOptions}
                       placeholder="Selecciona un tipo"
                     />
                   )}
@@ -118,7 +118,7 @@ export function TaskForm({
                     <ControlledSelect
                       value={field.value}
                       onValueChange={field.onChange}
-                      options={taskStatusOptions}
+                      options={workItemStatusOptions}
                       placeholder="Selecciona un estado"
                     />
                   )}

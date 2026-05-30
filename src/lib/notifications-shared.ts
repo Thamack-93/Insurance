@@ -18,7 +18,10 @@ export function alertLink(entityType: string, entityId: string): string {
     case "Receipt":
       return `/receipts/${entityId}`;
     case "Task":
+    case "WorkItem":
       return `/tasks/${entityId}`;
+    case "Reminder":
+      return "/tasks";
     case "Claim":
       return `/claims/${entityId}`;
     case "Quote":

@@ -7,7 +7,7 @@ Desplegar PolicyDesk como demo funcional en Vercel Hobby usando Postgres hosted 
 ## Stack recomendado
 
 - Hosting: [Vercel Hobby](https://vercel.com/pricing)
-- Base de datos: [Supabase Free](https://supabase.com/pricing)
+- Base de datos: Postgres hosted
 
 ## Qué entra en esta versión
 
@@ -25,8 +25,8 @@ Desplegar PolicyDesk como demo funcional en Vercel Hobby usando Postgres hosted 
 ## Qué queda fuera por ahora
 
 - Subida y descarga de PDFs
-- Almacenamiento local de documentos en runtime
-- Backups/restauraciones SQLite locales en el demo publicado
+- Almacenamiento de documentos en runtime
+- Flujos de respaldo visibles en la demo publicada
 
 ## Variables de entorno
 
@@ -34,19 +34,19 @@ Desplegar PolicyDesk como demo funcional en Vercel Hobby usando Postgres hosted 
 - `DATABASE_URL`
 - `ENABLE_DOCUMENT_FILES=false`
 - `ENABLE_LOCAL_BACKUPS=false`
-- `BACKUP_JOB_SECRET` solo si vas a usar el job local o un cron externo
+- `BACKUP_JOB_SECRET` solo si vas a usar un cron externo
 
 ## Flujo de despliegue
 
 1. Crear la base de datos hosted.
-2. Cargar el snapshot real actual de `data/pg.sqlite` en la base hosted.
+2. Cargar el snapshot real actual en la base hosted.
 3. Configurar las variables de entorno en Vercel.
 4. Desplegar la rama principal.
 5. Verificar dashboard, hoy y CRUD principal.
 
 ## Validaciones mínimas
 
-- La app no debe leer `data/pg.sqlite` en producción.
+- La app no debe leer la base anterior en producción.
 - No debe intentar escribir archivos PDF en runtime.
 - `Document` debe operar solo como metadata en esta fase.
-- Los flujos de backup locales deben quedar ocultos o deshabilitados.
+- Los flujos de respaldo deben quedar ocultos o deshabilitados.

@@ -79,7 +79,7 @@ export default async function SettingsPage() {
         </section>
         ) : null}
 
-        <section className="grid gap-3 sm:grid-cols-2">
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -91,6 +91,22 @@ export default async function SettingsPage() {
               <Button asChild variant="outline" className="rounded-full">
                 <Link href="/settings/account">
                   Ir a mi cuenta
+                  <ArrowRight className="ml-2 size-4" />
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <BellRing className="size-4" /> Notificaciones
+              </CardTitle>
+              <CardDescription>Configura Telegram y tus preferencias de aviso.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild variant="outline" className="rounded-full">
+                <Link href="/settings/notifications">
+                  Abrir notificaciones
                   <ArrowRight className="ml-2 size-4" />
                 </Link>
               </Button>
@@ -139,12 +155,12 @@ export default async function SettingsPage() {
                 <Database className="size-4" /> Respaldos
               </CardTitle>
               <CardDescription>
-                Los respaldos locales están deshabilitados en la demo publicada. Esta sección
-                seguirá disponible solo en desarrollo local.
+                Los respaldos están deshabilitados en esta demo publicada. Esta sección seguirá
+                disponible cuando el entorno los tenga habilitados.
               </CardDescription>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
-              En la versión desplegada se usará Postgres hosted y no archivos SQLite locales.
+              En la versión desplegada la base vive en Postgres hosted.
             </CardContent>
           </Card>
         ) : null}

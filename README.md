@@ -1,6 +1,6 @@
 # PolicyDesk
 
-PolicyDesk es un CRM/dashboard local-first para operar una cartera de seguros desde Mac. El MVP funciona sin cloud, sin IA y con SQLite local.
+PolicyDesk es un CRM operativo para cartera de seguros, construido con Next.js App Router, Prisma y Postgres hosted.
 
 ## Stack
 
@@ -9,7 +9,7 @@ PolicyDesk es un CRM/dashboard local-first para operar una cartera de seguros de
 - Tailwind CSS
 - shadcn/ui
 - Prisma
-- SQLite
+- PostgreSQL
 - TanStack Table
 - React Hook Form
 - Zod
@@ -18,14 +18,14 @@ PolicyDesk es un CRM/dashboard local-first para operar una cartera de seguros de
 - Recharts
 - Framer Motion
 
-## Estructura local
+## Qué resuelve
 
-- Base de datos: `data/pg.sqlite`
-- Backups: `data/backups`
-- Documentos: `data/documents`
-- Exportaciones: `data/exports`
-
-Los documentos sensibles no se guardan en `public`.
+- Clientes y aseguradoras
+- Pólizas, vencimientos y renovaciones
+- Recibos, pagos y comisiones
+- WorkItems para seguimiento operativo
+- Riesgos, auditoría y reportes
+- Documentos como metadatos en esta etapa
 
 ## Variables de entorno
 
@@ -35,21 +35,10 @@ Copia `.env.example` a `.env.local` y ajusta los valores:
 |----------|-----------|-------------|
 | `SESSION_SECRET` | Producción | Secreto HMAC para cookies de sesión (mín. 32 caracteres) |
 | `DATABASE_URL` | Producción | URL de Postgres hosted para el despliegue en Vercel |
-| `BACKUP_JOB_SECRET` | Opcional | Token Bearer para `POST /api/jobs/backup` (cron externo) |
-| `ENABLE_DOCUMENT_FILES` | Opcional | `false` para la demo desplegada sin PDFs |
-| `ENABLE_LOCAL_BACKUPS` | Opcional | `false` para ocultar respaldos SQLite locales en la demo |
+| `BACKUP_JOB_SECRET` | Opcional | Token Bearer para `POST /api/jobs/backup` |
+| `ENABLE_DOCUMENT_FILES` | Opcional | `false` para la demo publicada sin archivos |
+| `ENABLE_LOCAL_BACKUPS` | Opcional | Control de visibilidad de la sección de respaldos |
 | `AUTH_SECRET` | Dev | Alias de `SESSION_SECRET` en desarrollo |
-
-### Respaldo automático (cron)
-
-La ruta `POST /api/jobs/backup` está exenta del middleware de sesión y solo acepta:
-
-```bash
-curl -X POST "http://localhost:5000/api/jobs/backup" \
-  -H "Authorization: Bearer $BACKUP_JOB_SECRET"
-```
-
-Activa **Respaldo automático** en Configuración para que el job respete la frecuencia y retención configuradas.
 
 ## Comandos
 
@@ -59,8 +48,6 @@ npm run db:migrate
 npm run dev
 ```
 
-`npm run db:seed` queda solo para pruebas locales aisladas; no forma parte del despliegue hosted de esta versión.
-
 Scripts operativos:
 
 ```bash
@@ -68,7 +55,7 @@ npm run backup
 npm run validate-data
 npm run list:payments
 npm run list:renewals
-npm run list:tasks
+npm run list:work-items
 npm run export:due-payments
 npm run export:commissions
 ```
@@ -76,18 +63,18 @@ npm run export:commissions
 ## Flujo de desarrollo
 
 1. Ejecutar backup antes de cambios masivos.
-2. Usar Prisma o scripts dedicados; nunca editar SQLite manualmente.
+2. Usar Prisma o scripts dedicados.
 3. Validar con seed, lint y build.
 
 ## Despliegue demo
 
 La ruta recomendada para una demo pública o compartida es:
 
-1. Crear una base gratuita de Postgres hosted.
-2. Migrar el snapshot real actual de `data/pg.sqlite` a esa base hosted.
+1. Crear una base de datos hosted.
+2. Migrar el snapshot real actual a esa base hosted.
 3. Configurar `DATABASE_URL` en el entorno de Vercel.
 4. Desplegar en [Vercel Hobby](https://vercel.com/pricing).
-5. Mantener `ENABLE_DOCUMENT_FILES=false` y `ENABLE_LOCAL_BACKUPS=false` para la primera versión.
+5. Mantener `ENABLE_DOCUMENT_FILES=false` para la primera versión.
 
 La demo queda enfocada en datos estructurados y no requiere PDFs ni almacenamiento de archivos en esta fase.
 
@@ -105,6 +92,6 @@ npm run db:check-drift
 
 `npm run db:check-drift` ejecuta `prisma migrate diff --exit-code` y falla si el schema define algo que ninguna migración crea. El script `scripts/post-merge.sh` lo corre automáticamente tras cada merge: si detecta drift aborta el merge y pide generar la migración faltante.
 
-## Documentacion
+## Documentación
 
 - `docs/DEPLOYMENT_VERCEL.md`

@@ -1,14 +1,17 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { getCurrentUserId } from "@/lib/auth";
 import { notify } from "@/lib/notifications";
 import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
-import { taskSchema, type TaskFormValues } from "@/lib/validations";
+import { mapTaskStatusToWorkItemStatus } from "@/lib/work-items";
+import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
+import { workItemSchema, type WorkItemFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 
-async function normalizeTaskRelations(values: TaskFormValues) {
+async function normalizeWorkItemRelations(values: WorkItemFormValues) {
   const db = getDb();
   const receiptId = optionalRelationId(values.receiptId);
   const policyId = optionalRelationId(values.policyId);
@@ -59,8 +62,8 @@ async function normalizeTaskRelations(values: TaskFormValues) {
   };
 }
 
-async function normalizeTaskInput(values: TaskFormValues, existingFolio?: string) {
-  const relations = await normalizeTaskRelations(values);
+async function normalizeWorkItemInput(values: WorkItemFormValues, existingFolio?: string) {
+  const relations = await normalizeWorkItemRelations(values);
 
   return {
     folio: existingFolio ?? `PD-${new Date().getUTCFullYear()}-${String(Date.now()).slice(-6)}`,
@@ -77,8 +80,8 @@ async function normalizeTaskInput(values: TaskFormValues, existingFolio?: string
   };
 }
 
-export async function createTask(values: TaskFormValues): Promise<MutationResult> {
-  const parsed = taskSchema.safeParse(values);
+export async function createWorkItem(values: WorkItemFormValues): Promise<MutationResult> {
+  const parsed = workItemSchema.safeParse(values);
 
   if (!parsed.success) {
     return errorResult(parsed.error.issues[0]?.message ?? "No se pudo validar el pendiente.");
@@ -87,24 +90,57 @@ export async function createTask(values: TaskFormValues): Promise<MutationResult
   try {
     const db = getDb();
     const userId = await getCurrentUserId();
-    const payload = await normalizeTaskInput(parsed.data);
-    const task = await db.task.create({ data: { ...payload, createdById: userId, updatedById: userId } });
+    const payload = await normalizeWorkItemInput(parsed.data);
+    const workItemId = randomUUID();
+    const workItem = await db.$transaction(async (tx) => {
+      const createdWorkItem = await tx.workItem.create({
+        data: {
+          id: workItemId,
+          sourceType: "Task",
+          sourceId: workItemId,
+          workItemType: "TASK",
+          taskType: payload.taskType,
+          status: mapTaskStatusToWorkItemStatus(payload.status),
+          priority: payload.priority,
+          folio: payload.folio,
+          title: payload.title,
+          description: payload.description,
+          entityType: "WorkItem",
+          entityId: workItemId,
+          clientId: payload.clientId,
+          policyId: payload.policyId,
+          insurerId: payload.insurerId,
+          receiptId: payload.receiptId,
+          startDate: payload.startDate,
+          dueDate: payload.dueDate,
+          closedDate: payload.closedDate,
+          notes: payload.notes,
+          createdById: userId,
+          updatedById: userId,
+        },
+      });
+      const workItemRouteId = createdWorkItem.sourceId ?? createdWorkItem.id;
+      await writeActivityLog({
+        entityType: "WorkItem",
+        entityId: workItemRouteId,
+        action: "TASK_CREATE",
+        newValue: createdWorkItem,
+        db: tx,
+      });
 
-    await writeActivityLog({
-      entityType: "Task",
-      entityId: task.id,
-      action: "TASK_CREATE",
-      newValue: task,
+      return createdWorkItem;
     });
 
-    if (task.priority === "HIGH" || task.priority === "URGENT") {
+    const workItemRouteId = workItem.sourceId ?? workItem.id;
+
+    if (workItem.priority === "HIGH" || workItem.priority === "URGENT") {
       await notify({
         type: "TASK_HIGH_PRIORITY",
-        severity: task.priority === "URGENT" ? "CRITICAL" : "WARNING",
-        title: `Pendiente ${task.priority === "URGENT" ? "urgente" : "alta prioridad"}: ${task.title}`,
-        body: task.description ?? null,
-        entityType: "Task",
-        entityId: task.id,
+        severity: workItem.priority === "URGENT" ? "CRITICAL" : "WARNING",
+        title: `Pendiente ${workItem.priority === "URGENT" ? "urgente" : "alta prioridad"}: ${workItem.title}`,
+        body: workItem.description ?? null,
+        entityType: "WorkItem",
+        entityId: workItemRouteId,
       });
     }
 
@@ -114,20 +150,20 @@ export async function createTask(values: TaskFormValues): Promise<MutationResult
       "/dashboard",
       "/renewals",
       "/due-payments",
-      task.clientId ? `/clients/${task.clientId}` : "/clients",
-      task.policyId ? `/policies/${task.policyId}` : "/policies",
+      workItem.clientId ? `/clients/${workItem.clientId}` : "/clients",
+      workItem.policyId ? `/policies/${workItem.policyId}` : "/policies",
       "/risks",
       "/notifications",
     ]);
 
-    return successResult(task.id, "/tasks", "Pendiente creado.");
+    return successResult(workItemRouteId, "/tasks", "Pendiente creado.");
   } catch (error) {
     return errorResult(error instanceof Error ? error.message : "No se pudo crear el pendiente.");
   }
 }
 
-export async function updateTask(id: string, values: TaskFormValues): Promise<MutationResult> {
-  const parsed = taskSchema.safeParse(values);
+export async function updateWorkItem(id: string, values: WorkItemFormValues): Promise<MutationResult> {
+  const parsed = workItemSchema.safeParse(values);
 
   if (!parsed.success) {
     return errorResult(parsed.error.issues[0]?.message ?? "No se pudo validar el pendiente.");
@@ -135,25 +171,51 @@ export async function updateTask(id: string, values: TaskFormValues): Promise<Mu
 
   try {
     const db = getDb();
-    const previousTask = await db.task.findUnique({ where: { id } });
+    const previousWorkItem = await findWorkItemByRouteId(id);
 
-    if (!previousTask) {
+    if (!previousWorkItem) {
       return errorResult("El pendiente ya no existe.");
     }
 
     const userId = await getCurrentUserId();
-    const payload = await normalizeTaskInput(parsed.data, previousTask.folio);
-    const task = await db.task.update({
-      where: { id },
-      data: { ...payload, updatedById: userId },
-    });
+    const payload = await normalizeWorkItemInput(parsed.data, previousWorkItem.folio ?? undefined);
+    const workItem = await db.$transaction(async (tx) => {
+      const updatedWorkItem = await tx.workItem.update({
+        where: { id: previousWorkItem.id },
+        data: {
+          sourceType: previousWorkItem.sourceType ?? "Task",
+          sourceId: previousWorkItem.sourceId ?? previousWorkItem.id,
+          workItemType: "TASK",
+          taskType: payload.taskType,
+          status: mapTaskStatusToWorkItemStatus(payload.status),
+          priority: payload.priority,
+          title: payload.title,
+          entityType: "WorkItem",
+          entityId: previousWorkItem.id,
+          folio: payload.folio,
+          description: payload.description,
+          clientId: payload.clientId,
+          policyId: payload.policyId,
+          insurerId: payload.insurerId,
+          receiptId: payload.receiptId,
+          startDate: payload.startDate,
+          dueDate: payload.dueDate,
+          closedDate: payload.closedDate,
+          notes: payload.notes,
+          updatedById: userId,
+        },
+      });
+      const workItemRouteId = updatedWorkItem.sourceId ?? updatedWorkItem.id;
+      await writeActivityLog({
+        entityType: "WorkItem",
+        entityId: workItemRouteId,
+        action: "TASK_UPDATE",
+        oldValue: previousWorkItem,
+        newValue: updatedWorkItem,
+        db: tx,
+      });
 
-    await writeActivityLog({
-      entityType: "Task",
-      entityId: task.id,
-      action: "TASK_UPDATE",
-      oldValue: previousTask,
-      newValue: task,
+      return updatedWorkItem;
     });
 
     revalidatePaths([
@@ -162,12 +224,12 @@ export async function updateTask(id: string, values: TaskFormValues): Promise<Mu
       "/dashboard",
       "/renewals",
       "/due-payments",
-      task.clientId ? `/clients/${task.clientId}` : "/clients",
-      task.policyId ? `/policies/${task.policyId}` : "/policies",
+      workItem.clientId ? `/clients/${workItem.clientId}` : "/clients",
+      workItem.policyId ? `/policies/${workItem.policyId}` : "/policies",
       "/risks",
     ]);
 
-    return successResult(task.id, "/tasks", "Pendiente actualizado.");
+    return successResult(workItem.sourceId ?? workItem.id, "/tasks", "Pendiente actualizado.");
   } catch (error) {
     return errorResult(error instanceof Error ? error.message : "No se pudo actualizar el pendiente.");
   }
@@ -197,19 +259,27 @@ function isAllowedPriority(value: string): value is AllowedPriority {
   return (ALLOWED_PRIORITIES as readonly string[]).includes(value);
 }
 
-export async function bulkUpdateTaskStatus(ids: string[], status: string): Promise<MutationResult> {
+export async function bulkUpdateWorkItemStatus(ids: string[], status: string): Promise<MutationResult> {
   if (!ids.length) return errorResult("No hay pendientes seleccionados.");
   if (!isAllowedStatus(status)) {
     return errorResult("Estado no válido.");
   }
   const db = getDb();
   try {
-    await db.task.updateMany({
-      where: { id: { in: ids } },
-      data: {
-        status,
-        closedDate: status === "RESOLVED" ? new Date() : null,
-      },
+    await db.$transaction(async (tx) => {
+      await tx.workItem.updateMany({
+        where: {
+          OR: [
+            { sourceType: "Task", sourceId: { in: ids } },
+            { id: { in: ids } },
+          ],
+          workItemType: "TASK",
+        },
+        data: {
+          status: mapTaskStatusToWorkItemStatus(status),
+          closedDate: status === "RESOLVED" ? new Date() : null,
+        },
+      });
     });
     revalidatePaths(["/tasks", "/today", "/dashboard"]);
     return successResult("bulk", "", `${ids.length} pendiente${ids.length !== 1 ? "s" : ""} actualizado${ids.length !== 1 ? "s" : ""}.`);
@@ -218,16 +288,24 @@ export async function bulkUpdateTaskStatus(ids: string[], status: string): Promi
   }
 }
 
-export async function bulkUpdateTaskPriority(ids: string[], priority: string): Promise<MutationResult> {
+export async function bulkUpdateWorkItemPriority(ids: string[], priority: string): Promise<MutationResult> {
   if (!ids.length) return errorResult("No hay pendientes seleccionados.");
   if (!isAllowedPriority(priority)) {
     return errorResult("Prioridad no válida.");
   }
   const db = getDb();
   try {
-    await db.task.updateMany({
-      where: { id: { in: ids } },
-      data: { priority },
+    await db.$transaction(async (tx) => {
+      await tx.workItem.updateMany({
+        where: {
+          OR: [
+            { sourceType: "Task", sourceId: { in: ids } },
+            { id: { in: ids } },
+          ],
+          workItemType: "TASK",
+        },
+        data: { priority },
+      });
     });
     revalidatePaths(["/tasks", "/today", "/dashboard"]);
     return successResult("bulk", "", `${ids.length} pendiente${ids.length !== 1 ? "s" : ""} con nueva prioridad.`);
@@ -236,59 +314,69 @@ export async function bulkUpdateTaskPriority(ids: string[], priority: string): P
   }
 }
 
-export async function bulkDeleteTasks(ids: string[]): Promise<MutationResult> {
+export async function bulkDeleteWorkItems(ids: string[]): Promise<MutationResult> {
   if (!ids.length) return errorResult("No hay pendientes seleccionados.");
   const db = getDb();
   try {
-    const targets = await db.task.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, folio: true, title: true, clientId: true, policyId: true },
+    const workItems = await db.workItem.findMany({
+      where: {
+        OR: [
+          { sourceType: "Task", sourceId: { in: ids } },
+          { id: { in: ids } },
+        ],
+        workItemType: "TASK",
+      },
+      select: { id: true, sourceId: true, folio: true, title: true, clientId: true, policyId: true },
     });
 
-    if (targets.length === 0) {
+    if (workItems.length === 0) {
       return errorResult("Los pendientes ya no existen.");
     }
 
-    await db.task.deleteMany({ where: { id: { in: targets.map((t) => t.id) } } });
-
-    await Promise.all(
-      targets.map((task) =>
-        writeActivityLog({
-          entityType: "Task",
-          entityId: task.id,
+    await db.$transaction(async (tx) => {
+      await tx.workItem.deleteMany({ where: { id: { in: workItems.map((workItem) => workItem.id) } } });
+      for (const workItem of workItems) {
+        const workItemRouteId = workItem.sourceId ?? workItem.id;
+        await writeActivityLog({
+          entityType: "WorkItem",
+          entityId: workItemRouteId,
           action: "TASK_DELETE",
-          oldValue: task,
-        })
-      )
-    );
+          oldValue: workItem,
+          db: tx,
+        });
+      }
+    });
 
     revalidatePaths(["/tasks", "/today", "/dashboard", "/risks"]);
     return successResult(
       "bulk",
       "",
-      `${targets.length} pendiente${targets.length !== 1 ? "s" : ""} eliminado${targets.length !== 1 ? "s" : ""}.`
+      `${workItems.length} pendiente${workItems.length !== 1 ? "s" : ""} eliminado${workItems.length !== 1 ? "s" : ""}.`
     );
   } catch (error) {
     return errorResult(error instanceof Error ? error.message : "No se pudieron eliminar los pendientes.");
   }
 }
-export async function deleteTask(id: string): Promise<MutationResult> {
+export async function deleteWorkItem(id: string): Promise<MutationResult> {
   try {
     const db = getDb();
 
-    const existingTask = await db.task.findUnique({ where: { id } });
+    const existingWorkItem = await findWorkItemByRouteId(id);
 
-    if (!existingTask) {
+    if (!existingWorkItem) {
       return errorResult("El pendiente ya no existe.");
     }
 
-    await db.task.delete({ where: { id } });
+    await db.$transaction(async (tx) => {
+      await tx.workItem.delete({ where: { id: existingWorkItem.id } });
 
-    await writeActivityLog({
-      entityType: "Task",
-      entityId: id,
-      action: "TASK_DELETE",
-      oldValue: existingTask,
+      await writeActivityLog({
+        entityType: "WorkItem",
+        entityId: existingWorkItem.id,
+        action: "TASK_DELETE",
+        oldValue: existingWorkItem,
+        db: tx,
+      });
     });
 
     revalidatePaths([
@@ -296,11 +384,11 @@ export async function deleteTask(id: string): Promise<MutationResult> {
       "/today",
       "/dashboard",
       "/risks",
-      existingTask.clientId ? `/clients/${existingTask.clientId}` : "/clients",
-      existingTask.policyId ? `/policies/${existingTask.policyId}` : "/policies",
+      existingWorkItem.clientId ? `/clients/${existingWorkItem.clientId}` : "/clients",
+      existingWorkItem.policyId ? `/policies/${existingWorkItem.policyId}` : "/policies",
     ]);
 
-    return successResult(id, "/tasks", "Pendiente eliminado.");
+    return successResult(existingWorkItem.sourceId ?? existingWorkItem.id, "/tasks", "Pendiente eliminado.");
   } catch (error) {
     return errorResult(error instanceof Error ? error.message : "No se pudo eliminar el pendiente.");
   }

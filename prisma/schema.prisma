@@ -125,12 +125,6 @@ enum DocumentType {
   OTHER
 }
 
-enum ReminderStatus {
-  ACTIVE
-  DONE
-  CANCELLED
-}
-
 enum AlertSeverity {
   INFO
   WARNING
@@ -141,6 +135,38 @@ enum AlertStatus {
   OPEN
   DISMISSED
   RESOLVED
+}
+
+enum WorkItemType {
+  TASK
+  REMINDER
+  ALERT
+}
+
+enum WorkItemStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_CLIENT
+  WAITING_INSURER
+  WAITING_DOCUMENT
+  SENT
+  RESOLVED
+  CANCELLED
+  ARCHIVED
+  DISMISSED
+}
+
+enum NotificationChannelType {
+  TELEGRAM
+  WEB
+  EMAIL
+}
+
+enum NotificationEventStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
 }
 
 enum UserRole {
@@ -173,8 +199,14 @@ model User {
   updatedQuotes      Quote[]     @relation("QuoteUpdatedBy")
   createdTasks       Task[]      @relation("TaskCreatedBy")
   updatedTasks       Task[]      @relation("TaskUpdatedBy")
+  createdWorkItems   WorkItem[]  @relation("WorkItemCreatedBy")
+  updatedWorkItems   WorkItem[]  @relation("WorkItemUpdatedBy")
   createdDocuments   Document[]  @relation("DocumentCreatedBy")
   updatedDocuments   Document[]  @relation("DocumentUpdatedBy")
+  notificationChannels    NotificationChannel[]    @relation("NotificationChannelUser")
+  notificationPreferences NotificationPreference[] @relation("NotificationPreferenceUser")
+  notificationEvents      NotificationEvent[]      @relation("NotificationEventUser")
+  telegramLinkTokens      TelegramLinkToken[]      @relation("TelegramLinkTokenUser")
 
   @@index([email])
   @@index([role])
@@ -211,6 +243,8 @@ model Client {
   claims      Claim[]
   quotes      Quote[]
   documents   Document[]
+  workItems   WorkItem[]
+  notificationEvents NotificationEvent[]
 
   @@index([fullName])
   @@index([status])
@@ -238,6 +272,7 @@ model Insurer {
   tasks       Task[]
   claims      Claim[]
   quotes      Quote[]
+  workItems   WorkItem[]
 
   @@index([name])
   @@index([status])
@@ -252,7 +287,6 @@ model Policy {
   status          PolicyStatus     @default(ACTIVE)
   startDate       DateTime
   endDate         DateTime
-  renewalDate     DateTime?
   premiumAmount   Decimal
   currency        String           @default("MXN")
   paymentFrequency PaymentFrequency
@@ -275,13 +309,14 @@ model Policy {
   tasks       Task[]
   claims      Claim[]
   documents   Document[]
+  workItems   WorkItem[]
+  notificationEvents NotificationEvent[]
 
   @@index([policyNumber])
   @@index([clientId])
   @@index([insurerId])
   @@index([policyType])
   @@index([status])
-  @@index([renewalDate])
   @@index([endDate])
   @@index([createdById])
   @@index([updatedById])
@@ -318,6 +353,8 @@ model Receipt {
   commissions Commission[]
   tasks      Task[]
   documents  Document[] @relation("ReceiptDocuments")
+  workItems  WorkItem[]
+  notificationEvents NotificationEvent[]
 
   @@index([receiptNumber])
   @@index([policyId])
@@ -420,6 +457,57 @@ model Task {
   documents Document[]
 
   @@index([folio])
+  @@index([clientId])
+  @@index([policyId])
+  @@index([insurerId])
+  @@index([receiptId])
+  @@index([status])
+  @@index([priority])
+  @@index([dueDate])
+  @@index([createdById])
+  @@index([updatedById])
+}
+
+model WorkItem {
+  id          String         @id @default(cuid())
+  sourceType  String?
+  sourceId    String?
+  workItemType WorkItemType   @default(TASK)
+  taskType    TaskType?
+  status      WorkItemStatus  @default(OPEN)
+  priority    Priority        @default(MEDIUM)
+  severity    AlertSeverity?
+  folio       String?
+  title       String
+  description String?
+  entityType  String
+  entityId    String
+  clientId    String?
+  policyId    String?
+  insurerId   String?
+  receiptId   String?
+  startDate   DateTime        @default(now())
+  dueDate     DateTime?
+  closedDate  DateTime?
+  readAt      DateTime?
+  notes       String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  createdById String?
+  updatedById String?
+
+  client    Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  policy    Policy?   @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  insurer   Insurer?  @relation(fields: [insurerId], references: [id], onDelete: SetNull)
+  receipt   Receipt?  @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  createdBy User?     @relation("WorkItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?     @relation("WorkItemUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  notificationEvents NotificationEvent[]
+
+  @@unique([sourceType, sourceId])
+  @@index([folio])
+  @@index([entityType, entityId])
+  @@index([taskType])
   @@index([clientId])
   @@index([policyId])
   @@index([insurerId])
@@ -549,22 +637,6 @@ model SystemSetting {
   @@index([key])
 }
 
-model Reminder {
-  id           String         @id @default(cuid())
-  entityType   String
-  entityId     String
-  reminderDate DateTime
-  title        String
-  description  String?
-  status       ReminderStatus @default(ACTIVE)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-
-  @@index([entityType, entityId])
-  @@index([reminderDate])
-  @@index([status])
-}
-
 model ActivityLog {
   id         String   @id @default(cuid())
   entityType String
@@ -580,6 +652,93 @@ model ActivityLog {
   @@index([createdAt])
   @@index([action])
   @@index([userId])
+}
+
+model NotificationChannel {
+  id             String                @id @default(cuid())
+  userId         String
+  type           NotificationChannelType
+  telegramChatId String?
+  isEnabled      Boolean               @default(false)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  user User @relation("NotificationChannelUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+  @@index([userId])
+  @@index([type])
+  @@index([telegramChatId])
+}
+
+model NotificationPreference {
+  id              String                @id @default(cuid())
+  userId          String
+  eventType       String
+  channelType     NotificationChannelType
+  enabled         Boolean               @default(true)
+  minPriority     Priority              @default(MEDIUM)
+  quietHoursStart  String?
+  quietHoursEnd    String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  user User @relation("NotificationPreferenceUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventType, channelType])
+  @@index([userId])
+  @@index([eventType])
+  @@index([channelType])
+}
+
+model NotificationEvent {
+  id          String                @id @default(cuid())
+  type        String
+  title       String
+  body        String
+  priority    Priority              @default(MEDIUM)
+  userId      String
+  workItemId  String?
+  clientId    String?
+  policyId    String?
+  receiptId   String?
+  channelType NotificationChannelType
+  status      NotificationEventStatus @default(PENDING)
+  sentAt      DateTime?
+  error       String?
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  user    User     @relation("NotificationEventUser", fields: [userId], references: [id], onDelete: Cascade)
+  workItem WorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+  client   Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  policy   Policy?  @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  receipt  Receipt? @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([type])
+  @@index([channelType])
+  @@index([status])
+  @@index([createdAt])
+  @@index([workItemId])
+  @@index([clientId])
+  @@index([policyId])
+  @@index([receiptId])
+}
+
+model TelegramLinkToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt  DateTime
+  usedAt    DateTime?
+  createdAt  DateTime @default(now())
+
+  user User @relation("TelegramLinkTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([usedAt])
 }
 
 model Alert {

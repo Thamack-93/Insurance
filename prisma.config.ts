@@ -3,7 +3,6 @@ import path from "node:path";
 import { defineConfig } from "prisma/config";
 
 const localEnvPath = path.join(process.cwd(), ".env.local");
-const shadowDbPath = path.join(process.cwd(), ".tmp", "prisma-shadow.sqlite");
 
 function loadLocalEnvFile(filePath: string) {
   if (!fs.existsSync(filePath)) return;
@@ -29,7 +28,6 @@ function loadLocalEnvFile(filePath: string) {
 loadLocalEnvFile(localEnvPath);
 
 const databaseUrl = process.env.DATABASE_URL?.trim();
-const shadowDatabaseUrl = process.env.SHADOW_DATABASE_URL?.trim();
 const isPostgresUrl = databaseUrl ? /^postgres(ql)?:\/\//i.test(databaseUrl) : false;
 
 if (!databaseUrl) {
@@ -51,6 +49,5 @@ export default defineConfig({
   },
   datasource: {
     url: databaseUrl,
-    shadowDatabaseUrl: shadowDatabaseUrl || `file:${shadowDbPath}`,
   },
 });

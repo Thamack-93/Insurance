@@ -30,12 +30,6 @@ export async function AppSidebar() {
           <SidebarNav isAdmin={isAdmin} />
         </div>
 
-        <div className="mt-auto rounded-3xl border bg-card/65 p-4 shadow-sm">
-          <p className="text-sm font-semibold">Operaciones locales</p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            SQLite, documentos privados y backups seguros en `data/`.
-          </p>
-        </div>
       </div>
     </aside>
   );

@@ -26,7 +26,7 @@ function riskHref(entityType: string, entityId: string) {
   if (entityType === "Client") return `/clients/${entityId}`;
   if (entityType === "Policy") return `/policies/${entityId}`;
   if (entityType === "Receipt") return `/receipts`;
-  if (entityType === "Task") return `/tasks`;
+  if (entityType === "Task" || entityType === "WorkItem") return `/tasks`;
   if (entityType === "Document") return `/documents`;
   return "/reports";
 }

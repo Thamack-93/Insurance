@@ -43,7 +43,7 @@ export async function createBackup(): Promise<MutationResult> {
   try {
     await requireAdmin();
     if (!areLocalBackupsEnabled()) {
-      return errorResult("Los respaldos locales están deshabilitados en esta demo desplegada.");
+      return errorResult("Los respaldos están deshabilitados en esta demo publicada.");
     }
     const target = await backupDatabase();
     if (!target) {
@@ -66,7 +66,7 @@ export async function restoreBackup(filename: string): Promise<MutationResult> {
   try {
     await requireAdmin();
     if (!areLocalBackupsEnabled()) {
-      return errorResult("Las restauraciones locales están deshabilitadas en esta demo desplegada.");
+      return errorResult("Las restauraciones están deshabilitadas en esta demo publicada.");
     }
     const safePath = assertSafeBackupPath(filename);
     await fs.access(safePath);

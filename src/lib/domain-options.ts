@@ -51,7 +51,7 @@ export const receiptStatusOptions: SelectOption[] = [
   { value: "CANCELLED", label: "Cancelado" },
 ];
 
-export const taskTypeOptions: SelectOption[] = [
+export const workItemTypeOptions: SelectOption[] = [
   { value: "GENERAL", label: "General" },
   { value: "CLAIM", label: "Siniestro" },
   { value: "QUOTE", label: "Cotizacion" },
@@ -62,7 +62,7 @@ export const taskTypeOptions: SelectOption[] = [
   { value: "OTHER", label: "Otro" },
 ];
 
-export const taskStatusOptions: SelectOption[] = [
+export const workItemStatusOptions: SelectOption[] = [
   { value: "OPEN", label: "Abierto" },
   { value: "IN_PROGRESS", label: "En proceso" },
   { value: "WAITING_CLIENT", label: "Esperando cliente" },

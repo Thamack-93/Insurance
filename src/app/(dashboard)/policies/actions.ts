@@ -16,7 +16,6 @@ function normalizePolicyInput(values: PolicyFormValues) {
     status: values.status,
     startDate: parseDateInput(values.startDate),
     endDate: parseDateInput(values.endDate),
-    renewalDate: values.renewalDate ? parseDateInput(values.renewalDate) : null,
     premiumAmount: values.premiumAmount,
     currency: values.currency,
     paymentFrequency: values.paymentFrequency,

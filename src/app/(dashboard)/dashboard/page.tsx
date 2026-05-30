@@ -88,7 +88,7 @@ export default async function DashboardPage() {
         />
         <KpiCard
           title="Pendientes abiertos"
-          value={data.kpis.openTasks}
+          value={data.kpis.openWorkItems}
           description="Trabajo operativo activo"
           href="/tasks"
           icon={CheckSquare}
@@ -96,7 +96,7 @@ export default async function DashboardPage() {
         />
         <KpiCard
           title="Pendientes urgentes"
-          value={data.kpis.urgentTasks}
+          value={data.kpis.urgentWorkItems}
           description="Prioridad máxima"
           href="/today"
           icon={AlertTriangle}

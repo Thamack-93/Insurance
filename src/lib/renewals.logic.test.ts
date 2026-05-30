@@ -3,15 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   calculateRenewalPriority,
   calculateRenewalStats,
-  createRenewalTaskDescription,
-  createRenewalTaskTitle,
+  createRenewalWorkItemDescription,
+  createRenewalWorkItemTitle,
   filterRenewalsByTimeRange,
   shouldIncludeInRenewals,
   sortRenewalsByPriority,
   type RenewalInfo,
 } from "./renewals.logic";
 
-function makeRenewal(partial: Partial<RenewalInfo> & Pick<RenewalInfo, "policyId" | "renewalDate" | "priority">): RenewalInfo {
+function makeRenewal(partial: Partial<RenewalInfo> & Pick<RenewalInfo, "policyId" | "endDate" | "priority">): RenewalInfo {
   return {
     policyNumber: "POL-1",
     clientId: "c1",
@@ -39,21 +39,21 @@ describe("renewals.logic", () => {
     expect(shouldIncludeInRenewals("CANCELLED", new Date("2024-07-01"))).toBe(false);
   });
 
-  it("builds renewal task title and description", () => {
-    expect(createRenewalTaskTitle("HIGH", "POL-1")).toMatch(/POL-1/);
-    expect(createRenewalTaskDescription(5, "Acme", 1000, "MXN")).toMatch(/Acme/);
+  it("builds renewal work item title and description", () => {
+    expect(createRenewalWorkItemTitle("HIGH", "POL-1")).toMatch(/POL-1/);
+    expect(createRenewalWorkItemDescription(5, "Acme", 1000, "MXN")).toMatch(/Acme/);
   });
 
   it("filters and sorts renewals", () => {
     const renewals: RenewalInfo[] = [
       makeRenewal({
         policyId: "1",
-        renewalDate: addDays(today, 10),
+        endDate: addDays(today, 10),
         priority: "MEDIUM",
       }),
       makeRenewal({
         policyId: "2",
-        renewalDate: addDays(today, 2),
+        endDate: addDays(today, 2),
         priority: "HIGH",
       }),
     ];
@@ -62,7 +62,7 @@ describe("renewals.logic", () => {
     const sorted = sortRenewalsByPriority(renewals);
     expect(sorted[0].priority).toBe("HIGH");
     const stats = calculateRenewalStats(
-      renewals.map((r) => ({ renewalDate: r.renewalDate, premiumAmount: r.premiumAmount })),
+      renewals.map((r) => ({ endDate: r.endDate, premiumAmount: r.premiumAmount })),
       today,
     );
     expect(stats.totalActive).toBe(2);

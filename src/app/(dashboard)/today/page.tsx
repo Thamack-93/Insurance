@@ -24,7 +24,7 @@ export default async function TodayPage() {
   const overdueCount = data.overduePayments.length;
   const due7Count = data.paymentsDue7.length;
   const renewalsCount = data.urgentRenewals.length;
-  const overdueTasksCount = data.overdueTasks.length;
+  const overdueWorkItemsCount = data.overdueWorkItems.length;
   const commissionsCount = data.commissionsToReview.length;
 
   return (
@@ -69,8 +69,8 @@ export default async function TodayPage() {
         />
         <MetricCard
           title="Pendientes atrasados"
-          value={overdueTasksCount}
-          description="Tareas fuera de fecha"
+          value={overdueWorkItemsCount}
+          description="Pendientes fuera de fecha"
           icon={CheckSquare}
           tone="rose"
         />
@@ -106,7 +106,7 @@ export default async function TodayPage() {
                   <p className="font-medium">{policy.policyNumber}</p>
                   <p className="mt-1 text-sm text-muted-foreground">{policy.client.fullName}</p>
                   <p className="mt-2 text-xs text-muted-foreground">
-                    Renovación {policy.renewalDate ? formatDate(policy.renewalDate) : "sin fecha"}
+                    Renovación {formatDate(policy.endDate)}
                   </p>
                 </Link>
               ))
@@ -114,26 +114,26 @@ export default async function TodayPage() {
           </div>
         </SectionCard>
 
-        <SectionCard title="Pendientes atrasados" description="Tareas fuera de fecha.">
+        <SectionCard title="Pendientes atrasados" description="Pendientes fuera de fecha.">
           <div className="space-y-3 p-4">
-            {data.overdueTasks.length === 0 ? (
+            {data.overdueWorkItems.length === 0 ? (
               <EmptyRow icon={CheckSquare} message="Sin pendientes atrasados." />
             ) : (
-              data.overdueTasks.map((task) => (
+              data.overdueWorkItems.map((workItem) => (
                 <Link
-                  key={task.id}
-                  href={`/tasks/${task.id}`}
+                  key={workItem.id}
+                  href={`/tasks/${workItem.id}`}
                   className="block rounded-2xl border bg-card/70 p-4 hover:border-primary/20"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="font-medium">{task.title}</p>
-                      <p className="mt-1 text-sm text-muted-foreground">{task.folio}</p>
+                      <p className="font-medium">{workItem.title}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{workItem.folio}</p>
                     </div>
-                    <StatusBadge status={task.status} />
+                    <StatusBadge status={workItem.status} />
                   </div>
                   <p className="mt-2 text-xs text-muted-foreground">
-                    Inicio hace {daysSince(task.startDate)} días
+                    Inicio hace {daysSince(workItem.startDate)} días
                   </p>
                 </Link>
               ))

@@ -12,10 +12,22 @@ export function toNumber(value: unknown) {
 }
 
 export function formatCurrency(amount: unknown, currency?: string) {
-  const resolvedCurrency = currency ?? getDefaultCurrency() ?? DEFAULT_CURRENCY;
-  return new Intl.NumberFormat("es-MX", {
-    style: "currency",
-    currency: resolvedCurrency,
-    maximumFractionDigits: 0,
-  }).format(toNumber(amount));
+  const resolvedCurrency = (currency ?? getDefaultCurrency() ?? DEFAULT_CURRENCY)
+    .toString()
+    .trim()
+    .toUpperCase();
+
+  try {
+    return new Intl.NumberFormat("es-MX", {
+      style: "currency",
+      currency: resolvedCurrency,
+      maximumFractionDigits: 0,
+    }).format(toNumber(amount));
+  } catch {
+    return new Intl.NumberFormat("es-MX", {
+      style: "currency",
+      currency: DEFAULT_CURRENCY,
+      maximumFractionDigits: 0,
+    }).format(toNumber(amount));
+  }
 }

@@ -2,10 +2,11 @@ import { addDays, endOfDay, startOfDay } from "date-fns";
 import { getDb } from "@/lib/db";
 import { daysUntil, today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
+import { OPEN_WORK_ITEM_STATUSES, getWorkItems } from "@/lib/work-queue";
 
 type ReceiptStatus = "PENDING" | "PAID" | "OVERDUE" | "CANCELLED";
 type PolicyStatus = "ACTIVE" | "EXPIRED" | "CANCELLED" | "RENEWED" | "PENDING";
-type TaskStatus =
+type WorkItemStatus =
   | "OPEN"
   | "IN_PROGRESS"
   | "WAITING_CLIENT"
@@ -35,11 +36,11 @@ export type RenewalOptions = {
   statuses?: PolicyStatus[];
 };
 
-export type OpenTasksOptions = {
+export type OpenWorkItemsOptions = {
   from?: Date;
   to?: Date;
   limit?: number;
-  statuses?: TaskStatus[];
+  statuses?: WorkItemStatus[];
 };
 
 export type DuePaymentItem = {
@@ -70,7 +71,7 @@ export type RenewalItem = {
   policyNumber: string;
   policyType: string;
   status: PolicyStatus;
-  renewalDate: Date | null;
+  endDate: Date;
   premiumAmount: number;
   currency: string;
   daysUntilRenewal: number | null;
@@ -84,12 +85,12 @@ export type RenewalItem = {
   };
 };
 
-export type OpenTaskItem = {
+export type OpenWorkItemItem = {
   id: string;
   folio: string;
   title: string;
   description: string | null;
-  status: TaskStatus;
+  status: WorkItemStatus;
   priority: string;
   startDate: Date;
   dueDate: Date | null;
@@ -153,14 +154,14 @@ export async function getRenewals(options: RenewalOptions = {}) {
 
   const rows = await db.policy.findMany({
     where: {
-      renewalDate: { gte: range.from, lte: range.to },
+      endDate: { gte: range.from, lte: range.to },
       status: { in: statuses },
     },
     include: {
       client: { select: { id: true, fullName: true } },
       insurer: { select: { id: true, name: true } },
     },
-    orderBy: [{ renewalDate: "asc" }, { policyNumber: "asc" }],
+    orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }],
     take: options.limit,
   });
 
@@ -169,55 +170,33 @@ export async function getRenewals(options: RenewalOptions = {}) {
     policyNumber: row.policyNumber,
     policyType: row.policyType,
     status: row.status as PolicyStatus,
-    renewalDate: row.renewalDate,
+    endDate: row.endDate,
     premiumAmount: toNumber(row.premiumAmount),
     currency: row.currency,
-    daysUntilRenewal: row.renewalDate ? daysUntil(row.renewalDate) : null,
+    daysUntilRenewal: daysUntil(row.endDate),
     client: row.client,
     insurer: row.insurer,
   }));
 }
 
-export async function getOpenTasks(options: OpenTasksOptions = {}) {
-  const db = getDb();
+export async function getOpenWorkItems(options: OpenWorkItemsOptions = {}) {
   const range = options.from || options.to ? resolveRange(options.from, options.to, 0) : null;
-  const statuses = options.statuses ?? [
-    "OPEN",
-    "IN_PROGRESS",
-    "WAITING_CLIENT",
-    "WAITING_INSURER",
-    "WAITING_DOCUMENT",
-    "SENT",
-  ];
+  const statuses = options.statuses ?? OPEN_WORK_ITEM_STATUSES;
 
-  const rows = await db.task.findMany({
-    where: {
-      status: { in: statuses },
-      ...(range
-        ? {
-            dueDate: {
-              gte: range.from,
-              lte: range.to,
-            },
-          }
-        : {}),
-    },
-    include: {
-      client: { select: { id: true, fullName: true } },
-      policy: { select: { id: true, policyNumber: true, policyType: true } },
-      insurer: { select: { id: true, name: true } },
-      receipt: { select: { id: true, receiptNumber: true } },
-    },
-    orderBy: [{ priority: "desc" }, { dueDate: "asc" }, { createdAt: "desc" }],
-    take: options.limit,
+  const rows = await getWorkItems({
+    workItemTypes: ["TASK"],
+    statuses,
+    from: range?.from,
+    to: range?.to,
+    limit: options.limit,
   });
 
-  return rows.map<OpenTaskItem>((row) => ({
-    id: row.id,
-    folio: row.folio,
+  return rows.map<OpenWorkItemItem>((row) => ({
+    id: row.sourceId ?? row.id,
+    folio: row.folio ?? row.sourceId ?? row.id,
     title: row.title,
     description: row.description,
-    status: row.status as TaskStatus,
+    status: row.status as WorkItemStatus,
     priority: row.priority,
     startDate: row.startDate,
     dueDate: row.dueDate,
@@ -239,4 +218,3 @@ function resolveRange(from?: Date, to?: Date, fallbackDays = 60): DateRange {
 
   return { from: start, to: end };
 }
-

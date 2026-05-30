@@ -26,20 +26,20 @@ async function main() {
   const [overdue, upcoming] = await Promise.all([
     db.policy.findMany({
       where: {
-        renewalDate: { lt: now },
+        endDate: { lt: now },
         status: { notIn: ["RENEWED", "CANCELLED"] },
       },
       include: { client: true, insurer: true },
-      orderBy: { renewalDate: "asc" },
+      orderBy: { endDate: "asc" },
       take: limit,
     }),
     db.policy.findMany({
       where: {
-        renewalDate: { gte: now, lte: horizon },
+        endDate: { gte: now, lte: horizon },
         status: "ACTIVE",
       },
       include: { client: true, insurer: true },
-      orderBy: { renewalDate: "asc" },
+      orderBy: { endDate: "asc" },
       take: limit,
     }),
   ]);
@@ -52,8 +52,8 @@ async function main() {
     Cliente: policy.client.fullName,
     Aseguradora: policy.insurer.name,
     "Tipo": policy.policyType,
-    Renovacion: formatDateShort(policy.renewalDate),
-    "Dias restantes": daysUntil(policy.renewalDate ?? now),
+    Renovacion: formatDateShort(policy.endDate),
+    "Dias restantes": daysUntil(policy.endDate),
     Estado: policy.status,
     Prima: formatMoney(policy.premiumAmount, policy.currency),
     Nota: compactText(policy.notes, 48) || "-",

@@ -19,6 +19,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
+import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 
 const frequencyLabels: Record<string, string> = {
   MONTHLY: "Mensual",
@@ -44,7 +45,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     notFound();
   }
 
-  const [receipts, payments, commissions, tasks, documents, activity] = await Promise.all([
+  const [receipts, payments, commissions, workItems, documents, activity] = await Promise.all([
     db.receipt.findMany({
       where: { policyId: id },
       include: { client: true, insurer: true },
@@ -63,11 +64,10 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       orderBy: { expectedDate: "desc" },
       take: 10,
     }),
-    db.task.findMany({
-      where: { policyId: id },
-      include: { client: true, insurer: true },
-      orderBy: [{ priority: "desc" }, { dueDate: "asc" }],
-      take: 10,
+    getWorkItems({
+      workItemTypes: ["TASK"],
+      policyId: id,
+      limit: 10,
     }),
     db.document.findMany({
       where: { policyId: id },
@@ -80,7 +80,11 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
 
   const openReceipts = receipts.filter((receipt) => receipt.status !== "PAID" && receipt.status !== "CANCELLED");
   const openCommissions = commissions.filter((commission) => commission.status !== "PAID" && commission.status !== "CANCELLED");
-  const openTasks = tasks.filter((task) => task.status !== "RESOLVED" && task.status !== "CANCELLED" && task.status !== "ARCHIVED");
+  const openWorkItemCount = await countWorkItems({
+    workItemTypes: ["TASK"],
+    statuses: OPEN_WORK_ITEM_STATUSES,
+    policyId: id,
+  });
   const paymentsTotal = payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
 
   return (
@@ -136,8 +140,8 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           />
           <MetricCard
             title="Tareas abiertas"
-            value={openTasks.length}
-            description={policy.renewalDate ? `${daysUntil(policy.renewalDate)} días para renovación` : "Sin renovación capturada"}
+            value={openWorkItemCount}
+            description={`${daysUntil(policy.endDate)} días para renovación`}
             icon={FileClock}
             tone="rose"
           />
@@ -177,7 +181,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                 </div>
                 <div>
                   <p className="text-muted-foreground">Renovación</p>
-                  <p className="font-medium">{policy.renewalDate ? formatDate(policy.renewalDate) : "Sin fecha"}</p>
+                  <p className="font-medium">{formatDate(policy.endDate)}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Frecuencia</p>
@@ -277,10 +281,12 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
 
             <SectionCard title="Tareas" description="Flujo operativo abierto sobre la póliza.">
               <div className="divide-y divide-stone-200/80">
-                {tasks.map((task) => (
+                {workItems.map((task) => (
                   <div key={task.id} className="px-4 py-4">
                     <div className="flex items-center justify-between gap-3">
-                      <p className="font-medium text-foreground">{task.folio}</p>
+                      <Link href={`/tasks/${task.sourceId ?? task.id}`} className="font-medium text-foreground hover:text-primary">
+                        {task.folio ?? task.sourceId ?? task.id}
+                      </Link>
                       <div className="flex gap-2">
                         <PriorityBadge priority={task.priority} />
                         <StatusBadge status={task.status} />

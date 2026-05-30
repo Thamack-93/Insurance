@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, Clock3, Flame, ListTodo, MessageSquareWarning, Plus } from "lucide-react";
-import type { Prisma, TaskStatus } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
@@ -8,15 +7,13 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-states/empty-state";
 import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
-import { getDb } from "@/lib/db";
 import { daysUntil, formatDate, today } from "@/lib/dates";
-import { TasksTable, type TaskRow } from "@/components/tasks/tasks-table";
+import { WorkItemsTable, type WorkItemRow } from "@/components/tasks/tasks-table";
+import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 
 const PAGE_SIZE = 25;
-const INACTIVE_STATUSES = ["RESOLVED", "CANCELLED", "ARCHIVED"] as const satisfies readonly TaskStatus[];
-const ACTIVE_STATUS_FILTER = { notIn: [...INACTIVE_STATUSES] };
 
-export default async function TasksPage({
+export default async function WorkItemsPage({
   searchParams,
 }: {
   searchParams?: Promise<{ q?: string; page?: string }>;
@@ -25,25 +22,8 @@ export default async function TasksPage({
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = Math.max(1, Number(params.page) || 1);
 
-  const db = getDb();
   const now = today();
-
-  const baseWhere: Prisma.TaskWhereInput = { status: ACTIVE_STATUS_FILTER };
-  const where: Prisma.TaskWhereInput = query
-    ? {
-        AND: [
-          baseWhere,
-          {
-            OR: [
-              { folio: { contains: query } },
-              { title: { contains: query } },
-              { client: { fullName: { contains: query } } },
-              { policy: { policyNumber: { contains: query } } },
-            ],
-          },
-        ],
-      }
-    : baseWhere;
+  const in7 = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
   const [
     activeCount,
@@ -52,55 +32,96 @@ export default async function TasksPage({
     dueSoonCount,
     waitingClientCount,
     filteredCount,
-    pagedTasks,
-    urgentTasks,
-    overdueTasks,
+    pagedWorkItems,
+    urgentWorkItems,
+    overdueWorkItems,
   ] = await Promise.all([
-    db.task.count({ where: baseWhere }),
-    db.task.count({ where: { status: ACTIVE_STATUS_FILTER, priority: "URGENT" } }),
-    db.task.count({ where: { status: ACTIVE_STATUS_FILTER, dueDate: { lt: now } } }),
-    db.task.count({
-      where: {
-        status: ACTIVE_STATUS_FILTER,
-        dueDate: { gte: now, lte: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000) },
-      },
+    countWorkItems({ workItemTypes: ["TASK"], statuses: OPEN_WORK_ITEM_STATUSES }),
+    countWorkItems({
+      workItemTypes: ["TASK"],
+      statuses: OPEN_WORK_ITEM_STATUSES,
+      priorities: ["URGENT"],
     }),
-    db.task.count({ where: { status: "WAITING_CLIENT" } }),
-    db.task.count({ where }),
-    db.task.findMany({
-      where,
-      include: { client: true, policy: true, insurer: true },
-      orderBy: [{ priority: "desc" }, { dueDate: "asc" }],
+    countWorkItems({
+      workItemTypes: ["TASK"],
+      statuses: OPEN_WORK_ITEM_STATUSES,
+      to: new Date(now.getTime() - 1),
+    }),
+    countWorkItems({
+      workItemTypes: ["TASK"],
+      statuses: OPEN_WORK_ITEM_STATUSES,
+      from: now,
+      to: in7,
+    }),
+    countWorkItems({
+      workItemTypes: ["TASK"],
+      statuses: ["WAITING_CLIENT"],
+    }),
+    countWorkItems({
+      workItemTypes: ["TASK"],
+      statuses: OPEN_WORK_ITEM_STATUSES,
+      query,
+    }),
+    getWorkItems({
+      workItemTypes: ["TASK"],
+      statuses: OPEN_WORK_ITEM_STATUSES,
+      query,
       skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
+      limit: PAGE_SIZE,
     }),
-    db.task.findMany({
-      where: { priority: "URGENT", status: ACTIVE_STATUS_FILTER },
-      include: { client: true, policy: true, insurer: true },
-      orderBy: { dueDate: "asc" },
-      take: 10,
+    getWorkItems({
+      workItemTypes: ["TASK"],
+      statuses: OPEN_WORK_ITEM_STATUSES,
+      priorities: ["URGENT"],
+      limit: 10,
     }),
-    db.task.findMany({
-      where: { dueDate: { lt: now }, status: ACTIVE_STATUS_FILTER },
-      include: { client: true, policy: true, insurer: true },
-      orderBy: { dueDate: "asc" },
-      take: 10,
+    getWorkItems({
+      workItemTypes: ["TASK"],
+      statuses: OPEN_WORK_ITEM_STATUSES,
+      to: new Date(now.getTime() - 1),
+      limit: 10,
     }),
   ]);
 
-  const taskRows: TaskRow[] = pagedTasks.map((task) => ({
-    id: task.id,
-    folio: task.folio,
-    title: task.title,
-    taskType: task.taskType,
-    priority: task.priority,
-    status: task.status,
-    dueDate: task.dueDate ? formatDate(task.dueDate) : null,
-    dueDays: task.dueDate ? daysUntil(task.dueDate) : null,
-    clientId: task.clientId,
-    clientName: task.client?.fullName ?? null,
-    policyId: task.policyId,
-    policyNumber: task.policy?.policyNumber ?? null,
+  const workItemRows: WorkItemRow[] = pagedWorkItems.map((workItem) => ({
+    id: workItem.sourceId ?? workItem.id,
+    folio: workItem.folio ?? workItem.sourceId ?? workItem.id,
+    title: workItem.title,
+    workItemType: workItem.taskType ?? "GENERAL",
+    priority: workItem.priority,
+    status: workItem.status,
+    dueDate: workItem.dueDate ? formatDate(workItem.dueDate) : null,
+    dueDays: workItem.dueDate ? daysUntil(workItem.dueDate) : null,
+    clientId: workItem.clientId,
+    clientName: workItem.client?.fullName ?? null,
+    policyId: workItem.policyId,
+    policyNumber: workItem.policy?.policyNumber ?? null,
+  }));
+
+  const urgentWorkItemRows = urgentWorkItems.map((workItem) => ({
+    id: workItem.sourceId ?? workItem.id,
+    folio: workItem.folio ?? workItem.sourceId ?? workItem.id,
+    title: workItem.title,
+    priority: workItem.priority,
+    status: workItem.status,
+    client: workItem.client,
+    policy: workItem.policy,
+    insurer: workItem.insurer,
+    dueDate: workItem.dueDate,
+    startDate: workItem.startDate,
+  }));
+
+  const overdueWorkItemRows = overdueWorkItems.map((workItem) => ({
+    id: workItem.sourceId ?? workItem.id,
+    folio: workItem.folio ?? workItem.sourceId ?? workItem.id,
+    title: workItem.title,
+    priority: workItem.priority,
+    status: workItem.status,
+    client: workItem.client,
+    policy: workItem.policy,
+    insurer: workItem.insurer,
+    dueDate: workItem.dueDate,
+    startDate: workItem.startDate,
   }));
 
   return (
@@ -108,7 +129,7 @@ export default async function TasksPage({
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Operación"
-          title="Tareas"
+          title="Pendientes"
           description="Pendientes vivos, urgentes y bloqueos con cliente o aseguradora."
           actions={
             <>
@@ -132,7 +153,7 @@ export default async function TasksPage({
           <MetricCard
             title="Pendientes activos"
             value={activeCount}
-            description="Tareas que todavía requieren seguimiento."
+            description="Pendientes que todavía requieren seguimiento."
             icon={CheckCircle2}
             tone="blue"
           />
@@ -146,7 +167,7 @@ export default async function TasksPage({
           <MetricCard
             title="Vencidas"
             value={overdueCount}
-            description="Tareas con fecha límite ya superada."
+            description="Pendientes con fecha límite ya superada."
             icon={Clock3}
             tone="amber"
           />
@@ -185,7 +206,7 @@ export default async function TasksPage({
                   />
                 </div>
               )
-            ) : pagedTasks.length === 0 ? (
+            ) : pagedWorkItems.length === 0 ? (
               <div className="p-4">
                 <EmptyState
                   icon={ListTodo}
@@ -197,7 +218,7 @@ export default async function TasksPage({
               </div>
             ) : (
               <>
-                <TasksTable tasks={taskRows} />
+                <WorkItemsTable workItems={workItemRows} />
                 <Pagination
                   page={page}
                   pageSize={PAGE_SIZE}
@@ -210,34 +231,34 @@ export default async function TasksPage({
           </SectionCard>
 
           <SectionCard title="Urgentes y vencidas" description="Casos que deberían moverse antes que el resto.">
-            {[...new Map([...urgentTasks, ...overdueTasks].map((t) => [t.id, t])).values()].length === 0 ? (
+            {[...new Map([...urgentWorkItemRows, ...overdueWorkItemRows].map((workItem) => [workItem.id, workItem])).values()].length === 0 ? (
               <div className="p-4">
                 <EmptyState
                   icon={Flame}
                   title="Nada urgente"
-                  description="No hay tareas urgentes ni vencidas en este momento."
+                  description="No hay pendientes urgentes ni vencidos en este momento."
                 />
               </div>
             ) : (
               <div className="divide-y divide-stone-200/80">
-                {[...new Map([...urgentTasks, ...overdueTasks].map((t) => [t.id, t])).values()]
+                {[...new Map([...urgentWorkItemRows, ...overdueWorkItemRows].map((workItem) => [workItem.id, workItem])).values()]
                   .slice(0, 10)
-                  .map((task) => (
-                    <div key={task.id} className="flex items-start justify-between gap-4 px-4 py-4">
+                  .map((workItem) => (
+                    <div key={workItem.id} className="flex items-start justify-between gap-4 px-4 py-4">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium text-foreground">{task.folio}</span>
-                          <PriorityBadge priority={task.priority} />
+                          <span className="font-medium text-foreground">{workItem.folio}</span>
+                          <PriorityBadge priority={workItem.priority} />
                         </div>
-                        <p className="mt-1 truncate text-sm text-muted-foreground">{task.title}</p>
+                        <p className="mt-1 truncate text-sm text-muted-foreground">{workItem.title}</p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {task.client?.fullName ?? "Sin cliente"} · {task.policy?.policyNumber ?? "Sin póliza"}
+                          {workItem.client?.fullName ?? "Sin cliente"} · {workItem.policy?.policyNumber ?? "Sin póliza"}
                         </p>
                       </div>
                       <div className="text-right">
-                        <StatusBadge status={task.status} className="w-fit" />
+                        <StatusBadge status={workItem.status} className="w-fit" />
                         <p className="mt-2 text-xs text-muted-foreground">
-                          {task.dueDate ? `${formatDate(task.dueDate)} · ${daysUntil(task.dueDate)} días` : "Sin fecha"}
+                          {workItem.dueDate ? `${formatDate(workItem.dueDate)} · ${daysUntil(workItem.dueDate)} días` : "Sin fecha"}
                         </p>
                       </div>
                     </div>

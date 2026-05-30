@@ -9,25 +9,18 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { EmptyState } from "@/components/empty-states/empty-state";
 import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
-import {
-  getRenewalStats,
-  getUpcomingRenewals,
-  createRenewalTasks,
-  sendRenewalReminders,
-  type RenewalReminder,
-} from "@/lib/renewals";
+import { getRenewalStats, getUpcomingRenewals, type RenewalReminder } from "@/lib/renewals";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
+
+export const dynamic = "force-dynamic";
 
 export default async function RenewalsPage({
   searchParams,
 }: {
   searchParams?: Promise<{ q?: string; page?: string }>;
 }) {
-  // Run automatic side-effects in parallel before reading stats.
-  await Promise.all([createRenewalTasks(), sendRenewalReminders()]);
-
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100).toLowerCase();
   const page = Math.max(1, Number(params.page) || 1);
@@ -57,7 +50,7 @@ export default async function RenewalsPage({
         <PageHeader
           eyebrow="Operación"
           title="Renovaciones"
-          description="Gestión automática de renovaciones de pólizas y recordatorios."
+          description="Seguimiento de renovaciones basado en la fecha de vencimiento."
           actions={
             <Button asChild className="rounded-full">
               <Link href="/tasks">
@@ -131,7 +124,7 @@ export default async function RenewalsPage({
                       </TableCell>
                       <TableCell>{renewal.clientName}</TableCell>
                       <TableCell>{renewal.insurerName}</TableCell>
-                      <TableCell>{formatDate(renewal.renewalDate)}</TableCell>
+                      <TableCell>{formatDate(renewal.endDate)}</TableCell>
                       <TableCell className="text-right font-medium">{formatCurrency(renewal.premiumAmount)}</TableCell>
                       <TableCell>
                         <DaysBadge days={renewal.daysUntilRenewal} />
@@ -143,12 +136,12 @@ export default async function RenewalsPage({
             )}
           </SectionCard>
 
-          <SectionCard title="Acciones automáticas" description="Tareas y recordatorios generados.">
+          <SectionCard title="Seguimiento operativo" description="La gestión de tareas y recordatorios vive en la bandeja de trabajo.">
             <div className="space-y-4">
               <div className="rounded-lg bg-muted/40 p-4">
-                <h4 className="font-medium mb-2">Tareas creadas</h4>
+                <h4 className="mb-2 font-medium">Tareas sugeridas</h4>
                 <p className="text-sm text-muted-foreground">
-                  Se han creado automáticamente {urgentRenewals.length + highPriorityRenewals.length} tareas de renovación.
+                  {urgentRenewals.length + highPriorityRenewals.length} renovaciones requieren atención prioritaria.
                 </p>
                 <Button asChild className="mt-2 w-full" size="sm">
                   <Link href="/tasks">Ver todas las tareas</Link>
@@ -156,14 +149,14 @@ export default async function RenewalsPage({
               </div>
 
               <div className="rounded-lg bg-muted/40 p-4">
-                <h4 className="font-medium mb-2">Recordatorios enviados</h4>
+                <h4 className="mb-2 font-medium">Recordatorios</h4>
                 <p className="text-sm text-muted-foreground">
-                  {urgentRenewals.length + highPriorityRenewals.length} recordatorios automáticos enviados a clientes y agentes.
+                  Los recordatorios se generan desde procesos de soporte, no al abrir esta pantalla.
                 </p>
               </div>
 
               <div className="rounded-lg bg-muted/40 p-4">
-                <h4 className="font-medium mb-2">Próximas acciones</h4>
+                <h4 className="mb-2 font-medium">Próximas acciones</h4>
                 <ul className="text-sm text-muted-foreground space-y-1">
                   <li>• Contactar clientes urgentes hoy</li>
                   <li>• Preparar cotizaciones de renovación</li>
@@ -228,7 +221,7 @@ export default async function RenewalsPage({
                       <TableCell>{renewal.clientName}</TableCell>
                       <TableCell>{renewal.insurerName}</TableCell>
                       <TableCell>{renewal.policyType}</TableCell>
-                      <TableCell>{formatDate(renewal.renewalDate)}</TableCell>
+                      <TableCell>{formatDate(renewal.endDate)}</TableCell>
                       <TableCell className="text-right font-medium">{formatCurrency(renewal.premiumAmount)}</TableCell>
                       <TableCell>
                         <DaysBadge days={renewal.daysUntilRenewal} />

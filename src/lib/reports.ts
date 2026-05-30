@@ -97,7 +97,7 @@ export async function generateFinancialReport(
     // Calculate renewal rate
     const renewedPolicies = await db.policy.count({
       where: {
-        renewalDate: {
+        endDate: {
           gte: startDate,
           lte: endDate,
         },

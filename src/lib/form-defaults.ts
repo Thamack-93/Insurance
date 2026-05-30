@@ -1,7 +1,7 @@
 import type { ClientFormValues, InsurerFormValues, ClaimFormValues, QuoteFormValues } from "@/lib/validations";
 import type { PolicyFormValues } from "@/lib/validations";
 import type { ReceiptFormValues } from "@/lib/validations";
-import type { TaskFormValues } from "@/lib/validations";
+import type { WorkItemFormValues } from "@/lib/validations";
 import { NO_REFERIDOR_VALUE } from "@/lib/constants";
 
 export function createClientDefaults(values?: Partial<ClientFormValues>): ClientFormValues {
@@ -34,7 +34,6 @@ export function createPolicyDefaults(values?: Partial<PolicyFormValues>): Policy
     status: values?.status ?? "ACTIVE",
     startDate: values?.startDate ?? today,
     endDate: values?.endDate ?? nextYearStr,
-    renewalDate: values?.renewalDate ?? nextYearStr,
     premiumAmount: values?.premiumAmount ?? 0,
     currency: values?.currency ?? "MXN",
     paymentFrequency: values?.paymentFrequency ?? "ANNUAL",
@@ -64,7 +63,7 @@ export function createReceiptDefaults(values?: Partial<ReceiptFormValues>): Rece
   };
 }
 
-export function createTaskDefaults(values?: Partial<TaskFormValues>): TaskFormValues {
+export function createWorkItemDefaults(values?: Partial<WorkItemFormValues>): WorkItemFormValues {
   const today = new Date().toISOString().split("T")[0];
   const nextWeek = new Date();
   nextWeek.setDate(nextWeek.getDate() + 7);

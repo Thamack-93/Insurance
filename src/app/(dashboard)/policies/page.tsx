@@ -55,7 +55,7 @@ export default async function PoliciesPage({
     db.policy.count({ where: { status: "PENDING" } }),
     db.policy.count({ where: { status: "EXPIRED" } }),
     db.policy.count({
-      where: { status: "ACTIVE", renewalDate: { gte: now, lte: in60 } },
+      where: { status: "ACTIVE", endDate: { gte: now, lte: in60 } },
     }),
     db.policy.aggregate({
       where: { status: "ACTIVE" },
@@ -65,14 +65,14 @@ export default async function PoliciesPage({
     db.policy.findMany({
       where,
       include: { client: true, insurer: true },
-      orderBy: [{ renewalDate: "asc" }, { createdAt: "desc" }],
+      orderBy: [{ endDate: "asc" }, { createdAt: "desc" }],
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
     db.policy.findMany({
       where: { status: { in: ["EXPIRED", "PENDING"] } },
       include: { client: true, insurer: true },
-      orderBy: [{ status: "asc" }, { renewalDate: "asc" }],
+      orderBy: [{ status: "asc" }, { endDate: "asc" }],
       take: 10,
     }),
   ]);
@@ -209,9 +209,9 @@ export default async function PoliciesPage({
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {policy.renewalDate ? (
+                        {policy.endDate ? (
                           <span className="text-sm text-muted-foreground">
-                            {formatDate(policy.renewalDate)} · {daysUntil(policy.renewalDate)} días
+                            {formatDate(policy.endDate)} · {daysUntil(policy.endDate)} días
                           </span>
                         ) : (
                           <span className="text-sm text-muted-foreground">Sin fecha</span>
@@ -265,7 +265,7 @@ export default async function PoliciesPage({
                       {policy.client.fullName} · {policy.insurer.name}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {policy.renewalDate ? formatDate(policy.renewalDate) : "Sin renovación"} · {policyTypeLabel(policy.policyType)}
+                      {policy.endDate ? formatDate(policy.endDate) : "Sin renovación"} · {policyTypeLabel(policy.policyType)}
                     </p>
                   </div>
                   <StatusBadge status={policy.status} className="w-fit" />

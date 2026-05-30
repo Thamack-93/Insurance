@@ -1,7 +1,5 @@
 import Link from "next/link";
 import { ArrowRight, Bell, CheckCheck } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
-import { es } from "date-fns/locale";
 import { PageHeader } from "@/components/layout/page-header";
 import { SectionCard } from "@/components/pages-secondary/panels";
 import { EmptyState } from "@/components/empty-states/empty-state";
@@ -16,7 +14,7 @@ import {
   type AlertFilter,
 } from "@/lib/notifications";
 import { MarkOneButton, MarkAllReadButton } from "@/components/notifications/notifications-page-actions";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatRelativeDate } from "@/lib/dates";
 
 const PAGE_SIZE = 25;
 
@@ -124,10 +122,7 @@ export default async function NotificationsPage({
             {entries.map((alert) => {
               const href = alertLink(alert.entityType, alert.entityId);
               const isRead = Boolean(alert.readAt);
-              const relative = formatDistanceToNow(new Date(alert.createdAt), {
-                addSuffix: true,
-                locale: es,
-              });
+              const relative = formatRelativeDate(alert.createdAt);
               return (
                 <li
                   key={alert.id}

@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import {
   seedPendingReceipt,
   cleanupReceipt,
-  cleanupRecentRenewalTasks,
+  cleanupRecentRenewalWorkItems,
   getTestDb,
   getAdminSessionCookie,
 } from "../helpers/db";
@@ -105,7 +105,7 @@ test.describe("POST /api/payments/quick", () => {
     } finally {
       if (seeded) {
         await cleanupReceipt(seeded.id);
-        await cleanupRecentRenewalTasks(seeded.policyId, start);
+        await cleanupRecentRenewalWorkItems(seeded.policyId, start);
       }
     }
   });
@@ -159,7 +159,7 @@ test.describe("POST /api/payments/quick", () => {
     } finally {
       if (seeded) {
         await cleanupReceipt(seeded.id);
-        await cleanupRecentRenewalTasks(seeded.policyId, start);
+        await cleanupRecentRenewalWorkItems(seeded.policyId, start);
       }
     }
   });

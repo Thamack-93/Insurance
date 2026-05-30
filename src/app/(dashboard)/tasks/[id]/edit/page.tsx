@@ -1,16 +1,17 @@
 import { notFound } from "next/navigation";
-import { updateTask } from "@/app/(dashboard)/tasks/actions";
-import { TaskForm } from "@/components/forms/task-form";
-import { createTaskDefaults } from "@/lib/form-defaults";
+import { updateWorkItem } from "@/app/(dashboard)/tasks/actions";
+import { WorkItemForm } from "@/components/forms/task-form";
+import { createWorkItemDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
 import { formatDateInput } from "@/lib/form-utils";
+import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
 
-export default async function EditTaskPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EditWorkItemPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const db = getDb();
-  const [task, clients, policies, insurers, receipts] = await Promise.all([
-    db.task.findUnique({ where: { id } }),
+  const [workItem, clients, policies, insurers, receipts] = await Promise.all([
+    findWorkItemByRouteId(id, db),
     db.client.findMany({
       where: { status: { not: "ARCHIVED" } },
       orderBy: { fullName: "asc" },
@@ -33,7 +34,7 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
     }),
   ]);
 
-  if (!task) {
+  if (!workItem) {
     notFound();
   }
 
@@ -42,34 +43,34 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <PageHeader
           eyebrow="Operación"
-          title={`Editar ${task.folio}`}
+          title={`Editar ${workItem.folio ?? workItem.sourceId ?? workItem.id}`}
           description="Actualiza prioridad, estado o relaciones del pendiente sin perder historial."
         />
 
-        <TaskForm
+        <WorkItemForm
           title="Edición de pendiente"
           description="Los cambios afectan Hoy, Dashboard, renovaciones y cobranza cuando aplique."
           submitLabel="Guardar cambios"
           cancelHref="/tasks"
-          defaultValues={createTaskDefaults({
-            clientId: task.clientId ?? "",
-            policyId: task.policyId ?? "",
-            insurerId: task.insurerId ?? "",
-            receiptId: task.receiptId ?? "",
-            title: task.title,
-            description: task.description ?? "",
-            taskType: task.taskType,
-            status: task.status,
-            priority: task.priority,
-            startDate: formatDateInput(task.startDate),
-            dueDate: formatDateInput(task.dueDate),
-            notes: task.notes ?? "",
+          defaultValues={createWorkItemDefaults({
+            clientId: workItem.clientId ?? "",
+            policyId: workItem.policyId ?? "",
+            insurerId: workItem.insurerId ?? "",
+            receiptId: workItem.receiptId ?? "",
+            title: workItem.title,
+            description: workItem.description ?? "",
+            taskType: workItem.taskType ?? "GENERAL",
+            status: workItem.status === "DISMISSED" ? "ARCHIVED" : workItem.status,
+            priority: workItem.priority,
+            startDate: formatDateInput(workItem.startDate),
+            dueDate: formatDateInput(workItem.dueDate),
+            notes: workItem.notes ?? "",
           })}
           clientOptions={clients.map((client) => ({ value: client.id, label: client.fullName }))}
           policyOptions={policies.map((policy) => ({ value: policy.id, label: policy.policyNumber }))}
           insurerOptions={insurers.map((insurer) => ({ value: insurer.id, label: insurer.name }))}
           receiptOptions={receipts.map((receipt) => ({ value: receipt.id, label: receipt.receiptNumber }))}
-          submitAction={updateTask.bind(null, task.id)}
+          submitAction={updateWorkItem.bind(null, workItem.sourceId ?? workItem.id)}
         />
       </div>
     </div>

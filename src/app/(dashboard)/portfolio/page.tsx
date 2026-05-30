@@ -59,7 +59,7 @@ export default async function PortfolioPage({
     db.policy.findMany({
       where,
       include: { client: true, insurer: true },
-      orderBy: [{ premiumAmount: "desc" }, { renewalDate: "asc" }],
+      orderBy: [{ premiumAmount: "desc" }, { endDate: "asc" }],
       skip: (page - 1) * DEFAULT_PAGE_SIZE,
       take: DEFAULT_PAGE_SIZE,
     }),
@@ -71,7 +71,7 @@ export default async function PortfolioPage({
     db.client.count({ where: { status: "ACTIVE" } }),
     db.insurer.count({ where: { status: "ACTIVE" } }),
     db.policy.count({
-      where: { status: "ACTIVE", renewalDate: { gte: now, lte: in60 } },
+      where: { status: "ACTIVE", endDate: { gte: now, lte: in60 } },
     }),
     db.receipt.findMany({
       where: { dueDate: { gte: now, lte: in60 }, status: { in: ["PENDING", "OVERDUE"] } },
@@ -245,9 +245,9 @@ export default async function PortfolioPage({
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {policy.renewalDate ? (
+                        {policy.endDate ? (
                           <span className="text-sm text-muted-foreground">
-                            {formatDate(policy.renewalDate)} · {daysUntil(policy.renewalDate)} días
+                            {formatDate(policy.endDate)} · {daysUntil(policy.endDate)} días
                           </span>
                         ) : (
                           <span className="text-sm text-muted-foreground">Sin fecha</span>

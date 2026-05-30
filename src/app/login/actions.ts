@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { setSessionCookie, verifyPassword, SYSTEM_USER_ID } from "@/lib/auth";
 import { writeActivityLog } from "@/lib/activity-log";
+import { checkRateLimit } from "@/lib/request-guards";
 
 export type LoginResult = { ok: true } | { ok: false; error: string };
 
@@ -14,6 +15,14 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
 
   if (!email || !password) {
     return { ok: false, error: "Captura tu correo y contraseña." };
+  }
+
+  const rateLimit = checkRateLimit(`login:${email}`, {
+    limit: 5,
+    windowMs: 15 * 60 * 1000,
+  });
+  if (!rateLimit.allowed) {
+    return { ok: false, error: "Demasiados intentos. Intenta de nuevo en unos minutos." };
   }
 
   const db = getDb();

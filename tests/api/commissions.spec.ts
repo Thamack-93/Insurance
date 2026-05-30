@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import {
   seedPendingReceipt,
   cleanupReceipt,
-  cleanupRecentRenewalTasks,
+  cleanupRecentRenewalWorkItems,
   getTestDb,
   getAdminSessionCookie,
 } from "../helpers/db";
@@ -84,7 +84,7 @@ test.describe("Commissions API", () => {
       const db = getTestDb();
       if (policyId) {
         await db.commission.deleteMany({ where: { policyId } });
-        await cleanupRecentRenewalTasks(policyId, startedAt);
+        await cleanupRecentRenewalWorkItems(policyId, startedAt);
       }
       if (receiptId) {
         await cleanupReceipt(receiptId);

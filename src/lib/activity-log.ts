@@ -1,4 +1,4 @@
-import type { Prisma } from "@/generated/prisma/client";
+import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
 import { getCurrentUserIdOrSystem } from "@/lib/auth";
 
@@ -20,6 +20,7 @@ export async function writeActivityLog({
   oldValue,
   newValue,
   userId,
+  db: client,
 }: {
   entityType: string;
   entityId: string;
@@ -27,8 +28,9 @@ export async function writeActivityLog({
   oldValue?: unknown;
   newValue?: unknown;
   userId?: string;
+  db?: PrismaClient | Prisma.TransactionClient;
 }) {
-  const db = getDb();
+  const db = client ?? getDb();
   const resolvedUserId = userId ?? (await getCurrentUserIdOrSystem());
 
   await db.activityLog.create({

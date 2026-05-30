@@ -1,6 +1,7 @@
 import type { Prisma, AlertSeverity } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
+import { mapAlertStatusToWorkItemStatus, upsertWorkItemFromSource } from "@/lib/work-items";
 
 export { alertLink } from "@/lib/notifications-shared";
 
@@ -33,7 +34,7 @@ export type AlertFilter = {
 
 /**
  * Create a notification (Alert). Used by the risk engine, renewals helper
- * and task creation flows. Best-effort: failures are logged but not thrown
+ * and WorkItem creation flows. Best-effort: failures are logged but not thrown
  * so that the originating flow keeps working.
  */
 export async function notify(input: NotifyInput): Promise<AlertRecord | null> {
@@ -48,6 +49,20 @@ export async function notify(input: NotifyInput): Promise<AlertRecord | null> {
         entityType: input.entityType ?? "System",
         entityId: input.entityId ?? "general",
       },
+    });
+    await upsertWorkItemFromSource({
+      sourceType: "Alert",
+      sourceId: alert.id,
+      workItemType: "ALERT",
+      status: mapAlertStatusToWorkItemStatus(alert.status),
+      severity: alert.severity,
+      title: alert.title,
+      description: alert.description,
+      entityType: alert.entityType,
+      entityId: alert.entityId,
+      readAt: alert.readAt,
+      createdById: null,
+      updatedById: null,
     });
     return alert as AlertRecord;
   } catch (error) {
@@ -151,4 +166,3 @@ export async function getAlertTypes(): Promise<string[]> {
     return [];
   }
 }
-

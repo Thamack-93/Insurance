@@ -4,6 +4,7 @@ import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session";
 const PUBLIC_PREFIXES = [
   "/login",
   "/api/auth",
+  "/api/integrations/telegram/webhook",
   "/_next",
   "/favicon",
   "/public",
@@ -36,6 +37,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|favicon.svg|login|api/auth).*)",
+    "/((?!_next/static|_next/image|favicon.ico|favicon.svg|login|api/auth|api/integrations/telegram/webhook).*)",
   ],
 };

@@ -93,10 +93,10 @@ export async function cleanupReceipt(receiptId: string): Promise<void> {
 }
 
 /**
- * Removes any tasks created as side-effects of payment registration for a given policy
- * during the test (renewal tasks). Filtered by folio prefix `TASK-` plus a recency window.
+ * Removes any work items created as side-effects of payment registration for a given policy
+ * during the test (renewal follow-ups). Filtered by folio prefix `TASK-` plus a recency window.
  */
-export async function cleanupRecentRenewalTasks(policyId: string, sinceMs: number): Promise<void> {
+export async function cleanupRecentRenewalWorkItems(policyId: string, sinceMs: number): Promise<void> {
   const db = getTestDb();
   try {
     await db.task.deleteMany({

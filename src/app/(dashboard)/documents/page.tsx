@@ -95,7 +95,7 @@ export default async function DocumentsPage({
         <PageHeader
           eyebrow="Archivo"
           title="Documentos"
-          description="Control de documentos locales, asociaciones y huecos de expediente."
+          description="Control de documentos, asociaciones y huecos de expediente."
           actions={
             <Button asChild className="rounded-full">
               <Link href="/risks">

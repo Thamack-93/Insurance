@@ -18,6 +18,7 @@ import { getDb } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
+import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 
 const quoteStatusLabels: Record<string, string> = {
   REQUESTED: "Solicitada",
@@ -57,11 +58,11 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     notFound();
   }
 
-  const [policies, receipts, tasks, claims, quotes, documents, referidos, activity] = await Promise.all([
+  const [policies, receipts, workItems, claims, quotes, documents, referidos, activity] = await Promise.all([
     db.policy.findMany({
       where: { clientId: id },
       include: { insurer: true },
-      orderBy: [{ status: "asc" }, { renewalDate: "asc" }],
+      orderBy: [{ status: "asc" }, { endDate: "asc" }],
       take: 10,
     }),
     db.receipt.findMany({
@@ -70,11 +71,10 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       orderBy: { dueDate: "desc" },
       take: 10,
     }),
-    db.task.findMany({
-      where: { clientId: id },
-      include: { policy: true, insurer: true },
-      orderBy: [{ priority: "desc" }, { dueDate: "asc" }],
-      take: 10,
+    getWorkItems({
+      workItemTypes: ["TASK"],
+      clientId: id,
+      limit: 10,
     }),
     db.claim.findMany({
       where: { clientId: id },
@@ -110,7 +110,11 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
   const activePolicies = policies.filter((policy) => policy.status === "ACTIVE");
   const openReceipts = receipts.filter((receipt) => receipt.status !== "PAID" && receipt.status !== "CANCELLED");
-  const openTasks = tasks.filter((task) => task.status !== "RESOLVED" && task.status !== "CANCELLED" && task.status !== "ARCHIVED");
+  const openWorkItemCount = await countWorkItems({
+    workItemTypes: ["TASK"],
+    statuses: OPEN_WORK_ITEM_STATUSES,
+    clientId: id,
+  });
   const activePremium = activePolicies.reduce((sum, policy) => sum + toNumber(policy.premiumAmount), 0);
 
   return (
@@ -156,7 +160,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           />
           <MetricCard
             title="Tareas abiertas"
-            value={openTasks.length}
+            value={openWorkItemCount}
             description="Pendientes operativos relacionados."
             icon={BadgeInfo}
             tone="blue"
@@ -265,7 +269,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                         {policy.policyType}
                       </Badge>
                     </TableCell>
-                    <TableCell>{policy.renewalDate ? formatDate(policy.renewalDate) : "Sin fecha"}</TableCell>
+                    <TableCell>{policy.endDate ? formatDate(policy.endDate) : "Sin fecha"}</TableCell>
                     <TableCell className="text-right font-medium">{formatCurrency(policy.premiumAmount, policy.currency)}</TableCell>
                   </TableRow>
                 ))}
@@ -315,9 +319,13 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tasks.map((task) => (
+                {workItems.map((task) => (
                   <TableRow key={task.id}>
-                    <TableCell className="font-medium">{task.folio}</TableCell>
+                    <TableCell className="font-medium">
+                      <Link href={`/tasks/${task.sourceId ?? task.id}`} className="hover:text-primary">
+                        {task.folio ?? task.sourceId ?? task.id}
+                      </Link>
+                    </TableCell>
                     <TableCell>{task.title}</TableCell>
                     <TableCell>
                       <PriorityBadge priority={task.priority} />

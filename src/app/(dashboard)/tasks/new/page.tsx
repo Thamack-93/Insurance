@@ -1,10 +1,10 @@
-import { createTask } from "@/app/(dashboard)/tasks/actions";
-import { TaskForm } from "@/components/forms/task-form";
-import { createTaskDefaults } from "@/lib/form-defaults";
+import { createWorkItem } from "@/app/(dashboard)/tasks/actions";
+import { WorkItemForm } from "@/components/forms/task-form";
+import { createWorkItemDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
 
-export default async function NewTaskPage() {
+export default async function NewWorkItemPage() {
   const db = getDb();
   const [clients, policies, insurers, receipts] = await Promise.all([
     db.client.findMany({
@@ -35,20 +35,20 @@ export default async function NewTaskPage() {
         <PageHeader
           eyebrow="Operación"
           title="Nuevo pendiente"
-          description="Convierte seguimiento operativo en una tarea trazable y accionable."
+          description="Convierte seguimiento operativo en un WorkItem trazable y accionable."
         />
 
-        <TaskForm
+        <WorkItemForm
           title="Alta de pendiente"
           description="Puedes ligarlo a cliente, póliza, aseguradora o recibo según el contexto."
           submitLabel="Crear pendiente"
           cancelHref="/tasks"
-          defaultValues={createTaskDefaults()}
+          defaultValues={createWorkItemDefaults()}
           clientOptions={clients.map((client) => ({ value: client.id, label: client.fullName }))}
           policyOptions={policies.map((policy) => ({ value: policy.id, label: policy.policyNumber }))}
           insurerOptions={insurers.map((insurer) => ({ value: insurer.id, label: insurer.name }))}
           receiptOptions={receipts.map((receipt) => ({ value: receipt.id, label: receipt.receiptNumber }))}
-          submitAction={createTask}
+          submitAction={createWorkItem}
         />
       </div>
     </div>

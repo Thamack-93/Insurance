@@ -1,21 +1,21 @@
 "use client";
 
-import { deleteTask } from "@/app/(dashboard)/tasks/actions";
+import { deleteWorkItem } from "@/app/(dashboard)/tasks/actions";
 import { ConfirmDeleteDialog } from "@/components/dialogs/confirm-delete-dialog";
 
-type DeleteTaskButtonProps = {
+type DeleteWorkItemButtonProps = {
   id: string;
   folio: string;
 };
 
-export function DeleteTaskButton({ id, folio }: DeleteTaskButtonProps) {
+export function DeleteWorkItemButton({ id, folio }: DeleteWorkItemButtonProps) {
   return (
     <ConfirmDeleteDialog
       id={id}
       entityLabel="pendiente"
       itemName={folio}
       fallbackRedirect="/tasks"
-      onDelete={deleteTask}
+      onDelete={deleteWorkItem}
       description={
         <>
           ¿Seguro que quieres eliminar el pendiente <strong>{folio}</strong>? Esta acción no se puede

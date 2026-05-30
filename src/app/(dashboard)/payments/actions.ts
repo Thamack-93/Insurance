@@ -1,7 +1,6 @@
 "use server";
 
 import { getDb } from "@/lib/db";
-import { writeActivityLog } from "@/lib/activity-log";
 import { getCurrentUserId } from "@/lib/auth";
 import { today } from "@/lib/dates";
 import { logError } from "@/lib/logger";
@@ -59,73 +58,130 @@ export async function createPayment(data: CreatePaymentInput): Promise<MutationR
     }
 
     const userId = await getCurrentUserId();
-    const payment = await db.payment.create({
-      data: {
-        receiptId: data.receiptId,
-        policyId: receipt.policyId,
-        clientId: receipt.clientId,
-        amount: data.amount,
-        currency: receipt.currency,
-        paidDate: new Date(data.paidDate),
-        paymentMethod: data.paymentMethod,
-        reference: data.reference,
-        notes: data.notes,
-        createdById: userId,
-        updatedById: userId,
-      },
-    });
+    const payment = await db.$transaction(async (tx) => {
+      const currentReceipt = await tx.receipt.findUnique({
+        where: { id: data.receiptId },
+        include: {
+          client: true,
+          policy: true,
+          insurer: true,
+        },
+      });
 
-    await db.receipt.update({
-      where: { id: data.receiptId },
-      data: {
-        status: "PAID",
-        paidDate: new Date(data.paidDate),
-        paymentMethod: data.paymentMethod,
-        updatedById: userId,
-      },
-    });
-
-    await writeActivityLog({
-      action: "CREATE_PAYMENT",
-      entityType: "PAYMENT",
-      entityId: payment.id,
-      newValue: JSON.stringify({
-        receiptId: receipt.id,
-        receiptNumber: receipt.receiptNumber,
-        clientId: receipt.clientId,
-        clientName: receipt.client.fullName,
-        policyId: receipt.policyId,
-        policyNumber: receipt.policy.policyNumber,
-        amount: data.amount,
-        paymentMethod: data.paymentMethod,
-        paidDate: data.paidDate,
-      }),
-    });
-
-    if (receipt.policy.endDate) {
-      const renewalDate = new Date(receipt.policy.endDate);
-      const todayDate = new Date(today());
-      const daysUntilRenewal = Math.ceil(
-        (renewalDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24),
-      );
-
-      if (daysUntilRenewal <= 30 && daysUntilRenewal > 0) {
-        await db.task.create({
-          data: {
-            folio: `TASK-${Date.now()}`,
-            title: `Renovación de póliza ${receipt.policy.policyNumber}`,
-            description: `Póliza vence en ${daysUntilRenewal} días. Contactar cliente para renovación.`,
-            clientId: receipt.clientId,
-            policyId: receipt.policyId,
-            insurerId: receipt.insurerId,
-            priority: daysUntilRenewal <= 15 ? "HIGH" : "MEDIUM",
-            status: "OPEN",
-            dueDate: renewalDate,
-            taskType: "RENEWAL",
-          },
-        });
+      if (!currentReceipt) {
+        throw new Error("El recibo no existe o fue eliminado.");
       }
-    }
+
+      if (currentReceipt.status === "PAID") {
+        throw new Error("Este recibo ya está pagado.");
+      }
+
+      const paidDate = new Date(data.paidDate);
+      const updatedReceipt = await tx.receipt.updateMany({
+        where: {
+          id: data.receiptId,
+          status: { not: "PAID" },
+        },
+        data: {
+          status: "PAID",
+          paidDate,
+          paymentMethod: data.paymentMethod,
+          updatedById: userId,
+        },
+      });
+
+      if (!updatedReceipt.count) {
+        throw new Error("Este recibo ya está pagado.");
+      }
+
+      const createdPayment = await tx.payment.create({
+        data: {
+          receiptId: data.receiptId,
+          policyId: currentReceipt.policyId,
+          clientId: currentReceipt.clientId,
+          amount: data.amount,
+          currency: currentReceipt.currency,
+          paidDate,
+          paymentMethod: data.paymentMethod,
+          reference: data.reference,
+          notes: data.notes,
+          createdById: userId,
+          updatedById: userId,
+        },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          entityType: "PAYMENT",
+          entityId: createdPayment.id,
+          action: "CREATE_PAYMENT",
+          newValue: JSON.stringify({
+            receiptId: currentReceipt.id,
+            receiptNumber: currentReceipt.receiptNumber,
+            clientId: currentReceipt.clientId,
+            clientName: currentReceipt.client.fullName,
+            policyId: currentReceipt.policyId,
+            policyNumber: currentReceipt.policy.policyNumber,
+            amount: data.amount,
+            paymentMethod: data.paymentMethod,
+            paidDate: data.paidDate,
+          }),
+          userId,
+        },
+      });
+
+      if (currentReceipt.policy.endDate) {
+        const dueDate = new Date(currentReceipt.policy.endDate);
+        const todayDate = new Date(today());
+        const daysUntilRenewal = Math.ceil(
+          (dueDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24),
+        );
+
+        if (daysUntilRenewal <= 30 && daysUntilRenewal > 0) {
+          await tx.workItem.upsert({
+            where: {
+              sourceType_sourceId: {
+                sourceType: "Task",
+                sourceId: `receipt:${currentReceipt.id}:renewal-task`,
+              },
+            },
+            create: {
+              sourceType: "Task",
+              sourceId: `receipt:${currentReceipt.id}:renewal-task`,
+              workItemType: "TASK",
+              taskType: "RENEWAL",
+              folio: `TASK-${Date.now()}`,
+              title: `Renovación de póliza ${currentReceipt.policy.policyNumber}`,
+              description: `Póliza vence en ${daysUntilRenewal} días. Contactar cliente para renovación.`,
+              clientId: currentReceipt.clientId,
+              policyId: currentReceipt.policyId,
+              insurerId: currentReceipt.insurerId,
+              priority: daysUntilRenewal <= 15 ? "HIGH" : "MEDIUM",
+              status: "OPEN",
+              dueDate,
+              entityType: "WorkItem",
+              entityId: `receipt:${currentReceipt.id}:renewal-task`,
+            },
+            update: {
+              workItemType: "TASK",
+              taskType: "RENEWAL",
+              title: `Renovación de póliza ${currentReceipt.policy.policyNumber}`,
+              description: `Póliza vence en ${daysUntilRenewal} días. Contactar cliente para renovación.`,
+              clientId: currentReceipt.clientId,
+              policyId: currentReceipt.policyId,
+              insurerId: currentReceipt.insurerId,
+              priority: daysUntilRenewal <= 15 ? "HIGH" : "MEDIUM",
+              status: "OPEN",
+              dueDate,
+              entityType: "WorkItem",
+              entityId: `receipt:${currentReceipt.id}:renewal-task`,
+            },
+          });
+        }
+      }
+
+      return createdPayment;
+    });
 
     revalidatePaths([
       "/payments",
@@ -138,7 +194,12 @@ export async function createPayment(data: CreatePaymentInput): Promise<MutationR
     return successResult(payment.id, `/receipts/${receipt.id}`, "Pago registrado exitosamente.");
   } catch (error) {
     logError("payments.createPayment", error, { receiptId: data.receiptId });
-    return errorResult("No se pudo registrar el pago. Intenta de nuevo.");
+    const message =
+      error instanceof Error &&
+      ["El recibo no existe o fue eliminado.", "Este recibo ya está pagado."].includes(error.message)
+        ? error.message
+        : "No se pudo registrar el pago. Intenta de nuevo.";
+    return errorResult(message);
   }
 }
 

@@ -4,14 +4,13 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bell, CheckCheck } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
-import { es } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SeverityBadge } from "@/components/badges/status-badge";
 import { alertLink } from "@/lib/notifications-shared";
 import { markAlertRead, markAllAlertsRead } from "@/app/(dashboard)/notifications/actions";
 import { cn } from "@/lib/utils";
+import { formatRelativeDate } from "@/lib/dates";
 
 export type BellAlert = {
   id: string;
@@ -113,11 +112,7 @@ export function NotificationsBell({
             <ul className="divide-y divide-border/70">
               {alerts.map((alert) => {
                 const href = alertLink(alert.entityType, alert.entityId);
-                const created = new Date(alert.createdAt);
-                const relative = formatDistanceToNow(created, {
-                  addSuffix: true,
-                  locale: es,
-                });
+                const relative = formatRelativeDate(alert.createdAt);
                 const isUnread = alert.readAt === null;
                 return (
                   <li

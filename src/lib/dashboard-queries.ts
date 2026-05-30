@@ -5,6 +5,7 @@ import { today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
 import { detectRisks } from "@/lib/risk-engine";
 import { DASHBOARD_LIST_LIMIT } from "@/lib/constants";
+import { OPEN_WORK_ITEM_STATUSES, countWorkItems, getWorkItems } from "@/lib/work-queue";
 
 export async function getDashboardData() {
   const db = getDb();
@@ -19,8 +20,8 @@ export async function getDashboardData() {
     duePayments60,
     overduePayments,
     renewals60,
-    openTasks,
-    urgentTasks,
+    openWorkItems,
+    urgentWorkItems,
     commissionsAggregateParts,
     upcomingReceipts,
     upcomingReceiptsForChart,
@@ -32,7 +33,7 @@ export async function getDashboardData() {
     recentActivity,
     openAlerts,
     risks,
-    criticalTasks,
+    criticalWorkItems,
   ] = await Promise.all([
     db.policy.count({ where: { status: "ACTIVE" } }),
     db.receipt.count({
@@ -42,16 +43,16 @@ export async function getDashboardData() {
       where: { dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
     }),
     db.policy.count({
-      where: { renewalDate: { gte: now, lte: in60 }, status: "ACTIVE" },
+      where: { endDate: { gte: now, lte: in60 }, status: "ACTIVE" },
     }),
-    db.task.count({
-      where: { status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] } },
+    countWorkItems({
+      workItemTypes: ["TASK"],
+      statuses: OPEN_WORK_ITEM_STATUSES,
     }),
-    db.task.count({
-      where: {
-        priority: "URGENT",
-        status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] },
-      },
+    countWorkItems({
+      workItemTypes: ["TASK"],
+      statuses: OPEN_WORK_ITEM_STATUSES,
+      priorities: ["URGENT"],
     }),
     // Per-row fallback: actualAmount when set, otherwise expectedAmount.
     // We split into two aggregates to reproduce SUM(COALESCE(actualAmount, expectedAmount))
@@ -81,17 +82,17 @@ export async function getDashboardData() {
       take: 500,
     }),
     db.policy.findMany({
-      where: { renewalDate: { gte: now, lte: in60 }, status: "ACTIVE" },
+      where: { endDate: { gte: now, lte: in60 }, status: "ACTIVE" },
       include: { client: true, insurer: true },
-      orderBy: { renewalDate: "asc" },
+      orderBy: { endDate: "asc" },
       take: 6,
     }),
     // Lightweight chart query — only the field we need, capped separately so the
     // urgent renewals list size doesn't silently undercount the weekly chart.
     db.policy.findMany({
-      where: { renewalDate: { gte: now, lte: in60 }, status: "ACTIVE" },
-      select: { renewalDate: true },
-      orderBy: { renewalDate: "asc" },
+      where: { endDate: { gte: now, lte: in60 }, status: "ACTIVE" },
+      select: { endDate: true },
+      orderBy: { endDate: "asc" },
       take: 500,
     }),
     db.policy.groupBy({
@@ -111,14 +112,10 @@ export async function getDashboardData() {
     db.activityLog.findMany({ orderBy: { createdAt: "desc" }, take: 8 }),
     db.alert.findMany({ where: { status: "OPEN" }, orderBy: { createdAt: "desc" }, take: 8 }),
     detectRisks(),
-    db.task.findMany({
-      where: {
-        OR: [{ priority: "URGENT" }, { dueDate: { lte: in7 } }],
-        status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] },
-      },
-      include: { client: true, policy: true, insurer: true },
-      orderBy: [{ priority: "desc" }, { dueDate: "asc" }],
-      take: 6,
+    getWorkItems({
+      workItemTypes: ["TASK"],
+      statuses: OPEN_WORK_ITEM_STATUSES,
+      limit: 12,
     }),
   ]);
 
@@ -149,14 +146,14 @@ export async function getDashboardData() {
       duePayments60,
       overduePayments,
       renewals60,
-      openTasks,
-      urgentTasks,
+      openWorkItems,
+      urgentWorkItems,
       commissionsReceivable,
       risksDetected: risks.length,
     },
     charts: {
       dueByWeek: groupDatesByWeek(upcomingReceiptsForChart, "dueDate"),
-      renewalsByWeek: groupDatesByWeek(upcomingRenewalsForChart, "renewalDate"),
+      renewalsByWeek: groupDatesByWeek(upcomingRenewalsForChart, "endDate"),
       policyTypeDistribution: policyTypeDistributionRows.map((row) => ({
         name: row.policyType,
         value: row._count.policyType,
@@ -170,7 +167,7 @@ export async function getDashboardData() {
     sections: {
       urgentPayments,
       urgentRenewals: upcomingRenewalPolicies,
-      criticalTasks,
+      criticalWorkItems,
       recentActivity,
       documentsMissing,
       topRisks: risks.slice(0, 6),
@@ -220,7 +217,7 @@ export async function getTodayData() {
     overduePayments,
     paymentsDue7,
     urgentRenewals,
-    overdueTasks,
+    overdueWorkItems,
     clientsToContact,
     commissionsToReview,
     recentActivity,
@@ -243,24 +240,21 @@ export async function getTodayData() {
       take: 8,
     }),
     db.policy.findMany({
-      where: { renewalDate: { gte: now, lte: in30 }, status: "ACTIVE" },
+      where: { endDate: { gte: now, lte: in30 }, status: "ACTIVE" },
       include: { client: true, insurer: true },
-      orderBy: { renewalDate: "asc" },
+      orderBy: { endDate: "asc" },
       take: 8,
     }),
-    db.task.findMany({
-      where: {
-        dueDate: { lt: now },
-        status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] },
-      },
-      include: { client: true, policy: true, insurer: true },
-      orderBy: { dueDate: "asc" },
-      take: 8,
+    getWorkItems({
+      workItemTypes: ["TASK"],
+      statuses: OPEN_WORK_ITEM_STATUSES,
+      to: now,
+      limit: 8,
     }),
     db.client.findMany({
       where: {
-        tasks: {
-          some: { status: { in: ["OPEN", "WAITING_CLIENT"] } },
+        workItems: {
+          some: { workItemType: "TASK", status: { in: ["OPEN", "WAITING_CLIENT"] } },
         },
       },
       take: 6,
@@ -278,12 +272,26 @@ export async function getTodayData() {
     detectRisks(),
   ]);
 
+  const overdueWorkItemRows = overdueWorkItems.map((item) => ({
+    id: item.sourceId ?? item.id,
+    folio: item.folio ?? item.sourceId ?? item.id,
+    title: item.title,
+    status: item.status,
+    priority: item.priority,
+    startDate: item.startDate,
+    dueDate: item.dueDate,
+    client: item.client,
+    policy: item.policy,
+    insurer: item.insurer,
+    receipt: item.receipt,
+  }));
+
   return {
     paymentsDueToday,
     overduePayments,
     paymentsDue7,
     urgentRenewals,
-    overdueTasks,
+    overdueWorkItems: overdueWorkItemRows,
     clientsToContact,
     commissionsToReview,
     documentsMissing: risks

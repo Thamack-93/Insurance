@@ -6,9 +6,41 @@ import { SearchProvider } from "@/components/search/search-provider";
 import { CommandPaletteWrapper } from "@/components/command/command-palette-wrapper";
 import { ShortcutsHelp } from "@/components/shortcuts/shortcuts-help";
 import { getSettings } from "@/lib/settings";
+import type { Settings } from "@/lib/settings";
 import { RuntimeSettingsHydrator } from "@/components/settings/runtime-settings-hydrator";
 import { getUnreadAlertCount, getRecentAlerts } from "@/lib/notifications";
+import type { AlertRecord } from "@/lib/notifications";
 import { requireUserOrRedirect } from "@/lib/auth";
+
+const fallbackSettings: Settings = {
+  firmName: "PG",
+  firmEmail: "",
+  firmPhone: "",
+  firmAddress: "",
+  firmRfc: "",
+  defaultCurrency: "MXN",
+  dateFormat: "DD/MM/YYYY",
+  theme: "light",
+  emailNotifications: true,
+  smsNotifications: false,
+  autoBackup: false,
+  backupFrequency: "weekly",
+  retentionDays: 30,
+};
+
+async function getSafeDashboardShellData() {
+  const [settingsResult, unreadResult, alertsResult] = await Promise.allSettled([
+    getSettings(),
+    getUnreadAlertCount(),
+    getRecentAlerts(10),
+  ]);
+
+  return {
+    settings: settingsResult.status === "fulfilled" ? settingsResult.value : fallbackSettings,
+    unreadAlertCount: unreadResult.status === "fulfilled" ? unreadResult.value : 0,
+    recentAlerts: alertsResult.status === "fulfilled" ? alertsResult.value : ([] as AlertRecord[]),
+  };
+}
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
   // Re-validate the user against the database on every dashboard request so
@@ -17,11 +49,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   await requireUserOrRedirect();
   // Load settings once per request: hydrates the server runtime cache and
   // is forwarded to the client so format helpers stay consistent on both sides.
-  const settings = await getSettings();
-  const [unreadAlertCount, recentAlerts] = await Promise.all([
-    getUnreadAlertCount(),
-    getRecentAlerts(10),
-  ]);
+  const { settings, unreadAlertCount, recentAlerts } = await getSafeDashboardShellData();
   const bellAlerts = recentAlerts.map((alert) => ({
     id: alert.id,
     alertType: alert.alertType,

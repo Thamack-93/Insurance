@@ -7,7 +7,7 @@ export type SearchResultType =
   | "client"
   | "policy"
   | "receipt"
-  | "task"
+  | "workItem"
   | "claim"
   | "quote"
   | "insurer"

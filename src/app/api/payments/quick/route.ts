@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createPayment } from "@/app/(dashboard)/payments/actions";
 import { AuthError, requireUser } from "@/lib/auth";
 import { logError } from "@/lib/logger";
+import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,6 +15,21 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    assertSameOrigin(request, "quick payment");
+    const rateLimit = checkRateLimit(`quick-payment:${getRequestIp(request)}`, {
+      limit: 20,
+      windowMs: 15 * 60 * 1000,
+    });
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: "Demasiados intentos. Espera un momento e inténtalo de nuevo." },
+        {
+          status: 429,
+          headers: { "Retry-After": String(Math.max(1, Math.ceil(rateLimit.retryAfterMs / 1000))) },
+        },
+      );
+    }
+
     const body = await request.json();
 
     if (!body.receiptId || !body.amount || !body.paidDate || !body.paymentMethod) {

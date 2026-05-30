@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ExportButtons } from "@/components/reports/export-buttons";
 import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
+import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 
 type ReportCard = {
   title: string;
@@ -25,18 +26,18 @@ export default async function ReportsPage() {
     activePolicies,
     dueReceipts,
     renewalsSoon,
-    openTasks,
+    openWorkItems,
     risks,
     paidCommissions,
     clientsData,
     policiesData,
     receiptsData,
-    tasksData,
+    workItemsData,
   ] = await Promise.all([
     db.policy.count({ where: { status: "ACTIVE" } }),
     db.receipt.count({ where: { dueDate: { gte: now, lte: in60 }, status: { notIn: ["PAID", "CANCELLED"] } } }),
-    db.policy.count({ where: { status: "ACTIVE", renewalDate: { gte: now, lte: in60 } } }),
-    db.task.count({ where: { status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] } } }),
+    db.policy.count({ where: { status: "ACTIVE", endDate: { gte: now, lte: in60 } } }),
+    countWorkItems({ workItemTypes: ["TASK"], statuses: OPEN_WORK_ITEM_STATUSES }),
     db.alert.count({ where: { status: "OPEN" } }),
     db.commission.count({ where: { status: "PAID" } }),
     db.client.findMany({
@@ -54,7 +55,6 @@ export default async function ReportsPage() {
         currency: true,
         startDate: true,
         endDate: true,
-        renewalDate: true,
       },
       orderBy: { createdAt: "desc" },
       take: 1000,
@@ -64,10 +64,9 @@ export default async function ReportsPage() {
       orderBy: { dueDate: "desc" },
       take: 1000,
     }),
-    db.task.findMany({
-      select: { id: true, folio: true, title: true, taskType: true, status: true, priority: true, dueDate: true },
-      orderBy: { createdAt: "desc" },
-      take: 1000,
+    getWorkItems({
+      workItemTypes: ["TASK"],
+      limit: 1000,
     }),
   ]);
 
@@ -87,7 +86,18 @@ export default async function ReportsPage() {
         amount: r.amount ? Number(r.amount) : null,
       })),
     },
-    { name: "Tareas", data: tasksData },
+    {
+      name: "Pendientes",
+      data: workItemsData.map((workItem) => ({
+        id: workItem.sourceId ?? workItem.id,
+        folio: workItem.folio ?? workItem.sourceId ?? workItem.id,
+        title: workItem.title,
+        workItemType: workItem.workItemType,
+        status: workItem.status,
+        priority: workItem.priority,
+        dueDate: workItem.dueDate,
+      })),
+    },
   ];
 
   const reportCards: ReportCard[] = [
@@ -162,7 +172,7 @@ export default async function ReportsPage() {
           <MetricCard
             title="Alertas abiertas"
             value={risks}
-            description={`${openTasks} tareas activas y ${paidCommissions} comisiones ya cobradas.`}
+            description={`${openWorkItems} pendientes activos y ${paidCommissions} comisiones ya cobradas.`}
             icon={ShieldAlert}
             tone="rose"
           />

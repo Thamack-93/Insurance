@@ -17,14 +17,16 @@ const priorityRank: Record<string, number> = {
   LOW: 3,
 };
 
+const OPEN_STATUSES = ["OPEN", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_INSURER", "WAITING_DOCUMENT", "SENT"] as const;
+
 async function main() {
   const args = parseCliArgs();
   const limit = Number(getFlag(args, "limit", "30"));
   const db = createDb();
   const now = today();
 
-  const tasks = await db.task.findMany({
-    where: { status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] } },
+  const tasks = await db.workItem.findMany({
+    where: { workItemType: "TASK", status: { in: [...OPEN_STATUSES] } },
     include: { client: true, insurer: true, policy: true, receipt: true },
   });
 
@@ -50,7 +52,7 @@ async function main() {
   }, {});
 
   const formatRow = (task: (typeof sorted)[number]) => ({
-    Folio: task.folio,
+    Folio: task.folio ?? task.sourceId ?? task.id,
     Titulo: task.title,
     Cliente: task.client?.fullName ?? "-",
     Poliza: task.policy?.policyNumber ?? "-",

@@ -25,7 +25,7 @@ export type PortfolioHealth = {
   score: number;
   clientesCompletos: number;
   clientesConDatosBasicos: number;
-  polizasConRenovacion: number;
+  polizasConVencimiento: number;
   polizasConPDF: number;
   polizasConObjetoAsegurado: number;
   totalClientes: number;
@@ -99,7 +99,7 @@ export async function getPortfolioMetrics() {
         policyType: true,
         status: true,
         premiumAmount: true,
-        renewalDate: true,
+        endDate: true,
         insuredObject: true,
         clientId: true,
         client: { select: { fullName: true } },
@@ -171,7 +171,7 @@ export async function getPortfolioMetrics() {
   const clientesConDatosBasicos = clients.filter(
     (client) => Boolean(client.email && client.phone && client.address),
   ).length;
-  const polizasConRenovacion = policies.filter((policy) => policy.renewalDate !== null).length;
+  const polizasConVencimiento = policies.filter((policy) => Boolean(policy.endDate)).length;
   const polizasConPDF = policies.filter((policy) => policy.documents.length > 0).length;
   const polizasConObjetoAsegurado = policies.filter((policy) => Boolean(policy.insuredObject?.trim())).length;
 
@@ -180,7 +180,7 @@ export async function getPortfolioMetrics() {
     : 100;
   const scorePolizas = policies.length
     ? Math.round(
-        ((polizasConRenovacion / policies.length) +
+        ((polizasConVencimiento / policies.length) +
           (polizasConPDF / policies.length) +
           (polizasConObjetoAsegurado / policies.length)) /
           3 *
@@ -192,7 +192,7 @@ export async function getPortfolioMetrics() {
     score: Math.round((scoreClientes + scorePolizas) / 2),
     clientesCompletos: clientesConDatosBasicos,
     clientesConDatosBasicos,
-    polizasConRenovacion,
+    polizasConVencimiento,
     polizasConPDF,
     polizasConObjetoAsegurado,
     totalClientes: clients.length,

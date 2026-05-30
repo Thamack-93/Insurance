@@ -49,7 +49,6 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
             status: policy.status,
             startDate: formatDateInput(policy.startDate),
             endDate: formatDateInput(policy.endDate),
-            renewalDate: formatDateInput(policy.renewalDate),
             premiumAmount: Number(policy.premiumAmount),
             currency: policy.currency,
             paymentFrequency: policy.paymentFrequency,

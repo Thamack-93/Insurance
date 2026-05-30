@@ -94,7 +94,7 @@ export function BackupsPanel({ initialBackups, createBackup, restoreBackup, list
   return (
     <SectionCard
       title="Respaldos"
-      description="Crea, descarga y restaura copias locales de la base de datos. Se conservan los 10 más recientes."
+      description="Crea, descarga y restaura copias de seguridad de la base de datos. Se conservan los 10 más recientes."
       action={
         <div className="flex gap-2">
           <Button
@@ -120,7 +120,7 @@ export function BackupsPanel({ initialBackups, createBackup, restoreBackup, list
           <EmptyPanel
             icon={Database}
             title="Sin respaldos"
-            description="Crea tu primer respaldo para tener una copia local de la base de datos."
+            description="Crea tu primer respaldo para tener una copia de seguridad de la base de datos."
           />
         </div>
       ) : (

@@ -12,7 +12,7 @@ export interface RenewalInfo {
   clientName: string;
   insurerId: string;
   insurerName: string;
-  renewalDate: Date;
+  endDate: Date;
   daysUntilRenewal: number;
   priority: RenewalPriority;
   premiumAmount: number;
@@ -21,10 +21,10 @@ export interface RenewalInfo {
 }
 
 export function calculateRenewalPriority(
-  renewalDate: Date,
+  endDate: Date,
   today: Date = new Date()
 ): RenewalPriority {
-  const daysUntil = differenceInDays(renewalDate, today);
+  const daysUntil = differenceInDays(endDate, today);
 
   if (daysUntil <= 0) return "URGENT";
   if (daysUntil <= 14) return "HIGH";
@@ -34,14 +34,14 @@ export function calculateRenewalPriority(
 
 export function shouldIncludeInRenewals(
   policyStatus: string,
-  renewalDate: Date | null
+  endDate: Date | null
 ): boolean {
   if (policyStatus !== "ACTIVE") return false;
-  if (!renewalDate) return false;
+  if (!endDate) return false;
   return true;
 }
 
-export function createRenewalTaskTitle(
+export function createRenewalWorkItemTitle(
   priority: RenewalPriority,
   policyNumber: string
 ): string {
@@ -56,7 +56,7 @@ export function createRenewalTaskTitle(
   return `${prefix} Renovación ${policyNumber}`;
 }
 
-export function createRenewalTaskDescription(
+export function createRenewalWorkItemDescription(
   daysUntil: number,
   clientName: string,
   premiumAmount: number,
@@ -82,7 +82,7 @@ export interface RenewalStats {
 
 export function calculateRenewalStats(
   policies: Array<{
-    renewalDate: Date | null;
+    endDate: Date | null;
     premiumAmount: number;
   }>,
   today: Date = new Date()
@@ -99,18 +99,18 @@ export function calculateRenewalStats(
   let renewalCount = 0;
 
   for (const policy of policies) {
-    if (!policy.renewalDate) continue;
+    if (!policy.endDate) continue;
 
     renewalCount++;
     totalRenewalPremium += policy.premiumAmount || 0;
 
-    if (policy.renewalDate < today) {
+    if (policy.endDate < today) {
       overdueCount++;
-    } else if (policy.renewalDate <= next30Days) {
+    } else if (policy.endDate <= next30Days) {
       next30DaysCount++;
-    } else if (policy.renewalDate <= next60Days) {
+    } else if (policy.endDate <= next60Days) {
       next60DaysCount++;
-    } else if (policy.renewalDate <= next90Days) {
+    } else if (policy.endDate <= next90Days) {
       next90DaysCount++;
     }
   }
@@ -132,7 +132,7 @@ export function filterRenewalsByTimeRange(
   today: Date = new Date()
 ): RenewalInfo[] {
   const cutoffDate = addDays(today, days);
-  return renewals.filter((r) => r.renewalDate <= cutoffDate);
+  return renewals.filter((r) => r.endDate <= cutoffDate);
 }
 
 export function sortRenewalsByPriority(

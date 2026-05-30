@@ -10,11 +10,10 @@ import {
   Wallet,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { format, formatDistanceToNow } from "date-fns";
-import { es } from "date-fns/locale";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { getDb } from "@/lib/db";
 import { cn } from "@/lib/utils";
+import { formatRelativeDate, formatDate } from "@/lib/dates";
 
 export type ActivityTimelineEntry = {
   id: string;
@@ -62,7 +61,7 @@ const entityLabelMap: Record<string, string> = {
   Receipt: "Recibo",
   Claim: "Siniestro",
   Quote: "Cotización",
-  Task: "Tarea",
+  WorkItem: "Pendiente",
   Payment: "Pago",
   Commission: "Comisión",
   Document: "Documento",
@@ -132,8 +131,8 @@ export async function ActivityTimeline({
         const { icon: Icon, tone } = lookupAction(entry.action);
         const actionLabel = formatActionLabel(entry.action);
         const date = new Date(entry.createdAt);
-        const distance = formatDistanceToNow(date, { locale: es, addSuffix: true });
-        const fullDate = format(date, "d 'de' MMMM yyyy, HH:mm", { locale: es });
+        const distance = formatRelativeDate(entry.createdAt);
+        const fullDate = formatDate(date, "d 'de' MMMM yyyy, HH:mm");
         const performer = userMap.get(entry.userId) ?? "Sistema";
 
         return (

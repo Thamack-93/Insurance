@@ -4,6 +4,7 @@ import { addDays, subDays } from "date-fns";
 import { PrismaClient } from "../src/generated/prisma/client";
 import type { PaymentFrequency, Policy, Priority, Receipt, TaskStatus } from "../src/generated/prisma/client";
 import { hashPassword, SYSTEM_USER_ID } from "../src/lib/auth";
+import { ensureNotificationDefaultsForUser } from "../src/lib/notification-foundation";
 
 const databaseUrl = process.env.DATABASE_URL?.trim();
 if (!databaseUrl) {
@@ -91,7 +92,7 @@ async function main() {
     },
   });
 
-  await prisma.user.upsert({
+  const pedroUser = await prisma.user.upsert({
     where: { email: "pedroagl93@gmail.com" },
     update: { name: "Pedro Gomez", role: "ADMIN", active: true },
     create: {
@@ -102,6 +103,12 @@ async function main() {
       active: true,
     },
   });
+
+  await Promise.all([
+    ensureNotificationDefaultsForUser(adminUser.id, prisma),
+    ensureNotificationDefaultsForUser(brokerUser.id, prisma),
+    ensureNotificationDefaultsForUser(pedroUser.id, prisma),
+  ]);
 
   const audit = { createdById: adminUser.id, updatedById: brokerUser.id };
 
@@ -188,8 +195,6 @@ async function main() {
     const insurer = insurers[index % insurers.length];
     const startDate = subDays(baseDate, 330 - index * 7);
     const endDate = addDays(startDate, 365);
-    const renewalOffsets = [-20, 3, 9, 18, 34, 57, 88, 120, null, 44];
-    const renewalOffset = renewalOffsets[index % renewalOffsets.length];
 
     policies.push(
       await prisma.policy.create({
@@ -201,7 +206,6 @@ async function main() {
           status: index === 7 ? "EXPIRED" : index === 14 ? "PENDING" : "ACTIVE",
           startDate,
           endDate: index === 7 ? subDays(baseDate, 15) : endDate,
-          renewalDate: renewalOffset === null ? null : addDays(baseDate, renewalOffset),
           premiumAmount: 8500 + index * 2150,
           currency: index % 9 === 0 ? "USD" : "MXN",
           paymentFrequency: paymentFrequencies[index % paymentFrequencies.length],
@@ -448,8 +452,10 @@ async function main() {
 async function resetDatabase() {
   await prisma.receipt.updateMany({ data: { documentId: null } });
   await prisma.alert.deleteMany();
+  await prisma.notificationEvent.deleteMany();
+  await prisma.notificationPreference.deleteMany();
+  await prisma.notificationChannel.deleteMany();
   await prisma.activityLog.deleteMany();
-  await prisma.reminder.deleteMany();
   await prisma.payment.deleteMany();
   await prisma.commission.deleteMany();
   await prisma.document.deleteMany();

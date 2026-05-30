@@ -1,5 +1,32 @@
+import fs from "node:fs";
+import path from "node:path";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
+
+const localEnvPath = path.join(process.cwd(), ".env.local");
+
+function loadLocalEnvFile(filePath: string) {
+  if (!fs.existsSync(filePath)) return;
+  const contents = fs.readFileSync(filePath, "utf8");
+  for (const line of contents.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex <= 0) continue;
+    const key = trimmed.slice(0, separatorIndex).trim();
+    if (!key || process.env[key] !== undefined) continue;
+    let value = trimmed.slice(separatorIndex + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
+}
+
+loadLocalEnvFile(localEnvPath);
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
@@ -13,7 +40,7 @@ export function getDb() {
     }
     if (!/^postgres(ql)?:\/\//i.test(connectionString)) {
       throw new Error(
-        "DATABASE_URL must point to Postgres. SQLite fallback is not supported by the Prisma runtime client.",
+        "DATABASE_URL must point to Postgres. The Prisma runtime client does not support any other database type here.",
       );
     }
 

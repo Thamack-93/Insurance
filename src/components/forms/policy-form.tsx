@@ -164,10 +164,6 @@ export function PolicyForm({
                 <Input id="endDate" type="date" {...register("endDate")} />
               </FormField>
 
-              <FormField label="Renovación" htmlFor="renewalDate" error={errors.renewalDate?.message}>
-                <Input id="renewalDate" type="date" {...register("renewalDate")} />
-              </FormField>
-
               <FormField label="Prima" htmlFor="premiumAmount" error={errors.premiumAmount?.message}>
                 <Input id="premiumAmount" type="number" min="0" step="0.01" {...register("premiumAmount")} />
               </FormField>

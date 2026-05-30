@@ -9,7 +9,7 @@ mkdir -p src/generated/prisma
 printf '{"type":"module"}\n' > src/generated/prisma/package.json
 
 # Drift check: fail if schema.prisma defines models/columns/indexes that no
-# migration creates. Exit code 2 means drift was detected (Task #48).
+# migration creates. Exit code 2 means drift was detected (issue #48).
 if ! npm run -s db:check-drift; then
   echo ""
   echo "ERROR: Drift detectado entre prisma/schema.prisma y las migraciones."

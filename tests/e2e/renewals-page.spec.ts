@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { authenticatePageAsAdmin, getTestDb, cleanupRecentRenewalTasks } from "../helpers/db";
-import { addDays, addYears } from "date-fns";
+import { authenticatePageAsAdmin, getTestDb, cleanupRecentRenewalWorkItems } from "../helpers/db";
+import { addYears } from "date-fns";
 
 test.describe("Renewals Page (/renewals)", () => {
   let policyId = "";
@@ -9,7 +9,7 @@ test.describe("Renewals Page (/renewals)", () => {
   test.afterEach(async () => {
     const db = getTestDb();
     if (policyId) {
-      await cleanupRecentRenewalTasks(policyId, startedAt);
+      await cleanupRecentRenewalWorkItems(policyId, startedAt);
       await db.policy.deleteMany({ where: { id: policyId } });
     }
   });
@@ -47,7 +47,6 @@ test.describe("Renewals Page (/renewals)", () => {
         policyType: "AUTO",
         status: "ACTIVE",
         paymentFrequency: "ANNUAL",
-        renewalDate: new Date(),
         startDate: new Date(),
         endDate: addYears(new Date(), 1),
         premiumAmount: 1000,
@@ -82,7 +81,6 @@ test.describe("Renewals Page (/renewals)", () => {
         policyType: "AUTO",
         status: "ACTIVE",
         paymentFrequency: "ANNUAL",
-        renewalDate: addDays(new Date(), 20),
         startDate: new Date(),
         endDate: addYears(new Date(), 1),
         premiumAmount: 1000,

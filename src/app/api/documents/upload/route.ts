@@ -6,6 +6,7 @@ import { AuthError, requireUser } from "@/lib/auth";
 import { assertSafeDocumentPath, documentsDir } from "@/lib/files";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
 import { logError } from "@/lib/logger";
+import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
 import { z } from "zod";
 
 const uploadSchema = z.object({
@@ -39,6 +40,10 @@ const ALLOWED_TYPES = [
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ];
 const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+const UPLOAD_RATE_LIMIT = {
+  limit: 10,
+  windowMs: 15 * 60 * 1000,
+};
 
 type UploadResult = {
   ok: boolean;
@@ -53,7 +58,7 @@ async function processFile(
   metadata: z.infer<typeof uploadSchema>,
   userId: string,
 ): Promise<UploadResult> {
-  if (!ALLOWED_TYPES.includes(file.type)) {
+  if (file.type && file.type !== "application/octet-stream" && file.type !== "application/zip" && !ALLOWED_TYPES.includes(file.type)) {
     return { ok: false, fileName: file.name, error: "Tipo de archivo no permitido (PDF, JPG, PNG, WebP o Word)." };
   }
   if (file.size > MAX_SIZE) {
@@ -61,13 +66,22 @@ async function processFile(
   }
 
   try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const detectedType = detectFileType(bytes);
+    if (!detectedType) {
+      return { ok: false, fileName: file.name, error: "El archivo no coincide con un tipo permitido." };
+    }
+
+    if (file.type && file.type !== detectedType && file.type !== "application/octet-stream") {
+      return { ok: false, fileName: file.name, error: "El tipo del archivo no coincide con su contenido." };
+    }
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
     const fileName = `${timestamp}-${sanitizedFileName}`;
     const filePath = path.join(documentsDir, fileName);
     const safePath = assertSafeDocumentPath(filePath);
 
-    const bytes = await file.arrayBuffer();
     await writeFile(safePath, Buffer.from(bytes));
 
     const db = getDb();
@@ -76,7 +90,7 @@ async function processFile(
         ...metadata,
         fileName: file.name,
         filePath: `data/documents/${fileName}`,
-        mimeType: file.type,
+        mimeType: detectedType,
         uploadedAt: new Date(),
         createdById: userId,
         updatedById: userId,
@@ -101,12 +115,61 @@ async function processFile(
   }
 }
 
+function detectFileType(bytes: Uint8Array): string | null {
+  if (startsWith(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d])) {
+    return "application/pdf";
+  }
+
+  if (startsWith(bytes, [0xff, 0xd8, 0xff])) {
+    return "image/jpeg";
+  }
+
+  if (startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
+    return "image/png";
+  }
+
+  if (startsWith(bytes, [0x52, 0x49, 0x46, 0x46], 0) && startsWith(bytes, [0x57, 0x45, 0x42, 0x50], 8)) {
+    return "image/webp";
+  }
+
+  if (startsWith(bytes, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])) {
+    return "application/msword";
+  }
+
+  if (
+    startsWith(bytes, [0x50, 0x4b, 0x03, 0x04]) ||
+    startsWith(bytes, [0x50, 0x4b, 0x05, 0x06]) ||
+    startsWith(bytes, [0x50, 0x4b, 0x07, 0x08])
+  ) {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
+
+  return null;
+}
+
+function startsWith(bytes: Uint8Array, signature: number[], offset = 0) {
+  if (bytes.length < offset + signature.length) return false;
+  return signature.every((value, index) => bytes[offset + index] === value);
+}
+
 export async function POST(request: NextRequest) {
   try {
     if (!areDocumentFilesEnabled()) {
       return NextResponse.json(
         { error: "La carga de documentos está deshabilitada en este demo." },
         { status: 501 },
+      );
+    }
+
+    assertSameOrigin(request, "document upload");
+    const rateLimit = checkRateLimit(`upload:${getRequestIp(request)}`, UPLOAD_RATE_LIMIT);
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: "Demasiadas subidas. Intenta de nuevo en unos minutos." },
+        {
+          status: 429,
+          headers: { "Retry-After": String(Math.max(1, Math.ceil(rateLimit.retryAfterMs / 1000))) },
+        },
       );
     }
 

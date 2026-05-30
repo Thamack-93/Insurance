@@ -24,9 +24,16 @@ import { BulkActionsProvider, useBulkActions } from "@/components/bulk-actions/b
 import { SelectableRow } from "@/components/bulk-actions/selectable-row";
 import { SelectAllHeader } from "@/components/bulk-actions/select-all-header";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
-import { bulkUpdateTaskStatus, bulkUpdateTaskPriority, bulkDeleteTasks } from "@/app/(dashboard)/tasks/actions";
+import {
+  bulkDeleteWorkItems,
+  bulkUpdateWorkItemPriority,
+  bulkUpdateWorkItemStatus,
+} from "@/app/(dashboard)/tasks/actions";
 
-const taskTypeLabels: Record<string, string> = {
+const workItemTypeLabels: Record<string, string> = {
+  TASK: "Pendiente",
+  REMINDER: "Recordatorio",
+  ALERT: "Alerta",
   GENERAL: "General",
   CLAIM: "Siniestro",
   QUOTE: "Cotización",
@@ -52,11 +59,11 @@ const PRIORITY_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "LOW", label: "Baja" },
 ];
 
-export type TaskRow = {
+export type WorkItemRow = {
   id: string;
   folio: string;
   title: string;
-  taskType: string;
+  workItemType: string;
   priority: string;
   status: string;
   dueDate: string | null;
@@ -67,12 +74,12 @@ export type TaskRow = {
   policyNumber: string | null;
 };
 
-function TasksTableInner({ tasks }: { tasks: TaskRow[] }) {
+function WorkItemsTableInner({ workItems }: { workItems: WorkItemRow[] }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const { selectedItems, hasSelection, clearSelection, getSelectedIds } = useBulkActions();
-  const allIds = tasks.map((t) => t.id);
+  const allIds = workItems.map((t) => t.id);
   const selectedCount = selectedItems.size;
 
   const runBulk = (
@@ -99,10 +106,10 @@ function TasksTableInner({ tasks }: { tasks: TaskRow[] }) {
   };
 
   const handleStatus = (status: string) =>
-    runBulk((ids) => bulkUpdateTaskStatus(ids, status), "Estado actualizado.");
+    runBulk((ids) => bulkUpdateWorkItemStatus(ids, status), "Estado actualizado.");
 
   const handlePriority = (priority: string) =>
-    runBulk((ids) => bulkUpdateTaskPriority(ids, priority), "Prioridad actualizada.");
+    runBulk((ids) => bulkUpdateWorkItemPriority(ids, priority), "Prioridad actualizada.");
 
   const handleDelete = async () => {
     const ids = getSelectedIds();
@@ -112,7 +119,7 @@ function TasksTableInner({ tasks }: { tasks: TaskRow[] }) {
     }
     await new Promise<void>((resolve) => {
       startTransition(async () => {
-        const result = await bulkDeleteTasks(ids);
+        const result = await bulkDeleteWorkItems(ids);
         if (result.ok) {
           toast.success(result.message ?? "Pendientes eliminados.");
           flushSync(() => {
@@ -224,37 +231,37 @@ function TasksTableInner({ tasks }: { tasks: TaskRow[] }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {tasks.map((task) => (
-            <SelectableRow key={task.id} id={task.id}>
+          {workItems.map((workItem) => (
+            <SelectableRow key={workItem.id} id={workItem.id}>
               <TableCell className="font-medium">
-                <Link href={`/tasks/${task.id}`} className="hover:text-primary">
-                  {task.folio}
+                <Link href={`/tasks/${workItem.id}`} className="hover:text-primary">
+                  {workItem.folio}
                 </Link>
               </TableCell>
-              <TableCell className="max-w-[260px] truncate">{task.title}</TableCell>
+              <TableCell className="max-w-[260px] truncate">{workItem.title}</TableCell>
               <TableCell>
-                {task.clientId ? (
-                  <Link href={`/clients/${task.clientId}`} className="text-foreground hover:text-primary">
-                    {task.clientName}
+                {workItem.clientId ? (
+                  <Link href={`/clients/${workItem.clientId}`} className="text-foreground hover:text-primary">
+                    {workItem.clientName}
                   </Link>
                 ) : (
                   <span className="text-muted-foreground">Sin cliente</span>
                 )}
               </TableCell>
               <TableCell>
-                {task.policyId ? (
-                  <Link href={`/policies/${task.policyId}`} className="text-foreground hover:text-primary">
-                    {task.policyNumber}
+                {workItem.policyId ? (
+                  <Link href={`/policies/${workItem.policyId}`} className="text-foreground hover:text-primary">
+                    {workItem.policyNumber}
                   </Link>
                 ) : (
                   <span className="text-muted-foreground">Sin póliza</span>
                 )}
               </TableCell>
-              <TableCell>{taskTypeLabels[task.taskType] ?? task.taskType}</TableCell>
+              <TableCell>{workItemTypeLabels[workItem.workItemType] ?? workItem.workItemType}</TableCell>
               <TableCell>
-                {task.dueDate ? (
+                {workItem.dueDate ? (
                   <span className="text-sm text-muted-foreground">
-                    {task.dueDate} · {task.dueDays} días
+                    {workItem.dueDate} · {workItem.dueDays} días
                   </span>
                 ) : (
                   <span className="text-sm text-muted-foreground">Sin fecha</span>
@@ -262,8 +269,8 @@ function TasksTableInner({ tasks }: { tasks: TaskRow[] }) {
               </TableCell>
               <TableCell>
                 <div className="flex flex-wrap gap-2">
-                  <PriorityBadge priority={task.priority} />
-                  <StatusBadge status={task.status} />
+                  <PriorityBadge priority={workItem.priority} />
+                  <StatusBadge status={workItem.status} />
                 </div>
               </TableCell>
             </SelectableRow>
@@ -277,10 +284,10 @@ function TasksTableInner({ tasks }: { tasks: TaskRow[] }) {
   );
 }
 
-export function TasksTable({ tasks }: { tasks: TaskRow[] }) {
+export function WorkItemsTable({ workItems }: { workItems: WorkItemRow[] }) {
   return (
     <BulkActionsProvider>
-      <TasksTableInner tasks={tasks} />
+      <WorkItemsTableInner workItems={workItems} />
     </BulkActionsProvider>
   );
 }

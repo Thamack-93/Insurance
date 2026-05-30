@@ -45,11 +45,13 @@ async function main() {
       }
       
       // Check if reminder already exists
-      const existing = await db.reminder.findFirst({
+      const sourceId = `${policy.id}:${reminderDate.toISOString()}`;
+      const existing = await db.workItem.findUnique({
         where: {
-          entityType: 'POLICY',
-          entityId: policy.id,
-          reminderDate: reminderDate,
+          sourceType_sourceId: {
+            sourceType: 'Reminder',
+            sourceId,
+          },
         },
       });
       
@@ -62,15 +64,20 @@ async function main() {
         where: { id: policy.clientId },
       });
       
-      // Create reminder
-      await db.reminder.create({
+      // Create reminder work item
+      await db.workItem.create({
         data: {
-          entityType: 'POLICY',
-          entityId: policy.id,
+          sourceType: 'Reminder',
+          sourceId,
+          workItemType: 'REMINDER',
+          status: 'OPEN',
+          priority: 'MEDIUM',
           title: `Renovación: ${policy.policyNumber}`,
           description: `La póliza ${policy.policyNumber} de ${client?.fullName || 'Cliente'} vence el ${format(endDate, 'dd/MM/yyyy')}.`,
-          reminderDate: reminderDate,
-          status: 'ACTIVE',
+          entityType: 'POLICY',
+          entityId: policy.id,
+          dueDate: reminderDate,
+          startDate: new Date(),
         },
       });
       

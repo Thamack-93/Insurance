@@ -39,7 +39,6 @@ export const policySchema = z
     status: z.enum(["ACTIVE", "EXPIRED", "CANCELLED", "RENEWED", "PENDING"]),
     startDate: requiredDate,
     endDate: requiredDate,
-    renewalDate: optionalDate,
     premiumAmount: z.coerce.number().positive("La prima debe ser mayor a cero."),
     currency: z.string().trim().min(1, "Selecciona una moneda."),
     paymentFrequency: z.enum(["MONTHLY", "QUARTERLY", "SEMIANNUAL", "ANNUAL", "SINGLE", "OTHER"]),
@@ -70,7 +69,7 @@ export const receiptSchema = z
     path: ["periodEndDate"],
   });
 
-export const taskSchema = z.object({
+export const workItemSchema = z.object({
   clientId: z.string().optional().or(z.literal("")),
   policyId: z.string().optional().or(z.literal("")),
   insurerId: z.string().optional().or(z.literal("")),
@@ -147,7 +146,7 @@ export const quoteSchema = z.object({
 export type ClientFormValues = z.infer<typeof clientSchema>;
 export type PolicyFormValues = z.infer<typeof policySchema>;
 export type ReceiptFormValues = z.infer<typeof receiptSchema>;
-export type TaskFormValues = z.infer<typeof taskSchema>;
+export type WorkItemFormValues = z.infer<typeof workItemSchema>;
 export type InsurerFormValues = z.infer<typeof insurerSchema>;
 export type ClaimFormValues = z.infer<typeof claimSchema>;
 export type QuoteFormValues = z.infer<typeof quoteSchema>;

@@ -38,7 +38,6 @@ const policySchema = z.object({
   status: z.enum(["ACTIVE", "EXPIRED", "CANCELLED", "RENEWED", "PENDING"]).default("ACTIVE"),
   startDate: z.date(),
   endDate: z.date(),
-  renewalDate: z.date().optional(),
   premiumAmount: z.number().positive(),
   currency: z.string().min(3).max(3).default("MXN"),
   paymentFrequency: z.enum(["MONTHLY", "QUARTERLY", "SEMIANNUAL", "ANNUAL", "SINGLE", "OTHER"]),
@@ -59,7 +58,6 @@ type ExistingPolicy = {
   status: string;
   startDate: Date;
   endDate: Date;
-  renewalDate: Date | null;
   premiumAmount: unknown;
   currency: string;
   paymentFrequency: string;
@@ -105,7 +103,6 @@ function buildPolicyInput(row: Record<string, unknown>) {
     status: toEnumValue(pickValue(row, ["status", "estado"]), ["ACTIVE", "EXPIRED", "CANCELLED", "RENEWED", "PENDING"]) ?? "ACTIVE",
     startDate: toDateValue(pickValue(row, ["startDate", "fechaInicio", "inicio"])) ?? new Date("invalid"),
     endDate: toDateValue(pickValue(row, ["endDate", "fechaFin", "fin"])) ?? new Date("invalid"),
-    renewalDate: toDateValue(pickValue(row, ["renewalDate", "fechaRenovacion", "renovacion"])),
     premiumAmount: toNumberValue(pickValue(row, ["premiumAmount", "prima", "montoPrima"])) ?? Number.NaN,
     currency: (textValue(pickValue(row, ["currency", "moneda"])) ?? "MXN").toUpperCase(),
     paymentFrequency: toEnumValue(
@@ -170,7 +167,6 @@ function buildUpdateData(
     ["status", "status", input.status],
     ["startDate", "startDate", input.startDate],
     ["endDate", "endDate", input.endDate],
-    ["renewalDate", "renewalDate", input.renewalDate ?? null],
     ["premiumAmount", "premiumAmount", input.premiumAmount],
     ["currency", "currency", input.currency],
     ["paymentFrequency", "paymentFrequency", input.paymentFrequency],
@@ -261,7 +257,6 @@ async function main() {
               status: input.status,
               startDate: input.startDate,
               endDate: input.endDate,
-              renewalDate: input.renewalDate,
               premiumAmount: input.premiumAmount,
               currency: input.currency,
               paymentFrequency: input.paymentFrequency,
@@ -279,7 +274,7 @@ async function main() {
           Poliza: input.policyNumber,
           Cliente: client.fullName,
           Aseguradora: insurer.name,
-          Renovacion: input.renewalDate ? formatDateShort(input.renewalDate) : "-",
+          Vencimiento: formatDateShort(input.endDate),
         });
         continue;
       }
@@ -293,7 +288,7 @@ async function main() {
           Poliza: match.policyNumber,
           Cliente: match.client?.fullName ?? client.fullName,
           Aseguradora: match.insurer?.name ?? insurer.name,
-          Renovacion: match.renewalDate ? formatDateShort(match.renewalDate) : "-",
+          Vencimiento: formatDateShort(match.endDate),
         });
         continue;
       }
@@ -312,7 +307,7 @@ async function main() {
         Poliza: input.policyNumber,
         Cliente: client.fullName,
         Aseguradora: insurer.name,
-        Renovacion: input.renewalDate ? formatDateShort(input.renewalDate) : "-",
+        Vencimiento: formatDateShort(input.endDate),
       });
     } catch (error) {
       errors.push(`Fila ${index + 2}: ${(error as Error).message}`);
@@ -369,7 +364,6 @@ async function main() {
             status: input.status,
             startDate: input.startDate,
             endDate: input.endDate,
-            renewalDate: input.renewalDate,
             premiumAmount: input.premiumAmount,
             currency: input.currency,
             paymentFrequency: input.paymentFrequency,
@@ -421,7 +415,6 @@ async function main() {
         status: updatedPolicy.status,
         startDate: updatedPolicy.startDate,
         endDate: updatedPolicy.endDate,
-        renewalDate: updatedPolicy.renewalDate,
         premiumAmount: updatedPolicy.premiumAmount,
         currency: updatedPolicy.currency,
         paymentFrequency: updatedPolicy.paymentFrequency,

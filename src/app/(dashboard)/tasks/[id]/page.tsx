@@ -8,12 +8,13 @@ import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { DeleteTaskButton } from "@/components/tasks/delete-task-button";
+import { DeleteWorkItemButton } from "@/components/tasks/delete-task-button";
 import { getDb } from "@/lib/db";
 import { daysSince, daysUntil, formatDate } from "@/lib/dates";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
+import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
 
-const taskTypeLabels: Record<string, string> = {
+const workItemTypeLabels: Record<string, string> = {
   GENERAL: "General",
   CLAIM: "Siniestro",
   QUOTE: "Cotización",
@@ -24,7 +25,7 @@ const taskTypeLabels: Record<string, string> = {
   OTHER: "Otro",
 };
 
-const taskStatusLabels: Record<string, string> = {
+const workItemStatusLabels: Record<string, string> = {
   OPEN: "Abierta",
   IN_PROGRESS: "En progreso",
   WAITING_CLIENT: "Esperando cliente",
@@ -34,18 +35,16 @@ const taskStatusLabels: Record<string, string> = {
   RESOLVED: "Resuelta",
   CANCELLED: "Cancelada",
   ARCHIVED: "Archivada",
+  DISMISSED: "Descartada",
 };
 
-export default async function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function WorkItemDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const db = getDb();
 
-  const task = await db.task.findUnique({
-    where: { id },
-    include: { client: true, policy: true, insurer: true, receipt: true },
-  });
+  const workItem = await findWorkItemByRouteId(id, db);
 
-  if (!task) {
+  if (!workItem) {
     notFound();
   }
 
@@ -55,29 +54,32 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
       orderBy: { uploadedAt: "desc" },
     }),
     db.activityLog.findMany({
-      where: { entityType: "Task", entityId: id },
+      where: {
+        entityId: id,
+        OR: [{ entityType: "WorkItem" }, { entityType: "Task" }],
+      },
       orderBy: { createdAt: "desc" },
       take: 10,
     }),
   ]);
 
-  const isClosed = task.status === "RESOLVED" || task.status === "CANCELLED" || task.status === "ARCHIVED";
-  const isOverdue = task.dueDate && task.dueDate < new Date() && !isClosed;
-  const daysActive = daysSince(task.startDate);
+  const isClosed = workItem.status === "RESOLVED" || workItem.status === "CANCELLED" || workItem.status === "ARCHIVED" || workItem.status === "DISMISSED";
+  const isOverdue = workItem.dueDate && workItem.dueDate < new Date() && !isClosed;
+  const daysActive = daysSince(workItem.startDate);
 
   return (
     <div className="flex flex-col gap-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Operación"
-          title={task.folio}
-          description={task.title}
+          title={workItem.folio ?? workItem.sourceId ?? workItem.id}
+          description={workItem.title}
           actions={
             <>
               <Button asChild variant="outline" className="rounded-full bg-card/70">
-                <Link href={`/tasks/${task.id}/edit`}>Editar tarea</Link>
+                <Link href={`/tasks/${workItem.sourceId ?? workItem.id}/edit`}>Editar pendiente</Link>
               </Button>
-              <DeleteTaskButton id={task.id} folio={task.folio} />
+              <DeleteWorkItemButton id={workItem.sourceId ?? workItem.id} folio={workItem.folio ?? workItem.sourceId ?? workItem.id} />
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href="/tasks">
                   <ArrowLeft className="mr-2 size-4" />
@@ -88,33 +90,33 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
           }
         />
 
-        <AuditByline createdById={task.createdById} updatedById={task.updatedById} />
+        <AuditByline createdById={workItem.createdById} updatedById={workItem.updatedById} />
 
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
             title="Estado"
-            value={taskStatusLabels[task.status] ?? task.status}
-            description={isClosed ? "Tarea cerrada" : isOverdue ? "Vencida" : "Activa"}
+            value={workItemStatusLabels[workItem.status] ?? workItem.status}
+            description={isClosed ? "Pendiente cerrada" : isOverdue ? "Vencida" : "Activa"}
             icon={CheckSquare}
             tone={isClosed ? "blue" : isOverdue ? "rose" : "emerald"}
           />
           <MetricCard
             title="Prioridad"
-            value={task.priority}
+            value={workItem.priority}
             description="Nivel de urgencia asignado"
             icon={ClipboardList}
-            tone={task.priority === "URGENT" ? "rose" : task.priority === "HIGH" ? "amber" : "blue"}
+            tone={workItem.priority === "URGENT" ? "rose" : workItem.priority === "HIGH" ? "amber" : "blue"}
           />
           <MetricCard
             title="Días activa"
             value={daysActive}
-            description={`Iniciada el ${formatDate(task.startDate)}`}
+            description={`Iniciada el ${formatDate(workItem.startDate)}`}
             icon={CalendarClock}
             tone="blue"
           />
           <MetricCard
             title="Tipo"
-            value={taskTypeLabels[task.taskType] ?? task.taskType}
+            value={workItemTypeLabels[workItem.taskType ?? "GENERAL"] ?? workItem.taskType ?? "GENERAL"}
             description="Clasificación operativa"
             icon={FileText}
             tone="emerald"
@@ -126,53 +128,53 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
             <div className="grid gap-4 p-4 text-sm">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex gap-2">
-                  <PriorityBadge priority={task.priority} />
-                  <StatusBadge status={task.status} />
+                  <PriorityBadge priority={workItem.priority} />
+                  <StatusBadge status={workItem.status} />
                 </div>
                 <Badge variant="outline" className="rounded-full">
-                  {taskTypeLabels[task.taskType] ?? task.taskType}
+                  {workItemTypeLabels[workItem.taskType ?? "GENERAL"] ?? workItem.taskType ?? "GENERAL"}
                 </Badge>
               </div>
 
               <div className="rounded-2xl border bg-muted/40 p-4">
                 <p className="font-medium text-foreground">Título</p>
-                <p className="mt-1">{task.title}</p>
-                {task.description ? (
+                <p className="mt-1">{workItem.title}</p>
+                {workItem.description ? (
                   <>
                     <p className="mt-3 font-medium text-foreground">Descripción</p>
-                    <p className="mt-1 text-muted-foreground">{task.description}</p>
+                    <p className="mt-1 text-muted-foreground">{workItem.description}</p>
                   </>
                 ) : null}
               </div>
 
               <div className="grid gap-3">
-                {task.client ? (
+                {workItem.client ? (
                   <div>
                     <p className="text-muted-foreground">Cliente</p>
-                    <Link href={`/clients/${task.clientId}`} className="font-medium text-foreground hover:text-primary">
-                      {task.client.fullName}
+                    <Link href={`/clients/${workItem.clientId}`} className="font-medium text-foreground hover:text-primary">
+                      {workItem.client.fullName}
                     </Link>
                   </div>
                 ) : null}
-                {task.policy ? (
+                {workItem.policy ? (
                   <div>
                     <p className="text-muted-foreground">Póliza</p>
-                    <Link href={`/policies/${task.policyId}`} className="font-medium text-foreground hover:text-primary">
-                      {task.policy.policyNumber}
+                    <Link href={`/policies/${workItem.policyId}`} className="font-medium text-foreground hover:text-primary">
+                      {workItem.policy.policyNumber}
                     </Link>
                   </div>
                 ) : null}
-                {task.insurer ? (
+                {workItem.insurer ? (
                   <div>
                     <p className="text-muted-foreground">Aseguradora</p>
-                    <p className="font-medium">{task.insurer.name}</p>
+                    <p className="font-medium">{workItem.insurer.name}</p>
                   </div>
                 ) : null}
-                {task.receipt ? (
+                {workItem.receipt ? (
                   <div>
                     <p className="text-muted-foreground">Recibo</p>
-                    <Link href={`/receipts/${task.receiptId}`} className="font-medium text-foreground hover:text-primary">
-                      {task.receipt.receiptNumber}
+                    <Link href={`/receipts/${workItem.receiptId}`} className="font-medium text-foreground hover:text-primary">
+                      {workItem.receipt.receiptNumber}
                     </Link>
                   </div>
                 ) : null}
@@ -181,28 +183,28 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <p className="text-muted-foreground">Fecha de inicio</p>
-                  <p className="font-medium">{formatDate(task.startDate)}</p>
+                  <p className="font-medium">{formatDate(workItem.startDate)}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Fecha límite</p>
                   <p className={`font-medium ${isOverdue ? "text-rose-600" : ""}`}>
-                    {task.dueDate ? formatDate(task.dueDate) : "Sin fecha"}
-                    {task.dueDate ? ` · ${daysUntil(task.dueDate)} días` : ""}
+                    {workItem.dueDate ? formatDate(workItem.dueDate) : "Sin fecha"}
+                    {workItem.dueDate ? ` · ${daysUntil(workItem.dueDate)} días` : ""}
                   </p>
                 </div>
               </div>
 
-              {task.closedDate ? (
+              {workItem.closedDate ? (
                 <div>
                   <p className="text-muted-foreground">Fecha de cierre</p>
-                  <p className="font-medium">{formatDate(task.closedDate)}</p>
+                  <p className="font-medium">{formatDate(workItem.closedDate)}</p>
                 </div>
               ) : null}
 
-              {task.notes ? (
+              {workItem.notes ? (
                 <div className="rounded-2xl border bg-card/70 p-4 text-sm text-muted-foreground">
                   <p className="font-medium text-foreground">Notas internas</p>
-                  <p className="mt-1">{task.notes}</p>
+                  <p className="mt-1">{workItem.notes}</p>
                 </div>
               ) : null}
             </div>
@@ -241,7 +243,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
           description="Cambios y eventos registrados para este pendiente."
           action={
             <Link
-              href={`/activity?entity=Task&id=${id}`}
+              href={`/activity?entity=WorkItem&id=${workItem.sourceId ?? workItem.id}`}
               className="text-sm font-medium text-primary hover:underline"
             >
               Ver todo el historial
@@ -278,11 +280,11 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                 <p className="font-medium">Próximos pasos</p>
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
-                {task.status === "WAITING_CLIENT"
+                {workItem.status === "WAITING_CLIENT"
                   ? "En espera de respuesta o documentación del cliente."
-                  : task.status === "WAITING_INSURER"
+                  : workItem.status === "WAITING_INSURER"
                     ? "En espera de respuesta de la aseguradora."
-                    : task.status === "WAITING_DOCUMENT"
+                    : workItem.status === "WAITING_DOCUMENT"
                       ? "En espera de documentos para continuar el trámite."
                       : "Continuar con el seguimiento según prioridad y fecha límite."}
               </p>

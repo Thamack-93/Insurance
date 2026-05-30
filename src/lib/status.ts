@@ -22,6 +22,8 @@ export const statusLabels: Record<string, string> = {
   WAITING_INSURER: "Esperando aseguradora",
   WAITING_DOCUMENT: "Esperando documento",
   SENT: "Enviado",
+  FAILED: "Fallido",
+  SKIPPED: "Omitido",
   RESOLVED: "Resuelto",
   EXPECTED: "Esperada",
   DONE: "Hecho",
@@ -40,7 +42,7 @@ export function getStatusTone(status: string): BadgeTone {
     return "success";
   }
   if (["OVERDUE", "EXPIRED", "CRITICAL"].includes(status)) return "critical";
-  if (["CANCELLED", "ARCHIVED"].includes(status)) return "danger";
+  if (["FAILED", "CANCELLED", "ARCHIVED"].includes(status)) return "danger";
   if (["WAITING_CLIENT", "WAITING_INSURER", "WAITING_DOCUMENT", "HIGH"].includes(status)) {
     return "warning";
   }
@@ -71,4 +73,3 @@ export function policyTypeLabel(value: string) {
 
   return labels[value] ?? value;
 }
-

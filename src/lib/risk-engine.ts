@@ -1,6 +1,7 @@
 import { addDays, subDays } from "date-fns";
 import { getDb } from "@/lib/db";
 import { today } from "@/lib/dates";
+import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 
 export type RiskFinding = {
   alertType: string;
@@ -21,26 +22,20 @@ export async function detectRisks(): Promise<RiskFinding[]> {
   const olderThan15 = subDays(now, 15);
 
   const [
-    policiesWithoutRenewal,
     policiesWithoutPdf,
     expiredPolicies,
     overdueReceipts,
     paidReceiptsWithoutProof,
     overdueCommissions,
-    staleTasks,
+    staleWorkItems,
     clientsWithoutContact,
     inconsistentPolicies,
     orphanDocuments,
     clientsWithoutActivePolicies,
-    renewalsWithoutTask,
+    renewalsWithoutWorkItem,
     duplicatePolicyKeys,
     duplicateReceiptKeys,
   ] = await Promise.all([
-    db.policy.findMany({
-      where: { status: "ACTIVE", renewalDate: null },
-      take: TAKE_LIMIT,
-      select: { id: true, policyNumber: true },
-    }),
     db.policy.findMany({
       where: { status: "ACTIVE", documents: { none: { documentType: "POLICY" } } },
       take: TAKE_LIMIT,
@@ -70,13 +65,14 @@ export async function detectRisks(): Promise<RiskFinding[]> {
       take: TAKE_LIMIT,
       select: { id: true, expectedAmount: true },
     }),
-    db.task.findMany({
+    db.workItem.findMany({
       where: {
+        workItemType: "TASK",
         startDate: { lt: olderThan15 },
-        status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] },
+        status: { in: [...OPEN_WORK_ITEM_STATUSES] },
       },
       take: TAKE_LIMIT,
-      select: { id: true, folio: true, title: true },
+      select: { id: true, sourceId: true, folio: true, title: true },
     }),
     db.client.findMany({
       where: { OR: [{ phone: null }, { email: null }] },
@@ -108,8 +104,13 @@ export async function detectRisks(): Promise<RiskFinding[]> {
     db.policy.findMany({
       where: {
         status: "ACTIVE",
-        renewalDate: { gte: now, lte: in60 },
-        tasks: { none: { taskType: "RENEWAL", status: { notIn: ["RESOLVED", "CANCELLED", "ARCHIVED"] } } },
+        endDate: { gte: now, lte: in60 },
+        workItems: {
+          none: {
+            workItemType: "TASK",
+            status: { in: [...OPEN_WORK_ITEM_STATUSES] },
+          },
+        },
       },
       take: TAKE_LIMIT,
       select: { id: true, policyNumber: true },
@@ -149,18 +150,27 @@ export async function detectRisks(): Promise<RiskFinding[]> {
     : [];
 
   return [
-    ...policiesWithoutRenewal.map((policy) => risk("POLICY_MISSING_RENEWAL", "WARNING", "Poliza sin fecha de renovacion", policy.policyNumber, "Policy", policy.id, "Capturar fecha de renovacion.")),
     ...policiesWithoutPdf.map((policy) => risk("POLICY_MISSING_PDF", "WARNING", "Poliza sin PDF", policy.policyNumber, "Policy", policy.id, "Subir documento de poliza.")),
     ...expiredPolicies.map((policy) => risk("POLICY_EXPIRED", "CRITICAL", "Poliza vencida", policy.policyNumber, "Policy", policy.id, "Revisar renovacion o cancelacion.")),
     ...overdueReceipts.map((receipt) => risk("RECEIPT_OVERDUE", "CRITICAL", "Recibo vencido sin pago", receipt.receiptNumber, "Receipt", receipt.id, "Contactar cliente y registrar seguimiento.")),
     ...paidReceiptsWithoutProof.map((receipt) => risk("PAID_RECEIPT_WITHOUT_PROOF", "WARNING", "Recibo pagado sin comprobante", receipt.receiptNumber, "Receipt", receipt.id, "Subir comprobante de pago.")),
     ...overdueCommissions.map((commission) => risk("COMMISSION_OVERDUE", "WARNING", "Comision vencida sin cobro", String(commission.expectedAmount), "Commission", commission.id, "Revisar cobranza con aseguradora.")),
-    ...staleTasks.map((task) => risk("STALE_TASK", "WARNING", "Pendiente abierto mas de 15 dias", `${task.folio} · ${task.title}`, "Task", task.id, "Actualizar o cerrar pendiente.")),
+    ...staleWorkItems.map((workItem) =>
+      risk(
+        "STALE_TASK",
+        "WARNING",
+        "Pendiente abierto mas de 15 dias",
+        `${workItem.folio ?? workItem.sourceId ?? workItem.id} · ${workItem.title}`,
+        "WorkItem",
+        workItem.sourceId ?? workItem.id,
+        "Actualizar o cerrar pendiente.",
+      ),
+    ),
     ...clientsWithoutContact.map((client) => risk("CLIENT_MISSING_CONTACT", "WARNING", "Cliente sin telefono o email", client.fullName, "Client", client.id, "Completar datos de contacto.")),
     ...inconsistentPolicies.map((policy) => risk("INCONSISTENT_DATES", "CRITICAL", "Fechas inconsistentes", policy.policyNumber, "Policy", policy.id, "Corregir vigencia de poliza.")),
     ...orphanDocuments.map((document) => risk("ORPHAN_DOCUMENT", "INFO", "Documento huerfano", document.fileName, "Document", document.id, "Asociar documento a una entidad.")),
     ...clientsWithoutActivePolicies.map((client) => risk("CLIENT_WITHOUT_ACTIVE_POLICY", "INFO", "Cliente sin polizas activas", client.fullName, "Client", client.id, "Revisar si debe archivarse o reactivarse.")),
-    ...renewalsWithoutTask.map((policy) => risk("RENEWAL_WITHOUT_TASK", "WARNING", "Renovacion proxima sin pendiente", policy.policyNumber, "Policy", policy.id, "Crear pendiente de renovacion.")),
+    ...renewalsWithoutWorkItem.map((policy) => risk("RENEWAL_WITHOUT_WORK_ITEM", "WARNING", "Renovacion proxima sin pendiente", policy.policyNumber, "Policy", policy.id, "Crear pendiente de renovacion.")),
     ...duplicatePolicies.map((policy) => risk("DUPLICATE_POLICY_NUMBER", "WARNING", "Numero de poliza duplicado", policy.policyNumber, "Policy", policy.id, "Verificar duplicado.")),
     ...duplicateReceipts.map((receipt) => risk("DUPLICATE_RECEIPT_NUMBER", "WARNING", "Recibo duplicado", receipt.receiptNumber, "Receipt", receipt.id, "Verificar duplicado.")),
   ];

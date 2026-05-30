@@ -5,8 +5,9 @@ import type {
   PolicyType,
   Priority,
   QuoteStatus,
-  TaskStatus,
   TaskType,
+  WorkItemStatus,
+  WorkItemType,
 } from "../src/generated/prisma/client.ts";
 
 import {
@@ -17,6 +18,7 @@ import {
   parseCliArgs,
   toBooleanValue,
 } from "./_shared.ts";
+import { ensureNotificationDefaultsForUser } from "../src/lib/notification-foundation.ts";
 
 async function main() {
   const args = parseCliArgs();
@@ -31,7 +33,7 @@ async function main() {
     policies: 0,
     receipts: 0,
     payments: 0,
-    tasks: 0,
+    workItems: 0,
     claims: 0,
     quotes: 0,
     alerts: 0,
@@ -57,7 +59,7 @@ async function main() {
     "SINGLE",
     "OTHER",
   ] as const satisfies readonly PaymentFrequency[];
-  const taskTypes = [
+  const workItemTypesDemo = [
     "GENERAL",
     "DOCUMENT",
     "RENEWAL",
@@ -65,14 +67,15 @@ async function main() {
     "QUOTE",
     "PAYMENT",
   ] as const satisfies readonly TaskType[];
-  const taskStatuses = [
+  const workItemStatuses = [
     "OPEN",
     "IN_PROGRESS",
     "WAITING_CLIENT",
     "WAITING_INSURER",
     "WAITING_DOCUMENT",
     "SENT",
-  ] as const satisfies readonly TaskStatus[];
+  ] as const satisfies readonly WorkItemStatus[];
+  const workItemTypes = ["TASK"] as const satisfies readonly WorkItemType[];
   const priorities = ["URGENT", "HIGH", "MEDIUM", "LOW", "MEDIUM", "HIGH"] as const satisfies readonly Priority[];
   const quoteTypes = ["AUTO", "HOGAR"] as const satisfies readonly PolicyType[];
   const quoteStatuses = ["REQUESTED", "SENT"] as const satisfies readonly QuoteStatus[];
@@ -89,7 +92,7 @@ async function main() {
   if (dryRun) {
     console.log("Seed demo de PolicyDesk");
     console.log("Modo simulacion activado: no se escribira nada.");
-    console.log(`Se borrarian y recrearian ${clientNames.length} clientes, ${insurerNames.length} aseguradoras y una cartera base.`);
+    console.log(`Se borrarian y recrearian ${clientNames.length} clientes, ${insurerNames.length} aseguradoras, una cartera base y la cola demo de WorkItems.`);
     await closeDb(db);
     return;
   }
@@ -102,12 +105,14 @@ async function main() {
 
   await db.receipt.updateMany({ data: { documentId: null } });
   await db.alert.deleteMany();
+  await db.notificationEvent.deleteMany();
+  await db.notificationPreference.deleteMany();
+  await db.notificationChannel.deleteMany();
   await db.activityLog.deleteMany();
-  await db.reminder.deleteMany();
   await db.payment.deleteMany();
   await db.commission.deleteMany();
   await db.document.deleteMany();
-  await db.task.deleteMany();
+  await db.workItem.deleteMany();
   await db.claim.deleteMany();
   await db.quote.deleteMany();
   await db.receipt.deleteMany();
@@ -158,7 +163,6 @@ async function main() {
     const insurer = insurers[index % insurers.length];
     const startDate = subDays(base, 240 - index * 14);
     const endDate = addDays(startDate, 365);
-    const renewalDate = index % 4 === 0 ? null : addDays(base, 10 + index * 5);
     const policy = await db.policy.create({
       data: {
         policyNumber: `POL-DEMO-${1000 + index}`,
@@ -168,7 +172,6 @@ async function main() {
         status: index === 6 ? "PENDING" : "ACTIVE",
         startDate,
         endDate,
-        renewalDate,
         premiumAmount: 8500 + index * 1250,
         currency: index % 3 === 0 ? "USD" : "MXN",
         paymentFrequency: paymentFrequencies[index % paymentFrequencies.length],
@@ -228,24 +231,30 @@ async function main() {
 
   for (let index = 0; index < 6; index += 1) {
     const policy = policies[index % policies.length];
-    await db.task.create({
+    const sourceId = `PD-2026-${String(index + 1).padStart(4, "0")}`;
+    await db.workItem.create({
       data: {
-        folio: `PD-2026-${String(index + 1).padStart(4, "0")}`,
+        sourceType: null,
+        sourceId,
+        workItemType: workItemTypes[0],
+        taskType: workItemTypesDemo[index],
+        status: workItemStatuses[index],
+        priority: priorities[index],
+        folio: sourceId,
+        title: ["Confirmar pago", "Solicitar PDF", "Preparar renovacion", "Validar comision", "Enviar cotizacion", "Dar seguimiento"][index],
+        description: "Pendiente demo para probar la operacion diaria de PolicyDesk.",
+        entityType: "WorkItem",
+        entityId: sourceId,
         clientId: policy.clientId,
         policyId: policy.id,
         insurerId: policy.insurerId,
         receiptId: index % 2 === 0 ? receipts[index % receipts.length].id : null,
-        title: ["Confirmar pago", "Solicitar PDF", "Preparar renovacion", "Validar comision", "Enviar cotizacion", "Dar seguimiento"][index],
-        description: "Pendiente demo para probar la operacion diaria de PolicyDesk.",
-        taskType: taskTypes[index],
-        status: taskStatuses[index],
-        priority: priorities[index],
         startDate: subDays(base, 14 + index),
         dueDate: addDays(base, [-8, -1, 2, 7, 13, 21][index]),
         notes: index % 3 === 0 ? "Requiere seguimiento hoy." : null,
       },
     });
-    summary.tasks += 1;
+    summary.workItems += 1;
   }
 
   for (let index = 0; index < 2; index += 1) {
@@ -319,6 +328,14 @@ async function main() {
     summary.logs += 1;
   }
 
+  const activeUsers = await db.user.findMany({
+    where: { active: true },
+    select: { id: true },
+  });
+  for (const user of activeUsers) {
+    await ensureNotificationDefaultsForUser(user.id, db);
+  }
+
   console.log("Seed demo de PolicyDesk");
   console.log("Datos recreados con exito.");
   console.log(`Insurers: ${summary.insurers}`);
@@ -326,7 +343,7 @@ async function main() {
   console.log(`Policies: ${summary.policies}`);
   console.log(`Receipts: ${summary.receipts}`);
   console.log(`Payments: ${summary.payments}`);
-  console.log(`Tasks: ${summary.tasks}`);
+  console.log(`WorkItems: ${summary.workItems}`);
   console.log(`Claims: ${summary.claims}`);
   console.log(`Quotes: ${summary.quotes}`);
   console.log(`Alerts: ${summary.alerts}`);

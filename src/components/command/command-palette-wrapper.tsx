@@ -24,7 +24,7 @@ import {
   Clock,
 } from "lucide-react";
 import { CommandPalette, type CommandPaletteGroup } from "./command-palette";
-import { getRecentItems, RECENTLY_VIEWED_EVENT } from "@/lib/recently-viewed";
+import { EMPTY_RECENT_ITEMS, getRecentItems, RECENTLY_VIEWED_EVENT } from "@/lib/recently-viewed";
 import type { SearchResult, SearchResultType } from "@/components/search/search-provider";
 import { Highlight } from "@/components/search/highlight";
 
@@ -32,7 +32,7 @@ const dynamicEntityIcon: Record<SearchResultType, React.ReactNode> = {
   client: <Users className="size-4" />,
   policy: <FolderKanban className="size-4" />,
   receipt: <ReceiptText className="size-4" />,
-  task: <CheckSquare className="size-4" />,
+  workItem: <CheckSquare className="size-4" />,
   claim: <AlertTriangle className="size-4" />,
   quote: <Calculator className="size-4" />,
   insurer: <Building2 className="size-4" />,
@@ -43,7 +43,7 @@ const dynamicEntityLabel: Record<SearchResultType, string> = {
   client: "Clientes",
   policy: "Pólizas",
   receipt: "Recibos",
-  task: "Pendientes",
+  workItem: "Pendientes",
   claim: "Siniestros",
   quote: "Cotizaciones",
   insurer: "Aseguradoras",
@@ -56,10 +56,14 @@ const groupOrder: SearchResultType[] = [
   "receipt",
   "claim",
   "quote",
-  "task",
+  "workItem",
   "insurer",
   "document",
 ];
+
+function getServerRecentItems() {
+  return EMPTY_RECENT_ITEMS;
+}
 
 export function CommandPaletteWrapper() {
   const [open, setOpen] = useState(false);
@@ -78,8 +82,8 @@ export function CommandPaletteWrapper() {
         window.removeEventListener(RECENTLY_VIEWED_EVENT, handler);
       };
     }, []),
-    () => getRecentItems(),
-    () => [],
+    getRecentItems,
+    getServerRecentItems,
   );
 
   const handleSelect = useCallback((href: string) => {

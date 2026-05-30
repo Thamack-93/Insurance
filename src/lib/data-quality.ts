@@ -160,7 +160,6 @@ export async function getPolicyDataQualityScores() {
       id: true,
       policyNumber: true,
       status: true,
-      renewalDate: true,
       insuredObject: true,
       premiumAmount: true,
       clientId: true,
@@ -178,16 +177,6 @@ export async function getPolicyDataQualityScores() {
     .map<PolicyQualityScore>((policy) => {
       const issues: DataQualityIssue[] = [];
       let score = 100;
-
-      if (!policy.renewalDate) {
-        issues.push({
-          code: "POLICY_RENEWAL_MISSING",
-          etiqueta: "Renovación faltante",
-          descripcion: "La póliza no tiene fecha de renovación.",
-          penalizacion: 20,
-        });
-        score -= 20;
-      }
 
       const hasPolicyPdf = policy.documents.some((document) => document.documentType === "POLICY");
       if (!hasPolicyPdf) {
@@ -233,11 +222,10 @@ export async function getPolicyDataQualityScores() {
       const completitud = Math.max(
         0,
         Math.round(
-          ((Number(Boolean(policy.renewalDate)) +
-            Number(hasPolicyPdf) +
+          ((Number(hasPolicyPdf) +
             Number(Boolean(policy.insuredObject)) +
             Number(Boolean(toNumber(policy.premiumAmount)))) /
-            4) *
+            3) *
             100,
         ),
       );

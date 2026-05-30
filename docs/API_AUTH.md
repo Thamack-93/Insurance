@@ -6,6 +6,7 @@ All routes under `src/app/api/` require a valid session cookie (`pd_session`) un
 |-------|--------|------|------|
 | `/api/auth/logout` | POST | Public | — |
 | `/api/jobs/backup` | POST | Bearer `BACKUP_JOB_SECRET` | Cron job |
+| `/api/integrations/telegram/webhook` | GET / POST | Public for Telegram webhook | Telegram secret header on POST |
 | `/api/search` | GET | Session | Any active user |
 | `/api/payments/quick` | POST | Session | Any active user |
 | `/api/commissions/stats` | GET | Session | Any active user |

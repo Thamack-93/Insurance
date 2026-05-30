@@ -9,14 +9,30 @@ export type RecentItem = {
 const STORAGE_KEY = "pg_recently_viewed";
 const MAX_ITEMS = 8;
 export const RECENTLY_VIEWED_EVENT = "pg:recently-viewed-updated";
+export const EMPTY_RECENT_ITEMS: RecentItem[] = [];
+
+let cachedRaw: string | null = null;
+let cachedItems: RecentItem[] = EMPTY_RECENT_ITEMS;
 
 export function getRecentItems(): RecentItem[] {
-  if (typeof window === "undefined") return [];
+  if (typeof window === "undefined") return EMPTY_RECENT_ITEMS;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as RecentItem[]) : [];
+    if (!raw) {
+      cachedRaw = null;
+      cachedItems = EMPTY_RECENT_ITEMS;
+      return cachedItems;
+    }
+    if (raw === cachedRaw) return cachedItems;
+
+    const parsed = JSON.parse(raw);
+    cachedRaw = raw;
+    cachedItems = Array.isArray(parsed) ? (parsed as RecentItem[]) : EMPTY_RECENT_ITEMS;
+    return cachedItems;
   } catch {
-    return [];
+    cachedRaw = null;
+    cachedItems = EMPTY_RECENT_ITEMS;
+    return cachedItems;
   }
 }
 
@@ -28,7 +44,10 @@ export function recordRecentItem(item: Omit<RecentItem, "visitedAt">): void {
       { ...item, visitedAt: Date.now() },
       ...existing,
     ].slice(0, MAX_ITEMS);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    const raw = JSON.stringify(updated);
+    localStorage.setItem(STORAGE_KEY, raw);
+    cachedRaw = raw;
+    cachedItems = updated;
     window.dispatchEvent(new CustomEvent(RECENTLY_VIEWED_EVENT));
   } catch (error) {
     if (process.env.NODE_ENV === "development") {

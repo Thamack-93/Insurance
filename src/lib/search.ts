@@ -1,5 +1,6 @@
 import { getDb } from "@/lib/db";
 import { normalize, unaccentSql } from "@/lib/search-utils";
+import { Prisma } from "@/generated/prisma/client";
 
 export { normalize, unaccentSql };
 
@@ -11,7 +12,7 @@ export type SearchMatch = {
 
 export type GlobalSearchResult = {
   id: string;
-  type: "client" | "policy" | "receipt" | "task" | "claim" | "quote" | "insurer" | "document";
+  type: "client" | "policy" | "receipt" | "workItem" | "claim" | "quote" | "insurer" | "document";
   title: string;
   subtitle?: string;
   parentLabel?: string;
@@ -48,6 +49,7 @@ const FIELD_LABELS: Record<string, string> = {
   title: "título",
   folio: "folio",
   claimType: "tipo",
+  taskType: "tipo",
   name: "nombre",
   contactName: "contacto",
   fileName: "archivo",
@@ -69,20 +71,78 @@ function pickMatch(row: Record<string, unknown>, fields: string[], needle: strin
 
 type RowWithId = Record<string, unknown> & { id: string };
 
+type SearchTable =
+  | "Client"
+  | "Policy"
+  | "Receipt"
+  | "WorkItem"
+  | "Claim"
+  | "Quote"
+  | "Insurer"
+  | "Document";
+
+const ALLOWED_COLUMNS = new Set([
+  "id",
+  "fullName",
+  "email",
+  "phone",
+  "rfc",
+  "address",
+  "notes",
+  "policyNumber",
+  "policyType",
+  "insuredObject",
+  "receiptNumber",
+  "status",
+  "folio",
+  "title",
+  "claimType",
+  "taskType",
+  "name",
+  "contactName",
+  "fileName",
+  "documentType",
+  "clientId",
+  "policyId",
+  "claimId",
+  "receiptId",
+  "taskId",
+  "quoteId",
+  "sourceType",
+  "sourceId",
+  "updatedAt",
+]);
+
+function assertAllowedIdentifier(value: string) {
+  if (!ALLOWED_COLUMNS.has(value)) {
+    throw new Error(`Unsafe search column: ${value}`);
+  }
+}
+
 async function rawSearch<T extends RowWithId>(
-  table: string,
+  table: SearchTable,
   selectCols: string[],
   searchCols: string[],
   needle: string,
   limit = 5,
-  extraSelect = "",
+  extraSelect: Prisma.Sql = Prisma.empty,
 ): Promise<T[]> {
   const db = getDb();
-  const where = searchCols.map((c) => `${unaccentSql(c)} LIKE ?`).join(" OR ");
-  const cols = selectCols.map((c) => `"${c}"`).join(", ");
-  const sql = `SELECT ${cols}${extraSelect} FROM "${table}" WHERE ${where} ORDER BY "updatedAt" DESC LIMIT ${limit}`;
-  const params = Array.from({ length: searchCols.length }, () => `%${needle}%`);
-  return (await db.$queryRawUnsafe(sql, ...params)) as T[];
+
+  assertAllowedIdentifier("updatedAt");
+  for (const column of [...selectCols, ...searchCols]) {
+    assertAllowedIdentifier(column);
+  }
+
+  const tableSql = Prisma.raw(`"${table}"`);
+  const cols = Prisma.join(selectCols.map((column) => Prisma.raw(`"${column}"`)), ", ");
+  const where = Prisma.join(
+    searchCols.map((column) => Prisma.sql`${Prisma.raw(unaccentSql(column))} LIKE ${`%${needle}%`}`),
+    " OR ",
+  );
+
+  const sql = Prisma.sql`SELECT ${cols}${extraSelect} FROM ${tableSql} WHERE ${where} ORDER BY ${Prisma.raw('"updatedAt"')} DESC LIMIT ${limit}`;
+  return (await db.$queryRaw<T[]>(sql)) as T[];
 }
 
 export async function globalSearch(query: string): Promise<GlobalSearchResult[]> {
@@ -96,7 +156,16 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
   type ClientRow = RowWithId & { fullName: string; email: string | null; phone: string | null; rfc: string | null; address: string | null; notes: string | null };
   type PolicyRow = RowWithId & { policyNumber: string; policyType: string; insuredObject: string | null; notes: string | null; clientId: string; clientName: string | null };
   type ReceiptRow = RowWithId & { receiptNumber: string; status: string; clientName: string | null };
-  type TaskRow = RowWithId & { folio: string; title: string; status: string; notes: string | null; clientName: string | null };
+  type WorkItemRow = RowWithId & {
+    sourceType: string;
+    sourceId: string;
+    folio: string | null;
+    title: string;
+    taskType: string | null;
+    status: string;
+    notes: string | null;
+    clientName: string | null;
+  };
   type ClaimRow = RowWithId & { folio: string; claimType: string; notes: string | null; clientName: string | null };
   type QuoteRow = RowWithId & { policyType: string; notes: string | null; clientName: string | null };
   type InsurerRow = RowWithId & { name: string; contactName: string | null; notes: string | null };
@@ -113,7 +182,7 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
     parentLabel: string | null;
   };
 
-  const [clients, policies, receipts, tasks, claims, quotes, insurers, documents] = await Promise.all([
+  const [clients, policies, receipts, workItems, claims, quotes, insurers, documents] = await Promise.all([
     rawSearch<ClientRow>(
       "Client",
       ["id", "fullName", "email", "phone", "rfc", "address", "notes", "updatedAt"],
@@ -126,7 +195,7 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
       ["policyNumber", "insuredObject", "notes"],
       needle,
       5,
-      `, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Policy"."clientId") AS "clientName"`,
+      Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Policy"."clientId") AS "clientName"`,
     ),
     rawSearch<ReceiptRow>(
       "Receipt",
@@ -134,15 +203,15 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
       ["receiptNumber"],
       needle,
       5,
-      `, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Receipt"."clientId") AS "clientName"`,
+      Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Receipt"."clientId") AS "clientName"`,
     ),
-    rawSearch<TaskRow>(
-      "Task",
-      ["id", "folio", "title", "status", "notes", "updatedAt"],
-      ["folio", "title", "notes"],
+    rawSearch<WorkItemRow>(
+      "WorkItem",
+      ["id", "sourceType", "sourceId", "folio", "title", "taskType", "status", "notes", "updatedAt"],
+      ["sourceType", "sourceId", "folio", "title", "taskType", "notes"],
       needle,
       5,
-      `, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Task"."clientId") AS "clientName"`,
+      Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "WorkItem"."clientId") AS "clientName"`,
     ),
     rawSearch<ClaimRow>(
       "Claim",
@@ -150,7 +219,7 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
       ["folio", "claimType", "notes"],
       needle,
       5,
-      `, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Claim"."clientId") AS "clientName"`,
+      Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Claim"."clientId") AS "clientName"`,
     ),
     rawSearch<QuoteRow>(
       "Quote",
@@ -158,7 +227,7 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
       ["id", "notes"],
       needle,
       5,
-      `, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Quote"."clientId") AS "clientName"`,
+      Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Quote"."clientId") AS "clientName"`,
     ),
     rawSearch<InsurerRow>(
       "Insurer",
@@ -172,7 +241,7 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
       ["fileName", "notes"],
       needle,
       5,
-      `, COALESCE(
+      Prisma.sql`, COALESCE(
           (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Document"."clientId"),
           (SELECT "policyNumber" FROM "Policy" WHERE "Policy"."id" = "Document"."policyId"),
           (SELECT "folio" FROM "Claim" WHERE "Claim"."id" = "Document"."claimId"),
@@ -217,14 +286,14 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
     });
   }
 
-  for (const t of tasks) {
-    const match = pickMatch(t, ["folio", "title", "notes"], needle);
+  for (const w of workItems) {
+    const match = pickMatch(w, ["sourceType", "sourceId", "folio", "title", "taskType", "notes"], needle);
     results.push({
-      id: t.id,
-      type: "task",
-      title: t.title,
-      subtitle: `${t.clientName ?? "Sin cliente"} · ${t.status}`,
-      href: `/tasks/${t.id}`,
+      id: w.id,
+      type: "workItem",
+      title: w.title,
+      subtitle: `${w.clientName ?? "Sin cliente"} · ${w.status}`,
+      href: `/tasks/${w.sourceId ?? w.id}`,
       match,
     });
   }
