@@ -1,7 +1,7 @@
 -- Add role/active/lastLoginAt to User
 ALTER TABLE "User" ADD COLUMN "role" TEXT NOT NULL DEFAULT 'AGENT';
 ALTER TABLE "User" ADD COLUMN "active" BOOLEAN NOT NULL DEFAULT true;
-ALTER TABLE "User" ADD COLUMN "lastLoginAt" DATETIME;
+ALTER TABLE "User" ADD COLUMN "lastLoginAt" TIMESTAMP(3);
 
 -- Promote all existing real users to ADMIN so the broker keeps full access.
 -- The system user stays as AGENT (irrelevant: it cannot log in).

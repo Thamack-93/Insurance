@@ -11,8 +11,8 @@ CREATE TABLE "Client" (
     "preferredContactMethod" TEXT,
     "notes" TEXT,
     "status" TEXT NOT NULL DEFAULT 'ACTIVE',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL
 );
 
 -- CreateTable
@@ -26,8 +26,8 @@ CREATE TABLE "Insurer" (
     "contactPhone" TEXT,
     "notes" TEXT,
     "status" TEXT NOT NULL DEFAULT 'ACTIVE',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL
 );
 
 -- CreateTable
@@ -38,9 +38,9 @@ CREATE TABLE "Policy" (
     "insurerId" TEXT NOT NULL,
     "policyType" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'ACTIVE',
-    "startDate" DATETIME NOT NULL,
-    "endDate" DATETIME NOT NULL,
-    "renewalDate" DATETIME,
+    "startDate" TIMESTAMP(3) NOT NULL,
+    "endDate" TIMESTAMP(3) NOT NULL,
+    "renewalDate" TIMESTAMP(3),
     "premiumAmount" DECIMAL NOT NULL,
     "currency" TEXT NOT NULL DEFAULT 'MXN',
     "paymentFrequency" TEXT NOT NULL,
@@ -48,8 +48,8 @@ CREATE TABLE "Policy" (
     "insuredObject" TEXT,
     "beneficiaryInfo" TEXT,
     "notes" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "Policy_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "Policy_insurerId_fkey" FOREIGN KEY ("insurerId") REFERENCES "Insurer" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
@@ -61,18 +61,18 @@ CREATE TABLE "Receipt" (
     "policyId" TEXT NOT NULL,
     "clientId" TEXT NOT NULL,
     "insurerId" TEXT NOT NULL,
-    "periodStartDate" DATETIME NOT NULL,
-    "periodEndDate" DATETIME NOT NULL,
-    "dueDate" DATETIME NOT NULL,
+    "periodStartDate" TIMESTAMP(3) NOT NULL,
+    "periodEndDate" TIMESTAMP(3) NOT NULL,
+    "dueDate" TIMESTAMP(3) NOT NULL,
     "amount" DECIMAL NOT NULL,
     "currency" TEXT NOT NULL DEFAULT 'MXN',
     "status" TEXT NOT NULL DEFAULT 'PENDING',
-    "paidDate" DATETIME,
+    "paidDate" TIMESTAMP(3),
     "paymentMethod" TEXT,
     "documentId" TEXT,
     "notes" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "Receipt_policyId_fkey" FOREIGN KEY ("policyId") REFERENCES "Policy" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "Receipt_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "Receipt_insurerId_fkey" FOREIGN KEY ("insurerId") REFERENCES "Insurer" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
@@ -87,12 +87,12 @@ CREATE TABLE "Payment" (
     "clientId" TEXT NOT NULL,
     "amount" DECIMAL NOT NULL,
     "currency" TEXT NOT NULL DEFAULT 'MXN',
-    "paidDate" DATETIME NOT NULL,
+    "paidDate" TIMESTAMP(3) NOT NULL,
     "paymentMethod" TEXT,
     "reference" TEXT,
     "notes" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "Payment_receiptId_fkey" FOREIGN KEY ("receiptId") REFERENCES "Receipt" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "Payment_policyId_fkey" FOREIGN KEY ("policyId") REFERENCES "Policy" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "Payment_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client" ("id") ON DELETE CASCADE ON UPDATE CASCADE
@@ -109,11 +109,11 @@ CREATE TABLE "Commission" (
     "actualAmount" DECIMAL,
     "percentage" DECIMAL,
     "status" TEXT NOT NULL DEFAULT 'EXPECTED',
-    "expectedDate" DATETIME NOT NULL,
-    "paidDate" DATETIME,
+    "expectedDate" TIMESTAMP(3) NOT NULL,
+    "paidDate" TIMESTAMP(3),
     "notes" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "Commission_policyId_fkey" FOREIGN KEY ("policyId") REFERENCES "Policy" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "Commission_receiptId_fkey" FOREIGN KEY ("receiptId") REFERENCES "Receipt" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "Commission_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
@@ -133,12 +133,12 @@ CREATE TABLE "Task" (
     "taskType" TEXT NOT NULL DEFAULT 'GENERAL',
     "status" TEXT NOT NULL DEFAULT 'OPEN',
     "priority" TEXT NOT NULL DEFAULT 'MEDIUM',
-    "startDate" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "dueDate" DATETIME,
-    "closedDate" DATETIME,
+    "startDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "dueDate" TIMESTAMP(3),
+    "closedDate" TIMESTAMP(3),
     "notes" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "Task_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "Task_policyId_fkey" FOREIGN KEY ("policyId") REFERENCES "Policy" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "Task_insurerId_fkey" FOREIGN KEY ("insurerId") REFERENCES "Insurer" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
@@ -155,14 +155,14 @@ CREATE TABLE "Claim" (
     "claimType" TEXT NOT NULL,
     "description" TEXT,
     "status" TEXT NOT NULL DEFAULT 'OPEN',
-    "incidentDate" DATETIME NOT NULL,
-    "reportedDate" DATETIME NOT NULL,
-    "closedDate" DATETIME,
+    "incidentDate" TIMESTAMP(3) NOT NULL,
+    "reportedDate" TIMESTAMP(3) NOT NULL,
+    "closedDate" TIMESTAMP(3),
     "amountClaimed" DECIMAL,
     "amountPaid" DECIMAL,
     "notes" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "Claim_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "Claim_policyId_fkey" FOREIGN KEY ("policyId") REFERENCES "Policy" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "Claim_insurerId_fkey" FOREIGN KEY ("insurerId") REFERENCES "Insurer" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
@@ -175,13 +175,13 @@ CREATE TABLE "Quote" (
     "insurerId" TEXT,
     "policyType" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'REQUESTED',
-    "requestedDate" DATETIME NOT NULL,
-    "sentDate" DATETIME,
-    "validUntil" DATETIME,
+    "requestedDate" TIMESTAMP(3) NOT NULL,
+    "sentDate" TIMESTAMP(3),
+    "validUntil" TIMESTAMP(3),
     "quotedAmount" DECIMAL,
     "notes" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "Quote_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "Quote_insurerId_fkey" FOREIGN KEY ("insurerId") REFERENCES "Insurer" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
@@ -199,10 +199,10 @@ CREATE TABLE "Document" (
     "fileName" TEXT NOT NULL,
     "filePath" TEXT NOT NULL,
     "mimeType" TEXT NOT NULL,
-    "uploadedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "uploadedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "notes" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "Document_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "Document_policyId_fkey" FOREIGN KEY ("policyId") REFERENCES "Policy" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "Document_receiptId_fkey" FOREIGN KEY ("receiptId") REFERENCES "Receipt" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
@@ -216,12 +216,12 @@ CREATE TABLE "Reminder" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "entityType" TEXT NOT NULL,
     "entityId" TEXT NOT NULL,
-    "reminderDate" DATETIME NOT NULL,
+    "reminderDate" TIMESTAMP(3) NOT NULL,
     "title" TEXT NOT NULL,
     "description" TEXT,
     "status" TEXT NOT NULL DEFAULT 'ACTIVE',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL
 );
 
 -- CreateTable
@@ -232,7 +232,7 @@ CREATE TABLE "ActivityLog" (
     "action" TEXT NOT NULL,
     "oldValue" TEXT,
     "newValue" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "performedBy" TEXT NOT NULL DEFAULT 'local-user'
 );
 
@@ -246,8 +246,8 @@ CREATE TABLE "Alert" (
     "entityType" TEXT NOT NULL,
     "entityId" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'OPEN',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL
 );
 
 -- CreateIndex

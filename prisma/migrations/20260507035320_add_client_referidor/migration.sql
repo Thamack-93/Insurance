@@ -1,6 +1,4 @@
 -- RedefineTables
-PRAGMA defer_foreign_keys=ON;
-PRAGMA foreign_keys=OFF;
 CREATE TABLE "new_Client" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "fullName" TEXT NOT NULL,
@@ -14,8 +12,8 @@ CREATE TABLE "new_Client" (
     "referidorId" TEXT,
     "notes" TEXT,
     "status" TEXT NOT NULL DEFAULT 'ACTIVE',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
     "createdById" TEXT,
     "updatedById" TEXT,
     CONSTRAINT "Client_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
@@ -30,5 +28,3 @@ CREATE INDEX "Client_status_idx" ON "Client"("status");
 CREATE INDEX "Client_referidorId_idx" ON "Client"("referidorId");
 CREATE INDEX "Client_createdById_idx" ON "Client"("createdById");
 CREATE INDEX "Client_updatedById_idx" ON "Client"("updatedById");
-PRAGMA foreign_keys=ON;
-PRAGMA defer_foreign_keys=OFF;
