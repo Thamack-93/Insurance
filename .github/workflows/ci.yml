@@ -41,6 +41,9 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
+      - name: Apply Prisma migrations
+        run: npx prisma migrate deploy
+
       - name: Prepare shadow database
         run: |
           PGPASSWORD=postgres psql "postgresql://postgres@127.0.0.1:5432/postgres" -c "CREATE DATABASE shadow;"
