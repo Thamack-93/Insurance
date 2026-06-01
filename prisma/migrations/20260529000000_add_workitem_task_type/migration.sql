@@ -1,5 +1,5 @@
 -- Add business task subtype to WorkItem so task screens can live entirely on WorkItem.
-ALTER TABLE "WorkItem" ADD COLUMN "taskType" "TaskType";
+ALTER TABLE "WorkItem" ADD COLUMN "taskType" TEXT;
 
 -- Backfill the subtype for historical task-backed work items.
 UPDATE "WorkItem" AS w
