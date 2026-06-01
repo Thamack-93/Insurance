@@ -298,11 +298,14 @@ model Policy {
   updatedAt       DateTime         @updatedAt
   createdById     String?
   updatedById     String?
+  familyRootId    String?
 
   client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   insurer     Insurer      @relation(fields: [insurerId], references: [id], onDelete: Restrict)
   createdBy   User?        @relation("PolicyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   updatedBy   User?        @relation("PolicyUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  familyRoot  Policy?      @relation("PolicyFamily", fields: [familyRootId], references: [id], onDelete: SetNull)
+  familyPolicies Policy[]   @relation("PolicyFamily")
   receipts    Receipt[]
   payments    Payment[]
   commissions Commission[]
@@ -320,6 +323,7 @@ model Policy {
   @@index([endDate])
   @@index([createdById])
   @@index([updatedById])
+  @@index([familyRootId])
 }
 
 model Receipt {

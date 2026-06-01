@@ -34,6 +34,7 @@ type ExistingInsurer = {
 type ExistingPolicy = {
   id: string;
   policyNumber: string;
+  familyRootId: string | null;
   clientId: string;
   insurerId: string;
   policyType: string;
@@ -357,6 +358,34 @@ function paidKey(policyKey: string, receiptNumber: string) {
   return [policyKey, receiptNumber].join("|");
 }
 
+function policyGroupKey(policyNumber: string, startDate: Date | null, endDate: Date | null) {
+  return [normalizePolicyNumber(policyNumber), dateKey(startDate), dateKey(endDate)].join("|");
+}
+
+function policyGroupKeyFromRow(row: PolicyCsvRow) {
+  return policyGroupKey(row.policyNumber, row.policyStart ?? row.periodStart, row.policyEnd ?? row.periodEnd);
+}
+
+function policyGroupKeyFromPolicy(policy: ExistingPolicy) {
+  return policyGroupKey(policy.policyNumber, policy.startDate, policy.endDate);
+}
+
+function resolvePolicyFamilyRootId(
+  policies: ExistingPolicy[],
+  policyNumber: string,
+  clientId: string,
+  insurerId: string,
+) {
+  const target = normalizePolicyNumber(policyNumber);
+  const matches = policies
+    .filter((policy) => normalizePolicyNumber(policy.policyNumber) === target)
+    .filter((policy) => policy.clientId === clientId && policy.insurerId === insurerId)
+    .sort((left, right) => left.startDate.getTime() - right.startDate.getTime());
+
+  const root = matches[0];
+  return root ? root.familyRootId ?? root.id : null;
+}
+
 function readPolicyRows(csvPath: string): PolicyCsvRow[] {
   const workbook = XLSX.readFile(csvPath, { raw: false });
   const sheetName = workbook.SheetNames[0];
@@ -460,7 +489,7 @@ async function loadState(db: PgClient) {
   const clients = await db.query<ExistingClient>('select id, "fullName", "referidorId", status from public."Client"');
   const insurers = await db.query<ExistingInsurer>('select id, name, status from public."Insurer"');
   const policies = await db.query<ExistingPolicy>(
-    'select id, "policyNumber", "clientId", "insurerId", "policyType", status, "startDate", "endDate", "premiumAmount", currency, "paymentFrequency", "paymentPlan", "insuredObject" from public."Policy"',
+    'select id, "policyNumber", "familyRootId", "clientId", "insurerId", "policyType", status, "startDate", "endDate", "premiumAmount", currency, "paymentFrequency", "paymentPlan", "insuredObject" from public."Policy"',
   );
   const receipts = await db.query<ExistingReceipt>(
     'select id, "receiptNumber", "policyId", "clientId", "insurerId", "periodStartDate", "periodEndDate", "dueDate", amount, currency, status, "paidDate", "paymentMethod" from public."Receipt"',
@@ -761,16 +790,16 @@ async function runImport(args: Args) {
     const clientByName = buildMultiMap(state.clients, (client) => normalizeName(client.fullName));
     const clientByPersonTokens = buildMultiMap(state.clients, (client) => personTokenKey(client.fullName));
     const insurerByName = buildMultiMap(state.insurers, (insurer) => normalizeName(insurer.name));
-    const policyByKey = buildMultiMap(state.policies, (policy) => normalizePolicyNumber(policy.policyNumber));
+    const policyByKey = buildMultiMap(state.policies, policyGroupKeyFromPolicy);
     const receiptByExactKey = buildMultiMap(state.receipts, (receipt) =>
       receiptKey(receipt.policyId, receipt.receiptNumber, receipt.periodStartDate, receipt.periodEndDate),
     );
 
     const policyGroups = new Map<string, PolicyCsvRow[]>();
     for (const row of policyRows) {
-      const current = policyGroups.get(row.policyKey) ?? [];
+      const current = policyGroups.get(policyGroupKeyFromRow(row)) ?? [];
       current.push(row);
-      policyGroups.set(row.policyKey, current);
+      policyGroups.set(policyGroupKeyFromRow(row), current);
     }
 
     pushSummary(report, "Modo", args.mode);
@@ -877,6 +906,7 @@ async function runImport(args: Args) {
       const premiumAmount = premiumRows.reduce((total, row) => total + row.totalAmount, 0);
       const policyData = {
         policyNumber: existingPolicies[0]?.policyNumber ?? first.policyNumber,
+        familyRootId: existingPolicies[0]?.familyRootId ?? resolvePolicyFamilyRootId(state.policies, first.policyNumber, client.id, insurer.id),
         clientId: client.id,
         insurerId: insurer.id,
         policyType: mapPolicyType(first.subramo),
@@ -988,7 +1018,7 @@ async function runImport(args: Args) {
     }
 
     for (const row of policyRows) {
-      if (skippedPolicyKeys.has(row.policyKey)) continue;
+      if (skippedPolicyKeys.has(policyGroupKeyFromRow(row))) continue;
       if (!row.receiptNumber || !row.periodStart || !row.periodEnd) {
         report.skipped.push({
           Entidad: "Recibo",
@@ -999,7 +1029,7 @@ async function runImport(args: Args) {
         continue;
       }
 
-      const policyId = policyIdByKey.get(row.policyKey);
+      const policyId = policyIdByKey.get(policyGroupKeyFromRow(row));
       const policy = policyId ? state.policies.find((item) => item.id === policyId) : null;
       if (!policy) continue;
 

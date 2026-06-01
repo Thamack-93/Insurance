@@ -18,6 +18,7 @@ import { getDb } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
+import { getPolicyFamilyPolicies } from "@/lib/policy-families";
 import { policyTypeLabel } from "@/lib/status";
 import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 
@@ -45,7 +46,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     notFound();
   }
 
-  const [receipts, payments, commissions, workItems, documents, activity] = await Promise.all([
+  const [receipts, payments, commissions, workItems, documents, activity, family] = await Promise.all([
     db.receipt.findMany({
       where: { policyId: id },
       include: { client: true, insurer: true },
@@ -76,6 +77,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       take: 10,
     }),
     getActivityForEntity("Policy", id, 20),
+    getPolicyFamilyPolicies(id),
   ]);
 
   const openReceipts = receipts.filter((receipt) => receipt.status !== "PAID" && receipt.status !== "CANCELLED");
@@ -233,6 +235,51 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             </Table>
           </SectionCard>
         </section>
+
+        {family && family.policies.length > 1 ? (
+          <SectionCard
+            title="Historial de vigencias"
+            description={`Esta familia tiene ${family.policies.length} vigencias registradas. La póliza actual muestra solo su periodo propio.`}
+          >
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/40">
+                  <TableHead>Vigencia</TableHead>
+                  <TableHead>Periodo</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead className="text-right">Prima</TableHead>
+                  <TableHead className="text-right">Recibos</TableHead>
+                  <TableHead className="text-right">Pagos</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {family.policies.map((term) => (
+                  <TableRow key={term.id} className={term.id === policy.id ? "bg-muted/25" : undefined}>
+                    <TableCell>
+                      <Link href={`/policies/${term.id}`} className="font-medium text-foreground hover:text-primary">
+                        {term.policyNumber}
+                      </Link>
+                      {term.id === policy.id ? (
+                        <p className="text-xs text-muted-foreground">Vigencia actual</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Histórica</p>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {formatDate(term.startDate)} · {formatDate(term.endDate)}
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge status={term.status} />
+                    </TableCell>
+                    <TableCell className="text-right font-medium">{formatCurrency(term.premiumAmount, term.currency)}</TableCell>
+                    <TableCell className="text-right">{term._count.receipts}</TableCell>
+                    <TableCell className="text-right">{term._count.payments}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </SectionCard>
+        ) : null}
 
         <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
           <SectionCard title="Pagos" description="Pagos reales vinculados a la póliza.">

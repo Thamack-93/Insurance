@@ -52,6 +52,7 @@ type PolicyInput = z.infer<typeof policySchema>;
 type ExistingPolicy = {
   id: string;
   policyNumber: string;
+  familyRootId: string | null;
   clientId: string;
   insurerId: string;
   policyType: string;
@@ -120,6 +121,10 @@ function normalizeComparable(value: unknown) {
   return normalizeKey(String(value ?? ""));
 }
 
+function sameDate(left: Date | string, right: Date | string) {
+  return new Date(left).getTime() === new Date(right).getTime();
+}
+
 function resolveSingle<T>(items: T[], label: string) {
   if (items.length > 1) {
     throw new Error(`Coincidencia ambigua para ${label}.`);
@@ -144,10 +149,26 @@ function resolveInsurer(insurerRefs: InsurerRef[], ref: string) {
   return resolveSingle(matches, `la aseguradora "${ref}"`);
 }
 
-function resolvePolicyMatch(policies: ExistingPolicy[], policyNumber: string) {
-  const target = normalizeComparable(policyNumber);
-  const matches = policies.filter((policy) => normalizeComparable(policy.policyNumber) === target);
-  return resolveSingle(matches, `la poliza "${policyNumber}"`);
+function resolvePolicyMatch(policies: ExistingPolicy[], input: PolicyInput) {
+  const target = normalizeComparable(input.policyNumber);
+  const matches = policies.filter(
+    (policy) =>
+      normalizeComparable(policy.policyNumber) === target &&
+      sameDate(policy.startDate, input.startDate) &&
+      sameDate(policy.endDate, input.endDate),
+  );
+  return resolveSingle(matches, `la vigencia "${input.policyNumber}"`);
+}
+
+function resolvePolicyFamilyRootId(policies: ExistingPolicy[], input: PolicyInput, client: ClientRef, insurer: InsurerRef) {
+  const target = normalizeComparable(input.policyNumber);
+  const matches = policies
+    .filter((policy) => normalizeComparable(policy.policyNumber) === target)
+    .filter((policy) => policy.clientId === client.id && policy.insurerId === insurer.id)
+    .sort((left, right) => left.startDate.getTime() - right.startDate.getTime());
+
+  const root = matches[0];
+  return root ? root.familyRootId ?? root.id : null;
 }
 
 function buildUpdateData(
@@ -212,7 +233,23 @@ async function main() {
 
   const [policies, clientRefs, insurerRefs] = await Promise.all([
     db.policy.findMany({
-      include: {
+      select: {
+        id: true,
+        policyNumber: true,
+        familyRootId: true,
+        clientId: true,
+        insurerId: true,
+        policyType: true,
+        status: true,
+        startDate: true,
+        endDate: true,
+        premiumAmount: true,
+        currency: true,
+        paymentFrequency: true,
+        paymentPlan: true,
+        insuredObject: true,
+        beneficiaryInfo: true,
+        notes: true,
         client: { select: { id: true, fullName: true } },
         insurer: { select: { id: true, name: true } },
       },
@@ -244,13 +281,15 @@ async function main() {
         throw new Error(`No se encontro la aseguradora "${input.insurerRef}".`);
       }
 
-      const match = resolvePolicyMatch(policies, input.policyNumber);
+      const match = resolvePolicyMatch(policies, input);
 
       if (!match) {
+        const familyRootId = resolvePolicyFamilyRootId(policies, input, client, insurer);
         if (!dryRun) {
           await db.policy.create({
             data: {
               policyNumber: input.policyNumber,
+              familyRootId,
               clientId: client.id,
               insurerId: insurer.id,
               policyType: input.policyType,
@@ -352,12 +391,14 @@ async function main() {
       if (!client) throw new Error(`No se encontro el cliente "${input.clientRef}".`);
       if (!insurer) throw new Error(`No se encontro la aseguradora "${input.insurerRef}".`);
 
-      const match = resolvePolicyMatch(policies, input.policyNumber);
+      const exactMatch = resolvePolicyMatch(policies, input);
 
-      if (!match) {
+      if (!exactMatch) {
+        const familyRootId = resolvePolicyFamilyRootId(policies, input, client, insurer);
         const createdPolicy = await db.policy.create({
           data: {
             policyNumber: input.policyNumber,
+            familyRootId,
             clientId: client.id,
             insurerId: insurer.id,
             policyType: input.policyType,
@@ -394,13 +435,13 @@ async function main() {
         continue;
       }
 
-      const data = buildUpdateData(match, input, client, insurer);
+      const data = buildUpdateData(exactMatch, input, client, insurer);
       if (!Object.keys(data).length) continue;
 
-      const previousPolicy = { ...match };
+      const previousPolicy = { ...exactMatch };
 
       const updatedPolicy = await db.policy.update({
-        where: { id: match.id },
+        where: { id: exactMatch.id },
         data,
         include: {
           client: { select: { id: true, fullName: true } },
@@ -408,7 +449,7 @@ async function main() {
         },
       });
 
-      Object.assign(match, {
+      Object.assign(exactMatch, {
         clientId: updatedPolicy.clientId,
         insurerId: updatedPolicy.insurerId,
         policyType: updatedPolicy.policyType,
@@ -428,13 +469,13 @@ async function main() {
 
       await db.activityLog.create({
         data: {
-        entityType: "Policy",
-        entityId: updatedPolicy.id,
-        action: "IMPORT_UPDATE",
-        oldValue: safeJson(previousPolicy),
-        newValue: safeJson(updatedPolicy),
-        userId: "system-user-0000",
-      },
+          entityType: "Policy",
+          entityId: updatedPolicy.id,
+          action: "IMPORT_UPDATE",
+          oldValue: safeJson(previousPolicy),
+          newValue: safeJson(updatedPolicy),
+          userId: "system-user-0000",
+        },
       });
     } catch (error) {
       console.error(`Fila ${index + 2}: ${(error as Error).message}`);

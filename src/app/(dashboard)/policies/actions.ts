@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { AuthError, getCurrentUserId, requireAdmin } from "@/lib/auth";
 import { normalizeOptionalText, parseDateInput } from "@/lib/form-utils";
+import { resolvePolicyFamilyRootId } from "@/lib/policy-families";
 import { policySchema, type PolicyFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 
@@ -36,8 +37,18 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
   try {
     const db = getDb();
     const userId = await getCurrentUserId();
+    const familyRootId = await resolvePolicyFamilyRootId({
+      policyNumber: parsed.data.policyNumber.trim(),
+      clientId: parsed.data.clientId,
+      insurerId: parsed.data.insurerId,
+    });
     const policy = await db.policy.create({
-      data: { ...normalizePolicyInput(parsed.data), createdById: userId, updatedById: userId },
+      data: {
+        ...normalizePolicyInput(parsed.data),
+        familyRootId,
+        createdById: userId,
+        updatedById: userId,
+      },
     });
 
     await writeActivityLog({
