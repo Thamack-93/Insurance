@@ -57,7 +57,7 @@ export async function listUsers(): Promise<AdminUserRow[]> {
     id: u.id,
     email: u.email,
     name: u.name,
-    role: u.role,
+    role: u.role as UserRole,
     active: u.active,
     lastLoginAt: u.lastLoginAt ? u.lastLoginAt.toISOString() : null,
     createdAt: u.createdAt.toISOString(),

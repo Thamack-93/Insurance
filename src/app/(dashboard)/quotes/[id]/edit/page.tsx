@@ -4,6 +4,7 @@ import { QuoteForm } from "@/components/forms/quote-form";
 import { createQuoteDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
+import type { QuoteFormValues } from "@/lib/validations";
 
 export default async function EditQuotePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -33,8 +34,8 @@ export default async function EditQuotePage({ params }: { params: Promise<{ id: 
   const defaultValues = createQuoteDefaults({
     clientId: quote.clientId,
     insurerId: quote.insurerId ?? "",
-    policyType: quote.policyType,
-    status: quote.status,
+    policyType: quote.policyType as QuoteFormValues["policyType"],
+    status: quote.status as QuoteFormValues["status"],
     requestedDate: quote.requestedDate.toISOString().split("T")[0],
     sentDate: quote.sentDate?.toISOString().split("T")[0] ?? "",
     validUntil: quote.validUntil?.toISOString().split("T")[0] ?? "",

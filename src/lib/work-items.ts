@@ -1,25 +1,21 @@
 import type {
-  AlertSeverity,
-  Priority,
   Prisma,
   PrismaClient,
-  TaskType,
-  WorkItemStatus,
-  WorkItemType,
 } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
+import type { WorkItemStatus } from "@/lib/domain-values";
 
 export type WorkItemSourceType = "Task" | "Alert" | "Reminder";
 
 export type WorkItemSyncInput = {
   sourceType: WorkItemSourceType;
   sourceId: string;
-  workItemType: WorkItemType;
-  taskType?: TaskType | null;
-  status: WorkItemStatus;
-  priority?: Priority | null;
-  severity?: AlertSeverity | null;
+  workItemType: string;
+  taskType?: string | null;
+  status: string;
+  priority?: string | null;
+  severity?: string | null;
   folio?: string | null;
   title: string;
   description?: string | null;
@@ -48,11 +44,11 @@ function normalizeNullableText(value?: string | null) {
   return value ?? null;
 }
 
-function normalizeNullablePriority(value?: Priority | null) {
+function normalizeNullablePriority(value?: string | null) {
   return value ?? null;
 }
 
-function normalizeNullableSeverity(value?: AlertSeverity | null) {
+function normalizeNullableSeverity(value?: string | null) {
   return value ?? null;
 }
 

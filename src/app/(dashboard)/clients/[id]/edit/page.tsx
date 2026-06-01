@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
 import { createClientDefaults } from "@/lib/form-defaults";
 import type { SelectOption } from "@/lib/domain-options";
+import type { ClientFormValues } from "@/lib/validations";
 
 export default async function EditClientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -43,7 +44,7 @@ export default async function EditClientPage({ params }: { params: Promise<{ id:
           cancelHref={`/clients/${client.id}`}
           defaultValues={createClientDefaults({
             fullName: client.fullName,
-            type: client.type,
+            type: client.type as ClientFormValues["type"],
             email: client.email ?? "",
             phone: client.phone ?? "",
             secondaryPhone: client.secondaryPhone ?? "",
@@ -52,7 +53,7 @@ export default async function EditClientPage({ params }: { params: Promise<{ id:
             preferredContactMethod: client.preferredContactMethod ?? "",
             referidorId: client.referidorId ?? "NONE",
             notes: client.notes ?? "",
-            status: client.status,
+            status: client.status as ClientFormValues["status"],
           })}
           referidorOptions={referidorOptions}
           submitAction={updateClient.bind(null, client.id)}

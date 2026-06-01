@@ -1,4 +1,5 @@
-import type { Prisma, AlertSeverity } from "@/generated/prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
+import type { AlertSeverity } from "@/lib/domain-values";
 import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { mapAlertStatusToWorkItemStatus, upsertWorkItemFromSource } from "@/lib/work-items";
@@ -17,7 +18,7 @@ export type NotifyInput = {
 export type AlertRecord = {
   id: string;
   alertType: string;
-  severity: AlertSeverity;
+  severity: string;
   title: string;
   description: string | null;
   entityType: string;

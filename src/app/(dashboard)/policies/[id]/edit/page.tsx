@@ -5,6 +5,7 @@ import { createPolicyDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
 import { formatDateInput } from "@/lib/form-utils";
+import type { PolicyFormValues } from "@/lib/validations";
 
 export default async function EditPolicyPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -45,13 +46,13 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
             policyNumber: policy.policyNumber,
             clientId: policy.clientId,
             insurerId: policy.insurerId,
-            policyType: policy.policyType,
-            status: policy.status,
+            policyType: policy.policyType as PolicyFormValues["policyType"],
+            status: policy.status as PolicyFormValues["status"],
             startDate: formatDateInput(policy.startDate),
             endDate: formatDateInput(policy.endDate),
             premiumAmount: Number(policy.premiumAmount),
             currency: policy.currency,
-            paymentFrequency: policy.paymentFrequency,
+            paymentFrequency: policy.paymentFrequency as PolicyFormValues["paymentFrequency"],
             paymentPlan: policy.paymentPlan ?? "",
             insuredObject: policy.insuredObject ?? "",
             beneficiaryInfo: policy.beneficiaryInfo ?? "",

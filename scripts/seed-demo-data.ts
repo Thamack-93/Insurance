@@ -8,7 +8,7 @@ import type {
   TaskType,
   WorkItemStatus,
   WorkItemType,
-} from "../src/generated/prisma/client.ts";
+} from "../src/lib/domain-values";
 
 import {
   backupDatabase,

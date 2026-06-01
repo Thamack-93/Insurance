@@ -1,6 +1,6 @@
 "use server";
 
-import type { CommissionStatus, Prisma } from "@/generated/prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { today } from "@/lib/dates";
@@ -8,6 +8,7 @@ import { addDays } from "date-fns";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
+import type { CommissionStatus } from "@/lib/domain-values";
 
 export interface CommissionCalculation {
   policyId: string;

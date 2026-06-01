@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
 import { formatDateInput } from "@/lib/form-utils";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
+import type { WorkItemFormValues } from "@/lib/validations";
 
 export default async function EditWorkItemPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -59,9 +60,9 @@ export default async function EditWorkItemPage({ params }: { params: Promise<{ i
             receiptId: workItem.receiptId ?? "",
             title: workItem.title,
             description: workItem.description ?? "",
-            taskType: workItem.taskType ?? "GENERAL",
-            status: workItem.status === "DISMISSED" ? "ARCHIVED" : workItem.status,
-            priority: workItem.priority,
+            taskType: (workItem.taskType ?? "GENERAL") as WorkItemFormValues["taskType"],
+            status: (workItem.status === "DISMISSED" ? "ARCHIVED" : workItem.status) as WorkItemFormValues["status"],
+            priority: workItem.priority as WorkItemFormValues["priority"],
             startDate: formatDateInput(workItem.startDate),
             dueDate: formatDateInput(workItem.dueDate),
             notes: workItem.notes ?? "",

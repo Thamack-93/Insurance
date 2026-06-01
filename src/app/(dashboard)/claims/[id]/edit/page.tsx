@@ -4,6 +4,7 @@ import { ClaimForm } from "@/components/forms/claim-form";
 import { createClaimDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
+import type { ClaimFormValues } from "@/lib/validations";
 
 export default async function EditClaimPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -41,9 +42,9 @@ export default async function EditClaimPage({ params }: { params: Promise<{ id: 
     clientId: claim.clientId,
     policyId: claim.policyId,
     insurerId: claim.insurerId,
-    claimType: claim.claimType,
+    claimType: claim.claimType as ClaimFormValues["claimType"],
     description: claim.description ?? "",
-    status: claim.status,
+    status: claim.status as ClaimFormValues["status"],
     incidentDate: claim.incidentDate.toISOString().split("T")[0],
     reportedDate: claim.reportedDate.toISOString().split("T")[0],
     closedDate: claim.closedDate?.toISOString().split("T")[0] ?? "",

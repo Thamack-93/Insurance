@@ -4,6 +4,7 @@ import { InsurerForm } from "@/components/forms/insurer-form";
 import { createInsurerDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
+import type { InsurerFormValues } from "@/lib/validations";
 
 export default async function EditInsurerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -24,7 +25,7 @@ export default async function EditInsurerPage({ params }: { params: Promise<{ id
     contactEmail: insurer.contactEmail ?? "",
     contactPhone: insurer.contactPhone ?? "",
     notes: insurer.notes ?? "",
-    status: insurer.status,
+    status: insurer.status as InsurerFormValues["status"],
   });
 
   return (

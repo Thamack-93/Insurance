@@ -65,11 +65,12 @@ function buildInitialRows(snapshot: NotificationPreferencesSnapshot): Preference
     const existing = snapshot.preferences.find(
       (preference) => preference.eventType === meta.eventType && preference.channelType === "TELEGRAM",
     );
+    const existingMinPriority = existing?.minPriority as PreferenceRow["minPriority"] | undefined;
 
     return {
       eventType: meta.eventType,
       enabled: existing?.enabled ?? meta.defaultEnabled,
-      minPriority: existing?.minPriority ?? meta.defaultMinPriority,
+      minPriority: existingMinPriority ?? meta.defaultMinPriority,
       quietHoursStart: existing?.quietHoursStart ?? "",
       quietHoursEnd: existing?.quietHoursEnd ?? "",
     };

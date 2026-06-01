@@ -1,4 +1,17 @@
 import { z } from "zod";
+import {
+  CLAIM_STATUSES,
+  CLIENT_TYPES,
+  ENTITY_STATUSES,
+  PAYMENT_FREQUENCIES,
+  POLICY_STATUSES,
+  POLICY_TYPES,
+  PRIORITIES,
+  QUOTE_STATUSES,
+  RECEIPT_STATUSES,
+  TASK_STATUSES,
+  TASK_TYPES,
+} from "@/lib/domain-values";
 
 const optionalText = z.string().max(4000).optional().or(z.literal(""));
 const optionalEmail = z.string().email("Email invalido.").optional().or(z.literal(""));
@@ -7,7 +20,7 @@ const optionalDate = z.string().optional().or(z.literal(""));
 
 export const clientSchema = z.object({
   fullName: z.string().trim().min(2, "Escribe el nombre del cliente."),
-  type: z.enum(["PERSON", "COMPANY"]),
+  type: z.enum(CLIENT_TYPES),
   email: optionalEmail,
   phone: optionalText,
   secondaryPhone: optionalText,
@@ -16,7 +29,7 @@ export const clientSchema = z.object({
   preferredContactMethod: optionalText,
   referidorId: z.string().trim().optional().or(z.literal("")),
   notes: optionalText,
-  status: z.enum(["ACTIVE", "INACTIVE", "ARCHIVED"]),
+  status: z.enum(ENTITY_STATUSES),
 });
 
 export const policySchema = z
@@ -24,24 +37,13 @@ export const policySchema = z
     policyNumber: z.string().trim().min(2, "Escribe el numero de poliza."),
     clientId: z.string().min(1, "Selecciona un cliente."),
     insurerId: z.string().min(1, "Selecciona una aseguradora."),
-    policyType: z.enum([
-      "AUTO",
-      "GMM",
-      "VIDA",
-      "DANOS",
-      "FIANZAS",
-      "HOGAR",
-      "RESPONSABILIDAD_CIVIL",
-      "EMPRESARIAL",
-      "ACCIDENTES",
-      "OTRO",
-    ]),
-    status: z.enum(["ACTIVE", "EXPIRED", "CANCELLED", "RENEWED", "PENDING"]),
+    policyType: z.enum(POLICY_TYPES),
+    status: z.enum(POLICY_STATUSES),
     startDate: requiredDate,
     endDate: requiredDate,
     premiumAmount: z.coerce.number().positive("La prima debe ser mayor a cero."),
     currency: z.string().trim().min(1, "Selecciona una moneda."),
-    paymentFrequency: z.enum(["MONTHLY", "QUARTERLY", "SEMIANNUAL", "ANNUAL", "SINGLE", "OTHER"]),
+    paymentFrequency: z.enum(PAYMENT_FREQUENCIES),
     paymentPlan: optionalText,
     insuredObject: optionalText,
     beneficiaryInfo: optionalText,
@@ -61,7 +63,7 @@ export const receiptSchema = z
     dueDate: requiredDate,
     amount: z.coerce.number().positive("El monto debe ser mayor a cero."),
     currency: z.string().trim().min(1, "Selecciona una moneda."),
-    status: z.enum(["PENDING", "PAID", "OVERDUE", "CANCELLED"]),
+    status: z.enum(RECEIPT_STATUSES),
     notes: optionalText,
   })
   .refine((values) => values.periodEndDate >= values.periodStartDate, {
@@ -76,19 +78,9 @@ export const workItemSchema = z.object({
   receiptId: z.string().optional().or(z.literal("")),
   title: z.string().trim().min(3, "Escribe un titulo mas claro."),
   description: optionalText,
-  taskType: z.enum(["GENERAL", "CLAIM", "QUOTE", "RENEWAL", "PAYMENT", "DOCUMENT", "COMMISSION", "OTHER"]),
-  status: z.enum([
-    "OPEN",
-    "IN_PROGRESS",
-    "WAITING_CLIENT",
-    "WAITING_INSURER",
-    "WAITING_DOCUMENT",
-    "SENT",
-    "RESOLVED",
-    "CANCELLED",
-    "ARCHIVED",
-  ]),
-  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]),
+  taskType: z.enum(TASK_TYPES),
+  status: z.enum(TASK_STATUSES),
+  priority: z.enum(PRIORITIES),
   startDate: requiredDate,
   dueDate: optionalDate,
   notes: optionalText,
@@ -101,7 +93,7 @@ export const insurerSchema = z.object({
   contactEmail: optionalEmail,
   contactPhone: optionalText,
   notes: optionalText,
-  status: z.enum(["ACTIVE", "INACTIVE", "ARCHIVED"]),
+  status: z.enum(ENTITY_STATUSES),
 });
 
 export const claimSchema = z.object({
@@ -111,7 +103,7 @@ export const claimSchema = z.object({
   insurerId: z.string().min(1, "Selecciona una aseguradora."),
   claimType: z.string().trim().min(2, "Escribe el tipo de siniestro."),
   description: optionalText,
-  status: z.enum(["OPEN", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_INSURER", "RESOLVED", "CANCELLED"]),
+  status: z.enum(CLAIM_STATUSES),
   incidentDate: requiredDate,
   reportedDate: requiredDate,
   closedDate: optionalDate,
@@ -123,19 +115,8 @@ export const claimSchema = z.object({
 export const quoteSchema = z.object({
   clientId: z.string().min(1, "Selecciona un cliente."),
   insurerId: z.string().optional().or(z.literal("")),
-  policyType: z.enum([
-    "AUTO",
-    "GMM",
-    "VIDA",
-    "DANOS",
-    "FIANZAS",
-    "HOGAR",
-    "RESPONSABILIDAD_CIVIL",
-    "EMPRESARIAL",
-    "ACCIDENTES",
-    "OTRO",
-  ]),
-  status: z.enum(["REQUESTED", "IN_PROGRESS", "SENT", "ACCEPTED", "REJECTED", "EXPIRED", "CANCELLED"]),
+  policyType: z.enum(POLICY_TYPES),
+  status: z.enum(QUOTE_STATUSES),
   requestedDate: requiredDate,
   sentDate: optionalDate,
   validUntil: optionalDate,

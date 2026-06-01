@@ -1,5 +1,6 @@
 import { endOfDay, startOfDay } from "date-fns";
-import type { Priority, Prisma, WorkItemStatus, WorkItemType } from "@/generated/prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
+import type { Priority, WorkItemStatus, WorkItemType } from "@/lib/domain-values";
 import { getDb } from "@/lib/db";
 
 export const OPEN_WORK_ITEM_STATUSES = [

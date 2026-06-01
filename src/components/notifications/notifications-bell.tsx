@@ -15,7 +15,7 @@ import { formatRelativeDate } from "@/lib/dates";
 export type BellAlert = {
   id: string;
   alertType: string;
-  severity: "INFO" | "WARNING" | "CRITICAL";
+  severity: string;
   title: string;
   description: string | null;
   entityType: string;

@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { setSessionCookie, verifyPassword, SYSTEM_USER_ID } from "@/lib/auth";
+import type { UserRoleSession } from "@/lib/session";
 import { writeActivityLog } from "@/lib/activity-log";
 import { checkRateLimit } from "@/lib/request-guards";
 
@@ -42,7 +43,7 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
     userId: user.id,
     email: user.email,
     name: user.name,
-    role: user.role,
+    role: user.role as UserRoleSession,
   });
 
   await writeActivityLog({

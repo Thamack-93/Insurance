@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { AuthError, requireUser } from "@/lib/auth";
 import { updateCommissionStatus } from "@/lib/commissions";
 import { logError } from "@/lib/logger";
-import type { CommissionStatus } from "@/generated/prisma/client";
+import { COMMISSION_STATUSES, type CommissionStatus } from "@/lib/domain-values";
 
-const VALID_STATUSES: CommissionStatus[] = ["EXPECTED", "PENDING", "PAID", "OVERDUE", "CANCELLED"];
+const VALID_STATUSES: readonly CommissionStatus[] = COMMISSION_STATUSES;
 
 export async function POST(
   request: NextRequest,

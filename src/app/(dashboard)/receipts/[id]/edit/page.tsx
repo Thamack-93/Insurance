@@ -5,6 +5,7 @@ import { createReceiptDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
 import { formatDateInput } from "@/lib/form-utils";
+import type { ReceiptFormValues } from "@/lib/validations";
 
 export default async function EditReceiptPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -44,7 +45,7 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
             dueDate: formatDateInput(receipt.dueDate),
             amount: Number(receipt.amount),
             currency: receipt.currency,
-            status: receipt.status,
+            status: receipt.status as ReceiptFormValues["status"],
             notes: receipt.notes ?? "",
           })}
           policyOptions={policies.map((policy) => ({

@@ -2,9 +2,10 @@ import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { addDays, subDays } from "date-fns";
 import { PrismaClient } from "../src/generated/prisma/client";
-import type { PaymentFrequency, Policy, Priority, Receipt, TaskStatus } from "../src/generated/prisma/client";
+import type { PaymentFrequency, Priority, TaskStatus } from "../src/lib/domain-values";
 import { hashPassword, SYSTEM_USER_ID } from "../src/lib/auth";
 import { ensureNotificationDefaultsForUser } from "../src/lib/notification-foundation";
+import type { Policy, Receipt } from "../src/generated/prisma/client";
 
 const databaseUrl = process.env.DATABASE_URL?.trim();
 if (!databaseUrl) {

@@ -2,10 +2,8 @@ import { DEFAULT_TIMEZONE } from "@/lib/dates";
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
+import type { NotificationChannelType, Priority } from "@/lib/domain-values";
 import type {
-  NotificationChannelType,
-  NotificationEventStatus,
-  Priority,
   Prisma,
   PrismaClient,
 } from "@/generated/prisma/client";
@@ -53,7 +51,7 @@ export type NotificationEventType = (typeof notificationEventCatalog)[number]["e
 export type NotificationChannelRecord = {
   id: string;
   userId: string;
-  type: NotificationChannelType;
+  type: string;
   telegramChatId: string | null;
   isEnabled: boolean;
   createdAt: Date;
@@ -64,9 +62,9 @@ export type NotificationPreferenceRecord = {
   id: string;
   userId: string;
   eventType: string;
-  channelType: NotificationChannelType;
+  channelType: string;
   enabled: boolean;
-  minPriority: Priority;
+  minPriority: string;
   quietHoursStart: string | null;
   quietHoursEnd: string | null;
   createdAt: Date;
@@ -83,14 +81,14 @@ export type NotificationEventRecord = {
   type: string;
   title: string;
   body: string;
-  priority: Priority;
+  priority: string;
   userId: string;
   workItemId: string | null;
   clientId: string | null;
   policyId: string | null;
   receiptId: string | null;
-  channelType: NotificationChannelType;
-  status: NotificationEventStatus;
+  channelType: string;
+  status: string;
   sentAt: Date | null;
   error: string | null;
   createdAt: Date;
@@ -195,28 +193,28 @@ export function shouldNotifyFromState(input: {
 function toChannelRecord(row: {
   id: string;
   userId: string;
-  type: NotificationChannelType;
+  type: string;
   telegramChatId: string | null;
   isEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }): NotificationChannelRecord {
-  return row;
+  return row as NotificationChannelRecord;
 }
 
 function toPreferenceRecord(row: {
   id: string;
   userId: string;
   eventType: string;
-  channelType: NotificationChannelType;
+  channelType: string;
   enabled: boolean;
-  minPriority: Priority;
+  minPriority: string;
   quietHoursStart: string | null;
   quietHoursEnd: string | null;
   createdAt: Date;
   updatedAt: Date;
 }): NotificationPreferenceRecord {
-  return row;
+  return row as NotificationPreferenceRecord;
 }
 
 function toEventRecord(row: {
@@ -224,20 +222,20 @@ function toEventRecord(row: {
   type: string;
   title: string;
   body: string;
-  priority: Priority;
+  priority: string;
   userId: string;
   workItemId: string | null;
   clientId: string | null;
   policyId: string | null;
   receiptId: string | null;
-  channelType: NotificationChannelType;
-  status: NotificationEventStatus;
+  channelType: string;
+  status: string;
   sentAt: Date | null;
   error: string | null;
   createdAt: Date;
   updatedAt: Date;
 }): NotificationEventRecord {
-  return row;
+  return row as NotificationEventRecord;
 }
 
 export async function ensureNotificationDefaultsForUser(userId: string, client?: DbClient) {
@@ -343,7 +341,7 @@ export async function shouldNotifyUser(input: {
 
   return shouldNotifyFromState({
     priority: input.priority,
-    minPriority: preference.minPriority,
+    minPriority: preference.minPriority as Priority,
     channelEnabled:
       snapshot.channel.type === channelType &&
       snapshot.channel.isEnabled &&

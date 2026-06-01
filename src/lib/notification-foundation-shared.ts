@@ -1,5 +1,5 @@
 import { DEFAULT_TIMEZONE } from "@/lib/dates";
-import type { NotificationChannelType, NotificationEventStatus, Priority } from "@/generated/prisma/client";
+import type { Priority } from "@/lib/domain-values";
 
 export const notificationEventCatalog = [
   {
@@ -44,7 +44,7 @@ export type NotificationEventType = (typeof notificationEventCatalog)[number]["e
 export type NotificationChannelRecord = {
   id: string;
   userId: string;
-  type: NotificationChannelType;
+  type: string;
   telegramChatId: string | null;
   isEnabled: boolean;
   createdAt: Date;
@@ -55,9 +55,9 @@ export type NotificationPreferenceRecord = {
   id: string;
   userId: string;
   eventType: string;
-  channelType: NotificationChannelType;
+  channelType: string;
   enabled: boolean;
-  minPriority: Priority;
+  minPriority: string;
   quietHoursStart: string | null;
   quietHoursEnd: string | null;
   createdAt: Date;
@@ -74,14 +74,14 @@ export type NotificationEventRecord = {
   type: string;
   title: string;
   body: string;
-  priority: Priority;
+  priority: string;
   userId: string;
   workItemId: string | null;
   clientId: string | null;
   policyId: string | null;
   receiptId: string | null;
-  channelType: NotificationChannelType;
-  status: NotificationEventStatus;
+  channelType: string;
+  status: string;
   sentAt: Date | null;
   error: string | null;
   createdAt: Date;
