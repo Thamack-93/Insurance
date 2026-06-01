@@ -20,8 +20,8 @@ CREATE TABLE "WorkItem" (
     "sourceId" TEXT,
     "workItemType" "WorkItemType" NOT NULL DEFAULT 'TASK',
     "status" "WorkItemStatus" NOT NULL DEFAULT 'OPEN',
-    "priority" "Priority" NOT NULL DEFAULT 'MEDIUM',
-    "severity" "AlertSeverity",
+    "priority" TEXT NOT NULL DEFAULT 'MEDIUM',
+    "severity" TEXT,
     "folio" TEXT,
     "title" TEXT NOT NULL,
     "description" TEXT,
@@ -88,7 +88,7 @@ SELECT
         WHEN 'CANCELLED' THEN 'CANCELLED'
         ELSE 'OPEN'
     END)::"WorkItemStatus",
-    'MEDIUM'::"Priority",
+    'MEDIUM',
     NULL,
     NULL,
     "title",
