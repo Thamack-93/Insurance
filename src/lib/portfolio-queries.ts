@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
 import { policyTypeLabel, statusLabels } from "@/lib/status";
+import { commissionPortfolioWhere, policyPortfolioWhere, requirePortfolioUser } from "@/lib/portfolio-access";
 
 type CommissionStatus = "EXPECTED" | "PENDING" | "PAID" | "OVERDUE" | "CANCELLED";
 
@@ -80,10 +81,13 @@ export type CommissionSummary = {
 
 export async function getPortfolioMetrics() {
   const db = getDb();
+  const user = await requirePortfolioUser();
   const fechaCorte = today();
+  const policyWhere = policyPortfolioWhere(user.id);
 
   const [clients, policies] = await Promise.all([
     db.client.findMany({
+      where: { portfolioOwnerId: user.id },
       select: {
         id: true,
         fullName: true,
@@ -93,6 +97,7 @@ export async function getPortfolioMetrics() {
       },
     }),
     db.policy.findMany({
+      where: policyWhere,
       select: {
         id: true,
         policyNumber: true,
@@ -120,7 +125,7 @@ export async function getPortfolioMetrics() {
   const typeBuckets = new Map<string, PortfolioMetricItem & { tipo: string }>();
   const clientBuckets = new Map<string, PortfolioClientItem>();
 
-  for (const policy of policies) {
+  for (const policy of activePolicies) {
     const amount = toNumber(policy.premiumAmount);
 
     const insurerKey = policy.insurerId;
@@ -218,10 +223,12 @@ export async function getPortfolioMetrics() {
 
 export async function getCommissionSummary(options: CommissionSummaryOptions = {}) {
   const db = getDb();
+  const user = await requirePortfolioUser();
   const rango = resolveRange(options.from, options.to, 60);
 
   const commissions = await db.commission.findMany({
     where: {
+      ...commissionPortfolioWhere(user.id),
       expectedDate: { gte: rango.from, lte: rango.to },
       status: { not: "CANCELLED" },
     },

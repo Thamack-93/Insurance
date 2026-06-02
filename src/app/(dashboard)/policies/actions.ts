@@ -7,6 +7,7 @@ import { normalizeOptionalText, parseDateInput } from "@/lib/form-utils";
 import { resolvePolicyFamilyRootId } from "@/lib/policy-families";
 import { policySchema, type PolicyFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
+import { assertClientPortfolioAccess, assertPolicyPortfolioAccess } from "@/lib/portfolio-access";
 
 function normalizePolicyInput(values: PolicyFormValues) {
   return {
@@ -37,14 +38,29 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
   try {
     const db = getDb();
     const userId = await getCurrentUserId();
+    await assertClientPortfolioAccess(parsed.data.clientId, userId);
+    const normalized = normalizePolicyInput(parsed.data);
     const familyRootId = await resolvePolicyFamilyRootId({
       policyNumber: parsed.data.policyNumber.trim(),
       clientId: parsed.data.clientId,
       insurerId: parsed.data.insurerId,
     });
+    const overlap = await db.policy.findFirst({
+      where: {
+        policyNumber: normalized.policyNumber,
+        clientId: normalized.clientId,
+        insurerId: normalized.insurerId,
+        startDate: { lte: normalized.endDate },
+        endDate: { gte: normalized.startDate },
+      },
+      select: { id: true },
+    });
+    if (overlap) {
+      return errorResult("Ya existe una vigencia solapada para esta póliza. Revisa la familia antes de continuar.");
+    }
     const policy = await db.policy.create({
       data: {
-        ...normalizePolicyInput(parsed.data),
+        ...normalized,
         familyRootId,
         createdById: userId,
         updatedById: userId,
@@ -84,13 +100,15 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
 
   try {
     const db = getDb();
+    const userId = await getCurrentUserId();
+    await assertPolicyPortfolioAccess(id, userId);
+    await assertClientPortfolioAccess(parsed.data.clientId, userId);
     const previousPolicy = await db.policy.findUnique({ where: { id } });
 
     if (!previousPolicy) {
       return errorResult("La poliza ya no existe.");
     }
 
-    const userId = await getCurrentUserId();
     const policy = await db.policy.update({
       where: { id },
       data: { ...normalizePolicyInput(parsed.data), updatedById: userId },

@@ -30,6 +30,7 @@ type PolicyTypeAggregate = {
   totalPremium: number;
   claims: Claim[];
   commissions: Commission[];
+  renewedCount: number;
 };
 
 export interface PolicyReport {
@@ -162,12 +163,16 @@ export async function generatePolicyTypeReport(
           totalPremium: 0,
           claims: [],
           commissions: [],
+          renewedCount: 0,
         };
       }
       groups[type].count++;
       groups[type].totalPremium += toNumber(policy.premiumAmount);
       groups[type].claims.push(...policy.claims);
       groups[type].commissions.push(...policy.commissions);
+      if (policy.renewedFromPolicyId || policy.status === "RENEWED") {
+        groups[type].renewedCount++;
+      }
       return groups;
     }, {} as Record<string, PolicyTypeAggregate>);
 
@@ -176,7 +181,7 @@ export async function generatePolicyTypeReport(
         (sum, claim) => sum + toNumber(claim.amountClaimed || 0),
         0,
       );
-      const renewalRate = Math.random() * 30 + 70; // Placeholder calculation
+      const renewalRate = group.count > 0 ? (group.renewedCount / group.count) * 100 : 0;
 
       return {
         policyType,
@@ -233,11 +238,14 @@ export async function generateClientPerformanceReport(
           sum + toNumber(policy.premiumAmount), 0);
         const claimsCount = client.policies.reduce((sum, policy) => 
           sum + policy.claims.length, 0);
+        const renewedCount = client.policies.filter(
+          (policy) => Boolean(policy.renewedFromPolicyId) || policy.status === "RENEWED",
+        ).length;
         
         const lastPolicyDate = client.policies
           .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0]?.startDate;
         
-        const renewalRate = Math.random() * 30 + 70; // Placeholder calculation
+        const renewalRate = client.policies.length > 0 ? (renewedCount / client.policies.length) * 100 : 0;
 
         return {
           clientId: client.id,

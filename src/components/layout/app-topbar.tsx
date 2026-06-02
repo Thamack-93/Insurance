@@ -6,7 +6,7 @@ import { CalendarDays, Command } from "lucide-react";
 import { SearchInput } from "@/components/search/search-input";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { Button } from "@/components/ui/button";
-import { NotificationsBell, type BellAlert } from "@/components/notifications/notifications-bell";
+import { NotificationsBell, type BellNotification } from "@/components/notifications/notifications-bell";
 import { AppMobileSidebar } from "@/components/layout/app-mobile-sidebar";
 
 const labels: Record<string, string> = {
@@ -33,12 +33,12 @@ const labels: Record<string, string> = {
 
 export function AppTopbar({
   userMenu,
-  unreadAlertCount,
-  alerts,
+  unreadNotificationCount,
+  notifications,
 }: {
   userMenu?: ReactNode;
-  unreadAlertCount: number;
-  alerts: BellAlert[];
+  unreadNotificationCount: number;
+  notifications: BellNotification[];
 }) {
   const pathname = usePathname();
   const segments = pathname.split("/").filter(Boolean);
@@ -79,7 +79,7 @@ export function AppTopbar({
           >
             <CalendarDays className="size-4" aria-hidden />
           </Button>
-          <NotificationsBell unreadCount={unreadAlertCount} alerts={alerts} />
+          <NotificationsBell unreadCount={unreadNotificationCount} notifications={notifications} />
           {userMenu}
         </div>
       </div>

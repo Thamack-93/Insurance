@@ -8,8 +8,8 @@ import { ShortcutsHelp } from "@/components/shortcuts/shortcuts-help";
 import { getSettings } from "@/lib/settings";
 import type { Settings } from "@/lib/settings";
 import { RuntimeSettingsHydrator } from "@/components/settings/runtime-settings-hydrator";
-import { getUnreadAlertCount, getRecentAlerts } from "@/lib/notifications";
-import type { AlertRecord } from "@/lib/notifications";
+import { getUnreadNotificationCount, getRecentNotifications } from "@/lib/notifications";
+import type { NotificationRecord } from "@/lib/notifications";
 import { requireUserOrRedirect } from "@/lib/auth";
 
 const fallbackSettings: Settings = {
@@ -29,16 +29,17 @@ const fallbackSettings: Settings = {
 };
 
 async function getSafeDashboardShellData() {
-  const [settingsResult, unreadResult, alertsResult] = await Promise.allSettled([
+  const [settingsResult, unreadResult, notificationsResult] = await Promise.allSettled([
     getSettings(),
-    getUnreadAlertCount(),
-    getRecentAlerts(10),
+    getUnreadNotificationCount(),
+    getRecentNotifications(10),
   ]);
 
   return {
     settings: settingsResult.status === "fulfilled" ? settingsResult.value : fallbackSettings,
-    unreadAlertCount: unreadResult.status === "fulfilled" ? unreadResult.value : 0,
-    recentAlerts: alertsResult.status === "fulfilled" ? alertsResult.value : ([] as AlertRecord[]),
+    unreadNotificationCount: unreadResult.status === "fulfilled" ? unreadResult.value : 0,
+    recentNotifications:
+      notificationsResult.status === "fulfilled" ? notificationsResult.value : ([] as NotificationRecord[]),
   };
 }
 
@@ -49,17 +50,17 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   await requireUserOrRedirect();
   // Load settings once per request: hydrates the server runtime cache and
   // is forwarded to the client so format helpers stay consistent on both sides.
-  const { settings, unreadAlertCount, recentAlerts } = await getSafeDashboardShellData();
-  const bellAlerts = recentAlerts.map((alert) => ({
-    id: alert.id,
-    alertType: alert.alertType,
-    severity: alert.severity,
-    title: alert.title,
-    description: alert.description,
-    entityType: alert.entityType,
-    entityId: alert.entityId,
-    createdAt: alert.createdAt.toISOString(),
-    readAt: alert.readAt ? alert.readAt.toISOString() : null,
+  const { settings, unreadNotificationCount, recentNotifications } = await getSafeDashboardShellData();
+  const bellNotifications = recentNotifications.map((notification) => ({
+    id: notification.id,
+    alertType: notification.alertType,
+    severity: notification.severity,
+    title: notification.title,
+    description: notification.description,
+    entityType: notification.entityType,
+    entityId: notification.entityId,
+    createdAt: notification.createdAt.toISOString(),
+    readAt: notification.readAt ? notification.readAt.toISOString() : null,
   }));
   return (
     <SearchProvider>
@@ -76,8 +77,8 @@ export default async function DashboardLayout({ children }: { children: ReactNod
           <div className="min-w-0 flex-1">
             <AppTopbar
               userMenu={<UserMenu />}
-              unreadAlertCount={unreadAlertCount}
-              alerts={bellAlerts}
+              unreadNotificationCount={unreadNotificationCount}
+              notifications={bellNotifications}
             />
             <main id="main-content" className="mx-auto w-full max-w-[1560px] px-3 py-6 sm:px-5 sm:py-8 lg:px-8">{children}</main>
           </div>

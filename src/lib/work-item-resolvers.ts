@@ -1,5 +1,6 @@
 import type { PrismaClient, Prisma } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
+import { workItemPortfolioWhere } from "@/lib/portfolio-access";
 
 type WorkItemResolverDb = PrismaClient | Prisma.TransactionClient;
 
@@ -14,7 +15,11 @@ export type WorkItemResolverRecord = Prisma.WorkItemGetPayload<{
   include: typeof workItemInclude;
 }>;
 
-export async function findWorkItemByRouteId(id: string, client?: WorkItemResolverDb): Promise<WorkItemResolverRecord | null> {
+export async function findWorkItemByRouteId(
+  id: string,
+  client?: WorkItemResolverDb,
+  portfolioOwnerId?: string,
+): Promise<WorkItemResolverRecord | null> {
   const db = client ?? getDb();
 
   return db.workItem.findFirst({
@@ -29,6 +34,7 @@ export async function findWorkItemByRouteId(id: string, client?: WorkItemResolve
           id,
         },
       ],
+      ...(portfolioOwnerId ? { AND: [workItemPortfolioWhere(portfolioOwnerId)] } : {}),
     },
     include: workItemInclude,
   });

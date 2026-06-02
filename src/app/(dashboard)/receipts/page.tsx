@@ -15,6 +15,7 @@ import { CollectableReceipts, type CollectableReceipt } from "@/components/recei
 import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
+import { receiptPortfolioWhere, requirePortfolioUser } from "@/lib/portfolio-access";
 
 const PAGE_SIZE = 25;
 
@@ -24,15 +25,17 @@ export default async function ReceiptsPage({
   searchParams?: Promise<{ tab?: string; q?: string; page?: string }>;
 }) {
   const params = (await searchParams) ?? {};
-  const initialTab = params.tab === "historico" ? "historico" : "cobrar";
+  const initialTab = params.tab === "historico" || params.tab === "revision" ? params.tab : "cobrar";
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = Math.max(1, Number(params.page) || 1);
 
   const db = getDb();
+  const user = await requirePortfolioUser();
   const now = today();
   const monthStart = startOfMonth(now);
 
   const baseWhere: Prisma.ReceiptWhereInput = {
+    ...receiptPortfolioWhere(user.id),
     status: { notIn: ["PAID", "CANCELLED"] },
   };
   const where: Prisma.ReceiptWhereInput = query
@@ -60,11 +63,12 @@ export default async function ReceiptsPage({
     filteredCount,
     pagedReceipts,
     paymentHistory,
+    reviewIssues,
   ] = await Promise.all([
     db.receipt.count({ where: baseWhere }),
     db.receipt.count({ where: { ...baseWhere, dueDate: { lt: now } } }),
     db.receipt.findMany({
-      where: { status: "PAID", paidDate: { gte: monthStart } },
+      where: { ...receiptPortfolioWhere(user.id), status: "PAID", paidDate: { gte: monthStart } },
       include: { client: true, policy: true, insurer: true },
       orderBy: { paidDate: "desc" },
     }),
@@ -82,6 +86,7 @@ export default async function ReceiptsPage({
       take: PAGE_SIZE,
     }),
     db.payment.findMany({
+      where: { client: { portfolioOwnerId: user.id } },
       include: {
         receipt: { select: { id: true, receiptNumber: true, dueDate: true } },
         client: { select: { id: true, fullName: true } },
@@ -89,6 +94,18 @@ export default async function ReceiptsPage({
       },
       orderBy: { paidDate: "desc" },
       take: 50,
+    }),
+    db.receiptReconciliationIssue.findMany({
+      where: {
+        status: "OPEN",
+        receipt: { client: { portfolioOwnerId: user.id } },
+      },
+      include: {
+        receipt: { include: { payments: true, client: true } },
+        policy: true,
+      },
+      orderBy: { createdAt: "desc" },
+      take: 100,
     }),
   ]);
 
@@ -178,6 +195,9 @@ export default async function ReceiptsPage({
           </TabsTrigger>
           <TabsTrigger value="historico" className="rounded-full px-4">
             Histórico
+          </TabsTrigger>
+          <TabsTrigger value="revision" className="rounded-full px-4">
+            Revisión
           </TabsTrigger>
         </TabsList>
 
@@ -322,6 +342,70 @@ export default async function ReceiptsPage({
                       </TableCell>
                     </TableRow>
                   ))}
+                </TableBody>
+              </Table>
+            )}
+          </SectionCard>
+        </TabsContent>
+
+        <TabsContent value="revision" className="space-y-6">
+          <SectionCard
+            title="Inconsistencias por revisar"
+            description="Recibos con pagos parciales, diferencias o evidencia que requiere validación humana."
+          >
+            {reviewIssues.length === 0 ? (
+              <div className="p-4">
+                <EmptyState
+                  icon={BadgeCheck}
+                  title="Sin incidencias abiertas"
+                  description="La conciliación no dejó recibos pendientes de revisión."
+                />
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/40">
+                    <TableHead>Recibo</TableHead>
+                    <TableHead>Póliza</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Motivo</TableHead>
+                    <TableHead className="text-right">Recibo</TableHead>
+                    <TableHead className="text-right">Pagos reales</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {reviewIssues.filter((issue) => issue.receipt && issue.policy).map((issue) => {
+                    const receipt = issue.receipt!;
+                    const policy = issue.policy!;
+                    const paidAmount = receipt.payments.reduce(
+                      (sum, payment) => sum + toNumber(payment.amount),
+                      0,
+                    );
+                    return (
+                      <TableRow key={issue.id}>
+                        <TableCell>
+                          <Link href={`/receipts/${receipt.id}`} className="font-medium hover:text-primary">
+                            {receipt.receiptNumber}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <Link href={`/policies/${policy.id}`} className="hover:text-primary">
+                            {policy.policyNumber}
+                          </Link>
+                        </TableCell>
+                        <TableCell>{receipt.client.fullName}</TableCell>
+                        <TableCell className="max-w-xs text-xs text-muted-foreground">
+                          {issue.reason}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {formatCurrency(receipt.amount, receipt.currency)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {formatCurrency(paidAmount, receipt.currency)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             )}

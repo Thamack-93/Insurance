@@ -63,7 +63,7 @@ export default async function RisksPage({
   const initialTab = params.tab === "completitud" ? "completitud" : "hallazgos";
 
   const db = getDb();
-  const [risks, openAlerts, clientScores, policyScores] = await Promise.all([
+  const [risks, openNotifications, clientScores, policyScores] = await Promise.all([
     detectRisks(),
     db.alert.findMany({ where: { status: "OPEN" } }),
     getClientDataQualityScores(),
@@ -134,8 +134,8 @@ export default async function RisksPage({
         <MetricCard title="Críticos" value={critical.length} description="Acción prioritaria." icon={AlertTriangle} tone="rose" />
         <MetricCard title="Advertencias" value={warnings.length} description="Mejora operativa." icon={BadgeInfo} tone="amber" />
         <MetricCard
-          title="Alertas abiertas"
-          value={openAlerts.length}
+          title="Notificaciones abiertas"
+          value={openNotifications.length}
           description={`${info.length} señales informativas`}
           icon={ShieldAlert}
           tone="emerald"

@@ -156,6 +156,7 @@ async function main() {
       prisma.client.create({
         data: {
           fullName,
+          portfolioOwnerId: pedroUser.id,
           type: fullName.includes("SA") || fullName.includes("Orion") || fullName.includes("Talleres") || fullName.includes("Casa")
             ? "COMPANY"
             : "PERSON",
@@ -387,8 +388,103 @@ async function main() {
         notes: "Cotizacion demo para seguimiento comercial.",
         ...audit,
       },
-    });
+      });
   }
+
+  const brokerDemoClient = await prisma.client.create({
+    data: {
+      fullName: "Broker Demo Cliente",
+      portfolioOwnerId: brokerUser.id,
+      type: "PERSON",
+      email: "broker.demo.cliente@example.com",
+      phone: "55 9000 9000",
+      address: "Cartera sandbox de Broker Demo",
+      preferredContactMethod: "Email",
+      notes: "Cliente ficticio aislado para pruebas del agente demo.",
+      status: "ACTIVE",
+      createdById: brokerUser.id,
+      updatedById: brokerUser.id,
+    },
+  });
+
+  const brokerDemoPolicy = await prisma.policy.create({
+    data: {
+      policyNumber: "BROKER-DEMO-1000",
+      clientId: brokerDemoClient.id,
+      insurerId: insurers[0].id,
+      policyType: "AUTO",
+      status: "ACTIVE",
+      startDate: addDays(baseDate, -20),
+      endDate: addDays(baseDate, 345),
+      premiumAmount: 18400,
+      currency: "MXN",
+      paymentFrequency: "ANNUAL",
+      paymentPlan: "Pago referenciado",
+      insuredObject: "Tesla Model 3 demo",
+      notes: "Póliza sandbox de Broker Demo.",
+      createdById: brokerUser.id,
+      updatedById: brokerUser.id,
+    },
+  });
+
+  const brokerDemoReceipt = await prisma.receipt.create({
+    data: {
+      receiptNumber: "BROKER-DEMO-REC-0001",
+      policyId: brokerDemoPolicy.id,
+      clientId: brokerDemoClient.id,
+      insurerId: brokerDemoPolicy.insurerId,
+      periodStartDate: addDays(baseDate, -20),
+      periodEndDate: addDays(baseDate, 345),
+      dueDate: addDays(baseDate, 12),
+      amount: 18400,
+      currency: "MXN",
+      status: "PENDING",
+      notes: "Recibo sandbox de Broker Demo.",
+      createdById: brokerUser.id,
+      updatedById: brokerUser.id,
+    },
+  });
+
+  await prisma.payment.create({
+    data: {
+      receiptId: brokerDemoReceipt.id,
+      policyId: brokerDemoPolicy.id,
+      clientId: brokerDemoClient.id,
+      amount: 18400,
+      currency: "MXN",
+      paidDate: addDays(baseDate, 2),
+      paymentMethod: "Transferencia",
+      reference: "BROKER-DEMO-SPEI-0001",
+      notes: "Pago sandbox de Broker Demo.",
+      createdById: brokerUser.id,
+      updatedById: brokerUser.id,
+    },
+  });
+
+  await prisma.workItem.create({
+    data: {
+      sourceType: "Task",
+      sourceId: "broker-demo-renewal-task",
+      workItemType: "TASK",
+      taskType: "RENEWAL",
+      folio: `PD-${new Date(baseDate).getUTCFullYear()}-BD01`,
+      status: "OPEN",
+      priority: "MEDIUM",
+      title: "Seguimiento sandbox Broker Demo",
+      description: "Pendiente demo aislado para validar cartera de Broker Demo.",
+      entityType: "WorkItem",
+      entityId: "broker-demo-renewal-task",
+      clientId: brokerDemoClient.id,
+      policyId: brokerDemoPolicy.id,
+      insurerId: brokerDemoPolicy.insurerId,
+      receiptId: brokerDemoReceipt.id,
+      startDate: addDays(baseDate, -2),
+      dueDate: addDays(baseDate, 12),
+      createdById: brokerUser.id,
+      updatedById: brokerUser.id,
+      assignedToId: brokerUser.id,
+    },
+  });
 
   const alerts = [
     ["RECEIPT_OVERDUE", "CRITICAL", "Recibo vencido sin seguimiento"],

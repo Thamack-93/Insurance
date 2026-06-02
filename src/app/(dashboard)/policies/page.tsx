@@ -15,6 +15,7 @@ import { getDb } from "@/lib/db";
 import { daysUntil, formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
+import { policyPortfolioWhere, requirePortfolioUser } from "@/lib/portfolio-access";
 
 const PAGE_SIZE = 25;
 
@@ -28,18 +29,25 @@ export default async function PoliciesPage({
   const page = Math.max(1, Number(params.page) || 1);
 
   const db = getDb();
+  const user = await requirePortfolioUser();
   const now = today();
   const in60 = addDays(now, 60);
+  const portfolioWhere = policyPortfolioWhere(user.id);
 
   const where: Prisma.PolicyWhereInput = query
     ? {
-        OR: [
-          { policyNumber: { contains: query } },
-          { client: { fullName: { contains: query } } },
-          { insurer: { name: { contains: query } } },
+        AND: [
+          portfolioWhere,
+          {
+            OR: [
+              { policyNumber: { contains: query } },
+              { client: { fullName: { contains: query } } },
+              { insurer: { name: { contains: query } } },
+            ],
+          },
         ],
       }
-    : {};
+    : portfolioWhere;
 
   const [
     activeCount,
@@ -51,26 +59,26 @@ export default async function PoliciesPage({
     pagedPolicies,
     attentionPolicies,
   ] = await Promise.all([
-    db.policy.count({ where: { status: "ACTIVE" } }),
-    db.policy.count({ where: { status: "PENDING" } }),
-    db.policy.count({ where: { status: "EXPIRED" } }),
+    db.policy.count({ where: { ...portfolioWhere, status: "ACTIVE" } }),
+    db.policy.count({ where: { ...portfolioWhere, status: "PENDING" } }),
+    db.policy.count({ where: { ...portfolioWhere, status: "EXPIRED" } }),
     db.policy.count({
-      where: { status: "ACTIVE", endDate: { gte: now, lte: in60 } },
+      where: { ...portfolioWhere, status: "ACTIVE", endDate: { gte: now, lte: in60 } },
     }),
     db.policy.aggregate({
-      where: { status: "ACTIVE" },
+      where: { ...portfolioWhere, status: "ACTIVE" },
       _sum: { premiumAmount: true },
     }),
     db.policy.count({ where }),
     db.policy.findMany({
       where,
       include: { client: true, insurer: true },
-      orderBy: [{ endDate: "asc" }, { createdAt: "desc" }],
+      orderBy: [{ endDate: "desc" }, { startDate: "desc" }, { updatedAt: "desc" }],
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
     db.policy.findMany({
-      where: { status: { in: ["EXPIRED", "PENDING"] } },
+      where: { ...portfolioWhere, status: { in: ["EXPIRED", "PENDING"] } },
       include: { client: true, insurer: true },
       orderBy: [{ status: "asc" }, { endDate: "asc" }],
       take: 10,

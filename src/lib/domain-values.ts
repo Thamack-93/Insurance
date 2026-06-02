@@ -82,7 +82,7 @@ export type AlertSeverity = (typeof ALERT_SEVERITIES)[number];
 export const ALERT_STATUSES = ["OPEN", "DISMISSED", "RESOLVED"] as const;
 export type AlertStatus = (typeof ALERT_STATUSES)[number];
 
-export const WORK_ITEM_TYPES = ["TASK", "REMINDER", "ALERT"] as const;
+export const WORK_ITEM_TYPES = ["TASK", "NOTIFICATION"] as const;
 export type WorkItemType = (typeof WORK_ITEM_TYPES)[number];
 
 export const WORK_ITEM_STATUSES = [

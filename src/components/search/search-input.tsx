@@ -7,7 +7,7 @@ import { useSearch } from "./search-provider";
 import { SearchResults } from "./search-results";
 
 export function SearchInput() {
-  const { searchQuery, setSearchQuery, performSearch } = useSearch();
+  const { searchQuery, setSearchQuery, performSearch, clearSearch } = useSearch();
   const [isOpen, setIsOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -38,7 +38,12 @@ export function SearchInput() {
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchQuery(e.target.value);
+    const query = e.target.value;
+    if (query.trim()) {
+      setSearchQuery(query);
+    } else {
+      clearSearch();
+    }
     setIsOpen(true);
   };
 

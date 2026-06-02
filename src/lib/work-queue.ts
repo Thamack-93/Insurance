@@ -90,6 +90,7 @@ export type WorkQueueFilters = {
   insurerId?: string;
   receiptId?: string;
   entityType?: string;
+  portfolioOwnerId?: string;
 };
 
 export async function getWorkItems(filters: WorkQueueFilters = {}) {
@@ -164,6 +165,16 @@ function buildWhere(filters: WorkQueueFilters): Prisma.WorkItemWhereInput {
 
   if (filters.entityType) {
     where.entityType = filters.entityType;
+  }
+
+  if (filters.portfolioOwnerId) {
+    const portfolioWhere: Prisma.WorkItemWhereInput = {
+      OR: [
+        { client: { portfolioOwnerId: filters.portfolioOwnerId } },
+        { clientId: null, assignedToId: filters.portfolioOwnerId },
+      ],
+    };
+    where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), portfolioWhere];
   }
 
   if (filters.from || filters.to) {

@@ -1,6 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
+import { addDays, endOfDay, startOfDay } from "date-fns";
 import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
+import { formatCurrency, toNumber } from "@/lib/money";
 import { writeActivityLog } from "@/lib/activity-log";
 import {
   createNotificationEvent,
@@ -11,9 +13,12 @@ import {
   type NotificationEventRecord,
 } from "@/lib/notification-foundation";
 import {
+  TELEGRAM_DIGEST_SECTION_LIMIT,
   TELEGRAM_LINK_TOKEN_TTL_MINUTES,
+  TELEGRAM_QUERY_RESULT_LIMIT,
   buildTelegramFallbackMessage,
   buildTelegramHelpMessage,
+  buildTelegramLinkedChatRequiredMessage,
   buildTelegramLinkErrorMessage,
   buildTelegramLinkSuccessMessage,
   buildTelegramStartMessage,
@@ -22,10 +27,33 @@ import {
   hashTelegramLinkCode,
   normalizeTelegramLinkCode,
   parseTelegramCommand,
+  parseTelegramQueryDays,
 } from "@/lib/telegram-shared";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
+type TelegramReceiptItem = {
+  id: string;
+  receiptNumber: string;
+  policyNumber: string;
+  clientName: string;
+  insurerName: string;
+  dueDate: Date;
+  amount: number;
+  balance: number;
+  currency: string;
+};
+type TelegramRenewalItem = {
+  id: string;
+  policyNumber: string;
+  clientName: string;
+  insurerName: string;
+  endDate: Date;
+};
+type TelegramListResult<T> = {
+  total: number;
+  items: T[];
+};
 
 type TelegramUser = {
   id: number;
@@ -97,6 +125,20 @@ export type TelegramWebhookProcessResult = {
   replyText?: string;
 };
 
+export type TelegramDailyDigestResult = {
+  processed: number;
+  sent: number;
+  failed: number;
+};
+
+const TELEGRAM_FETCH_TIMEOUT_MS = 8_000;
+const TELEGRAM_DATE_FORMATTER = new Intl.DateTimeFormat("es-MX", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  timeZone: "America/Mexico_City",
+});
+
 function getTelegramBotToken() {
   return process.env.TELEGRAM_BOT_TOKEN?.trim() || null;
 }
@@ -125,6 +167,26 @@ function getTelegramLinkSecret() {
 
 function normalizeChatId(chatId: string | number) {
   return String(chatId);
+}
+
+function getAppBaseUrl() {
+  const value = process.env.APP_BASE_URL?.trim();
+  if (!value) return null;
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
+function buildPolicyDeskUrl(path: string) {
+  const baseUrl = getAppBaseUrl();
+  if (!baseUrl) return null;
+  return new URL(path, baseUrl).toString();
+}
+
+function formatTelegramDate(date: Date) {
+  return TELEGRAM_DATE_FORMATTER.format(date);
 }
 
 function formatTelegramNotificationText(title: string, body: string) {
@@ -176,6 +238,9 @@ export async function sendTelegramMessage(chatId: string, text: string): Promise
     return { ok: false, error: "El mensaje está vacío." };
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TELEGRAM_FETCH_TIMEOUT_MS);
+
   try {
     const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
@@ -187,6 +252,7 @@ export async function sendTelegramMessage(chatId: string, text: string): Promise
         text: message.length <= 3900 ? message : `${message.slice(0, 3899)}…`,
         disable_web_page_preview: true,
       }),
+      signal: controller.signal,
     });
 
     const payload = (await response.json().catch(() => null)) as
@@ -210,7 +276,287 @@ export async function sendTelegramMessage(chatId: string, text: string): Promise
       ok: false,
       error: "No se pudo enviar el mensaje a Telegram.",
     };
+  } finally {
+    clearTimeout(timeout);
   }
+}
+
+async function getTelegramReceipts(input: {
+  userId: string;
+  to: Date;
+  from?: Date;
+  limit: number;
+  client?: DbClient;
+}): Promise<TelegramListResult<TelegramReceiptItem>> {
+  const db = input.client ?? getDb();
+
+  const where: Prisma.ReceiptWhereInput = {
+    client: { portfolioOwnerId: input.userId },
+    dueDate: {
+      ...(input.from ? { gte: input.from } : {}),
+      lte: input.to,
+    },
+    status: { in: ["PENDING", "OVERDUE"] },
+  };
+
+  const [total, rows] = await Promise.all([
+    db.receipt.count({ where }),
+    db.receipt.findMany({
+      where,
+      include: {
+        client: { select: { fullName: true } },
+        insurer: { select: { name: true } },
+        policy: { select: { policyNumber: true } },
+        payments: { select: { amount: true } },
+      },
+      orderBy: [{ dueDate: "asc" }, { receiptNumber: "asc" }],
+      take: input.limit,
+    }),
+  ]);
+
+  return {
+    total,
+    items: rows.map((row) => {
+      const amount = toNumber(row.amount);
+      const paidAmount = row.payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
+      return {
+        id: row.id,
+        receiptNumber: row.receiptNumber,
+        policyNumber: row.policy.policyNumber,
+        clientName: row.client.fullName,
+        insurerName: row.insurer.name,
+        dueDate: row.dueDate,
+        amount,
+        balance: Math.max(amount - paidAmount, 0),
+        currency: row.currency,
+      };
+    }),
+  };
+}
+
+async function getTelegramRenewals(input: {
+  userId: string;
+  from: Date;
+  to: Date;
+  limit: number;
+  client?: DbClient;
+}): Promise<TelegramListResult<TelegramRenewalItem>> {
+  const db = input.client ?? getDb();
+
+  const where: Prisma.PolicyWhereInput = {
+    client: { portfolioOwnerId: input.userId },
+    endDate: { gte: input.from, lte: input.to },
+    status: "ACTIVE",
+  };
+
+  const [total, rows] = await Promise.all([
+    db.policy.count({ where }),
+    db.policy.findMany({
+      where,
+      include: {
+        client: { select: { fullName: true } },
+        insurer: { select: { name: true } },
+      },
+      orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }],
+      take: input.limit,
+    }),
+  ]);
+
+  return {
+    total,
+    items: rows.map((row) => ({
+      id: row.id,
+      policyNumber: row.policyNumber,
+      clientName: row.client.fullName,
+      insurerName: row.insurer.name,
+      endDate: row.endDate,
+    })),
+  };
+}
+
+function formatTelegramReceiptLine(item: TelegramReceiptItem) {
+  return [
+    `• ${item.receiptNumber} · ${item.clientName}`,
+    `  Póliza ${item.policyNumber} · ${item.insurerName}`,
+    `  Vence ${formatTelegramDate(item.dueDate)} · ${formatCurrency(item.amount, item.currency)} · saldo ${formatCurrency(item.balance, item.currency)}`,
+  ].join("\n");
+}
+
+function formatTelegramRenewalLine(item: TelegramRenewalItem) {
+  return [
+    `• Póliza ${item.policyNumber} · ${item.clientName}`,
+    `  ${item.insurerName} · vence ${formatTelegramDate(item.endDate)}`,
+  ].join("\n");
+}
+
+function buildTelegramSection(input: {
+  title: string;
+  total: number;
+  lines: string[];
+  emptyText: string;
+  path: string;
+}) {
+  const link = buildPolicyDeskUrl(input.path);
+  return [
+    `${input.title}: ${input.total}`,
+    ...(input.lines.length > 0 ? input.lines : [input.emptyText]),
+    ...(link ? [`Ver en PolicyDesk: ${link}`] : []),
+  ].join("\n");
+}
+
+export async function buildTelegramReceiptsReply(userId: string, days: number, client?: DbClient) {
+  const dayStart = startOfDay(new Date());
+  const receipts = await getTelegramReceipts({
+    userId,
+    to: endOfDay(addDays(dayStart, days)),
+    limit: TELEGRAM_QUERY_RESULT_LIMIT,
+    client,
+  });
+
+  return buildTelegramSection({
+    title: `Cobros vencidos y próximos (${days} días)`,
+    total: receipts.total,
+    lines: receipts.items.map(formatTelegramReceiptLine),
+    emptyText: "No hay cobros pendientes en este rango.",
+    path: "/receipts",
+  });
+}
+
+export async function buildTelegramRenewalsReply(userId: string, days: number, client?: DbClient) {
+  const dayStart = startOfDay(new Date());
+  const renewals = await getTelegramRenewals({
+    userId,
+    from: dayStart,
+    to: endOfDay(addDays(dayStart, days)),
+    limit: TELEGRAM_QUERY_RESULT_LIMIT,
+    client,
+  });
+
+  return buildTelegramSection({
+    title: `Renovaciones próximas (${days} días)`,
+    total: renewals.total,
+    lines: renewals.items.map(formatTelegramRenewalLine),
+    emptyText: "No hay renovaciones próximas en este rango.",
+    path: "/renewals",
+  });
+}
+
+export async function buildTelegramDailyDigest(userId: string, client?: DbClient) {
+  const dayStart = startOfDay(new Date());
+  const dayEnd = endOfDay(dayStart);
+  const [overdueReceipts, todayReceipts, upcomingReceipts, upcomingRenewals] = await Promise.all([
+    getTelegramReceipts({
+      userId,
+      to: new Date(dayStart.getTime() - 1),
+      limit: TELEGRAM_DIGEST_SECTION_LIMIT,
+      client,
+    }),
+    getTelegramReceipts({
+      userId,
+      from: dayStart,
+      to: dayEnd,
+      limit: TELEGRAM_DIGEST_SECTION_LIMIT,
+      client,
+    }),
+    getTelegramReceipts({
+      userId,
+      from: addDays(dayStart, 1),
+      to: endOfDay(addDays(dayStart, 14)),
+      limit: TELEGRAM_DIGEST_SECTION_LIMIT,
+      client,
+    }),
+    getTelegramRenewals({
+      userId,
+      from: dayStart,
+      to: endOfDay(addDays(dayStart, 7)),
+      limit: TELEGRAM_DIGEST_SECTION_LIMIT,
+      client,
+    }),
+  ]);
+
+  return [
+    `Fecha: ${formatTelegramDate(dayStart)}`,
+    "",
+    buildTelegramSection({
+      title: "Recibos vencidos",
+      total: overdueReceipts.total,
+      lines: overdueReceipts.items.map(formatTelegramReceiptLine),
+      emptyText: "Sin recibos vencidos.",
+      path: "/receipts",
+    }),
+    "",
+    buildTelegramSection({
+      title: "Recibos pendientes de hoy",
+      total: todayReceipts.total,
+      lines: todayReceipts.items.map(formatTelegramReceiptLine),
+      emptyText: "Sin recibos pendientes para hoy.",
+      path: "/receipts",
+    }),
+    "",
+    buildTelegramSection({
+      title: "Recibos próximos 14 días",
+      total: upcomingReceipts.total,
+      lines: upcomingReceipts.items.map(formatTelegramReceiptLine),
+      emptyText: "Sin recibos próximos.",
+      path: "/receipts",
+    }),
+    "",
+    buildTelegramSection({
+      title: "Renovaciones próximas 7 días",
+      total: upcomingRenewals.total,
+      lines: upcomingRenewals.items.map(formatTelegramRenewalLine),
+      emptyText: "Sin renovaciones próximas.",
+      path: "/renewals",
+    }),
+  ].join("\n");
+}
+
+export async function sendDailyTelegramDigests(client?: DbClient): Promise<TelegramDailyDigestResult> {
+  const db = client ?? getDb();
+  const channels = await db.notificationChannel.findMany({
+    where: {
+      type: "TELEGRAM",
+      isEnabled: true,
+      telegramChatId: { not: null },
+      user: { active: true },
+    },
+    select: {
+      userId: true,
+      telegramChatId: true,
+    },
+  });
+
+  const result: TelegramDailyDigestResult = {
+    processed: channels.length,
+    sent: 0,
+    failed: 0,
+  };
+
+  for (const channel of channels) {
+    if (!channel.telegramChatId) continue;
+    try {
+      const body = await buildTelegramDailyDigest(channel.userId, db);
+      const event = await createAndDeliverTelegramNotificationEvent({
+        type: "DAILY_DIGEST",
+        title: "Resumen diario PolicyDesk",
+        body,
+        priority: "LOW",
+        userId: channel.userId,
+        force: true,
+      });
+
+      if (event?.status === "SENT") {
+        result.sent += 1;
+      } else {
+        result.failed += 1;
+      }
+    } catch (error) {
+      result.failed += 1;
+      logError("telegram.sendDailyDigest", error, { userId: channel.userId });
+    }
+  }
+
+  return result;
 }
 
 export async function createTelegramLinkCodeForUser(input: {
@@ -617,6 +963,37 @@ export async function processTelegramWebhookUpdate(
           handled: true,
           chatId,
           replyText: buildTelegramLinkSuccessMessage(),
+        };
+      }
+      case "recibos":
+      case "renovaciones": {
+        const channel = await getTelegramChannelByChatId(chatId);
+        if (!channel?.isEnabled || !channel.telegramChatId) {
+          return {
+            handled: true,
+            chatId,
+            replyText: buildTelegramLinkedChatRequiredMessage(),
+          };
+        }
+
+        const range = parseTelegramQueryDays(command.argument);
+        if (!range.ok) {
+          return {
+            handled: true,
+            chatId,
+            replyText: range.error,
+          };
+        }
+
+        const replyText =
+          command.command === "recibos"
+            ? await buildTelegramReceiptsReply(channel.userId, range.days)
+            : await buildTelegramRenewalsReply(channel.userId, range.days);
+
+        return {
+          handled: true,
+          chatId,
+          replyText,
         };
       }
       default:

@@ -1,17 +1,24 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
+import type { Prisma } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { getCurrentUserId } from "@/lib/auth";
-import { notify } from "@/lib/notifications";
+import { createNotification } from "@/lib/notifications";
 import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
 import { mapTaskStatusToWorkItemStatus } from "@/lib/work-items";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
 import { workItemSchema, type WorkItemFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
+import {
+  assertClientPortfolioAccess,
+  assertPolicyPortfolioAccess,
+  assertReceiptPortfolioAccess,
+  workItemPortfolioWhere,
+} from "@/lib/portfolio-access";
 
-async function normalizeWorkItemRelations(values: WorkItemFormValues) {
+async function normalizeWorkItemRelations(values: WorkItemFormValues, userId: string) {
   const db = getDb();
   const receiptId = optionalRelationId(values.receiptId);
   const policyId = optionalRelationId(values.policyId);
@@ -19,6 +26,7 @@ async function normalizeWorkItemRelations(values: WorkItemFormValues) {
   const insurerId = optionalRelationId(values.insurerId);
 
   if (receiptId) {
+    await assertReceiptPortfolioAccess(receiptId, userId);
     const receipt = await db.receipt.findUnique({
       where: { id: receiptId },
       select: { id: true, policyId: true, clientId: true, insurerId: true },
@@ -37,6 +45,7 @@ async function normalizeWorkItemRelations(values: WorkItemFormValues) {
   }
 
   if (policyId) {
+    await assertPolicyPortfolioAccess(policyId, userId);
     const policy = await db.policy.findUnique({
       where: { id: policyId },
       select: { id: true, clientId: true, insurerId: true },
@@ -54,6 +63,10 @@ async function normalizeWorkItemRelations(values: WorkItemFormValues) {
     };
   }
 
+  if (clientId) {
+    await assertClientPortfolioAccess(clientId, userId);
+  }
+
   return {
     receiptId: null,
     policyId: null,
@@ -62,8 +75,8 @@ async function normalizeWorkItemRelations(values: WorkItemFormValues) {
   };
 }
 
-async function normalizeWorkItemInput(values: WorkItemFormValues, existingFolio?: string) {
-  const relations = await normalizeWorkItemRelations(values);
+async function normalizeWorkItemInput(values: WorkItemFormValues, userId: string, existingFolio?: string) {
+  const relations = await normalizeWorkItemRelations(values, userId);
 
   return {
     folio: existingFolio ?? `PD-${new Date().getUTCFullYear()}-${String(Date.now()).slice(-6)}`,
@@ -80,6 +93,18 @@ async function normalizeWorkItemInput(values: WorkItemFormValues, existingFolio?
   };
 }
 
+function buildWorkItemBulkWhere(userId: string, ids: string[]): Prisma.WorkItemWhereInput {
+  return {
+    workItemType: "TASK",
+    AND: [
+      workItemPortfolioWhere(userId),
+      {
+        OR: [{ sourceType: "Task", sourceId: { in: ids } }, { id: { in: ids } }],
+      },
+    ],
+  };
+}
+
 export async function createWorkItem(values: WorkItemFormValues): Promise<MutationResult> {
   const parsed = workItemSchema.safeParse(values);
 
@@ -90,7 +115,7 @@ export async function createWorkItem(values: WorkItemFormValues): Promise<Mutati
   try {
     const db = getDb();
     const userId = await getCurrentUserId();
-    const payload = await normalizeWorkItemInput(parsed.data);
+    const payload = await normalizeWorkItemInput(parsed.data, userId);
     const workItemId = randomUUID();
     const workItem = await db.$transaction(async (tx) => {
       const createdWorkItem = await tx.workItem.create({
@@ -117,6 +142,7 @@ export async function createWorkItem(values: WorkItemFormValues): Promise<Mutati
           notes: payload.notes,
           createdById: userId,
           updatedById: userId,
+          assignedToId: userId,
         },
       });
       const workItemRouteId = createdWorkItem.sourceId ?? createdWorkItem.id;
@@ -134,7 +160,7 @@ export async function createWorkItem(values: WorkItemFormValues): Promise<Mutati
     const workItemRouteId = workItem.sourceId ?? workItem.id;
 
     if (workItem.priority === "HIGH" || workItem.priority === "URGENT") {
-      await notify({
+      await createNotification({
         type: "TASK_HIGH_PRIORITY",
         severity: workItem.priority === "URGENT" ? "CRITICAL" : "WARNING",
         title: `Pendiente ${workItem.priority === "URGENT" ? "urgente" : "alta prioridad"}: ${workItem.title}`,
@@ -171,14 +197,13 @@ export async function updateWorkItem(id: string, values: WorkItemFormValues): Pr
 
   try {
     const db = getDb();
-    const previousWorkItem = await findWorkItemByRouteId(id);
+    const userId = await getCurrentUserId();
+    const previousWorkItem = await findWorkItemByRouteId(id, undefined, userId);
 
     if (!previousWorkItem) {
-      return errorResult("El pendiente ya no existe.");
+      return errorResult("El pendiente ya no existe o no pertenece a tu cartera.");
     }
-
-    const userId = await getCurrentUserId();
-    const payload = await normalizeWorkItemInput(parsed.data, previousWorkItem.folio ?? undefined);
+    const payload = await normalizeWorkItemInput(parsed.data, userId, previousWorkItem.folio ?? undefined);
     const workItem = await db.$transaction(async (tx) => {
       const updatedWorkItem = await tx.workItem.update({
         where: { id: previousWorkItem.id },
@@ -266,15 +291,10 @@ export async function bulkUpdateWorkItemStatus(ids: string[], status: string): P
   }
   const db = getDb();
   try {
+    const userId = await getCurrentUserId();
     await db.$transaction(async (tx) => {
       await tx.workItem.updateMany({
-        where: {
-          OR: [
-            { sourceType: "Task", sourceId: { in: ids } },
-            { id: { in: ids } },
-          ],
-          workItemType: "TASK",
-        },
+        where: buildWorkItemBulkWhere(userId, ids),
         data: {
           status: mapTaskStatusToWorkItemStatus(status),
           closedDate: status === "RESOLVED" ? new Date() : null,
@@ -295,15 +315,10 @@ export async function bulkUpdateWorkItemPriority(ids: string[], priority: string
   }
   const db = getDb();
   try {
+    const userId = await getCurrentUserId();
     await db.$transaction(async (tx) => {
       await tx.workItem.updateMany({
-        where: {
-          OR: [
-            { sourceType: "Task", sourceId: { in: ids } },
-            { id: { in: ids } },
-          ],
-          workItemType: "TASK",
-        },
+        where: buildWorkItemBulkWhere(userId, ids),
         data: { priority },
       });
     });
@@ -318,14 +333,9 @@ export async function bulkDeleteWorkItems(ids: string[]): Promise<MutationResult
   if (!ids.length) return errorResult("No hay pendientes seleccionados.");
   const db = getDb();
   try {
+    const userId = await getCurrentUserId();
     const workItems = await db.workItem.findMany({
-      where: {
-        OR: [
-          { sourceType: "Task", sourceId: { in: ids } },
-          { id: { in: ids } },
-        ],
-        workItemType: "TASK",
-      },
+      where: buildWorkItemBulkWhere(userId, ids),
       select: { id: true, sourceId: true, folio: true, title: true, clientId: true, policyId: true },
     });
 
@@ -360,8 +370,8 @@ export async function bulkDeleteWorkItems(ids: string[]): Promise<MutationResult
 export async function deleteWorkItem(id: string): Promise<MutationResult> {
   try {
     const db = getDb();
-
-    const existingWorkItem = await findWorkItemByRouteId(id);
+    const userId = await getCurrentUserId();
+    const existingWorkItem = await findWorkItemByRouteId(id, undefined, userId);
 
     if (!existingWorkItem) {
       return errorResult("El pendiente ya no existe.");

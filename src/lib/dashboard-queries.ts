@@ -6,14 +6,24 @@ import { toNumber } from "@/lib/money";
 import { detectRisks } from "@/lib/risk-engine";
 import { DASHBOARD_LIST_LIMIT } from "@/lib/constants";
 import { OPEN_WORK_ITEM_STATUSES, countWorkItems, getWorkItems } from "@/lib/work-queue";
+import {
+  commissionPortfolioWhere,
+  policyPortfolioWhere,
+  receiptPortfolioWhere,
+  requirePortfolioUser,
+} from "@/lib/portfolio-access";
 
 export async function getDashboardData() {
   const db = getDb();
+  const user = await requirePortfolioUser();
   const now = today();
   const in7 = addDays(now, 7);
   const in60 = addDays(now, 60);
   const monthStart = startOfMonth(now);
   const monthEnd = endOfMonth(now);
+  const policyWhere = policyPortfolioWhere(user.id);
+  const receiptWhere = receiptPortfolioWhere(user.id);
+  const commissionWhere = commissionPortfolioWhere(user.id);
 
   const [
     activePolicies,
@@ -31,44 +41,46 @@ export async function getDashboardData() {
     policyTypeDistributionRows,
     commissionsByMonthRows,
     recentActivity,
-    openAlerts,
+    openNotifications,
     risks,
     criticalWorkItems,
   ] = await Promise.all([
-    db.policy.count({ where: { status: "ACTIVE" } }),
+    db.policy.count({ where: { ...policyWhere, status: "ACTIVE" } }),
     db.receipt.count({
-      where: { dueDate: { gte: now, lte: in60 }, status: { in: ["PENDING", "OVERDUE"] } },
+      where: { ...receiptWhere, dueDate: { gte: now, lte: in60 }, status: { in: ["PENDING", "OVERDUE"] } },
     }),
     db.receipt.count({
-      where: { dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { ...receiptWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
     }),
     db.policy.count({
-      where: { endDate: { gte: now, lte: in60 }, status: "ACTIVE" },
+      where: { ...policyWhere, endDate: { gte: now, lte: in60 }, status: "ACTIVE" },
     }),
     countWorkItems({
       workItemTypes: ["TASK"],
       statuses: OPEN_WORK_ITEM_STATUSES,
+      portfolioOwnerId: user.id,
     }),
     countWorkItems({
       workItemTypes: ["TASK"],
       statuses: OPEN_WORK_ITEM_STATUSES,
       priorities: ["URGENT"],
+      portfolioOwnerId: user.id,
     }),
     // Per-row fallback: actualAmount when set, otherwise expectedAmount.
     // We split into two aggregates to reproduce SUM(COALESCE(actualAmount, expectedAmount))
     // without scanning every row in JS.
     Promise.all([
       db.commission.aggregate({
-        where: { status: { in: ["EXPECTED", "PENDING", "OVERDUE"] }, actualAmount: { not: null } },
+        where: { ...commissionWhere, status: { in: ["EXPECTED", "PENDING", "OVERDUE"] }, actualAmount: { not: null } },
         _sum: { actualAmount: true },
       }),
       db.commission.aggregate({
-        where: { status: { in: ["EXPECTED", "PENDING", "OVERDUE"] }, actualAmount: null },
+        where: { ...commissionWhere, status: { in: ["EXPECTED", "PENDING", "OVERDUE"] }, actualAmount: null },
         _sum: { expectedAmount: true },
       }),
     ]),
     db.receipt.findMany({
-      where: { dueDate: { lte: in60 }, status: { notIn: ["CANCELLED"] } },
+      where: { ...receiptWhere, dueDate: { lte: in60 }, status: { notIn: ["CANCELLED"] } },
       include: { client: true, insurer: true, policy: true },
       orderBy: { dueDate: "asc" },
       take: DASHBOARD_LIST_LIMIT,
@@ -76,13 +88,13 @@ export async function getDashboardData() {
     // Lightweight chart query — only the field we need, capped separately so the
     // urgent list size doesn't silently undercount the weekly chart.
     db.receipt.findMany({
-      where: { dueDate: { lte: in60 }, status: { notIn: ["CANCELLED"] } },
+      where: { ...receiptWhere, dueDate: { lte: in60 }, status: { notIn: ["CANCELLED"] } },
       select: { dueDate: true },
       orderBy: { dueDate: "asc" },
       take: 500,
     }),
     db.policy.findMany({
-      where: { endDate: { gte: now, lte: in60 }, status: "ACTIVE" },
+      where: { ...policyWhere, endDate: { gte: now, lte: in60 }, status: "ACTIVE" },
       include: { client: true, insurer: true },
       orderBy: { endDate: "asc" },
       take: 6,
@@ -90,32 +102,34 @@ export async function getDashboardData() {
     // Lightweight chart query — only the field we need, capped separately so the
     // urgent renewals list size doesn't silently undercount the weekly chart.
     db.policy.findMany({
-      where: { endDate: { gte: now, lte: in60 }, status: "ACTIVE" },
+      where: { ...policyWhere, endDate: { gte: now, lte: in60 }, status: "ACTIVE" },
       select: { endDate: true },
       orderBy: { endDate: "asc" },
       take: 500,
     }),
     db.policy.groupBy({
       by: ["insurerId"],
-      where: { status: "ACTIVE" },
+      where: { ...policyWhere, status: "ACTIVE" },
       _count: { insurerId: true },
     }),
     db.policy.groupBy({
       by: ["policyType"],
+      where: policyWhere,
       _count: { policyType: true },
     }),
     db.commission.findMany({
-      where: { status: { in: ["EXPECTED", "PENDING", "OVERDUE"] } },
+      where: { ...commissionWhere, status: { in: ["EXPECTED", "PENDING", "OVERDUE"] } },
       select: { expectedDate: true, expectedAmount: true, actualAmount: true },
       take: 200,
     }),
     db.activityLog.findMany({ orderBy: { createdAt: "desc" }, take: 8 }),
     db.alert.findMany({ where: { status: "OPEN" }, orderBy: { createdAt: "desc" }, take: 8 }),
-    detectRisks(),
+    detectRisks(user.id),
     getWorkItems({
       workItemTypes: ["TASK"],
       statuses: OPEN_WORK_ITEM_STATUSES,
       limit: 12,
+      portfolioOwnerId: user.id,
     }),
   ]);
 
@@ -171,7 +185,7 @@ export async function getDashboardData() {
       recentActivity,
       documentsMissing,
       topRisks: risks.slice(0, 6),
-      openAlerts,
+      openNotifications,
       monthRange: { monthStart, monthEnd },
     },
   };
@@ -188,11 +202,12 @@ export type OnboardingStatus = {
 
 export async function getOnboardingStatus(): Promise<OnboardingStatus> {
   const db = getDb();
+  const user = await requirePortfolioUser();
   const [insurers, clients, policies, receipts, dismissedRow] = await Promise.all([
     db.insurer.count(),
-    db.client.count(),
-    db.policy.count(),
-    db.receipt.count(),
+    db.client.count({ where: { portfolioOwnerId: user.id } }),
+    db.policy.count({ where: policyPortfolioWhere(user.id) }),
+    db.receipt.count({ where: receiptPortfolioWhere(user.id) }),
     db.systemSetting.findUnique({ where: { key: "onboardingDismissed" } }),
   ]);
   return {
@@ -207,10 +222,14 @@ export async function getOnboardingStatus(): Promise<OnboardingStatus> {
 
 export async function getTodayData() {
   const db = getDb();
+  const user = await requirePortfolioUser();
   const now = today();
   const tomorrow = addDays(now, 1);
   const in7 = addDays(now, 7);
   const in30 = addDays(now, 30);
+  const policyWhere = policyPortfolioWhere(user.id);
+  const receiptWhere = receiptPortfolioWhere(user.id);
+  const commissionWhere = commissionPortfolioWhere(user.id);
 
   const [
     paymentsDueToday,
@@ -224,23 +243,23 @@ export async function getTodayData() {
     risks,
   ] = await Promise.all([
     db.receipt.findMany({
-      where: { dueDate: { gte: now, lt: tomorrow }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { ...receiptWhere, dueDate: { gte: now, lt: tomorrow }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
     }),
     db.receipt.findMany({
-      where: { dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { ...receiptWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
       orderBy: { dueDate: "asc" },
       take: 8,
     }),
     db.receipt.findMany({
-      where: { dueDate: { gte: tomorrow, lte: in7 }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { ...receiptWhere, dueDate: { gte: tomorrow, lte: in7 }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
       orderBy: { dueDate: "asc" },
       take: 8,
     }),
     db.policy.findMany({
-      where: { endDate: { gte: now, lte: in30 }, status: "ACTIVE" },
+      where: { ...policyWhere, endDate: { gte: now, lte: in30 }, status: "ACTIVE" },
       include: { client: true, insurer: true },
       orderBy: { endDate: "asc" },
       take: 8,
@@ -250,9 +269,11 @@ export async function getTodayData() {
       statuses: OPEN_WORK_ITEM_STATUSES,
       to: now,
       limit: 8,
+      portfolioOwnerId: user.id,
     }),
     db.client.findMany({
       where: {
+        portfolioOwnerId: user.id,
         workItems: {
           some: { workItemType: "TASK", status: { in: ["OPEN", "WAITING_CLIENT"] } },
         },
@@ -261,6 +282,7 @@ export async function getTodayData() {
     }),
     db.commission.findMany({
       where: {
+        ...commissionWhere,
         expectedDate: { lte: in30 },
         status: { in: ["EXPECTED", "PENDING", "OVERDUE"] },
       },
@@ -269,7 +291,7 @@ export async function getTodayData() {
       take: 8,
     }),
     db.activityLog.findMany({ orderBy: { createdAt: "desc" }, take: 8 }),
-    detectRisks(),
+    detectRisks(user.id),
   ]);
 
   const overdueWorkItemRows = overdueWorkItems.map((item) => ({

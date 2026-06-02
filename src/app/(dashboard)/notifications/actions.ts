@@ -2,9 +2,9 @@
 
 import { getDb } from "@/lib/db";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
-import { mapAlertStatusToWorkItemStatus, upsertWorkItemFromSource } from "@/lib/work-items";
+import { mapNotificationStatusToWorkItemStatus, upsertWorkItemFromSource } from "@/lib/work-items";
 
-export async function markAlertRead(id: string): Promise<MutationResult> {
+export async function markNotificationRead(id: string): Promise<MutationResult> {
   if (!id) return errorResult("Notificación no encontrada.");
   try {
     const db = getDb();
@@ -16,10 +16,10 @@ export async function markAlertRead(id: string): Promise<MutationResult> {
         data: { readAt: new Date(), status: "DISMISSED" },
       });
       await upsertWorkItemFromSource({
-        sourceType: "Alert",
+        sourceType: "Notification",
         sourceId: alert.id,
-        workItemType: "ALERT",
-        status: mapAlertStatusToWorkItemStatus(alert.status),
+        workItemType: "NOTIFICATION",
+        status: mapNotificationStatusToWorkItemStatus(alert.status),
         severity: alert.severity,
         title: alert.title,
         description: alert.description,
@@ -35,7 +35,7 @@ export async function markAlertRead(id: string): Promise<MutationResult> {
   }
 }
 
-export async function markAllAlertsRead(): Promise<MutationResult> {
+export async function markAllNotificationsRead(): Promise<MutationResult> {
   try {
     const db = getDb();
     const now = new Date();
@@ -44,7 +44,7 @@ export async function markAllAlertsRead(): Promise<MutationResult> {
       data: { readAt: now, status: "DISMISSED" },
     });
     await db.workItem.updateMany({
-      where: { sourceType: "Alert" },
+      where: { sourceType: "Notification" },
       data: { readAt: now, status: "DISMISSED" },
     });
     revalidatePaths(["/", "/notifications"]);

@@ -15,11 +15,18 @@ export type RiskFinding = {
 
 const TAKE_LIMIT = 25;
 
-export async function detectRisks(): Promise<RiskFinding[]> {
+export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFinding[]> {
   const db = getDb();
   const now = today();
   const in60 = addDays(now, 60);
   const olderThan15 = subDays(now, 15);
+  const policyScope = portfolioOwnerId ? { client: { portfolioOwnerId } } : {};
+  const receiptScope = portfolioOwnerId ? { client: { portfolioOwnerId } } : {};
+  const commissionScope = portfolioOwnerId ? { client: { portfolioOwnerId } } : {};
+  const clientScope = portfolioOwnerId ? { portfolioOwnerId } : {};
+  const workItemScope = portfolioOwnerId
+    ? { OR: [{ client: { portfolioOwnerId } }, { clientId: null, assignedToId: portfolioOwnerId }] }
+    : {};
 
   const [
     policiesWithoutPdf,
@@ -37,17 +44,18 @@ export async function detectRisks(): Promise<RiskFinding[]> {
     duplicateReceiptKeys,
   ] = await Promise.all([
     db.policy.findMany({
-      where: { status: "ACTIVE", documents: { none: { documentType: "POLICY" } } },
+      where: { ...policyScope, status: "ACTIVE", documents: { none: { documentType: "POLICY" } } },
       take: TAKE_LIMIT,
       select: { id: true, policyNumber: true },
     }),
     db.policy.findMany({
-      where: { endDate: { lt: now }, status: { notIn: ["RENEWED", "CANCELLED"] } },
+      where: { ...policyScope, endDate: { lt: now }, status: { notIn: ["RENEWED", "CANCELLED"] } },
       take: TAKE_LIMIT,
       select: { id: true, policyNumber: true },
     }),
     db.receipt.findMany({
       where: {
+        ...receiptScope,
         dueDate: { lt: now },
         status: { notIn: ["PAID", "CANCELLED"] },
         payments: { none: {} },
@@ -56,17 +64,18 @@ export async function detectRisks(): Promise<RiskFinding[]> {
       select: { id: true, receiptNumber: true },
     }),
     db.receipt.findMany({
-      where: { status: "PAID", documentId: null },
+      where: { ...receiptScope, status: "PAID", documentId: null },
       take: TAKE_LIMIT,
       select: { id: true, receiptNumber: true },
     }),
     db.commission.findMany({
-      where: { expectedDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { ...commissionScope, expectedDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
       take: TAKE_LIMIT,
       select: { id: true, expectedAmount: true },
     }),
     db.workItem.findMany({
       where: {
+        ...workItemScope,
         workItemType: "TASK",
         startDate: { lt: olderThan15 },
         status: { in: [...OPEN_WORK_ITEM_STATUSES] },
@@ -75,17 +84,18 @@ export async function detectRisks(): Promise<RiskFinding[]> {
       select: { id: true, sourceId: true, folio: true, title: true },
     }),
     db.client.findMany({
-      where: { OR: [{ phone: null }, { email: null }] },
+      where: { ...clientScope, OR: [{ phone: null }, { email: null }] },
       take: TAKE_LIMIT,
       select: { id: true, fullName: true },
     }),
     db.policy.findMany({
-      where: { OR: [{ endDate: { lt: new Date("2000-01-01") } }, { startDate: { gt: in60 } }] },
+      where: { ...policyScope, OR: [{ endDate: { lt: new Date("2000-01-01") } }, { startDate: { gt: in60 } }] },
       take: TAKE_LIMIT,
       select: { id: true, policyNumber: true },
     }),
     db.document.findMany({
       where: {
+        ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
         clientId: null,
         policyId: null,
         receiptId: null,
@@ -97,12 +107,13 @@ export async function detectRisks(): Promise<RiskFinding[]> {
       select: { id: true, fileName: true },
     }),
     db.client.findMany({
-      where: { policies: { none: { status: "ACTIVE" } } },
+      where: { ...clientScope, policies: { none: { status: "ACTIVE" } } },
       take: TAKE_LIMIT,
       select: { id: true, fullName: true },
     }),
     db.policy.findMany({
       where: {
+        ...policyScope,
         status: "ACTIVE",
         endDate: { gte: now, lte: in60 },
         workItems: {
@@ -117,12 +128,14 @@ export async function detectRisks(): Promise<RiskFinding[]> {
     }),
     // Duplicate detection now happens in the database via groupBy.
     db.policy.groupBy({
-      by: ["policyNumber"],
+      by: ["policyNumber", "clientId", "insurerId"],
+      where: policyScope,
       _count: { policyNumber: true },
       having: { policyNumber: { _count: { gt: 1 } } },
     }),
     db.receipt.groupBy({
       by: ["policyId", "receiptNumber"],
+      where: receiptScope,
       _count: { receiptNumber: true },
       having: { receiptNumber: { _count: { gt: 1 } } },
     }),
@@ -130,8 +143,15 @@ export async function detectRisks(): Promise<RiskFinding[]> {
 
   const duplicatePolicies = duplicatePolicyKeys.length
     ? await db.policy.findMany({
-        where: { policyNumber: { in: duplicatePolicyKeys.map((row) => row.policyNumber) } },
-        select: { id: true, policyNumber: true },
+        where: {
+          ...policyScope,
+          OR: duplicatePolicyKeys.map((row) => ({
+            policyNumber: row.policyNumber,
+            clientId: row.clientId,
+            insurerId: row.insurerId,
+          })),
+        },
+        select: { id: true, policyNumber: true, clientId: true, insurerId: true, startDate: true, endDate: true },
         take: TAKE_LIMIT * 2,
       })
     : [];
@@ -148,6 +168,18 @@ export async function detectRisks(): Promise<RiskFinding[]> {
         take: TAKE_LIMIT * 2,
       })
     : [];
+
+  const overlappingPolicies = duplicatePolicies.filter((candidate, index, rows) =>
+    rows.some(
+      (other, otherIndex) =>
+        otherIndex !== index &&
+        other.policyNumber === candidate.policyNumber &&
+        other.clientId === candidate.clientId &&
+        other.insurerId === candidate.insurerId &&
+        other.startDate <= candidate.endDate &&
+        other.endDate >= candidate.startDate,
+    ),
+  );
 
   return [
     ...policiesWithoutPdf.map((policy) => risk("POLICY_MISSING_PDF", "WARNING", "Poliza sin PDF", policy.policyNumber, "Policy", policy.id, "Subir documento de poliza.")),
@@ -171,7 +203,7 @@ export async function detectRisks(): Promise<RiskFinding[]> {
     ...orphanDocuments.map((document) => risk("ORPHAN_DOCUMENT", "INFO", "Documento huerfano", document.fileName, "Document", document.id, "Asociar documento a una entidad.")),
     ...clientsWithoutActivePolicies.map((client) => risk("CLIENT_WITHOUT_ACTIVE_POLICY", "INFO", "Cliente sin polizas activas", client.fullName, "Client", client.id, "Revisar si debe archivarse o reactivarse.")),
     ...renewalsWithoutWorkItem.map((policy) => risk("RENEWAL_WITHOUT_WORK_ITEM", "WARNING", "Renovacion proxima sin pendiente", policy.policyNumber, "Policy", policy.id, "Crear pendiente de renovacion.")),
-    ...duplicatePolicies.map((policy) => risk("DUPLICATE_POLICY_NUMBER", "WARNING", "Numero de poliza duplicado", policy.policyNumber, "Policy", policy.id, "Verificar duplicado.")),
+    ...overlappingPolicies.map((policy) => risk("OVERLAPPING_POLICY_TERM", "WARNING", "Vigencias de poliza solapadas", policy.policyNumber, "Policy", policy.id, "Verificar familia de renovacion.")),
     ...duplicateReceipts.map((receipt) => risk("DUPLICATE_RECEIPT_NUMBER", "WARNING", "Recibo duplicado", receipt.receiptNumber, "Receipt", receipt.id, "Verificar duplicado.")),
   ];
 }

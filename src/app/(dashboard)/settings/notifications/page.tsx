@@ -13,11 +13,13 @@ import {
   generateTelegramLinkCode,
   saveNotificationPreferences,
   sendTelegramTestMessage,
+  updateNotificationTimezone,
 } from "./actions";
 
 export default async function NotificationSettingsPage() {
   const user = await requireUserOrRedirect();
   const snapshot = await getNotificationPreferencesForUser(user.id);
+  const timeZone = user.timeZone ?? "America/Mexico_City";
 
   return (
     <div className="flex flex-col gap-6">
@@ -95,18 +97,31 @@ export default async function NotificationSettingsPage() {
               {snapshot.preferences.length} preferencias cargadas para tu usuario.
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Zona horaria</CardTitle>
+              <CardDescription>Define cómo interpretamos quiet hours y resúmenes.</CardDescription>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              {timeZone}. Los campos “inicio” y “fin” se interpretan como ventana de no molestar en esa zona.
+            </CardContent>
+          </Card>
         </section>
 
         <NotificationPreferencesPanel
           key={[
             snapshot.channel.updatedAt.getTime(),
             snapshot.preferences.map((pref) => pref.updatedAt.getTime()).join("-"),
+            timeZone,
           ].join(":")}
           snapshot={snapshot}
+          timeZone={timeZone}
           generateTelegramLinkCode={generateTelegramLinkCode}
           disconnectTelegram={disconnectTelegram}
           sendTelegramTestMessage={sendTelegramTestMessage}
           saveNotificationPreferences={saveNotificationPreferences}
+          updateNotificationTimezone={updateNotificationTimezone}
         />
       </div>
     </div>

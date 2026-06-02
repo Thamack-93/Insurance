@@ -9,10 +9,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { EmptyState } from "@/components/empty-states/empty-state";
 import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
-import { getRenewalStats, getUpcomingRenewals, type RenewalReminder } from "@/lib/renewals";
+import { getRenewalStats, getUpcomingRenewals, type RenewalOpportunity } from "@/lib/renewals";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
+import { requirePortfolioUser } from "@/lib/portfolio-access";
 
 export const dynamic = "force-dynamic";
 
@@ -25,12 +26,13 @@ export default async function RenewalsPage({
   const query = (params.q ?? "").trim().slice(0, 100).toLowerCase();
   const page = Math.max(1, Number(params.page) || 1);
 
+  const user = await requirePortfolioUser();
   const [stats, upcomingRenewals] = await Promise.all([
-    getRenewalStats(),
-    getUpcomingRenewals(60),
+    getRenewalStats(user.id),
+    getUpcomingRenewals(60, user.id),
   ]);
 
-  const matchesQuery = (r: RenewalReminder) =>
+  const matchesQuery = (r: RenewalOpportunity) =>
     [r.policyNumber, r.clientName, r.insurerName, r.policyType]
       .filter(Boolean)
       .some((field) => String(field).toLowerCase().includes(query));
@@ -136,7 +138,7 @@ export default async function RenewalsPage({
             )}
           </SectionCard>
 
-          <SectionCard title="Seguimiento operativo" description="La gestión de tareas y recordatorios vive en la bandeja de trabajo.">
+          <SectionCard title="Seguimiento operativo" description="La gestión de tareas y seguimiento vive en la bandeja de trabajo.">
             <div className="space-y-4">
               <div className="rounded-lg bg-muted/40 p-4">
                 <h4 className="mb-2 font-medium">Tareas sugeridas</h4>
@@ -149,9 +151,9 @@ export default async function RenewalsPage({
               </div>
 
               <div className="rounded-lg bg-muted/40 p-4">
-                <h4 className="mb-2 font-medium">Recordatorios</h4>
+                <h4 className="mb-2 font-medium">Seguimiento</h4>
                 <p className="text-sm text-muted-foreground">
-                  Los recordatorios se generan desde procesos de soporte, no al abrir esta pantalla.
+                  El seguimiento se genera desde procesos de soporte, no al abrir esta pantalla.
                 </p>
               </div>
 

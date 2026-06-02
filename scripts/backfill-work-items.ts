@@ -1,5 +1,9 @@
 import { getDb } from "@/lib/db";
-import { mapAlertStatusToWorkItemStatus, mapTaskStatusToWorkItemStatus, upsertWorkItemFromSource } from "@/lib/work-items";
+import {
+  mapNotificationStatusToWorkItemStatus,
+  mapTaskStatusToWorkItemStatus,
+  upsertWorkItemFromSource,
+} from "@/lib/work-items";
 import { logError } from "@/lib/logger";
 
 async function main() {
@@ -7,8 +11,8 @@ async function main() {
 
   let taskCreated = 0;
   let taskUpdated = 0;
-  let alertCreated = 0;
-  let alertUpdated = 0;
+  let notificationCreated = 0;
+  let notificationUpdated = 0;
 
   const tasks = await db.task.findMany({
     select: {
@@ -88,7 +92,7 @@ async function main() {
     const existing = await db.workItem.findUnique({
       where: {
         sourceType_sourceId: {
-          sourceType: "Alert",
+          sourceType: "Notification",
           sourceId: alert.id,
         },
       },
@@ -96,10 +100,10 @@ async function main() {
     });
 
     await upsertWorkItemFromSource({
-      sourceType: "Alert",
+      sourceType: "Notification",
       sourceId: alert.id,
-      workItemType: "ALERT",
-      status: mapAlertStatusToWorkItemStatus(alert.status),
+      workItemType: "NOTIFICATION",
+      status: mapNotificationStatusToWorkItemStatus(alert.status),
       severity: alert.severity,
       title: alert.title,
       description: alert.description,
@@ -108,8 +112,8 @@ async function main() {
       readAt: alert.readAt,
     });
 
-    if (existing) alertUpdated++;
-    else alertCreated++;
+    if (existing) notificationUpdated++;
+    else notificationCreated++;
   }
 
   console.log(
@@ -120,10 +124,10 @@ async function main() {
           created: taskCreated,
           updated: taskUpdated,
         },
-        alerts: {
+        notifications: {
           total: alerts.length,
-          created: alertCreated,
-          updated: alertUpdated,
+          created: notificationCreated,
+          updated: notificationUpdated,
         },
       },
       null,

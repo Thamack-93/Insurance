@@ -333,6 +333,11 @@ export async function shouldNotifyUser(input: {
 }) {
   const channelType = input.channelType ?? "TELEGRAM";
   const snapshot = await getNotificationPreferencesForUser(input.userId, input.client);
+  const db = input.client ?? getDb();
+  const user = await db.user.findUnique({
+    where: { id: input.userId },
+    select: { timeZone: true },
+  });
   const preference = snapshot.preferences.find(
     (row) => row.eventType === input.eventType && row.channelType === channelType,
   );
@@ -350,6 +355,7 @@ export async function shouldNotifyUser(input: {
     quietHoursStart: preference.quietHoursStart,
     quietHoursEnd: preference.quietHoursEnd,
     now: input.now,
+    timeZone: user?.timeZone ?? DEFAULT_TIMEZONE,
   });
 }
 

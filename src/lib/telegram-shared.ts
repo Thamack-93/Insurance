@@ -1,8 +1,19 @@
 import { createHash, randomBytes } from "node:crypto";
 
 export const TELEGRAM_LINK_TOKEN_TTL_MINUTES = 15;
+export const TELEGRAM_QUERY_DEFAULT_DAYS = 30;
+export const TELEGRAM_QUERY_MAX_DAYS = 365;
+export const TELEGRAM_QUERY_RESULT_LIMIT = 20;
+export const TELEGRAM_DIGEST_SECTION_LIMIT = 10;
 
-export type TelegramCommandName = "start" | "help" | "link" | "status" | "unknown";
+export type TelegramCommandName =
+  | "start"
+  | "help"
+  | "link"
+  | "status"
+  | "recibos"
+  | "renovaciones"
+  | "unknown";
 
 export type TelegramCommand = {
   command: TelegramCommandName;
@@ -34,7 +45,14 @@ export function parseTelegramCommand(text: string): TelegramCommand | null {
   const command = commandToken.split("@")[0]?.toLowerCase() ?? "";
   const argument = rest.join(" ").trim() || null;
 
-  if (command === "start" || command === "help" || command === "link" || command === "status") {
+  if (
+    command === "start" ||
+    command === "help" ||
+    command === "link" ||
+    command === "status" ||
+    command === "recibos" ||
+    command === "renovaciones"
+  ) {
     return {
       command,
       argument,
@@ -47,6 +65,30 @@ export function parseTelegramCommand(text: string): TelegramCommand | null {
     argument,
     raw: trimmed,
   };
+}
+
+export function parseTelegramQueryDays(argument: string | null) {
+  if (!argument) {
+    return { ok: true as const, days: TELEGRAM_QUERY_DEFAULT_DAYS };
+  }
+
+  const normalized = argument.trim();
+  if (!/^\d+$/.test(normalized)) {
+    return {
+      ok: false as const,
+      error: `Usa un número de días entre 1 y ${TELEGRAM_QUERY_MAX_DAYS}.`,
+    };
+  }
+
+  const days = Number(normalized);
+  if (!Number.isSafeInteger(days) || days < 1 || days > TELEGRAM_QUERY_MAX_DAYS) {
+    return {
+      ok: false as const,
+      error: `Usa un número de días entre 1 y ${TELEGRAM_QUERY_MAX_DAYS}.`,
+    };
+  }
+
+  return { ok: true as const, days };
 }
 
 export function buildTelegramStartMessage() {
@@ -65,6 +107,8 @@ export function buildTelegramHelpMessage() {
     "/help - Mostrar este resumen.",
     "/link <código> - Vincular este chat con tu cuenta de PolicyDesk.",
     "/status - Ver si este chat ya está vinculado.",
+    "/recibos [días] - Ver cobros vencidos y próximos. Predeterminado: 30.",
+    "/renovaciones [días] - Ver renovaciones próximas. Predeterminado: 30.",
   ].join("\n");
 }
 
@@ -91,6 +135,13 @@ export function buildTelegramStatusMessage(connected: boolean) {
 
 export function buildTelegramLinkErrorMessage(reason: string) {
   return [reason, "Revisa el código o genera uno nuevo desde PolicyDesk."].join("\n");
+}
+
+export function buildTelegramLinkedChatRequiredMessage() {
+  return [
+    "Este comando solo está disponible para chats vinculados.",
+    "Genera un código desde Configuración > Notificaciones y usa /link CÓDIGO aquí.",
+  ].join("\n");
 }
 
 export function buildTelegramFallbackMessage() {

@@ -24,6 +24,7 @@ export type AdminUserRow = {
   active: boolean;
   lastLoginAt: string | null;
   createdAt: string;
+  portfolioClients: number;
 };
 
 function isRole(value: unknown): value is UserRole {
@@ -52,6 +53,7 @@ export async function listUsers(): Promise<AdminUserRow[]> {
   const users = await db.user.findMany({
     where: { id: { not: SYSTEM_USER_ID } },
     orderBy: [{ active: "desc" }, { name: "asc" }],
+    include: { _count: { select: { portfolioClients: true } } },
   });
   return users.map((u) => ({
     id: u.id,
@@ -61,6 +63,7 @@ export async function listUsers(): Promise<AdminUserRow[]> {
     active: u.active,
     lastLoginAt: u.lastLoginAt ? u.lastLoginAt.toISOString() : null,
     createdAt: u.createdAt.toISOString(),
+    portfolioClients: u._count.portfolioClients,
   }));
 }
 

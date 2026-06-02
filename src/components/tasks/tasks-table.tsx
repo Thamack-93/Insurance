@@ -32,8 +32,7 @@ import {
 
 const workItemTypeLabels: Record<string, string> = {
   TASK: "Pendiente",
-  REMINDER: "Recordatorio",
-  ALERT: "Alerta",
+  NOTIFICATION: "Notificación",
   GENERAL: "General",
   CLAIM: "Siniestro",
   QUOTE: "Cotización",

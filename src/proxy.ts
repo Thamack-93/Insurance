@@ -9,6 +9,7 @@ const PUBLIC_PREFIXES = [
   "/favicon",
   "/public",
   "/api/jobs/backup",
+  "/api/jobs/telegram-digest",
 ];
 
 function isPublicPath(pathname: string): boolean {

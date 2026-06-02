@@ -6,6 +6,12 @@ import { AuthError, getCurrentUserId, requireAdmin } from "@/lib/auth";
 import { normalizeOptionalText, parseDateInput } from "@/lib/form-utils";
 import { receiptSchema, type ReceiptFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
+import { recordPayment } from "@/lib/payment-service";
+import {
+  assertPolicyPortfolioAccess,
+  assertReceiptPortfolioAccess,
+  receiptPortfolioWhere,
+} from "@/lib/portfolio-access";
 
 const ALLOWED_PAYMENT_METHODS = ["TRANSFER", "CASH", "CARD", "CHECK", "OTHER"] as const;
 type AllowedPaymentMethod = (typeof ALLOWED_PAYMENT_METHODS)[number];
@@ -14,8 +20,9 @@ function isAllowedPaymentMethod(value: string): value is AllowedPaymentMethod {
   return (ALLOWED_PAYMENT_METHODS as readonly string[]).includes(value);
 }
 
-async function normalizeReceiptInput(values: ReceiptFormValues) {
+async function normalizeReceiptInput(values: ReceiptFormValues, userId: string) {
   const db = getDb();
+  await assertPolicyPortfolioAccess(values.policyId, userId);
   const policy = await db.policy.findUnique({
     where: { id: values.policyId },
     select: { id: true, clientId: true, insurerId: true, currency: true },
@@ -50,7 +57,7 @@ export async function createReceipt(values: ReceiptFormValues): Promise<Mutation
   try {
     const db = getDb();
     const userId = await getCurrentUserId();
-    const payload = await normalizeReceiptInput(parsed.data);
+    const payload = await normalizeReceiptInput(parsed.data, userId);
     const receipt = await db.receipt.create({ data: { ...payload, createdById: userId, updatedById: userId } });
 
     await writeActivityLog({
@@ -86,14 +93,15 @@ export async function updateReceipt(id: string, values: ReceiptFormValues): Prom
 
   try {
     const db = getDb();
+    const userId = await getCurrentUserId();
+    await assertReceiptPortfolioAccess(id, userId);
     const previousReceipt = await db.receipt.findUnique({ where: { id } });
 
     if (!previousReceipt) {
       return errorResult("El recibo ya no existe.");
     }
 
-    const userId = await getCurrentUserId();
-    const payload = await normalizeReceiptInput(parsed.data);
+    const payload = await normalizeReceiptInput(parsed.data, userId);
     const receipt = await db.receipt.update({
       where: { id },
       data: { ...payload, updatedById: userId },
@@ -139,7 +147,7 @@ export async function bulkMarkReceiptsPaid(
 
   try {
     const receipts = await db.receipt.findMany({
-      where: { id: { in: ids } },
+      where: { id: { in: ids }, ...receiptPortfolioWhere(userId) },
       select: {
         id: true,
         receiptNumber: true,
@@ -162,34 +170,13 @@ export async function bulkMarkReceiptsPaid(
 
     for (const receipt of eligible) {
       try {
-        await db.payment.create({
-          data: {
-            receiptId: receipt.id,
-            policyId: receipt.policyId,
-            clientId: receipt.clientId,
-            amount: receipt.amount,
-            currency: receipt.currency,
-            paidDate: now,
-            paymentMethod,
-            createdById: userId,
-            updatedById: userId,
-          },
-        });
-
-        await db.receipt.update({
-          where: { id: receipt.id },
-          data: { status: "PAID", paidDate: now, paymentMethod, updatedById: userId },
-        });
-
-        await writeActivityLog({
-          entityType: "Receipt",
-          entityId: receipt.id,
-          action: "RECEIPT_BULK_PAID",
-          newValue: {
-            receiptNumber: receipt.receiptNumber,
-            paymentMethod,
-            paidDate: now.toISOString(),
-          },
+        await recordPayment({
+          receiptId: receipt.id,
+          amount: Number(receipt.amount),
+          paidDate: now,
+          paymentMethod,
+          sourceEvidenceKey: `bulk:${receipt.id}:${now.toISOString()}`,
+          actorId: userId,
         });
 
         okCount += 1;

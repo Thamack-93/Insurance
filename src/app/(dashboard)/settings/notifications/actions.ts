@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getDb } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
@@ -15,6 +16,7 @@ import {
   updateNotificationPreferences,
   type NotificationPreferenceInput,
 } from "@/lib/notification-foundation";
+import { isSupportedTimeZone } from "@/lib/time-zones";
 
 export async function saveNotificationPreferences(
   preferences: NotificationPreferenceInput[],
@@ -121,5 +123,55 @@ export async function sendTelegramTestMessage(): Promise<MutationResult> {
   } catch (error) {
     logError("settings.notifications.telegram.test", error);
     return errorResult("No se pudo enviar el mensaje de prueba.");
+  }
+}
+
+export async function updateNotificationTimezone(timeZone: string): Promise<MutationResult> {
+  try {
+    const user = await requireUser();
+    const trimmed = timeZone.trim();
+
+    if (!trimmed || !isSupportedTimeZone(trimmed)) {
+      return errorResult("La zona horaria no es válida.");
+    }
+
+    const db = getDb();
+    const updated = await db.$transaction(async (tx) => {
+      const current = await tx.user.findUnique({
+        where: { id: user.id },
+        select: { id: true, timeZone: true },
+      });
+
+      if (!current) {
+        throw new Error("No se pudo localizar tu cuenta.");
+      }
+
+      const next = await tx.user.update({
+        where: { id: user.id },
+        data: { timeZone: trimmed },
+        select: { id: true, timeZone: true },
+      });
+
+      if (current.timeZone !== next.timeZone) {
+        await writeActivityLog({
+          entityType: "User",
+          entityId: user.id,
+          action: "USER_TIMEZONE_UPDATED",
+          oldValue: { timeZone: current.timeZone },
+          newValue: { timeZone: next.timeZone },
+          userId: user.id,
+          db: tx,
+        });
+      }
+
+      return next;
+    });
+
+    revalidatePath("/settings/notifications");
+    revalidatePath("/settings");
+    return successResult(updated.id, "/settings/notifications", "Zona horaria actualizada.");
+  } catch (error) {
+    logError("settings.notifications.timezone.update", error);
+    return errorResult("No se pudo actualizar la zona horaria.");
   }
 }

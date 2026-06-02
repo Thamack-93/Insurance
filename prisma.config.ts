@@ -27,18 +27,19 @@ function loadLocalEnvFile(filePath: string) {
 
 loadLocalEnvFile(localEnvPath);
 
-const databaseUrl = process.env.DATABASE_URL?.trim();
+const databaseUrl =
+  process.env.DATABASE_URL_UNPOOLED?.trim() || process.env.DATABASE_URL?.trim();
 const isPostgresUrl = databaseUrl ? /^postgres(ql)?:\/\//i.test(databaseUrl) : false;
 
 if (!databaseUrl) {
   throw new Error(
-    "DATABASE_URL is required for Prisma config. Set a Postgres URL in the environment or .env.local.",
+    "DATABASE_URL_UNPOOLED or DATABASE_URL is required for Prisma config. Set a Postgres URL in the environment or .env.local.",
   );
 }
 
 if (!isPostgresUrl) {
   throw new Error(
-    "DATABASE_URL must point to Postgres for Prisma client generation. SQLite fallback is no longer supported in the Prisma runtime.",
+    "DATABASE_URL_UNPOOLED or DATABASE_URL must point to Postgres for Prisma client generation. SQLite fallback is no longer supported in the Prisma runtime.",
   );
 }
 

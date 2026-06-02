@@ -4,7 +4,7 @@ import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { markAlertRead, markAllAlertsRead } from "@/app/(dashboard)/notifications/actions";
+import { markNotificationRead, markAllNotificationsRead } from "@/app/(dashboard)/notifications/actions";
 import { toast } from "sonner";
 
 export function MarkOneButton({ id }: { id: string }) {
@@ -20,7 +20,7 @@ export function MarkOneButton({ id }: { id: string }) {
       className="h-7 rounded-full px-2 text-xs"
       onClick={() => {
         startTransition(async () => {
-          const result = await markAlertRead(id);
+          const result = await markNotificationRead(id);
           if (!result.ok) toast.error(result.error);
           router.refresh();
         });
@@ -43,7 +43,7 @@ export function MarkAllReadButton() {
       disabled={isPending}
       onClick={() => {
         startTransition(async () => {
-          const result = await markAllAlertsRead();
+          const result = await markAllNotificationsRead();
           if (!result.ok) toast.error(result.error);
           else toast.success(result.message);
           router.refresh();

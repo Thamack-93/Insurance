@@ -5,10 +5,9 @@ import { today, daysUntil } from "@/lib/dates";
 import { addDays } from "date-fns";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
-import { notify } from "@/lib/notifications";
 import { upsertWorkItemFromSource } from "@/lib/work-items";
 
-export interface RenewalReminder {
+export interface RenewalOpportunity {
   policyId: string;
   clientId: string;
   insurerId: string;
@@ -24,7 +23,7 @@ export interface RenewalReminder {
   currency: string;
 }
 
-export async function getUpcomingRenewals(daysAhead: number = 90) {
+export async function getUpcomingRenewals(daysAhead: number = 90, portfolioOwnerId?: string) {
   const db = getDb();
   
   try {
@@ -33,6 +32,7 @@ export async function getUpcomingRenewals(daysAhead: number = 90) {
     
     const policies = await db.policy.findMany({
       where: {
+        ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
         status: "ACTIVE",
         endDate: {
           gte: todayDate,
@@ -62,7 +62,7 @@ export async function getUpcomingRenewals(daysAhead: number = 90) {
       },
     });
 
-    const renewals: RenewalReminder[] = policies.map((policy) => {
+    const renewals: RenewalOpportunity[] = policies.map((policy) => {
       const endDate = policy.endDate;
       const daysUntilRenewal = daysUntil(endDate);
       let priority: "LOW" | "MEDIUM" | "HIGH" | "URGENT" = "LOW";
@@ -108,59 +108,42 @@ export async function createRenewalWorkItems() {
 
     for (const renewal of upcomingRenewals) {
       const workItemSourceId = `policy:${renewal.policyId}:renewal-workItem`;
-      const existingWorkItem = await db.workItem.findUnique({
-        where: {
-          sourceType_sourceId: {
-            sourceType: "Task",
-            sourceId: workItemSourceId,
-          },
-        },
-      });
+      if (renewal.daysUntilRenewal <= 30) {
+        const workItem = await upsertWorkItemFromSource({
+          sourceType: "Task",
+          sourceId: workItemSourceId,
+          workItemType: "TASK",
+          taskType: "RENEWAL",
+          status: "OPEN",
+          priority: renewal.priority,
+          folio: `TASK-RENEWAL-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          title: `Renovación de póliza ${renewal.policyNumber}`,
+          description: generateRenewalWorkItemDescription(renewal),
+          entityType: "WorkItem",
+          entityId: workItemSourceId,
+          clientId: renewal.clientId,
+          policyId: renewal.policyId,
+          insurerId: renewal.insurerId,
+          dueDate: renewal.endDate,
+          createdById: null,
+          updatedById: null,
+        }, db);
 
-      if (!existingWorkItem && renewal.daysUntilRenewal <= 30) {
-        await db.workItem.create({
-          data: {
-            sourceType: "Task",
-            sourceId: workItemSourceId,
-            workItemType: "TASK",
-            taskType: "RENEWAL",
-            folio: `TASK-RENEWAL-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            title: `Renovación de póliza ${renewal.policyNumber}`,
-            description: generateRenewalWorkItemDescription(renewal),
-            clientId: renewal.clientId,
-            policyId: renewal.policyId,
-            insurerId: renewal.insurerId,
-            priority: renewal.priority,
-            status: "OPEN",
-            dueDate: renewal.endDate,
+        if (workItem) {
+          workItemsCreated++;
+
+          await writeActivityLog({
+            action: "CREATE_RENEWAL_WORK_ITEM",
             entityType: "WorkItem",
             entityId: workItemSourceId,
-          },
-        });
-
-        workItemsCreated++;
-
-        await notify({
-          type: "RENEWAL_WORKITEM_CREATED",
-          severity: renewal.priority === "URGENT" ? "CRITICAL" : "WARNING",
-          title: `Renovación próxima: ${renewal.policyNumber}`,
-          body: `${renewal.clientName} · ${renewal.daysUntilRenewal} día(s) para renovar`,
-          entityType: "WorkItem",
-          entityId: workItemSourceId,
-        });
-
-        // Log activity
-        await writeActivityLog({
-          action: "CREATE_RENEWAL_WORK_ITEM",
-          entityType: "WorkItem",
-          entityId: workItemSourceId,
-          newValue: JSON.stringify({
-            policyNumber: renewal.policyNumber,
-            endDate: renewal.endDate,
-            daysUntil: renewal.daysUntilRenewal,
-            priority: renewal.priority,
-          }),
-        });
+            newValue: JSON.stringify({
+              policyNumber: renewal.policyNumber,
+              endDate: renewal.endDate,
+              daysUntil: renewal.daysUntilRenewal,
+              priority: renewal.priority,
+            }),
+          });
+        }
       }
     }
 
@@ -171,7 +154,7 @@ export async function createRenewalWorkItems() {
   }
 }
 
-function generateRenewalWorkItemDescription(renewal: RenewalReminder): string {
+function generateRenewalWorkItemDescription(renewal: RenewalOpportunity): string {
   const urgencyText = {
     URGENT: "URGENTE: La póliza vence hoy o está vencida",
     HIGH: "ALTA: La póliza vence en menos de 15 días",
@@ -199,81 +182,17 @@ Acciones requeridas:
 ${renewal.clientEmail ? `Email del cliente: ${renewal.clientEmail}` : ''}`;
 }
 
-export async function sendRenewalReminders() {
-  const db = getDb();
-  
+export async function sendRenewalWorkItems() {
   try {
-    const upcomingRenewals = await getUpcomingRenewals(30);
-    const remindersSent = [];
-
-    for (const renewal of upcomingRenewals) {
-        // Only send reminders for high priority renewals
-        if (renewal.priority === "HIGH" || renewal.priority === "URGENT") {
-        // Create a reminder record (in a real system, this would send emails/SMS)
-        const reminder = await db.activityLog.create({
-          data: {
-            action: "SEND_RENEWAL_REMINDER",
-            entityType: "POLICY",
-            entityId: renewal.policyId,
-            userId: "system-user-0000",
-            newValue: JSON.stringify({
-              policyNumber: renewal.policyNumber,
-              clientName: renewal.clientName,
-              clientEmail: renewal.clientEmail,
-              endDate: renewal.endDate,
-              daysUntil: renewal.daysUntilRenewal,
-              priority: renewal.priority,
-              reminderType: "AUTOMATIC",
-            }),
-          },
-        });
-        const reminderSourceId = `policy:${renewal.policyId}:reminder:${renewal.endDate.toISOString().slice(0, 10)}`;
-        await upsertWorkItemFromSource({
-          sourceType: "Reminder",
-          sourceId: reminderSourceId,
-          workItemType: "REMINDER",
-          status: "RESOLVED",
-          priority: renewal.priority,
-          title: `Recordatorio de renovación: ${renewal.policyNumber}`,
-          description: `${renewal.clientName} · ${renewal.daysUntilRenewal} día(s) para renovar`,
-          entityType: "Policy",
-          entityId: renewal.policyId,
-          clientId: renewal.clientId,
-          policyId: renewal.policyId,
-          insurerId: renewal.insurerId,
-          dueDate: renewal.endDate,
-          closedDate: new Date(),
-          readAt: new Date(),
-          notes: "Recordatorio automático de renovación",
-        });
-
-        remindersSent.push({
-          renewal,
-          reminderId: reminder.id,
-        });
-
-        // Log the reminder action
-        await writeActivityLog({
-          action: "SEND_RENEWAL_REMINDER",
-          entityType: "POLICY",
-          entityId: renewal.policyId,
-          newValue: JSON.stringify({
-            reminderSent: true,
-            priority: renewal.priority,
-            daysUntil: renewal.daysUntilRenewal,
-          }),
-        });
-      }
-    }
-
-    return { remindersSent: remindersSent.length };
+    const { workItemsCreated } = await createRenewalWorkItems();
+    return { workItemsCreated };
   } catch (error) {
-    logError("renewals.sendRenewalReminders", error);
-    return { remindersSent: 0 };
+    logError("renewals.sendRenewalWorkItems", error);
+    return { workItemsCreated: 0 };
   }
 }
 
-export async function getRenewalStats() {
+export async function getRenewalStats(portfolioOwnerId?: string) {
   const db = getDb();
   
   try {
@@ -291,6 +210,7 @@ export async function getRenewalStats() {
     ] = await Promise.all([
       db.policy.count({
         where: {
+          ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
           status: "ACTIVE",
           endDate: {
             lt: todayDate,
@@ -299,6 +219,7 @@ export async function getRenewalStats() {
       }),
       db.policy.count({
         where: {
+          ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
           status: "ACTIVE",
           endDate: {
             gte: todayDate,
@@ -308,6 +229,7 @@ export async function getRenewalStats() {
       }),
       db.policy.count({
         where: {
+          ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
           status: "ACTIVE",
           endDate: {
             gt: next30Days,
@@ -317,6 +239,7 @@ export async function getRenewalStats() {
       }),
       db.policy.count({
         where: {
+          ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
           status: "ACTIVE",
           endDate: {
             gt: next60Days,
@@ -326,6 +249,7 @@ export async function getRenewalStats() {
       }),
       db.policy.count({
         where: {
+          ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
           status: "ACTIVE",
         },
       }),
@@ -334,6 +258,7 @@ export async function getRenewalStats() {
     // Calculate premium amounts for renewals
     const renewalPolicies = await db.policy.findMany({
       where: {
+        ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
         status: "ACTIVE",
         endDate: {
           gte: todayDate,

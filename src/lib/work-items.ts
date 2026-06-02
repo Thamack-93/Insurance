@@ -6,7 +6,7 @@ import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import type { WorkItemStatus } from "@/lib/domain-values";
 
-export type WorkItemSourceType = "Task" | "Alert" | "Reminder";
+export type WorkItemSourceType = "Task" | "Notification";
 
 export type WorkItemSyncInput = {
   sourceType: WorkItemSourceType;
@@ -160,7 +160,7 @@ export function mapTaskStatusToWorkItemStatus(status: string): WorkItemStatus {
   }
 }
 
-export function mapAlertStatusToWorkItemStatus(status: string): WorkItemStatus {
+export function mapNotificationStatusToWorkItemStatus(status: string): WorkItemStatus {
   switch (status) {
     case "OPEN":
     case "DISMISSED":

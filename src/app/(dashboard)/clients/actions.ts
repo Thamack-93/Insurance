@@ -7,6 +7,7 @@ import { normalizeOptionalText, optionalRelationId } from "@/lib/form-utils";
 import { NO_REFERIDOR_VALUE } from "@/lib/constants";
 import { clientSchema, type ClientFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
+import { assertClientPortfolioAccess } from "@/lib/portfolio-access";
 
 function normalizeClientInput(values: ClientFormValues) {
   const referidorId = optionalRelationId(values.referidorId);
@@ -106,7 +107,12 @@ export async function createClient(values: ClientFormValues): Promise<MutationRe
     const normalized = normalizeClientInput(parsed.data);
     normalized.referidorId = await ensureValidReferidor(db, normalized.referidorId);
     const client = await db.client.create({
-      data: { ...normalized, createdById: userId, updatedById: userId },
+      data: {
+        ...normalized,
+        portfolioOwnerId: userId,
+        createdById: userId,
+        updatedById: userId,
+      },
     });
 
     await writeActivityLog({
@@ -133,13 +139,14 @@ export async function updateClient(id: string, values: ClientFormValues): Promis
 
   try {
     const db = getDb();
+    const userId = await getCurrentUserId();
+    await assertClientPortfolioAccess(id, userId);
     const previousClient = await db.client.findUnique({ where: { id } });
 
     if (!previousClient) {
       return errorResult("El cliente ya no existe.");
     }
 
-    const userId = await getCurrentUserId();
     const normalized = normalizeClientInput(parsed.data);
     normalized.referidorId = await ensureValidReferidor(db, normalized.referidorId, id);
     const client = await db.client.update({
@@ -237,5 +244,101 @@ export async function deleteClient(id: string): Promise<MutationResult> {
   } catch (error) {
     if (error instanceof AuthError) return errorResult(error.message);
     return errorResult(error instanceof Error ? error.message : "No se pudo eliminar el cliente.");
+  }
+}
+
+export async function reassignClientPortfolio(input: {
+  clientId: string;
+  portfolioOwnerId: string;
+  reason: string;
+}): Promise<MutationResult> {
+  try {
+    const actor = await requireAdmin();
+    const reason = input.reason.trim();
+    if (!reason) return errorResult("Captura el motivo de la reasignación.");
+
+    const db = getDb();
+    const [client, owner] = await Promise.all([
+      db.client.findUnique({
+        where: { id: input.clientId },
+        select: { id: true, fullName: true, portfolioOwnerId: true },
+      }),
+      db.user.findFirst({
+        where: { id: input.portfolioOwnerId, active: true },
+        select: { id: true, name: true },
+      }),
+    ]);
+
+    if (!client) return errorResult("El cliente ya no existe.");
+    if (!owner) return errorResult("El agente seleccionado no existe o está inactivo.");
+    if (client.portfolioOwnerId === owner.id) {
+      return successResult(client.id, `/clients/${client.id}`, "La cartera ya pertenece a ese agente.");
+    }
+
+    await db.$transaction(async (tx) => {
+      await tx.client.update({
+        where: { id: client.id },
+        data: { portfolioOwnerId: owner.id, updatedById: actor.id },
+      });
+
+      const openWorkItems = await tx.workItem.findMany({
+        where: {
+          clientId: client.id,
+          status: {
+            in: [
+              "OPEN",
+              "IN_PROGRESS",
+              "WAITING_CLIENT",
+              "WAITING_INSURER",
+              "WAITING_DOCUMENT",
+              "SENT",
+            ],
+          },
+        },
+        select: { id: true, notes: true },
+      });
+
+      for (const workItem of openWorkItems) {
+        await tx.workItem.update({
+          where: { id: workItem.id },
+          data: {
+            assignedToId: null,
+            notes: [workItem.notes, `Revisar responsable tras reasignación de cartera: ${reason}`]
+              .filter(Boolean)
+              .join("\n"),
+          },
+        });
+      }
+
+      await writeActivityLog({
+        entityType: "Client",
+        entityId: client.id,
+        action: "CLIENT_PORTFOLIO_REASSIGN",
+        oldValue: { portfolioOwnerId: client.portfolioOwnerId },
+        newValue: {
+          portfolioOwnerId: owner.id,
+          portfolioOwnerName: owner.name,
+          reason,
+          openWorkItemsPendingAssignment: openWorkItems.length,
+        },
+        userId: actor.id,
+        db: tx,
+      });
+    });
+
+    revalidatePaths([
+      "/clients",
+      `/clients/${client.id}`,
+      "/dashboard",
+      "/today",
+      "/portfolio",
+      "/tasks",
+      "/renewals",
+      "/receipts",
+    ]);
+    return successResult(client.id, `/clients/${client.id}`, "Cartera reasignada; revisa los pendientes abiertos.");
+  } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
+    return errorResult(error instanceof Error ? error.message : "No se pudo reasignar la cartera.");
   }
 }

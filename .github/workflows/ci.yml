@@ -44,6 +44,9 @@ jobs:
       - name: Apply Prisma migrations
         run: npx prisma migrate deploy
 
+      - name: Check migration drift
+        run: npm run db:check-drift
+
       - name: Lint
         run: npm run lint
 

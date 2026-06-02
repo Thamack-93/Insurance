@@ -7,12 +7,12 @@ import { Bell, CheckCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SeverityBadge } from "@/components/badges/status-badge";
-import { alertLink } from "@/lib/notifications-shared";
-import { markAlertRead, markAllAlertsRead } from "@/app/(dashboard)/notifications/actions";
+import { notificationLink } from "@/lib/notifications-shared";
+import { markNotificationRead, markAllNotificationsRead } from "@/app/(dashboard)/notifications/actions";
 import { cn } from "@/lib/utils";
 import { formatRelativeDate } from "@/lib/dates";
 
-export type BellAlert = {
+export type BellNotification = {
   id: string;
   alertType: string;
   severity: string;
@@ -26,10 +26,10 @@ export type BellAlert = {
 
 export function NotificationsBell({
   unreadCount,
-  alerts,
+  notifications,
 }: {
   unreadCount: number;
-  alerts: BellAlert[];
+  notifications: BellNotification[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -37,14 +37,14 @@ export function NotificationsBell({
 
   const handleMarkOne = (id: string) => {
     startTransition(async () => {
-      await markAlertRead(id);
+      await markNotificationRead(id);
       router.refresh();
     });
   };
 
   const handleMarkAll = () => {
     startTransition(async () => {
-      await markAllAlertsRead();
+      await markAllNotificationsRead();
       router.refresh();
     });
   };
@@ -100,7 +100,7 @@ export function NotificationsBell({
         </div>
 
         <div className="max-h-[420px] overflow-y-auto">
-          {alerts.length === 0 ? (
+          {notifications.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 px-6 py-10 text-center">
               <Bell className="size-6 text-muted-foreground" aria-hidden />
               <p className="text-sm font-medium text-foreground">Sin notificaciones</p>
@@ -110,13 +110,13 @@ export function NotificationsBell({
             </div>
           ) : (
             <ul className="divide-y divide-border/70">
-              {alerts.map((alert) => {
-                const href = alertLink(alert.entityType, alert.entityId);
-                const relative = formatRelativeDate(alert.createdAt);
-                const isUnread = alert.readAt === null;
+              {notifications.map((notification) => {
+                const href = notificationLink(notification.entityType, notification.entityId);
+                const relative = formatRelativeDate(notification.createdAt);
+                const isUnread = notification.readAt === null;
                 return (
                   <li
-                    key={alert.id}
+                    key={notification.id}
                     className={cn("px-4 py-3", isUnread && "bg-primary/5")}
                   >
                     <div className="flex items-start gap-2">
@@ -128,46 +128,44 @@ export function NotificationsBell({
                         )}
                       />
                       <Link
-                        href={href}
-                        onClick={() => {
-                          setOpen(false);
-                          if (isUnread) handleMarkOne(alert.id);
-                        }}
-                        className="group min-w-0 flex-1"
+                          href={href}
+                          onClick={() => {
+                            setOpen(false);
+                            if (isUnread) handleMarkOne(notification.id);
+                          }}
+                          className="group min-w-0 flex-1"
                       >
                         <div className="flex items-center gap-2">
                           <p
                             className={cn(
                               "truncate text-sm group-hover:text-primary",
-                              isUnread
-                                ? "font-semibold text-foreground"
-                                : "font-medium text-muted-foreground",
+                              isUnread ? "font-semibold text-foreground" : "font-medium text-muted-foreground",
                             )}
                           >
-                            {alert.title}
+                            {notification.title}
                           </p>
-                          <SeverityBadge severity={alert.severity} />
+                          <SeverityBadge severity={notification.severity} />
                         </div>
-                        {alert.description ? (
+                        {notification.description ? (
                           <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                            {alert.description}
+                            {notification.description}
                           </p>
                         ) : null}
                         <p className="mt-1 text-[11px] text-muted-foreground">
-                          {relative} · {alert.alertType}
+                          {relative} · {notification.alertType}
                           {!isUnread ? " · Leída" : ""}
                         </p>
                       </Link>
                       {isUnread ? (
                         <button
                           type="button"
-                          onClick={() => handleMarkOne(alert.id)}
+                          onClick={() => handleMarkOne(notification.id)}
                           disabled={isPending}
                           className={cn(
                             "shrink-0 rounded-full px-2 py-1 text-[11px] font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground",
                             isPending && "opacity-50",
                           )}
-                          aria-label={`Marcar como leída ${alert.title}`}
+                          aria-label={`Marcar como leída ${notification.title}`}
                         >
                           Leída
                         </button>

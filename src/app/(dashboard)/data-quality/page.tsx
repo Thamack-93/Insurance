@@ -7,6 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getClientDataQualityScores, getPolicyDataQualityScores } from "@/lib/data-quality";
 import { formatCurrency } from "@/lib/money";
+import { getLatestMaintenanceRun } from "@/lib/vigency-maintenance";
+import { RunVigencyAuditButton } from "@/components/data-quality/run-vigency-audit-button";
+import { RunPaymentAuditButton } from "@/components/data-quality/run-payment-audit-button";
+import { runVigencyAuditAction, runPaymentAuditAction } from "./actions";
 
 function QualityBadge({ nivel }: { nivel: "Excelente" | "Bueno" | "Atención" | "Crítico" }) {
   const colors = {
@@ -37,10 +41,65 @@ function ScoreBar({ score }: { score: number }) {
 }
 
 export default async function DataQualityPage() {
-  const [clientScores, policyScores] = await Promise.all([
+  const [clientScores, policyScores, latestMaintenanceRun, latestPaymentMaintenanceRun] = await Promise.all([
     getClientDataQualityScores(),
     getPolicyDataQualityScores(),
+    getLatestMaintenanceRun("POLICY_VIGENCY_AUDIT"),
+    getLatestMaintenanceRun("PAYMENT_RECONCILIATION_AUDIT"),
   ]);
+
+  const latestAuditSummary = (() => {
+    if (!latestMaintenanceRun?.summaryJson) return null;
+    try {
+      return JSON.parse(latestMaintenanceRun.summaryJson) as {
+        familiesReviewed?: number;
+        familiesLinked?: number;
+        policiesUpdated?: number;
+        policySuggestionsUpserted?: number;
+        receiptsReviewed?: number;
+        receiptsRelinked?: number;
+        receiptsReconciled?: number;
+        paymentsReviewed?: number;
+        paymentsRelinked?: number;
+        receiptIssuesOpened?: number;
+        receiptIssuesResolved?: number;
+        multiYearPoliciesFlagged?: number;
+        overlappingFamilies?: number;
+      };
+    } catch {
+      return null;
+    }
+  })();
+
+  const latestPaymentAuditSummary = (() => {
+    if (!latestPaymentMaintenanceRun?.summaryJson) return null;
+    try {
+      return JSON.parse(latestPaymentMaintenanceRun.summaryJson) as {
+        familiesReviewed?: number;
+        familiesWithMultiplePolicies?: number;
+        receiptsScanned?: number;
+        receiptsUpdated?: number;
+        receiptsFlaggedForReview?: number;
+        receiptIssuesOpened?: number;
+        receiptIssuesResolved?: number;
+        familyKeysSample?: string[];
+        reviewReceipts?: Array<{
+          receiptId: string;
+          receiptNumber: string;
+          familyKey: string;
+          policyId: string;
+          policyNumber: string;
+          clientName: string;
+          insurerName: string;
+          amount: number;
+          paidAmount: number;
+          reasons: string[];
+        }>;
+      };
+    } catch {
+      return null;
+    }
+  })();
 
   const avgClientScore = Math.round(
     clientScores.reduce((sum, c) => sum + c.score, 0) / (clientScores.length || 1)
@@ -85,6 +144,138 @@ export default async function DataQualityPage() {
             </Button>
           }
         />
+
+        <SectionCard
+          title="Auditoría de vigencias"
+          description="Revisa todas las familias de pólizas, enlaza renovaciones y reconcilia recibos con pagos reales."
+          action={<RunVigencyAuditButton runVigencyAudit={runVigencyAuditAction} />}
+        >
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Última corrida</p>
+              <p className="mt-1 text-sm font-medium">
+                {latestMaintenanceRun ? latestMaintenanceRun.startedAt.toLocaleString("es-MX") : "Sin auditorías"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {latestMaintenanceRun?.status ?? "Ningún run registrado todavía"}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Familias revisadas</p>
+              <p className="mt-1 text-2xl font-semibold">{latestAuditSummary?.familiesReviewed ?? 0}</p>
+            </div>
+            <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Recibos reconciliados</p>
+              <p className="mt-1 text-2xl font-semibold">{latestAuditSummary?.receiptsReconciled ?? 0}</p>
+            </div>
+            <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Issues abiertos</p>
+              <p className="mt-1 text-2xl font-semibold">{latestAuditSummary?.receiptIssuesOpened ?? 0}</p>
+            </div>
+          </div>
+          {latestAuditSummary ? (
+            <div className="mt-4 grid gap-3 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
+              <div>Vigencias enlazadas: {latestAuditSummary.familiesLinked ?? 0}</div>
+              <div>Pólizas actualizadas: {latestAuditSummary.policiesUpdated ?? 0}</div>
+              <div>Sugerencias creadas: {latestAuditSummary.policySuggestionsUpserted ?? 0}</div>
+              <div>Familias con solapamiento: {latestAuditSummary.overlappingFamilies ?? 0}</div>
+              <div>Pagos revisados: {latestAuditSummary.paymentsReviewed ?? 0}</div>
+              <div>Pagos vinculados: {latestAuditSummary.paymentsRelinked ?? 0}</div>
+            </div>
+          ) : null}
+        </SectionCard>
+
+        <SectionCard
+          title="Auditoría de pagos"
+          description="Recalcula el estado visible de los recibos a partir de los pagos reales y deja en revisión los casos ambiguos."
+          action={
+            <div className="flex flex-wrap gap-2">
+              <RunPaymentAuditButton runPaymentAudit={runPaymentAuditAction} />
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
+                <Link href="/receipts?tab=revision">Ver revisión</Link>
+              </Button>
+            </div>
+          }
+        >
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Última corrida</p>
+              <p className="mt-1 text-sm font-medium">
+                {latestPaymentMaintenanceRun ? latestPaymentMaintenanceRun.startedAt.toLocaleString("es-MX") : "Sin auditorías"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {latestPaymentMaintenanceRun?.status ?? "Ningún run registrado todavía"}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Recibos revisados</p>
+              <p className="mt-1 text-2xl font-semibold">{latestPaymentAuditSummary?.receiptsScanned ?? 0}</p>
+            </div>
+            <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Recibos actualizados</p>
+              <p className="mt-1 text-2xl font-semibold">{latestPaymentAuditSummary?.receiptsUpdated ?? 0}</p>
+            </div>
+            <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Casos en revisión</p>
+              <p className="mt-1 text-2xl font-semibold">{latestPaymentAuditSummary?.receiptsFlaggedForReview ?? 0}</p>
+            </div>
+          </div>
+          {latestPaymentAuditSummary ? (
+            <div className="mt-4 grid gap-3 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
+              <div>Familias revisadas: {latestPaymentAuditSummary.familiesReviewed ?? 0}</div>
+              <div>Familias con múltiples pólizas: {latestPaymentAuditSummary.familiesWithMultiplePolicies ?? 0}</div>
+              <div>Issues abiertos: {latestPaymentAuditSummary.receiptIssuesOpened ?? 0}</div>
+              <div>Issues resueltos: {latestPaymentAuditSummary.receiptIssuesResolved ?? 0}</div>
+            </div>
+          ) : null}
+          {latestPaymentAuditSummary?.reviewReceipts?.length ? (
+            <div className="mt-5 overflow-hidden rounded-2xl border border-stone-200/80">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-stone-50/70">
+                    <TableHead>Recibo</TableHead>
+                    <TableHead>Póliza</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Motivo</TableHead>
+                    <TableHead className="text-right">Recibo</TableHead>
+                    <TableHead className="text-right">Pagado</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {latestPaymentAuditSummary.reviewReceipts.slice(0, 8).map((issue) => (
+                    <TableRow key={issue.receiptId}>
+                      <TableCell>
+                        <Link href={`/receipts/${issue.receiptId}`} className="font-medium text-foreground hover:text-primary">
+                          {issue.receiptNumber}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        <Link href={`/policies/${issue.policyId}`} className="hover:text-primary">
+                          {issue.policyNumber}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        <div className="space-y-1">
+                          <p>{issue.clientName}</p>
+                          <p className="text-xs text-muted-foreground">{issue.insurerName}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-xs text-xs text-muted-foreground">
+                        {issue.reasons.join(", ")}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {formatCurrency(issue.amount, "MXN")}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {formatCurrency(issue.paidAmount, "MXN")}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : null}
+        </SectionCard>
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard

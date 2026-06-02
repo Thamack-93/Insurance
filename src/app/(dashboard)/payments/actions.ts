@@ -1,9 +1,14 @@
 "use server";
 
 import { getDb } from "@/lib/db";
-import { getCurrentUserId } from "@/lib/auth";
-import { today } from "@/lib/dates";
+import { AuthError, getCurrentUserId } from "@/lib/auth";
 import { logError } from "@/lib/logger";
+import { PaymentConflictError, recordPayment } from "@/lib/payment-service";
+import {
+  assertReceiptPortfolioAccess,
+  paymentPortfolioWhere,
+  receiptPortfolioWhere,
+} from "@/lib/portfolio-access";
 import {
   errorResult,
   revalidatePaths,
@@ -40,6 +45,8 @@ export async function createPayment(data: CreatePaymentInput): Promise<MutationR
   }
 
   try {
+    const userId = await getCurrentUserId();
+    await assertReceiptPortfolioAccess(data.receiptId, userId);
     const receipt = await db.receipt.findUnique({
       where: { id: data.receiptId },
       include: {
@@ -53,134 +60,14 @@ export async function createPayment(data: CreatePaymentInput): Promise<MutationR
       return errorResult("El recibo no existe o fue eliminado.");
     }
 
-    if (receipt.status === "PAID") {
-      return errorResult("Este recibo ya está pagado.");
-    }
-
-    const userId = await getCurrentUserId();
-    const payment = await db.$transaction(async (tx) => {
-      const currentReceipt = await tx.receipt.findUnique({
-        where: { id: data.receiptId },
-        include: {
-          client: true,
-          policy: true,
-          insurer: true,
-        },
-      });
-
-      if (!currentReceipt) {
-        throw new Error("El recibo no existe o fue eliminado.");
-      }
-
-      if (currentReceipt.status === "PAID") {
-        throw new Error("Este recibo ya está pagado.");
-      }
-
-      const paidDate = new Date(data.paidDate);
-      const updatedReceipt = await tx.receipt.updateMany({
-        where: {
-          id: data.receiptId,
-          status: { not: "PAID" },
-        },
-        data: {
-          status: "PAID",
-          paidDate,
-          paymentMethod: data.paymentMethod,
-          updatedById: userId,
-        },
-      });
-
-      if (!updatedReceipt.count) {
-        throw new Error("Este recibo ya está pagado.");
-      }
-
-      const createdPayment = await tx.payment.create({
-        data: {
-          receiptId: data.receiptId,
-          policyId: currentReceipt.policyId,
-          clientId: currentReceipt.clientId,
-          amount: data.amount,
-          currency: currentReceipt.currency,
-          paidDate,
-          paymentMethod: data.paymentMethod,
-          reference: data.reference,
-          notes: data.notes,
-          createdById: userId,
-          updatedById: userId,
-        },
-      });
-
-      await tx.activityLog.create({
-        data: {
-          entityType: "PAYMENT",
-          entityId: createdPayment.id,
-          action: "CREATE_PAYMENT",
-          newValue: JSON.stringify({
-            receiptId: currentReceipt.id,
-            receiptNumber: currentReceipt.receiptNumber,
-            clientId: currentReceipt.clientId,
-            clientName: currentReceipt.client.fullName,
-            policyId: currentReceipt.policyId,
-            policyNumber: currentReceipt.policy.policyNumber,
-            amount: data.amount,
-            paymentMethod: data.paymentMethod,
-            paidDate: data.paidDate,
-          }),
-          userId,
-        },
-      });
-
-      if (currentReceipt.policy.endDate) {
-        const dueDate = new Date(currentReceipt.policy.endDate);
-        const todayDate = new Date(today());
-        const daysUntilRenewal = Math.ceil(
-          (dueDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24),
-        );
-
-        if (daysUntilRenewal <= 30 && daysUntilRenewal > 0) {
-          await tx.workItem.upsert({
-            where: {
-              sourceType_sourceId: {
-                sourceType: "Task",
-                sourceId: `receipt:${currentReceipt.id}:renewal-task`,
-              },
-            },
-            create: {
-              sourceType: "Task",
-              sourceId: `receipt:${currentReceipt.id}:renewal-task`,
-              workItemType: "TASK",
-              taskType: "RENEWAL",
-              folio: `TASK-${Date.now()}`,
-              title: `Renovación de póliza ${currentReceipt.policy.policyNumber}`,
-              description: `Póliza vence en ${daysUntilRenewal} días. Contactar cliente para renovación.`,
-              clientId: currentReceipt.clientId,
-              policyId: currentReceipt.policyId,
-              insurerId: currentReceipt.insurerId,
-              priority: daysUntilRenewal <= 15 ? "HIGH" : "MEDIUM",
-              status: "OPEN",
-              dueDate,
-              entityType: "WorkItem",
-              entityId: `receipt:${currentReceipt.id}:renewal-task`,
-            },
-            update: {
-              workItemType: "TASK",
-              taskType: "RENEWAL",
-              title: `Renovación de póliza ${currentReceipt.policy.policyNumber}`,
-              description: `Póliza vence en ${daysUntilRenewal} días. Contactar cliente para renovación.`,
-              clientId: currentReceipt.clientId,
-              policyId: currentReceipt.policyId,
-              insurerId: currentReceipt.insurerId,
-              priority: daysUntilRenewal <= 15 ? "HIGH" : "MEDIUM",
-              status: "OPEN",
-              dueDate,
-              entityType: "WorkItem",
-              entityId: `receipt:${currentReceipt.id}:renewal-task`,
-            },
-          });
-        }
-      }
-
-      return createdPayment;
+    const { payment } = await recordPayment({
+      receiptId: data.receiptId,
+      amount: data.amount,
+      paidDate: new Date(data.paidDate),
+      paymentMethod: data.paymentMethod,
+      reference: data.reference,
+      notes: data.notes,
+      actorId: userId,
     });
 
     revalidatePaths([
@@ -196,7 +83,12 @@ export async function createPayment(data: CreatePaymentInput): Promise<MutationR
     logError("payments.createPayment", error, { receiptId: data.receiptId });
     const message =
       error instanceof Error &&
-      ["El recibo no existe o fue eliminado.", "Este recibo ya está pagado."].includes(error.message)
+      (error instanceof AuthError ||
+        error instanceof PaymentConflictError ||
+        [
+          "El recibo no existe o fue eliminado.",
+          "No puedes aplicar pagos a un recibo cancelado.",
+        ].includes(error.message))
         ? error.message
         : "No se pudo registrar el pago. Intenta de nuevo.";
     return errorResult(message);
@@ -207,8 +99,12 @@ export async function getPendingReceipts() {
   const db = getDb();
 
   try {
+    const userId = await getCurrentUserId();
     const receipts = await db.receipt.findMany({
-      where: { status: "PENDING" },
+      where: {
+        ...receiptPortfolioWhere(userId),
+        status: { in: ["PENDING", "OVERDUE"] },
+      },
       include: {
         client: {
           select: {
@@ -250,7 +146,9 @@ export async function getPaymentHistory(limit?: number) {
   const db = getDb();
 
   try {
+    const userId = await getCurrentUserId();
     const payments = await db.payment.findMany({
+      where: paymentPortfolioWhere(userId),
       take: limit || 50,
       include: {
         receipt: {
@@ -294,11 +192,13 @@ export async function getPaymentStats() {
   const db = getDb();
 
   try {
+    const userId = await getCurrentUserId();
     const currentMonth = new Date();
     currentMonth.setDate(1);
 
     const totalPaymentsThisMonth = await db.payment.aggregate({
       where: {
+        ...paymentPortfolioWhere(userId),
         paidDate: {
           gte: currentMonth,
         },
@@ -312,12 +212,13 @@ export async function getPaymentStats() {
     });
 
     const pendingCount = await db.receipt.count({
-      where: { status: "PENDING" },
+      where: { ...receiptPortfolioWhere(userId), status: "PENDING" },
     });
 
     const overdueCount = await db.receipt.count({
       where: {
-        status: "PENDING",
+        ...receiptPortfolioWhere(userId),
+        status: { in: ["PENDING", "OVERDUE"] },
         dueDate: {
           lt: new Date(),
         },

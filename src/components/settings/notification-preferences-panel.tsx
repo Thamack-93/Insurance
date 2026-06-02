@@ -35,6 +35,7 @@ import {
   type NotificationPreferenceInput,
   type NotificationPreferencesSnapshot,
 } from "@/lib/notification-foundation-shared";
+import { TIME_ZONE_OPTIONS } from "@/lib/time-zones";
 import type { MutationResult } from "@/lib/mutation-utils";
 
 type TelegramLinkCodeResult =
@@ -52,10 +53,12 @@ type TelegramLinkCodeResult =
 
 type Props = {
   snapshot: NotificationPreferencesSnapshot;
+  timeZone: string;
   saveNotificationPreferences: (preferences: NotificationPreferenceInput[]) => Promise<MutationResult>;
   generateTelegramLinkCode: () => Promise<TelegramLinkCodeResult>;
   disconnectTelegram: () => Promise<MutationResult>;
   sendTelegramTestMessage: () => Promise<MutationResult>;
+  updateNotificationTimezone: (timeZone: string) => Promise<MutationResult>;
 };
 
 type PreferenceRow = NotificationPreferenceInput;
@@ -94,17 +97,21 @@ function isConnected(channel: NotificationChannelRecord) {
 
 export function NotificationPreferencesPanel({
   snapshot,
+  timeZone,
   saveNotificationPreferences,
   generateTelegramLinkCode,
   disconnectTelegram,
   sendTelegramTestMessage,
+  updateNotificationTimezone,
 }: Props) {
   const router = useRouter();
   const [rows, setRows] = useState<PreferenceRow[]>(() => buildInitialRows(snapshot));
+  const [selectedTimeZone, setSelectedTimeZone] = useState(timeZone);
   const [isPending, startTransition] = useTransition();
   const [isGeneratingLink, setIsGeneratingLink] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [isSavingTimeZone, setIsSavingTimeZone] = useState(false);
   const [generatedLink, setGeneratedLink] = useState<{ code: string; expiresAt: string } | null>(
     null,
   );
@@ -187,6 +194,22 @@ export function NotificationPreferencesPanel({
       router.refresh();
     } finally {
       setIsDisconnecting(false);
+    }
+  }
+
+  async function handleSaveTimeZone() {
+    setIsSavingTimeZone(true);
+    try {
+      const result = await updateNotificationTimezone(selectedTimeZone);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+
+      toast.success(result.message);
+      router.refresh();
+    } finally {
+      setIsSavingTimeZone(false);
     }
   }
 
@@ -282,6 +305,44 @@ export function NotificationPreferencesPanel({
         </CardContent>
       </Card>
 
+      <Card className="border-border/60 bg-card/85 shadow-sm">
+        <CardHeader className="border-b border-border/70">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Globe2 className="size-4" />
+            Zona horaria
+          </CardTitle>
+          <CardDescription>
+            Quiet hours se interpretan usando esta zona horaria. Si cambias aquí, el rango de no molestar cambia
+            sin modificar tus preferencias.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between">
+          <div className="space-y-1">
+            <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Zona horaria
+            </Label>
+            <Select value={selectedTimeZone} onValueChange={(value) => setSelectedTimeZone(value ?? timeZone)}>
+              <SelectTrigger className="w-full sm:w-[280px]">
+                <SelectValue placeholder="Selecciona una zona" />
+              </SelectTrigger>
+              <SelectContent>
+                {TIME_ZONE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label} ({option.value})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-sm text-muted-foreground">
+              La zona actual es <span className="font-medium text-foreground">{timeZone}</span>.
+            </p>
+          </div>
+          <Button type="button" variant="outline" onClick={handleSaveTimeZone} disabled={isSavingTimeZone}>
+            {isSavingTimeZone ? "Guardando…" : "Guardar zona"}
+          </Button>
+        </CardContent>
+      </Card>
+
       {generatedLink ? (
         <Card className="border-border/60 bg-card/85 shadow-sm">
           <CardHeader className="border-b border-border/70">
@@ -371,7 +432,7 @@ export function NotificationPreferencesPanel({
 
                 <div className="space-y-1">
                   <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Inicio
+                    No molestar desde
                   </Label>
                   <Input
                     type="time"
@@ -382,7 +443,7 @@ export function NotificationPreferencesPanel({
 
                 <div className="space-y-1">
                   <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Fin
+                    No molestar hasta
                   </Label>
                   <Input
                     type="time"
@@ -398,7 +459,8 @@ export function NotificationPreferencesPanel({
 
           <div className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-muted-foreground">
-              {enabledCount} de {rows.length} preferencias activas para Telegram.
+              {enabledCount} de {rows.length} preferencias activas para Telegram. Los horarios usan la zona
+              elegida arriba.
             </div>
           </div>
         </form>

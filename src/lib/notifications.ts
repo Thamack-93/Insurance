@@ -2,11 +2,11 @@ import type { Prisma } from "@/generated/prisma/client";
 import type { AlertSeverity } from "@/lib/domain-values";
 import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
-import { mapAlertStatusToWorkItemStatus, upsertWorkItemFromSource } from "@/lib/work-items";
+import { mapNotificationStatusToWorkItemStatus, upsertWorkItemFromSource } from "@/lib/work-items";
 
-export { alertLink } from "@/lib/notifications-shared";
+export { notificationLink } from "@/lib/notifications-shared";
 
-export type NotifyInput = {
+export type NotificationInput = {
   type: string;
   title: string;
   body?: string | null;
@@ -15,7 +15,7 @@ export type NotifyInput = {
   entityId?: string;
 };
 
-export type AlertRecord = {
+export type NotificationRecord = {
   id: string;
   alertType: string;
   severity: string;
@@ -28,17 +28,17 @@ export type AlertRecord = {
   createdAt: Date;
 };
 
-export type AlertFilter = {
+export type NotificationFilter = {
   type?: string;
   read?: "read" | "unread" | "all";
 };
 
 /**
- * Create a notification (Alert). Used by the risk engine, renewals helper
- * and WorkItem creation flows. Best-effort: failures are logged but not thrown
- * so that the originating flow keeps working.
+ * Create an in-app notification. Used by the risk engine and WorkItem creation
+ * flows. Best-effort: failures are logged but not thrown so the originating
+ * flow keeps working.
  */
-export async function notify(input: NotifyInput): Promise<AlertRecord | null> {
+export async function createNotification(input: NotificationInput): Promise<NotificationRecord | null> {
   const db = getDb();
   try {
     const alert = await db.alert.create({
@@ -52,10 +52,10 @@ export async function notify(input: NotifyInput): Promise<AlertRecord | null> {
       },
     });
     await upsertWorkItemFromSource({
-      sourceType: "Alert",
+      sourceType: "Notification",
       sourceId: alert.id,
-      workItemType: "ALERT",
-      status: mapAlertStatusToWorkItemStatus(alert.status),
+      workItemType: "NOTIFICATION",
+      status: mapNotificationStatusToWorkItemStatus(alert.status),
       severity: alert.severity,
       title: alert.title,
       description: alert.description,
@@ -65,26 +65,26 @@ export async function notify(input: NotifyInput): Promise<AlertRecord | null> {
       createdById: null,
       updatedById: null,
     });
-    return alert as AlertRecord;
+    return alert as NotificationRecord;
   } catch (error) {
-    logError("notifications.notify", error, { type: input.type });
+    logError("notifications.createNotification", error, { type: input.type });
     return null;
   }
 }
 
-export async function getUnreadAlertCount(): Promise<number> {
+export async function getUnreadNotificationCount(): Promise<number> {
   const db = getDb();
   try {
     return await db.alert.count({
       where: { readAt: null, status: { not: "RESOLVED" } },
     });
   } catch (error) {
-    logError("notifications.getUnreadAlertCount", error);
+    logError("notifications.getUnreadNotificationCount", error);
     return 0;
   }
 }
 
-export async function getUnreadAlerts(limit = 10): Promise<AlertRecord[]> {
+export async function getUnreadNotifications(limit = 10): Promise<NotificationRecord[]> {
   const db = getDb();
   try {
     const rows = await db.alert.findMany({
@@ -92,18 +92,18 @@ export async function getUnreadAlerts(limit = 10): Promise<AlertRecord[]> {
       orderBy: [{ createdAt: "desc" }],
       take: limit,
     });
-    return rows as AlertRecord[];
+    return rows as NotificationRecord[];
   } catch (error) {
-    logError("notifications.getUnreadAlerts", error);
+    logError("notifications.getUnreadNotifications", error);
     return [];
   }
 }
 
 /**
- * Latest N alerts (read or unread) for the bell dropdown. Excludes RESOLVED
- * so dismissed/resolved noise stays out of the tray.
+ * Latest N notifications (read or unread) for the bell dropdown. Excludes
+ * RESOLVED so dismissed/resolved noise stays out of the tray.
  */
-export async function getRecentAlerts(limit = 10): Promise<AlertRecord[]> {
+export async function getRecentNotifications(limit = 10): Promise<NotificationRecord[]> {
   const db = getDb();
   try {
     const rows = await db.alert.findMany({
@@ -111,22 +111,22 @@ export async function getRecentAlerts(limit = 10): Promise<AlertRecord[]> {
       orderBy: [{ createdAt: "desc" }],
       take: limit,
     });
-    return rows as AlertRecord[];
+    return rows as NotificationRecord[];
   } catch (error) {
-    logError("notifications.getRecentAlerts", error);
+    logError("notifications.getRecentNotifications", error);
     return [];
   }
 }
 
-export async function getAllAlerts({
+export async function getAllNotifications({
   filter = {},
   page = 1,
   pageSize = 25,
 }: {
-  filter?: AlertFilter;
+  filter?: NotificationFilter;
   page?: number;
   pageSize?: number;
-}): Promise<{ entries: AlertRecord[]; total: number }> {
+}): Promise<{ entries: NotificationRecord[]; total: number }> {
   const db = getDb();
   const where: Prisma.AlertWhereInput = {};
   if (filter.type) where.alertType = filter.type;
@@ -146,14 +146,14 @@ export async function getAllAlerts({
       }),
       db.alert.count({ where }),
     ]);
-    return { entries: entries as AlertRecord[], total };
+    return { entries: entries as NotificationRecord[], total };
   } catch (error) {
-    logError("notifications.getAllAlerts", error);
+    logError("notifications.getAllNotifications", error);
     return { entries: [], total: 0 };
   }
 }
 
-export async function getAlertTypes(): Promise<string[]> {
+export async function getNotificationTypes(): Promise<string[]> {
   const db = getDb();
   try {
     const rows = await db.alert.findMany({
@@ -163,7 +163,7 @@ export async function getAlertTypes(): Promise<string[]> {
     });
     return rows.map((row) => row.alertType);
   } catch (error) {
-    logError("notifications.getAlertTypes", error);
+    logError("notifications.getNotificationTypes", error);
     return [];
   }
 }

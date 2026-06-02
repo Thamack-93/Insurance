@@ -14,6 +14,7 @@ export type ReceiptReconciliationInput = {
   paymentMethod: string | null;
   payments: ReceiptPaymentSnapshot[];
   now?: Date;
+  closeTolerance?: number;
 };
 
 export type ReceiptReconciliationResult = {
@@ -62,7 +63,8 @@ export function reconcileReceiptState(input: ReceiptReconciliationInput): Receip
   }
 
   const now = input.now ?? new Date();
-  const isFullyPaid = paidAmount >= Math.max(input.amount, 0) - AMOUNT_TOLERANCE;
+  const closeTolerance = Math.max(input.closeTolerance ?? AMOUNT_TOLERANCE, AMOUNT_TOLERANCE);
+  const isFullyPaid = paidAmount >= Math.max(input.amount, 0) - closeTolerance;
   const nextStatus: ReceiptStatus = isFullyPaid ? "PAID" : input.dueDate < now ? "OVERDUE" : "PENDING";
   const nextPaidDate = isFullyPaid ? latestPaymentDate ?? input.paidDate : null;
   const nextPaymentMethod = isFullyPaid ? latestPaymentMethod ?? input.paymentMethod : null;
