@@ -155,7 +155,7 @@ export async function recordPayment(input: RecordPaymentInput, client?: DbClient
     throw new Error("El monto del pago debe ser mayor a cero.");
   }
 
-  return db.$transaction(async (tx) => {
+  const applyPayment = async (tx: DbClient) => {
     const receipt = await tx.receipt.findUnique({
       where: { id: input.receiptId },
       include: {
@@ -234,5 +234,11 @@ export async function recordPayment(input: RecordPaymentInput, client?: DbClient
 
     const reconciliation = await reconcileReceiptById(receipt.id, input.actorId, tx);
     return { payment, receipt, reconciliation };
-  });
+  };
+
+  if (client) {
+    return applyPayment(db);
+  }
+
+  return db.$transaction(applyPayment);
 }

@@ -12,7 +12,21 @@ if (!databaseUrl) {
   throw new Error("DATABASE_URL is required to seed the database.");
 }
 
-const adapter = new PrismaPg({ connectionString: databaseUrl });
+function normalizePostgresConnectionString(connectionString: string) {
+  try {
+    const url = new URL(connectionString);
+    const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
+    if (sslMode === "prefer" || sslMode === "require" || sslMode === "verify-ca") {
+      url.searchParams.set("sslmode", "verify-full");
+      return url.toString();
+    }
+  } catch {
+    // Prisma will surface malformed connection strings during initialization.
+  }
+  return connectionString;
+}
+
+const adapter = new PrismaPg({ connectionString: normalizePostgresConnectionString(databaseUrl) });
 const prisma = new PrismaClient({ adapter });
 const baseDate = new Date("2026-05-01T00:00:00.000Z");
 
@@ -83,16 +97,6 @@ async function main() {
     },
   });
 
-  const brokerUser = await prisma.user.create({
-    data: {
-      email: "broker@policydesk.local",
-      name: "Broker Demo",
-      passwordHash: hashPassword("broker1234"),
-      role: "AGENT",
-      active: true,
-    },
-  });
-
   const pedroUser = await prisma.user.upsert({
     where: { email: "pedroagl93@gmail.com" },
     update: { name: "Pedro Gomez", role: "ADMIN", active: true },
@@ -107,11 +111,10 @@ async function main() {
 
   await Promise.all([
     ensureNotificationDefaultsForUser(adminUser.id, prisma),
-    ensureNotificationDefaultsForUser(brokerUser.id, prisma),
     ensureNotificationDefaultsForUser(pedroUser.id, prisma),
   ]);
 
-  const audit = { createdById: adminUser.id, updatedById: brokerUser.id };
+  const audit = { createdById: adminUser.id, updatedById: pedroUser.id };
 
   const insurers = await Promise.all(
     [
@@ -391,104 +394,9 @@ async function main() {
       });
   }
 
-  const brokerDemoClient = await prisma.client.create({
-    data: {
-      fullName: "Broker Demo Cliente",
-      portfolioOwnerId: brokerUser.id,
-      type: "PERSON",
-      email: "broker.demo.cliente@example.com",
-      phone: "55 9000 9000",
-      address: "Cartera sandbox de Broker Demo",
-      preferredContactMethod: "Email",
-      notes: "Cliente ficticio aislado para pruebas del agente demo.",
-      status: "ACTIVE",
-      createdById: brokerUser.id,
-      updatedById: brokerUser.id,
-    },
-  });
-
-  const brokerDemoPolicy = await prisma.policy.create({
-    data: {
-      policyNumber: "BROKER-DEMO-1000",
-      clientId: brokerDemoClient.id,
-      insurerId: insurers[0].id,
-      policyType: "AUTO",
-      status: "ACTIVE",
-      startDate: addDays(baseDate, -20),
-      endDate: addDays(baseDate, 345),
-      premiumAmount: 18400,
-      currency: "MXN",
-      paymentFrequency: "ANNUAL",
-      paymentPlan: "Pago referenciado",
-      insuredObject: "Tesla Model 3 demo",
-      notes: "Póliza sandbox de Broker Demo.",
-      createdById: brokerUser.id,
-      updatedById: brokerUser.id,
-    },
-  });
-
-  const brokerDemoReceipt = await prisma.receipt.create({
-    data: {
-      receiptNumber: "BROKER-DEMO-REC-0001",
-      policyId: brokerDemoPolicy.id,
-      clientId: brokerDemoClient.id,
-      insurerId: brokerDemoPolicy.insurerId,
-      periodStartDate: addDays(baseDate, -20),
-      periodEndDate: addDays(baseDate, 345),
-      dueDate: addDays(baseDate, 12),
-      amount: 18400,
-      currency: "MXN",
-      status: "PENDING",
-      notes: "Recibo sandbox de Broker Demo.",
-      createdById: brokerUser.id,
-      updatedById: brokerUser.id,
-    },
-  });
-
-  await prisma.payment.create({
-    data: {
-      receiptId: brokerDemoReceipt.id,
-      policyId: brokerDemoPolicy.id,
-      clientId: brokerDemoClient.id,
-      amount: 18400,
-      currency: "MXN",
-      paidDate: addDays(baseDate, 2),
-      paymentMethod: "Transferencia",
-      reference: "BROKER-DEMO-SPEI-0001",
-      notes: "Pago sandbox de Broker Demo.",
-      createdById: brokerUser.id,
-      updatedById: brokerUser.id,
-    },
-  });
-
-  await prisma.workItem.create({
-    data: {
-      sourceType: "Task",
-      sourceId: "broker-demo-renewal-task",
-      workItemType: "TASK",
-      taskType: "RENEWAL",
-      folio: `PD-${new Date(baseDate).getUTCFullYear()}-BD01`,
-      status: "OPEN",
-      priority: "MEDIUM",
-      title: "Seguimiento sandbox Broker Demo",
-      description: "Pendiente demo aislado para validar cartera de Broker Demo.",
-      entityType: "WorkItem",
-      entityId: "broker-demo-renewal-task",
-      clientId: brokerDemoClient.id,
-      policyId: brokerDemoPolicy.id,
-      insurerId: brokerDemoPolicy.insurerId,
-      receiptId: brokerDemoReceipt.id,
-      startDate: addDays(baseDate, -2),
-      dueDate: addDays(baseDate, 12),
-      createdById: brokerUser.id,
-      updatedById: brokerUser.id,
-      assignedToId: brokerUser.id,
-    },
-  });
-
   const alerts = [
     ["RECEIPT_OVERDUE", "CRITICAL", "Recibo vencido sin seguimiento"],
-    ["POLICY_MISSING_PDF", "WARNING", "Poliza activa sin PDF"],
+    ["RENEWAL_WITHOUT_TASK", "WARNING", "Poliza activa sin seguimiento"],
     ["COMMISSION_OVERDUE", "WARNING", "Comision vencida por cobrar"],
     ["CLIENT_MISSING_CONTACT", "WARNING", "Cliente incompleto"],
     ["RENEWAL_WITHOUT_TASK", "WARNING", "Renovacion sin pendiente"],
@@ -496,7 +404,7 @@ async function main() {
     ["ORPHAN_DOCUMENT", "INFO", "Documento huerfano"],
     ["DUPLICATE_POLICY_NUMBER", "WARNING", "Poliza duplicada"],
     ["STALE_TASK", "WARNING", "Pendiente antiguo"],
-    ["PAID_RECEIPT_WITHOUT_PROOF", "WARNING", "Pago sin comprobante"],
+    ["RECEIPT_OVERDUE", "WARNING", "Pago sin comprobante"],
   ] as const;
 
   for (let index = 0; index < alerts.length; index += 1) {
@@ -538,7 +446,7 @@ async function main() {
         oldValue: index % 5 === 0 ? "Pendiente" : null,
         newValue: index % 5 === 0 ? "Actualizado" : null,
         createdAt: subDays(baseDate, index),
-        userId: index % 2 === 0 ? adminUser.id : brokerUser.id,
+        userId: index % 2 === 0 ? adminUser.id : pedroUser.id,
       },
     });
   }
@@ -552,6 +460,12 @@ async function resetDatabase() {
   await prisma.notificationEvent.deleteMany();
   await prisma.notificationPreference.deleteMany();
   await prisma.notificationChannel.deleteMany();
+  await prisma.ledgerImportIssue.deleteMany();
+  await prisma.ledgerImportAction.deleteMany();
+  await prisma.ledgerImportRow.deleteMany();
+  await prisma.ledgerImportBatch.deleteMany();
+  await prisma.policyInsuredAsset.deleteMany();
+  await prisma.policyInsuredParty.deleteMany();
   await prisma.activityLog.deleteMany();
   await prisma.payment.deleteMany();
   await prisma.commission.deleteMany();
@@ -595,7 +509,7 @@ function insuredObjectFor(policyType: (typeof policyTypes)[number], index: numbe
 function taskTitle(index: number) {
   const titles = [
     "Confirmar pago con cliente",
-    "Solicitar PDF de poliza",
+    "Solicitar documento de poliza",
     "Preparar renovacion",
     "Validar comision pendiente",
     "Enviar cotizacion actualizada",

@@ -3,7 +3,12 @@ import { getDb } from "@/lib/db";
 import { today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
 import { policyTypeLabel, statusLabels } from "@/lib/status";
-import { commissionPortfolioWhere, policyPortfolioWhere, requirePortfolioUser } from "@/lib/portfolio-access";
+import {
+  clientOperationalWhere,
+  commissionOperationalWhere,
+  policyOperationalWhere,
+  requirePortfolioReadScope,
+} from "@/lib/portfolio-access";
 
 type CommissionStatus = "EXPECTED" | "PENDING" | "PAID" | "OVERDUE" | "CANCELLED";
 
@@ -27,7 +32,6 @@ export type PortfolioHealth = {
   clientesCompletos: number;
   clientesConDatosBasicos: number;
   polizasConVencimiento: number;
-  polizasConPDF: number;
   polizasConObjetoAsegurado: number;
   totalClientes: number;
   totalPolizas: number;
@@ -81,13 +85,13 @@ export type CommissionSummary = {
 
 export async function getPortfolioMetrics() {
   const db = getDb();
-  const user = await requirePortfolioUser();
+  const scope = await requirePortfolioReadScope();
   const fechaCorte = today();
-  const policyWhere = policyPortfolioWhere(user.id);
+  const policyWhere = policyOperationalWhere(scope.portfolioOwnerId);
 
   const [clients, policies] = await Promise.all([
     db.client.findMany({
-      where: { portfolioOwnerId: user.id },
+      where: clientOperationalWhere(scope.portfolioOwnerId),
       select: {
         id: true,
         fullName: true,
@@ -106,14 +110,16 @@ export async function getPortfolioMetrics() {
         premiumAmount: true,
         endDate: true,
         insuredObject: true,
+        insuredParties: {
+          select: { id: true, isPrimary: true },
+        },
+        insuredAssets: {
+          select: { id: true, isPrimary: true },
+        },
         clientId: true,
         client: { select: { fullName: true } },
         insurerId: true,
         insurer: { select: { name: true } },
-        documents: {
-          where: { documentType: "POLICY" },
-          select: { id: true },
-        },
       },
     }),
   ]);
@@ -177,8 +183,12 @@ export async function getPortfolioMetrics() {
     (client) => Boolean(client.email && client.phone && client.address),
   ).length;
   const polizasConVencimiento = policies.filter((policy) => Boolean(policy.endDate)).length;
-  const polizasConPDF = policies.filter((policy) => policy.documents.length > 0).length;
-  const polizasConObjetoAsegurado = policies.filter((policy) => Boolean(policy.insuredObject?.trim())).length;
+  const polizasConObjetoAsegurado = policies.filter(
+    (policy) =>
+      Boolean(policy.insuredObject?.trim()) ||
+      policy.insuredParties.length > 0 ||
+      policy.insuredAssets.length > 0,
+  ).length;
 
   const scoreClientes = clients.length
     ? Math.round((clientesConDatosBasicos / clients.length) * 100)
@@ -186,9 +196,8 @@ export async function getPortfolioMetrics() {
   const scorePolizas = policies.length
     ? Math.round(
         ((polizasConVencimiento / policies.length) +
-          (polizasConPDF / policies.length) +
           (polizasConObjetoAsegurado / policies.length)) /
-          3 *
+          2 *
           100,
       )
     : 100;
@@ -198,7 +207,6 @@ export async function getPortfolioMetrics() {
     clientesCompletos: clientesConDatosBasicos,
     clientesConDatosBasicos,
     polizasConVencimiento,
-    polizasConPDF,
     polizasConObjetoAsegurado,
     totalClientes: clients.length,
     totalPolizas: policies.length,
@@ -223,12 +231,12 @@ export async function getPortfolioMetrics() {
 
 export async function getCommissionSummary(options: CommissionSummaryOptions = {}) {
   const db = getDb();
-  const user = await requirePortfolioUser();
+  const scope = await requirePortfolioReadScope();
   const rango = resolveRange(options.from, options.to, 60);
 
   const commissions = await db.commission.findMany({
     where: {
-      ...commissionPortfolioWhere(user.id),
+      ...commissionOperationalWhere(scope.portfolioOwnerId),
       expectedDate: { gte: rango.from, lte: rango.to },
       status: { not: "CANCELLED" },
     },

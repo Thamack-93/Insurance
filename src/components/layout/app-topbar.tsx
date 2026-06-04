@@ -18,6 +18,7 @@ const labels: Record<string, string> = {
   tasks: "Pendientes",
   claims: "Siniestros",
   clients: "Clientes",
+  assistant: "Asistente",
   policies: "Pólizas",
   quotes: "Cotizaciones",
   insurers: "Aseguradoras",

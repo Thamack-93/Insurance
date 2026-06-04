@@ -39,7 +39,16 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
 
   const policy = await db.policy.findUnique({
     where: { id },
-    include: { client: true, insurer: true },
+    include: {
+      client: true,
+      insurer: true,
+      insuredParties: {
+        orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+      },
+      insuredAssets: {
+        orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+      },
+    },
   });
 
   if (!policy) {
@@ -203,6 +212,44 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                   <div>
                     <p className="font-medium text-foreground">Beneficiarios</p>
                     <p className="mt-1">{policy.beneficiaryInfo ?? "Sin capturar"}</p>
+                  </div>
+                </div>
+              </SectionCard>
+              <SectionCard title="Asegurados y activos">
+                <div className="space-y-4 px-4 py-3 text-sm">
+                  <div>
+                    <p className="font-medium text-foreground">Personas aseguradas</p>
+                    {policy.insuredParties.length ? (
+                      <ul className="mt-2 space-y-2 text-muted-foreground">
+                        {policy.insuredParties.map((party) => (
+                          <li key={party.id} className="flex items-center justify-between gap-3">
+                            <span>{party.fullName}</span>
+                            <span className="text-xs uppercase tracking-wide">{party.isPrimary ? "Principal" : "Secundario"}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-1 text-muted-foreground">Sin personas aseguradas registradas.</p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Activos asegurados</p>
+                    {policy.insuredAssets.length ? (
+                      <ul className="mt-2 space-y-2 text-muted-foreground">
+                        {policy.insuredAssets.map((asset) => (
+                          <li key={asset.id} className="flex flex-col gap-1 rounded-2xl border border-border/60 bg-muted/20 p-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <span>{asset.assetType}</span>
+                              <span className="text-xs uppercase tracking-wide">{asset.isPrimary ? "Principal" : "Secundario"}</span>
+                            </div>
+                            <span>{asset.description}</span>
+                            {asset.serialNumber ? <span className="text-xs text-muted-foreground">Serie: {asset.serialNumber}</span> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-1 text-muted-foreground">Sin activos asegurados registrados.</p>
+                    )}
                   </div>
                 </div>
               </SectionCard>

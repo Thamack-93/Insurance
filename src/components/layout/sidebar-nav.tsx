@@ -8,6 +8,7 @@ import {
   BadgeCheck,
   BarChart3,
   Bell,
+  Bot,
   BriefcaseBusiness,
   Building2,
   Calculator,
@@ -94,6 +95,7 @@ export const sections: NavSection[] = [
     label: "Sistema",
     defaultOpen: false,
     items: [
+      { label: "Asistente", href: "/assistant", icon: Bot },
       { label: "Configuración", href: "/settings", icon: Settings },
       { label: "Usuarios", href: "/settings/users", icon: Users, adminOnly: true },
       { label: "Auditoría", href: "/activity", icon: History, adminOnly: true },

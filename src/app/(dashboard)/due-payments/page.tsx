@@ -14,6 +14,7 @@ import { formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { addDays } from "date-fns";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
+import { receiptOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function DuePaymentsPage({
   searchParams,
@@ -21,6 +22,7 @@ export default async function DuePaymentsPage({
   searchParams?: Promise<{ q?: string; page?: string }>;
 }) {
   const db = getDb();
+  const scope = await requirePortfolioReadScope();
   const now = today();
   const in7 = addDays(now, 7);
   const in30 = addDays(now, 30);
@@ -30,8 +32,10 @@ export default async function DuePaymentsPage({
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = Math.max(1, Number(params.page) || 1);
 
+  const receiptScopeWhere = receiptOperationalWhere(scope.portfolioOwnerId);
   const openHorizonWhere: Prisma.ReceiptWhereInput = {
-    dueDate: { gte: now, lte: in60 },
+    ...receiptScopeWhere,
+    dueDate: { lte: in60 },
     status: { notIn: ["PAID", "CANCELLED"] },
     ...(query
       ? {
@@ -64,40 +68,40 @@ export default async function DuePaymentsPage({
       take: DEFAULT_PAGE_SIZE,
     }),
     db.receipt.aggregate({
-      where: { dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { ...receiptScopeWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
       _sum: { amount: true },
       _count: { _all: true },
     }),
     db.receipt.findMany({
-      where: { dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { ...receiptScopeWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
+      include: { client: true, policy: true, insurer: true },
+      orderBy: { dueDate: "desc" },
+      take: 10,
+    }),
+    db.receipt.findMany({
+      where: { ...receiptScopeWhere, dueDate: { gte: now, lte: in7 }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
       orderBy: { dueDate: "asc" },
       take: 10,
     }),
     db.receipt.findMany({
-      where: { dueDate: { gte: now, lte: in7 }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { ...receiptScopeWhere, dueDate: { gt: in7, lte: in30 }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
       orderBy: { dueDate: "asc" },
       take: 10,
     }),
     db.receipt.findMany({
-      where: { dueDate: { gt: in7, lte: in30 }, status: { notIn: ["PAID", "CANCELLED"] } },
-      include: { client: true, policy: true, insurer: true },
-      orderBy: { dueDate: "asc" },
-      take: 10,
-    }),
-    db.receipt.findMany({
-      where: { status: "PAID" },
+      where: { ...receiptScopeWhere, status: "PAID" },
       include: { client: true, policy: true, insurer: true },
       orderBy: { paidDate: "desc" },
       take: 10,
     }),
     db.receipt.aggregate({
-      where: { dueDate: { gte: now, lte: in60 }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: openHorizonWhere,
       _sum: { amount: true },
     }),
     db.receipt.count({
-      where: { dueDate: { gte: now, lt: addDays(now, 1) }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { ...receiptScopeWhere, dueDate: { gte: now, lt: addDays(now, 1) }, status: { notIn: ["PAID", "CANCELLED"] } },
     }),
   ]);
 
@@ -125,7 +129,7 @@ export default async function DuePaymentsPage({
           <MetricCard
             title="Saldo por cobrar"
             value={formatCurrency(outstandingAmount)}
-            description="Total abierto dentro del horizonte de 60 días."
+            description="Vencido y próximos 60 días."
             icon={CircleDollarSign}
             tone="emerald"
           />
@@ -154,18 +158,18 @@ export default async function DuePaymentsPage({
 
         <SectionCard
           title="Recibos por cobrar (60 días)"
-          description="Listado paginado con búsqueda por recibo, cliente o póliza."
+          description="Listado paginado de vencidos y próximos 60 días."
           action={<ListSearch placeholder="Buscar por recibo, cliente o póliza..." />}
         >
           {openCount === 0 ? (
             <div className="p-4">
               <EmptyState
                 icon={ReceiptText}
-                title={query ? "Sin resultados" : "Sin recibos próximos"}
+                title={query ? "Sin resultados" : "Sin recibos abiertos"}
                 description={
                   query
                     ? `No encontramos recibos que coincidan con "${query}".`
-                    : "No hay recibos pendientes en los próximos 60 días."
+                    : "No hay recibos vencidos ni pendientes en los próximos 60 días."
                 }
               />
             </div>

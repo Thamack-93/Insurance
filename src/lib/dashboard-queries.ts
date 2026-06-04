@@ -7,23 +7,24 @@ import { detectRisks } from "@/lib/risk-engine";
 import { DASHBOARD_LIST_LIMIT } from "@/lib/constants";
 import { OPEN_WORK_ITEM_STATUSES, countWorkItems, getWorkItems } from "@/lib/work-queue";
 import {
-  commissionPortfolioWhere,
-  policyPortfolioWhere,
-  receiptPortfolioWhere,
-  requirePortfolioUser,
+  commissionOperationalWhere,
+  clientOperationalWhere,
+  policyOperationalWhere,
+  receiptOperationalWhere,
+  requirePortfolioReadScope,
 } from "@/lib/portfolio-access";
 
 export async function getDashboardData() {
   const db = getDb();
-  const user = await requirePortfolioUser();
+  const scope = await requirePortfolioReadScope();
   const now = today();
   const in7 = addDays(now, 7);
   const in60 = addDays(now, 60);
   const monthStart = startOfMonth(now);
   const monthEnd = endOfMonth(now);
-  const policyWhere = policyPortfolioWhere(user.id);
-  const receiptWhere = receiptPortfolioWhere(user.id);
-  const commissionWhere = commissionPortfolioWhere(user.id);
+  const policyWhere = policyOperationalWhere(scope.portfolioOwnerId);
+  const receiptWhere = receiptOperationalWhere(scope.portfolioOwnerId);
+  const commissionWhere = commissionOperationalWhere(scope.portfolioOwnerId);
 
   const [
     activePolicies,
@@ -58,13 +59,13 @@ export async function getDashboardData() {
     countWorkItems({
       workItemTypes: ["TASK"],
       statuses: OPEN_WORK_ITEM_STATUSES,
-      portfolioOwnerId: user.id,
+      portfolioOwnerId: scope.portfolioOwnerId,
     }),
     countWorkItems({
       workItemTypes: ["TASK"],
       statuses: OPEN_WORK_ITEM_STATUSES,
       priorities: ["URGENT"],
-      portfolioOwnerId: user.id,
+      portfolioOwnerId: scope.portfolioOwnerId,
     }),
     // Per-row fallback: actualAmount when set, otherwise expectedAmount.
     // We split into two aggregates to reproduce SUM(COALESCE(actualAmount, expectedAmount))
@@ -124,12 +125,12 @@ export async function getDashboardData() {
     }),
     db.activityLog.findMany({ orderBy: { createdAt: "desc" }, take: 8 }),
     db.alert.findMany({ where: { status: "OPEN" }, orderBy: { createdAt: "desc" }, take: 8 }),
-    detectRisks(user.id),
+    detectRisks(scope.portfolioOwnerId),
     getWorkItems({
       workItemTypes: ["TASK"],
       statuses: OPEN_WORK_ITEM_STATUSES,
       limit: 12,
-      portfolioOwnerId: user.id,
+      portfolioOwnerId: scope.portfolioOwnerId,
     }),
   ]);
 
@@ -148,10 +149,6 @@ export async function getDashboardData() {
 
   const urgentPayments = upcomingReceipts
     .filter((receipt) => receipt.status !== "PAID" && receipt.dueDate <= in7)
-    .slice(0, 6);
-
-  const documentsMissing = risks
-    .filter((risk) => ["POLICY_MISSING_PDF", "PAID_RECEIPT_WITHOUT_PROOF"].includes(risk.alertType))
     .slice(0, 6);
 
   return {
@@ -183,7 +180,6 @@ export async function getDashboardData() {
       urgentRenewals: upcomingRenewalPolicies,
       criticalWorkItems,
       recentActivity,
-      documentsMissing,
       topRisks: risks.slice(0, 6),
       openNotifications,
       monthRange: { monthStart, monthEnd },
@@ -202,12 +198,12 @@ export type OnboardingStatus = {
 
 export async function getOnboardingStatus(): Promise<OnboardingStatus> {
   const db = getDb();
-  const user = await requirePortfolioUser();
+  const scope = await requirePortfolioReadScope();
   const [insurers, clients, policies, receipts, dismissedRow] = await Promise.all([
     db.insurer.count(),
-    db.client.count({ where: { portfolioOwnerId: user.id } }),
-    db.policy.count({ where: policyPortfolioWhere(user.id) }),
-    db.receipt.count({ where: receiptPortfolioWhere(user.id) }),
+    db.client.count({ where: clientOperationalWhere(scope.portfolioOwnerId) }),
+    db.policy.count({ where: policyOperationalWhere(scope.portfolioOwnerId) }),
+    db.receipt.count({ where: receiptOperationalWhere(scope.portfolioOwnerId) }),
     db.systemSetting.findUnique({ where: { key: "onboardingDismissed" } }),
   ]);
   return {
@@ -222,14 +218,14 @@ export async function getOnboardingStatus(): Promise<OnboardingStatus> {
 
 export async function getTodayData() {
   const db = getDb();
-  const user = await requirePortfolioUser();
+  const scope = await requirePortfolioReadScope();
   const now = today();
   const tomorrow = addDays(now, 1);
   const in7 = addDays(now, 7);
   const in30 = addDays(now, 30);
-  const policyWhere = policyPortfolioWhere(user.id);
-  const receiptWhere = receiptPortfolioWhere(user.id);
-  const commissionWhere = commissionPortfolioWhere(user.id);
+  const policyWhere = policyOperationalWhere(scope.portfolioOwnerId);
+  const receiptWhere = receiptOperationalWhere(scope.portfolioOwnerId);
+  const commissionWhere = commissionOperationalWhere(scope.portfolioOwnerId);
 
   const [
     paymentsDueToday,
@@ -269,11 +265,11 @@ export async function getTodayData() {
       statuses: OPEN_WORK_ITEM_STATUSES,
       to: now,
       limit: 8,
-      portfolioOwnerId: user.id,
+      portfolioOwnerId: scope.portfolioOwnerId,
     }),
     db.client.findMany({
       where: {
-        portfolioOwnerId: user.id,
+        ...clientOperationalWhere(scope.portfolioOwnerId),
         workItems: {
           some: { workItemType: "TASK", status: { in: ["OPEN", "WAITING_CLIENT"] } },
         },
@@ -291,7 +287,7 @@ export async function getTodayData() {
       take: 8,
     }),
     db.activityLog.findMany({ orderBy: { createdAt: "desc" }, take: 8 }),
-    detectRisks(user.id),
+    detectRisks(scope.portfolioOwnerId),
   ]);
 
   const overdueWorkItemRows = overdueWorkItems.map((item) => ({
@@ -316,9 +312,6 @@ export async function getTodayData() {
     overdueWorkItems: overdueWorkItemRows,
     clientsToContact,
     commissionsToReview,
-    documentsMissing: risks
-      .filter((risk) => ["POLICY_MISSING_PDF", "PAID_RECEIPT_WITHOUT_PROOF"].includes(risk.alertType))
-      .slice(0, 6),
     criticalRisks: risks.filter((risk) => risk.severity === "CRITICAL").slice(0, 6),
     recentActivity,
   };

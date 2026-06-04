@@ -27,8 +27,23 @@ function loadLocalEnvFile(filePath: string) {
 
 loadLocalEnvFile(localEnvPath);
 
+function normalizePostgresConnectionString(connectionString: string) {
+  try {
+    const url = new URL(connectionString);
+    const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
+    if (sslMode === "prefer" || sslMode === "require" || sslMode === "verify-ca") {
+      url.searchParams.set("sslmode", "verify-full");
+      return url.toString();
+    }
+  } catch {
+    // Validation below reports malformed or unsupported URLs.
+  }
+  return connectionString;
+}
+
 const databaseUrl =
   process.env.DATABASE_URL_UNPOOLED?.trim() || process.env.DATABASE_URL?.trim();
+const normalizedDatabaseUrl = databaseUrl ? normalizePostgresConnectionString(databaseUrl) : "";
 const isPostgresUrl = databaseUrl ? /^postgres(ql)?:\/\//i.test(databaseUrl) : false;
 
 if (!databaseUrl) {
@@ -49,6 +64,6 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: databaseUrl,
+    url: normalizedDatabaseUrl,
   },
 });

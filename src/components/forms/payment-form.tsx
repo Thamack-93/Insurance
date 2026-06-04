@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -61,7 +61,7 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
     handleSubmit,
     setValue,
     setError,
-    watch,
+    control,
     formState: { errors },
   } = useForm<PaymentFormValues>({
     resolver: zodResolver(paymentSchema) as never,
@@ -72,8 +72,8 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
     },
   });
 
-  const selectedReceiptId = watch("receiptId");
-  const selectedPaymentMethod = watch("paymentMethod");
+  const selectedReceiptId = useWatch({ control, name: "receiptId" });
+  const selectedPaymentMethod = useWatch({ control, name: "paymentMethod" });
   const selectedReceiptData = receipts.find((r) => r.id === selectedReceiptId);
 
   const receiptOptions = receipts.map((r) => ({

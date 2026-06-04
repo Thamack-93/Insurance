@@ -13,7 +13,7 @@ import { getRenewalStats, getUpcomingRenewals, type RenewalOpportunity } from "@
 import { formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
-import { requirePortfolioUser } from "@/lib/portfolio-access";
+import { requirePortfolioReadScope } from "@/lib/portfolio-access";
 
 export const dynamic = "force-dynamic";
 
@@ -26,10 +26,10 @@ export default async function RenewalsPage({
   const query = (params.q ?? "").trim().slice(0, 100).toLowerCase();
   const page = Math.max(1, Number(params.page) || 1);
 
-  const user = await requirePortfolioUser();
+  const scope = await requirePortfolioReadScope();
   const [stats, upcomingRenewals] = await Promise.all([
-    getRenewalStats(user.id),
-    getUpcomingRenewals(60, user.id),
+    getRenewalStats(scope.portfolioOwnerId),
+    getUpcomingRenewals(60, scope.portfolioOwnerId),
   ]);
 
   const matchesQuery = (r: RenewalOpportunity) =>

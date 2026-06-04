@@ -29,10 +29,8 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
     : {};
 
   const [
-    policiesWithoutPdf,
     expiredPolicies,
     overdueReceipts,
-    paidReceiptsWithoutProof,
     overdueCommissions,
     staleWorkItems,
     clientsWithoutContact,
@@ -43,11 +41,6 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
     duplicatePolicyKeys,
     duplicateReceiptKeys,
   ] = await Promise.all([
-    db.policy.findMany({
-      where: { ...policyScope, status: "ACTIVE", documents: { none: { documentType: "POLICY" } } },
-      take: TAKE_LIMIT,
-      select: { id: true, policyNumber: true },
-    }),
     db.policy.findMany({
       where: { ...policyScope, endDate: { lt: now }, status: { notIn: ["RENEWED", "CANCELLED"] } },
       take: TAKE_LIMIT,
@@ -60,11 +53,6 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
         status: { notIn: ["PAID", "CANCELLED"] },
         payments: { none: {} },
       },
-      take: TAKE_LIMIT,
-      select: { id: true, receiptNumber: true },
-    }),
-    db.receipt.findMany({
-      where: { ...receiptScope, status: "PAID", documentId: null },
       take: TAKE_LIMIT,
       select: { id: true, receiptNumber: true },
     }),
@@ -182,10 +170,8 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
   );
 
   return [
-    ...policiesWithoutPdf.map((policy) => risk("POLICY_MISSING_PDF", "WARNING", "Poliza sin PDF", policy.policyNumber, "Policy", policy.id, "Subir documento de poliza.")),
     ...expiredPolicies.map((policy) => risk("POLICY_EXPIRED", "CRITICAL", "Poliza vencida", policy.policyNumber, "Policy", policy.id, "Revisar renovacion o cancelacion.")),
     ...overdueReceipts.map((receipt) => risk("RECEIPT_OVERDUE", "CRITICAL", "Recibo vencido sin pago", receipt.receiptNumber, "Receipt", receipt.id, "Contactar cliente y registrar seguimiento.")),
-    ...paidReceiptsWithoutProof.map((receipt) => risk("PAID_RECEIPT_WITHOUT_PROOF", "WARNING", "Recibo pagado sin comprobante", receipt.receiptNumber, "Receipt", receipt.id, "Subir comprobante de pago.")),
     ...overdueCommissions.map((commission) => risk("COMMISSION_OVERDUE", "WARNING", "Comision vencida sin cobro", String(commission.expectedAmount), "Commission", commission.id, "Revisar cobranza con aseguradora.")),
     ...staleWorkItems.map((workItem) =>
       risk(

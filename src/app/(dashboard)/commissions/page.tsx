@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { connection } from "next/server";
 import { ArrowRight, BadgeCheck, CircleAlert, HandCoins, TrendingUp } from "lucide-react";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
@@ -20,6 +21,7 @@ export default async function CommissionsPage({
 }: {
   searchParams?: Promise<{ q?: string; page?: string }>;
 }) {
+  await connection();
   // Run side-effect first; downstream reads must see the new statuses.
   await autoUpdateCommissionStatuses();
 

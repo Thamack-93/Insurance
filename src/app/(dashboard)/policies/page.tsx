@@ -15,7 +15,7 @@ import { getDb } from "@/lib/db";
 import { daysUntil, formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
-import { policyPortfolioWhere, requirePortfolioUser } from "@/lib/portfolio-access";
+import { policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 
 const PAGE_SIZE = 25;
 
@@ -29,10 +29,10 @@ export default async function PoliciesPage({
   const page = Math.max(1, Number(params.page) || 1);
 
   const db = getDb();
-  const user = await requirePortfolioUser();
+  const scope = await requirePortfolioReadScope();
   const now = today();
   const in60 = addDays(now, 60);
-  const portfolioWhere = policyPortfolioWhere(user.id);
+  const portfolioWhere = policyOperationalWhere(scope.portfolioOwnerId);
 
   const where: Prisma.PolicyWhereInput = query
     ? {

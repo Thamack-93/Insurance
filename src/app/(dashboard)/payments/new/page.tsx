@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { connection } from "next/server";
 import { ArrowLeft } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -6,6 +7,7 @@ import { PaymentForm } from "@/components/forms/payment-form";
 import { createPayment, getPendingReceipts } from "../actions";
 
 export default async function NewPaymentPage() {
+  await connection();
   const receipts = await getPendingReceipts();
 
   const formReceipts = receipts.map((receipt) => ({

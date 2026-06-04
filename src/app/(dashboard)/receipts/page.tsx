@@ -15,7 +15,12 @@ import { CollectableReceipts, type CollectableReceipt } from "@/components/recei
 import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
-import { receiptPortfolioWhere, requirePortfolioUser } from "@/lib/portfolio-access";
+import {
+  paymentOperationalWhere,
+  receiptOperationalWhere,
+  receiptPortfolioWhere,
+  requirePortfolioReadScope,
+} from "@/lib/portfolio-access";
 
 const PAGE_SIZE = 25;
 
@@ -30,14 +35,19 @@ export default async function ReceiptsPage({
   const page = Math.max(1, Number(params.page) || 1);
 
   const db = getDb();
-  const user = await requirePortfolioUser();
+  const scope = await requirePortfolioReadScope();
   const now = today();
   const monthStart = startOfMonth(now);
 
   const baseWhere: Prisma.ReceiptWhereInput = {
-    ...receiptPortfolioWhere(user.id),
+    ...receiptOperationalWhere(scope.portfolioOwnerId),
     status: { notIn: ["PAID", "CANCELLED"] },
   };
+  const scopedReceiptWhere = receiptOperationalWhere(scope.portfolioOwnerId);
+  const scopedPaymentWhere = paymentOperationalWhere(scope.portfolioOwnerId);
+  const scopedReceiptIssueWhere: Prisma.ReceiptReconciliationIssueWhereInput = scope.portfolioOwnerId
+    ? { receipt: receiptPortfolioWhere(scope.portfolioOwnerId) }
+    : {};
   const where: Prisma.ReceiptWhereInput = query
     ? {
         AND: [
@@ -68,7 +78,7 @@ export default async function ReceiptsPage({
     db.receipt.count({ where: baseWhere }),
     db.receipt.count({ where: { ...baseWhere, dueDate: { lt: now } } }),
     db.receipt.findMany({
-      where: { ...receiptPortfolioWhere(user.id), status: "PAID", paidDate: { gte: monthStart } },
+      where: { ...scopedReceiptWhere, status: "PAID", paidDate: { gte: monthStart } },
       include: { client: true, policy: true, insurer: true },
       orderBy: { paidDate: "desc" },
     }),
@@ -86,7 +96,7 @@ export default async function ReceiptsPage({
       take: PAGE_SIZE,
     }),
     db.payment.findMany({
-      where: { client: { portfolioOwnerId: user.id } },
+      where: scopedPaymentWhere,
       include: {
         receipt: { select: { id: true, receiptNumber: true, dueDate: true } },
         client: { select: { id: true, fullName: true } },
@@ -97,8 +107,8 @@ export default async function ReceiptsPage({
     }),
     db.receiptReconciliationIssue.findMany({
       where: {
+        ...scopedReceiptIssueWhere,
         status: "OPEN",
-        receipt: { client: { portfolioOwnerId: user.id } },
       },
       include: {
         receipt: { include: { payments: true, client: true } },

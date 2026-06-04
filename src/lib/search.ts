@@ -45,6 +45,8 @@ const FIELD_LABELS: Record<string, string> = {
   notes: "notas",
   policyNumber: "póliza",
   insuredObject: "objeto asegurado",
+  insuredPartiesText: "asegurado",
+  insuredAssetsText: "activo",
   receiptNumber: "recibo",
   title: "título",
   folio: "folio",
@@ -92,6 +94,8 @@ const ALLOWED_COLUMNS = new Set([
   "policyNumber",
   "policyType",
   "insuredObject",
+  "insuredPartiesText",
+  "insuredAssetsText",
   "receiptNumber",
   "status",
   "folio",
@@ -110,6 +114,8 @@ const ALLOWED_COLUMNS = new Set([
   "quoteId",
   "sourceType",
   "sourceId",
+  "assignedToId",
+  "portfolioOwnerId",
   "updatedAt",
 ]);
 
@@ -119,13 +125,21 @@ function assertAllowedIdentifier(value: string) {
   }
 }
 
+function quotedColumn(column: string) {
+  assertAllowedIdentifier(column);
+  return `"${column.replaceAll('"', '""')}"`;
+}
+
 async function rawSearch<T extends RowWithId>(
   table: SearchTable,
   selectCols: string[],
   searchCols: string[],
   needle: string,
   limit = 5,
+  orderBy?: Prisma.Sql,
   extraSelect: Prisma.Sql = Prisma.empty,
+  extraWhere?: Prisma.Sql,
+  scopeWhere?: Prisma.Sql,
 ): Promise<T[]> {
   const db = getDb();
 
@@ -137,24 +151,65 @@ async function rawSearch<T extends RowWithId>(
   const tableSql = Prisma.raw(`"${table}"`);
   const cols = Prisma.join(selectCols.map((column) => Prisma.raw(`"${column}"`)), ", ");
   const where = Prisma.join(
-    searchCols.map((column) => Prisma.sql`${Prisma.raw(unaccentSql(column))} LIKE ${`%${needle}%`}`),
+    searchCols.map((column) => Prisma.sql`${Prisma.raw(unaccentSql(quotedColumn(column)))} LIKE ${`%${needle}%`}`),
     " OR ",
   );
+  const searchWhere = extraWhere ? Prisma.sql`(${where}) OR (${extraWhere})` : Prisma.sql`(${where})`;
 
-  const sql = Prisma.sql`SELECT ${cols}${extraSelect} FROM ${tableSql} WHERE ${where} ORDER BY ${Prisma.raw('"updatedAt"')} DESC LIMIT ${limit}`;
+  const orderBySql = orderBy ?? Prisma.sql`ORDER BY ${Prisma.raw('"updatedAt"')} DESC`;
+  const combinedWhere = scopeWhere ? Prisma.sql`(${searchWhere}) AND ${scopeWhere}` : searchWhere;
+  const sql = Prisma.sql`SELECT ${cols}${extraSelect} FROM ${tableSql} WHERE ${combinedWhere} ${orderBySql} LIMIT ${limit}`;
   return (await db.$queryRaw<T[]>(sql)) as T[];
 }
 
-export async function globalSearch(query: string): Promise<GlobalSearchResult[]> {
+export async function globalSearch(query: string, portfolioOwnerId?: string): Promise<GlobalSearchResult[]> {
   const q = query.trim();
   if (!q) return [];
   const needle = normalize(q);
   if (!needle) return [];
 
+  const scopedClientWhere = portfolioOwnerId ? Prisma.sql`"portfolioOwnerId" = ${portfolioOwnerId}` : undefined;
+  const scopedPolicyWhere = portfolioOwnerId
+    ? Prisma.sql`EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Policy"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId})`
+    : undefined;
+  const scopedReceiptWhere = portfolioOwnerId
+    ? Prisma.sql`EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Receipt"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId})`
+    : undefined;
+  const scopedWorkItemWhere = portfolioOwnerId
+    ? Prisma.sql`(
+      EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "WorkItem"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId})
+      OR ("WorkItem"."clientId" IS NULL AND "WorkItem"."assignedToId" = ${portfolioOwnerId})
+    )`
+    : undefined;
+  const scopedClaimWhere = portfolioOwnerId
+    ? Prisma.sql`EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Claim"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId})`
+    : undefined;
+  const scopedQuoteWhere = portfolioOwnerId
+    ? Prisma.sql`EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Quote"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId})`
+    : undefined;
+  const scopedDocumentWhere = portfolioOwnerId
+    ? Prisma.sql`(
+      EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Document"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId})
+      OR EXISTS (SELECT 1 FROM "Policy" WHERE "Policy"."id" = "Document"."policyId" AND EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Policy"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId}))
+      OR EXISTS (SELECT 1 FROM "Receipt" WHERE "Receipt"."id" = "Document"."receiptId" AND EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Receipt"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId}))
+      OR EXISTS (SELECT 1 FROM "Claim" WHERE "Claim"."id" = "Document"."claimId" AND EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Claim"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId}))
+      OR EXISTS (SELECT 1 FROM "Quote" WHERE "Quote"."id" = "Document"."quoteId" AND EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Quote"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId}))
+    )`
+    : undefined;
+
   const results: GlobalSearchResult[] = [];
 
   type ClientRow = RowWithId & { fullName: string; email: string | null; phone: string | null; rfc: string | null; address: string | null; notes: string | null };
-  type PolicyRow = RowWithId & { policyNumber: string; policyType: string; insuredObject: string | null; notes: string | null; clientId: string; clientName: string | null };
+  type PolicyRow = RowWithId & {
+    policyNumber: string;
+    policyType: string;
+    insuredObject: string | null;
+    insuredPartiesText: string | null;
+    insuredAssetsText: string | null;
+    notes: string | null;
+    clientId: string;
+    clientName: string | null;
+  };
   type ReceiptRow = RowWithId & { receiptNumber: string; status: string; clientName: string | null };
   type WorkItemRow = RowWithId & {
     sourceType: string;
@@ -188,6 +243,11 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
       ["id", "fullName", "email", "phone", "rfc", "address", "notes", "updatedAt"],
       ["fullName", "email", "phone", "rfc", "address", "notes"],
       needle,
+      5,
+      undefined,
+      Prisma.empty,
+      undefined,
+      scopedClientWhere,
     ),
     rawSearch<PolicyRow>(
       "Policy",
@@ -195,7 +255,31 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
       ["policyNumber", "insuredObject", "notes"],
       needle,
       5,
-      Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Policy"."clientId") AS "clientName"`,
+      Prisma.sql`ORDER BY ${Prisma.raw('"endDate"')} DESC, ${Prisma.raw('"startDate"')} DESC, ${Prisma.raw('"updatedAt"')} DESC`,
+      Prisma.sql`,
+        (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Policy"."clientId") AS "clientName",
+        (
+          SELECT string_agg("fullName", ' | ')
+          FROM "PolicyInsuredParty"
+          WHERE "PolicyInsuredParty"."policyId" = "Policy"."id"
+        ) AS "insuredPartiesText",
+        (
+          SELECT string_agg("description", ' | ')
+          FROM "PolicyInsuredAsset"
+          WHERE "PolicyInsuredAsset"."policyId" = "Policy"."id"
+        ) AS "insuredAssetsText"`,
+      Prisma.sql`EXISTS (
+        SELECT 1
+        FROM "PolicyInsuredParty"
+        WHERE "PolicyInsuredParty"."policyId" = "Policy"."id"
+          AND ${Prisma.raw(unaccentSql('"PolicyInsuredParty"."fullName"'))} LIKE ${`%${needle}%`}
+      ) OR EXISTS (
+        SELECT 1
+        FROM "PolicyInsuredAsset"
+        WHERE "PolicyInsuredAsset"."policyId" = "Policy"."id"
+          AND ${Prisma.raw(unaccentSql('"PolicyInsuredAsset"."description"'))} LIKE ${`%${needle}%`}
+      )`,
+      scopedPolicyWhere,
     ),
     rawSearch<ReceiptRow>(
       "Receipt",
@@ -203,7 +287,10 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
       ["receiptNumber"],
       needle,
       5,
+      undefined,
       Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Receipt"."clientId") AS "clientName"`,
+      undefined,
+      scopedReceiptWhere,
     ),
     rawSearch<WorkItemRow>(
       "WorkItem",
@@ -211,7 +298,10 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
       ["sourceType", "sourceId", "folio", "title", "taskType", "notes"],
       needle,
       5,
+      undefined,
       Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "WorkItem"."clientId") AS "clientName"`,
+      undefined,
+      scopedWorkItemWhere,
     ),
     rawSearch<ClaimRow>(
       "Claim",
@@ -219,7 +309,10 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
       ["folio", "claimType", "notes"],
       needle,
       5,
+      undefined,
       Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Claim"."clientId") AS "clientName"`,
+      undefined,
+      scopedClaimWhere,
     ),
     rawSearch<QuoteRow>(
       "Quote",
@@ -227,13 +320,18 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
       ["id", "notes"],
       needle,
       5,
+      undefined,
       Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Quote"."clientId") AS "clientName"`,
+      undefined,
+      scopedQuoteWhere,
     ),
     rawSearch<InsurerRow>(
       "Insurer",
       ["id", "name", "contactName", "notes", "updatedAt"],
       ["name", "contactName", "notes"],
       needle,
+      5,
+      undefined,
     ),
     rawSearch<DocumentRow>(
       "Document",
@@ -241,12 +339,15 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
       ["fileName", "notes"],
       needle,
       5,
+      undefined,
       Prisma.sql`, COALESCE(
           (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Document"."clientId"),
           (SELECT "policyNumber" FROM "Policy" WHERE "Policy"."id" = "Document"."policyId"),
           (SELECT "folio" FROM "Claim" WHERE "Claim"."id" = "Document"."claimId"),
           (SELECT "receiptNumber" FROM "Receipt" WHERE "Receipt"."id" = "Document"."receiptId")
         ) AS "parentLabel"`,
+      undefined,
+      scopedDocumentWhere,
     ),
   ]);
 
@@ -263,7 +364,7 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult[]>
   }
 
   for (const p of policies) {
-    const match = pickMatch(p, ["policyNumber", "insuredObject", "notes"], needle);
+    const match = pickMatch(p, ["policyNumber", "insuredObject", "insuredPartiesText", "insuredAssetsText", "notes"], needle);
     results.push({
       id: p.id,
       type: "policy",

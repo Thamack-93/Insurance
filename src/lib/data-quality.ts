@@ -1,5 +1,7 @@
 import { getDb } from "@/lib/db";
+import { today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
+import { globalSearch } from "@/lib/search";
 
 export type DataQualityIssue = {
   code: string;
@@ -31,6 +33,81 @@ export type PolicyQualityScore = {
   completitud: number;
   issues: DataQualityIssue[];
 };
+
+export type OperationalDataHealthSummary = {
+  clientsWithoutPortfolioOwner: number;
+  activeDemoUsers: number;
+  demoUsers: Array<{ id: string; email: string; name: string; active: boolean }>;
+  brokerDemoPresent: boolean;
+  overdueOpenReceipts: number;
+  overdueOpenReceiptsOwned: number;
+  globalSearchOk: boolean;
+  globalSearchResultCount: number;
+  insuredOnlyClientsWithoutPolicies: number;
+};
+
+export async function getOperationalDataHealthSummary(): Promise<OperationalDataHealthSummary> {
+  const db = getDb();
+  const now = today();
+  const [
+    clientsWithoutPortfolioOwner,
+    demoUsers,
+    overdueOpenReceipts,
+    overdueOpenReceiptsOwned,
+    insuredOnlyClientsWithoutPolicies,
+  ] = await Promise.all([
+    db.client.count({ where: { portfolioOwnerId: null } }),
+    db.user.findMany({
+      where: {
+        OR: [
+          { email: { contains: "demo" } },
+          { name: { contains: "Demo" } },
+          { email: "broker@policydesk.local" },
+        ],
+      },
+      select: { id: true, email: true, name: true, active: true },
+      orderBy: { email: "asc" },
+    }),
+    db.receipt.count({
+      where: { dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
+    }),
+    db.receipt.count({
+      where: {
+        dueDate: { lt: now },
+        status: { notIn: ["PAID", "CANCELLED"] },
+        client: { portfolioOwnerId: { not: null } },
+      },
+    }),
+    db.client.count({
+      where: {
+        fullName: { contains: "ASEGURADO:" },
+        policies: { none: {} },
+      },
+    }),
+  ]);
+
+  let globalSearchOk = false;
+  let globalSearchResultCount = 0;
+  try {
+    const results = await globalSearch("199658");
+    globalSearchResultCount = results.length;
+    globalSearchOk = results.some((result) => result.title.includes("199658") || result.subtitle?.includes("199658"));
+  } catch {
+    globalSearchOk = false;
+  }
+
+  return {
+    clientsWithoutPortfolioOwner,
+    activeDemoUsers: demoUsers.filter((user) => user.active).length,
+    demoUsers,
+    brokerDemoPresent: demoUsers.some((user) => user.email === "broker@policydesk.local"),
+    overdueOpenReceipts,
+    overdueOpenReceiptsOwned,
+    globalSearchOk,
+    globalSearchResultCount,
+    insuredOnlyClientsWithoutPolicies,
+  };
+}
 
 export async function getClientDataQualityScores() {
   const db = getDb();
@@ -160,16 +237,23 @@ export async function getPolicyDataQualityScores() {
       id: true,
       policyNumber: true,
       status: true,
+      paymentFrequency: true,
       insuredObject: true,
       premiumAmount: true,
       clientId: true,
-      client: { select: { fullName: true } },
-      insurer: { select: { name: true } },
-      documents: {
+      _count: {
         select: {
-          documentType: true,
+          receipts: true,
         },
       },
+      insuredParties: {
+        select: { id: true, isPrimary: true },
+      },
+      insuredAssets: {
+        select: { id: true, isPrimary: true },
+      },
+      client: { select: { fullName: true } },
+      insurer: { select: { name: true } },
     },
   });
 
@@ -178,18 +262,10 @@ export async function getPolicyDataQualityScores() {
       const issues: DataQualityIssue[] = [];
       let score = 100;
 
-      const hasPolicyPdf = policy.documents.some((document) => document.documentType === "POLICY");
-      if (!hasPolicyPdf) {
-        issues.push({
-          code: "POLICY_PDF_MISSING",
-          etiqueta: "PDF faltante",
-          descripcion: "No existe documento principal de póliza.",
-          penalizacion: 20,
-        });
-        score -= 20;
-      }
+      const hasInsuredParty = policy.insuredParties.length > 0;
+      const hasInsuredAsset = policy.insuredAssets.length > 0;
 
-      if (!policy.insuredObject) {
+      if (!policy.insuredObject && !hasInsuredParty && !hasInsuredAsset) {
         issues.push({
           code: "POLICY_OBJECT_MISSING",
           etiqueta: "Objeto asegurado faltante",
@@ -219,13 +295,22 @@ export async function getPolicyDataQualityScores() {
         score -= 15;
       }
 
+      if (policy.paymentFrequency === "SINGLE" && policy._count.receipts > 1) {
+        issues.push({
+          code: "POLICY_PAYMENT_FREQUENCY_REVIEW",
+          etiqueta: "Frecuencia de pago para revisar",
+          descripcion: "La póliza está marcada como única, pero tiene múltiples recibos y conviene validar si debe normalizarse.",
+          penalizacion: 8,
+        });
+        score -= 8;
+      }
+
       const completitud = Math.max(
         0,
         Math.round(
-          ((Number(hasPolicyPdf) +
-            Number(Boolean(policy.insuredObject)) +
+          ((Number(Boolean(policy.insuredObject || hasInsuredParty || hasInsuredAsset)) +
             Number(Boolean(toNumber(policy.premiumAmount)))) /
-            3) *
+            2) *
             100,
         ),
       );

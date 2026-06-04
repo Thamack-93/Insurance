@@ -32,9 +32,24 @@ const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
 };
 
+function normalizePostgresConnectionString(connectionString: string) {
+  try {
+    const url = new URL(connectionString);
+    const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
+    if (sslMode === "prefer" || sslMode === "require" || sslMode === "verify-ca") {
+      url.searchParams.set("sslmode", "verify-full");
+      return url.toString();
+    }
+  } catch {
+    // The validation below will report malformed or unsupported URLs.
+  }
+  return connectionString;
+}
+
 export function getDb() {
   if (!globalForPrisma.prisma) {
-    const connectionString = process.env.DATABASE_URL?.trim();
+    const rawConnectionString = process.env.DATABASE_URL?.trim();
+    const connectionString = rawConnectionString ? normalizePostgresConnectionString(rawConnectionString) : "";
     if (!connectionString) {
       throw new Error("DATABASE_URL is required to initialize Prisma.");
     }
