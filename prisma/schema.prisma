@@ -47,6 +47,10 @@ model User {
   createdMaintenanceRuns     MaintenanceRun[]             @relation("MaintenanceRunCreatedBy")
   reviewedReceiptIssues      ReceiptReconciliationIssue[] @relation("ReceiptReconciliationIssueReviewedBy")
   reviewedRenewalSuggestions PolicyRenewalSuggestion[]    @relation("PolicyRenewalSuggestionReviewedBy")
+  createdLedgerImportBatches LedgerImportBatch[]          @relation("LedgerImportBatchCreatedBy")
+  approvedLedgerImportBatches LedgerImportBatch[]         @relation("LedgerImportBatchApprovedBy")
+  reviewedLedgerImportIssues LedgerImportIssue[]          @relation("LedgerImportIssueReviewedBy")
+  performedLedgerImportActions LedgerImportAction[]       @relation("LedgerImportActionPerformedBy")
 
   @@index([email])
   @@index([role])
@@ -162,6 +166,8 @@ model Policy {
   workItems                   WorkItem[]
   notificationEvents          NotificationEvent[]
   receiptReconciliationIssues ReceiptReconciliationIssue[]
+  insuredParties              PolicyInsuredParty[]
+  insuredAssets               PolicyInsuredAsset[]
   sourceRenewalSuggestions    PolicyRenewalSuggestion[]    @relation("PolicyRenewalSuggestionSource")
   targetRenewalSuggestions    PolicyRenewalSuggestion[]    @relation("PolicyRenewalSuggestionTarget")
 
@@ -589,6 +595,42 @@ model NotificationEvent {
   @@index([receiptId])
 }
 
+model PolicyInsuredParty {
+  id          String   @id @default(cuid())
+  policyId    String
+  fullName    String
+  isPrimary   Boolean  @default(false)
+  sourceLabel String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  policy Policy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@index([policyId])
+  @@index([fullName])
+  @@index([isPrimary])
+  @@unique([policyId, fullName])
+}
+
+model PolicyInsuredAsset {
+  id           String   @id @default(cuid())
+  policyId     String
+  assetType    String
+  description  String
+  serialNumber String?
+  isPrimary    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  policy Policy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@index([policyId])
+  @@index([assetType])
+  @@index([serialNumber])
+  @@index([isPrimary])
+  @@unique([policyId, assetType, description, serialNumber], map: "PolicyInsuredAsset_policyId_assetType_description_serialNumber_")
+}
+
 model TelegramLinkToken {
   id        String    @id @default(cuid())
   userId    String
@@ -602,6 +644,110 @@ model TelegramLinkToken {
   @@index([userId])
   @@index([expiresAt])
   @@index([usedAt])
+}
+
+model LedgerImportBatch {
+  id            String   @id @default(cuid())
+  sourceCsvName  String
+  sourceCsvHash  String
+  sourcePaidName String
+  sourcePaidHash String
+  status        String   @default("PREVIEW")
+  summaryJson   String?
+  createdById   String?
+  approvedById  String?
+  approvedAt    DateTime?
+  appliedAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  createdBy      User?              @relation("LedgerImportBatchCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  approvedBy     User?              @relation("LedgerImportBatchApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  rows           LedgerImportRow[]
+  issues         LedgerImportIssue[]
+  actions        LedgerImportAction[]
+
+  @@index([status])
+  @@index([createdById])
+  @@index([approvedById])
+  @@index([createdAt])
+}
+
+model LedgerImportRow {
+  id            String   @id @default(cuid())
+  batchId       String
+  sourceType    String
+  rowNumber     Int
+  sourceKey     String
+  rawJson       String
+  normalizedJson String?
+  action        String
+  status        String   @default("PENDING")
+  policyId      String?
+  receiptId     String?
+  paymentId     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  batch   LedgerImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  actions LedgerImportAction[]
+  issues  LedgerImportIssue[]
+
+  @@index([batchId])
+  @@index([sourceType])
+  @@index([sourceKey])
+  @@index([status])
+  @@index([policyId])
+  @@index([receiptId])
+  @@index([paymentId])
+}
+
+model LedgerImportAction {
+  id            String   @id @default(cuid())
+  batchId       String
+  rowId         String?
+  actionType    String
+  payloadJson   String?
+  performedById String?
+  createdAt     DateTime @default(now())
+
+  batch       LedgerImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  row         LedgerImportRow?  @relation(fields: [rowId], references: [id], onDelete: SetNull)
+  performedBy User?             @relation("LedgerImportActionPerformedBy", fields: [performedById], references: [id], onDelete: SetNull)
+
+  @@index([batchId])
+  @@index([rowId])
+  @@index([actionType])
+  @@index([performedById])
+  @@index([createdAt])
+}
+
+model LedgerImportIssue {
+  id            String   @id @default(cuid())
+  batchId       String
+  rowId         String?
+  issueType     String
+  severity      String
+  status        String   @default("OPEN")
+  message       String
+  detailsJson   String?
+  reviewedAt    DateTime?
+  reviewedById  String?
+  resolutionNote String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  batch      LedgerImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  row        LedgerImportRow?  @relation(fields: [rowId], references: [id], onDelete: SetNull)
+  reviewedBy User?             @relation("LedgerImportIssueReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([batchId])
+  @@index([rowId])
+  @@index([issueType])
+  @@index([severity])
+  @@index([status])
+  @@index([reviewedById])
+  @@index([createdAt])
 }
 
 model TelegramDraft {

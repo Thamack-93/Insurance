@@ -45,6 +45,15 @@ const policySchema = z.object({
   insuredObject: z.string().optional(),
   beneficiaryInfo: z.string().optional(),
   notes: z.string().optional(),
+}).refine((value) => value.endDate >= value.startDate, {
+  message: "La fecha final debe ser posterior al inicio.",
+  path: ["endDate"],
+}).refine((value) => {
+  const days = Math.round((value.endDate.getTime() - value.startDate.getTime()) / (1000 * 60 * 60 * 24));
+  return days <= 366;
+}, {
+  message: "La vigencia no puede superar 366 días. Divide contratos multianuales por anualidades.",
+  path: ["endDate"],
 });
 
 type PolicyInput = z.infer<typeof policySchema>;

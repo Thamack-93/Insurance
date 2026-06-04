@@ -57,6 +57,7 @@ type Props = {
   saveNotificationPreferences: (preferences: NotificationPreferenceInput[]) => Promise<MutationResult>;
   generateTelegramLinkCode: () => Promise<TelegramLinkCodeResult>;
   disconnectTelegram: () => Promise<MutationResult>;
+  sendTelegramDigestNow: () => Promise<MutationResult>;
   sendTelegramTestMessage: () => Promise<MutationResult>;
   updateNotificationTimezone: (timeZone: string) => Promise<MutationResult>;
 };
@@ -101,6 +102,7 @@ export function NotificationPreferencesPanel({
   saveNotificationPreferences,
   generateTelegramLinkCode,
   disconnectTelegram,
+  sendTelegramDigestNow,
   sendTelegramTestMessage,
   updateNotificationTimezone,
 }: Props) {
@@ -109,6 +111,7 @@ export function NotificationPreferencesPanel({
   const [selectedTimeZone, setSelectedTimeZone] = useState(timeZone);
   const [isPending, startTransition] = useTransition();
   const [isGeneratingLink, setIsGeneratingLink] = useState(false);
+  const [isSendingDigestNow, setIsSendingDigestNow] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [isSavingTimeZone, setIsSavingTimeZone] = useState(false);
@@ -175,6 +178,22 @@ export function NotificationPreferencesPanel({
       router.refresh();
     } finally {
       setIsSendingTest(false);
+    }
+  }
+
+  async function handleSendTelegramDigestNow() {
+    setIsSendingDigestNow(true);
+    try {
+      const result = await sendTelegramDigestNow();
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+
+      toast.success(result.message);
+      router.refresh();
+    } finally {
+      setIsSendingDigestNow(false);
     }
   }
 
@@ -279,6 +298,15 @@ export function NotificationPreferencesPanel({
               <Button type="button" variant="outline" size="sm" onClick={handleGenerateTelegramLinkCode} disabled={isGeneratingLink}>
                 <Link2 className="mr-2 size-4" />
                 {isGeneratingLink ? "Generando…" : "Generar código"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleSendTelegramDigestNow}
+                disabled={isSendingDigestNow || !connected}
+              >
+                <Send className="mr-2 size-4" />
+                {isSendingDigestNow ? "Enviando…" : "Enviar ahora"}
               </Button>
               <Button
                 type="button"

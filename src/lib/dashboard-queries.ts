@@ -150,10 +150,6 @@ export async function getDashboardData() {
     .filter((receipt) => receipt.status !== "PAID" && receipt.dueDate <= in7)
     .slice(0, 6);
 
-  const documentsMissing = risks
-    .filter((risk) => ["POLICY_MISSING_PDF", "PAID_RECEIPT_WITHOUT_PROOF"].includes(risk.alertType))
-    .slice(0, 6);
-
   return {
     kpis: {
       activePolicies,
@@ -183,7 +179,6 @@ export async function getDashboardData() {
       urgentRenewals: upcomingRenewalPolicies,
       criticalWorkItems,
       recentActivity,
-      documentsMissing,
       topRisks: risks.slice(0, 6),
       openNotifications,
       monthRange: { monthStart, monthEnd },
@@ -316,9 +311,6 @@ export async function getTodayData() {
     overdueWorkItems: overdueWorkItemRows,
     clientsToContact,
     commissionsToReview,
-    documentsMissing: risks
-      .filter((risk) => ["POLICY_MISSING_PDF", "PAID_RECEIPT_WITHOUT_PROOF"].includes(risk.alertType))
-      .slice(0, 6),
     criticalRisks: risks.filter((risk) => risk.severity === "CRITICAL").slice(0, 6),
     recentActivity,
   };

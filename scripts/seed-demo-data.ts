@@ -241,7 +241,7 @@ async function main() {
         status: workItemStatuses[index],
         priority: priorities[index],
         folio: sourceId,
-        title: ["Confirmar pago", "Solicitar PDF", "Preparar renovacion", "Validar comision", "Enviar cotizacion", "Dar seguimiento"][index],
+        title: ["Confirmar pago", "Solicitar documento", "Preparar renovacion", "Validar comision", "Enviar cotizacion", "Dar seguimiento"][index],
         description: "Pendiente demo para probar la operacion diaria de PolicyDesk.",
         entityType: "WorkItem",
         entityId: sourceId,
@@ -300,9 +300,9 @@ async function main() {
     const policy = policies[index % policies.length];
     await db.alert.create({
       data: {
-        alertType: ["RECEIPT_OVERDUE", "POLICY_MISSING_PDF", "COMMISSION_OVERDUE", "CLIENT_MISSING_CONTACT"][index],
+        alertType: ["RECEIPT_OVERDUE", "RENEWAL_WITHOUT_TASK", "COMMISSION_OVERDUE", "CLIENT_MISSING_CONTACT"][index],
         severity: alertSeverities[index],
-        title: ["Recibo vencido", "Poliza sin PDF", "Comision vencida", "Cliente incompleto"][index],
+        title: ["Recibo vencido", "Poliza sin seguimiento", "Comision vencida", "Cliente incompleto"][index],
         description: "Alerta demo generada para mostrar riesgos operativos.",
         entityType: index % 2 === 0 ? "Policy" : "Receipt",
         entityId: index % 2 === 0 ? policy.id : receipts[index].id,

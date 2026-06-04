@@ -8,6 +8,7 @@ import path from "node:path";
 
 import * as XLSX from "@e965/xlsx";
 import { Client as PgClient } from "pg";
+import { reconcileReceiptState } from "@/lib/receipt-reconciliation";
 
 type Mode = "dry-run" | "apply";
 
@@ -21,7 +22,6 @@ type Args = {
 type ExistingClient = {
   id: string;
   fullName: string;
-  referidorId: string | null;
   status: string;
 };
 
@@ -249,6 +249,10 @@ function sameDate(left: Date | null | undefined, right: Date | null | undefined)
   return dateKey(left) === dateKey(right);
 }
 
+function daysBetween(left: Date, right: Date) {
+  return Math.round((left.getTime() - right.getTime()) / (1000 * 60 * 60 * 24));
+}
+
 function id() {
   return randomUUID();
 }
@@ -259,15 +263,15 @@ function extractClient(raw: string) {
   const markerIndex = text.toUpperCase().indexOf(marker);
 
   if (markerIndex === -1) {
-    return { clientName: text, referidorName: null };
+    return { clientName: text, referidorName: text };
   }
 
   const before = cleanText(text.slice(0, markerIndex).replace(/-\s*$/g, ""));
   const after = cleanText(text.slice(markerIndex + marker.length));
 
   return {
-    clientName: after || before || text,
-    referidorName: before && after && normalizeName(before) !== normalizeName(after) ? before : null,
+    clientName: before || text,
+    referidorName: after || before || text,
   };
 }
 
@@ -494,7 +498,7 @@ async function loadState(db: PgClient) {
   const receipts = await db.query<ExistingReceipt>(
     'select id, "receiptNumber", "policyId", "clientId", "insurerId", "periodStartDate", "periodEndDate", "dueDate", amount, currency, status, "paidDate", "paymentMethod" from public."Receipt"',
   );
-  const payments = await db.query<{ receiptId: string }>('select "receiptId" from public."Payment"');
+  const payments = await db.query<{ receiptId: string; sourceEvidenceKey: string | null }>('select "receiptId", "sourceEvidenceKey" from public."Payment"');
   const users = await db.query<{ id: string; email: string }>('select id, email from public."User"');
 
   const importUser = users.rows.find((user) => user.email.toLowerCase() === IMPORT_USER_EMAIL)?.id;
@@ -508,6 +512,7 @@ async function loadState(db: PgClient) {
     policies: policies.rows,
     receipts: receipts.rows,
     paymentReceiptIds: new Set(payments.rows.map((payment) => payment.receiptId)),
+    paymentSourceEvidenceKeys: new Set(payments.rows.map((payment) => payment.sourceEvidenceKey).filter((key): key is string => Boolean(key))),
     importUser,
   };
 }
@@ -626,7 +631,6 @@ async function ensureClient(params: {
   db: PgClient;
   apply: boolean;
   name: string;
-  referidorId?: string | null;
   clients: ExistingClient[];
   clientByName: Map<string, ExistingClient[]>;
   clientByPersonTokens: Map<string, ExistingClient[]>;
@@ -662,46 +666,26 @@ async function ensureClient(params: {
   }
 
   if (match) {
-    const needsReferidor = params.referidorId && !match.referidorId && match.id !== params.referidorId;
-    if (needsReferidor) {
-      params.report.clients.push({
-        Accion: params.apply ? "ACTUALIZAR" : "ACTUALIZARIA",
-        Cliente: match.fullName,
-        Campo: "referidorId",
-        Fuente: params.source,
-      });
-      if (params.apply) {
-        await params.db.query('update public."Client" set "referidorId" = $1, "updatedAt" = now(), "updatedById" = $2 where id = $3', [
-          params.referidorId,
-          params.importUser,
-          match.id,
-        ]);
-        match.referidorId = params.referidorId ?? null;
-      }
-    } else {
-      params.report.clients.push({ Accion: "SIN_CAMBIOS", Cliente: match.fullName, Fuente: params.source });
-    }
+    params.report.clients.push({ Accion: "SIN_CAMBIOS", Cliente: match.fullName, Fuente: params.source });
     return match;
   }
 
   const newClient: ExistingClient = {
     id: id(),
     fullName: name,
-    referidorId: params.referidorId ?? null,
     status: "ACTIVE",
   };
   params.report.clients.push({
     Accion: params.apply ? "CREAR" : "CREARIA",
     Cliente: name,
     Tipo: inferClientType(name),
-    ReferidorId: params.referidorId ?? "",
     Fuente: params.source,
   });
 
   if (params.apply) {
     await params.db.query(
-      'insert into public."Client" (id, "fullName", type, "referidorId", status, "createdAt", "updatedAt", "createdById", "updatedById") values ($1,$2,$3,$4,$5,now(),now(),$6,$6)',
-      [newClient.id, newClient.fullName, inferClientType(name), newClient.referidorId, "ACTIVE", params.importUser],
+      'insert into public."Client" (id, "fullName", type, status, "createdAt", "updatedAt", "createdById", "updatedById") values ($1,$2,$3,$4,now(),now(),$5,$5)',
+      [newClient.id, newClient.fullName, inferClientType(name), "ACTIVE", params.importUser],
     );
   }
 
@@ -768,17 +752,106 @@ function addToMultiMap<T>(map: Map<string, T[]>, key: string, value: T) {
   map.set(key, current);
 }
 
+function sourceEvidenceKeyForPaidRow(row: PaidReceiptRow) {
+  return [
+    row.policyKey,
+    cleanText(row.receiptNumber),
+    dateKey(row.paidDate),
+    Math.round(row.totalPaid * 100),
+    normalizeName(row.clientName),
+    normalizeName(row.insurerName),
+  ].join("|");
+}
+
+function choosePaidEvidence(
+  receipt: {
+    receiptNumber: string;
+    amount: unknown;
+    dueDate: Date;
+    periodStartDate: Date;
+    periodEndDate: Date;
+    policyNumber: string;
+    clientName: string;
+    insurerName: string;
+  },
+  candidates: PaidReceiptRow[],
+  usedEvidence: Set<string>,
+) {
+  const ranked = candidates
+    .filter((candidate) => !usedEvidence.has(sourceEvidenceKeyForPaidRow(candidate)))
+    .map((candidate) => {
+      const amountDiff = Math.abs(Number(receipt.amount) - candidate.totalPaid);
+      const dueDiff = candidate.paidDate ? Math.abs(candidate.paidDate.getTime() - receipt.dueDate.getTime()) / (1000 * 60 * 60 * 24) : 999;
+      const termDiff =
+        candidate.paidDate && receipt.periodStartDate && receipt.periodEndDate
+          ? Math.min(
+              Math.abs(candidate.paidDate.getTime() - receipt.periodStartDate.getTime()) / (1000 * 60 * 60 * 24),
+              Math.abs(candidate.paidDate.getTime() - receipt.periodEndDate.getTime()) / (1000 * 60 * 60 * 24),
+            )
+          : 999;
+
+      let score = 0;
+      if (amountDiff <= 0.01) score += 40;
+      else if (amountDiff <= 5) score += 25;
+      else if (amountDiff <= 25) score += 10;
+      if (dueDiff <= 30) score += 25;
+      else if (dueDiff <= 60) score += 10;
+      if (termDiff <= 30) score += 25;
+      else if (termDiff <= 60) score += 10;
+      if (normalizeName(candidate.clientName) === normalizeName(receipt.clientName)) score += 10;
+      if (normalizeName(candidate.insurerName) === normalizeName(receipt.insurerName)) score += 10;
+
+      return { candidate, score };
+    })
+    .sort((left, right) => right.score - left.score || left.candidate.rowNumber - right.candidate.rowNumber);
+
+  const best = ranked[0];
+  const second = ranked[1];
+  if (!best || best.score < 60 || (second && second.score === best.score)) {
+    return { candidate: null as PaidReceiptRow | null, ambiguous: ranked.length > 1, score: best?.score ?? 0 };
+  }
+
+  return { candidate: best.candidate, ambiguous: false, score: best.score };
+}
+
+async function syncPolicyInsuredRecords(params: {
+  db: PgClient;
+  apply: boolean;
+  policyId: string;
+  insuredName: string;
+  assetDescription: string | null;
+  assetSerial: string | null;
+  policyType: string;
+  source: string;
+}) {
+  if (!params.apply) return;
+
+  await params.db.query('delete from public."PolicyInsuredParty" where "policyId" = $1', [params.policyId]);
+  await params.db.query('delete from public."PolicyInsuredAsset" where "policyId" = $1', [params.policyId]);
+
+  await params.db.query(
+    'insert into public."PolicyInsuredParty" (id, "policyId", "fullName", "isPrimary", "sourceLabel", "createdAt", "updatedAt") values ($1,$2,$3,$4,$5,now(),now())',
+    [id(), params.policyId, params.insuredName, true, params.source],
+  );
+
+  if (params.assetDescription || params.assetSerial) {
+    await params.db.query(
+      'insert into public."PolicyInsuredAsset" (id, "policyId", "assetType", "description", "serialNumber", "isPrimary", "createdAt", "updatedAt") values ($1,$2,$3,$4,$5,$6,now(),now())',
+      [id(), params.policyId, params.policyType, params.assetDescription ?? params.insuredName, params.assetSerial, true],
+    );
+  }
+}
+
 async function runImport(args: Args) {
   const policyRows = readPolicyRows(args.csvPath).filter((row) => row.policyKey && row.policyNumber);
   const paidRows = readPaidReceiptRows(args.paidPath);
-  const paidByReceipt = new Map<string, PaidReceiptRow>();
+  const paidByReceipt = new Map<string, PaidReceiptRow[]>();
 
   for (const paid of paidRows) {
     const key = paidKey(paid.policyKey, paid.receiptNumber);
-    const existing = paidByReceipt.get(key);
-    if (!existing || (paid.paidDate && (!existing.paidDate || paid.paidDate > existing.paidDate))) {
-      paidByReceipt.set(key, paid);
-    }
+    const existing = paidByReceipt.get(key) ?? [];
+    existing.push(paid);
+    paidByReceipt.set(key, existing);
   }
 
   const db = await connectDb();
@@ -794,6 +867,7 @@ async function runImport(args: Args) {
     const receiptByExactKey = buildMultiMap(state.receipts, (receipt) =>
       receiptKey(receipt.policyId, receipt.receiptNumber, receipt.periodStartDate, receipt.periodEndDate),
     );
+    const usedEvidenceKeys = new Set(state.paymentSourceEvidenceKeys ?? []);
 
     const policyGroups = new Map<string, PolicyCsvRow[]>();
     for (const row of policyRows) {
@@ -847,26 +921,10 @@ async function runImport(args: Args) {
       }
 
       const first = rows[0];
-      const referidor =
-        first.referidorName
-          ? await ensureClient({
-              db,
-              apply: args.mode === "apply",
-              name: first.referidorName,
-              clients: state.clients,
-              clientByName,
-              clientByPersonTokens,
-              report,
-              importUser: state.importUser,
-              source: `Referidor ${first.policyNumber}`,
-            })
-          : null;
-
       const client = await ensureClient({
         db,
         apply: args.mode === "apply",
         name: first.clientName,
-        referidorId: referidor?.id,
         clients: state.clients,
         clientByName,
         clientByPersonTokens,
@@ -898,6 +956,16 @@ async function runImport(args: Args) {
       if (!startDate || !endDate) {
         skippedPolicyKeys.add(policyKey);
         report.errors.push({ Entidad: "Póliza", Llave: first.policyNumber, Error: "No tiene vigencia válida" });
+        continue;
+      }
+
+      if (daysBetween(endDate, startDate) > 366) {
+        skippedPolicyKeys.add(policyKey);
+        report.errors.push({
+          Entidad: "Póliza",
+          Llave: first.policyNumber,
+          Error: "Vigencia mayor a 366 días. Debe dividirse por anualidades aprobadas por ADMIN.",
+        });
         continue;
       }
 
@@ -962,6 +1030,16 @@ async function runImport(args: Args) {
         state.policies.push(newPolicy);
         addToMultiMap(policyByKey, policyKey, newPolicy);
         policyIdByKey.set(policyKey, newPolicy.id);
+        await syncPolicyInsuredRecords({
+          db,
+          apply: args.mode === "apply",
+          policyId: newPolicy.id,
+          insuredName: first.referidorName ?? first.clientName,
+          assetDescription: policyData.insuredObject,
+          assetSerial: first.serial || null,
+          policyType: policyData.policyType,
+          source: `Póliza ${first.policyNumber}`,
+        });
         continue;
       }
 
@@ -1015,6 +1093,16 @@ async function runImport(args: Args) {
       }
 
       Object.assign(existing, { ...policyData, premiumAmount: String(policyData.premiumAmount) });
+      await syncPolicyInsuredRecords({
+        db,
+        apply: args.mode === "apply",
+        policyId: existing.id,
+        insuredName: first.referidorName ?? first.clientName,
+        assetDescription: policyData.insuredObject,
+        assetSerial: first.serial || null,
+        policyType: policyData.policyType,
+        source: `Póliza ${first.policyNumber}`,
+      });
     }
 
     for (const row of policyRows) {
@@ -1044,12 +1132,51 @@ async function runImport(args: Args) {
         continue;
       }
 
-      const paidEvidence = paidByReceipt.get(paidKey(row.policyKey, row.receiptNumber));
-      const fallbackPaid = normalizeName(row.paidFlag) === "SI" || mapReceiptStatus(row.status) === "PAID";
-      const paidDate = paidEvidence?.paidDate ?? (fallbackPaid ? row.paidDate : null);
-      const amount = row.totalAmount > 0 ? row.totalAmount : paidEvidence?.totalPaid ?? 0;
-      const receiptStatus = paidEvidence || fallbackPaid ? "PAID" : mapReceiptStatus(row.status);
       const existing = existingMatches[0] ?? null;
+      let amount = row.totalAmount > 0 ? row.totalAmount : Number(existing?.amount ?? 0);
+      const evidenceCandidates = paidByReceipt.get(paidKey(row.policyKey, row.receiptNumber)) ?? [];
+      const receiptClient = state.clients.find((item) => item.id === policy.clientId);
+      const receiptInsurer = state.insurers.find((item) => item.id === policy.insurerId);
+      const evidenceSelection = choosePaidEvidence(
+        {
+          receiptNumber: row.receiptNumber,
+          amount,
+          dueDate: row.periodStart,
+          periodStartDate: row.periodStart,
+          periodEndDate: row.periodEnd,
+          policyNumber: policy.policyNumber,
+          clientName: receiptClient?.fullName ?? "",
+          insurerName: receiptInsurer?.name ?? "",
+        },
+        evidenceCandidates,
+        usedEvidenceKeys,
+      );
+      const paidEvidence = evidenceSelection.candidate;
+      if (paidEvidence) {
+        amount = paidEvidence.totalPaid > 0 ? paidEvidence.totalPaid : amount;
+      }
+
+      const receiptReconciliation = reconcileReceiptState({
+        amount,
+        status: mapReceiptStatus(row.status) as "PENDING" | "PAID" | "OVERDUE" | "CANCELLED",
+        dueDate: row.periodStart,
+        paidDate: paidEvidence?.paidDate ?? null,
+        paymentMethod: paidEvidence ? PAYMENT_METHOD : null,
+        payments: paidEvidence
+          ? [
+              {
+                amount,
+                paidDate: paidEvidence.paidDate ?? row.periodStart,
+                paymentMethod: PAYMENT_METHOD,
+              },
+            ]
+          : [],
+        now: TODAY,
+        closeTolerance: 5,
+      });
+      const receiptStatus = receiptReconciliation.nextStatus;
+      const paidDate = receiptReconciliation.nextPaidDate;
+      const paymentMethod = receiptReconciliation.nextPaymentMethod;
 
       if (!amount || amount < 0) {
         report.skipped.push({
@@ -1076,7 +1203,7 @@ async function runImport(args: Args) {
           currency: mapCurrency(row.currency),
           status: receiptStatus,
           paidDate,
-          paymentMethod: receiptStatus === "PAID" ? PAYMENT_METHOD : null,
+          paymentMethod,
         };
 
         report.receipts.push({
@@ -1105,14 +1232,51 @@ async function runImport(args: Args) {
               newReceipt.currency,
               newReceipt.status,
               newReceipt.paidDate,
-              newReceipt.paymentMethod,
-              state.importUser,
+            newReceipt.paymentMethod,
+            state.importUser,
             ],
           );
         }
 
         state.receipts.push(newReceipt);
         addToMultiMap(receiptByExactKey, exactKey, newReceipt);
+
+        if (paidEvidence) {
+          const evidenceKey = sourceEvidenceKeyForPaidRow(paidEvidence);
+          usedEvidenceKeys.add(evidenceKey);
+          if (!state.paymentSourceEvidenceKeys.has(evidenceKey)) {
+            report.payments.push({
+              Accion: args.mode === "apply" ? "CREAR" : "CREARIA",
+              Poliza: policy.policyNumber,
+              Recibo: row.receiptNumber,
+              FechaPago: dateKey(paidEvidence.paidDate ?? row.periodStart),
+              Importe: amount,
+              Fuente: "recibos pagados.xls",
+            });
+
+            if (args.mode === "apply") {
+              const paymentId = id();
+              await db.query(
+                'insert into public."Payment" (id, "receiptId", "policyId", "clientId", amount, currency, "paidDate", "paymentMethod", reference, notes, "sourceEvidenceKey", "createdAt", "updatedAt", "createdById", "updatedById") values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now(),now(),$12,$12)',
+                [
+                  paymentId,
+                  newReceipt.id,
+                  policy.id,
+                  policy.clientId,
+                  amount,
+                  mapCurrency(row.currency),
+                  paidDate ?? paidEvidence.paidDate ?? row.periodStart,
+                  paymentMethod ?? PAYMENT_METHOD,
+                  `import-${dateKey(paidEvidence.paidDate ?? row.periodStart)}-${row.receiptNumber}`,
+                  "Pago importado desde reporte de recibos pagados.",
+                  evidenceKey,
+                  state.importUser,
+                ],
+              );
+              state.paymentSourceEvidenceKeys.add(evidenceKey);
+            }
+          }
+        }
         continue;
       }
 
@@ -1165,64 +1329,43 @@ async function runImport(args: Args) {
         currency: mapCurrency(row.currency),
         status: receiptStatus,
         paidDate,
-        paymentMethod: receiptStatus === "PAID" ? PAYMENT_METHOD : null,
+        paymentMethod,
       });
-    }
+      if (paidEvidence) {
+        const evidenceKey = sourceEvidenceKeyForPaidRow(paidEvidence);
+        usedEvidenceKeys.add(evidenceKey);
+        if (!state.paymentSourceEvidenceKeys.has(evidenceKey)) {
+          report.payments.push({
+            Accion: args.mode === "apply" ? "CREAR" : "CREARIA",
+            Poliza: policy.policyNumber,
+            Recibo: row.receiptNumber,
+            FechaPago: dateKey(paidEvidence.paidDate ?? row.periodStart),
+            Importe: amount,
+            Fuente: "recibos pagados.xls",
+          });
 
-    const receiptsForPayment = state.receipts.filter((receipt) => receipt.status === "PAID" && !state.paymentReceiptIds.has(receipt.id));
-    for (const receipt of receiptsForPayment) {
-      const policy = state.policies.find((item) => item.id === receipt.policyId);
-      if (!policy) continue;
-      const csvRow = policyRows.find(
-        (row) =>
-          row.policyKey === normalizePolicyNumber(policy.policyNumber) &&
-          row.receiptNumber === receipt.receiptNumber &&
-          dateKey(row.periodStart) === dateKey(receipt.periodStartDate) &&
-          dateKey(row.periodEnd) === dateKey(receipt.periodEndDate),
-      );
-      const evidence = paidByReceipt.get(paidKey(normalizePolicyNumber(policy.policyNumber), receipt.receiptNumber));
-      const amount = evidence?.totalPaid || Number(receipt.amount);
-      const paidDate = evidence?.paidDate ?? receipt.paidDate ?? csvRow?.paidDate ?? receipt.dueDate;
-
-      if (!amount || amount <= 0) {
-        report.skipped.push({
-          Entidad: "Pago",
-          Poliza: policy.policyNumber,
-          Recibo: receipt.receiptNumber,
-          Motivo: "Importe de pago no positivo",
-          Importe: amount,
-        });
-        continue;
-      }
-
-      report.payments.push({
-        Accion: args.mode === "apply" ? "CREAR" : "CREARIA",
-        Poliza: policy.policyNumber,
-        Recibo: receipt.receiptNumber,
-        FechaPago: dateKey(paidDate),
-        Importe: amount,
-        Fuente: evidence ? "recibos pagados.xls" : "Polizas.csv",
-      });
-
-      if (args.mode === "apply") {
-        const paymentId = id();
-        await db.query(
-          'insert into public."Payment" (id, "receiptId", "policyId", "clientId", amount, currency, "paidDate", "paymentMethod", reference, notes, "createdAt", "updatedAt", "createdById", "updatedById") values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),now(),$11,$11)',
-          [
-            paymentId,
-            receipt.id,
-            receipt.policyId,
-            receipt.clientId,
-            amount,
-            receipt.currency,
-            paidDate,
-            PAYMENT_METHOD,
-            `import-${dateKey(paidDate)}-${receipt.receiptNumber}`,
-            evidence ? "Pago importado desde reporte de recibos pagados." : "Pago inferido desde reporte de pólizas.",
-            state.importUser,
-          ],
-        );
-        state.paymentReceiptIds.add(receipt.id);
+          if (args.mode === "apply") {
+            const paymentId = id();
+            await db.query(
+              'insert into public."Payment" (id, "receiptId", "policyId", "clientId", amount, currency, "paidDate", "paymentMethod", reference, notes, "sourceEvidenceKey", "createdAt", "updatedAt", "createdById", "updatedById") values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now(),now(),$12,$12)',
+              [
+                paymentId,
+                existing.id,
+                policy.id,
+                policy.clientId,
+                amount,
+                mapCurrency(row.currency),
+                paidDate ?? paidEvidence.paidDate ?? row.periodStart,
+                paymentMethod ?? PAYMENT_METHOD,
+                `import-${dateKey(paidEvidence.paidDate ?? row.periodStart)}-${row.receiptNumber}`,
+                "Pago importado desde reporte de recibos pagados.",
+                evidenceKey,
+                state.importUser,
+              ],
+            );
+            state.paymentSourceEvidenceKeys.add(evidenceKey);
+          }
+        }
       }
     }
 

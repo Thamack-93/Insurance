@@ -12,6 +12,7 @@ import {
   disconnectTelegram,
   generateTelegramLinkCode,
   saveNotificationPreferences,
+  sendTelegramDigestNow,
   sendTelegramTestMessage,
   updateNotificationTimezone,
 } from "./actions";
@@ -119,6 +120,7 @@ export default async function NotificationSettingsPage() {
           timeZone={timeZone}
           generateTelegramLinkCode={generateTelegramLinkCode}
           disconnectTelegram={disconnectTelegram}
+          sendTelegramDigestNow={sendTelegramDigestNow}
           sendTelegramTestMessage={sendTelegramTestMessage}
           saveNotificationPreferences={saveNotificationPreferences}
           updateNotificationTimezone={updateNotificationTimezone}

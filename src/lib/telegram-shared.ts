@@ -11,6 +11,10 @@ export type TelegramCommandName =
   | "help"
   | "link"
   | "status"
+  | "confirmar"
+  | "cancelar"
+  | "pago"
+  | "poliza"
   | "recibos"
   | "renovaciones"
   | "unknown";
@@ -50,6 +54,10 @@ export function parseTelegramCommand(text: string): TelegramCommand | null {
     command === "help" ||
     command === "link" ||
     command === "status" ||
+    command === "confirmar" ||
+    command === "cancelar" ||
+    command === "pago" ||
+    command === "poliza" ||
     command === "recibos" ||
     command === "renovaciones"
   ) {
@@ -107,6 +115,10 @@ export function buildTelegramHelpMessage() {
     "/help - Mostrar este resumen.",
     "/link <código> - Vincular este chat con tu cuenta de PolicyDesk.",
     "/status - Ver si este chat ya está vinculado.",
+    "/pago <recibo> <monto> <fecha YYYY-MM-DD> <método> [referencia] - Preparar un pago para confirmar.",
+    "/poliza [campos] - Preparar una póliza y obtener un enlace seguro para terminarla en PolicyDesk.",
+    "/confirmar - Confirmar el borrador activo.",
+    "/cancelar - Cancelar el borrador activo.",
     "/recibos [días] - Ver cobros vencidos y próximos. Predeterminado: 30.",
     "/renovaciones [días] - Ver renovaciones próximas. Predeterminado: 30.",
   ].join("\n");
@@ -149,4 +161,50 @@ export function buildTelegramFallbackMessage() {
     "No reconocí ese comando.",
     "Usa /help para ver las instrucciones de vinculación.",
   ].join("\n");
+}
+
+export function buildTelegramPaymentDraftMessage(details: {
+  receiptNumber: string;
+  clientName: string;
+  policyNumber: string;
+  amount: string;
+  paymentMethod: string;
+  paidDate: string;
+  reference?: string | null;
+}) {
+  return [
+    "Borrador de pago preparado.",
+    `Recibo: ${details.receiptNumber} · ${details.clientName}`,
+    `Póliza: ${details.policyNumber}`,
+    `Monto: ${details.amount}`,
+    `Método: ${details.paymentMethod} · Fecha: ${details.paidDate}`,
+    details.reference ? `Referencia: ${details.reference}` : null,
+    "",
+    "Responde /confirmar para registrar el pago o /cancelar para descartarlo.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function buildTelegramPolicyDraftMessage(details: {
+  policyNumber: string | null;
+  summary: string;
+  link?: string | null;
+}) {
+  return [
+    "Borrador de póliza preparado.",
+    details.policyNumber ? `Póliza: ${details.policyNumber}` : null,
+    details.summary,
+    details.link ? `Abre este enlace para terminarla en PolicyDesk: ${details.link}` : "Abre PolicyDesk para completar la captura.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function buildTelegramDraftConfirmedMessage(label: string) {
+  return [`${label} confirmado.`, "El borrador se guardó y quedó auditado."].join("\n");
+}
+
+export function buildTelegramDraftCancelledMessage(label: string) {
+  return [`${label} cancelado.`, "El borrador fue descartado."].join("\n");
 }

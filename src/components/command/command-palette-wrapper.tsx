@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   BarChart3,
   BadgeCheck,
+  Bot,
   Settings,
   Plus,
   Clock,
@@ -198,7 +199,6 @@ export function CommandPaletteWrapper() {
     : [];
 
   const staticGroups: CommandPaletteGroup[] = [
-    ...recentGroup,
     {
       label: "Operación",
       items: [
@@ -254,9 +254,11 @@ export function CommandPaletteWrapper() {
     {
       label: "Sistema",
       items: [
+        { id: "assistant", label: "Asistente", icon: <Bot className="size-4" />, onSelect: () => handleSelect("/assistant") },
         { id: "settings", label: "Configuración", icon: <Settings className="size-4" />, onSelect: () => handleSelect("/settings") },
       ],
     },
+    ...recentGroup,
   ];
 
   // When the user is searching (2+ chars), show server results instead of
