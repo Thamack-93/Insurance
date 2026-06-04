@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { writeActivityLog } from "@/lib/activity-log";
+import { recordPayment } from "@/lib/payment-service";
 import {
   createNotificationEvent,
   ensureNotificationDefaultsForUser,
@@ -17,10 +18,14 @@ import {
   TELEGRAM_LINK_TOKEN_TTL_MINUTES,
   TELEGRAM_QUERY_RESULT_LIMIT,
   buildTelegramFallbackMessage,
+  buildTelegramDraftCancelledMessage,
+  buildTelegramDraftConfirmedMessage,
   buildTelegramHelpMessage,
   buildTelegramLinkedChatRequiredMessage,
   buildTelegramLinkErrorMessage,
   buildTelegramLinkSuccessMessage,
+  buildTelegramPaymentDraftMessage,
+  buildTelegramPolicyDraftMessage,
   buildTelegramStartMessage,
   buildTelegramStatusMessage,
   generateTelegramLinkCode,
@@ -131,6 +136,8 @@ export type TelegramDailyDigestResult = {
   failed: number;
 };
 
+const TELEGRAM_DRAFT_TTL_MS = 2 * 60 * 60 * 1000;
+
 const TELEGRAM_FETCH_TIMEOUT_MS = 8_000;
 const TELEGRAM_DATE_FORMATTER = new Intl.DateTimeFormat("es-MX", {
   day: "2-digit",
@@ -225,6 +232,127 @@ async function getTelegramChannelByChatId(chatId: string, client?: DbClient) {
       type: "TELEGRAM",
     },
   });
+}
+
+function parseTelegramIsoDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
+  }
+
+  const date = new Date(`${value}T12:00:00.000Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+async function getActiveTelegramDraftForChat(chatId: string, client?: DbClient) {
+  const db = client ?? getDb();
+  const channel = await getTelegramChannelByChatId(chatId, db);
+  if (!channel?.isEnabled) {
+    return { channel: null, draft: null };
+  }
+
+  const draft = await db.telegramDraft.findFirst({
+    where: {
+      userId: channel.userId,
+      channelId: channel.id,
+      status: "COLLECTING",
+      expiresAt: { gt: new Date() },
+    },
+    orderBy: [{ createdAt: "desc" }],
+  });
+
+  return { channel, draft };
+}
+
+function extractTelegramKeyValuePayload(argument: string) {
+  const payload: Record<string, string> = {};
+  for (const token of argument.split(/\s+/).filter(Boolean)) {
+    const [key, ...valueParts] = token.split("=");
+    if (!key || valueParts.length === 0) continue;
+    payload[key.toLowerCase()] = valueParts.join("=").trim();
+  }
+  return payload;
+}
+
+function buildPolicyDraftSummary(payload: Record<string, string>) {
+  const parts = [
+    payload.policynumber ? `Póliza ${payload.policynumber}` : null,
+    payload.client ? `Cliente ${payload.client}` : null,
+    payload.insurer ? `Aseguradora ${payload.insurer}` : null,
+    payload.start ? `Inicio ${payload.start}` : null,
+    payload.end ? `Fin ${payload.end}` : null,
+    payload.premium ? `Prima ${payload.premium}` : null,
+  ].filter(Boolean);
+
+  return parts.length > 0 ? parts.join(" · ") : "Borrador vacío para completar en PolicyDesk.";
+}
+
+function parseTelegramPaymentDraftArgument(argument: string) {
+  const parts = argument.split(/\s+/).filter(Boolean);
+  if (parts.length < 4) {
+    return {
+      ok: false as const,
+      error: "Usa: /pago <recibo> <monto> <fecha YYYY-MM-DD> <método> [referencia]",
+    };
+  }
+
+  const [receiptNumber, amountText, dateText, paymentMethod, ...referenceParts] = parts;
+  const amount = Number(amountText.replace(/,/g, ""));
+  const paidDate = parseTelegramIsoDate(dateText);
+  const reference = referenceParts.join(" ").trim() || null;
+
+  if (!receiptNumber) {
+    return { ok: false as const, error: "Debes indicar el número de recibo." };
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false as const, error: "El monto debe ser mayor a cero." };
+  }
+  if (!paidDate) {
+    return { ok: false as const, error: "La fecha debe tener formato YYYY-MM-DD." };
+  }
+  if (!paymentMethod) {
+    return { ok: false as const, error: "Debes indicar un método de pago." };
+  }
+
+  return {
+    ok: true as const,
+    receiptNumber,
+    amount,
+    paidDate,
+    paymentMethod,
+    reference,
+  };
+}
+
+async function getUserLinkedReceiptByNumber(userId: string, receiptNumber: string, client?: DbClient) {
+  const db = client ?? getDb();
+  const exact = await db.receipt.findFirst({
+    where: {
+      receiptNumber,
+      client: { portfolioOwnerId: userId },
+    },
+    include: {
+      client: { select: { fullName: true } },
+      policy: { select: { policyNumber: true } },
+      insurer: { select: { name: true } },
+    },
+  });
+
+  if (exact) return exact;
+
+  const fuzzy = await db.receipt.findMany({
+    where: {
+      receiptNumber: { contains: receiptNumber },
+      client: { portfolioOwnerId: userId },
+    },
+    include: {
+      client: { select: { fullName: true } },
+      policy: { select: { policyNumber: true } },
+      insurer: { select: { name: true } },
+    },
+    take: 2,
+  });
+
+  return fuzzy.length === 1 ? fuzzy[0] : null;
 }
 
 export async function sendTelegramMessage(chatId: string, text: string): Promise<TelegramSendResult> {
@@ -509,6 +637,302 @@ export async function buildTelegramDailyDigest(userId: string, client?: DbClient
       path: "/renewals",
     }),
   ].join("\n");
+}
+
+async function createTelegramPaymentDraft(input: {
+  chatId: string;
+  argument: string;
+  client?: DbClient;
+}) {
+  const db = input.client ?? getDb();
+  const channel = await getTelegramChannelByChatId(input.chatId, db);
+  if (!channel?.isEnabled || !channel.telegramChatId) {
+    return {
+      ok: false as const,
+      replyText: buildTelegramLinkedChatRequiredMessage(),
+    };
+  }
+
+  const parsed = parseTelegramPaymentDraftArgument(input.argument);
+  if (!parsed.ok) {
+    return {
+      ok: false as const,
+      replyText: parsed.error,
+    };
+  }
+
+  const receipt = await getUserLinkedReceiptByNumber(channel.userId, parsed.receiptNumber, db);
+  if (!receipt) {
+    return {
+      ok: false as const,
+      replyText: "No encontré un recibo único para ese número. Usa el número exacto o uno más específico.",
+    };
+  }
+
+  const draft = await db.$transaction(async (tx) => {
+    await tx.telegramDraft.updateMany({
+      where: {
+        userId: channel.userId,
+        channelId: channel.id,
+        type: "PAYMENT_CAPTURE",
+        status: "COLLECTING",
+      },
+      data: {
+        status: "CANCELLED",
+        cancelledAt: new Date(),
+      },
+    });
+
+    return tx.telegramDraft.create({
+      data: {
+        userId: channel.userId,
+        channelId: channel.id,
+        type: "PAYMENT_CAPTURE",
+        status: "COLLECTING",
+        payloadJson: JSON.stringify({
+          receiptId: receipt.id,
+          receiptNumber: receipt.receiptNumber,
+          policyId: receipt.policyId,
+          policyNumber: receipt.policy.policyNumber,
+          clientId: receipt.clientId,
+          clientName: receipt.client.fullName,
+          insurerId: receipt.insurerId,
+          insurerName: receipt.insurer.name,
+          amount: parsed.amount,
+          paidDate: parsed.paidDate.toISOString(),
+          paymentMethod: parsed.paymentMethod,
+          reference: parsed.reference,
+        }),
+        expiresAt: new Date(Date.now() + TELEGRAM_DRAFT_TTL_MS),
+      },
+      include: {
+        channel: true,
+        user: true,
+      },
+    });
+  });
+
+  return {
+    ok: true as const,
+    replyText: buildTelegramPaymentDraftMessage({
+      receiptNumber: receipt.receiptNumber,
+      clientName: receipt.client.fullName,
+      policyNumber: receipt.policy.policyNumber,
+      amount: formatCurrency(parsed.amount, receipt.currency),
+      paymentMethod: parsed.paymentMethod,
+      paidDate: formatTelegramDate(parsed.paidDate),
+      reference: parsed.reference,
+    }),
+    draftId: draft.id,
+  };
+}
+
+async function createTelegramPolicyDraft(input: {
+  chatId: string;
+  argument: string;
+  client?: DbClient;
+}) {
+  const db = input.client ?? getDb();
+  const channel = await getTelegramChannelByChatId(input.chatId, db);
+  if (!channel?.isEnabled || !channel.telegramChatId) {
+    return {
+      ok: false as const,
+      replyText: buildTelegramLinkedChatRequiredMessage(),
+    };
+  }
+
+  const payload = extractTelegramKeyValuePayload(input.argument);
+  const summary = buildPolicyDraftSummary(payload);
+  const draft = await db.$transaction(async (tx) => {
+    await tx.telegramDraft.updateMany({
+      where: {
+        userId: channel.userId,
+        channelId: channel.id,
+        type: "POLICY_CAPTURE",
+        status: "COLLECTING",
+      },
+      data: {
+        status: "CANCELLED",
+        cancelledAt: new Date(),
+      },
+    });
+
+    return tx.telegramDraft.create({
+      data: {
+        userId: channel.userId,
+        channelId: channel.id,
+        type: "POLICY_CAPTURE",
+        status: "COLLECTING",
+        payloadJson: JSON.stringify({
+          raw: input.argument,
+          ...payload,
+        }),
+        expiresAt: new Date(Date.now() + TELEGRAM_DRAFT_TTL_MS),
+      },
+    });
+  });
+
+  const link = buildPolicyDeskUrl(`/policies/new?telegramDraft=${draft.id}`);
+  return {
+    ok: true as const,
+    replyText: buildTelegramPolicyDraftMessage({
+      policyNumber: payload.policynumber ?? null,
+      summary,
+      link,
+    }),
+    draftId: draft.id,
+  };
+}
+
+async function confirmTelegramDraft(input: {
+  chatId: string;
+  client?: DbClient;
+}) {
+  const db = input.client ?? getDb();
+  const { channel, draft } = await getActiveTelegramDraftForChat(input.chatId, db);
+  if (!channel) {
+    return {
+      ok: false as const,
+      replyText: buildTelegramLinkedChatRequiredMessage(),
+    };
+  }
+
+  if (!draft) {
+    return {
+      ok: false as const,
+      replyText: "No hay ningún borrador activo para confirmar.",
+    };
+  }
+
+  if (draft.type === "PAYMENT_CAPTURE") {
+    const payload = JSON.parse(draft.payloadJson) as {
+      receiptId: string;
+      amount: number;
+      paidDate: string;
+      paymentMethod: string;
+      reference?: string | null;
+    };
+    try {
+      const result = await recordPayment(
+        {
+          receiptId: payload.receiptId,
+          amount: Number(payload.amount),
+          paidDate: new Date(payload.paidDate),
+          paymentMethod: payload.paymentMethod,
+          reference: payload.reference ?? null,
+          notes: "Pago capturado por Telegram.",
+          actorId: channel.userId,
+        },
+        db,
+      );
+
+      await db.telegramDraft.update({
+        where: { id: draft.id },
+        data: {
+          status: "CONFIRMED",
+          confirmedAt: new Date(),
+        },
+      });
+
+      await writeActivityLog({
+        entityType: "TelegramDraft",
+        entityId: draft.id,
+        action: "TELEGRAM_PAYMENT_DRAFT_CONFIRMED",
+        newValue: {
+          receiptId: payload.receiptId,
+          paymentId: result.payment.id,
+          amount: payload.amount,
+          paidDate: payload.paidDate,
+        },
+        userId: channel.userId,
+        db,
+      });
+
+      return {
+        ok: true as const,
+        replyText: buildTelegramDraftConfirmedMessage("Pago"),
+      };
+    } catch (error) {
+      logError("telegram.confirmPaymentDraft", error, { chatId: input.chatId, draftId: draft.id });
+      return {
+        ok: false as const,
+        replyText: "No se pudo confirmar el pago del borrador.",
+      };
+    }
+  }
+
+  await db.telegramDraft.update({
+    where: { id: draft.id },
+    data: {
+      status: "CONFIRMED",
+      confirmedAt: new Date(),
+    },
+  });
+
+  await writeActivityLog({
+    entityType: "TelegramDraft",
+    entityId: draft.id,
+    action: "TELEGRAM_POLICY_DRAFT_CONFIRMED",
+    newValue: {
+      payload: draft.payloadJson,
+    },
+    userId: channel.userId,
+    db,
+  });
+
+  const link = buildPolicyDeskUrl(`/policies/new?telegramDraft=${draft.id}`);
+  return {
+    ok: true as const,
+    replyText: [
+      buildTelegramDraftConfirmedMessage("Póliza"),
+      link ? `Abre este enlace para continuar en PolicyDesk: ${link}` : "Abre PolicyDesk para continuar la captura.",
+    ].join("\n"),
+  };
+}
+
+async function cancelTelegramDraft(input: {
+  chatId: string;
+  client?: DbClient;
+}) {
+  const db = input.client ?? getDb();
+  const { channel, draft } = await getActiveTelegramDraftForChat(input.chatId, db);
+  if (!channel) {
+    return {
+      ok: false as const,
+      replyText: buildTelegramLinkedChatRequiredMessage(),
+    };
+  }
+
+  if (!draft) {
+    return {
+      ok: false as const,
+      replyText: "No hay ningún borrador activo para cancelar.",
+    };
+  }
+
+  await db.telegramDraft.update({
+    where: { id: draft.id },
+    data: {
+      status: "CANCELLED",
+      cancelledAt: new Date(),
+    },
+  });
+
+  await writeActivityLog({
+    entityType: "TelegramDraft",
+    entityId: draft.id,
+    action: "TELEGRAM_DRAFT_CANCELLED",
+    newValue: {
+      type: draft.type,
+    },
+    userId: channel.userId,
+    db,
+  });
+
+  return {
+    ok: true as const,
+    replyText: buildTelegramDraftCancelledMessage(draft.type === "PAYMENT_CAPTURE" ? "Pago" : "Póliza"),
+  };
 }
 
 export async function sendDailyTelegramDigests(client?: DbClient): Promise<TelegramDailyDigestResult> {
@@ -934,6 +1358,54 @@ export async function processTelegramWebhookUpdate(
           handled: true,
           chatId,
           replyText: buildTelegramStatusMessage(Boolean(channel?.isEnabled && channel.telegramChatId)),
+        };
+      }
+      case "pago": {
+        if (!command.argument) {
+          return {
+            handled: true,
+            chatId,
+            replyText: "Usa: /pago <recibo> <monto> <fecha YYYY-MM-DD> <método> [referencia]",
+          };
+        }
+
+        const result = await createTelegramPaymentDraft({
+          chatId,
+          argument: command.argument,
+        });
+
+        return {
+          handled: true,
+          chatId,
+          replyText: result.replyText,
+        };
+      }
+      case "poliza": {
+        const result = await createTelegramPolicyDraft({
+          chatId,
+          argument: command.argument ?? "",
+        });
+
+        return {
+          handled: true,
+          chatId,
+          replyText: result.replyText,
+        };
+      }
+      case "confirmar": {
+        const result = await confirmTelegramDraft({ chatId });
+        return {
+          handled: true,
+          chatId,
+          replyText: result.replyText,
+        };
+      }
+      case "cancelar": {
+        const result = await cancelTelegramDraft({ chatId });
+        return {
+          handled: true,
+          chatId,
+          replyText: result.replyText,
         };
       }
       case "link": {

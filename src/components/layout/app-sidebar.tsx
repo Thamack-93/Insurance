@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 import { SidebarNav } from "./sidebar-nav";
-import { CommandPaletteTrigger } from "./command-palette-trigger";
 import { getCurrentUser } from "@/lib/auth";
 
 export async function AppSidebar() {
@@ -19,9 +18,6 @@ export async function AppSidebar() {
             <p className="text-xs text-muted-foreground">Cockpit de seguros</p>
           </div>
         </Link>
-
-        <CommandPaletteTrigger className="mt-5" />
-
         <div className="mt-5 flex min-h-0 flex-1 flex-col">
           <SidebarNav isAdmin={isAdmin} />
         </div>

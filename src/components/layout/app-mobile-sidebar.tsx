@@ -7,7 +7,6 @@ import { Menu, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { SidebarNav } from "./sidebar-nav";
-import { CommandPaletteTrigger } from "./command-palette-trigger";
 
 export function AppMobileSidebar() {
   const [open, setOpen] = useState(false);
@@ -45,9 +44,6 @@ export function AppMobileSidebar() {
               <p className="text-xs text-muted-foreground">Cockpit de seguros</p>
             </div>
           </Link>
-
-          <CommandPaletteTrigger className="mt-5" onOpen={() => setOpen(false)} />
-
           <div className="mt-5 flex min-h-0 flex-1 flex-col">
             <SidebarNav onNavigate={() => setOpen(false)} />
           </div>

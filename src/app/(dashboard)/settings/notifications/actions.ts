@@ -10,6 +10,7 @@ import {
   createAndDeliverTelegramNotificationEvent,
   createTelegramLinkCodeForUser,
   disconnectTelegramChannelForUser,
+  buildTelegramDailyDigest,
   type TelegramLinkCodeResult,
 } from "@/lib/telegram";
 import {
@@ -123,6 +124,67 @@ export async function sendTelegramTestMessage(): Promise<MutationResult> {
   } catch (error) {
     logError("settings.notifications.telegram.test", error);
     return errorResult("No se pudo enviar el mensaje de prueba.");
+  }
+}
+
+export async function sendTelegramDigestNow(): Promise<MutationResult> {
+  try {
+    const user = await requireUser();
+    const channel = await getDb().notificationChannel.findUnique({
+      where: {
+        userId_type: {
+          userId: user.id,
+          type: "TELEGRAM",
+        },
+      },
+      select: {
+        telegramChatId: true,
+        isEnabled: true,
+      },
+    });
+
+    if (!channel?.isEnabled || !channel.telegramChatId) {
+      return errorResult("Telegram no está vinculado.");
+    }
+
+    const body = await buildTelegramDailyDigest(user.id);
+    const event = await createAndDeliverTelegramNotificationEvent({
+      type: "DAILY_DIGEST",
+      title: "Resumen diario PolicyDesk",
+      body,
+      priority: "LOW",
+      userId: user.id,
+      force: true,
+    });
+
+    if (!event) {
+      return errorResult("No se pudo enviar el resumen.");
+    }
+
+    await writeActivityLog({
+      entityType: "NotificationEvent",
+      entityId: event.id,
+      action: `TELEGRAM_DIGEST_NOW_${event.status}`,
+      newValue: {
+        status: event.status,
+        error: event.error,
+      },
+      userId: user.id,
+    });
+
+    if (event.status === "SENT") {
+      revalidatePath("/settings/notifications");
+      return successResult(user.id, "/settings/notifications", "Resumen diario enviado.");
+    }
+
+    if (event.status === "SKIPPED") {
+      return errorResult(event.error ?? "Telegram no está vinculado.");
+    }
+
+    return errorResult(event.error ?? "No se pudo enviar el resumen.");
+  } catch (error) {
+    logError("settings.notifications.telegram.digestNow", error);
+    return errorResult("No se pudo enviar el resumen.");
   }
 }
 

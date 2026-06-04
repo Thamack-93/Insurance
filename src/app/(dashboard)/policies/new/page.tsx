@@ -2,9 +2,40 @@ import { createPolicy } from "@/app/(dashboard)/policies/actions";
 import { PolicyForm } from "@/components/forms/policy-form";
 import { createPolicyDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
+import { requireUserOrRedirect } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import type { PolicyFormValues } from "@/lib/validations";
 
-export default async function NewPolicyPage() {
+function parseTelegramDraftPolicyDefaults(payloadJson: string): Partial<PolicyFormValues> {
+  try {
+    const payload = JSON.parse(payloadJson) as Record<string, string | number | null | undefined>;
+    return {
+      policyNumber: typeof payload.policynumber === "string" ? payload.policynumber : undefined,
+      clientId: typeof payload.clientid === "string" ? payload.clientid : undefined,
+      insurerId: typeof payload.insurerid === "string" ? payload.insurerid : undefined,
+      policyType: typeof payload.policytype === "string" ? (payload.policytype as PolicyFormValues["policyType"]) : undefined,
+      startDate: typeof payload.start === "string" ? payload.start : undefined,
+      endDate: typeof payload.end === "string" ? payload.end : undefined,
+      premiumAmount: typeof payload.premium === "number" ? payload.premium : undefined,
+      currency: typeof payload.currency === "string" ? payload.currency : undefined,
+      paymentFrequency: typeof payload.frequency === "string" ? (payload.frequency as PolicyFormValues["paymentFrequency"]) : undefined,
+      paymentPlan: typeof payload.paymentplan === "string" ? payload.paymentplan : undefined,
+      insuredObject: typeof payload.object === "string" ? payload.object : undefined,
+      beneficiaryInfo: typeof payload.beneficiary === "string" ? payload.beneficiary : undefined,
+      notes: typeof payload.notes === "string" ? payload.notes : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+export default async function NewPolicyPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ telegramDraft?: string }>;
+}) {
+  const user = await requireUserOrRedirect();
+  const params = (await searchParams) ?? {};
   const db = getDb();
   const [clients, insurers, mostUsedInsurer] = await Promise.all([
     db.client.findMany({
@@ -26,12 +57,32 @@ export default async function NewPolicyPage() {
     }),
   ]);
 
+  let telegramDraftDefaults: Partial<PolicyFormValues> = {};
+  if (params.telegramDraft) {
+    const draft = await db.telegramDraft.findFirst({
+      where: {
+        id: params.telegramDraft,
+        userId: user.id,
+        type: "POLICY_CAPTURE",
+      },
+      select: { payloadJson: true, status: true, expiresAt: true },
+    });
+
+    if (draft && draft.status !== "CANCELLED" && draft.expiresAt > new Date()) {
+      telegramDraftDefaults = parseTelegramDraftPolicyDefaults(draft.payloadJson);
+    }
+  }
+
   const defaultInsurerId = mostUsedInsurer[0]?.insurerId;
-  const defaults = createPolicyDefaults();
-  const smartDefaults =
-    defaultInsurerId && insurers.some((i) => i.id === defaultInsurerId)
-      ? { ...defaults, insurerId: defaultInsurerId }
-      : defaults;
+  const telegramDraftOverrides = Object.fromEntries(
+    Object.entries(telegramDraftDefaults).filter(([, value]) => value !== undefined),
+  ) as Partial<PolicyFormValues>;
+  const smartDefaults = createPolicyDefaults({
+    ...(defaultInsurerId && insurers.some((i) => i.id === defaultInsurerId)
+      ? { insurerId: defaultInsurerId }
+      : {}),
+    ...telegramDraftOverrides,
+  });
 
   return (
     <div className="flex flex-col gap-6">

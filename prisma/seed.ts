@@ -488,7 +488,7 @@ async function main() {
 
   const alerts = [
     ["RECEIPT_OVERDUE", "CRITICAL", "Recibo vencido sin seguimiento"],
-    ["POLICY_MISSING_PDF", "WARNING", "Poliza activa sin PDF"],
+    ["RENEWAL_WITHOUT_TASK", "WARNING", "Poliza activa sin seguimiento"],
     ["COMMISSION_OVERDUE", "WARNING", "Comision vencida por cobrar"],
     ["CLIENT_MISSING_CONTACT", "WARNING", "Cliente incompleto"],
     ["RENEWAL_WITHOUT_TASK", "WARNING", "Renovacion sin pendiente"],
@@ -496,7 +496,7 @@ async function main() {
     ["ORPHAN_DOCUMENT", "INFO", "Documento huerfano"],
     ["DUPLICATE_POLICY_NUMBER", "WARNING", "Poliza duplicada"],
     ["STALE_TASK", "WARNING", "Pendiente antiguo"],
-    ["PAID_RECEIPT_WITHOUT_PROOF", "WARNING", "Pago sin comprobante"],
+    ["RECEIPT_OVERDUE", "WARNING", "Pago sin comprobante"],
   ] as const;
 
   for (let index = 0; index < alerts.length; index += 1) {
@@ -552,6 +552,12 @@ async function resetDatabase() {
   await prisma.notificationEvent.deleteMany();
   await prisma.notificationPreference.deleteMany();
   await prisma.notificationChannel.deleteMany();
+  await prisma.ledgerImportIssue.deleteMany();
+  await prisma.ledgerImportAction.deleteMany();
+  await prisma.ledgerImportRow.deleteMany();
+  await prisma.ledgerImportBatch.deleteMany();
+  await prisma.policyInsuredAsset.deleteMany();
+  await prisma.policyInsuredParty.deleteMany();
   await prisma.activityLog.deleteMany();
   await prisma.payment.deleteMany();
   await prisma.commission.deleteMany();
@@ -595,7 +601,7 @@ function insuredObjectFor(policyType: (typeof policyTypes)[number], index: numbe
 function taskTitle(index: number) {
   const titles = [
     "Confirmar pago con cliente",
-    "Solicitar PDF de poliza",
+    "Solicitar documento de poliza",
     "Preparar renovacion",
     "Validar comision pendiente",
     "Enviar cotizacion actualizada",

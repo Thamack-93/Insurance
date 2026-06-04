@@ -5,12 +5,13 @@ import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { applyLedgerImportBatchAction, previewLedgerImportAction, runPaymentAuditAction, runVigencyAuditAction } from "./actions";
 import { getClientDataQualityScores, getPolicyDataQualityScores } from "@/lib/data-quality";
+import { getDb } from "@/lib/db";
 import { formatCurrency } from "@/lib/money";
 import { getLatestMaintenanceRun } from "@/lib/vigency-maintenance";
 import { RunVigencyAuditButton } from "@/components/data-quality/run-vigency-audit-button";
 import { RunPaymentAuditButton } from "@/components/data-quality/run-payment-audit-button";
-import { runVigencyAuditAction, runPaymentAuditAction } from "./actions";
 
 function QualityBadge({ nivel }: { nivel: "Excelente" | "Bueno" | "Atención" | "Crítico" }) {
   const colors = {
@@ -40,13 +41,57 @@ function ScoreBar({ score }: { score: number }) {
   );
 }
 
-export default async function DataQualityPage() {
+export default async function DataQualityPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = (await searchParams) ?? {};
+  const previewBatchId = typeof params.ledgerBatch === "string" ? params.ledgerBatch : null;
+  const db = getDb();
   const [clientScores, policyScores, latestMaintenanceRun, latestPaymentMaintenanceRun] = await Promise.all([
     getClientDataQualityScores(),
     getPolicyDataQualityScores(),
     getLatestMaintenanceRun("POLICY_VIGENCY_AUDIT"),
     getLatestMaintenanceRun("PAYMENT_RECONCILIATION_AUDIT"),
   ]);
+  const previewBatch = previewBatchId
+      ? await db.ledgerImportBatch.findUnique({
+        where: { id: previewBatchId },
+        include: {
+          rows: {
+            orderBy: [{ rowNumber: "asc" }],
+            take: 15,
+          },
+          issues: {
+            include: {
+              row: {
+                select: { rowNumber: true, sourceType: true, sourceKey: true },
+              },
+            },
+            orderBy: [{ createdAt: "desc" }],
+            take: 20,
+          },
+        },
+      })
+    : null;
+  const previewSummary = (() => {
+    if (!previewBatch?.summaryJson) return null;
+    try {
+      return JSON.parse(previewBatch.summaryJson) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  })();
+  const previewRowCounts = previewBatch
+    ? await db.ledgerImportRow.groupBy({
+        by: ["status"],
+        where: { batchId: previewBatch.id },
+        _count: { status: true },
+      })
+    : [];
+  const readyRowCount = previewRowCounts.find((row) => row.status === "READY")?._count.status ?? 0;
+  const reviewRowCount = previewRowCounts.find((row) => row.status === "REVIEW")?._count.status ?? 0;
 
   const latestAuditSummary = (() => {
     if (!latestMaintenanceRun?.summaryJson) return null;
@@ -65,6 +110,15 @@ export default async function DataQualityPage() {
         receiptIssuesResolved?: number;
         multiYearPoliciesFlagged?: number;
         overlappingFamilies?: number;
+        paymentFrequenciesNormalized?: number;
+        paymentFrequencyReviewCandidates?: number;
+        paymentFrequencyReviewSample?: Array<{
+          policyId: string;
+          policyNumber: string;
+          currentFrequency: string;
+          receiptCount: number;
+          reason: string;
+        }>;
       };
     } catch {
       return null;
@@ -181,6 +235,36 @@ export default async function DataQualityPage() {
               <div>Familias con solapamiento: {latestAuditSummary.overlappingFamilies ?? 0}</div>
               <div>Pagos revisados: {latestAuditSummary.paymentsReviewed ?? 0}</div>
               <div>Pagos vinculados: {latestAuditSummary.paymentsRelinked ?? 0}</div>
+              <div>Frecuencias normalizadas: {latestAuditSummary.paymentFrequenciesNormalized ?? 0}</div>
+              <div>Candidatos en revisión: {latestAuditSummary.paymentFrequencyReviewCandidates ?? 0}</div>
+            </div>
+          ) : null}
+          {latestAuditSummary?.paymentFrequencyReviewSample?.length ? (
+            <div className="mt-5 overflow-hidden rounded-2xl border border-stone-200/80">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-stone-50/70">
+                    <TableHead>Póliza</TableHead>
+                    <TableHead>Frecuencia</TableHead>
+                    <TableHead className="text-right">Recibos</TableHead>
+                    <TableHead>Motivo</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {latestAuditSummary.paymentFrequencyReviewSample.map((candidate) => (
+                    <TableRow key={candidate.policyId}>
+                      <TableCell>
+                        <Link href={`/policies/${candidate.policyId}`} className="font-medium text-foreground hover:text-primary">
+                          {candidate.policyNumber}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{candidate.currentFrequency}</TableCell>
+                      <TableCell className="text-right">{candidate.receiptCount}</TableCell>
+                      <TableCell className="max-w-md text-xs text-muted-foreground">{candidate.reason}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           ) : null}
         </SectionCard>
@@ -273,6 +357,125 @@ export default async function DataQualityPage() {
                   ))}
                 </TableBody>
               </Table>
+            </div>
+          ) : null}
+        </SectionCard>
+
+        <SectionCard
+          title="Preview de importación de ledger"
+          description="Carga el CSV de pólizas y el XLS de pagos para revisar vigencias faltantes, pagos ambiguos y casos de revisión antes de aplicar cambios."
+        >
+          <form action={previewLedgerImportAction} encType="multipart/form-data" className="space-y-4 p-4">
+            <div className="grid gap-4 lg:grid-cols-2">
+              <label className="space-y-2">
+                <span className="text-sm font-medium text-foreground">Base de pólizas CSV</span>
+                <input
+                  type="file"
+                  name="ledgerCsv"
+                  accept=".csv,.xls,.xlsx"
+                  required
+                  className="block w-full rounded-2xl border border-border bg-background px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-full file:border-0 file:bg-primary file:px-4 file:py-2 file:text-primary-foreground"
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm font-medium text-foreground">Pagos Hechos XLS</span>
+                <input
+                  type="file"
+                  name="ledgerPaid"
+                  accept=".xls,.xlsx,.csv"
+                  required
+                  className="block w-full rounded-2xl border border-border bg-background px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-full file:border-0 file:bg-primary file:px-4 file:py-2 file:text-primary-foreground"
+                />
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="submit" className="rounded-full">
+                Generar preview
+              </Button>
+              <p className="text-sm text-muted-foreground">
+                El preview guarda un batch auditable y deja los casos ambiguos listos para revisión humana.
+              </p>
+            </div>
+          </form>
+
+          {previewBatch ? (
+            <div className="border-t border-border/70 px-4 py-4">
+              <div className="grid gap-4 md:grid-cols-4">
+                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">CSV</p>
+                  <p className="mt-1 text-sm font-medium">{previewBatch.sourceCsvName}</p>
+                </div>
+                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">XLS</p>
+                  <p className="mt-1 text-sm font-medium">{previewBatch.sourcePaidName}</p>
+                </div>
+                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Estado</p>
+                  <p className="mt-1 text-sm font-medium">{previewBatch.status}</p>
+                </div>
+                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Creado</p>
+                  <p className="mt-1 text-sm font-medium">{previewBatch.createdAt.toLocaleString("es-MX")}</p>
+                </div>
+              </div>
+              {previewSummary ? (
+                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {Object.entries(previewSummary).map(([key, value]) => {
+                    if (key === "sampleIssues") return null;
+                    if (Array.isArray(value)) return null;
+                    return (
+                      <div key={key} className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4 text-sm">
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">{key}</p>
+                        <p className="mt-1 font-medium">{String(value)}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+
+              <div className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-foreground">Aprobación ADMIN por bloque</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Listos para aplicar: {readyRowCount}. En revisión: {reviewRowCount}. Solo se crearán pagos con evidencia XLS, importe positivo, fecha no futura y match único.
+                  </p>
+                </div>
+                <form action={applyLedgerImportBatchAction}>
+                  <input type="hidden" name="batchId" value={previewBatch.id} />
+                  <Button
+                    type="submit"
+                    className="rounded-full"
+                    disabled={!["PREVIEW_READY", "APPROVED", "PARTIAL_APPLIED"].includes(previewBatch.status) || readyRowCount === 0}
+                  >
+                    Aprobar y aplicar pagos
+                  </Button>
+                </form>
+              </div>
+
+              {previewBatch.issues.length ? (
+                <div className="mt-5 overflow-hidden rounded-2xl border border-stone-200/80">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-stone-50/70">
+                        <TableHead>Tipo</TableHead>
+                        <TableHead>Severidad</TableHead>
+                        <TableHead>Mensaje</TableHead>
+                        <TableHead className="text-right">Fila</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {previewBatch.issues.map((issue) => (
+                        <TableRow key={issue.id}>
+                        <TableCell className="font-medium">{issue.issueType}</TableCell>
+                        <TableCell>{issue.severity}</TableCell>
+                        <TableCell>{issue.message}</TableCell>
+                        <TableCell className="text-right">{issue.row?.rowNumber ?? "—"}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              ) : null}
             </div>
           ) : null}
         </SectionCard>

@@ -160,16 +160,23 @@ export async function getPolicyDataQualityScores() {
       id: true,
       policyNumber: true,
       status: true,
+      paymentFrequency: true,
       insuredObject: true,
       premiumAmount: true,
       clientId: true,
-      client: { select: { fullName: true } },
-      insurer: { select: { name: true } },
-      documents: {
+      _count: {
         select: {
-          documentType: true,
+          receipts: true,
         },
       },
+      insuredParties: {
+        select: { id: true, isPrimary: true },
+      },
+      insuredAssets: {
+        select: { id: true, isPrimary: true },
+      },
+      client: { select: { fullName: true } },
+      insurer: { select: { name: true } },
     },
   });
 
@@ -178,18 +185,10 @@ export async function getPolicyDataQualityScores() {
       const issues: DataQualityIssue[] = [];
       let score = 100;
 
-      const hasPolicyPdf = policy.documents.some((document) => document.documentType === "POLICY");
-      if (!hasPolicyPdf) {
-        issues.push({
-          code: "POLICY_PDF_MISSING",
-          etiqueta: "PDF faltante",
-          descripcion: "No existe documento principal de póliza.",
-          penalizacion: 20,
-        });
-        score -= 20;
-      }
+      const hasInsuredParty = policy.insuredParties.length > 0;
+      const hasInsuredAsset = policy.insuredAssets.length > 0;
 
-      if (!policy.insuredObject) {
+      if (!policy.insuredObject && !hasInsuredParty && !hasInsuredAsset) {
         issues.push({
           code: "POLICY_OBJECT_MISSING",
           etiqueta: "Objeto asegurado faltante",
@@ -219,13 +218,22 @@ export async function getPolicyDataQualityScores() {
         score -= 15;
       }
 
+      if (policy.paymentFrequency === "SINGLE" && policy._count.receipts > 1) {
+        issues.push({
+          code: "POLICY_PAYMENT_FREQUENCY_REVIEW",
+          etiqueta: "Frecuencia de pago para revisar",
+          descripcion: "La póliza está marcada como única, pero tiene múltiples recibos y conviene validar si debe normalizarse.",
+          penalizacion: 8,
+        });
+        score -= 8;
+      }
+
       const completitud = Math.max(
         0,
         Math.round(
-          ((Number(hasPolicyPdf) +
-            Number(Boolean(policy.insuredObject)) +
+          ((Number(Boolean(policy.insuredObject || hasInsuredParty || hasInsuredAsset)) +
             Number(Boolean(toNumber(policy.premiumAmount)))) /
-            3) *
+            2) *
             100,
         ),
       );

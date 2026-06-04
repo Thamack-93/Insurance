@@ -4,6 +4,7 @@ import { addYears, differenceInCalendarDays } from "date-fns";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
 import { getDb } from "@/lib/db";
+import { inferClearPaymentFrequency } from "@/lib/payment-frequency";
 import { reconcileReceiptState } from "@/lib/receipt-reconciliation";
 import { toNumber } from "@/lib/money";
 import { logError } from "@/lib/logger";
@@ -24,6 +25,15 @@ export type VigencyAuditSummary = {
   receiptIssuesResolved: number;
   multiYearPoliciesFlagged: number;
   overlappingFamilies: number;
+  paymentFrequenciesNormalized: number;
+  paymentFrequencyReviewCandidates: number;
+  paymentFrequencyReviewSample: Array<{
+    policyId: string;
+    policyNumber: string;
+    currentFrequency: string;
+    receiptCount: number;
+    reason: string;
+  }>;
   familyKeysSample: string[];
 };
 
@@ -121,18 +131,34 @@ function buildAnnualTerms(startDate: Date, endDate: Date) {
   return terms;
 }
 
-function findTermIndex(targetDate: Date, familyStart: Date, termCount: number) {
-  if (termCount <= 1) return 0;
-
-  for (let index = 0; index < termCount; index += 1) {
-    const startDate = addYears(familyStart, index);
-    const endDate = addYears(familyStart, index + 1);
-    if (targetDate >= startDate && targetDate < endDate) {
-      return index;
-    }
+function resolveReceiptTermIndex(
+  receipt: Pick<ReceiptRow, "periodStartDate" | "periodEndDate" | "dueDate">,
+  terms: Array<{ startDate: Date; endDate: Date }>,
+) {
+  if (terms.length <= 1) {
+    return { index: 0, score: 0, ambiguous: false };
   }
 
-  return termCount - 1;
+  const ranked = terms
+    .map((term, index) => {
+      const overlapStart = receipt.periodStartDate > term.startDate ? receipt.periodStartDate : term.startDate;
+      const overlapEnd = receipt.periodEndDate < term.endDate ? receipt.periodEndDate : term.endDate;
+      const overlapDays = Math.max(0, differenceInCalendarDays(overlapEnd, overlapStart));
+      const startMatch = receipt.periodStartDate >= term.startDate && receipt.periodStartDate < term.endDate ? 4 : 0;
+      const endMatch = receipt.periodEndDate > term.startDate && receipt.periodEndDate <= term.endDate ? 4 : 0;
+      const dueMatch = receipt.dueDate >= term.startDate && receipt.dueDate < term.endDate ? 1 : 0;
+      return { index, score: overlapDays + startMatch + endMatch + dueMatch };
+    })
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+
+  const best = ranked[0];
+  const second = ranked[1];
+
+  return {
+    index: best?.index ?? 0,
+    score: best?.score ?? 0,
+    ambiguous: !best || best.score <= 0 || (second?.score ?? -1) === best.score,
+  };
 }
 
 function normalizeNumber(value: unknown) {
@@ -179,6 +205,9 @@ export async function runPolicyVigencyAudit(input: {
     receiptIssuesResolved: 0,
     multiYearPoliciesFlagged: 0,
     overlappingFamilies: 0,
+    paymentFrequenciesNormalized: 0,
+    paymentFrequencyReviewCandidates: 0,
+    paymentFrequencyReviewSample: [],
     familyKeysSample: [],
   };
 
@@ -300,12 +329,26 @@ export async function runPolicyVigencyAudit(input: {
       }
 
       const annualTerms = buildAnnualTerms(familyRoot.startDate, orderedPolicies[orderedPolicies.length - 1].endDate);
+      const familyTerms = annualTerms.length > 0 ? annualTerms : [{ startDate: familyRoot.startDate, endDate: familyRoot.endDate }];
       const useTermSplit = annualTerms.length > 1 || familyPolicies.length > 1;
       const nextPolicies: PolicyRow[] = [];
+      const receiptsByTermIndex = new Map<number, ReceiptRow[]>();
+
+      for (const receipt of familyReceipts) {
+        const targetResolution = resolveReceiptTermIndex(receipt, familyTerms);
+        if (targetResolution.score <= 0) {
+          continue;
+        }
+
+        const existingReceipts = receiptsByTermIndex.get(targetResolution.index) ?? [];
+        existingReceipts.push(receipt);
+        receiptsByTermIndex.set(targetResolution.index, existingReceipts);
+      }
 
       if (useTermSplit) {
         for (let index = 0; index < annualTerms.length; index += 1) {
           const term = annualTerms[index];
+          const receiptsForTerm = receiptsByTermIndex.get(index) ?? [];
           const existing =
             orderedPolicies.find(
               (policy) =>
@@ -327,14 +370,7 @@ export async function runPolicyVigencyAudit(input: {
               existing.endDate.getTime() !== term.endDate.getTime() ||
               existing.status !== nextState ||
               normalizeNumber(existing.premiumAmount) !==
-                normalizeNumber(
-                  familyReceipts
-                    .filter((receipt) => {
-                      const targetIndex = findTermIndex(receipt.periodStartDate, familyRoot.startDate, annualTerms.length);
-                      return targetIndex === index;
-                    })
-                    .reduce((sum, receipt) => sum + normalizeNumber(receipt.amount), 0),
-                );
+                normalizeNumber(receiptsForTerm.reduce((sum, receipt) => sum + normalizeNumber(receipt.amount), 0));
 
             if (changed) {
               const updated = await db.policy.update({
@@ -350,9 +386,7 @@ export async function runPolicyVigencyAudit(input: {
                   status: nextState,
                   startDate: term.startDate,
                   endDate: term.endDate,
-                  premiumAmount: familyReceipts
-                    .filter((receipt) => findTermIndex(receipt.periodStartDate, familyRoot.startDate, annualTerms.length) === index)
-                    .reduce((sum, receipt) => sum + normalizeNumber(receipt.amount), 0),
+                  premiumAmount: receiptsForTerm.reduce((sum, receipt) => sum + normalizeNumber(receipt.amount), 0),
                   currency: familyRoot.currency,
                   paymentFrequency: familyRoot.paymentFrequency,
                   paymentPlan: familyRoot.paymentPlan,
@@ -379,9 +413,7 @@ export async function runPolicyVigencyAudit(input: {
                 status: index < annualTerms.length - 1 ? "RENEWED" : familyRoot.endDate < now ? "EXPIRED" : "ACTIVE",
                 startDate: term.startDate,
                 endDate: term.endDate,
-                premiumAmount: familyReceipts
-                  .filter((receipt) => findTermIndex(receipt.periodStartDate, familyRoot.startDate, annualTerms.length) === index)
-                  .reduce((sum, receipt) => sum + normalizeNumber(receipt.amount), 0),
+                premiumAmount: receiptsForTerm.reduce((sum, receipt) => sum + normalizeNumber(receipt.amount), 0),
                 currency: familyRoot.currency,
                 paymentFrequency: familyRoot.paymentFrequency,
                 paymentPlan: familyRoot.paymentPlan,
@@ -417,6 +449,67 @@ export async function runPolicyVigencyAudit(input: {
           }
           if (isMultiYearContract) {
             summary.multiYearPoliciesFlagged += 1;
+          }
+        }
+
+        const policiesForFrequencyNormalization = nextPolicies.length > 0 ? nextPolicies : orderedPolicies;
+
+        for (let index = 0; index < policiesForFrequencyNormalization.length; index += 1) {
+          const policy = policiesForFrequencyNormalization[index];
+          const receiptsForTerm = receiptsByTermIndex.get(index) ?? [];
+          const inference = inferClearPaymentFrequency(
+            {
+              startDate: policy.startDate,
+              endDate: policy.endDate,
+              paymentFrequency: policy.paymentFrequency,
+            },
+            receiptsForTerm.map((receipt) => ({
+              periodStartDate: receipt.periodStartDate,
+              periodEndDate: receipt.periodEndDate,
+              amount: receipt.amount,
+            })),
+          );
+
+          if (policy.paymentFrequency === "SINGLE" && inference.normalizedFrequency === "SEMIANNUAL") {
+            const updated = await db.policy.update({
+              where: { id: policy.id },
+              data: { paymentFrequency: inference.normalizedFrequency },
+            });
+            if (nextPolicies.length > 0) {
+              nextPolicies[index] = updated as PolicyRow;
+            }
+            summary.paymentFrequenciesNormalized += 1;
+            summary.policiesUpdated += 1;
+
+            await writeActivityLog({
+              entityType: "Policy",
+              entityId: policy.id,
+              action: "POLICY_PAYMENT_FREQUENCY_NORMALIZED",
+              oldValue: {
+                paymentFrequency: policy.paymentFrequency,
+              },
+              newValue: {
+                paymentFrequency: inference.normalizedFrequency,
+                receiptCount: inference.receiptCount,
+                reason: inference.reason,
+              },
+              userId: input.actorId,
+              db,
+            });
+            continue;
+          }
+
+          if (policy.paymentFrequency === "SINGLE" && inference.reviewRequired) {
+            summary.paymentFrequencyReviewCandidates += 1;
+            if (summary.paymentFrequencyReviewSample.length < 10) {
+              summary.paymentFrequencyReviewSample.push({
+                policyId: policy.id,
+                policyNumber: policy.policyNumber,
+                currentFrequency: policy.paymentFrequency,
+                receiptCount: inference.receiptCount,
+                reason: inference.reason ?? "Requiere revisión manual.",
+              });
+            }
           }
         }
 
@@ -464,7 +557,8 @@ export async function runPolicyVigencyAudit(input: {
 
       for (const receipt of familyReceiptsOrdered) {
         summary.receiptsReviewed += 1;
-        const targetIndex = findTermIndex(receipt.periodStartDate, familyRoot.startDate, annualTerms.length || 1);
+        const targetResolution = resolveReceiptTermIndex(receipt, familyTerms);
+        const targetIndex = targetResolution.index;
         const targetPolicy = nextPolicies[targetIndex] ?? nextPolicies[0] ?? familyRoot;
 
         if (
@@ -472,15 +566,17 @@ export async function runPolicyVigencyAudit(input: {
           receipt.clientId !== targetPolicy.clientId ||
           receipt.insurerId !== targetPolicy.insurerId
         ) {
-          await db.receipt.update({
-            where: { id: receipt.id },
-            data: {
-              policyId: targetPolicy.id,
-              clientId: targetPolicy.clientId,
-              insurerId: targetPolicy.insurerId,
-            },
-          });
-          summary.receiptsRelinked += 1;
+          if (targetResolution.score > 0) {
+            await db.receipt.update({
+              where: { id: receipt.id },
+              data: {
+                policyId: targetPolicy.id,
+                clientId: targetPolicy.clientId,
+                insurerId: targetPolicy.insurerId,
+              },
+            });
+            summary.receiptsRelinked += 1;
+          }
         }
 
         for (const payment of receipt.payments) {
@@ -560,10 +656,16 @@ export async function runPolicyVigencyAudit(input: {
           summary.receiptsReconciled += 1;
         }
 
-        const reason = reconciliation.reasons.join(",") || "REVIEW_REQUIRED";
+        const reason = [
+          ...reconciliation.reasons,
+          targetResolution.ambiguous ? "TERM_ASSIGNMENT_AMBIGUOUS" : null,
+        ]
+          .filter(Boolean)
+          .join(",") || "REVIEW_REQUIRED";
         const issueDetails = {
           familyKey: key,
           policyNumber: familyRoot.policyNumber,
+          termAssignment: targetResolution,
           current: {
             status: receipt.status,
             paidDate: receipt.paidDate,
@@ -579,7 +681,7 @@ export async function runPolicyVigencyAudit(input: {
           reconciliation,
         };
 
-        if (reconciliation.shouldReview) {
+        if (reconciliation.shouldReview || targetResolution.ambiguous) {
           const existingIssue = await db.receiptReconciliationIssue.findFirst({
             where: { receiptId: receipt.id, status: "OPEN" },
             orderBy: { createdAt: "desc" },

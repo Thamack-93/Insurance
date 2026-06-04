@@ -27,7 +27,6 @@ export type PortfolioHealth = {
   clientesCompletos: number;
   clientesConDatosBasicos: number;
   polizasConVencimiento: number;
-  polizasConPDF: number;
   polizasConObjetoAsegurado: number;
   totalClientes: number;
   totalPolizas: number;
@@ -106,14 +105,16 @@ export async function getPortfolioMetrics() {
         premiumAmount: true,
         endDate: true,
         insuredObject: true,
+        insuredParties: {
+          select: { id: true, isPrimary: true },
+        },
+        insuredAssets: {
+          select: { id: true, isPrimary: true },
+        },
         clientId: true,
         client: { select: { fullName: true } },
         insurerId: true,
         insurer: { select: { name: true } },
-        documents: {
-          where: { documentType: "POLICY" },
-          select: { id: true },
-        },
       },
     }),
   ]);
@@ -177,8 +178,12 @@ export async function getPortfolioMetrics() {
     (client) => Boolean(client.email && client.phone && client.address),
   ).length;
   const polizasConVencimiento = policies.filter((policy) => Boolean(policy.endDate)).length;
-  const polizasConPDF = policies.filter((policy) => policy.documents.length > 0).length;
-  const polizasConObjetoAsegurado = policies.filter((policy) => Boolean(policy.insuredObject?.trim())).length;
+  const polizasConObjetoAsegurado = policies.filter(
+    (policy) =>
+      Boolean(policy.insuredObject?.trim()) ||
+      policy.insuredParties.length > 0 ||
+      policy.insuredAssets.length > 0,
+  ).length;
 
   const scoreClientes = clients.length
     ? Math.round((clientesConDatosBasicos / clients.length) * 100)
@@ -186,9 +191,8 @@ export async function getPortfolioMetrics() {
   const scorePolizas = policies.length
     ? Math.round(
         ((polizasConVencimiento / policies.length) +
-          (polizasConPDF / policies.length) +
           (polizasConObjetoAsegurado / policies.length)) /
-          3 *
+          2 *
           100,
       )
     : 100;
@@ -198,7 +202,6 @@ export async function getPortfolioMetrics() {
     clientesCompletos: clientesConDatosBasicos,
     clientesConDatosBasicos,
     polizasConVencimiento,
-    polizasConPDF,
     polizasConObjetoAsegurado,
     totalClientes: clients.length,
     totalPolizas: policies.length,

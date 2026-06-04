@@ -18,6 +18,15 @@ const optionalEmail = z.string().email("Email invalido.").optional().or(z.litera
 const requiredDate = z.string().min(1, "Selecciona una fecha.");
 const optionalDate = z.string().optional().or(z.literal(""));
 
+function dateOnly(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day, 12));
+}
+
+function daysBetweenDateInputs(startDate: string, endDate: string) {
+  return Math.round((dateOnly(endDate).getTime() - dateOnly(startDate).getTime()) / (1000 * 60 * 60 * 24));
+}
+
 export const clientSchema = z.object({
   fullName: z.string().trim().min(2, "Escribe el nombre del cliente."),
   type: z.enum(CLIENT_TYPES),
@@ -51,6 +60,10 @@ export const policySchema = z
   })
   .refine((values) => values.endDate >= values.startDate, {
     message: "La fecha final debe ser posterior al inicio.",
+    path: ["endDate"],
+  })
+  .refine((values) => daysBetweenDateInputs(values.startDate, values.endDate) <= 366, {
+    message: "La vigencia no puede superar 366 días. Divide contratos multianuales por anualidades.",
     path: ["endDate"],
   });
 
