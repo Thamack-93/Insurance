@@ -3,6 +3,12 @@ export type SelectOption = {
   label: string;
 };
 
+export const digestHourOptions: SelectOption[] = Array.from({ length: 24 }, (_, hour) => {
+  const value = String(hour);
+  const label = `${String(hour).padStart(2, "0")}:00`;
+  return { value, label };
+});
+
 export const clientTypeOptions: SelectOption[] = [
   { value: "PERSON", label: "Persona" },
   { value: "COMPANY", label: "Empresa" },

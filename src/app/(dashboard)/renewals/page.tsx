@@ -14,6 +14,7 @@ import { formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { NoRenewalButton } from "@/components/renewals/no-renewal-button";
 
 export const dynamic = "force-dynamic";
 
@@ -114,6 +115,7 @@ export default async function RenewalsPage({
                     <TableHead>Vencimiento</TableHead>
                     <TableHead className="text-right">Prima</TableHead>
                     <TableHead>Días</TableHead>
+                    <TableHead className="text-right">Acción</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -130,6 +132,13 @@ export default async function RenewalsPage({
                       <TableCell className="text-right font-medium">{formatCurrency(renewal.premiumAmount)}</TableCell>
                       <TableCell>
                         <DaysBadge days={renewal.daysUntilRenewal} />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <NoRenewalButton
+                          policyId={renewal.policyId}
+                          policyNumber={renewal.policyNumber}
+                          triggerClassName="h-7 rounded-full bg-card/70 px-2.5 text-xs"
+                        />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -210,6 +219,7 @@ export default async function RenewalsPage({
                     <TableHead className="text-right">Prima</TableHead>
                     <TableHead>Días restantes</TableHead>
                     <TableHead>Prioridad</TableHead>
+                    <TableHead className="text-right">Acción</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -230,6 +240,13 @@ export default async function RenewalsPage({
                       </TableCell>
                       <TableCell>
                         <StatusBadge status={renewal.priority} />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <NoRenewalButton
+                          policyId={renewal.policyId}
+                          policyNumber={renewal.policyNumber}
+                          triggerClassName="h-7 rounded-full bg-card/70 px-2.5 text-xs"
+                        />
                       </TableCell>
                     </TableRow>
                   ))}

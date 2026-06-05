@@ -9,39 +9,12 @@ import { errorResult, successResult, type MutationResult } from "@/lib/mutation-
 import {
   createAndDeliverTelegramNotificationEvent,
   createTelegramLinkCodeForUser,
+  markTelegramDigestAsSentForUser,
   disconnectTelegramChannelForUser,
   buildTelegramDailyDigest,
   type TelegramLinkCodeResult,
 } from "@/lib/telegram";
-import {
-  updateNotificationPreferences,
-  type NotificationPreferenceInput,
-} from "@/lib/notification-foundation";
 import { isSupportedTimeZone } from "@/lib/time-zones";
-
-export async function saveNotificationPreferences(
-  preferences: NotificationPreferenceInput[],
-): Promise<MutationResult> {
-  try {
-    const user = await requireUser();
-    const updated = await updateNotificationPreferences({
-      userId: user.id,
-      actorId: user.id,
-      preferences,
-    });
-
-    if (!updated) {
-      return errorResult("No se pudieron guardar tus preferencias.");
-    }
-
-    revalidatePath("/settings/notifications");
-    revalidatePath("/settings");
-    return successResult(user.id, "/settings/notifications", "Preferencias guardadas.");
-  } catch (error) {
-    logError("settings.notifications.save", error);
-    return errorResult("No se pudieron guardar tus preferencias.");
-  }
-}
 
 export async function generateTelegramLinkCode(): Promise<TelegramLinkCodeResult> {
   try {
@@ -173,6 +146,7 @@ export async function sendTelegramDigestNow(): Promise<MutationResult> {
     });
 
     if (event.status === "SENT") {
+      await markTelegramDigestAsSentForUser(user.id);
       revalidatePath("/settings/notifications");
       return successResult(user.id, "/settings/notifications", "Resumen diario enviado.");
     }
@@ -185,6 +159,56 @@ export async function sendTelegramDigestNow(): Promise<MutationResult> {
   } catch (error) {
     logError("settings.notifications.telegram.digestNow", error);
     return errorResult("No se pudo enviar el resumen.");
+  }
+}
+
+export async function updateTelegramDigestHour(hour: number): Promise<MutationResult> {
+  try {
+    const user = await requireUser();
+    const normalizedHour = Number(hour);
+
+    if (!Number.isInteger(normalizedHour) || normalizedHour < 0 || normalizedHour > 23) {
+      return errorResult("La hora seleccionada no es válida.");
+    }
+
+    const db = getDb();
+    const updated = await db.$transaction(async (tx) => {
+      const current = await tx.user.findUnique({
+        where: { id: user.id },
+        select: { id: true, telegramDigestHour: true },
+      });
+
+      if (!current) {
+        throw new Error("No se pudo localizar tu cuenta.");
+      }
+
+      const next = await tx.user.update({
+        where: { id: user.id },
+        data: { telegramDigestHour: normalizedHour },
+        select: { id: true, telegramDigestHour: true },
+      });
+
+      if (current.telegramDigestHour !== next.telegramDigestHour) {
+        await writeActivityLog({
+          entityType: "User",
+          entityId: user.id,
+          action: "USER_TELEGRAM_DIGEST_HOUR_UPDATED",
+          oldValue: { telegramDigestHour: current.telegramDigestHour },
+          newValue: { telegramDigestHour: next.telegramDigestHour },
+          userId: user.id,
+          db: tx,
+        });
+      }
+
+      return next;
+    });
+
+    revalidatePath("/settings/notifications");
+    revalidatePath("/settings");
+    return successResult(updated.id, "/settings/notifications", "Hora del resumen actualizada.");
+  } catch (error) {
+    logError("settings.notifications.telegram.digestHour.update", error);
+    return errorResult("No se pudo actualizar la hora del resumen.");
   }
 }
 

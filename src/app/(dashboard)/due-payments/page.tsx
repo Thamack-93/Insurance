@@ -9,6 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { EmptyState } from "@/components/empty-states/empty-state";
 import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
+import { QuickPaymentDialog } from "@/components/payments/quick-payment-dialog";
+import { CancelReceiptButton } from "@/components/receipts/cancel-receipt-button";
 import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
@@ -62,7 +64,12 @@ export default async function DuePaymentsPage({
     db.receipt.count({ where: openHorizonWhere }),
     db.receipt.findMany({
       where: openHorizonWhere,
-      include: { client: true, policy: true, insurer: true },
+      include: {
+        client: true,
+        policy: true,
+        insurer: true,
+        _count: { select: { payments: true } },
+      },
       orderBy: { dueDate: "asc" },
       skip: (page - 1) * DEFAULT_PAGE_SIZE,
       take: DEFAULT_PAGE_SIZE,
@@ -193,6 +200,7 @@ export default async function DuePaymentsPage({
                     <TableHead>Póliza</TableHead>
                     <TableHead>Vencimiento</TableHead>
                     <TableHead className="text-right">Monto</TableHead>
+                    <TableHead className="text-right">Acción</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -217,6 +225,29 @@ export default async function DuePaymentsPage({
                       </TableCell>
                       <TableCell className="text-right font-medium">
                         {formatCurrency(receipt.amount, receipt.currency)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <QuickPaymentDialog
+                            receipt={{
+                              id: receipt.id,
+                              receiptNumber: receipt.receiptNumber,
+                              amount: Number(receipt.amount),
+                              currency: receipt.currency,
+                              dueDate: receipt.dueDate.toISOString().split("T")[0],
+                              client: { fullName: receipt.client.fullName },
+                              policy: { policyNumber: receipt.policy.policyNumber },
+                            }}
+                          />
+                          {receipt.policy.status === "CANCELLED" && receipt._count.payments === 0 ? (
+                            <CancelReceiptButton
+                              id={receipt.id}
+                              receiptNumber={receipt.receiptNumber}
+                              triggerLabel="Cancelar"
+                              triggerClassName="h-7 rounded-full bg-card/70 px-2.5 text-xs"
+                            />
+                          ) : null}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

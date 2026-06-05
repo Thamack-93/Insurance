@@ -16,6 +16,8 @@ model User {
   active       Boolean   @default(true)
   lastLoginAt  DateTime?
   timeZone     String    @default("America/Mexico_City")
+  telegramDigestHour    Int       @default(8)
+  telegramDigestLastSentAt DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -547,8 +549,6 @@ model NotificationPreference {
   channelType     String
   enabled         Boolean  @default(true)
   minPriority     String   @default("MEDIUM")
-  quietHoursStart String?
-  quietHoursEnd   String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -829,7 +829,7 @@ model PolicyRenewalSuggestion {
   id               String    @id @default(cuid())
   maintenanceRunId String?
   sourcePolicyId   String
-  targetPolicyId   String
+  targetPolicyId   String?
   status           String    @default("PENDING")
   confidence       Decimal?
   reason           String?
@@ -841,12 +841,13 @@ model PolicyRenewalSuggestion {
 
   maintenanceRun MaintenanceRun? @relation(fields: [maintenanceRunId], references: [id], onDelete: SetNull)
   sourcePolicy   Policy          @relation("PolicyRenewalSuggestionSource", fields: [sourcePolicyId], references: [id], onDelete: Cascade)
-  targetPolicy   Policy          @relation("PolicyRenewalSuggestionTarget", fields: [targetPolicyId], references: [id], onDelete: Cascade)
+  targetPolicy   Policy?         @relation("PolicyRenewalSuggestionTarget", fields: [targetPolicyId], references: [id], onDelete: Cascade)
   reviewedBy     User?           @relation("PolicyRenewalSuggestionReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@unique([sourcePolicyId, targetPolicyId])
   @@index([maintenanceRunId])
   @@index([sourcePolicyId])
+  @@index([sourcePolicyId, status])
   @@index([targetPolicyId])
   @@index([status])
   @@index([reviewedById])

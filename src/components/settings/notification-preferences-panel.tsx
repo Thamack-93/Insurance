@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -16,7 +16,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -26,15 +25,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
-import { SectionCard } from "@/components/pages-secondary/panels";
-import { priorityOptions } from "@/lib/domain-options";
-import {
-  notificationEventCatalog,
-  type NotificationChannelRecord,
-  type NotificationPreferenceInput,
-  type NotificationPreferencesSnapshot,
-} from "@/lib/notification-foundation-shared";
+import { digestHourOptions } from "@/lib/domain-options";
+import type { NotificationChannelRecord } from "@/lib/notification-foundation-shared";
 import { TIME_ZONE_OPTIONS } from "@/lib/time-zones";
 import type { MutationResult } from "@/lib/mutation-utils";
 
@@ -52,99 +44,46 @@ type TelegramLinkCodeResult =
     };
 
 type Props = {
-  snapshot: NotificationPreferencesSnapshot;
+  channel: NotificationChannelRecord;
   timeZone: string;
-  saveNotificationPreferences: (preferences: NotificationPreferenceInput[]) => Promise<MutationResult>;
+  digestHour: number;
   generateTelegramLinkCode: () => Promise<TelegramLinkCodeResult>;
   disconnectTelegram: () => Promise<MutationResult>;
   sendTelegramDigestNow: () => Promise<MutationResult>;
   sendTelegramTestMessage: () => Promise<MutationResult>;
+  updateTelegramDigestHour: (hour: number) => Promise<MutationResult>;
   updateNotificationTimezone: (timeZone: string) => Promise<MutationResult>;
 };
-
-type PreferenceRow = NotificationPreferenceInput;
-
-function buildInitialRows(snapshot: NotificationPreferencesSnapshot): PreferenceRow[] {
-  return notificationEventCatalog.map((meta) => {
-    const existing = snapshot.preferences.find(
-      (preference) => preference.eventType === meta.eventType && preference.channelType === "TELEGRAM",
-    );
-    const existingMinPriority = existing?.minPriority as PreferenceRow["minPriority"] | undefined;
-
-    return {
-      eventType: meta.eventType,
-      enabled: existing?.enabled ?? meta.defaultEnabled,
-      minPriority: existingMinPriority ?? meta.defaultMinPriority,
-      quietHoursStart: existing?.quietHoursStart ?? "",
-      quietHoursEnd: existing?.quietHoursEnd ?? "",
-    };
-  });
-}
-
-function toLabel(eventType: string) {
-  return notificationEventCatalog.find((item) => item.eventType === eventType)?.title ?? eventType;
-}
-
-function toDescription(eventType: string) {
-  return (
-    notificationEventCatalog.find((item) => item.eventType === eventType)?.description ??
-    "Preferencia de notificación."
-  );
-}
 
 function isConnected(channel: NotificationChannelRecord) {
   return channel.isEnabled && Boolean(channel.telegramChatId);
 }
 
 export function NotificationPreferencesPanel({
-  snapshot,
+  channel,
   timeZone,
-  saveNotificationPreferences,
+  digestHour,
   generateTelegramLinkCode,
   disconnectTelegram,
   sendTelegramDigestNow,
   sendTelegramTestMessage,
+  updateTelegramDigestHour,
   updateNotificationTimezone,
 }: Props) {
   const router = useRouter();
-  const [rows, setRows] = useState<PreferenceRow[]>(() => buildInitialRows(snapshot));
   const [selectedTimeZone, setSelectedTimeZone] = useState(timeZone);
-  const [isPending, startTransition] = useTransition();
+  const [selectedDigestHour, setSelectedDigestHour] = useState(String(digestHour));
   const [isGeneratingLink, setIsGeneratingLink] = useState(false);
   const [isSendingDigestNow, setIsSendingDigestNow] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [isSavingTimeZone, setIsSavingTimeZone] = useState(false);
+  const [isSavingDigestHour, setIsSavingDigestHour] = useState(false);
   const [generatedLink, setGeneratedLink] = useState<{ code: string; expiresAt: string } | null>(
     null,
   );
 
-  const connected = isConnected(snapshot.channel);
-  const enabledCount = useMemo(
-    () => rows.filter((row) => row.enabled).length,
-    [rows],
-  );
-
-  function updateRow(index: number, patch: Partial<PreferenceRow>) {
-    setRows((current) =>
-      current.map((row, currentIndex) => (currentIndex === index ? { ...row, ...patch } : row)),
-    );
-  }
-
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    startTransition(async () => {
-      const result = await saveNotificationPreferences(rows);
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-
-      toast.success(result.message);
-      router.refresh();
-    });
-  }
+  const connected = isConnected(channel);
 
   async function handleGenerateTelegramLinkCode() {
     setIsGeneratingLink(true);
@@ -232,6 +171,23 @@ export function NotificationPreferencesPanel({
     }
   }
 
+  async function handleSaveDigestHour() {
+    setIsSavingDigestHour(true);
+    try {
+      const parsedHour = Number(selectedDigestHour);
+      const result = await updateTelegramDigestHour(parsedHour);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+
+      toast.success(result.message);
+      router.refresh();
+    } finally {
+      setIsSavingDigestHour(false);
+    }
+  }
+
   async function handleCopyLinkCode() {
     if (!generatedLink) return;
     try {
@@ -258,7 +214,7 @@ export function NotificationPreferencesPanel({
       <Card className="border-border/60 bg-card/85 shadow-sm">
         <CardHeader className="border-b border-border/70">
           <CardTitle className="flex items-center gap-2 text-base">
-            <Globe2 className="size-4" />
+            <BellRing className="size-4" />
             Canal disponible
           </CardTitle>
           <CardDescription>
@@ -276,7 +232,7 @@ export function NotificationPreferencesPanel({
             </div>
             <p className="text-sm text-muted-foreground">
               {connected
-                ? `Chat vinculado: ${snapshot.channel.telegramChatId ?? "—"}`
+                ? `Chat vinculado: ${channel.telegramChatId ?? "—"}`
                 : "Aún no hay enlace activo. Genera un código y usa /link en Telegram para conectarlo."}
             </p>
           </div>
@@ -285,7 +241,7 @@ export function NotificationPreferencesPanel({
               {connected ? (
                 <>
                   <CheckCircle2 className="size-4 text-emerald-600" />
-                  Listo para recibir mensajes
+                  Listo para recibir el resumen diario
                 </>
               ) : (
                 <>
@@ -295,7 +251,13 @@ export function NotificationPreferencesPanel({
               )}
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={handleGenerateTelegramLinkCode} disabled={isGeneratingLink}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleGenerateTelegramLinkCode}
+                disabled={isGeneratingLink}
+              >
                 <Link2 className="mr-2 size-4" />
                 {isGeneratingLink ? "Generando…" : "Generar código"}
               </Button>
@@ -340,8 +302,7 @@ export function NotificationPreferencesPanel({
             Zona horaria
           </CardTitle>
           <CardDescription>
-            Quiet hours se interpretan usando esta zona horaria. Si cambias aquí, el rango de no molestar cambia
-            sin modificar tus preferencias.
+            La hora seleccionada para el resumen diario se interpreta usando esta zona horaria.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between">
@@ -371,6 +332,48 @@ export function NotificationPreferencesPanel({
         </CardContent>
       </Card>
 
+      <Card className="border-border/60 bg-card/85 shadow-sm">
+        <CardHeader className="border-b border-border/70">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Send className="size-4" />
+            Hora del resumen diario
+          </CardTitle>
+          <CardDescription>
+            El cron revisa cada hora y envía tu resumen cuando el reloj local coincide con esta hora.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between">
+          <div className="space-y-1">
+            <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Hora de envío
+            </Label>
+            <Select
+              value={selectedDigestHour}
+              onValueChange={(value) => setSelectedDigestHour(value ?? String(digestHour))}
+            >
+              <SelectTrigger className="w-full sm:w-[220px]">
+                <SelectValue placeholder="Selecciona una hora" />
+              </SelectTrigger>
+              <SelectContent>
+                {digestHourOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-sm text-muted-foreground">
+              El resumen diario se enviará a las{" "}
+              <span className="font-medium text-foreground">{selectedDigestHour.padStart(2, "0")}:00</span>{" "}
+              en tu zona horaria.
+            </p>
+          </div>
+          <Button type="button" variant="outline" onClick={handleSaveDigestHour} disabled={isSavingDigestHour}>
+            {isSavingDigestHour ? "Guardando…" : "Guardar hora"}
+          </Button>
+        </CardContent>
+      </Card>
+
       {generatedLink ? (
         <Card className="border-border/60 bg-card/85 shadow-sm">
           <CardHeader className="border-b border-border/70">
@@ -396,103 +399,6 @@ export function NotificationPreferencesPanel({
           </CardContent>
         </Card>
       ) : null}
-
-      <SectionCard
-        title="Preferencias"
-        description="Activa o desactiva eventos y define el umbral mínimo por prioridad."
-        action={
-          <Button type="submit" form="notification-preferences-form" disabled={isPending}>
-            <BellRing className="mr-2 size-4" />
-            {isPending ? "Guardando…" : "Guardar preferencias"}
-          </Button>
-        }
-      >
-        <form id="notification-preferences-form" onSubmit={handleSubmit}>
-          <div className="space-y-0 divide-y divide-border/70">
-            {rows.map((row, index) => (
-              <div
-                key={row.eventType}
-                className="grid gap-4 px-5 py-4 lg:grid-cols-[1.8fr_0.55fr_0.7fr_0.7fr_0.7fr] lg:items-center"
-              >
-                <div className="space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-medium text-foreground">{toLabel(row.eventType)}</p>
-                    <Badge variant="outline" className="rounded-full text-[10px] uppercase tracking-wide">
-                      Telegram
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground">{toDescription(row.eventType)}</p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    checked={row.enabled}
-                    onCheckedChange={(checked) => updateRow(index, { enabled: checked === true })}
-                    aria-label={`Activar ${toLabel(row.eventType)}`}
-                  />
-                  <span className="text-sm text-muted-foreground">Activo</span>
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Prioridad mínima
-                  </Label>
-                  <Select
-                    value={row.minPriority}
-                    onValueChange={(value) =>
-                      updateRow(index, {
-                        minPriority: value as PreferenceRow["minPriority"],
-                      })
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {priorityOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    No molestar desde
-                  </Label>
-                  <Input
-                    type="time"
-                    value={row.quietHoursStart ?? ""}
-                    onChange={(event) => updateRow(index, { quietHoursStart: event.target.value })}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    No molestar hasta
-                  </Label>
-                  <Input
-                    type="time"
-                    value={row.quietHoursEnd ?? ""}
-                    onChange={(event) => updateRow(index, { quietHoursEnd: event.target.value })}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <Separator />
-
-          <div className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-sm text-muted-foreground">
-              {enabledCount} de {rows.length} preferencias activas para Telegram. Los horarios usan la zona
-              elegida arriba.
-            </div>
-          </div>
-        </form>
-      </SectionCard>
     </div>
   );
 }

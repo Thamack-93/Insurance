@@ -2,6 +2,7 @@ import { addDays, subDays } from "date-fns";
 import { getDb } from "@/lib/db";
 import { today } from "@/lib/dates";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
+import { ACTIVE_RENEWAL_POLICY_WHERE } from "@/lib/renewal-decisions";
 
 export type RiskFinding = {
   alertType: string;
@@ -21,15 +22,29 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
   const in60 = addDays(now, 60);
   const olderThan15 = subDays(now, 15);
   const policyScope = portfolioOwnerId ? { client: { portfolioOwnerId } } : {};
+  const clientScope = portfolioOwnerId ? { portfolioOwnerId } : {};
+  const activeRenewalScope = {
+    ...policyScope,
+    ...ACTIVE_RENEWAL_POLICY_WHERE,
+  };
+  const clientWithoutActivePolicyScope = {
+    ...clientScope,
+    policies: {
+      none: {
+        OR: [
+          ACTIVE_RENEWAL_POLICY_WHERE,
+          { sourceRenewalSuggestions: { some: { status: "DECLINED" } } },
+        ],
+      },
+    },
+  };
   const receiptScope = portfolioOwnerId ? { client: { portfolioOwnerId } } : {};
   const commissionScope = portfolioOwnerId ? { client: { portfolioOwnerId } } : {};
-  const clientScope = portfolioOwnerId ? { portfolioOwnerId } : {};
   const workItemScope = portfolioOwnerId
     ? { OR: [{ client: { portfolioOwnerId } }, { clientId: null, assignedToId: portfolioOwnerId }] }
     : {};
 
   const [
-    expiredPolicies,
     overdueReceipts,
     overdueCommissions,
     staleWorkItems,
@@ -41,11 +56,6 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
     duplicatePolicyKeys,
     duplicateReceiptKeys,
   ] = await Promise.all([
-    db.policy.findMany({
-      where: { ...policyScope, endDate: { lt: now }, status: { notIn: ["RENEWED", "CANCELLED"] } },
-      take: TAKE_LIMIT,
-      select: { id: true, policyNumber: true },
-    }),
     db.receipt.findMany({
       where: {
         ...receiptScope,
@@ -77,7 +87,10 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
       select: { id: true, fullName: true },
     }),
     db.policy.findMany({
-      where: { ...policyScope, OR: [{ endDate: { lt: new Date("2000-01-01") } }, { startDate: { gt: in60 } }] },
+      where: {
+        ...activeRenewalScope,
+        OR: [{ endDate: { lt: new Date("2000-01-01") } }, { startDate: { gt: in60 } }],
+      },
       take: TAKE_LIMIT,
       select: { id: true, policyNumber: true },
     }),
@@ -95,14 +108,13 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
       select: { id: true, fileName: true },
     }),
     db.client.findMany({
-      where: { ...clientScope, policies: { none: { status: "ACTIVE" } } },
+      where: clientWithoutActivePolicyScope,
       take: TAKE_LIMIT,
       select: { id: true, fullName: true },
     }),
     db.policy.findMany({
       where: {
-        ...policyScope,
-        status: "ACTIVE",
+        ...activeRenewalScope,
         endDate: { gte: now, lte: in60 },
         workItems: {
           none: {
@@ -117,7 +129,7 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
     // Duplicate detection now happens in the database via groupBy.
     db.policy.groupBy({
       by: ["policyNumber", "clientId", "insurerId"],
-      where: policyScope,
+      where: activeRenewalScope,
       _count: { policyNumber: true },
       having: { policyNumber: { _count: { gt: 1 } } },
     }),
@@ -132,7 +144,7 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
   const duplicatePolicies = duplicatePolicyKeys.length
     ? await db.policy.findMany({
         where: {
-          ...policyScope,
+          ...activeRenewalScope,
           OR: duplicatePolicyKeys.map((row) => ({
             policyNumber: row.policyNumber,
             clientId: row.clientId,
@@ -170,7 +182,6 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
   );
 
   return [
-    ...expiredPolicies.map((policy) => risk("POLICY_EXPIRED", "CRITICAL", "Poliza vencida", policy.policyNumber, "Policy", policy.id, "Revisar renovacion o cancelacion.")),
     ...overdueReceipts.map((receipt) => risk("RECEIPT_OVERDUE", "CRITICAL", "Recibo vencido sin pago", receipt.receiptNumber, "Receipt", receipt.id, "Contactar cliente y registrar seguimiento.")),
     ...overdueCommissions.map((commission) => risk("COMMISSION_OVERDUE", "WARNING", "Comision vencida sin cobro", String(commission.expectedAmount), "Commission", commission.id, "Revisar cobranza con aseguradora.")),
     ...staleWorkItems.map((workItem) =>

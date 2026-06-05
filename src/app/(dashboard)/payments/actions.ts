@@ -3,6 +3,7 @@
 import { getDb } from "@/lib/db";
 import { AuthError, getCurrentUserId } from "@/lib/auth";
 import { logError } from "@/lib/logger";
+import { parseDateInput } from "@/lib/form-utils";
 import { PaymentConflictError, recordPayment } from "@/lib/payment-service";
 import {
   assertReceiptPortfolioAccess,
@@ -63,7 +64,7 @@ export async function createPayment(data: CreatePaymentInput): Promise<MutationR
     const { payment } = await recordPayment({
       receiptId: data.receiptId,
       amount: data.amount,
-      paidDate: new Date(data.paidDate),
+      paidDate: parseDateInput(data.paidDate),
       paymentMethod: data.paymentMethod,
       reference: data.reference,
       notes: data.notes,

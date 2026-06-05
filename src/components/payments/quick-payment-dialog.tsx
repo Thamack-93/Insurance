@@ -4,10 +4,12 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { CreditCard, DollarSign } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency } from "@/lib/money";
-import { formatDate } from "@/lib/dates";
+import { formatDate, today } from "@/lib/dates";
+import { formatDateInput } from "@/lib/form-utils";
 import { Badge } from "@/components/ui/badge";
 import { createPayment } from "@/app/(dashboard)/payments/actions";
 
@@ -28,13 +30,14 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [paidDate, setPaidDate] = useState(formatDateInput(today()));
 
   const handleQuickPayment = () => {
     startTransition(async () => {
       const result = await createPayment({
         receiptId: receipt.id,
         amount: receipt.amount,
-        paidDate: new Date().toISOString().split("T")[0],
+        paidDate,
         paymentMethod: "TRANSFER",
       });
 
@@ -50,8 +53,15 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
     });
   };
 
+  const handleOpenChange = (open: boolean) => {
+    setIsOpen(open);
+    if (open) {
+      setPaidDate(formatDateInput(today()));
+    }
+  };
+
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogTrigger render={<Button size="sm" className="gap-2" />}>
         <CreditCard className="h-4 w-4" />
         Pagar
@@ -105,9 +115,22 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
 
           <div className="space-y-3">
             <div className="text-sm text-muted-foreground">
-              <p>• El pago se registrará con la fecha actual</p>
+              <p>• El pago se registrará con la fecha elegida</p>
               <p>• Método de pago: Transferencia bancaria</p>
               <p>• El recibo se marcará como pagado</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor={`paid-date-${receipt.id}`}>
+                Fecha de pago
+              </label>
+              <Input
+                id={`paid-date-${receipt.id}`}
+                type="date"
+                required
+                value={paidDate}
+                onChange={(event) => setPaidDate(event.target.value)}
+              />
             </div>
           </div>
 

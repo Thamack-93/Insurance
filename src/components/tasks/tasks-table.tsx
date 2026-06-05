@@ -24,6 +24,7 @@ import { BulkActionsProvider, useBulkActions } from "@/components/bulk-actions/b
 import { SelectableRow } from "@/components/bulk-actions/selectable-row";
 import { SelectAllHeader } from "@/components/bulk-actions/select-all-header";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
+import { DeleteWorkItemButton } from "@/components/tasks/delete-task-button";
 import {
   bulkDeleteWorkItems,
   bulkUpdateWorkItemPriority,
@@ -224,13 +225,14 @@ function WorkItemsTableInner({ workItems }: { workItems: WorkItemRow[] }) {
             <TableHead>Título</TableHead>
             <TableHead>Cliente</TableHead>
             <TableHead>Póliza</TableHead>
-            <TableHead>Tipo</TableHead>
-            <TableHead>Vence</TableHead>
-            <TableHead>Estado</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {workItems.map((workItem) => (
+          <TableHead>Tipo</TableHead>
+          <TableHead>Vence</TableHead>
+          <TableHead>Estado</TableHead>
+          <TableHead className="text-right">Acción</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {workItems.map((workItem) => (
             <SelectableRow key={workItem.id} id={workItem.id}>
               <TableCell className="font-medium">
                 <Link href={`/tasks/${workItem.id}`} className="hover:text-primary">
@@ -271,6 +273,14 @@ function WorkItemsTableInner({ workItems }: { workItems: WorkItemRow[] }) {
                   <PriorityBadge priority={workItem.priority} />
                   <StatusBadge status={workItem.status} />
                 </div>
+              </TableCell>
+              <TableCell className="text-right">
+                <DeleteWorkItemButton
+                  id={workItem.id}
+                  folio={workItem.folio}
+                  triggerLabel="Eliminar"
+                  triggerClassName="h-7 rounded-full bg-card/70 px-2.5 text-xs text-destructive hover:text-destructive"
+                />
               </TableCell>
             </SelectableRow>
           ))}

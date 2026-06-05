@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { addDays, endOfDay, startOfDay } from "date-fns";
+import { DEFAULT_TIMEZONE } from "@/lib/dates";
 import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { formatCurrency, toNumber } from "@/lib/money";
@@ -8,6 +9,8 @@ import { recordPayment } from "@/lib/payment-service";
 import {
   createNotificationEvent,
   ensureNotificationDefaultsForUser,
+  getLocalDateKey,
+  isDigestHourDue,
   markNotificationFailed,
   markNotificationSent,
   markNotificationSkipped,
@@ -200,6 +203,41 @@ function formatTelegramNotificationText(title: string, body: string) {
   const text = `${title.trim()}\n\n${body.trim()}`.trim();
   if (text.length <= 3900) return text;
   return `${text.slice(0, 3899)}…`;
+}
+
+function getDigestDateKey(now: Date, timeZone: string | null | undefined) {
+  return getLocalDateKey(now, timeZone ?? DEFAULT_TIMEZONE);
+}
+
+export async function markTelegramDigestAsSentForUser(
+  userId: string,
+  sentAt = new Date(),
+  client?: DbClient,
+) {
+  const db = client ?? getDb();
+  try {
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { id: true, timeZone: true },
+    });
+    if (!user) return null;
+
+    const updated = await db.user.update({
+      where: { id: userId },
+      data: {
+        telegramDigestLastSentAt: sentAt,
+      },
+      select: { id: true, telegramDigestLastSentAt: true },
+    });
+
+    return {
+      ...updated,
+      digestDateKey: getDigestDateKey(sentAt, user.timeZone),
+    };
+  } catch (error) {
+    logError("telegram.markDigestSent", error, { userId });
+    return null;
+  }
 }
 
 export function isTelegramWebhookSecretValid(headerValue: string | null) {
@@ -947,6 +985,13 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
     select: {
       userId: true,
       telegramChatId: true,
+      user: {
+        select: {
+          timeZone: true,
+          telegramDigestHour: true,
+          telegramDigestLastSentAt: true,
+        },
+      },
     },
   });
 
@@ -955,9 +1000,20 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
     sent: 0,
     failed: 0,
   };
+  const now = new Date();
 
   for (const channel of channels) {
     if (!channel.telegramChatId) continue;
+    const timeZone = channel.user.timeZone ?? DEFAULT_TIMEZONE;
+    if (!isDigestHourDue(now, channel.user.telegramDigestHour, timeZone)) {
+      continue;
+    }
+    if (
+      channel.user.telegramDigestLastSentAt &&
+      getLocalDateKey(channel.user.telegramDigestLastSentAt, timeZone) === getLocalDateKey(now, timeZone)
+    ) {
+      continue;
+    }
     try {
       const body = await buildTelegramDailyDigest(channel.userId, db);
       const event = await createAndDeliverTelegramNotificationEvent({
@@ -971,6 +1027,7 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
 
       if (event?.status === "SENT") {
         result.sent += 1;
+        await markTelegramDigestAsSentForUser(channel.userId, now, db);
       } else {
         result.failed += 1;
       }
