@@ -90,7 +90,12 @@ export default async function ReceiptsPage({
     db.receipt.count({ where }),
     db.receipt.findMany({
       where,
-      include: { client: true, policy: true, insurer: true },
+      include: {
+        client: true,
+        policy: true,
+        insurer: true,
+        _count: { select: { payments: true } },
+      },
       orderBy: { dueDate: "asc" },
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
@@ -129,7 +134,7 @@ export default async function ReceiptsPage({
 
   const collectableRows: CollectableReceipt[] = pagedReceipts
     .filter((receipt) => receipt.client && receipt.policy && receipt.insurer)
-    .map((receipt) => ({
+      .map((receipt) => ({
       id: receipt.id,
       receiptNumber: receipt.receiptNumber,
       dueDate: receipt.dueDate.toISOString().split("T")[0],
@@ -137,8 +142,9 @@ export default async function ReceiptsPage({
       currency: receipt.currency,
       status: receipt.status,
       client: { fullName: receipt.client.fullName },
-      policy: { policyNumber: receipt.policy.policyNumber },
+      policy: { policyNumber: receipt.policy.policyNumber, status: receipt.policy.status },
       insurer: { name: receipt.insurer.name },
+      paymentCount: receipt._count.payments,
     }));
 
   const safePaymentHistory = paymentHistory.filter((payment) => payment.receipt && payment.client && payment.policy);

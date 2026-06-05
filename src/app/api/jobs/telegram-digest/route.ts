@@ -5,8 +5,8 @@ import { sendDailyTelegramDigests } from "@/lib/telegram";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Vercel runs this route from a fixed UTC cron. The 14:00 UTC schedule approximates
-// 08:00 in Mexico City; revisit it if the business timezone or local DST rules change.
+// Vercel runs this route hourly. The handler checks each user's timezone and selected
+// digest hour, then sends only the summaries that are due right now.
 function hasValidCronSecret(request: NextRequest) {
   const secret = process.env.CRON_SECRET?.trim();
   if (!secret) return false;

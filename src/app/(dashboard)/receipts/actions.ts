@@ -132,6 +132,81 @@ export async function updateReceipt(id: string, values: ReceiptFormValues): Prom
   }
 }
 
+export async function cancelReceipt(id: string): Promise<MutationResult> {
+  try {
+    const db = getDb();
+    const userId = await getCurrentUserId();
+    await assertReceiptPortfolioAccess(id, userId);
+
+    const existingReceipt = await db.receipt.findUnique({
+      where: { id },
+      include: {
+        policy: {
+          select: {
+            id: true,
+            policyNumber: true,
+            status: true,
+          },
+        },
+        payments: {
+          select: { id: true },
+        },
+      },
+    });
+
+    if (!existingReceipt) {
+      return errorResult("El recibo ya no existe.");
+    }
+
+    if (existingReceipt.status === "CANCELLED") {
+      return successResult(existingReceipt.id, `/receipts/${existingReceipt.id}`, "El recibo ya estaba cancelado.");
+    }
+
+    if (existingReceipt.policy.status !== "CANCELLED") {
+      return errorResult("Solo se pueden cancelar recibos cuya póliza ya fue cancelada.");
+    }
+
+    if (existingReceipt.payments.length > 0) {
+      return errorResult("No se puede cancelar: el recibo ya tiene pagos registrados.");
+    }
+
+    const updatedReceipt = await db.receipt.update({
+      where: { id },
+      data: {
+        status: "CANCELLED",
+        paidDate: null,
+        paymentMethod: null,
+        updatedById: userId,
+      },
+    });
+
+    await writeActivityLog({
+      entityType: "Receipt",
+      entityId: updatedReceipt.id,
+      action: "RECEIPT_CANCEL",
+      oldValue: existingReceipt,
+      newValue: updatedReceipt,
+    });
+
+    revalidatePaths([
+      "/receipts",
+      "/due-payments",
+      `/receipts/${updatedReceipt.id}`,
+      `/policies/${existingReceipt.policy.id}`,
+      `/clients/${existingReceipt.clientId}`,
+      "/dashboard",
+      "/today",
+      "/portfolio",
+      "/risks",
+    ]);
+
+    return successResult(updatedReceipt.id, `/receipts/${updatedReceipt.id}`, "Recibo cancelado.");
+  } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
+    return errorResult(error instanceof Error ? error.message : "No se pudo cancelar el recibo.");
+  }
+}
+
 export async function bulkMarkReceiptsPaid(
   ids: string[],
   paymentMethod: string = "TRANSFER"

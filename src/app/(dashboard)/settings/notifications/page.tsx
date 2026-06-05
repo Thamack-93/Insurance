@@ -5,22 +5,22 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { requireUserOrRedirect } from "@/lib/auth";
-import { getNotificationPreferencesForUser } from "@/lib/notification-foundation";
-import { notificationEventCatalog } from "@/lib/notification-foundation-shared";
+import { getTelegramChannelStateForUser } from "@/lib/telegram";
 import { NotificationPreferencesPanel } from "@/components/settings/notification-preferences-panel";
 import {
   disconnectTelegram,
   generateTelegramLinkCode,
-  saveNotificationPreferences,
   sendTelegramDigestNow,
   sendTelegramTestMessage,
+  updateTelegramDigestHour,
   updateNotificationTimezone,
 } from "./actions";
 
 export default async function NotificationSettingsPage() {
   const user = await requireUserOrRedirect();
-  const snapshot = await getNotificationPreferencesForUser(user.id);
+  const channel = await getTelegramChannelStateForUser(user.id);
   const timeZone = user.timeZone ?? "America/Mexico_City";
+  const cronSecretConfigured = Boolean(process.env.CRON_SECRET?.trim());
 
   return (
     <div className="flex flex-col gap-6">
@@ -28,7 +28,7 @@ export default async function NotificationSettingsPage() {
         <PageHeader
           eyebrow="Sistema"
           title="Notificaciones"
-          description="Prepara Telegram y ajusta tus preferencias de alerta para las notificaciones futuras."
+          description="Prepara Telegram, define la hora del resumen diario y revisa el estado del cron."
           actions={
             <Button asChild variant="outline" className="rounded-full">
               <Link href="/settings">
@@ -49,12 +49,12 @@ export default async function NotificationSettingsPage() {
               <CardDescription>Telegram ya puede vincularse desde esta pantalla.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Badge variant={snapshot.channel.isEnabled && snapshot.channel.telegramChatId ? "default" : "outline"} className="rounded-full">
-                {snapshot.channel.isEnabled && snapshot.channel.telegramChatId ? "Conectado" : "Desconectado"}
+              <Badge variant={channel?.isEnabled && channel.telegramChatId ? "default" : "outline"} className="rounded-full">
+                {channel?.isEnabled && channel.telegramChatId ? "Conectado" : "Desconectado"}
               </Badge>
               <p className="text-sm text-muted-foreground">
-                {snapshot.channel.isEnabled && snapshot.channel.telegramChatId
-                  ? `Chat vinculado: ${snapshot.channel.telegramChatId}`
+                {channel?.isEnabled && channel.telegramChatId
+                  ? `Chat vinculado: ${channel.telegramChatId}`
                   : "No hay un chat vinculado todavía. Genera un código y envíalo por /link en Telegram para conectarlo."}
               </p>
             </CardContent>
@@ -62,27 +62,8 @@ export default async function NotificationSettingsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Eventos listos</CardTitle>
-              <CardDescription>Tipos de aviso que ya quedan preparados.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="flex flex-wrap gap-2">
-                {notificationEventCatalog.map((item) => (
-                  <Badge key={item.eventType} variant="secondary" className="rounded-full">
-                    {item.title}
-                  </Badge>
-                ))}
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Estos eventos ya se guardan en la base y quedan listos para Telegram en la siguiente etapa.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
               <CardTitle className="text-base">Acceso</CardTitle>
-              <CardDescription>Solo se editan tus propias preferencias.</CardDescription>
+              <CardDescription>Solo se edita tu canal y la hora del resumen diario.</CardDescription>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
               {user.role === "ADMIN" ? "Cuenta de administrador activa." : "Cuenta de agente activa."}
@@ -92,37 +73,70 @@ export default async function NotificationSettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Estado</CardTitle>
-              <CardDescription>Se guardan preferencias y auditoría.</CardDescription>
+              <CardDescription>Se guarda auditoría del canal y del resumen diario.</CardDescription>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
-              {snapshot.preferences.length} preferencias cargadas para tu usuario.
+              {channel?.isEnabled && channel.telegramChatId
+                ? "Telegram está conectado y listo para enviar el resumen diario."
+                : "Telegram todavía no está conectado para este usuario."}
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Zona horaria</CardTitle>
-              <CardDescription>Define cómo interpretamos quiet hours y resúmenes.</CardDescription>
+              <CardDescription>Define cómo interpretamos la hora elegida para el resumen diario.</CardDescription>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
-              {timeZone}. Los campos “inicio” y “fin” se interpretan como ventana de no molestar en esa zona.
+              {timeZone}. El resumen diario se enviará en esa zona horaria a la hora seleccionada.
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Resumen diario</CardTitle>
+              <CardDescription>La hora fija en la que se revisa el cron para tu resumen de Telegram.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-muted-foreground">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant={cronSecretConfigured ? "default" : "outline"} className="rounded-full">
+                  {cronSecretConfigured ? "Cron activo" : "Cron pendiente"}
+                </Badge>
+                <Badge variant="secondary" className="rounded-full">
+                  {String(user.telegramDigestHour).padStart(2, "0")}:00
+                </Badge>
+              </div>
+              <p>
+                El cron revisa la cola cada hora y envía tu resumen cuando coincide con{" "}
+                <span className="font-medium text-foreground">
+                  {String(user.telegramDigestHour).padStart(2, "0")}:00
+                </span>{" "}
+                en tu zona horaria.
+              </p>
             </CardContent>
           </Card>
         </section>
 
         <NotificationPreferencesPanel
-          key={[
-            snapshot.channel.updatedAt.getTime(),
-            snapshot.preferences.map((pref) => pref.updatedAt.getTime()).join("-"),
-            timeZone,
-          ].join(":")}
-          snapshot={snapshot}
+          key={[channel?.updatedAt.getTime() ?? 0, timeZone, user.telegramDigestHour].join(":")}
+          channel={
+            channel ?? {
+              id: "",
+              userId: user.id,
+              type: "TELEGRAM",
+              telegramChatId: null,
+              isEnabled: false,
+              createdAt: new Date(0),
+              updatedAt: new Date(0),
+            }
+          }
           timeZone={timeZone}
+          digestHour={user.telegramDigestHour}
           generateTelegramLinkCode={generateTelegramLinkCode}
           disconnectTelegram={disconnectTelegram}
           sendTelegramDigestNow={sendTelegramDigestNow}
           sendTelegramTestMessage={sendTelegramTestMessage}
-          saveNotificationPreferences={saveNotificationPreferences}
+          updateTelegramDigestHour={updateTelegramDigestHour}
           updateNotificationTimezone={updateNotificationTimezone}
         />
       </div>

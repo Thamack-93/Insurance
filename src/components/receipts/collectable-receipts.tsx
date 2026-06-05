@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { QuickPaymentDialog } from "@/components/payments/quick-payment-dialog";
+import { CancelReceiptButton } from "@/components/receipts/cancel-receipt-button";
 import { ConfirmDialog } from "@/components/drawers/confirm-dialog";
 import {
   BulkActionsProvider,
@@ -28,8 +29,9 @@ export type CollectableReceipt = {
   currency: string;
   status: string;
   client: { fullName: string };
-  policy: { policyNumber: string };
+  policy: { policyNumber: string; status: string };
   insurer: { name: string };
+  paymentCount: number;
 };
 
 export function CollectableReceipts({ receipts }: { receipts: CollectableReceipt[] }) {
@@ -191,6 +193,14 @@ function ReceiptRow({ receipt }: { receipt: CollectableReceipt }) {
             policy: { policyNumber: receipt.policy.policyNumber },
           }}
         />
+        {receipt.policy.status === "CANCELLED" && receipt.paymentCount === 0 ? (
+          <CancelReceiptButton
+            id={receipt.id}
+            receiptNumber={receipt.receiptNumber}
+            triggerLabel="Cancelar"
+            triggerClassName="h-8 rounded-full bg-card/70 px-3 text-xs"
+          />
+        ) : null}
       </div>
     </div>
   );

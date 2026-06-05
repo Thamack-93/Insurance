@@ -16,27 +16,6 @@ export const notificationEventCatalog = [
     defaultEnabled: true,
     defaultMinPriority: "LOW",
   },
-  {
-    eventType: "URGENT_WORKITEM_ASSIGNED",
-    title: "Pendiente urgente asignado",
-    description: "Notifica pendientes urgentes o de alta prioridad.",
-    defaultEnabled: true,
-    defaultMinPriority: "HIGH",
-  },
-  {
-    eventType: "CRITICAL_RENEWAL",
-    title: "Renovación crítica",
-    description: "Avisa cuando una renovación entra en ventana crítica.",
-    defaultEnabled: true,
-    defaultMinPriority: "HIGH",
-  },
-  {
-    eventType: "OVERDUE_RECEIPT",
-    title: "Recibo vencido",
-    description: "Alerta sobre cobranza vencida o atrasada.",
-    defaultEnabled: true,
-    defaultMinPriority: "HIGH",
-  },
 ] as const;
 
 export type NotificationEventType = (typeof notificationEventCatalog)[number]["eventType"];
@@ -58,8 +37,6 @@ export type NotificationPreferenceRecord = {
   channelType: string;
   enabled: boolean;
   minPriority: string;
-  quietHoursStart: string | null;
-  quietHoursEnd: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -92,8 +69,6 @@ export type NotificationPreferenceInput = {
   eventType: string;
   enabled: boolean;
   minPriority: Priority;
-  quietHoursStart?: string | null;
-  quietHoursEnd?: string | null;
 };
 
 const PRIORITY_RANK: Record<Priority, number> = {
@@ -103,29 +78,23 @@ const PRIORITY_RANK: Record<Priority, number> = {
   URGENT: 4,
 };
 
-function normalizeTime(value?: string | null) {
-  const trimmed = value?.trim();
-  if (!trimmed) return null;
-  if (!/^\d{2}:\d{2}$/.test(trimmed)) return null;
-  const [hoursText, minutesText] = trimmed.split(":");
-  const hours = Number(hoursText);
-  const minutes = Number(minutesText);
-  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-}
-
-function getMinutesInTimeZone(date: Date, timeZone = DEFAULT_TIMEZONE) {
+function getDatePartsInTimeZone(date: Date, timeZone = DEFAULT_TIMEZONE) {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone,
     hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
   }).formatToParts(date);
 
+  const year = Number(parts.find((part) => part.type === "year")?.value ?? 1970);
+  const month = Number(parts.find((part) => part.type === "month")?.value ?? 1);
+  const day = Number(parts.find((part) => part.type === "day")?.value ?? 1);
   const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
   const minute = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
-  return hour * 60 + minute;
+  return { year, month, day, hour, minute };
 }
 
 export function getNotificationEventMeta(eventType: string) {
@@ -140,27 +109,22 @@ export function comparePriority(priority: Priority, minPriority: Priority) {
   return PRIORITY_RANK[priority] - PRIORITY_RANK[minPriority];
 }
 
-export function isWithinQuietHours(
-  now: Date,
-  quietHoursStart?: string | null,
-  quietHoursEnd?: string | null,
-  timeZone = DEFAULT_TIMEZONE,
-) {
-  const start = normalizeTime(quietHoursStart);
-  const end = normalizeTime(quietHoursEnd);
-  if (!start || !end || start === end) return false;
+export function getLocalDateKey(now: Date, timeZone = DEFAULT_TIMEZONE) {
+  const parts = getDatePartsInTimeZone(now, timeZone);
+  return [
+    String(parts.year).padStart(4, "0"),
+    String(parts.month).padStart(2, "0"),
+    String(parts.day).padStart(2, "0"),
+  ].join("-");
+}
 
-  const currentMinutes = getMinutesInTimeZone(now, timeZone);
-  const [startHour, startMinute] = start.split(":").map(Number);
-  const [endHour, endMinute] = end.split(":").map(Number);
-  const startMinutes = startHour * 60 + startMinute;
-  const endMinutes = endHour * 60 + endMinute;
+export function getLocalHour(now: Date, timeZone = DEFAULT_TIMEZONE) {
+  return getDatePartsInTimeZone(now, timeZone).hour;
+}
 
-  if (startMinutes < endMinutes) {
-    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
-  }
-
-  return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+export function isDigestHourDue(now: Date, digestHour: number, timeZone = DEFAULT_TIMEZONE) {
+  if (!Number.isInteger(digestHour) || digestHour < 0 || digestHour > 23) return false;
+  return getLocalHour(now, timeZone) === digestHour;
 }
 
 export function shouldNotifyFromState(input: {
@@ -168,15 +132,8 @@ export function shouldNotifyFromState(input: {
   minPriority: Priority;
   channelEnabled: boolean;
   preferenceEnabled: boolean;
-  quietHoursStart?: string | null;
-  quietHoursEnd?: string | null;
-  now?: Date;
-  timeZone?: string;
 }) {
   if (!input.channelEnabled || !input.preferenceEnabled) return false;
   if (comparePriority(input.priority, input.minPriority) < 0) return false;
-  if (isWithinQuietHours(input.now ?? new Date(), input.quietHoursStart, input.quietHoursEnd, input.timeZone)) {
-    return false;
-  }
   return true;
 }

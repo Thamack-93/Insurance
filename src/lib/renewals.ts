@@ -6,6 +6,7 @@ import { addDays } from "date-fns";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
 import { upsertWorkItemFromSource } from "@/lib/work-items";
+import { ACTIVE_RENEWAL_POLICY_WHERE } from "@/lib/renewal-decisions";
 
 export interface RenewalOpportunity {
   policyId: string;
@@ -25,15 +26,15 @@ export interface RenewalOpportunity {
 
 export async function getUpcomingRenewals(daysAhead: number = 90, portfolioOwnerId?: string) {
   const db = getDb();
-  
+
   try {
     const todayDate = new Date(today());
     const futureDate = addDays(todayDate, daysAhead);
-    
+
     const policies = await db.policy.findMany({
       where: {
         ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
-        status: "ACTIVE",
+        ...ACTIVE_RENEWAL_POLICY_WHERE,
         endDate: {
           gte: todayDate,
           lte: futureDate,
@@ -101,7 +102,7 @@ export async function getUpcomingRenewals(daysAhead: number = 90, portfolioOwner
 
 export async function createRenewalWorkItems() {
   const db = getDb();
-  
+
   try {
     const upcomingRenewals = await getUpcomingRenewals(60);
     let workItemsCreated = 0;
@@ -194,7 +195,7 @@ export async function sendRenewalWorkItems() {
 
 export async function getRenewalStats(portfolioOwnerId?: string) {
   const db = getDb();
-  
+
   try {
     const todayDate = new Date(today());
     const next30Days = addDays(todayDate, 30);
@@ -211,7 +212,7 @@ export async function getRenewalStats(portfolioOwnerId?: string) {
       db.policy.count({
         where: {
           ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
-          status: "ACTIVE",
+          ...ACTIVE_RENEWAL_POLICY_WHERE,
           endDate: {
             lt: todayDate,
           },
@@ -220,7 +221,7 @@ export async function getRenewalStats(portfolioOwnerId?: string) {
       db.policy.count({
         where: {
           ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
-          status: "ACTIVE",
+          ...ACTIVE_RENEWAL_POLICY_WHERE,
           endDate: {
             gte: todayDate,
             lte: next30Days,
@@ -230,7 +231,7 @@ export async function getRenewalStats(portfolioOwnerId?: string) {
       db.policy.count({
         where: {
           ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
-          status: "ACTIVE",
+          ...ACTIVE_RENEWAL_POLICY_WHERE,
           endDate: {
             gt: next30Days,
             lte: next60Days,
@@ -240,7 +241,7 @@ export async function getRenewalStats(portfolioOwnerId?: string) {
       db.policy.count({
         where: {
           ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
-          status: "ACTIVE",
+          ...ACTIVE_RENEWAL_POLICY_WHERE,
           endDate: {
             gt: next60Days,
             lte: next90Days,
@@ -250,7 +251,7 @@ export async function getRenewalStats(portfolioOwnerId?: string) {
       db.policy.count({
         where: {
           ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
-          status: "ACTIVE",
+          ...ACTIVE_RENEWAL_POLICY_WHERE,
         },
       }),
     ]);
@@ -259,7 +260,7 @@ export async function getRenewalStats(portfolioOwnerId?: string) {
     const renewalPolicies = await db.policy.findMany({
       where: {
         ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
-        status: "ACTIVE",
+        ...ACTIVE_RENEWAL_POLICY_WHERE,
         endDate: {
           gte: todayDate,
           lte: next90Days,

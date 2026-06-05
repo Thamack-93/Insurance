@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DeleteReceiptButton } from "@/components/receipts/delete-receipt-button";
+import { CancelReceiptButton } from "@/components/receipts/cancel-receipt-button";
 import { getDb } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { daysUntil, formatDate } from "@/lib/dates";
@@ -69,6 +70,9 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/receipts/${receipt.id}/edit`}>Editar recibo</Link>
               </Button>
+              {receipt.policy.status === "CANCELLED" && payments.length === 0 ? (
+                <CancelReceiptButton id={receipt.id} receiptNumber={receipt.receiptNumber} />
+              ) : null}
               {isAdmin ? <DeleteReceiptButton id={receipt.id} receiptNumber={receipt.receiptNumber} /> : null}
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href="/receipts">

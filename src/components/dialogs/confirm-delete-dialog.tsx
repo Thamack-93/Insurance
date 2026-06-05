@@ -23,6 +23,8 @@ type ConfirmDeleteDialogProps = {
   onDelete: (id: string) => Promise<MutationResult>;
   id: string;
   fallbackRedirect?: string;
+  triggerLabel?: string;
+  triggerClassName?: string;
 };
 
 export function ConfirmDeleteDialog({
@@ -32,6 +34,8 @@ export function ConfirmDeleteDialog({
   onDelete,
   id,
   fallbackRedirect = "/",
+  triggerLabel = "Eliminar",
+  triggerClassName,
 }: ConfirmDeleteDialogProps) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
@@ -54,11 +58,17 @@ export function ConfirmDeleteDialog({
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger
         render={
-          <Button variant="outline" className="rounded-full bg-card/70 text-destructive hover:text-destructive" />
+          <Button
+            variant="outline"
+            className={
+              triggerClassName ??
+              "rounded-full bg-card/70 text-destructive hover:text-destructive"
+            }
+          />
         }
       >
         <Trash2 className="mr-2 size-4" />
-        Eliminar
+        {triggerLabel}
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
