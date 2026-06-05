@@ -17,17 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { digestHourOptions } from "@/lib/domain-options";
 import type { NotificationChannelRecord } from "@/lib/notification-foundation-shared";
-import { TIME_ZONE_OPTIONS } from "@/lib/time-zones";
 import type { MutationResult } from "@/lib/mutation-utils";
 
 type TelegramLinkCodeResult =
@@ -51,8 +41,6 @@ type Props = {
   disconnectTelegram: () => Promise<MutationResult>;
   sendTelegramDigestNow: () => Promise<MutationResult>;
   sendTelegramTestMessage: () => Promise<MutationResult>;
-  updateTelegramDigestHour: (hour: number) => Promise<MutationResult>;
-  updateNotificationTimezone: (timeZone: string) => Promise<MutationResult>;
 };
 
 function isConnected(channel: NotificationChannelRecord) {
@@ -67,18 +55,12 @@ export function NotificationPreferencesPanel({
   disconnectTelegram,
   sendTelegramDigestNow,
   sendTelegramTestMessage,
-  updateTelegramDigestHour,
-  updateNotificationTimezone,
 }: Props) {
   const router = useRouter();
-  const [selectedTimeZone, setSelectedTimeZone] = useState(timeZone);
-  const [selectedDigestHour, setSelectedDigestHour] = useState(String(digestHour));
   const [isGeneratingLink, setIsGeneratingLink] = useState(false);
   const [isSendingDigestNow, setIsSendingDigestNow] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
-  const [isSavingTimeZone, setIsSavingTimeZone] = useState(false);
-  const [isSavingDigestHour, setIsSavingDigestHour] = useState(false);
   const [generatedLink, setGeneratedLink] = useState<{ code: string; expiresAt: string } | null>(
     null,
   );
@@ -155,39 +137,6 @@ export function NotificationPreferencesPanel({
     }
   }
 
-  async function handleSaveTimeZone() {
-    setIsSavingTimeZone(true);
-    try {
-      const result = await updateNotificationTimezone(selectedTimeZone);
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-
-      toast.success(result.message);
-      router.refresh();
-    } finally {
-      setIsSavingTimeZone(false);
-    }
-  }
-
-  async function handleSaveDigestHour() {
-    setIsSavingDigestHour(true);
-    try {
-      const parsedHour = Number(selectedDigestHour);
-      const result = await updateTelegramDigestHour(parsedHour);
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-
-      toast.success(result.message);
-      router.refresh();
-    } finally {
-      setIsSavingDigestHour(false);
-    }
-  }
-
   async function handleCopyLinkCode() {
     if (!generatedLink) return;
     try {
@@ -218,8 +167,8 @@ export function NotificationPreferencesPanel({
             Canal disponible
           </CardTitle>
           <CardDescription>
-            Telegram ya puede vincularse con tu cuenta. Aquí ves el estado, generas códigos y
-            haces pruebas de conexión.
+            Telegram ya puede vincularse con tu cuenta. Aquí ves el estado y haces pruebas o
+            envíos manuales del resumen diario.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -299,78 +248,25 @@ export function NotificationPreferencesPanel({
         <CardHeader className="border-b border-border/70">
           <CardTitle className="flex items-center gap-2 text-base">
             <Globe2 className="size-4" />
-            Zona horaria
+            Horario fijo
           </CardTitle>
           <CardDescription>
-            La hora seleccionada para el resumen diario se interpreta usando esta zona horaria.
+            Este horario se muestra solo como referencia. Si hace falta cambiarlo, lo ajustamos
+            manualmente.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between">
-          <div className="space-y-1">
-            <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Zona horaria
-            </Label>
-            <Select value={selectedTimeZone} onValueChange={(value) => setSelectedTimeZone(value ?? timeZone)}>
-              <SelectTrigger className="w-full sm:w-[280px]">
-                <SelectValue placeholder="Selecciona una zona" />
-              </SelectTrigger>
-              <SelectContent>
-                {TIME_ZONE_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label} ({option.value})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-sm text-muted-foreground">
-              La zona actual es <span className="font-medium text-foreground">{timeZone}</span>.
-            </p>
+        <CardContent className="space-y-3 p-5 text-sm text-muted-foreground">
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="secondary" className="rounded-full">
+              {timeZone}
+            </Badge>
+            <Badge variant="secondary" className="rounded-full">
+              {String(digestHour).padStart(2, "0")}:00
+            </Badge>
           </div>
-          <Button type="button" variant="outline" onClick={handleSaveTimeZone} disabled={isSavingTimeZone}>
-            {isSavingTimeZone ? "Guardando…" : "Guardar zona"}
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card className="border-border/60 bg-card/85 shadow-sm">
-        <CardHeader className="border-b border-border/70">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Send className="size-4" />
-            Hora del resumen diario
-          </CardTitle>
-          <CardDescription>
-            El cron revisa cada hora y envía tu resumen cuando el reloj local coincide con esta hora.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between">
-          <div className="space-y-1">
-            <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Hora de envío
-            </Label>
-            <Select
-              value={selectedDigestHour}
-              onValueChange={(value) => setSelectedDigestHour(value ?? String(digestHour))}
-            >
-              <SelectTrigger className="w-full sm:w-[220px]">
-                <SelectValue placeholder="Selecciona una hora" />
-              </SelectTrigger>
-              <SelectContent>
-                {digestHourOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-sm text-muted-foreground">
-              El resumen diario se enviará a las{" "}
-              <span className="font-medium text-foreground">{selectedDigestHour.padStart(2, "0")}:00</span>{" "}
-              en tu zona horaria.
-            </p>
-          </div>
-          <Button type="button" variant="outline" onClick={handleSaveDigestHour} disabled={isSavingDigestHour}>
-            {isSavingDigestHour ? "Guardando…" : "Guardar hora"}
-          </Button>
+          <p>
+            El cron diario se ejecuta una vez al día y el resumen se envía en este horario fijo.
+          </p>
         </CardContent>
       </Card>
 
@@ -382,7 +278,8 @@ export function NotificationPreferencesPanel({
               Código de enlace
             </CardTitle>
             <CardDescription>
-              Envía este código por Telegram con el comando <span className="font-medium text-foreground">/link</span>.
+              Envía este código por Telegram con el comando{" "}
+              <span className="font-medium text-foreground">/link</span>.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 p-5">

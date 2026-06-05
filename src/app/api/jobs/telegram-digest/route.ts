@@ -5,8 +5,8 @@ import { sendDailyTelegramDigests } from "@/lib/telegram";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Vercel runs this route hourly. The handler checks each user's timezone and selected
-// digest hour, then sends only the summaries that are due right now.
+// Vercel runs this route once per day. The handler sends the daily summary for any
+// connected channel that has not already been sent today.
 function hasValidCronSecret(request: NextRequest) {
   const secret = process.env.CRON_SECRET?.trim();
   if (!secret) return false;

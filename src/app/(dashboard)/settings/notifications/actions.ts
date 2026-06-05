@@ -14,7 +14,6 @@ import {
   buildTelegramDailyDigest,
   type TelegramLinkCodeResult,
 } from "@/lib/telegram";
-import { isSupportedTimeZone } from "@/lib/time-zones";
 
 export async function generateTelegramLinkCode(): Promise<TelegramLinkCodeResult> {
   try {
@@ -159,105 +158,5 @@ export async function sendTelegramDigestNow(): Promise<MutationResult> {
   } catch (error) {
     logError("settings.notifications.telegram.digestNow", error);
     return errorResult("No se pudo enviar el resumen.");
-  }
-}
-
-export async function updateTelegramDigestHour(hour: number): Promise<MutationResult> {
-  try {
-    const user = await requireUser();
-    const normalizedHour = Number(hour);
-
-    if (!Number.isInteger(normalizedHour) || normalizedHour < 0 || normalizedHour > 23) {
-      return errorResult("La hora seleccionada no es válida.");
-    }
-
-    const db = getDb();
-    const updated = await db.$transaction(async (tx) => {
-      const current = await tx.user.findUnique({
-        where: { id: user.id },
-        select: { id: true, telegramDigestHour: true },
-      });
-
-      if (!current) {
-        throw new Error("No se pudo localizar tu cuenta.");
-      }
-
-      const next = await tx.user.update({
-        where: { id: user.id },
-        data: { telegramDigestHour: normalizedHour },
-        select: { id: true, telegramDigestHour: true },
-      });
-
-      if (current.telegramDigestHour !== next.telegramDigestHour) {
-        await writeActivityLog({
-          entityType: "User",
-          entityId: user.id,
-          action: "USER_TELEGRAM_DIGEST_HOUR_UPDATED",
-          oldValue: { telegramDigestHour: current.telegramDigestHour },
-          newValue: { telegramDigestHour: next.telegramDigestHour },
-          userId: user.id,
-          db: tx,
-        });
-      }
-
-      return next;
-    });
-
-    revalidatePath("/settings/notifications");
-    revalidatePath("/settings");
-    return successResult(updated.id, "/settings/notifications", "Hora del resumen actualizada.");
-  } catch (error) {
-    logError("settings.notifications.telegram.digestHour.update", error);
-    return errorResult("No se pudo actualizar la hora del resumen.");
-  }
-}
-
-export async function updateNotificationTimezone(timeZone: string): Promise<MutationResult> {
-  try {
-    const user = await requireUser();
-    const trimmed = timeZone.trim();
-
-    if (!trimmed || !isSupportedTimeZone(trimmed)) {
-      return errorResult("La zona horaria no es válida.");
-    }
-
-    const db = getDb();
-    const updated = await db.$transaction(async (tx) => {
-      const current = await tx.user.findUnique({
-        where: { id: user.id },
-        select: { id: true, timeZone: true },
-      });
-
-      if (!current) {
-        throw new Error("No se pudo localizar tu cuenta.");
-      }
-
-      const next = await tx.user.update({
-        where: { id: user.id },
-        data: { timeZone: trimmed },
-        select: { id: true, timeZone: true },
-      });
-
-      if (current.timeZone !== next.timeZone) {
-        await writeActivityLog({
-          entityType: "User",
-          entityId: user.id,
-          action: "USER_TIMEZONE_UPDATED",
-          oldValue: { timeZone: current.timeZone },
-          newValue: { timeZone: next.timeZone },
-          userId: user.id,
-          db: tx,
-        });
-      }
-
-      return next;
-    });
-
-    revalidatePath("/settings/notifications");
-    revalidatePath("/settings");
-    return successResult(updated.id, "/settings/notifications", "Zona horaria actualizada.");
-  } catch (error) {
-    logError("settings.notifications.timezone.update", error);
-    return errorResult("No se pudo actualizar la zona horaria.");
   }
 }

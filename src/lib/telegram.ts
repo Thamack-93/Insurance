@@ -10,7 +10,6 @@ import {
   createNotificationEvent,
   ensureNotificationDefaultsForUser,
   getLocalDateKey,
-  isDigestHourDue,
   markNotificationFailed,
   markNotificationSent,
   markNotificationSkipped,
@@ -988,7 +987,6 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
       user: {
         select: {
           timeZone: true,
-          telegramDigestHour: true,
           telegramDigestLastSentAt: true,
         },
       },
@@ -1005,9 +1003,6 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
   for (const channel of channels) {
     if (!channel.telegramChatId) continue;
     const timeZone = channel.user.timeZone ?? DEFAULT_TIMEZONE;
-    if (!isDigestHourDue(now, channel.user.telegramDigestHour, timeZone)) {
-      continue;
-    }
     if (
       channel.user.telegramDigestLastSentAt &&
       getLocalDateKey(channel.user.telegramDigestLastSentAt, timeZone) === getLocalDateKey(now, timeZone)

@@ -12,8 +12,6 @@ import {
   generateTelegramLinkCode,
   sendTelegramDigestNow,
   sendTelegramTestMessage,
-  updateTelegramDigestHour,
-  updateNotificationTimezone,
 } from "./actions";
 
 export default async function NotificationSettingsPage() {
@@ -28,7 +26,7 @@ export default async function NotificationSettingsPage() {
         <PageHeader
           eyebrow="Sistema"
           title="Notificaciones"
-          description="Prepara Telegram, define la hora del resumen diario y revisa el estado del cron."
+          description="Prepara Telegram, revisa el horario fijo del resumen diario y confirma el estado del cron."
           actions={
             <Button asChild variant="outline" className="rounded-full">
               <Link href="/settings">
@@ -63,10 +61,12 @@ export default async function NotificationSettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Acceso</CardTitle>
-              <CardDescription>Solo se edita tu canal y la hora del resumen diario.</CardDescription>
+              <CardDescription>Solo se administra tu canal de Telegram y el envío manual.</CardDescription>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
-              {user.role === "ADMIN" ? "Cuenta de administrador activa." : "Cuenta de agente activa."}
+              {user.role === "ADMIN"
+                ? "Cuenta de administrador activa."
+                : "Cuenta de agente activa."}
             </CardContent>
           </Card>
 
@@ -85,17 +85,17 @@ export default async function NotificationSettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Zona horaria</CardTitle>
-              <CardDescription>Define cómo interpretamos la hora elegida para el resumen diario.</CardDescription>
+              <CardDescription>Zona fija usada para interpretar el resumen diario.</CardDescription>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
-              {timeZone}. El resumen diario se enviará en esa zona horaria a la hora seleccionada.
+              {timeZone}. Si necesitamos moverla, lo ajustamos manualmente.
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Resumen diario</CardTitle>
-              <CardDescription>La hora fija en la que se revisa el cron para tu resumen de Telegram.</CardDescription>
+              <CardDescription>La hora fija del resumen diario en Telegram.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
               <div className="flex flex-wrap gap-2">
@@ -107,18 +107,15 @@ export default async function NotificationSettingsPage() {
                 </Badge>
               </div>
               <p>
-                El cron revisa la cola cada hora y envía tu resumen cuando coincide con{" "}
-                <span className="font-medium text-foreground">
-                  {String(user.telegramDigestHour).padStart(2, "0")}:00
-                </span>{" "}
-                en tu zona horaria.
+                El cron corre una sola vez al día y envía tu resumen en el horario fijo mostrado
+                arriba.
               </p>
             </CardContent>
           </Card>
         </section>
 
         <NotificationPreferencesPanel
-          key={[channel?.updatedAt.getTime() ?? 0, timeZone, user.telegramDigestHour].join(":")}
+          key={channel?.updatedAt.getTime() ?? 0}
           channel={
             channel ?? {
               id: "",
@@ -136,8 +133,6 @@ export default async function NotificationSettingsPage() {
           disconnectTelegram={disconnectTelegram}
           sendTelegramDigestNow={sendTelegramDigestNow}
           sendTelegramTestMessage={sendTelegramTestMessage}
-          updateTelegramDigestHour={updateTelegramDigestHour}
-          updateNotificationTimezone={updateNotificationTimezone}
         />
       </div>
     </div>
