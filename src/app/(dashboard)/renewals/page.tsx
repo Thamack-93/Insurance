@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { EmptyState } from "@/components/empty-states/empty-state";
 import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
-import { getRenewalStats, getUpcomingRenewals, type RenewalOpportunity } from "@/lib/renewals";
+import { getOverdueRenewals, getRenewalStats, getUpcomingRenewals, type RenewalOpportunity } from "@/lib/renewals";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
@@ -28,8 +28,9 @@ export default async function RenewalsPage({
   const page = Math.max(1, Number(params.page) || 1);
 
   const scope = await requirePortfolioReadScope();
-  const [stats, upcomingRenewals] = await Promise.all([
+  const [stats, overdueRenewals, upcomingRenewals] = await Promise.all([
     getRenewalStats(scope.portfolioOwnerId),
+    getOverdueRenewals(scope.portfolioOwnerId),
     getUpcomingRenewals(60, scope.portfolioOwnerId),
   ]);
 
@@ -38,14 +39,15 @@ export default async function RenewalsPage({
       .filter(Boolean)
       .some((field) => String(field).toLowerCase().includes(query));
 
-  const filtered = query ? upcomingRenewals.filter(matchesQuery) : upcomingRenewals;
+  const filteredOverdue = query ? overdueRenewals.filter(matchesQuery) : overdueRenewals;
+  const filteredUpcoming = query ? upcomingRenewals.filter(matchesQuery) : upcomingRenewals;
 
-  const totalFiltered = filtered.length;
+  const totalFiltered = filteredUpcoming.length;
   const start = (page - 1) * DEFAULT_PAGE_SIZE;
-  const pagedRenewals = filtered.slice(start, start + DEFAULT_PAGE_SIZE);
+  const pagedRenewals = filteredUpcoming.slice(start, start + DEFAULT_PAGE_SIZE);
 
-  const urgentRenewals = upcomingRenewals.filter((r) => r.priority === "URGENT");
-  const highPriorityRenewals = upcomingRenewals.filter((r) => r.priority === "HIGH");
+  const urgentRenewals = filteredUpcoming.filter((r) => r.priority === "URGENT");
+  const highPriorityRenewals = filteredUpcoming.filter((r) => r.priority === "HIGH");
 
   return (
     <div className="flex flex-col gap-6">
@@ -96,6 +98,61 @@ export default async function RenewalsPage({
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+          <SectionCard title="Renovaciones vencidas" description="Pólizas activas ya vencidas que siguen visibles para seguimiento.">
+            {filteredOverdue.length === 0 ? (
+              <div className="p-4">
+                <EmptyState
+                  icon={CircleAlert}
+                  title={query ? "Sin vencidas para esta búsqueda" : "Sin renovaciones vencidas"}
+                  description={
+                    query
+                      ? `No encontramos renovaciones vencidas que coincidan con "${query}".`
+                      : "No hay pólizas vencidas en la cartera actual."
+                  }
+                />
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/40">
+                    <TableHead>Póliza</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Aseguradora</TableHead>
+                    <TableHead>Vencimiento</TableHead>
+                    <TableHead className="text-right">Prima</TableHead>
+                    <TableHead>Días</TableHead>
+                    <TableHead className="text-right">Acción</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredOverdue.slice(0, 10).map((renewal) => (
+                    <TableRow key={renewal.policyId}>
+                      <TableCell>
+                        <Link href={`/policies/${renewal.policyId}`} className="font-medium text-foreground hover:text-primary">
+                          {renewal.policyNumber}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{renewal.clientName}</TableCell>
+                      <TableCell>{renewal.insurerName}</TableCell>
+                      <TableCell>{formatDate(renewal.endDate)}</TableCell>
+                      <TableCell className="text-right font-medium">{formatCurrency(renewal.premiumAmount)}</TableCell>
+                      <TableCell>
+                        <DaysBadge days={renewal.daysUntilRenewal} />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <NoRenewalButton
+                          policyId={renewal.policyId}
+                          policyNumber={renewal.policyNumber}
+                          triggerClassName="h-7 rounded-full bg-card/70 px-2.5 text-xs"
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </SectionCard>
+
           <SectionCard title="Renovaciones urgentes" description="Requieren atención inmediata.">
             {urgentRenewals.length === 0 ? (
               <div className="p-4">
@@ -184,15 +241,17 @@ export default async function RenewalsPage({
           description="Lista paginada con búsqueda por póliza, cliente o aseguradora."
           action={<ListSearch placeholder="Buscar por póliza, cliente, aseguradora o tipo..." />}
         >
-          {totalFiltered === 0 ? (
+          {filteredUpcoming.length === 0 ? (
             <div className="p-4">
               <EmptyState
                 icon={CalendarClock}
-                title={query ? "Sin resultados" : "Sin renovaciones próximas"}
+                title={query ? "Sin renovaciones próximas" : "Sin renovaciones próximas"}
                 description={
-                  query
-                    ? `No encontramos renovaciones que coincidan con "${query}".`
-                    : "No hay pólizas con renovación en los próximos 60 días."
+                  query && filteredOverdue.length > 0
+                    ? `Sí encontramos ${filteredOverdue.length} vencida${filteredOverdue.length === 1 ? "" : "s"} en la sección superior.`
+                    : query
+                      ? `No encontramos renovaciones próximas que coincidan con "${query}".`
+                      : "No hay pólizas con renovación en los próximos 60 días."
                 }
               />
             </div>

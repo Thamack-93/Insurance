@@ -37,6 +37,7 @@ describe("renewals.logic", () => {
   it("includes active policies with renewal date", () => {
     expect(shouldIncludeInRenewals("ACTIVE", new Date("2024-07-01"))).toBe(true);
     expect(shouldIncludeInRenewals("CANCELLED", new Date("2024-07-01"))).toBe(false);
+    expect(shouldIncludeInRenewals("ACTIVE", new Date("2024-07-01"), "CANCELLED")).toBe(false);
   });
 
   it("builds renewal work item title and description", () => {

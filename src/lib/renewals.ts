@@ -1,5 +1,6 @@
 "use server";
 
+import type { Prisma } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
 import { today, daysUntil } from "@/lib/dates";
 import { addDays } from "date-fns";
@@ -7,6 +8,8 @@ import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
 import { upsertWorkItemFromSource } from "@/lib/work-items";
 import { ACTIVE_RENEWAL_POLICY_WHERE } from "@/lib/renewal-decisions";
+import { LATEST_RENEWAL_RECEIPT_INCLUDE, getLatestReceiptStatus } from "@/lib/renewal-receipt";
+import { shouldIncludeInRenewals } from "@/lib/renewals.logic";
 
 export interface RenewalOpportunity {
   policyId: string;
@@ -24,78 +27,131 @@ export interface RenewalOpportunity {
   currency: string;
 }
 
-export async function getUpcomingRenewals(daysAhead: number = 90, portfolioOwnerId?: string) {
+type RenewalPolicyRecord = {
+  id: string;
+  clientId: string;
+  insurerId: string;
+  status: string;
+  endDate: Date;
+  policyNumber: string;
+  policyType: string;
+  premiumAmount: unknown;
+  currency: string;
+  client: { fullName: string; email: string | null };
+  insurer: { name: string };
+  receipts: Array<{ status: string | null }>;
+};
+
+function mapPolicyToRenewalOpportunity(policy: RenewalPolicyRecord): RenewalOpportunity {
+  const endDate = policy.endDate;
+  const daysUntilRenewal = daysUntil(endDate);
+  let priority: "LOW" | "MEDIUM" | "HIGH" | "URGENT" = "LOW";
+
+  if (daysUntilRenewal <= 0) {
+    priority = "URGENT";
+  } else if (daysUntilRenewal <= 15) {
+    priority = "HIGH";
+  } else if (daysUntilRenewal <= 30) {
+    priority = "MEDIUM";
+  }
+
+  return {
+    policyId: policy.id,
+    clientId: policy.clientId,
+    insurerId: policy.insurerId,
+    endDate,
+    daysUntilRenewal,
+    priority,
+    policyNumber: policy.policyNumber,
+    clientName: policy.client.fullName,
+    clientEmail: policy.client.email || undefined,
+    insurerName: policy.insurer.name,
+    policyType: policy.policyType,
+    premiumAmount: Number(policy.premiumAmount),
+    currency: policy.currency,
+  };
+}
+
+function buildRenewalWhere(portfolioOwnerId?: string, additionalWhere: Prisma.PolicyWhereInput = {}): Prisma.PolicyWhereInput {
+  return {
+    ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
+    ...ACTIVE_RENEWAL_POLICY_WHERE,
+    ...additionalWhere,
+  };
+}
+
+export async function loadEligibleRenewalPolicies(
+  additionalWhere: Prisma.PolicyWhereInput,
+  portfolioOwnerId?: string,
+): Promise<RenewalPolicyRecord[]> {
   const db = getDb();
 
+  const policies = await db.policy.findMany({
+    where: buildRenewalWhere(portfolioOwnerId, additionalWhere),
+    include: {
+      client: {
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          phone: true,
+        },
+      },
+      insurer: {
+        select: {
+          id: true,
+          name: true,
+          contactEmail: true,
+          contactPhone: true,
+        },
+      },
+      ...LATEST_RENEWAL_RECEIPT_INCLUDE,
+    },
+    orderBy: {
+      endDate: "asc",
+    },
+  });
+
+  return policies.filter((policy) =>
+    shouldIncludeInRenewals(policy.status, policy.endDate, getLatestReceiptStatus(policy.receipts)),
+  ) as RenewalPolicyRecord[];
+}
+
+export async function getUpcomingRenewals(daysAhead: number = 90, portfolioOwnerId?: string) {
   try {
     const todayDate = new Date(today());
     const futureDate = addDays(todayDate, daysAhead);
-
-    const policies = await db.policy.findMany({
-      where: {
-        ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
-        ...ACTIVE_RENEWAL_POLICY_WHERE,
+    const policies = await loadEligibleRenewalPolicies(
+      {
         endDate: {
           gte: todayDate,
           lte: futureDate,
         },
       },
-      include: {
-        client: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-            phone: true,
-          },
-        },
-        insurer: {
-          select: {
-            id: true,
-            name: true,
-            contactEmail: true,
-            contactPhone: true,
-          },
-        },
-      },
-      orderBy: {
-        endDate: "asc",
-      },
-    });
+      portfolioOwnerId,
+    );
 
-    const renewals: RenewalOpportunity[] = policies.map((policy) => {
-      const endDate = policy.endDate;
-      const daysUntilRenewal = daysUntil(endDate);
-      let priority: "LOW" | "MEDIUM" | "HIGH" | "URGENT" = "LOW";
-
-      if (daysUntilRenewal <= 0) {
-        priority = "URGENT";
-      } else if (daysUntilRenewal <= 15) {
-        priority = "HIGH";
-      } else if (daysUntilRenewal <= 30) {
-        priority = "MEDIUM";
-      }
-
-      return {
-        policyId: policy.id,
-        clientId: policy.clientId,
-        insurerId: policy.insurerId,
-        endDate,
-        daysUntilRenewal,
-        priority,
-        policyNumber: policy.policyNumber,
-        clientName: policy.client.fullName,
-        clientEmail: policy.client.email || undefined,
-        insurerName: policy.insurer.name,
-        policyType: policy.policyType,
-        premiumAmount: Number(policy.premiumAmount),
-        currency: policy.currency,
-      };
-    });
-
-    return renewals;
+    return policies.map(mapPolicyToRenewalOpportunity);
   } catch (error) {
     logError("renewals.getUpcomingRenewals", error, { daysAhead });
+    return [];
+  }
+}
+
+export async function getOverdueRenewals(portfolioOwnerId?: string) {
+  try {
+    const todayDate = new Date(today());
+    const policies = await loadEligibleRenewalPolicies(
+      {
+        endDate: {
+          lt: todayDate,
+        },
+      },
+      portfolioOwnerId,
+    );
+    return policies.map(mapPolicyToRenewalOpportunity);
+  } catch (error) {
+    logError("renewals.getOverdueRenewals", error);
     return [];
   }
 }
@@ -194,84 +250,25 @@ export async function sendRenewalWorkItems() {
 }
 
 export async function getRenewalStats(portfolioOwnerId?: string) {
-  const db = getDb();
-
   try {
     const todayDate = new Date(today());
     const next30Days = addDays(todayDate, 30);
     const next60Days = addDays(todayDate, 60);
     const next90Days = addDays(todayDate, 90);
 
-    const [
-      overdueCount,
-      next30DaysCount,
-      next60DaysCount,
-      next90DaysCount,
-      totalActive,
-    ] = await Promise.all([
-      db.policy.count({
-        where: {
-          ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
-          ...ACTIVE_RENEWAL_POLICY_WHERE,
-          endDate: {
-            lt: todayDate,
-          },
-        },
-      }),
-      db.policy.count({
-        where: {
-          ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
-          ...ACTIVE_RENEWAL_POLICY_WHERE,
-          endDate: {
-            gte: todayDate,
-            lte: next30Days,
-          },
-        },
-      }),
-      db.policy.count({
-        where: {
-          ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
-          ...ACTIVE_RENEWAL_POLICY_WHERE,
-          endDate: {
-            gt: next30Days,
-            lte: next60Days,
-          },
-        },
-      }),
-      db.policy.count({
-        where: {
-          ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
-          ...ACTIVE_RENEWAL_POLICY_WHERE,
-          endDate: {
-            gt: next60Days,
-            lte: next90Days,
-          },
-        },
-      }),
-      db.policy.count({
-        where: {
-          ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
-          ...ACTIVE_RENEWAL_POLICY_WHERE,
-        },
-      }),
-    ]);
+    const renewalPolicies = await loadEligibleRenewalPolicies({}, portfolioOwnerId);
 
-    // Calculate premium amounts for renewals
-    const renewalPolicies = await db.policy.findMany({
-      where: {
-        ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
-        ...ACTIVE_RENEWAL_POLICY_WHERE,
-        endDate: {
-          gte: todayDate,
-          lte: next90Days,
-        },
-      },
-      select: {
-        premiumAmount: true,
-        currency: true,
-        endDate: true,
-      },
-    });
+    const overdueCount = renewalPolicies.filter((policy) => policy.endDate < todayDate).length;
+    const next30DaysCount = renewalPolicies.filter(
+      (policy) => policy.endDate >= todayDate && policy.endDate <= next30Days,
+    ).length;
+    const next60DaysCount = renewalPolicies.filter(
+      (policy) => policy.endDate > next30Days && policy.endDate <= next60Days,
+    ).length;
+    const next90DaysCount = renewalPolicies.filter(
+      (policy) => policy.endDate > next60Days && policy.endDate <= next90Days,
+    ).length;
+    const totalActive = renewalPolicies.length;
 
     const totalRenewalPremium = renewalPolicies.reduce(
       (sum, policy) => sum + Number(policy.premiumAmount),

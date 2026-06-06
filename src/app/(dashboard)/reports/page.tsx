@@ -7,6 +7,7 @@ import { ExportButtons } from "@/components/reports/export-buttons";
 import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
 import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
+import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 
 type ReportCard = {
   title: string;
@@ -21,11 +22,20 @@ export default async function ReportsPage() {
   const now = today();
   const in60 = new Date(now);
   in60.setDate(in60.getDate() + 60);
+  const renewalsSoonPromise = loadEligibleRenewalPolicies(
+    {
+      endDate: {
+        gte: now,
+        lte: in60,
+      },
+    },
+    undefined,
+  );
 
   const [
     activePolicies,
     dueReceipts,
-    renewalsSoon,
+    renewalsSoonPolicies,
     openWorkItems,
     risks,
     paidCommissions,
@@ -36,7 +46,7 @@ export default async function ReportsPage() {
   ] = await Promise.all([
     db.policy.count({ where: { status: "ACTIVE" } }),
     db.receipt.count({ where: { dueDate: { gte: now, lte: in60 }, status: { notIn: ["PAID", "CANCELLED"] } } }),
-    db.policy.count({ where: { status: "ACTIVE", endDate: { gte: now, lte: in60 } } }),
+    renewalsSoonPromise,
     countWorkItems({ workItemTypes: ["TASK"], statuses: OPEN_WORK_ITEM_STATUSES }),
     db.alert.count({ where: { status: "OPEN" } }),
     db.commission.count({ where: { status: "PAID" } }),
@@ -168,7 +178,7 @@ export default async function ReportsPage() {
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard title="Pólizas activas" value={activePolicies} description="Base productiva actual." icon={BarChart3} tone="blue" />
           <MetricCard title="Cobranza 60 días" value={dueReceipts} description="Recibos en el radar." icon={CircleDollarSign} tone="emerald" />
-          <MetricCard title="Renovaciones" value={renewalsSoon} description="Renovaciones activas del horizonte." icon={CalendarClock} tone="amber" />
+          <MetricCard title="Renovaciones" value={renewalsSoonPolicies.length} description="Renovaciones activas del horizonte." icon={CalendarClock} tone="amber" />
           <MetricCard
             title="Alertas abiertas"
             value={risks}
