@@ -119,7 +119,6 @@ async function getTodayBrief(user: AssistantUser): Promise<AssistantTodayBrief> 
       orderBy: { dueDate: "asc" },
       take: 5,
     }),
-    renewalsPromise,
     getWorkItems({
       portfolioOwnerId,
       statuses: OPEN_WORK_ITEM_STATUSES,
