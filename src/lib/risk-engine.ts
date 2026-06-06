@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { today } from "@/lib/dates";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { ACTIVE_RENEWAL_POLICY_WHERE } from "@/lib/renewal-decisions";
+import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 
 export type RiskFinding = {
   alertType: string;
@@ -112,9 +113,8 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
       take: TAKE_LIMIT,
       select: { id: true, fullName: true },
     }),
-    db.policy.findMany({
-      where: {
-        ...activeRenewalScope,
+    loadEligibleRenewalPolicies(
+      {
         endDate: { gte: now, lte: in60 },
         workItems: {
           none: {
@@ -123,9 +123,8 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
           },
         },
       },
-      take: TAKE_LIMIT,
-      select: { id: true, policyNumber: true },
-    }),
+      portfolioOwnerId,
+    ).then((policies) => policies.slice(0, TAKE_LIMIT)),
     // Duplicate detection now happens in the database via groupBy.
     db.policy.groupBy({
       by: ["policyNumber", "clientId", "insurerId"],

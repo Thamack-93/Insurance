@@ -34,10 +34,12 @@ export function calculateRenewalPriority(
 
 export function shouldIncludeInRenewals(
   policyStatus: string,
-  endDate: Date | null
+  endDate: Date | null,
+  latestReceiptStatus: string | null = null,
 ): boolean {
   if (policyStatus !== "ACTIVE") return false;
   if (!endDate) return false;
+  if (latestReceiptStatus === "CANCELLED") return false;
   return true;
 }
 

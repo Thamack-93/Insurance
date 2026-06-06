@@ -1,4 +1,5 @@
 import { getDb } from "@/lib/db";
+import { differenceInCalendarDays } from "date-fns";
 import { today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
 import { globalSearch } from "@/lib/search";
@@ -44,6 +45,67 @@ export type OperationalDataHealthSummary = {
   globalSearchOk: boolean;
   globalSearchResultCount: number;
   insuredOnlyClientsWithoutPolicies: number;
+};
+
+export type ReceiptReviewIssue = {
+  issueId: string;
+  reason: string;
+  status: string;
+  receiptId: string;
+  receiptNumber: string;
+  policyId: string;
+  policyNumber: string;
+  clientName: string;
+  insurerName: string;
+  amount: number;
+  paidAmount: number;
+  currency: string;
+  dueDate: Date;
+  paidDate: Date | null;
+  paymentCount: number;
+  gapDays: number | null;
+  resolutionNote: string | null;
+  reviewedAt: Date | null;
+  createdAt: Date;
+};
+
+export type RenewalReviewSuggestion = {
+  suggestionId: string;
+  status: string;
+  reason: string | null;
+  resolutionNote: string | null;
+  reviewedAt: Date | null;
+  sourcePolicyId: string;
+  sourcePolicyNumber: string;
+  sourcePolicyStatus: string;
+  clientName: string;
+  insurerName: string;
+  sourceStartDate: Date;
+  sourceEndDate: Date;
+  targetPolicyId: string | null;
+  targetPolicyNumber: string | null;
+  targetPolicyStatus: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type LedgerReviewIssue = {
+  issueId: string;
+  batchId: string;
+  batchStatus: string;
+  batchCsvName: string;
+  batchPaidName: string;
+  rowId: string | null;
+  rowNumber: number | null;
+  sourceType: string | null;
+  sourceKey: string | null;
+  issueType: string;
+  severity: string;
+  status: string;
+  message: string;
+  resolutionNote: string | null;
+  reviewedAt: Date | null;
+  createdAt: Date;
 };
 
 export async function getOperationalDataHealthSummary(): Promise<OperationalDataHealthSummary> {
@@ -107,6 +169,146 @@ export async function getOperationalDataHealthSummary(): Promise<OperationalData
     globalSearchResultCount,
     insuredOnlyClientsWithoutPolicies,
   };
+}
+
+export async function getReceiptReviewIssues(): Promise<ReceiptReviewIssue[]> {
+  const db = getDb();
+  const issues = await db.receiptReconciliationIssue.findMany({
+    where: {
+      status: "OPEN",
+    },
+    include: {
+      receipt: {
+        include: {
+          payments: {
+            orderBy: [{ paidDate: "desc" }, { createdAt: "desc" }],
+          },
+          client: true,
+          policy: true,
+          insurer: true,
+        },
+      },
+    },
+    orderBy: [{ createdAt: "desc" }],
+    take: 200,
+  });
+
+  return issues
+    .filter((issue) => issue.receipt && issue.receipt.policy && issue.receipt.client && issue.receipt.insurer)
+    .map<ReceiptReviewIssue>((issue) => {
+      const receipt = issue.receipt!;
+      const latestPayment = receipt.payments[0] ?? null;
+      const paidDate = receipt.paidDate ?? latestPayment?.paidDate ?? null;
+      const paidAmount = receipt.payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
+
+      return {
+        issueId: issue.id,
+        reason: issue.reason,
+        status: issue.status,
+        receiptId: receipt.id,
+        receiptNumber: receipt.receiptNumber,
+        policyId: receipt.policy.id,
+        policyNumber: receipt.policy.policyNumber,
+        clientName: receipt.client.fullName,
+        insurerName: receipt.insurer.name,
+        amount: toNumber(receipt.amount),
+        paidAmount,
+        currency: receipt.currency,
+        dueDate: receipt.dueDate,
+        paidDate,
+        paymentCount: receipt.payments.length,
+        gapDays: paidDate ? differenceInCalendarDays(paidDate, receipt.dueDate) : null,
+        resolutionNote: issue.resolutionNote,
+        reviewedAt: issue.reviewedAt,
+        createdAt: issue.createdAt,
+      };
+    })
+    .sort((left, right) => left.dueDate.getTime() - right.dueDate.getTime() || left.receiptNumber.localeCompare(right.receiptNumber));
+}
+
+export async function getRenewalReviewSuggestions(): Promise<RenewalReviewSuggestion[]> {
+  const db = getDb();
+  const suggestions = await db.policyRenewalSuggestion.findMany({
+    include: {
+      sourcePolicy: {
+        include: {
+          client: true,
+          insurer: true,
+        },
+      },
+      targetPolicy: true,
+    },
+    orderBy: [{ updatedAt: "desc" }],
+    take: 200,
+  });
+
+  return suggestions.map<RenewalReviewSuggestion>((suggestion) => ({
+    suggestionId: suggestion.id,
+    status: suggestion.status,
+    reason: suggestion.reason,
+    resolutionNote: suggestion.resolutionNote,
+    reviewedAt: suggestion.reviewedAt,
+    sourcePolicyId: suggestion.sourcePolicyId,
+    sourcePolicyNumber: suggestion.sourcePolicy.policyNumber,
+    sourcePolicyStatus: suggestion.sourcePolicy.status,
+    clientName: suggestion.sourcePolicy.client.fullName,
+    insurerName: suggestion.sourcePolicy.insurer.name,
+    sourceStartDate: suggestion.sourcePolicy.startDate,
+    sourceEndDate: suggestion.sourcePolicy.endDate,
+    targetPolicyId: suggestion.targetPolicyId,
+    targetPolicyNumber: suggestion.targetPolicy?.policyNumber ?? null,
+    targetPolicyStatus: suggestion.targetPolicy?.status ?? null,
+    createdAt: suggestion.createdAt,
+    updatedAt: suggestion.updatedAt,
+  }));
+}
+
+export async function getLedgerReviewIssues(): Promise<LedgerReviewIssue[]> {
+  const db = getDb();
+  const issues = await db.ledgerImportIssue.findMany({
+    where: {
+      status: { not: "RESOLVED" },
+    },
+    include: {
+      batch: {
+        select: {
+          id: true,
+          sourceCsvName: true,
+          sourcePaidName: true,
+          status: true,
+        },
+      },
+      row: {
+        select: {
+          id: true,
+          rowNumber: true,
+          sourceType: true,
+          sourceKey: true,
+        },
+      },
+    },
+    orderBy: [{ createdAt: "desc" }],
+    take: 200,
+  });
+
+  return issues.map<LedgerReviewIssue>((issue) => ({
+    issueId: issue.id,
+    batchId: issue.batchId,
+    batchStatus: issue.batch.status,
+    batchCsvName: issue.batch.sourceCsvName,
+    batchPaidName: issue.batch.sourcePaidName,
+    rowId: issue.rowId,
+    rowNumber: issue.row?.rowNumber ?? null,
+    sourceType: issue.row?.sourceType ?? null,
+    sourceKey: issue.row?.sourceKey ?? null,
+    issueType: issue.issueType,
+    severity: issue.severity,
+    status: issue.status,
+    message: issue.message,
+    resolutionNote: issue.resolutionNote,
+    reviewedAt: issue.reviewedAt,
+    createdAt: issue.createdAt,
+  }));
 }
 
 export async function getClientDataQualityScores() {

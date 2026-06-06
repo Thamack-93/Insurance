@@ -1,6 +1,8 @@
 import { addDays } from "date-fns";
 
 import { daysUntil, today } from "../src/lib/dates.ts";
+import { LATEST_RENEWAL_RECEIPT_INCLUDE } from "../src/lib/renewal-receipt.ts";
+import { shouldIncludeInRenewals } from "../src/lib/renewals.logic.ts";
 
 import {
   closeDb,
@@ -29,7 +31,7 @@ async function main() {
         endDate: { lt: now },
         status: { notIn: ["RENEWED", "CANCELLED"] },
       },
-      include: { client: true, insurer: true },
+      include: { client: true, insurer: true, ...LATEST_RENEWAL_RECEIPT_INCLUDE },
       orderBy: { endDate: "asc" },
       take: limit,
     }),
@@ -38,14 +40,21 @@ async function main() {
         endDate: { gte: now, lte: horizon },
         status: "ACTIVE",
       },
-      include: { client: true, insurer: true },
+      include: { client: true, insurer: true, ...LATEST_RENEWAL_RECEIPT_INCLUDE },
       orderBy: { endDate: "asc" },
       take: limit,
     }),
   ]);
 
-  const upcomingTotals = summarizeByCurrency(upcoming, (policy) => policy.currency);
-  const overdueTotals = summarizeByCurrency(overdue, (policy) => policy.currency);
+  const filteredOverdue = overdue.filter((policy) =>
+    shouldIncludeInRenewals(policy.status, policy.endDate, policy.receipts[0]?.status ?? null),
+  );
+  const filteredUpcoming = upcoming.filter((policy) =>
+    shouldIncludeInRenewals(policy.status, policy.endDate, policy.receipts[0]?.status ?? null),
+  );
+
+  const upcomingTotals = summarizeByCurrency(filteredUpcoming, (policy) => policy.currency);
+  const overdueTotals = summarizeByCurrency(filteredOverdue, (policy) => policy.currency);
 
   const formatRow = (policy: (typeof upcoming)[number]) => ({
     Poliza: policy.policyNumber,
@@ -62,14 +71,14 @@ async function main() {
   console.log("Renovaciones proximas");
   console.log(`Horizonte: ${horizonDays} dias`);
   console.log(`Mostrando hasta ${limit} registros por bloque.`);
-  console.log(`Primas en renovacion: ${upcoming.length} | ${formatCurrencyBreakdown(upcomingTotals)}`);
-  console.log(`Renovaciones vencidas: ${overdue.length} | ${formatCurrencyBreakdown(overdueTotals)}`);
+  console.log(`Primas en renovacion: ${filteredUpcoming.length} | ${formatCurrencyBreakdown(upcomingTotals)}`);
+  console.log(`Renovaciones vencidas: ${filteredOverdue.length} | ${formatCurrencyBreakdown(overdueTotals)}`);
 
-  printTable("Renovaciones vencidas", overdue.map(formatRow));
-  printTable("Renovaciones proximas", upcoming.map(formatRow));
+  printTable("Renovaciones vencidas", filteredOverdue.map(formatRow));
+  printTable("Renovaciones proximas", filteredUpcoming.map(formatRow));
 
   console.log("");
-  console.log(`Total de polizas mostradas: ${overdue.length + upcoming.length}`);
+  console.log(`Total de polizas mostradas: ${filteredOverdue.length + filteredUpcoming.length}`);
 
   await closeDb(db);
 }

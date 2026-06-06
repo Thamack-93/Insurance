@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { addDays } from "date-fns";
-import { ArrowRight, Plus, Shield, CalendarClock, AlertCircle, BadgeDollarSign, FolderKanban } from "lucide-react";
+import { ArrowRight, FileUp, Plus, Shield, CalendarClock, AlertCircle, BadgeDollarSign, FolderKanban } from "lucide-react";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
@@ -16,6 +16,7 @@ import { daysUntil, formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
 import { policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 
 const PAGE_SIZE = 25;
 
@@ -33,6 +34,15 @@ export default async function PoliciesPage({
   const now = today();
   const in60 = addDays(now, 60);
   const portfolioWhere = policyOperationalWhere(scope.portfolioOwnerId);
+  const renewals60Promise = loadEligibleRenewalPolicies(
+    {
+      endDate: {
+        gte: now,
+        lte: in60,
+      },
+    },
+    scope.portfolioOwnerId,
+  );
 
   const where: Prisma.PolicyWhereInput = query
     ? {
@@ -53,7 +63,7 @@ export default async function PoliciesPage({
     activeCount,
     pendingCount,
     expiredCount,
-    renewals60Count,
+    renewals60Policies,
     portfolioAgg,
     filteredCount,
     pagedPolicies,
@@ -62,9 +72,7 @@ export default async function PoliciesPage({
     db.policy.count({ where: { ...portfolioWhere, status: "ACTIVE" } }),
     db.policy.count({ where: { ...portfolioWhere, status: "PENDING" } }),
     db.policy.count({ where: { ...portfolioWhere, status: "EXPIRED" } }),
-    db.policy.count({
-      where: { ...portfolioWhere, status: "ACTIVE", endDate: { gte: now, lte: in60 } },
-    }),
+    renewals60Promise,
     db.policy.aggregate({
       where: { ...portfolioWhere, status: "ACTIVE" },
       _sum: { premiumAmount: true },
@@ -102,6 +110,12 @@ export default async function PoliciesPage({
                   Nueva póliza
                 </Link>
               </Button>
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
+                <Link href="/policies/capture">
+                  <FileUp className="mr-2 size-4" />
+                  Capturar PDF
+                </Link>
+              </Button>
               <Button asChild className="rounded-full">
                 <Link href="/portfolio">
                   Portfolio
@@ -122,7 +136,7 @@ export default async function PoliciesPage({
           />
           <MetricCard
             title="Renovaciones 60 días"
-            value={renewals60Count}
+            value={renewals60Policies.length}
             description="Pólizas activas con ventana de seguimiento."
             icon={CalendarClock}
             tone="amber"

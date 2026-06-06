@@ -13,6 +13,7 @@ import {
   receiptOperationalWhere,
   requirePortfolioReadScope,
 } from "@/lib/portfolio-access";
+import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 
 export async function getDashboardData() {
   const db = getDb();
@@ -25,19 +26,26 @@ export async function getDashboardData() {
   const policyWhere = policyOperationalWhere(scope.portfolioOwnerId);
   const receiptWhere = receiptOperationalWhere(scope.portfolioOwnerId);
   const commissionWhere = commissionOperationalWhere(scope.portfolioOwnerId);
+  const upcomingRenewalPoliciesPromise = loadEligibleRenewalPolicies(
+    {
+      endDate: {
+        gte: now,
+        lte: in60,
+      },
+    },
+    scope.portfolioOwnerId,
+  );
 
   const [
     activePolicies,
     duePayments60,
     overduePayments,
-    renewals60,
+    upcomingRenewalPolicies,
     openWorkItems,
     urgentWorkItems,
     commissionsAggregateParts,
     upcomingReceipts,
     upcomingReceiptsForChart,
-    upcomingRenewalPolicies,
-    upcomingRenewalsForChart,
     insurerDistributionRows,
     policyTypeDistributionRows,
     commissionsByMonthRows,
@@ -53,9 +61,7 @@ export async function getDashboardData() {
     db.receipt.count({
       where: { ...receiptWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
     }),
-    db.policy.count({
-      where: { ...policyWhere, endDate: { gte: now, lte: in60 }, status: "ACTIVE" },
-    }),
+    upcomingRenewalPoliciesPromise,
     countWorkItems({
       workItemTypes: ["TASK"],
       statuses: OPEN_WORK_ITEM_STATUSES,
@@ -92,20 +98,6 @@ export async function getDashboardData() {
       where: { ...receiptWhere, dueDate: { lte: in60 }, status: { notIn: ["CANCELLED"] } },
       select: { dueDate: true },
       orderBy: { dueDate: "asc" },
-      take: 500,
-    }),
-    db.policy.findMany({
-      where: { ...policyWhere, endDate: { gte: now, lte: in60 }, status: "ACTIVE" },
-      include: { client: true, insurer: true },
-      orderBy: { endDate: "asc" },
-      take: 6,
-    }),
-    // Lightweight chart query — only the field we need, capped separately so the
-    // urgent renewals list size doesn't silently undercount the weekly chart.
-    db.policy.findMany({
-      where: { ...policyWhere, endDate: { gte: now, lte: in60 }, status: "ACTIVE" },
-      select: { endDate: true },
-      orderBy: { endDate: "asc" },
       take: 500,
     }),
     db.policy.groupBy({
@@ -156,7 +148,7 @@ export async function getDashboardData() {
       activePolicies,
       duePayments60,
       overduePayments,
-      renewals60,
+      renewals60: upcomingRenewalPolicies.length,
       openWorkItems,
       urgentWorkItems,
       commissionsReceivable,
@@ -164,7 +156,7 @@ export async function getDashboardData() {
     },
     charts: {
       dueByWeek: groupDatesByWeek(upcomingReceiptsForChart, "dueDate"),
-      renewalsByWeek: groupDatesByWeek(upcomingRenewalsForChart, "endDate"),
+      renewalsByWeek: groupDatesByWeek(upcomingRenewalPolicies, "endDate"),
       policyTypeDistribution: policyTypeDistributionRows.map((row) => ({
         name: row.policyType,
         value: row._count.policyType,
@@ -223,9 +215,17 @@ export async function getTodayData() {
   const tomorrow = addDays(now, 1);
   const in7 = addDays(now, 7);
   const in30 = addDays(now, 30);
-  const policyWhere = policyOperationalWhere(scope.portfolioOwnerId);
   const receiptWhere = receiptOperationalWhere(scope.portfolioOwnerId);
   const commissionWhere = commissionOperationalWhere(scope.portfolioOwnerId);
+  const urgentRenewalsPromise = loadEligibleRenewalPolicies(
+    {
+      endDate: {
+        gte: now,
+        lte: in30,
+      },
+    },
+    scope.portfolioOwnerId,
+  );
 
   const [
     paymentsDueToday,
@@ -254,12 +254,7 @@ export async function getTodayData() {
       orderBy: { dueDate: "asc" },
       take: 8,
     }),
-    db.policy.findMany({
-      where: { ...policyWhere, endDate: { gte: now, lte: in30 }, status: "ACTIVE" },
-      include: { client: true, insurer: true },
-      orderBy: { endDate: "asc" },
-      take: 8,
-    }),
+    urgentRenewalsPromise,
     getWorkItems({
       workItemTypes: ["TASK"],
       statuses: OPEN_WORK_ITEM_STATUSES,

@@ -15,6 +15,7 @@ import { daysUntil, formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
+import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 
 export default async function PortfolioPage({
   searchParams,
@@ -25,6 +26,15 @@ export default async function PortfolioPage({
   const now = today();
   const in60 = new Date(now);
   in60.setDate(in60.getDate() + 60);
+  const renewalSoonPromise = loadEligibleRenewalPolicies(
+    {
+      endDate: {
+        gte: now,
+        lte: in60,
+      },
+    },
+    undefined,
+  );
 
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
@@ -50,7 +60,7 @@ export default async function PortfolioPage({
     activePolicyCount,
     activeClientCount,
     activeInsurerCount,
-    renewalSoonCount,
+    renewalSoonPolicies,
     dueReceipts,
     insurerDistribution,
     topClientsRows,
@@ -70,9 +80,7 @@ export default async function PortfolioPage({
     db.policy.count({ where: { status: "ACTIVE" } }),
     db.client.count({ where: { status: "ACTIVE" } }),
     db.insurer.count({ where: { status: "ACTIVE" } }),
-    db.policy.count({
-      where: { status: "ACTIVE", endDate: { gte: now, lte: in60 } },
-    }),
+    renewalSoonPromise,
     db.receipt.findMany({
       where: { dueDate: { gte: now, lte: in60 }, status: { in: ["PENDING", "OVERDUE"] } },
       include: { client: true, policy: true, insurer: true },
@@ -169,7 +177,7 @@ export default async function PortfolioPage({
           />
           <MetricCard
             title="Renovaciones 60 días"
-            value={renewalSoonCount}
+            value={renewalSoonPolicies.length}
             description="Pólizas activas con vencimiento próximo."
             icon={CalendarDays}
             tone="amber"

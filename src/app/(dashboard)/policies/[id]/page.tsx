@@ -42,6 +42,12 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     include: {
       client: true,
       insurer: true,
+      renewedFrom: {
+        select: {
+          id: true,
+          policyNumber: true,
+        },
+      },
       insuredParties: {
         orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
       },
@@ -198,6 +204,14 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                   <p className="text-muted-foreground">Frecuencia</p>
                   <p className="font-medium">{frequencyLabels[policy.paymentFrequency] ?? policy.paymentFrequency}</p>
                 </div>
+                {policy.renewedFrom ? (
+                  <div>
+                    <p className="text-muted-foreground">Renueva de</p>
+                    <Link href={`/policies/${policy.renewedFrom.id}`} className="font-medium text-foreground hover:text-primary">
+                      {policy.renewedFrom.policyNumber}
+                    </Link>
+                  </div>
+                ) : null}
               </div>
               <SectionCard title="Detalle comercial">
                 <div className="space-y-3 px-4 py-3 text-sm text-muted-foreground">
