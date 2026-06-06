@@ -32,6 +32,15 @@ import { formatCurrency } from "@/lib/money";
 import { getLatestMaintenanceRun } from "@/lib/vigency-maintenance";
 import { RunVigencyAuditButton } from "@/components/data-quality/run-vigency-audit-button";
 import { RunPaymentAuditButton } from "@/components/data-quality/run-payment-audit-button";
+import { ReviewActionButtons } from "@/components/data-quality/review-action-buttons";
+import {
+  approveLedgerIssue,
+  approveReceiptReviewIssue,
+  approveRenewalSuggestionReview,
+  denyLedgerIssue,
+  denyReceiptReviewIssue,
+  denyRenewalSuggestionReview,
+} from "./actions";
 
 function QualityBadge({ nivel }: { nivel: "Excelente" | "Bueno" | "Atención" | "Crítico" }) {
   const colors = {
@@ -241,7 +250,7 @@ export default async function DataQualityPage({
   }, {} as Record<number, number>);
   const openRenewalSuggestions = renewalReviewSuggestions.filter((suggestion) => suggestion.status === "PENDING");
   const declinedRenewalSuggestions = renewalReviewSuggestions.filter((suggestion) => suggestion.status === "DECLINED");
-  const openLedgerIssues = ledgerReviewIssues.filter((issue) => issue.status !== "RESOLVED");
+  const openLedgerIssues = ledgerReviewIssues.filter((issue) => issue.status === "OPEN");
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
@@ -715,6 +724,7 @@ export default async function DataQualityPage({
                         <TableHead className="text-right">Brecha</TableHead>
                         <TableHead className="text-right">Monto</TableHead>
                         <TableHead>Estado</TableHead>
+                        <TableHead className="text-right">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -739,6 +749,15 @@ export default async function DataQualityPage({
                             <Badge variant="outline" className="rounded-full">
                               {receiptReviewReasonLabel(issue.reason)}
                             </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <ReviewActionButtons
+                              id={issue.issueId}
+                              modifyHref={`/receipts/${issue.receiptId}/edit`}
+                              approveAction={approveReceiptReviewIssue}
+                              denyAction={denyReceiptReviewIssue}
+                              className="flex flex-wrap items-center justify-end gap-2"
+                            />
                           </TableCell>
                         </TableRow>
                       ))}
@@ -792,6 +811,7 @@ export default async function DataQualityPage({
                         <TableHead>Aseguradora</TableHead>
                         <TableHead>Póliza destino</TableHead>
                         <TableHead>Nota</TableHead>
+                        <TableHead className="text-right">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -823,6 +843,19 @@ export default async function DataQualityPage({
                           </TableCell>
                           <TableCell className="max-w-md text-xs text-muted-foreground">
                             {suggestion.reason ?? suggestion.resolutionNote ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {suggestion.status === "PENDING" ? (
+                              <ReviewActionButtons
+                                id={suggestion.suggestionId}
+                                modifyHref={`/policies/${suggestion.sourcePolicyId}/edit`}
+                                approveAction={approveRenewalSuggestionReview}
+                                denyAction={denyRenewalSuggestionReview}
+                                className="flex flex-wrap items-center justify-end gap-2"
+                              />
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Revisada</span>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -973,6 +1006,7 @@ export default async function DataQualityPage({
                         <TableHead>Mensaje</TableHead>
                         <TableHead className="text-right">Fila</TableHead>
                         <TableHead>Estado</TableHead>
+                        <TableHead className="text-right">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -992,6 +1026,15 @@ export default async function DataQualityPage({
                             <Badge variant="outline" className="rounded-full">
                               {issue.status}
                             </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <ReviewActionButtons
+                              id={issue.issueId}
+                              modifyHref={`/data-quality?tab=ledger&ledgerBatch=${issue.batchId}`}
+                              approveAction={approveLedgerIssue}
+                              denyAction={denyLedgerIssue}
+                              className="flex flex-wrap items-center justify-end gap-2"
+                            />
                           </TableCell>
                         </TableRow>
                       ))}

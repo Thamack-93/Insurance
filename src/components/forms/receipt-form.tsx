@@ -15,6 +15,7 @@ import type { MutationResult } from "@/lib/mutation-utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { StatusBadge } from "@/components/badges/status-badge";
 import {
   ControlledSelect,
   FormActions,
@@ -45,6 +46,8 @@ export function ReceiptForm({
 }: ReceiptFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const editableReceiptStatusOptions = receiptStatusOptions.filter((option) => option.value !== "CANCELLED");
+  const isCancelled = defaultValues.status === "CANCELLED";
   const {
     register,
     control,
@@ -123,18 +126,26 @@ export function ReceiptForm({
               </FormField>
 
               <FormField label="Estado" error={errors.status?.message}>
-                <Controller
-                  name="status"
-                  control={control}
-                  render={({ field }) => (
-                    <ControlledSelect
-                      value={field.value}
-                      onValueChange={field.onChange}
-                      options={receiptStatusOptions}
-                      placeholder="Selecciona un estado"
-                    />
-                  )}
-                />
+                {isCancelled ? (
+                  <div className="flex min-h-10 items-center gap-3 rounded-xl border border-border bg-muted/40 px-3 py-2.5">
+                    <StatusBadge status={defaultValues.status} />
+                    <span className="text-sm text-muted-foreground">Este recibo está cancelado y el estado no se edita desde aquí.</span>
+                    <input type="hidden" {...register("status")} />
+                  </div>
+                ) : (
+                  <Controller
+                    name="status"
+                    control={control}
+                    render={({ field }) => (
+                      <ControlledSelect
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        options={editableReceiptStatusOptions}
+                        placeholder="Selecciona un estado"
+                      />
+                    )}
+                  />
+                )}
               </FormField>
             </FormGrid>
           </FormSection>

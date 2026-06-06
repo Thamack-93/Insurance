@@ -193,7 +193,7 @@ function ReceiptRow({ receipt }: { receipt: CollectableReceipt }) {
             policy: { policyNumber: receipt.policy.policyNumber },
           }}
         />
-        {receipt.policy.status === "CANCELLED" && receipt.paymentCount === 0 ? (
+        {receipt.status !== "CANCELLED" && receipt.paymentCount === 0 ? (
           <CancelReceiptButton
             id={receipt.id}
             receiptNumber={receipt.receiptNumber}

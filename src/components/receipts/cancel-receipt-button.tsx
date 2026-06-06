@@ -1,7 +1,7 @@
 "use client";
 
 import { toast } from "sonner";
-import { cancelReceipt } from "@/app/(dashboard)/receipts/actions";
+import { cancelReceiptAndPolicy } from "@/app/(dashboard)/receipts/actions";
 import { ConfirmDialog } from "@/components/drawers/confirm-dialog";
 
 type CancelReceiptButtonProps = {
@@ -18,7 +18,7 @@ export function CancelReceiptButton({
   triggerClassName,
 }: CancelReceiptButtonProps) {
   const handleConfirm = async () => {
-    const result = await cancelReceipt(id);
+    const result = await cancelReceiptAndPolicy(id);
     if (!result.ok) {
       toast.error(result.error);
     } else {
@@ -31,11 +31,11 @@ export function CancelReceiptButton({
       title={`Cancelar recibo ${receiptNumber}`}
       description={
         <>
-          Esta acción solo está disponible cuando la póliza ya fue cancelada y el recibo no tiene pagos.
-          El recibo dejará de aparecer en cobranza y vencimientos.
+          Si el cliente no pagó, esta acción cancela el recibo, la póliza y cualquier otro recibo abierto de esa póliza.
+          Los recibos ya pagados no se tocan.
         </>
       }
-      confirmLabel="Cancelar recibo"
+      confirmLabel="Cancelar"
       cancelLabel="Cerrar"
       destructive
       onConfirm={handleConfirm}

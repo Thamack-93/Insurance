@@ -267,7 +267,7 @@ export async function getLedgerReviewIssues(): Promise<LedgerReviewIssue[]> {
   const db = getDb();
   const issues = await db.ledgerImportIssue.findMany({
     where: {
-      status: { not: "RESOLVED" },
+      status: "OPEN",
     },
     include: {
       batch: {

@@ -239,7 +239,7 @@ export default async function DuePaymentsPage({
                               policy: { policyNumber: receipt.policy.policyNumber },
                             }}
                           />
-                          {receipt.policy.status === "CANCELLED" && receipt._count.payments === 0 ? (
+                          {receipt.status !== "CANCELLED" && receipt._count.payments === 0 ? (
                             <CancelReceiptButton
                               id={receipt.id}
                               receiptNumber={receipt.receiptNumber}

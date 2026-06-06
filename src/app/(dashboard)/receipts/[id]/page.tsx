@@ -70,7 +70,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/receipts/${receipt.id}/edit`}>Editar recibo</Link>
               </Button>
-              {receipt.policy.status === "CANCELLED" && payments.length === 0 ? (
+              {receipt.status !== "CANCELLED" && payments.length === 0 ? (
                 <CancelReceiptButton id={receipt.id} receiptNumber={receipt.receiptNumber} />
               ) : null}
               {isAdmin ? <DeleteReceiptButton id={receipt.id} receiptNumber={receipt.receiptNumber} /> : null}
