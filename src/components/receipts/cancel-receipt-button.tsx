@@ -32,7 +32,7 @@ export function CancelReceiptButton({
       description={
         <>
           Si el cliente no pagó, esta acción cancela el recibo, la póliza y cualquier otro recibo abierto de esa póliza.
-          Los recibos ya pagados no se tocan.
+          Los recibos ya pagados no se tocan. Si este recibo tiene pagos que no deben quedar, elimínalos primero desde el detalle del recibo.
         </>
       }
       confirmLabel="Cancelar"

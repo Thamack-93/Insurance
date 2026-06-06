@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { AuthError, getCurrentUserId } from "@/lib/auth";
 import { logError } from "@/lib/logger";
 import { parseDateInput } from "@/lib/form-utils";
+import { writeActivityLog } from "@/lib/activity-log";
 import { PaymentConflictError, recordPayment } from "@/lib/payment-service";
 import {
   assertReceiptPortfolioAccess,
@@ -16,6 +17,7 @@ import {
   successResult,
   type MutationResult,
 } from "@/lib/mutation-utils";
+import { reconcileReceiptById } from "@/lib/payment-service";
 
 export type CreatePaymentInput = {
   receiptId: string;
@@ -93,6 +95,96 @@ export async function createPayment(data: CreatePaymentInput): Promise<MutationR
         ? error.message
         : "No se pudo registrar el pago. Intenta de nuevo.";
     return errorResult(message);
+  }
+}
+
+export async function deletePayment(id: string): Promise<MutationResult> {
+  try {
+    const db = getDb();
+    const userId = await getCurrentUserId();
+
+    const payment = await db.payment.findFirst({
+      where: { id, ...paymentPortfolioWhere(userId) },
+      include: {
+        receipt: {
+          select: {
+            id: true,
+            receiptNumber: true,
+            policyId: true,
+            clientId: true,
+            status: true,
+          },
+        },
+        policy: {
+          select: {
+            id: true,
+            policyNumber: true,
+          },
+        },
+        client: {
+          select: {
+            id: true,
+            fullName: true,
+          },
+        },
+      },
+    });
+
+    if (!payment) {
+      return errorResult("El pago no existe o no tienes acceso.");
+    }
+
+    await db.$transaction(async (tx) => {
+      const deletedPayment = await tx.payment.delete({
+        where: { id: payment.id },
+      });
+
+      await writeActivityLog({
+        entityType: "Payment",
+        entityId: deletedPayment.id,
+        action: "PAYMENT_DELETE",
+        oldValue: {
+          receiptId: payment.receiptId,
+          receiptNumber: payment.receipt.receiptNumber,
+          policyId: payment.policyId,
+          policyNumber: payment.policy.policyNumber,
+          clientId: payment.clientId,
+          clientName: payment.client.fullName,
+          amount: Number(deletedPayment.amount),
+          paymentMethod: deletedPayment.paymentMethod,
+          paidDate: deletedPayment.paidDate.toISOString(),
+          reference: deletedPayment.reference,
+          notes: deletedPayment.notes,
+          sourceEvidenceKey: deletedPayment.sourceEvidenceKey,
+        },
+        newValue: null,
+        userId,
+        db: tx,
+      });
+
+      await reconcileReceiptById(payment.receiptId, userId, tx);
+    });
+
+    revalidatePaths([
+      "/payments",
+      "/receipts",
+      `/receipts/${payment.receiptId}`,
+      `/policies/${payment.policyId}`,
+      `/clients/${payment.clientId}`,
+      "/due-payments",
+      "/dashboard",
+      "/today",
+      "/portfolio",
+      "/renewals",
+      "/risks",
+      "/data-quality",
+    ]);
+
+    return successResult(payment.id, `/receipts/${payment.receiptId}`, "Pago eliminado y recibo conciliado de nuevo.");
+  } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
+    logError("payments.deletePayment", error, { paymentId: id });
+    return errorResult(error instanceof Error ? error.message : "No se pudo eliminar el pago.");
   }
 }
 

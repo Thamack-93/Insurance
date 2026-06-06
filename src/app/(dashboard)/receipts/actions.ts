@@ -164,7 +164,7 @@ export async function cancelReceiptAndPolicy(id: string): Promise<MutationResult
     }
 
     if (existingReceipt.payments.length > 0) {
-      return errorResult("No se puede cancelar: el recibo ya tiene pagos registrados.");
+      return errorResult("No se puede cancelar: elimina primero los pagos registrados desde el detalle del recibo.");
     }
 
     const openPolicyReceipts = await db.receipt.findMany({
@@ -187,7 +187,7 @@ export async function cancelReceiptAndPolicy(id: string): Promise<MutationResult
     if (blockedReceipts.length > 0) {
       const numbers = blockedReceipts.map((receipt) => receipt.receiptNumber).join(", ");
       return errorResult(
-        `No se puede cancelar la póliza: ${blockedReceipts.length} recibo${blockedReceipts.length !== 1 ? "s" : ""} abierto${blockedReceipts.length !== 1 ? "s" : ""} ya tiene${blockedReceipts.length !== 1 ? "n" : ""} pagos registrados (${numbers}).`,
+        `No se puede cancelar la póliza: elimina primero los pagos registrados de ${blockedReceipts.length} recibo${blockedReceipts.length !== 1 ? "s" : ""} abierto${blockedReceipts.length !== 1 ? "s" : ""} (${numbers}).`,
       );
     }
 
@@ -327,7 +327,7 @@ export async function cancelReceipt(id: string): Promise<MutationResult> {
     }
 
     if (existingReceipt.payments.length > 0) {
-      return errorResult("No se puede cancelar: el recibo ya tiene pagos registrados.");
+      return errorResult("No se puede cancelar: elimina primero los pagos registrados desde el detalle del recibo.");
     }
 
     const updatedReceipt = await db.receipt.update({

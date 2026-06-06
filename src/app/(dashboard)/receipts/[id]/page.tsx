@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DeleteReceiptButton } from "@/components/receipts/delete-receipt-button";
 import { CancelReceiptButton } from "@/components/receipts/cancel-receipt-button";
+import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
 import { getDb } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { daysUntil, formatDate } from "@/lib/dates";
@@ -177,18 +178,19 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                 No hay pagos registrados para este recibo.
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/40">
-                    <TableHead>Fecha de pago</TableHead>
-                    <TableHead>Monto</TableHead>
-                    <TableHead>Método</TableHead>
-                    <TableHead>Referencia</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {payments.map((payment) => (
-                    <TableRow key={payment.id}>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/40">
+                      <TableHead>Fecha de pago</TableHead>
+                      <TableHead>Monto</TableHead>
+                      <TableHead>Método</TableHead>
+                      <TableHead>Referencia</TableHead>
+                      <TableHead className="text-right">Acciones</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {payments.map((payment) => (
+                      <TableRow key={payment.id}>
                       <TableCell>{formatDate(payment.paidDate)}</TableCell>
                       <TableCell className="font-medium">
                         {formatCurrency(payment.amount, payment.currency)}
@@ -196,6 +198,19 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                       <TableCell>{payment.paymentMethod ?? "—"}</TableCell>
                       <TableCell className="font-mono text-xs">
                         {payment.reference ?? "—"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <DeletePaymentButton
+                          id={payment.id}
+                          receiptId={receipt.id}
+                          receiptNumber={receipt.receiptNumber}
+                          paidDate={payment.paidDate}
+                          amount={toNumber(payment.amount)}
+                          currency={payment.currency}
+                          paymentMethod={payment.paymentMethod}
+                          triggerLabel="Eliminar"
+                          triggerClassName="h-7 rounded-full bg-card/70 px-2.5 text-xs text-destructive hover:text-destructive"
+                        />
                       </TableCell>
                     </TableRow>
                   ))}

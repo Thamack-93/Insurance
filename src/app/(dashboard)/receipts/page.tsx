@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/empty-states/empty-state";
 import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
 import { CollectableReceipts, type CollectableReceipt } from "@/components/receipts/collectable-receipts";
+import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
 import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
@@ -291,6 +292,7 @@ export default async function ReceiptsPage({
                     <TableHead>Fecha</TableHead>
                     <TableHead>Método</TableHead>
                     <TableHead className="text-right">Monto</TableHead>
+                    <TableHead className="text-right">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -311,6 +313,19 @@ export default async function ReceiptsPage({
                       <TableCell>{payment.paymentMethod ?? "Sin método"}</TableCell>
                       <TableCell className="text-right font-medium">
                         {formatCurrency(payment.amount, payment.currency)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <DeletePaymentButton
+                          id={payment.id}
+                          receiptId={payment.receipt.id}
+                          receiptNumber={payment.receipt.receiptNumber}
+                          paidDate={payment.paidDate}
+                          amount={Number(payment.amount)}
+                          currency={payment.currency}
+                          paymentMethod={payment.paymentMethod}
+                          triggerLabel="Eliminar"
+                          triggerClassName="h-7 rounded-full bg-card/70 px-2.5 text-xs text-destructive hover:text-destructive"
+                        />
                       </TableCell>
                     </TableRow>
                   ))}
