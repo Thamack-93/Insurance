@@ -3,6 +3,7 @@ import { differenceInCalendarDays } from "date-fns";
 import { today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
 import { globalSearch } from "@/lib/search";
+import { matchesSuppressionCriteria } from "@/lib/data-quality-rules";
 
 export type DataQualityIssue = {
   code: string;
@@ -51,6 +52,9 @@ export type ReceiptReviewIssue = {
   issueId: string;
   reason: string;
   status: string;
+  dispositionLabel: string;
+  suppressedByRuleId: string | null;
+  duplicateOfId: string | null;
   receiptId: string;
   receiptNumber: string;
   policyId: string;
@@ -72,6 +76,9 @@ export type ReceiptReviewIssue = {
 export type RenewalReviewSuggestion = {
   suggestionId: string;
   status: string;
+  dispositionLabel: string;
+  suppressedByRuleId: string | null;
+  duplicateOfId: string | null;
   reason: string | null;
   resolutionNote: string | null;
   reviewedAt: Date | null;
@@ -93,6 +100,9 @@ export type LedgerReviewIssue = {
   issueId: string;
   batchId: string;
   batchStatus: string;
+  dispositionLabel: string;
+  suppressedByRuleId: string | null;
+  duplicateOfId: string | null;
   batchCsvName: string;
   batchPaidName: string;
   rowId: string | null;
@@ -107,6 +117,16 @@ export type LedgerReviewIssue = {
   reviewedAt: Date | null;
   createdAt: Date;
 };
+
+function describeDisposition(status: string, suppressedByRuleId: string | null, duplicateOfId: string | null) {
+  if (duplicateOfId) return "Fusionada";
+  if (suppressedByRuleId) return "Suprimida";
+  if (status === "OPEN" || status === "PENDING") return "Abierta";
+  if (status === "RESOLVED") return "Resuelta";
+  if (status === "DECLINED") return "Declinada";
+  if (status === "DISMISSED") return "Descartada";
+  return status;
+}
 
 export async function getOperationalDataHealthSummary(): Promise<OperationalDataHealthSummary> {
   const db = getDb();
@@ -173,10 +193,15 @@ export async function getOperationalDataHealthSummary(): Promise<OperationalData
 
 export async function getReceiptReviewIssues(): Promise<ReceiptReviewIssue[]> {
   const db = getDb();
-  const issues = await db.receiptReconciliationIssue.findMany({
+  const suppressionRules = await db.dataQualitySuppressionRule.findMany({
     where: {
-      status: "OPEN",
+      active: true,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      category: "PAYMENTS",
     },
+  });
+  const issues = await db.receiptReconciliationIssue.findMany({
+    where: {},
     include: {
       receipt: {
         include: {
@@ -195,6 +220,18 @@ export async function getReceiptReviewIssues(): Promise<ReceiptReviewIssue[]> {
 
   return issues
     .filter((issue) => issue.receipt && issue.receipt.policy && issue.receipt.client && issue.receipt.insurer)
+    .filter((issue) => {
+      const receipt = issue.receipt!;
+      const fields = {
+        receiptId: receipt.id,
+        receiptNumber: receipt.receiptNumber,
+        policyId: receipt.policy.id,
+        policyNumber: receipt.policy.policyNumber,
+        reason: issue.reason,
+      };
+
+      return !suppressionRules.some((rule) => rule.issueCode === issue.reason && matchesSuppressionCriteria(rule.criteriaJson, fields));
+    })
     .map<ReceiptReviewIssue>((issue) => {
       const receipt = issue.receipt!;
       const latestPayment = receipt.payments[0] ?? null;
@@ -205,6 +242,9 @@ export async function getReceiptReviewIssues(): Promise<ReceiptReviewIssue[]> {
         issueId: issue.id,
         reason: issue.reason,
         status: issue.status,
+        dispositionLabel: describeDisposition(issue.status, issue.suppressedByRuleId, issue.duplicateOfId),
+        suppressedByRuleId: issue.suppressedByRuleId,
+        duplicateOfId: issue.duplicateOfId,
         receiptId: receipt.id,
         receiptNumber: receipt.receiptNumber,
         policyId: receipt.policy.id,
@@ -228,6 +268,13 @@ export async function getReceiptReviewIssues(): Promise<ReceiptReviewIssue[]> {
 
 export async function getRenewalReviewSuggestions(): Promise<RenewalReviewSuggestion[]> {
   const db = getDb();
+  const suppressionRules = await db.dataQualitySuppressionRule.findMany({
+    where: {
+      active: true,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      category: "RENOVATIONS",
+    },
+  });
   const suggestions = await db.policyRenewalSuggestion.findMany({
     include: {
       sourcePolicy: {
@@ -242,33 +289,51 @@ export async function getRenewalReviewSuggestions(): Promise<RenewalReviewSugges
     take: 200,
   });
 
-  return suggestions.map<RenewalReviewSuggestion>((suggestion) => ({
-    suggestionId: suggestion.id,
-    status: suggestion.status,
-    reason: suggestion.reason,
-    resolutionNote: suggestion.resolutionNote,
-    reviewedAt: suggestion.reviewedAt,
-    sourcePolicyId: suggestion.sourcePolicyId,
-    sourcePolicyNumber: suggestion.sourcePolicy.policyNumber,
-    sourcePolicyStatus: suggestion.sourcePolicy.status,
-    clientName: suggestion.sourcePolicy.client.fullName,
-    insurerName: suggestion.sourcePolicy.insurer.name,
-    sourceStartDate: suggestion.sourcePolicy.startDate,
-    sourceEndDate: suggestion.sourcePolicy.endDate,
-    targetPolicyId: suggestion.targetPolicyId,
-    targetPolicyNumber: suggestion.targetPolicy?.policyNumber ?? null,
-    targetPolicyStatus: suggestion.targetPolicy?.status ?? null,
-    createdAt: suggestion.createdAt,
-    updatedAt: suggestion.updatedAt,
-  }));
+  return suggestions
+    .filter((suggestion) => {
+      const fields = {
+        sourcePolicyId: suggestion.sourcePolicyId,
+        sourcePolicyNumber: suggestion.sourcePolicy.policyNumber,
+        targetPolicyId: suggestion.targetPolicyId ?? "",
+        reason: suggestion.reason ?? "",
+      };
+      return !suppressionRules.some((rule) => rule.issueCode === (suggestion.reason ?? "RENEWAL_SUGGESTION") && matchesSuppressionCriteria(rule.criteriaJson, fields));
+    })
+    .map<RenewalReviewSuggestion>((suggestion) => ({
+      suggestionId: suggestion.id,
+      status: suggestion.status,
+      dispositionLabel: describeDisposition(suggestion.status, suggestion.suppressedByRuleId, suggestion.duplicateOfId),
+      suppressedByRuleId: suggestion.suppressedByRuleId,
+      duplicateOfId: suggestion.duplicateOfId,
+      reason: suggestion.reason,
+      resolutionNote: suggestion.resolutionNote,
+      reviewedAt: suggestion.reviewedAt,
+      sourcePolicyId: suggestion.sourcePolicyId,
+      sourcePolicyNumber: suggestion.sourcePolicy.policyNumber,
+      sourcePolicyStatus: suggestion.sourcePolicy.status,
+      clientName: suggestion.sourcePolicy.client.fullName,
+      insurerName: suggestion.sourcePolicy.insurer.name,
+      sourceStartDate: suggestion.sourcePolicy.startDate,
+      sourceEndDate: suggestion.sourcePolicy.endDate,
+      targetPolicyId: suggestion.targetPolicyId,
+      targetPolicyNumber: suggestion.targetPolicy?.policyNumber ?? null,
+      targetPolicyStatus: suggestion.targetPolicy?.status ?? null,
+      createdAt: suggestion.createdAt,
+      updatedAt: suggestion.updatedAt,
+    }));
 }
 
 export async function getLedgerReviewIssues(): Promise<LedgerReviewIssue[]> {
   const db = getDb();
-  const issues = await db.ledgerImportIssue.findMany({
+  const suppressionRules = await db.dataQualitySuppressionRule.findMany({
     where: {
-      status: "OPEN",
+      active: true,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      category: "LEDGER",
     },
+  });
+  const issues = await db.ledgerImportIssue.findMany({
+    where: {},
     include: {
       batch: {
         select: {
@@ -291,24 +356,39 @@ export async function getLedgerReviewIssues(): Promise<LedgerReviewIssue[]> {
     take: 200,
   });
 
-  return issues.map<LedgerReviewIssue>((issue) => ({
-    issueId: issue.id,
-    batchId: issue.batchId,
-    batchStatus: issue.batch.status,
-    batchCsvName: issue.batch.sourceCsvName,
-    batchPaidName: issue.batch.sourcePaidName,
-    rowId: issue.rowId,
-    rowNumber: issue.row?.rowNumber ?? null,
-    sourceType: issue.row?.sourceType ?? null,
-    sourceKey: issue.row?.sourceKey ?? null,
-    issueType: issue.issueType,
-    severity: issue.severity,
-    status: issue.status,
-    message: issue.message,
-    resolutionNote: issue.resolutionNote,
-    reviewedAt: issue.reviewedAt,
-    createdAt: issue.createdAt,
-  }));
+  return issues
+    .filter((issue) => {
+      const fields = {
+        batchId: issue.batchId,
+        rowId: issue.rowId ?? "",
+        rowNumber: issue.row?.rowNumber ?? "",
+        sourceType: issue.row?.sourceType ?? "",
+        sourceKey: issue.row?.sourceKey ?? "",
+        issueType: issue.issueType,
+      };
+      return !suppressionRules.some((rule) => rule.issueCode === issue.issueType && matchesSuppressionCriteria(rule.criteriaJson, fields));
+    })
+    .map<LedgerReviewIssue>((issue) => ({
+      issueId: issue.id,
+      batchId: issue.batchId,
+      batchStatus: issue.batch.status,
+      dispositionLabel: describeDisposition(issue.status, issue.suppressedByRuleId, issue.duplicateOfId),
+      suppressedByRuleId: issue.suppressedByRuleId,
+      duplicateOfId: issue.duplicateOfId,
+      batchCsvName: issue.batch.sourceCsvName,
+      batchPaidName: issue.batch.sourcePaidName,
+      rowId: issue.rowId,
+      rowNumber: issue.row?.rowNumber ?? null,
+      sourceType: issue.row?.sourceType ?? null,
+      sourceKey: issue.row?.sourceKey ?? null,
+      issueType: issue.issueType,
+      severity: issue.severity,
+      status: issue.status,
+      message: issue.message,
+      resolutionNote: issue.resolutionNote,
+      reviewedAt: issue.reviewedAt,
+      createdAt: issue.createdAt,
+    }));
 }
 
 export async function getClientDataQualityScores() {

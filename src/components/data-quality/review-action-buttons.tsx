@@ -12,10 +12,14 @@ type ReviewAction = (id: string) => Promise<MutationResult>;
 type ReviewActionButtonsProps = {
   id: string;
   modifyHref: string;
-  approveAction: ReviewAction;
-  denyAction: ReviewAction;
+  approveAction?: ReviewAction;
+  denyAction?: ReviewAction;
+  suppressAction?: ReviewAction;
+  reopenAction?: ReviewAction;
   approveLabel?: string;
   denyLabel?: string;
+  suppressLabel?: string;
+  reopenLabel?: string;
   modifyLabel?: string;
   className?: string;
 };
@@ -25,8 +29,12 @@ export function ReviewActionButtons({
   modifyHref,
   approveAction,
   denyAction,
+  suppressAction,
+  reopenAction,
   approveLabel = "Aprobar",
   denyLabel = "Denegar",
+  suppressLabel = "Suprimir",
+  reopenLabel = "Reabrir",
   modifyLabel = "Modificar",
   className,
 }: ReviewActionButtonsProps) {
@@ -48,26 +56,54 @@ export function ReviewActionButtons({
 
   return (
     <div className={className ?? "flex flex-wrap items-center justify-end gap-2"}>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="rounded-full"
-        disabled={isPending}
-        onClick={() => run(approveAction, "Aprobado.")}
-      >
-        {approveLabel}
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="rounded-full"
-        disabled={isPending}
-        onClick={() => run(denyAction, "Denegado.")}
-      >
-        {denyLabel}
-      </Button>
+      {approveAction ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="rounded-full"
+          disabled={isPending}
+          onClick={() => run(approveAction, "Aprobado.")}
+        >
+          {approveLabel}
+        </Button>
+      ) : null}
+      {denyAction ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="rounded-full"
+          disabled={isPending}
+          onClick={() => run(denyAction, "Denegado.")}
+        >
+          {denyLabel}
+        </Button>
+      ) : null}
+      {suppressAction ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="rounded-full"
+          disabled={isPending}
+          onClick={() => run(suppressAction, "Suprimido.")}
+        >
+          {suppressLabel}
+        </Button>
+      ) : null}
+      {reopenAction ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="rounded-full"
+          disabled={isPending}
+          onClick={() => run(reopenAction, "Reabierto.")}
+        >
+          {reopenLabel}
+        </Button>
+      ) : null}
       <Button asChild type="button" size="sm" variant="ghost" className="rounded-full">
         <Link href={modifyHref}>{modifyLabel}</Link>
       </Button>

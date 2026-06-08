@@ -1,6 +1,7 @@
 import { addDays, subDays } from "date-fns";
 import { getDb } from "@/lib/db";
 import { today } from "@/lib/dates";
+import { matchesSuppressionCriteria } from "@/lib/data-quality-rules";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { ACTIVE_RENEWAL_POLICY_WHERE } from "@/lib/renewal-decisions";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
@@ -46,6 +47,7 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
     : {};
 
   const [
+    suppressionRules,
     overdueReceipts,
     overdueCommissions,
     staleWorkItems,
@@ -57,6 +59,12 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
     duplicatePolicyKeys,
     duplicateReceiptKeys,
   ] = await Promise.all([
+    db.dataQualitySuppressionRule.findMany({
+      where: {
+        active: true,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      },
+    }),
     db.receipt.findMany({
       where: {
         ...receiptScope,
@@ -201,7 +209,19 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
     ...renewalsWithoutWorkItem.map((policy) => risk("RENEWAL_WITHOUT_WORK_ITEM", "WARNING", "Renovacion proxima sin pendiente", policy.policyNumber, "Policy", policy.id, "Crear pendiente de renovacion.")),
     ...overlappingPolicies.map((policy) => risk("OVERLAPPING_POLICY_TERM", "WARNING", "Vigencias de poliza solapadas", policy.policyNumber, "Policy", policy.id, "Verificar familia de renovacion.")),
     ...duplicateReceipts.map((receipt) => risk("DUPLICATE_RECEIPT_NUMBER", "WARNING", "Recibo duplicado", receipt.receiptNumber, "Receipt", receipt.id, "Verificar duplicado.")),
-  ];
+  ].filter((finding) => {
+    return !suppressionRules.some((rule) =>
+      rule.issueCode === finding.alertType &&
+      matchesSuppressionCriteria(rule.criteriaJson, {
+        alertType: finding.alertType,
+        severity: finding.severity,
+        title: finding.title,
+        description: finding.description,
+        entityType: finding.entityType,
+        entityId: finding.entityId,
+      }),
+    );
+  });
 }
 
 function risk(

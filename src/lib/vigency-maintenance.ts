@@ -8,6 +8,7 @@ import { inferClearPaymentFrequency } from "@/lib/payment-frequency";
 import { reconcileReceiptState } from "@/lib/receipt-reconciliation";
 import { toNumber } from "@/lib/money";
 import { logError } from "@/lib/logger";
+import { findMatchingSuppressionRule } from "@/lib/data-quality-rules";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -521,6 +522,21 @@ export async function runPolicyVigencyAudit(input: {
           const reason = gapDays <= 0
             ? "Vigencia consecutiva detectada automáticamente."
             : `Renovación detectada con separación de ${gapDays} día(s).`;
+          const suppressionRule = await findMatchingSuppressionRule(
+            {
+              category: "RENOVATIONS",
+              issueCode: "RENEWAL_SUGGESTION",
+              fields: {
+                sourcePolicyId: sourcePolicy.id,
+                sourcePolicyNumber: sourcePolicy.policyNumber,
+                targetPolicyId: targetPolicy.id,
+                clientId: sourcePolicy.clientId,
+                insurerId: sourcePolicy.insurerId,
+              },
+            },
+            db,
+          );
+          const nextStatus = suppressionRule ? "DECLINED" : "PENDING";
 
           await db.policyRenewalSuggestion.upsert({
             where: {
@@ -532,8 +548,12 @@ export async function runPolicyVigencyAudit(input: {
             update: {
               confidence,
               reason,
-              status: "PENDING",
+              status: nextStatus,
               maintenanceRunId: run.id,
+              suppressedByRuleId: suppressionRule?.id ?? undefined,
+              reviewedAt: suppressionRule ? now : undefined,
+              reviewedById: suppressionRule ? input.actorId : undefined,
+              resolutionNote: suppressionRule ? `Suprimida por regla: ${suppressionRule.reason ?? suppressionRule.issueCode}.` : undefined,
             },
             create: {
               maintenanceRunId: run.id,
@@ -541,7 +561,11 @@ export async function runPolicyVigencyAudit(input: {
               targetPolicyId: targetPolicy.id,
               confidence,
               reason,
-              status: "PENDING",
+              status: nextStatus,
+              suppressedByRuleId: suppressionRule?.id ?? undefined,
+              reviewedAt: suppressionRule ? now : undefined,
+              reviewedById: suppressionRule ? input.actorId : undefined,
+              resolutionNote: suppressionRule ? `Suprimida por regla: ${suppressionRule.reason ?? suppressionRule.issueCode}.` : undefined,
             },
           });
 
@@ -662,6 +686,20 @@ export async function runPolicyVigencyAudit(input: {
         ]
           .filter(Boolean)
           .join(",") || "REVIEW_REQUIRED";
+        const suppressionRule = await findMatchingSuppressionRule(
+          {
+            category: "PAYMENTS",
+            issueCode: reason,
+            fields: {
+              receiptId: receipt.id,
+              receiptNumber: receipt.receiptNumber,
+              policyId: targetPolicy.id,
+              policyNumber: targetPolicy.policyNumber,
+              familyKey: key,
+            },
+          },
+          db,
+        );
         const issueDetails = {
           familyKey: key,
           policyNumber: familyRoot.policyNumber,
@@ -681,7 +719,7 @@ export async function runPolicyVigencyAudit(input: {
           reconciliation,
         };
 
-        if (reconciliation.shouldReview || targetResolution.ambiguous) {
+        if (reconciliation.shouldReview || targetResolution.ambiguous || suppressionRule) {
           const existingIssue = await db.receiptReconciliationIssue.findFirst({
             where: { receiptId: receipt.id, status: "OPEN" },
             orderBy: { createdAt: "desc" },
@@ -697,6 +735,11 @@ export async function runPolicyVigencyAudit(input: {
                 detailsJson: JSON.stringify(issueDetails),
                 expectedAmount: receipt.amount as never,
                 paidAmount: reconciliation.paidAmount as never,
+                status: suppressionRule ? "DISMISSED" : "OPEN",
+                suppressedByRuleId: suppressionRule?.id ?? null,
+                reviewedAt: suppressionRule ? now : null,
+                reviewedById: suppressionRule ? input.actorId : null,
+                resolutionNote: suppressionRule ? `Suprimida por regla: ${suppressionRule.reason ?? suppressionRule.issueCode}.` : null,
               },
             });
           } else {
@@ -706,13 +749,21 @@ export async function runPolicyVigencyAudit(input: {
                 receiptId: receipt.id,
                 policyId: targetPolicy.id,
                 reason,
-                status: "OPEN",
+                status: suppressionRule ? "DISMISSED" : "OPEN",
                 detailsJson: JSON.stringify(issueDetails),
                 expectedAmount: receipt.amount as never,
                 paidAmount: reconciliation.paidAmount as never,
+                suppressedByRuleId: suppressionRule?.id ?? undefined,
+                reviewedAt: suppressionRule ? now : undefined,
+                reviewedById: suppressionRule ? input.actorId : undefined,
+                resolutionNote: suppressionRule ? `Suprimida por regla: ${suppressionRule.reason ?? suppressionRule.issueCode}.` : undefined,
               },
             });
-            summary.receiptIssuesOpened += 1;
+            if (!suppressionRule) {
+              summary.receiptIssuesOpened += 1;
+            } else {
+              summary.receiptIssuesResolved += 1;
+            }
           }
         } else {
           const existingIssue = await db.receiptReconciliationIssue.findFirst({

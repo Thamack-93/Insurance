@@ -6,6 +6,7 @@ import { getDb } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { PaymentConflictError, recordPayment } from "@/lib/payment-service";
 import { writeActivityLog } from "@/lib/activity-log";
+import { findMatchingSuppressionRule } from "@/lib/data-quality-rules";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -816,15 +817,40 @@ export async function createLedgerImportPreview(input: {
     batchRows.map((row) => [`${row.sourceType}:${row.rowNumber}:${row.sourceKey}`, row]),
   );
 
-  const issueData = allIssues.map((issue) => ({
-      batchId: batch.id,
-      rowId: rowBySource.get(`${issue.sourceType}:${issue.rowNumber}:${issue.sourceKey}`)?.id,
-      issueType: issue.type,
-      severity: issue.severity,
-      status: "OPEN",
-      message: issue.message,
-      detailsJson: JSON.stringify(issue),
-  }));
+  const issueData = await Promise.all(
+    allIssues.map(async (issue) => {
+      const rowId = rowBySource.get(`${issue.sourceType}:${issue.rowNumber}:${issue.sourceKey}`)?.id ?? null;
+      const suppressionRule = await findMatchingSuppressionRule(
+        {
+          category: "LEDGER",
+          issueCode: issue.type,
+          fields: {
+            batchId: batch.id,
+            rowId: rowId ?? "",
+            rowNumber: String(issue.rowNumber),
+            sourceType: issue.sourceType,
+            sourceKey: issue.sourceKey,
+            issueType: issue.type,
+          },
+        },
+        db,
+      );
+
+      return {
+        batchId: batch.id,
+        rowId,
+        issueType: issue.type,
+        severity: issue.severity,
+        status: suppressionRule ? "DISMISSED" : "OPEN",
+        message: issue.message,
+        detailsJson: JSON.stringify(issue),
+        suppressedByRuleId: suppressionRule?.id ?? null,
+        reviewedAt: suppressionRule ? new Date() : null,
+        reviewedById: suppressionRule ? input.actorId : null,
+        resolutionNote: suppressionRule ? `Suprimida por regla: ${suppressionRule.reason ?? suppressionRule.issueCode}.` : null,
+      };
+    }),
+  );
 
   if (issueData.length) {
     await db.ledgerImportIssue.createMany({
@@ -930,6 +956,20 @@ export async function applyLedgerImportBatch(input: {
 
     if (!row.receiptId || !paidRow.paidDate || paidRow.totalPaid <= 0) {
       paymentsSkipped += 1;
+      const suppressionRule = await findMatchingSuppressionRule(
+        {
+          category: "LEDGER",
+          issueCode: "PAYMENT_NOT_APPLICABLE",
+          fields: {
+            batchId: batch.id,
+            rowId: row.id,
+            rowNumber: String(row.rowNumber),
+            sourceType: row.sourceType,
+            sourceKey: row.sourceKey,
+          },
+        },
+        db,
+      );
       await db.ledgerImportRow.update({
         where: { id: row.id },
         data: { status: "REVIEW", action: "REVIEW_PAYMENT_NOT_APPLICABLE" },
@@ -940,9 +980,13 @@ export async function applyLedgerImportBatch(input: {
           rowId: row.id,
           issueType: "PAYMENT_NOT_APPLICABLE",
           severity: "WARNING",
-          status: "OPEN",
+          status: suppressionRule ? "DISMISSED" : "OPEN",
           message: "La fila ya no cumple criterios para aplicar automáticamente.",
           detailsJson: JSON.stringify({ rowNumber: row.rowNumber, evidenceKey }),
+          suppressedByRuleId: suppressionRule?.id ?? null,
+          reviewedAt: suppressionRule ? now : null,
+          reviewedById: suppressionRule ? input.actorId : null,
+          resolutionNote: suppressionRule ? `Suprimida por regla: ${suppressionRule.reason ?? suppressionRule.issueCode}.` : null,
         },
       });
       continue;
@@ -1013,6 +1057,20 @@ export async function applyLedgerImportBatch(input: {
       }
 
       paymentsFailed += 1;
+      const suppressionRule = await findMatchingSuppressionRule(
+        {
+          category: "LEDGER",
+          issueCode: "PAYMENT_APPLY_FAILED",
+          fields: {
+            batchId: batch.id,
+            rowId: row.id,
+            rowNumber: String(row.rowNumber),
+            sourceType: row.sourceType,
+            sourceKey: row.sourceKey,
+          },
+        },
+        db,
+      );
       await db.ledgerImportRow.update({
         where: { id: row.id },
         data: { status: "REVIEW", action: "REVIEW_PAYMENT_APPLY_FAILED" },
@@ -1023,9 +1081,13 @@ export async function applyLedgerImportBatch(input: {
           rowId: row.id,
           issueType: "PAYMENT_APPLY_FAILED",
           severity: "CRITICAL",
-          status: "OPEN",
+          status: suppressionRule ? "DISMISSED" : "OPEN",
           message: error instanceof Error ? error.message : "No se pudo aplicar este pago.",
           detailsJson: JSON.stringify({ rowNumber: row.rowNumber, evidenceKey }),
+          suppressedByRuleId: suppressionRule?.id ?? null,
+          reviewedAt: suppressionRule ? now : null,
+          reviewedById: suppressionRule ? input.actorId : null,
+          resolutionNote: suppressionRule ? `Suprimida por regla: ${suppressionRule.reason ?? suppressionRule.issueCode}.` : null,
         },
       });
     }

@@ -6,6 +6,7 @@ import { getDb } from "@/lib/db";
 import { reconcileReceiptState } from "@/lib/receipt-reconciliation";
 import { logError } from "@/lib/logger";
 import { toNumber } from "@/lib/money";
+import { findMatchingSuppressionRule } from "@/lib/data-quality-rules";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -287,6 +288,20 @@ export async function runPaymentReconciliationAudit(input: {
           orderBy: { createdAt: "desc" },
           select: { id: true },
         });
+        const suppressionRule = await findMatchingSuppressionRule(
+          {
+            category: "PAYMENTS",
+            issueCode: issueReason,
+            fields: {
+              receiptId: receipt.id,
+              receiptNumber: receipt.receiptNumber,
+              policyId: receipt.policy.id,
+              policyNumber: receipt.policy.policyNumber,
+              familyKey: key,
+            },
+          },
+          db,
+        );
 
         if (reconciliation.shouldReview) {
           summary.receiptsFlaggedForReview += 1;
@@ -303,6 +318,58 @@ export async function runPaymentReconciliationAudit(input: {
               paidAmount: reconciliation.paidAmount,
               reasons: reconciliation.reasons,
             });
+          }
+
+          if (suppressionRule) {
+            if (openIssues.length > 0) {
+              await db.receiptReconciliationIssue.update({
+                where: { id: openIssues[0].id },
+                data: {
+                  reason: issueReason,
+                  policyId: receipt.policyId,
+                  detailsJson: JSON.stringify(issueDetails),
+                  expectedAmount: receipt.amount as never,
+                  paidAmount: reconciliation.paidAmount as never,
+                  status: "DISMISSED",
+                  suppressedByRuleId: suppressionRule.id,
+                  reviewedAt: now,
+                  reviewedById: input.actorId,
+                  resolutionNote: `Suprimida por regla: ${suppressionRule.reason ?? suppressionRule.issueCode}.`,
+                },
+              });
+
+              for (const duplicateIssue of openIssues.slice(1)) {
+                await db.receiptReconciliationIssue.update({
+                  where: { id: duplicateIssue.id },
+                  data: {
+                    status: "DISMISSED",
+                    reviewedAt: now,
+                    reviewedById: input.actorId,
+                    resolutionNote: "Duplicado suprimido durante la auditoría de pagos.",
+                  },
+                });
+                summary.receiptIssuesResolved += 1;
+              }
+            } else {
+              await db.receiptReconciliationIssue.create({
+                data: {
+                  maintenanceRunId: run.id,
+                  receiptId: receipt.id,
+                  policyId: receipt.policyId,
+                  reason: issueReason,
+                  status: "DISMISSED",
+                  detailsJson: JSON.stringify(issueDetails),
+                  expectedAmount: receipt.amount as never,
+                  paidAmount: reconciliation.paidAmount as never,
+                  suppressedByRuleId: suppressionRule.id,
+                  reviewedAt: now,
+                  reviewedById: input.actorId,
+                  resolutionNote: `Suprimida por regla: ${suppressionRule.reason ?? suppressionRule.issueCode}.`,
+                },
+              });
+              summary.receiptIssuesResolved += 1;
+            }
+            continue;
           }
 
           if (openIssues.length > 0) {

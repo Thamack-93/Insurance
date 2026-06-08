@@ -48,11 +48,16 @@ model User {
   telegramDrafts             TelegramDraft[]              @relation("TelegramDraftUser")
   createdMaintenanceRuns     MaintenanceRun[]             @relation("MaintenanceRunCreatedBy")
   reviewedReceiptIssues      ReceiptReconciliationIssue[] @relation("ReceiptReconciliationIssueReviewedBy")
+  mergedReceiptIssues        ReceiptReconciliationIssue[] @relation("ReceiptReconciliationIssueMergedBy")
   reviewedRenewalSuggestions PolicyRenewalSuggestion[]    @relation("PolicyRenewalSuggestionReviewedBy")
+  mergedRenewalSuggestions   PolicyRenewalSuggestion[]    @relation("PolicyRenewalSuggestionMergedBy")
   createdLedgerImportBatches LedgerImportBatch[]          @relation("LedgerImportBatchCreatedBy")
   approvedLedgerImportBatches LedgerImportBatch[]         @relation("LedgerImportBatchApprovedBy")
   reviewedLedgerImportIssues LedgerImportIssue[]          @relation("LedgerImportIssueReviewedBy")
+  mergedLedgerImportIssues    LedgerImportIssue[]          @relation("LedgerImportIssueMergedBy")
   performedLedgerImportActions LedgerImportAction[]       @relation("LedgerImportActionPerformedBy")
+  createdDataQualitySuppressionRules DataQualitySuppressionRule[] @relation("DataQualitySuppressionRuleCreatedBy")
+  reviewedDataQualitySuppressionRules DataQualitySuppressionRule[] @relation("DataQualitySuppressionRuleReviewedBy")
 
   @@index([email])
   @@index([role])
@@ -731,6 +736,10 @@ model LedgerImportIssue {
   status        String   @default("OPEN")
   message       String
   detailsJson   String?
+  suppressedByRuleId String?
+  duplicateOfId String?
+  mergedAt      DateTime?
+  mergedById    String?
   reviewedAt    DateTime?
   reviewedById  String?
   resolutionNote String?
@@ -739,6 +748,8 @@ model LedgerImportIssue {
 
   batch      LedgerImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
   row        LedgerImportRow?  @relation(fields: [rowId], references: [id], onDelete: SetNull)
+  suppressedByRule DataQualitySuppressionRule? @relation("LedgerIssueSuppressionRule", fields: [suppressedByRuleId], references: [id], onDelete: SetNull)
+  mergedBy         User?                      @relation("LedgerImportIssueMergedBy", fields: [mergedById], references: [id], onDelete: SetNull)
   reviewedBy User?             @relation("LedgerImportIssueReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@index([batchId])
@@ -746,7 +757,10 @@ model LedgerImportIssue {
   @@index([issueType])
   @@index([severity])
   @@index([status])
+  @@index([suppressedByRuleId])
+  @@index([duplicateOfId])
   @@index([reviewedById])
+  @@index([mergedById])
   @@index([createdAt])
 }
 
@@ -805,6 +819,10 @@ model ReceiptReconciliationIssue {
   detailsJson      String?
   expectedAmount   Decimal?
   paidAmount       Decimal?
+  suppressedByRuleId String?
+  duplicateOfId    String?
+  mergedAt         DateTime?
+  mergedById       String?
   reviewedAt       DateTime?
   reviewedById     String?
   resolutionNote   String?
@@ -814,6 +832,8 @@ model ReceiptReconciliationIssue {
   maintenanceRun MaintenanceRun? @relation(fields: [maintenanceRunId], references: [id], onDelete: SetNull)
   receipt        Receipt?        @relation(fields: [receiptId], references: [id], onDelete: SetNull)
   policy         Policy?         @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  suppressedByRule DataQualitySuppressionRule? @relation("ReceiptIssueSuppressionRule", fields: [suppressedByRuleId], references: [id], onDelete: SetNull)
+  mergedBy      User?           @relation("ReceiptReconciliationIssueMergedBy", fields: [mergedById], references: [id], onDelete: SetNull)
   reviewedBy     User?           @relation("ReceiptReconciliationIssueReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@index([maintenanceRunId])
@@ -821,7 +841,10 @@ model ReceiptReconciliationIssue {
   @@index([policyId])
   @@index([reason])
   @@index([status])
+  @@index([suppressedByRuleId])
+  @@index([duplicateOfId])
   @@index([reviewedById])
+  @@index([mergedById])
   @@index([createdAt])
 }
 
@@ -833,6 +856,10 @@ model PolicyRenewalSuggestion {
   status           String    @default("PENDING")
   confidence       Decimal?
   reason           String?
+  suppressedByRuleId String?
+  duplicateOfId    String?
+  mergedAt         DateTime?
+  mergedById       String?
   reviewedAt       DateTime?
   reviewedById     String?
   resolutionNote   String?
@@ -842,6 +869,8 @@ model PolicyRenewalSuggestion {
   maintenanceRun MaintenanceRun? @relation(fields: [maintenanceRunId], references: [id], onDelete: SetNull)
   sourcePolicy   Policy          @relation("PolicyRenewalSuggestionSource", fields: [sourcePolicyId], references: [id], onDelete: Cascade)
   targetPolicy   Policy?         @relation("PolicyRenewalSuggestionTarget", fields: [targetPolicyId], references: [id], onDelete: Cascade)
+  suppressedByRule DataQualitySuppressionRule? @relation("RenewalSuggestionSuppressionRule", fields: [suppressedByRuleId], references: [id], onDelete: SetNull)
+  mergedBy     User?           @relation("PolicyRenewalSuggestionMergedBy", fields: [mergedById], references: [id], onDelete: SetNull)
   reviewedBy     User?           @relation("PolicyRenewalSuggestionReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@unique([sourcePolicyId, targetPolicyId])
@@ -850,6 +879,38 @@ model PolicyRenewalSuggestion {
   @@index([sourcePolicyId, status])
   @@index([targetPolicyId])
   @@index([status])
+  @@index([suppressedByRuleId])
+  @@index([duplicateOfId])
+  @@index([reviewedById])
+  @@index([mergedById])
+  @@index([createdAt])
+}
+
+model DataQualitySuppressionRule {
+  id           String   @id @default(cuid())
+  category     String
+  issueCode    String
+  criteriaJson String
+  active       Boolean  @default(true)
+  reason       String?
+  expiresAt    DateTime?
+  createdById  String?
+  reviewedAt   DateTime?
+  reviewedById String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  createdBy  User? @relation("DataQualitySuppressionRuleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  reviewedBy User? @relation("DataQualitySuppressionRuleReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  receiptIssues ReceiptReconciliationIssue[] @relation("ReceiptIssueSuppressionRule")
+  renewalSuggestions PolicyRenewalSuggestion[] @relation("RenewalSuggestionSuppressionRule")
+  ledgerIssues LedgerImportIssue[] @relation("LedgerIssueSuppressionRule")
+
+  @@unique([category, issueCode, criteriaJson])
+  @@index([category])
+  @@index([issueCode])
+  @@index([active])
+  @@index([createdById])
   @@index([reviewedById])
   @@index([createdAt])
 }

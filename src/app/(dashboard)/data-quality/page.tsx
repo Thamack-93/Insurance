@@ -40,6 +40,15 @@ import {
   denyLedgerIssue,
   denyReceiptReviewIssue,
   denyRenewalSuggestionReview,
+  bulkReceiptReviewIssuesAction,
+  bulkRenewalSuggestionReviewsAction,
+  bulkLedgerIssuesAction,
+  reopenReceiptReviewIssue,
+  reopenRenewalSuggestionReview,
+  reopenLedgerIssue,
+  suppressReceiptReviewIssue,
+  suppressRenewalSuggestionReview,
+  suppressLedgerIssue,
 } from "./actions";
 
 function QualityBadge({ nivel }: { nivel: "Excelente" | "Bueno" | "Atención" | "Crítico" }) {
@@ -240,17 +249,20 @@ export default async function DataQualityPage({
     .slice(0, 8);
 
   const paymentAfterDueDateIssues = receiptReviewIssues.filter((issue) => issue.reason === "payment_after_due_date");
-  const paymentWithin30Days = paymentAfterDueDateIssues.filter((issue) => issue.gapDays !== null && issue.gapDays <= 30).length;
-  const paymentOver30Days = paymentAfterDueDateIssues.filter((issue) => issue.gapDays !== null && issue.gapDays > 30).length;
-  const paymentMaxGap = paymentAfterDueDateIssues.reduce((max, issue) => Math.max(max, issue.gapDays ?? 0), 0);
-  const receiptIssuesByYear = paymentAfterDueDateIssues.reduce((acc, issue) => {
+  const openPaymentAfterDueDateIssues = paymentAfterDueDateIssues.filter((issue) => issue.status === "OPEN");
+  const closedPaymentAfterDueDateIssues = paymentAfterDueDateIssues.filter((issue) => issue.status !== "OPEN");
+  const paymentWithin30Days = openPaymentAfterDueDateIssues.filter((issue) => issue.gapDays !== null && issue.gapDays <= 30).length;
+  const paymentOver30Days = openPaymentAfterDueDateIssues.filter((issue) => issue.gapDays !== null && issue.gapDays > 30).length;
+  const paymentMaxGap = openPaymentAfterDueDateIssues.reduce((max, issue) => Math.max(max, issue.gapDays ?? 0), 0);
+  const receiptIssuesByYear = openPaymentAfterDueDateIssues.reduce((acc, issue) => {
     const year = issue.dueDate.getUTCFullYear();
     acc[year] = (acc[year] ?? 0) + 1;
     return acc;
   }, {} as Record<number, number>);
   const openRenewalSuggestions = renewalReviewSuggestions.filter((suggestion) => suggestion.status === "PENDING");
-  const declinedRenewalSuggestions = renewalReviewSuggestions.filter((suggestion) => suggestion.status === "DECLINED");
+  const closedRenewalSuggestions = renewalReviewSuggestions.filter((suggestion) => suggestion.status !== "PENDING");
   const openLedgerIssues = ledgerReviewIssues.filter((issue) => issue.status === "OPEN");
+  const closedLedgerIssues = ledgerReviewIssues.filter((issue) => issue.status !== "OPEN");
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
@@ -687,7 +699,7 @@ export default async function DataQualityPage({
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Casos</p>
-                  <p className="mt-1 text-2xl font-semibold">{paymentAfterDueDateIssues.length}</p>
+                  <p className="mt-1 text-2xl font-semibold">{openPaymentAfterDueDateIssues.length}</p>
                 </div>
                 <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Dentro de 30 días</p>
@@ -707,62 +719,151 @@ export default async function DataQualityPage({
                 <div>2024: {receiptIssuesByYear[2024] ?? 0}</div>
                 <div>2025: {receiptIssuesByYear[2025] ?? 0}</div>
               </div>
-              {paymentAfterDueDateIssues.length === 0 ? (
+              {openPaymentAfterDueDateIssues.length === 0 ? (
                 <div className="p-4">
                   <ReceiptText className="mb-3 size-5 text-muted-foreground" />
                   <p className="text-sm text-muted-foreground">No hay casos `payment_after_due_date` abiertos.</p>
                 </div>
               ) : (
-                <div className="mt-5 overflow-hidden rounded-2xl border border-stone-200/80">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-stone-50/70">
-                        <TableHead>Recibo</TableHead>
-                        <TableHead>Póliza</TableHead>
-                        <TableHead>Vencimiento</TableHead>
-                        <TableHead>Pago</TableHead>
-                        <TableHead className="text-right">Brecha</TableHead>
-                        <TableHead className="text-right">Monto</TableHead>
-                        <TableHead>Estado</TableHead>
-                        <TableHead className="text-right">Acciones</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {paymentAfterDueDateIssues.map((issue) => (
-                        <TableRow key={issue.issueId}>
-                          <TableCell>
-                            <Link href={`/receipts/${issue.receiptId}`} className="font-medium text-foreground hover:text-primary">
-                              {issue.receiptNumber}
-                            </Link>
-                          </TableCell>
-                          <TableCell>
-                            <Link href={`/policies/${issue.policyId}`} className="hover:text-primary">
-                              {issue.policyNumber}
-                            </Link>
-                            <p className="text-xs text-muted-foreground">{issue.clientName}</p>
-                          </TableCell>
-                          <TableCell>{formatDate(issue.dueDate)}</TableCell>
-                          <TableCell>{issue.paidDate ? formatDate(issue.paidDate) : "—"}</TableCell>
-                          <TableCell className="text-right font-medium">{formatGapDays(issue.gapDays)}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(issue.amount, issue.currency)}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="rounded-full">
-                              {receiptReviewReasonLabel(issue.reason)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <ReviewActionButtons
-                              id={issue.issueId}
-                              modifyHref={`/receipts/${issue.receiptId}/edit`}
-                              approveAction={approveReceiptReviewIssue}
-                              denyAction={denyReceiptReviewIssue}
-                              className="flex flex-wrap items-center justify-end gap-2"
-                            />
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                <div className="mt-5 space-y-4">
+                  <form action={bulkReceiptReviewIssuesAction} className="space-y-4">
+                    <div className="overflow-hidden rounded-2xl border border-stone-200/80">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-stone-50/70">
+                            <TableHead className="w-10">
+                              <span className="sr-only">Seleccionar</span>
+                            </TableHead>
+                            <TableHead>Recibo</TableHead>
+                            <TableHead>Póliza</TableHead>
+                            <TableHead>Vencimiento</TableHead>
+                            <TableHead>Pago</TableHead>
+                            <TableHead className="text-right">Brecha</TableHead>
+                            <TableHead className="text-right">Monto</TableHead>
+                            <TableHead>Estado</TableHead>
+                            <TableHead className="text-right">Acciones</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {openPaymentAfterDueDateIssues.map((issue) => (
+                            <TableRow key={issue.issueId}>
+                              <TableCell>
+                                <input
+                                  type="checkbox"
+                                  name="issueIds"
+                                  value={issue.issueId}
+                                  className="size-4 rounded border-border text-primary"
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Link href={`/receipts/${issue.receiptId}`} className="font-medium text-foreground hover:text-primary">
+                                  {issue.receiptNumber}
+                                </Link>
+                              </TableCell>
+                              <TableCell>
+                                <Link href={`/policies/${issue.policyId}`} className="hover:text-primary">
+                                  {issue.policyNumber}
+                                </Link>
+                                <p className="text-xs text-muted-foreground">{issue.clientName}</p>
+                              </TableCell>
+                              <TableCell>{formatDate(issue.dueDate)}</TableCell>
+                              <TableCell>{issue.paidDate ? formatDate(issue.paidDate) : "—"}</TableCell>
+                              <TableCell className="text-right font-medium">{formatGapDays(issue.gapDays)}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(issue.amount, issue.currency)}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className="rounded-full">
+                                  {receiptReviewReasonLabel(issue.reason)}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <ReviewActionButtons
+                                  id={issue.issueId}
+                                  modifyHref={`/receipts/${issue.receiptId}/edit`}
+                                  approveAction={approveReceiptReviewIssue}
+                                  denyAction={denyReceiptReviewIssue}
+                                  suppressAction={suppressReceiptReviewIssue}
+                                  className="flex flex-wrap items-center justify-end gap-2"
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                      <p className="text-sm text-muted-foreground">
+                        Selecciona filas para resolverlas en lote. También puedes dejar la fila individual con aprobar, denegar, suprimir o reabrir.
+                      </p>
+                      <div className="ml-auto flex flex-wrap gap-2">
+                        <Button type="submit" name="operation" value="APPROVE" className="rounded-full">
+                          Aprobar selección
+                        </Button>
+                        <Button type="submit" name="operation" value="DENY" variant="outline" className="rounded-full">
+                          Denegar selección
+                        </Button>
+                        <Button type="submit" name="operation" value="SUPPRESS" variant="outline" className="rounded-full">
+                          Suprimir selección
+                        </Button>
+                        <Button type="submit" name="operation" value="MERGE" variant="outline" className="rounded-full">
+                          Fusionar selección
+                        </Button>
+                        <Button type="submit" name="operation" value="REOPEN" variant="ghost" className="rounded-full">
+                          Reabrir selección
+                        </Button>
+                      </div>
+                    </div>
+                  </form>
+                  {closedPaymentAfterDueDateIssues.length ? (
+                    <div className="overflow-hidden rounded-2xl border border-stone-200/80">
+                      <div className="border-b border-stone-200/80 bg-stone-50/70 px-4 py-3">
+                        <p className="text-sm font-semibold">Historial reciente</p>
+                        <p className="text-xs text-muted-foreground">Casos resueltos, descartados, suprimidos o fusionados.</p>
+                      </div>
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-stone-50/70">
+                            <TableHead>Recibo</TableHead>
+                            <TableHead>Póliza</TableHead>
+                            <TableHead>Estado</TableHead>
+                            <TableHead>Salida</TableHead>
+                            <TableHead className="text-right">Acciones</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {closedPaymentAfterDueDateIssues.slice(0, 10).map((issue) => (
+                            <TableRow key={issue.issueId}>
+                              <TableCell>
+                                <Link href={`/receipts/${issue.receiptId}`} className="font-medium hover:text-primary">
+                                  {issue.receiptNumber}
+                                </Link>
+                              </TableCell>
+                              <TableCell>
+                                <Link href={`/policies/${issue.policyId}`} className="hover:text-primary">
+                                  {issue.policyNumber}
+                                </Link>
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className="rounded-full">
+                                  {issue.dispositionLabel}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="max-w-md text-xs text-muted-foreground">
+                                {issue.resolutionNote ?? issue.reason}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <ReviewActionButtons
+                                  id={issue.issueId}
+                                  modifyHref={`/receipts/${issue.receiptId}/edit`}
+                                  reopenAction={reopenReceiptReviewIssue}
+                                  className="flex flex-wrap items-center justify-end gap-2"
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : null}
                 </div>
               )}
             </SectionCard>
@@ -788,79 +889,168 @@ export default async function DataQualityPage({
                 </div>
                 <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Declinadas</p>
-                  <p className="mt-1 text-2xl font-semibold">{declinedRenewalSuggestions.length}</p>
+                  <p className="mt-1 text-2xl font-semibold">{closedRenewalSuggestions.length}</p>
                 </div>
                 <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Total revisadas</p>
                   <p className="mt-1 text-2xl font-semibold">{renewalReviewSuggestions.length}</p>
                 </div>
               </div>
-              {renewalReviewSuggestions.length === 0 ? (
+              {openRenewalSuggestions.length === 0 ? (
                 <div className="p-4">
                   <CalendarCheck2 className="mb-3 size-5 text-muted-foreground" />
                   <p className="text-sm text-muted-foreground">No hay sugerencias de renovación para revisar.</p>
                 </div>
               ) : (
-                <div className="mt-5 overflow-hidden rounded-2xl border border-stone-200/80">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-stone-50/70">
-                        <TableHead>Estado</TableHead>
-                        <TableHead>Póliza origen</TableHead>
-                        <TableHead>Cliente</TableHead>
-                        <TableHead>Aseguradora</TableHead>
-                        <TableHead>Póliza destino</TableHead>
-                        <TableHead>Nota</TableHead>
-                        <TableHead className="text-right">Acciones</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {renewalReviewSuggestions.slice(0, 20).map((suggestion) => (
-                        <TableRow key={suggestion.suggestionId}>
-                          <TableCell>
-                            <Badge variant="outline" className="rounded-full">
-                              {suggestion.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Link href={`/policies/${suggestion.sourcePolicyId}`} className="font-medium hover:text-primary">
-                              {suggestion.sourcePolicyNumber}
-                            </Link>
-                            <p className="text-xs text-muted-foreground">
-                              {formatDate(suggestion.sourceStartDate)} → {formatDate(suggestion.sourceEndDate)}
-                            </p>
-                          </TableCell>
-                          <TableCell>{suggestion.clientName}</TableCell>
-                          <TableCell>{suggestion.insurerName}</TableCell>
-                          <TableCell>
-                            {suggestion.targetPolicyId ? (
-                              <Link href={`/policies/${suggestion.targetPolicyId}`} className="hover:text-primary">
-                                {suggestion.targetPolicyNumber}
-                              </Link>
-                            ) : (
-                              "Pendiente"
-                            )}
-                          </TableCell>
-                          <TableCell className="max-w-md text-xs text-muted-foreground">
-                            {suggestion.reason ?? suggestion.resolutionNote ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {suggestion.status === "PENDING" ? (
-                              <ReviewActionButtons
-                                id={suggestion.suggestionId}
-                                modifyHref={`/policies/${suggestion.sourcePolicyId}/edit`}
-                                approveAction={approveRenewalSuggestionReview}
-                                denyAction={denyRenewalSuggestionReview}
-                                className="flex flex-wrap items-center justify-end gap-2"
-                              />
-                            ) : (
-                              <span className="text-xs text-muted-foreground">Revisada</span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                <div className="mt-5 space-y-4">
+                  <form action={bulkRenewalSuggestionReviewsAction} className="space-y-4">
+                    <div className="overflow-hidden rounded-2xl border border-stone-200/80">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-stone-50/70">
+                            <TableHead className="w-10">
+                              <span className="sr-only">Seleccionar</span>
+                            </TableHead>
+                            <TableHead>Estado</TableHead>
+                            <TableHead>Póliza origen</TableHead>
+                            <TableHead>Cliente</TableHead>
+                            <TableHead>Aseguradora</TableHead>
+                            <TableHead>Póliza destino</TableHead>
+                            <TableHead>Nota</TableHead>
+                            <TableHead className="text-right">Acciones</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {openRenewalSuggestions.slice(0, 20).map((suggestion) => (
+                            <TableRow key={suggestion.suggestionId}>
+                              <TableCell>
+                                <input
+                                  type="checkbox"
+                                  name="issueIds"
+                                  value={suggestion.suggestionId}
+                                  className="size-4 rounded border-border text-primary"
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className="rounded-full">
+                                  {suggestion.dispositionLabel}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <Link href={`/policies/${suggestion.sourcePolicyId}`} className="font-medium hover:text-primary">
+                                  {suggestion.sourcePolicyNumber}
+                                </Link>
+                                <p className="text-xs text-muted-foreground">
+                                  {formatDate(suggestion.sourceStartDate)} → {formatDate(suggestion.sourceEndDate)}
+                                </p>
+                              </TableCell>
+                              <TableCell>{suggestion.clientName}</TableCell>
+                              <TableCell>{suggestion.insurerName}</TableCell>
+                              <TableCell>
+                                {suggestion.targetPolicyId ? (
+                                  <Link href={`/policies/${suggestion.targetPolicyId}`} className="hover:text-primary">
+                                    {suggestion.targetPolicyNumber}
+                                  </Link>
+                                ) : (
+                                  "Pendiente"
+                                )}
+                              </TableCell>
+                              <TableCell className="max-w-md text-xs text-muted-foreground">
+                                {suggestion.reason ?? suggestion.resolutionNote ?? "—"}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <ReviewActionButtons
+                                  id={suggestion.suggestionId}
+                                  modifyHref={`/policies/${suggestion.sourcePolicyId}/edit`}
+                                  approveAction={approveRenewalSuggestionReview}
+                                  denyAction={denyRenewalSuggestionReview}
+                                  suppressAction={suppressRenewalSuggestionReview}
+                                  className="flex flex-wrap items-center justify-end gap-2"
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                      <p className="text-sm text-muted-foreground">
+                        Marca varias sugerencias para aprobarlas, descartarlas, suprimirlas o fusionarlas como un solo caso maestro.
+                      </p>
+                      <div className="ml-auto flex flex-wrap gap-2">
+                        <Button type="submit" name="operation" value="APPROVE" className="rounded-full">
+                          Aprobar selección
+                        </Button>
+                        <Button type="submit" name="operation" value="DENY" variant="outline" className="rounded-full">
+                          Denegar selección
+                        </Button>
+                        <Button type="submit" name="operation" value="SUPPRESS" variant="outline" className="rounded-full">
+                          Suprimir selección
+                        </Button>
+                        <Button type="submit" name="operation" value="MERGE" variant="outline" className="rounded-full">
+                          Fusionar selección
+                        </Button>
+                        <Button type="submit" name="operation" value="REOPEN" variant="ghost" className="rounded-full">
+                          Reabrir selección
+                        </Button>
+                      </div>
+                    </div>
+                  </form>
+                  {closedRenewalSuggestions.length ? (
+                    <div className="overflow-hidden rounded-2xl border border-stone-200/80">
+                      <div className="border-b border-stone-200/80 bg-stone-50/70 px-4 py-3">
+                        <p className="text-sm font-semibold">Historial reciente</p>
+                        <p className="text-xs text-muted-foreground">Sugerencias resueltas, descartadas, suprimidas o fusionadas.</p>
+                      </div>
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-stone-50/70">
+                            <TableHead>Estado</TableHead>
+                            <TableHead>Póliza origen</TableHead>
+                            <TableHead>Póliza destino</TableHead>
+                            <TableHead>Salida</TableHead>
+                            <TableHead className="text-right">Acciones</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {closedRenewalSuggestions.slice(0, 10).map((suggestion) => (
+                            <TableRow key={suggestion.suggestionId}>
+                              <TableCell>
+                                <Badge variant="outline" className="rounded-full">
+                                  {suggestion.dispositionLabel}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <Link href={`/policies/${suggestion.sourcePolicyId}`} className="font-medium hover:text-primary">
+                                  {suggestion.sourcePolicyNumber}
+                                </Link>
+                              </TableCell>
+                              <TableCell>
+                                {suggestion.targetPolicyId ? (
+                                  <Link href={`/policies/${suggestion.targetPolicyId}`} className="hover:text-primary">
+                                    {suggestion.targetPolicyNumber}
+                                  </Link>
+                                ) : (
+                                  "Pendiente"
+                                )}
+                              </TableCell>
+                              <TableCell className="max-w-md text-xs text-muted-foreground">
+                                {suggestion.resolutionNote ?? suggestion.reason ?? "—"}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <ReviewActionButtons
+                                  id={suggestion.suggestionId}
+                                  modifyHref={`/policies/${suggestion.sourcePolicyId}/edit`}
+                                  reopenAction={reopenRenewalSuggestionReview}
+                                  className="flex flex-wrap items-center justify-end gap-2"
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : null}
                 </div>
               )}
             </SectionCard>
@@ -996,50 +1186,135 @@ export default async function DataQualityPage({
                   <p className="text-sm text-muted-foreground">No hay issues abiertos de ledger.</p>
                 </div>
               ) : (
-                <div className="overflow-hidden rounded-2xl border border-stone-200/80">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-stone-50/70">
-                        <TableHead>Lote</TableHead>
-                        <TableHead>Tipo</TableHead>
-                        <TableHead>Severidad</TableHead>
-                        <TableHead>Mensaje</TableHead>
-                        <TableHead className="text-right">Fila</TableHead>
-                        <TableHead>Estado</TableHead>
-                        <TableHead className="text-right">Acciones</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {openLedgerIssues.map((issue) => (
-                        <TableRow key={issue.issueId}>
-                          <TableCell>
-                            <Link href={`/data-quality?tab=ledger&ledgerBatch=${issue.batchId}`} className="font-medium hover:text-primary">
-                              {issue.batchCsvName}
-                            </Link>
-                            <p className="text-xs text-muted-foreground">{issue.batchPaidName}</p>
-                          </TableCell>
-                          <TableCell>{issue.issueType}</TableCell>
-                          <TableCell>{issue.severity}</TableCell>
-                          <TableCell className="max-w-md text-xs text-muted-foreground">{issue.message}</TableCell>
-                          <TableCell className="text-right">{issue.rowNumber ?? "—"}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="rounded-full">
-                              {issue.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <ReviewActionButtons
-                              id={issue.issueId}
-                              modifyHref={`/data-quality?tab=ledger&ledgerBatch=${issue.batchId}`}
-                              approveAction={approveLedgerIssue}
-                              denyAction={denyLedgerIssue}
-                              className="flex flex-wrap items-center justify-end gap-2"
-                            />
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                <div className="space-y-4">
+                  <form action={bulkLedgerIssuesAction} className="space-y-4">
+                    <div className="overflow-hidden rounded-2xl border border-stone-200/80">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-stone-50/70">
+                            <TableHead className="w-10">
+                              <span className="sr-only">Seleccionar</span>
+                            </TableHead>
+                            <TableHead>Lote</TableHead>
+                            <TableHead>Tipo</TableHead>
+                            <TableHead>Severidad</TableHead>
+                            <TableHead>Mensaje</TableHead>
+                            <TableHead className="text-right">Fila</TableHead>
+                            <TableHead>Estado</TableHead>
+                            <TableHead className="text-right">Acciones</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {openLedgerIssues.map((issue) => (
+                            <TableRow key={issue.issueId}>
+                              <TableCell>
+                                <input
+                                  type="checkbox"
+                                  name="issueIds"
+                                  value={issue.issueId}
+                                  className="size-4 rounded border-border text-primary"
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Link href={`/data-quality?tab=ledger&ledgerBatch=${issue.batchId}`} className="font-medium hover:text-primary">
+                                  {issue.batchCsvName}
+                                </Link>
+                                <p className="text-xs text-muted-foreground">{issue.batchPaidName}</p>
+                              </TableCell>
+                              <TableCell>{issue.issueType}</TableCell>
+                              <TableCell>{issue.severity}</TableCell>
+                              <TableCell className="max-w-md text-xs text-muted-foreground">{issue.message}</TableCell>
+                              <TableCell className="text-right">{issue.rowNumber ?? "—"}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className="rounded-full">
+                                  {issue.dispositionLabel}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <ReviewActionButtons
+                                  id={issue.issueId}
+                                  modifyHref={`/data-quality?tab=ledger&ledgerBatch=${issue.batchId}`}
+                                  approveAction={approveLedgerIssue}
+                                  denyAction={denyLedgerIssue}
+                                  suppressAction={suppressLedgerIssue}
+                                  className="flex flex-wrap items-center justify-end gap-2"
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                      <p className="text-sm text-muted-foreground">
+                        Puedes resolver varios issues iguales al mismo tiempo o fusionarlos si representan el mismo origen.
+                      </p>
+                      <div className="ml-auto flex flex-wrap gap-2">
+                        <Button type="submit" name="operation" value="APPROVE" className="rounded-full">
+                          Aprobar selección
+                        </Button>
+                        <Button type="submit" name="operation" value="DENY" variant="outline" className="rounded-full">
+                          Denegar selección
+                        </Button>
+                        <Button type="submit" name="operation" value="SUPPRESS" variant="outline" className="rounded-full">
+                          Suprimir selección
+                        </Button>
+                        <Button type="submit" name="operation" value="MERGE" variant="outline" className="rounded-full">
+                          Fusionar selección
+                        </Button>
+                        <Button type="submit" name="operation" value="REOPEN" variant="ghost" className="rounded-full">
+                          Reabrir selección
+                        </Button>
+                      </div>
+                    </div>
+                  </form>
+                  {closedLedgerIssues.length ? (
+                    <div className="overflow-hidden rounded-2xl border border-stone-200/80">
+                      <div className="border-b border-stone-200/80 bg-stone-50/70 px-4 py-3">
+                        <p className="text-sm font-semibold">Historial reciente</p>
+                        <p className="text-xs text-muted-foreground">Issues resueltos, descartados, suprimidos o fusionados.</p>
+                      </div>
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-stone-50/70">
+                            <TableHead>Tipo</TableHead>
+                            <TableHead>Lote</TableHead>
+                            <TableHead>Estado</TableHead>
+                            <TableHead>Salida</TableHead>
+                            <TableHead className="text-right">Acciones</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {closedLedgerIssues.slice(0, 10).map((issue) => (
+                            <TableRow key={issue.issueId}>
+                              <TableCell>{issue.issueType}</TableCell>
+                              <TableCell>
+                                <Link href={`/data-quality?tab=ledger&ledgerBatch=${issue.batchId}`} className="font-medium hover:text-primary">
+                                  {issue.batchCsvName}
+                                </Link>
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className="rounded-full">
+                                  {issue.dispositionLabel}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="max-w-md text-xs text-muted-foreground">
+                                {issue.resolutionNote ?? issue.message}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <ReviewActionButtons
+                                  id={issue.issueId}
+                                  modifyHref={`/data-quality?tab=ledger&ledgerBatch=${issue.batchId}`}
+                                  reopenAction={reopenLedgerIssue}
+                                  className="flex flex-wrap items-center justify-end gap-2"
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : null}
                 </div>
               )}
             </SectionCard>
