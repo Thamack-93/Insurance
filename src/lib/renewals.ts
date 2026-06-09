@@ -1,5 +1,6 @@
 "use server";
 
+import { connection } from "next/server";
 import type { Prisma } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
 import { today, daysUntil } from "@/lib/dates";
@@ -84,6 +85,7 @@ export async function loadEligibleRenewalPolicies(
   additionalWhere: Prisma.PolicyWhereInput,
   portfolioOwnerId?: string,
 ): Promise<RenewalPolicyRecord[]> {
+  await connection();
   const db = getDb();
 
   const policies = await db.policy.findMany({
