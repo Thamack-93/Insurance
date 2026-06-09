@@ -16,6 +16,7 @@
     "clean:cache": "node --import tsx scripts/clean-cache.ts cache",
     "clean:artifacts": "node --import tsx scripts/clean-cache.ts artifacts",
     "validate-data": "tsx scripts/validate-data-quality.ts",
+    "reconcile:insured-clients": "tsx scripts/reconcile-insured-clients.ts",
     "check:legacy-workitem-refs": "node --import tsx scripts/check-legacy-workitem-refs.ts",
     "list:payments": "tsx scripts/list-next-payments.ts",
     "list:renewals": "tsx scripts/list-renewals.ts",
