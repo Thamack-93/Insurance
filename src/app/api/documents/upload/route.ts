@@ -7,6 +7,11 @@ import { assertSafeDocumentPath, documentsDir } from "@/lib/files";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
+import {
+  assertClientPortfolioAccess,
+  assertPolicyPortfolioAccess,
+  assertReceiptPortfolioAccess,
+} from "@/lib/portfolio-access";
 import { z } from "zod";
 
 const uploadSchema = z.object({
@@ -152,6 +157,63 @@ function startsWith(bytes: Uint8Array, signature: number[], offset = 0) {
   return signature.every((value, index) => bytes[offset + index] === value);
 }
 
+async function assertDocumentUploadOwnership(
+  metadata: z.infer<typeof uploadSchema>,
+  userId: string,
+  role: string,
+) {
+  if (role === "ADMIN") return;
+
+  if (metadata.clientId) {
+    await assertClientPortfolioAccess(metadata.clientId, userId);
+  }
+  if (metadata.policyId) {
+    await assertPolicyPortfolioAccess(metadata.policyId, userId);
+  }
+  if (metadata.receiptId) {
+    await assertReceiptPortfolioAccess(metadata.receiptId, userId);
+  }
+  if (metadata.claimId) {
+    const db = getDb();
+    const claim = await db.claim.findFirst({
+      where: {
+        id: metadata.claimId,
+        client: { portfolioOwnerId: userId },
+      },
+      select: { id: true },
+    });
+    if (!claim) {
+      throw new AuthError("No tienes acceso a esta reclamación.", 403);
+    }
+  }
+  if (metadata.quoteId) {
+    const db = getDb();
+    const quote = await db.quote.findFirst({
+      where: {
+        id: metadata.quoteId,
+        client: { portfolioOwnerId: userId },
+      },
+      select: { id: true },
+    });
+    if (!quote) {
+      throw new AuthError("No tienes acceso a esta cotización.", 403);
+    }
+  }
+  if (metadata.taskId) {
+    const db = getDb();
+    const task = await db.task.findFirst({
+      where: {
+        id: metadata.taskId,
+        OR: [{ createdById: userId }, { client: { portfolioOwnerId: userId } }],
+      },
+      select: { id: true },
+    });
+    if (!task) {
+      throw new AuthError("No tienes acceso a esta tarea.", 403);
+    }
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     if (!areDocumentFilesEnabled()) {
@@ -202,6 +264,7 @@ export async function POST(request: NextRequest) {
 
     const activeUser = await requireUser();
     const userId = activeUser.id;
+    await assertDocumentUploadOwnership(validatedData, userId, activeUser.role);
     const rollback = formData.get("rollback") === "1" || files.length > 1;
     const results = await Promise.all(files.map((f) => processFile(f, validatedData, userId)));
 

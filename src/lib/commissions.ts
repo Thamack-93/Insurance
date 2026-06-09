@@ -9,6 +9,7 @@ import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 import type { CommissionStatus } from "@/lib/domain-values";
+import { commissionOperationalWhere } from "@/lib/portfolio-access";
 
 export interface CommissionCalculation {
   policyId: string;
@@ -169,18 +170,24 @@ export async function updateCommissionStatus(
   }
 }
 
-export async function getCommissionStats(dateRange?: { start: Date; end: Date }) {
+export async function getCommissionStats(
+  dateRange?: { start: Date; end: Date },
+  portfolioOwnerId?: string,
+) {
   const db = getDb();
   
   try {
-    const whereClause = dateRange 
-      ? {
+    const whereClause: Prisma.CommissionWhereInput = {
+      ...commissionOperationalWhere(portfolioOwnerId),
+      ...(dateRange
+        ? {
           expectedDate: {
             gte: dateRange.start,
             lte: dateRange.end,
           },
         }
-      : {};
+        : {}),
+    };
 
     const stats = await db.commission.aggregate({
       where: whereClause,
@@ -227,7 +234,7 @@ export async function getCommissionStats(dateRange?: { start: Date; end: Date })
   }
 }
 
-export async function getOverdueCommissions() {
+export async function getOverdueCommissions(portfolioOwnerId?: string) {
   const db = getDb();
   
   try {
@@ -235,6 +242,7 @@ export async function getOverdueCommissions() {
     
     const overdueCommissions = await db.commission.findMany({
       where: {
+        ...commissionOperationalWhere(portfolioOwnerId),
         expectedDate: {
           lt: todayDate,
         },
@@ -284,16 +292,18 @@ export async function getOverdueCommissions() {
   }
 }
 
-export async function autoUpdateCommissionStatuses() {
+export async function autoUpdateCommissionStatuses(portfolioOwnerId?: string) {
   const db = getDb();
 
   try {
     const todayDate = new Date(today());
+    const operationalWhere = commissionOperationalWhere(portfolioOwnerId);
 
     // Sequential transitions: a commission may need EXPECTED→PENDING→OVERDUE
     // in the same run if its receipt was just paid AND it's already past due.
     const pendingResult = await db.commission.updateMany({
       where: {
+        ...operationalWhere,
         status: "EXPECTED",
         receipt: { status: "PAID" },
       },
@@ -301,6 +311,7 @@ export async function autoUpdateCommissionStatuses() {
     });
     const overdueResult = await db.commission.updateMany({
       where: {
+        ...operationalWhere,
         status: "PENDING",
         expectedDate: { lt: todayDate },
       },

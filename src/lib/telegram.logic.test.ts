@@ -44,6 +44,7 @@ describe("telegram.shared", () => {
     expect(buildTelegramLinkSuccessMessage()).toContain("Chat vinculado");
     expect(buildTelegramLinkErrorMessage("Código inválido")).toContain("Código inválido");
     expect(buildTelegramStatusMessage(true)).toContain("vinculado");
+    expect(buildTelegramStatusMessage(true, false)).toContain("deshabilitadas");
     expect(buildTelegramStatusMessage(false)).toContain("todavía no está vinculado");
   });
 });

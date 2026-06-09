@@ -15,6 +15,7 @@ import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getDb } from "@/lib/db";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
+import { commissionOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function CommissionsPage({
   searchParams,
@@ -22,14 +23,16 @@ export default async function CommissionsPage({
   searchParams?: Promise<{ q?: string; page?: string }>;
 }) {
   await connection();
+  const scope = await requirePortfolioReadScope();
   // Run side-effect first; downstream reads must see the new statuses.
-  await autoUpdateCommissionStatuses();
+  await autoUpdateCommissionStatuses(scope.portfolioOwnerId);
 
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = Math.max(1, Number(params.page) || 1);
 
   const openWhere: Prisma.CommissionWhereInput = {
+    ...commissionOperationalWhere(scope.portfolioOwnerId),
     status: { notIn: ["PAID", "CANCELLED"] },
     ...(query
       ? {
@@ -44,8 +47,8 @@ export default async function CommissionsPage({
 
   const db = getDb();
   const [stats, overdueCommissions, openCount, openCommissions, paidCommissions] = await Promise.all([
-    getCommissionStats(),
-    getOverdueCommissions(),
+    getCommissionStats(undefined, scope.portfolioOwnerId),
+    getOverdueCommissions(scope.portfolioOwnerId),
     db.commission.count({ where: openWhere }),
     db.commission.findMany({
       where: openWhere,

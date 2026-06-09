@@ -7,10 +7,27 @@ import { areDocumentFilesEnabled } from "@/lib/deployment";
 import { logError } from "@/lib/logger";
 import { AuthError, requireUser } from "@/lib/auth";
 
+type DownloadableDocument = {
+  id: string;
+  fileName: string;
+  filePath: string;
+  mimeType: string;
+  createdById: string | null;
+  client: { portfolioOwnerId: string | null } | null;
+  policy: { client: { portfolioOwnerId: string | null } | null } | null;
+  receipt: { client: { portfolioOwnerId: string | null } | null } | null;
+  claim: { client: { portfolioOwnerId: string | null } | null } | null;
+  quote: { client: { portfolioOwnerId: string | null } | null } | null;
+  task: { createdById: string | null; client: { portfolioOwnerId: string | null } | null } | null;
+};
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  type ActiveUser = Awaited<ReturnType<typeof requireUser>>;
+  let user: ActiveUser;
+
   try {
     if (!areDocumentFilesEnabled()) {
       return NextResponse.json(
@@ -21,7 +38,7 @@ export async function GET(
 
     // Reject deactivated/unauthenticated users immediately.
     try {
-      await requireUser();
+      user = await requireUser();
     } catch (authErr) {
       if (authErr instanceof AuthError) {
         return NextResponse.json({ error: "No autorizado." }, { status: authErr.status });
@@ -33,15 +50,39 @@ export async function GET(
 
     // Get document metadata from database
     const db = getDb();
-    const document = await db.document.findUnique({
+    const document = (await db.document.findUnique({
       where: { id },
-    });
+      include: {
+        client: { select: { portfolioOwnerId: true } },
+        policy: { select: { client: { select: { portfolioOwnerId: true } } } },
+        receipt: { select: { client: { select: { portfolioOwnerId: true } } } },
+        claim: { select: { client: { select: { portfolioOwnerId: true } } } },
+        quote: { select: { client: { select: { portfolioOwnerId: true } } } },
+        task: { select: { createdById: true, client: { select: { portfolioOwnerId: true } } } },
+      },
+    })) as DownloadableDocument | null;
 
     if (!document) {
       return NextResponse.json(
         { error: "El documento no existe o fue eliminado." },
         { status: 404 }
       );
+    }
+
+    if (user.role !== "ADMIN") {
+      const isAllowed =
+        document.createdById === user.id ||
+        document.client?.portfolioOwnerId === user.id ||
+        document.policy?.client?.portfolioOwnerId === user.id ||
+        document.receipt?.client?.portfolioOwnerId === user.id ||
+        document.claim?.client?.portfolioOwnerId === user.id ||
+        document.quote?.client?.portfolioOwnerId === user.id ||
+        document.task?.createdById === user.id ||
+        document.task?.client?.portfolioOwnerId === user.id;
+
+      if (!isAllowed) {
+        return NextResponse.json({ error: "No tienes acceso a este documento." }, { status: 403 });
+      }
     }
 
     // Validate file path security
@@ -54,10 +95,11 @@ export async function GET(
     // Inline preview vs attachment download
     const inline = request.nextUrl.searchParams.get("inline") === "1";
     const disposition = inline ? "inline" : "attachment";
+    const safeFileName = document.fileName.replace(/["\\]/g, "_");
 
     const headers = new Headers();
     headers.set("Content-Type", document.mimeType);
-    headers.set("Content-Disposition", `${disposition}; filename="${document.fileName}"`);
+    headers.set("Content-Disposition", `${disposition}; filename="${safeFileName}"`);
     headers.set("Content-Length", fileBuffer.length.toString());
 
     return new NextResponse(fileBuffer, {

@@ -33,6 +33,7 @@ export type NotificationChannelRecord = {
   type: string;
   telegramChatId: string | null;
   isEnabled: boolean;
+  telegramMutationsEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -153,6 +154,7 @@ function toChannelRecord(row: {
   type: string;
   telegramChatId: string | null;
   isEnabled: boolean;
+  telegramMutationsEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }): NotificationChannelRecord {
@@ -204,13 +206,14 @@ export async function ensureNotificationDefaultsForUser(userId: string, client?:
       },
     },
     update: {},
-    create: {
-      userId,
-      type: "TELEGRAM",
-      isEnabled: false,
-      telegramChatId: null,
-    },
-  });
+      create: {
+        userId,
+        type: "TELEGRAM",
+        isEnabled: false,
+        telegramChatId: null,
+        telegramMutationsEnabled: false,
+      },
+    });
 }
 
 export async function getNotificationPreferencesForUser(
@@ -243,6 +246,7 @@ export async function getNotificationPreferencesForUser(
         type: "TELEGRAM",
         telegramChatId: null,
         isEnabled: false,
+        telegramMutationsEnabled: false,
         createdAt: new Date(),
         updatedAt: new Date(),
       }),
@@ -257,6 +261,7 @@ export async function getNotificationPreferencesForUser(
         type: "TELEGRAM",
         telegramChatId: null,
         isEnabled: false,
+        telegramMutationsEnabled: false,
         createdAt: new Date(),
         updatedAt: new Date(),
       },
