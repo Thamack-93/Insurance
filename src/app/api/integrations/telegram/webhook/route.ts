@@ -1,12 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { logError } from "@/lib/logger";
-import {
-  getTelegramWebhookUrl,
-  isTelegramWebhookSecretValid,
-  processTelegramWebhookUpdate,
-  sendTelegramMessage,
-  type TelegramWebhookUpdate,
-} from "@/lib/telegram";
+import { isTelegramWebhookSecretValid, processTelegramWebhookUpdate, sendTelegramMessage, type TelegramWebhookUpdate } from "@/lib/telegram";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,10 +10,15 @@ function hasValidSecret(request: NextRequest) {
 }
 
 export async function GET() {
-  return NextResponse.json({
-    ok: true,
-    webhookUrl: getTelegramWebhookUrl(),
-  });
+  return NextResponse.json(
+    { ok: false, error: "Method not allowed" },
+    {
+      status: 405,
+      headers: {
+        Allow: "POST",
+      },
+    },
+  );
 }
 
 export async function POST(request: NextRequest) {

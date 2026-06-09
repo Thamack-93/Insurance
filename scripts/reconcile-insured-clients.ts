@@ -1,5 +1,3 @@
-import "dotenv/config";
-
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -141,7 +139,40 @@ async function main() {
   const apply = process.argv.includes("--apply");
   const db = getDb();
 
-  const [clients, policies] = await Promise.all([
+  const [allClients, candidateClients, policies] = await Promise.all([
+    db.client.findMany({
+      select: {
+        id: true,
+        fullName: true,
+        type: true,
+        status: true,
+        email: true,
+        phone: true,
+        secondaryPhone: true,
+        rfc: true,
+        address: true,
+        preferredContactMethod: true,
+        notes: true,
+        portfolioOwnerId: true,
+        createdAt: true,
+        updatedAt: true,
+        _count: {
+          select: {
+            policies: true,
+            receipts: true,
+            payments: true,
+            commissions: true,
+            claims: true,
+            quotes: true,
+            documents: true,
+            workItems: true,
+            notificationEvents: true,
+            referidos: true,
+          },
+        },
+      },
+      orderBy: { fullName: "asc" },
+    }),
     db.client.findMany({
       where: {
         status: "ACTIVE",
@@ -205,9 +236,9 @@ async function main() {
   const skipped: string[] = [];
   let mergedCount = 0;
 
-  for (const candidate of clients) {
+  for (const candidate of candidateClients) {
     const parts = splitInsuredClientName(candidate.fullName);
-    const canonical = pickCanonicalClient(clients, parts.contractorName);
+    const canonical = pickCanonicalClient(allClients, parts.contractorName);
 
     if (!canonical) {
       skipped.push(`${candidate.fullName}: no encontré cliente canónico para ${parts.contractorName}`);
@@ -229,9 +260,12 @@ async function main() {
     }
 
     const canonicalPolicies = policyMap.get(canonical.id) ?? [];
-    const activePolicies = canonicalPolicies.filter((policy) => policy.status === "ACTIVE");
-    const gmmPolicies = canonicalPolicies.filter(isGmmPolicy);
-    const policySummary = (gmmPolicies.length ? gmmPolicies : canonicalPolicies).map(
+    const sourcePolicies = policyMap.get(candidate.id) ?? [];
+    const combinedPolicies = candidate.id === canonical.id ? canonicalPolicies : [...canonicalPolicies, ...sourcePolicies];
+    const combinedPoliciesUnique = [...new Map(combinedPolicies.map((policy) => [policy.id, policy] as const)).values()];
+    const activePolicies = combinedPoliciesUnique.filter((policy) => policy.status === "ACTIVE");
+    const gmmPolicies = combinedPoliciesUnique.filter(isGmmPolicy);
+    const policySummary = (gmmPolicies.length ? gmmPolicies : combinedPoliciesUnique).map(
       (policy) => `${policy.policyNumber} [${policy.policyType}] ${policy.status} · ${policy.insurer.name}`,
     );
 
@@ -244,7 +278,7 @@ async function main() {
         canonicalClient: canonical.fullName,
         contractorName: parts.contractorName,
         insuredName: parts.insuredName,
-        policyCount: candidate._count.policies,
+        policyCount: combinedPoliciesUnique.length,
         gmmPolicyCount: gmmPolicies.length,
         activePolicyCount: activePolicies.length,
         policies: policySummary.join(" | "),
@@ -262,7 +296,7 @@ async function main() {
         canonicalClient: canonical.fullName,
         contractorName: parts.contractorName,
         insuredName: parts.insuredName,
-        policyCount: candidate._count.policies,
+        policyCount: combinedPoliciesUnique.length,
         gmmPolicyCount: gmmPolicies.length,
         activePolicyCount: activePolicies.length,
         policies: policySummary.join(" | "),
@@ -357,7 +391,7 @@ async function main() {
         canonicalClient: canonical.fullName,
         contractorName: parts.contractorName,
         insuredName: parts.insuredName,
-        policyCount: candidate._count.policies,
+        policyCount: combinedPoliciesUnique.length,
         gmmPolicyCount: gmmPolicies.length,
         activePolicyCount: activePolicies.length,
         policies: policySummary.join(" | "),
@@ -373,7 +407,7 @@ async function main() {
         canonicalClient: canonical.fullName,
         contractorName: parts.contractorName,
         insuredName: parts.insuredName,
-        policyCount: candidate._count.policies,
+        policyCount: combinedPoliciesUnique.length,
         gmmPolicyCount: gmmPolicies.length,
         activePolicyCount: activePolicies.length,
         policies: policySummary.join(" | "),
@@ -385,7 +419,7 @@ async function main() {
 
   const summary = {
     mode: apply ? "apply" : "preview",
-    totalCandidates: clients.length,
+    totalCandidates: candidateClients.length,
     mergedCount,
     skippedCount: skipped.length,
     ambiguousCount: ambiguous.length,
