@@ -54,6 +54,19 @@ function compact(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+const POLICY_TYPE_CODES = new Set([
+  "AUTO",
+  "GMM",
+  "VIDA",
+  "DANOS",
+  "FIANZAS",
+  "HOGAR",
+  "RESPONSABILIDAD_CIVIL",
+  "EMPRESARIAL",
+  "ACCIDENTES",
+  "OTRO",
+]);
+
 function monthTokenToNumber(token: string) {
   const normalized = token.toLowerCase();
   const map: Record<string, string> = {
@@ -230,6 +243,7 @@ function normalizePolicyType(value: string | null | undefined) {
   if (!value) return "GMM";
   const normalized = normalizeText(value);
   if (normalized.includes("gmm")) return "GMM";
+  if (normalized.includes("plan solicitud")) return "GMM";
   if (normalized.includes("auto")) return "AUTO";
   if (normalized.includes("vida")) return "VIDA";
   if (normalized.includes("danos")) return "DANOS";
@@ -238,7 +252,8 @@ function normalizePolicyType(value: string | null | undefined) {
   if (normalized.includes("responsabilidad")) return "RESPONSABILIDAD_CIVIL";
   if (normalized.includes("empresarial")) return "EMPRESARIAL";
   if (normalized.includes("accidente")) return "ACCIDENTES";
-  return value.toUpperCase();
+  const upper = value.toUpperCase();
+  return POLICY_TYPE_CODES.has(upper) ? upper : "OTRO";
 }
 
 function parsePolicyNumber(lines: string[], text: string) {

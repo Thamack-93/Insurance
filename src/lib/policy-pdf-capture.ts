@@ -192,6 +192,7 @@ function normalizePolicyType(value: string | null | undefined) {
   if (!value) return "GMM";
   const normalized = normalize(value);
   if (normalized.includes("gmm")) return "GMM";
+  if (normalized.includes("plan solicitud")) return "GMM";
   if (normalized.includes("auto")) return "AUTO";
   if (normalized.includes("vida")) return "VIDA";
   if (normalized.includes("danos") || normalized.includes("daños")) return "DANOS";

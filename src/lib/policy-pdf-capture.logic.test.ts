@@ -48,6 +48,22 @@ describe("policy-pdf-capture", () => {
     expect(draft.sourcePolicyNumber).toBe("19941U00");
   });
 
+  it("normalizes plan solicitud headers to GMM", () => {
+    const text = `
+      AXA Seguros
+      Póliza 19941U01
+      Ramo DE PLAN SOLICITUD
+      Asegurado titular
+      ARELLANO REGINO, ADRIAN YOSEF
+      Vigencia 28/05/2026 al 28/05/2027
+      Prima anual total $30,266.88
+    `;
+
+    const draft = extractPolicyPdfDraftFromText(text);
+
+    expect(draft.policyType).toBe("GMM");
+  });
+
   it("extracts the automobile capture fields including serial number", () => {
     const text = `
       PÓLIZA DE SEGURO DE AUTOMÓVILES
