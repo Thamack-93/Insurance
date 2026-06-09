@@ -1778,37 +1778,37 @@ export async function connectTelegramChannelFromCode(input: {
         },
       });
 
-      await writeActivityLog(
-        {
-          entityType: "NotificationChannel",
-          entityId: channel.id,
-          action: previousChannel?.telegramChatId
-            ? "TELEGRAM_RELINKED"
-            : "TELEGRAM_LINKED",
-          oldValue: previousChannel
-            ? {
-                telegramChatId: previousChannel.telegramChatId,
-                isEnabled: previousChannel.isEnabled,
-              }
-            : null,
-          newValue: {
-            telegramChatId: chatId,
-            isEnabled: true,
-          },
-          userId: token.userId,
-          db: tx,
-        },
-      );
-
       return {
         ok: true as const,
         userId: token.userId,
         channelId: channel.id,
+        previousChannel,
       };
     });
 
     if (!result.ok) {
       return result;
+    }
+
+    try {
+      await writeActivityLog({
+        entityType: "NotificationChannel",
+        entityId: result.channelId,
+        action: result.previousChannel?.telegramChatId ? "TELEGRAM_RELINKED" : "TELEGRAM_LINKED",
+        oldValue: result.previousChannel
+          ? {
+              telegramChatId: result.previousChannel.telegramChatId,
+              isEnabled: result.previousChannel.isEnabled,
+            }
+          : null,
+        newValue: {
+          telegramChatId: chatId,
+          isEnabled: true,
+        },
+        userId: result.userId,
+      });
+    } catch (auditError) {
+      logError("telegram.connect.audit", auditError, { chatId, userId: result.userId });
     }
 
     return {
