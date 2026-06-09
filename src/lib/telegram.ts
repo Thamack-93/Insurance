@@ -1636,7 +1636,6 @@ export async function createTelegramLinkCodeForUser(input: {
 
   try {
     const result = await db.$transaction(async (tx) => {
-      await ensureNotificationDefaultsForUser(input.userId, tx);
       await tx.telegramLinkToken.deleteMany({
         where: {
           userId: input.userId,
@@ -1656,25 +1655,29 @@ export async function createTelegramLinkCodeForUser(input: {
         },
       });
 
-      await writeActivityLog(
-        {
-          entityType: "TelegramLinkToken",
-          entityId: token.id,
-          action: "TELEGRAM_LINK_CODE_GENERATED",
-          newValue: {
-            expiresAt: token.expiresAt,
-          },
-          userId: input.actorId,
-          db: tx,
-        },
-      );
-
       return {
         code,
         expiresAt: token.expiresAt.toISOString(),
         tokenId: token.id,
       };
     });
+
+    try {
+      await writeActivityLog({
+        entityType: "TelegramLinkToken",
+        entityId: result.tokenId,
+        action: "TELEGRAM_LINK_CODE_GENERATED",
+        newValue: {
+          expiresAt: result.expiresAt,
+        },
+        userId: input.actorId,
+      });
+    } catch (auditError) {
+      logError("telegram.createLinkCode.audit", auditError, {
+        userId: input.userId,
+        actorId: input.actorId,
+      });
+    }
 
     return {
       ok: true,
