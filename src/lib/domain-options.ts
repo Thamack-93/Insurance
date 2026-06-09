@@ -123,3 +123,11 @@ export const currencyOptions: SelectOption[] = [
   { value: "MXN", label: "MXN" },
   { value: "USD", label: "USD" },
 ];
+
+export const paymentMethodOptions: SelectOption[] = [
+  { value: "TRANSFER", label: "Transferencia bancaria" },
+  { value: "CASH", label: "Efectivo" },
+  { value: "CHECK", label: "Cheque" },
+  { value: "CARD", label: "Tarjeta de crédito/débito" },
+  { value: "OTHER", label: "Otro" },
+];

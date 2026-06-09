@@ -3,6 +3,7 @@ import { updateReceipt } from "@/app/(dashboard)/receipts/actions";
 import { ReceiptForm } from "@/components/forms/receipt-form";
 import { createReceiptDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
+import { CancelReceiptOnlyButton } from "@/components/receipts/cancel-receipt-button";
 import { getDb } from "@/lib/db";
 import { formatDateInput } from "@/lib/form-utils";
 import type { ReceiptFormValues } from "@/lib/validations";
@@ -29,12 +30,12 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
         <PageHeader
           eyebrow="Finanzas"
           title={`Editar ${receipt.receiptNumber}`}
-          description="Actualiza periodos y vencimiento sin mezclar el recibo con el evento de pago."
+          description="Actualiza periodos, cobro manual y vencimiento sin mezclar el recibo con el evento de pago."
         />
 
         <ReceiptForm
           title="Edición de recibo"
-          description="Los cambios actualizan vistas de cobranza, cartera y riesgo."
+          description="Los cambios actualizan vistas de cobranza, cartera y riesgo. La fecha y el método de pago se ajustan manualmente en este formulario."
           submitLabel="Guardar cambios"
           cancelHref="/receipts"
           defaultValues={createReceiptDefaults({
@@ -46,6 +47,8 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
             amount: Number(receipt.amount),
             currency: receipt.currency,
             status: receipt.status as ReceiptFormValues["status"],
+            paidDate: formatDateInput(receipt.paidDate),
+            paymentMethod: receipt.paymentMethod ?? "",
             notes: receipt.notes ?? "",
           })}
           policyOptions={policies.map((policy) => ({
@@ -53,6 +56,13 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
             label: `${policy.policyNumber} · ${policy.client.fullName}`,
           }))}
           submitAction={updateReceipt.bind(null, receipt.id)}
+          footerActions={
+            <CancelReceiptOnlyButton
+              id={receipt.id}
+              receiptNumber={receipt.receiptNumber}
+              triggerClassName="rounded-full border-destructive/40 bg-card/80 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            />
+          }
         />
       </div>
     </div>

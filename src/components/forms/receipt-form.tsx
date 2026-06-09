@@ -1,12 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useTransition, type ReactNode } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import {
   currencyOptions,
+  paymentMethodOptions,
   receiptStatusOptions,
   type SelectOption,
 } from "@/lib/domain-options";
@@ -33,6 +34,7 @@ type ReceiptFormProps = {
   defaultValues: ReceiptFormValues;
   policyOptions: SelectOption[];
   submitAction: (values: ReceiptFormValues) => Promise<MutationResult>;
+  footerActions?: ReactNode;
 };
 
 export function ReceiptForm({
@@ -43,6 +45,7 @@ export function ReceiptForm({
   defaultValues,
   policyOptions,
   submitAction,
+  footerActions,
 }: ReceiptFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -170,7 +173,38 @@ export function ReceiptForm({
             </FormField>
           </FormSection>
 
-          <FormActions cancelHref={cancelHref} submitLabel={submitLabel} pending={isPending} />
+          <FormSection
+            title="Cobro manual"
+            description="Estos campos corrigen el recibo. No registran un pago nuevo ni crean conciliación."
+          >
+            <FormGrid>
+              <FormField label="Fecha de pago" htmlFor="paidDate" error={errors.paidDate?.message}>
+                <Input id="paidDate" type="date" {...register("paidDate")} />
+              </FormField>
+
+              <FormField label="Método de pago" error={errors.paymentMethod?.message}>
+                <Controller
+                  name="paymentMethod"
+                  control={control}
+                  render={({ field }) => (
+                    <ControlledSelect
+                      value={field.value || ""}
+                      onValueChange={field.onChange}
+                      options={paymentMethodOptions}
+                      placeholder="Selecciona un método"
+                    />
+                  )}
+                />
+              </FormField>
+            </FormGrid>
+          </FormSection>
+
+          <FormActions
+            cancelHref={cancelHref}
+            submitLabel={submitLabel}
+            pending={isPending}
+            leftContent={footerActions}
+          />
         </form>
       </CardContent>
     </Card>

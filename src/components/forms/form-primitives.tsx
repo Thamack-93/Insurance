@@ -209,19 +209,24 @@ export function FormActions({
   cancelHref,
   submitLabel,
   pending,
+  leftContent,
 }: {
   cancelHref: string;
   submitLabel: string;
   pending?: boolean;
+  leftContent?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap justify-end gap-2 border-t border-border/70 pt-5">
-      <Button asChild type="button" variant="outline" className="rounded-full bg-card/80">
-        <Link href={cancelHref}>Cancelar</Link>
-      </Button>
-      <Button type="submit" className="rounded-full" disabled={pending}>
-        {pending ? "Guardando..." : submitLabel}
-      </Button>
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-5">
+      <div className="flex flex-wrap gap-2">{leftContent}</div>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button asChild type="button" variant="outline" className="rounded-full bg-card/80">
+          <Link href={cancelHref}>Cancelar</Link>
+        </Button>
+        <Button type="submit" className="rounded-full" disabled={pending}>
+          {pending ? "Guardando..." : submitLabel}
+        </Button>
+      </div>
     </div>
   );
 }

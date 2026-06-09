@@ -77,6 +77,8 @@ export const receiptSchema = z
     amount: z.coerce.number().positive("El monto debe ser mayor a cero."),
     currency: z.string().trim().min(1, "Selecciona una moneda."),
     status: z.enum(RECEIPT_STATUSES),
+    paidDate: optionalDate,
+    paymentMethod: optionalText,
     notes: optionalText,
   })
   .refine((values) => values.periodEndDate >= values.periodStartDate, {

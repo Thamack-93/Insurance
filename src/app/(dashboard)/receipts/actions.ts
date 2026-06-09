@@ -43,6 +43,8 @@ async function normalizeReceiptInput(values: ReceiptFormValues, userId: string) 
     amount: values.amount,
     currency: values.currency || policy.currency,
     status: values.status,
+    paidDate: values.paidDate ? parseDateInput(values.paidDate) : null,
+    paymentMethod: normalizeOptionalText(values.paymentMethod),
     notes: normalizeOptionalText(values.notes),
   };
 }
@@ -305,7 +307,7 @@ export async function cancelReceipt(id: string): Promise<MutationResult> {
           select: {
             id: true,
             policyNumber: true,
-            status: true,
+            clientId: true,
           },
         },
         payments: {
@@ -320,10 +322,6 @@ export async function cancelReceipt(id: string): Promise<MutationResult> {
 
     if (existingReceipt.status === "CANCELLED") {
       return successResult(existingReceipt.id, `/receipts/${existingReceipt.id}`, "El recibo ya estaba cancelado.");
-    }
-
-    if (existingReceipt.policy.status !== "CANCELLED") {
-      return errorResult("Solo se pueden cancelar recibos cuya póliza ya fue cancelada.");
     }
 
     if (existingReceipt.payments.length > 0) {
@@ -353,11 +351,13 @@ export async function cancelReceipt(id: string): Promise<MutationResult> {
       "/due-payments",
       `/receipts/${updatedReceipt.id}`,
       `/policies/${existingReceipt.policy.id}`,
-      `/clients/${existingReceipt.clientId}`,
+      `/clients/${existingReceipt.policy.clientId}`,
       "/dashboard",
       "/today",
       "/portfolio",
+      "/renewals",
       "/risks",
+      "/data-quality",
     ]);
 
     return successResult(updatedReceipt.id, `/receipts/${updatedReceipt.id}`, "Recibo cancelado.");

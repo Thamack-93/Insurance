@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DocumentDropZone } from "@/components/documents/document-drop-zone";
 import { DocumentList } from "@/components/documents/document-list";
+import { PolicyReceiptsTable } from "@/components/policies/policy-receipts-table";
 import { getDb } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { daysUntil, formatDate } from "@/lib/dates";
@@ -96,6 +97,14 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
   ]);
 
   const openReceipts = receipts.filter((receipt) => receipt.status !== "PAID" && receipt.status !== "CANCELLED");
+  const policyReceiptRows = receipts.map((receipt) => ({
+    id: receipt.id,
+    receiptNumber: receipt.receiptNumber,
+    dueDate: receipt.dueDate.toISOString().slice(0, 10),
+    status: receipt.status,
+    amount: toNumber(receipt.amount),
+    currency: receipt.currency,
+  }));
   const openCommissions = commissions.filter((commission) => commission.status !== "PAID" && commission.status !== "CANCELLED");
   const openWorkItemCount = await countWorkItems({
     workItemTypes: ["TASK"],
@@ -272,28 +281,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           </SectionCard>
 
           <SectionCard title="Recibos" description="Calendario de cobro derivado de esta póliza.">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/40">
-                  <TableHead>Recibo</TableHead>
-                  <TableHead>Vencimiento</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Monto</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {receipts.map((receipt) => (
-                  <TableRow key={receipt.id}>
-                    <TableCell className="font-medium">{receipt.receiptNumber}</TableCell>
-                    <TableCell>{formatDate(receipt.dueDate)}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={receipt.status} />
-                    </TableCell>
-                    <TableCell className="text-right font-medium">{formatCurrency(receipt.amount, receipt.currency)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <PolicyReceiptsTable receipts={policyReceiptRows} />
           </SectionCard>
         </section>
 

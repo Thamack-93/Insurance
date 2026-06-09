@@ -59,6 +59,8 @@ export function createReceiptDefaults(values?: Partial<ReceiptFormValues>): Rece
     amount: values?.amount ?? 0,
     currency: values?.currency ?? "MXN",
     status: values?.status ?? "PENDING",
+    paidDate: values?.paidDate ?? "",
+    paymentMethod: values?.paymentMethod ?? "",
     notes: values?.notes ?? "",
   };
 }
