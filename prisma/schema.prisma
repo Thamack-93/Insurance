@@ -535,6 +535,7 @@ model NotificationChannel {
   type           String
   telegramChatId String?
   isEnabled      Boolean  @default(false)
+  telegramMutationsEnabled Boolean @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

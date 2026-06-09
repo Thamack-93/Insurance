@@ -15,6 +15,54 @@ import {
   type TelegramLinkCodeResult,
 } from "@/lib/telegram";
 
+export async function setTelegramMutationsEnabled(enabled: boolean): Promise<MutationResult> {
+  try {
+    const user = await requireUser();
+    const db = getDb();
+    const current = await db.notificationChannel.findUnique({
+      where: {
+        userId_type: {
+          userId: user.id,
+          type: "TELEGRAM",
+        },
+      },
+      select: { telegramMutationsEnabled: true },
+    });
+    const channel = await db.notificationChannel.upsert({
+      where: {
+        userId_type: {
+          userId: user.id,
+          type: "TELEGRAM",
+        },
+      },
+      update: {
+        telegramMutationsEnabled: enabled,
+      },
+      create: {
+        userId: user.id,
+        type: "TELEGRAM",
+        telegramMutationsEnabled: enabled,
+      },
+    });
+
+    await writeActivityLog({
+      entityType: "NotificationChannel",
+      entityId: channel.id,
+      action: enabled ? "TELEGRAM_MUTATIONS_ENABLED" : "TELEGRAM_MUTATIONS_DISABLED",
+      oldValue: { telegramMutationsEnabled: current?.telegramMutationsEnabled ?? false },
+      newValue: { telegramMutationsEnabled: enabled },
+      userId: user.id,
+    });
+
+    revalidatePath("/settings/notifications");
+    revalidatePath("/settings");
+    return successResult(user.id, "/settings/notifications", enabled ? "Mutaciones de Telegram habilitadas." : "Mutaciones de Telegram deshabilitadas.");
+  } catch (error) {
+    logError("settings.notifications.telegram.mutations", error);
+    return errorResult("No se pudo actualizar el estado de las mutaciones de Telegram.");
+  }
+}
+
 export async function generateTelegramLinkCode(): Promise<TelegramLinkCodeResult> {
   try {
     const user = await requireUser();

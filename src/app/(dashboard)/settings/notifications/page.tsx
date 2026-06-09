@@ -12,6 +12,7 @@ import {
   generateTelegramLinkCode,
   sendTelegramDigestNow,
   sendTelegramTestMessage,
+  setTelegramMutationsEnabled,
 } from "./actions";
 
 export default async function NotificationSettingsPage() {
@@ -123,6 +124,7 @@ export default async function NotificationSettingsPage() {
               type: "TELEGRAM",
               telegramChatId: null,
               isEnabled: false,
+              telegramMutationsEnabled: false,
               createdAt: new Date(0),
               updatedAt: new Date(0),
             }
@@ -133,6 +135,7 @@ export default async function NotificationSettingsPage() {
           disconnectTelegram={disconnectTelegram}
           sendTelegramDigestNow={sendTelegramDigestNow}
           sendTelegramTestMessage={sendTelegramTestMessage}
+          setTelegramMutationsEnabled={setTelegramMutationsEnabled}
         />
       </div>
     </div>

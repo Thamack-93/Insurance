@@ -26,6 +26,7 @@ export type NotificationChannelRecord = {
   type: string;
   telegramChatId: string | null;
   isEnabled: boolean;
+  telegramMutationsEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 };

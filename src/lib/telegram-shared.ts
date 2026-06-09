@@ -105,6 +105,7 @@ export function buildTelegramStartMessage() {
     "",
     "Genera un código desde Configuración > Notificaciones y envía /link CÓDIGO en este chat privado.",
     "Después podrás usar /status para revisar el estado del vínculo.",
+    "Los pagos y capturas están desactivados por defecto; actívalos en Configuración > Notificaciones si los necesitas.",
   ].join("\n");
 }
 
@@ -115,12 +116,14 @@ export function buildTelegramHelpMessage() {
     "/help - Mostrar este resumen.",
     "/link <código> - Vincular este chat con tu cuenta de PolicyDesk.",
     "/status - Ver si este chat ya está vinculado.",
-    "/pago <recibo> <monto> <fecha YYYY-MM-DD> <método> [referencia] - Preparar un pago para confirmar.",
+    "/pago <póliza> <recibo> <monto> <fecha YYYY-MM-DD> <método> - Preparar un pago para confirmar.",
     "/poliza [campos] - Preparar una póliza y obtener un enlace seguro para terminarla en PolicyDesk.",
     "/confirmar - Confirmar el borrador activo.",
     "/cancelar - Cancelar el borrador activo.",
     "/recibos [días] - Ver cobros vencidos y próximos. Predeterminado: 30.",
     "/renovaciones [días] - Ver renovaciones próximas. Predeterminado: 30.",
+    "Si falta información, el bot te la irá pidiendo paso a paso.",
+    "Las mutaciones por Telegram están desactivadas por defecto.",
   ].join("\n");
 }
 
@@ -132,11 +135,14 @@ export function buildTelegramLinkSuccessMessage() {
   ].join("\n");
 }
 
-export function buildTelegramStatusMessage(connected: boolean) {
+export function buildTelegramStatusMessage(connected: boolean, mutationsEnabled = false) {
   return connected
     ? [
         "Este chat ya está vinculado con PolicyDesk.",
         "Telegram está activo para este usuario.",
+        mutationsEnabled
+          ? "Las mutaciones por Telegram están habilitadas."
+          : "Las mutaciones por Telegram están deshabilitadas por defecto.",
         "Usa /help para ver los comandos disponibles.",
       ].join("\n")
     : [
@@ -164,9 +170,9 @@ export function buildTelegramFallbackMessage() {
 }
 
 export function buildTelegramPaymentDraftMessage(details: {
+  policyNumber: string;
   receiptNumber: string;
   clientName: string;
-  policyNumber: string;
   amount: string;
   paymentMethod: string;
   paidDate: string;
@@ -174,8 +180,8 @@ export function buildTelegramPaymentDraftMessage(details: {
 }) {
   return [
     "Borrador de pago preparado.",
-    `Recibo: ${details.receiptNumber} · ${details.clientName}`,
     `Póliza: ${details.policyNumber}`,
+    `Recibo: ${details.receiptNumber} · ${details.clientName}`,
     `Monto: ${details.amount}`,
     `Método: ${details.paymentMethod} · Fecha: ${details.paidDate}`,
     details.reference ? `Referencia: ${details.reference}` : null,

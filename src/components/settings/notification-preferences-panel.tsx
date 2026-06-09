@@ -16,6 +16,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import type { NotificationChannelRecord } from "@/lib/notification-foundation-shared";
 import type { MutationResult } from "@/lib/mutation-utils";
@@ -41,6 +43,7 @@ type Props = {
   disconnectTelegram: () => Promise<MutationResult>;
   sendTelegramDigestNow: () => Promise<MutationResult>;
   sendTelegramTestMessage: () => Promise<MutationResult>;
+  setTelegramMutationsEnabled: (enabled: boolean) => Promise<MutationResult>;
 };
 
 function isConnected(channel: NotificationChannelRecord) {
@@ -55,15 +58,18 @@ export function NotificationPreferencesPanel({
   disconnectTelegram,
   sendTelegramDigestNow,
   sendTelegramTestMessage,
+  setTelegramMutationsEnabled,
 }: Props) {
   const router = useRouter();
   const [isGeneratingLink, setIsGeneratingLink] = useState(false);
   const [isSendingDigestNow, setIsSendingDigestNow] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [isUpdatingMutations, setIsUpdatingMutations] = useState(false);
   const [generatedLink, setGeneratedLink] = useState<{ code: string; expiresAt: string } | null>(
     null,
   );
+  const [mutationsEnabled, setMutationsEnabled] = useState(channel.telegramMutationsEnabled);
 
   const connected = isConnected(channel);
 
@@ -134,6 +140,25 @@ export function NotificationPreferencesPanel({
       router.refresh();
     } finally {
       setIsDisconnecting(false);
+    }
+  }
+
+  async function handleMutationsToggle(nextEnabled: boolean) {
+    setIsUpdatingMutations(true);
+    const previous = mutationsEnabled;
+    setMutationsEnabled(nextEnabled);
+    try {
+      const result = await setTelegramMutationsEnabled(nextEnabled);
+      if (!result.ok) {
+        setMutationsEnabled(previous);
+        toast.error(result.error);
+        return;
+      }
+
+      toast.success(result.message);
+      router.refresh();
+    } finally {
+      setIsUpdatingMutations(false);
     }
   }
 
@@ -239,6 +264,39 @@ export function NotificationPreferencesPanel({
                 <Unplug className="mr-2 size-4" />
                 {isDisconnecting ? "Desconectando…" : "Desconectar"}
               </Button>
+            </div>
+          </div>
+          </CardContent>
+        </Card>
+
+      <Card className="border-border/60 bg-card/85 shadow-sm">
+        <CardHeader className="border-b border-border/70">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Send className="size-4" />
+            Mutaciones por Telegram
+          </CardTitle>
+          <CardDescription>
+            Las consultas y avisos siguen activos. Este interruptor permite o bloquea pagos y
+            capturas confirmadas desde Telegram.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 p-5">
+          <div className="flex items-start gap-3 rounded-2xl border bg-muted/20 px-4 py-3">
+            <Checkbox
+              id="telegram-mutations-enabled"
+              checked={mutationsEnabled}
+              disabled={isUpdatingMutations || !connected}
+              onCheckedChange={(checked) => handleMutationsToggle(Boolean(checked))}
+            />
+            <div className="space-y-1">
+              <Label htmlFor="telegram-mutations-enabled" className="text-sm font-medium">
+                Permitir pagos y capturas desde Telegram
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                {connected
+                  ? "Si lo activas, /pago y /confirmar podrán registrar cambios reales después de completar el borrador."
+                  : "Conecta primero Telegram para habilitar esta opción."}
+              </p>
             </div>
           </div>
         </CardContent>

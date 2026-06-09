@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { logError } from "@/lib/logger";
 import {
-  getTelegramWebhookUrl,
   isTelegramWebhookSecretValid,
   processTelegramWebhookUpdate,
   sendTelegramMessage,
@@ -16,10 +15,10 @@ function hasValidSecret(request: NextRequest) {
 }
 
 export async function GET() {
-  return NextResponse.json({
-    ok: true,
-    webhookUrl: getTelegramWebhookUrl(),
-  });
+  return NextResponse.json(
+    { error: "Method not allowed" },
+    { status: 405, headers: { Allow: "POST" } },
+  );
 }
 
 export async function POST(request: NextRequest) {

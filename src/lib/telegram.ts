@@ -36,6 +36,7 @@ import {
   parseTelegramCommand,
   parseTelegramQueryDays,
 } from "@/lib/telegram-shared";
+import { checkRateLimit } from "@/lib/request-guards";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -138,7 +139,67 @@ export type TelegramDailyDigestResult = {
   failed: number;
 };
 
+type TelegramPaymentDraftState = {
+  step:
+    | "policyNumber"
+    | "receiptNumber"
+    | "amount"
+    | "paidDate"
+    | "paymentMethod"
+    | "ready";
+  policyNumber?: string;
+  receiptNumber?: string;
+  amount?: number;
+  paidDate?: string;
+  paymentMethod?: string;
+  reference?: string | null;
+  receiptId?: string;
+  policyId?: string;
+  clientId?: string;
+  insurerId?: string;
+  clientName?: string;
+  insurerName?: string;
+  currency?: string;
+  receiptResolvedAt?: string;
+};
+
+type TelegramPolicyDraftState = {
+  step:
+    | "policyNumber"
+    | "clientName"
+    | "insurerName"
+    | "policyType"
+    | "startDate"
+    | "endDate"
+    | "premiumAmount"
+    | "paymentFrequency"
+    | "ready";
+  policyNumber?: string;
+  clientName?: string;
+  insurerName?: string;
+  policyType?: string;
+  startDate?: string;
+  endDate?: string;
+  premiumAmount?: number;
+  paymentFrequency?: string;
+  sourcePolicyNumber?: string | null;
+};
+
+type TelegramDraftState = {
+  type: "PAYMENT_CAPTURE" | "POLICY_CAPTURE";
+  payment?: TelegramPaymentDraftState;
+  policy?: TelegramPolicyDraftState;
+};
+
 const TELEGRAM_DRAFT_TTL_MS = 2 * 60 * 60 * 1000;
+const TELEGRAM_COMMAND_RATE_LIMIT = {
+  limit: 40,
+  windowMs: 15 * 60 * 1000,
+};
+const TELEGRAM_DRAFT_CONTINUATION_RATE_LIMIT = {
+  limit: 30,
+  windowMs: 15 * 60 * 1000,
+};
 
 const TELEGRAM_FETCH_TIMEOUT_MS = 8_000;
 const TELEGRAM_DATE_FORMATTER = new Intl.DateTimeFormat("es-MX", {
@@ -154,6 +215,14 @@ function getTelegramBotToken() {
 
 function getTelegramWebhookSecret() {
   return process.env.TELEGRAM_WEBHOOK_SECRET?.trim() || null;
+}
+
+function isTelegramMutationsEnabled(channel?: {
+  telegramMutationsEnabled?: boolean | null;
+  isEnabled?: boolean | null;
+  telegramChatId?: string | null;
+}) {
+  return Boolean(channel?.isEnabled && channel?.telegramChatId && channel.telegramMutationsEnabled);
 }
 
 export function getTelegramWebhookUrl() {
@@ -192,6 +261,83 @@ function buildPolicyDeskUrl(path: string) {
   const baseUrl = getAppBaseUrl();
   if (!baseUrl) return null;
   return new URL(path, baseUrl).toString();
+}
+
+function toTelegramDraftState(payloadJson: string): TelegramDraftState | null {
+  try {
+    const parsed = JSON.parse(payloadJson) as TelegramDraftState;
+    if (!parsed || (parsed.type !== "PAYMENT_CAPTURE" && parsed.type !== "POLICY_CAPTURE")) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function stringifyTelegramDraftState(state: TelegramDraftState) {
+  return JSON.stringify(state);
+}
+
+function getTelegramPaymentPrompt(step: TelegramPaymentDraftState["step"]) {
+  switch (step) {
+    case "policyNumber":
+      return "Escribe el número de póliza.";
+    case "receiptNumber":
+      return "Ahora escribe el número de recibo.";
+    case "amount":
+      return "Escribe el monto del pago.";
+    case "paidDate":
+      return "Escribe la fecha del pago en formato YYYY-MM-DD.";
+    case "paymentMethod":
+      return "Escribe el método de pago.";
+    case "ready":
+      return "Ya tengo el borrador. Responde /confirmar para registrar el pago o /cancelar para descartarlo.";
+  }
+}
+
+function getTelegramPolicyPrompt(step: TelegramPolicyDraftState["step"]) {
+  switch (step) {
+    case "policyNumber":
+      return "Escribe el número de póliza.";
+    case "clientName":
+      return "Escribe el nombre del cliente.";
+    case "insurerName":
+      return "Escribe la aseguradora.";
+    case "policyType":
+      return "Escribe el tipo de póliza.";
+    case "startDate":
+      return "Escribe la fecha de inicio en formato YYYY-MM-DD.";
+    case "endDate":
+      return "Escribe la fecha de fin en formato YYYY-MM-DD.";
+    case "premiumAmount":
+      return "Escribe la prima total.";
+    case "paymentFrequency":
+      return "Escribe la frecuencia de pago.";
+    case "ready":
+      return "Ya tengo el borrador. Responde /confirmar para guardar el borrador o /cancelar para descartarlo.";
+  }
+}
+
+function getNextPaymentStep(state: TelegramPaymentDraftState): TelegramPaymentDraftState["step"] {
+  if (!state.policyNumber) return "policyNumber";
+  if (!state.receiptNumber) return "receiptNumber";
+  if (state.amount == null) return "amount";
+  if (!state.paidDate) return "paidDate";
+  if (!state.paymentMethod) return "paymentMethod";
+  return "ready";
+}
+
+function getNextPolicyStep(state: TelegramPolicyDraftState): TelegramPolicyDraftState["step"] {
+  if (!state.policyNumber) return "policyNumber";
+  if (!state.clientName) return "clientName";
+  if (!state.insurerName) return "insurerName";
+  if (!state.policyType) return "policyType";
+  if (!state.startDate) return "startDate";
+  if (!state.endDate) return "endDate";
+  if (state.premiumAmount == null) return "premiumAmount";
+  if (!state.paymentFrequency) return "paymentFrequency";
+  return "ready";
 }
 
 function formatTelegramDate(date: Date) {
@@ -318,54 +464,81 @@ function buildPolicyDraftSummary(payload: Record<string, string>) {
     payload.start ? `Inicio ${payload.start}` : null,
     payload.end ? `Fin ${payload.end}` : null,
     payload.premium ? `Prima ${payload.premium}` : null,
+    payload.frequency ? `Frecuencia ${payload.frequency}` : null,
   ].filter(Boolean);
 
   return parts.length > 0 ? parts.join(" · ") : "Borrador vacío para completar en PolicyDesk.";
 }
 
-function parseTelegramPaymentDraftArgument(argument: string) {
+function parseTelegramPaymentArgument(argument: string) {
   const parts = argument.split(/\s+/).filter(Boolean);
-  if (parts.length < 4) {
-    return {
-      ok: false as const,
-      error: "Usa: /pago <recibo> <monto> <fecha YYYY-MM-DD> <método> [referencia]",
-    };
-  }
+  const state: TelegramPaymentDraftState = { step: "policyNumber" };
 
-  const [receiptNumber, amountText, dateText, paymentMethod, ...referenceParts] = parts;
-  const amount = Number(amountText.replace(/,/g, ""));
-  const paidDate = parseTelegramIsoDate(dateText);
-  const reference = referenceParts.join(" ").trim() || null;
+  if (parts[0]) state.policyNumber = parts[0];
+  if (parts[1]) state.receiptNumber = parts[1];
+  if (parts[2]) {
+    const amount = Number(parts[2].replace(/,/g, ""));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { ok: false as const, error: "El monto debe ser mayor a cero." };
+    }
+    state.amount = amount;
+  }
+  if (parts[3]) {
+    const paidDate = parseTelegramIsoDate(parts[3]);
+    if (!paidDate) {
+      return { ok: false as const, error: "La fecha debe tener formato YYYY-MM-DD." };
+    }
+    state.paidDate = paidDate.toISOString().slice(0, 10);
+  }
+  if (parts[4]) state.paymentMethod = parts[4];
+  if (parts.length > 5) state.reference = parts.slice(5).join(" ").trim() || null;
 
-  if (!receiptNumber) {
-    return { ok: false as const, error: "Debes indicar el número de recibo." };
-  }
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return { ok: false as const, error: "El monto debe ser mayor a cero." };
-  }
-  if (!paidDate) {
-    return { ok: false as const, error: "La fecha debe tener formato YYYY-MM-DD." };
-  }
-  if (!paymentMethod) {
-    return { ok: false as const, error: "Debes indicar un método de pago." };
-  }
+  state.step = getNextPaymentStep(state);
 
-  return {
-    ok: true as const,
-    receiptNumber,
-    amount,
-    paidDate,
-    paymentMethod,
-    reference,
-  };
+  return { ok: true as const, state };
 }
 
-async function getUserLinkedReceiptByNumber(userId: string, receiptNumber: string, client?: DbClient) {
+function parseTelegramPolicyArgument(argument: string) {
+  const payload = extractTelegramKeyValuePayload(argument);
+  const state: TelegramPolicyDraftState = { step: "policyNumber" };
+
+  const maybePolicyNumber = payload.policynumber ?? payload.policy ?? payload.policia ?? null;
+  if (maybePolicyNumber) state.policyNumber = maybePolicyNumber;
+  if (payload.client) state.clientName = payload.client;
+  if (payload.insurer) state.insurerName = payload.insurer;
+  if (payload.type) state.policyType = payload.type;
+  if (payload.start) state.startDate = payload.start;
+  if (payload.end) state.endDate = payload.end;
+  if (payload.premium) {
+    const premiumAmount = Number(payload.premium.replace(/,/g, ""));
+    if (!Number.isFinite(premiumAmount) || premiumAmount <= 0) {
+      return { ok: false as const, error: "La prima debe ser mayor a cero." };
+    }
+    state.premiumAmount = premiumAmount;
+  }
+  if (payload.frequency) state.paymentFrequency = payload.frequency;
+  if (payload.sourcepolicy || payload.sourcepolicynumber) {
+    state.sourcePolicyNumber = payload.sourcepolicy ?? payload.sourcepolicynumber;
+  }
+
+  state.step = getNextPolicyStep(state);
+  return { ok: true as const, state };
+}
+
+async function getUserLinkedReceiptByPolicyAndNumber(
+  userId: string,
+  policyNumber: string,
+  receiptNumber: string,
+  client?: DbClient,
+) {
   const db = client ?? getDb();
   const exact = await db.receipt.findFirst({
     where: {
       receiptNumber,
-      client: { portfolioOwnerId: userId },
+      policy: {
+        policyNumber,
+        client: { portfolioOwnerId: userId },
+      },
     },
     include: {
       client: { select: { fullName: true } },
@@ -379,7 +552,10 @@ async function getUserLinkedReceiptByNumber(userId: string, receiptNumber: strin
   const fuzzy = await db.receipt.findMany({
     where: {
       receiptNumber: { contains: receiptNumber },
-      client: { portfolioOwnerId: userId },
+      policy: {
+        policyNumber,
+        client: { portfolioOwnerId: userId },
+      },
     },
     include: {
       client: { select: { fullName: true } },
@@ -390,6 +566,63 @@ async function getUserLinkedReceiptByNumber(userId: string, receiptNumber: strin
   });
 
   return fuzzy.length === 1 ? fuzzy[0] : null;
+}
+
+async function persistTelegramDraftState(input: {
+  draftId: string;
+  state: TelegramDraftState;
+  client?: DbClient;
+}) {
+  const db = input.client ?? getDb();
+  return db.telegramDraft.update({
+    where: { id: input.draftId },
+    data: {
+      payloadJson: stringifyTelegramDraftState(input.state),
+      updatedAt: new Date(),
+    },
+  });
+}
+
+function buildPaymentDraftStateFromInput(input: {
+  policyNumber?: string;
+  receiptNumber?: string;
+  amount?: number;
+  paidDate?: string;
+  paymentMethod?: string;
+  reference?: string | null;
+}): TelegramPaymentDraftState {
+  const state: TelegramPaymentDraftState = {
+    step: "policyNumber",
+    policyNumber: input.policyNumber?.trim() || undefined,
+    receiptNumber: input.receiptNumber?.trim() || undefined,
+    amount: input.amount,
+    paidDate: input.paidDate,
+    paymentMethod: input.paymentMethod?.trim() || undefined,
+    reference: input.reference ?? null,
+  };
+  state.step = getNextPaymentStep(state);
+  return state;
+}
+
+function buildPolicyDraftStateFromInput(input: Partial<TelegramPolicyDraftState>): TelegramPolicyDraftState {
+  const state: TelegramPolicyDraftState = {
+    step: "policyNumber",
+    policyNumber: input.policyNumber?.trim() || undefined,
+    clientName: input.clientName?.trim() || undefined,
+    insurerName: input.insurerName?.trim() || undefined,
+    policyType: input.policyType?.trim() || undefined,
+    startDate: input.startDate?.trim() || undefined,
+    endDate: input.endDate?.trim() || undefined,
+    premiumAmount: input.premiumAmount,
+    paymentFrequency: input.paymentFrequency?.trim() || undefined,
+    sourcePolicyNumber: input.sourcePolicyNumber?.trim() || null,
+  };
+  state.step = getNextPolicyStep(state);
+  return state;
+}
+
+function parseTelegramDraftState(payloadJson: string): TelegramDraftState | null {
+  return toTelegramDraftState(payloadJson);
 }
 
 export async function sendTelegramMessage(chatId: string, text: string): Promise<TelegramSendResult> {
@@ -690,7 +923,7 @@ async function createTelegramPaymentDraft(input: {
     };
   }
 
-  const parsed = parseTelegramPaymentDraftArgument(input.argument);
+  const parsed = parseTelegramPaymentArgument(input.argument);
   if (!parsed.ok) {
     return {
       ok: false as const,
@@ -698,11 +931,20 @@ async function createTelegramPaymentDraft(input: {
     };
   }
 
-  const receipt = await getUserLinkedReceiptByNumber(channel.userId, parsed.receiptNumber, db);
-  if (!receipt) {
+  const readyReceipt =
+    parsed.state.step === "ready" && parsed.state.policyNumber && parsed.state.receiptNumber
+      ? await getUserLinkedReceiptByPolicyAndNumber(
+          channel.userId,
+          parsed.state.policyNumber,
+          parsed.state.receiptNumber,
+          db,
+        )
+      : null;
+
+  if (parsed.state.step === "ready" && !readyReceipt) {
     return {
       ok: false as const,
-      replyText: "No encontré un recibo único para ese número. Usa el número exacto o uno más específico.",
+      replyText: "No encontré un recibo único para esa póliza y ese número. Revisa los datos e inténtalo de nuevo.",
     };
   }
 
@@ -720,26 +962,30 @@ async function createTelegramPaymentDraft(input: {
       },
     });
 
+    const state: TelegramDraftState = {
+      type: "PAYMENT_CAPTURE",
+      payment: parsed.state.step === "ready" && readyReceipt
+        ? {
+            ...parsed.state,
+            receiptId: readyReceipt.id,
+            policyId: readyReceipt.policyId,
+            clientId: readyReceipt.clientId,
+            insurerId: readyReceipt.insurerId,
+            clientName: readyReceipt.client.fullName,
+            insurerName: readyReceipt.insurer.name,
+            currency: readyReceipt.currency,
+            receiptResolvedAt: new Date().toISOString(),
+          }
+        : parsed.state,
+    };
+
     return tx.telegramDraft.create({
       data: {
         userId: channel.userId,
         channelId: channel.id,
         type: "PAYMENT_CAPTURE",
         status: "COLLECTING",
-        payloadJson: JSON.stringify({
-          receiptId: receipt.id,
-          receiptNumber: receipt.receiptNumber,
-          policyId: receipt.policyId,
-          policyNumber: receipt.policy.policyNumber,
-          clientId: receipt.clientId,
-          clientName: receipt.client.fullName,
-          insurerId: receipt.insurerId,
-          insurerName: receipt.insurer.name,
-          amount: parsed.amount,
-          paidDate: parsed.paidDate.toISOString(),
-          paymentMethod: parsed.paymentMethod,
-          reference: parsed.reference,
-        }),
+        payloadJson: stringifyTelegramDraftState(state),
         expiresAt: new Date(Date.now() + TELEGRAM_DRAFT_TTL_MS),
       },
       include: {
@@ -749,16 +995,50 @@ async function createTelegramPaymentDraft(input: {
     });
   });
 
+  if (parsed.state.step !== "ready") {
+    return {
+      ok: true as const,
+      replyText: getTelegramPaymentPrompt(parsed.state.step),
+      draftId: draft.id,
+    };
+  }
+
+  const payload = {
+    type: "PAYMENT_CAPTURE" as const,
+    payment: {
+      ...parsed.state,
+      ...(readyReceipt
+        ? {
+            receiptId: readyReceipt.id,
+            policyId: readyReceipt.policyId,
+            clientId: readyReceipt.clientId,
+            insurerId: readyReceipt.insurerId,
+            clientName: readyReceipt.client.fullName,
+            insurerName: readyReceipt.insurer.name,
+            currency: readyReceipt.currency,
+            receiptResolvedAt: new Date().toISOString(),
+          }
+        : {}),
+    },
+  };
+  await persistTelegramDraftState({
+    draftId: draft.id,
+    state: payload,
+    client: db,
+  });
+
+  const receipt = readyReceipt as NonNullable<typeof readyReceipt>;
+
   return {
     ok: true as const,
     replyText: buildTelegramPaymentDraftMessage({
+      policyNumber: receipt.policy.policyNumber,
       receiptNumber: receipt.receiptNumber,
       clientName: receipt.client.fullName,
-      policyNumber: receipt.policy.policyNumber,
-      amount: formatCurrency(parsed.amount, receipt.currency),
-      paymentMethod: parsed.paymentMethod,
-      paidDate: formatTelegramDate(parsed.paidDate),
-      reference: parsed.reference,
+      amount: formatCurrency(parsed.state.amount ?? 0, receipt.currency),
+      paymentMethod: parsed.state.paymentMethod ?? "",
+      paidDate: formatTelegramDate(new Date(`${parsed.state.paidDate}T12:00:00.000Z`)),
+      reference: parsed.state.reference,
     }),
     draftId: draft.id,
   };
@@ -778,8 +1058,14 @@ async function createTelegramPolicyDraft(input: {
     };
   }
 
-  const payload = extractTelegramKeyValuePayload(input.argument);
-  const summary = buildPolicyDraftSummary(payload);
+  const parsed = parseTelegramPolicyArgument(input.argument);
+  if (!parsed.ok) {
+    return {
+      ok: false as const,
+      replyText: parsed.error,
+    };
+  }
+
   const draft = await db.$transaction(async (tx) => {
     await tx.telegramDraft.updateMany({
       where: {
@@ -794,16 +1080,18 @@ async function createTelegramPolicyDraft(input: {
       },
     });
 
+    const state: TelegramDraftState = {
+      type: "POLICY_CAPTURE",
+      policy: parsed.state,
+    };
+
     return tx.telegramDraft.create({
       data: {
         userId: channel.userId,
         channelId: channel.id,
         type: "POLICY_CAPTURE",
         status: "COLLECTING",
-        payloadJson: JSON.stringify({
-          raw: input.argument,
-          ...payload,
-        }),
+        payloadJson: stringifyTelegramDraftState(state),
         expiresAt: new Date(Date.now() + TELEGRAM_DRAFT_TTL_MS),
       },
     });
@@ -812,11 +1100,23 @@ async function createTelegramPolicyDraft(input: {
   const link = buildPolicyDeskUrl(`/policies/new?telegramDraft=${draft.id}`);
   return {
     ok: true as const,
-    replyText: buildTelegramPolicyDraftMessage({
-      policyNumber: payload.policynumber ?? null,
-      summary,
-      link,
-    }),
+    replyText:
+      parsed.state.step === "ready"
+        ? buildTelegramPolicyDraftMessage({
+            policyNumber: parsed.state.policyNumber ?? null,
+            summary: buildPolicyDraftSummary({
+              policynumber: parsed.state.policyNumber ?? "",
+              client: parsed.state.clientName ?? "",
+              insurer: parsed.state.insurerName ?? "",
+              type: parsed.state.policyType ?? "",
+              start: parsed.state.startDate ?? "",
+              end: parsed.state.endDate ?? "",
+              premium: String(parsed.state.premiumAmount ?? ""),
+              frequency: parsed.state.paymentFrequency ?? "",
+            }),
+            link,
+          })
+        : getTelegramPolicyPrompt(parsed.state.step),
     draftId: draft.id,
   };
 }
@@ -841,22 +1141,52 @@ async function confirmTelegramDraft(input: {
     };
   }
 
-  if (draft.type === "PAYMENT_CAPTURE") {
-    const payload = JSON.parse(draft.payloadJson) as {
-      receiptId: string;
-      amount: number;
-      paidDate: string;
-      paymentMethod: string;
-      reference?: string | null;
+  const payload = parseTelegramDraftState(draft.payloadJson);
+  if (!payload) {
+    return {
+      ok: false as const,
+      replyText: "El borrador está dañado. Cancélalo y vuelve a intentarlo.",
     };
+  }
+
+  if (draft.type === "PAYMENT_CAPTURE") {
+    if (!isTelegramMutationsEnabled(channel)) {
+      return {
+        ok: false as const,
+        replyText:
+          "Las mutaciones por Telegram están desactivadas. Completa el borrador y confírmalo desde PolicyDesk.",
+      };
+    }
+
+    const state = payload.payment;
+    if (!state || state.step !== "ready" || !state.policyNumber || !state.receiptNumber) {
+      return {
+        ok: false as const,
+        replyText: "El borrador de pago todavía no está completo.",
+      };
+    }
+
+    const receipt = await getUserLinkedReceiptByPolicyAndNumber(
+      channel.userId,
+      state.policyNumber,
+      state.receiptNumber,
+      db,
+    );
+    if (!receipt) {
+      return {
+        ok: false as const,
+        replyText: "No encontré un recibo único para esa póliza y ese número.",
+      };
+    }
+
     try {
       const result = await recordPayment(
         {
-          receiptId: payload.receiptId,
-          amount: Number(payload.amount),
-          paidDate: new Date(payload.paidDate),
-          paymentMethod: payload.paymentMethod,
-          reference: payload.reference ?? null,
+          receiptId: receipt.id,
+          amount: Number(state.amount),
+          paidDate: new Date(`${state.paidDate}T12:00:00.000Z`),
+          paymentMethod: state.paymentMethod ?? "",
+          reference: state.reference ?? null,
           notes: "Pago capturado por Telegram.",
           actorId: channel.userId,
         },
@@ -876,10 +1206,10 @@ async function confirmTelegramDraft(input: {
         entityId: draft.id,
         action: "TELEGRAM_PAYMENT_DRAFT_CONFIRMED",
         newValue: {
-          receiptId: payload.receiptId,
+          receiptId: receipt.id,
           paymentId: result.payment.id,
-          amount: payload.amount,
-          paidDate: payload.paidDate,
+          amount: state.amount,
+          paidDate: state.paidDate,
         },
         userId: channel.userId,
         db,
@@ -898,6 +1228,14 @@ async function confirmTelegramDraft(input: {
     }
   }
 
+  const policyState = payload.policy;
+  if (!policyState || policyState.step !== "ready") {
+    return {
+      ok: false as const,
+      replyText: "El borrador de póliza todavía no está completo.",
+    };
+  }
+
   await db.telegramDraft.update({
     where: { id: draft.id },
     data: {
@@ -911,7 +1249,7 @@ async function confirmTelegramDraft(input: {
     entityId: draft.id,
     action: "TELEGRAM_POLICY_DRAFT_CONFIRMED",
     newValue: {
-      payload: draft.payloadJson,
+      payload: payload,
     },
     userId: channel.userId,
     db,
@@ -969,6 +1307,246 @@ async function cancelTelegramDraft(input: {
   return {
     ok: true as const,
     replyText: buildTelegramDraftCancelledMessage(draft.type === "PAYMENT_CAPTURE" ? "Pago" : "Póliza"),
+  };
+}
+
+async function continueTelegramDraftFromMessage(input: {
+  chatId: string;
+  text: string;
+  client?: DbClient;
+}) {
+  const db = input.client ?? getDb();
+  const { channel, draft } = await getActiveTelegramDraftForChat(input.chatId, db);
+  if (!channel) return null;
+  if (!draft) return null;
+
+  const payload = parseTelegramDraftState(draft.payloadJson);
+  if (!payload) {
+    return {
+      handled: true as const,
+      chatId: input.chatId,
+      replyText: "El borrador está dañado. Cancélalo y vuelve a intentarlo.",
+    };
+  }
+
+  const text = input.text.trim();
+  if (!text) return null;
+
+  if (payload.type === "PAYMENT_CAPTURE") {
+    const state = buildPaymentDraftStateFromInput(payload.payment ?? {});
+    switch (state.step) {
+      case "policyNumber":
+        state.policyNumber = text;
+        state.step = getNextPaymentStep(state);
+        break;
+      case "receiptNumber":
+        state.receiptNumber = text;
+        state.step = getNextPaymentStep(state);
+        break;
+      case "amount": {
+        const amount = Number(text.replace(/,/g, ""));
+        if (!Number.isFinite(amount) || amount <= 0) {
+          return {
+            handled: true as const,
+            chatId: input.chatId,
+            replyText: "El monto debe ser mayor a cero. Intenta de nuevo.",
+          };
+        }
+        state.amount = amount;
+        state.step = getNextPaymentStep(state);
+        break;
+      }
+      case "paidDate": {
+        const paidDate = parseTelegramIsoDate(text);
+        if (!paidDate) {
+          return {
+            handled: true as const,
+            chatId: input.chatId,
+            replyText: "La fecha debe tener formato YYYY-MM-DD. Intenta de nuevo.",
+          };
+        }
+        state.paidDate = paidDate.toISOString().slice(0, 10);
+        state.step = getNextPaymentStep(state);
+        break;
+      }
+      case "paymentMethod":
+        state.paymentMethod = text;
+        state.step = getNextPaymentStep(state);
+        break;
+      case "ready":
+        return {
+          handled: true as const,
+          chatId: input.chatId,
+          replyText: buildTelegramPaymentDraftMessage({
+            policyNumber: state.policyNumber ?? "—",
+            receiptNumber: state.receiptNumber ?? "—",
+            clientName: "—",
+            amount: formatCurrency(state.amount ?? 0, "MXN"),
+            paymentMethod: state.paymentMethod ?? "—",
+            paidDate: state.paidDate ?? "—",
+            reference: state.reference,
+          }),
+        };
+    }
+
+    const nextPayload: TelegramDraftState = {
+      type: "PAYMENT_CAPTURE",
+      payment: state,
+    };
+    await persistTelegramDraftState({ draftId: draft.id, state: nextPayload, client: db });
+
+    if (state.step === "ready") {
+      const receipt =
+        state.policyNumber && state.receiptNumber
+          ? await getUserLinkedReceiptByPolicyAndNumber(channel.userId, state.policyNumber, state.receiptNumber, db)
+          : null;
+      if (!receipt) {
+        return {
+          handled: true as const,
+          chatId: input.chatId,
+          replyText: "No encontré un recibo único para esa póliza y ese número. Revisa los datos o usa /cancelar para empezar de nuevo.",
+        };
+      }
+
+      const confirmedPayload: TelegramDraftState = {
+        type: "PAYMENT_CAPTURE",
+        payment: {
+          ...state,
+          receiptNumber: receipt.receiptNumber,
+          policyNumber: receipt.policy.policyNumber,
+          amount: state.amount,
+          paidDate: state.paidDate,
+          paymentMethod: state.paymentMethod,
+          reference: state.reference ?? null,
+        },
+      };
+      await persistTelegramDraftState({ draftId: draft.id, state: confirmedPayload, client: db });
+
+      return {
+        handled: true as const,
+        chatId: input.chatId,
+        replyText: buildTelegramPaymentDraftMessage({
+          policyNumber: receipt.policy.policyNumber,
+          receiptNumber: receipt.receiptNumber,
+          clientName: receipt.client.fullName,
+          amount: formatCurrency(state.amount ?? 0, receipt.currency),
+          paymentMethod: state.paymentMethod ?? "",
+          paidDate: formatTelegramDate(new Date(`${state.paidDate}T12:00:00.000Z`)),
+          reference: state.reference,
+        }),
+      };
+    }
+
+    return {
+      handled: true as const,
+      chatId: input.chatId,
+      replyText: getTelegramPaymentPrompt(state.step),
+    };
+  }
+
+  const state = buildPolicyDraftStateFromInput(payload.policy ?? {});
+  switch (state.step) {
+    case "policyNumber":
+      state.policyNumber = text;
+      break;
+    case "clientName":
+      state.clientName = text;
+      break;
+    case "insurerName":
+      state.insurerName = text;
+      break;
+    case "policyType":
+      state.policyType = text;
+      break;
+    case "startDate":
+      if (!parseTelegramIsoDate(text)) {
+        return {
+          handled: true as const,
+          chatId: input.chatId,
+          replyText: "La fecha debe tener formato YYYY-MM-DD. Intenta de nuevo.",
+        };
+      }
+      state.startDate = text;
+      break;
+    case "endDate":
+      if (!parseTelegramIsoDate(text)) {
+        return {
+          handled: true as const,
+          chatId: input.chatId,
+          replyText: "La fecha debe tener formato YYYY-MM-DD. Intenta de nuevo.",
+        };
+      }
+      state.endDate = text;
+      break;
+    case "premiumAmount": {
+      const premiumAmount = Number(text.replace(/,/g, ""));
+      if (!Number.isFinite(premiumAmount) || premiumAmount <= 0) {
+        return {
+          handled: true as const,
+          chatId: input.chatId,
+          replyText: "La prima debe ser mayor a cero. Intenta de nuevo.",
+        };
+      }
+      state.premiumAmount = premiumAmount;
+      break;
+    }
+    case "paymentFrequency":
+      state.paymentFrequency = text;
+      break;
+    case "ready":
+      return {
+        handled: true as const,
+        chatId: input.chatId,
+        replyText: buildTelegramPolicyDraftMessage({
+          policyNumber: state.policyNumber ?? null,
+          summary: buildPolicyDraftSummary({
+            policynumber: state.policyNumber ?? "",
+            client: state.clientName ?? "",
+            insurer: state.insurerName ?? "",
+            type: state.policyType ?? "",
+            start: state.startDate ?? "",
+            end: state.endDate ?? "",
+            premium: String(state.premiumAmount ?? ""),
+            frequency: state.paymentFrequency ?? "",
+          }),
+          link: buildPolicyDeskUrl(`/policies/new?telegramDraft=${draft.id}`),
+        }),
+      };
+  }
+
+  state.step = getNextPolicyStep(state);
+  const nextPayload: TelegramDraftState = {
+    type: "POLICY_CAPTURE",
+    policy: state,
+  };
+  await persistTelegramDraftState({ draftId: draft.id, state: nextPayload, client: db });
+
+  if (state.step === "ready") {
+    const link = buildPolicyDeskUrl(`/policies/new?telegramDraft=${draft.id}`);
+    return {
+      handled: true as const,
+      chatId: input.chatId,
+      replyText: buildTelegramPolicyDraftMessage({
+        policyNumber: state.policyNumber ?? null,
+        summary: buildPolicyDraftSummary({
+          policynumber: state.policyNumber ?? "",
+          client: state.clientName ?? "",
+          insurer: state.insurerName ?? "",
+          type: state.policyType ?? "",
+          start: state.startDate ?? "",
+          end: state.endDate ?? "",
+          premium: String(state.premiumAmount ?? ""),
+          frequency: state.paymentFrequency ?? "",
+        }),
+        link,
+      }),
+    };
+  }
+
+  return {
+    handled: true as const,
+    chatId: input.chatId,
+    replyText: getTelegramPolicyPrompt(state.step),
   };
 }
 
@@ -1388,7 +1966,24 @@ export async function processTelegramWebhookUpdate(
   const chatId = normalizeChatId(message.chat.id);
   const command = parseTelegramCommand(message.text);
   if (!command) {
-    return { handled: false };
+    if (message.chat.type !== "private") {
+      return { handled: true, chatId };
+    }
+
+    const rateLimit = checkRateLimit(`telegram:draft:${chatId}`, TELEGRAM_DRAFT_CONTINUATION_RATE_LIMIT);
+    if (!rateLimit.allowed) {
+      return {
+        handled: true,
+        chatId,
+        replyText: "Demasiados intentos. Espera un momento e inténtalo de nuevo.",
+      };
+    }
+
+    const continuation = await continueTelegramDraftFromMessage({
+      chatId,
+      text: message.text,
+    });
+    return continuation ?? { handled: false };
   }
 
   try {
@@ -1396,6 +1991,15 @@ export async function processTelegramWebhookUpdate(
       return {
         handled: true,
         chatId,
+      };
+    }
+
+    const rateLimit = checkRateLimit(`telegram:${chatId}:${command.command}`, TELEGRAM_COMMAND_RATE_LIMIT);
+    if (!rateLimit.allowed) {
+      return {
+        handled: true,
+        chatId,
+        replyText: "Demasiados intentos. Espera un momento e inténtalo de nuevo.",
       };
     }
 
@@ -1409,21 +2013,16 @@ export async function processTelegramWebhookUpdate(
         return {
           handled: true,
           chatId,
-          replyText: buildTelegramStatusMessage(Boolean(channel?.isEnabled && channel.telegramChatId)),
+          replyText: buildTelegramStatusMessage(
+            Boolean(channel?.isEnabled && channel.telegramChatId),
+            Boolean(channel?.telegramMutationsEnabled),
+          ),
         };
       }
       case "pago": {
-        if (!command.argument) {
-          return {
-            handled: true,
-            chatId,
-            replyText: "Usa: /pago <recibo> <monto> <fecha YYYY-MM-DD> <método> [referencia]",
-          };
-        }
-
         const result = await createTelegramPaymentDraft({
           chatId,
-          argument: command.argument,
+          argument: command.argument ?? "",
         });
 
         return {

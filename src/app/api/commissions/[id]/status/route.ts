@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { AuthError, requireUser } from "@/lib/auth";
+import { AuthError, requireAdmin } from "@/lib/auth";
 import { updateCommissionStatus } from "@/lib/commissions";
 import { logError } from "@/lib/logger";
 import { COMMISSION_STATUSES, type CommissionStatus } from "@/lib/domain-values";
+import { assertSameOrigin } from "@/lib/request-guards";
 
 const VALID_STATUSES: readonly CommissionStatus[] = COMMISSION_STATUSES;
 
@@ -13,10 +14,15 @@ export async function POST(
   const params = await context.params;
 
   try {
-    await requireUser();
+    await requireAdmin();
+    assertSameOrigin(request, "commission status update");
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof Error) {
+      logError("api.commissions.status.origin", error, { commissionId: params.id });
+      return NextResponse.json({ error: "No autorizado." }, { status: 403 });
     }
     throw error;
   }
