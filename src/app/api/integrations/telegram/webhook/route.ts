@@ -16,8 +16,13 @@ function hasValidSecret(request: NextRequest) {
 
 export async function GET() {
   return NextResponse.json(
-    { error: "Method not allowed" },
-    { status: 405, headers: { Allow: "POST" } },
+    { ok: false, error: "Method not allowed" },
+    {
+      status: 405,
+      headers: {
+        Allow: "POST",
+      },
+    },
   );
 }
 
