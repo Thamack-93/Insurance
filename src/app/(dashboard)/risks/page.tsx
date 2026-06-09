@@ -31,6 +31,39 @@ function riskHref(entityType: string, entityId: string) {
   return "/reports";
 }
 
+const RISK_TYPE_LABELS: Record<string, string> = {
+  CLIENT_MISSING_CONTACT: "Clientes sin contacto",
+  CLIENT_WITHOUT_ACTIVE_POLICY: "Clientes sin pólizas activas",
+  RENEWAL_WITHOUT_WORK_ITEM: "Renovaciones sin seguimiento",
+  RECEIPT_OVERDUE: "Recibos vencidos",
+  COMMISSION_OVERDUE: "Comisiones vencidas",
+  STALE_TASK: "Pendientes estancados",
+  INCONSISTENT_DATES: "Fechas inconsistentes",
+  ORPHAN_DOCUMENT: "Documentos huérfanos",
+  OVERLAPPING_POLICY_TERM: "Vigencias solapadas",
+  DUPLICATE_RECEIPT_NUMBER: "Recibos duplicados",
+};
+
+const ISSUE_CODE_LABELS: Record<string, string> = {
+  POLICY_OBJECT_MISSING: "Objeto asegurado faltante",
+  POLICY_PREMIUM_MISSING: "Prima faltante",
+  POLICY_PENDING: "Pólizas pendientes",
+  POLICY_PAYMENT_FREQUENCY_REVIEW: "Frecuencia de pago para revisar",
+  EMAIL_MISSING: "Email faltante",
+  PHONE_MISSING: "Teléfono faltante",
+  ADDRESS_MISSING: "Dirección faltante",
+  RFC_MISSING: "RFC faltante",
+  CONTACT_METHOD_MISSING: "Método de contacto faltante",
+};
+
+function getRiskTypeLabel(code: string) {
+  return RISK_TYPE_LABELS[code] ?? code;
+}
+
+function getIssueCodeLabel(code: string) {
+  return ISSUE_CODE_LABELS[code] ?? code;
+}
+
 function QualityBadge({ nivel }: { nivel: "Excelente" | "Bueno" | "Atención" | "Crítico" }) {
   const colors = {
     Excelente: "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900/60",
@@ -57,10 +90,12 @@ function ScoreBar({ score }: { score: number }) {
 export default async function RisksPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ tab?: string }>;
+  searchParams?: Promise<{ tab?: string; alertType?: string; issueCode?: string }>;
 }) {
   const params = (await searchParams) ?? {};
   const initialTab = params.tab === "completitud" ? "completitud" : "hallazgos";
+  const alertTypeFilter = params.alertType;
+  const issueCodeFilter = params.issueCode;
 
   const db = getDb();
   const [risks, openNotifications, clientScores, policyScores] = await Promise.all([
@@ -70,9 +105,11 @@ export default async function RisksPage({
     getPolicyDataQualityScores(),
   ]);
 
-  const critical = risks.filter((risk) => risk.severity === "CRITICAL");
-  const warnings = risks.filter((risk) => risk.severity === "WARNING");
-  const info = risks.filter((risk) => risk.severity === "INFO");
+  const filteredRisks = alertTypeFilter ? risks.filter((r) => r.alertType === alertTypeFilter) : risks;
+
+  const critical = filteredRisks.filter((risk) => risk.severity === "CRITICAL");
+  const warnings = filteredRisks.filter((risk) => risk.severity === "WARNING");
+  const info = filteredRisks.filter((risk) => risk.severity === "INFO");
 
   const typeCounts = risks.reduce<Record<string, number>>((acc, risk) => {
     acc[risk.alertType] = (acc[risk.alertType] ?? 0) + 1;
@@ -93,6 +130,13 @@ export default async function RisksPage({
   const policyCritical = policyScores.filter((p) => p.score < 50).length;
   const clientAttention = clientScores.filter((c) => c.nivel === "Atención").length;
   const policyAttention = policyScores.filter((p) => p.score >= 50 && p.score < 75).length;
+
+  const filteredClientScores = issueCodeFilter
+    ? clientScores.filter((c) => c.issues.some((i) => i.code === issueCodeFilter))
+    : clientScores;
+  const filteredPolicyScores = issueCodeFilter
+    ? policyScores.filter((p) => p.issues.some((i) => i.code === issueCodeFilter))
+    : policyScores;
 
   const allIssues = [
     ...clientScores.flatMap((c) => c.issues.map((i) => ({ ...i, entity: c.cliente }))),
@@ -168,14 +212,14 @@ export default async function RisksPage({
 
         <TabsContent value="hallazgos" className="space-y-6">
           <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-            <SectionCard title="Hallazgos" description="Ordenados por severidad y utilidad inmediata.">
-              {risks.length === 0 ? (
+            <SectionCard title="Hallazgos" description={alertTypeFilter ? `Filtrado por: ${getRiskTypeLabel(alertTypeFilter)}` : "Ordenados por severidad y utilidad inmediata."}>
+              {filteredRisks.length === 0 ? (
                 <div className="px-4 py-6 text-sm text-muted-foreground">
-                  No hay hallazgos activos. ¡Cartera limpia!
+                  {alertTypeFilter ? "No hay hallazgos de este tipo." : "No hay hallazgos activos. ¡Cartera limpia!"}
                 </div>
               ) : (
                 <div className="divide-y divide-stone-200/80">
-                  {risks.slice(0, 12).map((risk) => (
+                  {filteredRisks.slice(0, 12).map((risk) => (
                     <div
                       key={`${risk.alertType}-${risk.entityId}-${risk.title}`}
                       className="flex items-start justify-between gap-4 px-4 py-4"
@@ -187,7 +231,7 @@ export default async function RisksPage({
                         </div>
                         <p className="mt-1 text-sm text-muted-foreground">{risk.description}</p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {risk.entityType} · {risk.alertType}
+                          {risk.entityType} · {getRiskTypeLabel(risk.alertType)}
                         </p>
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-2">
@@ -208,10 +252,14 @@ export default async function RisksPage({
               ) : (
                 <div className="divide-y divide-stone-200/80">
                   {topTypes.map((entry) => (
-                    <div key={entry.type} className="flex items-center justify-between gap-4 px-4 py-4">
-                      <p className="text-sm font-medium text-foreground">{entry.type}</p>
-                      <p className="text-sm text-muted-foreground">{entry.count}</p>
-                    </div>
+                    <Link
+                      key={entry.type}
+                      href={`/risks?tab=hallazgos&alertType=${encodeURIComponent(entry.type)}`}
+                      className="flex items-center justify-between gap-4 px-4 py-4 hover:bg-muted/50 transition-colors"
+                    >
+                      <p className="text-sm font-medium text-foreground">{getRiskTypeLabel(entry.type)}</p>
+                      <Badge variant="secondary" className="rounded-full">{entry.count}</Badge>
+                    </Link>
                   ))}
                 </div>
               )}
@@ -220,6 +268,14 @@ export default async function RisksPage({
         </TabsContent>
 
         <TabsContent value="completitud" className="space-y-6">
+          {issueCodeFilter && (
+            <div className="flex items-center gap-2 rounded-2xl bg-muted/50 px-4 py-3">
+              <Badge variant="secondary">Filtrado: {getIssueCodeLabel(issueCodeFilter)}</Badge>
+              <Link href="/risks?tab=completitud">
+                <Button variant="ghost" size="sm" className="h-6 rounded-full">Limpiar filtro</Button>
+              </Link>
+            </div>
+          )}
           <section className="grid gap-3 md:grid-cols-2">
             <MetricCard
               title="Críticos"
@@ -238,9 +294,9 @@ export default async function RisksPage({
           </section>
 
           <section className="grid gap-6 xl:grid-cols-2">
-            <SectionCard title="Calidad por cliente" description="Peores primero.">
-              {clientScores.length === 0 ? (
-                <div className="px-4 py-6 text-sm text-muted-foreground">No hay clientes para evaluar.</div>
+            <SectionCard title="Calidad por cliente" description={issueCodeFilter ? `Filtrado por: ${getIssueCodeLabel(issueCodeFilter)}` : "Peores primero."}>
+              {filteredClientScores.length === 0 ? (
+                <div className="px-4 py-6 text-sm text-muted-foreground">{issueCodeFilter ? "No hay clientes con este problema." : "No hay clientes para evaluar."}</div>
               ) : (
                 <Table>
                   <TableHeader>
@@ -253,16 +309,20 @@ export default async function RisksPage({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {clientScores.slice(0, 10).map((client) => (
+                    {filteredClientScores.slice(0, 10).map((client) => (
                       <TableRow key={client.clienteId}>
                         <TableCell>
                           <Link href={`/clients/${client.clienteId}`} className="font-medium hover:text-primary">
                             {client.cliente}
                           </Link>
                           {client.issues.length > 0 ? (
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {client.issues.length} problema(s)
-                            </p>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {client.issues.slice(0, 3).map((issue) => (
+                                <Badge key={issue.code} variant="outline" className="text-xs">
+                                  {issue.etiqueta}
+                                </Badge>
+                              ))}
+                            </div>
                           ) : null}
                         </TableCell>
                         <TableCell>
@@ -284,9 +344,9 @@ export default async function RisksPage({
               )}
             </SectionCard>
 
-            <SectionCard title="Calidad por póliza" description="Peores primero.">
-              {policyScores.length === 0 ? (
-                <div className="px-4 py-6 text-sm text-muted-foreground">No hay pólizas para evaluar.</div>
+            <SectionCard title="Calidad por póliza" description={issueCodeFilter ? `Filtrado por: ${getIssueCodeLabel(issueCodeFilter)}` : "Peores primero."}>
+              {filteredPolicyScores.length === 0 ? (
+                <div className="px-4 py-6 text-sm text-muted-foreground">{issueCodeFilter ? "No hay pólizas con este problema." : "No hay pólizas para evaluar."}</div>
               ) : (
                 <Table>
                   <TableHeader>
@@ -298,7 +358,7 @@ export default async function RisksPage({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {policyScores.slice(0, 10).map((policy) => (
+                    {filteredPolicyScores.slice(0, 10).map((policy) => (
                       <TableRow key={policy.polizaId}>
                         <TableCell>
                           <Link href={`/policies/${policy.polizaId}`} className="font-medium hover:text-primary">
@@ -347,13 +407,17 @@ export default async function RisksPage({
             ) : (
               <div className="divide-y divide-stone-200/80">
                 {topIssues.map(([code, dataItem]) => (
-                  <div key={code} className="flex items-center justify-between gap-4 px-4 py-4">
+                  <Link
+                    key={code}
+                    href={`/risks?tab=completitud&issueCode=${encodeURIComponent(code)}`}
+                    className="flex items-center justify-between gap-4 px-4 py-4 hover:bg-muted/50 transition-colors"
+                  >
                     <div className="flex items-center gap-3">
                       <FileWarning className="size-4 text-amber-500" />
-                      <span className="text-sm font-medium">{dataItem.label}</span>
+                      <span className="text-sm font-medium">{getIssueCodeLabel(code)}</span>
                     </div>
                     <Badge variant="outline">{dataItem.count} casos</Badge>
-                  </div>
+                  </Link>
                 ))}
               </div>
             )}

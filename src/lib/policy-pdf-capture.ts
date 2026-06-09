@@ -1,6 +1,6 @@
 import "server-only";
 
-import { PDFParse, VerbosityLevel } from "pdf-parse";
+import PDFParser from "pdf2json";
 import { getDb } from "@/lib/db";
 import { parseDateInput } from "@/lib/form-utils";
 import { normalize } from "@/lib/search-utils";
@@ -423,11 +423,21 @@ function scoreTextMatch(needle: string, candidate: string) {
 }
 
 export async function parsePolicyPdfCapture(file: Uint8Array) {
-  const parser = new PDFParse({ data: file, verbosity: VerbosityLevel.ERRORS });
+  const pdfParser = new PDFParser();
 
   try {
-    const parsed = await parser.getText();
-    const text = typeof parsed === "string" ? parsed : parsed?.text ?? "";
+    const text = await new Promise<string>((resolve, reject) => {
+      pdfParser.on("pdfParser_dataReady", () => {
+        resolve(pdfParser.getRawTextContent());
+      });
+      pdfParser.on("pdfParser_dataError", (errData) => {
+        const errorMessage = errData && "parserError" in errData && errData.parserError instanceof Error
+          ? errData.parserError.message
+          : "PDF parsing failed";
+        reject(new Error(errorMessage));
+      });
+      pdfParser.parseBuffer(Buffer.from(file));
+    });
 
     if (!text.trim()) {
       throw new PolicyPdfCaptureError(
@@ -460,8 +470,6 @@ export async function parsePolicyPdfCapture(file: Uint8Array) {
       "PARSE_FAILURE",
       "No pudimos analizar el PDF. Revisa que el archivo esté completo y tenga texto legible.",
     );
-  } finally {
-    await parser.destroy().catch(() => {});
   }
 }
 

@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 
-import { PDFParse, VerbosityLevel } from "pdf-parse";
+import PDFParser from "pdf2json";
 
 import { SYSTEM_USER_ID } from "@/lib/auth";
 import { writeActivityLog } from "@/lib/activity-log";
@@ -70,11 +70,23 @@ function scoreTextMatch(needle: string, candidate: string) {
 
 async function parsePdfDraft(pdfPath: string) {
   const file = await readFile(pdfPath);
-  const parser = new PDFParse({ data: new Uint8Array(file), verbosity: VerbosityLevel.ERRORS });
-  const textResult = await parser.getText();
-  await parser.destroy();
-  const draft = extractPolicyPdfDraftFromText(textResult.text ?? "");
-  return { draft, text: textResult.text ?? "" };
+  const pdfParser = new PDFParser();
+
+  const text = await new Promise<string>((resolve, reject) => {
+    pdfParser.on("pdfParser_dataReady", () => {
+      resolve(pdfParser.getRawTextContent());
+    });
+    pdfParser.on("pdfParser_dataError", (errData) => {
+      const errorMessage = errData && "parserError" in errData && errData.parserError instanceof Error
+        ? errData.parserError.message
+        : "PDF parsing failed";
+      reject(new Error(errorMessage));
+    });
+    pdfParser.parseBuffer(Buffer.from(file));
+  });
+
+  const draft = extractPolicyPdfDraftFromText(text);
+  return { draft, text };
 }
 
 function buildCaptureNotes(draft: PolicyPdfCaptureDraft, sourcePolicyNumber: string | null, sourceSerial: string | null) {
