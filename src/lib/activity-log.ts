@@ -73,6 +73,7 @@ export type ActivityFilter = {
   entityType?: string;
   entityId?: string;
   action?: string;
+  actionStartsWith?: string;
   from?: Date;
   to?: Date;
 };
@@ -90,7 +91,11 @@ export async function getAllActivity({
   const where: Prisma.ActivityLogWhereInput = {};
   if (filter.entityType) where.entityType = filter.entityType;
   if (filter.entityId) where.entityId = filter.entityId;
-  if (filter.action) where.action = { contains: filter.action };
+  if (filter.actionStartsWith) {
+    where.action = { startsWith: filter.actionStartsWith };
+  } else if (filter.action) {
+    where.action = { contains: filter.action };
+  }
   if (filter.from || filter.to) {
     where.createdAt = {
       ...(filter.from ? { gte: filter.from } : {}),

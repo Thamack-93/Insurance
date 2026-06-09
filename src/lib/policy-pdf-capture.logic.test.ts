@@ -19,7 +19,7 @@ describe("policy-pdf-capture", () => {
 
   it("extracts the core renewal fields from the PDF text layout", () => {
     const text = `
-      AXA Seguros
+      AXA Seguros, S.A. de C.V.
       Póliza 19941U01
       Asegurado titular
       ARELLANO REGINO, ADRIAN YOSEF
@@ -36,7 +36,7 @@ describe("policy-pdf-capture", () => {
 
     expect(draft.policyNumber).toBe("19941U01");
     expect(draft.clientName).toBe("ARELLANO REGINO, ADRIAN YOSEF");
-    expect(draft.insurerName).toBe("AXA Seguros");
+    expect(draft.insurerName).toBe("AXA Seguros, S.A. de C.V.");
     expect(draft.policyType).toBe("GMM");
     expect(draft.startDate).toBe("2026-05-28");
     expect(draft.endDate).toBe("2027-05-28");
@@ -45,6 +45,8 @@ describe("policy-pdf-capture", () => {
     expect(draft.paymentPlan).toBe("Flex Plus");
     expect(draft.premiumAmount).toBeCloseTo(30266.88);
     expect(draft.requestNumber).toBe("000013938707");
+    expect(draft.insuredObject).toBeNull();
+    expect(draft.beneficiaryInfo).toBeNull();
     expect(draft.sourcePolicyNumber).toBe("19941U00");
   });
 

@@ -6,6 +6,8 @@ import {
   FileSignature,
   History,
   PlayCircle,
+  ShieldAlert,
+  Siren,
   Trash2,
   Wallet,
 } from "lucide-react";
@@ -38,6 +40,17 @@ const actionIconMap: Record<string, IconTone> = {
   CLOSE: { icon: CircleCheck, tone: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
   REOPEN: { icon: PlayCircle, tone: "bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300" },
   RENEW: { icon: History, tone: "bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300" },
+  SECURITY_LOGIN_FAILED: { icon: ShieldAlert, tone: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300" },
+  SECURITY_LOGIN_DISABLED: { icon: ShieldAlert, tone: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300" },
+  SECURITY_RATE_LIMITED: { icon: Siren, tone: "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" },
+  SECURITY_INVALID_SECRET: { icon: ShieldAlert, tone: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300" },
+  SECURITY_INVALID_PAYLOAD: { icon: ShieldAlert, tone: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300" },
+  SECURITY_SAME_ORIGIN_BLOCKED: { icon: ShieldAlert, tone: "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" },
+  SECURITY_ACCESS_DENIED_DOCUMENT: { icon: ShieldAlert, tone: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300" },
+  SECURITY_ACCESS_DENIED_FILE_PATH: { icon: ShieldAlert, tone: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300" },
+  SECURITY_ACCESS_DENIED: { icon: ShieldAlert, tone: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300" },
+  SECURITY_PDF_PARSE_FAILED: { icon: ShieldAlert, tone: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300" },
+  SECURITY_PDF_NO_TEXT: { icon: Siren, tone: "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" },
 };
 
 const defaultIcon: IconTone = { icon: Activity, tone: "bg-muted text-muted-foreground" };
@@ -52,6 +65,17 @@ const actionLabelMap: Record<string, string> = {
   CLOSE: "Cerrado",
   REOPEN: "Reabierto",
   RENEW: "Renovado",
+  SECURITY_LOGIN_FAILED: "Inicio de sesión fallido",
+  SECURITY_LOGIN_DISABLED: "Acceso bloqueado",
+  SECURITY_RATE_LIMITED: "Límite de tasa",
+  SECURITY_INVALID_SECRET: "Secret inválido",
+  SECURITY_INVALID_PAYLOAD: "Payload inválido",
+  SECURITY_SAME_ORIGIN_BLOCKED: "Mutación bloqueada",
+  SECURITY_ACCESS_DENIED_DOCUMENT: "Acceso a documento bloqueado",
+  SECURITY_ACCESS_DENIED_FILE_PATH: "Ruta de archivo inválida",
+  SECURITY_ACCESS_DENIED: "Acceso denegado",
+  SECURITY_PDF_PARSE_FAILED: "Error al analizar PDF",
+  SECURITY_PDF_NO_TEXT: "PDF sin texto extraíble",
 };
 
 const entityLabelMap: Record<string, string> = {
@@ -65,6 +89,7 @@ const entityLabelMap: Record<string, string> = {
   Payment: "Pago",
   Commission: "Comisión",
   Document: "Documento",
+  SecurityEvent: "Seguridad",
 };
 
 function lookupAction(action: string): IconTone {

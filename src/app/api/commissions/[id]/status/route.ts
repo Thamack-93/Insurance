@@ -4,6 +4,7 @@ import { updateCommissionStatus } from "@/lib/commissions";
 import { logError } from "@/lib/logger";
 import { COMMISSION_STATUSES, type CommissionStatus } from "@/lib/domain-values";
 import { assertSameOrigin } from "@/lib/request-guards";
+import { recordSecurityAccessDenied, SECURITY_EVENT_TYPES } from "@/lib/security-events";
 
 const VALID_STATUSES: readonly CommissionStatus[] = COMMISSION_STATUSES;
 
@@ -15,9 +16,29 @@ export async function POST(
 
   try {
     await requireAdmin();
-    assertSameOrigin(request, "commission status update");
+    try {
+      assertSameOrigin(request, "commission status update");
+    } catch {
+      await recordSecurityAccessDenied({
+        alertType: SECURITY_EVENT_TYPES.sameOriginBlocked,
+        title: "Actualización de comisión bloqueada por same-origin",
+        description: "Se intentó cambiar el estado de una comisión desde un origen no permitido.",
+        severity: "WARNING",
+        entityType: "SecurityEvent",
+        entityId: `commission-status:same-origin:${params.id}`,
+      });
+      return NextResponse.json({ error: "No autorizado." }, { status: 403 });
+    }
   } catch (error) {
     if (error instanceof AuthError) {
+      await recordSecurityAccessDenied({
+        alertType: SECURITY_EVENT_TYPES.accessDenied,
+        title: "Actualización de comisión sin permisos",
+        description: "Se intentó cambiar el estado de una comisión sin permisos de administrador.",
+        severity: "WARNING",
+        entityType: "SecurityEvent",
+        entityId: `commission-status:auth:${params.id}`,
+      });
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     if (error instanceof Error) {

@@ -28,6 +28,8 @@ export function notificationLink(entityType: string, entityId: string): string {
       return `/documents`;
     case "Commission":
       return `/commissions`;
+    case "SecurityEvent":
+      return `/activity?view=security`;
     case "Insurer":
       return `/insurers/${entityId}`;
     default:

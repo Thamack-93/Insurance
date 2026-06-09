@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { logError } from "@/lib/logger";
+import { getRequestIp } from "@/lib/request-guards";
+import { recordSecurityEvent, SECURITY_EVENT_TYPES } from "@/lib/security-events";
 import {
   isTelegramWebhookSecretValid,
   processTelegramWebhookUpdate,
@@ -28,6 +30,14 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   if (!hasValidSecret(request)) {
+    await recordSecurityEvent({
+      alertType: SECURITY_EVENT_TYPES.invalidSecretTelegram,
+      title: "Webhook de Telegram con secret inválido",
+      description: "Se rechazó una petición al webhook de Telegram por firma inválida.",
+      severity: "WARNING",
+      entityType: "SecurityEvent",
+      entityId: `telegram-webhook:invalid-secret:${getRequestIp(request)}`,
+    });
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
@@ -35,6 +45,14 @@ export async function POST(request: NextRequest) {
   try {
     update = (await request.json()) as TelegramWebhookUpdate;
   } catch {
+    await recordSecurityEvent({
+      alertType: SECURITY_EVENT_TYPES.invalidPayload,
+      title: "Webhook de Telegram con payload inválido",
+      description: "Se rechazó un payload inválido antes de procesar el webhook.",
+      severity: "WARNING",
+      entityType: "SecurityEvent",
+      entityId: `telegram-webhook:invalid-payload:${getRequestIp(request)}`,
+    });
     return NextResponse.json({ ok: false, error: "Invalid payload" }, { status: 400 });
   }
 

@@ -118,6 +118,14 @@ export default async function DashboardPage() {
           icon={FileWarning}
           tone="amber"
         />
+        <KpiCard
+          title="Alertas de seguridad"
+          value={data.kpis.securityAlerts}
+          description="Eventos SECURITY_* abiertos"
+          href="/activity?view=security"
+          icon={Siren}
+          tone="red"
+        />
       </StatGrid>
 
       <div className="grid gap-4 xl:grid-cols-2">

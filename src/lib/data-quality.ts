@@ -541,9 +541,13 @@ export async function getPolicyDataQualityScores() {
       insuredObject: true,
       premiumAmount: true,
       clientId: true,
-      _count: {
+      receipts: {
         select: {
-          receipts: true,
+          id: true,
+          status: true,
+          periodStartDate: true,
+          periodEndDate: true,
+          amount: true,
         },
       },
       insuredParties: {
@@ -595,14 +599,36 @@ export async function getPolicyDataQualityScores() {
         score -= 15;
       }
 
-      if (policy.paymentFrequency === "SINGLE" && policy._count.receipts > 1) {
-        issues.push({
-          code: "POLICY_PAYMENT_FREQUENCY_REVIEW",
-          etiqueta: "Frecuencia de pago para revisar",
-          descripcion: "La póliza está marcada como única, pero tiene múltiples recibos y conviene validar si debe normalizarse.",
-          penalizacion: 8,
+      if (policy.paymentFrequency === "SINGLE" && policy.receipts.length > 1) {
+        // Filter out cancelled receipts
+        const activeReceipts = policy.receipts.filter((r) => r.status !== "CANCELLED");
+        // Filter out prorrateo receipts (period < 30 days)
+        const nonProratedReceipts = activeReceipts.filter((r) => {
+          const days = differenceInCalendarDays(r.periodEndDate, r.periodStartDate);
+          return days >= 30;
         });
-        score -= 8;
+        // Check if there are 2+ receipts with consecutive or non-overlapping periods
+        if (nonProratedReceipts.length >= 2) {
+          const sorted = [...nonProratedReceipts].sort(
+            (a, b) => a.periodStartDate.getTime() - b.periodStartDate.getTime(),
+          );
+          const hasConsecutive = sorted.some((receipt, i) => {
+            if (i === 0) return false;
+            const prev = sorted[i - 1];
+            // Check if periods are consecutive or non-overlapping with reasonable gap
+            const gap = differenceInCalendarDays(receipt.periodStartDate, prev.periodEndDate);
+            return gap >= 0 && gap <= 5; // Allow 5 days gap for grace period
+          });
+          if (hasConsecutive) {
+            issues.push({
+              code: "POLICY_PAYMENT_FREQUENCY_REVIEW",
+              etiqueta: "Frecuencia de pago para revisar",
+              descripcion: "La póliza está marcada como única, pero tiene múltiples recibos consecutivos y conviene validar si debe normalizarse.",
+              penalizacion: 8,
+            });
+            score -= 8;
+          }
+        }
       }
 
       const completitud = Math.max(

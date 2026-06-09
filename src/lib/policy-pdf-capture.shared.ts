@@ -379,7 +379,7 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
     (normalizedFullText.includes("qualitas")
       ? "Quálitas Compañía de Seguros"
       : normalizedFullText.includes("axa seguros")
-      ? "AXA Seguros"
+      ? "AXA Seguros, S.A. de C.V."
       : extractInlineValue(lines, ["Aseguradora", "Compañía", "Compañia"]) ?? "");
   const policyType = normalizePolicyType(extractInlineValue(lines, ["Ramo", "Tipo", "Subramo"]) ?? (normalizedFullText.includes("gmm") ? "GMM" : ""));
   const paymentFrequency = normalizePaymentFrequency(

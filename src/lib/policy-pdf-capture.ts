@@ -1,5 +1,6 @@
 import "server-only";
 
+import { PDFParse, VerbosityLevel } from "pdf-parse";
 import { getDb } from "@/lib/db";
 import { parseDateInput } from "@/lib/form-utils";
 import { normalize } from "@/lib/search-utils";
@@ -11,6 +12,16 @@ import type {
 
 const PAYMENT_FREQUENCY_CODES = new Set(["MONTHLY", "QUARTERLY", "SEMIANNUAL", "ANNUAL", "SINGLE", "OTHER"]);
 const POLICY_TYPES = new Set(["AUTO", "GMM", "VIDA", "DANOS", "FIANZAS", "HOGAR", "RESPONSABILIDAD_CIVIL", "EMPRESARIAL", "ACCIDENTES", "OTRO"]);
+
+export class PolicyPdfCaptureError extends Error {
+  code: "INVALID_PDF" | "NO_TEXT" | "PARSE_FAILURE";
+
+  constructor(code: "INVALID_PDF" | "NO_TEXT" | "PARSE_FAILURE", message: string) {
+    super(message);
+    this.name = "PolicyPdfCaptureError";
+    this.code = code;
+  }
+}
 
 function compact(value: string) {
   return value.replace(/\s+/g, " ").trim();
@@ -317,7 +328,7 @@ export function extractPolicyPdfDraftFromText(text: string) {
     (normalizedFullText.includes("qualitas")
       ? "Quálitas Compañía de Seguros"
       : normalizedFullText.includes("axa seguros")
-      ? "AXA Seguros"
+      ? "AXA Seguros, S.A. de C.V."
       : extractInlineValue(lines, ["Aseguradora", "Compañía", "Compañia"]) ?? "");
   const policyType = normalizePolicyType(extractInlineValue(lines, ["Ramo", "Tipo", "Subramo"]) ?? (normalizedFullText.includes("gmm") ? "GMM" : ""));
   const paymentFrequency = normalizePaymentFrequency(
@@ -412,12 +423,46 @@ function scoreTextMatch(needle: string, candidate: string) {
 }
 
 export async function parsePolicyPdfCapture(file: Uint8Array) {
-  const pdfParseModule = await import("pdf-parse");
-  const pdfParse =
-    (pdfParseModule as unknown as { default?: (input: Buffer) => Promise<{ text?: string }> }).default ??
-    (pdfParseModule as unknown as (input: Buffer) => Promise<{ text?: string }>);
-  const parsed = await pdfParse(Buffer.from(file));
-  return extractPolicyPdfDraftFromText(parsed.text ?? "");
+  const parser = new PDFParse({ data: file, verbosity: VerbosityLevel.ERRORS });
+
+  try {
+    const parsed = await parser.getText();
+    const text = typeof parsed === "string" ? parsed : parsed?.text ?? "";
+
+    if (!text.trim()) {
+      throw new PolicyPdfCaptureError(
+        "NO_TEXT",
+        "El PDF no tiene texto extraíble. Puede ser una imagen, un escaneo o un archivo sin capa de texto.",
+      );
+    }
+
+    return extractPolicyPdfDraftFromText(text);
+  } catch (error) {
+    if (error instanceof PolicyPdfCaptureError) {
+      throw error;
+    }
+
+    const message = error instanceof Error ? error.message.toLowerCase() : "";
+    if (
+      message.includes("invalid pdf") ||
+      message.includes("malformed") ||
+      message.includes("corrupt") ||
+      message.includes("xref") ||
+      message.includes("format error")
+    ) {
+      throw new PolicyPdfCaptureError(
+        "INVALID_PDF",
+        "El PDF parece estar corrupto o no es un archivo PDF válido.",
+      );
+    }
+
+    throw new PolicyPdfCaptureError(
+      "PARSE_FAILURE",
+      "No pudimos analizar el PDF. Revisa que el archivo esté completo y tenga texto legible.",
+    );
+  } finally {
+    await parser.destroy().catch(() => {});
+  }
 }
 
 export async function buildPolicyPdfCapturePreview(file: Uint8Array): Promise<PolicyPdfCapturePreview> {

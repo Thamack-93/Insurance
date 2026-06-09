@@ -8,6 +8,11 @@ import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-gu
 import { parseDateInput } from "@/lib/form-utils";
 import { assertClientPortfolioAccess, assertPolicyPortfolioAccess } from "@/lib/portfolio-access";
 import type { PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
+import {
+  recordSecurityAccessDenied,
+  recordSecurityRateLimit,
+  SECURITY_EVENT_TYPES,
+} from "@/lib/security-events";
 
 export const runtime = "nodejs";
 
@@ -77,22 +82,50 @@ function buildCaptureNotes(draft: PolicyPdfCaptureDraft, existingNotes: string |
 
 export async function POST(request: NextRequest) {
   try {
-    const user = await requireUser().catch((error) => {
+    let user: Awaited<ReturnType<typeof requireUser>>;
+    try {
+      user = await requireUser();
+    } catch (error) {
       if (error instanceof AuthError) {
-        return null;
+        await recordSecurityAccessDenied({
+          alertType: SECURITY_EVENT_TYPES.accessDenied,
+          title: "Confirmación de captura sin sesión válida",
+          description: "Se intentó confirmar una captura de póliza sin sesión válida.",
+          severity: "WARNING",
+          entityType: "SecurityEvent",
+          entityId: "policy-capture-confirm:auth",
+        });
+        return NextResponse.json({ error: "No autorizado." }, { status: 401 });
       }
       throw error;
-    });
-    if (!user) {
-      return NextResponse.json({ error: "No autorizado." }, { status: 401 });
     }
 
-    assertSameOrigin(request, "policy pdf capture confirm");
+    try {
+      assertSameOrigin(request, "policy pdf capture confirm");
+    } catch {
+      await recordSecurityAccessDenied({
+        alertType: SECURITY_EVENT_TYPES.sameOriginBlocked,
+        title: "Confirmación de captura bloqueada por same-origin",
+        description: "Se intentó confirmar una captura de póliza desde un origen no permitido.",
+        severity: "WARNING",
+        entityType: "SecurityEvent",
+        entityId: "policy-capture-confirm:same-origin",
+      });
+      return NextResponse.json({ error: "No autorizado." }, { status: 403 });
+    }
     const rateLimit = checkRateLimit(`policy-pdf-confirm:${getRequestIp(request)}`, {
       limit: 6,
       windowMs: 15 * 60 * 1000,
     });
     if (!rateLimit.allowed) {
+      await recordSecurityRateLimit({
+        alertType: SECURITY_EVENT_TYPES.rateLimitedRequest,
+        title: "Límite de confirmaciones de captura alcanzado",
+        description: "Se bloqueó una confirmación de captura por exceso de intentos.",
+        severity: "WARNING",
+        entityType: "SecurityEvent",
+        entityId: "policy-capture-confirm:rate-limit",
+      });
       return NextResponse.json(
         { error: "Demasiados intentos. Espera un momento e inténtalo de nuevo." },
         {
@@ -106,8 +139,24 @@ export async function POST(request: NextRequest) {
     const draft = normalizeDraft(payload.draft);
     const db = getDb();
 
-    await assertClientPortfolioAccess(payload.clientId, user.id);
-    await assertPolicyPortfolioAccess(payload.sourcePolicyId, user.id);
+    try {
+      await assertClientPortfolioAccess(payload.clientId, user.id);
+      await assertPolicyPortfolioAccess(payload.sourcePolicyId, user.id);
+    } catch (error) {
+      if (error instanceof AuthError) {
+        await recordSecurityAccessDenied({
+          alertType: SECURITY_EVENT_TYPES.accessDenied,
+          title: "Confirmación de captura sin acceso a cartera",
+          description: "Se intentó confirmar una captura de póliza fuera de la cartera permitida.",
+          severity: "WARNING",
+          entityType: "SecurityEvent",
+          entityId: `policy-capture-confirm:portfolio:${payload.sourcePolicyId}`,
+          userId: user.id,
+        });
+        return NextResponse.json({ error: "No tienes acceso a esta póliza." }, { status: error.status });
+      }
+      throw error;
+    }
 
     const insurer = await db.insurer.findUnique({
       where: { id: payload.insurerId },

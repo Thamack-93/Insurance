@@ -51,6 +51,7 @@ export async function getDashboardData() {
     commissionsByMonthRows,
     recentActivity,
     openNotifications,
+    securityAlerts,
     risks,
     criticalWorkItems,
   ] = await Promise.all([
@@ -117,6 +118,7 @@ export async function getDashboardData() {
     }),
     db.activityLog.findMany({ orderBy: { createdAt: "desc" }, take: 8 }),
     db.alert.findMany({ where: { status: "OPEN" }, orderBy: { createdAt: "desc" }, take: 8 }),
+    db.alert.count({ where: { status: "OPEN", alertType: { startsWith: "SECURITY_" } } }),
     detectRisks(scope.portfolioOwnerId),
     getWorkItems({
       workItemTypes: ["TASK"],
@@ -153,6 +155,7 @@ export async function getDashboardData() {
       urgentWorkItems,
       commissionsReceivable,
       risksDetected: risks.length,
+      securityAlerts,
     },
     charts: {
       dueByWeek: groupDatesByWeek(upcomingReceiptsForChart, "dueDate"),

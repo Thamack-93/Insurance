@@ -130,6 +130,11 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
             status: { in: [...OPEN_WORK_ITEM_STATUSES] },
           },
         },
+        sourceRenewalSuggestions: {
+          none: {
+            status: { in: ["PENDING", "ACCEPTED", "MERGED"] },
+          },
+        },
       },
       portfolioOwnerId,
     ).then((policies) => policies.slice(0, TAKE_LIMIT)),
@@ -163,7 +168,7 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
       })
     : [];
 
-  const duplicateReceipts = duplicateReceiptKeys.length
+  const duplicateReceiptCandidates = duplicateReceiptKeys.length
     ? await db.receipt.findMany({
         where: {
           OR: duplicateReceiptKeys.map((row) => ({
@@ -171,10 +176,63 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
             receiptNumber: row.receiptNumber,
           })),
         },
-        select: { id: true, receiptNumber: true },
+        select: {
+          id: true,
+          receiptNumber: true,
+          policyId: true,
+          periodStartDate: true,
+          periodEndDate: true,
+          status: true,
+          amount: true,
+          paidDate: true,
+        },
         take: TAKE_LIMIT * 2,
       })
     : [];
+
+  // Group by policyId + receiptNumber and filter out false positives
+  const receiptGroups = new Map<string, typeof duplicateReceiptCandidates>();
+  for (const r of duplicateReceiptCandidates) {
+    const key = `${r.policyId}:${r.receiptNumber}`;
+    const existing = receiptGroups.get(key) ?? [];
+    existing.push(r);
+    receiptGroups.set(key, existing);
+  }
+
+  const duplicateReceipts: typeof duplicateReceiptCandidates = [];
+  for (const group of receiptGroups.values()) {
+    if (group.length < 2) continue;
+
+    // Filter 1: if any is CANCELLED and another is not, skip the group
+    const hasCancelled = group.some((r) => r.status === "CANCELLED");
+    const hasActive = group.some((r) => r.status !== "CANCELLED");
+    if (hasCancelled && hasActive) continue;
+
+    // Filter 2: if only one has a paidDate and others have different periods, skip
+    const paidCount = group.filter((r) => r.paidDate != null).length;
+    const unpaidCount = group.length - paidCount;
+    if (paidCount === 1 && unpaidCount >= 1) {
+      const paid = group.find((r) => r.paidDate != null)!;
+      const allUnpaidSamePeriod = group
+        .filter((r) => r.paidDate == null)
+        .every(
+          (r) =>
+            r.periodStartDate.getTime() === paid.periodStartDate.getTime() &&
+            r.periodEndDate.getTime() === paid.periodEndDate.getTime(),
+        );
+      if (!allUnpaidSamePeriod) continue;
+    }
+
+    // Filter 3: if all have different periods, these are legitimate (prorrateo, frequency change)
+    const periods = group.map(
+      (r) => `${r.periodStartDate.toISOString()}:${r.periodEndDate.toISOString()}`,
+    );
+    const uniquePeriods = new Set(periods);
+    if (uniquePeriods.size > 1) continue;
+
+    // Only keep groups where all share the same period and are active
+    duplicateReceipts.push(...group);
+  }
 
   const overlappingPolicies = duplicatePolicies.filter((candidate, index, rows) =>
     rows.some(

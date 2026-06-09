@@ -6,6 +6,7 @@ import { assertSafeDocumentPath } from "@/lib/files";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
 import { logError } from "@/lib/logger";
 import { AuthError, requireUser } from "@/lib/auth";
+import { recordSecurityAccessDenied, SECURITY_EVENT_TYPES } from "@/lib/security-events";
 
 type DownloadableDocument = {
   id: string;
@@ -27,6 +28,9 @@ export async function GET(
 ) {
   type ActiveUser = Awaited<ReturnType<typeof requireUser>>;
   let user: ActiveUser;
+  let documentId = "";
+  const { id } = await params;
+  documentId = id;
 
   try {
     if (!areDocumentFilesEnabled()) {
@@ -41,12 +45,18 @@ export async function GET(
       user = await requireUser();
     } catch (authErr) {
       if (authErr instanceof AuthError) {
+        await recordSecurityAccessDenied({
+          alertType: SECURITY_EVENT_TYPES.documentAccessDenied,
+          title: "Descarga de documento sin sesión válida",
+          description: `Se intentó descargar el documento ${documentId} sin una sesión válida.`,
+          severity: "WARNING",
+          entityType: "SecurityEvent",
+          entityId: `document-download:auth:${documentId}`,
+        });
         return NextResponse.json({ error: "No autorizado." }, { status: authErr.status });
       }
       throw authErr;
     }
-
-    const { id } = await params;
 
     // Get document metadata from database
     const db = getDb();
@@ -81,6 +91,15 @@ export async function GET(
         document.task?.client?.portfolioOwnerId === user.id;
 
       if (!isAllowed) {
+        await recordSecurityAccessDenied({
+          alertType: SECURITY_EVENT_TYPES.documentAccessDenied,
+          title: "Acceso denegado a documento",
+          description: `Se bloqueó la descarga del documento ${id} para el usuario ${user.id}.`,
+          severity: "WARNING",
+          entityType: "SecurityEvent",
+          entityId: `document-download:denied:${documentId}`,
+          userId: user.id,
+        });
         return NextResponse.json({ error: "No tienes acceso a este documento." }, { status: 403 });
       }
     }
@@ -111,6 +130,14 @@ export async function GET(
     logError("api.documents.download", error);
 
     if (error instanceof Error && error.message.includes("Document path must stay inside")) {
+      await recordSecurityAccessDenied({
+        alertType: SECURITY_EVENT_TYPES.documentPathInvalid,
+        title: "Ruta de documento no válida",
+        description: "Se intentó acceder a un archivo fuera del directorio permitido.",
+        severity: "WARNING",
+        entityType: "SecurityEvent",
+        entityId: `document-download:path:${documentId}`,
+      });
       return NextResponse.json(
         { error: "Ruta de archivo no válida." },
         { status: 403 }

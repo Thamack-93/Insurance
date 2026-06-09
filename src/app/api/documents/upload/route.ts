@@ -12,6 +12,11 @@ import {
   assertPolicyPortfolioAccess,
   assertReceiptPortfolioAccess,
 } from "@/lib/portfolio-access";
+import {
+  recordSecurityAccessDenied,
+  recordSecurityRateLimit,
+  SECURITY_EVENT_TYPES,
+} from "@/lib/security-events";
 import { z } from "zod";
 
 const uploadSchema = z.object({
@@ -223,9 +228,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    assertSameOrigin(request, "document upload");
+    try {
+      assertSameOrigin(request, "document upload");
+    } catch {
+      await recordSecurityAccessDenied({
+        alertType: SECURITY_EVENT_TYPES.sameOriginBlocked,
+        title: "Subida de documentos bloqueada por same-origin",
+        description: "Se intentó subir un documento desde un origen no permitido.",
+        severity: "WARNING",
+        entityType: "SecurityEvent",
+        entityId: "document-upload:same-origin",
+      });
+      return NextResponse.json({ error: "No autorizado." }, { status: 403 });
+    }
     const rateLimit = checkRateLimit(`upload:${getRequestIp(request)}`, UPLOAD_RATE_LIMIT);
     if (!rateLimit.allowed) {
+      await recordSecurityRateLimit({
+        alertType: SECURITY_EVENT_TYPES.rateLimitedRequest,
+        title: "Límite de subidas alcanzado",
+        description: "Se bloqueó una subida de documentos por exceso de intentos.",
+        severity: "WARNING",
+        entityType: "SecurityEvent",
+        entityId: "document-upload:rate-limit",
+      });
       return NextResponse.json(
         { error: "Demasiadas subidas. Intenta de nuevo en unos minutos." },
         {
@@ -264,7 +289,22 @@ export async function POST(request: NextRequest) {
 
     const activeUser = await requireUser();
     const userId = activeUser.id;
-    await assertDocumentUploadOwnership(validatedData, userId, activeUser.role);
+    try {
+      await assertDocumentUploadOwnership(validatedData, userId, activeUser.role);
+    } catch (error) {
+      if (error instanceof AuthError) {
+        await recordSecurityAccessDenied({
+          alertType: SECURITY_EVENT_TYPES.documentAccessDenied,
+          title: "Subida de documento sin acceso",
+          description: `Se intentó subir un documento fuera de la cartera permitida para ${userId}.`,
+          severity: "WARNING",
+          entityType: "SecurityEvent",
+          entityId: `document-upload:denied:${validatedData.documentType}`,
+          userId,
+        });
+      }
+      throw error;
+    }
     const rollback = formData.get("rollback") === "1" || files.length > 1;
     const results = await Promise.all(files.map((f) => processFile(f, validatedData, userId)));
 
@@ -319,6 +359,14 @@ export async function POST(request: NextRequest) {
     logError("api.documents.upload", error);
 
     if (error instanceof AuthError) {
+      await recordSecurityAccessDenied({
+        alertType: SECURITY_EVENT_TYPES.documentAccessDenied,
+        title: "Carga de documento sin sesión válida",
+        description: "Se intentó subir un documento sin una sesión válida.",
+        severity: "WARNING",
+        entityType: "SecurityEvent",
+        entityId: "document-upload:auth",
+      });
       return NextResponse.json(
         { error: "Necesitas iniciar sesión para subir documentos." },
         { status: error.status },
