@@ -1,6 +1,7 @@
 import "server-only";
 
 import PDFParser from "pdf2json";
+import { PDFParse } from "pdf-parse";
 import { getDb } from "@/lib/db";
 import { parseDateInput } from "@/lib/form-utils";
 import { normalize } from "@/lib/search-utils";
@@ -22,6 +23,8 @@ export class PolicyPdfCaptureError extends Error {
     this.code = code;
   }
 }
+
+const INVALID_PDF_ERROR_PATTERNS = ["invalid pdf", "malformed", "corrupt", "xref", "format error"];
 
 function compact(value: string) {
   return value.replace(/\s+/g, " ").trim();
@@ -213,6 +216,45 @@ function normalizePolicyType(value: string | null | undefined) {
   if (normalized.includes("empresarial")) return "EMPRESARIAL";
   if (normalized.includes("accidente")) return "ACCIDENTES";
   return POLICY_TYPES.has(value.toUpperCase()) ? value.toUpperCase() : "OTRO";
+}
+
+function isInvalidPdfError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return INVALID_PDF_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
+}
+
+async function extractTextWithPdf2Json(file: Uint8Array) {
+  const pdfParser = new PDFParser();
+
+  return await new Promise<string>((resolve, reject) => {
+    pdfParser.on("pdfParser_dataReady", () => {
+      resolve(pdfParser.getRawTextContent());
+    });
+    pdfParser.on("pdfParser_dataError", (errData) => {
+      const errorMessage =
+        errData && "parserError" in errData && errData.parserError instanceof Error
+          ? errData.parserError.message
+          : "PDF parsing failed";
+      reject(new Error(errorMessage));
+    });
+    pdfParser.parseBuffer(Buffer.from(file));
+  });
+}
+
+async function extractTextWithPdfParse(file: Uint8Array) {
+  const parser = new PDFParse({
+    data: Buffer.from(file),
+    verbosity: 0,
+  });
+
+  try {
+    const result = await parser.getText({
+      pageJoiner: "",
+    });
+    return result.text;
+  } finally {
+    await parser.destroy();
+  }
 }
 
 function parsePolicyNumber(lines: string[], text: string) {
@@ -423,54 +465,44 @@ function scoreTextMatch(needle: string, candidate: string) {
 }
 
 export async function parsePolicyPdfCapture(file: Uint8Array) {
-  const pdfParser = new PDFParser();
+  const parseErrors: unknown[] = [];
 
   try {
-    const text = await new Promise<string>((resolve, reject) => {
-      pdfParser.on("pdfParser_dataReady", () => {
-        resolve(pdfParser.getRawTextContent());
-      });
-      pdfParser.on("pdfParser_dataError", (errData) => {
-        const errorMessage = errData && "parserError" in errData && errData.parserError instanceof Error
-          ? errData.parserError.message
-          : "PDF parsing failed";
-        reject(new Error(errorMessage));
-      });
-      pdfParser.parseBuffer(Buffer.from(file));
-    });
-
-    if (!text.trim()) {
-      throw new PolicyPdfCaptureError(
-        "NO_TEXT",
-        "El PDF no tiene texto extraíble. Puede ser una imagen, un escaneo o un archivo sin capa de texto.",
-      );
+    const primaryText = await extractTextWithPdf2Json(file);
+    if (primaryText.trim()) {
+      return extractPolicyPdfDraftFromText(primaryText);
     }
-
-    return extractPolicyPdfDraftFromText(text);
   } catch (error) {
-    if (error instanceof PolicyPdfCaptureError) {
-      throw error;
-    }
+    parseErrors.push(error);
+  }
 
-    const message = error instanceof Error ? error.message.toLowerCase() : "";
-    if (
-      message.includes("invalid pdf") ||
-      message.includes("malformed") ||
-      message.includes("corrupt") ||
-      message.includes("xref") ||
-      message.includes("format error")
-    ) {
-      throw new PolicyPdfCaptureError(
-        "INVALID_PDF",
-        "El PDF parece estar corrupto o no es un archivo PDF válido.",
-      );
+  try {
+    const fallbackText = await extractTextWithPdfParse(file);
+    if (fallbackText.trim()) {
+      return extractPolicyPdfDraftFromText(fallbackText);
     }
+  } catch (error) {
+    parseErrors.push(error);
+  }
 
+  if (parseErrors.some(isInvalidPdfError)) {
+    throw new PolicyPdfCaptureError(
+      "INVALID_PDF",
+      "El PDF parece estar corrupto o no es un archivo PDF válido.",
+    );
+  }
+
+  if (parseErrors.length > 0) {
     throw new PolicyPdfCaptureError(
       "PARSE_FAILURE",
       "No pudimos analizar el PDF. Revisa que el archivo esté completo y tenga texto legible.",
     );
   }
+
+  throw new PolicyPdfCaptureError(
+    "NO_TEXT",
+    "El PDF no tiene texto extraíble. Puede ser una imagen, un escaneo o un archivo sin capa de texto.",
+  );
 }
 
 export async function buildPolicyPdfCapturePreview(file: Uint8Array): Promise<PolicyPdfCapturePreview> {

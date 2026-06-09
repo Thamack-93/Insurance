@@ -20,6 +20,7 @@ export default async function NotificationSettingsPage() {
   const channel = await getTelegramChannelStateForUser(user.id);
   const timeZone = user.timeZone ?? "America/Mexico_City";
   const cronSecretConfigured = Boolean(process.env.CRON_SECRET?.trim());
+  const telegramConnected = channel.isEnabled && Boolean(channel.telegramChatId);
 
   return (
     <div className="flex flex-col gap-6">
@@ -48,11 +49,11 @@ export default async function NotificationSettingsPage() {
               <CardDescription>Telegram ya puede vincularse desde esta pantalla.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Badge variant={channel?.isEnabled && channel.telegramChatId ? "default" : "outline"} className="rounded-full">
-                {channel?.isEnabled && channel.telegramChatId ? "Conectado" : "Desconectado"}
+              <Badge variant={telegramConnected ? "default" : "outline"} className="rounded-full">
+                {telegramConnected ? "Conectado" : "Desconectado"}
               </Badge>
               <p className="text-sm text-muted-foreground">
-                {channel?.isEnabled && channel.telegramChatId
+                {telegramConnected
                   ? `Chat vinculado: ${channel.telegramChatId}`
                   : "No hay un chat vinculado todavía. Genera un código y envíalo por /link en Telegram para conectarlo."}
               </p>
@@ -77,7 +78,7 @@ export default async function NotificationSettingsPage() {
               <CardDescription>Se guarda auditoría del canal y del resumen diario.</CardDescription>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
-              {channel?.isEnabled && channel.telegramChatId
+              {telegramConnected
                 ? "Telegram está conectado y listo para enviar el resumen diario."
                 : "Telegram todavía no está conectado para este usuario."}
             </CardContent>

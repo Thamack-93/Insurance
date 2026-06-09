@@ -13,6 +13,7 @@ import {
   markNotificationFailed,
   markNotificationSent,
   markNotificationSkipped,
+  type NotificationChannelRecord,
   type NotificationEventRecord,
 } from "@/lib/notification-foundation";
 import {
@@ -223,6 +224,19 @@ function isTelegramMutationsEnabled(channel?: {
   telegramChatId?: string | null;
 }) {
   return Boolean(channel?.isEnabled && channel?.telegramChatId && channel.telegramMutationsEnabled);
+}
+
+function createFallbackTelegramChannelState(userId: string): NotificationChannelRecord {
+  return {
+    id: "",
+    userId,
+    type: "TELEGRAM",
+    telegramChatId: null,
+    isEnabled: false,
+    telegramMutationsEnabled: false,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+  };
 }
 
 export function getTelegramWebhookUrl() {
@@ -2134,8 +2148,13 @@ export async function processTelegramWebhookUpdate(
 
 export async function getTelegramChannelStateForUser(userId: string, client?: DbClient) {
   const db = client ?? getDb();
-  await ensureNotificationDefaultsForUser(userId, db);
-  return getTelegramChannelByUserId(userId, db);
+  try {
+    await ensureNotificationDefaultsForUser(userId, db);
+    return (await getTelegramChannelByUserId(userId, db)) ?? createFallbackTelegramChannelState(userId);
+  } catch (error) {
+    logError("telegram.getTelegramChannelStateForUser", error, { userId });
+    return createFallbackTelegramChannelState(userId);
+  }
 }
 
 export { TELEGRAM_LINK_TOKEN_TTL_MINUTES };
