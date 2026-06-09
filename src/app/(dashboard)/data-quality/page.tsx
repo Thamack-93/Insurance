@@ -30,6 +30,7 @@ import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { getLatestMaintenanceRun } from "@/lib/vigency-maintenance";
+import { getUpcomingRenewals } from "@/lib/renewals";
 import { RunVigencyAuditButton } from "@/components/data-quality/run-vigency-audit-button";
 import { RunPaymentAuditButton } from "@/components/data-quality/run-payment-audit-button";
 import { ReviewActionButtons } from "@/components/data-quality/review-action-buttons";
@@ -111,6 +112,7 @@ export default async function DataQualityPage({
     receiptReviewIssues,
     renewalReviewSuggestions,
     ledgerReviewIssues,
+    renewalFollowUps,
   ] = await Promise.all([
     getClientDataQualityScores(),
     getPolicyDataQualityScores(),
@@ -120,6 +122,7 @@ export default async function DataQualityPage({
     getReceiptReviewIssues(),
     getRenewalReviewSuggestions(),
     getLedgerReviewIssues(),
+    getUpcomingRenewals(30),
   ]);
   const previewBatch = previewBatchId
       ? await db.ledgerImportBatch.findUnique({
@@ -228,10 +231,54 @@ export default async function DataQualityPage({
     policyScores.reduce((sum, p) => sum + p.score, 0) / (policyScores.length || 1)
   );
 
-  const clientCritical = clientScores.filter((c) => c.score < 50).length;
-  const clientAttention = clientScores.filter((c) => c.score >= 50 && c.score < 75).length;
+  const clientMissingData = clientScores.filter((c) => c.issues.length > 0);
+  const clientAttention = clientScores.filter((c) => c.nivel === "Atención").length;
   const policyCritical = policyScores.filter((p) => p.score < 50).length;
   const policyAttention = policyScores.filter((p) => p.score >= 50 && p.score < 75).length;
+  const renewalFollowUpByClient = renewalFollowUps.reduce((acc, renewal) => {
+    const current = acc.get(renewal.clientId) ?? {
+      clienteId: renewal.clientId,
+      cliente: renewal.clientName,
+      overduePolicies: 0,
+      followUpPolicies: 0,
+      nextRenewalDate: renewal.endDate,
+      items: [],
+    };
+
+    if (renewal.daysUntilRenewal <= 0) {
+      current.overduePolicies += 1;
+    } else {
+      current.followUpPolicies += 1;
+    }
+
+    current.nextRenewalDate =
+      current.nextRenewalDate === null || renewal.endDate < current.nextRenewalDate
+        ? renewal.endDate
+        : current.nextRenewalDate;
+
+    current.items.push(renewal);
+    acc.set(renewal.clientId, current);
+    return acc;
+  }, new Map<string, {
+    clienteId: string;
+    cliente: string;
+    overduePolicies: number;
+    followUpPolicies: number;
+    nextRenewalDate: Date | null;
+    items: typeof renewalFollowUps;
+  }>());
+  const renewalCriticalClients = [...renewalFollowUpByClient.values()]
+    .filter((client) => client.overduePolicies > 0)
+    .sort((a, b) => b.overduePolicies - a.overduePolicies || a.cliente.localeCompare(b.cliente));
+  const renewalFollowUpClients = [...renewalFollowUpByClient.values()]
+    .filter((client) => client.overduePolicies === 0)
+    .sort((a, b) => b.followUpPolicies - a.followUpPolicies || a.cliente.localeCompare(b.cliente));
+  const renewalCriticalPolicies = renewalCriticalClients.reduce((sum, client) => sum + client.overduePolicies, 0);
+  const renewalFollowUpPolicies = renewalFollowUpClients.reduce((sum, client) => sum + client.followUpPolicies, 0);
+  const renewalRows = [
+    ...renewalCriticalClients.map((client) => ({ ...client, statusLabel: "Crítica" as const })),
+    ...renewalFollowUpClients.map((client) => ({ ...client, statusLabel: "Seguimiento" as const })),
+  ];
 
   const allIssues = [
     ...clientScores.flatMap((c) => c.issues.map((i) => ({ ...i, entity: c.cliente, entityId: c.clienteId, type: "cliente" as const }))),
@@ -361,15 +408,15 @@ export default async function DataQualityPage({
               />
               <MetricCard
                 title="Críticos"
-                value={clientCritical + policyCritical}
-                description={`${clientCritical} clientes + ${policyCritical} pólizas`}
+                value={policyCritical + renewalCriticalPolicies}
+                description={`${policyCritical} pólizas + ${renewalCriticalPolicies} renovaciones`}
                 icon={ShieldAlert}
                 tone="rose"
               />
               <MetricCard
                 title="Atención"
-                value={clientAttention + policyAttention}
-                description={`${clientAttention} clientes + ${policyAttention} pólizas`}
+                value={clientAttention + policyAttention + renewalFollowUpPolicies}
+                description={`${clientAttention} clientes + ${policyAttention} pólizas + ${renewalFollowUpPolicies} seguimientos`}
                 icon={AlertTriangle}
                 tone="amber"
               />
@@ -483,28 +530,30 @@ export default async function DataQualityPage({
                 )}
               </SectionCard>
 
-              <SectionCard title="Clientes con problemas críticos" description="Requieren atención prioritaria.">
-                {clientCritical === 0 ? (
-                  <div className="px-4 py-6 text-sm text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <BadgeCheck className="size-5 text-emerald-500" />
-                      No hay clientes en estado crítico. ¡Felicitaciones!
+              <div className="grid gap-6">
+                <SectionCard
+                  title="Clientes con datos faltantes"
+                  description="No se marcan como críticos; solo quedan en seguimiento mientras no se capture información."
+                >
+                  {clientMissingData.length === 0 ? (
+                    <div className="px-4 py-6 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-2">
+                        <BadgeCheck className="size-5 text-emerald-500" />
+                        No hay clientes con datos faltantes.
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-stone-50/70">
-                        <TableHead>Cliente</TableHead>
-                        <TableHead>Problemas</TableHead>
-                        <TableHead>Acción sugerida</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {clientScores
-                        .filter((c) => c.score < 50)
-                        .slice(0, 10)
-                        .map((client) => (
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-stone-50/70">
+                          <TableHead>Cliente</TableHead>
+                          <TableHead>Estado</TableHead>
+                          <TableHead>Problemas</TableHead>
+                          <TableHead>Acción sugerida</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {clientMissingData.slice(0, 8).map((client) => (
                           <TableRow key={client.clienteId}>
                             <TableCell>
                               <Link href={`/clients/${client.clienteId}`} className="font-medium text-foreground hover:text-primary">
@@ -513,6 +562,9 @@ export default async function DataQualityPage({
                               <p className="text-xs text-muted-foreground">
                                 Score: {client.score} · Completitud: {client.completitud}%
                               </p>
+                            </TableCell>
+                            <TableCell>
+                              <QualityBadge nivel={client.nivel} />
                             </TableCell>
                             <TableCell>
                               <div className="flex flex-col gap-1">
@@ -525,15 +577,70 @@ export default async function DataQualityPage({
                             </TableCell>
                             <TableCell>
                               <Button asChild size="sm" variant="outline" className="rounded-full">
-                                <Link href={`/clients/${client.clienteId}/edit`}>Completar datos</Link>
+                                <Link href={`/clients/${client.clienteId}`}>Ver cliente</Link>
                               </Button>
                             </TableCell>
                           </TableRow>
                         ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </SectionCard>
+
+                <SectionCard
+                  title="Clientes con renovación / seguimiento real"
+                  description="Solo pólizas activas que sí requieren contacto o acción."
+                >
+                  {renewalRows.length === 0 ? (
+                    <div className="px-4 py-6 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-2">
+                        <BadgeCheck className="size-5 text-emerald-500" />
+                        No hay renovaciones activas que requieran seguimiento.
+                      </div>
+                    </div>
+                  ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-stone-50/70">
+                        <TableHead>Cliente</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead>Renovaciones</TableHead>
+                        <TableHead>Próxima vigencia</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {renewalRows.slice(0, 10).map((client) => (
+                          <TableRow key={client.clienteId}>
+                            <TableCell>
+                              <Link href={`/clients/${client.clienteId}`} className="font-medium text-foreground hover:text-primary">
+                                {client.cliente}
+                              </Link>
+                              <p className="text-xs text-muted-foreground">
+                                {client.overduePolicies > 0
+                                  ? `${client.overduePolicies} vencida(s)`
+                                  : `${client.followUpPolicies} seguimiento(s)`}
+                              </p>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={client.statusLabel === "Crítica" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-amber-200 bg-amber-50 text-amber-700"}>
+                                {client.statusLabel}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <span className="text-sm text-muted-foreground">{client.overduePolicies + client.followUpPolicies}</span>
+                            </TableCell>
+                            <TableCell>
+                              <span className="text-sm text-muted-foreground">
+                                {client.nextRenewalDate ? formatDate(client.nextRenewalDate) : "—"}
+                              </span>
+                            </TableCell>
+                          </TableRow>
+                      ))}
                     </TableBody>
                   </Table>
-                )}
-              </SectionCard>
+                  )}
+                </SectionCard>
+              </div>
             </section>
           </TabsContent>
 

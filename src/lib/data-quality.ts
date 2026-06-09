@@ -4,6 +4,7 @@ import { today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
 import { globalSearch } from "@/lib/search";
 import { matchesSuppressionCriteria } from "@/lib/data-quality-rules";
+import { getOverdueRenewals, getUpcomingRenewals } from "@/lib/renewals";
 
 export type DataQualityIssue = {
   code: string;
@@ -94,6 +95,21 @@ export type RenewalReviewSuggestion = {
   targetPolicyStatus: string | null;
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type RenewalFollowUpClient = {
+  clienteId: string;
+  cliente: string;
+  overduePolicies: number;
+  followUpPolicies: number;
+  nextRenewalDate: Date | null;
+  items: Array<{
+    policyId: string;
+    policyNumber: string;
+    daysUntilRenewal: number;
+    priority: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+    status: "OVERDUE" | "FOLLOW_UP";
+  }>;
 };
 
 export type LedgerReviewIssue = {
@@ -503,7 +519,7 @@ export async function getClientDataQualityScores() {
         clienteId: client.id,
         cliente: client.fullName,
         score: clampScore(score),
-        nivel: qualityLevel(score),
+        nivel: clientQualityLevel(score),
         completitud,
         totalPolizas,
         polizasActivas,
@@ -606,7 +622,7 @@ export async function getPolicyDataQualityScores() {
         cliente: policy.client.fullName,
         aseguradora: policy.insurer.name,
         score: clampScore(score),
-        nivel: qualityLevel(score),
+        nivel: policyQualityLevel(score),
         completitud,
         issues,
       };
@@ -614,11 +630,68 @@ export async function getPolicyDataQualityScores() {
     .sort((a, b) => a.score - b.score || a.poliza.localeCompare(b.poliza));
 }
 
+export async function getRenewalFollowUpClients(daysAhead = 30): Promise<RenewalFollowUpClient[]> {
+  const [overdueRenewals, upcomingRenewals] = await Promise.all([
+    getOverdueRenewals(),
+    getUpcomingRenewals(daysAhead),
+  ]);
+
+  const grouped = new Map<string, RenewalFollowUpClient>();
+
+  for (const renewal of [...overdueRenewals, ...upcomingRenewals]) {
+    const status = renewal.daysUntilRenewal <= 0 ? "OVERDUE" : "FOLLOW_UP";
+    const current = grouped.get(renewal.clientId) ?? {
+      clienteId: renewal.clientId,
+      cliente: renewal.clientName,
+      overduePolicies: 0,
+      followUpPolicies: 0,
+      nextRenewalDate: renewal.endDate,
+      items: [],
+    };
+
+    if (status === "OVERDUE") {
+      current.overduePolicies += 1;
+    } else {
+      current.followUpPolicies += 1;
+    }
+
+    current.nextRenewalDate =
+      current.nextRenewalDate === null || renewal.endDate < current.nextRenewalDate
+        ? renewal.endDate
+        : current.nextRenewalDate;
+
+    current.items.push({
+      policyId: renewal.policyId,
+      policyNumber: renewal.policyNumber,
+      daysUntilRenewal: renewal.daysUntilRenewal,
+      priority: renewal.priority,
+      status,
+    });
+
+    grouped.set(renewal.clientId, current);
+  }
+
+  return [...grouped.values()].sort(
+    (left, right) =>
+      right.overduePolicies - left.overduePolicies ||
+      right.followUpPolicies - left.followUpPolicies ||
+      (left.nextRenewalDate?.getTime() ?? Number.POSITIVE_INFINITY) -
+        (right.nextRenewalDate?.getTime() ?? Number.POSITIVE_INFINITY) ||
+      left.cliente.localeCompare(right.cliente),
+  );
+}
+
 function clampScore(score: number) {
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
-function qualityLevel(score: number): ClientQualityScore["nivel"] {
+function clientQualityLevel(score: number): ClientQualityScore["nivel"] {
+  if (score >= 90) return "Excelente";
+  if (score >= 75) return "Bueno";
+  return "Atención";
+}
+
+function policyQualityLevel(score: number): PolicyQualityScore["nivel"] {
   if (score >= 90) return "Excelente";
   if (score >= 75) return "Bueno";
   if (score >= 50) return "Atención";

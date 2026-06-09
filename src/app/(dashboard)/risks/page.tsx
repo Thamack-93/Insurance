@@ -89,9 +89,9 @@ export default async function RisksPage({
   const avgPolicyScore = Math.round(
     policyScores.reduce((sum, p) => sum + p.score, 0) / (policyScores.length || 1),
   );
-  const clientCritical = clientScores.filter((c) => c.score < 50).length;
+  const clientCritical = clientScores.filter((c) => c.nivel === "Crítico").length;
   const policyCritical = policyScores.filter((p) => p.score < 50).length;
-  const clientAttention = clientScores.filter((c) => c.score >= 50 && c.score < 75).length;
+  const clientAttention = clientScores.filter((c) => c.nivel === "Atención").length;
   const policyAttention = policyScores.filter((p) => p.score >= 50 && p.score < 75).length;
 
   const allIssues = [
