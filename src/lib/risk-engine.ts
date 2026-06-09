@@ -24,7 +24,7 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
   const in60 = addDays(now, 60);
   const olderThan15 = subDays(now, 15);
   const policyScope = portfolioOwnerId ? { client: { portfolioOwnerId } } : {};
-  const clientScope = portfolioOwnerId ? { portfolioOwnerId } : {};
+  const clientScope = portfolioOwnerId ? { portfolioOwnerId, status: "ACTIVE" } : { status: "ACTIVE" };
   const activeRenewalScope = {
     ...policyScope,
     ...ACTIVE_RENEWAL_POLICY_WHERE,

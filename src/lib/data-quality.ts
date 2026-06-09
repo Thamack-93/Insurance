@@ -162,6 +162,7 @@ export async function getOperationalDataHealthSummary(): Promise<OperationalData
     }),
     db.client.count({
       where: {
+        status: "ACTIVE",
         fullName: { contains: "ASEGURADO:" },
         policies: { none: {} },
       },
@@ -394,6 +395,7 @@ export async function getLedgerReviewIssues(): Promise<LedgerReviewIssue[]> {
 export async function getClientDataQualityScores() {
   const db = getDb();
   const clients = await db.client.findMany({
+    where: { status: "ACTIVE" },
     select: {
       id: true,
       fullName: true,
