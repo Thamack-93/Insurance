@@ -16,6 +16,7 @@ import {
   FormField,
   FormGrid,
 } from "@/components/forms/form-primitives";
+import { paymentMethodOptions } from "@/lib/domain-options";
 import { formatCurrency } from "@/lib/money";
 import { today, formatDate } from "@/lib/dates";
 import type { MutationResult } from "@/lib/mutation-utils";
@@ -43,14 +44,6 @@ type PaymentFormProps = {
   submitAction: (data: PaymentFormValues) => Promise<MutationResult>;
   cancelHref?: string;
 };
-
-const paymentMethods = [
-  { value: "TRANSFER", label: "Transferencia bancaria" },
-  { value: "CASH", label: "Efectivo" },
-  { value: "CHECK", label: "Cheque" },
-  { value: "CARD", label: "Tarjeta de crédito/débito" },
-  { value: "OTHER", label: "Otro" },
-];
 
 export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormProps) {
   const router = useRouter();
@@ -153,13 +146,13 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
             </FormField>
 
             <FormField label="Método de pago" required error={errors.paymentMethod?.message}>
-              <ControlledSelect
-                value={selectedPaymentMethod || ""}
-                onValueChange={(value) => setValue("paymentMethod", value ?? "")}
-                options={paymentMethods}
-                placeholder="Seleccionar método"
-              />
-            </FormField>
+                <ControlledSelect
+                  value={selectedPaymentMethod || ""}
+                  onValueChange={(value) => setValue("paymentMethod", value ?? "")}
+                  options={paymentMethodOptions}
+                  placeholder="Seleccionar método"
+                />
+              </FormField>
           </FormGrid>
 
           <FormField label="Referencia (opcional)" htmlFor="reference" error={errors.reference?.message}>

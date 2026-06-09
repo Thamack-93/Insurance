@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { connection } from "next/server";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppTopbar } from "@/components/layout/app-topbar";
 import { UserMenu } from "@/components/layout/user-menu";
@@ -44,6 +45,7 @@ async function getSafeDashboardShellData() {
 }
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
+  await connection();
   // Re-validate the user against the database on every dashboard request so
   // deactivations and role changes take effect immediately, rather than
   // waiting for the signed session token to expire.
