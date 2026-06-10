@@ -30,6 +30,46 @@ type ConfirmResponse = {
   error?: string;
 };
 
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
+
+async function extractPdfTextFromFile(file: File) {
+  const pdfjs = await import("pdfjs-dist/webpack.mjs");
+  const loadingTask = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
+  const pdf = await loadingTask.promise;
+
+  try {
+    const pageTexts: string[] = [];
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const textContent = await page.getTextContent();
+      const lines = textContent.items
+        .map((item) => {
+          if (typeof item !== "object" || item === null || !("str" in item)) return "";
+          return String((item as { str?: string }).str ?? "");
+        })
+        .filter(Boolean);
+      if (lines.length > 0) {
+        pageTexts.push(lines.join(" "));
+      }
+    }
+    return pageTexts.join("\n");
+  } finally {
+    await pdf.destroy().catch(() => {});
+  }
+}
+
+async function readJsonResponse<T>(response: Response) {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    const body = await response.text();
+    const message = body.includes("<!DOCTYPE")
+      ? "El servidor devolvió HTML inesperado. Recarga la página e inténtalo de nuevo."
+      : "El servidor devolvió una respuesta inesperada. Recarga la página e inténtalo de nuevo.";
+    throw new Error(message);
+  }
+  return (await response.json()) as T;
+}
+
 export function PolicyPdfCapturePanel() {
   const router = useRouter();
   const [isConfirming, setIsConfirming] = useState(false);
@@ -57,21 +97,31 @@ export function PolicyPdfCapturePanel() {
       setError("Selecciona un PDF para analizar.");
       return;
     }
+    if (file.size > MAX_PDF_BYTES) {
+      setError("El PDF supera el tamaño máximo de 10 MB.");
+      return;
+    }
 
     setIsAnalyzing(true);
     setError(null);
     setPreview(null);
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
+      const extractedText = await extractPdfTextFromFile(file);
+      if (!extractedText.trim()) {
+        throw new Error("El PDF no tiene texto extraíble. Puede ser una imagen, un escaneo o un archivo sin capa de texto.");
+      }
 
       const response = await fetch("/api/policies/capture/preview", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: extractedText,
+          fileName: file.name,
+        }),
       });
 
-      const result = (await response.json()) as PreviewResponse;
+      const result = await readJsonResponse<PreviewResponse>(response);
       if (!response.ok || !result.preview) {
         throw new Error(result.error || "No se pudo analizar el PDF.");
       }
@@ -122,7 +172,7 @@ export function PolicyPdfCapturePanel() {
         }),
       });
 
-      const result = (await response.json()) as ConfirmResponse;
+      const result = await readJsonResponse<ConfirmResponse>(response);
       if (!response.ok || !result.success || !result.redirectTo) {
         throw new Error(result.error || "No se pudo confirmar la captura.");
       }

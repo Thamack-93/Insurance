@@ -286,7 +286,15 @@ function parseInsuredName(lines: string[]) {
     return compact(uppercaseCandidate);
   }
 
-  const labels = ["Asegurado titular", "Asegurado", "Titular", "Nombre del asegurado"];
+  const labels = [
+    "Razón Social o Contratante",
+    "Razon Social o Contratante",
+    "Contratante",
+    "Asegurado titular",
+    "Asegurado",
+    "Titular",
+    "Nombre del asegurado",
+  ];
   const labeled = extractInlineValue(lines, labels);
   if (labeled) {
     const normalized = normalize(labeled);
@@ -501,7 +509,7 @@ export async function parsePolicyPdfCapture(file: Uint8Array) {
 
   throw new PolicyPdfCaptureError(
     "NO_TEXT",
-    "El PDF no tiene texto extraíble. Puede ser una imagen, un escaneo o un archivo sin capa de texto.",
+    "El PDF no tiene una capa de texto extraíble. Puede ser una imagen, un escaneo o un PDF con texto inaccesible para el parser.",
   );
 }
 

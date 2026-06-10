@@ -285,7 +285,15 @@ function parseInsuredName(lines: string[]) {
     return compact(uppercaseCandidate);
   }
 
-  const labels = ["Asegurado titular", "Asegurado", "Titular", "Nombre del asegurado"];
+  const labels = [
+    "Razón Social o Contratante",
+    "Razon Social o Contratante",
+    "Contratante",
+    "Asegurado titular",
+    "Asegurado",
+    "Titular",
+    "Nombre del asegurado",
+  ];
   const labeled = extractInlineValue(lines, labels);
   if (labeled) {
     const normalized = normalizeText(labeled);

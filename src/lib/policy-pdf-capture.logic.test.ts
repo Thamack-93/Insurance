@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   extractPolicyPdfDraftFromText,
   normalizePdfPaymentFrequencyLabel,
   suggestPreviousPolicyNumber,
 } from "@/lib/policy-pdf-capture.shared";
+import { buildPolicyPdfCapturePreviewFromText } from "@/lib/policy-pdf-capture-preview";
+
+vi.mock("server-only", () => ({}));
 
 describe("policy-pdf-capture", () => {
   it("suggests the prior renewal policy number", () => {
@@ -94,5 +97,57 @@ describe("policy-pdf-capture", () => {
     expect(draft.premiumAmount).toBeCloseTo(14324.39);
     expect(draft.requestNumber).toBeNull();
     expect(draft.sourcePolicyNumber).toBeNull();
+  });
+
+  it("builds a preview from extracted PDF text without relying on the server parser", async () => {
+    const db = {
+      client: {
+        findMany: async () => [
+          { id: "client-1", fullName: "Maria Fernanda Corral Morales" },
+          { id: "client-2", fullName: "Otra Persona" },
+        ],
+      },
+      insurer: {
+        findMany: async () => [
+          { id: "insurer-1", name: "Quálitas Compañía de Seguros" },
+          { id: "insurer-2", name: "Aseguradora Genérica" },
+        ],
+      },
+      policy: {
+        findMany: async () => [
+          {
+            id: "policy-1",
+            policyNumber: "50702000465",
+            startDate: new Date("2025-02-01T00:00:00.000Z"),
+            endDate: new Date("2026-02-01T00:00:00.000Z"),
+            status: "EXPIRED",
+            insuredAssets: [{ serialNumber: "ABC1234567890" }],
+          },
+        ],
+      },
+    } as never;
+
+    const preview = await buildPolicyPdfCapturePreviewFromText(
+      `
+        Quálitas Compañía de Seguros
+        Póliza: 50702000466
+        Razón Social o Contratante: Maria Fernanda Corral Morales
+        Tipo de seguro: Accidentes Personales
+        Vigencia: 01/02/2026 al 01/02/2027
+        Prima total $1,234.56
+      `,
+      db,
+    );
+
+    expect(preview.draft.policyNumber).toBe("50702000466");
+    expect(preview.draft.clientName).toBe("Maria Fernanda Corral Morales");
+    expect(preview.draft.insurerName).toBe("Quálitas Compañía de Seguros");
+    expect(preview.draft.startDate).toBe("2026-02-01");
+    expect(preview.draft.endDate).toBe("2027-02-01");
+    expect(preview.draft.policyType).toBe("ACCIDENTES");
+    expect(preview.draft.premiumAmount).toBeCloseTo(1234.56);
+    expect(preview.suggestions.clientId).toBe("client-1");
+    expect(preview.suggestions.insurerId).toBe("insurer-1");
+    expect(preview.warnings).not.toContain("No pudimos detectar el número de póliza.");
   });
 });

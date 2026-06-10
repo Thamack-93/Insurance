@@ -104,7 +104,8 @@ describe("policy-pdf-capture parser", () => {
   it("throws NO_TEXT only after both parsers return empty text", async () => {
     await expect(parsePolicyPdfCapture(new Uint8Array([1, 2, 3]))).rejects.toMatchObject({
       code: "NO_TEXT",
-      message: "El PDF no tiene texto extraíble. Puede ser una imagen, un escaneo o un archivo sin capa de texto.",
+      message:
+        "El PDF no tiene una capa de texto extraíble. Puede ser una imagen, un escaneo o un PDF con texto inaccesible para el parser.",
     });
   });
 

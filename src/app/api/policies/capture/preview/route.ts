@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { AuthError, requireUser } from "@/lib/auth";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
-import {
-  PolicyPdfCaptureError,
-  buildPolicyPdfCapturePreview,
-} from "@/lib/policy-pdf-capture";
+import { buildPolicyPdfCapturePreviewFromText } from "@/lib/policy-pdf-capture-preview";
 import {
   recordSecurityAccessDenied,
   recordSecurityRateLimit,
@@ -13,6 +11,11 @@ import {
 } from "@/lib/security-events";
 
 export const runtime = "nodejs";
+
+const previewRequestSchema = z.object({
+  text: z.string().min(1),
+  fileName: z.string().trim().max(255).optional().nullable(),
+});
 
 export async function POST(request: NextRequest) {
   try {
@@ -68,28 +71,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const formData = await request.formData();
-    const file = formData.get("file");
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: "Selecciona un PDF para analizar." }, { status: 400 });
-    }
-    if (file.type !== "application/pdf" && file.type !== "application/octet-stream") {
-      return NextResponse.json({ error: "El archivo debe ser un PDF." }, { status: 400 });
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      return NextResponse.json({ error: "El PDF supera el tamaño máximo de 10 MB." }, { status: 400 });
+    const contentType = request.headers.get("content-type") ?? "";
+    if (!contentType.includes("application/json")) {
+      return NextResponse.json(
+        { error: "Esta versión del lector requiere actualizar la página para analizar PDFs." },
+        { status: 415 },
+      );
     }
 
+    let payload: z.infer<typeof previewRequestSchema>;
     try {
-      const preview = await buildPolicyPdfCapturePreview(new Uint8Array(await file.arrayBuffer()));
-      return NextResponse.json({ success: true, preview });
-    } catch (error) {
-      if (error instanceof PolicyPdfCaptureError) {
-        const status = error.code === "INVALID_PDF" ? 400 : error.code === "NO_TEXT" ? 422 : 500;
-        return NextResponse.json({ error: error.message, code: error.code }, { status });
-      }
-      throw error;
+      payload = previewRequestSchema.parse(await request.json());
+    } catch {
+      return NextResponse.json({ error: "El payload de análisis no es válido." }, { status: 400 });
     }
+
+    const extractedText = payload.text.trim();
+    if (!extractedText) {
+      return NextResponse.json(
+        {
+          error: "No pudimos extraer texto del PDF. Puede ser una imagen, un escaneo o un archivo sin capa de texto.",
+          code: "NO_TEXT",
+        },
+        { status: 422 },
+      );
+    }
+
+    const preview = await buildPolicyPdfCapturePreviewFromText(extractedText);
+    return NextResponse.json({ success: true, preview });
   } catch (error) {
     logError("api.policies.capture.preview", error);
     return NextResponse.json(
