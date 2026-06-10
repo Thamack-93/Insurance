@@ -11,11 +11,19 @@ export type DataQualityIssue = {
   etiqueta: string;
   descripcion: string;
   penalizacion: number;
+  entityType?: "Client" | "Policy";
+  entityId?: string;
 };
 
 export type ClientQualityScore = {
   clienteId: string;
   cliente: string;
+  email: string | null;
+  phone: string | null;
+  secondaryPhone: string | null;
+  address: string | null;
+  rfc: string | null;
+  preferredContactMethod: string | null;
   score: number;
   nivel: "Excelente" | "Bueno" | "Atención" | "Crítico";
   completitud: number;
@@ -31,6 +39,11 @@ export type PolicyQualityScore = {
   clienteId: string;
   cliente: string;
   aseguradora: string;
+  status: string;
+  premiumAmount: number;
+  paymentFrequency: string;
+  insuredObject: string | null;
+  notes: string | null;
   score: number;
   nivel: "Excelente" | "Bueno" | "Atención" | "Crítico";
   completitud: number;
@@ -139,9 +152,46 @@ function describeDisposition(status: string, suppressedByRuleId: string | null, 
   if (suppressedByRuleId) return "Suprimida";
   if (status === "OPEN" || status === "PENDING") return "Abierta";
   if (status === "RESOLVED") return "Resuelta";
+  if (status === "ACCEPTED") return "Resuelta";
   if (status === "DECLINED") return "Declinada";
   if (status === "DISMISSED") return "Descartada";
   return status;
+}
+
+function buildRiskIssueMatch(input: {
+  issueCode: string;
+  entityType: "Client" | "Policy";
+  entityId: string;
+}) {
+  return {
+    issueCode: input.issueCode,
+    entityType: input.entityType,
+    entityId: input.entityId,
+  };
+}
+
+async function loadRiskSuppressionRules() {
+  const db = getDb();
+  return db.dataQualitySuppressionRule.findMany({
+    where: {
+      active: true,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      category: "RISKS",
+    },
+  });
+}
+
+function isRiskIssueSuppressed(
+  rules: Array<{ issueCode: string; criteriaJson: string }>,
+  issueCode: string,
+  entityType: "Client" | "Policy",
+  entityId: string,
+) {
+  return rules.some(
+    (rule) =>
+      rule.issueCode === issueCode &&
+      matchesSuppressionCriteria(rule.criteriaJson, buildRiskIssueMatch({ issueCode, entityType, entityId })),
+  );
 }
 
 export async function getOperationalDataHealthSummary(): Promise<OperationalDataHealthSummary> {
@@ -410,6 +460,7 @@ export async function getLedgerReviewIssues(): Promise<LedgerReviewIssue[]> {
 
 export async function getClientDataQualityScores() {
   const db = getDb();
+  const suppressionRules = await loadRiskSuppressionRules();
   const clients = await db.client.findMany({
     where: { status: "ACTIVE" },
     select: {
@@ -429,60 +480,61 @@ export async function getClientDataQualityScores() {
       },
     },
   });
+  const completenessIssueCodes = new Set([
+    "CLIENT_EMAIL_MISSING",
+    "CLIENT_PHONE_MISSING",
+    "CLIENT_ADDRESS_MISSING",
+    "CLIENT_RFC_MISSING",
+    "CLIENT_CONTACT_METHOD_MISSING",
+  ]);
 
   return clients
     .map<ClientQualityScore>((client) => {
-      const issues: DataQualityIssue[] = [];
-      let score = 100;
+      const issueCandidates: DataQualityIssue[] = [];
 
       if (!client.email) {
-        issues.push({
+        issueCandidates.push({
           code: "CLIENT_EMAIL_MISSING",
           etiqueta: "Email faltante",
           descripcion: "El cliente no tiene correo electrónico registrado.",
           penalizacion: 20,
         });
-        score -= 20;
       }
 
       if (!client.phone && !client.secondaryPhone) {
-        issues.push({
+        issueCandidates.push({
           code: "CLIENT_PHONE_MISSING",
           etiqueta: "Teléfono faltante",
           descripcion: "El cliente no tiene teléfono principal ni secundario.",
           penalizacion: 20,
         });
-        score -= 20;
       }
 
       if (!client.address) {
-        issues.push({
+        issueCandidates.push({
           code: "CLIENT_ADDRESS_MISSING",
           etiqueta: "Dirección faltante",
           descripcion: "Falta la dirección postal del cliente.",
           penalizacion: 15,
         });
-        score -= 15;
       }
 
       if (!client.rfc) {
-        issues.push({
+        issueCandidates.push({
           code: "CLIENT_RFC_MISSING",
           etiqueta: "RFC faltante",
           descripcion: "No se capturó RFC para el cliente.",
           penalizacion: 10,
         });
-        score -= 10;
       }
 
       if (!client.preferredContactMethod) {
-        issues.push({
+        issueCandidates.push({
           code: "CLIENT_CONTACT_METHOD_MISSING",
           etiqueta: "Método de contacto faltante",
           descripcion: "No se indicó un medio de contacto preferido.",
           penalizacion: 10,
         });
-        score -= 10;
       }
 
       const totalPolizas = client.policies.length;
@@ -493,38 +545,43 @@ export async function getClientDataQualityScores() {
       );
 
       if (totalPolizas === 0) {
-        issues.push({
+        issueCandidates.push({
           code: "CLIENT_WITHOUT_POLICY",
           etiqueta: "Sin pólizas",
           descripcion: "El cliente no tiene pólizas registradas.",
           penalizacion: 15,
         });
-        score -= 15;
       }
 
+      const openIssues = issueCandidates
+        .filter((issue) => !isRiskIssueSuppressed(suppressionRules, issue.code, "Client", client.id))
+        .map<DataQualityIssue>((issue) => ({
+          ...issue,
+          entityType: "Client",
+          entityId: client.id,
+        }));
+      const score = clampScore(100 - openIssues.reduce((sum, issue) => sum + issue.penalizacion, 0));
       const completitud = Math.max(
         0,
-        Math.round(
-          ((Number(Boolean(client.email)) +
-            Number(Boolean(client.phone || client.secondaryPhone)) +
-            Number(Boolean(client.address)) +
-            Number(Boolean(client.rfc)) +
-            Number(Boolean(client.preferredContactMethod))) /
-            5) *
-            100,
-        ),
+        Math.round(((5 - openIssues.filter((issue) => completenessIssueCodes.has(issue.code)).length) / 5) * 100),
       );
 
       return {
         clienteId: client.id,
         cliente: client.fullName,
-        score: clampScore(score),
+        email: client.email,
+        phone: client.phone,
+        secondaryPhone: client.secondaryPhone,
+        address: client.address,
+        rfc: client.rfc,
+        preferredContactMethod: client.preferredContactMethod,
+        score,
         nivel: clientQualityLevel(score),
         completitud,
         totalPolizas,
         polizasActivas,
         ingresosEstimados,
-        issues,
+        issues: openIssues,
       };
     })
     .sort((a, b) => a.score - b.score || a.cliente.localeCompare(b.cliente));
@@ -532,6 +589,7 @@ export async function getClientDataQualityScores() {
 
 export async function getPolicyDataQualityScores() {
   const db = getDb();
+  const suppressionRules = await loadRiskSuppressionRules();
   const policies = await db.policy.findMany({
     select: {
       id: true,
@@ -540,6 +598,7 @@ export async function getPolicyDataQualityScores() {
       paymentFrequency: true,
       insuredObject: true,
       premiumAmount: true,
+      notes: true,
       clientId: true,
       receipts: {
         select: {
@@ -563,40 +622,36 @@ export async function getPolicyDataQualityScores() {
 
   return policies
     .map<PolicyQualityScore>((policy) => {
-      const issues: DataQualityIssue[] = [];
-      let score = 100;
+      const issueCandidates: DataQualityIssue[] = [];
 
       const hasInsuredParty = policy.insuredParties.length > 0;
       const hasInsuredAsset = policy.insuredAssets.length > 0;
 
       if (!policy.insuredObject && !hasInsuredParty && !hasInsuredAsset) {
-        issues.push({
+        issueCandidates.push({
           code: "POLICY_OBJECT_MISSING",
           etiqueta: "Objeto asegurado faltante",
           descripcion: "La póliza no describe el objeto asegurado.",
           penalizacion: 15,
         });
-        score -= 15;
       }
 
       if (policy.status === "PENDING") {
-        issues.push({
+        issueCandidates.push({
           code: "POLICY_PENDING",
           etiqueta: "Póliza pendiente",
           descripcion: "La póliza sigue en estado pendiente.",
           penalizacion: 10,
         });
-        score -= 10;
       }
 
       if (!toNumber(policy.premiumAmount)) {
-        issues.push({
+        issueCandidates.push({
           code: "POLICY_PREMIUM_MISSING",
           etiqueta: "Prima faltante",
           descripcion: "La póliza no tiene prima capturada.",
           penalizacion: 15,
         });
-        score -= 15;
       }
 
       if (policy.paymentFrequency === "SINGLE" && policy.receipts.length > 1) {
@@ -620,22 +675,30 @@ export async function getPolicyDataQualityScores() {
             return gap >= 0 && gap <= 5; // Allow 5 days gap for grace period
           });
           if (hasConsecutive) {
-            issues.push({
+            issueCandidates.push({
               code: "POLICY_PAYMENT_FREQUENCY_REVIEW",
               etiqueta: "Frecuencia de pago para revisar",
               descripcion: "La póliza está marcada como única, pero tiene múltiples recibos consecutivos y conviene validar si debe normalizarse.",
               penalizacion: 8,
             });
-            score -= 8;
           }
         }
       }
 
+      const openIssues = issueCandidates
+        .filter((issue) => !isRiskIssueSuppressed(suppressionRules, issue.code, "Policy", policy.id))
+        .map<DataQualityIssue>((issue) => ({
+          ...issue,
+          entityType: "Policy",
+          entityId: policy.id,
+        }));
+      const score = clampScore(100 - openIssues.reduce((sum, issue) => sum + issue.penalizacion, 0));
       const completitud = Math.max(
         0,
         Math.round(
-          ((Number(Boolean(policy.insuredObject || hasInsuredParty || hasInsuredAsset)) +
-            Number(Boolean(toNumber(policy.premiumAmount)))) /
+          ((2 -
+            openIssues.filter((issue) => issue.code === "POLICY_OBJECT_MISSING" || issue.code === "POLICY_PREMIUM_MISSING")
+              .length) /
             2) *
             100,
         ),
@@ -647,10 +710,15 @@ export async function getPolicyDataQualityScores() {
         clienteId: policy.clientId,
         cliente: policy.client.fullName,
         aseguradora: policy.insurer.name,
-        score: clampScore(score),
+        status: policy.status,
+        premiumAmount: toNumber(policy.premiumAmount),
+        paymentFrequency: policy.paymentFrequency,
+        insuredObject: policy.insuredObject,
+        notes: policy.notes,
+        score,
         nivel: policyQualityLevel(score),
         completitud,
-        issues,
+        issues: openIssues,
       };
     })
     .sort((a, b) => a.score - b.score || a.poliza.localeCompare(b.poliza));

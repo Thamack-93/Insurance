@@ -138,6 +138,101 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
     return errorResult(error instanceof Error ? error.message : "No se pudo actualizar la poliza.");
   }
 }
+
+export async function updatePolicyQualityFields(
+  id: string,
+  values: {
+    insuredObject?: string;
+    premiumAmount?: number | string;
+    paymentFrequency?: string;
+    status?: string;
+    notes?: string;
+  },
+): Promise<MutationResult> {
+  try {
+    const db = getDb();
+    const userId = await getCurrentUserId();
+    await assertPolicyPortfolioAccess(id, userId);
+    const previousPolicy = await db.policy.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        policyNumber: true,
+        clientId: true,
+        insurerId: true,
+        policyType: true,
+        status: true,
+        startDate: true,
+        endDate: true,
+        premiumAmount: true,
+        currency: true,
+        paymentFrequency: true,
+        paymentPlan: true,
+        insuredObject: true,
+        beneficiaryInfo: true,
+        notes: true,
+      },
+    });
+
+    if (!previousPolicy) {
+      return errorResult("La poliza ya no existe.");
+    }
+
+    const updateData: Record<string, unknown> = {
+      updatedById: userId,
+    };
+    if (values.insuredObject !== undefined) {
+      updateData.insuredObject = normalizeOptionalText(values.insuredObject);
+    }
+    if (values.notes !== undefined) {
+      updateData.notes = normalizeOptionalText(values.notes);
+    }
+    if (values.paymentFrequency !== undefined) {
+      updateData.paymentFrequency = values.paymentFrequency.trim();
+    }
+    if (values.status !== undefined) {
+      updateData.status = values.status.trim();
+    }
+    if (values.premiumAmount !== undefined) {
+      const premium = typeof values.premiumAmount === "string" ? Number(values.premiumAmount) : values.premiumAmount;
+      if (!Number.isFinite(premium) || premium <= 0) {
+        return errorResult("La prima debe ser mayor a cero.");
+      }
+      updateData.premiumAmount = premium;
+    }
+
+    const policy = await db.policy.update({
+      where: { id },
+      data: updateData,
+    });
+
+    await writeActivityLog({
+      entityType: "Policy",
+      entityId: policy.id,
+      action: "POLICY_QUALITY_UPDATE",
+      oldValue: previousPolicy,
+      newValue: policy,
+      userId,
+    });
+
+    revalidatePaths([
+      "/policies",
+      `/policies/${policy.id}`,
+      `/clients/${policy.clientId}`,
+      "/dashboard",
+      "/today",
+      "/portfolio",
+      "/renewals",
+      "/risks",
+      "/data-quality",
+    ]);
+
+    return successResult(policy.id, `/policies/${policy.id}`, "Datos de calidad actualizados.");
+  } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
+    return errorResult(error instanceof Error ? error.message : "No se pudo actualizar la calidad de la poliza.");
+  }
+}
 export async function deletePolicy(id: string): Promise<MutationResult> {
   try {
     await requireAdmin();

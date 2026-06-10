@@ -209,6 +209,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
     notes: string | null;
     clientId: string;
     clientName: string | null;
+    insurerName: string | null;
   };
   type ReceiptRow = RowWithId & { receiptNumber: string; status: string; clientName: string | null };
   type WorkItemRow = RowWithId & {
@@ -251,24 +252,35 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
     ),
     rawSearch<PolicyRow>(
       "Policy",
-      ["id", "policyNumber", "policyType", "insuredObject", "notes", "clientId", "updatedAt"],
+      ["id", "policyNumber", "policyType", "insuredObject", "notes", "clientId", "insurerId", "updatedAt"],
       ["policyNumber", "insuredObject", "notes"],
       needle,
       5,
       Prisma.sql`ORDER BY ${Prisma.raw('"endDate"')} DESC, ${Prisma.raw('"startDate"')} DESC, ${Prisma.raw('"updatedAt"')} DESC`,
       Prisma.sql`,
         (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Policy"."clientId") AS "clientName",
+        (SELECT "name" FROM "Insurer" WHERE "Insurer"."id" = "Policy"."insurerId") AS "insurerName",
         (
           SELECT string_agg("fullName", ' | ')
           FROM "PolicyInsuredParty"
           WHERE "PolicyInsuredParty"."policyId" = "Policy"."id"
         ) AS "insuredPartiesText",
         (
-          SELECT string_agg("description", ' | ')
+          SELECT string_agg(COALESCE("serialNumber", "description"), ' | ')
           FROM "PolicyInsuredAsset"
           WHERE "PolicyInsuredAsset"."policyId" = "Policy"."id"
         ) AS "insuredAssetsText"`,
       Prisma.sql`EXISTS (
+        SELECT 1
+        FROM "Client"
+        WHERE "Client"."id" = "Policy"."clientId"
+          AND ${Prisma.raw(unaccentSql('"Client"."fullName"'))} LIKE ${`%${needle}%`}
+      ) OR EXISTS (
+        SELECT 1
+        FROM "Insurer"
+        WHERE "Insurer"."id" = "Policy"."insurerId"
+          AND ${Prisma.raw(unaccentSql('"Insurer"."name"'))} LIKE ${`%${needle}%`}
+      ) OR EXISTS (
         SELECT 1
         FROM "PolicyInsuredParty"
         WHERE "PolicyInsuredParty"."policyId" = "Policy"."id"
@@ -277,7 +289,10 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
         SELECT 1
         FROM "PolicyInsuredAsset"
         WHERE "PolicyInsuredAsset"."policyId" = "Policy"."id"
-          AND ${Prisma.raw(unaccentSql('"PolicyInsuredAsset"."description"'))} LIKE ${`%${needle}%`}
+          AND (
+            ${Prisma.raw(unaccentSql('"PolicyInsuredAsset"."description"'))} LIKE ${`%${needle}%`}
+            OR ${Prisma.raw(unaccentSql('"PolicyInsuredAsset"."serialNumber"'))} LIKE ${`%${needle}%`}
+          )
       )`,
       scopedPolicyWhere,
     ),
@@ -364,12 +379,12 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
   }
 
   for (const p of policies) {
-    const match = pickMatch(p, ["policyNumber", "insuredObject", "insuredPartiesText", "insuredAssetsText", "notes"], needle);
+    const match = pickMatch(p, ["policyNumber", "insuredObject", "insuredPartiesText", "insuredAssetsText", "notes", "clientName", "insurerName"], needle);
     results.push({
       id: p.id,
       type: "policy",
       title: p.policyNumber,
-      subtitle: `${p.clientName ?? "Sin cliente"} · ${p.policyType}`,
+      subtitle: `${p.clientName ?? "Sin cliente"} · ${p.insurerName ?? "Sin aseguradora"} · ${p.policyType}`,
       href: `/policies/${p.id}`,
       match,
     });

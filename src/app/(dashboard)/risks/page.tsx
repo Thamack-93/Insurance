@@ -21,6 +21,9 @@ import { getDb } from "@/lib/db";
 import { detectRisks } from "@/lib/risk-engine";
 import { getClientDataQualityScores, getPolicyDataQualityScores } from "@/lib/data-quality";
 import { formatCurrency } from "@/lib/money";
+import { ClientResolutionActions, PolicyResolutionActions, RenewalResolutionActions } from "@/components/risk-resolution/resolution-actions";
+import { PageRefreshTicker } from "@/components/risk-resolution/page-refresh-ticker";
+import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-button";
 
 function riskHref(entityType: string, entityId: string) {
   if (entityType === "Client") return `/clients/${entityId}`;
@@ -126,6 +129,8 @@ export default async function RisksPage({
   const avgPolicyScore = Math.round(
     policyScores.reduce((sum, p) => sum + p.score, 0) / (policyScores.length || 1),
   );
+  const clientScoreById = new Map(clientScores.map((client) => [client.clienteId, client] as const));
+  const policyScoreById = new Map(policyScores.map((policy) => [policy.polizaId, policy] as const));
   const clientCritical = clientScores.filter((c) => c.nivel === "Crítico").length;
   const policyCritical = policyScores.filter((p) => p.score < 50).length;
   const clientAttention = clientScores.filter((c) => c.nivel === "Atención").length;
@@ -153,17 +158,21 @@ export default async function RisksPage({
 
   return (
     <div className="space-y-6">
+      <PageRefreshTicker />
       <PageHeader
         eyebrow="Calidad"
         title="Riesgos y calidad"
         description="Hallazgos del motor de calidad y completitud de datos en una sola vista."
         actions={
-          <Button asChild className="rounded-full">
-            <Link href="/documents">
-              Documentos
-              <ArrowRight className="ml-2 size-4" />
-            </Link>
-          </Button>
+          <>
+            <RefreshPageButton />
+            <Button asChild className="rounded-full">
+              <Link href="/documents">
+                Documentos
+                <ArrowRight className="ml-2 size-4" />
+              </Link>
+            </Button>
+          </>
         }
       />
 
@@ -235,9 +244,54 @@ export default async function RisksPage({
                         </p>
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-2">
-                        <Button asChild variant="outline" size="sm" className="rounded-full">
-                          <Link href={riskHref(risk.entityType, risk.entityId)}>Abrir</Link>
-                        </Button>
+                        {risk.alertType === "RENEWAL_WITHOUT_WORK_ITEM" ? (
+                          policyScoreById.get(risk.entityId) ? (
+                            <RenewalResolutionActions
+                              mode="policy"
+                              sourcePolicyId={risk.entityId}
+                              sourcePolicyNumber={policyScoreById.get(risk.entityId)!.poliza}
+                              clientName={policyScoreById.get(risk.entityId)!.cliente}
+                              insurerName={policyScoreById.get(risk.entityId)!.aseguradora}
+                            />
+                          ) : null
+                        ) : risk.alertType === "CLIENT_MISSING_CONTACT" ? (
+                          clientScoreById.get(risk.entityId) ? (
+                            <ClientResolutionActions
+                              clientId={risk.entityId}
+                              clientName={clientScoreById.get(risk.entityId)!.cliente}
+                              email={clientScoreById.get(risk.entityId)!.email}
+                              phone={clientScoreById.get(risk.entityId)!.phone}
+                              secondaryPhone={clientScoreById.get(risk.entityId)!.secondaryPhone}
+                              address={clientScoreById.get(risk.entityId)!.address}
+                              rfc={clientScoreById.get(risk.entityId)!.rfc}
+                              preferredContactMethod={clientScoreById.get(risk.entityId)!.preferredContactMethod}
+                              notes={null}
+                              issueCodes={[risk.alertType]}
+                            />
+                          ) : null
+                        ) : risk.alertType === "CLIENT_WITHOUT_ACTIVE_POLICY" ? (
+                          clientScoreById.get(risk.entityId) ? (
+                            <ClientResolutionActions
+                              clientId={risk.entityId}
+                              clientName={clientScoreById.get(risk.entityId)!.cliente}
+                              email={clientScoreById.get(risk.entityId)!.email}
+                              phone={clientScoreById.get(risk.entityId)!.phone}
+                              secondaryPhone={clientScoreById.get(risk.entityId)!.secondaryPhone}
+                              address={clientScoreById.get(risk.entityId)!.address}
+                              rfc={clientScoreById.get(risk.entityId)!.rfc}
+                              preferredContactMethod={clientScoreById.get(risk.entityId)!.preferredContactMethod}
+                              notes={null}
+                              issueCodes={[risk.alertType]}
+                              allowClose={false}
+                              allowEdit={false}
+                              consolidateLabel="Consolidar"
+                            />
+                          ) : null
+                        ) : (
+                          <Button asChild variant="outline" size="sm" className="rounded-full">
+                            <Link href={riskHref(risk.entityType, risk.entityId)}>Abrir</Link>
+                          </Button>
+                        )}
                         <span className="text-xs text-muted-foreground">{risk.suggestedAction}</span>
                       </div>
                     </div>
@@ -299,18 +353,19 @@ export default async function RisksPage({
                 <div className="px-4 py-6 text-sm text-muted-foreground">{issueCodeFilter ? "No hay clientes con este problema." : "No hay clientes para evaluar."}</div>
               ) : (
                 <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/40">
-                      <TableHead>Cliente</TableHead>
-                      <TableHead>Score</TableHead>
-                      <TableHead>Nivel</TableHead>
-                      <TableHead className="text-right">Pólizas</TableHead>
-                      <TableHead className="text-right">Prima</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredClientScores.slice(0, 10).map((client) => (
-                      <TableRow key={client.clienteId}>
+                    <TableHeader>
+                      <TableRow className="bg-muted/40">
+                        <TableHead>Cliente</TableHead>
+                        <TableHead>Score</TableHead>
+                        <TableHead>Nivel</TableHead>
+                        <TableHead className="text-right">Pólizas</TableHead>
+                        <TableHead className="text-right">Prima</TableHead>
+                        <TableHead className="text-right">Acción</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredClientScores.slice(0, 10).map((client) => (
+                        <TableRow key={client.clienteId}>
                         <TableCell>
                           <Link href={`/clients/${client.clienteId}`} className="font-medium hover:text-primary">
                             {client.cliente}
@@ -337,6 +392,31 @@ export default async function RisksPage({
                         <TableCell className="text-right font-medium">
                           {formatCurrency(client.ingresosEstimados)}
                         </TableCell>
+                        <TableCell className="text-right">
+                          {client.issues.length > 0 ? (
+                            <ClientResolutionActions
+                              clientId={client.clienteId}
+                              clientName={client.cliente}
+                              email={client.email}
+                              phone={client.phone}
+                              secondaryPhone={client.secondaryPhone}
+                              address={client.address}
+                              rfc={client.rfc}
+                              preferredContactMethod={client.preferredContactMethod}
+                              notes={null}
+                              issueCodes={client.issues.map((issue) => issue.code)}
+                              allowClose={!(
+                                client.issues.length === 1 && client.issues[0].code === "CLIENT_WITHOUT_POLICY"
+                              )}
+                              allowEdit={!(
+                                client.issues.length === 1 && client.issues[0].code === "CLIENT_WITHOUT_POLICY"
+                              )}
+                              consolidateLabel="Consolidar"
+                            />
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Sin acción</span>
+                          )}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -349,17 +429,18 @@ export default async function RisksPage({
                 <div className="px-4 py-6 text-sm text-muted-foreground">{issueCodeFilter ? "No hay pólizas con este problema." : "No hay pólizas para evaluar."}</div>
               ) : (
                 <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/40">
-                      <TableHead>Póliza</TableHead>
-                      <TableHead>Score</TableHead>
-                      <TableHead>Nivel</TableHead>
-                      <TableHead>Problemas</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredPolicyScores.slice(0, 10).map((policy) => (
-                      <TableRow key={policy.polizaId}>
+                    <TableHeader>
+                      <TableRow className="bg-muted/40">
+                        <TableHead>Póliza</TableHead>
+                        <TableHead>Score</TableHead>
+                        <TableHead>Nivel</TableHead>
+                        <TableHead>Problemas</TableHead>
+                        <TableHead className="text-right">Acción</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredPolicyScores.slice(0, 10).map((policy) => (
+                        <TableRow key={policy.polizaId}>
                         <TableCell>
                           <Link href={`/policies/${policy.polizaId}`} className="font-medium hover:text-primary">
                             {policy.poliza}
@@ -388,6 +469,24 @@ export default async function RisksPage({
                                 </Badge>
                               ) : null}
                             </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {policy.issues.length > 0 ? (
+                            <PolicyResolutionActions
+                              policyId={policy.polizaId}
+                              policyNumber={policy.poliza}
+                              clientName={policy.cliente}
+                              insurerName={policy.aseguradora}
+                              insuredObject={policy.insuredObject}
+                              premiumAmount={policy.premiumAmount}
+                              paymentFrequency={policy.paymentFrequency}
+                              status={policy.status}
+                              notes={policy.notes}
+                              issueCodes={policy.issues.map((issue) => issue.code)}
+                            />
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Sin acción</span>
                           )}
                         </TableCell>
                       </TableRow>

@@ -11,11 +11,13 @@ import { applyLedgerImportBatch, createLedgerImportPreview } from "@/lib/ledger-
 import { runPolicyVigencyAudit } from "@/lib/vigency-maintenance";
 import { runPaymentReconciliationAudit } from "@/lib/payment-maintenance";
 import { upsertSuppressionRule } from "@/lib/data-quality-rules";
+import { linkRenewalToPolicy } from "@/app/(dashboard)/renewals/actions";
 
 const REVIEW_APPROVED_NOTE = "Aprobado desde Data Quality.";
 const REVIEW_DENIED_NOTE = "Denegado desde Data Quality.";
 const REVIEW_SUPPRESSED_NOTE = "Suprimido por regla desde Data Quality.";
 const REVIEW_REOPENED_NOTE = "Reabierto desde Data Quality.";
+const REVIEW_CLOSED_NOTE = "Cerrado manualmente desde Riesgos y calidad.";
 
 function parseIssueIds(formData: FormData) {
   return formData
@@ -114,6 +116,56 @@ async function loadRenewalSuggestion(suggestionId: string) {
       },
     },
   });
+}
+
+async function closeRiskIssueSet(input: {
+  entityType: "Client" | "Policy";
+  entityId: string;
+  issueCodes: string[];
+  note?: string;
+}) {
+  const actor = await requireAdmin();
+  const db = getDb();
+  const issueCodes = [...new Set(input.issueCodes.map((code) => code.trim()).filter(Boolean))];
+
+  if (!issueCodes.length) {
+    throw new Error("Selecciona al menos un hallazgo para cerrar.");
+  }
+
+  const closeNote = input.note?.trim() || REVIEW_CLOSED_NOTE;
+  const ruleIds: string[] = [];
+
+  for (const issueCode of issueCodes) {
+    const suppressionRule = await upsertSuppressionRule(
+      {
+        category: "RISKS",
+        issueCode,
+        criteria: {
+          entityType: input.entityType,
+          entityId: input.entityId,
+        },
+        reason: closeNote,
+        actorId: actor.id,
+      },
+      db,
+    );
+    ruleIds.push(suppressionRule.id);
+  }
+
+  await writeActivityLog({
+    entityType: input.entityType,
+    entityId: input.entityId,
+    action: "RISK_ISSUES_CLOSED",
+    newValue: {
+      issueCodes,
+      note: closeNote,
+      suppressionRuleIds: ruleIds,
+    },
+    userId: actor.id,
+    db,
+  });
+
+  revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
 }
 
 async function loadLedgerIssue(issueId: string) {
@@ -343,6 +395,44 @@ async function reviewLedgerIssue(issueId: string, decision: "APPROVE" | "DENY"):
   } catch (error) {
     logError("data-quality.reviewLedgerIssue", error);
     return errorResult(error instanceof Error ? error.message : "No se pudo revisar el issue de ledger.");
+  }
+}
+
+export async function closeRiskIssuesAction(input: {
+  entityType: "Client" | "Policy";
+  entityId: string;
+  issueCodes: string[];
+  note?: string;
+}): Promise<MutationResult> {
+  try {
+    await closeRiskIssueSet(input);
+    return successResult(input.entityId, "/data-quality", "Caso cerrado.");
+  } catch (error) {
+    logError("data-quality.closeRiskIssuesAction", error);
+    return errorResult(error instanceof Error ? error.message : "No se pudo cerrar el caso.");
+  }
+}
+
+export async function linkRenewalSuggestionToPolicy(
+  suggestionId: string,
+  targetPolicyId: string,
+): Promise<MutationResult> {
+  try {
+    const suggestion = await loadRenewalSuggestion(suggestionId);
+    if (!suggestion) {
+      return errorResult("La sugerencia de renovación ya no existe.");
+    }
+    if (!suggestion.sourcePolicy) {
+      return errorResult("La sugerencia no tiene póliza origen.");
+    }
+    if (!targetPolicyId?.trim()) {
+      return errorResult("Selecciona una póliza destino.");
+    }
+
+    return linkRenewalToPolicy(suggestion.sourcePolicy.id, targetPolicyId);
+  } catch (error) {
+    logError("data-quality.linkRenewalSuggestionToPolicy", error);
+    return errorResult(error instanceof Error ? error.message : "No se pudo vincular la sugerencia de renovación.");
   }
 }
 

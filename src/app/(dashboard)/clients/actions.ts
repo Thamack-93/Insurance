@@ -8,6 +8,7 @@ import { NO_REFERIDOR_VALUE } from "@/lib/constants";
 import { clientSchema, type ClientFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { assertClientPortfolioAccess } from "@/lib/portfolio-access";
+import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 
 function normalizeClientInput(values: ClientFormValues) {
   const referidorId = optionalRelationId(values.referidorId);
@@ -24,6 +25,47 @@ function normalizeClientInput(values: ClientFormValues) {
     notes: normalizeOptionalText(values.notes),
     status: values.status,
   };
+}
+
+function mergeClientMetadata(target: {
+  type: string;
+  email: string | null;
+  phone: string | null;
+  secondaryPhone: string | null;
+  rfc: string | null;
+  address: string | null;
+  preferredContactMethod: string | null;
+  notes: string | null;
+  portfolioOwnerId: string | null;
+}, source: {
+  type: string;
+  email: string | null;
+  phone: string | null;
+  secondaryPhone: string | null;
+  rfc: string | null;
+  address: string | null;
+  preferredContactMethod: string | null;
+  notes: string | null;
+  portfolioOwnerId: string | null;
+}) {
+  return {
+    type: target.type === "PERSON" && source.type !== "PERSON" ? source.type : target.type,
+    email: target.email ?? source.email,
+    phone: target.phone ?? source.phone,
+    secondaryPhone: target.secondaryPhone ?? source.secondaryPhone,
+    rfc: target.rfc ?? source.rfc,
+    address: target.address ?? source.address,
+    preferredContactMethod: target.preferredContactMethod ?? source.preferredContactMethod,
+    notes: target.notes ?? source.notes,
+    portfolioOwnerId: target.portfolioOwnerId ?? source.portfolioOwnerId,
+  };
+}
+
+function appendConsolidationNote(current: string | null, details: string) {
+  const note = `Consolidado desde ${details}`;
+  if (!current?.trim()) return note;
+  if (current.includes(note)) return current;
+  return `${current.trim()}\n\n${note}`;
 }
 
 async function ensureValidReferidor(
@@ -173,6 +215,216 @@ export async function updateClient(id: string, values: ClientFormValues): Promis
     return successResult(client.id, `/clients/${client.id}`, "Cliente actualizado.");
   } catch (error) {
     return errorResult(error instanceof Error ? error.message : "No se pudo actualizar el cliente.");
+  }
+}
+
+export async function updateClientQualityFields(
+  id: string,
+  values: {
+    email?: string;
+    phone?: string;
+    secondaryPhone?: string;
+    rfc?: string;
+    address?: string;
+    preferredContactMethod?: string;
+    notes?: string;
+  },
+): Promise<MutationResult> {
+  try {
+    const db = getDb();
+    const userId = await getCurrentUserId();
+    await assertClientPortfolioAccess(id, userId);
+    const previousClient = await db.client.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        secondaryPhone: true,
+        rfc: true,
+        address: true,
+        preferredContactMethod: true,
+        notes: true,
+        status: true,
+        type: true,
+      },
+    });
+
+    if (!previousClient) {
+      return errorResult("El cliente ya no existe.");
+    }
+
+    const client = await db.client.update({
+      where: { id },
+      data: {
+        ...(values.email !== undefined ? { email: normalizeOptionalText(values.email) } : {}),
+        ...(values.phone !== undefined ? { phone: normalizeOptionalText(values.phone) } : {}),
+        ...(values.secondaryPhone !== undefined ? { secondaryPhone: normalizeOptionalText(values.secondaryPhone) } : {}),
+        ...(values.rfc !== undefined ? { rfc: normalizeOptionalText(values.rfc) } : {}),
+        ...(values.address !== undefined ? { address: normalizeOptionalText(values.address) } : {}),
+        ...(values.preferredContactMethod !== undefined
+          ? { preferredContactMethod: normalizeOptionalText(values.preferredContactMethod) }
+          : {}),
+        ...(values.notes !== undefined ? { notes: normalizeOptionalText(values.notes) } : {}),
+        updatedById: userId,
+      },
+    });
+
+    await writeActivityLog({
+      entityType: "Client",
+      entityId: client.id,
+      action: "CLIENT_QUALITY_UPDATE",
+      oldValue: previousClient,
+      newValue: client,
+      userId,
+    });
+
+    revalidatePaths([
+      "/clients",
+      `/clients/${client.id}`,
+      "/dashboard",
+      "/today",
+      "/portfolio",
+      "/risks",
+      "/data-quality",
+    ]);
+
+    return successResult(client.id, `/clients/${client.id}`, "Datos de calidad actualizados.");
+  } catch (error) {
+    return errorResult(error instanceof Error ? error.message : "No se pudo actualizar la calidad del cliente.");
+  }
+}
+
+export async function consolidateClientIntoTarget(
+  sourceClientId: string,
+  targetClientId: string,
+  reason: string,
+): Promise<MutationResult> {
+  try {
+    const actor = await requireAdmin();
+    if (sourceClientId === targetClientId) {
+      return errorResult("Selecciona un cliente distinto para consolidar.");
+    }
+
+    const db = getDb();
+    const sourceClient = await db.client.findUnique({
+      where: { id: sourceClientId },
+      select: {
+        id: true,
+        fullName: true,
+        type: true,
+        email: true,
+        phone: true,
+        secondaryPhone: true,
+        rfc: true,
+        address: true,
+        preferredContactMethod: true,
+        notes: true,
+        portfolioOwnerId: true,
+        status: true,
+      },
+    });
+    const targetClient = await db.client.findUnique({
+      where: { id: targetClientId },
+      select: {
+        id: true,
+        fullName: true,
+        type: true,
+        email: true,
+        phone: true,
+        secondaryPhone: true,
+        rfc: true,
+        address: true,
+        preferredContactMethod: true,
+        notes: true,
+        portfolioOwnerId: true,
+        status: true,
+      },
+    });
+
+    if (!sourceClient) {
+      return errorResult("El cliente origen ya no existe.");
+    }
+    if (!targetClient) {
+      return errorResult("El cliente destino ya no existe.");
+    }
+
+    const cleanedReason = reason.trim();
+    const summaryReason = cleanedReason || `Consolidación manual hacia ${targetClient.fullName}.`;
+
+    await db.$transaction(async (tx) => {
+      const mergedMetadata = mergeClientMetadata(targetClient, sourceClient);
+      await tx.client.update({
+        where: { id: targetClient.id },
+        data: {
+          ...mergedMetadata,
+          notes: appendConsolidationNote(targetClient.notes, `${sourceClient.fullName}`),
+          status: "ACTIVE",
+          updatedById: actor.id,
+        },
+      });
+
+      await tx.policy.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
+      await tx.receipt.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
+      await tx.payment.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
+      await tx.commission.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
+      await tx.claim.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
+      await tx.quote.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
+      await tx.document.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
+      await tx.task.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
+      await tx.workItem.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
+      await tx.notificationEvent.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
+      await tx.client.updateMany({ where: { referidorId: sourceClient.id }, data: { referidorId: targetClient.id } });
+
+      await tx.client.update({
+        where: { id: sourceClient.id },
+        data: {
+          status: "ARCHIVED",
+          notes: appendConsolidationNote(sourceClient.notes, `fusionado con ${targetClient.fullName}`),
+          updatedById: actor.id,
+        },
+      });
+
+      const openWorkItems = await tx.workItem.findMany({
+        where: {
+          clientId: targetClient.id,
+          status: { in: [...OPEN_WORK_ITEM_STATUSES] },
+        },
+        select: { id: true },
+      });
+
+      await writeActivityLog({
+        entityType: "Client",
+        entityId: sourceClient.id,
+        action: "CLIENT_CONSOLIDATED",
+        oldValue: sourceClient,
+        newValue: {
+          targetClientId: targetClient.id,
+          targetClientName: targetClient.fullName,
+          reason: summaryReason,
+          openWorkItemsOnTarget: openWorkItems.length,
+        },
+        userId: actor.id,
+        db: tx,
+      });
+    });
+
+    revalidatePaths([
+      "/clients",
+      `/clients/${sourceClient.id}`,
+      `/clients/${targetClient.id}`,
+      "/dashboard",
+      "/today",
+      "/portfolio",
+      "/risks",
+      "/data-quality",
+    ]);
+
+    return successResult(sourceClient.id, `/clients/${targetClient.id}`, "Cliente consolidado.");
+  } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
+    return errorResult(error instanceof Error ? error.message : "No se pudo consolidar el cliente.");
   }
 }
 export async function bulkArchiveClients(ids: string[]): Promise<MutationResult> {
