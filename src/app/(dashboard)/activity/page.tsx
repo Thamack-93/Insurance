@@ -76,7 +76,7 @@ const ACTIVITY_VIEWS: ActivityView[] = [
   },
   {
     value: "mutations-blocked",
-    label: "Mutaciones bloqueadas",
+    label: "Cambios reales bloqueados",
     description: "Cambios frenados por same-origin o CSRF.",
     icon: Siren,
     actionStartsWith: "SECURITY_SAME_ORIGIN_BLOCKED",

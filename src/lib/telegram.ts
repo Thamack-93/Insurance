@@ -144,7 +144,6 @@ type TelegramPaymentDraftState = {
   step:
     | "policyNumber"
     | "receiptNumber"
-    | "amount"
     | "paidDate"
     | "paymentMethod"
     | "ready";
@@ -299,10 +298,8 @@ function getTelegramPaymentPrompt(step: TelegramPaymentDraftState["step"]) {
       return "Escribe el número de póliza.";
     case "receiptNumber":
       return "Ahora escribe el número de recibo.";
-    case "amount":
-      return "Escribe el monto del pago.";
     case "paidDate":
-      return "Escribe la fecha del pago en formato YYYY-MM-DD.";
+      return "Escribe la fecha del pago. Puedes responder hoy o usar YYYY-MM-DD.";
     case "paymentMethod":
       return "Escribe el método de pago.";
     case "ready":
@@ -336,7 +333,6 @@ function getTelegramPolicyPrompt(step: TelegramPolicyDraftState["step"]) {
 function getNextPaymentStep(state: TelegramPaymentDraftState): TelegramPaymentDraftState["step"] {
   if (!state.policyNumber) return "policyNumber";
   if (!state.receiptNumber) return "receiptNumber";
-  if (state.amount == null) return "amount";
   if (!state.paidDate) return "paidDate";
   if (!state.paymentMethod) return "paymentMethod";
   return "ready";
@@ -356,6 +352,12 @@ function getNextPolicyStep(state: TelegramPolicyDraftState): TelegramPolicyDraft
 
 function formatTelegramDate(date: Date) {
   return TELEGRAM_DATE_FORMATTER.format(date);
+}
+
+function formatTelegramPaymentDateLabel(paidDate: string) {
+  return paidDate === getLocalDateKey(new Date())
+    ? "hoy"
+    : formatTelegramDate(new Date(`${paidDate}T12:00:00.000Z`));
 }
 
 function formatTelegramNotificationText(title: string, body: string) {
@@ -440,6 +442,16 @@ function parseTelegramIsoDate(value: string) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+export function parseTelegramPaymentDateInput(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "hoy" || normalized === "today") {
+    return getLocalDateKey(new Date());
+  }
+
+  const parsed = parseTelegramIsoDate(value);
+  return parsed ? parsed.toISOString().slice(0, 10) : null;
+}
+
 async function getActiveTelegramDraftForChat(chatId: string, client?: DbClient) {
   const db = client ?? getDb();
   const channel = await getTelegramChannelByChatId(chatId, db);
@@ -484,28 +496,42 @@ function buildPolicyDraftSummary(payload: Record<string, string>) {
   return parts.length > 0 ? parts.join(" · ") : "Borrador vacío para completar en PolicyDesk.";
 }
 
-function parseTelegramPaymentArgument(argument: string) {
+export function parseTelegramPaymentArgument(argument: string) {
   const parts = argument.split(/\s+/).filter(Boolean);
   const state: TelegramPaymentDraftState = { step: "policyNumber" };
 
   if (parts[0]) state.policyNumber = parts[0];
   if (parts[1]) state.receiptNumber = parts[1];
-  if (parts[2]) {
-    const amount = Number(parts[2].replace(/,/g, ""));
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return { ok: false as const, error: "El monto debe ser mayor a cero." };
+
+  const rest = parts.slice(2);
+  const firstToken = rest[0] ?? null;
+  const secondToken = rest[1] ?? null;
+
+  if (firstToken) {
+    const firstDate = parseTelegramPaymentDateInput(firstToken);
+    if (firstDate) {
+      state.paidDate = firstDate;
+      if (secondToken) {
+        state.paymentMethod = secondToken;
+      }
+      if (rest.length > 2) {
+        state.reference = rest.slice(2).join(" ").trim() || null;
+      }
+    } else {
+      state.paymentMethod = firstToken;
+      if (secondToken) {
+        const secondDate = parseTelegramPaymentDateInput(secondToken);
+        if (secondDate) {
+          state.paidDate = secondDate;
+          if (rest.length > 2) {
+            state.reference = rest.slice(2).join(" ").trim() || null;
+          }
+        } else {
+          state.reference = rest.slice(1).join(" ").trim() || null;
+        }
+      }
     }
-    state.amount = amount;
   }
-  if (parts[3]) {
-    const paidDate = parseTelegramIsoDate(parts[3]);
-    if (!paidDate) {
-      return { ok: false as const, error: "La fecha debe tener formato YYYY-MM-DD." };
-    }
-    state.paidDate = paidDate.toISOString().slice(0, 10);
-  }
-  if (parts[4]) state.paymentMethod = parts[4];
-  if (parts.length > 5) state.reference = parts.slice(5).join(" ").trim() || null;
 
   state.step = getNextPaymentStep(state);
 
@@ -600,7 +626,6 @@ async function persistTelegramDraftState(input: {
 function buildPaymentDraftStateFromInput(input: {
   policyNumber?: string;
   receiptNumber?: string;
-  amount?: number;
   paidDate?: string;
   paymentMethod?: string;
   reference?: string | null;
@@ -609,7 +634,6 @@ function buildPaymentDraftStateFromInput(input: {
     step: "policyNumber",
     policyNumber: input.policyNumber?.trim() || undefined,
     receiptNumber: input.receiptNumber?.trim() || undefined,
-    amount: input.amount,
     paidDate: input.paidDate,
     paymentMethod: input.paymentMethod?.trim() || undefined,
     reference: input.reference ?? null,
@@ -938,12 +962,6 @@ async function createTelegramPaymentDraft(input: {
   }
 
   const parsed = parseTelegramPaymentArgument(input.argument);
-  if (!parsed.ok) {
-    return {
-      ok: false as const,
-      replyText: parsed.error,
-    };
-  }
 
   const readyReceipt =
     parsed.state.step === "ready" && parsed.state.policyNumber && parsed.state.receiptNumber
@@ -981,6 +999,7 @@ async function createTelegramPaymentDraft(input: {
       payment: parsed.state.step === "ready" && readyReceipt
         ? {
             ...parsed.state,
+            amount: toNumber(readyReceipt.amount),
             receiptId: readyReceipt.id,
             policyId: readyReceipt.policyId,
             clientId: readyReceipt.clientId,
@@ -1023,6 +1042,7 @@ async function createTelegramPaymentDraft(input: {
       ...parsed.state,
       ...(readyReceipt
         ? {
+            amount: toNumber(readyReceipt.amount),
             receiptId: readyReceipt.id,
             policyId: readyReceipt.policyId,
             clientId: readyReceipt.clientId,
@@ -1049,9 +1069,9 @@ async function createTelegramPaymentDraft(input: {
       policyNumber: receipt.policy.policyNumber,
       receiptNumber: receipt.receiptNumber,
       clientName: receipt.client.fullName,
-      amount: formatCurrency(parsed.state.amount ?? 0, receipt.currency),
+      amount: formatCurrency(toNumber(receipt.amount), receipt.currency),
       paymentMethod: parsed.state.paymentMethod ?? "",
-      paidDate: formatTelegramDate(new Date(`${parsed.state.paidDate}T12:00:00.000Z`)),
+      paidDate: formatTelegramPaymentDateLabel(parsed.state.paidDate ?? getLocalDateKey(new Date())),
       reference: parsed.state.reference,
     }),
     draftId: draft.id,
@@ -1168,12 +1188,20 @@ async function confirmTelegramDraft(input: {
       return {
         ok: false as const,
         replyText:
-          "Las mutaciones por Telegram están desactivadas. Completa el borrador y confírmalo desde PolicyDesk.",
+          "Los cambios reales por Telegram están desactivados. Actívalos en Configuración > Notificaciones para registrar el pago aquí. Si no los activas, completa el pago en PolicyDesk.",
       };
     }
 
     const state = payload.payment;
-    if (!state || state.step !== "ready" || !state.policyNumber || !state.receiptNumber) {
+    if (
+      !state ||
+      state.step !== "ready" ||
+      !state.policyNumber ||
+      !state.receiptNumber ||
+      !state.paidDate ||
+      !state.paymentMethod ||
+      state.amount == null
+    ) {
       return {
         ok: false as const,
         replyText: "El borrador de pago todavía no está completo.",
@@ -1357,29 +1385,16 @@ async function continueTelegramDraftFromMessage(input: {
         state.receiptNumber = text;
         state.step = getNextPaymentStep(state);
         break;
-      case "amount": {
-        const amount = Number(text.replace(/,/g, ""));
-        if (!Number.isFinite(amount) || amount <= 0) {
-          return {
-            handled: true as const,
-            chatId: input.chatId,
-            replyText: "El monto debe ser mayor a cero. Intenta de nuevo.",
-          };
-        }
-        state.amount = amount;
-        state.step = getNextPaymentStep(state);
-        break;
-      }
       case "paidDate": {
-        const paidDate = parseTelegramIsoDate(text);
+        const paidDate = parseTelegramPaymentDateInput(text);
         if (!paidDate) {
           return {
             handled: true as const,
             chatId: input.chatId,
-            replyText: "La fecha debe tener formato YYYY-MM-DD. Intenta de nuevo.",
+            replyText: "La fecha debe ser hoy o tener formato YYYY-MM-DD. Intenta de nuevo.",
           };
         }
-        state.paidDate = paidDate.toISOString().slice(0, 10);
+        state.paidDate = paidDate;
         state.step = getNextPaymentStep(state);
         break;
       }
@@ -1395,9 +1410,9 @@ async function continueTelegramDraftFromMessage(input: {
             policyNumber: state.policyNumber ?? "—",
             receiptNumber: state.receiptNumber ?? "—",
             clientName: "—",
-            amount: formatCurrency(state.amount ?? 0, "MXN"),
+            amount: formatCurrency(state.amount ?? 0, state.currency ?? "MXN"),
             paymentMethod: state.paymentMethod ?? "—",
-            paidDate: state.paidDate ?? "—",
+            paidDate: state.paidDate ? formatTelegramPaymentDateLabel(state.paidDate) : "—",
             reference: state.reference,
           }),
         };
@@ -1426,9 +1441,17 @@ async function continueTelegramDraftFromMessage(input: {
         type: "PAYMENT_CAPTURE",
         payment: {
           ...state,
+          amount: toNumber(receipt.amount),
+          receiptId: receipt.id,
+          policyId: receipt.policyId,
+          clientId: receipt.clientId,
+          insurerId: receipt.insurerId,
+          clientName: receipt.client.fullName,
+          insurerName: receipt.insurer.name,
+          currency: receipt.currency,
+          receiptResolvedAt: new Date().toISOString(),
           receiptNumber: receipt.receiptNumber,
           policyNumber: receipt.policy.policyNumber,
-          amount: state.amount,
           paidDate: state.paidDate,
           paymentMethod: state.paymentMethod,
           reference: state.reference ?? null,
@@ -1443,9 +1466,9 @@ async function continueTelegramDraftFromMessage(input: {
           policyNumber: receipt.policy.policyNumber,
           receiptNumber: receipt.receiptNumber,
           clientName: receipt.client.fullName,
-          amount: formatCurrency(state.amount ?? 0, receipt.currency),
+          amount: formatCurrency(toNumber(receipt.amount), receipt.currency),
           paymentMethod: state.paymentMethod ?? "",
-          paidDate: formatTelegramDate(new Date(`${state.paidDate}T12:00:00.000Z`)),
+          paidDate: formatTelegramPaymentDateLabel(state.paidDate ?? getLocalDateKey(new Date())),
           reference: state.reference,
         }),
       };

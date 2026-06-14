@@ -105,7 +105,7 @@ export function buildTelegramStartMessage() {
     "",
     "Genera un código desde Configuración > Notificaciones y envía /link CÓDIGO en este chat privado.",
     "Después podrás usar /status para revisar el estado del vínculo.",
-    "Los pagos y capturas están desactivados por defecto; actívalos en Configuración > Notificaciones si los necesitas.",
+    "Los cambios reales por Telegram están desactivados por defecto; actívalos en Configuración > Notificaciones si los necesitas.",
   ].join("\n");
 }
 
@@ -116,14 +116,14 @@ export function buildTelegramHelpMessage() {
     "/help - Mostrar este resumen.",
     "/link <código> - Vincular este chat con tu cuenta de PolicyDesk.",
     "/status - Ver si este chat ya está vinculado.",
-    "/pago <póliza> <recibo> <monto> <fecha YYYY-MM-DD> <método> - Preparar un pago para confirmar.",
+    "/pago <póliza> <recibo> [hoy|YYYY-MM-DD] <método> - Preparar un pago por el total del recibo.",
     "/poliza [campos] - Preparar una póliza y obtener un enlace seguro para terminarla en PolicyDesk.",
     "/confirmar - Confirmar el borrador activo.",
     "/cancelar - Cancelar el borrador activo.",
     "/recibos [días] - Ver cobros vencidos y próximos. Predeterminado: 30.",
     "/renovaciones [días] - Ver renovaciones próximas. Predeterminado: 30.",
     "Si falta información, el bot te la irá pidiendo paso a paso.",
-    "Las mutaciones por Telegram están desactivadas por defecto.",
+    "Los cambios reales por Telegram están desactivados por defecto; actívalos en Configuración > Notificaciones.",
   ].join("\n");
 }
 
@@ -141,8 +141,8 @@ export function buildTelegramStatusMessage(connected: boolean, mutationsEnabled 
         "Este chat ya está vinculado con PolicyDesk.",
         "Telegram está activo para este usuario.",
         mutationsEnabled
-          ? "Las mutaciones por Telegram están habilitadas."
-          : "Las mutaciones por Telegram están deshabilitadas por defecto.",
+          ? "Los cambios reales por Telegram están habilitados."
+          : "Los cambios reales por Telegram están deshabilitados. Actívalos en Configuración > Notificaciones.",
         "Usa /help para ver los comandos disponibles.",
       ].join("\n")
     : [
@@ -182,7 +182,7 @@ export function buildTelegramPaymentDraftMessage(details: {
     "Borrador de pago preparado.",
     `Póliza: ${details.policyNumber}`,
     `Recibo: ${details.receiptNumber} · ${details.clientName}`,
-    `Monto: ${details.amount}`,
+    `Total del recibo: ${details.amount}`,
     `Método: ${details.paymentMethod} · Fecha: ${details.paidDate}`,
     details.reference ? `Referencia: ${details.reference}` : null,
     "",

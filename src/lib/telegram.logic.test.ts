@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+
 import {
   buildTelegramHelpMessage,
   buildTelegramLinkErrorMessage,
@@ -10,6 +13,7 @@ import {
   normalizeTelegramLinkCode,
   parseTelegramCommand,
 } from "./telegram-shared";
+import { parseTelegramPaymentArgument, parseTelegramPaymentDateInput } from "./telegram";
 
 describe("telegram.shared", () => {
   it("generates a readable hex link code", () => {
@@ -44,7 +48,35 @@ describe("telegram.shared", () => {
     expect(buildTelegramLinkSuccessMessage()).toContain("Chat vinculado");
     expect(buildTelegramLinkErrorMessage("Código inválido")).toContain("Código inválido");
     expect(buildTelegramStatusMessage(true)).toContain("vinculado");
-    expect(buildTelegramStatusMessage(true, false)).toContain("deshabilitadas");
+    expect(buildTelegramStatusMessage(true, false)).toContain("deshabilitados");
     expect(buildTelegramStatusMessage(false)).toContain("todavía no está vinculado");
+  });
+
+  it("parses payment drafts without an amount and accepts hoy as the payment date", () => {
+    expect(parseTelegramPaymentDateInput("hoy")).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    expect(parseTelegramPaymentArgument("POL-123 REC-456 hoy TRANSFER")).toMatchObject({
+      ok: true,
+      state: {
+        policyNumber: "POL-123",
+        receiptNumber: "REC-456",
+        paidDate: expect.any(String),
+        paymentMethod: "TRANSFER",
+        step: "ready",
+      },
+    });
+  });
+
+  it("allows the payment method to come before the date", () => {
+    expect(parseTelegramPaymentArgument("POL-123 REC-456 TRANSFER 2026-06-14")).toMatchObject({
+      ok: true,
+      state: {
+        policyNumber: "POL-123",
+        receiptNumber: "REC-456",
+        paidDate: "2026-06-14",
+        paymentMethod: "TRANSFER",
+        step: "ready",
+      },
+    });
   });
 });

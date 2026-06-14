@@ -273,7 +273,7 @@ export function NotificationPreferencesPanel({
         <CardHeader className="border-b border-border/70">
           <CardTitle className="flex items-center gap-2 text-base">
             <Send className="size-4" />
-            Mutaciones por Telegram
+            Cambios reales por Telegram
           </CardTitle>
           <CardDescription>
             Las consultas y avisos siguen activos. Este interruptor permite o bloquea pagos y
@@ -290,7 +290,7 @@ export function NotificationPreferencesPanel({
             />
             <div className="space-y-1">
               <Label htmlFor="telegram-mutations-enabled" className="text-sm font-medium">
-                Permitir pagos y capturas desde Telegram
+                Permitir cambios reales desde Telegram
               </Label>
               <p className="text-sm text-muted-foreground">
                 {connected

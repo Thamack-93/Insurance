@@ -56,10 +56,14 @@ export async function setTelegramMutationsEnabled(enabled: boolean): Promise<Mut
 
     revalidatePath("/settings/notifications");
     revalidatePath("/settings");
-    return successResult(user.id, "/settings/notifications", enabled ? "Mutaciones de Telegram habilitadas." : "Mutaciones de Telegram deshabilitadas.");
+    return successResult(
+      user.id,
+      "/settings/notifications",
+      enabled ? "Cambios reales por Telegram habilitados." : "Cambios reales por Telegram deshabilitados.",
+    );
   } catch (error) {
     logError("settings.notifications.telegram.mutations", error);
-    return errorResult("No se pudo actualizar el estado de las mutaciones de Telegram.");
+    return errorResult("No se pudo actualizar el estado de los cambios reales por Telegram.");
   }
 }
 
