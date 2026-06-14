@@ -282,7 +282,7 @@ export default async function RisksPage({
                               preferredContactMethod={clientScoreById.get(risk.entityId)!.preferredContactMethod}
                               notes={null}
                               issueCodes={[risk.alertType]}
-                              allowClose={false}
+                              allowClose={true}
                               allowEdit={false}
                               consolidateLabel="Consolidar"
                             />

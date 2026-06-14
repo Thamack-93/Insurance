@@ -2,6 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -11,24 +12,10 @@ import {
   PencilLine,
   Search,
   Users,
-  Wrench,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -58,6 +45,41 @@ type SearchDialogProps = {
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function renderDetails(details?: string[]) {
+  if (!details?.length) return null;
+  return details.join(" · ");
+}
+
+function ResolutionActionButton({
+  icon,
+  label,
+  onClick,
+  disabled,
+  variant = "outline",
+  className,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  variant?: "default" | "outline";
+  className?: string;
+}) {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant={variant}
+      className={cn("rounded-full", className)}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {icon}
+      {label}
+    </Button>
+  );
 }
 
 function SearchDialog({
@@ -194,16 +216,16 @@ function SearchDialog({
           <div className="max-h-[360px] overflow-auto rounded-2xl border border-border/70 bg-muted/20">
             {error ? (
               <div className="px-4 py-6 text-sm text-destructive">{error}</div>
-            ) : isLoading ? (
+          ) : isLoading ? (
               <div className="flex items-center gap-2 px-4 py-6 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
                 Buscando sugerencias...
               </div>
-            ) : query.trim().length < 2 ? (
+          ) : query.trim().length < 2 ? (
               <div className="px-4 py-6 text-sm text-muted-foreground">
-                Empieza a escribir para ver coincidencias por nombre, póliza, aseguradora o cliente.
+                Empieza a escribir para ver coincidencias por nombre, póliza, aseguradora, estado o serie.
               </div>
-            ) : results.length === 0 ? (
+          ) : results.length === 0 ? (
               <div className="px-4 py-6 text-sm text-muted-foreground">No encontramos coincidencias para esta búsqueda.</div>
             ) : (
               <div className="divide-y divide-border/70">
@@ -226,6 +248,9 @@ function SearchDialog({
                         </Badge>
                       </div>
                       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{result.subtitle ?? "Sin descripción"}</p>
+                      {renderDetails(result.details) ? (
+                        <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{renderDetails(result.details)}</p>
+                      ) : null}
                       {result.match ? (
                         <p className="mt-1 text-[11px] text-muted-foreground">
                           Coincidencia: {result.match.fieldLabel} · {result.match.snippet}
@@ -355,22 +380,19 @@ export function RenewalResolutionActions({
 
   return (
     <div className={cn("flex flex-wrap items-center justify-end gap-2", className)}>
-      <DropdownMenu>
-        <DropdownMenuTrigger render={<Button type="button" variant="outline" size="sm" className="rounded-full" disabled={isPending} />}>
-          <Wrench className="size-4" />
-          Resolver
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuItem onSelect={() => runMutation(closeAction)}>
-            <BadgeCheck className="mr-2 size-4" />
-            No renovada
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setSearchOpen(true)}>
-            <Search className="mr-2 size-4" />
-            Vincular renovación
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <ResolutionActionButton
+        icon={<BadgeCheck className="size-4" />}
+        label="No renovada"
+        onClick={() => runMutation(closeAction)}
+        disabled={isPending}
+      />
+      <ResolutionActionButton
+        icon={<Search className="size-4" />}
+        label="Vincular renovación"
+        onClick={() => setSearchOpen(true)}
+        disabled={isPending}
+        variant="default"
+      />
 
       <SearchDialog
         open={searchOpen}
@@ -427,7 +449,10 @@ export function ClientResolutionActions({
   const [isSaving, setIsSaving] = useState(false);
   const consolidateOnly = issueCodes.length > 0 && issueCodes.every((code) => code === "CLIENT_WITHOUT_POLICY");
   const issueSummary = uniqueStrings(issueCodes);
-  const suggestions = useMemo(() => uniqueStrings([clientName, ...clientName.split(" ").filter((piece) => piece.length >= 3)]), [clientName]);
+  const suggestions = useMemo(
+    () => uniqueStrings([clientName, email ?? "", phone ?? "", rfc ?? "", ...clientName.split(" ").filter((piece) => piece.length >= 3)]),
+    [clientName, email, phone, rfc],
+  );
 
   useEffect(() => {
     if (!editOpen) return;
@@ -500,30 +525,40 @@ export function ClientResolutionActions({
 
   return (
     <div className={cn("flex flex-wrap items-center justify-end gap-2", className)}>
-      <DropdownMenu>
-        <DropdownMenuTrigger render={<Button type="button" variant="outline" size="sm" className="rounded-full" />}>
-          <PencilLine className="size-4" />
-          Resolver
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
-          {allowEdit ? (
-            <DropdownMenuItem onSelect={() => setEditOpen(true)}>
-              <PencilLine className="mr-2 size-4" />
-              {editLabel}
-            </DropdownMenuItem>
-          ) : null}
-          {allowClose && !consolidateOnly ? (
-            <DropdownMenuItem onSelect={() => void closeClientCase()}>
-              <BadgeCheck className="mr-2 size-4" />
-              {closeLabel}
-            </DropdownMenuItem>
-          ) : null}
-          <DropdownMenuItem onSelect={() => setConsolidateOpen(true)}>
-            <Users className="mr-2 size-4" />
-            {consolidateLabel}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {consolidateOnly ? (
+        <ResolutionActionButton
+          icon={<Users className="size-4" />}
+          label={consolidateLabel}
+          onClick={() => setConsolidateOpen(true)}
+          disabled={isSaving}
+          variant="default"
+        />
+      ) : null}
+      {allowEdit ? (
+        <ResolutionActionButton
+          icon={<PencilLine className="size-4" />}
+          label={editLabel}
+          onClick={() => setEditOpen(true)}
+          disabled={isSaving}
+          variant="default"
+        />
+      ) : null}
+      {allowClose ? (
+        <ResolutionActionButton
+          icon={<BadgeCheck className="size-4" />}
+          label={closeLabel}
+          onClick={() => void closeClientCase()}
+          disabled={isSaving}
+        />
+      ) : null}
+      {!consolidateOnly ? (
+        <ResolutionActionButton
+          icon={<Users className="size-4" />}
+          label={consolidateLabel}
+          onClick={() => setConsolidateOpen(true)}
+          disabled={isSaving}
+        />
+      ) : null}
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-2xl" showCloseButton>
@@ -695,26 +730,23 @@ export function PolicyResolutionActions({
 
   return (
     <div className={cn("flex flex-wrap items-center justify-end gap-2", className)}>
-      <DropdownMenu>
-        <DropdownMenuTrigger render={<Button type="button" variant="outline" size="sm" className="rounded-full" />}>
-          <PencilLine className="size-4" />
-          Resolver
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
-          {allowEdit ? (
-            <DropdownMenuItem onSelect={() => setEditOpen(true)}>
-              <PencilLine className="mr-2 size-4" />
-              {editLabel}
-            </DropdownMenuItem>
-          ) : null}
-          {allowClose ? (
-            <DropdownMenuItem onSelect={() => void closePolicyCase()}>
-              <BadgeCheck className="mr-2 size-4" />
-              {closeLabel}
-            </DropdownMenuItem>
-          ) : null}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {allowEdit ? (
+        <ResolutionActionButton
+          icon={<PencilLine className="size-4" />}
+          label={editLabel}
+          onClick={() => setEditOpen(true)}
+          disabled={isSaving}
+          variant="default"
+        />
+      ) : null}
+      {allowClose ? (
+        <ResolutionActionButton
+          icon={<BadgeCheck className="size-4" />}
+          label={closeLabel}
+          onClick={() => void closePolicyCase()}
+          disabled={isSaving}
+        />
+      ) : null}
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-2xl" showCloseButton>

@@ -472,7 +472,7 @@ export default async function DataQualityPage({
                                 preferredContactMethod={client.preferredContactMethod}
                                 notes={null}
                                 issueCodes={client.issues.map((issue) => issue.code)}
-                                allowClose={!(client.issues.length === 1 && client.issues[0].code === "CLIENT_WITHOUT_POLICY")}
+                                allowClose={true}
                                 allowEdit={!(client.issues.length === 1 && client.issues[0].code === "CLIENT_WITHOUT_POLICY")}
                                 consolidateLabel="Consolidar"
                               />
@@ -638,7 +638,7 @@ export default async function DataQualityPage({
                                 preferredContactMethod={client.preferredContactMethod}
                                 notes={null}
                                 issueCodes={client.issues.map((issue) => issue.code)}
-                                allowClose={!(client.issues.length === 1 && client.issues[0].code === "CLIENT_WITHOUT_POLICY")}
+                                allowClose={true}
                                 allowEdit={!(client.issues.length === 1 && client.issues[0].code === "CLIENT_WITHOUT_POLICY")}
                                 consolidateLabel="Consolidar"
                               />

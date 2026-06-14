@@ -15,6 +15,7 @@ export type GlobalSearchResult = {
   type: "client" | "policy" | "receipt" | "workItem" | "claim" | "quote" | "insurer" | "document";
   title: string;
   subtitle?: string;
+  details?: string[];
   parentLabel?: string;
   href: string;
   match?: SearchMatch;
@@ -69,6 +70,10 @@ function pickMatch(row: Record<string, unknown>, fields: string[], needle: strin
     }
   }
   return undefined;
+}
+
+function cleanStrings(values: Array<string | null | undefined>) {
+  return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))];
 }
 
 type RowWithId = Record<string, unknown> & { id: string };
@@ -373,6 +378,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       type: "client",
       title: c.fullName,
       subtitle: c.email || c.phone || "Sin contacto",
+      details: cleanStrings([c.email, c.phone, c.rfc, c.address]),
       href: `/clients/${c.id}`,
       match,
     });
@@ -384,7 +390,8 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       id: p.id,
       type: "policy",
       title: p.policyNumber,
-      subtitle: `${p.clientName ?? "Sin cliente"} · ${p.insurerName ?? "Sin aseguradora"} · ${p.policyType}`,
+      subtitle: `${p.clientName ?? "Sin cliente"} · ${p.insurerName ?? "Sin aseguradora"} · ${p.policyType} · ${p.status}`,
+      details: cleanStrings([p.insuredObject, p.insuredPartiesText, p.insuredAssetsText]),
       href: `/policies/${p.id}`,
       match,
     });
@@ -397,6 +404,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       type: "receipt",
       title: r.receiptNumber,
       subtitle: `${r.clientName ?? "Sin cliente"} · ${r.status}`,
+      details: cleanStrings([r.status]),
       href: `/receipts/${r.id}`,
       match,
     });
@@ -409,6 +417,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       type: "workItem",
       title: w.title,
       subtitle: `${w.clientName ?? "Sin cliente"} · ${w.status}`,
+      details: cleanStrings([w.folio, w.taskType, w.sourceType, w.sourceId]),
       href: `/tasks/${w.sourceId ?? w.id}`,
       match,
     });
@@ -421,6 +430,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       type: "claim",
       title: cl.folio,
       subtitle: `${cl.clientName ?? "Sin cliente"} · ${cl.claimType}`,
+      details: cleanStrings([cl.claimType, cl.notes]),
       href: `/claims/${cl.id}`,
       match,
     });
@@ -433,6 +443,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       type: "quote",
       title: q.id.slice(0, 8),
       subtitle: `${q.clientName ?? "Sin cliente"} · ${q.policyType}`,
+      details: cleanStrings([q.policyType, q.notes]),
       href: `/quotes/${q.id}`,
       match,
     });
@@ -445,6 +456,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       type: "insurer",
       title: ins.name,
       subtitle: ins.contactName || "Sin contacto",
+      details: cleanStrings([ins.contactName, ins.notes]),
       href: `/insurers/${ins.id}`,
       match,
     });
@@ -464,6 +476,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       type: "document",
       title: d.fileName,
       subtitle,
+      details: cleanStrings([d.documentType, d.parentLabel]),
       parentLabel: d.parentLabel ?? undefined,
       href,
       match,
