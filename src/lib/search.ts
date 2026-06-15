@@ -102,6 +102,7 @@ const ALLOWED_COLUMNS = new Set([
   "insuredObject",
   "insuredPartiesText",
   "insuredAssetsText",
+  "insurerId",
   "receiptNumber",
   "status",
   "folio",
