@@ -12,6 +12,7 @@ import { ControlledSelect } from "@/components/forms/form-primitives";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
+import { reconstructPdfTextFromTextContent } from "@/lib/pdf-text-reconstruction";
 import {
   normalizePdfPaymentFrequencyLabel,
   type PolicyPdfCapturePreview,
@@ -42,14 +43,9 @@ async function extractPdfTextFromFile(file: File) {
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
       const page = await pdf.getPage(pageNumber);
       const textContent = await page.getTextContent();
-      const lines = textContent.items
-        .map((item) => {
-          if (typeof item !== "object" || item === null || !("str" in item)) return "";
-          return String((item as { str?: string }).str ?? "");
-        })
-        .filter(Boolean);
-      if (lines.length > 0) {
-        pageTexts.push(lines.join(" "));
+      const pageText = reconstructPdfTextFromTextContent(textContent);
+      if (pageText.trim()) {
+        pageTexts.push(pageText);
       }
     }
     return pageTexts.join("\n");

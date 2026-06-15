@@ -203,6 +203,13 @@ function parseMoney(value: string | null | undefined) {
   return Number.isFinite(amount) ? amount : null;
 }
 
+function extractMoneyValues(value: string | null | undefined) {
+  if (!value) return [] as number[];
+  return Array.from(value.matchAll(/\$?\s*[\d.,]+(?:\.\d{2})?/g))
+    .map((match) => parseMoney(match[0]))
+    .filter((amount): amount is number => amount !== null);
+}
+
 function extractInlineValue(lines: string[], labels: string[]) {
   for (const line of lines) {
     const normalizedLine = normalizeText(line);
@@ -264,7 +271,7 @@ function parsePolicyNumber(lines: string[], text: string) {
   }
 
   for (const line of lines.slice(0, 20)) {
-    if (/tel[eé]fono|rfc/i.test(line)) continue;
+    if (/tel[eé]fono|rfc|renueva a|p[oó]liza anterior|vigencia anterior/i.test(line)) continue;
     const match = line.match(/\b\d{10}\b/);
     if (match?.[0]) return match[0];
   }
@@ -336,6 +343,23 @@ function parseRequestNumber(text: string, policyNumber: string) {
   }
 
   return text.match(/\b\d{9,}\b/g)?.find((candidate) => candidate !== policyNumber) ?? null;
+}
+
+function parseSourcePolicyNumber(lines: string[], text: string) {
+  const labels = ["RENUEVA A", "Renueva a", "Póliza anterior", "Poliza anterior", "Vigencia anterior"];
+  const labeled = extractInlineValue(lines, labels);
+  if (labeled) {
+    const match = labeled.match(/\b\d{8,10}\b/);
+    if (match?.[0]) return match[0];
+  }
+
+  for (const line of lines) {
+    if (!labels.some((label) => normalizeText(line).includes(normalizeText(label)))) continue;
+    const match = line.match(/\b\d{8,10}\b/);
+    if (match?.[0]) return match[0];
+  }
+
+  return text.match(/\bRENUEVA A[:\s-]*([0-9]{8,10})\b/i)?.[1] ?? null;
 }
 
 function parseSerialNumber(lines: string[]) {
@@ -422,8 +446,8 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
     lines.find((line) => /\$\s?[\d.,]+/.test(line)) ??
     null;
   const premiumAmount =
-    parseMoney(premiumLine?.match(/\$\s?[\d.,]+(?:\.\d{2})?/)?.[0] ?? premiumLine?.match(/\b[\d.,]+\b/)?.[0] ?? null) ??
-    parseMoney(fullText.match(/\$\s?[\d.,]+(?:\.\d{2})?/)?.[0] ?? fullText.match(/\b[\d.,]+\b/)?.[0] ?? null) ??
+    extractMoneyValues(premiumLine).at(-1) ??
+    extractMoneyValues(fullText).at(-1) ??
     0;
   const serialNumber = policyType === "AUTO" ? parseSerialNumber(lines) : null;
   const insuredObject =
@@ -435,6 +459,7 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
   const notes = [requestNumber ? `Solicitud ${requestNumber}` : null, issueDate ? `Emisión ${issueDate}` : null]
     .filter(Boolean)
     .join(" · ") || null;
+  const sourcePolicyNumber = parseSourcePolicyNumber(lines, fullText) ?? suggestPreviousPolicyNumber(policyNumber);
 
   return {
     policyNumber,
@@ -453,7 +478,7 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
     insuredObject,
     beneficiaryInfo,
     notes,
-    sourcePolicyNumber: suggestPreviousPolicyNumber(policyNumber),
+    sourcePolicyNumber,
   };
 }
 

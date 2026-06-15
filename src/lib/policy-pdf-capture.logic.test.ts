@@ -5,6 +5,7 @@ import {
   suggestPreviousPolicyNumber,
 } from "@/lib/policy-pdf-capture.shared";
 import { buildPolicyPdfCapturePreviewFromText } from "@/lib/policy-pdf-capture-preview";
+import { reconstructPdfTextFromTextContent } from "@/lib/pdf-text-reconstruction";
 
 vi.mock("server-only", () => ({}));
 
@@ -97,6 +98,47 @@ describe("policy-pdf-capture", () => {
     expect(draft.premiumAmount).toBeCloseTo(14324.39);
     expect(draft.requestNumber).toBeNull();
     expect(draft.sourcePolicyNumber).toBeNull();
+  });
+
+  it("reconstructs the browser PDF text layout before parsing Quálitas fields", () => {
+    const textContent = {
+      items: [
+        { str: "PÓLIZA DE SEGURO DE AUTOMÓVILES", transform: [0, 0, 0, 0, 80, 700] },
+        { str: "0940424986", transform: [0, 0, 0, 0, 390, 696] },
+        { str: "000000", transform: [0, 0, 0, 0, 465, 696] },
+        { str: "0001", transform: [0, 0, 0, 0, 535, 696] },
+        { str: "INFORMACIÓN DEL ASEGURADO", transform: [0, 0, 0, 0, 210, 671] },
+        { str: "PEDRO ALFREDO GOMEZ LORENZO", transform: [0, 0, 0, 0, 30, 658] },
+        { str: "Domicilio:", transform: [0, 0, 0, 0, 30, 646] },
+        { str: "CALLE 3 No. EXT. 1 No. INT.", transform: [0, 0, 0, 0, 80, 646] },
+        { str: "R.F.C.:", transform: [0, 0, 0, 0, 440, 646] },
+        { str: "GOLP930818E95", transform: [0, 0, 0, 0, 475, 646] },
+        { str: "Desde las 12:00 P.M. del:", transform: [0, 0, 0, 0, 33, 526] },
+        { str: "23/SEP/2025", transform: [0, 0, 0, 0, 147, 526] },
+        { str: "Hasta las 12:00 P.M. del:", transform: [0, 0, 0, 0, 33, 510] },
+        { str: "23/SEP/2026", transform: [0, 0, 0, 0, 147, 510] },
+        { str: "RENUEVA A: 0940394284", transform: [0, 0, 0, 0, 390, 740] },
+        { str: "IMPORTE TOTAL", transform: [0, 0, 0, 0, 395, 116] },
+        { str: "12,281.81", transform: [0, 0, 0, 0, 515.52, 116] },
+      ],
+    };
+
+    const reconstructed = reconstructPdfTextFromTextContent(textContent);
+
+    expect(reconstructed).toContain("PEDRO ALFREDO GOMEZ LORENZO");
+    expect(reconstructed).toContain("Domicilio: CALLE 3 No. EXT. 1 No. INT. R.F.C.: GOLP930818E95");
+    expect(reconstructed).toContain("Desde las 12:00 P.M. del: 23/SEP/2025");
+    expect(reconstructed).toContain("Hasta las 12:00 P.M. del: 23/SEP/2026");
+    expect(reconstructed).toContain("IMPORTE TOTAL 12,281.81");
+
+    const draft = extractPolicyPdfDraftFromText(reconstructed);
+
+    expect(draft.policyNumber).toBe("0940424986");
+    expect(draft.clientName).toBe("PEDRO ALFREDO GOMEZ LORENZO");
+    expect(draft.startDate).toBe("2025-09-23");
+    expect(draft.endDate).toBe("2026-09-23");
+    expect(draft.premiumAmount).toBeCloseTo(12281.81);
+    expect(draft.sourcePolicyNumber).toBe("0940394284");
   });
 
   it("builds a preview from extracted PDF text without relying on the server parser", async () => {
