@@ -13,7 +13,12 @@ import {
   normalizeTelegramLinkCode,
   parseTelegramCommand,
 } from "./telegram-shared";
-import { parseTelegramPaymentArgument, parseTelegramPaymentDateInput } from "./telegram";
+import {
+  getTelegramWebhookUrl,
+  syncTelegramWebhook,
+  parseTelegramPaymentArgument,
+  parseTelegramPaymentDateInput,
+} from "./telegram";
 
 describe("telegram.shared", () => {
   it("generates a readable hex link code", () => {
@@ -78,5 +83,58 @@ describe("telegram.shared", () => {
         step: "ready",
       },
     });
+  });
+
+  it("builds the webhook url from an explicit base url", () => {
+    expect(getTelegramWebhookUrl("https://example.com")).toBe(
+      "https://example.com/api/integrations/telegram/webhook",
+    );
+  });
+
+  it("syncs the webhook with Telegram using the current domain", async () => {
+    const originalFetch = global.fetch;
+    const originalBotToken = process.env.TELEGRAM_BOT_TOKEN;
+    const originalWebhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true }),
+    });
+
+    process.env.TELEGRAM_BOT_TOKEN = "bot-token";
+    process.env.TELEGRAM_WEBHOOK_SECRET = "webhook-secret";
+    global.fetch = fetchMock as typeof fetch;
+
+    try {
+      await expect(syncTelegramWebhook("https://example.com")).resolves.toMatchObject({
+        ok: true,
+        webhookUrl: "https://example.com/api/integrations/telegram/webhook",
+      });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://api.telegram.org/botbot-token/setWebhook",
+        expect.objectContaining({
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            url: "https://example.com/api/integrations/telegram/webhook",
+            secret_token: "webhook-secret",
+            drop_pending_updates: false,
+          }),
+        }),
+      );
+    } finally {
+      global.fetch = originalFetch;
+      if (originalBotToken === undefined) {
+        delete process.env.TELEGRAM_BOT_TOKEN;
+      } else {
+        process.env.TELEGRAM_BOT_TOKEN = originalBotToken;
+      }
+      if (originalWebhookSecret === undefined) {
+        delete process.env.TELEGRAM_WEBHOOK_SECRET;
+      } else {
+        process.env.TELEGRAM_WEBHOOK_SECRET = originalWebhookSecret;
+      }
+    }
   });
 });

@@ -140,6 +140,17 @@ export type TelegramDailyDigestResult = {
   failed: number;
 };
 
+export type TelegramWebhookSyncResult =
+  | {
+      ok: true;
+      webhookUrl: string;
+      message: string;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
 type TelegramPaymentDraftState = {
   step:
     | "policyNumber"
@@ -238,8 +249,7 @@ function createFallbackTelegramChannelState(userId: string): NotificationChannel
   };
 }
 
-export function getTelegramWebhookUrl() {
-  const baseUrl = process.env.APP_BASE_URL?.trim();
+export function getTelegramWebhookUrl(baseUrl = process.env.APP_BASE_URL?.trim()) {
   if (!baseUrl) return null;
   try {
     return new URL("/api/integrations/telegram/webhook", baseUrl).toString();
@@ -254,6 +264,67 @@ function getTelegramLinkSecret() {
     return secret;
   }
   return "policydesk-dev-secret-change-in-production-please-0123456789";
+}
+
+export async function syncTelegramWebhook(baseUrl?: string): Promise<TelegramWebhookSyncResult> {
+  const token = getTelegramBotToken();
+  const webhookUrl = getTelegramWebhookUrl(baseUrl);
+  const secret = getTelegramWebhookSecret();
+
+  if (!token) {
+    return { ok: false, error: "TELEGRAM_BOT_TOKEN no está configurado." };
+  }
+
+  if (!webhookUrl) {
+    return { ok: false, error: "No pude construir la URL del webhook de Telegram." };
+  }
+
+  if (!secret) {
+    return { ok: false, error: "TELEGRAM_WEBHOOK_SECRET no está configurado." };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TELEGRAM_FETCH_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        url: webhookUrl,
+        secret_token: secret,
+        drop_pending_updates: false,
+      }),
+      signal: controller.signal,
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | { ok?: boolean; description?: string }
+      | null;
+
+    if (!response.ok || !payload?.ok) {
+      return {
+        ok: false,
+        error: payload?.description ?? `Telegram respondió con estado ${response.status}.`,
+      };
+    }
+
+    return {
+      ok: true,
+      webhookUrl,
+      message: "Webhook de Telegram sincronizado con el dominio actual.",
+    };
+  } catch (error) {
+    logError("telegram.syncWebhook", error, { webhookUrl });
+    return {
+      ok: false,
+      error: "No se pudo sincronizar el webhook de Telegram.",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function normalizeChatId(chatId: string | number) {

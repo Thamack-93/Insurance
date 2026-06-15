@@ -1,11 +1,12 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { ArrowLeft, BellRing } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { requireUserOrRedirect } from "@/lib/auth";
-import { getTelegramChannelStateForUser } from "@/lib/telegram";
+import { getTelegramChannelStateForUser, syncTelegramWebhook } from "@/lib/telegram";
 import { NotificationPreferencesPanel } from "@/components/settings/notification-preferences-panel";
 import {
   disconnectTelegram,
@@ -18,6 +19,14 @@ import {
 export default async function NotificationSettingsPage() {
   const user = await requireUserOrRedirect();
   const channel = await getTelegramChannelStateForUser(user.id);
+  const requestHeaders = await headers();
+  const forwardedProto = requestHeaders.get("x-forwarded-proto") ?? "https";
+  const forwardedHost = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
+  const currentOrigin = forwardedHost ? `${forwardedProto}://${forwardedHost}` : null;
+  const webhookSync =
+    process.env.VERCEL_ENV === "production" && currentOrigin
+      ? await syncTelegramWebhook(currentOrigin)
+      : null;
   const timeZone = user.timeZone ?? "America/Mexico_City";
   const cronSecretConfigured = Boolean(process.env.CRON_SECRET?.trim());
   const telegramConnected = channel.isEnabled && Boolean(channel.telegramChatId);
@@ -115,6 +124,22 @@ export default async function NotificationSettingsPage() {
             </CardContent>
           </Card>
         </section>
+
+        {webhookSync ? (
+          <Card className="border-border/60 bg-card/85 shadow-sm">
+            <CardHeader className="border-b border-border/70">
+              <CardTitle className="text-base">Webhook de Telegram</CardTitle>
+              <CardDescription>
+                Reconfigura el bot para que apunte al dominio actual de esta instalación.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              {webhookSync.ok
+                ? `Sincronizado con ${webhookSync.webhookUrl}.`
+                : `No se pudo sincronizar automáticamente: ${webhookSync.error}`}
+            </CardContent>
+          </Card>
+        ) : null}
 
         <NotificationPreferencesPanel
           key={channel?.updatedAt.getTime() ?? 0}
