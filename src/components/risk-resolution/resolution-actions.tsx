@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { paymentFrequencyOptions, policyStatusOptions } from "@/lib/domain-options";
 
 type SearchKind = "client" | "policy";
+type SearchScope = "portfolio" | "all";
 
 type SearchDialogProps = {
   open: boolean;
@@ -38,6 +39,7 @@ type SearchDialogProps = {
   placeholder: string;
   sourceLabel: string;
   searchKind: SearchKind;
+  searchScope?: SearchScope;
   initialQuery: string;
   suggestions: string[];
   onPick: (result: GlobalSearchResult) => Promise<MutationResult>;
@@ -90,6 +92,7 @@ function SearchDialog({
   placeholder,
   sourceLabel,
   searchKind,
+  searchScope = "portfolio",
   initialQuery,
   suggestions,
   onPick,
@@ -125,7 +128,7 @@ function SearchDialog({
       try {
         setIsLoading(true);
         setError(null);
-        const response = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}`, {
+        const response = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}${searchScope === "all" ? "&scope=all" : ""}`, {
           signal: controller.signal,
           headers: { Accept: "application/json" },
         });
@@ -150,7 +153,7 @@ function SearchDialog({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [open, query, searchKind]);
+  }, [open, query, searchKind, searchScope]);
 
   async function selectResult(result: GlobalSearchResult) {
     try {
@@ -223,10 +226,12 @@ function SearchDialog({
               </div>
           ) : query.trim().length < 2 ? (
               <div className="px-4 py-6 text-sm text-muted-foreground">
-                Empieza a escribir para ver coincidencias por nombre, póliza, aseguradora, estado o serie.
+                Empieza a escribir para ver coincidencias por nombre, RFC, email, teléfono, póliza, aseguradora, estado o serie.
               </div>
           ) : results.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-muted-foreground">No encontramos coincidencias para esta búsqueda.</div>
+              <div className="px-4 py-6 text-sm text-muted-foreground">
+                No encontramos coincidencias para esta búsqueda. Prueba con nombre, RFC, email, teléfono o cartera.
+              </div>
             ) : (
               <div className="divide-y divide-border/70">
                 {results.map((result) => (
@@ -636,6 +641,7 @@ export function ClientResolutionActions({
         placeholder="Cliente similar..."
         sourceLabel={clientName}
         searchKind="client"
+        searchScope="all"
         initialQuery={clientName}
         suggestions={suggestions}
         onPick={(result) => consolidateClient(result.id)}

@@ -11,6 +11,7 @@ export async function GET(request: NextRequest) {
     const user = await requireUser();
     const { searchParams } = new URL(request.url);
     query = searchParams.get("q") ?? "";
+    const scope = searchParams.get("scope");
 
     const rateLimit = checkRateLimit(`search:${getRequestIp(request)}`, {
       limit: 60,
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json([]);
     }
 
-    const results = await globalSearch(query, user.role === "ADMIN" ? undefined : user.id);
+    const results = await globalSearch(query, user.role === "ADMIN" && scope === "all" ? undefined : user.id);
     return NextResponse.json(results);
   } catch (error) {
     if (error instanceof AuthError) {

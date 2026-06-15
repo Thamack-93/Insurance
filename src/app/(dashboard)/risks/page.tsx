@@ -445,7 +445,9 @@ export default async function RisksPage({
                           <Link href={`/policies/${policy.polizaId}`} className="font-medium hover:text-primary">
                             {policy.poliza}
                           </Link>
-                          <p className="mt-1 text-xs text-muted-foreground">{policy.cliente}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {policy.cliente} · {policy.aseguradora} · {policy.status}
+                          </p>
                         </TableCell>
                         <TableCell>
                           <ScoreBar score={policy.score} />

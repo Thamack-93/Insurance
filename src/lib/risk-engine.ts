@@ -1,6 +1,7 @@
 import { addDays, subDays } from "date-fns";
 import { getDb } from "@/lib/db";
 import { today } from "@/lib/dates";
+import { formatCurrency } from "@/lib/money";
 import { matchesSuppressionCriteria } from "@/lib/data-quality-rules";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { ACTIVE_RENEWAL_POLICY_WHERE } from "@/lib/renewal-decisions";
@@ -73,7 +74,14 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
         payments: { none: {} },
       },
       take: TAKE_LIMIT,
-      select: { id: true, receiptNumber: true },
+      select: {
+        id: true,
+        receiptNumber: true,
+        amount: true,
+        currency: true,
+        client: { select: { fullName: true } },
+        policy: { select: { policyNumber: true } },
+      },
     }),
     db.commission.findMany({
       where: { ...commissionScope, expectedDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
@@ -132,7 +140,7 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
         },
         sourceRenewalSuggestions: {
           none: {
-            status: { in: ["PENDING", "ACCEPTED", "MERGED"] },
+            status: { in: ["PENDING", "ACCEPTED", "MERGED", "DECLINED"] },
           },
         },
       },
@@ -247,7 +255,17 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
   );
 
   return [
-    ...overdueReceipts.map((receipt) => risk("RECEIPT_OVERDUE", "CRITICAL", "Recibo vencido sin pago", receipt.receiptNumber, "Receipt", receipt.id, "Contactar cliente y registrar seguimiento.")),
+    ...overdueReceipts.map((receipt) =>
+      risk(
+        "RECEIPT_OVERDUE",
+        "CRITICAL",
+        "Recibo vencido sin pago",
+        `${receipt.receiptNumber} · ${receipt.policy?.policyNumber ?? "Sin póliza"} · ${receipt.client?.fullName ?? "Sin cliente"} · ${formatCurrency(receipt.amount, receipt.currency)}`,
+        "Receipt",
+        receipt.id,
+        "Contactar cliente y registrar seguimiento.",
+      ),
+    ),
     ...overdueCommissions.map((commission) => risk("COMMISSION_OVERDUE", "WARNING", "Comision vencida sin cobro", String(commission.expectedAmount), "Commission", commission.id, "Revisar cobranza con aseguradora.")),
     ...staleWorkItems.map((workItem) =>
       risk(

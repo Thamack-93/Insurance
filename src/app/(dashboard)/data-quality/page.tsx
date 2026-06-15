@@ -504,12 +504,14 @@ export default async function DataQualityPage({
                     <TableBody>
                       {policyScores.slice(0, 10).map((policy) => (
                         <TableRow key={policy.polizaId}>
-                          <TableCell>
-                            <Link href={`/policies/${policy.polizaId}`} className="font-medium text-foreground hover:text-primary">
-                              {policy.poliza}
-                            </Link>
-                            <p className="mt-1 text-xs text-muted-foreground">{policy.cliente}</p>
-                          </TableCell>
+                        <TableCell>
+                          <Link href={`/policies/${policy.polizaId}`} className="font-medium text-foreground hover:text-primary">
+                            {policy.poliza}
+                          </Link>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {policy.cliente} · {policy.aseguradora} · {policy.status}
+                          </p>
+                        </TableCell>
                           <TableCell>
                             <ScoreBar score={policy.score} />
                           </TableCell>

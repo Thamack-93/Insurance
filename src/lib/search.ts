@@ -44,6 +44,7 @@ const FIELD_LABELS: Record<string, string> = {
   rfc: "RFC",
   address: "dirección",
   notes: "notas",
+  status: "estado",
   policyNumber: "póliza",
   insuredObject: "objeto asegurado",
   insuredPartiesText: "asegurado",
@@ -123,6 +124,28 @@ const ALLOWED_COLUMNS = new Set([
   "portfolioOwnerId",
   "updatedAt",
 ]);
+
+function normalizeSearchText(value: string | undefined) {
+  return normalize(value ?? "");
+}
+
+function getRelevanceScore(result: GlobalSearchResult, needle: string) {
+  const normalizedNeedle = normalizeSearchText(needle);
+  if (!normalizedNeedle) return 0;
+
+  const title = normalizeSearchText(result.title);
+  const subtitle = normalizeSearchText(result.subtitle);
+  const details = normalizeSearchText(result.details?.join(" "));
+  const parentLabel = normalizeSearchText(result.parentLabel);
+  const matchSnippet = normalizeSearchText(result.match?.snippet);
+  const haystack = [title, subtitle, details, parentLabel, matchSnippet].join(" ");
+
+  if (title === normalizedNeedle) return 100;
+  if (title.startsWith(normalizedNeedle)) return 90;
+  if (title.includes(normalizedNeedle)) return 80;
+  if (haystack.includes(normalizedNeedle)) return 60;
+  return 0;
+}
 
 function assertAllowedIdentifier(value: string) {
   if (!ALLOWED_COLUMNS.has(value)) {
@@ -204,7 +227,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
 
   const results: GlobalSearchResult[] = [];
 
-  type ClientRow = RowWithId & { fullName: string; email: string | null; phone: string | null; rfc: string | null; address: string | null; notes: string | null };
+  type ClientRow = RowWithId & { fullName: string; status: string; email: string | null; phone: string | null; rfc: string | null; address: string | null; notes: string | null };
   type PolicyRow = RowWithId & {
     policyNumber: string;
     policyType: string;
@@ -246,8 +269,8 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
   const [clients, policies, receipts, workItems, claims, quotes, insurers, documents] = await Promise.all([
     rawSearch<ClientRow>(
       "Client",
-      ["id", "fullName", "email", "phone", "rfc", "address", "notes", "updatedAt"],
-      ["fullName", "email", "phone", "rfc", "address", "notes"],
+      ["id", "fullName", "status", "email", "phone", "rfc", "address", "notes", "updatedAt"],
+      ["fullName", "status", "email", "phone", "rfc", "address", "notes"],
       needle,
       5,
       undefined,
@@ -372,13 +395,13 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
   ]);
 
   for (const c of clients) {
-    const match = pickMatch(c, ["fullName", "email", "phone", "rfc", "address", "notes"], needle);
+    const match = pickMatch(c, ["fullName", "status", "email", "phone", "rfc", "address", "notes"], needle);
     results.push({
       id: c.id,
       type: "client",
       title: c.fullName,
-      subtitle: c.email || c.phone || "Sin contacto",
-      details: cleanStrings([c.email, c.phone, c.rfc, c.address]),
+      subtitle: `${c.status} · ${c.email || c.phone || "Sin contacto"}`,
+      details: cleanStrings([c.status, c.email, c.phone, c.rfc, c.address]),
       href: `/clients/${c.id}`,
       match,
     });
@@ -482,6 +505,13 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       match,
     });
   }
+
+  results.sort((left, right) => {
+    const scoreDiff = getRelevanceScore(right, q) - getRelevanceScore(left, q);
+    if (scoreDiff !== 0) return scoreDiff;
+    if (left.type !== right.type) return left.type.localeCompare(right.type);
+    return left.title.localeCompare(right.title);
+  });
 
   return results;
 }
