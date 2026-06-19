@@ -703,7 +703,7 @@ export default async function DataQualityPage({
                                         {item.policyNumber}
                                       </Link>
                                       <Badge variant="outline" className="rounded-full">
-                                        {item.status === "OVERDUE" ? "Vencida" : "Seguimiento"}
+                                        {item.daysUntilRenewal <= 0 ? "Vencida" : "Seguimiento"}
                                       </Badge>
                                     </div>
                                     <p className="mt-1 text-xs text-muted-foreground">

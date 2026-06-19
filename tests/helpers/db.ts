@@ -187,7 +187,7 @@ export async function getAdminSessionCookie(): Promise<string> {
     userId: admin.id,
     email: admin.email,
     name: admin.name,
-    role: admin.role,
+    role: "ADMIN",
   });
 
   return `${SESSION_COOKIE_NAME}=${token}`;
