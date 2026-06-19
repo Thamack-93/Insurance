@@ -14,7 +14,7 @@ import { formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { requirePortfolioReadScope } from "@/lib/portfolio-access";
-import { NoRenewalButton } from "@/components/renewals/no-renewal-button";
+import { RenewalRowActions } from "@/components/renewals/renewal-row-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -140,10 +140,11 @@ export default async function RenewalsPage({
                         <DaysBadge days={renewal.daysUntilRenewal} />
                       </TableCell>
                       <TableCell className="text-right">
-                        <NoRenewalButton
-                          policyId={renewal.policyId}
-                          policyNumber={renewal.policyNumber}
-                          triggerClassName="h-7 rounded-full bg-card/70 px-2.5 text-xs"
+                        <RenewalRowActions
+                          sourcePolicyId={renewal.policyId}
+                          sourcePolicyNumber={renewal.policyNumber}
+                          clientName={renewal.clientName}
+                          insurerName={renewal.insurerName}
                         />
                       </TableCell>
                     </TableRow>
@@ -191,10 +192,11 @@ export default async function RenewalsPage({
                         <DaysBadge days={renewal.daysUntilRenewal} />
                       </TableCell>
                       <TableCell className="text-right">
-                        <NoRenewalButton
-                          policyId={renewal.policyId}
-                          policyNumber={renewal.policyNumber}
-                          triggerClassName="h-7 rounded-full bg-card/70 px-2.5 text-xs"
+                        <RenewalRowActions
+                          sourcePolicyId={renewal.policyId}
+                          sourcePolicyNumber={renewal.policyNumber}
+                          clientName={renewal.clientName}
+                          insurerName={renewal.insurerName}
                         />
                       </TableCell>
                     </TableRow>
@@ -301,10 +303,11 @@ export default async function RenewalsPage({
                         <StatusBadge status={renewal.priority} />
                       </TableCell>
                       <TableCell className="text-right">
-                        <NoRenewalButton
-                          policyId={renewal.policyId}
-                          policyNumber={renewal.policyNumber}
-                          triggerClassName="h-7 rounded-full bg-card/70 px-2.5 text-xs"
+                        <RenewalRowActions
+                          sourcePolicyId={renewal.policyId}
+                          sourcePolicyNumber={renewal.policyNumber}
+                          clientName={renewal.clientName}
+                          insurerName={renewal.insurerName}
                         />
                       </TableCell>
                     </TableRow>

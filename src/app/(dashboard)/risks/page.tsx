@@ -45,6 +45,7 @@ const RISK_TYPE_LABELS: Record<string, string> = {
   ORPHAN_DOCUMENT: "Documentos huérfanos",
   OVERLAPPING_POLICY_TERM: "Vigencias solapadas",
   DUPLICATE_RECEIPT_NUMBER: "Recibos duplicados",
+  POLICY_WITHOUT_RECEIPTS: "Pólizas sin recibos",
 };
 
 const ISSUE_CODE_LABELS: Record<string, string> = {
@@ -57,6 +58,7 @@ const ISSUE_CODE_LABELS: Record<string, string> = {
   ADDRESS_MISSING: "Dirección faltante",
   RFC_MISSING: "RFC faltante",
   CONTACT_METHOD_MISSING: "Método de contacto faltante",
+  POLICY_WITHOUT_RECEIPTS: "Sin recibos",
 };
 
 function getRiskTypeLabel(code: string) {

@@ -57,6 +57,7 @@ export const policySchema = z
     insuredObject: optionalText,
     beneficiaryInfo: optionalText,
     notes: optionalText,
+    renewedFromPolicyId: z.string().trim().optional().or(z.literal("")),
   })
   .refine((values) => values.endDate >= values.startDate, {
     message: "La fecha final debe ser posterior al inicio.",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -14,9 +14,11 @@ import {
 } from "@/lib/domain-options";
 import { policySchema, type PolicyFormValues } from "@/lib/validations";
 import type { MutationResult } from "@/lib/mutation-utils";
+import type { PolicyRenewalSource } from "@/lib/policy-renewal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { PolicyRenewalSelector } from "@/components/policies/policy-renewal-selector";
 import {
   ControlledSelect,
   FormActions,
@@ -34,6 +36,9 @@ type PolicyFormProps = {
   defaultValues: PolicyFormValues;
   clientOptions: SelectOption[];
   insurerOptions: SelectOption[];
+  renewalSource?: PolicyRenewalSource | null;
+  showRenewalLink?: boolean;
+  renewalSearchScope?: "portfolio" | "all";
   submitAction: (values: PolicyFormValues) => Promise<MutationResult>;
 };
 
@@ -45,6 +50,9 @@ export function PolicyForm({
   defaultValues,
   clientOptions,
   insurerOptions,
+  renewalSource = null,
+  showRenewalLink = false,
+  renewalSearchScope = "portfolio",
   submitAction,
 }: PolicyFormProps) {
   const router = useRouter();
@@ -54,11 +62,13 @@ export function PolicyForm({
     control,
     handleSubmit,
     setError,
+    setValue,
     formState: { errors },
   } = useForm<PolicyFormValues>({
     resolver: zodResolver(policySchema) as never,
     defaultValues,
   });
+  const [renewedFromPolicyId, setRenewedFromPolicyId] = useState(defaultValues.renewedFromPolicyId ?? "");
 
   async function onSubmit(values: PolicyFormValues) {
     startTransition(async () => {
@@ -199,6 +209,23 @@ export function PolicyForm({
               </FormField>
             </FormGrid>
           </FormSection>
+
+          {showRenewalLink ? (
+            <FormSection title="Renovación" description="Si esta póliza renueva otra, deja el vínculo capturado desde aquí.">
+              <input type="hidden" {...register("renewedFromPolicyId")} />
+              <PolicyRenewalSelector
+                value={renewedFromPolicyId}
+                onChange={(next) => {
+                  setRenewedFromPolicyId(next);
+                  setValue("renewedFromPolicyId", next, { shouldDirty: true, shouldValidate: true });
+                }}
+                selectedPolicy={renewalSource}
+                disabled={isPending}
+                allowClear
+                searchScope={renewalSearchScope}
+              />
+            </FormSection>
+          ) : null}
 
           <FormSection title="Detalle comercial" description="Información útil para asesoría y renovación.">
             <FormGrid>
