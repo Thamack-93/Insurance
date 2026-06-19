@@ -49,6 +49,13 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           policyNumber: true,
         },
       },
+      renewals: {
+        select: {
+          id: true,
+          policyNumber: true,
+        },
+        orderBy: { updatedAt: "desc" },
+      },
       insuredParties: {
         orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
       },
@@ -219,6 +226,22 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                     <Link href={`/policies/${policy.renewedFrom.id}`} className="font-medium text-foreground hover:text-primary">
                       {policy.renewedFrom.policyNumber}
                     </Link>
+                  </div>
+                ) : null}
+                {policy.renewals.length ? (
+                  <div>
+                    <p className="text-muted-foreground">Renueva a</p>
+                    <div className="mt-1 space-y-1">
+                      {policy.renewals.map((renewal) => (
+                        <Link
+                          key={renewal.id}
+                          href={`/policies/${renewal.id}`}
+                          className="block font-medium text-foreground hover:text-primary"
+                        >
+                          {renewal.policyNumber}
+                        </Link>
+                      ))}
+                    </div>
                   </div>
                 ) : null}
               </div>

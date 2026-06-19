@@ -59,6 +59,7 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
     renewalsWithoutWorkItem,
     duplicatePolicyKeys,
     duplicateReceiptKeys,
+    policiesWithoutReceipts,
   ] = await Promise.all([
     db.dataQualitySuppressionRule.findMany({
       where: {
@@ -158,6 +159,18 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
       where: receiptScope,
       _count: { receiptNumber: true },
       having: { receiptNumber: { _count: { gt: 1 } } },
+    }),
+    db.policy.findMany({
+      where: {
+        ...activeRenewalScope,
+        receipts: { none: {} },
+      },
+      take: TAKE_LIMIT,
+      select: {
+        id: true,
+        policyNumber: true,
+        client: { select: { fullName: true } },
+      },
     }),
   ]);
 
@@ -285,6 +298,17 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
     ...renewalsWithoutWorkItem.map((policy) => risk("RENEWAL_WITHOUT_WORK_ITEM", "WARNING", "Renovacion proxima sin pendiente", policy.policyNumber, "Policy", policy.id, "Crear pendiente de renovacion.")),
     ...overlappingPolicies.map((policy) => risk("OVERLAPPING_POLICY_TERM", "WARNING", "Vigencias de poliza solapadas", policy.policyNumber, "Policy", policy.id, "Verificar familia de renovacion.")),
     ...duplicateReceipts.map((receipt) => risk("DUPLICATE_RECEIPT_NUMBER", "WARNING", "Recibo duplicado", receipt.receiptNumber, "Receipt", receipt.id, "Verificar duplicado.")),
+    ...policiesWithoutReceipts.map((policy) =>
+      risk(
+        "POLICY_WITHOUT_RECEIPTS",
+        "CRITICAL",
+        "Póliza activa sin recibos",
+        `${policy.policyNumber} · ${policy.client?.fullName ?? "Sin cliente"}`,
+        "Policy",
+        policy.id,
+        "Capturar los recibos pendientes para la póliza.",
+      ),
+    ),
   ].filter((finding) => {
     return !suppressionRules.some((rule) =>
       rule.issueCode === finding.alertType &&

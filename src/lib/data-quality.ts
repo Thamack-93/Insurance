@@ -654,6 +654,15 @@ export async function getPolicyDataQualityScores() {
         });
       }
 
+      if (policy.receipts.length === 0) {
+        issueCandidates.push({
+          code: "POLICY_WITHOUT_RECEIPTS",
+          etiqueta: "Sin recibos",
+          descripcion: "La póliza no tiene ningún recibo registrado.",
+          penalizacion: 20,
+        });
+      }
+
       if (policy.paymentFrequency === "SINGLE" && policy.receipts.length > 1) {
         // Filter out cancelled receipts
         const activeReceipts = policy.receipts.filter((r) => r.status !== "CANCELLED");

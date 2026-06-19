@@ -669,7 +669,7 @@ export default async function DataQualityPage({
                       <TableRow className="bg-stone-50/70">
                         <TableHead>Cliente</TableHead>
                         <TableHead>Estado</TableHead>
-                        <TableHead>Renovaciones</TableHead>
+                        <TableHead>Detalle</TableHead>
                         <TableHead>Próxima vigencia</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -692,7 +692,32 @@ export default async function DataQualityPage({
                               </Badge>
                             </TableCell>
                             <TableCell>
-                              <span className="text-sm text-muted-foreground">{client.overduePolicies + client.followUpPolicies}</span>
+                              <div className="space-y-2">
+                                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                                  {client.items.length} póliza{client.items.length === 1 ? "" : "s"}
+                                </p>
+                                {client.items.slice(0, 3).map((item) => (
+                                  <div key={item.policyId} className="rounded-2xl border border-stone-200/80 bg-white/80 p-3">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <Link href={`/policies/${item.policyId}`} className="font-medium text-foreground hover:text-primary">
+                                        {item.policyNumber}
+                                      </Link>
+                                      <Badge variant="outline" className="rounded-full">
+                                        {item.status === "OVERDUE" ? "Vencida" : "Seguimiento"}
+                                      </Badge>
+                                    </div>
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                      {formatDate(item.endDate)} · {item.clientName} · {item.insurerName}
+                                    </p>
+                                    <Button asChild size="sm" variant="outline" className="mt-2 rounded-full">
+                                      <Link href={`/policies/new?renewalFrom=${encodeURIComponent(item.policyId)}`}>Ver y renovar</Link>
+                                    </Button>
+                                  </div>
+                                ))}
+                                {client.items.length > 3 ? (
+                                  <p className="text-xs text-muted-foreground">+{client.items.length - 3} más</p>
+                                ) : null}
+                              </div>
                             </TableCell>
                             <TableCell>
                               <span className="text-sm text-muted-foreground">
