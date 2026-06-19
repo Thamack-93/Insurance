@@ -2,9 +2,10 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
-import { AuthError, getCurrentUserId, requireAdmin } from "@/lib/auth";
-import { normalizeOptionalText, parseDateInput } from "@/lib/form-utils";
+import { AuthError, getCurrentUser, getCurrentUserId, requireAdmin } from "@/lib/auth";
+import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
 import { resolvePolicyFamilyRootId } from "@/lib/policy-families";
+import type { Prisma } from "@/generated/prisma/client";
 import { policySchema, type PolicyFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { assertClientPortfolioAccess, assertPolicyPortfolioAccess } from "@/lib/portfolio-access";
@@ -25,7 +26,36 @@ function normalizePolicyInput(values: PolicyFormValues) {
     insuredObject: normalizeOptionalText(values.insuredObject),
     beneficiaryInfo: normalizeOptionalText(values.beneficiaryInfo),
     notes: normalizeOptionalText(values.notes),
+    renewedFromPolicyId: optionalRelationId(values.renewedFromPolicyId),
   };
+}
+
+type RenewalPolicyRecord = {
+  id: string;
+  policyNumber: string;
+  clientId: string;
+  insurerId: string;
+  familyRootId: string | null;
+  status: string;
+};
+
+async function clearPreviousRenewalSource(tx: Prisma.TransactionClient, sourcePolicyId: string, currentPolicyId: string, userId: string) {
+  const remainingChildren = await tx.policy.count({
+    where: {
+      renewedFromPolicyId: sourcePolicyId,
+      id: { not: currentPolicyId },
+    },
+  });
+
+  if (remainingChildren === 0) {
+    await tx.policy.update({
+      where: { id: sourcePolicyId },
+      data: {
+        status: "ACTIVE",
+        updatedById: userId,
+      },
+    });
+  }
 }
 
 export async function createPolicy(values: PolicyFormValues): Promise<MutationResult> {
@@ -40,6 +70,27 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
     const userId = await getCurrentUserId();
     await assertClientPortfolioAccess(parsed.data.clientId, userId);
     const normalized = normalizePolicyInput(parsed.data);
+    const renewalSourceId = normalized.renewedFromPolicyId;
+    const renewalSource = renewalSourceId
+      ? await db.policy.findUnique({
+          where: { id: renewalSourceId },
+          select: {
+            id: true,
+            policyNumber: true,
+            clientId: true,
+            insurerId: true,
+            familyRootId: true,
+          },
+        })
+      : null;
+
+    if (renewalSourceId && !renewalSource) {
+      return errorResult("La póliza que se va a renovar ya no existe.");
+    }
+    if (renewalSource && (renewalSource.clientId !== normalized.clientId || renewalSource.insurerId !== normalized.insurerId)) {
+      return errorResult("La póliza renovada debe pertenecer al mismo cliente y aseguradora.");
+    }
+
     const familyRootId = await resolvePolicyFamilyRootId({
       policyNumber: parsed.data.policyNumber.trim(),
       clientId: parsed.data.clientId,
@@ -52,26 +103,50 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
         insurerId: normalized.insurerId,
         startDate: { lte: normalized.endDate },
         endDate: { gte: normalized.startDate },
+        ...(renewalSourceId ? { id: { not: renewalSourceId } } : {}),
       },
       select: { id: true },
     });
     if (overlap) {
       return errorResult("Ya existe una vigencia solapada para esta póliza. Revisa la familia antes de continuar.");
     }
-    const policy = await db.policy.create({
-      data: {
-        ...normalized,
-        familyRootId,
-        createdById: userId,
-        updatedById: userId,
-      },
-    });
 
-    await writeActivityLog({
-      entityType: "Policy",
-      entityId: policy.id,
-      action: "POLICY_CREATE",
-      newValue: policy,
+    const policy = await db.$transaction(async (tx) => {
+      const effectiveFamilyRootId = renewalSource ? renewalSource.familyRootId ?? renewalSource.id : familyRootId;
+      const createdPolicy = await tx.policy.create({
+        data: {
+          ...normalized,
+          familyRootId: effectiveFamilyRootId,
+          renewedFromPolicyId: renewalSource?.id ?? null,
+          status: renewalSource ? "ACTIVE" : normalized.status,
+          createdById: userId,
+          updatedById: userId,
+        },
+      });
+
+      if (renewalSource) {
+        await tx.policy.update({
+          where: { id: renewalSource.id },
+          data: {
+            status: "RENEWED",
+            updatedById: userId,
+          },
+        });
+      }
+
+      await writeActivityLog({
+        entityType: "Policy",
+        entityId: createdPolicy.id,
+        action: renewalSource ? "POLICY_CREATE_RENEWAL" : "POLICY_CREATE",
+        newValue: {
+          ...createdPolicy,
+          renewedFromPolicyId: renewalSource?.id ?? null,
+          familyRootId: effectiveFamilyRootId,
+        },
+        db: tx,
+      });
+
+      return createdPolicy;
     });
 
     revalidatePaths([
@@ -83,6 +158,7 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
       "/portfolio",
       "/renewals",
       "/risks",
+      "/data-quality",
     ]);
 
     return successResult(policy.id, `/policies/${policy.id}`, "Poliza creada.");
@@ -101,6 +177,7 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
   try {
     const db = getDb();
     const userId = await getCurrentUserId();
+    const currentUser = await getCurrentUser();
     await assertPolicyPortfolioAccess(id, userId);
     await assertClientPortfolioAccess(parsed.data.clientId, userId);
     const previousPolicy = await db.policy.findUnique({ where: { id } });
@@ -109,17 +186,110 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
       return errorResult("La poliza ya no existe.");
     }
 
-    const policy = await db.policy.update({
-      where: { id },
-      data: { ...normalizePolicyInput(parsed.data), updatedById: userId },
-    });
+    const normalized = normalizePolicyInput(parsed.data);
+    const nextRenewedFromPolicyId = normalized.renewedFromPolicyId;
+    const previousRenewedFromPolicyId = previousPolicy.renewedFromPolicyId ?? null;
+    const renewalChanged = previousRenewedFromPolicyId !== nextRenewedFromPolicyId;
 
-    await writeActivityLog({
-      entityType: "Policy",
-      entityId: policy.id,
-      action: "POLICY_UPDATE",
-      oldValue: previousPolicy,
-      newValue: policy,
+    if (renewalChanged && currentUser?.role !== "ADMIN") {
+      return errorResult("Solo un administrador puede cambiar el vínculo de renovación.");
+    }
+
+    let nextRenewalSource: RenewalPolicyRecord | null = null;
+    if (nextRenewedFromPolicyId) {
+      if (nextRenewedFromPolicyId === id) {
+        return errorResult("La póliza origen y la destino no pueden ser la misma.");
+      }
+
+      await assertPolicyPortfolioAccess(nextRenewedFromPolicyId, userId);
+      nextRenewalSource = await db.policy.findUnique({
+        where: { id: nextRenewedFromPolicyId },
+        select: {
+          id: true,
+          policyNumber: true,
+          clientId: true,
+          insurerId: true,
+          familyRootId: true,
+          status: true,
+        },
+      });
+
+      if (!nextRenewalSource) {
+        return errorResult("La póliza origen ya no existe.");
+      }
+      if (nextRenewalSource.clientId !== normalized.clientId || nextRenewalSource.insurerId !== normalized.insurerId) {
+        return errorResult("La póliza destino debe pertenecer al mismo cliente y aseguradora.");
+      }
+    }
+
+    const policy = await db.$transaction(async (tx) => {
+      await tx.policy.update({
+        where: { id },
+        data: {
+          ...normalized,
+          status: (normalized.renewedFromPolicyId || renewalChanged) ? "ACTIVE" : normalized.status,
+          updatedById: userId,
+        },
+      });
+
+      if (renewalChanged) {
+        if (previousRenewedFromPolicyId) {
+          await clearPreviousRenewalSource(tx, previousRenewedFromPolicyId, id, userId);
+        }
+
+        if (nextRenewalSource) {
+          const effectiveFamilyRootId = nextRenewalSource.familyRootId ?? nextRenewalSource.id;
+          await tx.policy.update({
+            where: { id },
+            data: {
+              renewedFromPolicyId: nextRenewalSource.id,
+              familyRootId: effectiveFamilyRootId,
+              status: "ACTIVE",
+              updatedById: userId,
+            },
+          });
+
+          await tx.policy.update({
+            where: { id: nextRenewalSource.id },
+            data: {
+              status: "RENEWED",
+              updatedById: userId,
+            },
+          });
+        } else {
+          await tx.policy.update({
+            where: { id },
+            data: {
+              renewedFromPolicyId: null,
+              status: "ACTIVE",
+              updatedById: userId,
+            },
+          });
+        }
+      }
+
+      const finalPolicy = await tx.policy.findUnique({
+        where: { id },
+        include: {
+          client: true,
+          insurer: true,
+        },
+      });
+
+      if (!finalPolicy) {
+        throw new Error("La poliza ya no existe.");
+      }
+
+      await writeActivityLog({
+        entityType: "Policy",
+        entityId: finalPolicy.id,
+        action: renewalChanged ? "POLICY_UPDATE_RENEWAL" : "POLICY_UPDATE",
+        oldValue: previousPolicy,
+        newValue: finalPolicy,
+        db: tx,
+      });
+
+      return finalPolicy;
     });
 
     revalidatePaths([
@@ -131,6 +301,7 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
       "/portfolio",
       "/renewals",
       "/risks",
+      "/data-quality",
     ]);
 
     return successResult(policy.id, `/policies/${policy.id}`, "Poliza actualizada.");

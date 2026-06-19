@@ -52,7 +52,7 @@ test.describe("Quick payment dialog (/receipts cobrar tab)", () => {
     await page.getByRole("button", { name: /^pagar\s/i }).click();
 
     // Sonner toast appears with the success message.
-    await expect(page.getByText(/pago registrado exitosamente/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator(".cn-toast")).toContainText(/pago registrado exitosamente/i, { timeout: 10_000 });
 
     // Dialog closes after success.
     await expect(page.getByRole("dialog")).toBeHidden({ timeout: 10_000 });

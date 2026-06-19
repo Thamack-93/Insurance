@@ -1,25 +1,83 @@
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import { createHmac } from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
+import { createHmac } from "node:crypto";
+import { PrismaPg } from "@prisma/adapter-pg";
 import type { Page } from "@playwright/test";
 import { PrismaClient } from "../../src/generated/prisma/client";
 
-const databasePath = path.join(process.cwd(), "data", "pg.sqlite");
+const localEnvPath = path.join(process.cwd(), ".env.local");
+const SESSION_COOKIE_NAME = "pd_session";
+const DEV_SECRET = "policydesk-dev-secret-change-in-production-please-0123456789";
+
+function loadLocalEnvFile(filePath: string) {
+  if (!fs.existsSync(filePath)) return;
+  const contents = fs.readFileSync(filePath, "utf8");
+  for (const line of contents.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex <= 0) continue;
+    const key = trimmed.slice(0, separatorIndex).trim();
+    if (!key || process.env[key] !== undefined) continue;
+    let value = trimmed.slice(separatorIndex + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
+}
+
+loadLocalEnvFile(localEnvPath);
 
 const globalForTests = globalThis as unknown as {
   prisma?: PrismaClient;
 };
 
-const SESSION_COOKIE_NAME = "pd_session";
-const TEST_SESSION_SECRET =
-  process.env.SESSION_SECRET ?? process.env.AUTH_SECRET ?? "policydesk-dev-secret-change-in-production-please-0123456789";
+function normalizePostgresConnectionString(connectionString: string) {
+  try {
+    const url = new URL(connectionString);
+    const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
+    if (sslMode === "prefer" || sslMode === "require" || sslMode === "verify-ca") {
+      url.searchParams.set("sslmode", "verify-full");
+      return url.toString();
+    }
+  } catch {
+    // The validation below will report malformed or unsupported URLs.
+  }
+  return connectionString;
+}
+
+function getSessionSecret() {
+  const secret = process.env.SESSION_SECRET ?? process.env.AUTH_SECRET;
+  if (secret && secret.length >= 16) {
+    return secret;
+  }
+  return DEV_SECRET;
+}
+
+async function createSessionToken(payload: { userId: string; email: string; name: string; role: "ADMIN" | "AGENT" }) {
+  const exp = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30;
+  const data = { ...payload, exp };
+  const payloadB64 = Buffer.from(JSON.stringify(data)).toString("base64url");
+  const signatureB64 = createHmac("sha256", getSessionSecret()).update(payloadB64).digest("base64url");
+  return { token: `${payloadB64}.${signatureB64}`, exp };
+}
 
 export function getTestDb() {
   if (!globalForTests.prisma) {
-    const adapter = new PrismaBetterSqlite3({
-      url: `file:${databasePath}`,
-    });
+    const rawConnectionString = process.env.DATABASE_URL?.trim();
+    const connectionString = rawConnectionString ? normalizePostgresConnectionString(rawConnectionString) : "";
+    if (!connectionString) {
+      throw new Error("DATABASE_URL is required to initialize Prisma for tests.");
+    }
+    if (!/^postgres(ql)?:\/\//i.test(connectionString)) {
+      throw new Error("DATABASE_URL must point to Postgres for e2e tests.");
+    }
 
+    const adapter = new PrismaPg({ connectionString });
     globalForTests.prisma = new PrismaClient({ adapter });
   }
 
@@ -125,26 +183,21 @@ export async function getAdminSessionCookie(): Promise<string> {
     throw new Error("No active admin user found in the seeded database.");
   }
 
-  const payload = {
+  const { token } = await createSessionToken({
     userId: admin.id,
     email: admin.email,
     name: admin.name,
     role: admin.role,
-    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30,
-  };
-  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const signatureB64 = createHmac("sha256", TEST_SESSION_SECRET)
-    .update(payloadB64)
-    .digest("base64url");
+  });
 
-  return `${SESSION_COOKIE_NAME}=${payloadB64}.${signatureB64}`;
+  return `${SESSION_COOKIE_NAME}=${token}`;
 }
 
 export async function authenticatePageAsAdmin(page: Page): Promise<void> {
   const cookie = await getAdminSessionCookie();
   const [name, ...rest] = cookie.split("=");
   const value = rest.join("=");
-  const baseUrl = new URL(process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:5011").origin;
+  const baseUrl = new URL(process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:5000").origin;
 
   await page.context().addCookies([
     {
