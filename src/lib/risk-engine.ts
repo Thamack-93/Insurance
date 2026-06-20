@@ -1,6 +1,6 @@
 import { addDays, subDays } from "date-fns";
 import { getDb } from "@/lib/db";
-import { today } from "@/lib/dates";
+import { formatDate, today } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { matchesSuppressionCriteria } from "@/lib/data-quality-rules";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
@@ -295,7 +295,17 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
     ...inconsistentPolicies.map((policy) => risk("INCONSISTENT_DATES", "CRITICAL", "Fechas inconsistentes", policy.policyNumber, "Policy", policy.id, "Corregir vigencia de poliza.")),
     ...orphanDocuments.map((document) => risk("ORPHAN_DOCUMENT", "INFO", "Documento huerfano", document.fileName, "Document", document.id, "Asociar documento a una entidad.")),
     ...clientsWithoutActivePolicies.map((client) => risk("CLIENT_WITHOUT_ACTIVE_POLICY", "INFO", "Cliente sin polizas activas", client.fullName, "Client", client.id, "Revisar si debe archivarse o reactivarse.")),
-    ...renewalsWithoutWorkItem.map((policy) => risk("RENEWAL_WITHOUT_WORK_ITEM", "WARNING", "Renovacion proxima sin pendiente", policy.policyNumber, "Policy", policy.id, "Crear pendiente de renovacion.")),
+    ...renewalsWithoutWorkItem.map((policy) =>
+      risk(
+        "RENEWAL_WITHOUT_WORK_ITEM",
+        "WARNING",
+        "Renovacion proxima sin pendiente",
+        `${policy.policyNumber} · ${policy.client.fullName} · ${policy.insurer.name} · vence ${formatDate(policy.endDate)} · ${policy.policyType} · ${formatCurrency(policy.premiumAmount, policy.currency)}`,
+        "Policy",
+        policy.id,
+        "Crear pendiente de renovacion.",
+      ),
+    ),
     ...overlappingPolicies.map((policy) => risk("OVERLAPPING_POLICY_TERM", "WARNING", "Vigencias de poliza solapadas", policy.policyNumber, "Policy", policy.id, "Verificar familia de renovacion.")),
     ...duplicateReceipts.map((receipt) => risk("DUPLICATE_RECEIPT_NUMBER", "WARNING", "Recibo duplicado", receipt.receiptNumber, "Receipt", receipt.id, "Verificar duplicado.")),
     ...policiesWithoutReceipts.map((policy) =>
