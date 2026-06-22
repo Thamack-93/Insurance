@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatDate } from "@/lib/dates";
+import { formatCalendarDate } from "@/lib/calendar-dates";
 import { formatCurrency } from "@/lib/money";
 
 export type PolicyReceiptRow = {
@@ -45,7 +45,7 @@ export function PolicyReceiptsTable({ receipts }: { receipts: PolicyReceiptRow[]
             }}
           >
             <TableCell className="font-medium">{receipt.receiptNumber}</TableCell>
-            <TableCell>{formatDate(receipt.dueDate)}</TableCell>
+            <TableCell>{formatCalendarDate(receipt.dueDate)}</TableCell>
             <TableCell>
               <StatusBadge status={receipt.status} />
             </TableCell>

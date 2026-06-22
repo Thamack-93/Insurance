@@ -3,7 +3,7 @@
 import { deletePayment } from "@/app/(dashboard)/payments/actions";
 import { ConfirmDeleteDialog } from "@/components/dialogs/confirm-delete-dialog";
 import { formatCurrency } from "@/lib/money";
-import { formatDate } from "@/lib/dates";
+import { formatCalendarDate } from "@/lib/calendar-dates";
 
 type DeletePaymentButtonProps = {
   id: string;
@@ -40,7 +40,7 @@ export function DeletePaymentButton({
       description={
         <>
           ¿Seguro que quieres eliminar el pago de <strong>{formatCurrency(amount, currency)}</strong>{" "}
-          registrado el <strong>{formatDate(paidDate)}</strong>
+          registrado el <strong>{formatCalendarDate(paidDate)}</strong>
           {paymentMethod ? <> con método <strong>{paymentMethod}</strong></> : null}? Esta acción recalcula el recibo
           y, si era el último obstáculo, te permitirá cancelar la póliza después.
         </>

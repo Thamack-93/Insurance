@@ -8,8 +8,8 @@ import { Input } from "@/components/ui/input";
 import { CreditCard, DollarSign } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency } from "@/lib/money";
-import { formatDate, today } from "@/lib/dates";
-import { formatDateInput } from "@/lib/form-utils";
+import { today } from "@/lib/dates";
+import { calendarDateInputValue, formatCalendarDate, isCalendarDateBeforeToday } from "@/lib/calendar-dates";
 import { Badge } from "@/components/ui/badge";
 import { createPayment } from "@/app/(dashboard)/payments/actions";
 
@@ -30,7 +30,7 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const [paidDate, setPaidDate] = useState(formatDateInput(today()));
+  const [paidDate, setPaidDate] = useState(calendarDateInputValue(today()));
 
   const handleQuickPayment = () => {
     startTransition(async () => {
@@ -56,7 +56,7 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
   const handleOpenChange = (open: boolean) => {
     setIsOpen(open);
     if (open) {
-      setPaidDate(formatDateInput(today()));
+      setPaidDate(calendarDateInputValue(today()));
     }
   };
 
@@ -94,12 +94,12 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Vencimiento:</span>
-                <span className="font-medium">{formatDate(receipt.dueDate)}</span>
+                <span className="font-medium">{formatCalendarDate(receipt.dueDate)}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">Estado:</span>
-                <Badge variant={new Date(receipt.dueDate) < new Date() ? "destructive" : "secondary"}>
-                  {new Date(receipt.dueDate) < new Date() ? "Vencido" : "Pendiente"}
+                <Badge variant={isCalendarDateBeforeToday(receipt.dueDate) ? "destructive" : "secondary"}>
+                  {isCalendarDateBeforeToday(receipt.dueDate) ? "Vencido" : "Pendiente"}
                 </Badge>
               </div>
               <div className="border-t pt-3 mt-3">

@@ -47,6 +47,21 @@ describe("receipt-reconciliation", () => {
     expect(result.shouldReview).toBe(true);
   });
 
+  it("keeps a receipt pending when the due date is still the same calendar day", () => {
+    const result = reconcileReceiptState({
+      amount: 1500,
+      status: "PENDING",
+      dueDate: new Date("2024-06-13T06:00:00Z"),
+      paidDate: null,
+      paymentMethod: null,
+      payments: [],
+      now: new Date("2024-06-14T05:59:59Z"),
+    });
+
+    expect(result.nextStatus).toBe("PENDING");
+    expect(result.shouldReview).toBe(false);
+  });
+
   it("marks a partially paid future receipt as PENDING and flags it for review", () => {
     const result = reconcileReceiptState({
       amount: 2000,

@@ -18,6 +18,7 @@ import { PolicyReceiptsTable } from "@/components/policies/policy-receipts-table
 import { getDb } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { daysUntil, formatDate } from "@/lib/dates";
+import { calendarDateInputValue, formatCalendarDate } from "@/lib/calendar-dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getPolicyFamilyPolicies } from "@/lib/policy-families";
 import { policyTypeLabel } from "@/lib/status";
@@ -107,7 +108,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
   const policyReceiptRows = receipts.map((receipt) => ({
     id: receipt.id,
     receiptNumber: receipt.receiptNumber,
-    dueDate: receipt.dueDate.toISOString().slice(0, 10),
+    dueDate: calendarDateInputValue(receipt.dueDate),
     status: receipt.status,
     amount: toNumber(receipt.amount),
     currency: receipt.currency,
@@ -367,7 +368,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
               <TableBody>
                 {payments.map((payment) => (
                   <TableRow key={payment.id}>
-                    <TableCell>{formatDate(payment.paidDate)}</TableCell>
+                    <TableCell>{formatCalendarDate(payment.paidDate)}</TableCell>
                     <TableCell>{payment.client.fullName}</TableCell>
                     <TableCell className="font-mono text-xs">{payment.reference ?? "Sin referencia"}</TableCell>
                     <TableCell className="text-right font-medium">{formatCurrency(payment.amount, payment.currency)}</TableCell>

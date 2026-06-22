@@ -14,7 +14,8 @@ import { Pagination } from "@/components/lists/pagination";
 import { CollectableReceipts, type CollectableReceipt } from "@/components/receipts/collectable-receipts";
 import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
 import { getDb } from "@/lib/db";
-import { formatDate, today } from "@/lib/dates";
+import { today } from "@/lib/dates";
+import { calendarDateInputValue, formatCalendarDate } from "@/lib/calendar-dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import {
   paymentOperationalWhere,
@@ -138,7 +139,7 @@ export default async function ReceiptsPage({
       .map((receipt) => ({
       id: receipt.id,
       receiptNumber: receipt.receiptNumber,
-      dueDate: receipt.dueDate.toISOString().split("T")[0],
+      dueDate: calendarDateInputValue(receipt.dueDate),
       amount: toNumber(receipt.amount),
       currency: receipt.currency,
       status: receipt.status,
@@ -309,7 +310,7 @@ export default async function ReceiptsPage({
                           {payment.policy.policyNumber}
                         </Link>
                       </TableCell>
-                      <TableCell>{formatDate(payment.paidDate)}</TableCell>
+                      <TableCell>{formatCalendarDate(payment.paidDate)}</TableCell>
                       <TableCell>{payment.paymentMethod ?? "Sin método"}</TableCell>
                       <TableCell className="text-right font-medium">
                         {formatCurrency(payment.amount, payment.currency)}
@@ -366,7 +367,7 @@ export default async function ReceiptsPage({
                         </Link>
                       </TableCell>
                       <TableCell>{receipt.client?.fullName ?? "Cliente eliminado"}</TableCell>
-                      <TableCell>{receipt.paidDate ? formatDate(receipt.paidDate) : "—"}</TableCell>
+                      <TableCell>{receipt.paidDate ? formatCalendarDate(receipt.paidDate) : "—"}</TableCell>
                       <TableCell>{receipt.paymentMethod ?? "Sin método"}</TableCell>
                       <TableCell className="text-right font-medium">
                         {formatCurrency(receipt.amount, receipt.currency)}

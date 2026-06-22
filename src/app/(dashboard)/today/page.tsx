@@ -13,7 +13,8 @@ import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { buttonVariants } from "@/components/ui/button";
 import { getTodayData } from "@/lib/dashboard-queries";
-import { daysSince, daysUntil, formatDate } from "@/lib/dates";
+import { daysSince, formatDate } from "@/lib/dates";
+import { daysUntilCalendarDate, formatCalendarDate } from "@/lib/calendar-dates";
 import { formatCurrency } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
@@ -106,7 +107,7 @@ export default async function TodayPage() {
                   <p className="font-medium">{policy.policyNumber}</p>
                   <p className="mt-1 text-sm text-muted-foreground">{policy.client.fullName}</p>
                   <p className="mt-2 text-xs text-muted-foreground">
-                    Renovación {formatDate(policy.endDate)}
+                    Renovación {formatCalendarDate(policy.endDate)}
                   </p>
                 </Link>
               ))
@@ -232,7 +233,7 @@ function PaymentGroup({
                 <div>
                   <p className="font-semibold">{formatCurrency(receipt.amount, receipt.currency)}</p>
                   <p className="text-xs text-muted-foreground">
-                    {formatDate(receipt.dueDate)} · {daysUntil(receipt.dueDate)} días
+                    {formatCalendarDate(receipt.dueDate)} · {daysUntilCalendarDate(receipt.dueDate)} días
                   </p>
                 </div>
                 <Link

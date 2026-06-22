@@ -38,6 +38,7 @@ import {
   parseTelegramQueryDays,
 } from "@/lib/telegram-shared";
 import { checkRateLimit } from "@/lib/request-guards";
+import { formatCalendarDate } from "@/lib/calendar-dates";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -428,7 +429,7 @@ function formatTelegramDate(date: Date) {
 function formatTelegramPaymentDateLabel(paidDate: string) {
   return paidDate === getLocalDateKey(new Date())
     ? "hoy"
-    : formatTelegramDate(new Date(`${paidDate}T12:00:00.000Z`));
+    : formatCalendarDate(new Date(`${paidDate}T12:00:00.000Z`));
 }
 
 function formatTelegramNotificationText(title: string, body: string) {
@@ -885,7 +886,7 @@ function formatTelegramReceiptLine(item: TelegramReceiptItem) {
   return [
     `• ${item.receiptNumber} · ${item.clientName}`,
     `  Póliza ${item.policyNumber} · ${item.insurerName}`,
-    `  Vence ${formatTelegramDate(item.dueDate)} · ${formatCurrency(item.amount, item.currency)} · saldo ${formatCurrency(item.balance, item.currency)}`,
+    `  Vence ${formatCalendarDate(item.dueDate)} · ${formatCurrency(item.amount, item.currency)} · saldo ${formatCurrency(item.balance, item.currency)}`,
   ].join("\n");
 }
 
@@ -925,7 +926,7 @@ export async function buildTelegramReceiptsReply(userId: string, days: number, c
     total: receipts.total,
     lines: receipts.items.map(formatTelegramReceiptLine),
     emptyText: "No hay cobros pendientes en este rango.",
-    path: "/receipts",
+    path: "/due-payments",
   });
 }
 
@@ -989,7 +990,7 @@ export async function buildTelegramDailyDigest(userId: string, client?: DbClient
       total: overdueReceipts.total,
       lines: overdueReceipts.items.map(formatTelegramReceiptLine),
       emptyText: "Sin recibos vencidos.",
-      path: "/receipts",
+      path: "/due-payments",
     }),
     "",
     buildTelegramSection({
@@ -997,7 +998,7 @@ export async function buildTelegramDailyDigest(userId: string, client?: DbClient
       total: todayReceipts.total,
       lines: todayReceipts.items.map(formatTelegramReceiptLine),
       emptyText: "Sin recibos pendientes para hoy.",
-      path: "/receipts",
+      path: "/due-payments",
     }),
     "",
     buildTelegramSection({
@@ -1005,7 +1006,7 @@ export async function buildTelegramDailyDigest(userId: string, client?: DbClient
       total: upcomingReceipts.total,
       lines: upcomingReceipts.items.map(formatTelegramReceiptLine),
       emptyText: "Sin recibos próximos.",
-      path: "/receipts",
+      path: "/due-payments",
     }),
     "",
     buildTelegramSection({

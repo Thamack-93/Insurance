@@ -17,7 +17,7 @@ import {
   BulkActionsProvider,
   useBulkActions,
 } from "@/components/bulk-actions/bulk-actions-provider";
-import { formatDate } from "@/lib/dates";
+import { calendarDateInputValue, formatCalendarDate, isCalendarDateBeforeToday } from "@/lib/calendar-dates";
 import { formatCurrency } from "@/lib/money";
 import { bulkMarkReceiptsPaid } from "@/app/(dashboard)/receipts/actions";
 
@@ -142,8 +142,7 @@ function BulkToolbar({ receipts }: { receipts: CollectableReceipt[] }) {
 function ReceiptRow({ receipt }: { receipt: CollectableReceipt }) {
   const { selectedItems, toggleItem } = useBulkActions();
   const isSelected = selectedItems.has(receipt.id);
-  const due = new Date(receipt.dueDate);
-  const isOverdue = due < new Date();
+  const isOverdue = isCalendarDateBeforeToday(receipt.dueDate);
 
   return (
     <div
@@ -174,7 +173,7 @@ function ReceiptRow({ receipt }: { receipt: CollectableReceipt }) {
           <p className="mt-1 text-sm text-muted-foreground">
             {receipt.client.fullName} · {receipt.policy.policyNumber} · {receipt.insurer.name}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">Vence {formatDate(due)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Vence {formatCalendarDate(receipt.dueDate)}</p>
         </div>
       </div>
       <div className="flex items-center gap-3 md:text-right">
@@ -188,7 +187,7 @@ function ReceiptRow({ receipt }: { receipt: CollectableReceipt }) {
             receiptNumber: receipt.receiptNumber,
             amount: receipt.amount,
             currency: receipt.currency,
-            dueDate: receipt.dueDate,
+            dueDate: calendarDateInputValue(receipt.dueDate),
             client: { fullName: receipt.client.fullName },
             policy: { policyNumber: receipt.policy.policyNumber },
           }}

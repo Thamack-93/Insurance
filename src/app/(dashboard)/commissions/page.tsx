@@ -11,7 +11,7 @@ import { EmptyState } from "@/components/empty-states/empty-state";
 import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
 import { getCommissionStats, getOverdueCommissions, autoUpdateCommissionStatuses } from "@/lib/commissions";
-import { formatDate } from "@/lib/dates";
+import { formatCalendarDate } from "@/lib/calendar-dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getDb } from "@/lib/db";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
@@ -177,7 +177,7 @@ export default async function CommissionsPage({
                       </TableCell>
                       <TableCell>{commission.client.fullName}</TableCell>
                       <TableCell>{commission.insurer.name}</TableCell>
-                      <TableCell>{formatDate(commission.expectedDate)}</TableCell>
+                      <TableCell>{formatCalendarDate(commission.expectedDate)}</TableCell>
                       <TableCell className="text-right font-medium">{formatCurrency(toNumber(commission.expectedAmount))}</TableCell>
                       <TableCell>
                         <StatusBadge status={commission.status} />
@@ -218,7 +218,7 @@ export default async function CommissionsPage({
                       {commission.client.fullName} · {commission.insurer.name}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {commission.paidDate ? formatDate(commission.paidDate) : formatDate(commission.expectedDate)}
+                      {commission.paidDate ? formatCalendarDate(commission.paidDate) : formatCalendarDate(commission.expectedDate)}
                     </p>
                   </div>
                   <div className="text-right">

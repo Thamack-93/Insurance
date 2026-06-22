@@ -15,7 +15,8 @@ import { CancelReceiptButton } from "@/components/receipts/cancel-receipt-button
 import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
 import { getDb } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
-import { daysUntil, formatDate } from "@/lib/dates";
+import { formatDate } from "@/lib/dates";
+import { daysUntilCalendarDate, formatCalendarDate, isCalendarDateBeforeToday } from "@/lib/calendar-dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
 
@@ -98,16 +99,16 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
           <MetricCard
             title="Estado"
             value={receipt.status}
-            description={receipt.paidDate ? `Pagado el ${formatDate(receipt.paidDate)}` : `Vence ${formatDate(receipt.dueDate)}`}
+            description={receipt.paidDate ? `Pagado el ${formatCalendarDate(receipt.paidDate)}` : `Vence ${formatCalendarDate(receipt.dueDate)}`}
             icon={CircleDollarSign}
-            tone={receipt.status === "PAID" ? "blue" : receipt.status === "OVERDUE" ? "rose" : "amber"}
+            tone={receipt.status === "PAID" ? "blue" : isCalendarDateBeforeToday(receipt.dueDate) ? "rose" : "amber"}
           />
           <MetricCard
             title="Días al vencimiento"
-            value={daysUntil(receipt.dueDate)}
-            description={receipt.dueDate < new Date() ? "Días vencido" : "Días restantes"}
+            value={daysUntilCalendarDate(receipt.dueDate)}
+            description={isCalendarDateBeforeToday(receipt.dueDate) ? "Días vencido" : "Días restantes"}
             icon={CalendarClock}
-            tone={receipt.dueDate < new Date() ? "rose" : "blue"}
+            tone={isCalendarDateBeforeToday(receipt.dueDate) ? "rose" : "blue"}
           />
           <MetricCard
             title="Pagado"
@@ -155,7 +156,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                 </div>
                 <div>
                   <p className="text-muted-foreground">Vencimiento</p>
-                  <p className="font-medium">{formatDate(receipt.dueDate)}</p>
+                  <p className="font-medium">{formatCalendarDate(receipt.dueDate)}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Método de pago</p>
@@ -191,7 +192,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                   <TableBody>
                     {payments.map((payment) => (
                       <TableRow key={payment.id}>
-                      <TableCell>{formatDate(payment.paidDate)}</TableCell>
+                      <TableCell>{formatCalendarDate(payment.paidDate)}</TableCell>
                       <TableCell className="font-medium">
                         {formatCurrency(payment.amount, payment.currency)}
                       </TableCell>
@@ -257,7 +258,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
                       Esperada: {formatDate(commission.expectedDate)}
-                      {commission.paidDate ? ` · Cobrada: ${formatDate(commission.paidDate)}` : ""}
+                      {commission.paidDate ? ` · Cobrada: ${formatCalendarDate(commission.paidDate)}` : ""}
                     </p>
                   </div>
                 ))}
@@ -313,7 +314,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                     <TableCell>
                       {formatDate(related.periodStartDate)} - {formatDate(related.periodEndDate)}
                     </TableCell>
-                    <TableCell>{formatDate(related.dueDate)}</TableCell>
+                    <TableCell>{formatCalendarDate(related.dueDate)}</TableCell>
                     <TableCell>
                       <StatusBadge status={related.status} />
                     </TableCell>

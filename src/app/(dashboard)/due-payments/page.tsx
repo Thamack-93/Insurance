@@ -12,7 +12,8 @@ import { Pagination } from "@/components/lists/pagination";
 import { QuickPaymentDialog } from "@/components/payments/quick-payment-dialog";
 import { CancelReceiptButton } from "@/components/receipts/cancel-receipt-button";
 import { getDb } from "@/lib/db";
-import { formatDate, today } from "@/lib/dates";
+import { today } from "@/lib/dates";
+import { calendarDateInputValue, formatCalendarDate } from "@/lib/calendar-dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { addDays } from "date-fns";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
@@ -219,7 +220,7 @@ export default async function DuePaymentsPage({
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col">
-                          <span>{formatDate(receipt.dueDate)}</span>
+                          <span>{formatCalendarDate(receipt.dueDate)}</span>
                           <StatusBadge status={receipt.status} className="mt-1 w-fit" />
                         </div>
                       </TableCell>
@@ -234,7 +235,7 @@ export default async function DuePaymentsPage({
                               receiptNumber: receipt.receiptNumber,
                               amount: Number(receipt.amount),
                               currency: receipt.currency,
-                              dueDate: receipt.dueDate.toISOString().split("T")[0],
+                              dueDate: calendarDateInputValue(receipt.dueDate),
                               client: { fullName: receipt.client.fullName },
                               policy: { policyNumber: receipt.policy.policyNumber },
                             }}
@@ -296,7 +297,7 @@ export default async function DuePaymentsPage({
                           {receipt.client.fullName}
                         </Link>
                       </TableCell>
-                      <TableCell>{formatDate(receipt.dueDate)}</TableCell>
+                      <TableCell>{formatCalendarDate(receipt.dueDate)}</TableCell>
                       <TableCell className="text-right font-medium">
                         {formatCurrency(receipt.amount, receipt.currency)}
                       </TableCell>
@@ -338,7 +339,7 @@ export default async function DuePaymentsPage({
                           {receipt.client.fullName}
                         </Link>
                       </TableCell>
-                      <TableCell>{formatDate(receipt.dueDate)}</TableCell>
+                      <TableCell>{formatCalendarDate(receipt.dueDate)}</TableCell>
                       <TableCell className="text-right font-medium">
                         {formatCurrency(receipt.amount, receipt.currency)}
                       </TableCell>
@@ -379,7 +380,7 @@ export default async function DuePaymentsPage({
                           {receipt.client.fullName}
                         </Link>
                       </TableCell>
-                      <TableCell>{formatDate(receipt.dueDate)}</TableCell>
+                      <TableCell>{formatCalendarDate(receipt.dueDate)}</TableCell>
                       <TableCell className="text-right font-medium">
                         {formatCurrency(receipt.amount, receipt.currency)}
                       </TableCell>
@@ -416,7 +417,7 @@ export default async function DuePaymentsPage({
                       <TableCell>{receipt.client.fullName}</TableCell>
                       <TableCell>
                         <div className="flex flex-col">
-                          <span>{receipt.paidDate ? formatDate(receipt.paidDate) : "Sin fecha"}</span>
+                          <span>{receipt.paidDate ? formatCalendarDate(receipt.paidDate) : "Sin fecha"}</span>
                           <StatusBadge status={receipt.status} className="mt-1 w-fit" />
                         </div>
                       </TableCell>
