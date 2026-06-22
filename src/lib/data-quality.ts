@@ -39,6 +39,7 @@ export type PolicyQualityScore = {
   clienteId: string;
   cliente: string;
   aseguradora: string;
+  endDate: Date;
   status: string;
   premiumAmount: number;
   paymentFrequency: string;
@@ -594,6 +595,7 @@ export async function getPolicyDataQualityScores() {
     select: {
       id: true,
       policyNumber: true,
+      endDate: true,
       status: true,
       paymentFrequency: true,
       insuredObject: true,
@@ -719,6 +721,7 @@ export async function getPolicyDataQualityScores() {
         clienteId: policy.clientId,
         cliente: policy.client.fullName,
         aseguradora: policy.insurer.name,
+        endDate: policy.endDate,
         status: policy.status,
         premiumAmount: toNumber(policy.premiumAmount),
         paymentFrequency: policy.paymentFrequency,
