@@ -3,7 +3,18 @@ import { DEFAULT_TIMEZONE } from "@/lib/dates";
 import { getLocalDateKey } from "@/lib/notification-foundation-shared";
 
 function toDate(value: Date | string) {
-  const parsed = value instanceof Date ? value : new Date(value);
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  const normalized = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    const [year, month, day] = normalized.split("-").map(Number);
+    const parsed = new Date(Date.UTC(year, month - 1, day, 12));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const parsed = new Date(normalized);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
