@@ -17,11 +17,13 @@ type QuickPaymentDialogProps = {
   receipt: {
     id: string;
     receiptNumber: string;
+    originLabel?: string;
     amount: number;
     currency: string;
     dueDate: string;
     client: { fullName: string };
     policy: { policyNumber: string };
+    endorsement?: { endorsementNumber: string; reference?: string | null };
   };
   onPaymentComplete?: () => void;
 };
@@ -80,10 +82,18 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
         <div className="space-y-4">
           <div className="rounded-lg bg-muted/40 p-4">
             <div className="grid gap-3 text-sm">
-              <div className="flex justify-between">
+              <div className="flex items-center justify-between gap-3">
                 <span className="text-muted-foreground">Recibo:</span>
                 <span className="font-medium">{receipt.receiptNumber}</span>
               </div>
+              {receipt.originLabel ? (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">Origen:</span>
+                  <Badge variant="outline" className="rounded-full px-2 py-0 text-[11px]">
+                    {receipt.originLabel}
+                  </Badge>
+                </div>
+              ) : null}
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Cliente:</span>
                 <span className="font-medium">{receipt.client.fullName}</span>
@@ -92,6 +102,12 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
                 <span className="text-muted-foreground">Póliza:</span>
                 <span className="font-medium">{receipt.policy.policyNumber}</span>
               </div>
+              {receipt.endorsement ? (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Endoso:</span>
+                  <span className="font-medium">#{receipt.endorsement.endorsementNumber}</span>
+                </div>
+              ) : null}
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Vencimiento:</span>
                 <span className="font-medium">{formatDate(receipt.dueDate)}</span>

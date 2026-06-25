@@ -17,6 +17,7 @@ import { getDb } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
+import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import { policyTypeLabel } from "@/lib/status";
 
 export default async function ReceiptDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -27,7 +28,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
 
   const receipt = await db.receipt.findUnique({
     where: { id },
-    include: { client: true, policy: true, insurer: true, document: true },
+    include: { client: true, policy: true, insurer: true, document: true, endorsement: true },
   });
 
   if (!receipt) {
@@ -50,6 +51,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
     }),
     db.receipt.findMany({
       where: { policyId: receipt.policyId, id: { not: id } },
+      include: { endorsement: true },
       orderBy: { dueDate: "desc" },
       take: 5,
     }),
@@ -65,7 +67,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
         <PageHeader
           eyebrow="Finanzas"
           title={receipt.receiptNumber}
-          description={`${receipt.client.fullName} · ${receipt.policy.policyNumber} · ${receipt.insurer.name}`}
+          description={`${receipt.client.fullName} · ${receipt.policy.policyNumber} · ${getReceiptOriginLabel(receipt)} · ${receipt.insurer.name}`}
           actions={
             <>
               <Button asChild variant="outline" className="rounded-full bg-card/70">
@@ -123,9 +125,14 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
             <div className="grid gap-4 p-4 text-sm">
               <div className="flex items-start justify-between gap-3">
                 <StatusBadge status={receipt.status} />
-                <Badge variant="outline" className="rounded-full">
-                  {receipt.currency}
-                </Badge>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Badge variant="outline" className="rounded-full">
+                    {receipt.currency}
+                  </Badge>
+                  <Badge variant="outline" className="rounded-full">
+                    {getReceiptOriginLabel(receipt)}
+                  </Badge>
+                </div>
               </div>
 
               <div className="rounded-2xl border bg-muted/40 p-4">
@@ -140,6 +147,20 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                 <p className="mt-1 text-xs text-muted-foreground">
                   {policyTypeLabel(receipt.policy.policyType)}
                 </p>
+                {receipt.endorsement ? (
+                  <>
+                    <p className="mt-3 font-medium text-foreground">Endoso</p>
+                    <Link
+                      href={`/policies/${receipt.policyId}/endorsements/${receipt.endorsement.id}/edit`}
+                      className="mt-1 block text-foreground hover:text-primary"
+                    >
+                      Endoso {receipt.endorsement.endorsementNumber}
+                    </Link>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {receipt.endorsement.reference ?? "Sin referencia"} · {receipt.endorsement.concept ?? "Sin concepto"}
+                    </p>
+                  </>
+                ) : null}
                 <p className="mt-3 font-medium text-foreground">Aseguradora</p>
                 <p className="mt-1">{receipt.insurer.name}</p>
               </div>
@@ -309,6 +330,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                       <Link href={`/receipts/${related.id}`} className="font-medium text-foreground hover:text-primary">
                         {related.receiptNumber}
                       </Link>
+                      <p className="text-xs text-muted-foreground">{getReceiptOriginLabel(related)}</p>
                     </TableCell>
                     <TableCell>
                       {formatDate(related.periodStartDate)} - {formatDate(related.periodEndDate)}

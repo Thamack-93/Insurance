@@ -24,6 +24,7 @@ import { bulkMarkReceiptsPaid } from "@/app/(dashboard)/receipts/actions";
 export type CollectableReceipt = {
   id: string;
   receiptNumber: string;
+  originLabel?: string;
   dueDate: string;
   amount: number;
   currency: string;
@@ -31,6 +32,7 @@ export type CollectableReceipt = {
   client: { fullName: string };
   policy: { policyNumber: string; status: string };
   insurer: { name: string };
+  endorsement?: { endorsementNumber: string; reference?: string | null };
   paymentCount: number;
 };
 
@@ -166,6 +168,11 @@ function ReceiptRow({ receipt }: { receipt: CollectableReceipt }) {
             >
               {receipt.receiptNumber}
             </Link>
+            {receipt.originLabel ? (
+              <Badge variant="outline" className="rounded-full px-2 py-0 text-[11px] text-muted-foreground">
+                {receipt.originLabel}
+              </Badge>
+            ) : null}
             <Badge variant={isOverdue ? "destructive" : "secondary"}>
               {isOverdue ? "Vencido" : "Pendiente"}
             </Badge>
@@ -174,6 +181,12 @@ function ReceiptRow({ receipt }: { receipt: CollectableReceipt }) {
           <p className="mt-1 text-sm text-muted-foreground">
             {receipt.client.fullName} · {receipt.policy.policyNumber} · {receipt.insurer.name}
           </p>
+          {receipt.endorsement ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Endoso {receipt.endorsement.endorsementNumber}
+              {receipt.endorsement.reference ? ` · ${receipt.endorsement.reference}` : ""}
+            </p>
+          ) : null}
           <p className="mt-1 text-xs text-muted-foreground">Vence {formatDate(due)}</p>
         </div>
       </div>
@@ -182,15 +195,17 @@ function ReceiptRow({ receipt }: { receipt: CollectableReceipt }) {
           <p className="font-semibold">{formatCurrency(receipt.amount, receipt.currency)}</p>
           <p className="text-xs text-muted-foreground">{receipt.currency}</p>
         </div>
-        <QuickPaymentDialog
-          receipt={{
-            id: receipt.id,
-            receiptNumber: receipt.receiptNumber,
-            amount: receipt.amount,
-            currency: receipt.currency,
-            dueDate: receipt.dueDate,
-            client: { fullName: receipt.client.fullName },
+          <QuickPaymentDialog
+            receipt={{
+              id: receipt.id,
+              receiptNumber: receipt.receiptNumber,
+              originLabel: receipt.originLabel,
+              amount: receipt.amount,
+              currency: receipt.currency,
+              dueDate: receipt.dueDate,
+              client: { fullName: receipt.client.fullName },
             policy: { policyNumber: receipt.policy.policyNumber },
+            endorsement: receipt.endorsement,
           }}
         />
         {receipt.status !== "CANCELLED" && receipt.paymentCount === 0 ? (

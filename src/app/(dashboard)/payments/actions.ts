@@ -6,6 +6,7 @@ import { logError } from "@/lib/logger";
 import { parseDateInput } from "@/lib/form-utils";
 import { writeActivityLog } from "@/lib/activity-log";
 import { PaymentConflictError, recordPayment } from "@/lib/payment-service";
+import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import {
   assertReceiptPortfolioAccess,
   paymentPortfolioWhere,
@@ -56,6 +57,7 @@ export async function createPayment(data: CreatePaymentInput): Promise<MutationR
         client: true,
         policy: true,
         insurer: true,
+        endorsement: true,
       },
     });
 
@@ -219,6 +221,13 @@ export async function getPendingReceipts() {
             name: true,
           },
         },
+        endorsement: {
+          select: {
+            id: true,
+            endorsementNumber: true,
+            reference: true,
+          },
+        },
       },
       orderBy: { dueDate: "asc" },
     });
@@ -226,8 +235,9 @@ export async function getPendingReceipts() {
     return receipts
       .filter((receipt) => receipt.client && receipt.policy && receipt.insurer)
       .map((receipt) => ({
-      ...receipt,
-      amount: Number(receipt.amount),
+        ...receipt,
+        amount: Number(receipt.amount),
+        originLabel: getReceiptOriginLabel(receipt),
       }));
   } catch (error) {
     logError("payments.getPendingReceipts", error);
@@ -249,6 +259,9 @@ export async function getPaymentHistory(limit?: number) {
             id: true,
             receiptNumber: true,
             dueDate: true,
+            endorsement: {
+              select: { id: true, endorsementNumber: true },
+            },
           },
         },
         client: {

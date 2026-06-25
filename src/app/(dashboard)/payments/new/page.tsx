@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { PaymentForm } from "@/components/forms/payment-form";
+import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import { createPayment, getPendingReceipts } from "../actions";
 
 export default async function NewPaymentPage() {
@@ -17,6 +18,10 @@ export default async function NewPaymentPage() {
     currency: receipt.currency,
     client: { fullName: receipt.client.fullName },
     policy: { policyNumber: receipt.policy.policyNumber },
+    endorsement: receipt.endorsement
+      ? { endorsementNumber: receipt.endorsement.endorsementNumber, reference: receipt.endorsement.reference }
+      : undefined,
+    originLabel: getReceiptOriginLabel(receipt),
   }));
 
   return (

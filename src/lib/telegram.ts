@@ -6,6 +6,8 @@ import { logError } from "@/lib/logger";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { writeActivityLog } from "@/lib/activity-log";
 import { recordPayment } from "@/lib/payment-service";
+import { buildPolicyPdfCapturePreviewFromText } from "@/lib/policy-pdf-capture-preview";
+import { extractPdfTextFromBytes } from "@/lib/pdf-text-extraction";
 import {
   createNotificationEvent,
   ensureNotificationDefaultsForUser,
@@ -37,6 +39,7 @@ import {
   parseTelegramCommand,
   parseTelegramQueryDays,
 } from "@/lib/telegram-shared";
+import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import { checkRateLimit } from "@/lib/request-guards";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 
@@ -47,6 +50,7 @@ type TelegramReceiptItem = {
   policyNumber: string;
   clientName: string;
   insurerName: string;
+  originLabel: string;
   dueDate: Date;
   amount: number;
   balance: number;
@@ -87,6 +91,13 @@ type TelegramMessage = {
   chat: TelegramChat;
   date?: number;
   text?: string;
+  caption?: string;
+  document?: {
+    file_id: string;
+    file_name?: string;
+    mime_type?: string;
+    file_size?: number;
+  };
 };
 
 export type TelegramWebhookUpdate = {
@@ -132,6 +143,7 @@ export type TelegramWebhookProcessResult = {
   handled: boolean;
   chatId?: string;
   replyText?: string;
+  draftId?: string;
 };
 
 export type TelegramDailyDigestResult = {
@@ -224,8 +236,29 @@ function getTelegramBotToken() {
   return process.env.TELEGRAM_BOT_TOKEN?.trim() || null;
 }
 
+function isTelegramPdfDocument(document?: {
+  file_id: string;
+  file_name?: string;
+  mime_type?: string;
+}) {
+  if (!document) return false;
+  if (document.mime_type === "application/pdf") return true;
+  return document.file_name?.trim().toLowerCase().endsWith(".pdf") ?? false;
+}
+
 function getTelegramWebhookSecret() {
   return process.env.TELEGRAM_WEBHOOK_SECRET?.trim() || null;
+}
+
+function normalizeBaseUrlCandidate(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    return new URL(withScheme);
+  } catch {
+    return null;
+  }
 }
 
 function isTelegramMutationsEnabled(channel?: {
@@ -250,11 +283,73 @@ function createFallbackTelegramChannelState(userId: string): NotificationChannel
 }
 
 export function getTelegramWebhookUrl(baseUrl = process.env.APP_BASE_URL?.trim()) {
-  if (!baseUrl) return null;
+  const resolvedBaseUrl =
+    normalizeBaseUrlCandidate(baseUrl) ??
+    normalizeBaseUrlCandidate(process.env.VERCEL_PROJECT_PRODUCTION_URL) ??
+    normalizeBaseUrlCandidate(process.env.NEXT_PUBLIC_APP_URL) ??
+    normalizeBaseUrlCandidate(process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ??
+    (process.env.NODE_ENV !== "production" ? normalizeBaseUrlCandidate("http://localhost:3000") : null);
+
+  if (!resolvedBaseUrl) return null;
+  return new URL("/api/integrations/telegram/webhook", resolvedBaseUrl).toString();
+}
+
+function getTelegramFileDownloadUrl(filePath: string) {
+  const token = getTelegramBotToken();
+  if (!token) return null;
+  return `https://api.telegram.org/file/bot${token}/${filePath}`;
+}
+
+async function downloadTelegramPdfBytes(fileId: string) {
+  const token = getTelegramBotToken();
+  if (!token) {
+    return { ok: false as const, error: "TELEGRAM_BOT_TOKEN no está configurado." };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TELEGRAM_FETCH_TIMEOUT_MS);
+
   try {
-    return new URL("/api/integrations/telegram/webhook", baseUrl).toString();
-  } catch {
-    return null;
+    const fileResponse = await fetch(`https://api.telegram.org/bot${token}/getFile`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ file_id: fileId }),
+      signal: controller.signal,
+    });
+
+    const filePayload = (await fileResponse.json().catch(() => null)) as
+      | { ok?: boolean; result?: { file_path?: string }; description?: string }
+      | null;
+
+    if (!fileResponse.ok || !filePayload?.ok || !filePayload.result?.file_path) {
+      return {
+        ok: false as const,
+        error: filePayload?.description ?? `Telegram respondió con estado ${fileResponse.status}.`,
+      };
+    }
+
+    const downloadUrl = getTelegramFileDownloadUrl(filePayload.result.file_path);
+    if (!downloadUrl) {
+      return { ok: false as const, error: "No se pudo construir la URL de descarga del documento." };
+    }
+
+    const downloadResponse = await fetch(downloadUrl, { signal: controller.signal });
+    if (!downloadResponse.ok) {
+      return {
+        ok: false as const,
+        error: `No se pudo descargar el PDF desde Telegram (${downloadResponse.status}).`,
+      };
+    }
+
+    const bytes = new Uint8Array(await downloadResponse.arrayBuffer());
+    return { ok: true as const, bytes };
+  } catch (error) {
+    logError("telegram.downloadPdf", error, { fileId });
+    return { ok: false as const, error: "No se pudo descargar el PDF desde Telegram." };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -268,7 +363,9 @@ function getTelegramLinkSecret() {
 
 export async function syncTelegramWebhook(baseUrl?: string): Promise<TelegramWebhookSyncResult> {
   const token = getTelegramBotToken();
-  const webhookUrl = getTelegramWebhookUrl(baseUrl);
+  const webhookUrl = getTelegramWebhookUrl(
+    baseUrl ?? process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.APP_BASE_URL?.trim(),
+  );
   const secret = getTelegramWebhookSecret();
 
   if (!token) {
@@ -332,13 +429,13 @@ function normalizeChatId(chatId: string | number) {
 }
 
 function getAppBaseUrl() {
-  const value = process.env.APP_BASE_URL?.trim();
-  if (!value) return null;
-  try {
-    return new URL(value);
-  } catch {
-    return null;
-  }
+  return (
+    normalizeBaseUrlCandidate(process.env.VERCEL_PROJECT_PRODUCTION_URL) ??
+    normalizeBaseUrlCandidate(process.env.APP_BASE_URL) ??
+    normalizeBaseUrlCandidate(process.env.NEXT_PUBLIC_APP_URL) ??
+    normalizeBaseUrlCandidate(process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ??
+    (process.env.NODE_ENV !== "production" ? normalizeBaseUrlCandidate("http://localhost:3000") : null)
+  );
 }
 
 function buildPolicyDeskUrl(path: string) {
@@ -567,6 +664,65 @@ function buildPolicyDraftSummary(payload: Record<string, string>) {
   return parts.length > 0 ? parts.join(" · ") : "Borrador vacío para completar en PolicyDesk.";
 }
 
+function buildTelegramPolicyDraftPayloadFromPreview(preview: {
+  draft: {
+    policyNumber: string;
+    clientName: string;
+    insurerName: string;
+    policyType: string;
+    serialNumber: string | null;
+    startDate: string;
+    endDate: string;
+    paymentFrequency: string;
+    paymentPlan: string | null;
+    premiumAmount: number;
+    currency: string;
+    requestNumber: string | null;
+    insuredObject: string | null;
+    beneficiaryInfo: string | null;
+    notes: string | null;
+    sourcePolicyNumber: string | null;
+  };
+  suggestions: {
+    clientId: string | null;
+    insurerId: string | null;
+    sourcePolicyId: string | null;
+  };
+}) {
+  return {
+    type: "POLICY_CAPTURE" as const,
+    policy: {
+      step: "ready" as const,
+      policyNumber: preview.draft.policyNumber,
+      clientName: preview.draft.clientName,
+      insurerName: preview.draft.insurerName,
+      policyType: preview.draft.policyType,
+      startDate: preview.draft.startDate,
+      endDate: preview.draft.endDate,
+      premiumAmount: preview.draft.premiumAmount,
+      paymentFrequency: preview.draft.paymentFrequency,
+      sourcePolicyNumber: preview.draft.sourcePolicyNumber,
+    },
+    policynumber: preview.draft.policyNumber,
+    client: preview.draft.clientName,
+    insurer: preview.draft.insurerName,
+    policytype: preview.draft.policyType,
+    start: preview.draft.startDate,
+    end: preview.draft.endDate,
+    premium: preview.draft.premiumAmount,
+    currency: preview.draft.currency,
+    frequency: preview.draft.paymentFrequency,
+    paymentplan: preview.draft.paymentPlan,
+    object: preview.draft.insuredObject,
+    beneficiary: preview.draft.beneficiaryInfo,
+    notes: preview.draft.notes,
+    sourcepolicy: preview.draft.sourcePolicyNumber,
+    clientid: preview.suggestions.clientId,
+    insurerid: preview.suggestions.insurerId,
+    sourcepolicyid: preview.suggestions.sourcePolicyId,
+  };
+}
+
 export function parseTelegramPaymentArgument(argument: string) {
   const parts = argument.split(/\s+/).filter(Boolean);
   const state: TelegramPaymentDraftState = { step: "policyNumber" };
@@ -655,6 +811,7 @@ async function getUserLinkedReceiptByPolicyAndNumber(
       client: { select: { fullName: true } },
       policy: { select: { policyNumber: true } },
       insurer: { select: { name: true } },
+      endorsement: { select: { endorsementNumber: true } },
     },
   });
 
@@ -672,6 +829,7 @@ async function getUserLinkedReceiptByPolicyAndNumber(
       client: { select: { fullName: true } },
       policy: { select: { policyNumber: true } },
       insurer: { select: { name: true } },
+      endorsement: { select: { endorsementNumber: true } },
     },
     take: 2,
   });
@@ -814,6 +972,7 @@ async function getTelegramReceipts(input: {
         client: { select: { fullName: true } },
         insurer: { select: { name: true } },
         policy: { select: { policyNumber: true } },
+        endorsement: { select: { endorsementNumber: true } },
         payments: { select: { amount: true } },
       },
       orderBy: [{ dueDate: "asc" }, { receiptNumber: "asc" }],
@@ -832,6 +991,7 @@ async function getTelegramReceipts(input: {
         policyNumber: row.policy.policyNumber,
         clientName: row.client.fullName,
         insurerName: row.insurer.name,
+        originLabel: getReceiptOriginLabel(row),
         dueDate: row.dueDate,
         amount,
         balance: Math.max(amount - paidAmount, 0),
@@ -884,7 +1044,7 @@ async function getTelegramRenewals(input: {
 function formatTelegramReceiptLine(item: TelegramReceiptItem) {
   return [
     `• ${item.receiptNumber} · ${item.clientName}`,
-    `  Póliza ${item.policyNumber} · ${item.insurerName}`,
+    `  ${item.originLabel} · Póliza ${item.policyNumber} · ${item.insurerName}`,
     `  Vence ${formatTelegramDate(item.dueDate)} · ${formatCurrency(item.amount, item.currency)} · saldo ${formatCurrency(item.balance, item.currency)}`,
   ].join("\n");
 }
@@ -1139,6 +1299,7 @@ async function createTelegramPaymentDraft(input: {
     replyText: buildTelegramPaymentDraftMessage({
       policyNumber: receipt.policy.policyNumber,
       receiptNumber: receipt.receiptNumber,
+      originLabel: getReceiptOriginLabel(receipt),
       clientName: receipt.client.fullName,
       amount: formatCurrency(toNumber(receipt.amount), receipt.currency),
       paymentMethod: parsed.state.paymentMethod ?? "",
@@ -1222,6 +1383,137 @@ async function createTelegramPolicyDraft(input: {
             link,
           })
         : getTelegramPolicyPrompt(parsed.state.step),
+    draftId: draft.id,
+  };
+}
+
+async function createTelegramPolicyDraftFromPdf(input: {
+  chatId: string;
+  document: NonNullable<TelegramMessage["document"]>;
+  caption?: string | null;
+  client?: DbClient;
+}) {
+  const db = input.client ?? getDb();
+  const channel = await getTelegramChannelByChatId(input.chatId, db);
+  if (!channel?.isEnabled || !channel.telegramChatId) {
+    return {
+      ok: false as const,
+      replyText: buildTelegramLinkedChatRequiredMessage(),
+    };
+  }
+
+  if (!isTelegramPdfDocument(input.document)) {
+    return {
+      ok: false as const,
+      replyText: "Solo puedo analizar archivos PDF de pólizas por Telegram.",
+    };
+  }
+
+  if (input.document.file_size && input.document.file_size > 12 * 1024 * 1024) {
+    return {
+      ok: false as const,
+      replyText: "El PDF es muy grande para revisarlo por Telegram. Sube la carátula en PolicyDesk para revisarla ahí.",
+    };
+  }
+
+  const download = await downloadTelegramPdfBytes(input.document.file_id);
+  if (!download.ok) {
+    return {
+      ok: false as const,
+      replyText: download.error,
+    };
+  }
+
+  let extractedText = "";
+  try {
+    const extracted = await extractPdfTextFromBytes(download.bytes);
+    extractedText = extracted.text;
+  } catch (error) {
+    logError("telegram.extractPdfFromBytes", error, {
+      chatId: input.chatId,
+      fileName: input.document.file_name,
+    });
+  }
+
+  if (!extractedText.trim()) {
+    return {
+      ok: true as const,
+      replyText: [
+        "Recibí el PDF, pero no pude extraer texto útil de ese archivo.",
+        "Puede ser un escaneo o una imagen incrustada. Súbelo en PolicyDesk para revisarlo con más detalle.",
+        buildPolicyDeskUrl("/policies/capture") ? `Abre aquí la revisión: ${buildPolicyDeskUrl("/policies/capture")}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  }
+
+  const user = await db.user.findUnique({
+    where: { id: channel.userId },
+    select: { id: true, role: true },
+  });
+
+  const preview = await buildPolicyPdfCapturePreviewFromText(
+    extractedText,
+    db,
+    user ? { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" } : null,
+  );
+
+  const payload = buildTelegramPolicyDraftPayloadFromPreview(preview);
+  const draft = await db.$transaction(async (tx) => {
+    await tx.telegramDraft.updateMany({
+      where: {
+        userId: channel.userId,
+        channelId: channel.id,
+        type: "POLICY_CAPTURE",
+        status: "COLLECTING",
+      },
+      data: {
+        status: "CANCELLED",
+        cancelledAt: new Date(),
+      },
+    });
+
+    return tx.telegramDraft.create({
+      data: {
+        userId: channel.userId,
+        channelId: channel.id,
+        type: "POLICY_CAPTURE",
+        status: "COLLECTING",
+        payloadJson: JSON.stringify(payload),
+        expiresAt: new Date(Date.now() + TELEGRAM_DRAFT_TTL_MS),
+      },
+    });
+  });
+
+  const link = buildPolicyDeskUrl(`/policies/new?telegramDraft=${draft.id}`);
+  const summary = buildPolicyDraftSummary({
+    policynumber: preview.draft.policyNumber,
+    client: preview.draft.clientName,
+    insurer: preview.draft.insurerName,
+    type: preview.draft.policyType,
+    start: preview.draft.startDate,
+    end: preview.draft.endDate,
+    premium: String(preview.draft.premiumAmount),
+    frequency: preview.draft.paymentFrequency,
+  });
+  const aiSummary = preview.aiReview?.summary?.trim();
+  const aiWarnings = preview.aiReview?.warnings ?? [];
+  const aiSuggestions = preview.aiReview?.suggestions ?? [];
+
+  const replyParts = [
+    "PDF recibido y analizado.",
+    input.document.file_name ? `Archivo: ${input.document.file_name}` : null,
+    summary,
+    aiSummary ? `Revisión IA: ${aiSummary}` : null,
+    aiWarnings.length > 0 ? `Observaciones IA: ${aiWarnings.slice(0, 3).join(" · ")}` : null,
+    aiSuggestions.length > 0 ? `Sugerencias IA: ${aiSuggestions.slice(0, 3).join(" · ")}` : null,
+    link ? `Abre este enlace para revisar y guardar en PolicyDesk: ${link}` : "Abre PolicyDesk para revisar y guardar la póliza.",
+  ].filter(Boolean);
+
+  return {
+    ok: true as const,
+    replyText: replyParts.join("\n"),
     draftId: draft.id,
   };
 }
@@ -1473,20 +1765,28 @@ async function continueTelegramDraftFromMessage(input: {
         state.paymentMethod = text;
         state.step = getNextPaymentStep(state);
         break;
-      case "ready":
+      case "ready": {
+        const readyReceipt =
+          state.policyNumber && state.receiptNumber
+            ? await getUserLinkedReceiptByPolicyAndNumber(channel.userId, state.policyNumber, state.receiptNumber, db)
+            : null;
         return {
           handled: true as const,
           chatId: input.chatId,
           replyText: buildTelegramPaymentDraftMessage({
-            policyNumber: state.policyNumber ?? "—",
-            receiptNumber: state.receiptNumber ?? "—",
-            clientName: "—",
-            amount: formatCurrency(state.amount ?? 0, state.currency ?? "MXN"),
+            policyNumber: readyReceipt?.policy.policyNumber ?? state.policyNumber ?? "—",
+            receiptNumber: readyReceipt?.receiptNumber ?? state.receiptNumber ?? "—",
+            originLabel: readyReceipt ? getReceiptOriginLabel(readyReceipt) : undefined,
+            clientName: readyReceipt?.client.fullName ?? "—",
+            amount: readyReceipt
+              ? formatCurrency(toNumber(readyReceipt.amount), readyReceipt.currency)
+              : formatCurrency(state.amount ?? 0, state.currency ?? "MXN"),
             paymentMethod: state.paymentMethod ?? "—",
             paidDate: state.paidDate ? formatTelegramPaymentDateLabel(state.paidDate) : "—",
             reference: state.reference,
           }),
         };
+      }
     }
 
     const nextPayload: TelegramDraftState = {
@@ -1536,6 +1836,7 @@ async function continueTelegramDraftFromMessage(input: {
         replyText: buildTelegramPaymentDraftMessage({
           policyNumber: receipt.policy.policyNumber,
           receiptNumber: receipt.receiptNumber,
+          originLabel: getReceiptOriginLabel(receipt),
           clientName: receipt.client.fullName,
           amount: formatCurrency(toNumber(receipt.amount), receipt.currency),
           paymentMethod: state.paymentMethod ?? "",
@@ -2070,12 +2371,41 @@ export async function processTelegramWebhookUpdate(
   update: TelegramWebhookUpdate,
 ): Promise<TelegramWebhookProcessResult> {
   const message = update.message;
-  if (!message?.text) {
+  if (!message?.text && !message?.document) {
     return { handled: false };
   }
 
   const chatId = normalizeChatId(message.chat.id);
-  const command = parseTelegramCommand(message.text);
+  if (message.document) {
+    if (message.chat.type !== "private") {
+      return { handled: true, chatId };
+    }
+
+    const rateLimit = checkRateLimit(`telegram:pdf:${chatId}`, TELEGRAM_DRAFT_CONTINUATION_RATE_LIMIT);
+    if (!rateLimit.allowed) {
+      return {
+        handled: true,
+        chatId,
+        replyText: "Demasiados intentos. Espera un momento e inténtalo de nuevo.",
+      };
+    }
+
+    const result = await createTelegramPolicyDraftFromPdf({
+      chatId,
+      document: message.document,
+      caption: message.caption ?? null,
+    });
+
+    return {
+      handled: true,
+      chatId,
+      replyText: result.replyText,
+      draftId: result.draftId,
+    };
+  }
+
+  const text = message.text ?? "";
+  const command = parseTelegramCommand(text);
   if (!command) {
     if (message.chat.type !== "private") {
       return { handled: true, chatId };
@@ -2092,7 +2422,7 @@ export async function processTelegramWebhookUpdate(
 
     const continuation = await continueTelegramDraftFromMessage({
       chatId,
-      text: message.text,
+      text,
     });
     return continuation ?? { handled: false };
   }

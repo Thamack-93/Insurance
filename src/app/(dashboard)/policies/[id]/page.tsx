@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RecordPageView } from "@/components/recently-viewed/record-page-view";
-import { ArrowLeft, FileClock, History, Pencil, ReceiptText, Repeat, Shield } from "lucide-react";
+import { ArrowLeft, FileClock, History, Pencil, Plus, ReceiptText, Repeat, Shield } from "lucide-react";
 import { DeletePolicyButton } from "@/components/policies/delete-policy-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { AuditByline } from "@/components/audit/audit-byline";
@@ -19,6 +19,7 @@ import { getDb } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
+import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import { getPolicyFamilyPolicies } from "@/lib/policy-families";
 import { policyTypeLabel } from "@/lib/status";
 import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
@@ -62,12 +63,69 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     notFound();
   }
 
-  const [receipts, payments, commissions, workItems, documents, activity, family] = await Promise.all([
+  const [
+    receipts,
+    baseReceiptCount,
+    basePendingCount,
+    basePendingAmountAgg,
+    endorsementReceiptCount,
+    endorsementPendingCount,
+    endorsementPendingAmountAgg,
+    payments,
+    commissions,
+    workItems,
+    documents,
+    endorsements,
+    activity,
+    family,
+  ] = await Promise.all([
     db.receipt.findMany({
-      where: { policyId: id },
-      include: { client: true, insurer: true },
+      where: { policyId: id, endorsementId: null },
+      include: { client: true, insurer: true, endorsement: true },
       orderBy: { dueDate: "desc" },
       take: 10,
+    }),
+    db.receipt.count({
+      where: {
+        policyId: id,
+        endorsementId: null,
+      },
+    }),
+    db.receipt.count({
+      where: {
+        policyId: id,
+        endorsementId: null,
+        status: { notIn: ["PAID", "CANCELLED"] },
+      },
+    }),
+    db.receipt.aggregate({
+      where: {
+        policyId: id,
+        endorsementId: null,
+        status: { notIn: ["PAID", "CANCELLED"] },
+      },
+      _sum: { amount: true },
+    }),
+    db.receipt.count({
+      where: {
+        policyId: id,
+        endorsementId: { not: null },
+      },
+    }),
+    db.receipt.count({
+      where: {
+        policyId: id,
+        endorsementId: { not: null },
+        status: { notIn: ["PAID", "CANCELLED"] },
+      },
+    }),
+    db.receipt.aggregate({
+      where: {
+        policyId: id,
+        endorsementId: { not: null },
+        status: { notIn: ["PAID", "CANCELLED"] },
+      },
+      _sum: { amount: true },
     }),
     db.payment.findMany({
       where: { policyId: id },
@@ -88,23 +146,44 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     }),
     db.document.findMany({
       where: { policyId: id },
-      include: { receipt: true, task: true, claim: true, quote: true },
+      include: { receipt: true, task: true, claim: true, quote: true, endorsement: true },
       orderBy: { uploadedAt: "desc" },
       take: 10,
+    }),
+    db.policyEndorsement.findMany({
+      where: { policyId: id },
+      include: {
+        receipts: {
+          include: { client: true, insurer: true, endorsement: true },
+          orderBy: { dueDate: "asc" },
+        },
+        documents: {
+          include: {
+            receipt: true,
+            endorsement: true,
+          },
+        },
+      },
+      orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
     }),
     getActivityForEntity("Policy", id, 20),
     getPolicyFamilyPolicies(id),
   ]);
 
-  const openReceipts = receipts.filter((receipt) => receipt.status !== "PAID" && receipt.status !== "CANCELLED");
   const policyReceiptRows = receipts.map((receipt) => ({
     id: receipt.id,
     receiptNumber: receipt.receiptNumber,
+    originLabel: getReceiptOriginLabel(receipt),
     dueDate: receipt.dueDate.toISOString().slice(0, 10),
     status: receipt.status,
     amount: toNumber(receipt.amount),
     currency: receipt.currency,
   }));
+  const activeEndorsements = endorsements.filter((endorsement) => endorsement.status === "ACTIVE");
+  const expiredEndorsements = endorsements.filter((endorsement) => endorsement.status === "EXPIRED");
+  const cancelledEndorsements = endorsements.filter((endorsement) => endorsement.status === "CANCELLED");
+  const basePendingAmount = toNumber(basePendingAmountAgg._sum.amount);
+  const endorsementPendingAmount = toNumber(endorsementPendingAmountAgg._sum.amount);
   const openCommissions = commissions.filter((commission) => commission.status !== "PAID" && commission.status !== "CANCELLED");
   const openWorkItemCount = await countWorkItems({
     workItemTypes: ["TASK"],
@@ -142,7 +221,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
 
         <AuditByline createdById={policy.createdById} updatedById={policy.updatedById} />
 
-        <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
           <MetricCard
             title="Prima"
             value={formatCurrency(policy.premiumAmount, policy.currency)}
@@ -151,18 +230,32 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             tone="emerald"
           />
           <MetricCard
-            title="Recibos abiertos"
-            value={openReceipts.length}
-            description="Cargos por cobrar dentro de esta póliza."
+            title="Recibos póliza"
+            value={baseReceiptCount}
+            description={`${basePendingCount} abiertos en la vigencia base.`}
             icon={ReceiptText}
             tone="amber"
+          />
+          <MetricCard
+            title="Recibos endosos"
+            value={endorsementReceiptCount}
+            description={`${endorsementPendingCount} abiertos en endosos.`}
+            icon={Repeat}
+            tone="blue"
+          />
+          <MetricCard
+            title="Endosos activos"
+            value={activeEndorsements.length}
+            description={`${expiredEndorsements.length} vencidos · ${cancelledEndorsements.length} cancelados`}
+            icon={Repeat}
+            tone="blue"
           />
           <MetricCard
             title="Comisiones abiertas"
             value={openCommissions.length}
             description="Esperadas, pendientes u observadas."
-            icon={Repeat}
-            tone="blue"
+            icon={Shield}
+            tone="emerald"
           />
           <MetricCard
             title="Tareas abiertas"
@@ -174,13 +267,30 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
-          <SectionCard title="Ficha de póliza" description="Contexto operativo y comercial.">
+          <SectionCard title="Póliza base" description="Contexto operativo y comercial de la vigencia base.">
             <div className="grid gap-4 p-4 text-sm">
               <div className="flex items-start justify-between gap-3">
                 <StatusBadge status={policy.status} />
                 <Badge variant="outline" className="rounded-full">
                   {policyTypeLabel(policy.policyType)}
                 </Badge>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="rounded-2xl border border-border/70 bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Saldo póliza</p>
+                  <p className="mt-1 text-lg font-semibold">{formatCurrency(basePendingAmount, policy.currency)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{basePendingCount} recibo(s) abiertos</p>
+                </div>
+                <div className="rounded-2xl border border-border/70 bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Saldo endosos</p>
+                  <p className="mt-1 text-lg font-semibold">{formatCurrency(endorsementPendingAmount, policy.currency)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{endorsementPendingCount} recibo(s) abiertos</p>
+                </div>
+                <div className="rounded-2xl border border-border/70 bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Endosos vigentes</p>
+                  <p className="mt-1 text-lg font-semibold">{activeEndorsements.length}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{expiredEndorsements.length} vencidos · {cancelledEndorsements.length} cancelados</p>
+                </div>
               </div>
               <SectionCard title="Relaciones">
                 <div className="space-y-3 px-4 py-3 text-sm">
@@ -280,8 +390,133 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             </div>
           </SectionCard>
 
-          <SectionCard title="Recibos" description="Calendario de cobro derivado de esta póliza.">
+          <SectionCard
+            title="Recibos de la póliza"
+            description="Calendario de cobro derivado solo de la vigencia base."
+            action={
+              <Button asChild size="sm" className="rounded-full">
+                <Link href={`/receipts/new?policyId=${id}`}>
+                  <Plus className="mr-2 size-4" />
+                  Nuevo recibo de póliza
+                </Link>
+              </Button>
+            }
+          >
             <PolicyReceiptsTable receipts={policyReceiptRows} />
+          </SectionCard>
+
+          <SectionCard
+            title="Endosos"
+            description="Ajustes ligados a esta póliza base, cada uno con sus propios recibos y documentos."
+            action={
+              <Button asChild size="sm" className="rounded-full">
+                <Link href={`/policies/${id}/endorsements/new`}>
+                  <Plus className="mr-2 size-4" />
+                  Nuevo endoso
+                </Link>
+              </Button>
+            }
+          >
+            {endorsements.length === 0 ? (
+              <div className="p-4">
+                <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
+                  <ReceiptText className="mx-auto mb-2 size-5 text-muted-foreground" />
+                  Todavía no hay endosos para esta póliza.
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4 p-4">
+                {endorsements.map((endorsement) => (
+                  <div key={endorsement.id} className="rounded-3xl border border-border/70 bg-card p-4 shadow-sm">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link
+                            href={`/policies/${id}/endorsements/${endorsement.id}/edit`}
+                            className="text-lg font-semibold text-foreground hover:text-primary"
+                          >
+                            Endoso {endorsement.endorsementNumber}
+                          </Link>
+                          <StatusBadge status={endorsement.status} />
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {formatDate(endorsement.startDate)} · {formatDate(endorsement.endDate)} ·{" "}
+                          {formatCurrency(endorsement.amount, endorsement.currency)}
+                        </p>
+                        {endorsement.reference ? (
+                          <p className="text-xs text-muted-foreground">Referencia: {endorsement.reference}</p>
+                        ) : null}
+                        {endorsement.concept ? (
+                          <p className="text-xs text-muted-foreground">Concepto: {endorsement.concept}</p>
+                        ) : null}
+                        {endorsement.notes ? <p className="text-xs text-muted-foreground">{endorsement.notes}</p> : null}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button asChild variant="outline" size="sm" className="rounded-full bg-card/70">
+                          <Link href={`/policies/${id}/endorsements/${endorsement.id}/edit`}>Editar</Link>
+                        </Button>
+                        <Button asChild size="sm" className="rounded-full">
+                          <Link href={`/receipts/new?policyId=${id}&endorsementId=${endorsement.id}`}>Nuevo recibo de endoso</Link>
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium text-foreground">Recibos del endoso</p>
+                        <span className="text-xs text-muted-foreground">{endorsement.receipts.length} recibo(s)</span>
+                      </div>
+                      {endorsement.receipts.length > 0 ? (
+                        <PolicyReceiptsTable
+                          receipts={endorsement.receipts.map((receipt, index) => ({
+                            id: receipt.id,
+                            receiptNumber: receipt.receiptNumber,
+                            displayLabel: String(index + 1),
+                            secondaryLabel: `Folio ${receipt.receiptNumber}`,
+                            originLabel: getReceiptOriginLabel(receipt),
+                            dueDate: receipt.dueDate.toISOString().slice(0, 10),
+                            status: receipt.status,
+                            amount: Number(receipt.amount),
+                            currency: receipt.currency,
+                          }))}
+                        />
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-border bg-muted/30 px-4 py-6 text-sm text-muted-foreground">
+                          Este endoso todavía no tiene recibos asociados.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-4 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium text-foreground">Documentos del endoso</p>
+                        <span className="text-xs text-muted-foreground">{endorsement.documents.length} archivo(s)</span>
+                      </div>
+                      <DocumentDropZone
+                        associations={{ policyId: id, clientId: policy.clientId, endorsementId: endorsement.id }}
+                        defaultDocumentType="ENDORSEMENT"
+                        title="Subir documentos del endoso"
+                        description="Adjunta el aviso de pago, PDF o soporte de este endoso."
+                      />
+                      <DocumentList
+                        showAssociation
+                        documents={endorsement.documents.map((doc) => ({
+                          id: doc.id,
+                          fileName: doc.fileName,
+                          documentType: doc.documentType,
+                          mimeType: doc.mimeType,
+                          uploadedAt: doc.uploadedAt,
+                          associationLabel:
+                            doc.receipt?.receiptNumber ??
+                            doc.endorsement?.endorsementNumber ??
+                            "Endoso",
+                        }))}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </SectionCard>
         </section>
 

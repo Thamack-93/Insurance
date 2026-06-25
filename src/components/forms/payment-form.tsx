@@ -36,10 +36,12 @@ type PaymentFormProps = {
   receipts: Array<{
     id: string;
     receiptNumber: string;
+    originLabel?: string;
     amount: number;
     currency: string;
     client: { fullName: string };
     policy: { policyNumber: string };
+    endorsement?: { endorsementNumber: string; reference?: string | null };
   }>;
   submitAction: (data: PaymentFormValues) => Promise<MutationResult>;
   cancelHref?: string;
@@ -71,7 +73,7 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
 
   const receiptOptions = receipts.map((r) => ({
     value: r.id,
-    label: `${r.receiptNumber} – ${r.client.fullName} – ${formatCurrency(r.amount)}`,
+    label: `${r.receiptNumber} – ${r.client.fullName} – ${r.originLabel ?? (r.endorsement ? `Endoso ${r.endorsement.endorsementNumber}` : "Póliza base")} – ${formatCurrency(r.amount, r.currency)}`,
   }));
 
   const handleReceiptChange = (receiptId: string) => {
@@ -125,7 +127,7 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
               error={errors.amount?.message}
               hint={
                 selectedReceiptData
-                  ? `Monto original: ${formatCurrency(selectedReceiptData.amount)}`
+                  ? `Monto original: ${formatCurrency(selectedReceiptData.amount, selectedReceiptData.currency)}`
                   : undefined
               }
             >
@@ -146,13 +148,13 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
             </FormField>
 
             <FormField label="Método de pago" required error={errors.paymentMethod?.message}>
-                <ControlledSelect
-                  value={selectedPaymentMethod || ""}
-                  onValueChange={(value) => setValue("paymentMethod", value ?? "")}
-                  options={paymentMethodOptions}
-                  placeholder="Seleccionar método"
-                />
-              </FormField>
+              <ControlledSelect
+                value={selectedPaymentMethod || ""}
+                onValueChange={(value) => setValue("paymentMethod", value ?? "")}
+                options={paymentMethodOptions}
+                placeholder="Seleccionar método"
+              />
+            </FormField>
           </FormGrid>
 
           <FormField label="Referencia (opcional)" htmlFor="reference" error={errors.reference?.message}>
@@ -172,6 +174,10 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
                   <span>{selectedReceiptData.receiptNumber}</span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-muted-foreground">Origen:</span>
+                  <span>{selectedReceiptData.originLabel ?? (selectedReceiptData.endorsement ? `Endoso ${selectedReceiptData.endorsement.endorsementNumber}` : "Póliza base")}</span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-muted-foreground">Cliente:</span>
                   <span>{selectedReceiptData.client.fullName}</span>
                 </div>
@@ -179,9 +185,15 @@ export function PaymentForm({ receipts, submitAction, cancelHref }: PaymentFormP
                   <span className="text-muted-foreground">Póliza:</span>
                   <span>{selectedReceiptData.policy.policyNumber}</span>
                 </div>
+                {selectedReceiptData.endorsement ? (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Endoso:</span>
+                    <span>{selectedReceiptData.endorsement.endorsementNumber}</span>
+                  </div>
+                ) : null}
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Monto:</span>
-                  <span>{formatCurrency(selectedReceiptData.amount)}</span>
+                  <span>{formatCurrency(selectedReceiptData.amount, selectedReceiptData.currency)}</span>
                 </div>
               </div>
             </div>

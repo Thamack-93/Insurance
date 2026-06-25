@@ -6,6 +6,7 @@ import {
   buildTelegramHelpMessage,
   buildTelegramLinkErrorMessage,
   buildTelegramLinkSuccessMessage,
+  buildTelegramPaymentDraftMessage,
   buildTelegramStartMessage,
   buildTelegramStatusMessage,
   generateTelegramLinkCode,
@@ -52,6 +53,17 @@ describe("telegram.shared", () => {
     expect(buildTelegramHelpMessage()).toContain("/status");
     expect(buildTelegramLinkSuccessMessage()).toContain("Chat vinculado");
     expect(buildTelegramLinkErrorMessage("Código inválido")).toContain("Código inválido");
+    expect(
+      buildTelegramPaymentDraftMessage({
+        policyNumber: "940453041",
+        receiptNumber: "1",
+        originLabel: "Endoso 2",
+        clientName: "Mariano Martinez Grayeb",
+        amount: "$7,294.00",
+        paymentMethod: "TRANSFER",
+        paidDate: "12/06/2026",
+      }),
+    ).toContain("Origen: Endoso 2");
     expect(buildTelegramStatusMessage(true)).toContain("vinculado");
     expect(buildTelegramStatusMessage(true, false)).toContain("deshabilitados");
     expect(buildTelegramStatusMessage(false)).toContain("todavía no está vinculado");

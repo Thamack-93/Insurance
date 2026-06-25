@@ -16,6 +16,7 @@ import { DeletePaymentButton } from "@/components/payments/delete-payment-button
 import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
+import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import {
   paymentOperationalWhere,
   receiptOperationalWhere,
@@ -80,7 +81,7 @@ export default async function ReceiptsPage({
     db.receipt.count({ where: { ...baseWhere, dueDate: { lt: now } } }),
     db.receipt.findMany({
       where: { ...scopedReceiptWhere, status: "PAID", paidDate: { gte: monthStart } },
-      include: { client: true, policy: true, insurer: true },
+      include: { client: true, policy: true, insurer: true, endorsement: true },
       orderBy: { paidDate: "desc" },
     }),
     db.receipt.aggregate({ _sum: { amount: true }, where: baseWhere }),
@@ -95,6 +96,7 @@ export default async function ReceiptsPage({
         client: true,
         policy: true,
         insurer: true,
+        endorsement: true,
         _count: { select: { payments: true } },
       },
       orderBy: { dueDate: "asc" },
@@ -104,7 +106,7 @@ export default async function ReceiptsPage({
     db.payment.findMany({
       where: scopedPaymentWhere,
       include: {
-        receipt: { select: { id: true, receiptNumber: true, dueDate: true } },
+        receipt: { select: { id: true, receiptNumber: true, dueDate: true, endorsement: { select: { id: true, endorsementNumber: true } } } },
         client: { select: { id: true, fullName: true } },
         policy: { select: { id: true, policyNumber: true } },
       },
@@ -135,7 +137,7 @@ export default async function ReceiptsPage({
 
   const collectableRows: CollectableReceipt[] = pagedReceipts
     .filter((receipt) => receipt.client && receipt.policy && receipt.insurer)
-      .map((receipt) => ({
+    .map((receipt) => ({
       id: receipt.id,
       receiptNumber: receipt.receiptNumber,
       dueDate: receipt.dueDate.toISOString().split("T")[0],
@@ -145,6 +147,10 @@ export default async function ReceiptsPage({
       client: { fullName: receipt.client.fullName },
       policy: { policyNumber: receipt.policy.policyNumber, status: receipt.policy.status },
       insurer: { name: receipt.insurer.name },
+      endorsement: receipt.endorsement
+        ? { endorsementNumber: receipt.endorsement.endorsementNumber, reference: receipt.endorsement.reference }
+        : undefined,
+      originLabel: getReceiptOriginLabel(receipt),
       paymentCount: receipt._count.payments,
     }));
 
@@ -284,11 +290,12 @@ export default async function ReceiptsPage({
               </div>
             ) : (
               <Table>
-                <TableHeader>
+              <TableHeader>
                   <TableRow className="bg-muted/40">
                     <TableHead>Recibo</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Póliza</TableHead>
+                    <TableHead>Origen</TableHead>
                     <TableHead>Fecha</TableHead>
                     <TableHead>Método</TableHead>
                     <TableHead className="text-right">Monto</TableHead>
@@ -308,6 +315,19 @@ export default async function ReceiptsPage({
                         <Link href={`/policies/${payment.policy.id}`} className="hover:text-primary">
                           {payment.policy.policyNumber}
                         </Link>
+                        <p className="text-xs text-muted-foreground">{getReceiptOriginLabel(payment.receipt)}</p>
+                      </TableCell>
+                      <TableCell>
+                        {payment.receipt.endorsement ? (
+                          <Link
+                            href={`/policies/${payment.policy.id}/endorsements/${payment.receipt.endorsement.id}/edit`}
+                            className="hover:text-primary"
+                          >
+                            Endoso {payment.receipt.endorsement.endorsementNumber}
+                          </Link>
+                        ) : (
+                          "Póliza base"
+                        )}
                       </TableCell>
                       <TableCell>{formatDate(payment.paidDate)}</TableCell>
                       <TableCell>{payment.paymentMethod ?? "Sin método"}</TableCell>
@@ -352,6 +372,7 @@ export default async function ReceiptsPage({
                   <TableRow className="bg-muted/40">
                     <TableHead>Recibo</TableHead>
                     <TableHead>Cliente</TableHead>
+                    <TableHead>Origen</TableHead>
                     <TableHead>Pago</TableHead>
                     <TableHead>Método</TableHead>
                     <TableHead className="text-right">Monto</TableHead>
@@ -366,6 +387,18 @@ export default async function ReceiptsPage({
                         </Link>
                       </TableCell>
                       <TableCell>{receipt.client?.fullName ?? "Cliente eliminado"}</TableCell>
+                      <TableCell>
+                        {receipt.endorsement ? (
+                          <Link
+                            href={`/policies/${receipt.policyId}/endorsements/${receipt.endorsement.id}/edit`}
+                            className="hover:text-primary"
+                          >
+                            Endoso {receipt.endorsement.endorsementNumber}
+                          </Link>
+                        ) : (
+                          "Póliza base"
+                        )}
+                      </TableCell>
                       <TableCell>{receipt.paidDate ? formatDate(receipt.paidDate) : "—"}</TableCell>
                       <TableCell>{receipt.paymentMethod ?? "Sin método"}</TableCell>
                       <TableCell className="text-right font-medium">

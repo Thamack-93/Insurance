@@ -16,6 +16,7 @@ import { formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { addDays } from "date-fns";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
+import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import { receiptOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function DuePaymentsPage({
@@ -45,6 +46,7 @@ export default async function DuePaymentsPage({
             { receiptNumber: { contains: query } },
             { client: { fullName: { contains: query } } },
             { policy: { policyNumber: { contains: query } } },
+            { endorsement: { endorsementNumber: { contains: query } } },
           ],
         }
       : {}),
@@ -68,6 +70,7 @@ export default async function DuePaymentsPage({
         client: true,
         policy: true,
         insurer: true,
+        endorsement: true,
         _count: { select: { payments: true } },
       },
       orderBy: { dueDate: "asc" },
@@ -81,25 +84,25 @@ export default async function DuePaymentsPage({
     }),
     db.receipt.findMany({
       where: { ...receiptScopeWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
-      include: { client: true, policy: true, insurer: true },
+      include: { client: true, policy: true, insurer: true, endorsement: true },
       orderBy: { dueDate: "desc" },
       take: 10,
     }),
     db.receipt.findMany({
       where: { ...receiptScopeWhere, dueDate: { gte: now, lte: in7 }, status: { notIn: ["PAID", "CANCELLED"] } },
-      include: { client: true, policy: true, insurer: true },
+      include: { client: true, policy: true, insurer: true, endorsement: true },
       orderBy: { dueDate: "asc" },
       take: 10,
     }),
     db.receipt.findMany({
       where: { ...receiptScopeWhere, dueDate: { gt: in7, lte: in30 }, status: { notIn: ["PAID", "CANCELLED"] } },
-      include: { client: true, policy: true, insurer: true },
+      include: { client: true, policy: true, insurer: true, endorsement: true },
       orderBy: { dueDate: "asc" },
       take: 10,
     }),
     db.receipt.findMany({
       where: { ...receiptScopeWhere, status: "PAID" },
-      include: { client: true, policy: true, insurer: true },
+      include: { client: true, policy: true, insurer: true, endorsement: true },
       orderBy: { paidDate: "desc" },
       take: 10,
     }),
@@ -216,6 +219,7 @@ export default async function DuePaymentsPage({
                         <Link href={`/policies/${receipt.policyId}`} className="text-foreground hover:text-primary">
                           {receipt.policy.policyNumber}
                         </Link>
+                        <p className="text-xs text-muted-foreground">{getReceiptOriginLabel(receipt)}</p>
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col">
@@ -237,6 +241,8 @@ export default async function DuePaymentsPage({
                               dueDate: receipt.dueDate.toISOString().split("T")[0],
                               client: { fullName: receipt.client.fullName },
                               policy: { policyNumber: receipt.policy.policyNumber },
+                              endorsement: receipt.endorsement ?? undefined,
+                              originLabel: getReceiptOriginLabel(receipt),
                             }}
                           />
                           {receipt.status !== "CANCELLED" && receipt._count.payments === 0 ? (
@@ -295,6 +301,7 @@ export default async function DuePaymentsPage({
                         <Link href={`/clients/${receipt.clientId}`} className="text-foreground hover:text-primary">
                           {receipt.client.fullName}
                         </Link>
+                        <p className="text-xs text-muted-foreground">{getReceiptOriginLabel(receipt)}</p>
                       </TableCell>
                       <TableCell>{formatDate(receipt.dueDate)}</TableCell>
                       <TableCell className="text-right font-medium">
@@ -337,6 +344,7 @@ export default async function DuePaymentsPage({
                         <Link href={`/clients/${receipt.clientId}`} className="text-foreground hover:text-primary">
                           {receipt.client.fullName}
                         </Link>
+                        <p className="text-xs text-muted-foreground">{getReceiptOriginLabel(receipt)}</p>
                       </TableCell>
                       <TableCell>{formatDate(receipt.dueDate)}</TableCell>
                       <TableCell className="text-right font-medium">
@@ -378,6 +386,7 @@ export default async function DuePaymentsPage({
                         <Link href={`/clients/${receipt.clientId}`} className="text-foreground hover:text-primary">
                           {receipt.client.fullName}
                         </Link>
+                        <p className="text-xs text-muted-foreground">{getReceiptOriginLabel(receipt)}</p>
                       </TableCell>
                       <TableCell>{formatDate(receipt.dueDate)}</TableCell>
                       <TableCell className="text-right font-medium">
@@ -413,7 +422,10 @@ export default async function DuePaymentsPage({
                   {recentPaidReceipts.map((receipt) => (
                     <TableRow key={receipt.id}>
                       <TableCell className="font-medium">{receipt.receiptNumber}</TableCell>
-                      <TableCell>{receipt.client.fullName}</TableCell>
+                      <TableCell>
+                        {receipt.client.fullName}
+                        <p className="text-xs text-muted-foreground">{getReceiptOriginLabel(receipt)}</p>
+                      </TableCell>
                       <TableCell>
                         <div className="flex flex-col">
                           <span>{receipt.paidDate ? formatDate(receipt.paidDate) : "Sin fecha"}</span>

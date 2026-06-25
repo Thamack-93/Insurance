@@ -172,6 +172,7 @@ export function buildTelegramFallbackMessage() {
 export function buildTelegramPaymentDraftMessage(details: {
   policyNumber: string;
   receiptNumber: string;
+  originLabel?: string;
   clientName: string;
   amount: string;
   paymentMethod: string;
@@ -182,6 +183,7 @@ export function buildTelegramPaymentDraftMessage(details: {
     "Borrador de pago preparado.",
     `Póliza: ${details.policyNumber}`,
     `Recibo: ${details.receiptNumber} · ${details.clientName}`,
+    details.originLabel ? `Origen: ${details.originLabel}` : null,
     `Total del recibo: ${details.amount}`,
     `Método: ${details.paymentMethod} · Fecha: ${details.paidDate}`,
     details.reference ? `Referencia: ${details.reference}` : null,
