@@ -1,7 +1,7 @@
-import { endOfDay, startOfDay } from "date-fns";
 import type { Prisma } from "@/generated/prisma/client";
 import type { Priority, WorkItemStatus, WorkItemType } from "@/lib/domain-values";
 import { getDb } from "@/lib/db";
+import { businessEndOfDay, businessStartOfDay } from "@/lib/business-dates";
 
 export const OPEN_WORK_ITEM_STATUSES = [
   "OPEN",
@@ -179,8 +179,8 @@ function buildWhere(filters: WorkQueueFilters): Prisma.WorkItemWhereInput {
 
   if (filters.from || filters.to) {
     where.dueDate = {
-      ...(filters.from ? { gte: startOfDay(filters.from) } : {}),
-      ...(filters.to ? { lte: endOfDay(filters.to) } : {}),
+      ...(filters.from ? { gte: businessStartOfDay(filters.from) } : {}),
+      ...(filters.to ? { lte: businessEndOfDay(filters.to) } : {}),
     };
   }
 

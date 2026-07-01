@@ -3,8 +3,8 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
 import { toNumber } from "@/lib/money";
+import { businessAddDays } from "@/lib/business-dates";
 import { today } from "@/lib/dates";
-import { addDays } from "date-fns";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
@@ -57,7 +57,7 @@ export async function calculateCommissionsForPolicy(
     for (const receipt of receiptsToProcess) {
       const receiptAmount = toNumber(receipt.amount);
       const commissionAmount = receiptAmount * commissionRate;
-      const expectedDate = addDays(receipt.dueDate, 30); // Commission expected 30 days after receipt due
+      const expectedDate = businessAddDays(receipt.dueDate, 30); // Commission expected 30 days after receipt due
 
       // Check if commission already exists
       const existingCommission = await db.commission.findFirst({
@@ -238,7 +238,7 @@ export async function getOverdueCommissions(portfolioOwnerId?: string) {
   const db = getDb();
   
   try {
-    const todayDate = new Date(today());
+    const todayDate = today();
     
     const overdueCommissions = await db.commission.findMany({
       where: {
@@ -296,7 +296,7 @@ export async function autoUpdateCommissionStatuses(portfolioOwnerId?: string) {
   const db = getDb();
 
   try {
-    const todayDate = new Date(today());
+    const todayDate = today();
     const operationalWhere = commissionOperationalWhere(portfolioOwnerId);
 
     // Sequential transitions: a commission may need EXPECTED→PENDING→OVERDUE

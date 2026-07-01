@@ -15,6 +15,7 @@ import {
 } from "@/lib/auth";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { logError } from "@/lib/logger";
+import { DEFAULT_USER_TIME_ZONE } from "@/lib/time-zones";
 
 export type AdminUserRow = {
   id: string;
@@ -116,6 +117,7 @@ export async function inviteUser(input: {
         email,
         role,
         active: true,
+        timeZone: DEFAULT_USER_TIME_ZONE,
         passwordHash: hashPassword(tempPassword),
       },
     });

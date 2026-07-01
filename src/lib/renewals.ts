@@ -3,8 +3,8 @@
 import { connection } from "next/server";
 import type { Prisma } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
-import { today, daysUntil } from "@/lib/dates";
-import { addDays } from "date-fns";
+import { today, daysUntil, formatDate } from "@/lib/dates";
+import { businessAddDays } from "@/lib/business-dates";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
 import { upsertWorkItemFromSource } from "@/lib/work-items";
@@ -121,8 +121,8 @@ export async function loadEligibleRenewalPolicies(
 
 export async function getUpcomingRenewals(daysAhead: number = 90, portfolioOwnerId?: string) {
   try {
-    const todayDate = new Date(today());
-    const futureDate = addDays(todayDate, daysAhead);
+    const todayDate = today();
+    const futureDate = businessAddDays(todayDate, daysAhead);
     const policies = await loadEligibleRenewalPolicies(
       {
         endDate: {
@@ -142,7 +142,7 @@ export async function getUpcomingRenewals(daysAhead: number = 90, portfolioOwner
 
 export async function getOverdueRenewals(portfolioOwnerId?: string) {
   try {
-    const todayDate = new Date(today());
+    const todayDate = today();
     const policies = await loadEligibleRenewalPolicies(
       {
         endDate: {
@@ -229,7 +229,7 @@ Detalles de la póliza:
 • Aseguradora: ${renewal.insurerName}
 • Tipo: ${renewal.policyType}
 • Prima: ${renewal.premiumAmount} ${renewal.currency}
-• Vencimiento: ${renewal.endDate.toLocaleDateString('es-MX')}
+• Vencimiento: ${formatDate(renewal.endDate, "dd/MM/yyyy")}
 • Días restantes: ${renewal.daysUntilRenewal}
 
 Acciones requeridas:
@@ -253,10 +253,10 @@ export async function sendRenewalWorkItems() {
 
 export async function getRenewalStats(portfolioOwnerId?: string) {
   try {
-    const todayDate = new Date(today());
-    const next30Days = addDays(todayDate, 30);
-    const next60Days = addDays(todayDate, 60);
-    const next90Days = addDays(todayDate, 90);
+    const todayDate = today();
+    const next30Days = businessAddDays(todayDate, 30);
+    const next60Days = businessAddDays(todayDate, 60);
+    const next90Days = businessAddDays(todayDate, 90);
 
     const renewalPolicies = await loadEligibleRenewalPolicies({}, portfolioOwnerId);
 

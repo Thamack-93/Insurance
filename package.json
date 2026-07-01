@@ -23,6 +23,7 @@
     "list:work-items": "tsx scripts/list-open-work-items.ts",
     "reconcile:receipts": "tsx scripts/reconcile-receipt-statuses.ts",
     "maintenance:historical-receipts": "tsx scripts/apply-historical-receipts.ts",
+    "maintenance:business-dates": "tsx scripts/backfill-business-dates.ts",
     "maintenance:preview-policy-work": "node --import tsx scripts/preview-policy-maintenance.ts",
     "pdf:lab": "tsx scripts/pdf-extraction-lab.ts",
     "assign:portfolio": "tsx scripts/assign-existing-portfolio.ts",

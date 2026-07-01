@@ -8,6 +8,7 @@ import * as XLSX from "@e965/xlsx";
 
 import { PrismaClient } from "../src/generated/prisma/client.ts";
 import { backupsDir, dataDir, databasePath, exportsDir } from "../src/lib/files.ts";
+import { BUSINESS_TIME_ZONE, businessStartOfDay, formatBusinessDate } from "../src/lib/business-dates.ts";
 
 export { backupsDir, dataDir, databasePath, exportsDir };
 
@@ -153,32 +154,30 @@ export function formatMoney(amount: unknown, currency = "MXN") {
 
 export function formatDateShort(date: Date | string | null | undefined) {
   if (!date) return "-";
-  return new Intl.DateTimeFormat("es-MX", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(date));
+  return formatBusinessDate(date, "dd/MM/yyyy");
 }
 
 export function formatDateTime(date: Date | string | null | undefined) {
   if (!date) return "-";
+  const parsedDate =
+    typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date.trim())
+      ? businessStartOfDay(date)
+      : new Date(date);
+
   return new Intl.DateTimeFormat("es-MX", {
     day: "2-digit",
     month: "short",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(new Date(date));
+    timeZone: BUSINESS_TIME_ZONE,
+  }).format(parsedDate);
 }
 
 export function daysFromNow(date: Date | string) {
-  const base = startOfDay(new Date());
-  const target = startOfDay(new Date(date));
+  const base = businessStartOfDay(new Date());
+  const target = businessStartOfDay(date);
   return Math.round((target.getTime() - base.getTime()) / (24 * 60 * 60 * 1000));
-}
-
-function startOfDay(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
 export async function writeCsv(filePath: string, rows: Record<string, unknown>[]) {

@@ -1,7 +1,7 @@
 // Pure business logic for commissions - no "use server"
 // This file can be imported in tests without Next.js context
 
-import { addDays } from "date-fns";
+import { businessAddDays, businessToday } from "@/lib/business-dates";
 
 export interface CommissionCalculationInput {
   policyId: string;
@@ -44,7 +44,7 @@ export function calculateCommission(
     expectedAmount,
     actualAmount: undefined,
     percentage: input.commissionRate,
-    expectedDate: input.receiptDueDate || addDays(new Date(), 30),
+    expectedDate: input.receiptDueDate || businessAddDays(businessToday(), 30),
     status,
   };
 }

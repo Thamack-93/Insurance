@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
-import { addDays, endOfDay, startOfDay } from "date-fns";
-import { DEFAULT_TIMEZONE } from "@/lib/dates";
+import { DEFAULT_TIMEZONE, formatDate } from "@/lib/dates";
+import { businessAddDays, businessEndOfDay, businessStartOfDay, parseBusinessDateInput } from "@/lib/business-dates";
 import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { formatCurrency, toNumber } from "@/lib/money";
@@ -229,7 +229,7 @@ const TELEGRAM_DATE_FORMATTER = new Intl.DateTimeFormat("es-MX", {
   day: "2-digit",
   month: "2-digit",
   year: "numeric",
-  timeZone: "America/Mexico_City",
+  timeZone: DEFAULT_TIMEZONE,
 });
 
 function getTelegramBotToken() {
@@ -525,7 +525,7 @@ function formatTelegramDate(date: Date) {
 function formatTelegramPaymentDateLabel(paidDate: string) {
   return paidDate === getLocalDateKey(new Date())
     ? "hoy"
-    : formatTelegramDate(new Date(`${paidDate}T12:00:00.000Z`));
+    : formatDate(parseBusinessDateInput(paidDate), "dd/MM/yyyy");
 }
 
 function formatTelegramNotificationText(title: string, body: string) {
@@ -547,7 +547,7 @@ export async function markTelegramDigestAsSentForUser(
   try {
     const user = await db.user.findUnique({
       where: { id: userId },
-      select: { id: true, timeZone: true },
+      select: { id: true },
     });
     if (!user) return null;
 
@@ -561,7 +561,7 @@ export async function markTelegramDigestAsSentForUser(
 
     return {
       ...updated,
-      digestDateKey: getDigestDateKey(sentAt, user.timeZone),
+      digestDateKey: getDigestDateKey(sentAt, DEFAULT_TIMEZONE),
     };
   } catch (error) {
     logError("telegram.markDigestSent", error, { userId });
@@ -606,8 +606,7 @@ function parseTelegramIsoDate(value: string) {
     return null;
   }
 
-  const date = new Date(`${value}T12:00:00.000Z`);
-  return Number.isNaN(date.getTime()) ? null : date;
+  return parseBusinessDateInput(value);
 }
 
 export function parseTelegramPaymentDateInput(value: string) {
@@ -1072,10 +1071,10 @@ function buildTelegramSection(input: {
 }
 
 export async function buildTelegramReceiptsReply(userId: string, days: number, client?: DbClient) {
-  const dayStart = startOfDay(new Date());
+  const dayStart = businessStartOfDay(new Date());
   const receipts = await getTelegramReceipts({
     userId,
-    to: endOfDay(addDays(dayStart, days)),
+    to: businessEndOfDay(businessAddDays(dayStart, days)),
     limit: TELEGRAM_QUERY_RESULT_LIMIT,
     client,
   });
@@ -1090,11 +1089,11 @@ export async function buildTelegramReceiptsReply(userId: string, days: number, c
 }
 
 export async function buildTelegramRenewalsReply(userId: string, days: number, client?: DbClient) {
-  const dayStart = startOfDay(new Date());
+  const dayStart = businessStartOfDay(new Date());
   const renewals = await getTelegramRenewals({
     userId,
     from: dayStart,
-    to: endOfDay(addDays(dayStart, days)),
+    to: businessEndOfDay(businessAddDays(dayStart, days)),
     limit: TELEGRAM_QUERY_RESULT_LIMIT,
     client,
   });
@@ -1109,8 +1108,8 @@ export async function buildTelegramRenewalsReply(userId: string, days: number, c
 }
 
 export async function buildTelegramDailyDigest(userId: string, client?: DbClient) {
-  const dayStart = startOfDay(new Date());
-  const dayEnd = endOfDay(dayStart);
+  const dayStart = businessStartOfDay(new Date());
+  const dayEnd = businessEndOfDay(dayStart);
   const [overdueReceipts, todayReceipts, upcomingReceipts, upcomingRenewals] = await Promise.all([
     getTelegramReceipts({
       userId,
@@ -1127,15 +1126,15 @@ export async function buildTelegramDailyDigest(userId: string, client?: DbClient
     }),
     getTelegramReceipts({
       userId,
-      from: addDays(dayStart, 1),
-      to: endOfDay(addDays(dayStart, 14)),
+      from: businessAddDays(dayStart, 1),
+      to: businessEndOfDay(businessAddDays(dayStart, 14)),
       limit: TELEGRAM_DIGEST_SECTION_LIMIT,
       client,
     }),
     getTelegramRenewals({
       userId,
       from: dayStart,
-      to: endOfDay(addDays(dayStart, 7)),
+      to: businessEndOfDay(businessAddDays(dayStart, 7)),
       limit: TELEGRAM_DIGEST_SECTION_LIMIT,
       client,
     }),
@@ -1589,7 +1588,7 @@ async function confirmTelegramDraft(input: {
         {
           receiptId: receipt.id,
           amount: Number(state.amount),
-          paidDate: new Date(`${state.paidDate}T12:00:00.000Z`),
+          paidDate: parseBusinessDateInput(state.paidDate ?? ""),
           paymentMethod: state.paymentMethod ?? "",
           reference: state.reference ?? null,
           notes: "Pago capturado por Telegram.",
@@ -1989,7 +1988,7 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
 
   for (const channel of channels) {
     if (!channel.telegramChatId) continue;
-    const timeZone = channel.user.timeZone ?? DEFAULT_TIMEZONE;
+    const timeZone = DEFAULT_TIMEZONE;
     if (
       channel.user.telegramDigestLastSentAt &&
       getLocalDateKey(channel.user.telegramDigestLastSentAt, timeZone) === getLocalDateKey(now, timeZone)

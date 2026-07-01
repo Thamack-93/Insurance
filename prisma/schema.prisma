@@ -15,7 +15,7 @@ model User {
   role         String    @default("AGENT")
   active       Boolean   @default(true)
   lastLoginAt  DateTime?
-  timeZone     String    @default("America/Mexico_City")
+  timeZone     String    @default("Etc/GMT+6")
   telegramDigestHour    Int       @default(8)
   telegramDigestLastSentAt DateTime?
   createdAt    DateTime  @default(now())

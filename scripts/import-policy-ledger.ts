@@ -8,6 +8,7 @@ import path from "node:path";
 
 import * as XLSX from "@e965/xlsx";
 import { Client as PgClient } from "pg";
+import { businessStartOfDay, parseBusinessDateInput } from "../src/lib/business-dates.ts";
 import { reconcileReceiptState } from "@/lib/receipt-reconciliation";
 
 type Mode = "dry-run" | "apply";
@@ -127,7 +128,7 @@ const DATA_DIR = path.join(process.cwd(), "data");
 const BACKUPS_DIR = path.join(DATA_DIR, "backups");
 const EXPORTS_DIR = path.join(DATA_DIR, "exports");
 const PAYMENT_METHOD = "Reporte externo";
-const TODAY = new Date("2026-05-27T12:00:00.000Z");
+const TODAY = parseBusinessDateInput("2026-05-27");
 
 loadEnvLocal();
 
@@ -223,15 +224,19 @@ function dateKey(date: Date | null | undefined) {
 
 function parseDate(value: unknown): Date | null {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return new Date(Date.UTC(value.getFullYear(), value.getMonth(), value.getDate(), 12));
+    return businessStartOfDay(value);
   }
 
   const text = cleanText(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return parseBusinessDateInput(text);
+  }
+
   const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (!match) return null;
 
   const [, day, month, year] = match;
-  return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12));
+  return parseBusinessDateInput(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`);
 }
 
 function parseMoney(value: unknown) {

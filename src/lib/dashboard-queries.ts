@@ -1,7 +1,6 @@
-import { addDays, endOfMonth, format, startOfMonth } from "date-fns";
-import { es } from "date-fns/locale";
 import { getDb } from "@/lib/db";
 import { today } from "@/lib/dates";
+import { BUSINESS_TIME_ZONE, businessAddDays, businessEndOfMonth, businessStartOfMonth } from "@/lib/business-dates";
 import { toNumber } from "@/lib/money";
 import { detectRisks } from "@/lib/risk-engine";
 import { DASHBOARD_LIST_LIMIT } from "@/lib/constants";
@@ -19,10 +18,10 @@ export async function getDashboardData() {
   const db = getDb();
   const scope = await requirePortfolioReadScope();
   const now = today();
-  const in7 = addDays(now, 7);
-  const in60 = addDays(now, 60);
-  const monthStart = startOfMonth(now);
-  const monthEnd = endOfMonth(now);
+  const in7 = businessAddDays(now, 7);
+  const in60 = businessAddDays(now, 60);
+  const monthStart = businessStartOfMonth(now);
+  const monthEnd = businessEndOfMonth(now);
   const policyWhere = policyOperationalWhere(scope.portfolioOwnerId);
   const receiptWhere = receiptOperationalWhere(scope.portfolioOwnerId);
   const commissionWhere = commissionOperationalWhere(scope.portfolioOwnerId);
@@ -215,9 +214,9 @@ export async function getTodayData() {
   const db = getDb();
   const scope = await requirePortfolioReadScope();
   const now = today();
-  const tomorrow = addDays(now, 1);
-  const in7 = addDays(now, 7);
-  const in30 = addDays(now, 30);
+  const tomorrow = businessAddDays(now, 1);
+  const in7 = businessAddDays(now, 7);
+  const in30 = businessAddDays(now, 30);
   const receiptWhere = receiptOperationalWhere(scope.portfolioOwnerId);
   const commissionWhere = commissionOperationalWhere(scope.portfolioOwnerId);
   const urgentRenewalsPromise = loadEligibleRenewalPolicies(
@@ -317,11 +316,16 @@ export async function getTodayData() {
 
 function groupDatesByWeek<T extends Record<string, unknown>>(items: T[], field: keyof T) {
   const buckets = new Map<string, number>();
+  const formatter = new Intl.DateTimeFormat("es-MX", {
+    month: "short",
+    day: "numeric",
+    timeZone: BUSINESS_TIME_ZONE,
+  });
 
   for (const item of items) {
     const date = item[field] as Date | null;
     if (!date) continue;
-    const label = format(date, "MMM d", { locale: es });
+    const label = formatter.format(date);
     buckets.set(label, (buckets.get(label) ?? 0) + 1);
   }
 
@@ -332,9 +336,14 @@ function groupCommissionsByMonth(
   commissions: Array<{ expectedDate: Date; expectedAmount: unknown; actualAmount: unknown }>,
 ) {
   const buckets = new Map<string, number>();
+  const formatter = new Intl.DateTimeFormat("es-MX", {
+    month: "short",
+    year: "numeric",
+    timeZone: BUSINESS_TIME_ZONE,
+  });
 
   for (const commission of commissions) {
-    const label = format(commission.expectedDate, "MMM yyyy", { locale: es });
+    const label = formatter.format(commission.expectedDate);
     buckets.set(label, (buckets.get(label) ?? 0) + toNumber(commission.actualAmount ?? commission.expectedAmount));
   }
 

@@ -3,6 +3,7 @@ import { parse as parseCsv } from "csv-parse/sync";
 import * as XLSX from "@e965/xlsx";
 import type { PrismaClient, Prisma } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
+import { businessStartOfDay, parseBusinessDateInput } from "@/lib/business-dates";
 import { toNumber } from "@/lib/money";
 import { PaymentConflictError, recordPayment } from "@/lib/payment-service";
 import { writeActivityLog } from "@/lib/activity-log";
@@ -127,15 +128,19 @@ function dateKey(date: Date | null | undefined) {
 
 function parseDate(value: unknown): Date | null {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return new Date(Date.UTC(value.getFullYear(), value.getMonth(), value.getDate(), 12));
+    return businessStartOfDay(value);
   }
 
   const text = cleanText(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return parseBusinessDateInput(text);
+  }
+
   const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (!match) return null;
 
   const [, day, month, year] = match;
-  return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12));
+  return parseBusinessDateInput(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`);
 }
 
 function sameDate(left: Date | null | undefined, right: Date | null | undefined) {
@@ -177,11 +182,14 @@ function sourceEvidenceKeyForPaidRow(row: PaidLedgerRow) {
 
 function applyPaidDateOverrides(row: Omit<PaidLedgerRow, "originalPaidDate" | "overrideNote">): PaidLedgerRow {
   const originalPaidDate = row.paidDate;
-  if (row.policyKey === normalizePolicyNumber("2832600022452") && sameDate(row.paidDate, new Date(Date.UTC(2026, 5, 24, 12)))) {
+  if (
+    row.policyKey === normalizePolicyNumber("2832600022452") &&
+    sameDate(row.paidDate, parseBusinessDateInput("2026-06-24"))
+  ) {
     return {
       ...row,
       originalPaidDate,
-      paidDate: new Date(Date.UTC(2026, 3, 24, 12)),
+      paidDate: parseBusinessDateInput("2026-04-24"),
       overrideNote: "Override auditado: fecha original 24/06/2026 corregida a 24/04/2026.",
     };
   }

@@ -1,5 +1,5 @@
-import { addDays, endOfDay, startOfDay } from "date-fns";
 import { getDb } from "@/lib/db";
+import { businessAddDays, businessEndOfDay, businessStartOfDay } from "@/lib/business-dates";
 import { daysUntil, today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
 import { OPEN_WORK_ITEM_STATUSES, getWorkItems } from "@/lib/work-queue";
@@ -209,8 +209,8 @@ export async function getOpenWorkItems(options: OpenWorkItemsOptions = {}) {
 }
 
 function resolveRange(from?: Date, to?: Date, fallbackDays = 60): DateRange {
-  const start = from ? startOfDay(from) : today();
-  const end = to ? endOfDay(to) : endOfDay(addDays(start, fallbackDays));
+  const start = from ? businessStartOfDay(from) : today();
+  const end = to ? businessEndOfDay(to) : businessEndOfDay(businessAddDays(start, fallbackDays));
 
   if (end < start) {
     throw new Error("El rango de fechas es inválido.");

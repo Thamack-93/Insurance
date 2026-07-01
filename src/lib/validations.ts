@@ -1,3 +1,4 @@
+import { daysBetweenBusinessDates, parseBusinessDateInput } from "@/lib/business-dates";
 import { z } from "zod";
 import {
   CLAIM_STATUSES,
@@ -20,12 +21,11 @@ const requiredDate = z.string().min(1, "Selecciona una fecha.");
 const optionalDate = z.string().optional().or(z.literal(""));
 
 function dateOnly(value: string) {
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day, 12));
+  return parseBusinessDateInput(value);
 }
 
 function daysBetweenDateInputs(startDate: string, endDate: string) {
-  return Math.round((dateOnly(endDate).getTime() - dateOnly(startDate).getTime()) / (1000 * 60 * 60 * 24));
+  return daysBetweenBusinessDates(dateOnly(endDate), dateOnly(startDate));
 }
 
 export const clientSchema = z.object({

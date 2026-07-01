@@ -1,7 +1,8 @@
 // Pure business logic for renewals - no "use server"
 // This file can be imported in tests without Next.js context
 
-import { addDays, differenceInDays } from "date-fns";
+import { differenceInDays } from "date-fns";
+import { businessAddDays, businessToday } from "@/lib/business-dates";
 
 export type RenewalPriority = "URGENT" | "HIGH" | "MEDIUM" | "LOW";
 
@@ -22,7 +23,7 @@ export interface RenewalInfo {
 
 export function calculateRenewalPriority(
   endDate: Date,
-  today: Date = new Date()
+  today: Date = businessToday()
 ): RenewalPriority {
   const daysUntil = differenceInDays(endDate, today);
 
@@ -87,11 +88,11 @@ export function calculateRenewalStats(
     endDate: Date | null;
     premiumAmount: number;
   }>,
-  today: Date = new Date()
+  today: Date = businessToday()
 ): RenewalStats {
-  const next30Days = addDays(today, 30);
-  const next60Days = addDays(today, 60);
-  const next90Days = addDays(today, 90);
+  const next30Days = businessAddDays(today, 30);
+  const next60Days = businessAddDays(today, 60);
+  const next90Days = businessAddDays(today, 90);
 
   let overdueCount = 0;
   let next30DaysCount = 0;
@@ -131,9 +132,9 @@ export function calculateRenewalStats(
 export function filterRenewalsByTimeRange(
   renewals: RenewalInfo[],
   days: number,
-  today: Date = new Date()
+  today: Date = businessToday()
 ): RenewalInfo[] {
-  const cutoffDate = addDays(today, days);
+  const cutoffDate = businessAddDays(today, days);
   return renewals.filter((r) => r.endDate <= cutoffDate);
 }
 

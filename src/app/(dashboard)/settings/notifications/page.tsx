@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { requireUserOrRedirect } from "@/lib/auth";
 import { getTelegramChannelStateForUser, syncTelegramWebhook } from "@/lib/telegram";
+import { DEFAULT_USER_TIME_ZONE } from "@/lib/time-zones";
 import { NotificationPreferencesPanel } from "@/components/settings/notification-preferences-panel";
 import {
   disconnectTelegram,
@@ -27,7 +28,7 @@ export default async function NotificationSettingsPage() {
     process.env.VERCEL_ENV === "production" && currentOrigin
       ? await syncTelegramWebhook(currentOrigin)
       : null;
-  const timeZone = user.timeZone ?? "America/Mexico_City";
+  const timeZone = DEFAULT_USER_TIME_ZONE;
   const cronSecretConfigured = Boolean(process.env.CRON_SECRET?.trim());
   const telegramConnected = channel.isEnabled && Boolean(channel.telegramChatId);
 

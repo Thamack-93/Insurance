@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import { getDb } from "@/lib/db";
 import { SYSTEM_USER_ID } from "@/lib/auth";
 import { formatDateInput } from "@/lib/form-utils";
+import { businessEndOfDay, businessStartOfDay, parseBusinessDateInput } from "@/lib/business-dates";
 import { writeActivityLog } from "@/lib/activity-log";
 import { reconcileReceiptState } from "@/lib/receipt-reconciliation";
 import { toNumber } from "@/lib/money";
@@ -349,8 +350,8 @@ async function main() {
   const args = parseArgs();
   const db = getDb();
   const startedAt = new Date();
-  const yearStart = new Date(Date.UTC(2023, 0, 1, 0, 0, 0));
-  const yearEnd = new Date(Date.UTC(2025, 11, 31, 23, 59, 59));
+  const yearStart = businessStartOfDay(parseBusinessDateInput("2023-01-01"));
+  const yearEnd = businessEndOfDay(parseBusinessDateInput("2025-12-31"));
 
   const receipts = (await db.receipt.findMany({
     where: {

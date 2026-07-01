@@ -1,5 +1,5 @@
-import { endOfDay, startOfDay } from "date-fns";
 import { getDb } from "@/lib/db";
+import { businessAddDays, businessEndOfDay, businessStartOfDay } from "@/lib/business-dates";
 import { today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
 import { policyTypeLabel, statusLabels } from "@/lib/status";
@@ -307,8 +307,8 @@ export async function getCommissionSummary(options: CommissionSummaryOptions = {
 }
 
 function resolveRange(from?: Date, to?: Date, fallbackDays = 60) {
-  const inicio = from ? startOfDay(from) : today();
-  const fin = to ? endOfDay(to) : endOfDay(new Date(inicio.getTime() + fallbackDays * 24 * 60 * 60 * 1000));
+  const inicio = from ? businessStartOfDay(from) : today();
+  const fin = to ? businessEndOfDay(to) : businessEndOfDay(businessAddDays(inicio, fallbackDays));
 
   if (fin < inicio) {
     throw new Error("El rango de fechas es inválido.");

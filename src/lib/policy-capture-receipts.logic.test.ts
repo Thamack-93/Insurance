@@ -33,9 +33,9 @@ describe("policy-capture-receipts", () => {
     expect(payload.policyId).toBe("policy-1");
     expect(payload.clientId).toBe("client-1");
     expect(payload.insurerId).toBe("insurer-1");
-    expect(payload.periodStartDate.toISOString()).toBe("2026-07-14T12:00:00.000Z");
-    expect(payload.periodEndDate.toISOString()).toBe("2027-07-14T12:00:00.000Z");
-    expect(payload.dueDate.toISOString()).toBe("2026-07-14T12:00:00.000Z");
+    expect(payload.periodStartDate.toISOString()).toBe("2026-07-14T06:00:00.000Z");
+    expect(payload.periodEndDate.toISOString()).toBe("2027-07-14T06:00:00.000Z");
+    expect(payload.dueDate.toISOString()).toBe("2026-07-14T06:00:00.000Z");
     expect(payload.amount).toBe(4254.73);
     expect(payload.currency).toBe("MXN");
     expect(payload.status).toBe("PENDING");
@@ -47,8 +47,16 @@ describe("policy-capture-receipts", () => {
   });
 
   it("creates the receipt when none exists and updates the existing one instead of duplicating it", async () => {
-    const create = vi.fn(async (args: { data: unknown }) => ({ id: "receipt-new", receiptNumber: "1", ...args.data }));
-    const update = vi.fn(async (args: { where: { id: string }; data: unknown }) => ({ id: args.where.id, receiptNumber: "1", ...args.data }));
+    const create = vi.fn(async (args: { data: unknown }) => ({
+      id: "receipt-new",
+      receiptNumber: "1",
+      ...(args.data as Record<string, unknown>),
+    }));
+    const update = vi.fn(async (args: { where: { id: string }; data: unknown }) => ({
+      id: args.where.id,
+      receiptNumber: "1",
+      ...(args.data as Record<string, unknown>),
+    }));
     const findFirst = vi
       .fn()
       .mockResolvedValueOnce(null)

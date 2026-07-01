@@ -1,13 +1,9 @@
-export const DEFAULT_USER_TIME_ZONE = "America/Mexico_City";
+import { BUSINESS_TIME_ZONE } from "@/lib/business-dates";
+
+export const DEFAULT_USER_TIME_ZONE = BUSINESS_TIME_ZONE;
 
 export const TIME_ZONE_OPTIONS = [
-  { value: "America/Mexico_City", label: "Ciudad de México" },
-  { value: "America/Monterrey", label: "Monterrey" },
-  { value: "America/Guatemala", label: "Guatemala" },
-  { value: "America/Chicago", label: "Chicago" },
-  { value: "America/New_York", label: "Nueva York" },
-  { value: "America/Los_Angeles", label: "Los Ángeles" },
-  { value: "UTC", label: "UTC" },
+  { value: BUSINESS_TIME_ZONE, label: "GMT-6 fijo" },
 ] as const;
 
 export type SupportedTimeZone = (typeof TIME_ZONE_OPTIONS)[number]["value"];
