@@ -11,18 +11,51 @@ import type { ReceiptFormValues } from "@/lib/validations";
 export default async function EditReceiptPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const db = getDb();
-  const [receipt, policies] = await Promise.all([
-    db.receipt.findUnique({ where: { id } }),
-    db.policy.findMany({
-      where: { status: { not: "CANCELLED" } },
-      include: { client: true },
-      orderBy: { policyNumber: "asc" },
-    }),
-  ]);
+  const receipt = await db.receipt.findUnique({
+    where: { id },
+    include: {
+      client: true,
+      policy: true,
+      insurer: true,
+      endorsement: {
+        include: {
+          policy: {
+            include: { client: true },
+          },
+        },
+      },
+    },
+  });
 
   if (!receipt) {
     notFound();
   }
+
+  const policies = receipt.endorsement
+    ? [
+        {
+          id: receipt.policyId,
+          policyNumber: receipt.policy.policyNumber,
+          currency: receipt.policy.currency,
+          client: {
+            fullName: receipt.client.fullName,
+          },
+        },
+      ]
+    : await db.policy.findMany({
+        where: { status: { not: "CANCELLED" } },
+        include: { client: true },
+        orderBy: { policyNumber: "asc" },
+      });
+
+  const endorsementOptions = receipt.endorsement
+    ? [
+        {
+          value: receipt.endorsement.id,
+          label: `${receipt.endorsement.endorsementNumber} · ${receipt.endorsement.reference ?? "Sin referencia"}`,
+        },
+      ]
+    : undefined;
 
   return (
     <div className="flex flex-col gap-6">
@@ -44,6 +77,7 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
             periodStartDate: formatDateInput(receipt.periodStartDate),
             periodEndDate: formatDateInput(receipt.periodEndDate),
             dueDate: formatDateInput(receipt.dueDate),
+            endorsementId: receipt.endorsementId ?? "",
             amount: Number(receipt.amount),
             currency: receipt.currency,
             status: receipt.status as ReceiptFormValues["status"],
@@ -55,6 +89,7 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
             value: policy.id,
             label: `${policy.policyNumber} · ${policy.client.fullName}`,
           }))}
+          endorsementOptions={endorsementOptions}
           submitAction={updateReceipt.bind(null, receipt.id)}
           footerActions={
             <CancelReceiptOnlyButton

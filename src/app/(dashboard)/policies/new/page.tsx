@@ -9,20 +9,33 @@ import type { PolicyFormValues } from "@/lib/validations";
 function parseTelegramDraftPolicyDefaults(payloadJson: string): Partial<PolicyFormValues> {
   try {
     const payload = JSON.parse(payloadJson) as Record<string, string | number | null | undefined>;
+    const nestedPolicy =
+      typeof payload.policy === "object" && payload.policy !== null
+        ? (payload.policy as Record<string, string | number | null | undefined>)
+        : null;
+    const readString = (...values: Array<string | number | null | undefined>) =>
+      values.find((value): value is string => typeof value === "string" && value.trim().length > 0);
+    const readNumber = (...values: Array<string | number | null | undefined>) =>
+      values.find((value): value is number => typeof value === "number" && Number.isFinite(value));
     return {
-      policyNumber: typeof payload.policynumber === "string" ? payload.policynumber : undefined,
-      clientId: typeof payload.clientid === "string" ? payload.clientid : undefined,
-      insurerId: typeof payload.insurerid === "string" ? payload.insurerid : undefined,
-      policyType: typeof payload.policytype === "string" ? (payload.policytype as PolicyFormValues["policyType"]) : undefined,
-      startDate: typeof payload.start === "string" ? payload.start : undefined,
-      endDate: typeof payload.end === "string" ? payload.end : undefined,
-      premiumAmount: typeof payload.premium === "number" ? payload.premium : undefined,
-      currency: typeof payload.currency === "string" ? payload.currency : undefined,
-      paymentFrequency: typeof payload.frequency === "string" ? (payload.frequency as PolicyFormValues["paymentFrequency"]) : undefined,
-      paymentPlan: typeof payload.paymentplan === "string" ? payload.paymentplan : undefined,
-      insuredObject: typeof payload.object === "string" ? payload.object : undefined,
-      beneficiaryInfo: typeof payload.beneficiary === "string" ? payload.beneficiary : undefined,
-      notes: typeof payload.notes === "string" ? payload.notes : undefined,
+      policyNumber:
+        readString(payload.policynumber, nestedPolicy?.policyNumber, nestedPolicy?.policynumber) ?? undefined,
+      clientId: readString(payload.clientid, nestedPolicy?.clientid, nestedPolicy?.clientId) ?? undefined,
+      insurerId: readString(payload.insurerid, nestedPolicy?.insurerid, nestedPolicy?.insurerId) ?? undefined,
+      policyType:
+        (readString(payload.policytype, nestedPolicy?.policyType, nestedPolicy?.type) as PolicyFormValues["policyType"] | undefined) ??
+        undefined,
+      startDate: readString(payload.start, nestedPolicy?.startDate) ?? undefined,
+      endDate: readString(payload.end, nestedPolicy?.endDate) ?? undefined,
+      premiumAmount: readNumber(payload.premium, nestedPolicy?.premiumAmount) ?? undefined,
+      currency: readString(payload.currency, nestedPolicy?.currency) ?? undefined,
+      paymentFrequency:
+        (readString(payload.frequency, nestedPolicy?.paymentFrequency) as PolicyFormValues["paymentFrequency"] | undefined) ??
+        undefined,
+      paymentPlan: readString(payload.paymentplan, nestedPolicy?.paymentPlan) ?? undefined,
+      insuredObject: readString(payload.object, nestedPolicy?.insuredObject) ?? undefined,
+      beneficiaryInfo: readString(payload.beneficiary, nestedPolicy?.beneficiaryInfo) ?? undefined,
+      notes: readString(payload.notes, nestedPolicy?.notes) ?? undefined,
     };
   } catch {
     return {};

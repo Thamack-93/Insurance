@@ -1,7 +1,13 @@
-import type { ClientFormValues, InsurerFormValues, ClaimFormValues, QuoteFormValues } from "@/lib/validations";
-import type { PolicyFormValues } from "@/lib/validations";
-import type { ReceiptFormValues } from "@/lib/validations";
-import type { WorkItemFormValues } from "@/lib/validations";
+import type {
+  ClientFormValues,
+  InsurerFormValues,
+  ClaimFormValues,
+  QuoteFormValues,
+  EndorsementFormValues,
+  PolicyFormValues,
+  ReceiptFormValues,
+  WorkItemFormValues,
+} from "@/lib/validations";
 import { NO_REFERIDOR_VALUE } from "@/lib/constants";
 
 export function createClientDefaults(values?: Partial<ClientFormValues>): ClientFormValues {
@@ -53,6 +59,7 @@ export function createReceiptDefaults(values?: Partial<ReceiptFormValues>): Rece
   return {
     receiptNumber: values?.receiptNumber ?? "",
     policyId: values?.policyId ?? "",
+    endorsementId: values?.endorsementId ?? "",
     periodStartDate: values?.periodStartDate ?? today,
     periodEndDate: values?.periodEndDate ?? nextMonthStr,
     dueDate: values?.dueDate ?? nextMonthStr,
@@ -61,6 +68,23 @@ export function createReceiptDefaults(values?: Partial<ReceiptFormValues>): Rece
     status: values?.status ?? "PENDING",
     paidDate: values?.paidDate ?? "",
     paymentMethod: values?.paymentMethod ?? "",
+    notes: values?.notes ?? "",
+  };
+}
+
+export function createEndorsementDefaults(values?: Partial<EndorsementFormValues>): EndorsementFormValues {
+  const today = new Date().toISOString().split("T")[0];
+
+  return {
+    endorsementNumber: values?.endorsementNumber ?? "",
+    policyId: values?.policyId ?? "",
+    status: values?.status ?? "ACTIVE",
+    startDate: values?.startDate ?? today,
+    endDate: values?.endDate ?? today,
+    amount: values?.amount ?? 0,
+    currency: values?.currency ?? "MXN",
+    reference: values?.reference ?? "",
+    concept: values?.concept ?? "",
     notes: values?.notes ?? "",
   };
 }

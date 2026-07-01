@@ -52,3 +52,42 @@ export type AssistantUser = {
   id: string;
   role: "ADMIN" | "AGENT";
 };
+
+export type AssistantResponseSource = "local" | "ai";
+
+export type AssistantReportKind = "INCIDENT" | "SUGGESTION";
+
+export type AssistantReportStatus = "COLLECTING" | "OPEN" | "RESOLVED" | "ARCHIVED" | "DELETED";
+
+export type AssistantReportSeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+export type AssistantReportSnapshot = {
+  id: string;
+  kind: AssistantReportKind;
+  themeKey: string;
+  themeLabel: string;
+  status: AssistantReportStatus;
+  version: number;
+  parentReportId: string | null;
+  title: string;
+  summary: string;
+  recommendation: string;
+  plan: string;
+  signalCount: number;
+  severity: AssistantReportSeverity;
+  firstSignalAt: string;
+  lastSignalAt: string;
+  openedAt: string | null;
+  resolvedAt: string | null;
+  archivedAt: string | null;
+  deletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AssistantConversationResponse = AssistantReply & {
+  source: AssistantResponseSource;
+  reportId: string | null;
+  reportThemeKey: string | null;
+  reportThemeLabel: string | null;
+};

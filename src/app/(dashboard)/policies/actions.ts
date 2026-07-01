@@ -244,6 +244,7 @@ export async function deletePolicy(id: string): Promise<MutationResult> {
         _count: {
           select: {
             receipts: true,
+            endorsements: true,
             payments: true,
             commissions: true,
             claims: true,
@@ -259,6 +260,7 @@ export async function deletePolicy(id: string): Promise<MutationResult> {
     const counts = existingPolicy._count;
     const blockers: string[] = [];
     if (counts.receipts > 0) blockers.push(`${counts.receipts} recibo${counts.receipts !== 1 ? "s" : ""}`);
+    if (counts.endorsements > 0) blockers.push(`${counts.endorsements} endoso${counts.endorsements !== 1 ? "s" : ""}`);
     if (counts.payments > 0) blockers.push(`${counts.payments} pago${counts.payments !== 1 ? "s" : ""}`);
     if (counts.commissions > 0) blockers.push(`${counts.commissions} comisión${counts.commissions !== 1 ? "es" : ""}`);
     if (counts.claims > 0) blockers.push(`${counts.claims} siniestro${counts.claims !== 1 ? "s" : ""}`);

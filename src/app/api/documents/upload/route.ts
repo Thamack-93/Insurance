@@ -8,6 +8,7 @@ import { areDocumentFilesEnabled } from "@/lib/deployment";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
 import {
+  assertEndorsementPortfolioAccess,
   assertClientPortfolioAccess,
   assertPolicyPortfolioAccess,
   assertReceiptPortfolioAccess,
@@ -22,6 +23,7 @@ import { z } from "zod";
 const uploadSchema = z.object({
   clientId: z.string().optional(),
   policyId: z.string().optional(),
+  endorsementId: z.string().optional(),
   receiptId: z.string().optional(),
   taskId: z.string().optional(),
   claimId: z.string().optional(),
@@ -174,6 +176,23 @@ async function assertDocumentUploadOwnership(
   }
   if (metadata.policyId) {
     await assertPolicyPortfolioAccess(metadata.policyId, userId);
+  }
+  if (metadata.endorsementId) {
+    const db = getDb();
+    const endorsement = await db.policyEndorsement.findFirst({
+      where: {
+        id: metadata.endorsementId,
+        policy: { client: { portfolioOwnerId: userId } },
+      },
+      select: { id: true, policyId: true },
+    });
+    if (!endorsement) {
+      throw new AuthError("No tienes acceso a este endoso.", 403);
+    }
+    if (metadata.policyId && metadata.policyId !== endorsement.policyId) {
+      throw new AuthError("El endoso no pertenece a la póliza seleccionada.", 403);
+    }
+    await assertEndorsementPortfolioAccess(metadata.endorsementId, userId);
   }
   if (metadata.receiptId) {
     await assertReceiptPortfolioAccess(metadata.receiptId, userId);

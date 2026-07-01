@@ -32,6 +32,12 @@ export type PolicyCaptureSourceOption = PolicyCaptureOption & {
   serialNumber: string | null;
 };
 
+export type PolicyPdfCaptureAiReview = {
+  summary: string;
+  warnings: string[];
+  suggestions: string[];
+};
+
 export type PolicyPdfCapturePreview = {
   draft: PolicyPdfCaptureDraft;
   suggestions: {
@@ -48,6 +54,7 @@ export type PolicyPdfCapturePreview = {
     sourcePolicy: boolean;
   };
   warnings: string[];
+  aiReview?: PolicyPdfCaptureAiReview | null;
 };
 
 function compact(value: string) {
@@ -124,6 +131,10 @@ function normalizeText(value: string) {
     .replaceAll("ú", "u")
     .replaceAll("ñ", "n")
     .replaceAll("ü", "u");
+}
+
+function normalizeLooseText(value: string) {
+  return normalizeText(value).replace(/[^a-z0-9]+/g, "");
 }
 
 function normalizeDateString(value: string | null | undefined) {
@@ -203,13 +214,6 @@ function parseMoney(value: string | null | undefined) {
   return Number.isFinite(amount) ? amount : null;
 }
 
-function extractMoneyValues(value: string | null | undefined) {
-  if (!value) return [] as number[];
-  return Array.from(value.matchAll(/\$?\s*[\d.,]+(?:\.\d{2})?/g))
-    .map((match) => parseMoney(match[0]))
-    .filter((amount): amount is number => amount !== null);
-}
-
 function extractInlineValue(lines: string[], labels: string[]) {
   for (const line of lines) {
     const normalizedLine = normalizeText(line);
@@ -230,6 +234,31 @@ function extractLineContaining(lines: string[], labels: string[]) {
     const normalizedLine = normalizeText(line);
     if (labels.some((label) => normalizedLine.includes(normalizeText(label)))) {
       return line;
+    }
+  }
+  return null;
+}
+
+function extractAmountAfterLabel(lines: string[], labels: string[]) {
+  for (const label of labels) {
+    const normalizedLabel = normalizeText(label);
+    const pattern = new RegExp(`(^|[^a-z0-9])${normalizedLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`);
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      if (!pattern.test(normalizeText(line))) continue;
+
+      const inline = line.match(/\b(?:\$|MXN\s*)?([\d]{1,3}(?:,[\d]{3})*(?:\.[\d]{2})|[\d]+(?:\.[\d]{2})?)\b/);
+      if (inline?.[1]) {
+        const parsed = parseMoney(inline[1]);
+        if (parsed !== null) return parsed;
+      }
+
+      const nearby = lines.slice(index, index + 4).join(" ");
+      const nearbyAmounts = Array.from(nearby.matchAll(/\b(?:\$|MXN\s*)?([\d]{1,3}(?:,[\d]{3})*(?:\.[\d]{2})|[\d]+(?:\.[\d]{2})?)\b/g))
+        .map((match) => parseMoney(match[1]))
+        .filter((amount): amount is number => amount !== null && amount > 0);
+      if (nearbyAmounts.length > 0) return nearbyAmounts[0];
     }
   }
   return null;
@@ -284,21 +313,11 @@ function parsePolicyNumber(lines: string[], text: string) {
 }
 
 function parseInsuredName(lines: string[]) {
-  const uppercaseCandidate = lines.find((line) =>
-    /^[A-ZÁÉÍÓÚÜÑ ,.'-]{8,}$/.test(line) &&
-    !/qu[aá]litas|seguros|asegurad[oa]|p[oó]liza|vigencia|condiciones|informaci[oó]n/i.test(line),
-  );
-  if (uppercaseCandidate) {
-    return compact(uppercaseCandidate);
-  }
-
   const labels = [
     "Razón Social o Contratante",
     "Razon Social o Contratante",
     "Contratante",
     "Asegurado titular",
-    "Asegurado",
-    "Titular",
     "Nombre del asegurado",
   ];
   const labeled = extractInlineValue(lines, labels);
@@ -317,12 +336,22 @@ function parseInsuredName(lines: string[]) {
     }
   }
 
-  const insuredHeadingIndex = lines.findIndex((line) => normalizeText(line).includes("informacion del asegurado"));
+  const insuredHeadingIndex = lines.findIndex((line) => normalizeLooseText(line).includes("informaciondelasegurado"));
   if (insuredHeadingIndex >= 0) {
-    const nextLine = lines[insuredHeadingIndex + 1];
-    if (nextLine && !/vigencia|descripcion|informacion|p[oó]liza/i.test(nextLine)) {
-      return compact(nextLine);
+    for (let index = insuredHeadingIndex + 1; index < Math.min(lines.length, insuredHeadingIndex + 5); index += 1) {
+      const candidate = compact(lines[index]);
+      if (!candidate) continue;
+      if (/vigencia|descripcion|informacion|p[oó]liza|endoso|inciso|solicitud/i.test(normalizeText(candidate))) continue;
+      return candidate;
     }
+  }
+
+  const uppercaseCandidate = lines.find((line) =>
+    /^[A-ZÁÉÍÓÚÜÑ ,.'-]{8,}$/.test(line) &&
+    !/qu[aá]litas|seguros|asegurad[oa]|p[oó]liza|vigencia|condiciones|informaci[oó]n|endoso|inciso|solicitud/i.test(line),
+  );
+  if (uppercaseCandidate) {
+    return compact(uppercaseCandidate);
   }
 
   const candidate = lines.find((line) => /,\s/.test(line) && line === line.toUpperCase());
@@ -375,7 +404,7 @@ function parseSerialNumber(lines: string[]) {
 }
 
 function parseAutoInsuredObject(lines: string[]) {
-  const headingIndex = lines.findIndex((line) => normalizeText(line).includes("descripcion del vehiculo asegurado"));
+  const headingIndex = lines.findIndex((line) => normalizeLooseText(line).includes("descripciondelvehiculoasegurado"));
   if (headingIndex >= 0) {
     const nextLine = lines[headingIndex + 1];
     if (nextLine) return compact(nextLine);
@@ -414,10 +443,11 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
       ? "AXA Seguros, S.A. de C.V."
       : extractInlineValue(lines, ["Aseguradora", "Compañía", "Compañia"]) ?? "");
   const policyType = normalizePolicyType(extractInlineValue(lines, ["Ramo", "Tipo", "Subramo"]) ?? (normalizedFullText.includes("gmm") ? "GMM" : ""));
-  const paymentFrequency = normalizePaymentFrequency(
-    extractInlineValue(lines, ["Frecuencia", "Periodicidad", "Forma de Pago", "Forma de pago"]) ??
-      (normalizedFullText.includes("anual") ? "Anual" : ""),
+  const paymentFrequencyCandidate = normalizePaymentFrequency(
+    extractInlineValue(lines, ["Frecuencia", "Periodicidad"]) ?? (normalizedFullText.includes("anual") ? "Anual" : ""),
   );
+  const paymentFrequency =
+    paymentFrequencyCandidate === "OTHER" && normalizedFullText.includes("anual") ? "ANNUAL" : paymentFrequencyCandidate;
   const paymentPlan = extractInlineValue(lines, ["Plan de pago", "Plan"]) ?? null;
   const requestNumber = parseRequestNumber(fullText, policyNumber);
 
@@ -440,14 +470,11 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
 
   const issueLine = extractLineContaining(lines, ["Fecha de emisión", "Fecha de emision", "Emisión", "Emision", "Expedición", "Expedicion"]);
   const issueDate = normalizeDateString(issueLine?.match(/\b(\d{2}[/-]\d{2}[/-]\d{4})\b/)?.[1] ?? null);
+  const sourcePolicyNumber = parseSourcePolicyNumber(lines, fullText) ?? suggestPreviousPolicyNumber(policyNumber);
 
-  const premiumLine =
-    extractLineContaining(lines, ["Prima anual total", "Prima total", "Prima anual", "Prima", "Importe total", "IMPORTE TOTAL"]) ??
-    lines.find((line) => /\$\s?[\d.,]+/.test(line)) ??
-    null;
   const premiumAmount =
-    extractMoneyValues(premiumLine).at(-1) ??
-    extractMoneyValues(fullText).at(-1) ??
+    extractAmountAfterLabel(lines, ["IMPORTE TOTAL", "Prima total", "Prima anual total", "Prima anual", "Prima neta"]) ??
+    parseMoney(fullText.match(/IMPORTE TOTAL[^\d]{0,12}([\d.,]+)/i)?.[1] ?? null) ??
     0;
   const serialNumber = policyType === "AUTO" ? parseSerialNumber(lines) : null;
   const insuredObject =
@@ -459,7 +486,6 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
   const notes = [requestNumber ? `Solicitud ${requestNumber}` : null, issueDate ? `Emisión ${issueDate}` : null]
     .filter(Boolean)
     .join(" · ") || null;
-  const sourcePolicyNumber = parseSourcePolicyNumber(lines, fullText) ?? suggestPreviousPolicyNumber(policyNumber);
 
   return {
     policyNumber,

@@ -3,12 +3,18 @@ import "server-only";
 import { getDb } from "@/lib/db";
 import { parseDateInput } from "@/lib/form-utils";
 import { normalize } from "@/lib/search-utils";
+import { reviewPolicyPdfWithAi } from "@/lib/assistant-ai";
 import {
   extractPolicyPdfDraftFromText,
   type PolicyCaptureSourceOption,
+  type PolicyPdfCaptureAiReview,
   type PolicyPdfCaptureDraft,
   type PolicyPdfCapturePreview,
 } from "@/lib/policy-pdf-capture.shared";
+import type { AssistantUser } from "@/lib/assistant-types";
+import type { Prisma, PrismaClient } from "@/generated/prisma/client";
+
+type DbClient = PrismaClient | Prisma.TransactionClient;
 
 function scoreTextMatch(needle: string, candidate: string) {
   const normalizedNeedle = normalize(needle).trim();
@@ -27,7 +33,7 @@ function scoreTextMatch(needle: string, candidate: string) {
 }
 
 async function buildSourcePolicyCandidates(
-  db: ReturnType<typeof getDb>,
+  db: DbClient,
   draft: PolicyPdfCaptureDraft,
   clientId: string | null,
   insurerId: string | null,
@@ -164,7 +170,8 @@ async function buildSourcePolicyCandidates(
 
 export async function buildPolicyPdfCapturePreviewFromText(
   text: string,
-  db: ReturnType<typeof getDb> = getDb(),
+  db: DbClient = getDb(),
+  user?: AssistantUser | null,
 ): Promise<PolicyPdfCapturePreview> {
   const draft = extractPolicyPdfDraftFromText(text);
   const warnings: string[] = [];
@@ -222,6 +229,25 @@ export async function buildPolicyPdfCapturePreviewFromText(
     warnings.push("La frecuencia no quedó totalmente clara; revisa que sea Anual.");
   }
 
+  const shouldRequestAiReview =
+    Boolean(user) &&
+    (warnings.length > 0 ||
+      clientCandidates.length === 0 ||
+      insurerCandidates.length === 0 ||
+      sourcePolicyCandidates.length === 0 ||
+      draft.paymentFrequency === "OTHER");
+
+  let aiReview: PolicyPdfCaptureAiReview | null = null;
+  if (shouldRequestAiReview && user) {
+    aiReview = await reviewPolicyPdfWithAi({
+      user,
+      text,
+      draft,
+      warnings,
+      themeHint: "policy-pdf-review",
+    });
+  }
+
   return {
     draft,
     suggestions: {
@@ -238,5 +264,6 @@ export async function buildPolicyPdfCapturePreviewFromText(
       sourcePolicy: Boolean(suggestedSourcePolicyId),
     },
     warnings,
+    aiReview,
   } satisfies PolicyPdfCapturePreview;
 }

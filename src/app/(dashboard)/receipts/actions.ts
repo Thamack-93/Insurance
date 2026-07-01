@@ -3,11 +3,12 @@
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { AuthError, getCurrentUserId, requireAdmin } from "@/lib/auth";
-import { normalizeOptionalText, parseDateInput } from "@/lib/form-utils";
+import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
 import { receiptSchema, type ReceiptFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { recordPayment } from "@/lib/payment-service";
 import {
+  assertEndorsementPortfolioAccess,
   assertPolicyPortfolioAccess,
   assertReceiptPortfolioAccess,
   receiptPortfolioWhere,
@@ -32,9 +33,26 @@ async function normalizeReceiptInput(values: ReceiptFormValues, userId: string) 
     throw new Error("La poliza seleccionada ya no existe.");
   }
 
+  const endorsementId = optionalRelationId(values.endorsementId);
+  if (endorsementId) {
+    await assertEndorsementPortfolioAccess(endorsementId, userId);
+    const endorsement = await db.policyEndorsement.findFirst({
+      where: {
+        id: endorsementId,
+        policyId: policy.id,
+      },
+      select: { id: true },
+    });
+
+    if (!endorsement) {
+      throw new Error("El endoso seleccionado no pertenece a esta poliza.");
+    }
+  }
+
   return {
     receiptNumber: values.receiptNumber.trim(),
     policyId: policy.id,
+    endorsementId,
     clientId: policy.clientId,
     insurerId: policy.insurerId,
     periodStartDate: parseDateInput(values.periodStartDate),

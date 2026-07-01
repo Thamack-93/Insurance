@@ -4,6 +4,7 @@ import { AuthError, requireUser } from "@/lib/auth";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
 import { buildPolicyPdfCapturePreviewFromText } from "@/lib/policy-pdf-capture-preview";
+import type { AssistantUser } from "@/lib/assistant-types";
 import {
   recordSecurityAccessDenied,
   recordSecurityRateLimit,
@@ -19,8 +20,9 @@ const previewRequestSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    let user: Awaited<ReturnType<typeof requireUser>> | null = null;
     try {
-      await requireUser();
+      user = await requireUser();
     } catch (error) {
       if (error instanceof AuthError) {
         await recordSecurityAccessDenied({
@@ -97,7 +99,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const preview = await buildPolicyPdfCapturePreviewFromText(extractedText);
+    const assistantUser: AssistantUser | null = user
+      ? { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" }
+      : null;
+    const preview = await buildPolicyPdfCapturePreviewFromText(extractedText, undefined, assistantUser);
     return NextResponse.json({ success: true, preview });
   } catch (error) {
     logError("api.policies.capture.preview", error);

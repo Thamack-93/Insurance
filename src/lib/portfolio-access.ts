@@ -43,6 +43,14 @@ export function policyOperationalWhere(portfolioOwnerId?: string): Prisma.Policy
   return portfolioOwnerId ? policyPortfolioWhere(portfolioOwnerId) : {};
 }
 
+export function endorsementPortfolioWhere(userId: string): Prisma.PolicyEndorsementWhereInput {
+  return { policy: policyPortfolioWhere(userId) };
+}
+
+export function endorsementOperationalWhere(portfolioOwnerId?: string): Prisma.PolicyEndorsementWhereInput {
+  return portfolioOwnerId ? endorsementPortfolioWhere(portfolioOwnerId) : {};
+}
+
 export function receiptPortfolioWhere(userId: string): Prisma.ReceiptWhereInput {
   return { client: clientPortfolioWhere(userId) };
 }
@@ -88,6 +96,7 @@ export function documentPortfolioWhere(userId: string): Prisma.DocumentWhereInpu
     OR: [
       { client: clientPortfolioWhere(userId) },
       { policy: policyPortfolioWhere(userId) },
+      { endorsement: endorsementPortfolioWhere(userId) },
       { receipt: receiptPortfolioWhere(userId) },
       { claim: claimPortfolioWhere(userId) },
       { quote: quotePortfolioWhere(userId) },
@@ -133,6 +142,18 @@ export async function assertPolicyPortfolioAccess(policyId: string, userId: stri
 
   if (!policy) {
     throw new AuthError("No tienes acceso a esta póliza.", 403);
+  }
+}
+
+export async function assertEndorsementPortfolioAccess(endorsementId: string, userId: string) {
+  const db = getDb();
+  const endorsement = await db.policyEndorsement.findFirst({
+    where: { id: endorsementId, ...endorsementPortfolioWhere(userId) },
+    select: { id: true },
+  });
+
+  if (!endorsement) {
+    throw new AuthError("No tienes acceso a este endoso.", 403);
   }
 }
 

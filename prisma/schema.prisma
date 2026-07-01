@@ -26,6 +26,8 @@ model User {
   updatedClients             Client[]                     @relation("ClientUpdatedBy")
   createdPolicies            Policy[]                     @relation("PolicyCreatedBy")
   updatedPolicies            Policy[]                     @relation("PolicyUpdatedBy")
+  createdEndorsements        PolicyEndorsement[]          @relation("PolicyEndorsementCreatedBy")
+  updatedEndorsements        PolicyEndorsement[]          @relation("PolicyEndorsementUpdatedBy")
   createdReceipts            Receipt[]                    @relation("ReceiptCreatedBy")
   updatedReceipts            Receipt[]                    @relation("ReceiptUpdatedBy")
   createdPayments            Payment[]                    @relation("PaymentCreatedBy")
@@ -164,6 +166,7 @@ model Policy {
   familyPolicies              Policy[]                     @relation("PolicyFamily")
   renewedFrom                 Policy?                      @relation("PolicyRenewalChain", fields: [renewedFromPolicyId], references: [id], onDelete: SetNull)
   renewals                    Policy[]                     @relation("PolicyRenewalChain")
+  endorsements                PolicyEndorsement[]
   receipts                    Receipt[]
   payments                    Payment[]
   commissions                 Commission[]
@@ -194,6 +197,7 @@ model Receipt {
   id                       String    @id @default(cuid())
   receiptNumber            String
   policyId                 String
+  endorsementId            String?
   clientId                 String
   insurerId                String
   periodStartDate          DateTime
@@ -214,6 +218,7 @@ model Receipt {
   reconciliationNote       String?
 
   policy               Policy                       @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  endorsement          PolicyEndorsement?            @relation(fields: [endorsementId], references: [id], onDelete: SetNull)
   client               Client                       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   insurer              Insurer                      @relation(fields: [insurerId], references: [id], onDelete: Restrict)
   document             Document?                    @relation("ReceiptPrimaryDocument", fields: [documentId], references: [id], onDelete: SetNull)
@@ -229,12 +234,47 @@ model Receipt {
 
   @@index([receiptNumber])
   @@index([policyId])
+  @@index([endorsementId])
   @@index([clientId])
   @@index([insurerId])
   @@index([status])
   @@index([dueDate])
   @@index([paidDate])
   @@index([policyId, receiptNumber])
+  @@index([createdById])
+  @@index([updatedById])
+}
+
+model PolicyEndorsement {
+  id                String   @id @default(cuid())
+  endorsementNumber  String
+  policyId          String
+  status            String   @default("ACTIVE")
+  startDate         DateTime
+  endDate           DateTime
+  amount            Decimal
+  currency          String   @default("MXN")
+  reference         String?
+  concept           String?
+  notes             String?
+  documentId        String?  @unique
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  createdById       String?
+  updatedById       String?
+
+  policy        Policy       @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  document      Document?    @relation("PolicyEndorsementPrimaryDocument", fields: [documentId], references: [id], onDelete: SetNull)
+  createdBy     User?        @relation("PolicyEndorsementCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy     User?        @relation("PolicyEndorsementUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  receipts      Receipt[]
+  documents     Document[]   @relation("PolicyEndorsementDocuments")
+
+  @@unique([policyId, endorsementNumber])
+  @@index([policyId])
+  @@index([status])
+  @@index([startDate])
+  @@index([endDate])
   @@index([createdById])
   @@index([updatedById])
 }
@@ -465,6 +505,7 @@ model Document {
   id           String   @id @default(cuid())
   clientId     String?
   policyId     String?
+  endorsementId String?
   receiptId    String?
   taskId       String?
   claimId      String?
@@ -482,16 +523,19 @@ model Document {
 
   client         Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
   policy         Policy?  @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  endorsement    PolicyEndorsement? @relation("PolicyEndorsementDocuments", fields: [endorsementId], references: [id], onDelete: SetNull)
   receipt        Receipt? @relation("ReceiptDocuments", fields: [receiptId], references: [id], onDelete: SetNull)
   task           Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
   claim          Claim?   @relation(fields: [claimId], references: [id], onDelete: SetNull)
   quote          Quote?   @relation(fields: [quoteId], references: [id], onDelete: SetNull)
   primaryReceipt Receipt? @relation("ReceiptPrimaryDocument")
+  primaryEndorsement PolicyEndorsement? @relation("PolicyEndorsementPrimaryDocument")
   createdBy      User?    @relation("DocumentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   updatedBy      User?    @relation("DocumentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([clientId])
   @@index([policyId])
+  @@index([endorsementId])
   @@index([receiptId])
   @@index([taskId])
   @@index([claimId])
@@ -913,6 +957,62 @@ model DataQualitySuppressionRule {
   @@index([active])
   @@index([createdById])
   @@index([reviewedById])
+  @@index([createdAt])
+}
+
+model AssistantReport {
+  id              String    @id @default(cuid())
+  kind            String
+  themeKey        String
+  themeLabel      String
+  status          String    @default("PENDING")
+  version         Int       @default(1)
+  parentReportId  String?
+  title           String
+  summary         String
+  recommendation  String
+  plan            String
+  evidenceJson    String
+  detailsJson     String
+  signalCount     Int       @default(0)
+  severity        String    @default("MEDIUM")
+  firstSignalAt   DateTime
+  lastSignalAt    DateTime
+  openedAt        DateTime?
+  resolvedAt      DateTime?
+  archivedAt      DateTime?
+  deletedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  parentReport AssistantReport?      @relation("AssistantReportChildren", fields: [parentReportId], references: [id], onDelete: SetNull)
+  childReports AssistantReport[]      @relation("AssistantReportChildren")
+  signals      AssistantReportSignal[]
+
+  @@index([kind])
+  @@index([themeKey])
+  @@index([status])
+  @@index([version])
+  @@index([parentReportId])
+  @@index([lastSignalAt])
+  @@index([createdAt])
+}
+
+model AssistantReportSignal {
+  id          String   @id @default(cuid())
+  reportId    String
+  signalKind  String
+  source      String
+  title       String
+  inputJson   String
+  outputJson  String
+  createdAt   DateTime @default(now())
+
+  report AssistantReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@index([signalKind])
+  @@index([source])
   @@index([createdAt])
 }
 

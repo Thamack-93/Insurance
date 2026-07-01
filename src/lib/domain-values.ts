@@ -21,6 +21,9 @@ export type PolicyType = (typeof POLICY_TYPES)[number];
 export const POLICY_STATUSES = ["ACTIVE", "EXPIRED", "CANCELLED", "RENEWED", "PENDING"] as const;
 export type PolicyStatus = (typeof POLICY_STATUSES)[number];
 
+export const ENDORSEMENT_STATUSES = ["ACTIVE", "PENDING", "EXPIRED", "CANCELLED"] as const;
+export type EndorsementStatus = (typeof ENDORSEMENT_STATUSES)[number];
+
 export const PAYMENT_FREQUENCIES = [
   "MONTHLY",
   "QUARTERLY",

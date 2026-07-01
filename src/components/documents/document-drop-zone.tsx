@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 type Associations = {
   clientId?: string;
   policyId?: string;
+  endorsementId?: string;
   receiptId?: string;
   taskId?: string;
   claimId?: string;

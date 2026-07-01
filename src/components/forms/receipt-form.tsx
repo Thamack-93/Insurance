@@ -33,6 +33,7 @@ type ReceiptFormProps = {
   cancelHref: string;
   defaultValues: ReceiptFormValues;
   policyOptions: SelectOption[];
+  endorsementOptions?: SelectOption[];
   submitAction: (values: ReceiptFormValues) => Promise<MutationResult>;
   footerActions?: ReactNode;
 };
@@ -44,6 +45,7 @@ export function ReceiptForm({
   cancelHref,
   defaultValues,
   policyOptions,
+  endorsementOptions,
   submitAction,
   footerActions,
 }: ReceiptFormProps) {
@@ -108,6 +110,25 @@ export function ReceiptForm({
                   )}
                 />
               </FormField>
+
+              {endorsementOptions && endorsementOptions.length > 0 ? (
+                <FormField label="Endoso" error={errors.endorsementId?.message}>
+                  <Controller
+                    name="endorsementId"
+                    control={control}
+                    render={({ field }) => (
+                      <ControlledSelect
+                        value={field.value || ""}
+                        onValueChange={field.onChange}
+                        options={endorsementOptions}
+                        placeholder="Selecciona un endoso"
+                      />
+                    )}
+                  />
+                </FormField>
+              ) : (
+                <input type="hidden" {...register("endorsementId")} />
+              )}
 
               <FormField label="Monto" htmlFor="amount" error={errors.amount?.message}>
                 <Input id="amount" type="number" min="0" step="0.01" {...register("amount")} />

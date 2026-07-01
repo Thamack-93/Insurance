@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   CLAIM_STATUSES,
+  ENDORSEMENT_STATUSES,
   CLIENT_TYPES,
   ENTITY_STATUSES,
   PAYMENT_FREQUENCIES,
@@ -71,6 +72,7 @@ export const receiptSchema = z
   .object({
     receiptNumber: z.string().trim().min(2, "Escribe el numero de recibo."),
     policyId: z.string().min(1, "Selecciona una poliza."),
+    endorsementId: z.string().optional().or(z.literal("")),
     periodStartDate: requiredDate,
     periodEndDate: requiredDate,
     dueDate: requiredDate,
@@ -84,6 +86,24 @@ export const receiptSchema = z
   .refine((values) => values.periodEndDate >= values.periodStartDate, {
     message: "El fin del periodo debe ser posterior al inicio.",
     path: ["periodEndDate"],
+  });
+
+export const endorsementSchema = z
+  .object({
+    endorsementNumber: z.string().trim().min(1, "Escribe el numero de endoso."),
+    policyId: z.string().min(1, "Selecciona una poliza."),
+    status: z.enum(ENDORSEMENT_STATUSES),
+    startDate: requiredDate,
+    endDate: requiredDate,
+    amount: z.coerce.number().positive("El importe debe ser mayor a cero."),
+    currency: z.string().trim().min(1, "Selecciona una moneda."),
+    reference: optionalText,
+    concept: optionalText,
+    notes: optionalText,
+  })
+  .refine((values) => values.endDate >= values.startDate, {
+    message: "La fecha final debe ser posterior al inicio.",
+    path: ["endDate"],
   });
 
 export const workItemSchema = z.object({
@@ -142,6 +162,7 @@ export const quoteSchema = z.object({
 export type ClientFormValues = z.infer<typeof clientSchema>;
 export type PolicyFormValues = z.infer<typeof policySchema>;
 export type ReceiptFormValues = z.infer<typeof receiptSchema>;
+export type EndorsementFormValues = z.infer<typeof endorsementSchema>;
 export type WorkItemFormValues = z.infer<typeof workItemSchema>;
 export type InsurerFormValues = z.infer<typeof insurerSchema>;
 export type ClaimFormValues = z.infer<typeof claimSchema>;

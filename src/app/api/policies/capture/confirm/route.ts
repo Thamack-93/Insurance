@@ -7,7 +7,9 @@ import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
 import { parseDateInput } from "@/lib/form-utils";
 import { assertClientPortfolioAccess, assertPolicyPortfolioAccess } from "@/lib/portfolio-access";
+import { syncAutoCaptureReceipt } from "@/lib/policy-capture-receipts";
 import type { PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
+import { revalidatePaths } from "@/lib/mutation-utils";
 import {
   recordSecurityAccessDenied,
   recordSecurityRateLimit,
@@ -275,6 +277,23 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      const autoReceiptResult = await syncAutoCaptureReceipt(tx, {
+        policyId: targetPolicy.id,
+        clientId: payload.clientId,
+        insurerId: payload.insurerId,
+        draft: captureDraft,
+        userId: user.id,
+      });
+
+      await writeActivityLog({
+        entityType: "Receipt",
+        entityId: autoReceiptResult.receipt.id,
+        action: autoReceiptResult.created ? "RECEIPT_CREATE_CAPTURE_PDF" : "RECEIPT_UPDATE_CAPTURE_PDF",
+        newValue: autoReceiptResult.receipt,
+        userId: user.id,
+        db: tx,
+      });
+
       if (sourcePolicy.status !== "RENEWED") {
         await tx.policy.update({
           where: { id: sourcePolicy.id },
@@ -308,14 +327,30 @@ export async function POST(request: NextRequest) {
         db: tx,
       });
 
-      return targetPolicy;
+      return {
+        targetPolicy,
+        receiptId: autoReceiptResult.receipt.id,
+      };
     });
+
+    revalidatePaths([
+      "/receipts",
+      "/due-payments",
+      `/receipts/${result.receiptId}`,
+      `/policies/${result.targetPolicy.id}`,
+      `/clients/${payload.clientId}`,
+      "/dashboard",
+      "/today",
+      "/portfolio",
+      "/renewals",
+      "/risks",
+    ]);
 
     return NextResponse.json({
       success: true,
-      policyId: result.id,
-      redirectTo: `/policies/${result.id}`,
-      message: "Póliza capturada y marcada como renovada.",
+      policyId: result.targetPolicy.id,
+      redirectTo: `/policies/${result.targetPolicy.id}`,
+      message: "Póliza capturada, recibo generado y marcada como renovada.",
     });
   } catch (error) {
     if (error instanceof AuthError) {

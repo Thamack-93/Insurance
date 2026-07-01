@@ -285,6 +285,38 @@ export function PolicyPdfCapturePanel() {
                 </div>
               ) : null}
 
+              {preview.aiReview ? (
+                <div className="space-y-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950 dark:border-sky-900/40 dark:bg-sky-950/30 dark:text-sky-100">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium">Revisión asistida por IA</p>
+                    <Badge variant="outline" className="rounded-full border-sky-200 text-sky-700 dark:border-sky-800 dark:text-sky-200">
+                      Revisor
+                    </Badge>
+                  </div>
+                  <p>{preview.aiReview.summary}</p>
+                  {preview.aiReview.warnings.length > 0 ? (
+                    <div className="space-y-1">
+                      <p className="font-medium">Observaciones</p>
+                      <ul className="list-disc space-y-1 pl-5">
+                        {preview.aiReview.warnings.map((warning) => (
+                          <li key={warning}>{warning}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {preview.aiReview.suggestions.length > 0 ? (
+                    <div className="space-y-1">
+                      <p className="font-medium">Sugerencias</p>
+                      <ul className="list-disc space-y-1 pl-5">
+                        {preview.aiReview.suggestions.map((suggestion) => (
+                          <li key={suggestion}>{suggestion}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
           <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl border bg-muted/30 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Nueva póliza</p>

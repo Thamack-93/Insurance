@@ -41,6 +41,13 @@ export const policyStatusOptions: SelectOption[] = [
   { value: "CANCELLED", label: "Cancelada" },
 ];
 
+export const endorsementStatusOptions: SelectOption[] = [
+  { value: "ACTIVE", label: "Activo" },
+  { value: "PENDING", label: "Pendiente" },
+  { value: "EXPIRED", label: "Expirado" },
+  { value: "CANCELLED", label: "Cancelado" },
+];
+
 export const paymentFrequencyOptions: SelectOption[] = [
   { value: "MONTHLY", label: "Mensual" },
   { value: "QUARTERLY", label: "Trimestral" },

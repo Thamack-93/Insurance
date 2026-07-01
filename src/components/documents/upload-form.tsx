@@ -18,6 +18,7 @@ interface UploadFormProps {
   associations?: {
     clientId?: string;
     policyId?: string;
+    endorsementId?: string;
     receiptId?: string;
     taskId?: string;
     claimId?: string;
@@ -67,6 +68,7 @@ export function UploadForm({
     notes: string;
     clientId?: string;
     policyId?: string;
+    endorsementId?: string;
     receiptId?: string;
     taskId?: string;
     claimId?: string;
