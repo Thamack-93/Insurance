@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import * as XLSX from "@e965/xlsx";
+import { formatDateInput } from "@/lib/form-utils";
 
 type ExportData = {
   name: string;
@@ -61,7 +62,7 @@ export function ExportButtons({ exports }: { exports: ExportData[] }) {
         }
       });
 
-      XLSX.writeFile(workbook, `pg-report-${new Date().toISOString().split("T")[0]}.xlsx`);
+      XLSX.writeFile(workbook, `pg-report-${formatDateInput(new Date())}.xlsx`);
     } finally {
       setIsExporting(false);
     }

@@ -17,8 +17,9 @@ import {
   BulkActionsProvider,
   useBulkActions,
 } from "@/components/bulk-actions/bulk-actions-provider";
-import { formatDate } from "@/lib/dates";
+import { formatDate, isOverdue } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
+import { parseBusinessDateInput } from "@/lib/business-dates";
 import { bulkMarkReceiptsPaid } from "@/app/(dashboard)/receipts/actions";
 
 export type CollectableReceipt = {
@@ -144,8 +145,8 @@ function BulkToolbar({ receipts }: { receipts: CollectableReceipt[] }) {
 function ReceiptRow({ receipt }: { receipt: CollectableReceipt }) {
   const { selectedItems, toggleItem } = useBulkActions();
   const isSelected = selectedItems.has(receipt.id);
-  const due = new Date(receipt.dueDate);
-  const isOverdue = due < new Date();
+  const due = parseBusinessDateInput(receipt.dueDate);
+  const overdue = isOverdue(due);
 
   return (
     <div
@@ -173,8 +174,8 @@ function ReceiptRow({ receipt }: { receipt: CollectableReceipt }) {
                 {receipt.originLabel}
               </Badge>
             ) : null}
-            <Badge variant={isOverdue ? "destructive" : "secondary"}>
-              {isOverdue ? "Vencido" : "Pendiente"}
+            <Badge variant={overdue ? "destructive" : "secondary"}>
+              {overdue ? "Vencido" : "Pendiente"}
             </Badge>
             <StatusBadge status={receipt.status} />
           </div>

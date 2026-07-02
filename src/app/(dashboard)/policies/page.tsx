@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { addDays } from "date-fns";
 import { ArrowRight, FileUp, Plus, Shield, CalendarClock, AlertCircle, BadgeDollarSign, FolderKanban } from "lucide-react";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
@@ -12,6 +11,7 @@ import { EmptyState } from "@/components/empty-states/empty-state";
 import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
 import { getDb } from "@/lib/db";
+import { businessAddDays } from "@/lib/business-dates";
 import { daysUntil, formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
@@ -32,7 +32,7 @@ export default async function PoliciesPage({
   const db = getDb();
   const scope = await requirePortfolioReadScope();
   const now = today();
-  const in60 = addDays(now, 60);
+  const in60 = businessAddDays(now, 60);
   const portfolioWhere = policyOperationalWhere(scope.portfolioOwnerId);
   const renewals60Promise = loadEligibleRenewalPolicies(
     {

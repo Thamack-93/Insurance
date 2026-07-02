@@ -1,6 +1,6 @@
-import { addDays, subDays } from "date-fns";
 import { getDb } from "@/lib/db";
 import { today } from "@/lib/dates";
+import { businessAddDays } from "@/lib/business-dates";
 import { formatCurrency } from "@/lib/money";
 import { matchesSuppressionCriteria } from "@/lib/data-quality-rules";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
@@ -22,8 +22,8 @@ const TAKE_LIMIT = 25;
 export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFinding[]> {
   const db = getDb();
   const now = today();
-  const in60 = addDays(now, 60);
-  const olderThan15 = subDays(now, 15);
+  const in60 = businessAddDays(now, 60);
+  const olderThan15 = businessAddDays(now, -15);
   const policyScope = portfolioOwnerId ? { client: { portfolioOwnerId } } : {};
   const clientScope = portfolioOwnerId ? { portfolioOwnerId, status: "ACTIVE" } : { status: "ACTIVE" };
   const activeRenewalScope = {

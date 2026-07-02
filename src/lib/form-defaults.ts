@@ -9,6 +9,8 @@ import type {
   WorkItemFormValues,
 } from "@/lib/validations";
 import { NO_REFERIDOR_VALUE } from "@/lib/constants";
+import { businessAddDays, businessToday } from "@/lib/business-dates";
+import { formatDateInput } from "@/lib/form-utils";
 
 export function createClientDefaults(values?: Partial<ClientFormValues>): ClientFormValues {
   return {
@@ -27,10 +29,8 @@ export function createClientDefaults(values?: Partial<ClientFormValues>): Client
 }
 
 export function createPolicyDefaults(values?: Partial<PolicyFormValues>): PolicyFormValues {
-  const today = new Date().toISOString().split("T")[0];
-  const nextYear = new Date();
-  nextYear.setFullYear(nextYear.getFullYear() + 1);
-  const nextYearStr = nextYear.toISOString().split("T")[0];
+  const today = formatDateInput(businessToday());
+  const nextYearStr = formatDateInput(businessAddDays(businessToday(), 365));
 
   return {
     policyNumber: values?.policyNumber ?? "",
@@ -51,10 +51,8 @@ export function createPolicyDefaults(values?: Partial<PolicyFormValues>): Policy
 }
 
 export function createReceiptDefaults(values?: Partial<ReceiptFormValues>): ReceiptFormValues {
-  const today = new Date().toISOString().split("T")[0];
-  const nextMonth = new Date();
-  nextMonth.setMonth(nextMonth.getMonth() + 1);
-  const nextMonthStr = nextMonth.toISOString().split("T")[0];
+  const today = formatDateInput(businessToday());
+  const nextMonthStr = formatDateInput(businessAddDays(businessToday(), 30));
 
   return {
     receiptNumber: values?.receiptNumber ?? "",
@@ -73,7 +71,7 @@ export function createReceiptDefaults(values?: Partial<ReceiptFormValues>): Rece
 }
 
 export function createEndorsementDefaults(values?: Partial<EndorsementFormValues>): EndorsementFormValues {
-  const today = new Date().toISOString().split("T")[0];
+  const today = formatDateInput(businessToday());
 
   return {
     endorsementNumber: values?.endorsementNumber ?? "",
@@ -90,10 +88,8 @@ export function createEndorsementDefaults(values?: Partial<EndorsementFormValues
 }
 
 export function createWorkItemDefaults(values?: Partial<WorkItemFormValues>): WorkItemFormValues {
-  const today = new Date().toISOString().split("T")[0];
-  const nextWeek = new Date();
-  nextWeek.setDate(nextWeek.getDate() + 7);
-  const nextWeekStr = nextWeek.toISOString().split("T")[0];
+  const today = formatDateInput(businessToday());
+  const nextWeekStr = formatDateInput(businessAddDays(businessToday(), 7));
 
   return {
     clientId: values?.clientId ?? "",
@@ -124,7 +120,7 @@ export function createInsurerDefaults(values?: Partial<InsurerFormValues>): Insu
 }
 
 export function createClaimDefaults(values?: Partial<ClaimFormValues>): ClaimFormValues {
-  const today = new Date().toISOString().split("T")[0];
+  const today = formatDateInput(businessToday());
 
   return {
     folio: values?.folio ?? "",
@@ -144,10 +140,8 @@ export function createClaimDefaults(values?: Partial<ClaimFormValues>): ClaimFor
 }
 
 export function createQuoteDefaults(values?: Partial<QuoteFormValues>): QuoteFormValues {
-  const today = new Date().toISOString().split("T")[0];
-  const nextWeek = new Date();
-  nextWeek.setDate(nextWeek.getDate() + 7);
-  const nextWeekStr = nextWeek.toISOString().split("T")[0];
+  const today = formatDateInput(businessToday());
+  const nextWeekStr = formatDateInput(businessAddDays(businessToday(), 7));
 
   return {
     clientId: values?.clientId ?? "",

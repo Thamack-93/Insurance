@@ -4,6 +4,7 @@ import { ClaimForm } from "@/components/forms/claim-form";
 import { createClaimDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
+import { formatDateInput } from "@/lib/form-utils";
 import type { ClaimFormValues } from "@/lib/validations";
 
 export default async function EditClaimPage({ params }: { params: Promise<{ id: string }> }) {
@@ -45,9 +46,9 @@ export default async function EditClaimPage({ params }: { params: Promise<{ id: 
     claimType: claim.claimType as ClaimFormValues["claimType"],
     description: claim.description ?? "",
     status: claim.status as ClaimFormValues["status"],
-    incidentDate: claim.incidentDate.toISOString().split("T")[0],
-    reportedDate: claim.reportedDate.toISOString().split("T")[0],
-    closedDate: claim.closedDate?.toISOString().split("T")[0] ?? "",
+    incidentDate: formatDateInput(claim.incidentDate),
+    reportedDate: formatDateInput(claim.reportedDate),
+    closedDate: formatDateInput(claim.closedDate),
     amountClaimed: claim.amountClaimed ? Number(claim.amountClaimed) : undefined,
     amountPaid: claim.amountPaid ? Number(claim.amountPaid) : undefined,
     notes: claim.notes ?? "",

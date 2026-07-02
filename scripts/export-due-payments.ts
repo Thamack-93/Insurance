@@ -1,6 +1,6 @@
-import { addDays } from "date-fns";
 import path from "node:path";
 
+import { businessAddDays } from "../src/lib/business-dates.ts";
 import { daysUntil, today } from "../src/lib/dates.ts";
 
 import {
@@ -25,7 +25,7 @@ async function main() {
   const horizonDays = Number(getFlag(args, "days", "60"));
   const db = createDb();
   const now = today();
-  const horizon = addDays(now, horizonDays);
+  const horizon = businessAddDays(now, horizonDays);
   await ensureDataDirs();
 
   const receipts = await db.receipt.findMany({

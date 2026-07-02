@@ -1,5 +1,4 @@
-import { addDays } from "date-fns";
-
+import { businessAddDays } from "../src/lib/business-dates.ts";
 import { daysUntil, today } from "../src/lib/dates.ts";
 
 import {
@@ -21,7 +20,7 @@ async function main() {
   const limit = Number(getFlag(args, "limit", "20"));
   const db = createDb();
   const now = today();
-  const horizon = addDays(now, horizonDays);
+  const horizon = businessAddDays(now, horizonDays);
 
   const [overdue, upcoming] = await Promise.all([
     db.receipt.findMany({

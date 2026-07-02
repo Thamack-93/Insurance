@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { startOfMonth } from "date-fns";
 import { ArrowRight, BadgeCheck, CircleDollarSign, Plus, ReceiptText, ShieldAlert } from "lucide-react";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
@@ -15,6 +14,7 @@ import { CollectableReceipts, type CollectableReceipt } from "@/components/recei
 import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
 import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
+import { businessStartOfMonth } from "@/lib/business-dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import {
@@ -39,7 +39,7 @@ export default async function ReceiptsPage({
   const db = getDb();
   const scope = await requirePortfolioReadScope();
   const now = today();
-  const monthStart = startOfMonth(now);
+  const monthStart = businessStartOfMonth(now);
 
   const baseWhere: Prisma.ReceiptWhereInput = {
     ...receiptOperationalWhere(scope.portfolioOwnerId),
@@ -140,7 +140,7 @@ export default async function ReceiptsPage({
     .map((receipt) => ({
       id: receipt.id,
       receiptNumber: receipt.receiptNumber,
-      dueDate: receipt.dueDate.toISOString().split("T")[0],
+      dueDate: formatDate(receipt.dueDate, "yyyy-MM-dd"),
       amount: toNumber(receipt.amount),
       currency: receipt.currency,
       status: receipt.status,

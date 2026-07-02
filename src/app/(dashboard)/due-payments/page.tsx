@@ -13,8 +13,8 @@ import { QuickPaymentDialog } from "@/components/payments/quick-payment-dialog";
 import { CancelReceiptButton } from "@/components/receipts/cancel-receipt-button";
 import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
+import { businessAddDays } from "@/lib/business-dates";
 import { formatCurrency, toNumber } from "@/lib/money";
-import { addDays } from "date-fns";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import { receiptOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
@@ -27,9 +27,9 @@ export default async function DuePaymentsPage({
   const db = getDb();
   const scope = await requirePortfolioReadScope();
   const now = today();
-  const in7 = addDays(now, 7);
-  const in30 = addDays(now, 30);
-  const in60 = addDays(now, 60);
+  const in7 = businessAddDays(now, 7);
+  const in30 = businessAddDays(now, 30);
+  const in60 = businessAddDays(now, 60);
 
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
@@ -111,7 +111,7 @@ export default async function DuePaymentsPage({
       _sum: { amount: true },
     }),
     db.receipt.count({
-      where: { ...receiptScopeWhere, dueDate: { gte: now, lt: addDays(now, 1) }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { ...receiptScopeWhere, dueDate: { gte: now, lt: businessAddDays(now, 1) }, status: { notIn: ["PAID", "CANCELLED"] } },
     }),
   ]);
 
@@ -238,7 +238,7 @@ export default async function DuePaymentsPage({
                               receiptNumber: receipt.receiptNumber,
                               amount: Number(receipt.amount),
                               currency: receipt.currency,
-                              dueDate: receipt.dueDate.toISOString().split("T")[0],
+                              dueDate: formatDate(receipt.dueDate, "yyyy-MM-dd"),
                               client: { fullName: receipt.client.fullName },
                               policy: { policyNumber: receipt.policy.policyNumber },
                               endorsement: receipt.endorsement ?? undefined,

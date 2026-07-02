@@ -1,10 +1,16 @@
 #!/usr/bin/env tsx
 
-import { addDays, format } from "date-fns";
+import {
+  businessAddDays,
+  businessStartOfDay,
+  formatBusinessDate,
+  formatBusinessDateInput,
+} from "../src/lib/business-dates.ts";
 import { getDb } from "../src/lib/db";
 
 async function main() {
   const db = getDb();
+  const now = businessStartOfDay(new Date());
 
   console.log("Configurando pendientes de renovación...\n");
 
@@ -12,7 +18,7 @@ async function main() {
     where: {
       status: "ACTIVE",
       endDate: {
-        gt: new Date(),
+        gt: now,
       },
     },
   });
@@ -22,8 +28,8 @@ async function main() {
   for (const policy of policies) {
     if (!policy.endDate) continue;
 
-    const endDate = new Date(policy.endDate);
-    const today = new Date();
+    const endDate = businessStartOfDay(policy.endDate);
+    const today = now;
 
     const daysUntilExpiry = Math.floor((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
     if (daysUntilExpiry > 90 || daysUntilExpiry < 0) {
@@ -33,12 +39,12 @@ async function main() {
     const reminderDays = [60, 30, 15, 7, 1];
 
     for (const daysBefore of reminderDays) {
-      const dueDate = addDays(endDate, -daysBefore);
+      const dueDate = businessAddDays(endDate, -daysBefore);
       if (dueDate < today) {
         continue;
       }
 
-      const sourceId = `${policy.id}:${dueDate.toISOString()}`;
+      const sourceId = `${policy.id}:${formatBusinessDateInput(dueDate)}`;
       const existing = await db.workItem.findUnique({
         where: {
           sourceType_sourceId: {
@@ -65,11 +71,11 @@ async function main() {
           status: "OPEN",
           priority: "MEDIUM",
           title: `Renovación: ${policy.policyNumber}`,
-          description: `La póliza ${policy.policyNumber} de ${client?.fullName || "Cliente"} vence el ${format(endDate, "dd/MM/yyyy")}.`,
+          description: `La póliza ${policy.policyNumber} de ${client?.fullName || "Cliente"} vence el ${formatBusinessDate(endDate, "dd/MM/yyyy")}.`,
           entityType: "POLICY",
           entityId: policy.id,
           dueDate,
-          startDate: new Date(),
+          startDate: now,
         },
       });
 

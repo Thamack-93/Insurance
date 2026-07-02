@@ -4,6 +4,7 @@ import { QuoteForm } from "@/components/forms/quote-form";
 import { createQuoteDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
+import { formatDateInput } from "@/lib/form-utils";
 import type { QuoteFormValues } from "@/lib/validations";
 
 export default async function EditQuotePage({ params }: { params: Promise<{ id: string }> }) {
@@ -36,9 +37,9 @@ export default async function EditQuotePage({ params }: { params: Promise<{ id: 
     insurerId: quote.insurerId ?? "",
     policyType: quote.policyType as QuoteFormValues["policyType"],
     status: quote.status as QuoteFormValues["status"],
-    requestedDate: quote.requestedDate.toISOString().split("T")[0],
-    sentDate: quote.sentDate?.toISOString().split("T")[0] ?? "",
-    validUntil: quote.validUntil?.toISOString().split("T")[0] ?? "",
+    requestedDate: formatDateInput(quote.requestedDate),
+    sentDate: formatDateInput(quote.sentDate),
+    validUntil: formatDateInput(quote.validUntil),
     quotedAmount: quote.quotedAmount ? Number(quote.quotedAmount) : undefined,
     notes: quote.notes ?? "",
   });

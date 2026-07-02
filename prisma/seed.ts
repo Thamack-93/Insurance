@@ -1,11 +1,15 @@
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { addDays, subDays } from "date-fns";
 import { PrismaClient } from "../src/generated/prisma/client";
 import type { PaymentFrequency, Priority, TaskStatus } from "../src/lib/domain-values";
 import { hashPassword, SYSTEM_USER_ID } from "../src/lib/auth";
 import { ensureNotificationDefaultsForUser } from "../src/lib/notification-foundation";
 import type { Policy, Receipt } from "../src/generated/prisma/client";
+import {
+  businessAddDays,
+  businessStartOfDay,
+  parseBusinessDateInput,
+} from "../src/lib/business-dates";
 
 const databaseUrl = process.env.DATABASE_URL?.trim();
 if (!databaseUrl) {
@@ -28,7 +32,7 @@ function normalizePostgresConnectionString(connectionString: string) {
 
 const adapter = new PrismaPg({ connectionString: normalizePostgresConnectionString(databaseUrl) });
 const prisma = new PrismaClient({ adapter });
-const baseDate = new Date("2026-05-01T00:00:00.000Z");
+const baseDate = businessStartOfDay(parseBusinessDateInput("2026-05-01"));
 
 const policyTypes = [
   "AUTO",
@@ -198,8 +202,8 @@ async function main() {
   for (let index = 0; index < 25; index += 1) {
     const client = clients[index % clients.length];
     const insurer = insurers[index % insurers.length];
-    const startDate = subDays(baseDate, 330 - index * 7);
-    const endDate = addDays(startDate, 365);
+    const startDate = businessAddDays(baseDate, -(330 - index * 7));
+    const endDate = businessAddDays(startDate, 365);
 
     policies.push(
       await prisma.policy.create({
@@ -210,7 +214,7 @@ async function main() {
           policyType: policyTypes[index % policyTypes.length],
           status: index === 7 ? "EXPIRED" : index === 14 ? "PENDING" : "ACTIVE",
           startDate,
-          endDate: index === 7 ? subDays(baseDate, 15) : endDate,
+          endDate: index === 7 ? businessAddDays(baseDate, -15) : endDate,
           premiumAmount: 8500 + index * 2150,
           currency: index % 9 === 0 ? "USD" : "MXN",
           paymentFrequency: paymentFrequencies[index % paymentFrequencies.length],
@@ -229,7 +233,7 @@ async function main() {
 
   for (let index = 0; index < 50; index += 1) {
     const policy = policies[index % policies.length];
-    const dueDate = addDays(baseDate, dueOffsets[index % dueOffsets.length]);
+    const dueDate = businessAddDays(baseDate, dueOffsets[index % dueOffsets.length]);
     const paid = index < 20;
     const status = paid ? "PAID" : dueDate < baseDate ? "OVERDUE" : "PENDING";
 
@@ -240,13 +244,13 @@ async function main() {
           policyId: policy.id,
           clientId: policy.clientId,
           insurerId: policy.insurerId,
-          periodStartDate: subDays(dueDate, 30),
-          periodEndDate: addDays(dueDate, 30),
+          periodStartDate: businessAddDays(dueDate, -30),
+          periodEndDate: businessAddDays(dueDate, 30),
           dueDate,
           amount: 1800 + (index % 12) * 975,
           currency: policy.currency,
           status,
-          paidDate: paid ? addDays(dueDate, index % 4) : null,
+          paidDate: paid ? businessAddDays(dueDate, index % 4) : null,
           paymentMethod: paid ? ["Transferencia", "Tarjeta", "SPEI"][index % 3] : null,
           notes: status === "OVERDUE" ? "Recibo vencido sin pago registrado." : null,
           ...audit,
@@ -291,7 +295,7 @@ async function main() {
           fileName: isReceiptProof ? `comprobante-${receipt.receiptNumber}.pdf` : `poliza-${policy.policyNumber}.pdf`,
           filePath: `data/documents/demo/${isReceiptProof ? "receipts" : "policies"}/${index + 1}.pdf`,
           mimeType: "application/pdf",
-          uploadedAt: subDays(baseDate, index * 2),
+          uploadedAt: businessAddDays(baseDate, -(index * 2)),
           notes: isOrphan ? "Documento demo sin asociacion para probar calidad de datos." : "Ruta simulada de documento local.",
           ...audit,
         },
@@ -309,7 +313,7 @@ async function main() {
   for (let index = 0; index < 25; index += 1) {
     const policy = policies[index];
     const receipt = receipts[index];
-    const expectedDate = addDays(baseDate, [-18, -4, 4, 13, 29, 49][index % 6]);
+    const expectedDate = businessAddDays(baseDate, [-18, -4, 4, 13, 29, 49][index % 6]);
     const paid = index % 5 === 0;
 
     await prisma.commission.create({
@@ -323,7 +327,7 @@ async function main() {
         percentage: 10 + (index % 6),
         status: paid ? "PAID" : expectedDate < baseDate ? "OVERDUE" : index % 2 === 0 ? "EXPECTED" : "PENDING",
         expectedDate,
-        paidDate: paid ? addDays(expectedDate, 2) : null,
+        paidDate: paid ? businessAddDays(expectedDate, 2) : null,
         notes: paid ? "Comision cobrada." : "Comision pendiente de conciliacion.",
       },
     });
@@ -331,13 +335,13 @@ async function main() {
 
   for (let index = 0; index < 30; index += 1) {
     const policy = policies[index % policies.length];
-    const startDate = subDays(baseDate, index + 2);
-    const dueDate = addDays(baseDate, [-12, -3, 0, 4, 9, 15, 23][index % 7]);
+    const startDate = businessAddDays(baseDate, -(index + 2));
+    const dueDate = businessAddDays(baseDate, [-12, -3, 0, 4, 9, 15, 23][index % 7]);
     const status = taskStatuses[index % taskStatuses.length];
 
     await prisma.task.create({
       data: {
-        folio: `PD-${new Date(baseDate).getUTCFullYear()}-${String(index + 1).padStart(4, "0")}`,
+        folio: `PD-${businessStartOfDay(baseDate).getUTCFullYear()}-${String(index + 1).padStart(4, "0")}`,
         clientId: policy.clientId,
         policyId: policy.id,
         insurerId: policy.insurerId,
@@ -366,9 +370,9 @@ async function main() {
         claimType: ["Cristales", "Gastos medicos", "Daños a terceros", "Robo parcial"][index],
         description: "Siniestro demo para roadmap Fase 6.",
         status: ["OPEN", "IN_PROGRESS", "WAITING_INSURER", "RESOLVED"][index] as never,
-        incidentDate: subDays(baseDate, 20 + index),
-        reportedDate: subDays(baseDate, 18 + index),
-        closedDate: index === 3 ? subDays(baseDate, 2) : null,
+        incidentDate: businessAddDays(baseDate, -(20 + index)),
+        reportedDate: businessAddDays(baseDate, -(18 + index)),
+        closedDate: index === 3 ? businessAddDays(baseDate, -2) : null,
         amountClaimed: 15000 + index * 12000,
         amountPaid: index === 3 ? 22000 : null,
         ...audit,
@@ -384,9 +388,9 @@ async function main() {
         insurerId: index % 2 === 0 ? insurers[index % insurers.length].id : null,
         policyType: policyTypes[(index + 4) % policyTypes.length],
         status: ["REQUESTED", "IN_PROGRESS", "SENT", "ACCEPTED", "REJECTED", "EXPIRED"][index] as never,
-        requestedDate: subDays(baseDate, 12 + index),
-        sentDate: index >= 2 ? subDays(baseDate, 5 + index) : null,
-        validUntil: addDays(baseDate, [3, 7, -2, 15, 21, -5][index]),
+        requestedDate: businessAddDays(baseDate, -(12 + index)),
+        sentDate: index >= 2 ? businessAddDays(baseDate, -(5 + index)) : null,
+        validUntil: businessAddDays(baseDate, [3, 7, -2, 15, 21, -5][index]),
         quotedAmount: 9800 + index * 2400,
         notes: "Cotizacion demo para seguimiento comercial.",
         ...audit,
@@ -445,7 +449,7 @@ async function main() {
         action: actions[index % actions.length],
         oldValue: index % 5 === 0 ? "Pendiente" : null,
         newValue: index % 5 === 0 ? "Actualizado" : null,
-        createdAt: subDays(baseDate, index),
+        createdAt: businessAddDays(baseDate, -index),
         userId: index % 2 === 0 ? adminUser.id : pedroUser.id,
       },
     });

@@ -1,4 +1,3 @@
-import { addDays, subDays } from "date-fns";
 import type {
   AlertSeverity,
   PaymentFrequency,
@@ -9,6 +8,11 @@ import type {
   WorkItemStatus,
   WorkItemType,
 } from "../src/lib/domain-values";
+import {
+  businessAddDays,
+  businessStartOfDay,
+  businessToday,
+} from "../src/lib/business-dates";
 
 import {
   backupDatabase,
@@ -24,8 +28,7 @@ async function main() {
   const args = parseCliArgs();
   const dryRun = toBooleanValue(args.flags["dry-run"] ?? args.flags["dryRun"]) ?? false;
   const db = createDb();
-  const now = new Date();
-  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const base = businessStartOfDay(businessToday());
 
   const summary = {
     insurers: 0,
@@ -161,8 +164,8 @@ async function main() {
   for (let index = 0; index < 8; index += 1) {
     const client = clients[index % clients.length];
     const insurer = insurers[index % insurers.length];
-    const startDate = subDays(base, 240 - index * 14);
-    const endDate = addDays(startDate, 365);
+    const startDate = businessAddDays(base, -(240 - index * 14));
+    const endDate = businessAddDays(startDate, 365);
     const policy = await db.policy.create({
       data: {
         policyNumber: `POL-DEMO-${1000 + index}`,
@@ -188,7 +191,7 @@ async function main() {
   const receipts = [];
   for (let index = 0; index < 10; index += 1) {
     const policy = policies[index % policies.length];
-    const dueDate = addDays(base, [-18, -7, -2, 0, 4, 9, 15, 24, 36, 48][index]);
+    const dueDate = businessAddDays(base, [-18, -7, -2, 0, 4, 9, 15, 24, 36, 48][index]);
     const paid = index < 4;
     const receipt = await db.receipt.create({
       data: {
@@ -196,13 +199,13 @@ async function main() {
         policyId: policy.id,
         clientId: policy.clientId,
         insurerId: policy.insurerId,
-        periodStartDate: subDays(dueDate, 30),
-        periodEndDate: addDays(dueDate, 30),
+        periodStartDate: businessAddDays(dueDate, -30),
+        periodEndDate: businessAddDays(dueDate, 30),
         dueDate,
         amount: 1800 + index * 450,
         currency: policy.currency,
         status: paid ? "PAID" : dueDate < base ? "OVERDUE" : "PENDING",
-        paidDate: paid ? addDays(dueDate, 1) : null,
+        paidDate: paid ? businessAddDays(dueDate, 1) : null,
         paymentMethod: paid ? ["Transferencia", "SPEI", "Tarjeta"][index % 3] : null,
         notes: paid ? "Recibo pagado demo." : "Pendiente de seguimiento demo.",
       },
@@ -249,8 +252,8 @@ async function main() {
         policyId: policy.id,
         insurerId: policy.insurerId,
         receiptId: index % 2 === 0 ? receipts[index % receipts.length].id : null,
-        startDate: subDays(base, 14 + index),
-        dueDate: addDays(base, [-8, -1, 2, 7, 13, 21][index]),
+        startDate: businessAddDays(base, -(14 + index)),
+        dueDate: businessAddDays(base, [-8, -1, 2, 7, 13, 21][index]),
         notes: index % 3 === 0 ? "Requiere seguimiento hoy." : null,
       },
     });
@@ -268,8 +271,8 @@ async function main() {
         claimType: ["Cristales", "Gastos medicos"][index],
         description: "Siniestro demo para pruebas operativas.",
         status: index === 0 ? "OPEN" : "IN_PROGRESS",
-        incidentDate: subDays(base, 20 + index),
-        reportedDate: subDays(base, 18 + index),
+        incidentDate: businessAddDays(base, -(20 + index)),
+        reportedDate: businessAddDays(base, -(18 + index)),
         closedDate: null,
         amountClaimed: 15000 + index * 4000,
         amountPaid: null,
@@ -286,9 +289,9 @@ async function main() {
         insurerId: index % 2 === 0 ? insurers[index].id : null,
         policyType: quoteTypes[index],
         status: quoteStatuses[index],
-        requestedDate: subDays(base, 12 + index),
-        sentDate: index === 1 ? subDays(base, 5) : null,
-        validUntil: addDays(base, 14 + index * 7),
+        requestedDate: businessAddDays(base, -(12 + index)),
+        sentDate: index === 1 ? businessAddDays(base, -5) : null,
+        validUntil: businessAddDays(base, 14 + index * 7),
         quotedAmount: 9800 + index * 2400,
         notes: "Cotizacion demo para seguimiento comercial.",
       },
@@ -321,7 +324,7 @@ async function main() {
         action: ["Cliente creado", "Poliza creada", "Recibo creado", "Pago registrado"][index % 4],
         oldValue: index % 2 === 0 ? "Pendiente" : null,
         newValue: index % 2 === 0 ? "Actualizado" : null,
-        createdAt: subDays(base, index),
+        createdAt: businessAddDays(base, -index),
         userId: "system-user-0000",
       },
     });

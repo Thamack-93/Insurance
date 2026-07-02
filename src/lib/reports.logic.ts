@@ -1,13 +1,14 @@
 // Pure business logic for reports - no "use server"
 // This file can be imported in tests without Next.js context
 
+import { subMonths, subYears } from "date-fns";
 import {
-  startOfMonth,
-  endOfMonth,
-  subMonths,
-  subYears,
-  format,
-} from "date-fns";
+  businessEndOfMonth,
+  businessStartOfMonth,
+  businessToday,
+  formatBusinessDateInput,
+  parseBusinessDateInput,
+} from "@/lib/business-dates";
 
 // es-MX locale constants
 const MONTH_NAMES_ES = [
@@ -173,12 +174,12 @@ export function calculateMonthlyTrends(
   months: number = 12
 ): MonthlyTrend[] {
   const trends: MonthlyTrend[] = [];
-  const today = new Date();
+  const today = businessToday();
 
   for (let i = months - 1; i >= 0; i--) {
     const monthDate = subMonths(today, i);
-    const start = startOfMonth(monthDate);
-    const end = endOfMonth(monthDate);
+    const start = businessStartOfMonth(monthDate);
+    const end = businessEndOfMonth(monthDate);
 
     const monthPolicies = policies.filter((p) => {
       const date = new Date(p.startDate);
@@ -276,7 +277,7 @@ export function getDefaultReportPeriods(
   periods: ReportPeriod[];
   dataRange: { start: string; end: string } | null;
 } {
-  const today = new Date();
+  const today = businessToday();
   const periods: ReportPeriod[] = [
     {
       label: "Último mes",
@@ -313,8 +314,8 @@ export function getDefaultReportPeriods(
       periods.push({
         label: `Año ${previousYear}`,
         value: `year_${previousYear}`,
-        startDate: new Date(previousYear, 0, 1),
-        endDate: new Date(previousYear, 11, 31),
+        startDate: parseBusinessDateInput(`${previousYear}-01-01`),
+        endDate: parseBusinessDateInput(`${previousYear}-12-31`),
       });
     }
   }
@@ -325,9 +326,9 @@ export function getDefaultReportPeriods(
     dataRange:
       oldestPolicyDate && newestPolicyDate
         ? {
-            start: format(oldestPolicyDate, "yyyy-MM-dd"),
-            end: format(newestPolicyDate, "yyyy-MM-dd"),
-          }
+            start: formatBusinessDateInput(oldestPolicyDate),
+            end: formatBusinessDateInput(newestPolicyDate),
+        }
         : null,
   };
 }

@@ -8,8 +8,9 @@ import { Input } from "@/components/ui/input";
 import { CreditCard, DollarSign } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency } from "@/lib/money";
-import { formatDate, today } from "@/lib/dates";
+import { formatDate, isOverdue, today } from "@/lib/dates";
 import { formatDateInput } from "@/lib/form-utils";
+import { parseBusinessDateInput } from "@/lib/business-dates";
 import { Badge } from "@/components/ui/badge";
 import { createPayment } from "@/app/(dashboard)/payments/actions";
 
@@ -114,8 +115,8 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">Estado:</span>
-                <Badge variant={new Date(receipt.dueDate) < new Date() ? "destructive" : "secondary"}>
-                  {new Date(receipt.dueDate) < new Date() ? "Vencido" : "Pendiente"}
+                <Badge variant={isOverdue(parseBusinessDateInput(receipt.dueDate)) ? "destructive" : "secondary"}>
+                  {isOverdue(parseBusinessDateInput(receipt.dueDate)) ? "Vencido" : "Pendiente"}
                 </Badge>
               </div>
               <div className="border-t pt-3 mt-3">
