@@ -5,24 +5,27 @@ import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-states/empty-state";
-import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
+import { SortableTableHead } from "@/components/tables/sortable-table-head";
+import { TableToolbar } from "@/components/tables/table-toolbar";
 import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
+import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
 
 const PAGE_SIZE = 25;
 
 export default async function ClaimsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; page?: string }>;
+  searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string }>;
 }) {
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
-  const page = Math.max(1, Number(params.page) || 1);
+  const page = readTablePage(params);
+  const { sortKey, direction } = readTableSort(params);
 
   const db = getDb();
 
@@ -35,6 +38,25 @@ export default async function ClaimsPage({
         ],
       }
     : {};
+
+  const orderBy =
+    sortKey === "folio"
+      ? [{ folio: direction ?? "asc" }]
+      : sortKey === "client"
+        ? [{ client: { fullName: direction ?? "asc" } }, { createdAt: "desc" as const }]
+        : sortKey === "type"
+          ? [{ claimType: direction ?? "asc" }, { createdAt: "desc" as const }]
+          : sortKey === "insurer"
+            ? [{ insurer: { name: direction ?? "asc" } }, { createdAt: "desc" as const }]
+            : sortKey === "status"
+              ? [{ status: direction ?? "asc" }, { createdAt: "desc" as const }]
+              : sortKey === "incidentDate"
+                ? [{ incidentDate: direction ?? "asc" }, { folio: "asc" as const }]
+                : sortKey === "claimed"
+                  ? [{ amountClaimed: direction ?? "desc" }, { createdAt: "desc" as const }]
+                  : sortKey === "paid"
+                    ? [{ amountPaid: direction ?? "desc" }, { createdAt: "desc" as const }]
+                    : [{ createdAt: "desc" as const }];
 
   const [
     openCount,
@@ -58,7 +80,7 @@ export default async function ClaimsPage({
     db.claim.findMany({
       where,
       include: { client: true, policy: true, insurer: true },
-      orderBy: { createdAt: "desc" },
+      orderBy,
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
@@ -138,7 +160,7 @@ export default async function ClaimsPage({
         <SectionCard
           title="Siniestros"
           description="Listado completo de reclamaciones."
-          action={<ListSearch placeholder="Buscar por folio, tipo o cliente..." />}
+          action={<TableToolbar searchPlaceholder="Buscar por folio, tipo o cliente..." />}
         >
           {filteredCount === 0 ? (
             query ? (
@@ -162,29 +184,37 @@ export default async function ClaimsPage({
             )
           ) : pagedClaims.length === 0 ? (
             <div className="p-4">
-              <EmptyState
-                icon={AlertTriangle}
-                title="Página fuera de rango"
-                description="No hay siniestros en esta página. Vuelve al inicio del listado."
-                action="Volver al inicio"
-                actionHref={query ? `/claims?q=${encodeURIComponent(query)}` : "/claims"}
-              />
-            </div>
-          ) : (
-            <>
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/40">
-                    <TableHead>Folio</TableHead>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead>Aseguradora</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead>Incidente</TableHead>
-                    <TableHead className="text-right">Reclamado</TableHead>
-                    <TableHead className="text-right">Pagado</TableHead>
-                  </TableRow>
-                </TableHeader>
+                <EmptyState
+                  icon={AlertTriangle}
+                  title="Página fuera de rango"
+                  description="No hay siniestros en esta página. Vuelve al inicio del listado."
+                  action="Volver al inicio"
+                  actionHref={buildTableHref("/claims", params, {
+                    q: query || null,
+                    sort: sortKey ?? null,
+                    dir: direction ?? null,
+                  })}
+                />
+              </div>
+            ) : (
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/40">
+                      <SortableTableHead sortKey="folio">Folio</SortableTableHead>
+                      <SortableTableHead sortKey="client">Cliente</SortableTableHead>
+                      <SortableTableHead sortKey="type">Tipo</SortableTableHead>
+                      <SortableTableHead sortKey="insurer">Aseguradora</SortableTableHead>
+                      <SortableTableHead sortKey="status">Estado</SortableTableHead>
+                      <SortableTableHead sortKey="incidentDate">Incidente</SortableTableHead>
+                      <SortableTableHead sortKey="claimed" className="text-right">
+                        Reclamado
+                      </SortableTableHead>
+                      <SortableTableHead sortKey="paid" className="text-right">
+                        Pagado
+                      </SortableTableHead>
+                    </TableRow>
+                  </TableHeader>
                 <TableBody>
                   {pagedClaims.map((claim) => (
                     <TableRow key={claim.id}>
@@ -224,7 +254,7 @@ export default async function ClaimsPage({
                 pageSize={PAGE_SIZE}
                 total={filteredCount}
                 basePath="/claims"
-                searchParams={{ q: query }}
+                searchParams={{ q: query, sort: sortKey ?? undefined, dir: direction ?? undefined }}
               />
             </>
           )}

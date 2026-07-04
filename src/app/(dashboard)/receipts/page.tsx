@@ -8,8 +8,8 @@ import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UrlTabs } from "@/components/ui/url-tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-states/empty-state";
-import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
+import { TableToolbar } from "@/components/tables/table-toolbar";
 import { CollectableReceipts, type CollectableReceipt } from "@/components/receipts/collectable-receipts";
 import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
 import { getDb } from "@/lib/db";
@@ -23,18 +23,20 @@ import {
   receiptPortfolioWhere,
   requirePortfolioReadScope,
 } from "@/lib/portfolio-access";
+import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
 
 const PAGE_SIZE = 25;
 
 export default async function ReceiptsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ tab?: string; q?: string; page?: string }>;
+  searchParams?: Promise<{ tab?: string; q?: string; page?: string; sort?: string; dir?: string }>;
 }) {
   const params = (await searchParams) ?? {};
   const initialTab = params.tab === "historico" || params.tab === "revision" ? params.tab : "cobrar";
   const query = (params.q ?? "").trim().slice(0, 100);
-  const page = Math.max(1, Number(params.page) || 1);
+  const page = readTablePage(params);
+  const { sortKey, direction } = readTableSort(params);
 
   const db = getDb();
   const scope = await requirePortfolioReadScope();
@@ -65,6 +67,21 @@ export default async function ReceiptsPage({
         ],
       }
     : baseWhere;
+
+  const orderBy =
+    sortKey === "receiptNumber"
+      ? [{ receiptNumber: direction ?? "asc" }, { dueDate: "asc" as const }]
+      : sortKey === "client"
+        ? [{ client: { fullName: direction ?? "asc" } }, { dueDate: "asc" as const }]
+        : sortKey === "policy"
+          ? [{ policy: { policyNumber: direction ?? "asc" } }, { dueDate: "asc" as const }]
+          : sortKey === "insurer"
+            ? [{ insurer: { name: direction ?? "asc" } }, { dueDate: "asc" as const }]
+            : sortKey === "dueDate"
+              ? [{ dueDate: direction ?? "asc" }, { receiptNumber: "asc" as const }]
+              : sortKey === "amount"
+                ? [{ amount: direction ?? "desc" }, { dueDate: "asc" as const }]
+                : [{ dueDate: "asc" as const }];
 
   const [
     openCount,
@@ -99,7 +116,7 @@ export default async function ReceiptsPage({
         endorsement: true,
         _count: { select: { payments: true } },
       },
-      orderBy: { dueDate: "asc" },
+      orderBy,
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
@@ -228,7 +245,7 @@ export default async function ReceiptsPage({
           <SectionCard
             title="Por cobrar"
             description="Búsqueda y paginación sobre todos los recibos abiertos."
-            action={<ListSearch placeholder="Buscar por número, cliente, póliza o aseguradora..." />}
+            action={<TableToolbar searchPlaceholder="Buscar por número, cliente, póliza o aseguradora..." />}
           >
             {filteredCount === 0 ? (
               query ? (
@@ -257,7 +274,12 @@ export default async function ReceiptsPage({
                   title="Página fuera de rango"
                   description="No hay recibos en esta página. Vuelve al inicio del listado."
                   action="Volver al inicio"
-                  actionHref={query ? `/receipts?tab=cobrar&q=${encodeURIComponent(query)}` : "/receipts?tab=cobrar"}
+                  actionHref={buildTableHref("/receipts", params, {
+                    tab: "cobrar",
+                    q: query || null,
+                    sort: sortKey ?? null,
+                    dir: direction ?? null,
+                  })}
                 />
               </div>
             ) : (
@@ -268,7 +290,7 @@ export default async function ReceiptsPage({
                   pageSize={PAGE_SIZE}
                   total={filteredCount}
                   basePath="/receipts"
-                  searchParams={{ tab: "cobrar", q: query }}
+                  searchParams={{ tab: "cobrar", q: query, sort: sortKey ?? undefined, dir: direction ?? undefined }}
                 />
               </div>
             )}

@@ -8,19 +8,22 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-states/empty-state";
-import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
+import { TableToolbar } from "@/components/tables/table-toolbar";
+import { SortableTableHead } from "@/components/tables/sortable-table-head";
 import { getDb } from "@/lib/db";
 import { daysUntil, formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
+import { policyTypeOptions } from "@/lib/domain-options";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
+import { buildTableHref, readAllowedTableParam, readTablePage, readTableSort } from "@/lib/table-query";
 
 export default async function PortfolioPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; page?: string }>;
+  searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string; type?: string }>;
 }) {
   const db = getDb();
   const now = today();
@@ -38,10 +41,13 @@ export default async function PortfolioPage({
 
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
-  const page = Math.max(1, Number(params.page) || 1);
+  const page = readTablePage(params);
+  const typeFilter = readAllowedTableParam(params, "type", policyTypeOptions.map((option) => option.value));
+  const { sortKey, direction } = readTableSort(params);
 
   const where: Prisma.PolicyWhereInput = {
     status: "ACTIVE",
+    ...(typeFilter ? { policyType: typeFilter } : {}),
     ...(query
       ? {
           OR: [
@@ -49,9 +55,22 @@ export default async function PortfolioPage({
             { client: { fullName: { contains: query } } },
             { insurer: { name: { contains: query } } },
           ],
-        }
+      }
       : {}),
   };
+
+  const orderBy =
+    sortKey === "policyNumber"
+      ? [{ policyNumber: direction ?? "asc" }, { endDate: "asc" as const }]
+      : sortKey === "client"
+        ? [{ client: { fullName: direction ?? "asc" } }, { endDate: "asc" as const }]
+        : sortKey === "insurer"
+          ? [{ insurer: { name: direction ?? "asc" } }, { endDate: "asc" as const }]
+          : sortKey === "endDate"
+            ? [{ endDate: direction ?? "asc" }, { premiumAmount: "desc" as const }]
+            : sortKey === "premiumAmount"
+              ? [{ premiumAmount: direction ?? "desc" }, { endDate: "asc" as const }]
+              : [{ premiumAmount: "desc" as const }, { endDate: "asc" as const }];
 
   const [
     activeCount,
@@ -69,7 +88,7 @@ export default async function PortfolioPage({
     db.policy.findMany({
       where,
       include: { client: true, insurer: true },
-      orderBy: [{ premiumAmount: "desc" }, { endDate: "asc" }],
+      orderBy,
       skip: (page - 1) * DEFAULT_PAGE_SIZE,
       take: DEFAULT_PAGE_SIZE,
     }),
@@ -194,7 +213,18 @@ export default async function PortfolioPage({
         <SectionCard
           title="Pólizas activas"
           description="Ordenadas por prima. Listado paginado con búsqueda."
-          action={<ListSearch placeholder="Buscar por póliza, cliente o aseguradora..." />}
+          action={
+            <TableToolbar
+              searchPlaceholder="Buscar por póliza, cliente o aseguradora..."
+              filters={[
+                {
+                  key: "type",
+                  label: "Tipo",
+                  options: policyTypeOptions,
+                },
+              ]}
+            />
+          }
         >
           {activeCount === 0 ? (
             <div className="p-4">
@@ -217,7 +247,10 @@ export default async function PortfolioPage({
                 title="Página fuera de rango"
                 description="Vuelve al inicio del listado."
                 action="Volver al inicio"
-                actionHref={query ? `/portfolio?q=${encodeURIComponent(query)}` : "/portfolio"}
+                actionHref={buildTableHref("/portfolio", params, {
+                  q: query || null,
+                  type: typeFilter || null,
+                })}
               />
             </div>
           ) : (
@@ -225,11 +258,11 @@ export default async function PortfolioPage({
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/40">
-                    <TableHead>Póliza</TableHead>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Aseguradora</TableHead>
+                    <SortableTableHead sortKey="policyNumber">Póliza</SortableTableHead>
+                    <SortableTableHead sortKey="client">Cliente</SortableTableHead>
+                    <SortableTableHead sortKey="insurer">Aseguradora</SortableTableHead>
                     <TableHead>Tipo</TableHead>
-                    <TableHead>Renovación</TableHead>
+                    <SortableTableHead sortKey="endDate">Renovación</SortableTableHead>
                     <TableHead className="text-right">Prima</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -273,7 +306,12 @@ export default async function PortfolioPage({
                 pageSize={DEFAULT_PAGE_SIZE}
                 total={activeCount}
                 basePath="/portfolio"
-                searchParams={{ q: query }}
+                searchParams={{
+                  q: query,
+                  type: typeFilter ?? undefined,
+                  sort: sortKey ?? undefined,
+                  dir: direction ?? undefined,
+                }}
               />
             </>
           )}

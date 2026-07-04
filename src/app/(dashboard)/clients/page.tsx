@@ -9,33 +9,53 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableHead, TableHeader, TableRow, TableCell } from "@/components/ui/table";
 import { ClientsListTable } from "@/components/clients/clients-list-table";
 import { EmptyState } from "@/components/empty-states/empty-state";
-import { ListSearch } from "@/components/lists/list-search";
+import { TableToolbar } from "@/components/tables/table-toolbar";
 import { getDb } from "@/lib/db";
 import { formatCurrency, toNumber } from "@/lib/money";
+import { entityStatusOptions } from "@/lib/domain-options";
+import { buildTableHref, readAllowedTableParam, readTablePage, readTableSort } from "@/lib/table-query";
 
 const PAGE_SIZE = 25;
 
 export default async function ClientsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; page?: string }>;
+  searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string; status?: string; type?: string }>;
 }) {
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
-  const page = Math.max(1, Number(params.page) || 1);
+  const page = readTablePage(params);
+  const statusFilter = readAllowedTableParam(params, "status", ["ACTIVE", "INACTIVE", "ARCHIVED"]);
+  const typeFilter = readAllowedTableParam(params, "type", ["PERSON", "COMPANY"]);
+  const { sortKey, direction } = readTableSort(params);
 
   const db = getDb();
 
-  const where: Prisma.ClientWhereInput = query
-    ? {
-        OR: [
-          { fullName: { contains: query } },
-          { email: { contains: query } },
-          { phone: { contains: query } },
-          { rfc: { contains: query } },
-        ],
-      }
-    : {};
+  const where: Prisma.ClientWhereInput = {
+    ...(statusFilter ? { status: statusFilter } : {}),
+    ...(typeFilter ? { type: typeFilter } : {}),
+    ...(query
+      ? {
+          OR: [
+            { fullName: { contains: query } },
+            { email: { contains: query } },
+            { phone: { contains: query } },
+            { rfc: { contains: query } },
+          ],
+        }
+      : {}),
+  };
+
+  const orderBy =
+    sortKey === "fullName"
+      ? [{ fullName: direction ?? "asc" }, { createdAt: "desc" as const }]
+      : sortKey === "type"
+        ? [{ type: direction ?? "asc" }, { createdAt: "desc" as const }]
+        : sortKey === "status"
+          ? [{ status: direction ?? "asc" }, { createdAt: "desc" as const }]
+          : sortKey === "createdAt"
+            ? [{ createdAt: direction ?? "desc" }]
+            : [{ createdAt: "desc" as const }];
 
   const [
     activeCount,
@@ -53,7 +73,7 @@ export default async function ClientsPage({
     db.client.count({ where }),
     db.client.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy,
       include: {
         _count: { select: { policies: true, receipts: true, tasks: true } },
       },
@@ -141,7 +161,24 @@ export default async function ClientsPage({
           title="Directorio"
           description="Listado completo con búsqueda y paginación."
           action={
-            <ListSearch placeholder="Buscar por nombre, email, teléfono o RFC..." />
+            <TableToolbar
+              searchPlaceholder="Buscar por nombre, email, teléfono o RFC..."
+              filters={[
+                {
+                  key: "type",
+                  label: "Tipo",
+                  options: [
+                    { value: "PERSON", label: "Persona" },
+                    { value: "COMPANY", label: "Empresa" },
+                  ],
+                },
+                {
+                  key: "status",
+                  label: "Estado",
+                  options: entityStatusOptions,
+                },
+              ]}
+            />
           }
         >
           {filteredCount === 0 ? (
@@ -171,7 +208,11 @@ export default async function ClientsPage({
                 title="Página fuera de rango"
                 description="No hay clientes en esta página. Vuelve al inicio del listado."
                 action="Volver al inicio"
-                actionHref={query ? `/clients?q=${encodeURIComponent(query)}` : "/clients"}
+                actionHref={buildTableHref("/clients", params, {
+                  q: query || null,
+                  status: statusFilter || null,
+                  type: typeFilter || null,
+                })}
               />
             </div>
           ) : (
@@ -190,6 +231,12 @@ export default async function ClientsPage({
               pageSize={PAGE_SIZE}
               total={filteredCount}
               query={query}
+              searchParams={{
+                status: statusFilter ?? undefined,
+                type: typeFilter ?? undefined,
+                sort: sortKey ?? undefined,
+                dir: direction ?? undefined,
+              }}
             />
           )}
         </SectionCard>

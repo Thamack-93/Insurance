@@ -5,24 +5,27 @@ import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-states/empty-state";
-import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
+import { SortableTableHead } from "@/components/tables/sortable-table-head";
+import { TableToolbar } from "@/components/tables/table-toolbar";
 import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
+import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
 
 const PAGE_SIZE = 25;
 
 export default async function QuotesPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; page?: string }>;
+  searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string }>;
 }) {
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
-  const page = Math.max(1, Number(params.page) || 1);
+  const page = readTablePage(params);
+  const { sortKey, direction } = readTableSort(params);
 
   const db = getDb();
 
@@ -34,6 +37,23 @@ export default async function QuotesPage({
         ],
       }
     : {};
+
+  const orderBy =
+    sortKey === "folio"
+      ? [{ id: direction ?? "asc" }]
+      : sortKey === "client"
+        ? [{ client: { fullName: direction ?? "asc" } }, { createdAt: "desc" as const }]
+        : sortKey === "type"
+          ? [{ policyType: direction ?? "asc" }, { createdAt: "desc" as const }]
+          : sortKey === "insurer"
+            ? [{ insurer: { name: direction ?? "asc" } }, { createdAt: "desc" as const }]
+            : sortKey === "status"
+              ? [{ status: direction ?? "asc" }, { createdAt: "desc" as const }]
+              : sortKey === "createdAt"
+                ? [{ createdAt: direction ?? "desc" }]
+                : sortKey === "value"
+                  ? [{ quotedAmount: direction ?? "desc" }, { createdAt: "desc" as const }]
+                  : [{ createdAt: "desc" as const }];
 
   const [
     activeCount,
@@ -59,7 +79,7 @@ export default async function QuotesPage({
     db.quote.findMany({
       where,
       include: { client: true, insurer: true },
-      orderBy: { createdAt: "desc" },
+      orderBy,
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
@@ -138,7 +158,7 @@ export default async function QuotesPage({
         <SectionCard
           title="Cotizaciones"
           description="Listado completo de propuestas."
-          action={<ListSearch placeholder="Buscar por cliente, tipo o aseguradora..." />}
+          action={<TableToolbar searchPlaceholder="Buscar por cliente, tipo o aseguradora..." />}
         >
           {filteredCount === 0 ? (
             query ? (
@@ -162,28 +182,34 @@ export default async function QuotesPage({
             )
           ) : pagedQuotes.length === 0 ? (
             <div className="p-4">
-              <EmptyState
-                icon={Calculator}
-                title="Página fuera de rango"
-                description="No hay cotizaciones en esta página. Vuelve al inicio del listado."
-                action="Volver al inicio"
-                actionHref={query ? `/quotes?q=${encodeURIComponent(query)}` : "/quotes"}
-              />
-            </div>
-          ) : (
-            <>
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/40">
-                    <TableHead>Folio</TableHead>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead>Aseguradora</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead>Creada</TableHead>
-                    <TableHead className="text-right">Prima</TableHead>
-                  </TableRow>
-                </TableHeader>
+                <EmptyState
+                  icon={Calculator}
+                  title="Página fuera de rango"
+                  description="No hay cotizaciones en esta página. Vuelve al inicio del listado."
+                  action="Volver al inicio"
+                  actionHref={buildTableHref("/quotes", params, {
+                    q: query || null,
+                    sort: sortKey ?? null,
+                    dir: direction ?? null,
+                  })}
+                />
+              </div>
+            ) : (
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/40">
+                      <SortableTableHead sortKey="folio">Folio</SortableTableHead>
+                      <SortableTableHead sortKey="client">Cliente</SortableTableHead>
+                      <SortableTableHead sortKey="type">Tipo</SortableTableHead>
+                      <SortableTableHead sortKey="insurer">Aseguradora</SortableTableHead>
+                      <SortableTableHead sortKey="status">Estado</SortableTableHead>
+                      <SortableTableHead sortKey="createdAt">Creada</SortableTableHead>
+                      <SortableTableHead sortKey="value" className="text-right">
+                        Prima
+                      </SortableTableHead>
+                    </TableRow>
+                  </TableHeader>
                 <TableBody>
                   {pagedQuotes.map((quote) => (
                     <TableRow key={quote.id}>
@@ -220,7 +246,7 @@ export default async function QuotesPage({
                 pageSize={PAGE_SIZE}
                 total={filteredCount}
                 basePath="/quotes"
-                searchParams={{ q: query }}
+                searchParams={{ q: query, sort: sortKey ?? undefined, dir: direction ?? undefined }}
               />
             </>
           )}

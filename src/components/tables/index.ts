@@ -1,2 +1,6 @@
 export * from "./data-table"
 export * from "./density-toggle"
+export * from "./use-table-state"
+export * from "./sortable-table-head"
+export * from "./column-filter"
+export * from "./table-toolbar"

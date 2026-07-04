@@ -5,11 +5,12 @@ import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-states/empty-state";
-import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
 import { daysUntil, formatDate, today } from "@/lib/dates";
 import { WorkItemsTable, type WorkItemRow } from "@/components/tasks/tasks-table";
 import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
+import { TableToolbar } from "@/components/tables/table-toolbar";
+import { buildTableHref, readTablePage } from "@/lib/table-query";
 
 const PAGE_SIZE = 25;
 
@@ -20,7 +21,7 @@ export default async function WorkItemsPage({
 }) {
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
-  const page = Math.max(1, Number(params.page) || 1);
+  const page = readTablePage(params);
 
   const now = today();
   const in7 = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -181,13 +182,13 @@ export default async function WorkItemsPage({
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-          <SectionCard
-            title="Cola principal"
-            description="Búsqueda y paginación sobre todos los pendientes activos."
-            action={<ListSearch placeholder="Buscar por folio, título, cliente o póliza..." />}
-          >
-            {filteredCount === 0 ? (
-              query ? (
+        <SectionCard
+          title="Cola principal"
+          description="Búsqueda y paginación sobre todos los pendientes activos."
+          action={<TableToolbar searchPlaceholder="Buscar por folio, título, cliente o póliza..." />}
+        >
+          {filteredCount === 0 ? (
+            query ? (
                 <div className="p-4">
                   <EmptyState
                     icon={ListTodo}
@@ -213,7 +214,7 @@ export default async function WorkItemsPage({
                   title="Página fuera de rango"
                   description="No hay pendientes en esta página. Vuelve al inicio del listado."
                   action="Volver al inicio"
-                  actionHref={query ? `/tasks?q=${encodeURIComponent(query)}` : "/tasks"}
+                  actionHref={buildTableHref("/tasks", params, { q: query || null })}
                 />
               </div>
             ) : (

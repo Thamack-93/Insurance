@@ -8,26 +8,36 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-states/empty-state";
-import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
+import { TableToolbar } from "@/components/tables/table-toolbar";
+import { SortableTableHead } from "@/components/tables/sortable-table-head";
 import { getDb } from "@/lib/db";
 import { businessAddDays } from "@/lib/business-dates";
 import { daysUntil, formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
+import { policyStatusOptions, policyTypeOptions } from "@/lib/domain-options";
 import { policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
+import { buildTableHref, readAllowedTableParam, readTablePage, readTableSort } from "@/lib/table-query";
 
 const PAGE_SIZE = 25;
 
 export default async function PoliciesPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; page?: string }>;
+  searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string; status?: string; type?: string }>;
 }) {
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
-  const page = Math.max(1, Number(params.page) || 1);
+  const page = readTablePage(params);
+  const statusFilter = readAllowedTableParam(
+    params,
+    "status",
+    policyStatusOptions.map((option) => option.value),
+  );
+  const typeFilter = readAllowedTableParam(params, "type", policyTypeOptions.map((option) => option.value));
+  const { sortKey, direction } = readTableSort(params);
 
   const db = getDb();
   const scope = await requirePortfolioReadScope();
@@ -48,6 +58,8 @@ export default async function PoliciesPage({
     ? {
         AND: [
           portfolioWhere,
+          ...(statusFilter ? [{ status: statusFilter }] : []),
+          ...(typeFilter ? [{ policyType: typeFilter }] : []),
           {
             OR: [
               { policyNumber: { contains: query } },
@@ -57,7 +69,26 @@ export default async function PoliciesPage({
           },
         ],
       }
-    : portfolioWhere;
+    : {
+        ...portfolioWhere,
+        ...(statusFilter ? { status: statusFilter } : {}),
+        ...(typeFilter ? { policyType: typeFilter } : {}),
+      };
+
+  const orderBy =
+    sortKey === "policyNumber"
+      ? [{ policyNumber: direction ?? "asc" }, { endDate: "desc" as const }, { updatedAt: "desc" as const }]
+      : sortKey === "client"
+        ? [{ client: { fullName: direction ?? "asc" } }, { endDate: "desc" as const }, { updatedAt: "desc" as const }]
+        : sortKey === "insurer"
+          ? [{ insurer: { name: direction ?? "asc" } }, { endDate: "desc" as const }, { updatedAt: "desc" as const }]
+          : sortKey === "type"
+            ? [{ policyType: direction ?? "asc" }, { endDate: "desc" as const }, { updatedAt: "desc" as const }]
+            : sortKey === "endDate"
+              ? [{ endDate: direction ?? "desc" }, { updatedAt: "desc" as const }]
+              : sortKey === "premiumAmount"
+                ? [{ premiumAmount: direction ?? "desc" }, { endDate: "desc" as const }]
+                : [{ endDate: "desc" as const }, { startDate: "desc" as const }, { updatedAt: "desc" as const }];
 
   const [
     activeCount,
@@ -81,7 +112,7 @@ export default async function PoliciesPage({
     db.policy.findMany({
       where,
       include: { client: true, insurer: true },
-      orderBy: [{ endDate: "desc" }, { startDate: "desc" }, { updatedAt: "desc" }],
+      orderBy,
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
@@ -161,7 +192,21 @@ export default async function PoliciesPage({
           title="Inventario"
           description="Búsqueda y paginación sobre todas las pólizas."
           action={
-            <ListSearch placeholder="Buscar por número, cliente o aseguradora..." />
+            <TableToolbar
+              searchPlaceholder="Buscar por número, cliente o aseguradora..."
+              filters={[
+                {
+                  key: "status",
+                  label: "Estado",
+                  options: policyStatusOptions,
+                },
+                {
+                  key: "type",
+                  label: "Tipo",
+                  options: policyTypeOptions,
+                },
+              ]}
+            />
           }
         >
           {filteredCount === 0 ? (
@@ -186,24 +231,28 @@ export default async function PoliciesPage({
             )
           ) : pagedPolicies.length === 0 ? (
             <div className="p-4">
-              <EmptyState
-                icon={FolderKanban}
-                title="Página fuera de rango"
-                description="No hay pólizas en esta página. Vuelve al inicio del listado."
-                action="Volver al inicio"
-                actionHref={query ? `/policies?q=${encodeURIComponent(query)}` : "/policies"}
-              />
-            </div>
+                <EmptyState
+                  icon={FolderKanban}
+                  title="Página fuera de rango"
+                  description="No hay pólizas en esta página. Vuelve al inicio del listado."
+                  action="Volver al inicio"
+                  actionHref={buildTableHref("/policies", params, {
+                    q: query || null,
+                    status: statusFilter || null,
+                    type: typeFilter || null,
+                  })}
+                />
+              </div>
           ) : (
             <>
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/40">
-                    <TableHead>Póliza</TableHead>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Aseguradora</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead>Renovación</TableHead>
+                    <SortableTableHead sortKey="policyNumber">Póliza</SortableTableHead>
+                    <SortableTableHead sortKey="client">Cliente</SortableTableHead>
+                    <SortableTableHead sortKey="insurer">Aseguradora</SortableTableHead>
+                    <SortableTableHead sortKey="type">Tipo</SortableTableHead>
+                    <SortableTableHead sortKey="endDate">Renovación</SortableTableHead>
                     <TableHead className="text-right">Prima</TableHead>
                     <TableHead>Estado</TableHead>
                   </TableRow>
@@ -254,7 +303,13 @@ export default async function PoliciesPage({
                 pageSize={PAGE_SIZE}
                 total={filteredCount}
                 basePath="/policies"
-                searchParams={{ q: query }}
+                searchParams={{
+                  q: query,
+                  status: statusFilter ?? undefined,
+                  type: typeFilter ?? undefined,
+                  sort: sortKey ?? undefined,
+                  dir: direction ?? undefined,
+                }}
               />
             </>
           )}

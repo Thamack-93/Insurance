@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Pagination } from "@/components/lists/pagination";
+import { SortableTableHead } from "@/components/tables/sortable-table-head";
 import {
   BulkActionsProvider,
   useBulkActions,
@@ -34,9 +35,10 @@ type ClientsListTableProps = {
   pageSize: number;
   total: number;
   query: string;
+  searchParams?: Record<string, string | undefined>;
 };
 
-export function ClientsListTable({ clients, page, pageSize, total, query }: ClientsListTableProps) {
+export function ClientsListTable({ clients, page, pageSize, total, query, searchParams = {} }: ClientsListTableProps) {
   return (
     <BulkActionsProvider>
       <ClientsBulkToolbar clients={clients} />
@@ -44,13 +46,13 @@ export function ClientsListTable({ clients, page, pageSize, total, query }: Clie
         <TableHeader>
           <TableRow className="bg-muted/40">
             <TableHead className="w-10" />
-            <TableHead>Cliente</TableHead>
-            <TableHead>Tipo</TableHead>
+            <SortableTableHead sortKey="fullName">Cliente</SortableTableHead>
+            <SortableTableHead sortKey="type">Tipo</SortableTableHead>
             <TableHead className="text-right">Pólizas</TableHead>
             <TableHead className="text-right">Recibos</TableHead>
             <TableHead className="text-right">Tareas</TableHead>
-            <TableHead>Alta</TableHead>
-            <TableHead>Estado</TableHead>
+            <SortableTableHead sortKey="createdAt">Alta</SortableTableHead>
+            <SortableTableHead sortKey="status">Estado</SortableTableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -64,7 +66,7 @@ export function ClientsListTable({ clients, page, pageSize, total, query }: Clie
         pageSize={pageSize}
         total={total}
         basePath="/clients"
-        searchParams={{ q: query }}
+        searchParams={{ q: query, ...searchParams }}
       />
     </BulkActionsProvider>
   );

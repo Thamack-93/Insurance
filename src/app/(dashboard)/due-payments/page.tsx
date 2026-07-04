@@ -7,8 +7,9 @@ import { StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-states/empty-state";
-import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
+import { TableToolbar } from "@/components/tables/table-toolbar";
+import { SortableTableHead } from "@/components/tables/sortable-table-head";
 import { QuickPaymentDialog } from "@/components/payments/quick-payment-dialog";
 import { CancelReceiptButton } from "@/components/receipts/cancel-receipt-button";
 import { getDb } from "@/lib/db";
@@ -18,11 +19,12 @@ import { formatCurrency, toNumber } from "@/lib/money";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import { receiptOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { buildTableHref, readAllowedTableParam, readTablePage, readTableSort } from "@/lib/table-query";
 
 export default async function DuePaymentsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; page?: string }>;
+  searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string; window?: string }>;
 }) {
   const db = getDb();
   const scope = await requirePortfolioReadScope();
@@ -33,12 +35,27 @@ export default async function DuePaymentsPage({
 
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
-  const page = Math.max(1, Number(params.page) || 1);
+  const page = readTablePage(params);
+  const horizonFilter = readAllowedTableParam(params, "window", ["overdue", "today", "7", "30", "60"]);
+  const { sortKey, direction } = readTableSort(params);
 
   const receiptScopeWhere = receiptOperationalWhere(scope.portfolioOwnerId);
+  const horizonWhere =
+    horizonFilter === "overdue"
+      ? { dueDate: { lt: now } }
+      : horizonFilter === "today"
+        ? { dueDate: { gte: now, lt: businessAddDays(now, 1) } }
+        : horizonFilter === "7"
+          ? { dueDate: { gte: now, lte: in7 } }
+          : horizonFilter === "30"
+            ? { dueDate: { gt: in7, lte: in30 } }
+            : horizonFilter === "60"
+              ? { dueDate: { gt: in30, lte: in60 } }
+              : { dueDate: { lte: in60 } };
+
   const openHorizonWhere: Prisma.ReceiptWhereInput = {
     ...receiptScopeWhere,
-    dueDate: { lte: in60 },
+    ...horizonWhere,
     status: { notIn: ["PAID", "CANCELLED"] },
     ...(query
       ? {
@@ -51,6 +68,19 @@ export default async function DuePaymentsPage({
         }
       : {}),
   };
+
+  const orderBy =
+    sortKey === "receiptNumber"
+      ? [{ receiptNumber: direction ?? "asc" }, { dueDate: "asc" as const }]
+      : sortKey === "client"
+        ? [{ client: { fullName: direction ?? "asc" } }, { dueDate: "asc" as const }]
+        : sortKey === "policy"
+          ? [{ policy: { policyNumber: direction ?? "asc" } }, { dueDate: "asc" as const }]
+          : sortKey === "dueDate"
+            ? [{ dueDate: direction ?? "asc" }, { receiptNumber: "asc" as const }]
+            : sortKey === "amount"
+              ? [{ amount: direction ?? "desc" }, { dueDate: "asc" as const }]
+              : [{ dueDate: "asc" as const }];
 
   const [
     openCount,
@@ -73,7 +103,7 @@ export default async function DuePaymentsPage({
         endorsement: true,
         _count: { select: { payments: true } },
       },
-      orderBy: { dueDate: "asc" },
+      orderBy,
       skip: (page - 1) * DEFAULT_PAGE_SIZE,
       take: DEFAULT_PAGE_SIZE,
     }),
@@ -169,7 +199,24 @@ export default async function DuePaymentsPage({
         <SectionCard
           title="Recibos por cobrar (60 días)"
           description="Listado paginado de vencidos y próximos 60 días."
-          action={<ListSearch placeholder="Buscar por recibo, cliente o póliza..." />}
+          action={
+            <TableToolbar
+              searchPlaceholder="Buscar por recibo, cliente o póliza..."
+              filters={[
+                {
+                  key: "window",
+                  label: "Ventana",
+                  options: [
+                    { value: "overdue", label: "Vencidos" },
+                    { value: "today", label: "Hoy" },
+                    { value: "7", label: "7 días" },
+                    { value: "30", label: "8-30 días" },
+                    { value: "60", label: "31-60 días" },
+                  ],
+                },
+              ]}
+            />
+          }
         >
           {openCount === 0 ? (
             <div className="p-4">
@@ -190,7 +237,10 @@ export default async function DuePaymentsPage({
                 title="Página fuera de rango"
                 description="Vuelve al inicio del listado."
                 action="Volver al inicio"
-                actionHref={query ? `/due-payments?q=${encodeURIComponent(query)}` : "/due-payments"}
+                actionHref={buildTableHref("/due-payments", params, {
+                  q: query || null,
+                  window: horizonFilter || null,
+                })}
               />
             </div>
           ) : (
@@ -198,10 +248,10 @@ export default async function DuePaymentsPage({
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/40">
-                    <TableHead>Recibo</TableHead>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Póliza</TableHead>
-                    <TableHead>Vencimiento</TableHead>
+                    <SortableTableHead sortKey="receiptNumber">Recibo</SortableTableHead>
+                    <SortableTableHead sortKey="client">Cliente</SortableTableHead>
+                    <SortableTableHead sortKey="policy">Póliza</SortableTableHead>
+                    <SortableTableHead sortKey="dueDate">Vencimiento</SortableTableHead>
                     <TableHead className="text-right">Monto</TableHead>
                     <TableHead className="text-right">Acción</TableHead>
                   </TableRow>
@@ -264,7 +314,12 @@ export default async function DuePaymentsPage({
                 pageSize={DEFAULT_PAGE_SIZE}
                 total={openCount}
                 basePath="/due-payments"
-                searchParams={{ q: query }}
+                searchParams={{
+                  q: query,
+                  window: horizonFilter ?? undefined,
+                  sort: sortKey ?? undefined,
+                  dir: direction ?? undefined,
+                }}
               />
             </>
           )}

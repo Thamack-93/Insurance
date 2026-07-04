@@ -6,21 +6,23 @@ import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-states/empty-state";
-import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
+import { SortableTableHead } from "@/components/tables/sortable-table-head";
+import { TableToolbar } from "@/components/tables/table-toolbar";
 import { getCommissionStats, getOverdueCommissions, autoUpdateCommissionStatuses } from "@/lib/commissions";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getDb } from "@/lib/db";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { commissionOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
 
 export default async function CommissionsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; page?: string }>;
+  searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string }>;
 }) {
   await connection();
   const scope = await requirePortfolioReadScope();
@@ -29,7 +31,8 @@ export default async function CommissionsPage({
 
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
-  const page = Math.max(1, Number(params.page) || 1);
+  const page = readTablePage(params);
+  const { sortKey, direction } = readTableSort(params);
 
   const openWhere: Prisma.CommissionWhereInput = {
     ...commissionOperationalWhere(scope.portfolioOwnerId),
@@ -45,6 +48,21 @@ export default async function CommissionsPage({
       : {}),
   };
 
+  const orderBy =
+    sortKey === "policy"
+      ? [{ policy: { policyNumber: direction ?? "asc" } }, { expectedDate: "asc" as const }]
+      : sortKey === "client"
+        ? [{ client: { fullName: direction ?? "asc" } }, { expectedDate: "asc" as const }]
+        : sortKey === "insurer"
+          ? [{ insurer: { name: direction ?? "asc" } }, { expectedDate: "asc" as const }]
+          : sortKey === "expectedDate"
+            ? [{ expectedDate: direction ?? "asc" }, { policy: { policyNumber: "asc" as const } }]
+            : sortKey === "amount"
+              ? [{ expectedAmount: direction ?? "desc" }, { expectedDate: "asc" as const }]
+              : sortKey === "status"
+                ? [{ status: direction ?? "asc" }, { expectedDate: "asc" as const }]
+                : [{ status: "asc" as const }, { expectedDate: "asc" as const }];
+
   const db = getDb();
   const [stats, overdueCommissions, openCount, openCommissions, paidCommissions] = await Promise.all([
     getCommissionStats(undefined, scope.portfolioOwnerId),
@@ -53,7 +71,7 @@ export default async function CommissionsPage({
     db.commission.findMany({
       where: openWhere,
       include: { client: true, insurer: true, policy: true, receipt: true },
-      orderBy: [{ status: "asc" }, { expectedDate: "asc" }],
+      orderBy,
       skip: (page - 1) * DEFAULT_PAGE_SIZE,
       take: DEFAULT_PAGE_SIZE,
     }),
@@ -130,7 +148,7 @@ export default async function CommissionsPage({
         <SectionCard
           title="Comisiones abiertas"
           description="Listado paginado con búsqueda por póliza, cliente o aseguradora."
-          action={<ListSearch placeholder="Buscar por póliza, cliente o aseguradora..." />}
+          action={<TableToolbar searchPlaceholder="Buscar por póliza, cliente o aseguradora..." />}
         >
           {safeOpenCommissions.length === 0 ? (
             <div className="p-4">
@@ -151,7 +169,11 @@ export default async function CommissionsPage({
                 title="Página fuera de rango"
                 description="Vuelve al inicio del listado."
                 action="Volver al inicio"
-                actionHref={query ? `/commissions?q=${encodeURIComponent(query)}` : "/commissions"}
+                actionHref={buildTableHref("/commissions", params, {
+                  q: query || null,
+                  sort: sortKey ?? null,
+                  dir: direction ?? null,
+                })}
               />
             </div>
           ) : (
@@ -159,12 +181,14 @@ export default async function CommissionsPage({
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/40">
-                    <TableHead>Póliza</TableHead>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Aseguradora</TableHead>
-                    <TableHead>Esperada</TableHead>
-                    <TableHead className="text-right">Monto</TableHead>
-                    <TableHead>Estado</TableHead>
+                    <SortableTableHead sortKey="policy">Póliza</SortableTableHead>
+                    <SortableTableHead sortKey="client">Cliente</SortableTableHead>
+                    <SortableTableHead sortKey="insurer">Aseguradora</SortableTableHead>
+                    <SortableTableHead sortKey="expectedDate">Esperada</SortableTableHead>
+                    <SortableTableHead sortKey="amount" className="text-right">
+                      Monto
+                    </SortableTableHead>
+                    <SortableTableHead sortKey="status">Estado</SortableTableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -191,7 +215,7 @@ export default async function CommissionsPage({
                 pageSize={DEFAULT_PAGE_SIZE}
                 total={openCount}
                 basePath="/commissions"
-                searchParams={{ q: query }}
+                searchParams={{ q: query, sort: sortKey ?? undefined, dir: direction ?? undefined }}
               />
             </>
           )}
