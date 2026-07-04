@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { defineConfig } from "prisma/config";
+import { defineConfig } from "@prisma/config";
 
 const localEnvPath = path.join(process.cwd(), ".env.local");
 
