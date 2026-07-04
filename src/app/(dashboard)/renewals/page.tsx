@@ -7,25 +7,28 @@ import { DaysBadge } from "@/components/badges/days-badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-states/empty-state";
-import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
 import { getOverdueRenewals, getRenewalStats, getUpcomingRenewals, type RenewalOpportunity } from "@/lib/renewals";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { requirePortfolioReadScope } from "@/lib/portfolio-access";
-import { NoRenewalButton } from "@/components/renewals/no-renewal-button";
+import { RenewalRowActions } from "@/components/renewals/renewal-row-actions";
+import { SortableTableHead } from "@/components/tables/sortable-table-head";
+import { TableToolbar } from "@/components/tables/table-toolbar";
+import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
 
 export const dynamic = "force-dynamic";
 
 export default async function RenewalsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; page?: string }>;
+  searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string }>;
 }) {
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100).toLowerCase();
-  const page = Math.max(1, Number(params.page) || 1);
+  const page = readTablePage(params);
+  const { sortKey, direction } = readTableSort(params);
 
   const scope = await requirePortfolioReadScope();
   const [stats, overdueRenewals, upcomingRenewals] = await Promise.all([
@@ -42,9 +45,44 @@ export default async function RenewalsPage({
   const filteredOverdue = query ? overdueRenewals.filter(matchesQuery) : overdueRenewals;
   const filteredUpcoming = query ? upcomingRenewals.filter(matchesQuery) : upcomingRenewals;
 
-  const totalFiltered = filteredUpcoming.length;
+  const priorityWeight: Record<RenewalOpportunity["priority"], number> = {
+    URGENT: 0,
+    HIGH: 1,
+    MEDIUM: 2,
+    LOW: 3,
+  };
+
+  const sortedUpcoming = [...filteredUpcoming].sort((a, b) => {
+    const dir = direction === "desc" ? -1 : 1;
+    const compareText = (left: string, right: string) => left.localeCompare(right) * dir;
+    const compareDate = (left: Date, right: Date) => (left.getTime() - right.getTime()) * dir;
+    const compareNumber = (left: number, right: number) => (left - right) * dir;
+
+    switch (sortKey) {
+      case "policy":
+        return compareText(a.policyNumber, b.policyNumber) || compareText(a.clientName, b.clientName);
+      case "client":
+        return compareText(a.clientName, b.clientName) || compareText(a.policyNumber, b.policyNumber);
+      case "insurer":
+        return compareText(a.insurerName, b.insurerName) || compareText(a.policyNumber, b.policyNumber);
+      case "type":
+        return compareText(a.policyType, b.policyType) || compareText(a.policyNumber, b.policyNumber);
+      case "dueDate":
+        return compareDate(a.endDate, b.endDate) || compareText(a.policyNumber, b.policyNumber);
+      case "premium":
+        return compareNumber(a.premiumAmount, b.premiumAmount) || compareText(a.policyNumber, b.policyNumber);
+      case "days":
+        return compareNumber(a.daysUntilRenewal, b.daysUntilRenewal) || compareText(a.policyNumber, b.policyNumber);
+      case "priority":
+        return compareNumber(priorityWeight[a.priority], priorityWeight[b.priority]) || compareText(a.policyNumber, b.policyNumber);
+      default:
+        return compareDate(a.endDate, b.endDate) || compareText(a.policyNumber, b.policyNumber);
+    }
+  });
+
+  const totalFiltered = sortedUpcoming.length;
   const start = (page - 1) * DEFAULT_PAGE_SIZE;
-  const pagedRenewals = filteredUpcoming.slice(start, start + DEFAULT_PAGE_SIZE);
+  const pagedRenewals = sortedUpcoming.slice(start, start + DEFAULT_PAGE_SIZE);
 
   const urgentRenewals = filteredUpcoming.filter((r) => r.priority === "URGENT");
   const highPriorityRenewals = filteredUpcoming.filter((r) => r.priority === "HIGH");
@@ -140,10 +178,11 @@ export default async function RenewalsPage({
                         <DaysBadge days={renewal.daysUntilRenewal} />
                       </TableCell>
                       <TableCell className="text-right">
-                        <NoRenewalButton
-                          policyId={renewal.policyId}
-                          policyNumber={renewal.policyNumber}
-                          triggerClassName="h-7 rounded-full bg-card/70 px-2.5 text-xs"
+                        <RenewalRowActions
+                          sourcePolicyId={renewal.policyId}
+                          sourcePolicyNumber={renewal.policyNumber}
+                          clientName={renewal.clientName}
+                          insurerName={renewal.insurerName}
                         />
                       </TableCell>
                     </TableRow>
@@ -191,10 +230,11 @@ export default async function RenewalsPage({
                         <DaysBadge days={renewal.daysUntilRenewal} />
                       </TableCell>
                       <TableCell className="text-right">
-                        <NoRenewalButton
-                          policyId={renewal.policyId}
-                          policyNumber={renewal.policyNumber}
-                          triggerClassName="h-7 rounded-full bg-card/70 px-2.5 text-xs"
+                        <RenewalRowActions
+                          sourcePolicyId={renewal.policyId}
+                          sourcePolicyNumber={renewal.policyNumber}
+                          clientName={renewal.clientName}
+                          insurerName={renewal.insurerName}
                         />
                       </TableCell>
                     </TableRow>
@@ -239,9 +279,9 @@ export default async function RenewalsPage({
         <SectionCard
           title="Todas las renovaciones próximas"
           description="Lista paginada con búsqueda por póliza, cliente o aseguradora."
-          action={<ListSearch placeholder="Buscar por póliza, cliente, aseguradora o tipo..." />}
+          action={<TableToolbar searchPlaceholder="Buscar por póliza, cliente, aseguradora o tipo..." />}
         >
-          {filteredUpcoming.length === 0 ? (
+          {sortedUpcoming.length === 0 ? (
             <div className="p-4">
               <EmptyState
                 icon={CalendarClock}
@@ -253,34 +293,40 @@ export default async function RenewalsPage({
                       ? `No encontramos renovaciones próximas que coincidan con "${query}".`
                       : "No hay pólizas con renovación en los próximos 60 días."
                 }
-              />
-            </div>
-          ) : pagedRenewals.length === 0 ? (
-            <div className="p-4">
-              <EmptyState
-                icon={CalendarClock}
-                title="Página fuera de rango"
-                description="Vuelve al inicio del listado."
-                action="Volver al inicio"
-                actionHref={query ? `/renewals?q=${encodeURIComponent(query)}` : "/renewals"}
-              />
-            </div>
-          ) : (
-            <>
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/40">
-                    <TableHead>Póliza</TableHead>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Aseguradora</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead>Vencimiento</TableHead>
-                    <TableHead className="text-right">Prima</TableHead>
-                    <TableHead>Días restantes</TableHead>
-                    <TableHead>Prioridad</TableHead>
+                />
+              </div>
+            ) : pagedRenewals.length === 0 ? (
+              <div className="p-4">
+                <EmptyState
+                  icon={CalendarClock}
+                  title="Página fuera de rango"
+                  description="Vuelve al inicio del listado."
+                  action="Volver al inicio"
+                  actionHref={buildTableHref("/renewals", params, {
+                    q: query || null,
+                    sort: sortKey ?? null,
+                    dir: direction ?? null,
+                  })}
+                />
+              </div>
+            ) : (
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/40">
+                      <SortableTableHead sortKey="policy">Póliza</SortableTableHead>
+                      <SortableTableHead sortKey="client">Cliente</SortableTableHead>
+                      <SortableTableHead sortKey="insurer">Aseguradora</SortableTableHead>
+                      <SortableTableHead sortKey="type">Tipo</SortableTableHead>
+                      <SortableTableHead sortKey="dueDate">Vencimiento</SortableTableHead>
+                      <SortableTableHead sortKey="premium" className="text-right">
+                        Prima
+                      </SortableTableHead>
+                      <SortableTableHead sortKey="days">Días restantes</SortableTableHead>
+                      <SortableTableHead sortKey="priority">Prioridad</SortableTableHead>
                     <TableHead className="text-right">Acción</TableHead>
-                  </TableRow>
-                </TableHeader>
+                    </TableRow>
+                  </TableHeader>
                 <TableBody>
                   {pagedRenewals.map((renewal) => (
                     <TableRow key={renewal.policyId}>
@@ -301,10 +347,11 @@ export default async function RenewalsPage({
                         <StatusBadge status={renewal.priority} />
                       </TableCell>
                       <TableCell className="text-right">
-                        <NoRenewalButton
-                          policyId={renewal.policyId}
-                          policyNumber={renewal.policyNumber}
-                          triggerClassName="h-7 rounded-full bg-card/70 px-2.5 text-xs"
+                        <RenewalRowActions
+                          sourcePolicyId={renewal.policyId}
+                          sourcePolicyNumber={renewal.policyNumber}
+                          clientName={renewal.clientName}
+                          insurerName={renewal.insurerName}
                         />
                       </TableCell>
                     </TableRow>
@@ -316,7 +363,7 @@ export default async function RenewalsPage({
                 pageSize={DEFAULT_PAGE_SIZE}
                 total={totalFiltered}
                 basePath="/renewals"
-                searchParams={{ q: query }}
+                searchParams={{ q: query, sort: sortKey ?? undefined, dir: direction ?? undefined }}
               />
             </>
           )}

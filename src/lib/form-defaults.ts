@@ -47,6 +47,7 @@ export function createPolicyDefaults(values?: Partial<PolicyFormValues>): Policy
     insuredObject: values?.insuredObject ?? "",
     beneficiaryInfo: values?.beneficiaryInfo ?? "",
     notes: values?.notes ?? "",
+    renewedFromPolicyId: values?.renewedFromPolicyId ?? "",
   };
 }
 

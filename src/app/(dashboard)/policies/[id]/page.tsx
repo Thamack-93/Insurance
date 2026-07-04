@@ -17,6 +17,7 @@ import { DocumentList } from "@/components/documents/document-list";
 import { PolicyReceiptsTable } from "@/components/policies/policy-receipts-table";
 import { getDb } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
@@ -35,12 +36,13 @@ const frequencyLabels: Record<string, string> = {
 
 export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const scope = await requirePortfolioReadScope();
   const liveUser = await getCurrentUser();
   const isAdmin = !!liveUser && liveUser.active && liveUser.role === "ADMIN";
   const db = getDb();
 
-  const policy = await db.policy.findUnique({
-    where: { id },
+  const policy = await db.policy.findFirst({
+    where: { id, ...policyOperationalWhere(scope.portfolioOwnerId) },
     include: {
       client: true,
       insurer: true,
@@ -49,6 +51,13 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           id: true,
           policyNumber: true,
         },
+      },
+      renewals: {
+        select: {
+          id: true,
+          policyNumber: true,
+        },
+        orderBy: { updatedAt: "desc" },
       },
       insuredParties: {
         orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
@@ -329,6 +338,22 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                     <Link href={`/policies/${policy.renewedFrom.id}`} className="font-medium text-foreground hover:text-primary">
                       {policy.renewedFrom.policyNumber}
                     </Link>
+                  </div>
+                ) : null}
+                {policy.renewals.length ? (
+                  <div>
+                    <p className="text-muted-foreground">Renueva a</p>
+                    <div className="mt-1 space-y-1">
+                      {policy.renewals.map((renewal) => (
+                        <Link
+                          key={renewal.id}
+                          href={`/policies/${renewal.id}`}
+                          className="block font-medium text-foreground hover:text-primary"
+                        >
+                          {renewal.policyNumber}
+                        </Link>
+                      ))}
+                    </div>
                   </div>
                 ) : null}
               </div>

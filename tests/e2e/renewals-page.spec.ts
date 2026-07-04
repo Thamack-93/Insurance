@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { authenticatePageAsAdmin, getTestDb, cleanupRecentRenewalWorkItems } from "../helpers/db";
-import { addYears } from "date-fns";
+import { addDays, addYears } from "date-fns";
 
 test.describe("Renewals Page (/renewals)", () => {
   let policyId = "";
@@ -59,7 +59,7 @@ test.describe("Renewals Page (/renewals)", () => {
     await page.goto("/renewals");
 
     // Check for urgent renewals section
-    await expect(page.getByText("Renovaciones urgentes")).toBeVisible();
+    await expect(page.getByText("Renovaciones urgentes", { exact: true })).toBeVisible();
   });
 
   test("allows filtering renewals", async ({ page }) => {
@@ -99,5 +99,45 @@ test.describe("Renewals Page (/renewals)", () => {
       // Wait for filtered results
       await page.waitForTimeout(300);
     }
+  });
+
+  test("opens renewal creation prefilled from a renewal row", async ({ page }) => {
+    startedAt = Date.now();
+    const db = getTestDb();
+
+    const client = await db.client.findFirst();
+    const insurer = await db.insurer.findFirst();
+    if (!client || !insurer) {
+      test.skip(true, "No client or insurer found");
+      return;
+    }
+
+    const policyNumber = `REN-E2E-${Date.now()}`;
+    const policy = await db.policy.create({
+      data: {
+        policyNumber,
+        clientId: client.id,
+        insurerId: insurer.id,
+        policyType: "AUTO",
+        status: "ACTIVE",
+        paymentFrequency: "ANNUAL",
+        startDate: new Date(),
+        endDate: addDays(new Date(), 1),
+        premiumAmount: 1000,
+        currency: "MXN",
+      },
+    });
+    policyId = policy.id;
+
+    await authenticatePageAsAdmin(page);
+    await page.goto("/renewals");
+
+    const row = page.locator("tr", { hasText: policyNumber });
+    await expect(row.getByRole("link", { name: "Renovar" })).toBeVisible();
+    await row.getByRole("link", { name: "Renovar" }).click();
+
+    await expect(page).toHaveURL(new RegExp(`/policies/new\\?renewalFrom=${policy.id}`));
+    await expect(page.getByText("Renueva a")).toBeVisible();
+    await expect(page.getByText(policyNumber, { exact: true })).toBeVisible();
   });
 });

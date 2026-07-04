@@ -3,17 +3,47 @@ import { updatePolicy } from "@/app/(dashboard)/policies/actions";
 import { PolicyForm } from "@/components/forms/policy-form";
 import { createPolicyDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
+import { getCurrentUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { formatDateInput } from "@/lib/form-utils";
+import type { PolicyRenewalSource } from "@/lib/policy-renewal";
 import type { PolicyFormValues } from "@/lib/validations";
+import { clientOperationalWhere, policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function EditPolicyPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const scope = await requirePortfolioReadScope();
+  const liveUser = await getCurrentUser();
+  const isAdmin = !!liveUser && liveUser.active && liveUser.role === "ADMIN";
   const db = getDb();
   const [policy, clients, insurers] = await Promise.all([
-    db.policy.findUnique({ where: { id } }),
+    db.policy.findFirst({
+      where: { id, ...policyOperationalWhere(scope.portfolioOwnerId) },
+      include: {
+        renewedFrom: {
+          select: {
+            id: true,
+            policyNumber: true,
+            clientId: true,
+            insurerId: true,
+            policyType: true,
+            startDate: true,
+            endDate: true,
+            premiumAmount: true,
+            currency: true,
+            paymentFrequency: true,
+            paymentPlan: true,
+            insuredObject: true,
+            beneficiaryInfo: true,
+            notes: true,
+            client: { select: { fullName: true } },
+            insurer: { select: { name: true } },
+          },
+        },
+      },
+    }),
     db.client.findMany({
-      where: { status: { not: "ARCHIVED" } },
+      where: { status: { not: "ARCHIVED" }, ...clientOperationalWhere(scope.portfolioOwnerId) },
       orderBy: { fullName: "asc" },
       select: { id: true, fullName: true },
     }),
@@ -57,9 +87,33 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
             insuredObject: policy.insuredObject ?? "",
             beneficiaryInfo: policy.beneficiaryInfo ?? "",
             notes: policy.notes ?? "",
+            renewedFromPolicyId: policy.renewedFromPolicyId ?? "",
           })}
           clientOptions={clients.map((client) => ({ value: client.id, label: client.fullName }))}
           insurerOptions={insurers.map((insurer) => ({ value: insurer.id, label: insurer.name }))}
+          renewalSource={
+            policy.renewedFrom
+              ? {
+                  id: policy.renewedFrom.id,
+                  policyNumber: policy.renewedFrom.policyNumber,
+                  clientId: policy.renewedFrom.clientId,
+                  clientName: policy.renewedFrom.client.fullName,
+                  insurerId: policy.renewedFrom.insurerId,
+                  insurerName: policy.renewedFrom.insurer.name,
+                  policyType: policy.renewedFrom.policyType as PolicyRenewalSource["policyType"],
+                  startDate: policy.renewedFrom.startDate,
+                  endDate: policy.renewedFrom.endDate,
+                  premiumAmount: Number(policy.renewedFrom.premiumAmount),
+                  currency: policy.renewedFrom.currency as PolicyRenewalSource["currency"],
+                  paymentFrequency: policy.renewedFrom.paymentFrequency as PolicyRenewalSource["paymentFrequency"],
+                  paymentPlan: policy.renewedFrom.paymentPlan,
+                  insuredObject: policy.renewedFrom.insuredObject,
+                  beneficiaryInfo: policy.renewedFrom.beneficiaryInfo,
+                  notes: policy.renewedFrom.notes,
+                }
+              : null
+          }
+          showRenewalLink={isAdmin}
           submitAction={updatePolicy.bind(null, policy.id)}
         />
       </div>

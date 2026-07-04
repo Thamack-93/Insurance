@@ -4,6 +4,8 @@ import { createPolicyDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { requireUserOrRedirect } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { buildRenewalPolicyDefaults, type PolicyRenewalSource } from "@/lib/policy-renewal";
+import { assertPolicyPortfolioAccess } from "@/lib/portfolio-access";
 import type { PolicyFormValues } from "@/lib/validations";
 
 function parseTelegramDraftPolicyDefaults(payloadJson: string): Partial<PolicyFormValues> {
@@ -45,7 +47,7 @@ function parseTelegramDraftPolicyDefaults(payloadJson: string): Partial<PolicyFo
 export default async function NewPolicyPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ telegramDraft?: string }>;
+  searchParams?: Promise<{ telegramDraft?: string; renewalFrom?: string }>;
 }) {
   const user = await requireUserOrRedirect();
   const params = (await searchParams) ?? {};
@@ -86,15 +88,56 @@ export default async function NewPolicyPage({
     }
   }
 
+  let renewalSource: PolicyRenewalSource | null = null;
+  if (params.renewalFrom) {
+    const source = await db.policy.findUnique({
+      where: { id: params.renewalFrom },
+      include: {
+        client: { select: { id: true, fullName: true } },
+        insurer: { select: { id: true, name: true } },
+      },
+    });
+
+    if (source) {
+      try {
+        if (user.role !== "ADMIN") {
+          await assertPolicyPortfolioAccess(source.id, user.id);
+        }
+        renewalSource = {
+          id: source.id,
+          policyNumber: source.policyNumber,
+          clientId: source.clientId,
+          clientName: source.client.fullName,
+          insurerId: source.insurerId,
+          insurerName: source.insurer.name,
+          policyType: source.policyType as PolicyRenewalSource["policyType"],
+          startDate: source.startDate,
+          endDate: source.endDate,
+          premiumAmount: Number(source.premiumAmount),
+          currency: source.currency as PolicyRenewalSource["currency"],
+          paymentFrequency: source.paymentFrequency as PolicyRenewalSource["paymentFrequency"],
+          paymentPlan: source.paymentPlan,
+          insuredObject: source.insuredObject,
+          beneficiaryInfo: source.beneficiaryInfo,
+          notes: source.notes,
+        };
+      } catch {
+        renewalSource = null;
+      }
+    }
+  }
+
   const defaultInsurerId = mostUsedInsurer[0]?.insurerId;
   const telegramDraftOverrides = Object.fromEntries(
     Object.entries(telegramDraftDefaults).filter(([, value]) => value !== undefined),
   ) as Partial<PolicyFormValues>;
+  const renewalDefaults = renewalSource ? buildRenewalPolicyDefaults(renewalSource) : {};
   const smartDefaults = createPolicyDefaults({
     ...(defaultInsurerId && insurers.some((i) => i.id === defaultInsurerId)
       ? { insurerId: defaultInsurerId }
       : {}),
     ...telegramDraftOverrides,
+    ...renewalDefaults,
   });
 
   return (
@@ -114,6 +157,8 @@ export default async function NewPolicyPage({
           defaultValues={smartDefaults}
           clientOptions={clients.map((client) => ({ value: client.id, label: client.fullName }))}
           insurerOptions={insurers.map((insurer) => ({ value: insurer.id, label: insurer.name }))}
+          renewalSource={renewalSource}
+          showRenewalLink={true}
           submitAction={createPolicy}
         />
       </div>

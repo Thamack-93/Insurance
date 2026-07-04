@@ -20,6 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { getDb } from "@/lib/db";
 import { detectRisks } from "@/lib/risk-engine";
 import { getClientDataQualityScores, getPolicyDataQualityScores } from "@/lib/data-quality";
+import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { ClientResolutionActions, PolicyResolutionActions, RenewalResolutionActions } from "@/components/risk-resolution/resolution-actions";
 import { PageRefreshTicker } from "@/components/risk-resolution/page-refresh-ticker";
@@ -45,6 +46,7 @@ const RISK_TYPE_LABELS: Record<string, string> = {
   ORPHAN_DOCUMENT: "Documentos huérfanos",
   OVERLAPPING_POLICY_TERM: "Vigencias solapadas",
   DUPLICATE_RECEIPT_NUMBER: "Recibos duplicados",
+  POLICY_WITHOUT_RECEIPTS: "Pólizas sin recibos",
 };
 
 const ISSUE_CODE_LABELS: Record<string, string> = {
@@ -57,6 +59,7 @@ const ISSUE_CODE_LABELS: Record<string, string> = {
   ADDRESS_MISSING: "Dirección faltante",
   RFC_MISSING: "RFC faltante",
   CONTACT_METHOD_MISSING: "Método de contacto faltante",
+  POLICY_WITHOUT_RECEIPTS: "Sin recibos",
 };
 
 function getRiskTypeLabel(code: string) {
@@ -65,6 +68,13 @@ function getRiskTypeLabel(code: string) {
 
 function getIssueCodeLabel(code: string) {
   return ISSUE_CODE_LABELS[code] ?? code;
+}
+
+function getRenewalDueLabel(endDate: Date) {
+  const remainingDays = daysUntil(endDate);
+  if (remainingDays < 0) return `Vencida hace ${Math.abs(remainingDays)} días`;
+  if (remainingDays === 0) return "Vence hoy";
+  return `En ${remainingDays} días`;
 }
 
 function QualityBadge({ nivel }: { nivel: "Excelente" | "Bueno" | "Atención" | "Crítico" }) {
@@ -228,74 +238,98 @@ export default async function RisksPage({
                 </div>
               ) : (
                 <div className="divide-y divide-stone-200/80">
-                  {filteredRisks.slice(0, 12).map((risk) => (
-                    <div
-                      key={`${risk.alertType}-${risk.entityId}-${risk.title}`}
-                      className="flex items-start justify-between gap-4 px-4 py-4"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-medium text-foreground">{risk.title}</p>
-                          <SeverityBadge severity={risk.severity} />
+                  {filteredRisks.slice(0, 12).map((risk) => {
+                    const renewalPolicy = risk.alertType === "RENEWAL_WITHOUT_WORK_ITEM" ? policyScoreById.get(risk.entityId) : null;
+
+                    return (
+                      <div
+                        key={`${risk.alertType}-${risk.entityId}-${risk.title}`}
+                        className="flex items-start justify-between gap-4 px-4 py-4"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-medium text-foreground">{risk.title}</p>
+                            <SeverityBadge severity={risk.severity} />
+                          </div>
+                          <p className="mt-1 text-sm text-muted-foreground">{risk.description}</p>
+                          {renewalPolicy ? (
+                            <div className="mt-3 grid gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-2">
+                              <p className="min-w-0 truncate">
+                                <span className="text-muted-foreground">Cliente:</span>{" "}
+                                <span className="font-medium text-foreground">{renewalPolicy.cliente}</span>
+                              </p>
+                              <p className="min-w-0 truncate">
+                                <span className="text-muted-foreground">Aseguradora:</span>{" "}
+                                <span className="font-medium text-foreground">{renewalPolicy.aseguradora}</span>
+                              </p>
+                              <p className="min-w-0 truncate">
+                                <span className="text-muted-foreground">Vence:</span>{" "}
+                                <span className="font-medium text-foreground">
+                                  {formatDate(renewalPolicy.endDate)} · {getRenewalDueLabel(renewalPolicy.endDate)}
+                                </span>
+                              </p>
+                              <p className="min-w-0 truncate">
+                                <span className="text-muted-foreground">Póliza:</span>{" "}
+                                <span className="font-medium text-foreground">{renewalPolicy.poliza}</span>
+                              </p>
+                            </div>
+                          ) : null}
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {risk.entityType} · {getRiskTypeLabel(risk.alertType)}
+                          </p>
                         </div>
-                        <p className="mt-1 text-sm text-muted-foreground">{risk.description}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {risk.entityType} · {getRiskTypeLabel(risk.alertType)}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 flex-col items-end gap-2">
-                        {risk.alertType === "RENEWAL_WITHOUT_WORK_ITEM" ? (
-                          policyScoreById.get(risk.entityId) ? (
+                        <div className="flex shrink-0 flex-col items-end gap-2">
+                          {renewalPolicy ? (
                             <RenewalResolutionActions
                               mode="policy"
                               sourcePolicyId={risk.entityId}
-                              sourcePolicyNumber={policyScoreById.get(risk.entityId)!.poliza}
-                              clientName={policyScoreById.get(risk.entityId)!.cliente}
-                              insurerName={policyScoreById.get(risk.entityId)!.aseguradora}
+                              sourcePolicyNumber={renewalPolicy.poliza}
+                              clientName={renewalPolicy.cliente}
+                              insurerName={renewalPolicy.aseguradora}
                             />
-                          ) : null
-                        ) : risk.alertType === "CLIENT_MISSING_CONTACT" ? (
-                          clientScoreById.get(risk.entityId) ? (
-                            <ClientResolutionActions
-                              clientId={risk.entityId}
-                              clientName={clientScoreById.get(risk.entityId)!.cliente}
-                              email={clientScoreById.get(risk.entityId)!.email}
-                              phone={clientScoreById.get(risk.entityId)!.phone}
-                              secondaryPhone={clientScoreById.get(risk.entityId)!.secondaryPhone}
-                              address={clientScoreById.get(risk.entityId)!.address}
-                              rfc={clientScoreById.get(risk.entityId)!.rfc}
-                              preferredContactMethod={clientScoreById.get(risk.entityId)!.preferredContactMethod}
-                              notes={null}
-                              issueCodes={[risk.alertType]}
-                            />
-                          ) : null
-                        ) : risk.alertType === "CLIENT_WITHOUT_ACTIVE_POLICY" ? (
-                          clientScoreById.get(risk.entityId) ? (
-                            <ClientResolutionActions
-                              clientId={risk.entityId}
-                              clientName={clientScoreById.get(risk.entityId)!.cliente}
-                              email={clientScoreById.get(risk.entityId)!.email}
-                              phone={clientScoreById.get(risk.entityId)!.phone}
-                              secondaryPhone={clientScoreById.get(risk.entityId)!.secondaryPhone}
-                              address={clientScoreById.get(risk.entityId)!.address}
-                              rfc={clientScoreById.get(risk.entityId)!.rfc}
-                              preferredContactMethod={clientScoreById.get(risk.entityId)!.preferredContactMethod}
-                              notes={null}
-                              issueCodes={[risk.alertType]}
-                              allowClose={true}
-                              allowEdit={false}
-                              consolidateLabel="Consolidar"
-                            />
-                          ) : null
-                        ) : (
-                          <Button asChild variant="outline" size="sm" className="rounded-full">
-                            <Link href={riskHref(risk.entityType, risk.entityId)}>Abrir</Link>
-                          </Button>
-                        )}
-                        <span className="text-xs text-muted-foreground">{risk.suggestedAction}</span>
+                          ) : risk.alertType === "CLIENT_MISSING_CONTACT" ? (
+                            clientScoreById.get(risk.entityId) ? (
+                              <ClientResolutionActions
+                                clientId={risk.entityId}
+                                clientName={clientScoreById.get(risk.entityId)!.cliente}
+                                email={clientScoreById.get(risk.entityId)!.email}
+                                phone={clientScoreById.get(risk.entityId)!.phone}
+                                secondaryPhone={clientScoreById.get(risk.entityId)!.secondaryPhone}
+                                address={clientScoreById.get(risk.entityId)!.address}
+                                rfc={clientScoreById.get(risk.entityId)!.rfc}
+                                preferredContactMethod={clientScoreById.get(risk.entityId)!.preferredContactMethod}
+                                notes={null}
+                                issueCodes={[risk.alertType]}
+                              />
+                            ) : null
+                          ) : risk.alertType === "CLIENT_WITHOUT_ACTIVE_POLICY" ? (
+                            clientScoreById.get(risk.entityId) ? (
+                              <ClientResolutionActions
+                                clientId={risk.entityId}
+                                clientName={clientScoreById.get(risk.entityId)!.cliente}
+                                email={clientScoreById.get(risk.entityId)!.email}
+                                phone={clientScoreById.get(risk.entityId)!.phone}
+                                secondaryPhone={clientScoreById.get(risk.entityId)!.secondaryPhone}
+                                address={clientScoreById.get(risk.entityId)!.address}
+                                rfc={clientScoreById.get(risk.entityId)!.rfc}
+                                preferredContactMethod={clientScoreById.get(risk.entityId)!.preferredContactMethod}
+                                notes={null}
+                                issueCodes={[risk.alertType]}
+                                allowClose={true}
+                                allowEdit={false}
+                                consolidateLabel="Consolidar"
+                              />
+                            ) : null
+                          ) : (
+                            <Button asChild variant="outline" size="sm" className="rounded-full">
+                              <Link href={riskHref(risk.entityType, risk.entityId)}>Abrir</Link>
+                            </Button>
+                          )}
+                          <span className="text-xs text-muted-foreground">{risk.suggestedAction}</span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </SectionCard>

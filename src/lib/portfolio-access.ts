@@ -123,6 +123,11 @@ export function workItemOperationalWhere(portfolioOwnerId?: string): Prisma.Work
 
 export async function assertClientPortfolioAccess(clientId: string, userId: string) {
   const db = getDb();
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { role: true },
+  });
+  if (user?.role === "ADMIN") return;
   const client = await db.client.findFirst({
     where: { id: clientId, ...clientPortfolioWhere(userId) },
     select: { id: true },
@@ -135,6 +140,11 @@ export async function assertClientPortfolioAccess(clientId: string, userId: stri
 
 export async function assertPolicyPortfolioAccess(policyId: string, userId: string) {
   const db = getDb();
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { role: true },
+  });
+  if (user?.role === "ADMIN") return;
   const policy = await db.policy.findFirst({
     where: { id: policyId, ...policyPortfolioWhere(userId) },
     select: { id: true },
@@ -147,6 +157,11 @@ export async function assertPolicyPortfolioAccess(policyId: string, userId: stri
 
 export async function assertEndorsementPortfolioAccess(endorsementId: string, userId: string) {
   const db = getDb();
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { role: true },
+  });
+  if (user?.role === "ADMIN") return;
   const endorsement = await db.policyEndorsement.findFirst({
     where: { id: endorsementId, ...endorsementPortfolioWhere(userId) },
     select: { id: true },
@@ -159,6 +174,11 @@ export async function assertEndorsementPortfolioAccess(endorsementId: string, us
 
 export async function assertReceiptPortfolioAccess(receiptId: string, userId: string) {
   const db = getDb();
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { role: true },
+  });
+  if (user?.role === "ADMIN") return;
   const receipt = await db.receipt.findFirst({
     where: { id: receiptId, ...receiptPortfolioWhere(userId) },
     select: { id: true },
