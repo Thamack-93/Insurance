@@ -11,6 +11,11 @@ describe("policy-capture-receipts", () => {
       draft: {
         policyNumber: "P-123",
         clientName: "Cliente Demo",
+        clientType: "PERSON",
+        clientEmail: null,
+        clientPhone: null,
+        clientAddress: null,
+        clientRfc: null,
         insurerName: "Aseguradora Demo",
         policyType: "AUTO",
         serialNumber: null,
@@ -78,6 +83,11 @@ describe("policy-capture-receipts", () => {
       draft: {
         policyNumber: "P-123",
         clientName: "Cliente Demo",
+        clientType: "PERSON",
+        clientEmail: null,
+        clientPhone: null,
+        clientAddress: null,
+        clientRfc: null,
         insurerName: "Aseguradora Demo",
         policyType: "AUTO",
         serialNumber: null,

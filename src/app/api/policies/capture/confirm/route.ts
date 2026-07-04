@@ -7,8 +7,8 @@ import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
 import { parseDateInput } from "@/lib/form-utils";
 import { assertClientPortfolioAccess, assertPolicyPortfolioAccess } from "@/lib/portfolio-access";
+import { inferClientType, type PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
 import { syncAutoCaptureReceipt } from "@/lib/policy-capture-receipts";
-import type { PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
 import { revalidatePaths } from "@/lib/mutation-utils";
 import {
   recordSecurityAccessDenied,
@@ -22,6 +22,11 @@ const confirmSchema = z.object({
   draft: z.object({
     policyNumber: z.string().min(1),
     clientName: z.string().min(1),
+    clientType: z.enum(["PERSON", "COMPANY"]).optional(),
+    clientEmail: z.string().nullable().optional(),
+    clientPhone: z.string().nullable().optional(),
+    clientAddress: z.string().nullable().optional(),
+    clientRfc: z.string().nullable().optional(),
     insurerName: z.string().min(1),
     policyType: z.string().min(1),
     startDate: z.string().min(1),
@@ -47,6 +52,11 @@ function normalizeDraft(draft: z.infer<typeof confirmSchema>["draft"]): PolicyPd
   return {
     policyNumber: draft.policyNumber.trim(),
     clientName: draft.clientName.trim(),
+    clientType: draft.clientType ?? inferClientType(draft.clientName, draft.clientRfc ?? null),
+    clientEmail: draft.clientEmail?.trim() || null,
+    clientPhone: draft.clientPhone?.trim() || null,
+    clientAddress: draft.clientAddress?.trim() || null,
+    clientRfc: draft.clientRfc?.trim() || null,
     insurerName: draft.insurerName.trim(),
     policyType: draft.policyType.trim(),
     startDate: draft.startDate.trim(),
@@ -344,13 +354,14 @@ export async function POST(request: NextRequest) {
       "/portfolio",
       "/renewals",
       "/risks",
+      "/data-quality",
     ]);
 
     return NextResponse.json({
       success: true,
       policyId: result.targetPolicy.id,
       redirectTo: `/policies/${result.targetPolicy.id}`,
-      message: "Póliza capturada, recibo generado y marcada como renovada.",
+      message: "Póliza capturada, recibo generado y renovación vinculada.",
     });
   } catch (error) {
     if (error instanceof AuthError) {

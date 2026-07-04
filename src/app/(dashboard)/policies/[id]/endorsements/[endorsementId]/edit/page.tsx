@@ -8,6 +8,11 @@ import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { formatDateInput } from "@/lib/form-utils";
 import type { EndorsementFormValues } from "@/lib/validations";
+import {
+  endorsementOperationalWhere,
+  policyOperationalWhere,
+  requirePortfolioReadScope,
+} from "@/lib/portfolio-access";
 
 export default async function EditEndorsementPage({
   params,
@@ -15,15 +20,16 @@ export default async function EditEndorsementPage({
   params: Promise<{ id: string; endorsementId: string }>;
 }) {
   const { id, endorsementId } = await params;
+  const scope = await requirePortfolioReadScope();
   const db = getDb();
 
   const [policy, endorsement] = await Promise.all([
-    db.policy.findUnique({
-      where: { id },
+    db.policy.findFirst({
+      where: { id, ...policyOperationalWhere(scope.portfolioOwnerId) },
       include: { client: true, insurer: true },
     }),
-    db.policyEndorsement.findUnique({
-      where: { id: endorsementId },
+    db.policyEndorsement.findFirst({
+      where: { id: endorsementId, ...endorsementOperationalWhere(scope.portfolioOwnerId) },
       include: { policy: { include: { client: true, insurer: true } } },
     }),
   ]);

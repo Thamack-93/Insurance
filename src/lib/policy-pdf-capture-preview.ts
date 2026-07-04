@@ -6,8 +6,8 @@ import { normalize } from "@/lib/search-utils";
 import { reviewPolicyPdfWithAi } from "@/lib/assistant-ai";
 import {
   extractPolicyPdfDraftFromText,
+  buildPolicyPdfCaptureFieldConfidence,
   type PolicyCaptureSourceOption,
-  type PolicyPdfCaptureAiReview,
   type PolicyPdfCaptureDraft,
   type PolicyPdfCapturePreview,
 } from "@/lib/policy-pdf-capture.shared";
@@ -15,6 +15,11 @@ import type { AssistantUser } from "@/lib/assistant-types";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
+
+type PolicyPdfCapturePreviewContext = {
+  portfolioOwnerId?: string;
+  user?: AssistantUser | null;
+};
 
 function scoreTextMatch(needle: string, candidate: string) {
   const normalizedNeedle = normalize(needle).trim();
@@ -37,6 +42,7 @@ async function buildSourcePolicyCandidates(
   draft: PolicyPdfCaptureDraft,
   clientId: string | null,
   insurerId: string | null,
+  portfolioOwnerId?: string,
 ) {
   const candidates: Array<PolicyCaptureSourceOption> = [];
   const exactNumber = draft.sourcePolicyNumber;
@@ -45,6 +51,7 @@ async function buildSourcePolicyCandidates(
     const targetStartDate = draft.startDate ? parseDateInput(draft.startDate) : null;
     const serialPolicies = await db.policy.findMany({
       where: {
+        ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
         ...(clientId ? { clientId } : {}),
         ...(insurerId ? { insurerId } : {}),
         policyType: "AUTO",
@@ -92,6 +99,7 @@ async function buildSourcePolicyCandidates(
     const exact = await db.policy.findMany({
       where: {
         policyNumber: exactNumber,
+        ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
         ...(clientId ? { clientId } : {}),
         ...(insurerId ? { insurerId } : {}),
       },
@@ -129,6 +137,7 @@ async function buildSourcePolicyCandidates(
   if (candidates.length === 0 && clientId && insurerId) {
     const fallback = await db.policy.findMany({
       where: {
+        ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
         clientId,
         insurerId,
         policyType: draft.policyType,
@@ -171,15 +180,19 @@ async function buildSourcePolicyCandidates(
 export async function buildPolicyPdfCapturePreviewFromText(
   text: string,
   db: DbClient = getDb(),
-  user?: AssistantUser | null,
+  context: PolicyPdfCapturePreviewContext = {},
 ): Promise<PolicyPdfCapturePreview> {
+  const { portfolioOwnerId, user } = context;
   const draft = extractPolicyPdfDraftFromText(text);
   const warnings: string[] = [];
   const policyNumberSuggestion = draft.sourcePolicyNumber;
 
   const clientCandidates = draft.clientName
     ? (await db.client.findMany({
-        where: { status: { not: "ARCHIVED" } },
+        where: {
+          status: { not: "ARCHIVED" },
+          ...(portfolioOwnerId ? { portfolioOwnerId } : {}),
+        },
         select: { id: true, fullName: true },
         orderBy: { fullName: "asc" },
       }))
@@ -206,11 +219,14 @@ export async function buildPolicyPdfCapturePreviewFromText(
   const suggestedClientId = clientCandidates[0]?.id ?? null;
   const suggestedInsurerId = insurerCandidates[0]?.id ?? null;
 
-  const sourcePolicyCandidates = await buildSourcePolicyCandidates(db, draft, suggestedClientId, suggestedInsurerId);
-  const suggestedSourcePolicyId =
-    sourcePolicyCandidates.find((policy) => policy.policyNumber === policyNumberSuggestion)?.id ??
-    sourcePolicyCandidates[0]?.id ??
-    null;
+  const sourcePolicyCandidates = await buildSourcePolicyCandidates(
+    db,
+    draft,
+    suggestedClientId,
+    suggestedInsurerId,
+    portfolioOwnerId,
+  );
+  const suggestedSourcePolicyId = sourcePolicyCandidates.find((policy) => policy.policyNumber === policyNumberSuggestion)?.id ?? null;
 
   if (!draft.policyNumber) warnings.push("No pudimos detectar el número de póliza.");
   if (!draft.clientName) warnings.push("No pudimos detectar el asegurado principal.");
@@ -229,24 +245,25 @@ export async function buildPolicyPdfCapturePreviewFromText(
     warnings.push("La frecuencia no quedó totalmente clara; revisa que sea Anual.");
   }
 
-  const shouldRequestAiReview =
-    Boolean(user) &&
-    (warnings.length > 0 ||
-      clientCandidates.length === 0 ||
-      insurerCandidates.length === 0 ||
-      sourcePolicyCandidates.length === 0 ||
-      draft.paymentFrequency === "OTHER");
-
-  let aiReview: PolicyPdfCaptureAiReview | null = null;
-  if (shouldRequestAiReview && user) {
-    aiReview = await reviewPolicyPdfWithAi({
-      user,
-      text,
-      draft,
-      warnings,
-      themeHint: "policy-pdf-review",
-    });
-  }
+  const fieldConfidence = buildPolicyPdfCaptureFieldConfidence(text, draft);
+  const hasLowConfidence = Object.values(fieldConfidence).some((confidence) => confidence === "low");
+  const shouldRequestAiReview = Boolean(
+    user &&
+      (warnings.length > 0 ||
+        hasLowConfidence ||
+        clientCandidates.length === 0 ||
+        insurerCandidates.length === 0 ||
+        sourcePolicyCandidates.length === 0),
+  );
+  const aiReview = shouldRequestAiReview && user
+    ? await reviewPolicyPdfWithAi({
+        user,
+        text,
+        draft,
+        warnings,
+        themeHint: "policy-pdf-review",
+      })
+    : null;
 
   return {
     draft,
@@ -258,6 +275,7 @@ export async function buildPolicyPdfCapturePreviewFromText(
     clientOptions: clientCandidates,
     insurerOptions: insurerCandidates,
     sourcePolicyOptions: sourcePolicyCandidates,
+    fieldConfidence,
     confidence: {
       client: clientCandidates.length > 0,
       insurer: insurerCandidates.length > 0,

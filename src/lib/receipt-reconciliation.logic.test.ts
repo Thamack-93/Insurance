@@ -71,6 +71,20 @@ describe("receipt-reconciliation", () => {
     expect(result.reasons).toContain("partial_payment");
   });
 
+  it("keeps a receipt pending throughout its business due date", () => {
+    const result = reconcileReceiptState({
+      amount: 1000,
+      status: "PENDING",
+      dueDate: new Date("2026-07-01T06:00:00.000Z"),
+      paidDate: null,
+      paymentMethod: null,
+      payments: [],
+      now: new Date("2026-07-01T23:30:00.000Z"),
+    });
+
+    expect(result.nextStatus).toBe("PENDING");
+  });
+
   it("preserves cancelled receipts", () => {
     const result = reconcileReceiptState({
       amount: 1000,

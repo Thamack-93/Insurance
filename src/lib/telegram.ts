@@ -1084,7 +1084,7 @@ export async function buildTelegramReceiptsReply(userId: string, days: number, c
     total: receipts.total,
     lines: receipts.items.map(formatTelegramReceiptLine),
     emptyText: "No hay cobros pendientes en este rango.",
-    path: "/receipts",
+    path: "/due-payments",
   });
 }
 
@@ -1148,7 +1148,7 @@ export async function buildTelegramDailyDigest(userId: string, client?: DbClient
       total: overdueReceipts.total,
       lines: overdueReceipts.items.map(formatTelegramReceiptLine),
       emptyText: "Sin recibos vencidos.",
-      path: "/receipts",
+      path: "/due-payments?window=overdue",
     }),
     "",
     buildTelegramSection({
@@ -1156,7 +1156,7 @@ export async function buildTelegramDailyDigest(userId: string, client?: DbClient
       total: todayReceipts.total,
       lines: todayReceipts.items.map(formatTelegramReceiptLine),
       emptyText: "Sin recibos pendientes para hoy.",
-      path: "/receipts",
+      path: "/due-payments?window=today",
     }),
     "",
     buildTelegramSection({
@@ -1164,7 +1164,7 @@ export async function buildTelegramDailyDigest(userId: string, client?: DbClient
       total: upcomingReceipts.total,
       lines: upcomingReceipts.items.map(formatTelegramReceiptLine),
       emptyText: "Sin recibos próximos.",
-      path: "/receipts",
+      path: "/due-payments?window=30",
     }),
     "",
     buildTelegramSection({
@@ -1455,7 +1455,10 @@ async function createTelegramPolicyDraftFromPdf(input: {
   const preview = await buildPolicyPdfCapturePreviewFromText(
     extractedText,
     db,
-    user ? { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" } : null,
+    {
+      portfolioOwnerId: user?.role === "ADMIN" ? undefined : user?.id,
+      user: user ? { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" } : null,
+    },
   );
 
   const payload = buildTelegramPolicyDraftPayloadFromPreview(preview);
