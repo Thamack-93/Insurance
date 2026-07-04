@@ -8,6 +8,7 @@ import { requireAdminOrRedirect } from "@/lib/auth";
 import { listAssistantReports } from "@/lib/assistant-reports";
 import { formatDate } from "@/lib/dates";
 import { AssistantReportActionButtons } from "@/components/assistant/report-action-buttons";
+import { Gauge, ShieldCheck } from "lucide-react";
 import {
   archiveAssistantReportAction,
   closeAssistantReportAction,
@@ -72,6 +73,27 @@ function ReportList({
               <span>Inicio: {formatDate(new Date(report.firstSignalAt))}</span>
               {report.openedAt ? <span>Apertura: {formatDate(new Date(report.openedAt))}</span> : null}
             </div>
+            <details className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3">
+              <summary className="cursor-pointer font-medium">Evidencia y señales ({report.signalCount})</summary>
+              <div className="mt-3 space-y-3">
+                {report.evidence.slice(-10).reverse().map((entry, index) => (
+                  <div key={`${report.id}-evidence-${index}`} className="rounded-xl border border-border/60 bg-background/70 p-3">
+                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      <span>{entry.signalKind ?? "SEÑAL"}</span>
+                      <span>{entry.source ?? "sistema"}</span>
+                      {entry.createdAt ? <span>{formatDate(new Date(entry.createdAt))}</span> : null}
+                    </div>
+                    <p className="mt-1 font-medium">{entry.title ?? "Señal registrada"}</p>
+                    {entry.summary ? <p className="mt-1 text-muted-foreground">{entry.summary}</p> : null}
+                    {entry.input ? (
+                      <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-2 text-xs text-muted-foreground">
+                        {JSON.stringify(entry.input, null, 2).slice(0, 2_000)}
+                      </pre>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </details>
           </CardContent>
         </Card>
       ))}
@@ -98,7 +120,7 @@ export default async function AssistantSettingsPage() {
         actions={<RefreshPageButton label="Actualizar" />}
       />
 
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Card>
           <CardHeader className="pb-3">
             <CardDescription>Incidentes abiertos</CardDescription>
@@ -123,7 +145,25 @@ export default async function AssistantSettingsPage() {
             <CardTitle className="text-3xl">{suggestions.length}</CardTitle>
           </CardHeader>
         </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription className="flex items-center gap-2"><Gauge className="size-4" /> Rate limits IA</CardDescription>
+            <CardTitle className="text-3xl">Sin límite</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 text-xs text-muted-foreground">
+            Sin cuota de uso por usuario. Permanecen autenticación, same-origin y límite técnico de payload.
+          </CardContent>
+        </Card>
       </section>
+
+      <Card className="border-emerald-200/70 bg-emerald-50/60 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="size-4" /> Controles activos</CardTitle>
+          <CardDescription>
+            Nora bloquea temas ajenos a PolicyDesk, limita el contexto a la cartera autorizada y nunca aplica cambios de PDF sin confirmación humana.
+          </CardDescription>
+        </CardHeader>
+      </Card>
 
       <UrlTabs defaultValue="incidentes" className="space-y-4">
         <TabsList>

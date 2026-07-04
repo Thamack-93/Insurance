@@ -1,15 +1,29 @@
 import "server-only";
 
 import { buildAssistantReply as buildLocalAssistantReply, getAssistantHomeSnapshot as getLocalAssistantHomeSnapshot } from "@/lib/assistant-local";
-import { buildAssistantAiReply } from "@/lib/assistant-ai";
-import { createAssistantThemeKey, recordAssistantReportSignal } from "@/lib/assistant-reports";
+import { buildAssistantAiReply, classifyAssistantReportSignalWithAi } from "@/lib/assistant-ai";
+import { createAssistantThemeKey, listAssistantReports, recordAssistantReportSignal } from "@/lib/assistant-reports";
+import { buildAssistantBlockedReply, evaluateAssistantInput } from "@/lib/assistant-guardrails";
 import type {
   AssistantConversationResponse,
+  AssistantReportKind,
+  AssistantReportSeverity,
   AssistantReply,
   AssistantResponseSource,
   AssistantSnapshot,
   AssistantUser,
 } from "@/lib/assistant-types";
+
+type AssistantReportTheme = {
+  kind: AssistantReportKind;
+  themeKey: string;
+  themeLabel: string;
+  title: string;
+  summary: string;
+  recommendation: string;
+  plan: string;
+  severity: AssistantReportSeverity;
+};
 
 function normalizeMessage(value: string) {
   return value
@@ -43,8 +57,24 @@ function isDeterministicQuery(normalized: string) {
   );
 }
 
-function detectTheme(normalized: string) {
-  if (normalized.includes("pdf") || normalized.includes("caratula") || normalized.includes("carátula") || normalized.includes("documento")) {
+function detectTheme(normalized: string): AssistantReportTheme | null {
+  const hasFailure = normalized.includes("error") || normalized.includes("falla") || normalized.includes("no funciona") || normalized.includes("rompe");
+  const hasProductNeed = hasFailure || normalized.includes("necesito") || normalized.includes("falta") || normalized.includes("deberia") || normalized.includes("mejora") || normalized.includes("sugerencia") || normalized.includes("no encuentro");
+
+  if (hasFailure) {
+    return {
+      kind: "INCIDENT" as const,
+      themeKey: createAssistantThemeKey([normalized.includes("pdf") ? "pdf" : null, normalized.includes("telegram") ? "telegram" : null, "error", "sistema"]),
+      themeLabel: normalized.includes("pdf") ? "Error en captura de pólizas por PDF" : "Error de producto",
+      title: normalized.includes("pdf") ? "Fallo reportado en captura por PDF" : "Fallo reportado en PolicyDesk",
+      summary: "El usuario reportó un flujo que no funciona como se esperaba.",
+      recommendation: "Reproducir el caso, identificar la capa afectada y corregir la causa raíz.",
+      plan: "Conservar evidencia, reproducir el error, añadir una prueba de regresión y validar el flujo completo.",
+      severity: "HIGH" as const,
+    };
+  }
+
+  if (hasProductNeed && (normalized.includes("pdf") || normalized.includes("caratula") || normalized.includes("carátula") || normalized.includes("documento"))) {
     return {
       kind: "SUGGESTION" as const,
       themeKey: createAssistantThemeKey(["pdf", "captura", "pólizas"]),
@@ -57,7 +87,7 @@ function detectTheme(normalized: string) {
     };
   }
 
-  if (normalized.includes("telegram")) {
+  if (hasProductNeed && normalized.includes("telegram")) {
     return {
       kind: "SUGGESTION" as const,
       themeKey: createAssistantThemeKey(["telegram", "captura", "pólizas"]),
@@ -67,19 +97,6 @@ function detectTheme(normalized: string) {
       recommendation: "Revisar recepción de documentos, resumen inline y enlace a revisión web.",
       plan: "Acumular señales del canal Telegram y centralizar los casos dudosos en revisión web.",
       severity: "MEDIUM" as const,
-    };
-  }
-
-  if (normalized.includes("error") || normalized.includes("falla") || normalized.includes("no funciona") || normalized.includes("rompe")) {
-    return {
-      kind: "INCIDENT" as const,
-      themeKey: createAssistantThemeKey(["error", "asistente"]),
-      themeLabel: "Error del asistente",
-      title: "Error reportado por el asistente",
-      summary: "Se reportó un error o un flujo que no funciona como se esperaba.",
-      recommendation: "Revisar el flujo asociado y corregir la causa raíz.",
-      plan: "Registrar el incidente, agrupar señales similares y cerrar cuando quede resuelto.",
-      severity: "CRITICAL" as const,
     };
   }
 
@@ -96,14 +113,7 @@ function detectTheme(normalized: string) {
     };
   }
 
-  if (
-    normalized.includes("no encuentro") ||
-    normalized.includes("buscar") ||
-    normalized.includes("vincular") ||
-    normalized.includes("consolidar") ||
-    normalized.includes("renovacion") ||
-    normalized.includes("renovación")
-  ) {
+  if (hasProductNeed && (normalized.includes("buscar") || normalized.includes("vincular") || normalized.includes("consolidar") || normalized.includes("renovacion") || normalized.includes("renovación"))) {
     return {
       kind: "SUGGESTION" as const,
       themeKey: createAssistantThemeKey(["busqueda", "vinculos"]),
@@ -137,10 +147,27 @@ export async function getAssistantHomeSnapshot(user: AssistantUser): Promise<Ass
 }
 
 export async function buildAssistantReply(user: AssistantUser, message: string): Promise<AssistantConversationResponse> {
+  const guardrail = evaluateAssistantInput(message);
   const normalized = normalizeMessage(message);
+  if (!guardrail.allowed) {
+    return {
+      reply: buildAssistantBlockedReply(),
+      sections: [],
+      quickPrompts: [
+        { label: "Buscar una póliza", prompt: "Buscar póliza" },
+        { label: "Ver renovaciones", prompt: "Renovaciones próximas" },
+        { label: "Recibos vencidos", prompt: "Recibos vencidos" },
+      ],
+      source: "local",
+      reportId: null,
+      reportThemeKey: null,
+      reportThemeLabel: null,
+    };
+  }
+
   const localReply = await buildLocalAssistantReply(user, message);
   const theme = detectTheme(normalized);
-  const shouldTryAi = !isDeterministicQuery(normalized) || Boolean(theme) || message.includes("?") || message.length > 160;
+  const shouldTryAi = !theme && (!isDeterministicQuery(normalized) || message.includes("?") || message.length > 160);
 
   let finalReply: AssistantReply = localReply;
   let source: AssistantResponseSource = "local";
@@ -150,7 +177,7 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
       user,
       message,
       localReply,
-      themeHint: theme?.themeLabel ?? null,
+      themeHint: null,
     });
     if (aiReply) {
       finalReply = aiReply;
@@ -158,20 +185,47 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
     }
   }
 
+  let reportTheme: AssistantReportTheme | null = theme;
+  if (shouldTryAi || theme) {
+    const activeReports = (await listAssistantReports({ limit: 100 }).catch(() => []))
+      .filter((report) => report.status === "OPEN" || report.status === "COLLECTING")
+      .map((report) => ({ themeKey: report.themeKey, themeLabel: report.themeLabel, kind: report.kind }));
+    const aiReport = await classifyAssistantReportSignalWithAi({
+      user,
+      message,
+      existingThemes: activeReports,
+      fallback: theme ?? null,
+    });
+    if (aiReport) {
+      reportTheme = aiReport.shouldReport
+        ? {
+            kind: aiReport.kind,
+            themeKey: aiReport.themeKey,
+            themeLabel: aiReport.themeLabel,
+            title: aiReport.title,
+            summary: aiReport.summary,
+            recommendation: aiReport.recommendation,
+            plan: aiReport.plan,
+            severity: aiReport.severity,
+          }
+        : theme?.kind === "INCIDENT" ? theme : null;
+    }
+  }
+
   let reportId: string | null = null;
-  if (theme) {
+  if (reportTheme) {
     try {
       const report = await recordAssistantReportSignal({
-        kind: theme.kind,
-        themeKey: theme.themeKey,
-        themeLabel: theme.themeLabel,
+        kind: reportTheme.kind,
+        themeKey: reportTheme.themeKey,
+        themeLabel: reportTheme.themeLabel,
         signalKind: source === "ai" ? "AI_RESPONSE" : "USER_MESSAGE",
         source: "assistant",
-        title: theme.title,
-        summary: theme.summary,
-        recommendation: theme.recommendation,
-        plan: theme.plan,
-        severity: theme.severity,
+        title: reportTheme.title,
+        summary: reportTheme.summary,
+        recommendation: reportTheme.recommendation,
+        plan: reportTheme.plan,
+        severity: reportTheme.severity,
         evidence: {
           message,
           normalized,
@@ -180,7 +234,7 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
         input: { message },
         output: { reply: finalReply.reply },
         actorId: user.id,
-        forceOpen: theme.kind === "INCIDENT",
+        forceOpen: reportTheme.kind === "INCIDENT",
       });
       reportId = report.id;
     } catch {
@@ -192,7 +246,7 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
     ...finalReply,
     source,
     reportId,
-    reportThemeKey: theme?.themeKey ?? null,
-    reportThemeLabel: theme?.themeLabel ?? null,
+    reportThemeKey: reportTheme?.themeKey ?? null,
+    reportThemeLabel: reportTheme?.themeLabel ?? null,
   };
 }

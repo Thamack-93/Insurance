@@ -965,7 +965,7 @@ model AssistantReport {
   kind            String
   themeKey        String
   themeLabel      String
-  status          String    @default("PENDING")
+  status          String    @default("COLLECTING")
   version         Int       @default(1)
   parentReportId  String?
   title           String

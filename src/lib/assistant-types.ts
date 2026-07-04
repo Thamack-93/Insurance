@@ -48,6 +48,15 @@ export type AssistantReply = {
   quickPrompts: AssistantPrompt[];
 };
 
+export type AssistantMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  source?: "local" | "ai";
+  sections?: AssistantSection[];
+  quickPrompts?: AssistantPrompt[];
+};
+
 export type AssistantUser = {
   id: string;
   role: "ADMIN" | "AGENT";
@@ -83,6 +92,26 @@ export type AssistantReportSnapshot = {
   deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  evidence: Array<{
+    signalKind?: string;
+    source?: string;
+    title?: string;
+    summary?: string;
+    recommendation?: string;
+    plan?: string;
+    severity?: string;
+    input?: unknown;
+    output?: unknown;
+    evidence?: unknown;
+    createdAt?: string;
+  }>;
+  signals: Array<{
+    id: string;
+    signalKind: string;
+    source: string;
+    title: string;
+    createdAt: string;
+  }>;
 };
 
 export type AssistantConversationResponse = AssistantReply & {

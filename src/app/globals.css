@@ -131,3 +131,15 @@
     @apply font-sans;
   }
 }
+
+@layer components {
+  table[data-density="compact"] th,
+  table[data-density="compact"] td {
+    @apply h-9 py-1.5;
+  }
+
+  table[data-density="spacious"] th,
+  table[data-density="spacious"] td {
+    @apply h-14 py-4;
+  }
+}

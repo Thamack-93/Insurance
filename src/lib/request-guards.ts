@@ -45,7 +45,20 @@ export function checkRateLimit(key: string, options: RateLimitOptions) {
 }
 
 export function assertSameOrigin(request: Request | { url: string; headers: Headers }, context = "request") {
-  const expectedOrigin = new URL(request.url).origin;
+  const expectedOrigins = new Set([new URL(request.url).origin]);
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const host = forwardedHost || request.headers.get("host")?.trim();
+  const forwardedProtocol = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+  const requestProtocol = new URL(request.url).protocol.replace(":", "");
+  const protocol = forwardedProtocol === "http" || forwardedProtocol === "https" ? forwardedProtocol : requestProtocol;
+
+  if (host) {
+    try {
+      expectedOrigins.add(new URL(`${protocol}://${host}`).origin);
+    } catch {
+      // Ignore malformed proxy metadata and retain the canonical request URL.
+    }
+  }
   const origin = request.headers.get("origin");
   const referer = request.headers.get("referer");
   const source = origin ?? referer;
@@ -61,7 +74,7 @@ export function assertSameOrigin(request: Request | { url: string; headers: Head
     throw new Error(`${context} sent an invalid origin header.`);
   }
 
-  if (sourceOrigin !== expectedOrigin) {
-    throw new Error(`${context} must originate from ${expectedOrigin}.`);
+  if (!expectedOrigins.has(sourceOrigin)) {
+    throw new Error(`${context} must originate from the current application origin.`);
   }
 }

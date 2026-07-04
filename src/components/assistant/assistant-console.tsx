@@ -1,20 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { Bot, FileUp, Loader2, Send, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowUp, Bot, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import type {
-  AssistantPrompt,
   AssistantConversationResponse,
+  AssistantPrompt,
   AssistantSection,
   AssistantSnapshot,
 } from "@/lib/assistant-types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-button";
+import { cn } from "@/lib/utils";
 
 type Message = {
   id: string;
@@ -23,294 +22,206 @@ type Message = {
   source?: AssistantConversationResponse["source"];
   sections?: AssistantSection[];
   quickPrompts?: AssistantPrompt[];
-  reportId?: string | null;
   reportThemeLabel?: string | null;
 };
 
 function makeId() {
-  return Math.random().toString(36).slice(2);
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function SectionCard({ section }: { section: AssistantSection }) {
+function initialMessage(snapshot: AssistantSnapshot): Message {
+  return {
+    id: makeId(),
+    role: "assistant",
+    text: snapshot.welcome,
+    source: "local",
+    quickPrompts: snapshot.quickPrompts,
+  };
+}
+
+function ResultSection({ section }: { section: AssistantSection }) {
   return (
-    <Card className="border-border/70 bg-card/80">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">{section.title}</CardTitle>
-        <CardDescription>{section.summary}</CardDescription>
-      </CardHeader>
+    <div className="mt-3 overflow-hidden rounded-2xl border border-border/70 bg-background/80">
+      <div className="border-b border-border/60 px-4 py-3">
+        <p className="text-sm font-medium">{section.title}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{section.summary}</p>
+      </div>
       {section.items.length > 0 ? (
-        <CardContent className="space-y-3">
+        <div className="divide-y divide-border/60">
           {section.items.map((item) => (
             <Link
-              key={`${section.title}-${item.title}-${item.href}`}
+              key={`${item.href}-${item.title}`}
               href={item.href}
-              className="block rounded-2xl border border-border/60 bg-background/70 p-3 transition hover:border-primary/40 hover:bg-accent/20"
+              className="flex items-start justify-between gap-4 px-4 py-3 transition-colors hover:bg-muted/50"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-medium">{item.title}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">{item.subtitle}</p>
-                </div>
-                {item.meta ? <Badge variant="secondary" className="rounded-full">{item.meta}</Badge> : null}
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{item.title}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{item.subtitle}</p>
               </div>
+              {item.meta ? <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">{item.meta}</Badge> : null}
             </Link>
           ))}
-        </CardContent>
+        </div>
       ) : null}
-    </Card>
+    </div>
   );
 }
 
 export function AssistantConsole({ snapshot }: { snapshot: AssistantSnapshot }) {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: makeId(),
-      role: "assistant",
-      text: snapshot.welcome,
-      sections: snapshot.sections,
-      quickPrompts: snapshot.quickPrompts,
-      source: "local",
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>(() => [initialMessage(snapshot)]);
   const [isSending, setIsSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const endRef = useRef<HTMLDivElement>(null);
 
-  function sendMessage(text: string) {
-    const trimmed = text.trim();
-    if (!trimmed) return;
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, isSending]);
 
-    setError(null);
-    setIsSending(true);
-    const userMessage: Message = {
-      id: makeId(),
-      role: "user",
-      text: trimmed,
-    };
-    setMessages((current) => [...current, userMessage]);
+  async function sendMessage(value: string) {
+    const message = value.trim();
+    if (!message || isSending) return;
+
+    setMessages((current) => [...current, { id: makeId(), role: "user", text: message }]);
     setInput("");
+    setIsSending(true);
 
-    void (async () => {
-      try {
-        const response = await fetch("/api/assistant", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ message: trimmed }),
-        });
+    try {
+      const response = await fetch("/api/assistant", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { success?: boolean; response?: AssistantConversationResponse; error?: string }
+        | null;
 
-        const payload = (await response.json().catch(() => null)) as
-          | { success?: boolean; response?: AssistantConversationResponse; error?: string }
-          | null;
+      if (!response.ok || !payload?.success || !payload.response) {
+        throw new Error(payload?.error || "No pude responder esta consulta.");
+      }
+      const assistantResponse = payload.response;
 
-        if (!response.ok || !payload?.success || !payload.response) {
-          throw new Error(payload?.error || "No se pudo responder la consulta.");
-        }
-
-        const assistantMessage: Message = {
+      setMessages((current) => [
+        ...current,
+        {
           id: makeId(),
           role: "assistant",
-          text: payload.response.reply,
-          source: payload.response.source,
-          sections: payload.response.sections,
-          quickPrompts: payload.response.quickPrompts,
-          reportId: payload.response.reportId,
-          reportThemeLabel: payload.response.reportThemeLabel,
-        };
+          text: assistantResponse.reply,
+          source: assistantResponse.source,
+          sections: assistantResponse.sections,
+          quickPrompts: assistantResponse.quickPrompts,
+          reportThemeLabel: assistantResponse.reportThemeLabel,
+        },
+      ]);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : "No pude responder esta consulta.";
+      toast.error(messageText);
+      setMessages((current) => [
+        ...current,
+        { id: makeId(), role: "assistant", text: messageText, source: "local" },
+      ]);
+    } finally {
+      setIsSending(false);
+    }
+  }
 
-        setMessages((current) => [...current, assistantMessage]);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "No se pudo responder la consulta.";
-        setError(message);
-        toast.error(message);
-      } finally {
-        setIsSending(false);
-      }
-    })();
+  function resetConversation() {
+    setMessages([initialMessage(snapshot)]);
+    setInput("");
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-      <div className="space-y-6">
-        <Card className="border-border/70 bg-card/90 shadow-sm">
-          <CardHeader className="border-b border-border/70">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Bot className="size-5" />
-              Asistente
-              <Badge variant="secondary" className="rounded-full">
-                {snapshot.scopeLabel}
-              </Badge>
-            </CardTitle>
-            <CardDescription>
-              Consulta rápida, respuesta local primero y fallback con IA cuando la pregunta necesite más contexto.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 p-5">
-            {error ? (
-              <div className="rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                {error}
-              </div>
-            ) : null}
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              {snapshot.summaryCards.map((card) => (
-                <Link
-                  key={card.label}
-                  href={card.href}
-                  className="rounded-2xl border border-border/70 bg-background/70 p-4 transition hover:border-primary/40 hover:bg-accent/20"
-                >
-                  <p className="text-sm text-muted-foreground">{card.label}</p>
-                  <p className="mt-2 text-3xl font-semibold tracking-tight">{card.value}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">{card.description}</p>
-                </Link>
-              ))}
-            </div>
-
-            <div className="rounded-3xl border border-primary/15 bg-primary/5 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-primary">Probar un PDF</p>
-                  <p className="text-sm text-muted-foreground">
-                    Si quieres capturar una póliza desde PDF, entra al flujo dedicado y revisa el borrador antes de guardar.
-                  </p>
-                </div>
-                <Button asChild className="rounded-full">
-                  <Link href="/policies/capture">
-                    <FileUp className="mr-2 size-4" />
-                    Abrir captura
-                  </Link>
-                </Button>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Textarea
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                placeholder="Pregunta por clientes, pólizas, riesgos, recibos o pide un reporte."
-                rows={4}
-                className="rounded-2xl"
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                    event.preventDefault();
-                    sendMessage(input);
-                  }
-                }}
-              />
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" onClick={() => sendMessage(input)} disabled={isSending} className="rounded-full">
-                  {isSending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" />}
-                  Enviar
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="rounded-full"
-                  onClick={() => {
-                    setInput("");
-                    setError(null);
-                  }}
-                  disabled={isSending}
-                >
-                  Limpiar
-                </Button>
-                <RefreshPageButton label="Actualizar vista" className="rounded-full" />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {snapshot.quickPrompts.map((prompt) => (
-                <Button
-                  key={prompt.label}
-                  type="button"
-                  variant="outline"
-                  className="rounded-full"
-                  onClick={() => sendMessage(prompt.prompt)}
-                  disabled={isSending}
-                >
-                  <Sparkles className="mr-2 size-4" />
-                  {prompt.label}
-                </Button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="space-y-4">
-          {messages.map((message) => (
-            <Card key={message.id} className={message.role === "assistant" ? "border-border/70 bg-card/90" : "border-primary/20 bg-primary/5"}>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  {message.role === "assistant" ? <Bot className="size-4" /> : null}
-                  {message.role === "assistant" ? "Asistente" : "Tú"}
-                  {message.source ? (
-                    <Badge variant="secondary" className="rounded-full">
-                      {message.source === "ai" ? "IA" : "Local"}
-                    </Badge>
-                  ) : null}
-                  {message.reportThemeLabel ? (
-                    <Badge variant="outline" className="rounded-full">
-                      Reporte
-                    </Badge>
-                  ) : null}
-                </CardTitle>
-                {message.reportThemeLabel ? (
-                  <CardDescription>Se registró o actualizó el tema: {message.reportThemeLabel}</CardDescription>
-                ) : null}
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">{message.text}</p>
-                {message.quickPrompts && message.quickPrompts.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {message.quickPrompts.map((prompt) => (
-                      <Button
-                        key={`${message.id}-${prompt.label}`}
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="rounded-full"
-                        onClick={() => sendMessage(prompt.prompt)}
-                        disabled={isSending}
-                      >
-                        {prompt.label}
-                      </Button>
-                    ))}
-                  </div>
-                ) : null}
-                {message.sections && message.sections.length > 0 ? (
-                  <div className="grid gap-3">
-                    {message.sections.map((section) => (
-                      <SectionCard key={`${message.id}-${section.title}`} section={section} />
-                    ))}
-                  </div>
-                ) : null}
-                {message.reportId ? (
-                  <p className="text-xs text-muted-foreground">Reporte vinculado: {message.reportId}</p>
-                ) : null}
-              </CardContent>
-            </Card>
-          ))}
+    <section className="mx-auto flex min-h-[calc(100dvh-9rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[2rem] border border-border/70 bg-card/90 shadow-sm">
+      <header className="flex items-center justify-between border-b border-border/70 px-5 py-4 sm:px-7">
+        <div className="flex items-center gap-3">
+          <div className="grid size-10 place-items-center rounded-2xl bg-foreground text-background">
+            <Bot className="size-5" />
+          </div>
+          <div>
+            <h1 className="font-serif text-xl font-semibold tracking-tight">Nora</h1>
+            <p className="text-xs text-muted-foreground">Asistente de PolicyDesk · {snapshot.scopeLabel}</p>
+          </div>
         </div>
-      </div>
+        <Button type="button" variant="ghost" size="sm" className="rounded-full" onClick={resetConversation} disabled={isSending}>
+          <RotateCcw className="mr-2 size-4" />
+          Nuevo chat
+        </Button>
+      </header>
 
-      <div className="space-y-4">
-        <Card className="border-border/70 bg-card/90 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-base">Pistas rápidas</CardTitle>
-            <CardDescription>
-              El asistente trabaja local-first; si la pregunta necesita más contexto, cae al modelo vía AI Gateway.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm text-muted-foreground">
-            <p>Usa el campo principal para pedir resúmenes, búsquedas o reportes.</p>
-            <p>Si subes PDFs, sigue usando el flujo de captura y el preview humano antes de guardar.</p>
-            <p>Los temas repetidos y los errores alimentan el backlog en Configuración para que no se abran duplicados.</p>
-          </CardContent>
-        </Card>
-
-        {snapshot.sections.map((section) => (
-          <SectionCard key={section.title} section={section} />
+      <div className="flex-1 space-y-7 overflow-y-auto px-4 py-7 sm:px-8">
+        {messages.map((message) => (
+          <article key={message.id} className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}>
+            <div className={cn("max-w-[88%] sm:max-w-[78%]", message.role === "user" && "rounded-3xl rounded-br-lg bg-foreground px-4 py-3 text-background")}>
+              {message.role === "assistant" ? (
+                <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">Nora</span>
+                  {message.source ? <span>{message.source === "ai" ? "IA" : "Local"}</span> : null}
+                  {message.reportThemeLabel ? <Badge variant="outline" className="rounded-full text-[10px]">Señal registrada</Badge> : null}
+                </div>
+              ) : null}
+              <p className="whitespace-pre-wrap text-sm leading-6">{message.text}</p>
+              {message.sections?.map((section) => <ResultSection key={`${message.id}-${section.title}`} section={section} />)}
+              {message.quickPrompts && message.role === "assistant" ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {message.quickPrompts.slice(0, 4).map((prompt) => (
+                    <Button
+                      key={`${message.id}-${prompt.label}`}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-full bg-background/80 text-xs"
+                      onClick={() => sendMessage(prompt.prompt)}
+                      disabled={isSending}
+                    >
+                      {prompt.label}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </article>
         ))}
+        {isSending ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            Nora está revisando tu cartera…
+          </div>
+        ) : null}
+        <div ref={endRef} />
       </div>
-    </div>
+
+      <footer className="border-t border-border/70 bg-background/70 p-4 backdrop-blur sm:p-5">
+        <div className="flex items-end gap-2 rounded-3xl border border-border bg-card px-4 py-3 shadow-sm focus-within:ring-2 focus-within:ring-ring/30">
+          <Textarea
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            placeholder="Pregunta por una póliza, cliente, renovación, recibo o reporte…"
+            rows={1}
+            maxLength={2_000}
+            className="max-h-36 min-h-8 resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void sendMessage(input);
+              }
+            }}
+          />
+          <Button
+            type="button"
+            size="icon"
+            className="size-9 shrink-0 rounded-full"
+            onClick={() => sendMessage(input)}
+            disabled={!input.trim() || isSending}
+            aria-label="Enviar mensaje"
+          >
+            <ArrowUp className="size-4" />
+          </Button>
+        </div>
+        <p className="mt-2 text-center text-[11px] text-muted-foreground">
+          Nora solo responde sobre PolicyDesk y únicamente usa información accesible para tu usuario.
+        </p>
+      </footer>
+    </section>
   );
 }

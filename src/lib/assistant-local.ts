@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { AssistantPrompt, AssistantReply, AssistantSection, AssistantSnapshot, AssistantUser } from "@/lib/assistant-types";
+import { globalSearch, type GlobalSearchResult } from "@/lib/search";
 
 function normalizeMessage(value: string) {
   return value
@@ -48,7 +49,49 @@ function buildHomeSections(user: AssistantUser): AssistantSection[] {
   ];
 }
 
-function buildPromptReply(message: string): AssistantReply {
+function buildSearchTerms(message: string) {
+  const terms = new Set<string>();
+  for (const match of message.matchAll(/[A-Z0-9][A-Z0-9/-]{3,}/gi)) {
+    terms.add(match[0]);
+  }
+
+  for (const match of message.matchAll(/(?:cliente|p[oó]liza|recibo|siniestro)\s+([^,.;?]+)/gi)) {
+    const candidate = match[1]?.replace(/\b(?:es|la|el|de|del|una?|renovaci[oó]n)\b/gi, " ").replace(/\s+/g, " ").trim();
+    if (candidate && candidate.length >= 3) terms.add(candidate);
+  }
+
+  if (terms.size === 0) {
+    const fallback = message
+      .replace(/\b(?:busca|buscar|encuentra|encontrar|mu[eé]strame|cliente|p[oó]liza|recibo|por|favor)\b/gi, " ")
+      .replace(/[^\p{L}\p{N}'/-]+/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (fallback.length >= 3) terms.add(fallback);
+  }
+
+  return [...terms].slice(0, 3);
+}
+
+function toSearchItem(result: GlobalSearchResult) {
+  return {
+    title: result.title,
+    subtitle: [result.subtitle, result.parentLabel, result.match ? `Coincide en ${result.match.fieldLabel}` : null]
+      .filter(Boolean)
+      .join(" · "),
+    href: result.href,
+    meta: result.type,
+  };
+}
+
+async function searchUserPortfolio(user: AssistantUser, message: string) {
+  const terms = buildSearchTerms(message);
+  const resultGroups = await Promise.all(terms.map((term) => globalSearch(term, user.role === "ADMIN" ? undefined : user.id)));
+  const unique = new Map<string, GlobalSearchResult>();
+  for (const result of resultGroups.flat()) unique.set(`${result.type}:${result.id}`, result);
+  return [...unique.values()].slice(0, 8);
+}
+
+async function buildPromptReply(user: AssistantUser, message: string): Promise<AssistantReply> {
   const normalized = normalizeMessage(message);
 
   if (normalized.includes("renov")) {
@@ -78,13 +121,19 @@ function buildPromptReply(message: string): AssistantReply {
   }
 
   if (normalized.includes("buscar") || normalized.includes("cliente") || normalized.includes("poliza") || normalized.includes("póliza")) {
+    const results = await searchUserPortfolio(user, message);
     return {
-      reply: "Puedo ayudarte a ubicar una póliza o cliente y luego saltar al flujo correcto. Si la póliza ya se renovó, la ruta más útil suele ser la póliza nueva o el apartado de renovaciones para dejar el vínculo bien cerrado.",
+      reply: results.length > 0
+        ? `Encontré ${results.length} resultado${results.length === 1 ? "" : "s"} dentro de tu cartera.`
+        : "No encontré coincidencias dentro de tu cartera. Prueba con el número de póliza, nombre completo, RFC, teléfono, serie o número de recibo.",
       sections: [
-        makeSection("Búsqueda", "Rutas útiles para localizar y continuar.", [
-          { title: "Ir a pólizas", subtitle: "Buscar por número, cliente o aseguradora", href: "/policies", meta: "buscador" },
-          { title: "Crear póliza", subtitle: "Iniciar una nueva póliza", href: "/policies/new", meta: "captura" },
-        ]),
+        makeSection(
+          "Resultados",
+          results.length > 0 ? "Coincidencias accesibles para tu usuario." : "No se muestran datos de otras carteras.",
+          results.length > 0
+            ? results.map(toSearchItem)
+            : [{ title: "Abrir búsqueda", subtitle: "Buscar con más campos en PolicyDesk", href: "/policies", meta: "buscador" }],
+        ),
       ],
       quickPrompts: buildQuickPrompts(),
     };
@@ -121,6 +170,5 @@ export async function getAssistantHomeSnapshot(user: AssistantUser): Promise<Ass
 }
 
 export async function buildAssistantReply(user: AssistantUser, message: string): Promise<AssistantReply> {
-  void user;
-  return buildPromptReply(message);
+  return buildPromptReply(user, message);
 }

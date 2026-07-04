@@ -9,7 +9,7 @@ import type {
   AssistantReportSnapshot,
   AssistantReportStatus,
 } from "@/lib/assistant-types";
-import type { Prisma, PrismaClient } from "@/generated/prisma/client";
+import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -94,6 +94,14 @@ function buildSnapshot(report: {
   deletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  evidenceJson: string;
+  signals?: Array<{
+    id: string;
+    signalKind: string;
+    source: string;
+    title: string;
+    createdAt: Date;
+  }>;
 }): AssistantReportSnapshot {
   return {
     id: report.id,
@@ -117,6 +125,11 @@ function buildSnapshot(report: {
     deletedAt: report.deletedAt?.toISOString() ?? null,
     createdAt: report.createdAt.toISOString(),
     updatedAt: report.updatedAt.toISOString(),
+    evidence: parseEvidenceJson(report.evidenceJson),
+    signals: (report.signals ?? []).map((signal) => ({
+      ...signal,
+      createdAt: signal.createdAt.toISOString(),
+    })),
   };
 }
 
@@ -139,6 +152,12 @@ export async function listAssistantReports(
 
   const reports = await client.assistantReport.findMany({
     where,
+    include: {
+      signals: {
+        orderBy: { createdAt: "desc" },
+        take: 10,
+      },
+    },
     orderBy: [{ lastSignalAt: "desc" }, { createdAt: "desc" }],
     take: filter.limit ?? 100,
   });
@@ -149,6 +168,9 @@ export async function listAssistantReports(
 export async function getAssistantReport(reportId: string, client: DbClient = getDb()) {
   const report = await client.assistantReport.findUnique({
     where: { id: reportId },
+    include: {
+      signals: { orderBy: { createdAt: "desc" }, take: 25 },
+    },
   });
 
   return report ? buildSnapshot(report) : null;
@@ -183,6 +205,7 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
 
   try {
     return await client.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`${input.kind}:${themeKey}`}))`);
       const reports = await tx.assistantReport.findMany({
         where: {
           kind: input.kind,
@@ -352,6 +375,18 @@ export async function archiveAssistantReport(reportId: string, actorId: string, 
 }
 
 export async function reopenAssistantReport(reportId: string, actorId: string, client: DbClient = getDb()) {
+  const report = await client.assistantReport.findUnique({ where: { id: reportId } });
+  if (!report) throw new Error("El reporte ya no existe.");
+  const active = await client.assistantReport.findFirst({
+    where: {
+      id: { not: reportId },
+      kind: report.kind,
+      themeKey: report.themeKey,
+      status: { in: ["OPEN", "COLLECTING"] },
+    },
+    select: { id: true },
+  });
+  if (active) throw new Error("Ya existe una versión activa de este tema.");
   return setReportStatus(reportId, "OPEN", actorId, client);
 }
 

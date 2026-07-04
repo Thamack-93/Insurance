@@ -3,13 +3,13 @@ import { z } from "zod";
 import { AuthError, requireUser } from "@/lib/auth";
 import { buildAssistantReply, getAssistantHomeSnapshot } from "@/lib/assistant";
 import { logError } from "@/lib/logger";
-import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
+import { assertSameOrigin } from "@/lib/request-guards";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const messageSchema = z.object({
-  message: z.string().min(1),
+  message: z.string().trim().min(1).max(2_000),
 });
 
 export async function GET() {
@@ -36,20 +36,6 @@ export async function POST(request: NextRequest) {
       assertSameOrigin(request, "assistant request");
     } catch {
       return NextResponse.json({ error: "No autorizado." }, { status: 403 });
-    }
-
-    const rateLimit = checkRateLimit(`assistant:${getRequestIp(request)}:${user.id}`, {
-      limit: 20,
-      windowMs: 10 * 60 * 1000,
-    });
-    if (!rateLimit.allowed) {
-      return NextResponse.json(
-        { error: "Demasiados intentos. Espera un momento e inténtalo de nuevo." },
-        {
-          status: 429,
-          headers: { "Retry-After": String(Math.max(1, Math.ceil(rateLimit.retryAfterMs / 1000))) },
-        },
-      );
     }
 
     let payload: z.infer<typeof messageSchema>;

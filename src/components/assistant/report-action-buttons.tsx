@@ -39,6 +39,12 @@ export function AssistantReportActionButtons({
     });
   }
 
+  function confirmDelete() {
+    if (!deleteAction) return;
+    if (!window.confirm("¿Eliminar definitivamente este reporte y todas sus señales? Esta acción no se puede deshacer.")) return;
+    run(deleteAction, "Eliminado.");
+  }
+
   return (
     <div className="flex flex-wrap gap-2">
       {closeAction ? (
@@ -64,7 +70,7 @@ export function AssistantReportActionButtons({
         </Button>
       ) : null}
       {deleteAction ? (
-        <Button type="button" size="sm" variant="destructive" className="rounded-full" disabled={isPending} onClick={() => run(deleteAction, "Eliminado.")}>
+        <Button type="button" size="sm" variant="destructive" className="rounded-full" disabled={isPending} onClick={confirmDelete}>
           Eliminar
         </Button>
       ) : null}

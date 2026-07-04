@@ -1,7 +1,7 @@
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard } from "@/components/pages-secondary/panels";
 import { Button } from "@/components/ui/button";
-import { BellRing, Database, Globe2, ArrowRight, Settings2, KeyRound, Users } from "lucide-react";
+import { BellRing, Bot, Database, Globe2, ArrowRight, Settings2, KeyRound, Users } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { today, formatDate } from "@/lib/dates";
@@ -124,6 +124,24 @@ export default async function SettingsPage() {
                 <Button asChild variant="outline" className="rounded-full">
                   <Link href="/settings/users">
                     Administrar usuarios
+                    <ArrowRight className="ml-2 size-4" />
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+          ) : null}
+          {isAdmin ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Bot className="size-4" /> Nora y reportes IA
+                </CardTitle>
+                <CardDescription>Revisa incidentes, sugerencias, evidencia y configuración de uso.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button asChild variant="outline" className="rounded-full">
+                  <Link href="/settings/assistant">
+                    Abrir panel IA
                     <ArrowRight className="ml-2 size-4" />
                   </Link>
                 </Button>

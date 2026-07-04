@@ -1,0 +1,2 @@
+ALTER TABLE "AssistantReport"
+ALTER COLUMN "status" SET DEFAULT 'COLLECTING';
