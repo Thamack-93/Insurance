@@ -17,6 +17,8 @@ PolicyDesk es un CRM operativo para cartera de seguros, construido con Next.js A
 - Lucide
 - Recharts
 - Framer Motion
+- Vercel AI Gateway
+- Vercel Blob privado
 
 ## Qué resuelve
 
@@ -35,9 +37,13 @@ Copia `.env.example` a `.env.local` y ajusta los valores:
 |----------|-----------|-------------|
 | `SESSION_SECRET` | Producción | Secreto HMAC para cookies de sesión (mín. 32 caracteres) |
 | `DATABASE_URL` | Producción | URL de Postgres hosted para el despliegue en Vercel |
-| `BACKUP_JOB_SECRET` | Opcional | Token Bearer para `POST /api/jobs/backup` |
+| `CRON_SECRET` | Producción | Protege el único job diario compartido por Telegram y backups |
+| `AI_GATEWAY_MODEL` | Opcional | Modelo `provider/model` usado por Nora |
+| `AI_GATEWAY_API_KEY` | Opcional | Fallback estático; Vercel OIDC es la credencial primaria |
+| `BLOB_READ_WRITE_TOKEN` | Producción | Acceso al store privado de Vercel Blob |
+| `BACKUP_ENCRYPTION_KEY` | Producción | Clave de 32 bytes para AES-256-GCM |
+| `BACKUP_ENCRYPTION_KEY_VERSION` | Producción | Versión activa de la clave de cifrado |
 | `ENABLE_DOCUMENT_FILES` | Opcional | `false` para la demo publicada sin archivos |
-| `ENABLE_LOCAL_BACKUPS` | Opcional | Control de visibilidad de la sección de respaldos |
 | `AUTH_SECRET` | Dev | Alias de `SESSION_SECRET` en desarrollo |
 
 ## Comandos
@@ -51,7 +57,6 @@ npm run dev
 Scripts operativos:
 
 ```bash
-npm run backup
 npm run validate-data
 npm run list:payments
 npm run list:renewals
@@ -60,11 +65,19 @@ npm run export:due-payments
 npm run export:commissions
 ```
 
+La restauración nunca se ejecuta desde la UI. Para una rama temporal de Neon:
+
+```bash
+RESTORE_DATABASE_URL=... RESTORE_NEON_BRANCH=restore-prueba \
+ALLOW_TEMPORARY_NEON_RESTORE=true \
+npm run restore:backup:temp-neon -- <archivo.ndjson.gz.enc>
+```
+
 ## Flujo de desarrollo
 
-1. Ejecutar backup antes de cambios masivos.
-2. Usar Prisma o scripts dedicados.
-3. Validar con seed, lint y build.
+1. Crear y verificar un backup cifrado desde el panel admin antes de cambios masivos.
+2. Usar Prisma o scripts dedicados sobre una rama temporal de Neon.
+3. Validar con lint, typecheck, tests y build; nunca ejecutar seeds sobre la base actual.
 
 ## Despliegue demo
 
@@ -74,7 +87,7 @@ La ruta recomendada para una demo pública o compartida es:
 2. Migrar el snapshot real actual a esa base hosted.
 3. Configurar `DATABASE_URL` en el entorno de Vercel.
 4. Desplegar en [Vercel Hobby](https://vercel.com/pricing).
-5. Mantener `ENABLE_DOCUMENT_FILES=false` para la primera versión.
+5. Conectar un store privado de Blob para los backups cifrados.
 
 La demo queda enfocada en datos estructurados y no requiere PDFs ni almacenamiento de archivos en esta fase.
 

@@ -240,10 +240,8 @@ export function SettingsForm({ initialSettings, updateSettings }: SettingsFormPr
             <div className="space-y-0.5">
               <Label>Respaldo automático</Label>
               <p className="text-sm text-muted-foreground">
-                Activa la copia periódica de la base de datos. Configura un cron externo con
-                <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">Authorization: Bearer $BACKUP_JOB_SECRET</code>
-                {" "}en <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">POST /api/jobs/backup</code>
-                (ruta pública en middleware; no requiere cookie de sesión).
+                El único job diario de Vercel comparte la ejecución con Telegram y crea un
+                respaldo cifrado en Blob privado cuando corresponde.
               </p>
             </div>
             <Checkbox
@@ -273,18 +271,11 @@ export function SettingsForm({ initialSettings, updateSettings }: SettingsFormPr
                     Mínimo entre respaldos. El job ignora ejecuciones más frecuentes.
                   </p>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="retentionDays">Retención (días)</Label>
-                  <Input
-                    id="retentionDays"
-                    type="number"
-                    value={settings.retentionDays}
-                    onChange={(e) => handleChange("retentionDays", parseInt(e.target.value))}
-                    min={1}
-                    max={365}
-                  />
+                <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
+                  <p className="text-sm font-medium">Retención protegida</p>
                   <p className={fieldHint}>
-                    Los respaldos más antiguos se eliminan automáticamente al ejecutar el job.
+                    Se conservan 7 copias diarias, 2 semanales y 1 mensual. Restaurar solo está
+                    permitido por CLI hacia una rama temporal de Neon.
                   </p>
                 </div>
               </div>

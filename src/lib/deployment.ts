@@ -10,7 +10,3 @@ export function hasHostedDatabase() {
 export function areDocumentFilesEnabled() {
   return !isVercelDeployment() && process.env.ENABLE_DOCUMENT_FILES !== "false";
 }
-
-export function areLocalBackupsEnabled() {
-  return !isVercelDeployment() && process.env.ENABLE_LOCAL_BACKUPS !== "false";
-}

@@ -14,18 +14,15 @@ import { OnboardingPanel } from "@/components/settings/onboarding-panel";
 import {
   createBackup,
   listBackupsAction,
-  restoreBackup,
 } from "./backups-actions";
-import { areLocalBackupsEnabled } from "@/lib/deployment";
 
 export default async function SettingsPage() {
   const now = today();
   const liveUser = await getCurrentUser();
   const isAdmin = !!liveUser && liveUser.active && liveUser.role === "ADMIN";
-  const backupsEnabled = areLocalBackupsEnabled();
   const [settings, initialBackups, onboarding] = await Promise.all([
     getSettings(),
-    isAdmin && backupsEnabled ? listBackupsAction() : Promise.resolve([]),
+    isAdmin ? listBackupsAction().catch(() => []) : Promise.resolve([]),
     getOnboardingStatus(),
   ]);
 
@@ -159,28 +156,12 @@ export default async function SettingsPage() {
 
         <OnboardingPanel initialDismissed={onboarding.dismissed} />
 
-        {isAdmin && backupsEnabled ? (
+        {isAdmin ? (
           <BackupsPanel
             initialBackups={initialBackups}
             createBackup={createBackup}
-            restoreBackup={restoreBackup}
             listBackups={listBackupsAction}
           />
-        ) : isAdmin ? (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Database className="size-4" /> Respaldos
-              </CardTitle>
-              <CardDescription>
-                Los respaldos están deshabilitados en esta demo publicada. Esta sección seguirá
-                disponible cuando el entorno los tenga habilitados.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
-              En la versión desplegada la base vive en Postgres hosted.
-            </CardContent>
-          </Card>
         ) : null}
       </div>
     </div>

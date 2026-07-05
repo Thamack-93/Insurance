@@ -1,27 +1,19 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+import { Database, Download, RefreshCw, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
-import { Database, Download, RotateCcw, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { SectionCard, EmptyPanel } from "@/components/pages-secondary/panels";
 import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+  verifyBackupAction,
+  type BackupListItem,
+} from "@/app/(dashboard)/settings/backups-actions";
+import { EmptyPanel, SectionCard } from "@/components/pages-secondary/panels";
+import { Button } from "@/components/ui/button";
 import type { MutationResult } from "@/lib/mutation-utils";
-import type { BackupListItem } from "@/app/(dashboard)/settings/backups-actions";
 
 type Props = {
   initialBackups: BackupListItem[];
   createBackup: () => Promise<MutationResult>;
-  restoreBackup: (filename: string) => Promise<MutationResult>;
   listBackups: () => Promise<BackupListItem[]>;
 };
 
@@ -45,21 +37,20 @@ function formatDateTime(iso: string) {
   }
 }
 
-export function BackupsPanel({ initialBackups, createBackup, restoreBackup, listBackups }: Props) {
-  const router = useRouter();
+export function BackupsPanel({ initialBackups, createBackup, listBackups }: Props) {
   const [backups, setBackups] = useState<BackupListItem[]>(initialBackups);
   const [pendingCreate, startCreate] = useTransition();
-  const [restoring, setRestoring] = useState<string | null>(null);
-  const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
-
-  const sorted = useMemo(
-    () => [...backups].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-    [backups],
+  const [verifying, setVerifying] = useState<string | null>(null);
+  const sorted = [...backups].sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt),
   );
 
   async function refresh() {
-    const next = await listBackups();
-    setBackups(next);
+    try {
+      setBackups(await listBackups());
+    } catch {
+      toast.error("No se pudo actualizar la lista de respaldos.");
+    }
   }
 
   function handleCreate() {
@@ -74,43 +65,30 @@ export function BackupsPanel({ initialBackups, createBackup, restoreBackup, list
     });
   }
 
-  async function handleRestore(filename: string) {
-    setRestoring(filename);
+  async function handleVerify(filename: string) {
+    setVerifying(filename);
     try {
-      const result = await restoreBackup(filename);
-      if (result.ok) {
-        toast.success(result.message);
-        await refresh();
-        router.refresh();
-      } else {
-        toast.error(result.error);
-      }
+      const result = await verifyBackupAction(filename);
+      if (result.ok) toast.success(result.message);
+      else toast.error(result.error);
     } finally {
-      setRestoring(null);
-      setConfirmTarget(null);
+      setVerifying(null);
     }
   }
 
   return (
     <SectionCard
-      title="Respaldos"
-      description="Crea, descarga y restaura copias de seguridad de la base de datos. Se conservan los 10 más recientes."
+      title="Respaldos cifrados"
+      description="Snapshots Postgres privados, comprimidos y cifrados. Retención: 7 diarios, 2 semanales y 1 mensual. La restauración se realiza fuera de la web."
       action={
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void refresh();
-            }}
-          >
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => void refresh()}>
             <RefreshCw className="mr-2 size-4" />
             Actualizar
           </Button>
           <Button type="button" size="sm" onClick={handleCreate} disabled={pendingCreate}>
             <Database className="mr-2 size-4" />
-            {pendingCreate ? "Creando…" : "Crear respaldo ahora"}
+            {pendingCreate ? "Creando..." : "Crear respaldo ahora"}
           </Button>
         </div>
       }
@@ -120,81 +98,48 @@ export function BackupsPanel({ initialBackups, createBackup, restoreBackup, list
           <EmptyPanel
             icon={Database}
             title="Sin respaldos"
-            description="Crea tu primer respaldo para tener una copia de seguridad de la base de datos."
+            description="Crea el primer snapshot cifrado de la base Postgres."
           />
         </div>
       ) : (
         <ul className="divide-y divide-border/60">
-          {sorted.map((backup) => {
-            const isRestoring = restoring === backup.filename;
-            return (
-              <li
-                key={backup.filename}
-                className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-foreground">{backup.filename}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatDateTime(backup.createdAt)} · {formatSize(backup.size)}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button asChild variant="outline" size="sm">
-                    <a
-                      href={`/api/backups/${encodeURIComponent(backup.filename)}/download`}
-                      download={backup.filename}
-                    >
-                      <Download className="mr-2 size-4" />
-                      Descargar
-                    </a>
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => setConfirmTarget(backup.filename)}
-                    disabled={isRestoring}
+          {sorted.map((backup) => (
+            <li
+              key={backup.filename}
+              className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-foreground">{backup.filename}</p>
+                <p className="text-xs text-muted-foreground">
+                  {formatDateTime(backup.createdAt)} · {formatSize(backup.size)} ·{" "}
+                  {backup.manifestAvailable ? "manifiesto disponible" : "sin manifiesto"}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!backup.manifestAvailable || verifying === backup.filename}
+                  onClick={() => void handleVerify(backup.filename)}
+                >
+                  <ShieldCheck className="mr-2 size-4" />
+                  {verifying === backup.filename ? "Verificando..." : "Verificar"}
+                </Button>
+                <Button asChild variant="outline" size="sm">
+                  <a
+                    href={`/api/backups/${encodeURIComponent(backup.filename)}/download`}
+                    download={backup.filename}
                   >
-                    <RotateCcw className="mr-2 size-4" />
-                    {isRestoring ? "Restaurando…" : "Restaurar"}
-                  </Button>
-                </div>
-              </li>
-            );
-          })}
+                    <Download className="mr-2 size-4" />
+                    Descargar cifrado
+                  </a>
+                </Button>
+              </div>
+            </li>
+          ))}
         </ul>
       )}
-
-      <AlertDialog
-        open={confirmTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setConfirmTarget(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Restaurar este respaldo?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esto reemplazará todos los datos actuales con el contenido de{" "}
-              <span className="font-medium text-foreground">{confirmTarget}</span>. Antes de
-              sobrescribir, se guardará un respaldo automático del estado actual.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={restoring !== null}>Cancelar</AlertDialogCancel>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={restoring !== null}
-              onClick={() => {
-                if (confirmTarget) void handleRestore(confirmTarget);
-              }}
-            >
-              {restoring ? "Restaurando…" : "Restaurar"}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </SectionCard>
   );
 }

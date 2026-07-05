@@ -11,7 +11,6 @@ type Target = {
 
 const repoRoot = process.cwd();
 const forbiddenRoots = [
-  path.resolve(repoRoot, "data", "pg.sqlite"),
   path.resolve(repoRoot, "data", "documents"),
   path.resolve(repoRoot, "data", "backups"),
 ];

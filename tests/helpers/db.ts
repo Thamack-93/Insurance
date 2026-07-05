@@ -94,7 +94,7 @@ export type SeededReceipt = {
 
 /**
  * Creates a PENDING receipt attached to the first existing client/policy/insurer
- * found in the seeded database. Returns the receipt id and a unique number.
+ * found in the isolated test database. Returns the receipt id and a unique number.
  */
 export async function seedPendingReceipt(prefix: string): Promise<SeededReceipt> {
   const db = getTestDb();
@@ -106,7 +106,7 @@ export async function seedPendingReceipt(prefix: string): Promise<SeededReceipt>
   });
 
   if (!policy) {
-    throw new Error("No active policy found in seeded DB; run `npm run db:seed`.");
+    throw new Error("No active policy found in the isolated test database.");
   }
 
   const receiptNumber = `${prefix}-${Date.now().toString(36).slice(-6).toUpperCase()}`;

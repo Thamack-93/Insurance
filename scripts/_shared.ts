@@ -1,16 +1,17 @@
 import "dotenv/config";
 
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
 
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaPg } from "@prisma/adapter-pg";
 import * as XLSX from "@e965/xlsx";
 
 import { PrismaClient } from "../src/generated/prisma/client.ts";
-import { backupsDir, dataDir, databasePath, exportsDir } from "../src/lib/files.ts";
+import { dataDir, exportsDir } from "../src/lib/files.ts";
 import { BUSINESS_TIME_ZONE, businessStartOfDay, formatBusinessDate } from "../src/lib/business-dates.ts";
 
-export { backupsDir, dataDir, databasePath, exportsDir };
+export { dataDir, exportsDir };
 
 export type CliArgs = {
   positionals: string[];
@@ -22,12 +23,33 @@ export type QuerySummary = {
   total: number;
 };
 
-const defaultDatabaseUrl = `file:${databasePath}`;
+const localEnvPath = path.join(process.cwd(), ".env.local");
+
+function loadLocalEnv() {
+  if (!fsSync.existsSync(localEnvPath)) return;
+  for (const line of fsSync.readFileSync(localEnvPath, "utf8").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) continue;
+    const key = trimmed.slice(0, separator).trim();
+    if (process.env[key] !== undefined) continue;
+    let value = trimmed.slice(separator + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
+}
+
+loadLocalEnv();
 
 export function createDb() {
-  const adapter = new PrismaBetterSqlite3({
-    url: defaultDatabaseUrl,
-  });
+  const connectionString = process.env.DATABASE_URL?.trim();
+  if (!connectionString || !/^postgres(ql)?:\/\//i.test(connectionString)) {
+    throw new Error("DATABASE_URL debe apuntar a Postgres para ejecutar este script.");
+  }
+  const adapter = new PrismaPg({ connectionString });
 
   return new PrismaClient({ adapter });
 }
@@ -41,7 +63,7 @@ export async function ensureDir(dir: string) {
 }
 
 export async function ensureDataDirs() {
-  await Promise.all([ensureDir(dataDir), ensureDir(backupsDir), ensureDir(exportsDir)]);
+  await Promise.all([ensureDir(dataDir), ensureDir(exportsDir)]);
 }
 
 export function timestampForFile(date = new Date()) {
@@ -54,20 +76,6 @@ export function timestampForFile(date = new Date()) {
     pad(date.getHours()),
     pad(date.getMinutes()),
   ].join("-");
-}
-
-export async function backupDatabase() {
-  await ensureDir(backupsDir);
-
-  try {
-    await fs.access(databasePath);
-  } catch {
-    return null;
-  }
-
-  const target = path.join(backupsDir, `pg-${timestampForFile()}.sqlite`);
-  await fs.copyFile(databasePath, target);
-  return target;
 }
 
 export function parseCliArgs(argv = process.argv.slice(2)): CliArgs {

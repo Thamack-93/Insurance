@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Desplegar PolicyDesk como demo funcional en Vercel Hobby usando Postgres hosted y sin PDFs en la primera versión.
+Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob privado.
 
 ## Stack recomendado
 
@@ -24,29 +24,31 @@ Desplegar PolicyDesk como demo funcional en Vercel Hobby usando Postgres hosted 
 
 ## Qué queda fuera por ahora
 
-- Subida y descarga de PDFs
-- Almacenamiento de documentos en runtime
-- Flujos de respaldo visibles en la demo publicada
+- Restauración de backups desde la UI; la restauración solo se permite por CLI hacia una rama temporal de Neon.
 
 ## Variables de entorno
 
 - `SESSION_SECRET`
 - `DATABASE_URL`
 - `ENABLE_DOCUMENT_FILES=false`
-- `ENABLE_LOCAL_BACKUPS=false`
-- `BACKUP_JOB_SECRET` solo si vas a usar un cron externo
+- `CRON_SECRET`
+- `AI_GATEWAY_MODEL`
+- `AI_GATEWAY_API_KEY` solo como fallback si no se usa OIDC
+- `BLOB_READ_WRITE_TOKEN`
+- `BACKUP_ENCRYPTION_KEY`
+- `BACKUP_ENCRYPTION_KEY_VERSION`
 
 ## Flujo de despliegue
 
 1. Crear la base de datos hosted.
-2. Cargar el snapshot real actual en la base hosted.
+2. Crear una rama protegida para preview; no seedear ni resetear la base actual.
 3. Configurar las variables de entorno en Vercel.
-4. Desplegar la rama principal.
-5. Verificar dashboard, hoy y CRUD principal.
+4. Conectar un Blob store privado.
+5. Desplegar preview, validar y luego promover la rama principal.
 
 ## Validaciones mínimas
 
-- La app no debe leer la base anterior en producción.
+- La app no debe resetear, truncar ni seedear la base actual.
 - No debe intentar escribir archivos PDF en runtime.
 - `Document` debe operar solo como metadata en esta fase.
-- Los flujos de respaldo deben quedar ocultos o deshabilitados.
+- Los backups deben poder crearse, listarse y verificarse solo por admin.

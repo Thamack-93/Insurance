@@ -1,25 +1,21 @@
 "use server";
 
-import fs from "node:fs/promises";
 import { revalidatePath } from "next/cache";
 import {
-  backupDatabase,
+  createDatabaseBackup,
   listBackups,
-  rotateBackups,
-  restoreDatabaseFromFile,
+  verifyStoredBackup,
   type BackupEntry,
 } from "@/lib/backup";
-import { assertSafeBackupPath } from "@/lib/files";
-import { resetDb } from "@/lib/db";
 import { AuthError, requireAdmin } from "@/lib/auth";
-import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { logError } from "@/lib/logger";
-import { areLocalBackupsEnabled } from "@/lib/deployment";
+import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 
 export type BackupListItem = {
   filename: string;
   size: number;
   createdAt: string;
+  manifestAvailable: boolean;
 };
 
 function toItem(entry: BackupEntry): BackupListItem {
@@ -27,72 +23,45 @@ function toItem(entry: BackupEntry): BackupListItem {
     filename: entry.filename,
     size: entry.size,
     createdAt: entry.createdAt.toISOString(),
+    manifestAvailable: entry.manifestAvailable,
   };
 }
 
 export async function listBackupsAction(): Promise<BackupListItem[]> {
   await requireAdmin();
-  if (!areLocalBackupsEnabled()) {
-    return [];
-  }
-  const entries = await listBackups();
-  return entries.map(toItem);
+  return (await listBackups()).map(toItem);
 }
 
 export async function createBackup(): Promise<MutationResult> {
   try {
     await requireAdmin();
-    if (!areLocalBackupsEnabled()) {
-      return errorResult("Los respaldos están deshabilitados en esta demo publicada.");
-    }
-    const target = await backupDatabase();
-    if (!target) {
-      return errorResult("No se encontró la base de datos para respaldar.");
-    }
-
-    await rotateBackups();
+    const backup = await createDatabaseBackup();
     revalidatePath("/settings");
-
-    const filename = target.split(/[\\/]/).pop() ?? target;
-    return successResult(filename, "/settings", `Respaldo creado: ${filename}`);
+    return successResult(
+      backup.filename,
+      "/settings",
+      `Respaldo cifrado creado: ${backup.filename}`,
+    );
   } catch (error) {
     if (error instanceof AuthError) return errorResult(error.message);
     logError("settings.backups.create", error);
-    return errorResult("No se pudo crear el respaldo. Intenta de nuevo.");
+    return errorResult("No se pudo crear el respaldo cifrado. Revisa la configuración segura.");
   }
 }
 
-export async function restoreBackup(filename: string): Promise<MutationResult> {
+export async function verifyBackupAction(filename: string): Promise<MutationResult> {
   try {
     await requireAdmin();
-    if (!areLocalBackupsEnabled()) {
-      return errorResult("Las restauraciones están deshabilitadas en esta demo publicada.");
-    }
-    const safePath = assertSafeBackupPath(filename);
-    await fs.access(safePath);
-
-    // Take a safety snapshot of the current DB before overwriting.
-    await backupDatabase("pre-restore");
-    await rotateBackups();
-
-    // Close the Prisma client (and its better-sqlite3 handle) before
-    // overwriting the database file, then drop the cached singleton so the
-    // next getDb() call opens a fresh connection against the restored file.
-    await resetDb();
-
-    await restoreDatabaseFromFile(safePath);
-
-    revalidatePath("/", "layout");
-    return successResult(filename, "/settings", `Respaldo restaurado: ${filename}`);
+    const verification = await verifyStoredBackup(filename);
+    if (!verification.valid) return errorResult(verification.reason);
+    return successResult(
+      filename,
+      "/settings",
+      `Respaldo verificado (${verification.manifest.totals.rows} filas).`,
+    );
   } catch (error) {
     if (error instanceof AuthError) return errorResult(error.message);
-    logError("settings.backups.restore", error, { filename });
-    if (error instanceof Error && error.message.includes("Backup path must stay")) {
-      return errorResult("Ruta de respaldo no válida.");
-    }
-    if (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") {
-      return errorResult("El archivo de respaldo ya no existe.");
-    }
-    return errorResult("No se pudo restaurar el respaldo. Intenta de nuevo.");
+    logError("settings.backups.verify", error, { filename });
+    return errorResult("No se pudo verificar el respaldo.");
   }
 }

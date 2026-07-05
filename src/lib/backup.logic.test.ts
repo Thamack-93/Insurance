@@ -1,0 +1,115 @@
+import { describe, expect, it } from "vitest";
+import {
+  createBackupManifest,
+  decryptBackupPayload,
+  encryptBackupPayload,
+  parseBackupEncryptionKey,
+  selectBackupRetention,
+  verifyBackupManifest,
+} from "@/lib/backup-logic";
+
+const KEY = Buffer.from(
+  "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "hex",
+);
+const IV = Buffer.from("101112131415161718191a1b", "hex");
+
+describe("backup encryption", () => {
+  it("encrypts deterministically with a fixed IV and authenticates the payload", () => {
+    const plaintext = Buffer.from('{"type":"backup"}\n{"type":"end"}\n');
+    const first = encryptBackupPayload(plaintext, KEY, "v7", IV);
+    const second = encryptBackupPayload(plaintext, KEY, "v7", IV);
+
+    expect(first.equals(second)).toBe(true);
+    const decrypted = decryptBackupPayload(first, KEY);
+    expect(decrypted.header.keyVersion).toBe("v7");
+    expect(decrypted.plaintext.equals(plaintext)).toBe(true);
+
+    const tampered = Buffer.from(first);
+    tampered[tampered.length - 20] ^= 1;
+    expect(() => decryptBackupPayload(tampered, KEY)).toThrow();
+  });
+
+  it("accepts explicit hex and base64 256-bit keys", () => {
+    expect(parseBackupEncryptionKey(`hex:${KEY.toString("hex")}`)).toEqual(KEY);
+    expect(parseBackupEncryptionKey(`base64:${KEY.toString("base64")}`)).toEqual(KEY);
+    expect(() => parseBackupEncryptionKey(Buffer.alloc(31).toString("base64"))).toThrow(
+      "exactly 32 bytes",
+    );
+  });
+});
+
+describe("backup manifest", () => {
+  it("hashes canonical content and detects changes", () => {
+    const manifest = createBackupManifest({
+      format: "policydesk-postgres-ndjson",
+      version: 1,
+      createdAt: "2026-07-04T10:00:00.000Z",
+      completedAt: "2026-07-04T10:00:01.000Z",
+      payload: {
+        filename: "backup.ndjson.gz.enc",
+        pathname: "database-backups/backup.ndjson.gz.enc",
+        size: 123,
+        sha256: "a".repeat(64),
+      },
+      encryption: {
+        algorithm: "AES-256-GCM",
+        keyVersion: "v1",
+        iv: IV.toString("base64"),
+        authTagBytes: 16,
+      },
+      compression: "gzip",
+      tables: [{ schema: "public", name: "User", rowCount: 2 }],
+      totals: { tables: 1, rows: 2 },
+    });
+
+    expect(verifyBackupManifest(manifest).valid).toBe(true);
+    const changed = structuredClone(manifest);
+    changed.totals.rows = 3;
+    expect(verifyBackupManifest(changed)).toEqual({
+      valid: false,
+      reason: "El hash del manifiesto no coincide.",
+    });
+  });
+});
+
+describe("backup retention", () => {
+  it("keeps seven daily, two older weekly, and one older monthly snapshots", () => {
+    const candidates = [
+      ["d0-new", "2026-07-04T20:00:00.000Z"],
+      ["d0-old", "2026-07-04T08:00:00.000Z"],
+      ["d1", "2026-07-03T08:00:00.000Z"],
+      ["d2", "2026-07-02T08:00:00.000Z"],
+      ["d3", "2026-07-01T08:00:00.000Z"],
+      ["d4", "2026-06-30T08:00:00.000Z"],
+      ["d5", "2026-06-29T08:00:00.000Z"],
+      ["d6", "2026-06-28T08:00:00.000Z"],
+      ["w1-new", "2026-06-20T08:00:00.000Z"],
+      ["w1-old", "2026-06-18T08:00:00.000Z"],
+      ["w2", "2026-06-10T08:00:00.000Z"],
+      ["m1-new", "2026-05-15T08:00:00.000Z"],
+      ["m1-old", "2026-05-01T08:00:00.000Z"],
+      ["expired", "2026-04-01T08:00:00.000Z"],
+    ].map(([id, createdAt]) => ({ id, createdAt: new Date(createdAt) }));
+
+    const selection = selectBackupRetention(candidates);
+    expect(selection.keep.map((item) => item.id)).toEqual([
+      "d0-new",
+      "d1",
+      "d2",
+      "d3",
+      "d4",
+      "d5",
+      "d6",
+      "w1-new",
+      "w2",
+      "m1-new",
+    ]);
+    expect(selection.remove.map((item) => item.id)).toEqual([
+      "d0-old",
+      "w1-old",
+      "m1-old",
+      "expired",
+    ]);
+  });
+});
