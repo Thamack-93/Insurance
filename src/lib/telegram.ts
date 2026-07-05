@@ -687,6 +687,17 @@ function buildTelegramPolicyDraftPayloadFromPreview(preview: {
     insurerId: string | null;
     sourcePolicyId: string | null;
   };
+  aiReview: {
+    summary: string;
+    warnings: string[];
+    suggestions: string[];
+    corrections: Array<{
+      field: string;
+      proposedValue: string;
+      reason: string;
+      confidence: "high" | "medium" | "low";
+    }>;
+  } | null;
 }) {
   return {
     type: "POLICY_CAPTURE" as const,
@@ -719,6 +730,7 @@ function buildTelegramPolicyDraftPayloadFromPreview(preview: {
     clientid: preview.suggestions.clientId,
     insurerid: preview.suggestions.insurerId,
     sourcepolicyid: preview.suggestions.sourcePolicyId,
+    aiReview: preview.aiReview,
   };
 }
 

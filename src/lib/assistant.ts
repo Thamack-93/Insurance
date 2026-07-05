@@ -226,13 +226,9 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
         recommendation: reportTheme.recommendation,
         plan: reportTheme.plan,
         severity: reportTheme.severity,
-        evidence: {
-          message,
-          normalized,
-          source,
-        },
-        input: { message },
-        output: { reply: finalReply.reply },
+        evidence: { source, messageLength: message.length, normalizedLength: normalized.length },
+        input: { redacted: true },
+        output: { redacted: true },
         actorId: user.id,
         forceOpen: reportTheme.kind === "INCIDENT",
       });

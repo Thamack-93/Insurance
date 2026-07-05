@@ -85,11 +85,6 @@ function ReportList({
                     </div>
                     <p className="mt-1 font-medium">{entry.title ?? "Señal registrada"}</p>
                     {entry.summary ? <p className="mt-1 text-muted-foreground">{entry.summary}</p> : null}
-                    {entry.input ? (
-                      <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-2 text-xs text-muted-foreground">
-                        {JSON.stringify(entry.input, null, 2).slice(0, 2_000)}
-                      </pre>
-                    ) : null}
                   </div>
                 ))}
               </div>

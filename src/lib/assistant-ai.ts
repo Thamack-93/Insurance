@@ -1,6 +1,6 @@
 import "server-only";
 
-import { gateway, generateText } from "ai";
+import { createGateway, generateText, type GatewayModelId } from "ai";
 import { z } from "zod";
 import type { AssistantPrompt, AssistantReply, AssistantUser } from "@/lib/assistant-types";
 import type {
@@ -60,6 +60,29 @@ function hasGatewayAuth() {
   return Boolean(process.env.AI_GATEWAY_API_KEY?.trim() || process.env.VERCEL_OIDC_TOKEN?.trim());
 }
 
+export function getAssistantAiModel(): GatewayModelId {
+  const configured = process.env.AI_GATEWAY_MODEL?.trim();
+  if (configured && configured.includes("/")) {
+    return configured as GatewayModelId;
+  }
+  return "openai/gpt-5.4";
+}
+
+export function getAssistantGatewayAuthMode(): "oidc" | "api-key" | "unavailable" {
+  if (process.env.VERCEL_OIDC_TOKEN?.trim()) return "oidc";
+  if (process.env.AI_GATEWAY_API_KEY?.trim()) return "api-key";
+  return "unavailable";
+}
+
+function getAssistantGatewayModel() {
+  const authMode = getAssistantGatewayAuthMode();
+  const provider = createGateway({
+    // An explicit empty key keeps AI_GATEWAY_API_KEY from overriding OIDC.
+    apiKey: authMode === "oidc" ? "" : process.env.AI_GATEWAY_API_KEY?.trim(),
+  });
+  return provider(getAssistantAiModel());
+}
+
 function toAssistantPrompts(prompts: Array<{ label: string; prompt: string }>): AssistantPrompt[] {
   return prompts.slice(0, 4).map((prompt) => ({ label: prompt.label, prompt: prompt.prompt }));
 }
@@ -101,7 +124,7 @@ export async function buildAssistantAiReply(input: {
 
   try {
     const result = await generateText({
-      model: gateway("openai/gpt-5.4"),
+      model: getAssistantGatewayModel(),
       temperature: 0.2,
       abortSignal: AbortSignal.timeout(4_000),
       prompt: [
@@ -154,7 +177,7 @@ export async function classifyAssistantReportSignalWithAi(input: {
 
   try {
     const result = await generateText({
-      model: gateway("openai/gpt-5.4"),
+      model: getAssistantGatewayModel(),
       temperature: 0.1,
       abortSignal: AbortSignal.timeout(4_000),
       prompt: [
@@ -196,7 +219,7 @@ export async function reviewPolicyPdfWithAi(input: {
 
   try {
     const result = await generateText({
-      model: gateway("openai/gpt-5.4"),
+      model: getAssistantGatewayModel(),
       temperature: 0.1,
       abortSignal: AbortSignal.timeout(4_000),
       prompt: [

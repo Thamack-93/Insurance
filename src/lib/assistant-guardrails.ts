@@ -1,14 +1,13 @@
 const DOMAIN_TERMS = [
   "asegur", "poliza", "renov", "recibo", "pago", "cobro", "cliente", "cartera", "prima", "comision",
   "siniestro", "reclamo", "cotizacion", "endoso", "vigencia", "riesgo", "calidad", "pendiente", "tarea",
-  "reporte", "export", "documento", "pdf", "telegram", "sistema", "nora", "buscar", "encuentra", "consolid",
-  "vincul", "datos", "dashboard", "hoy",
+  "consolid", "vincul", "policydesk", "nora", "telegram", "dashboard",
 ];
 
 const OFF_TOPIC_TERMS = [
   "receta", "cocina", "clima", "pronostico", "politica", "presidente", "eleccion", "futbol", "deporte",
   "pelicula", "serie de tv", "poema", "cuento", "chiste", "horoscopo", "programa en", "codigo de", "capital de",
-  "traduceme", "traduce", "tarea escolar",
+  "traduceme", "traduce", "tarea escolar", "fisica", "cuantica", "historia universal", "matematicas",
 ];
 
 function normalize(value: string) {
@@ -25,7 +24,13 @@ function looksLikeEntityLookup(value: string) {
   const tokens = compact.split(/\s+/).filter(Boolean);
   if (tokens.length === 0 || tokens.length > 6) return false;
   if (tokens.some((token) => /\d/.test(token) && token.length >= 4)) return true;
-  return tokens.length >= 2 && tokens.every((token) => /^[\p{L}'-]{2,}$/u.test(token));
+  if (tokens.length < 2 || tokens.length > 4) return false;
+  return tokens.every((token) => /^\p{Lu}[\p{L}'-]{1,}$/u.test(token));
+}
+
+function hasDomainTerm(value: string) {
+  const tokens = value.split(/[^a-z0-9]+/).filter(Boolean);
+  return DOMAIN_TERMS.some((term) => tokens.some((token) => token.startsWith(term)));
 }
 
 export type AssistantGuardrailDecision = {
@@ -44,7 +49,7 @@ export function evaluateAssistantInput(message: string): AssistantGuardrailDecis
 
   if (
     ["hola", "buenos dias", "buenas tardes", "ayuda", "menu", "que puedes hacer"].includes(normalized) ||
-    DOMAIN_TERMS.some((term) => normalized.includes(term))
+    hasDomainTerm(normalized)
   ) {
     return { allowed: true, normalized, reason: "system" };
   }

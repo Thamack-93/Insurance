@@ -2,11 +2,22 @@ import { createPolicy } from "@/app/(dashboard)/policies/actions";
 import { PolicyForm } from "@/components/forms/policy-form";
 import { createPolicyDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUserOrRedirect } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { buildRenewalPolicyDefaults, type PolicyRenewalSource } from "@/lib/policy-renewal";
-import { assertPolicyPortfolioAccess } from "@/lib/portfolio-access";
+import {
+  assertPolicyPortfolioAccess,
+  clientOperationalWhere,
+  policyOperationalWhere,
+} from "@/lib/portfolio-access";
 import type { PolicyFormValues } from "@/lib/validations";
+
+type TelegramDraftAiReview = {
+  summary: string;
+  warnings: string[];
+  suggestions: string[];
+};
 
 function parseTelegramDraftPolicyDefaults(payloadJson: string): Partial<PolicyFormValues> {
   try {
@@ -44,6 +55,26 @@ function parseTelegramDraftPolicyDefaults(payloadJson: string): Partial<PolicyFo
   }
 }
 
+function parseTelegramDraftAiReview(payloadJson: string): TelegramDraftAiReview | null {
+  try {
+    const payload = JSON.parse(payloadJson) as { aiReview?: unknown };
+    if (!payload.aiReview || typeof payload.aiReview !== "object") return null;
+    const review = payload.aiReview as Record<string, unknown>;
+    if (typeof review.summary !== "string") return null;
+    return {
+      summary: review.summary,
+      warnings: Array.isArray(review.warnings)
+        ? review.warnings.filter((value): value is string => typeof value === "string").slice(0, 6)
+        : [],
+      suggestions: Array.isArray(review.suggestions)
+        ? review.suggestions.filter((value): value is string => typeof value === "string").slice(0, 6)
+        : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default async function NewPolicyPage({
   searchParams,
 }: {
@@ -52,9 +83,10 @@ export default async function NewPolicyPage({
   const user = await requireUserOrRedirect();
   const params = (await searchParams) ?? {};
   const db = getDb();
+  const portfolioOwnerId = user.role === "ADMIN" ? undefined : user.id;
   const [clients, insurers, mostUsedInsurer] = await Promise.all([
     db.client.findMany({
-      where: { status: { not: "ARCHIVED" } },
+      where: { status: { not: "ARCHIVED" }, ...clientOperationalWhere(portfolioOwnerId) },
       orderBy: { fullName: "asc" },
       select: { id: true, fullName: true },
     }),
@@ -65,7 +97,7 @@ export default async function NewPolicyPage({
     }),
     db.policy.groupBy({
       by: ["insurerId"],
-      where: { status: "ACTIVE" },
+      where: { status: "ACTIVE", ...policyOperationalWhere(portfolioOwnerId) },
       _count: { insurerId: true },
       orderBy: { _count: { insurerId: "desc" } },
       take: 1,
@@ -73,6 +105,7 @@ export default async function NewPolicyPage({
   ]);
 
   let telegramDraftDefaults: Partial<PolicyFormValues> = {};
+  let telegramAiReview: TelegramDraftAiReview | null = null;
   if (params.telegramDraft) {
     const draft = await db.telegramDraft.findFirst({
       where: {
@@ -85,13 +118,14 @@ export default async function NewPolicyPage({
 
     if (draft && draft.status !== "CANCELLED" && draft.expiresAt > new Date()) {
       telegramDraftDefaults = parseTelegramDraftPolicyDefaults(draft.payloadJson);
+      telegramAiReview = parseTelegramDraftAiReview(draft.payloadJson);
     }
   }
 
   let renewalSource: PolicyRenewalSource | null = null;
   if (params.renewalFrom) {
-    const source = await db.policy.findUnique({
-      where: { id: params.renewalFrom },
+    const source = await db.policy.findFirst({
+      where: { id: params.renewalFrom, ...policyOperationalWhere(portfolioOwnerId) },
       include: {
         client: { select: { id: true, fullName: true } },
         insurer: { select: { id: true, name: true } },
@@ -148,6 +182,27 @@ export default async function NewPolicyPage({
           title="Nueva póliza"
           description="Registra una cobertura nueva con fechas, prima y relaciones operativas."
         />
+
+        {telegramAiReview ? (
+          <Card className="border-amber-200/80 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/20">
+            <CardHeader>
+              <CardTitle className="text-base">Revisión IA del PDF enviado por Telegram</CardTitle>
+              <CardDescription>{telegramAiReview.summary}</CardDescription>
+            </CardHeader>
+            {(telegramAiReview.warnings.length > 0 || telegramAiReview.suggestions.length > 0) ? (
+              <CardContent className="grid gap-4 text-sm md:grid-cols-2">
+                <div>
+                  <p className="font-medium">Observaciones</p>
+                  {telegramAiReview.warnings.map((warning) => <p key={warning} className="mt-1 text-muted-foreground">· {warning}</p>)}
+                </div>
+                <div>
+                  <p className="font-medium">Sugerencias</p>
+                  {telegramAiReview.suggestions.map((suggestion) => <p key={suggestion} className="mt-1 text-muted-foreground">· {suggestion}</p>)}
+                </div>
+              </CardContent>
+            ) : null}
+          </Card>
+        ) : null}
 
         <PolicyForm
           title="Alta de póliza"

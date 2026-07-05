@@ -62,11 +62,11 @@ export async function POST(request: NextRequest) {
         status: { not: "ARCHIVED" },
         portfolioOwnerId: user.id,
         OR: [
-          { rfc: rfc ?? undefined },
+          ...(rfc ? [{ rfc }] : []),
           {
             fullName: {
               equals: payload.fullName.trim(),
-              mode: "insensitive",
+              mode: "insensitive" as const,
             },
           },
         ],
@@ -127,6 +127,7 @@ export async function POST(request: NextRequest) {
       entityId: client.id,
       action: "CLIENT_CREATE",
       newValue: client,
+      userId: user.id,
     });
 
     return NextResponse.json({

@@ -16,6 +16,7 @@ type DbClient = PrismaClient | Prisma.TransactionClient;
 const ACTIVE_REPORT_STATUSES = new Set<AssistantReportStatus>(["COLLECTING", "OPEN"]);
 const CLOSED_REPORT_STATUSES = new Set<AssistantReportStatus>(["RESOLVED", "ARCHIVED", "DELETED"]);
 const DEFAULT_SUGGESTION_THRESHOLD = 5;
+const MAX_EVIDENCE_JSON_LENGTH = 5_000;
 
 export type AssistantReportSignalInput = {
   kind: AssistantReportKind;
@@ -180,18 +181,47 @@ function isActiveReport(status: string) {
   return ACTIVE_REPORT_STATUSES.has(status as AssistantReportStatus);
 }
 
+export function redactAssistantReportText(value: string, maxLength = 3_000) {
+  return value
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
+    .replace(/\b[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}\b/gi, "[rfc]")
+    .replace(/(?:\+?\d[\s().-]?){10,15}/g, "[telefono]")
+    .replace(/\b\d{6,}\b/g, "[identificador]")
+    .slice(0, maxLength);
+}
+
+export function serializeAssistantEvidence(
+  entries: Array<Record<string, unknown>>,
+  maxLength = MAX_EVIDENCE_JSON_LENGTH,
+) {
+  const retained: Array<Record<string, unknown>> = [];
+  for (const entry of entries.slice().reverse()) {
+    const candidate = [entry, ...retained];
+    const serialized = JSON.stringify(candidate);
+    if (serialized.length > maxLength) break;
+    retained.unshift(entry);
+  }
+  return JSON.stringify(retained);
+}
+
+export function getNewAssistantReportStatus(input: {
+  kind: AssistantReportKind;
+  forceOpen?: boolean;
+  threshold: number;
+}): AssistantReportStatus {
+  if (input.kind === "INCIDENT" || input.forceOpen) return "OPEN";
+  return input.threshold <= 1 ? "OPEN" : "COLLECTING";
+}
+
 function buildEvidenceEntry(input: AssistantReportSignalInput) {
   return {
     signalKind: input.signalKind,
     source: input.source,
-    title: input.title,
-    summary: input.summary,
-    recommendation: input.recommendation,
-    plan: input.plan,
+    title: redactAssistantReportText(input.title, 200),
+    summary: redactAssistantReportText(input.summary, 1_500),
+    recommendation: redactAssistantReportText(input.recommendation, 1_500),
+    plan: redactAssistantReportText(input.plan, 3_000),
     severity: input.severity ?? "MEDIUM",
-    input: input.input ?? null,
-    output: input.output ?? null,
-    evidence: input.evidence ?? null,
     createdAt: new Date().toISOString(),
   };
 }
@@ -202,6 +232,10 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
   const themeKey = normalizeThemeKey(input.themeKey);
   const themeLabel = toThemeLabel(input.themeLabel || input.themeKey);
   const threshold = Math.max(1, input.threshold ?? DEFAULT_SUGGESTION_THRESHOLD);
+  const title = redactAssistantReportText(input.title, 200);
+  const summary = redactAssistantReportText(input.summary, 1_500);
+  const recommendation = redactAssistantReportText(input.recommendation, 1_500);
+  const plan = redactAssistantReportText(input.plan, 3_000);
 
   try {
     return await client.$transaction(async (tx) => {
@@ -217,12 +251,11 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
       const activeReport = reports.find((report) => isActiveReport(report.status));
       const latestReport = reports[0] ?? null;
       const evidenceEntry = buildEvidenceEntry(input);
-      const statusForNewReport: AssistantReportStatus =
-        input.kind === "INCIDENT" || input.forceOpen
-          ? "OPEN"
-          : (latestReport?.signalCount ?? 0) + 1 >= threshold
-            ? "OPEN"
-            : "COLLECTING";
+      const statusForNewReport = getNewAssistantReportStatus({
+        kind: input.kind,
+        forceOpen: input.forceOpen,
+        threshold,
+      });
 
       if (activeReport) {
         const nextEvidence = [...parseEvidenceJson(activeReport.evidenceJson), evidenceEntry];
@@ -235,17 +268,17 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
           where: { id: activeReport.id },
           data: {
             themeLabel,
-            title: input.title,
-            summary: input.summary,
-            recommendation: input.recommendation,
-            plan: input.plan,
+            title,
+            summary,
+            recommendation,
+            plan,
             severity: input.severity ?? activeReport.severity,
             signalCount: nextSignalCount,
             status: nextStatus,
             openedAt,
             lastSignalAt: now,
-            evidenceJson: safeJson(nextEvidence),
-            detailsJson: safeJson(input.details ?? {}),
+            evidenceJson: serializeAssistantEvidence(nextEvidence),
+            detailsJson: safeJson({ redacted: true }),
           },
         });
 
@@ -254,9 +287,9 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
             reportId: updated.id,
             signalKind: input.signalKind,
             source: input.source,
-            title: input.title,
-            inputJson: safeJson(input.input ?? {}),
-            outputJson: safeJson(input.output ?? {}),
+            title,
+            inputJson: safeJson({ redacted: true }),
+            outputJson: safeJson({ redacted: true }),
           },
         });
 
@@ -290,12 +323,12 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
           status: statusForNewReport,
           version: nextVersion,
           parentReportId: latestReport?.status && CLOSED_REPORT_STATUSES.has(latestReport.status as AssistantReportStatus) ? latestReport.id : latestReport?.id ?? null,
-          title: input.title,
-          summary: input.summary,
-          recommendation: input.recommendation,
-          plan: input.plan,
-          evidenceJson: safeJson([evidenceEntry]),
-          detailsJson: safeJson(input.details ?? {}),
+          title,
+          summary,
+          recommendation,
+          plan,
+          evidenceJson: serializeAssistantEvidence([evidenceEntry]),
+          detailsJson: safeJson({ redacted: true }),
           signalCount: 1,
           severity: input.severity ?? "MEDIUM",
           firstSignalAt: now,
@@ -309,9 +342,9 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
           reportId: created.id,
           signalKind: input.signalKind,
           source: input.source,
-          title: input.title,
-          inputJson: safeJson(input.input ?? {}),
-          outputJson: safeJson(input.output ?? {}),
+          title,
+          inputJson: safeJson({ redacted: true }),
+          outputJson: safeJson({ redacted: true }),
         },
       });
 
