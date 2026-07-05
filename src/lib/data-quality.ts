@@ -794,7 +794,8 @@ function clampScore(score: number) {
 function clientQualityLevel(score: number): ClientQualityScore["nivel"] {
   if (score >= 90) return "Excelente";
   if (score >= 75) return "Bueno";
-  return "Atención";
+  if (score >= 50) return "Atención";
+  return "Crítico";
 }
 
 function policyQualityLevel(score: number): PolicyQualityScore["nivel"] {

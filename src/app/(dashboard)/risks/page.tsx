@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UrlTabs } from "@/components/ui/url-tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { TableToolbar } from "@/components/tables/table-toolbar";
 import { getDb } from "@/lib/db";
 import { detectRisks } from "@/lib/risk-engine";
 import { getClientDataQualityScores, getPolicyDataQualityScores } from "@/lib/data-quality";
@@ -29,8 +30,10 @@ import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-but
 function riskHref(entityType: string, entityId: string) {
   if (entityType === "Client") return `/clients/${entityId}`;
   if (entityType === "Policy") return `/policies/${entityId}`;
-  if (entityType === "Receipt") return `/receipts`;
-  if (entityType === "Task" || entityType === "WorkItem") return `/tasks`;
+  if (entityType === "Receipt") return `/receipts/${entityId}`;
+  if (entityType === "Task" || entityType === "WorkItem") return `/tasks/${entityId}`;
+  if (entityType === "Claim") return `/claims/${entityId}`;
+  if (entityType === "Quote") return `/quotes/${entityId}`;
   if (entityType === "Document") return `/documents`;
   return "/reports";
 }
@@ -103,12 +106,13 @@ function ScoreBar({ score }: { score: number }) {
 export default async function RisksPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ tab?: string; alertType?: string; issueCode?: string }>;
+  searchParams?: Promise<{ tab?: string; alertType?: string; issueCode?: string; q?: string }>;
 }) {
   const params = (await searchParams) ?? {};
   const initialTab = params.tab === "completitud" ? "completitud" : "hallazgos";
   const alertTypeFilter = params.alertType;
   const issueCodeFilter = params.issueCode;
+  const query = (params.q ?? "").trim().toLowerCase();
 
   const db = getDb();
   const [risks, openNotifications, clientScores, policyScores] = await Promise.all([
@@ -118,13 +122,19 @@ export default async function RisksPage({
     getPolicyDataQualityScores(),
   ]);
 
-  const filteredRisks = alertTypeFilter ? risks.filter((r) => r.alertType === alertTypeFilter) : risks;
+  const matchesQuery = (...values: Array<string | null | undefined>) =>
+    !query || values.some((value) => value?.toLowerCase().includes(query));
+
+  const filteredRisks = risks.filter((risk) => {
+    if (alertTypeFilter && risk.alertType !== alertTypeFilter) return false;
+    return matchesQuery(risk.title, risk.description, getRiskTypeLabel(risk.alertType), risk.entityType, risk.suggestedAction);
+  });
 
   const critical = filteredRisks.filter((risk) => risk.severity === "CRITICAL");
   const warnings = filteredRisks.filter((risk) => risk.severity === "WARNING");
   const info = filteredRisks.filter((risk) => risk.severity === "INFO");
 
-  const typeCounts = risks.reduce<Record<string, number>>((acc, risk) => {
+  const typeCounts = filteredRisks.reduce<Record<string, number>>((acc, risk) => {
     acc[risk.alertType] = (acc[risk.alertType] ?? 0) + 1;
     return acc;
   }, {});
@@ -152,6 +162,18 @@ export default async function RisksPage({
   const filteredPolicyScores = issueCodeFilter
     ? policyScores.filter((p) => p.issues.some((i) => i.code === issueCodeFilter))
     : policyScores;
+  const searchedClientScores = filteredClientScores.filter((client) =>
+    matchesQuery(client.cliente, ...client.issues.map((issue) => issue.etiqueta), ...client.issues.map((issue) => issue.descripcion)),
+  );
+  const searchedPolicyScores = filteredPolicyScores.filter((policy) =>
+    matchesQuery(
+      policy.poliza,
+      policy.cliente,
+      policy.aseguradora,
+      ...policy.issues.map((issue) => issue.etiqueta),
+      ...policy.issues.map((issue) => issue.descripcion),
+    ),
+  );
 
   const allIssues = [
     ...clientScores.flatMap((c) => c.issues.map((i) => ({ ...i, entity: c.cliente }))),
@@ -364,6 +386,7 @@ export default async function RisksPage({
               </Link>
             </div>
           )}
+          <TableToolbar searchPlaceholder="Buscar cliente, póliza o hallazgo de calidad..." />
           <section className="grid gap-3 md:grid-cols-2">
             <MetricCard
               title="Críticos"
@@ -383,7 +406,7 @@ export default async function RisksPage({
 
           <section className="grid gap-6 xl:grid-cols-2">
             <SectionCard title="Calidad por cliente" description={issueCodeFilter ? `Filtrado por: ${getIssueCodeLabel(issueCodeFilter)}` : "Peores primero."}>
-              {filteredClientScores.length === 0 ? (
+              {searchedClientScores.length === 0 ? (
                 <div className="px-4 py-6 text-sm text-muted-foreground">{issueCodeFilter ? "No hay clientes con este problema." : "No hay clientes para evaluar."}</div>
               ) : (
                 <Table>
@@ -398,7 +421,7 @@ export default async function RisksPage({
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredClientScores.slice(0, 10).map((client) => (
+                      {searchedClientScores.slice(0, 10).map((client) => (
                         <TableRow key={client.clienteId}>
                         <TableCell>
                           <Link href={`/clients/${client.clienteId}`} className="font-medium hover:text-primary">
@@ -459,7 +482,7 @@ export default async function RisksPage({
             </SectionCard>
 
             <SectionCard title="Calidad por póliza" description={issueCodeFilter ? `Filtrado por: ${getIssueCodeLabel(issueCodeFilter)}` : "Peores primero."}>
-              {filteredPolicyScores.length === 0 ? (
+              {searchedPolicyScores.length === 0 ? (
                 <div className="px-4 py-6 text-sm text-muted-foreground">{issueCodeFilter ? "No hay pólizas con este problema." : "No hay pólizas para evaluar."}</div>
               ) : (
                 <Table>
@@ -473,7 +496,7 @@ export default async function RisksPage({
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredPolicyScores.slice(0, 10).map((policy) => (
+                      {searchedPolicyScores.slice(0, 10).map((policy) => (
                         <TableRow key={policy.polizaId}>
                         <TableCell>
                           <Link href={`/policies/${policy.polizaId}`} className="font-medium hover:text-primary">

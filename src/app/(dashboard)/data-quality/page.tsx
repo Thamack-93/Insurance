@@ -17,6 +17,9 @@ import { Button } from "@/components/ui/button";
 import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UrlTabs } from "@/components/ui/url-tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Pagination } from "@/components/lists/pagination";
+import { SortableTableHead } from "@/components/tables/sortable-table-head";
+import { TableToolbar } from "@/components/tables/table-toolbar";
 import { applyLedgerImportBatchAction, previewLedgerImportAction, runPaymentAuditAction, runVigencyAuditAction } from "./actions";
 import {
   getClientDataQualityScores,
@@ -29,6 +32,8 @@ import {
 import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
+import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
+import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
 import { getLatestMaintenanceRun } from "@/lib/vigency-maintenance";
 import { getUpcomingRenewals } from "@/lib/renewals";
 import { RunVigencyAuditButton } from "@/components/data-quality/run-vigency-audit-button";
@@ -91,6 +96,11 @@ function receiptReviewReasonLabel(reason: string) {
   return reason;
 }
 
+function matchesTableQuery(query: string, ...values: Array<string | null | undefined>) {
+  if (!query) return true;
+  return values.some((value) => value?.toLowerCase().includes(query));
+}
+
 export default async function DataQualityPage({
   searchParams,
 }: {
@@ -101,6 +111,9 @@ export default async function DataQualityPage({
     params.tab === "salud" || params.tab === "vigencias" || params.tab === "pagos" || params.tab === "renovaciones" || params.tab === "ledger"
       ? params.tab
       : "salud";
+  const query = (typeof params.q === "string" ? params.q : "").trim().toLowerCase();
+  const page = readTablePage(params);
+  const { sortKey, direction } = readTableSort(params);
   const previewBatchId = typeof params.ledgerBatch === "string" ? params.ledgerBatch : null;
   const db = getDb();
   const [
@@ -232,6 +245,7 @@ export default async function DataQualityPage({
   );
 
   const clientMissingData = clientScores.filter((c) => c.issues.length > 0);
+  const clientCritical = clientScores.filter((c) => c.nivel === "Crítico").length;
   const clientAttention = clientScores.filter((c) => c.nivel === "Atención").length;
   const policyCritical = policyScores.filter((p) => p.score < 50).length;
   const policyAttention = policyScores.filter((p) => p.score >= 50 && p.score < 75).length;
@@ -306,10 +320,112 @@ export default async function DataQualityPage({
     acc[year] = (acc[year] ?? 0) + 1;
     return acc;
   }, {} as Record<number, number>);
+  const paymentYearEntries = Object.entries(receiptIssuesByYear)
+    .map(([year, count]) => ({ year, count }))
+    .sort((left, right) => Number(right.year) - Number(left.year));
   const openRenewalSuggestions = renewalReviewSuggestions.filter((suggestion) => suggestion.status === "PENDING");
   const closedRenewalSuggestions = renewalReviewSuggestions.filter((suggestion) => suggestion.status !== "PENDING");
   const openLedgerIssues = ledgerReviewIssues.filter((issue) => issue.status === "OPEN");
   const closedLedgerIssues = ledgerReviewIssues.filter((issue) => issue.status !== "OPEN");
+  const filteredOpenRenewalSuggestions = openRenewalSuggestions.filter((suggestion) =>
+    matchesTableQuery(
+      query,
+      suggestion.sourcePolicyNumber,
+      suggestion.clientName,
+      suggestion.insurerName,
+      suggestion.targetPolicyNumber,
+      suggestion.reason,
+      suggestion.resolutionNote,
+    ),
+  );
+  const filteredClosedRenewalSuggestions = closedRenewalSuggestions.filter((suggestion) =>
+    matchesTableQuery(
+      query,
+      suggestion.sourcePolicyNumber,
+      suggestion.clientName,
+      suggestion.insurerName,
+      suggestion.targetPolicyNumber,
+      suggestion.reason,
+      suggestion.resolutionNote,
+    ),
+  );
+  const sortedOpenRenewalSuggestions = [...filteredOpenRenewalSuggestions].sort((left, right) => {
+    const dir = direction === "desc" ? -1 : 1;
+    const compareText = (a: string | null | undefined, b: string | null | undefined) =>
+      (a ?? "").localeCompare(b ?? "") * dir;
+    const compareDate = (a: Date, b: Date) => (a.getTime() - b.getTime()) * dir;
+
+    switch (sortKey) {
+      case "status":
+        return compareText(left.dispositionLabel, right.dispositionLabel) || compareText(left.sourcePolicyNumber, right.sourcePolicyNumber);
+      case "sourcePolicy":
+        return compareText(left.sourcePolicyNumber, right.sourcePolicyNumber) || compareDate(left.sourceEndDate, right.sourceEndDate);
+      case "client":
+        return compareText(left.clientName, right.clientName) || compareText(left.sourcePolicyNumber, right.sourcePolicyNumber);
+      case "insurer":
+        return compareText(left.insurerName, right.insurerName) || compareText(left.sourcePolicyNumber, right.sourcePolicyNumber);
+      case "targetPolicy":
+        return compareText(left.targetPolicyNumber, right.targetPolicyNumber) || compareText(left.sourcePolicyNumber, right.sourcePolicyNumber);
+      case "updatedAt":
+        return compareDate(left.updatedAt, right.updatedAt) || compareText(left.sourcePolicyNumber, right.sourcePolicyNumber);
+      default:
+        return compareDate(left.updatedAt, right.updatedAt) || compareText(left.sourcePolicyNumber, right.sourcePolicyNumber);
+    }
+  });
+  const sortedOpenLedgerIssues = [...openLedgerIssues]
+    .filter((issue) =>
+      matchesTableQuery(
+        query,
+        issue.batchCsvName,
+        issue.batchPaidName,
+        issue.issueType,
+        issue.message,
+        issue.sourceType,
+        issue.sourceKey,
+        issue.severity,
+      ),
+    )
+    .sort((left, right) => {
+      const dir = direction === "desc" ? -1 : 1;
+      const compareText = (a: string | null | undefined, b: string | null | undefined) =>
+        (a ?? "").localeCompare(b ?? "") * dir;
+      const compareNumber = (a: number | null | undefined, b: number | null | undefined) => ((a ?? -1) - (b ?? -1)) * dir;
+      const compareDate = (a: Date, b: Date) => (a.getTime() - b.getTime()) * dir;
+
+      switch (sortKey) {
+        case "batch":
+          return compareText(left.batchCsvName, right.batchCsvName) || compareDate(left.createdAt, right.createdAt);
+        case "type":
+          return compareText(left.issueType, right.issueType) || compareText(left.batchCsvName, right.batchCsvName);
+        case "severity":
+          return compareText(left.severity, right.severity) || compareText(left.issueType, right.issueType);
+        case "row":
+          return compareNumber(left.rowNumber, right.rowNumber) || compareText(left.issueType, right.issueType);
+        case "status":
+          return compareText(left.dispositionLabel, right.dispositionLabel) || compareText(left.issueType, right.issueType);
+        case "createdAt":
+          return compareDate(left.createdAt, right.createdAt) || compareText(left.issueType, right.issueType);
+        default:
+          return compareDate(left.createdAt, right.createdAt) || compareText(left.issueType, right.issueType);
+      }
+    });
+  const filteredClosedLedgerIssues = closedLedgerIssues.filter((issue) =>
+    matchesTableQuery(
+      query,
+      issue.batchCsvName,
+      issue.batchPaidName,
+      issue.issueType,
+      issue.message,
+      issue.resolutionNote,
+      issue.sourceType,
+      issue.sourceKey,
+      issue.severity,
+    ),
+  );
+  const renewalStart = (page - 1) * DEFAULT_PAGE_SIZE;
+  const pagedOpenRenewalSuggestions = sortedOpenRenewalSuggestions.slice(renewalStart, renewalStart + DEFAULT_PAGE_SIZE);
+  const ledgerStart = (page - 1) * DEFAULT_PAGE_SIZE;
+  const pagedOpenLedgerIssues = sortedOpenLedgerIssues.slice(ledgerStart, ledgerStart + DEFAULT_PAGE_SIZE);
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
@@ -412,8 +528,8 @@ export default async function DataQualityPage({
               />
               <MetricCard
                 title="Críticos"
-                value={policyCritical + renewalCriticalPolicies}
-                description={`${policyCritical} pólizas + ${renewalCriticalPolicies} renovaciones`}
+                value={clientCritical + policyCritical + renewalCriticalPolicies}
+                description={`${clientCritical} clientes + ${policyCritical} pólizas + ${renewalCriticalPolicies} renovaciones`}
                 icon={ShieldAlert}
                 tone="rose"
               />
@@ -912,9 +1028,15 @@ export default async function DataQualityPage({
                 </div>
               </div>
               <div className="mt-4 grid gap-3 text-sm text-muted-foreground md:grid-cols-3">
-                <div>2023: {receiptIssuesByYear[2023] ?? 0}</div>
-                <div>2024: {receiptIssuesByYear[2024] ?? 0}</div>
-                <div>2025: {receiptIssuesByYear[2025] ?? 0}</div>
+                {paymentYearEntries.length ? (
+                  paymentYearEntries.slice(0, 3).map((entry) => (
+                    <div key={entry.year}>
+                      {entry.year}: {entry.count}
+                    </div>
+                  ))
+                ) : (
+                  <div>Sin histórico abierto.</div>
+                )}
               </div>
               {openPaymentAfterDueDateIssues.length === 0 ? (
                 <div className="p-4">
@@ -1082,21 +1204,36 @@ export default async function DataQualityPage({
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Pendientes</p>
-                  <p className="mt-1 text-2xl font-semibold">{openRenewalSuggestions.length}</p>
+                  <p className="mt-1 text-2xl font-semibold">{filteredOpenRenewalSuggestions.length}</p>
                 </div>
                 <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Declinadas</p>
-                  <p className="mt-1 text-2xl font-semibold">{closedRenewalSuggestions.length}</p>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Cerradas</p>
+                  <p className="mt-1 text-2xl font-semibold">{filteredClosedRenewalSuggestions.length}</p>
                 </div>
                 <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Total revisadas</p>
-                  <p className="mt-1 text-2xl font-semibold">{renewalReviewSuggestions.length}</p>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Coincidencias</p>
+                  <p className="mt-1 text-2xl font-semibold">{filteredOpenRenewalSuggestions.length + filteredClosedRenewalSuggestions.length}</p>
                 </div>
               </div>
-              {openRenewalSuggestions.length === 0 ? (
+              <div className="mt-5">
+                <TableToolbar searchPlaceholder="Buscar por póliza origen/destino, cliente o aseguradora..." />
+              </div>
+              {filteredOpenRenewalSuggestions.length === 0 ? (
                 <div className="p-4">
                   <CalendarCheck2 className="mb-3 size-5 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">No hay sugerencias de renovación para revisar.</p>
+                  <p className="text-sm text-muted-foreground">
+                    {query ? "No hay sugerencias abiertas que coincidan con esta búsqueda." : "No hay sugerencias de renovación para revisar."}
+                  </p>
+                </div>
+              ) : pagedOpenRenewalSuggestions.length === 0 ? (
+                <div className="p-4 text-sm text-muted-foreground">
+                  Esta página no tiene resultados.{" "}
+                  <Link
+                    href={buildTableHref("/data-quality", params, { tab: "renovaciones", q: query || null, sort: sortKey ?? null, dir: direction ?? null })}
+                    className="font-medium text-foreground hover:text-primary"
+                  >
+                    Volver al inicio
+                  </Link>
                 </div>
               ) : (
                 <div className="mt-5 space-y-4">
@@ -1108,17 +1245,17 @@ export default async function DataQualityPage({
                             <TableHead className="w-10">
                               <span className="sr-only">Seleccionar</span>
                             </TableHead>
-                            <TableHead>Estado</TableHead>
-                            <TableHead>Póliza origen</TableHead>
-                            <TableHead>Cliente</TableHead>
-                            <TableHead>Aseguradora</TableHead>
-                            <TableHead>Póliza destino</TableHead>
+                            <SortableTableHead sortKey="status">Estado</SortableTableHead>
+                            <SortableTableHead sortKey="sourcePolicy">Póliza origen</SortableTableHead>
+                            <SortableTableHead sortKey="client">Cliente</SortableTableHead>
+                            <SortableTableHead sortKey="insurer">Aseguradora</SortableTableHead>
+                            <SortableTableHead sortKey="targetPolicy">Póliza destino</SortableTableHead>
                             <TableHead>Nota</TableHead>
                             <TableHead className="text-right">Acciones</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {openRenewalSuggestions.slice(0, 20).map((suggestion) => (
+                          {pagedOpenRenewalSuggestions.map((suggestion) => (
                             <TableRow key={suggestion.suggestionId}>
                               <TableCell>
                                 <input
@@ -1170,9 +1307,21 @@ export default async function DataQualityPage({
                         </TableBody>
                       </Table>
                     </div>
+                    <Pagination
+                      page={page}
+                      pageSize={DEFAULT_PAGE_SIZE}
+                      total={sortedOpenRenewalSuggestions.length}
+                      basePath="/data-quality"
+                      searchParams={{
+                        tab: "renovaciones",
+                        q: query || undefined,
+                        sort: sortKey ?? undefined,
+                        dir: direction ?? undefined,
+                      }}
+                    />
                     <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
                       <p className="text-sm text-muted-foreground">
-                        Marca varias sugerencias para aprobarlas, descartarlas, suprimirlas o fusionarlas como un solo caso maestro.
+                        Aprobar selección vincula la renovación con su póliza destino y cierra el origen usando la lógica real de renovaciones.
                       </p>
                       <div className="ml-auto flex flex-wrap gap-2">
                         <Button type="submit" name="operation" value="APPROVE" className="rounded-full">
@@ -1193,7 +1342,7 @@ export default async function DataQualityPage({
                       </div>
                     </div>
                   </form>
-                  {closedRenewalSuggestions.length ? (
+                  {filteredClosedRenewalSuggestions.length ? (
                     <div className="overflow-hidden rounded-2xl border border-stone-200/80">
                       <div className="border-b border-stone-200/80 bg-stone-50/70 px-4 py-3">
                         <p className="text-sm font-semibold">Historial reciente</p>
@@ -1210,7 +1359,7 @@ export default async function DataQualityPage({
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {closedRenewalSuggestions.slice(0, 10).map((suggestion) => (
+                          {filteredClosedRenewalSuggestions.slice(0, 10).map((suggestion) => (
                             <TableRow key={suggestion.suggestionId}>
                               <TableCell>
                                 <Badge variant="outline" className="rounded-full">
@@ -1377,10 +1526,31 @@ export default async function DataQualityPage({
               title="Issues de ledger por revisar"
               description="Cada fila queda agrupada por lote para que puedas aprobar o revisar por categoría."
             >
-              {openLedgerIssues.length === 0 ? (
+              <div className="mb-5">
+                <TableToolbar searchPlaceholder="Buscar lote, tipo, severidad o mensaje..." />
+              </div>
+              {sortedOpenLedgerIssues.length === 0 ? (
                 <div className="p-4">
                   <BadgeCheck className="mb-3 size-5 text-emerald-500" />
-                  <p className="text-sm text-muted-foreground">No hay issues abiertos de ledger.</p>
+                  <p className="text-sm text-muted-foreground">
+                    {query ? "No hay issues abiertos de ledger que coincidan con esta búsqueda." : "No hay issues abiertos de ledger."}
+                  </p>
+                </div>
+              ) : pagedOpenLedgerIssues.length === 0 ? (
+                <div className="p-4 text-sm text-muted-foreground">
+                  Esta página no tiene resultados.{" "}
+                  <Link
+                    href={buildTableHref("/data-quality", params, {
+                      tab: "ledger",
+                      q: query || null,
+                      sort: sortKey ?? null,
+                      dir: direction ?? null,
+                      ledgerBatch: previewBatchId,
+                    })}
+                    className="font-medium text-foreground hover:text-primary"
+                  >
+                    Volver al inicio
+                  </Link>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -1392,17 +1562,17 @@ export default async function DataQualityPage({
                             <TableHead className="w-10">
                               <span className="sr-only">Seleccionar</span>
                             </TableHead>
-                            <TableHead>Lote</TableHead>
-                            <TableHead>Tipo</TableHead>
-                            <TableHead>Severidad</TableHead>
+                            <SortableTableHead sortKey="batch">Lote</SortableTableHead>
+                            <SortableTableHead sortKey="type">Tipo</SortableTableHead>
+                            <SortableTableHead sortKey="severity">Severidad</SortableTableHead>
                             <TableHead>Mensaje</TableHead>
-                            <TableHead className="text-right">Fila</TableHead>
-                            <TableHead>Estado</TableHead>
+                            <SortableTableHead sortKey="row" className="text-right">Fila</SortableTableHead>
+                            <SortableTableHead sortKey="status">Estado</SortableTableHead>
                             <TableHead className="text-right">Acciones</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {openLedgerIssues.map((issue) => (
+                          {pagedOpenLedgerIssues.map((issue) => (
                             <TableRow key={issue.issueId}>
                               <TableCell>
                                 <input
@@ -1442,6 +1612,19 @@ export default async function DataQualityPage({
                         </TableBody>
                       </Table>
                     </div>
+                    <Pagination
+                      page={page}
+                      pageSize={DEFAULT_PAGE_SIZE}
+                      total={sortedOpenLedgerIssues.length}
+                      basePath="/data-quality"
+                      searchParams={{
+                        tab: "ledger",
+                        q: query || undefined,
+                        sort: sortKey ?? undefined,
+                        dir: direction ?? undefined,
+                        ledgerBatch: previewBatchId ?? undefined,
+                      }}
+                    />
                     <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
                       <p className="text-sm text-muted-foreground">
                         Puedes resolver varios issues iguales al mismo tiempo o fusionarlos si representan el mismo origen.
@@ -1465,7 +1648,7 @@ export default async function DataQualityPage({
                       </div>
                     </div>
                   </form>
-                  {closedLedgerIssues.length ? (
+                  {filteredClosedLedgerIssues.length ? (
                     <div className="overflow-hidden rounded-2xl border border-stone-200/80">
                       <div className="border-b border-stone-200/80 bg-stone-50/70 px-4 py-3">
                         <p className="text-sm font-semibold">Historial reciente</p>
@@ -1482,7 +1665,7 @@ export default async function DataQualityPage({
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {closedLedgerIssues.slice(0, 10).map((issue) => (
+                          {filteredClosedLedgerIssues.slice(0, 10).map((issue) => (
                             <TableRow key={issue.issueId}>
                               <TableCell>{issue.issueType}</TableCell>
                               <TableCell>

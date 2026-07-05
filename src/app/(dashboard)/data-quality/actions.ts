@@ -11,13 +11,21 @@ import { applyLedgerImportBatch, createLedgerImportPreview } from "@/lib/ledger-
 import { runPolicyVigencyAudit } from "@/lib/vigency-maintenance";
 import { runPaymentReconciliationAudit } from "@/lib/payment-maintenance";
 import { upsertSuppressionRule } from "@/lib/data-quality-rules";
-import { linkRenewalToPolicy } from "@/app/(dashboard)/renewals/actions";
+import { linkRenewalToPolicy, markRenewalAsNotContinuing } from "@/app/(dashboard)/renewals/actions";
 
 const REVIEW_APPROVED_NOTE = "Aprobado desde Data Quality.";
 const REVIEW_DENIED_NOTE = "Denegado desde Data Quality.";
 const REVIEW_SUPPRESSED_NOTE = "Suprimido por regla desde Data Quality.";
 const REVIEW_REOPENED_NOTE = "Reabierto desde Data Quality.";
 const REVIEW_CLOSED_NOTE = "Cerrado manualmente desde Riesgos y calidad.";
+
+function buildLedgerTabHref(batchId?: string | null) {
+  const params = new URLSearchParams({ tab: "ledger" });
+  if (batchId) {
+    params.set("ledgerBatch", batchId);
+  }
+  return `/data-quality?${params.toString()}`;
+}
 
 function parseIssueIds(formData: FormData) {
   return formData
@@ -299,7 +307,14 @@ async function reviewRenewalSuggestion(
       return successResult(suggestion.id, "/data-quality?tab=renovaciones", "La sugerencia ya estaba revisada.");
     }
 
-    const nextStatus = decision === "APPROVE" ? "RESOLVED" : "DECLINED";
+    if (decision === "APPROVE") {
+      if (!suggestion.targetPolicy) {
+        return errorResult("Selecciona una póliza destino antes de aprobar la sugerencia.");
+      }
+      return linkRenewalToPolicy(suggestion.sourcePolicy.id, suggestion.targetPolicy.id);
+    }
+
+    const nextStatus = "DECLINED";
     const reviewedAt = new Date();
 
     await db.policyRenewalSuggestion.update({
@@ -308,14 +323,14 @@ async function reviewRenewalSuggestion(
         status: nextStatus,
         reviewedAt,
         reviewedById: actor.id,
-        resolutionNote: decision === "APPROVE" ? REVIEW_APPROVED_NOTE : REVIEW_DENIED_NOTE,
+        resolutionNote: REVIEW_DENIED_NOTE,
       },
     });
 
     await writeActivityLog({
       entityType: "PolicyRenewalSuggestion",
       entityId: suggestion.id,
-      action: decision === "APPROVE" ? "RENEWAL_REVIEW_APPROVED" : "RENEWAL_REVIEW_DENIED",
+      action: "RENEWAL_REVIEW_DENIED",
       oldValue: suggestion,
       newValue: { ...suggestion, status: nextStatus, reviewedAt, reviewedById: actor.id },
       userId: actor.id,
@@ -334,7 +349,7 @@ async function reviewRenewalSuggestion(
     return successResult(
       suggestion.id,
       "/data-quality?tab=renovaciones",
-      decision === "APPROVE" ? "Sugerencia aprobada." : "Sugerencia denegada.",
+      "Sugerencia denegada.",
     );
   } catch (error) {
     logError("data-quality.reviewRenewalSuggestion", error);
@@ -433,6 +448,23 @@ export async function linkRenewalSuggestionToPolicy(
   } catch (error) {
     logError("data-quality.linkRenewalSuggestionToPolicy", error);
     return errorResult(error instanceof Error ? error.message : "No se pudo vincular la sugerencia de renovación.");
+  }
+}
+
+export async function markRenewalSuggestionAsNotContinuing(suggestionId: string): Promise<MutationResult> {
+  try {
+    const suggestion = await loadRenewalSuggestion(suggestionId);
+    if (!suggestion) {
+      return errorResult("La sugerencia de renovación ya no existe.");
+    }
+    if (!suggestion.sourcePolicy) {
+      return errorResult("La sugerencia no tiene póliza origen.");
+    }
+
+    return markRenewalAsNotContinuing(suggestion.sourcePolicy.id);
+  } catch (error) {
+    logError("data-quality.markRenewalSuggestionAsNotContinuing", error);
+    return errorResult(error instanceof Error ? error.message : "No se pudo cerrar la renovación.");
   }
 }
 
@@ -813,6 +845,34 @@ export async function bulkRenewalSuggestionReviewsAction(formData: FormData): Pr
       throw new Error("Las sugerencias seleccionadas ya no existen.");
     }
 
+    if (operation === "APPROVE") {
+      const missingTargetPolicy = suggestions.find((suggestion) => !suggestion.targetPolicyId);
+      if (missingTargetPolicy) {
+        throw new Error(`La sugerencia ${missingTargetPolicy.sourcePolicy.policyNumber} no tiene una póliza destino seleccionada.`);
+      }
+
+      for (const suggestion of suggestions) {
+        const result = await linkRenewalToPolicy(suggestion.sourcePolicyId, suggestion.targetPolicyId!);
+        if (!result.ok) {
+          throw new Error(result.error);
+        }
+      }
+
+      await writeActivityLog({
+        entityType: "PolicyRenewalSuggestion",
+        entityId: suggestions[0].id,
+        action: "RENEWAL_REVIEW_BULK_APPROVE",
+        oldValue: suggestions,
+        newValue: {
+          suggestionIds,
+          targetPolicyIds: suggestions.map((suggestion) => suggestion.targetPolicyId),
+        },
+        userId: actor.id,
+      });
+      revalidatePaths(["/data-quality", "/renewals", "/dashboard", "/today", "/portfolio", "/risks"]);
+      return;
+    }
+
     if (operation === "MERGE") {
       if (suggestions.length < 2) {
         throw new Error("Selecciona al menos dos sugerencias para fusionar.");
@@ -845,11 +905,11 @@ export async function bulkRenewalSuggestionReviewsAction(formData: FormData): Pr
     }
 
     const nextStatus =
-      operation === "APPROVE" ? "RESOLVED" : operation === "DENY" ? "DECLINED" : operation === "REOPEN" ? "PENDING" : null;
+      operation === "DENY" ? "DECLINED" : operation === "REOPEN" ? "PENDING" : null;
     if (!nextStatus && operation !== "SUPPRESS") {
       throw new Error("Operación de lote no válida.");
     }
-    const resolvedStatus = operation === "SUPPRESS" ? "DECLINED" : (nextStatus as "RESOLVED" | "DECLINED" | "PENDING");
+    const resolvedStatus = operation === "SUPPRESS" ? "DECLINED" : (nextStatus as "DECLINED" | "PENDING");
 
     let suppressionRuleId: string | null = null;
     if (operation === "SUPPRESS") {
@@ -879,15 +939,13 @@ export async function bulkRenewalSuggestionReviewsAction(formData: FormData): Pr
           reviewedAt: operation === "REOPEN" ? null : new Date(),
           reviewedById: operation === "REOPEN" ? null : actor.id,
           resolutionNote:
-            operation === "APPROVE"
-              ? REVIEW_APPROVED_NOTE
-              : operation === "DENY"
-                ? REVIEW_DENIED_NOTE
-                : operation === "SUPPRESS"
-                  ? `${REVIEW_SUPPRESSED_NOTE} ${suggestions[0].sourcePolicy.policyNumber}.`
-                  : operation === "REOPEN"
-                    ? REVIEW_REOPENED_NOTE
-                    : null,
+            operation === "DENY"
+              ? REVIEW_DENIED_NOTE
+              : operation === "SUPPRESS"
+                ? `${REVIEW_SUPPRESSED_NOTE} ${suggestions[0].sourcePolicy.policyNumber}.`
+                : operation === "REOPEN"
+                  ? REVIEW_REOPENED_NOTE
+                  : null,
         },
       });
     }
@@ -1209,7 +1267,7 @@ export async function previewLedgerImportAction(formData: FormData): Promise<voi
   }
 
   if (batchId) {
-    redirect(`/data-quality?ledgerBatch=${batchId}`);
+    redirect(buildLedgerTabHref(batchId));
   }
 
   throw new Error("No se pudo generar el preview del ledger.");
@@ -1237,7 +1295,7 @@ export async function applyLedgerImportBatchAction(formData: FormData): Promise<
     revalidatePath("/portfolio");
     revalidatePath("/risks");
 
-    redirectTo = `/data-quality?ledgerBatch=${result.batchId}`;
+    redirectTo = buildLedgerTabHref(result.batchId);
   } catch (error) {
     logError("data-quality.applyLedgerImportBatch", error);
     throw new Error(error instanceof Error ? error.message : "No se pudo aplicar el batch del ledger.");

@@ -58,6 +58,7 @@ export async function markRenewalAsNotContinuing(policyId: string): Promise<Muta
           action: "TASK_CANCEL_RENEWAL",
           oldValue: workItem,
           newValue: updatedWorkItem,
+          userId,
           db: tx,
         });
       }
@@ -103,6 +104,7 @@ export async function markRenewalAsNotContinuing(policyId: string): Promise<Muta
           note: "No se va a renovar.",
           workItemCancelled: Boolean(cancelledWorkItemId),
         },
+        userId,
         db: tx,
       });
 
@@ -120,6 +122,7 @@ export async function markRenewalAsNotContinuing(policyId: string): Promise<Muta
       "/portfolio",
       `/policies/${policyId}`,
       "/risks",
+      "/data-quality",
     ]);
 
     return successResult(

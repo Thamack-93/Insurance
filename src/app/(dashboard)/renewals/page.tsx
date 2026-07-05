@@ -17,6 +17,8 @@ import { RenewalRowActions } from "@/components/renewals/renewal-row-actions";
 import { SortableTableHead } from "@/components/tables/sortable-table-head";
 import { TableToolbar } from "@/components/tables/table-toolbar";
 import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
+import { PageRefreshTicker } from "@/components/risk-resolution/page-refresh-ticker";
+import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-button";
 
 export const dynamic = "force-dynamic";
 
@@ -86,21 +88,32 @@ export default async function RenewalsPage({
 
   const urgentRenewals = filteredUpcoming.filter((r) => r.priority === "URGENT");
   const highPriorityRenewals = filteredUpcoming.filter((r) => r.priority === "HIGH");
+  const renewalsInFocus = [...filteredOverdue, ...filteredUpcoming];
+  const focusClientCount = new Set(renewalsInFocus.map((renewal) => renewal.clientId)).size;
+  const nextRenewal = sortedUpcoming[0] ?? filteredOverdue[0] ?? null;
+  const highestPremiumRenewal = renewalsInFocus.reduce<RenewalOpportunity | null>((current, renewal) => {
+    if (!current) return renewal;
+    return renewal.premiumAmount > current.premiumAmount ? renewal : current;
+  }, null);
 
   return (
     <div className="flex flex-col gap-6">
+      <PageRefreshTicker />
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Operación"
           title="Renovaciones"
           description="Seguimiento de renovaciones basado en la fecha de vencimiento."
           actions={
-            <Button asChild className="rounded-full">
-              <Link href="/tasks">
-                Ver tareas
-                <ArrowRight className="ml-2 size-4" />
-              </Link>
-            </Button>
+            <>
+              <RefreshPageButton />
+              <Button asChild className="rounded-full">
+                <Link href="/tasks">
+                  Ver tareas
+                  <ArrowRight className="ml-2 size-4" />
+                </Link>
+              </Button>
+            </>
           }
         />
 
@@ -244,33 +257,42 @@ export default async function RenewalsPage({
             )}
           </SectionCard>
 
-          <SectionCard title="Seguimiento operativo" description="La gestión de tareas y seguimiento vive en la bandeja de trabajo.">
+          <SectionCard title="Seguimiento operativo" description="Resumen vivo de la carga operativa que sale de la cartera visible.">
             <div className="space-y-4">
               <div className="rounded-lg bg-muted/40 p-4">
-                <h4 className="mb-2 font-medium">Tareas sugeridas</h4>
+                <h4 className="mb-2 font-medium">Cartera en foco</h4>
                 <p className="text-sm text-muted-foreground">
-                  {urgentRenewals.length + highPriorityRenewals.length} renovaciones requieren atención prioritaria.
+                  {focusClientCount} cliente{focusClientCount === 1 ? "" : "s"} con {renewalsInFocus.length} renovación{renewalsInFocus.length === 1 ? "" : "es"} visible{renewalsInFocus.length === 1 ? "" : "s"} en esta vista.
                 </p>
                 <Button asChild className="mt-2 w-full" size="sm">
                   <Link href="/tasks">Ver todas las tareas</Link>
                 </Button>
               </div>
 
-              <div className="rounded-lg bg-muted/40 p-4">
-                <h4 className="mb-2 font-medium">Seguimiento</h4>
-                <p className="text-sm text-muted-foreground">
-                  El seguimiento se genera desde procesos de soporte, no al abrir esta pantalla.
-                </p>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-lg bg-muted/40 p-4">
+                  <h4 className="mb-2 font-medium">Prioridad</h4>
+                  <p className="text-sm text-muted-foreground">
+                    {urgentRenewals.length + highPriorityRenewals.length} renovaciones requieren atención inmediata o alta.
+                  </p>
+                </div>
+                <div className="rounded-lg bg-muted/40 p-4">
+                  <h4 className="mb-2 font-medium">Siguiente vencimiento</h4>
+                  <p className="text-sm text-muted-foreground">
+                    {nextRenewal
+                      ? `${nextRenewal.policyNumber} · ${nextRenewal.clientName} · ${formatDate(nextRenewal.endDate)}`
+                      : "No hay renovaciones en ventana."}
+                  </p>
+                </div>
               </div>
 
               <div className="rounded-lg bg-muted/40 p-4">
-                <h4 className="mb-2 font-medium">Próximas acciones</h4>
-                <ul className="text-sm text-muted-foreground space-y-1">
-                  <li>• Contactar clientes urgentes hoy</li>
-                  <li>• Preparar cotizaciones de renovación</li>
-                  <li>• Coordinar con aseguradoras</li>
-                  <li>• Actualizar estados de pólizas</li>
-                </ul>
+                <h4 className="mb-2 font-medium">Mayor prima en la ventana</h4>
+                <p className="text-sm text-muted-foreground">
+                  {highestPremiumRenewal
+                    ? `${highestPremiumRenewal.policyNumber} · ${highestPremiumRenewal.clientName} · ${formatCurrency(highestPremiumRenewal.premiumAmount)}`
+                    : "No hay primas por revisar en este rango."}
+                </p>
               </div>
             </div>
           </SectionCard>

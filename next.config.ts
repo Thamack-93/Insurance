@@ -48,7 +48,6 @@ const nextConfig: NextConfig = {
     return [
       { source: "/payments", destination: "/receipts?tab=cobrar", permanent: false },
       { source: "/payments/new", destination: "/receipts?tab=cobrar", permanent: false },
-      { source: "/data-quality", destination: "/risks?tab=completitud", permanent: false },
     ];
   },
 };
