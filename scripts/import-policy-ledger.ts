@@ -1,6 +1,5 @@
 import "dotenv/config";
 
-import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import fs from "node:fs/promises";
@@ -9,6 +8,7 @@ import path from "node:path";
 import * as XLSX from "@e965/xlsx";
 import { Client as PgClient } from "pg";
 import { businessStartOfDay, parseBusinessDateInput } from "../src/lib/business-dates.ts";
+import { createDatabaseBackup } from "../src/lib/backup.ts";
 import { reconcileReceiptState } from "@/lib/receipt-reconciliation";
 
 type Mode = "dry-run" | "apply";
@@ -18,6 +18,7 @@ type Args = {
   csvPath: string;
   paidPath: string;
   exportReport: boolean;
+  confirmation: string | null;
 };
 
 type ExistingClient = {
@@ -53,6 +54,7 @@ type ExistingReceipt = {
   id: string;
   receiptNumber: string;
   policyId: string;
+  endorsementId: string | null;
   clientId: string;
   insurerId: string;
   periodStartDate: Date;
@@ -63,6 +65,19 @@ type ExistingReceipt = {
   status: string;
   paidDate: Date | null;
   paymentMethod: string | null;
+};
+
+type ExistingEndorsement = {
+  id: string;
+  endorsementNumber: string;
+  policyId: string;
+  status: string;
+  startDate: Date;
+  endDate: Date;
+  amount: string;
+  currency: string;
+  reference: string | null;
+  concept: string | null;
 };
 
 type PolicyCsvRow = {
@@ -114,6 +129,7 @@ type ImportReport = {
   clients: ReportRow[];
   insurers: ReportRow[];
   policies: ReportRow[];
+  endorsements: ReportRow[];
   receipts: ReportRow[];
   payments: ReportRow[];
   ambiguous: ReportRow[];
@@ -125,10 +141,11 @@ const DEFAULT_CSV_PATH = "/Users/pedrogomez/Downloads/Polizas.csv";
 const DEFAULT_PAID_PATH = "/Users/pedrogomez/Downloads/recibos pagados.xls";
 const IMPORT_USER_EMAIL = "pedroagl93@gmail.com";
 const DATA_DIR = path.join(process.cwd(), "data");
-const BACKUPS_DIR = path.join(DATA_DIR, "backups");
 const EXPORTS_DIR = path.join(DATA_DIR, "exports");
 const PAYMENT_METHOD = "Reporte externo";
 const TODAY = parseBusinessDateInput("2026-05-27");
+const APPLY_CONFIRMATION = "APPLY_POLICY_LEDGER";
+const PRODUCTION_OVERRIDE_ENV = "ALLOW_POLICY_LEDGER_PRODUCTION_APPLY";
 
 loadEnvLocal();
 
@@ -171,12 +188,41 @@ function parseArgs(argv = process.argv.slice(2)): Args {
     throw new Error("Usa solo uno: --dry-run o --apply.");
   }
 
+  const confirmation = typeof flags.get("confirm-apply") === "string" ? String(flags.get("confirm-apply")) : null;
+  if (apply && confirmation !== APPLY_CONFIRMATION) {
+    throw new Error(`--apply requiere --confirm-apply=${APPLY_CONFIRMATION}.`);
+  }
+
   return {
     mode: apply ? "apply" : "dry-run",
     csvPath: stringFlag(flags, "csv", DEFAULT_CSV_PATH),
     paidPath: stringFlag(flags, "paid", DEFAULT_PAID_PATH),
     exportReport: flags.has("export-report") || flags.has("exportReport"),
+    confirmation,
   };
+}
+
+function assertProductionApplyAllowed(args: Args, connectionString: string) {
+  if (args.mode !== "apply") return;
+
+  const url = new URL(connectionString);
+  const targetEnvironment = process.env.POLICY_LEDGER_TARGET_ENV?.trim().toLowerCase() ?? "";
+  const labels = [
+    process.env.NODE_ENV,
+    process.env.VERCEL_ENV,
+    process.env.APP_ENV,
+    process.env.DATABASE_ENV,
+    url.hostname,
+    url.pathname,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const explicitlyNonProduction = /^(development|dev|preview|staging|test|temporary|temp)$/.test(targetEnvironment);
+  const isProduction =
+    !explicitlyNonProduction || /(^|[^a-z])(prod|production)([^a-z]|$)/i.test(labels);
+  if (isProduction && process.env[PRODUCTION_OVERRIDE_ENV] !== "1") {
+    throw new Error(`Apply rechazado para producción. Define ${PRODUCTION_OVERRIDE_ENV}=1 solo tras autorización explícita.`);
+  }
 }
 
 function loadEnvLocal() {
@@ -333,6 +379,14 @@ function mapReceiptStatus(value: string) {
   return "PENDING";
 }
 
+function mapEndorsementStatus(value: string, endDate: Date) {
+  const normalized = normalizeName(value);
+  if (normalized === "CANCELADO") return "CANCELLED";
+  if (normalized === "PENDIENTE") return "PENDING";
+  if (endDate < TODAY) return "EXPIRED";
+  return "ACTIVE";
+}
+
 function derivePolicyStatus(rows: PolicyCsvRow[]) {
   const statuses = rows.map((row) => normalizeName(row.status)).filter(Boolean);
   const latestEnd = latestDate(rows.map((row) => row.policyEnd));
@@ -361,6 +415,22 @@ function canonicalInsurerName(sourceName: string) {
 
 function receiptKey(policyId: string, receiptNumber: string, periodStart: Date, periodEnd: Date) {
   return [policyId, receiptNumber, dateKey(periodStart), dateKey(periodEnd)].join("|");
+}
+
+function endorsementKey(policyId: string, endorsementNumber: string) {
+  return [policyId, cleanText(endorsementNumber)].join("|");
+}
+
+function endorsementSourceDataKey(row: PolicyCsvRow) {
+  return [
+    dateKey(row.periodStart),
+    dateKey(row.periodEnd),
+    Math.round(row.totalAmount * 100),
+    mapCurrency(row.currency),
+    cleanText(row.endorsementType),
+    cleanText(row.endorsementConcept || row.description),
+    row.periodEnd ? mapEndorsementStatus(row.status, row.periodEnd) : "",
+  ].join("|");
 }
 
 function paidKey(policyKey: string, receiptNumber: string) {
@@ -487,9 +557,9 @@ async function getConnectionString() {
   return connectionString;
 }
 
-async function connectDb() {
-  const connectionString = await getConnectionString();
-  const db = new PgClient({ connectionString, ssl: { rejectUnauthorized: false } });
+async function connectDb(connectionString?: string) {
+  const resolvedConnectionString = connectionString ?? await getConnectionString();
+  const db = new PgClient({ connectionString: resolvedConnectionString, ssl: { rejectUnauthorized: false } });
   await db.connect();
   return db;
 }
@@ -501,7 +571,10 @@ async function loadState(db: PgClient) {
     'select id, "policyNumber", "familyRootId", "clientId", "insurerId", "policyType", status, "startDate", "endDate", "premiumAmount", currency, "paymentFrequency", "paymentPlan", "insuredObject" from public."Policy"',
   );
   const receipts = await db.query<ExistingReceipt>(
-    'select id, "receiptNumber", "policyId", "clientId", "insurerId", "periodStartDate", "periodEndDate", "dueDate", amount, currency, status, "paidDate", "paymentMethod" from public."Receipt"',
+    'select id, "receiptNumber", "policyId", "endorsementId", "clientId", "insurerId", "periodStartDate", "periodEndDate", "dueDate", amount, currency, status, "paidDate", "paymentMethod" from public."Receipt"',
+  );
+  const endorsements = await db.query<ExistingEndorsement>(
+    'select id, "endorsementNumber", "policyId", status, "startDate", "endDate", amount, currency, reference, concept from public."PolicyEndorsement"',
   );
   const payments = await db.query<{ receiptId: string; sourceEvidenceKey: string | null }>('select "receiptId", "sourceEvidenceKey" from public."Payment"');
   const users = await db.query<{ id: string; email: string }>('select id, email from public."User"');
@@ -516,6 +589,7 @@ async function loadState(db: PgClient) {
     insurers: insurers.rows,
     policies: policies.rows,
     receipts: receipts.rows,
+    endorsements: endorsements.rows,
     paymentReceiptIds: new Set(payments.rows.map((payment) => payment.receiptId)),
     paymentSourceEvidenceKeys: new Set(payments.rows.map((payment) => payment.sourceEvidenceKey).filter((key): key is string => Boolean(key))),
     importUser,
@@ -540,6 +614,7 @@ function initReport(): ImportReport {
     clients: [],
     insurers: [],
     policies: [],
+    endorsements: [],
     receipts: [],
     payments: [],
     ambiguous: [],
@@ -550,68 +625,6 @@ function initReport(): ImportReport {
 
 function pushSummary(report: ImportReport, metric: string, value: string | number) {
   report.summary.push({ Metrica: metric, Valor: value });
-}
-
-async function backupPostgres() {
-  await fs.mkdir(BACKUPS_DIR, { recursive: true });
-  const connectionString = await getConnectionString();
-  const url = new URL(connectionString);
-  const backupPath = path.join(BACKUPS_DIR, `postgres-policy-ledger-${timestampForFile()}.dump`);
-  const env = {
-    ...process.env,
-    PGHOST: url.hostname,
-    PGPORT: url.port || "5432",
-    PGDATABASE: url.pathname.replace(/^\//, ""),
-    PGUSER: decodeURIComponent(url.username),
-    PGPASSWORD: decodeURIComponent(url.password),
-    PGSSLMODE: url.searchParams.get("sslmode") ?? "require",
-  };
-
-  const result = spawnSync(
-    "pg_dump",
-    ["--format=custom", "--no-owner", "--no-acl", "--file", backupPath],
-    { env, encoding: "utf8" },
-  );
-
-  if (result.status !== 0) {
-    return backupLogicalJson(result.stderr || result.stdout || "pg_dump falló sin detalle");
-  }
-
-  return backupPath;
-}
-
-async function backupLogicalJson(reason: string) {
-  await fs.mkdir(BACKUPS_DIR, { recursive: true });
-  const backupPath = path.join(BACKUPS_DIR, `postgres-policy-ledger-${timestampForFile()}.json`);
-  const db = await connectDb();
-
-  try {
-    const tables = await db.query<{ table_name: string }>(
-      "select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE' order by table_name",
-    );
-    const snapshot: {
-      createdAt: string;
-      backupType: string;
-      fallbackReason: string;
-      tables: Record<string, unknown[]>;
-    } = {
-      createdAt: new Date().toISOString(),
-      backupType: "logical-json",
-      fallbackReason: reason.slice(0, 1000),
-      tables: {},
-    };
-
-    for (const table of tables.rows) {
-      const tableName = table.table_name;
-      const result = await db.query(`select * from public."${tableName}"`);
-      snapshot.tables[tableName] = result.rows;
-    }
-
-    await fs.writeFile(backupPath, JSON.stringify(snapshot, null, 2), "utf8");
-    return backupPath;
-  } finally {
-    await db.end();
-  }
 }
 
 function timestampForFile(date = new Date()) {
@@ -831,19 +844,28 @@ async function syncPolicyInsuredRecords(params: {
 }) {
   if (!params.apply) return;
 
-  await params.db.query('delete from public."PolicyInsuredParty" where "policyId" = $1', [params.policyId]);
-  await params.db.query('delete from public."PolicyInsuredAsset" where "policyId" = $1', [params.policyId]);
-
-  await params.db.query(
-    'insert into public."PolicyInsuredParty" (id, "policyId", "fullName", "isPrimary", "sourceLabel", "createdAt", "updatedAt") values ($1,$2,$3,$4,$5,now(),now())',
-    [id(), params.policyId, params.insuredName, true, params.source],
+  const partyUpdate = await params.db.query(
+    'update public."PolicyInsuredParty" set "fullName"=$1, "sourceLabel"=$2, "updatedAt"=now() where "policyId"=$3 and "isPrimary"=true',
+    [params.insuredName, params.source, params.policyId],
   );
+  if (!partyUpdate.rowCount) {
+    await params.db.query(
+      'insert into public."PolicyInsuredParty" (id, "policyId", "fullName", "isPrimary", "sourceLabel", "createdAt", "updatedAt") values ($1,$2,$3,$4,$5,now(),now())',
+      [id(), params.policyId, params.insuredName, true, params.source],
+    );
+  }
 
   if (params.assetDescription || params.assetSerial) {
-    await params.db.query(
-      'insert into public."PolicyInsuredAsset" (id, "policyId", "assetType", "description", "serialNumber", "isPrimary", "createdAt", "updatedAt") values ($1,$2,$3,$4,$5,$6,now(),now())',
-      [id(), params.policyId, params.policyType, params.assetDescription ?? params.insuredName, params.assetSerial, true],
+    const assetUpdate = await params.db.query(
+      'update public."PolicyInsuredAsset" set "assetType"=$1, description=$2, "serialNumber"=$3, "updatedAt"=now() where "policyId"=$4 and "isPrimary"=true',
+      [params.policyType, params.assetDescription ?? params.insuredName, params.assetSerial, params.policyId],
     );
+    if (!assetUpdate.rowCount) {
+      await params.db.query(
+        'insert into public."PolicyInsuredAsset" (id, "policyId", "assetType", "description", "serialNumber", "isPrimary", "createdAt", "updatedAt") values ($1,$2,$3,$4,$5,$6,now(),now())',
+        [id(), params.policyId, params.policyType, params.assetDescription ?? params.insuredName, params.assetSerial, true],
+      );
+    }
   }
 }
 
@@ -859,7 +881,9 @@ async function runImport(args: Args) {
     paidByReceipt.set(key, existing);
   }
 
-  const db = await connectDb();
+  const connectionString = await getConnectionString();
+  assertProductionApplyAllowed(args, connectionString);
+  const db = await connectDb(connectionString);
   const report = initReport();
   let backupPath = "";
 
@@ -871,6 +895,9 @@ async function runImport(args: Args) {
     const policyByKey = buildMultiMap(state.policies, policyGroupKeyFromPolicy);
     const receiptByExactKey = buildMultiMap(state.receipts, (receipt) =>
       receiptKey(receipt.policyId, receipt.receiptNumber, receipt.periodStartDate, receipt.periodEndDate),
+    );
+    const endorsementByKey = buildMultiMap(state.endorsements, (endorsement) =>
+      endorsementKey(endorsement.policyId, endorsement.endorsementNumber),
     );
     const usedEvidenceKeys = new Set(state.paymentSourceEvidenceKeys ?? []);
 
@@ -888,11 +915,13 @@ async function runImport(args: Args) {
     pushSummary(report, "DB clientes antes", state.clients.length);
     pushSummary(report, "DB aseguradoras antes", state.insurers.length);
     pushSummary(report, "DB pólizas antes", state.policies.length);
+    pushSummary(report, "DB endosos antes", state.endorsements.length);
     pushSummary(report, "DB recibos antes", state.receipts.length);
     pushSummary(report, "DB pagos antes", state.paymentReceiptIds.size);
 
     if (args.mode === "apply") {
-      backupPath = await backupPostgres();
+      const backup = await createDatabaseBackup();
+      backupPath = backup.filename;
       pushSummary(report, "Backup previo", backupPath);
       await db.query("begin");
     }
@@ -1110,6 +1139,22 @@ async function runImport(args: Args) {
       });
     }
 
+    const endorsementSourceVariants = new Map<string, Set<string>>();
+    for (const row of policyRows.filter((candidate) => candidate.endorsementNumber)) {
+      const policyId = policyIdByKey.get(policyGroupKeyFromRow(row));
+      if (!policyId) continue;
+      const key = endorsementKey(policyId, row.endorsementNumber);
+      const variants = endorsementSourceVariants.get(key) ?? new Set<string>();
+      variants.add(endorsementSourceDataKey(row));
+      endorsementSourceVariants.set(key, variants);
+    }
+    const conflictingEndorsementKeys = new Set(
+      Array.from(endorsementSourceVariants.entries())
+        .filter(([, variants]) => variants.size > 1)
+        .map(([key]) => key),
+    );
+    const reportedEndorsementReviews = new Set<string>();
+
     for (const row of policyRows) {
       if (skippedPolicyKeys.has(policyGroupKeyFromRow(row))) continue;
       if (!row.receiptNumber || !row.periodStart || !row.periodEnd) {
@@ -1194,11 +1239,132 @@ async function runImport(args: Args) {
         continue;
       }
 
+      let endorsementId = existing?.endorsementId ?? null;
+      if (row.endorsementNumber) {
+        const key = endorsementKey(policy.id, row.endorsementNumber);
+        const reportReview = (reason: string) => {
+          if (reportedEndorsementReviews.has(key)) return;
+          reportedEndorsementReviews.add(key);
+          report.endorsements.push({
+            Accion: "REVISION",
+            Poliza: policy.policyNumber,
+            Endoso: row.endorsementNumber,
+            Motivo: reason,
+          });
+          report.ambiguous.push({
+            Entidad: "Endoso",
+            Llave: `${policy.policyNumber} / ${row.endorsementNumber}`,
+            Motivo: reason,
+          });
+        };
+
+        if (conflictingEndorsementKeys.has(key)) {
+          reportReview("El mismo endoso trae datos incompatibles en el ledger");
+          continue;
+        }
+
+        const endorsementMatches = endorsementByKey.get(key) ?? [];
+        if (endorsementMatches.length > 1) {
+          reportReview("Hay más de un endoso existente con la misma llave");
+          continue;
+        }
+
+        const currentEndorsement = endorsementMatches[0] ?? null;
+        if (existing?.endorsementId && existing.endorsementId !== currentEndorsement?.id) {
+          reportReview("El recibo ya está enlazado a otro endoso");
+          continue;
+        }
+
+        const endorsementData = {
+          status: mapEndorsementStatus(row.status, row.periodEnd),
+          startDate: row.periodStart,
+          endDate: row.periodEnd,
+          amount,
+          currency: mapCurrency(row.currency),
+          reference: cleanText(row.endorsementType) || null,
+          concept: cleanText(row.endorsementConcept || row.description) || null,
+        };
+
+        if (!currentEndorsement) {
+          const newEndorsement: ExistingEndorsement = {
+            id: id(),
+            endorsementNumber: cleanText(row.endorsementNumber),
+            policyId: policy.id,
+            ...endorsementData,
+            amount: String(endorsementData.amount),
+          };
+          report.endorsements.push({
+            Accion: args.mode === "apply" ? "CREAR" : "CREARIA",
+            Poliza: policy.policyNumber,
+            Endoso: newEndorsement.endorsementNumber,
+            Recibo: row.receiptNumber,
+            Importe: endorsementData.amount,
+          });
+          if (args.mode === "apply") {
+            await db.query(
+              'insert into public."PolicyEndorsement" (id, "endorsementNumber", "policyId", status, "startDate", "endDate", amount, currency, reference, concept, "createdAt", "updatedAt", "createdById", "updatedById") values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),now(),$11,$11) on conflict ("policyId", "endorsementNumber") do update set status=excluded.status, "startDate"=excluded."startDate", "endDate"=excluded."endDate", amount=excluded.amount, currency=excluded.currency, reference=excluded.reference, concept=excluded.concept, "updatedAt"=now(), "updatedById"=excluded."updatedById"',
+              [
+                newEndorsement.id,
+                newEndorsement.endorsementNumber,
+                newEndorsement.policyId,
+                newEndorsement.status,
+                newEndorsement.startDate,
+                newEndorsement.endDate,
+                endorsementData.amount,
+                newEndorsement.currency,
+                newEndorsement.reference,
+                newEndorsement.concept,
+                state.importUser,
+              ],
+            );
+          }
+          state.endorsements.push(newEndorsement);
+          addToMultiMap(endorsementByKey, key, newEndorsement);
+          endorsementId = newEndorsement.id;
+        } else {
+          const changes: string[] = [];
+          if (currentEndorsement.status !== endorsementData.status) changes.push("status");
+          if (!sameDate(currentEndorsement.startDate, endorsementData.startDate)) changes.push("startDate");
+          if (!sameDate(currentEndorsement.endDate, endorsementData.endDate)) changes.push("endDate");
+          if (!sameMoney(currentEndorsement.amount, endorsementData.amount)) changes.push("amount");
+          if (currentEndorsement.currency !== endorsementData.currency) changes.push("currency");
+          if ((currentEndorsement.reference ?? "") !== (endorsementData.reference ?? "")) changes.push("reference");
+          if ((currentEndorsement.concept ?? "") !== (endorsementData.concept ?? "")) changes.push("concept");
+
+          report.endorsements.push({
+            Accion: changes.length ? (args.mode === "apply" ? "ACTUALIZAR" : "ACTUALIZARIA") : "SIN_CAMBIOS",
+            Poliza: policy.policyNumber,
+            Endoso: currentEndorsement.endorsementNumber,
+            Recibo: row.receiptNumber,
+            Campos: changes.join(", "),
+          });
+          if (changes.length && args.mode === "apply") {
+            await db.query(
+              'update public."PolicyEndorsement" set status=$1, "startDate"=$2, "endDate"=$3, amount=$4, currency=$5, reference=$6, concept=$7, "updatedAt"=now(), "updatedById"=$8 where id=$9',
+              [
+                endorsementData.status,
+                endorsementData.startDate,
+                endorsementData.endDate,
+                endorsementData.amount,
+                endorsementData.currency,
+                endorsementData.reference,
+                endorsementData.concept,
+                state.importUser,
+                currentEndorsement.id,
+              ],
+            );
+          }
+          Object.assign(currentEndorsement, { ...endorsementData, amount: String(endorsementData.amount) });
+          endorsementId = currentEndorsement.id;
+        }
+      }
+
       if (!existing) {
         const newReceipt: ExistingReceipt = {
           id: id(),
           receiptNumber: row.receiptNumber,
           policyId: policy.id,
+          endorsementId,
           clientId: policy.clientId,
           insurerId: policy.insurerId,
           periodStartDate: row.periodStart,
@@ -1223,11 +1389,12 @@ async function runImport(args: Args) {
 
         if (args.mode === "apply") {
           await db.query(
-          'insert into public."Receipt" (id, "receiptNumber", "policyId", "clientId", "insurerId", "periodStartDate", "periodEndDate", "dueDate", amount, currency, status, "paidDate", "paymentMethod", "createdAt", "updatedAt", "createdById", "updatedById") values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now(),now(),$14,$14)',
+          'insert into public."Receipt" (id, "receiptNumber", "policyId", "endorsementId", "clientId", "insurerId", "periodStartDate", "periodEndDate", "dueDate", amount, currency, status, "paidDate", "paymentMethod", "createdAt", "updatedAt", "createdById", "updatedById") values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now(),now(),$15,$15)',
             [
               newReceipt.id,
               newReceipt.receiptNumber,
               newReceipt.policyId,
+              newReceipt.endorsementId,
               newReceipt.clientId,
               newReceipt.insurerId,
               newReceipt.periodStartDate,
@@ -1288,6 +1455,7 @@ async function runImport(args: Args) {
       const changes: string[] = [];
       if (existing.clientId !== policy.clientId) changes.push("clientId");
       if (existing.insurerId !== policy.insurerId) changes.push("insurerId");
+      if (existing.endorsementId !== endorsementId) changes.push("endorsementId");
       if (!sameDate(existing.dueDate, row.periodStart)) changes.push("dueDate");
       if (!sameMoney(existing.amount, amount)) changes.push("amount");
       if (existing.currency !== mapCurrency(row.currency)) changes.push("currency");
@@ -1309,10 +1477,11 @@ async function runImport(args: Args) {
 
         if (args.mode === "apply") {
           await db.query(
-          'update public."Receipt" set "clientId"=$1, "insurerId"=$2, "dueDate"=$3, amount=$4, currency=$5, status=$6, "paidDate"=$7, "paymentMethod"=$8, "updatedAt"=now(), "updatedById"=$9 where id=$10',
+          'update public."Receipt" set "clientId"=$1, "insurerId"=$2, "endorsementId"=$3, "dueDate"=$4, amount=$5, currency=$6, status=$7, "paidDate"=$8, "paymentMethod"=$9, "updatedAt"=now(), "updatedById"=$10 where id=$11',
             [
               policy.clientId,
               policy.insurerId,
+              endorsementId,
               row.periodStart,
               amount,
               mapCurrency(row.currency),
@@ -1329,6 +1498,7 @@ async function runImport(args: Args) {
       Object.assign(existing, {
         clientId: policy.clientId,
         insurerId: policy.insurerId,
+        endorsementId,
         dueDate: row.periodStart,
         amount: String(amount),
         currency: mapCurrency(row.currency),
@@ -1378,6 +1548,10 @@ async function runImport(args: Args) {
     pushSummary(report, "Aseguradoras acciones crear", countAction(report.insurers, "CREAR", "CREARIA"));
     pushSummary(report, "Pólizas acciones crear", countAction(report.policies, "CREAR", "CREARIA"));
     pushSummary(report, "Pólizas acciones actualizar", countAction(report.policies, "ACTUALIZAR", "ACTUALIZARIA"));
+    pushSummary(report, "Endosos created", countAction(report.endorsements, "CREAR", "CREARIA"));
+    pushSummary(report, "Endosos updated", countAction(report.endorsements, "ACTUALIZAR", "ACTUALIZARIA"));
+    pushSummary(report, "Endosos unchanged", report.endorsements.filter((row) => row.Accion === "SIN_CAMBIOS").length);
+    pushSummary(report, "Endosos reviewRequired", report.endorsements.filter((row) => row.Accion === "REVISION").length);
     pushSummary(report, "Recibos acciones crear", countAction(report.receipts, "CREAR", "CREARIA"));
     pushSummary(report, "Recibos acciones actualizar", countAction(report.receipts, "ACTUALIZAR", "ACTUALIZARIA"));
     pushSummary(report, "Pagos acciones crear", countAction(report.payments, "CREAR", "CREARIA"));
@@ -1437,134 +1611,14 @@ async function resolveDuplicatePoliciesForImport(params: {
   receipts: ExistingReceipt[];
   report: ImportReport;
   importUser: string;
-}) {
-  const sourceClean = cleanText(params.sourcePolicyNumber);
-  const canonical =
-    params.policies.find((policy) => cleanText(policy.policyNumber) === sourceClean) ??
-    params.policies.find((policy) => /^0+\d+$/.test(cleanText(policy.policyNumber))) ??
-    params.policies[0];
-
-  const duplicates = params.policies.filter((policy) => policy.id !== canonical.id);
-  const compatible = params.policies.every(
-    (policy) =>
-      policy.clientId === canonical.clientId &&
-      policy.insurerId === canonical.insurerId &&
-      sameDate(policy.startDate, canonical.startDate) &&
-      sameDate(policy.endDate, canonical.endDate) &&
-      sameMoney(policy.premiumAmount, Number(canonical.premiumAmount)),
-  );
-
-  if (!compatible) {
-    params.report.ambiguous.push({
-      Entidad: "Póliza",
-      Llave: normalizePolicyNumber(sourceClean),
-      Motivo: "Duplicados no idénticos; requiere revisión manual",
-      Coincidencias: params.policies.map((policy) => policy.policyNumber).join(" | "),
-    });
-    return null;
-  }
-
-  const duplicateIds = duplicates.map((policy) => policy.id);
-  const relationCounts = await params.db.query<{
-    id: string;
-    payments: number;
-    commissions: number;
-    workItems: number;
-    claims: number;
-  }>(
-    `select p.id,
-      count(distinct pay.id)::int as payments,
-      count(distinct co.id)::int as commissions,
-      count(distinct wi.id)::int as workItems,
-      count(distinct cl.id)::int as claims
-    from public."Policy" p
-    left join public."Payment" pay on pay."policyId" = p.id
-    left join public."Commission" co on co."policyId" = p.id
-    left join public."WorkItem" wi on wi."policyId" = p.id and wi."workItemType" = 'TASK'
-    left join public."Claim" cl on cl."policyId" = p.id
-    where p.id = any($1)
-    group by p.id`,
-    [duplicateIds],
-  );
-
-  const unsafeRelations = relationCounts.rows.filter(
-    (row) => row.payments || row.commissions || row.workItems || row.claims,
-  );
-
-  if (unsafeRelations.length) {
-    params.report.ambiguous.push({
-      Entidad: "Póliza",
-      Llave: normalizePolicyNumber(sourceClean),
-      Motivo: "Duplicados con pagos/comisiones/pendientes/siniestros; no se fusionan automáticamente",
-      Coincidencias: params.policies.map((policy) => policy.policyNumber).join(" | "),
-    });
-    return null;
-  }
-
-  const canonicalReceiptKeys = new Set(
-    params.receipts
-      .filter((receipt) => receipt.policyId === canonical.id)
-      .map((receipt) => [receipt.receiptNumber, dateKey(receipt.periodStartDate), dateKey(receipt.periodEndDate), Math.round(Number(receipt.amount) * 100)].join("|")),
-  );
-  const duplicateReceipts = params.receipts.filter((receipt) => duplicateIds.includes(receipt.policyId));
-  const receiptCopiesAreSafe = duplicateReceipts.every((receipt) =>
-    canonicalReceiptKeys.has(
-      [receipt.receiptNumber, dateKey(receipt.periodStartDate), dateKey(receipt.periodEndDate), Math.round(Number(receipt.amount) * 100)].join("|"),
-    ),
-  );
-
-  if (!receiptCopiesAreSafe) {
-    params.report.ambiguous.push({
-      Entidad: "Póliza",
-      Llave: normalizePolicyNumber(sourceClean),
-      Motivo: "Los recibos duplicados no coinciden exactamente con la póliza canónica",
-      Coincidencias: params.policies.map((policy) => policy.policyNumber).join(" | "),
-    });
-    return null;
-  }
-
-  const duplicateDocs = await params.db.query<{ id: string; fileName: string; documentType: string }>(
-    'select id, "fileName", "documentType" from public."Document" where "policyId" = any($1)',
-    [duplicateIds],
-  );
-  const canonicalDocs = await params.db.query<{ fileName: string; documentType: string }>(
-    'select "fileName", "documentType" from public."Document" where "policyId" = $1',
-    [canonical.id],
-  );
-  const canonicalDocKeys = new Set(
-    canonicalDocs.rows.map((doc) => [normalizeName(doc.fileName), doc.documentType].join("|")),
-  );
-  const docsToDelete = duplicateDocs.rows.filter((doc) =>
-    canonicalDocKeys.has([normalizeName(doc.fileName), doc.documentType].join("|")),
-  );
-  const docsToMove = duplicateDocs.rows.filter((doc) => !docsToDelete.some((deleted) => deleted.id === doc.id));
-
-  params.report.policies.push({
-    Accion: params.apply ? "FUSIONAR_DUPLICADO" : "FUSIONARIA_DUPLICADO",
-    Poliza: canonical.policyNumber,
-    Duplicados: duplicates.map((policy) => policy.policyNumber).join(" | "),
-    RecibosDuplicados: duplicateReceipts.length,
-    DocumentosDuplicadosEliminados: docsToDelete.length,
-    DocumentosMovidos: docsToMove.length,
+}): Promise<{ canonical: ExistingPolicy; duplicateIds: string[] } | null> {
+  params.report.ambiguous.push({
+    Entidad: "Póliza",
+    Llave: normalizePolicyNumber(params.sourcePolicyNumber),
+    Motivo: "Hay varias pólizas candidatas; el import no fusiona ni elimina registros.",
+    Coincidencias: params.policies.map((policy) => policy.policyNumber).join(" | "),
   });
-
-  if (params.apply) {
-    for (const doc of docsToMove) {
-      await params.db.query('update public."Document" set "policyId" = $1, "updatedAt" = now(), "updatedById" = $2 where id = $3', [
-        canonical.id,
-        params.importUser,
-        doc.id,
-      ]);
-    }
-    for (const doc of docsToDelete) {
-      await params.db.query('delete from public."Document" where id = $1', [doc.id]);
-    }
-    for (const duplicate of duplicates) {
-      await params.db.query('delete from public."Policy" where id = $1', [duplicate.id]);
-    }
-  }
-
-  return { canonical, duplicateIds };
+  return null;
 }
 
 async function writeReport(report: ImportReport, mode: Mode) {
@@ -1577,6 +1631,7 @@ async function writeReport(report: ImportReport, mode: Mode) {
     ["Clientes", report.clients],
     ["Aseguradoras", report.insurers],
     ["Polizas", report.policies],
+    ["Endosos", report.endorsements],
     ["Recibos", report.receipts],
     ["Pagos", report.payments],
     ["Ambiguos", report.ambiguous],
@@ -1595,7 +1650,7 @@ async function writeReport(report: ImportReport, mode: Mode) {
 function printReport(report: ImportReport, backupPath: string) {
   const summary = Object.fromEntries(report.summary.map((row) => [String(row.Metrica), row.Valor]));
   console.log("");
-  console.log("Importación de pólizas/recibos/pagos");
+  console.log("Importación de pólizas/endosos/recibos/pagos");
   if (backupPath) console.log(`Backup: ${backupPath}`);
   for (const [key, value] of Object.entries(summary)) {
     console.log(`${key}: ${value}`);

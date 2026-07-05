@@ -18,6 +18,9 @@ type PolicyLedgerRow = {
   receiptNumber: string;
   periodStart: Date | null;
   periodEnd: Date | null;
+  endorsementNumber: string;
+  endorsementType: string;
+  endorsementConcept: string;
   rawClient: string;
   contractorName: string;
   insuredName: string;
@@ -65,12 +68,94 @@ type PaidDecision = {
   };
 };
 
+export type LedgerEndorsementPlanState = "CREATED" | "UPDATED" | "UNCHANGED" | "REVIEW_REQUIRED";
+
+export type LedgerEndorsementSourceRow = {
+  rowNumber: number;
+  policyNumber: string;
+  contractorName: string;
+  insurerName: string;
+  policyStart: Date | null;
+  policyEnd: Date | null;
+  receiptNumber: string;
+  periodStart: Date | null;
+  periodEnd: Date | null;
+  endorsementNumber: string;
+  endorsementType: string;
+  endorsementConcept: string;
+  description: string;
+  currency: string;
+  totalAmount: number;
+  status: string;
+};
+
+export type LedgerEndorsementPolicyCandidate = {
+  id: string;
+  policyNumber: string;
+  startDate: Date;
+  endDate: Date;
+  clientName: string;
+  insurerName: string;
+};
+
+export type LedgerEndorsementReceiptCandidate = {
+  id: string;
+  policyId: string;
+  receiptNumber: string;
+  periodStartDate: Date;
+  periodEndDate: Date;
+  endorsementId: string | null;
+};
+
+export type LedgerExistingEndorsement = {
+  id: string;
+  policyId: string;
+  endorsementNumber: string;
+  status: string;
+  startDate: Date;
+  endDate: Date;
+  amount: number;
+  currency: string;
+  reference: string | null;
+  concept: string | null;
+};
+
+export type LedgerEndorsementData = Omit<LedgerExistingEndorsement, "id" | "policyId">;
+
+export type LedgerEndorsementDecision = {
+  rowNumber: number;
+  state: LedgerEndorsementPlanState;
+  action: string;
+  status: string;
+  metricKey: string;
+  policyId?: string;
+  receiptId?: string;
+  endorsementId?: string;
+  data?: LedgerEndorsementData;
+  issue?: {
+    type: string;
+    severity: string;
+    message: string;
+  };
+};
+
+export type LedgerEndorsementMetrics = {
+  created: number;
+  updated: number;
+  unchanged: number;
+  reviewRequired: number;
+};
+
 export type LedgerImportPreviewSummary = {
   policyRows: number;
   paidRows: number;
   policiesMatched: number;
   policiesMissing: number;
   policiesOverLong: number;
+  endorsementsCreated: number;
+  endorsementsUpdated: number;
+  endorsementsUnchanged: number;
+  endorsementsReviewRequired: number;
   paymentsMatched: number;
   paymentsReadyToApply: number;
   paymentsAlreadyApplied: number;
@@ -96,6 +181,9 @@ export type LedgerImportPreviewResult = {
 export type LedgerImportApplyResult = {
   batchId: string;
   summary: LedgerImportPreviewSummary & {
+    endorsementsApplied: number;
+    endorsementsSkipped: number;
+    endorsementsFailed: number;
     paymentsApplied: number;
     paymentsSkipped: number;
     paymentsFailed: number;
@@ -152,6 +240,217 @@ function parseMoney(value: unknown) {
   if (!text) return 0;
   const amount = Number(text);
   return Number.isFinite(amount) ? amount : 0;
+}
+
+function mapCurrency(value: string) {
+  return normalizeName(value).includes("DOLAR") ? "USD" : "MXN";
+}
+
+function mapEndorsementStatus(value: string, endDate: Date, now: Date) {
+  const normalized = normalizeName(value);
+  if (normalized === "CANCELADO") return "CANCELLED";
+  if (normalized === "PENDIENTE") return "PENDING";
+  if (endDate < businessStartOfDay(now)) return "EXPIRED";
+  return "ACTIVE";
+}
+
+function nullableText(value: string) {
+  const text = cleanText(value);
+  return text || null;
+}
+
+function endorsementDataKey(data: LedgerEndorsementData) {
+  return [
+    cleanText(data.endorsementNumber),
+    data.status,
+    dateKey(data.startDate),
+    dateKey(data.endDate),
+    Math.round(data.amount * 100),
+    data.currency,
+    cleanText(data.reference),
+    cleanText(data.concept),
+  ].join("|");
+}
+
+function sameEndorsementData(existing: LedgerExistingEndorsement, planned: LedgerEndorsementData) {
+  return endorsementDataKey(existing) === endorsementDataKey(planned);
+}
+
+function endorsementIssue(
+  row: LedgerEndorsementSourceRow,
+  type: string,
+  message: string,
+  metricKey = `row:${row.rowNumber}`,
+): LedgerEndorsementDecision {
+  return {
+    rowNumber: row.rowNumber,
+    state: "REVIEW_REQUIRED",
+    action: `REVIEW_${type}`,
+    status: "REVIEW",
+    metricKey,
+    issue: { type, severity: "WARNING", message },
+  };
+}
+
+export function summarizeLedgerEndorsementDecisions(
+  decisions: LedgerEndorsementDecision[],
+): LedgerEndorsementMetrics {
+  const states = new Map<string, LedgerEndorsementPlanState>();
+  for (const decision of decisions) states.set(decision.metricKey, decision.state);
+
+  return {
+    created: Array.from(states.values()).filter((state) => state === "CREATED").length,
+    updated: Array.from(states.values()).filter((state) => state === "UPDATED").length,
+    unchanged: Array.from(states.values()).filter((state) => state === "UNCHANGED").length,
+    reviewRequired: Array.from(states.values()).filter((state) => state === "REVIEW_REQUIRED").length,
+  };
+}
+
+export function planLedgerEndorsements(input: {
+  rows: LedgerEndorsementSourceRow[];
+  policies: LedgerEndorsementPolicyCandidate[];
+  receipts: LedgerEndorsementReceiptCandidate[];
+  existingEndorsements: LedgerExistingEndorsement[];
+  now: Date;
+}) {
+  const resolved: Array<{
+    row: LedgerEndorsementSourceRow;
+    policy: LedgerEndorsementPolicyCandidate;
+    receipt: LedgerEndorsementReceiptCandidate;
+    metricKey: string;
+    data: LedgerEndorsementData;
+  }> = [];
+  const decisions: LedgerEndorsementDecision[] = [];
+
+  for (const row of input.rows.filter((candidate) => cleanText(candidate.endorsementNumber))) {
+    const policyStart = row.policyStart ?? row.periodStart;
+    const policyEnd = row.policyEnd ?? row.periodEnd;
+    const policyCandidates = input.policies
+      .filter((policy) => normalizePolicyNumber(policy.policyNumber) === normalizePolicyNumber(row.policyNumber))
+      .filter((policy) => !policyStart || sameDate(policy.startDate, policyStart))
+      .filter((policy) => !policyEnd || sameDate(policy.endDate, policyEnd))
+      .filter((policy) => !row.contractorName || normalizeName(policy.clientName) === normalizeName(row.contractorName))
+      .filter((policy) => !row.insurerName || normalizeName(policy.insurerName) === normalizeName(row.insurerName));
+
+    if (!policyCandidates.length) {
+      decisions.push(endorsementIssue(row, "ENDORSEMENT_POLICY_NOT_FOUND", "No se encontró una póliza inequívoca para el endoso."));
+      continue;
+    }
+    if (policyCandidates.length > 1) {
+      decisions.push(endorsementIssue(row, "ENDORSEMENT_POLICY_AMBIGUOUS", "El endoso coincide con varias pólizas y requiere revisión."));
+      continue;
+    }
+    if (!row.receiptNumber || !row.periodStart || !row.periodEnd) {
+      decisions.push(endorsementIssue(row, "ENDORSEMENT_RECEIPT_NOT_FOUND", "El endoso no tiene recibo y vigencia suficientes para enlazarlo."));
+      continue;
+    }
+
+    const policy = policyCandidates[0];
+    const metricKey = `${policy.id}|${cleanText(row.endorsementNumber)}`;
+    const receiptCandidates = input.receipts
+      .filter((receipt) => receipt.policyId === policy.id)
+      .filter((receipt) => cleanText(receipt.receiptNumber) === cleanText(row.receiptNumber))
+      .filter((receipt) => sameDate(receipt.periodStartDate, row.periodStart))
+      .filter((receipt) => sameDate(receipt.periodEndDate, row.periodEnd));
+
+    if (!receiptCandidates.length) {
+      decisions.push(endorsementIssue(row, "ENDORSEMENT_RECEIPT_NOT_FOUND", "No se encontró el recibo exacto que debe enlazarse al endoso.", metricKey));
+      continue;
+    }
+    if (receiptCandidates.length > 1) {
+      decisions.push(endorsementIssue(row, "ENDORSEMENT_RECEIPT_AMBIGUOUS", "El endoso coincide con varios recibos y requiere revisión.", metricKey));
+      continue;
+    }
+
+    resolved.push({
+      row,
+      policy,
+      receipt: receiptCandidates[0],
+      metricKey,
+      data: {
+        endorsementNumber: cleanText(row.endorsementNumber),
+        status: mapEndorsementStatus(row.status, row.periodEnd, input.now),
+        startDate: row.periodStart,
+        endDate: row.periodEnd,
+        amount: row.totalAmount,
+        currency: mapCurrency(row.currency),
+        reference: nullableText(row.endorsementType),
+        concept: nullableText(row.endorsementConcept || row.description),
+      },
+    });
+  }
+
+  const groups = new Map<string, typeof resolved>();
+  for (const item of resolved) {
+    const group = groups.get(item.metricKey) ?? [];
+    group.push(item);
+    groups.set(item.metricKey, group);
+  }
+  const receiptGroups = new Map<string, Set<string>>();
+  for (const item of resolved) {
+    const groupKeys = receiptGroups.get(item.receipt.id) ?? new Set<string>();
+    groupKeys.add(item.metricKey);
+    receiptGroups.set(item.receipt.id, groupKeys);
+  }
+
+  for (const [metricKey, group] of groups) {
+    const first = group[0];
+    const sourceVariants = new Set(group.map((item) => endorsementDataKey(item.data)));
+    if (sourceVariants.size > 1) {
+      for (const item of group) {
+        decisions.push(endorsementIssue(item.row, "ENDORSEMENT_SOURCE_CONFLICT", "El mismo número de endoso trae datos incompatibles en el ledger.", metricKey));
+      }
+      continue;
+    }
+    if (group.some((item) => (receiptGroups.get(item.receipt.id)?.size ?? 0) > 1)) {
+      for (const item of group) {
+        decisions.push(endorsementIssue(item.row, "ENDORSEMENT_RECEIPT_CONFLICT", "El mismo recibo apunta a más de un endoso.", metricKey));
+      }
+      continue;
+    }
+
+    const existingMatches = input.existingEndorsements.filter(
+      (endorsement) => endorsement.policyId === first.policy.id && cleanText(endorsement.endorsementNumber) === first.data.endorsementNumber,
+    );
+    if (existingMatches.length > 1) {
+      for (const item of group) {
+        decisions.push(endorsementIssue(item.row, "ENDORSEMENT_AMBIGUOUS", "Hay más de un endoso existente con la misma llave.", metricKey));
+      }
+      continue;
+    }
+
+    const existing = existingMatches[0];
+    if (group.some((item) => item.receipt.endorsementId && item.receipt.endorsementId !== existing?.id)) {
+      for (const item of group) {
+        decisions.push(endorsementIssue(item.row, "ENDORSEMENT_RECEIPT_CONFLICT", "El recibo ya está enlazado a otro endoso; no se modificó.", metricKey));
+      }
+      continue;
+    }
+
+    const state: LedgerEndorsementPlanState = !existing
+      ? "CREATED"
+      : sameEndorsementData(existing, first.data)
+        ? "UNCHANGED"
+        : "UPDATED";
+    for (const item of group) {
+      const needsReceiptLink = item.receipt.endorsementId !== existing?.id;
+      const needsApply = state !== "UNCHANGED" || needsReceiptLink;
+      decisions.push({
+        rowNumber: item.row.rowNumber,
+        state,
+        action: state === "UNCHANGED" && needsReceiptLink ? "LINK_ENDORSEMENT_RECEIPT" : state === "UNCHANGED" ? "NOOP_ENDORSEMENT_UNCHANGED" : "UPSERT_ENDORSEMENT",
+        status: needsApply ? "READY" : "APPLIED",
+        metricKey,
+        policyId: item.policy.id,
+        receiptId: item.receipt.id,
+        endorsementId: existing?.id,
+        data: item.data,
+      });
+    }
+  }
+
+  decisions.sort((left, right) => left.rowNumber - right.rowNumber);
+  return { decisions, metrics: summarizeLedgerEndorsementDecisions(decisions) };
 }
 
 function hashContent(buffer: Buffer) {
@@ -239,6 +538,9 @@ function readCsvLedgerRows(fileName: string, buffer: Buffer): PolicyLedgerRow[] 
       receiptNumber: cleanText(row["No. Recibo"]),
       periodStart: parseDate(row["Ini Vigencia Rec"]),
       periodEnd: parseDate(row["Fin Vigencia Rec"]),
+      endorsementNumber: cleanText(row["No. de Endoso"]),
+      endorsementType: cleanText(row["Tipo Endoso"]),
+      endorsementConcept: cleanText(row["Concepto Endoso"]),
       rawClient,
       contractorName,
       insuredName,
@@ -281,6 +583,9 @@ function readWorkbookPolicyRows(buffer: Buffer): PolicyLedgerRow[] {
       receiptNumber: cleanText(row["No. Recibo"]),
       periodStart: parseDate(row["Ini Vigencia Rec"]),
       periodEnd: parseDate(row["Fin Vigencia Rec"]),
+      endorsementNumber: cleanText(row["No. de Endoso"]),
+      endorsementType: cleanText(row["Tipo Endoso"]),
+      endorsementConcept: cleanText(row["Concepto Endoso"]),
       rawClient,
       contractorName,
       insuredName,
@@ -429,6 +734,7 @@ async function storePreviewBatch(input: {
   policyRows: PolicyLedgerRow[];
   paidRows: PaidLedgerRow[];
   paidDecisions: Map<number, PaidDecision>;
+  endorsementDecisions: Map<number, LedgerEndorsementDecision>;
 }) {
   const batch = await input.db.ledgerImportBatch.create({
     data: {
@@ -443,24 +749,33 @@ async function storePreviewBatch(input: {
   });
 
   const rowData = [
-      ...input.policyRows.map((row) => ({
-        batchId: batch.id,
-        sourceType: "POLICY_CSV",
-        rowNumber: row.rowNumber,
-        sourceKey: buildPolicySignature(row),
-        rawJson: JSON.stringify(row),
-        normalizedJson: JSON.stringify({
-          policyNumber: normalizePolicyNumber(row.policyNumber),
-          receiptNumber: row.receiptNumber,
-          periodStart: dateKey(row.periodStart),
-          periodEnd: dateKey(row.periodEnd),
-          contractorName: row.contractorName,
-          insuredName: row.insuredName,
-          insurerName: row.insurerName,
-        }),
-        action: "PREVIEW",
-        status: "REVIEW",
-      })),
+      ...input.policyRows.map((row) => {
+        const decision = input.endorsementDecisions.get(row.rowNumber);
+        return {
+          batchId: batch.id,
+          sourceType: "POLICY_CSV",
+          rowNumber: row.rowNumber,
+          sourceKey: buildPolicySignature(row),
+          rawJson: JSON.stringify(row),
+          normalizedJson: JSON.stringify({
+            policyNumber: normalizePolicyNumber(row.policyNumber),
+            receiptNumber: row.receiptNumber,
+            periodStart: dateKey(row.periodStart),
+            periodEnd: dateKey(row.periodEnd),
+            contractorName: row.contractorName,
+            insuredName: row.insuredName,
+            insurerName: row.insurerName,
+            endorsementNumber: row.endorsementNumber,
+            endorsementType: row.endorsementType,
+            endorsementConcept: row.endorsementConcept,
+            endorsementPlanState: decision?.state ?? null,
+          }),
+          action: decision?.action ?? "NO_ENDORSEMENT",
+          status: decision?.status ?? "IGNORED",
+          policyId: decision?.policyId,
+          receiptId: decision?.receiptId,
+        };
+      }),
       ...input.paidRows.map((row) => {
         const decision = input.paidDecisions.get(row.rowNumber);
         return {
@@ -512,7 +827,7 @@ export async function createLedgerImportPreview(input: {
   const csvHash = hashContent(input.csvBuffer);
   const paidHash = hashContent(input.paidBuffer);
 
-  const [policies, receipts, existingPayments] = await Promise.all([
+  const [policies, receipts, existingPayments, existingEndorsements] = await Promise.all([
     db.policy.findMany({
       select: {
         id: true,
@@ -535,6 +850,7 @@ export async function createLedgerImportPreview(input: {
         dueDate: true,
         periodStartDate: true,
         periodEndDate: true,
+        endorsementId: true,
         policy: {
           select: {
             id: true,
@@ -548,6 +864,20 @@ export async function createLedgerImportPreview(input: {
     db.payment.findMany({
       where: { sourceEvidenceKey: { not: null } },
       select: { id: true, sourceEvidenceKey: true },
+    }),
+    db.policyEndorsement.findMany({
+      select: {
+        id: true,
+        policyId: true,
+        endorsementNumber: true,
+        status: true,
+        startDate: true,
+        endDate: true,
+        amount: true,
+        currency: true,
+        reference: true,
+        concept: true,
+      },
     }),
   ]);
 
@@ -565,6 +895,31 @@ export async function createLedgerImportPreview(input: {
 
   const longPolicies = policies.filter((policy) => daysBetween(policy.endDate, policy.startDate) > 366);
   const missingPolicyRows = policyRows.filter((row) => !policyBySignature.has(buildPolicySignature(row)));
+  const endorsementPlan = planLedgerEndorsements({
+    rows: policyRows,
+    policies: policies.map((policy) => ({
+      id: policy.id,
+      policyNumber: policy.policyNumber,
+      startDate: policy.startDate,
+      endDate: policy.endDate,
+      clientName: policy.client.fullName,
+      insurerName: policy.insurer.name,
+    })),
+    receipts: receipts.map((receipt) => ({
+      id: receipt.id,
+      policyId: receipt.policy.id,
+      receiptNumber: receipt.receiptNumber,
+      periodStartDate: receipt.periodStartDate,
+      periodEndDate: receipt.periodEndDate,
+      endorsementId: receipt.endorsementId,
+    })),
+    existingEndorsements: existingEndorsements.map((endorsement) => ({
+      ...endorsement,
+      amount: toNumber(endorsement.amount),
+    })),
+    now: input.now ?? new Date(),
+  });
+  const endorsementDecisions = new Map(endorsementPlan.decisions.map((decision) => [decision.rowNumber, decision]));
 
   const existingPaymentByEvidence = new Map(
     existingPayments
@@ -786,7 +1141,15 @@ export async function createLedgerImportPreview(input: {
     rowNumber: 0,
     sourceKey: policy.id,
   }));
-  const allIssues = [...matchIssues, ...policyIssues, ...longPolicyIssues];
+  const endorsementIssues = endorsementPlan.decisions
+    .filter((decision): decision is LedgerEndorsementDecision & { issue: NonNullable<LedgerEndorsementDecision["issue"]> } => Boolean(decision.issue))
+    .map((decision) => ({
+      ...decision.issue,
+      sourceType: "POLICY_CSV",
+      rowNumber: decision.rowNumber,
+      sourceKey: buildPolicySignature(policyRows.find((row) => row.rowNumber === decision.rowNumber)!),
+    }));
+  const allIssues = [...matchIssues, ...policyIssues, ...longPolicyIssues, ...endorsementIssues];
 
   const summary: LedgerImportPreviewSummary = {
     policyRows: policyRows.length,
@@ -794,6 +1157,10 @@ export async function createLedgerImportPreview(input: {
     policiesMatched: policyRows.length - missingPolicyRows.length,
     policiesMissing: missingPolicyRows.length,
     policiesOverLong: longPolicies.length,
+    endorsementsCreated: endorsementPlan.metrics.created,
+    endorsementsUpdated: endorsementPlan.metrics.updated,
+    endorsementsUnchanged: endorsementPlan.metrics.unchanged,
+    endorsementsReviewRequired: endorsementPlan.metrics.reviewRequired,
     paymentsMatched: Array.from(paidDecisions.values()).filter((decision) => decision.state === "READY").length,
     paymentsReadyToApply: Array.from(paidDecisions.values()).filter((decision) => decision.state === "READY").length,
     paymentsAlreadyApplied: Array.from(paidDecisions.values()).filter((decision) => decision.state === "ALREADY_APPLIED").length,
@@ -815,6 +1182,7 @@ export async function createLedgerImportPreview(input: {
     policyRows,
     paidRows,
     paidDecisions,
+    endorsementDecisions,
   });
 
   const batchRows = await db.ledgerImportRow.findMany({
@@ -880,6 +1248,10 @@ function parsePreviewSummary(value: string | null): LedgerImportPreviewSummary {
       policiesMatched: 0,
       policiesMissing: 0,
       policiesOverLong: 0,
+      endorsementsCreated: 0,
+      endorsementsUpdated: 0,
+      endorsementsUnchanged: 0,
+      endorsementsReviewRequired: 0,
       paymentsMatched: 0,
       paymentsReadyToApply: 0,
       paymentsAlreadyApplied: 0,
@@ -903,6 +1275,63 @@ function parsePaidRow(rawJson: string): PaidLedgerRow {
   }) as PaidLedgerRow;
 }
 
+function parsePolicyRow(rawJson: string): PolicyLedgerRow {
+  return JSON.parse(rawJson, (key, value) => {
+    if (
+      ["periodStart", "periodEnd", "policyStart", "policyEnd", "paidDate"].includes(key) &&
+      typeof value === "string" &&
+      value
+    ) {
+      return new Date(value);
+    }
+    return value;
+  }) as PolicyLedgerRow;
+}
+
+async function markEndorsementApplyReview(input: {
+  db: DbClient;
+  batchId: string;
+  actorId: string;
+  row: { id: string; rowNumber: number; sourceType: string; sourceKey: string };
+  issueType: string;
+  message: string;
+  now: Date;
+}) {
+  const suppressionRule = await findMatchingSuppressionRule(
+    {
+      category: "LEDGER",
+      issueCode: input.issueType,
+      fields: {
+        batchId: input.batchId,
+        rowId: input.row.id,
+        rowNumber: String(input.row.rowNumber),
+        sourceType: input.row.sourceType,
+        sourceKey: input.row.sourceKey,
+      },
+    },
+    input.db,
+  );
+  await input.db.ledgerImportRow.update({
+    where: { id: input.row.id },
+    data: { status: "REVIEW", action: `REVIEW_${input.issueType}` },
+  });
+  await input.db.ledgerImportIssue.create({
+    data: {
+      batchId: input.batchId,
+      rowId: input.row.id,
+      issueType: input.issueType,
+      severity: "WARNING",
+      status: suppressionRule ? "DISMISSED" : "OPEN",
+      message: input.message,
+      detailsJson: JSON.stringify({ rowNumber: input.row.rowNumber, sourceKey: input.row.sourceKey }),
+      suppressedByRuleId: suppressionRule?.id ?? null,
+      reviewedAt: suppressionRule ? input.now : null,
+      reviewedById: suppressionRule ? input.actorId : null,
+      resolutionNote: suppressionRule ? `Suprimida por regla: ${suppressionRule.reason ?? suppressionRule.issueCode}.` : null,
+    },
+  });
+}
+
 export async function applyLedgerImportBatch(input: {
   actorId: string;
   batchId: string;
@@ -915,9 +1344,14 @@ export async function applyLedgerImportBatch(input: {
     include: {
       rows: {
         where: {
-          sourceType: "PAID_XLS",
-          action: "CREATE_PAYMENT",
-          status: "READY",
+          OR: [
+            { sourceType: "PAID_XLS", action: "CREATE_PAYMENT", status: "READY" },
+            {
+              sourceType: "POLICY_CSV",
+              action: { in: ["UPSERT_ENDORSEMENT", "LINK_ENDORSEMENT_RECEIPT"] },
+              status: "READY",
+            },
+          ],
         },
         orderBy: [{ rowNumber: "asc" }],
       },
@@ -957,8 +1391,136 @@ export async function applyLedgerImportBatch(input: {
   let paymentsApplied = 0;
   let paymentsSkipped = 0;
   let paymentsFailed = 0;
+  let endorsementsApplied = 0;
+  let endorsementsSkipped = 0;
+  let endorsementsFailed = 0;
 
-  for (const row of batch.rows) {
+  const endorsementRows = batch.rows.filter((row) => row.sourceType === "POLICY_CSV");
+  const paymentRows = batch.rows.filter((row) => row.sourceType === "PAID_XLS");
+
+  for (const row of endorsementRows) {
+    const policyRow = parsePolicyRow(row.rawJson);
+    if (
+      !row.policyId ||
+      !row.receiptId ||
+      !policyRow.endorsementNumber ||
+      !policyRow.periodStart ||
+      !policyRow.periodEnd
+    ) {
+      endorsementsSkipped += 1;
+      await markEndorsementApplyReview({
+        db,
+        batchId: batch.id,
+        actorId: input.actorId,
+        row,
+        issueType: "ENDORSEMENT_NOT_APPLICABLE",
+        message: "La fila ya no contiene los datos necesarios para aplicar el endoso.",
+        now,
+      });
+      continue;
+    }
+
+    const endorsementNumber = cleanText(policyRow.endorsementNumber);
+    const [policy, receipt, existingEndorsement] = await Promise.all([
+      db.policy.findUnique({ where: { id: row.policyId }, select: { id: true } }),
+      db.receipt.findUnique({
+        where: { id: row.receiptId },
+        select: {
+          id: true,
+          policyId: true,
+          receiptNumber: true,
+          periodStartDate: true,
+          periodEndDate: true,
+          endorsementId: true,
+        },
+      }),
+      db.policyEndorsement.findUnique({
+        where: { policyId_endorsementNumber: { policyId: row.policyId, endorsementNumber } },
+        select: { id: true },
+      }),
+    ]);
+    const receiptStillMatches =
+      receipt?.policyId === row.policyId &&
+      cleanText(receipt.receiptNumber) === cleanText(policyRow.receiptNumber) &&
+      sameDate(receipt.periodStartDate, policyRow.periodStart) &&
+      sameDate(receipt.periodEndDate, policyRow.periodEnd);
+    const receiptHasConflict = Boolean(receipt?.endorsementId && receipt.endorsementId !== existingEndorsement?.id);
+
+    if (!policy || !receiptStillMatches || receiptHasConflict) {
+      endorsementsSkipped += 1;
+      await markEndorsementApplyReview({
+        db,
+        batchId: batch.id,
+        actorId: input.actorId,
+        row,
+        issueType: receiptHasConflict ? "ENDORSEMENT_RECEIPT_CONFLICT" : "ENDORSEMENT_TARGET_CHANGED",
+        message: receiptHasConflict
+          ? "El recibo fue enlazado a otro endoso después del preview; no se modificó."
+          : "La póliza o el recibo dejaron de coincidir con el preview; no se modificaron.",
+        now,
+      });
+      continue;
+    }
+
+    const data = {
+      status: mapEndorsementStatus(policyRow.status, policyRow.periodEnd, now),
+      startDate: policyRow.periodStart,
+      endDate: policyRow.periodEnd,
+      amount: policyRow.totalAmount,
+      currency: mapCurrency(policyRow.currency),
+      reference: nullableText(policyRow.endorsementType),
+      concept: nullableText(policyRow.endorsementConcept || policyRow.description),
+      updatedById: input.actorId,
+      receipts: { connect: { id: row.receiptId } },
+    };
+
+    try {
+      const endorsement = await db.policyEndorsement.upsert({
+        where: { policyId_endorsementNumber: { policyId: row.policyId, endorsementNumber } },
+        create: {
+          endorsementNumber,
+          policyId: row.policyId,
+          ...data,
+          createdById: input.actorId,
+        },
+        update: data,
+        select: { id: true },
+      });
+
+      await db.ledgerImportRow.update({
+        where: { id: row.id },
+        data: { status: "APPLIED", action: existingEndorsement ? row.action : "UPSERT_ENDORSEMENT" },
+      });
+      await db.ledgerImportAction.create({
+        data: {
+          batchId: batch.id,
+          rowId: row.id,
+          actionType: existingEndorsement ? "ENDORSEMENT_UPDATED_FROM_LEDGER" : "ENDORSEMENT_CREATED_FROM_LEDGER",
+          performedById: input.actorId,
+          payloadJson: JSON.stringify({
+            endorsementId: endorsement.id,
+            policyId: row.policyId,
+            receiptId: row.receiptId,
+            endorsementNumber,
+          }),
+        },
+      });
+      endorsementsApplied += 1;
+    } catch (error) {
+      endorsementsFailed += 1;
+      await markEndorsementApplyReview({
+        db,
+        batchId: batch.id,
+        actorId: input.actorId,
+        row,
+        issueType: "ENDORSEMENT_APPLY_FAILED",
+        message: error instanceof Error ? error.message : "No se pudo aplicar este endoso.",
+        now,
+      });
+    }
+  }
+
+  for (const row of paymentRows) {
     const paidRow = parsePaidRow(row.rawJson);
     const evidenceKey = row.sourceKey;
 
@@ -1104,12 +1666,19 @@ export async function applyLedgerImportBatch(input: {
   const previewSummary = parsePreviewSummary(batch.summaryJson);
   const summary = {
     ...previewSummary,
+    endorsementsApplied,
+    endorsementsSkipped,
+    endorsementsFailed,
     paymentsApplied,
     paymentsSkipped,
     paymentsFailed,
   };
   const finalStatus =
-    paymentsFailed > 0 ? "PARTIAL_APPLIED" : paymentsApplied > 0 || paymentsSkipped > 0 ? "APPLIED" : "APPLIED_NO_CHANGES";
+    paymentsFailed > 0 || endorsementsFailed > 0
+      ? "PARTIAL_APPLIED"
+      : paymentsApplied > 0 || paymentsSkipped > 0 || endorsementsApplied > 0 || endorsementsSkipped > 0
+        ? "APPLIED"
+        : "APPLIED_NO_CHANGES";
 
   await db.ledgerImportBatch.update({
     where: { id: batch.id },
