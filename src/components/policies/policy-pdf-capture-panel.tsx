@@ -814,6 +814,12 @@ export function PolicyPdfCapturePanel() {
                       {preview.aiReview.warnings.map((warning) => <p key={warning}>· {warning}</p>)}
                     </div>
                   ) : null}
+                  {preview.aiReview.suggestions.length > 0 ? (
+                    <div>
+                      <p className="font-medium">Sugerencias</p>
+                      {preview.aiReview.suggestions.map((suggestion) => <p key={suggestion}>· {suggestion}</p>)}
+                    </div>
+                  ) : null}
                   {preview.aiReview.corrections.length > 0 ? (
                     <div>
                       <p className="font-medium">Correcciones propuestas para revisar</p>

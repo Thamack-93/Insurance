@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 import {
+  createAssistantThemeKey,
   getNewAssistantReportStatus,
+  normalizeAssistantThemeKey,
   redactAssistantReportText,
   serializeAssistantEvidence,
 } from "@/lib/assistant-reports";
@@ -33,5 +35,10 @@ describe("assistant report privacy and versioning", () => {
     expect(getNewAssistantReportStatus({ kind: "SUGGESTION", threshold: 5 })).toBe("COLLECTING");
     expect(getNewAssistantReportStatus({ kind: "SUGGESTION", threshold: 1 })).toBe("OPEN");
     expect(getNewAssistantReportStatus({ kind: "INCIDENT", threshold: 5 })).toBe("OPEN");
+  });
+
+  it("normalizes report themes so repeated signals merge into one topic", () => {
+    expect(normalizeAssistantThemeKey("  Captura de Pólizas por PDF  ")).toBe("captura-de-polizas-por-pdf");
+    expect(createAssistantThemeKey(["Captura", "de", "Pólizas", "por", "PDF"])).toBe("captura-de-polizas-por-pdf");
   });
 });

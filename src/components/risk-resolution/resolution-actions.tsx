@@ -54,6 +54,10 @@ function renderDetails(details?: string[]) {
   return details.join(" · ");
 }
 
+function renderContextTags(result: GlobalSearchResult) {
+  return uniqueStrings([result.parentLabel ?? "", ...(result.details ?? [])]).slice(0, 4);
+}
+
 function ResolutionActionButton({
   icon,
   label,
@@ -255,6 +259,15 @@ function SearchDialog({
                       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{result.subtitle ?? "Sin descripción"}</p>
                       {renderDetails(result.details) ? (
                         <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{renderDetails(result.details)}</p>
+                      ) : null}
+                      {renderContextTags(result).length ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {renderContextTags(result).map((tag) => (
+                            <Badge key={tag} variant="outline" className="rounded-full px-2 py-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
                       ) : null}
                       {result.match ? (
                         <p className="mt-1 text-[11px] text-muted-foreground">
