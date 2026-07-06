@@ -33,7 +33,7 @@ function makeId() {
 
 function initialMessage(snapshot: AssistantSnapshot): Message {
   return {
-    id: makeId(),
+    id: "welcome",
     role: "assistant",
     text: snapshot.welcome,
     source: "local",
