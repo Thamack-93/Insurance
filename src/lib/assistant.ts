@@ -1,7 +1,7 @@
 import "server-only";
 
 import { buildAssistantReply as buildLocalAssistantReply, getAssistantHomeSnapshot as getLocalAssistantHomeSnapshot } from "@/lib/assistant-local";
-import { buildAssistantAiReply, classifyAssistantReportSignalWithAi } from "@/lib/assistant-ai";
+import { buildAssistantAiReply, classifyAssistantReportSignalWithAi, getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
 import { buildAssistantActionProposalFromPlan } from "@/lib/assistant-actions";
 import { createAssistantThemeKey, listAssistantReports, recordAssistantReportSignal } from "@/lib/assistant-reports";
 import { buildAssistantBlockedReply, evaluateAssistantInput } from "@/lib/assistant-guardrails";
@@ -59,6 +59,26 @@ function isDeterministicQuery(normalized: string) {
   );
 }
 
+function shouldUseAssistantAi(normalized: string) {
+  return (
+    hasMutationIntent(normalized) ||
+    normalized.includes("revisa") ||
+    normalized.includes("valida") ||
+    normalized.includes("verifica") ||
+    normalized.includes("confirma") ||
+    normalized.includes("duplica") ||
+    normalized.includes("coincid") ||
+    normalized.includes("simil") ||
+    normalized.includes("endoso") ||
+    normalized.includes("renovacion") ||
+    normalized.includes("pdf") ||
+    normalized.includes("caratula") ||
+    normalized.includes("detalle") ||
+    normalized.includes("falta") ||
+    normalized.includes("corrige")
+  );
+}
+
 function hasMutationIntent(normalized: string) {
   return (
     normalized.includes("actualiz") ||
@@ -68,7 +88,7 @@ function hasMutationIntent(normalized: string) {
     normalized.includes("corrig") ||
     normalized.includes("crea") ||
     normalized.includes("agrega") ||
-    normalized.includes("añad") ||
+    normalized.includes("anad") ||
     normalized.includes("anade") ||
     normalized.includes("registra pago") ||
     normalized.includes("registrar pago") ||
@@ -97,7 +117,7 @@ function detectTheme(normalized: string): AssistantReportTheme | null {
     };
   }
 
-  if (hasProductNeed && (normalized.includes("pdf") || normalized.includes("caratula") || normalized.includes("carátula") || normalized.includes("documento"))) {
+  if (hasProductNeed && (normalized.includes("pdf") || normalized.includes("caratula") || normalized.includes("documento"))) {
     return {
       kind: "SUGGESTION" as const,
       themeKey: createAssistantThemeKey(["pdf", "captura", "pólizas"]),
@@ -124,11 +144,32 @@ function detectTheme(normalized: string): AssistantReportTheme | null {
   }
 
   if (normalized.includes("reporte") || normalized.includes("export") || normalized.includes("descarg")) {
+    const isDailySummary = normalized.includes("hoy") || normalized.includes("diario") || normalized.includes("resumen");
+    const isReceiptReport = normalized.includes("recibo") || normalized.includes("cobro") || normalized.includes("pago");
+    const isRenewalReport = normalized.includes("renov");
+    const themeParts = [
+      "reportes",
+      isDailySummary ? "diario" : null,
+      isReceiptReport ? "cobros" : null,
+      isRenewalReport ? "renovaciones" : null,
+    ];
     return {
       kind: "SUGGESTION" as const,
-      themeKey: createAssistantThemeKey(["reportes", "globales"]),
-      themeLabel: "Reportes globales",
-      title: "Mejoras en generación de reportes",
+      themeKey: createAssistantThemeKey(themeParts),
+      themeLabel: isDailySummary
+        ? "Reportes diarios"
+        : isReceiptReport
+          ? "Reportes de cobros"
+          : isRenewalReport
+            ? "Reportes de renovaciones"
+            : "Reportes globales",
+      title: isDailySummary
+        ? "Mejoras en resumen diario"
+        : isReceiptReport
+          ? "Mejoras en reportes de cobros"
+          : isRenewalReport
+            ? "Mejoras en reportes de renovaciones"
+            : "Mejoras en generación de reportes",
       summary: "Se pidió un reporte o exportación con contexto recurrente.",
       recommendation: "Revisar si falta una vista, filtro o exportación reutilizable.",
       plan: "Contar repeticiones, normalizar el tema y abrir una sola sugerencia consolidada.",
@@ -136,15 +177,37 @@ function detectTheme(normalized: string): AssistantReportTheme | null {
     };
   }
 
-  if (hasProductNeed && (normalized.includes("buscar") || normalized.includes("vincular") || normalized.includes("consolidar") || normalized.includes("renovacion") || normalized.includes("renovación"))) {
+  if (hasProductNeed && (normalized.includes("buscar") || normalized.includes("vincular") || normalized.includes("consolidar") || normalized.includes("renovacion"))) {
+    const isConsolidation = normalized.includes("consolid");
+    const isRenewal = normalized.includes("renov");
+    const isSearch = normalized.includes("buscar") || normalized.includes("encuent");
     return {
       kind: "SUGGESTION" as const,
-      themeKey: createAssistantThemeKey(["busqueda", "vinculos"]),
-      themeLabel: "Búsqueda y vínculos",
-      title: "Mejoras en búsqueda y vinculación",
-      summary: "Se detectó una necesidad de búsqueda o de vincular entidades relacionadas.",
-      recommendation: "Revisar resultados, contexto mostrado y acciones disponibles.",
-      plan: "Agrupar repeticiones por tema y proponer mejoras de contexto o accesos directos.",
+      themeKey: createAssistantThemeKey([
+        isConsolidation ? "consolidacion" : isSearch ? "busqueda" : "vinculacion",
+        isRenewal ? "renovacion" : null,
+        normalized.includes("cliente") ? "cliente" : null,
+        normalized.includes("poliza") ? "poliza" : null,
+      ]),
+      themeLabel: isConsolidation
+        ? "Consolidación de clientes"
+        : isRenewal
+          ? "Renovaciones con contexto"
+          : "Búsqueda y vínculos",
+      title: isConsolidation
+        ? "Mejoras en consolidación de clientes"
+        : isRenewal
+          ? "Mejoras en búsquedas de renovación"
+          : "Mejoras en búsqueda y vinculación",
+      summary: isConsolidation
+        ? "Se detectó una necesidad repetida de consolidar clientes o evitar duplicados."
+        : "Se detectó una necesidad de búsqueda o de vincular entidades relacionadas.",
+      recommendation: isConsolidation
+        ? "Revisar resultados, similitud y datos visibles para consolidar con menos fricción."
+        : "Revisar resultados, contexto mostrado y acciones disponibles.",
+      plan: isConsolidation
+        ? "Agrupar repeticiones por tema, mostrar más contexto y proponer un destino canónico."
+        : "Agrupar repeticiones por tema y proponer mejoras de contexto o accesos directos.",
       severity: "MEDIUM" as const,
     };
   }
@@ -166,7 +229,11 @@ function detectTheme(normalized: string): AssistantReportTheme | null {
 }
 
 export async function getAssistantHomeSnapshot(user: AssistantUser): Promise<AssistantSnapshot> {
-  return getLocalAssistantHomeSnapshot(user);
+  const snapshot = await getLocalAssistantHomeSnapshot(user);
+  return {
+    ...snapshot,
+    ai: getAssistantAiConnectionStatus(),
+  };
 }
 
 export async function buildAssistantReply(user: AssistantUser, message: string): Promise<AssistantConversationResponse> {
@@ -192,7 +259,7 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
   const theme = detectTheme(normalized);
   const shouldTryAi =
     !theme &&
-    (hasMutationIntent(normalized) || !isDeterministicQuery(normalized) || message.includes("?") || message.length > 160);
+    (shouldUseAssistantAi(normalized) || !isDeterministicQuery(normalized) || message.includes("?") || message.length > 160);
 
   let finalReply: AssistantReply = localReply;
   let source: AssistantResponseSource = "local";
@@ -226,6 +293,9 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
     const aiReport = await classifyAssistantReportSignalWithAi({
       user,
       message,
+      localReplyText: `${localReply.reply}\n\n${localReply.sections
+        .map((section) => `${section.title}\n${section.summary}\n${section.items.map((item) => `${item.title} · ${item.subtitle ?? ""} · ${item.meta ?? ""}`).join("\n")}`)
+        .join("\n\n")}`,
       existingThemes: activeReports,
       fallback: theme ?? null,
     });
@@ -248,6 +318,7 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
   let reportId: string | null = null;
   if (reportTheme) {
     try {
+      const aiStatus = getAssistantAiConnectionStatus();
       const report = await recordAssistantReportSignal({
         kind: reportTheme.kind,
         themeKey: reportTheme.themeKey,
@@ -259,7 +330,14 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
         recommendation: reportTheme.recommendation,
         plan: reportTheme.plan,
         severity: reportTheme.severity,
-        evidence: { source, messageLength: message.length, normalizedLength: normalized.length },
+        evidence: {
+          source,
+          aiAvailable: aiStatus.available,
+          aiMode: aiStatus.authMode,
+          messageLength: message.length,
+          normalizedLength: normalized.length,
+          reportTheme: reportTheme.themeLabel,
+        },
         input: { redacted: true },
         output: { redacted: true },
         actorId: user.id,

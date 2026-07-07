@@ -4,6 +4,7 @@ import type { AssistantPrompt, AssistantReply, AssistantSection, AssistantSnapsh
 import { getTodayData } from "@/lib/dashboard-queries";
 import { daysUntil } from "@/lib/dates";
 import { globalSearch, type GlobalSearchResult } from "@/lib/search";
+import { getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
 
 function normalizeMessage(value: string) {
   return value
@@ -362,6 +363,7 @@ export async function getAssistantHomeSnapshot(user: AssistantUser): Promise<Ass
       user.role === "ADMIN"
         ? "Revisa renovaciones, riesgos y calidad de datos con vista administrativa."
         : "Consulta renovaciones, riesgos y calidad de datos desde una vista operativa.",
+    ai: getAssistantAiConnectionStatus(),
     summaryCards: [
       { label: "Renovaciones", value: "Abrir", description: "Ver próximos vencimientos y seguimientos.", href: "/renewals" },
       { label: "Riesgos", value: "Abrir", description: "Revisar alertas y hallazgos críticos.", href: "/risks" },

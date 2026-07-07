@@ -37,9 +37,17 @@ export type AssistantTodayBrief = AssistantSection & {
 export type AssistantSnapshot = {
   scopeLabel: string;
   welcome: string;
+  ai: AssistantAiStatus;
   summaryCards: AssistantSummaryCard[];
   sections: AssistantSection[];
   quickPrompts: AssistantPrompt[];
+};
+
+export type AssistantAiStatus = {
+  available: boolean;
+  authMode: "api-key" | "oidc" | "deployment" | "unavailable";
+  model: string;
+  fallbackModels: string[];
 };
 
 export type AssistantReply = {

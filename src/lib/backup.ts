@@ -54,6 +54,18 @@ export type CreatedBackup = BackupEntry & {
   pruned: string[];
 };
 
+export type BackupPreflightCheck = {
+  key: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+};
+
+export type BackupPreflightStatus = {
+  ready: boolean;
+  checks: BackupPreflightCheck[];
+};
+
 export type BackupVerification =
   | {
       valid: true;
@@ -68,6 +80,76 @@ function requireEnvironment(name: string) {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required for database backups.`);
   return value;
+}
+
+function buildBackupPreflightCheck(
+  key: string,
+  label: string,
+  detail: string,
+  ok: boolean,
+): BackupPreflightCheck {
+  return { key, label, detail, ok };
+}
+
+export function getBackupPreflightStatus(): BackupPreflightStatus {
+  const checks: BackupPreflightCheck[] = [];
+
+  const blobToken = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  checks.push(
+    buildBackupPreflightCheck(
+      "blob",
+      "Vercel Blob",
+      blobToken ? "Token privado detectado." : "Falta BLOB_READ_WRITE_TOKEN para escribir el respaldo privado.",
+      Boolean(blobToken),
+    ),
+  );
+
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  checks.push(
+    buildBackupPreflightCheck(
+      "database",
+      "Postgres",
+      databaseUrl && /^postgres(ql)?:\/\//i.test(databaseUrl)
+        ? "DATABASE_URL apunta a Postgres."
+        : "DATABASE_URL debe apuntar a Postgres hosted.",
+      Boolean(databaseUrl && /^postgres(ql)?:\/\//i.test(databaseUrl)),
+    ),
+  );
+
+  const encryptionKey = process.env.BACKUP_ENCRYPTION_KEY?.trim();
+  let encryptionKeyOk = false;
+  let encryptionKeyDetail = "Falta BACKUP_ENCRYPTION_KEY.";
+  if (encryptionKey) {
+    try {
+      parseBackupEncryptionKey(encryptionKey);
+      encryptionKeyOk = true;
+      encryptionKeyDetail = "Clave de cifrado válida.";
+    } catch (error) {
+      encryptionKeyDetail = error instanceof Error ? error.message : "BACKUP_ENCRYPTION_KEY inválida.";
+    }
+  }
+  checks.push(buildBackupPreflightCheck("encryption-key", "Clave de cifrado", encryptionKeyDetail, encryptionKeyOk));
+
+  const encryptionVersion = process.env.BACKUP_ENCRYPTION_KEY_VERSION?.trim();
+  checks.push(
+    buildBackupPreflightCheck(
+      "encryption-version",
+      "Versión de clave",
+      encryptionVersion ? `Versión activa: ${encryptionVersion}.` : "Falta BACKUP_ENCRYPTION_KEY_VERSION.",
+      Boolean(encryptionVersion),
+    ),
+  );
+
+  return {
+    ready: checks.every((check) => check.ok),
+    checks,
+  };
+}
+
+export function formatBackupPreflightError(status: BackupPreflightStatus) {
+  const missing = status.checks.filter((check) => !check.ok);
+  if (missing.length === 0) return "La configuración de backup está lista.";
+  return `Faltan validaciones de backup: ${missing.map((check) => `${check.label} (${check.detail})`).join(" · ")}`;
 }
 
 function getEncryptionConfiguration() {
@@ -318,6 +400,10 @@ export async function rotateBackups() {
 }
 
 export async function createDatabaseBackup(now = new Date()): Promise<CreatedBackup> {
+  const preflight = getBackupPreflightStatus();
+  if (!preflight.ready) {
+    throw new Error(formatBackupPreflightError(preflight));
+  }
   const { key, keyVersion } = getEncryptionConfiguration();
   const iv = randomBytes(12);
   const nonce = randomBytes(6).toString("hex");

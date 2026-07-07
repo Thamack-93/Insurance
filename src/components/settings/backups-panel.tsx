@@ -8,11 +8,14 @@ import {
   type BackupListItem,
 } from "@/app/(dashboard)/settings/backups-actions";
 import { EmptyPanel, SectionCard } from "@/components/pages-secondary/panels";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import type { BackupPreflightStatus } from "@/lib/backup";
 import type { MutationResult } from "@/lib/mutation-utils";
 
 type Props = {
   initialBackups: BackupListItem[];
+  backupStatus: BackupPreflightStatus;
   createBackup: () => Promise<MutationResult>;
   listBackups: () => Promise<BackupListItem[]>;
 };
@@ -37,7 +40,7 @@ function formatDateTime(iso: string) {
   }
 }
 
-export function BackupsPanel({ initialBackups, createBackup, listBackups }: Props) {
+export function BackupsPanel({ initialBackups, backupStatus, createBackup, listBackups }: Props) {
   const [backups, setBackups] = useState<BackupListItem[]>(initialBackups);
   const [pendingCreate, startCreate] = useTransition();
   const [verifying, setVerifying] = useState<string | null>(null);
@@ -93,6 +96,30 @@ export function BackupsPanel({ initialBackups, createBackup, listBackups }: Prop
         </div>
       }
     >
+      <div className="border-b border-border/60 px-6 py-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={backupStatus.ready ? "default" : "outline"} className="rounded-full">
+            {backupStatus.ready ? "Backup listo" : "Backup incompleto"}
+          </Badge>
+          {backupStatus.checks.map((check) => (
+            <Badge
+              key={check.key}
+              variant={check.ok ? "secondary" : "destructive"}
+              className="rounded-full"
+            >
+              {check.label}
+            </Badge>
+          ))}
+        </div>
+        <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 xl:grid-cols-4">
+          {backupStatus.checks.map((check) => (
+            <div key={check.key} className="rounded-2xl border border-border/60 bg-background/70 px-3 py-2">
+              <p className="font-medium text-foreground">{check.label}</p>
+              <p className="mt-1">{check.detail}</p>
+            </div>
+          ))}
+        </div>
+      </div>
       {sorted.length === 0 ? (
         <div className="p-6">
           <EmptyPanel

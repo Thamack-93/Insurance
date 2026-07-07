@@ -6,6 +6,7 @@ import { UrlTabs } from "@/components/ui/url-tabs";
 import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-button";
 import { requireAdminOrRedirect } from "@/lib/auth";
 import { listAssistantReports } from "@/lib/assistant-reports";
+import { getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
 import { formatDate } from "@/lib/dates";
 import { AssistantReportActionButtons } from "@/components/assistant/report-action-buttons";
 import { Gauge, ShieldCheck } from "lucide-react";
@@ -98,6 +99,7 @@ function ReportList({
 
 export default async function AssistantSettingsPage() {
   await requireAdminOrRedirect();
+  const aiStatus = getAssistantAiConnectionStatus();
   const [incidents, suggestions] = await Promise.all([
     listAssistantReports({ kind: "INCIDENT", limit: 100 }),
     listAssistantReports({ kind: "SUGGESTION", limit: 100 }),
@@ -115,7 +117,7 @@ export default async function AssistantSettingsPage() {
         actions={<RefreshPageButton label="Actualizar" />}
       />
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <Card>
           <CardHeader className="pb-3">
             <CardDescription>Incidentes abiertos</CardDescription>
@@ -147,6 +149,27 @@ export default async function AssistantSettingsPage() {
           </CardHeader>
           <CardContent className="pt-0 text-xs text-muted-foreground">
             Sin cuota de uso por usuario. Permanecen autenticación, same-origin y límite técnico de payload.
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription>Estado IA</CardDescription>
+            <CardTitle className="text-3xl">{aiStatus.available ? "Conectada" : "Offline"}</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 space-y-2 text-xs text-muted-foreground">
+            <div className="flex flex-wrap gap-2">
+              <Badge variant={aiStatus.available ? "default" : "outline"} className="rounded-full">
+                {aiStatus.authMode}
+              </Badge>
+              <Badge variant="secondary" className="rounded-full">
+                {aiStatus.model}
+              </Badge>
+            </div>
+            <p>
+              {aiStatus.available
+                ? `La IA está lista para responder y generar mejoras con fallback a ${aiStatus.fallbackModels.join(", ")}.`
+                : "La IA no está disponible todavía. Revisa credenciales o entorno."}
+            </p>
           </CardContent>
         </Card>
       </section>

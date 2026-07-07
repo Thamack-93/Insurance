@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 import {
   buildAssistantAiReply,
+  getAssistantAiConnectionStatus,
   getAssistantAiModel,
   getAssistantGatewayAuthMode,
   getAssistantGatewayFallbackModels,
@@ -54,5 +55,19 @@ describe("assistant ai fallback", () => {
 
     vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "openai/gpt-4o-mini, deepseek/deepseek-v3");
     expect(getAssistantGatewayFallbackModels()).toEqual(["openai/gpt-4o-mini", "deepseek/deepseek-v3"]);
+  });
+
+  it("treats a Vercel deployment as gateway-capable even without a local token", () => {
+    vi.stubEnv("AI_GATEWAY_API_KEY", "");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", "");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+
+    expect(getAssistantAiConnectionStatus()).toEqual({
+      available: true,
+      authMode: "deployment",
+      model: "minimax/minimax-m3",
+      fallbackModels: ["openai/gpt-4o-mini"],
+    });
   });
 });

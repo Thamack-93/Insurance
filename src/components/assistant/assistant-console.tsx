@@ -429,7 +429,12 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
           </div>
           <div>
             <h1 className="font-serif text-xl font-semibold tracking-tight">Nora</h1>
-            <p className="text-xs text-muted-foreground">Asistente de PolicyDesk · {snapshot.scopeLabel}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span>Asistente de PolicyDesk · {snapshot.scopeLabel}</span>
+              <Badge variant={snapshot.ai.available ? "default" : "outline"} className="rounded-full text-[10px] uppercase tracking-wide">
+                {snapshot.ai.available ? `IA conectada · ${snapshot.ai.model}` : "IA desconectada"}
+              </Badge>
+            </div>
           </div>
         </div>
         <Button type="button" variant="ghost" size="sm" className="rounded-full" onClick={resetConversation} disabled={isSending}>
@@ -554,7 +559,8 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
           </Button>
         </div>
         <p className="mt-2 text-center text-[11px] text-muted-foreground">
-          Nora solo responde sobre PolicyDesk y únicamente usa información accesible para tu usuario. También puedes adjuntar un PDF de póliza.
+          Nora solo responde sobre PolicyDesk y únicamente usa información accesible para tu usuario.
+          {snapshot.ai.available ? ` IA conectada con ${snapshot.ai.model}.` : " IA no disponible por ahora."} También puedes adjuntar un PDF de póliza.
         </p>
       </footer>
     </section>

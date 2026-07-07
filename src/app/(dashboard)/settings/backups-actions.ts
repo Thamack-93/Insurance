@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import {
   createDatabaseBackup,
+  formatBackupPreflightError,
   listBackups,
+  getBackupPreflightStatus,
   verifyStoredBackup,
   type BackupEntry,
 } from "@/lib/backup";
@@ -35,6 +37,10 @@ export async function listBackupsAction(): Promise<BackupListItem[]> {
 export async function createBackup(): Promise<MutationResult> {
   try {
     await requireAdmin();
+    const preflight = getBackupPreflightStatus();
+    if (!preflight.ready) {
+      return errorResult(formatBackupPreflightError(preflight));
+    }
     const backup = await createDatabaseBackup();
     revalidatePath("/settings");
     return successResult(
@@ -44,6 +50,7 @@ export async function createBackup(): Promise<MutationResult> {
     );
   } catch (error) {
     if (error instanceof AuthError) return errorResult(error.message);
+    if (error instanceof Error) return errorResult(error.message);
     logError("settings.backups.create", error);
     return errorResult("No se pudo crear el respaldo cifrado. Revisa la configuración segura.");
   }

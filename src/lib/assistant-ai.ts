@@ -6,6 +6,7 @@ import type {
   AssistantMutationPlan,
   AssistantPrompt,
   AssistantReply,
+  AssistantAiStatus,
   AssistantUser,
 } from "@/lib/assistant-types";
 import type {
@@ -155,7 +156,12 @@ const pdfFileExtractionSchema = z.object({
 });
 
 function hasGatewayAuth() {
-  return Boolean(process.env.AI_GATEWAY_API_KEY?.trim() || process.env.VERCEL_OIDC_TOKEN?.trim());
+  return Boolean(
+    process.env.AI_GATEWAY_API_KEY?.trim() ||
+      process.env.VERCEL_OIDC_TOKEN?.trim() ||
+      process.env.VERCEL_ENV?.trim() ||
+      process.env.VERCEL?.trim(),
+  );
 }
 
 export function getAssistantAiModel() {
@@ -170,6 +176,19 @@ export function getAssistantGatewayAuthMode(): "oidc" | "api-key" | "unavailable
   if (process.env.AI_GATEWAY_API_KEY?.trim()) return "api-key";
   if (process.env.VERCEL_OIDC_TOKEN?.trim()) return "oidc";
   return "unavailable";
+}
+
+export function getAssistantAiConnectionStatus(): AssistantAiStatus {
+  const authMode = getAssistantGatewayAuthMode();
+  const available = hasGatewayAuth();
+  const deploymentMode = available && authMode === "unavailable" ? "deployment" : authMode;
+
+  return {
+    available,
+    authMode: deploymentMode,
+    model: getAssistantAiModel(),
+    fallbackModels: getAssistantGatewayFallbackModels(),
+  };
 }
 
 export function getAssistantGatewayFallbackModels() {
@@ -401,6 +420,7 @@ export async function buildAssistantAiReply(input: {
 export async function classifyAssistantReportSignalWithAi(input: {
   user: AssistantUser;
   message: string;
+  localReplyText?: string;
   existingThemes: Array<{ themeKey: string; themeLabel: string; kind: "INCIDENT" | "SUGGESTION" }>;
   fallback?: Omit<AssistantAiReportSignal, "shouldReport"> | null;
 }): Promise<AssistantAiReportSignal | null> {
@@ -420,6 +440,7 @@ export async function classifyAssistantReportSignalWithAi(input: {
         "No incluyas datos personales en themeKey, título ni resumen. Redacta un diagnóstico y un plan accionable.",
         "Devuelve SOLO JSON válido con: shouldReport, kind, themeKey, themeLabel, title, summary, recommendation, plan, severity.",
         `Mensaje: ${input.message.slice(0, 2_000)}`,
+        input.localReplyText ? `Respuesta local actual:\n${input.localReplyText.slice(0, 3_000)}` : "Sin respuesta local detallada.",
         `Temas abiertos: ${JSON.stringify(input.existingThemes.slice(0, 50))}`,
         input.fallback ? `Clasificación determinística sugerida: ${JSON.stringify(input.fallback)}` : "Sin clasificación determinística.",
       ].join("\n\n"),

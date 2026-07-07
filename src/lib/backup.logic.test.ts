@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createBackupManifest,
   decryptBackupPayload,
@@ -7,12 +7,17 @@ import {
   selectBackupRetention,
   verifyBackupManifest,
 } from "@/lib/backup-logic";
+import { formatBackupPreflightError, getBackupPreflightStatus } from "@/lib/backup";
 
 const KEY = Buffer.from(
   "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
   "hex",
 );
 const IV = Buffer.from("101112131415161718191a1b", "hex");
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("backup encryption", () => {
   it("encrypts deterministically with a fixed IV and authenticates the payload", () => {
@@ -111,5 +116,33 @@ describe("backup retention", () => {
       "m1-old",
       "expired",
     ]);
+  });
+});
+
+describe("backup preflight", () => {
+  it("reports missing secure configuration", () => {
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "");
+    vi.stubEnv("DATABASE_URL", "");
+    vi.stubEnv("BACKUP_ENCRYPTION_KEY", "");
+    vi.stubEnv("BACKUP_ENCRYPTION_KEY_VERSION", "");
+
+    const status = getBackupPreflightStatus();
+
+    expect(status.ready).toBe(false);
+    expect(status.checks.every((check) => !check.ok)).toBe(true);
+    expect(formatBackupPreflightError(status)).toContain("Vercel Blob");
+    expect(formatBackupPreflightError(status)).toContain("Postgres");
+  });
+
+  it("accepts a valid backup configuration", () => {
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "blob-token");
+    vi.stubEnv("DATABASE_URL", "postgresql://localhost:5432/policydesk");
+    vi.stubEnv("BACKUP_ENCRYPTION_KEY", `hex:${KEY.toString("hex")}`);
+    vi.stubEnv("BACKUP_ENCRYPTION_KEY_VERSION", "v1");
+
+    const status = getBackupPreflightStatus();
+
+    expect(status.ready).toBe(true);
+    expect(status.checks.every((check) => check.ok)).toBe(true);
   });
 });

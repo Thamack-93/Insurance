@@ -8,6 +8,8 @@ import { today, formatDate } from "@/lib/dates";
 import Link from "next/link";
 import { getSettings, updateSettings } from "@/lib/settings";
 import { getOnboardingStatus } from "@/lib/dashboard-queries";
+import { getBackupPreflightStatus } from "@/lib/backup";
+import { getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
 import { SettingsForm } from "@/components/forms/settings-form";
 import { BackupsPanel } from "@/components/settings/backups-panel";
 import { OnboardingPanel } from "@/components/settings/onboarding-panel";
@@ -20,6 +22,8 @@ export default async function SettingsPage() {
   const now = today();
   const liveUser = await getCurrentUser();
   const isAdmin = !!liveUser && liveUser.active && liveUser.role === "ADMIN";
+  const aiStatus = getAssistantAiConnectionStatus();
+  const backupStatus = getBackupPreflightStatus();
   const [settings, initialBackups, onboarding] = await Promise.all([
     getSettings(),
     isAdmin ? listBackupsAction().catch(() => []) : Promise.resolve([]),
@@ -133,7 +137,12 @@ export default async function SettingsPage() {
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Bot className="size-4" /> Nora y reportes IA
                 </CardTitle>
-                <CardDescription>Revisa incidentes, sugerencias, evidencia y configuración de uso.</CardDescription>
+                <CardDescription>
+                  Revisa incidentes, sugerencias, evidencia y configuración de uso.
+                  {aiStatus.available
+                    ? ` IA conectada con ${aiStatus.model}.`
+                    : " IA desconectada por ahora."}
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <Button asChild variant="outline" className="rounded-full">
@@ -159,6 +168,7 @@ export default async function SettingsPage() {
         {isAdmin ? (
           <BackupsPanel
             initialBackups={initialBackups}
+            backupStatus={backupStatus}
             createBackup={createBackup}
             listBackups={listBackupsAction}
           />
