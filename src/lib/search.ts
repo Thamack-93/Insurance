@@ -1,4 +1,6 @@
 import { getDb } from "@/lib/db";
+import { formatDate } from "@/lib/dates";
+import { policyStatusOptions } from "@/lib/domain-options";
 import { normalize, unaccentSql } from "@/lib/search-utils";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { Prisma } from "@/generated/prisma/client";
@@ -76,6 +78,15 @@ function pickMatch(row: Record<string, unknown>, fields: string[], needle: strin
 
 function cleanStrings(values: Array<string | null | undefined>) {
   return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))];
+}
+
+export function formatPolicyStatusLabel(status: string | null | undefined) {
+  if (!status) return "Sin estado";
+  return policyStatusOptions.find((option) => option.value === status)?.label ?? status;
+}
+
+export function formatPolicyValidity(startDate: Date, endDate: Date) {
+  return `Vigencia ${formatDate(startDate)} a ${formatDate(endDate)}`;
 }
 
 type RowWithId = Record<string, unknown> & { id: string };
@@ -233,6 +244,9 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
   type PolicyRow = RowWithId & {
     policyNumber: string;
     policyType: string;
+    status: string;
+    startDate: Date;
+    endDate: Date;
     insuredObject: string | null;
     insuredPartiesText: string | null;
     insuredAssetsText: string | null;
@@ -286,7 +300,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
         policyNeedles.map((policyNeedle) =>
           rawSearch<PolicyRow>(
             "Policy",
-            ["id", "policyNumber", "policyType", "insuredObject", "notes", "clientId", "insurerId", "updatedAt"],
+            ["id", "policyNumber", "policyType", "status", "startDate", "endDate", "insuredObject", "notes", "clientId", "insurerId", "updatedAt"],
             ["policyNumber", "insuredObject", "notes"],
             normalize(policyNeedle),
             5,
@@ -427,8 +441,13 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       id: p.id,
       type: "policy",
       title: p.policyNumber,
-      subtitle: `${p.clientName ?? "Sin cliente"} · ${p.insurerName ?? "Sin aseguradora"} · ${p.policyType} · ${p.status}`,
-      details: cleanStrings([p.insuredObject, p.insuredPartiesText, p.insuredAssetsText]),
+      subtitle: `${p.clientName ?? "Sin cliente"} · ${p.insurerName ?? "Sin aseguradora"} · ${p.policyType} · ${formatPolicyStatusLabel(p.status)}`,
+      details: cleanStrings([
+        formatPolicyValidity(p.startDate, p.endDate),
+        p.insuredObject,
+        p.insuredPartiesText,
+        p.insuredAssetsText,
+      ]),
       href: `/policies/${p.id}`,
       match,
     });
