@@ -181,16 +181,16 @@ function SearchDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl" showCloseButton>
-        <DialogHeader>
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] max-w-3xl overflow-hidden sm:max-w-3xl" showCloseButton>
+        <DialogHeader className="min-w-0">
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="break-words">
             {description}
             <span className="block text-xs text-muted-foreground">Origen: {sourceLabel}</span>
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -210,7 +210,8 @@ function SearchDialog({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="rounded-full"
+                  className="max-w-full rounded-full truncate text-left"
+                  title={suggestion}
                   onClick={() => setQuery(suggestion)}
                   disabled={isSubmitting}
                 >
@@ -220,7 +221,7 @@ function SearchDialog({
             </div>
           ) : null}
 
-          <div className="max-h-[360px] overflow-auto rounded-2xl border border-border/70 bg-muted/20">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-2xl border border-border/70 bg-muted/20">
             {error ? (
               <div className="px-4 py-6 text-sm text-destructive">{error}</div>
           ) : isLoading ? (
@@ -243,34 +244,34 @@ function SearchDialog({
                     key={`${result.type}-${result.id}`}
                     type="button"
                     className={cn(
-                      "flex w-full items-start justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/70",
+                      "flex w-full min-w-0 items-start justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/70",
                       isSubmitting ? "pointer-events-none opacity-60" : "",
                     )}
                     onClick={() => void selectResult(result)}
                     disabled={isSubmitting}
                   >
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate font-medium text-foreground">{result.title}</span>
-                        <Badge variant="outline" className="rounded-full text-[11px] uppercase tracking-wide">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="min-w-0 truncate font-medium text-foreground">{result.title}</span>
+                        <Badge variant="outline" className="shrink-0 rounded-full text-[11px] uppercase tracking-wide">
                           {result.type}
                         </Badge>
                       </div>
-                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{result.subtitle ?? "Sin descripción"}</p>
+                      <p className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">{result.subtitle ?? "Sin descripción"}</p>
                       {renderDetails(result.details) ? (
-                        <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{renderDetails(result.details)}</p>
+                        <p className="mt-1 line-clamp-2 break-words text-[11px] text-muted-foreground">{renderDetails(result.details)}</p>
                       ) : null}
                       {renderContextTags(result).length ? (
                         <div className="mt-2 flex flex-wrap gap-1.5">
                           {renderContextTags(result).map((tag) => (
-                            <Badge key={tag} variant="outline" className="rounded-full px-2 py-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+                            <Badge key={tag} variant="outline" className="max-w-full rounded-full px-2 py-0 text-[10px] uppercase tracking-wide text-muted-foreground">
                               {tag}
                             </Badge>
                           ))}
                         </div>
                       ) : null}
                       {result.match ? (
-                        <p className="mt-1 text-[11px] text-muted-foreground">
+                        <p className="mt-1 break-words text-[11px] text-muted-foreground">
                           Coincidencia: {result.match.fieldLabel} · {result.match.snippet}
                         </p>
                       ) : null}
