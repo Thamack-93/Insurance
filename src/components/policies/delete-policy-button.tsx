@@ -19,7 +19,8 @@ export function DeletePolicyButton({ id, policyNumber }: DeletePolicyButtonProps
       description={
         <>
           ¿Seguro que quieres eliminar la póliza <strong>{policyNumber}</strong>? Esta acción no se puede
-          deshacer y solo funciona si la póliza no tiene recibos, pagos, comisiones ni siniestros asociados.
+          deshacer y solo se bloquea si la póliza tiene recibos pagados. Si un recibo ya fue pagado, primero
+          elimina sus pagos desde el detalle del recibo para poder despagarlo.
         </>
       }
     />

@@ -125,16 +125,20 @@ export default async function RisksPage({
   const matchesQuery = (...values: Array<string | null | undefined>) =>
     !query || values.some((value) => value?.toLowerCase().includes(query));
 
-  const filteredRisks = risks.filter((risk) => {
+  const queryMatchedRisks = risks.filter((risk) =>
+    matchesQuery(risk.title, risk.description, getRiskTypeLabel(risk.alertType), risk.entityType, risk.suggestedAction),
+  );
+
+  const filteredRisks = queryMatchedRisks.filter((risk) => {
     if (alertTypeFilter && risk.alertType !== alertTypeFilter) return false;
-    return matchesQuery(risk.title, risk.description, getRiskTypeLabel(risk.alertType), risk.entityType, risk.suggestedAction);
+    return true;
   });
 
   const critical = filteredRisks.filter((risk) => risk.severity === "CRITICAL");
   const warnings = filteredRisks.filter((risk) => risk.severity === "WARNING");
   const info = filteredRisks.filter((risk) => risk.severity === "INFO");
 
-  const typeCounts = filteredRisks.reduce<Record<string, number>>((acc, risk) => {
+  const typeCounts = queryMatchedRisks.reduce<Record<string, number>>((acc, risk) => {
     acc[risk.alertType] = (acc[risk.alertType] ?? 0) + 1;
     return acc;
   }, {});

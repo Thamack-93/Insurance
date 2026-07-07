@@ -10,6 +10,7 @@ import { policySchema, type PolicyFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { assertClientPortfolioAccess, assertPolicyPortfolioAccess } from "@/lib/portfolio-access";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
+import { buildPolicyDeleteBlockedMessage } from "@/lib/policy-delete";
 
 function normalizePolicyInput(values: PolicyFormValues) {
   return {
@@ -413,16 +414,10 @@ export async function deletePolicy(id: string): Promise<MutationResult> {
 
     const existingPolicy = await db.policy.findUnique({
       where: { id },
-      include: {
-        _count: {
-          select: {
-            receipts: true,
-            endorsements: true,
-            payments: true,
-            commissions: true,
-            claims: true,
-          },
-        },
+      select: {
+        id: true,
+        policyNumber: true,
+        clientId: true,
       },
     });
 
@@ -430,18 +425,15 @@ export async function deletePolicy(id: string): Promise<MutationResult> {
       return errorResult("La poliza ya no existe.");
     }
 
-    const counts = existingPolicy._count;
-    const blockers: string[] = [];
-    if (counts.receipts > 0) blockers.push(`${counts.receipts} recibo${counts.receipts !== 1 ? "s" : ""}`);
-    if (counts.endorsements > 0) blockers.push(`${counts.endorsements} endoso${counts.endorsements !== 1 ? "s" : ""}`);
-    if (counts.payments > 0) blockers.push(`${counts.payments} pago${counts.payments !== 1 ? "s" : ""}`);
-    if (counts.commissions > 0) blockers.push(`${counts.commissions} comisión${counts.commissions !== 1 ? "es" : ""}`);
-    if (counts.claims > 0) blockers.push(`${counts.claims} siniestro${counts.claims !== 1 ? "s" : ""}`);
-
-    if (blockers.length > 0) {
-      return errorResult(
-        `No se puede eliminar: la póliza tiene ${blockers.join(", ")} asociado${blockers.length > 1 ? "s" : ""}. Cancélala o elimina primero esos registros.`,
-      );
+    const paidReceiptCount = await db.receipt.count({
+      where: {
+        policyId: id,
+        status: "PAID",
+      },
+    });
+    const blockerMessage = buildPolicyDeleteBlockedMessage(paidReceiptCount);
+    if (blockerMessage) {
+      return errorResult(blockerMessage);
     }
 
     await db.policy.delete({ where: { id } });
