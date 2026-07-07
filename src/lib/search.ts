@@ -1,5 +1,6 @@
 import { getDb } from "@/lib/db";
 import { normalize, unaccentSql } from "@/lib/search-utils";
+import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { Prisma } from "@/generated/prisma/client";
 
 export { normalize, unaccentSql };
@@ -279,52 +280,64 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       undefined,
       scopedClientWhere,
     ),
-    rawSearch<PolicyRow>(
-      "Policy",
-      ["id", "policyNumber", "policyType", "insuredObject", "notes", "clientId", "insurerId", "updatedAt"],
-      ["policyNumber", "insuredObject", "notes"],
-      needle,
-      5,
-      Prisma.sql`ORDER BY ${Prisma.raw('"endDate"')} DESC, ${Prisma.raw('"startDate"')} DESC, ${Prisma.raw('"updatedAt"')} DESC`,
-      Prisma.sql`,
-        (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Policy"."clientId") AS "clientName",
-        (SELECT "name" FROM "Insurer" WHERE "Insurer"."id" = "Policy"."insurerId") AS "insurerName",
-        (
-          SELECT string_agg("fullName", ' | ')
-          FROM "PolicyInsuredParty"
-          WHERE "PolicyInsuredParty"."policyId" = "Policy"."id"
-        ) AS "insuredPartiesText",
-        (
-          SELECT string_agg(COALESCE("serialNumber", "description"), ' | ')
-          FROM "PolicyInsuredAsset"
-          WHERE "PolicyInsuredAsset"."policyId" = "Policy"."id"
-        ) AS "insuredAssetsText"`,
-      Prisma.sql`EXISTS (
-        SELECT 1
-        FROM "Client"
-        WHERE "Client"."id" = "Policy"."clientId"
-          AND ${Prisma.raw(unaccentSql('"Client"."fullName"'))} LIKE ${`%${needle}%`}
-      ) OR EXISTS (
-        SELECT 1
-        FROM "Insurer"
-        WHERE "Insurer"."id" = "Policy"."insurerId"
-          AND ${Prisma.raw(unaccentSql('"Insurer"."name"'))} LIKE ${`%${needle}%`}
-      ) OR EXISTS (
-        SELECT 1
-        FROM "PolicyInsuredParty"
-        WHERE "PolicyInsuredParty"."policyId" = "Policy"."id"
-          AND ${Prisma.raw(unaccentSql('"PolicyInsuredParty"."fullName"'))} LIKE ${`%${needle}%`}
-      ) OR EXISTS (
-        SELECT 1
-        FROM "PolicyInsuredAsset"
-        WHERE "PolicyInsuredAsset"."policyId" = "Policy"."id"
-          AND (
-            ${Prisma.raw(unaccentSql('"PolicyInsuredAsset"."description"'))} LIKE ${`%${needle}%`}
-            OR ${Prisma.raw(unaccentSql('"PolicyInsuredAsset"."serialNumber"'))} LIKE ${`%${needle}%`}
-          )
-      )`,
-      scopedPolicyWhere,
-    ),
+    (async () => {
+      const policyNeedles = buildPolicyNumberSearchVariants(q);
+      const policyRows = await Promise.all(
+        policyNeedles.map((policyNeedle) =>
+          rawSearch<PolicyRow>(
+            "Policy",
+            ["id", "policyNumber", "policyType", "insuredObject", "notes", "clientId", "insurerId", "updatedAt"],
+            ["policyNumber", "insuredObject", "notes"],
+            normalize(policyNeedle),
+            5,
+            Prisma.sql`ORDER BY ${Prisma.raw('"endDate"')} DESC, ${Prisma.raw('"startDate"')} DESC, ${Prisma.raw('"updatedAt"')} DESC`,
+            Prisma.sql`,
+              (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Policy"."clientId") AS "clientName",
+              (SELECT "name" FROM "Insurer" WHERE "Insurer"."id" = "Policy"."insurerId") AS "insurerName",
+              (
+                SELECT string_agg("fullName", ' | ')
+                FROM "PolicyInsuredParty"
+                WHERE "PolicyInsuredParty"."policyId" = "Policy"."id"
+              ) AS "insuredPartiesText",
+              (
+                SELECT string_agg(COALESCE("serialNumber", "description"), ' | ')
+                FROM "PolicyInsuredAsset"
+                WHERE "PolicyInsuredAsset"."policyId" = "Policy"."id"
+              ) AS "insuredAssetsText"`,
+            Prisma.sql`EXISTS (
+              SELECT 1
+              FROM "Client"
+              WHERE "Client"."id" = "Policy"."clientId"
+                AND ${Prisma.raw(unaccentSql('"Client"."fullName"'))} LIKE ${`%${needle}%`}
+            ) OR EXISTS (
+              SELECT 1
+              FROM "Insurer"
+              WHERE "Insurer"."id" = "Policy"."insurerId"
+                AND ${Prisma.raw(unaccentSql('"Insurer"."name"'))} LIKE ${`%${needle}%`}
+            ) OR EXISTS (
+              SELECT 1
+              FROM "PolicyInsuredParty"
+              WHERE "PolicyInsuredParty"."policyId" = "Policy"."id"
+                AND ${Prisma.raw(unaccentSql('"PolicyInsuredParty"."fullName"'))} LIKE ${`%${needle}%`}
+            ) OR EXISTS (
+              SELECT 1
+              FROM "PolicyInsuredAsset"
+              WHERE "PolicyInsuredAsset"."policyId" = "Policy"."id"
+                AND (
+                  ${Prisma.raw(unaccentSql('"PolicyInsuredAsset"."description"'))} LIKE ${`%${needle}%`}
+                  OR ${Prisma.raw(unaccentSql('"PolicyInsuredAsset"."serialNumber"'))} LIKE ${`%${needle}%`}
+                )
+            )`,
+            scopedPolicyWhere,
+          ),
+        ),
+      );
+      const dedup = new Map<string, PolicyRow>();
+      for (const row of policyRows.flat()) {
+        dedup.set(row.id, row);
+      }
+      return [...dedup.values()];
+    })(),
     rawSearch<ReceiptRow>(
       "Receipt",
       ["id", "receiptNumber", "status", "updatedAt"],

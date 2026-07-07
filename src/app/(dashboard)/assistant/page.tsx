@@ -10,7 +10,7 @@ export default async function AssistantPage() {
   });
 
   return (
-    <div className="flex flex-col">
+    <div className="flex min-h-0 flex-col">
       <AssistantConsole snapshot={snapshot} userId={user.id} />
     </div>
   );

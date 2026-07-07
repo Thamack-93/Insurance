@@ -421,7 +421,7 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
   }
 
   return (
-    <section className="mx-auto flex min-h-[calc(100dvh-9rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[2rem] border border-border/70 bg-card/90 shadow-sm">
+    <section className="mx-auto flex h-[calc(100dvh-9rem)] min-h-0 w-full max-w-4xl flex-col overflow-hidden rounded-[2rem] border border-border/70 bg-card/90 shadow-sm">
       <header className="flex items-center justify-between border-b border-border/70 px-5 py-4 sm:px-7">
         <div className="flex items-center gap-3">
           <div className="grid size-10 place-items-center rounded-2xl bg-foreground text-background">
@@ -438,7 +438,7 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
         </Button>
       </header>
 
-      <div className="flex-1 space-y-7 overflow-y-auto px-4 py-7 sm:px-8">
+      <div className="min-h-0 flex-1 space-y-7 overflow-y-auto px-4 py-7 sm:px-8">
         {messages.map((message) => (
           <article key={message.id} className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}>
             <div className={cn("max-w-[88%] sm:max-w-[78%]", message.role === "user" && "rounded-3xl rounded-br-lg bg-foreground px-4 py-3 text-background")}>
@@ -489,7 +489,7 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
         <div ref={endRef} />
       </div>
 
-      <footer className="border-t border-border/70 bg-background/70 p-4 backdrop-blur sm:p-5">
+      <footer className="shrink-0 border-t border-border/70 bg-background/70 p-4 backdrop-blur sm:p-5">
         <input
           ref={fileInputRef}
           type="file"

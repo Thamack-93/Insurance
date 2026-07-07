@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { AssistantPrompt, AssistantReply, AssistantSection, AssistantSnapshot, AssistantUser } from "@/lib/assistant-types";
+import { getTodayData } from "@/lib/dashboard-queries";
 import { globalSearch, type GlobalSearchResult } from "@/lib/search";
 
 function normalizeMessage(value: string) {
@@ -22,6 +23,13 @@ function buildQuickPrompts(): AssistantPrompt[] {
     { label: "Recibos vencidos", prompt: "recibos vencidos" },
     { label: "Buscar cliente", prompt: "buscar cliente" },
   ];
+}
+
+function buildTodaySectionItems<T extends { id: string }>(
+  rows: T[],
+  mapRow: (row: T) => AssistantSection["items"][number] | null,
+) {
+  return rows.slice(0, 4).map(mapRow).filter(Boolean) as AssistantSection["items"];
 }
 
 function buildHomeSections(user: AssistantUser): AssistantSection[] {
@@ -47,6 +55,78 @@ function buildHomeSections(user: AssistantUser): AssistantSection[] {
       ],
     ),
   ];
+}
+
+async function buildTodayReply(): Promise<AssistantReply> {
+  const todayData = await getTodayData();
+  const dueTodayCount = todayData.paymentsDueToday.length;
+  const overdueCount = todayData.overduePayments.length;
+  const due7Count = todayData.paymentsDue7.length;
+  const renewalsCount = todayData.urgentRenewals.length;
+  const overdueWorkItemsCount = todayData.overdueWorkItems.length;
+  const commissionsCount = todayData.commissionsToReview.length;
+
+  const reply =
+    `Hoy tienes ${overdueCount} recibo${overdueCount === 1 ? "" : "s"} vencido${overdueCount === 1 ? "" : "s"}, ` +
+    `${dueTodayCount} que vencen hoy, ${due7Count} en los próximos 7 días, ` +
+    `${renewalsCount} renovación${renewalsCount === 1 ? "" : "es"} en 30 días, ` +
+    `${overdueWorkItemsCount} pendiente${overdueWorkItemsCount === 1 ? "" : "s"} atrasado${overdueWorkItemsCount === 1 ? "" : "s"} y ` +
+    `${commissionsCount} comisión${commissionsCount === 1 ? "" : "es"} por revisar.`;
+
+  return {
+    reply,
+    sections: [
+      makeSection(
+        "Cobros de hoy",
+        "Recibos vencidos, los de hoy y los próximos siete días.",
+        [
+          ...buildTodaySectionItems(todayData.overduePayments, (receipt) => ({
+            title: `${receipt.client.fullName} · ${receipt.policy.policyNumber}`,
+            subtitle: `${receipt.receiptNumber} · ${receipt.insurer.name}`,
+            href: `/receipts/${receipt.id}`,
+            meta: "vencido",
+          })),
+          ...buildTodaySectionItems(todayData.paymentsDueToday, (receipt) => ({
+            title: `${receipt.client.fullName} · ${receipt.policy.policyNumber}`,
+            subtitle: `${receipt.receiptNumber} · ${receipt.insurer.name}`,
+            href: `/receipts/${receipt.id}`,
+            meta: "hoy",
+          })),
+        ],
+      ),
+      makeSection(
+        "Renovaciones",
+        "Pólizas que vencen pronto.",
+        todayData.urgentRenewals.length > 0
+          ? buildTodaySectionItems(todayData.urgentRenewals, (policy) => ({
+              title: policy.policyNumber,
+              subtitle: `${policy.client.fullName} · Renovación ${policy.endDate.toISOString().slice(0, 10)}`,
+              href: `/policies/${policy.id}`,
+              meta: "30 días",
+            }))
+          : [{ title: "Sin renovaciones urgentes", subtitle: "No hay pólizas en el periodo de 30 días.", href: "/today", meta: "ok" }],
+      ),
+      makeSection(
+        "Pendientes",
+        "Tareas atrasadas y comisiones próximas.",
+        [
+          ...buildTodaySectionItems(todayData.overdueWorkItems, (workItem) => ({
+            title: workItem.title,
+            subtitle: `${workItem.folio ?? workItem.id} · ${workItem.policy?.policyNumber ?? "Sin póliza"}`,
+            href: `/tasks/${workItem.id}`,
+            meta: "atrasado",
+          })),
+          ...buildTodaySectionItems(todayData.commissionsToReview, (commission) => ({
+            title: commission.client.fullName,
+            subtitle: `${commission.policy?.policyNumber ?? "Sin póliza"} · ${commission.insurer.name}`,
+            href: "/commissions",
+            meta: "comisión",
+          })),
+        ],
+      ),
+    ],
+    quickPrompts: buildQuickPrompts(),
+  };
 }
 
 function buildSearchTerms(message: string) {
@@ -93,6 +173,16 @@ async function searchUserPortfolio(user: AssistantUser, message: string) {
 
 async function buildPromptReply(user: AssistantUser, message: string): Promise<AssistantReply> {
   const normalized = normalizeMessage(message);
+
+  if (
+    normalized.includes("hoy") ||
+    normalized.includes("today") ||
+    normalized.includes("diario") ||
+    normalized.includes("agenda") ||
+    (normalized.includes("resumen") && normalized.includes("dia"))
+  ) {
+    return buildTodayReply();
+  }
 
   if (normalized.includes("renov")) {
     return {

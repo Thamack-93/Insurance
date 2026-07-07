@@ -14,6 +14,7 @@ import {
   type PolicyPdfCapturePreview,
 } from "@/lib/policy-pdf-capture.shared";
 import type { AssistantUser } from "@/lib/assistant-types";
+import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -47,7 +48,7 @@ async function buildSourcePolicyCandidates(
   portfolioOwnerId?: string,
 ) {
   const candidates: Array<PolicyCaptureSourceOption> = [];
-  const exactNumber = draft.sourcePolicyNumber;
+  const exactNumberVariants = draft.sourcePolicyNumber ? buildPolicyNumberSearchVariants(draft.sourcePolicyNumber) : [];
 
   if (draft.serialNumber && draft.policyType === "AUTO") {
     const targetStartDate = draft.startDate ? parseDateInput(draft.startDate) : null;
@@ -97,10 +98,10 @@ async function buildSourcePolicyCandidates(
     );
   }
 
-  if (exactNumber) {
+  if (exactNumberVariants.length > 0) {
     const exact = await db.policy.findMany({
       where: {
-        policyNumber: exactNumber,
+        OR: exactNumberVariants.map((variant) => ({ policyNumber: variant })),
         ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
         ...(clientId ? { clientId } : {}),
         ...(insurerId ? { insurerId } : {}),
@@ -144,6 +145,7 @@ async function buildSourcePolicyCandidates(
         insurerId,
         policyType: draft.policyType,
         status: { in: ["ACTIVE", "EXPIRED", "RENEWED"] },
+        ...(exactNumberVariants.length > 0 ? { OR: exactNumberVariants.map((variant) => ({ policyNumber: variant })) } : {}),
       },
       orderBy: [{ endDate: "desc" }, { startDate: "desc" }, { updatedAt: "desc" }],
       select: {
@@ -195,6 +197,21 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
   const { portfolioOwnerId, user } = input.context ?? {};
   const warnings = [...(input.warnings ?? [])];
   const policyNumberSuggestion = input.draft.sourcePolicyNumber;
+  const policyNumberVariants = buildPolicyNumberSearchVariants(input.draft.policyNumber);
+  const existingPolicyMatches = policyNumberVariants.length > 0
+    ? await db.policy.findMany({
+        where: {
+          ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
+          OR: policyNumberVariants.map((variant) => ({ policyNumber: variant })),
+        },
+        select: {
+          id: true,
+          policyNumber: true,
+        },
+        orderBy: [{ updatedAt: "desc" }],
+        take: 3,
+      })
+    : [];
 
   const clientCandidates = input.draft.clientName
     ? (await db.client.findMany({
@@ -238,6 +255,14 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
   const suggestedSourcePolicyId = sourcePolicyCandidates.find((policy) => policy.policyNumber === policyNumberSuggestion)?.id ?? null;
 
   if (!input.draft.policyNumber) warnings.push("No pudimos detectar el número de póliza.");
+  if (existingPolicyMatches.length > 0) {
+    const matchLabel = existingPolicyMatches.map((policy) => policy.policyNumber).join(" | ");
+    warnings.push(
+      existingPolicyMatches.length === 1
+        ? `Ya existe una póliza equivalente: ${matchLabel}. Revisa si esta captura debe actualizar o enlazar el registro existente.`
+        : `Encontramos pólizas equivalentes o muy cercanas: ${matchLabel}. Revisa si ya está capturada.`,
+    );
+  }
   if (!input.draft.clientName) warnings.push("No pudimos detectar el asegurado principal.");
   if (!input.draft.insurerName) warnings.push("No pudimos detectar la aseguradora.");
   if (!input.draft.startDate || !input.draft.endDate) warnings.push("No pudimos detectar la vigencia completa.");

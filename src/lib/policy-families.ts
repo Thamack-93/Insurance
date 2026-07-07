@@ -1,5 +1,6 @@
 import { getDb } from "@/lib/db";
 import { toNumber } from "@/lib/money";
+import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 
 type PolicyFamilyPolicy = {
   id: string;
@@ -25,9 +26,10 @@ export async function resolvePolicyFamilyRootId(input: {
   excludePolicyId?: string;
 }) {
   const db = getDb();
+  const policyNumberVariants = buildPolicyNumberSearchVariants(input.policyNumber);
   const existing = await db.policy.findFirst({
     where: {
-      policyNumber: input.policyNumber,
+      OR: policyNumberVariants.map((variant) => ({ policyNumber: variant })),
       clientId: input.clientId,
       insurerId: input.insurerId,
       ...(input.excludePolicyId ? { id: { not: input.excludePolicyId } } : {}),

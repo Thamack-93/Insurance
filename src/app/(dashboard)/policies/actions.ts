@@ -9,6 +9,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { policySchema, type PolicyFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { assertClientPortfolioAccess, assertPolicyPortfolioAccess } from "@/lib/portfolio-access";
+import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 
 function normalizePolicyInput(values: PolicyFormValues) {
   return {
@@ -96,9 +97,10 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
       clientId: parsed.data.clientId,
       insurerId: parsed.data.insurerId,
     });
+    const policyNumberVariants = buildPolicyNumberSearchVariants(normalized.policyNumber);
     const overlap = await db.policy.findFirst({
       where: {
-        policyNumber: normalized.policyNumber,
+        OR: policyNumberVariants.map((variant) => ({ policyNumber: variant })),
         clientId: normalized.clientId,
         insurerId: normalized.insurerId,
         startDate: { lte: normalized.endDate },

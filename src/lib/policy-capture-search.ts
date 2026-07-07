@@ -1,5 +1,6 @@
 import { getDb } from "@/lib/db";
 import { normalize } from "@/lib/search-utils";
+import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 
 export type PolicyCaptureSearchKind = "client" | "insurer" | "policy";
 
@@ -147,6 +148,7 @@ async function searchPolicies(
 ) {
   const db = getDb();
   const needle = normalize(query);
+  const policyNumberVariants = buildPolicyNumberSearchVariants(query);
   const rows = await db.policy.findMany({
     where: needle
       ? {
@@ -155,6 +157,9 @@ async function searchPolicies(
           ...(filters?.insurerId ? { insurerId: filters.insurerId } : {}),
           OR: [
             { policyNumber: { contains: query, mode: "insensitive" } },
+            ...policyNumberVariants
+              .filter((variant) => variant !== query)
+              .map((variant) => ({ policyNumber: { contains: variant, mode: "insensitive" as const } })),
             { insuredObject: { contains: query, mode: "insensitive" } },
             { beneficiaryInfo: { contains: query, mode: "insensitive" } },
             { notes: { contains: query, mode: "insensitive" } },
