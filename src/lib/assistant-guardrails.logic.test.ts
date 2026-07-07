@@ -5,6 +5,8 @@ describe("assistant guardrails", () => {
   it("allows insurance and system requests", () => {
     expect(evaluateAssistantInput("Busca la póliza 12345").allowed).toBe(true);
     expect(evaluateAssistantInput("Necesito un reporte de renovaciones").allowed).toBe(true);
+    expect(evaluateAssistantInput("hoy").allowed).toBe(true);
+    expect(evaluateAssistantInput("Resumen de hoy").allowed).toBe(true);
   });
 
   it("allows concise entity lookups", () => {

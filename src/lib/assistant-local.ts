@@ -2,6 +2,7 @@ import "server-only";
 
 import type { AssistantPrompt, AssistantReply, AssistantSection, AssistantSnapshot, AssistantUser } from "@/lib/assistant-types";
 import { getTodayData } from "@/lib/dashboard-queries";
+import { daysUntil } from "@/lib/dates";
 import { globalSearch, type GlobalSearchResult } from "@/lib/search";
 
 function normalizeMessage(value: string) {
@@ -30,6 +31,57 @@ function buildTodaySectionItems<T extends { id: string }>(
   mapRow: (row: T) => AssistantSection["items"][number] | null,
 ) {
   return rows.slice(0, 4).map(mapRow).filter(Boolean) as AssistantSection["items"];
+}
+
+function extractRenewalWindowDays(normalized: string) {
+  const explicit = normalized.match(/\b(\d{1,3})\s*(?:dias?|days?)\b/);
+  if (explicit) return Number(explicit[1]);
+
+  const afterRenewals = normalized.match(/\brenov(?:acion(?:es)?)?(?:\s+(?:a|en|de|por))?\s*(\d{1,3})\b/);
+  if (afterRenewals) return Number(afterRenewals[1]);
+
+  return null;
+}
+
+function buildRenewalSectionItems(days: number, todayData: Awaited<ReturnType<typeof getTodayData>>) {
+  return todayData.urgentRenewals
+    .filter((policy) => {
+      const distance = daysUntil(policy.endDate);
+      return distance >= 0 && distance <= days;
+    })
+    .sort((a, b) => daysUntil(a.endDate) - daysUntil(b.endDate))
+    .slice(0, 6)
+    .map((policy) => ({
+      title: policy.policyNumber,
+      subtitle: `${policy.client.fullName} · Vence ${policy.endDate.toISOString().slice(0, 10)}`,
+      href: `/policies/${policy.id}`,
+      meta: `${daysUntil(policy.endDate)} días`,
+    }));
+}
+
+async function buildRenewalsReply(days: number): Promise<AssistantReply> {
+  const todayData = await getTodayData();
+  const renewals = buildRenewalSectionItems(days, todayData);
+  const dueSoonCount = renewals.length;
+  const overdueCount = todayData.urgentRenewals.filter((policy) => daysUntil(policy.endDate) < 0).length;
+  const reply =
+    days === 30
+      ? `Tienes ${dueSoonCount} renovación${dueSoonCount === 1 ? "" : "es"} dentro de los próximos 30 días${overdueCount > 0 ? ` y ${overdueCount} vencida${overdueCount === 1 ? "" : "s"}` : ""}.`
+      : `Tienes ${dueSoonCount} renovación${dueSoonCount === 1 ? "" : "es"} dentro de los próximos ${days} días${overdueCount > 0 ? ` y ${overdueCount} vencida${overdueCount === 1 ? "" : "s"}` : ""}.`;
+
+  return {
+    reply,
+    sections: [
+      makeSection(
+        `Renovaciones en ${days} días`,
+        "Pólizas que vencen dentro del periodo solicitado.",
+        renewals.length > 0
+          ? renewals
+          : [{ title: "Sin renovaciones en este rango", subtitle: "Prueba con 30 días o abre Renovaciones.", href: "/renewals", meta: "ok" }],
+      ),
+    ],
+    quickPrompts: buildQuickPrompts(),
+  };
 }
 
 function buildHomeSections(user: AssistantUser): AssistantSection[] {
@@ -171,6 +223,7 @@ async function searchUserPortfolio(user: AssistantUser, message: string) {
 
 async function buildPromptReply(user: AssistantUser, message: string): Promise<AssistantReply> {
   const normalized = normalizeMessage(message);
+  const renewalWindowDays = extractRenewalWindowDays(normalized);
 
   if (
     normalized.includes("hoy") ||
@@ -183,6 +236,10 @@ async function buildPromptReply(user: AssistantUser, message: string): Promise<A
   }
 
   if (normalized.includes("renov")) {
+    if (renewalWindowDays) {
+      return buildRenewalsReply(renewalWindowDays);
+    }
+
     return {
       reply: "Puedo ayudarte a revisar renovaciones próximas, vencidas o sin seguimiento. Si quieres, abre Renovaciones para ver los casos más urgentes o crea una póliza nueva vinculándola a la póliza anterior.",
       sections: [

@@ -48,7 +48,22 @@ export function evaluateAssistantInput(message: string): AssistantGuardrailDecis
   }
 
   if (
-    ["hola", "buenos dias", "buenas tardes", "ayuda", "menu", "que puedes hacer"].includes(normalized) ||
+    [
+      "hola",
+      "buenos dias",
+      "buenas tardes",
+      "ayuda",
+      "menu",
+      "que puedes hacer",
+      "hoy",
+      "today",
+      "resumen de hoy",
+      "resumen del dia",
+      "resumen diario",
+      "agenda de hoy",
+      "agenda del dia",
+      "diario",
+    ].includes(normalized) ||
     hasDomainTerm(normalized)
   ) {
     return { allowed: true, normalized, reason: "system" };
