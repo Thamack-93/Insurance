@@ -52,6 +52,25 @@ vi.mock("@/lib/dashboard-queries", () => {
   return { getTodayData };
 });
 
+vi.mock("@/lib/search", () => {
+  const globalSearch = vi.fn(async (query: string) => {
+    if (query.includes("940454625")) {
+      return [
+        {
+          id: "policy-1",
+          type: "policy",
+          title: "940454625",
+          subtitle: "Cliente Vencimiento · Qualitas",
+          href: "/policies/policy-1",
+        },
+      ];
+    }
+    return [];
+  });
+
+  return { globalSearch };
+});
+
 import { buildAssistantReply } from "@/lib/assistant-local";
 
 describe("assistant local replies", () => {
@@ -76,5 +95,15 @@ describe("assistant local replies", () => {
     expect(reply.sections[0]?.title).toBe("Renovaciones en 10 días");
     expect(reply.sections[0]?.items[0]?.title).toBe("POL-300");
     expect(reply.sections[0]?.items[0]?.subtitle).toContain("Cliente Renovación");
+  });
+
+  it("starts a policy change flow instead of a generic search", async () => {
+    const reply = await buildAssistantReply({ id: "user-1", role: "ADMIN" }, "necesito cambiar la fecha de vencimiento de la poliza 940454625");
+
+    expect(reply.reply).toContain("Encontré 940454625");
+    expect(reply.reply).toContain("nueva fecha de vencimiento");
+    expect(reply.sections[0]?.title).toBe("Cambiar vencimiento");
+    expect(reply.sections[0]?.items[0]?.title).toBe("940454625");
+    expect(reply.sections[0]?.items[0]?.href).toBe("/policies/policy-1");
   });
 });

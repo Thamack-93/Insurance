@@ -33,6 +33,11 @@ function buildTodaySectionItems<T extends { id: string }>(
   return rows.slice(0, 4).map(mapRow).filter(Boolean) as AssistantSection["items"];
 }
 
+function extractPolicyNumber(normalized: string) {
+  const match = normalized.match(/\b\d{5,}\b/);
+  return match?.[0] ?? null;
+}
+
 function extractRenewalWindowDays(normalized: string) {
   const explicit = normalized.match(/\b(\d{1,3})\s*(?:dias?|days?)\b/);
   if (explicit) return Number(explicit[1]);
@@ -81,6 +86,52 @@ async function buildRenewalsReply(days: number): Promise<AssistantReply> {
       ),
     ],
     quickPrompts: buildQuickPrompts(),
+  };
+}
+
+async function buildPolicyChangeReply(user: AssistantUser, message: string): Promise<AssistantReply> {
+  const normalized = normalizeMessage(message);
+  const policyNumber = extractPolicyNumber(normalized);
+  const searchQuery = policyNumber ?? message;
+  const results = await searchUserPortfolio(user, searchQuery);
+  const policyResults = results.filter((result) => result.href.startsWith("/policies/"));
+  const target = policyResults[0] ?? null;
+  const targetLabel = target?.title ?? policyNumber ?? "la póliza";
+
+  return {
+    reply: target
+      ? `Encontré ${targetLabel}. Dime la nueva fecha de vencimiento y te preparo la edición.`
+      : policyNumber
+        ? `No encontré la póliza ${policyNumber} dentro de tu cartera. Si quieres, dime la nueva fecha y revisamos si el número está incompleto o si la póliza está fuera de tu alcance.`
+        : "Puedo cambiar la fecha de vencimiento de una póliza. Dime el número exacto y la nueva fecha, y te preparo la edición.",
+    sections: [
+      makeSection(
+        "Cambiar vencimiento",
+        target ? "La póliza objetivo está identificada, falta confirmar la nueva fecha." : "Necesito identificar la póliza exacta para continuar.",
+        target
+          ? [
+              {
+                title: target.title,
+                subtitle: target.subtitle ?? "Abrir póliza para editar vencimiento",
+                href: target.href,
+                meta: "editar",
+              },
+            ]
+          : [
+              {
+                title: "Abrir búsqueda de póliza",
+                subtitle: "Busca por número, cliente, RFC o aseguradora.",
+                href: "/policies",
+                meta: "buscar",
+              },
+            ],
+      ),
+    ],
+    quickPrompts: [
+      { label: "Cambiar vencimiento", prompt: "Cambiar fecha de vencimiento de la póliza" },
+      { label: "Buscar póliza", prompt: "Buscar póliza" },
+      { label: "Ver renovaciones", prompt: "Renovaciones próximas" },
+    ],
   };
 }
 
@@ -250,6 +301,13 @@ async function buildPromptReply(user: AssistantUser, message: string): Promise<A
       ],
       quickPrompts: buildQuickPrompts(),
     };
+  }
+
+  if (
+    normalized.includes("poliz") &&
+    (normalized.includes("cambi") || normalized.includes("modific") || normalized.includes("editar") || normalized.includes("vencim") || normalized.includes("vigencia"))
+  ) {
+    return buildPolicyChangeReply(user, message);
   }
 
   if (normalized.includes("riesg")) {

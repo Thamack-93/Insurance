@@ -337,7 +337,7 @@ export async function buildAssistantAiReply(input: {
       model: getAssistantGatewayModel(),
       temperature: 0.2,
       abortSignal: AbortSignal.timeout(4_000),
-      prompt: [
+      system: [
         "Eres Nora, el asistente interno de una app de seguros y correduría.",
         "Solo puedes responder sobre PolicyDesk y sobre los datos incluidos en el contexto local de este mensaje.",
         "Rechaza conocimiento general, entretenimiento, política, programación y cualquier tema ajeno al sistema.",
@@ -347,7 +347,9 @@ export async function buildAssistantAiReply(input: {
         "Si la petición es ambigua o compleja, ayuda a desambiguar, pero no inventes datos.",
         "Si el usuario pide crear o editar un cliente, póliza, recibo, pago o tarea, incluye una propiedad mutation con el plan estructurado. No propongas borrar, consolidar ni archivar.",
         "La mutation debe usar solo estos campos y referencias visibles en el mensaje o el contexto local. Si faltan datos, llena missingFields y no inventes valores.",
-        "Devuelve SOLO JSON válido con la forma: {\"reply\": string, \"quickPrompts\": [{\"label\": string, \"prompt\": string}], \"mutation\": null | {\"entityType\": \"client\"|\"policy\"|\"receipt\"|\"payment\"|\"task\", \"operation\": \"create\"|\"update\", \"targetQuery\": string|null, \"title\": string, \"summary\": string, \"reply\": string, \"fields\": [{\"field\": string, \"label\": string, \"value\": string}], \"relations\": [{\"field\": string, \"label\": string, \"query\": string}], \"missingFields\": [{\"field\": string, \"label\": string, \"question\": string}] } }.",
+        "Devuelve una respuesta estructurada exacta con reply, quickPrompts y mutation.",
+      ].join("\n"),
+      prompt: [
         `Usuario: ${input.user.role}`,
         `Mensaje: ${input.message}`,
         `Contexto local:\n${serializeSections(input.localReply.sections) || "Sin secciones locales."}`,
@@ -356,6 +358,9 @@ export async function buildAssistantAiReply(input: {
       ]
         .filter(Boolean)
         .join("\n\n"),
+      output: Output.object({
+        schema: assistantAiResponseSchema,
+      }),
       providerOptions: {
         gateway: {
           user: input.user.id,
@@ -365,7 +370,7 @@ export async function buildAssistantAiReply(input: {
       },
     });
 
-    const parsed = parseJsonResponse(result.text, assistantAiResponseSchema);
+    const parsed = result.output;
     if (!parsed) {
       return null;
     }
