@@ -382,10 +382,7 @@ export function RenewalResolutionActions({
   const { isPending, runMutation } = useMutationState();
   const [searchOpen, setSearchOpen] = useState(false);
   const sourceLabel = `${sourcePolicyNumber} · ${clientName} · ${insurerName}`;
-  const suggestions = useMemo(
-    () => uniqueStrings([sourcePolicyNumber, clientName, insurerName, `${clientName} ${insurerName}`, `${sourcePolicyNumber} ${insurerName}`]),
-    [clientName, insurerName, sourcePolicyNumber],
-  );
+  const suggestions = useMemo(() => uniqueStrings([clientName]), [clientName]);
 
   const closeAction =
     mode === "suggestion"
@@ -421,7 +418,7 @@ export function RenewalResolutionActions({
         placeholder="Cliente, póliza, aseguradora..."
         sourceLabel={sourceLabel}
         searchKind="policy"
-        initialQuery={`${clientName} ${insurerName}`}
+        initialQuery={clientName}
         suggestions={suggestions}
         onPick={async (result) => {
           if (mode === "suggestion") {
