@@ -65,6 +65,34 @@ async function buildTodayReply(): Promise<AssistantReply> {
   const renewalsCount = todayData.urgentRenewals.length;
   const overdueWorkItemsCount = todayData.overdueWorkItems.length;
   const commissionsCount = todayData.commissionsToReview.length;
+  const cashFlowItems = [
+    ...buildTodaySectionItems(todayData.overduePayments, (receipt) => ({
+      title: `${receipt.client.fullName} · ${receipt.policy.policyNumber}`,
+      subtitle: `${receipt.receiptNumber} · ${receipt.insurer.name}`,
+      href: `/receipts/${receipt.id}`,
+      meta: "vencido",
+    })),
+    ...buildTodaySectionItems(todayData.paymentsDueToday, (receipt) => ({
+      title: `${receipt.client.fullName} · ${receipt.policy.policyNumber}`,
+      subtitle: `${receipt.receiptNumber} · ${receipt.insurer.name}`,
+      href: `/receipts/${receipt.id}`,
+      meta: "hoy",
+    })),
+  ];
+  const pendingItems = [
+    ...buildTodaySectionItems(todayData.overdueWorkItems, (workItem) => ({
+      title: workItem.title,
+      subtitle: `${workItem.folio ?? workItem.id} · ${workItem.policy?.policyNumber ?? "Sin póliza"}`,
+      href: `/tasks/${workItem.id}`,
+      meta: "atrasado",
+    })),
+    ...buildTodaySectionItems(todayData.commissionsToReview, (commission) => ({
+      title: commission.client.fullName,
+      subtitle: `${commission.policy?.policyNumber ?? "Sin póliza"} · ${commission.insurer.name}`,
+      href: "/commissions",
+      meta: "comisión",
+    })),
+  ];
 
   const reply =
     `Hoy tienes ${overdueCount} recibo${overdueCount === 1 ? "" : "s"} vencido${overdueCount === 1 ? "" : "s"}, ` +
@@ -76,24 +104,9 @@ async function buildTodayReply(): Promise<AssistantReply> {
   return {
     reply,
     sections: [
-      makeSection(
-        "Cobros de hoy",
-        "Recibos vencidos, los de hoy y los próximos siete días.",
-        [
-          ...buildTodaySectionItems(todayData.overduePayments, (receipt) => ({
-            title: `${receipt.client.fullName} · ${receipt.policy.policyNumber}`,
-            subtitle: `${receipt.receiptNumber} · ${receipt.insurer.name}`,
-            href: `/receipts/${receipt.id}`,
-            meta: "vencido",
-          })),
-          ...buildTodaySectionItems(todayData.paymentsDueToday, (receipt) => ({
-            title: `${receipt.client.fullName} · ${receipt.policy.policyNumber}`,
-            subtitle: `${receipt.receiptNumber} · ${receipt.insurer.name}`,
-            href: `/receipts/${receipt.id}`,
-            meta: "hoy",
-          })),
-        ],
-      ),
+      makeSection("Cobros de hoy", "Recibos vencidos, los de hoy y los próximos siete días.", cashFlowItems.length > 0 ? cashFlowItems : [
+        { title: "Sin cobros urgentes", subtitle: "No hay recibos vencidos ni de hoy.", href: "/today", meta: "ok" },
+      ]),
       makeSection(
         "Renovaciones",
         "Pólizas que vencen pronto.",
@@ -106,24 +119,9 @@ async function buildTodayReply(): Promise<AssistantReply> {
             }))
           : [{ title: "Sin renovaciones urgentes", subtitle: "No hay pólizas en el periodo de 30 días.", href: "/today", meta: "ok" }],
       ),
-      makeSection(
-        "Pendientes",
-        "Tareas atrasadas y comisiones próximas.",
-        [
-          ...buildTodaySectionItems(todayData.overdueWorkItems, (workItem) => ({
-            title: workItem.title,
-            subtitle: `${workItem.folio ?? workItem.id} · ${workItem.policy?.policyNumber ?? "Sin póliza"}`,
-            href: `/tasks/${workItem.id}`,
-            meta: "atrasado",
-          })),
-          ...buildTodaySectionItems(todayData.commissionsToReview, (commission) => ({
-            title: commission.client.fullName,
-            subtitle: `${commission.policy?.policyNumber ?? "Sin póliza"} · ${commission.insurer.name}`,
-            href: "/commissions",
-            meta: "comisión",
-          })),
-        ],
-      ),
+      makeSection("Pendientes", "Tareas atrasadas y comisiones próximas.", pendingItems.length > 0 ? pendingItems : [
+        { title: "Sin pendientes urgentes", subtitle: "No hay tareas atrasadas ni comisiones inmediatas.", href: "/today", meta: "ok" },
+      ]),
     ],
     quickPrompts: buildQuickPrompts(),
   };
