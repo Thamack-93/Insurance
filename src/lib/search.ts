@@ -127,6 +127,8 @@ const ALLOWED_COLUMNS = new Set([
   "documentType",
   "clientId",
   "policyId",
+  "startDate",
+  "endDate",
   "claimId",
   "receiptId",
   "taskId",
