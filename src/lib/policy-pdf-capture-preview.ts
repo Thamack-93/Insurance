@@ -8,7 +8,9 @@ import {
   extractPolicyPdfDraftFromText,
   buildPolicyPdfCaptureFieldConfidence,
   type PolicyCaptureSourceOption,
+  type PolicyPdfCaptureAiReview,
   type PolicyPdfCaptureDraft,
+  type PolicyPdfCaptureFieldConfidence,
   type PolicyPdfCapturePreview,
 } from "@/lib/policy-pdf-capture.shared";
 import type { AssistantUser } from "@/lib/assistant-types";
@@ -177,17 +179,24 @@ async function buildSourcePolicyCandidates(
   return candidates;
 }
 
-export async function buildPolicyPdfCapturePreviewFromText(
-  text: string,
-  db: DbClient = getDb(),
-  context: PolicyPdfCapturePreviewContext = {},
-): Promise<PolicyPdfCapturePreview> {
-  const { portfolioOwnerId, user } = context;
-  const draft = extractPolicyPdfDraftFromText(text);
-  const warnings: string[] = [];
-  const policyNumberSuggestion = draft.sourcePolicyNumber;
+type PolicyPdfCapturePreviewInput = {
+  draft: PolicyPdfCaptureDraft;
+  fieldConfidence: PolicyPdfCaptureFieldConfidence;
+  warnings?: string[];
+  aiReview?: PolicyPdfCaptureAiReview | null;
+  reviewText?: string | null;
+  context?: PolicyPdfCapturePreviewContext;
+};
 
-  const clientCandidates = draft.clientName
+export async function buildPolicyPdfCapturePreviewFromDraft(
+  input: PolicyPdfCapturePreviewInput,
+  db: DbClient = getDb(),
+): Promise<PolicyPdfCapturePreview> {
+  const { portfolioOwnerId, user } = input.context ?? {};
+  const warnings = [...(input.warnings ?? [])];
+  const policyNumberSuggestion = input.draft.sourcePolicyNumber;
+
+  const clientCandidates = input.draft.clientName
     ? (await db.client.findMany({
         where: {
           status: { not: "ARCHIVED" },
@@ -196,20 +205,20 @@ export async function buildPolicyPdfCapturePreviewFromText(
         select: { id: true, fullName: true },
         orderBy: { fullName: "asc" },
       }))
-        .map((client) => ({ id: client.id, label: client.fullName, score: scoreTextMatch(draft.clientName, client.fullName) }))
+        .map((client) => ({ id: client.id, label: client.fullName, score: scoreTextMatch(input.draft.clientName, client.fullName) }))
         .filter((client) => client.score > 0)
         .sort((left, right) => right.score - left.score)
         .slice(0, 5)
         .map(({ id, label }) => ({ id, value: id, label }))
     : [];
 
-  const insurerCandidates = draft.insurerName
+  const insurerCandidates = input.draft.insurerName
     ? (await db.insurer.findMany({
         where: { status: { not: "ARCHIVED" } },
         select: { id: true, name: true },
         orderBy: { name: "asc" },
       }))
-        .map((insurer) => ({ id: insurer.id, label: insurer.name, score: scoreTextMatch(draft.insurerName, insurer.name) }))
+        .map((insurer) => ({ id: insurer.id, label: insurer.name, score: scoreTextMatch(input.draft.insurerName, insurer.name) }))
         .filter((insurer) => insurer.score > 0)
         .sort((left, right) => right.score - left.score)
         .slice(0, 5)
@@ -221,52 +230,60 @@ export async function buildPolicyPdfCapturePreviewFromText(
 
   const sourcePolicyCandidates = await buildSourcePolicyCandidates(
     db,
-    draft,
+    input.draft,
     suggestedClientId,
     suggestedInsurerId,
     portfolioOwnerId,
   );
   const suggestedSourcePolicyId = sourcePolicyCandidates.find((policy) => policy.policyNumber === policyNumberSuggestion)?.id ?? null;
 
-  if (!draft.policyNumber) warnings.push("No pudimos detectar el número de póliza.");
-  if (!draft.clientName) warnings.push("No pudimos detectar el asegurado principal.");
-  if (!draft.insurerName) warnings.push("No pudimos detectar la aseguradora.");
-  if (!draft.startDate || !draft.endDate) warnings.push("No pudimos detectar la vigencia completa.");
-  if (draft.policyType === "AUTO" && !draft.serialNumber) {
+  if (!input.draft.policyNumber) warnings.push("No pudimos detectar el número de póliza.");
+  if (!input.draft.clientName) warnings.push("No pudimos detectar el asegurado principal.");
+  if (!input.draft.insurerName) warnings.push("No pudimos detectar la aseguradora.");
+  if (!input.draft.startDate || !input.draft.endDate) warnings.push("No pudimos detectar la vigencia completa.");
+  if (input.draft.policyType === "AUTO" && !input.draft.serialNumber) {
     warnings.push("No pudimos detectar la serie del vehículo.");
   }
   if (!sourcePolicyCandidates.length && policyNumberSuggestion) {
     warnings.push(`No encontramos una póliza origen para sugerir (${policyNumberSuggestion}).`);
   }
-  if (!sourcePolicyCandidates.length && draft.serialNumber) {
-    warnings.push(`No encontramos una póliza origen para sugerir con la serie ${draft.serialNumber}.`);
+  if (!sourcePolicyCandidates.length && input.draft.serialNumber) {
+    warnings.push(`No encontramos una póliza origen para sugerir con la serie ${input.draft.serialNumber}.`);
   }
-  if (draft.paymentFrequency === "OTHER") {
+  if (input.draft.paymentFrequency === "OTHER") {
     warnings.push("La frecuencia no quedó totalmente clara; revisa que sea Anual.");
   }
 
-  const fieldConfidence = buildPolicyPdfCaptureFieldConfidence(text, draft);
+  const fieldConfidence = input.fieldConfidence;
   const hasLowConfidence = Object.values(fieldConfidence).some((confidence) => confidence === "low");
   const shouldRequestAiReview = Boolean(
     user &&
+      !input.aiReview &&
       (warnings.length > 0 ||
         hasLowConfidence ||
         clientCandidates.length === 0 ||
         insurerCandidates.length === 0 ||
         sourcePolicyCandidates.length === 0),
   );
-  const aiReview = shouldRequestAiReview && user
+  const aiReview = input.aiReview ?? (shouldRequestAiReview && user
     ? await reviewPolicyPdfWithAi({
         user,
-        text,
-        draft,
+        text: input.reviewText ?? null,
+        draft: input.draft,
         warnings,
         themeHint: "policy-pdf-review",
       })
-    : null;
+    : null);
+  if (aiReview) {
+    for (const warning of aiReview.warnings) {
+      if (!warnings.includes(warning)) {
+        warnings.push(warning);
+      }
+    }
+  }
 
   return {
-    draft,
+    draft: input.draft,
     suggestions: {
       clientId: suggestedClientId,
       insurerId: suggestedInsurerId,
@@ -284,4 +301,19 @@ export async function buildPolicyPdfCapturePreviewFromText(
     warnings,
     aiReview,
   } satisfies PolicyPdfCapturePreview;
+}
+
+export async function buildPolicyPdfCapturePreviewFromText(
+  text: string,
+  db: DbClient = getDb(),
+  context: PolicyPdfCapturePreviewContext = {},
+): Promise<PolicyPdfCapturePreview> {
+  const draft = extractPolicyPdfDraftFromText(text);
+  const fieldConfidence = buildPolicyPdfCaptureFieldConfidence(text, draft);
+  return buildPolicyPdfCapturePreviewFromDraft({
+    draft,
+    fieldConfidence,
+    reviewText: text,
+    context,
+  }, db);
 }

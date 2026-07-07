@@ -4,6 +4,7 @@ import {
   buildAssistantAiReply,
   getAssistantAiModel,
   getAssistantGatewayAuthMode,
+  getAssistantGatewayFallbackModels,
 } from "@/lib/assistant-ai";
 import type { AssistantUser } from "@/lib/assistant-types";
 
@@ -35,15 +36,23 @@ describe("assistant ai fallback", () => {
     expect(getAssistantAiModel()).toBe("minimax/minimax-m3");
 
     vi.stubEnv("AI_GATEWAY_MODEL", "invalid-model");
-    expect(getAssistantAiModel()).toBe("openai/gpt-5.4");
+    expect(getAssistantAiModel()).toBe("minimax/minimax-m3");
   });
 
-  it("prefers OIDC when both supported credentials exist", () => {
+  it("prefers API key when both supported credentials exist", () => {
     vi.stubEnv("VERCEL_OIDC_TOKEN", "oidc-token");
     vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
-    expect(getAssistantGatewayAuthMode()).toBe("oidc");
+    expect(getAssistantGatewayAuthMode()).toBe("api-key");
 
     vi.stubEnv("VERCEL_OIDC_TOKEN", "");
     expect(getAssistantGatewayAuthMode()).toBe("api-key");
+  });
+
+  it("defaults to gpt-4o-mini as the fallback gateway model", () => {
+    vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "");
+    expect(getAssistantGatewayFallbackModels()).toEqual(["openai/gpt-4o-mini"]);
+
+    vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "openai/gpt-4o-mini, deepseek/deepseek-v3");
+    expect(getAssistantGatewayFallbackModels()).toEqual(["openai/gpt-4o-mini", "deepseek/deepseek-v3"]);
   });
 });

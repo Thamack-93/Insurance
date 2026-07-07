@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -155,10 +155,13 @@ export function SidebarNav({
   isAdmin?: boolean;
 }) {
   const pathname = usePathname();
-  const [openMap, setOpenMap] = useState<Record<string, boolean>>(() => {
+  const [openMap, setOpenMap] = useState<Record<string, boolean>>(defaultOpenState);
+
+  useEffect(() => {
     const stored = readStoredState();
-    return stored ? { ...defaultOpenState(), ...stored } : defaultOpenState();
-  });
+    if (!stored) return;
+    queueMicrotask(() => setOpenMap({ ...defaultOpenState(), ...stored }));
+  }, []);
 
   const visibleSections = useMemo(
     () =>

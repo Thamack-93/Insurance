@@ -2,9 +2,11 @@ import "server-only";
 
 import { buildAssistantReply as buildLocalAssistantReply, getAssistantHomeSnapshot as getLocalAssistantHomeSnapshot } from "@/lib/assistant-local";
 import { buildAssistantAiReply, classifyAssistantReportSignalWithAi } from "@/lib/assistant-ai";
+import { buildAssistantActionProposalFromPlan } from "@/lib/assistant-actions";
 import { createAssistantThemeKey, listAssistantReports, recordAssistantReportSignal } from "@/lib/assistant-reports";
 import { buildAssistantBlockedReply, evaluateAssistantInput } from "@/lib/assistant-guardrails";
 import type {
+  AssistantActionProposal,
   AssistantConversationResponse,
   AssistantReportKind,
   AssistantReportSeverity,
@@ -54,6 +56,27 @@ function isDeterministicQuery(normalized: string) {
     normalized.includes("pago") ||
     normalized.includes("cliente") ||
     normalized.includes("poliza")
+  );
+}
+
+function hasMutationIntent(normalized: string) {
+  return (
+    normalized.includes("actualiz") ||
+    normalized.includes("cambi") ||
+    normalized.includes("modific") ||
+    normalized.includes("edita") ||
+    normalized.includes("corrig") ||
+    normalized.includes("crea") ||
+    normalized.includes("agrega") ||
+    normalized.includes("añad") ||
+    normalized.includes("anade") ||
+    normalized.includes("registra pago") ||
+    normalized.includes("registrar pago") ||
+    normalized.includes("aplica pago") ||
+    normalized.includes("nuevo cliente") ||
+    normalized.includes("nueva poliza") ||
+    normalized.includes("nuevo recibo") ||
+    normalized.includes("nueva tarea")
   );
 }
 
@@ -167,10 +190,13 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
 
   const localReply = await buildLocalAssistantReply(user, message);
   const theme = detectTheme(normalized);
-  const shouldTryAi = !theme && (!isDeterministicQuery(normalized) || message.includes("?") || message.length > 160);
+  const shouldTryAi =
+    !theme &&
+    (hasMutationIntent(normalized) || !isDeterministicQuery(normalized) || message.includes("?") || message.length > 160);
 
   let finalReply: AssistantReply = localReply;
   let source: AssistantResponseSource = "local";
+  let actionProposal: AssistantActionProposal | null = null;
 
   if (shouldTryAi) {
     const aiReply = await buildAssistantAiReply({
@@ -180,8 +206,15 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
       themeHint: null,
     });
     if (aiReply) {
-      finalReply = aiReply;
+      finalReply = {
+        reply: aiReply.reply,
+        sections: aiReply.sections,
+        quickPrompts: aiReply.quickPrompts,
+      };
       source = "ai";
+      if (aiReply.mutation) {
+        actionProposal = await buildAssistantActionProposalFromPlan(aiReply.mutation, user);
+      }
     }
   }
 
@@ -244,5 +277,6 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
     reportId,
     reportThemeKey: reportTheme?.themeKey ?? null,
     reportThemeLabel: reportTheme?.themeLabel ?? null,
+    actionProposal,
   };
 }

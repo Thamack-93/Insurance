@@ -60,6 +60,7 @@ model User {
   performedLedgerImportActions LedgerImportAction[]       @relation("LedgerImportActionPerformedBy")
   createdDataQualitySuppressionRules DataQualitySuppressionRule[] @relation("DataQualitySuppressionRuleCreatedBy")
   reviewedDataQualitySuppressionRules DataQualitySuppressionRule[] @relation("DataQualitySuppressionRuleReviewedBy")
+  createdAssistantActionDrafts AssistantActionDraft[]     @relation("AssistantActionDraftUser")
 
   @@index([email])
   @@index([role])
@@ -571,6 +572,32 @@ model ActivityLog {
   @@index([createdAt])
   @@index([action])
   @@index([userId])
+}
+
+model AssistantActionDraft {
+  id           String   @id @default(cuid())
+  userId       String
+  title        String
+  summary      String
+  reply        String
+  entityType   String
+  operation    String
+  targetLabel  String?
+  payloadJson   String
+  resultJson    String?
+  status       String   @default("PENDING")
+  expiresAt    DateTime
+  confirmedAt  DateTime?
+  cancelledAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation("AssistantActionDraftUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([expiresAt])
+  @@index([createdAt])
 }
 
 model NotificationChannel {

@@ -1,0 +1,189 @@
+import { NextRequest, NextResponse } from "next/server";
+import { del, get } from "@vercel/blob";
+import { z } from "zod";
+import { AuthError, requireUser } from "@/lib/auth";
+import { logError } from "@/lib/logger";
+import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
+import { getPortfolioOwnerIdForRead } from "@/lib/portfolio-access";
+import { extractPdfTextFromBytes } from "@/lib/pdf-text-extraction";
+import { buildPolicyPdfCapturePreviewFromText, buildPolicyPdfCapturePreviewFromDraft } from "@/lib/policy-pdf-capture-preview";
+import { extractPolicyPdfDraftFromAiFile } from "@/lib/assistant-ai";
+import {
+  cleanupExpiredNoraPolicyPdfUploads,
+} from "@/lib/nora-pdf-storage";
+import { isNoraPolicyPdfPathname, NORA_POLICY_PDF_MAX_BYTES } from "@/lib/nora-pdf-storage.shared";
+import {
+  recordSecurityAccessDenied,
+  recordSecurityRateLimit,
+  SECURITY_EVENT_TYPES,
+} from "@/lib/security-events";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const analyzeSchema = z.object({
+  text: z.string().trim().min(1).optional(),
+  blobUrl: z.string().url().optional(),
+  fileName: z.string().trim().max(255).optional().nullable(),
+  prompt: z.string().trim().max(500).optional().nullable(),
+});
+
+async function responseFromText(text: string, userId: string, role: "ADMIN" | "AGENT") {
+  const preview = await buildPolicyPdfCapturePreviewFromText(text, undefined, {
+    portfolioOwnerId: role === "ADMIN" ? undefined : userId,
+    user: { id: userId, role },
+  });
+  return {
+    preview,
+    analysisSource: preview.aiReview ? "ai" : "local",
+  } as const;
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    let user: Awaited<ReturnType<typeof requireUser>>;
+    let portfolioOwnerId: string | undefined;
+    try {
+      user = await requireUser();
+      portfolioOwnerId = getPortfolioOwnerIdForRead(user);
+    } catch (error) {
+      if (error instanceof AuthError) {
+        await recordSecurityAccessDenied({
+          alertType: SECURITY_EVENT_TYPES.accessDenied,
+          title: "Análisis de PDF sin sesión válida",
+          description: "Se intentó analizar una carátula de póliza sin sesión válida.",
+          severity: "WARNING",
+          entityType: "SecurityEvent",
+          entityId: "nora-policy-pdf-analyze:auth",
+        });
+        return NextResponse.json({ error: error.message }, { status: error.status });
+      }
+      throw error;
+    }
+
+    try {
+      assertSameOrigin(request, "nora policy pdf analyze");
+    } catch {
+      await recordSecurityAccessDenied({
+        alertType: SECURITY_EVENT_TYPES.sameOriginBlocked,
+        title: "Análisis de PDF bloqueado por same-origin",
+        description: "Se intentó analizar una carátula de póliza desde un origen no permitido.",
+        severity: "WARNING",
+        entityType: "SecurityEvent",
+        entityId: "nora-policy-pdf-analyze:same-origin",
+      });
+      return NextResponse.json({ error: "No autorizado." }, { status: 403 });
+    }
+
+    const rateLimit = checkRateLimit(`nora-policy-pdf-analyze:${getRequestIp(request)}`, {
+      limit: 8,
+      windowMs: 15 * 60 * 1000,
+    });
+    if (!rateLimit.allowed) {
+      await recordSecurityRateLimit({
+        alertType: SECURITY_EVENT_TYPES.rateLimitedRequest,
+        title: "Límite de análisis de PDF alcanzado",
+        description: "Se bloqueó el análisis de una carátula de póliza por exceso de intentos.",
+        severity: "WARNING",
+        entityType: "SecurityEvent",
+        entityId: "nora-policy-pdf-analyze:rate-limit",
+      });
+      return NextResponse.json(
+        { error: "Demasiados intentos. Espera un momento e inténtalo de nuevo." },
+        {
+          status: 429,
+          headers: { "Retry-After": String(Math.max(1, Math.ceil(rateLimit.retryAfterMs / 1000))) },
+        },
+      );
+    }
+
+    let payload: z.infer<typeof analyzeSchema>;
+    try {
+      payload = analyzeSchema.parse(await request.json());
+    } catch {
+      return NextResponse.json({ error: "El payload de análisis no es válido." }, { status: 400 });
+    }
+
+    if (!payload.text && !payload.blobUrl) {
+      return NextResponse.json({ error: "Debes enviar texto extraído o una URL temporal del PDF." }, { status: 400 });
+    }
+
+    if (payload.text) {
+      const result = await responseFromText(payload.text, user.id, user.role === "ADMIN" ? "ADMIN" : "AGENT");
+      return NextResponse.json({ success: true, ...result });
+    }
+
+    const blobUrl = payload.blobUrl!;
+    const blobPath = new URL(blobUrl).pathname.replace(/^\/+/, "");
+    if (!isNoraPolicyPdfPathname(blobPath, user.id)) {
+      return NextResponse.json({ error: "La carátula temporal no pertenece a tu sesión." }, { status: 403 });
+    }
+
+    const blob = await get(blobUrl, { access: "private" });
+    if (!blob) {
+      return NextResponse.json({ error: "La carátula temporal ya no está disponible." }, { status: 404 });
+    }
+
+    if ((blob.blob?.size ?? 0) > NORA_POLICY_PDF_MAX_BYTES) {
+      return NextResponse.json({ error: "El PDF temporal supera el tamaño permitido." }, { status: 413 });
+    }
+
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(await new Response(blob.stream).arrayBuffer());
+    } catch (error) {
+      logError("api.nora.policyPdf.analyze.readBlob", error);
+      return NextResponse.json({ error: "No se pudo leer la carátula temporal." }, { status: 500 });
+    }
+
+    let preview = null;
+    let analysisSource: "local" | "ai" = "ai";
+    try {
+      const extracted = await extractPdfTextFromBytes(bytes);
+      if (extracted.text.trim()) {
+        const result = await responseFromText(extracted.text, user.id, user.role === "ADMIN" ? "ADMIN" : "AGENT");
+        preview = result.preview;
+        analysisSource = result.analysisSource;
+      } else {
+        const aiExtraction = await extractPolicyPdfDraftFromAiFile({
+          user: { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" },
+          fileName: payload.fileName ?? blob.blob.pathname.split("/").pop() ?? "policy.pdf",
+          fileData: bytes,
+          instruction: payload.prompt ?? null,
+        });
+
+        if (!aiExtraction) {
+          return NextResponse.json(
+            {
+              error:
+                "No pudimos leer este PDF ni con el parser local ni con la revisión IA. Prueba con una versión con mejor calidad.",
+            },
+            { status: 422 },
+          );
+        }
+
+        preview = await buildPolicyPdfCapturePreviewFromDraft({
+          draft: aiExtraction.draft,
+          fieldConfidence: aiExtraction.fieldConfidence,
+          warnings: aiExtraction.warnings,
+          aiReview: aiExtraction.aiReview,
+          context: {
+            portfolioOwnerId,
+            user: { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" },
+          },
+        });
+        analysisSource = "ai";
+      }
+    } finally {
+      await del(blobUrl).catch(() => {});
+      await cleanupExpiredNoraPolicyPdfUploads(user.id).catch((error) => {
+        logError("api.nora.policyPdf.analyze.cleanup", error);
+      });
+    }
+
+    return NextResponse.json({ success: true, analysisSource, preview });
+  } catch (error) {
+    logError("api.nora.policyPdf.analyze", error);
+    return NextResponse.json({ error: "No se pudo analizar el PDF." }, { status: 500 });
+  }
+}

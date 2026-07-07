@@ -48,6 +48,55 @@ export type AssistantReply = {
   quickPrompts: AssistantPrompt[];
 };
 
+export type AssistantMutationEntityType = "client" | "policy" | "receipt" | "payment" | "task";
+export type AssistantMutationOperation = "create" | "update";
+
+export type AssistantMutationField = {
+  field: string;
+  label: string;
+  value: string;
+};
+
+export type AssistantMutationRelation = {
+  field: string;
+  label: string;
+  query: string;
+};
+
+export type AssistantMutationMissingField = {
+  field: string;
+  label: string;
+  question: string;
+};
+
+export type AssistantMutationPlan = {
+  entityType: AssistantMutationEntityType;
+  operation: AssistantMutationOperation;
+  targetQuery: string | null;
+  title: string;
+  summary: string;
+  reply: string;
+  fields: AssistantMutationField[];
+  relations: AssistantMutationRelation[];
+  missingFields: AssistantMutationMissingField[];
+};
+
+export type AssistantActionProposal = {
+  draftId: string;
+  entityType: AssistantMutationEntityType;
+  operation: AssistantMutationOperation;
+  title: string;
+  summary: string;
+  targetLabel: string | null;
+  changes: Array<{
+    label: string;
+    before: string | null;
+    after: string;
+  }>;
+  confirmLabel: string;
+  expiresAt: string;
+};
+
 export type AssistantMessage = {
   id: string;
   role: "user" | "assistant";
@@ -119,4 +168,5 @@ export type AssistantConversationResponse = AssistantReply & {
   reportId: string | null;
   reportThemeKey: string | null;
   reportThemeLabel: string | null;
+  actionProposal?: AssistantActionProposal | null;
 };

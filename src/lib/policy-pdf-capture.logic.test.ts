@@ -6,7 +6,7 @@ import {
   normalizePdfPaymentFrequencyLabel,
   suggestPreviousPolicyNumber,
 } from "@/lib/policy-pdf-capture.shared";
-import { buildPolicyPdfCapturePreviewFromText } from "@/lib/policy-pdf-capture-preview";
+import { buildPolicyPdfCapturePreviewFromDraft, buildPolicyPdfCapturePreviewFromText } from "@/lib/policy-pdf-capture-preview";
 
 vi.mock("server-only", () => ({}));
 
@@ -412,6 +412,81 @@ describe("policy-pdf-capture", () => {
     expect(preview.warnings).not.toContain("No pudimos detectar el número de póliza.");
     expect(preview.fieldConfidence.clientName).toBe("high");
     expect(preview.fieldConfidence.premiumAmount).toBe("high");
+  });
+
+  it("merges AI warnings into the compact preview", async () => {
+    const db = {
+      client: {
+        findMany: async () => [{ id: "client-1", fullName: "Maria Fernanda Corral Morales" }],
+      },
+      insurer: {
+        findMany: async () => [{ id: "insurer-1", name: "Quálitas Compañía de Seguros" }],
+      },
+      policy: {
+        findMany: async () => [],
+      },
+    } as never;
+
+    const preview = await buildPolicyPdfCapturePreviewFromDraft(
+      {
+        draft: {
+          policyNumber: "50702000466",
+          clientName: "Maria Fernanda Corral Morales",
+          clientType: "PERSON",
+          clientEmail: null,
+          clientPhone: null,
+          clientAddress: null,
+          clientRfc: null,
+          insurerName: "Quálitas Compañía de Seguros",
+          policyType: "ACCIDENTES",
+          serialNumber: null,
+          startDate: "2026-02-01",
+          endDate: "2027-02-01",
+          issueDate: null,
+          paymentFrequency: "ANNUAL",
+          paymentPlan: null,
+          premiumAmount: 1234.56,
+          currency: "MXN",
+          requestNumber: null,
+          insuredObject: null,
+          beneficiaryInfo: null,
+          notes: null,
+          sourcePolicyNumber: null,
+        },
+        fieldConfidence: {
+          policyNumber: "high",
+          clientName: "high",
+          clientType: "high",
+          clientEmail: "low",
+          clientPhone: "low",
+          clientAddress: "low",
+          clientRfc: "low",
+          insurerName: "high",
+          policyType: "high",
+          serialNumber: "low",
+          startDate: "high",
+          endDate: "high",
+          issueDate: "low",
+          paymentFrequency: "high",
+          premiumAmount: "high",
+          sourcePolicyNumber: "low",
+        },
+        warnings: ["Advertencia local"],
+        aiReview: {
+          summary: "Resumen IA",
+          warnings: ["Advertencia IA"],
+          suggestions: [],
+          corrections: [],
+        },
+        context: {
+          user: { id: "agent-1", role: "AGENT" },
+        },
+      },
+      db,
+    );
+
+    expect(preview.warnings).toContain("Advertencia local");
+    expect(preview.warnings).toContain("Advertencia IA");
   });
 
   it("does not auto-select a source policy when there is no exact match", async () => {
