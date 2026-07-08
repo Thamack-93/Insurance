@@ -79,16 +79,13 @@ describe("backup manifest", () => {
 });
 
 describe("backup retention", () => {
-  it("keeps seven daily, two older weekly, and one older monthly snapshots", () => {
+  it("keeps four daily, two older weekly, and one older monthly snapshots", () => {
     const candidates = [
       ["d0-new", "2026-07-04T20:00:00.000Z"],
       ["d0-old", "2026-07-04T08:00:00.000Z"],
       ["d1", "2026-07-03T08:00:00.000Z"],
       ["d2", "2026-07-02T08:00:00.000Z"],
       ["d3", "2026-07-01T08:00:00.000Z"],
-      ["d4", "2026-06-30T08:00:00.000Z"],
-      ["d5", "2026-06-29T08:00:00.000Z"],
-      ["d6", "2026-06-28T08:00:00.000Z"],
       ["w1-new", "2026-06-20T08:00:00.000Z"],
       ["w1-old", "2026-06-18T08:00:00.000Z"],
       ["w2", "2026-06-10T08:00:00.000Z"],
@@ -103,9 +100,6 @@ describe("backup retention", () => {
       "d1",
       "d2",
       "d3",
-      "d4",
-      "d5",
-      "d6",
       "w1-new",
       "w2",
       "m1-new",

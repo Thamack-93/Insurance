@@ -33,7 +33,7 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 - `ENABLE_DOCUMENT_FILES=false`
 - `CRON_SECRET`
 - `AI_GATEWAY_MODEL`
-- `AI_GATEWAY_API_KEY` solo como fallback si no se usa OIDC
+- `AI_GATEWAY_API_KEY` como credencial principal para AI Gateway
 - `BLOB_READ_WRITE_TOKEN`
 - `BACKUP_ENCRYPTION_KEY`
 - `BACKUP_ENCRYPTION_KEY_VERSION`
@@ -44,7 +44,8 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 2. Crear una rama protegida para preview; no seedear ni resetear la base actual.
 3. Configurar las variables de entorno en Vercel.
 4. Conectar un Blob store privado.
-5. Desplegar preview, validar y luego promover la rama principal.
+5. Configurar los backups diarios fuera de Vercel Cron.
+6. Desplegar preview, validar y luego promover la rama principal.
 
 ## Validaciones mínimas
 

@@ -82,7 +82,7 @@ export function BackupsPanel({ initialBackups, backupStatus, createBackup, listB
   return (
     <SectionCard
       title="Respaldos cifrados"
-      description="Snapshots Postgres privados, comprimidos y cifrados. Retención: 7 diarios, 2 semanales y 1 mensual. La restauración se realiza fuera de la web."
+      description="Snapshots Postgres privados, comprimidos y cifrados. Retención: 4 diarios, 2 semanales y 1 mensual. La restauración se realiza fuera de la web."
       action={
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" onClick={() => void refresh()}>

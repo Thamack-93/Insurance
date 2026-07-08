@@ -265,7 +265,7 @@ function toSearchItem(result: GlobalSearchResult) {
   };
 }
 
-async function searchUserPortfolio(user: AssistantUser, message: string) {
+export async function searchUserPortfolio(user: AssistantUser, message: string) {
   const terms = buildSearchTerms(message);
   const resultGroups = await Promise.all(terms.map((term) => globalSearch(term, user.role === "ADMIN" ? undefined : user.id)));
   const unique = new Map<string, GlobalSearchResult>();

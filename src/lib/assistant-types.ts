@@ -176,5 +176,6 @@ export type AssistantConversationResponse = AssistantReply & {
   reportId: string | null;
   reportThemeKey: string | null;
   reportThemeLabel: string | null;
+  aiFallbackNotice?: string | null;
   actionProposal?: AssistantActionProposal | null;
 };

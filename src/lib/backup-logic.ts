@@ -305,7 +305,7 @@ export function selectBackupRetention<T extends RetentionCandidate>(items: T[]):
     return selected;
   }
 
-  const daily = selectDistinct(sorted, 7, utcDay);
+  const daily = selectDistinct(sorted, 4, utcDay);
   const dailyBoundary = daily.length
     ? startOfUtcDay(daily[daily.length - 1].createdAt)
     : Number.POSITIVE_INFINITY;

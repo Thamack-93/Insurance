@@ -29,6 +29,7 @@ type Message = {
   sections?: AssistantSection[];
   quickPrompts?: AssistantPrompt[];
   reportThemeLabel?: string | null;
+  aiFallbackNotice?: string | null;
   capturePreview?: {
     fileName: string;
     analysisSource: "local" | "ai";
@@ -289,6 +290,7 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
           sections: assistantResponse.sections,
           quickPrompts: assistantResponse.quickPrompts,
           reportThemeLabel: assistantResponse.reportThemeLabel,
+          aiFallbackNotice: assistantResponse.aiFallbackNotice,
           actionProposal: assistantResponse.actionProposal,
         },
       ]);
@@ -452,6 +454,11 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
                   <span className="font-medium text-foreground">Nora</span>
                   {message.source ? <span>{message.source === "ai" ? "IA" : "Local"}</span> : null}
                   {message.reportThemeLabel ? <Badge variant="outline" className="rounded-full text-[10px]">Señal registrada</Badge> : null}
+                </div>
+              ) : null}
+              {message.aiFallbackNotice ? (
+                <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  {message.aiFallbackNotice}
                 </div>
               ) : null}
               <p className="whitespace-pre-wrap text-sm leading-6">{message.text}</p>

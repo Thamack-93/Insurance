@@ -1,6 +1,10 @@
 import "server-only";
 
-import { buildAssistantReply as buildLocalAssistantReply, getAssistantHomeSnapshot as getLocalAssistantHomeSnapshot } from "@/lib/assistant-local";
+import {
+  buildAssistantReply as buildLocalAssistantReply,
+  getAssistantHomeSnapshot as getLocalAssistantHomeSnapshot,
+  searchUserPortfolio,
+} from "@/lib/assistant-local";
 import { buildAssistantAiReply, classifyAssistantReportSignalWithAi, getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
 import { buildAssistantActionProposalFromPlan } from "@/lib/assistant-actions";
 import { createAssistantThemeKey, listAssistantReports, recordAssistantReportSignal } from "@/lib/assistant-reports";
@@ -70,11 +74,9 @@ function shouldUseAssistantAi(normalized: string) {
     normalized.includes("coincid") ||
     normalized.includes("simil") ||
     normalized.includes("endoso") ||
-    normalized.includes("renovacion") ||
     normalized.includes("pdf") ||
     normalized.includes("caratula") ||
     normalized.includes("detalle") ||
-    normalized.includes("falta") ||
     normalized.includes("corrige")
   );
 }
@@ -101,6 +103,10 @@ function hasMutationIntent(normalized: string) {
 }
 
 function detectTheme(normalized: string): AssistantReportTheme | null {
+  if (hasMutationIntent(normalized)) {
+    return null;
+  }
+
   const hasFailure = normalized.includes("error") || normalized.includes("falla") || normalized.includes("no funciona") || normalized.includes("rompe");
   const hasProductNeed = hasFailure || normalized.includes("necesito") || normalized.includes("falta") || normalized.includes("deberia") || normalized.includes("mejora") || normalized.includes("sugerencia") || normalized.includes("no encuentro");
 
@@ -228,6 +234,84 @@ function detectTheme(normalized: string): AssistantReportTheme | null {
   return null;
 }
 
+function extractPolicyFocus(localReply: AssistantReply) {
+  for (const section of localReply.sections) {
+    for (const item of section.items) {
+      if (!item.href.startsWith("/policies/")) continue;
+      const [clientName, insurerName, policyType, status] = (item.subtitle ?? "").split(" · ").map((value) => value.trim());
+      return {
+        policyNumber: item.title,
+        clientName: clientName ?? null,
+        insurerName: insurerName ?? null,
+        policyType: policyType ?? null,
+        status: status ?? null,
+        href: item.href,
+      };
+    }
+  }
+
+  return null;
+}
+
+function formatContextResults(results: Awaited<ReturnType<typeof searchUserPortfolio>>) {
+  return results
+    .slice(0, 6)
+    .map((result) => {
+      const details = [result.subtitle, result.parentLabel, result.details?.slice(0, 2).join(" · "), result.match ? `Coincide en ${result.match.fieldLabel}` : null]
+        .filter(Boolean)
+        .join(" · ");
+      return `- ${result.type}: ${result.title}${details ? ` · ${details}` : ""}${result.href ? ` · ${result.href}` : ""}`;
+    })
+    .join("\n");
+}
+
+async function buildAssistantAiContext(user: AssistantUser, message: string, localReply: AssistantReply) {
+  const baseResults = await searchUserPortfolio(user, message).catch(() => []);
+  const focus = extractPolicyFocus(localReply);
+  const relatedResults = focus
+    ? await searchUserPortfolio(
+        user,
+        [focus.policyNumber, focus.clientName, focus.insurerName, focus.policyType, focus.status]
+          .filter((value): value is string => Boolean(value && value.trim()))
+          .join(" "),
+      ).catch(() => [])
+    : [];
+
+  const deduped = new Map<string, (typeof baseResults)[number]>();
+  for (const result of [...baseResults, ...relatedResults]) {
+    deduped.set(`${result.type}:${result.id}`, result);
+  }
+
+  const combinedResults = [...deduped.values()];
+  const localReplySections = localReply.sections.length
+    ? localReply.sections
+        .map((section) => {
+          const items = section.items
+            .slice(0, 4)
+            .map((item) => `- ${item.title}${item.subtitle ? ` · ${item.subtitle}` : ""}${item.meta ? ` · ${item.meta}` : ""}`)
+            .join("\n");
+          return `${section.title}\n${section.summary}\n${items}`.trim();
+        })
+        .join("\n\n")
+    : "Sin secciones locales.";
+
+  return [
+    `Respuesta local:\n${localReply.reply}`,
+    `Secciones locales:\n${localReplySections}`,
+    combinedResults.length > 0 ? `Coincidencias accesibles:\n${formatContextResults(combinedResults)}` : "Coincidencias accesibles: ninguna.",
+    focus
+      ? `Póliza foco:
+- póliza: ${focus.policyNumber}
+- cliente: ${focus.clientName ?? "Sin dato"}
+- aseguradora: ${focus.insurerName ?? "Sin dato"}
+- tipo: ${focus.policyType ?? "Sin dato"}
+- estado: ${focus.status ?? "Sin dato"}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export async function getAssistantHomeSnapshot(user: AssistantUser): Promise<AssistantSnapshot> {
   const snapshot = await getLocalAssistantHomeSnapshot(user);
   return {
@@ -258,18 +342,21 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
   const localReply = await buildLocalAssistantReply(user, message);
   const theme = detectTheme(normalized);
   const shouldTryAi =
-    !theme &&
-    (shouldUseAssistantAi(normalized) || !isDeterministicQuery(normalized) || message.includes("?") || message.length > 160);
+    shouldUseAssistantAi(normalized) || (!isDeterministicQuery(normalized) && message.length > 40) || message.length > 220;
+
+  const aiContext = shouldTryAi || theme ? await buildAssistantAiContext(user, message, localReply) : null;
 
   let finalReply: AssistantReply = localReply;
   let source: AssistantResponseSource = "local";
   let actionProposal: AssistantActionProposal | null = null;
+  let aiFallbackNotice: string | null = null;
 
   if (shouldTryAi) {
     const aiReply = await buildAssistantAiReply({
       user,
       message,
       localReply,
+      contextText: aiContext,
       themeHint: null,
     });
     if (aiReply) {
@@ -282,6 +369,8 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
       if (aiReply.mutation) {
         actionProposal = await buildAssistantActionProposalFromPlan(aiReply.mutation, user);
       }
+    } else {
+      aiFallbackNotice = "Intenté usar IA para este caso, pero respondí con el respaldo local por una falla temporal.";
     }
   }
 
@@ -296,6 +385,7 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
       localReplyText: `${localReply.reply}\n\n${localReply.sections
         .map((section) => `${section.title}\n${section.summary}\n${section.items.map((item) => `${item.title} · ${item.subtitle ?? ""} · ${item.meta ?? ""}`).join("\n")}`)
         .join("\n\n")}`,
+      contextText: aiContext,
       existingThemes: activeReports,
       fallback: theme ?? null,
     });
@@ -355,6 +445,7 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
     reportId,
     reportThemeKey: reportTheme?.themeKey ?? null,
     reportThemeLabel: reportTheme?.themeLabel ?? null,
+    aiFallbackNotice,
     actionProposal,
   };
 }

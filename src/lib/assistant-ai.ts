@@ -345,6 +345,7 @@ export async function buildAssistantAiReply(input: {
   user: AssistantUser;
   message: string;
   localReply: AssistantReply;
+  contextText?: string | null;
   themeHint?: string | null;
 }): Promise<(AssistantReply & { mutation: AssistantMutationPlan | null }) | null> {
   if (!hasGatewayAuth()) {
@@ -373,6 +374,7 @@ export async function buildAssistantAiReply(input: {
         `Mensaje: ${input.message}`,
         `Contexto local:\n${serializeSections(input.localReply.sections) || "Sin secciones locales."}`,
         `Respuesta local sugerida: ${input.localReply.reply}`,
+        input.contextText ? `Contexto ampliado:\n${input.contextText}` : "Sin contexto ampliado.",
         input.themeHint ? `Tema sugerido: ${input.themeHint}` : null,
       ]
         .filter(Boolean)
@@ -421,6 +423,7 @@ export async function classifyAssistantReportSignalWithAi(input: {
   user: AssistantUser;
   message: string;
   localReplyText?: string;
+  contextText?: string | null;
   existingThemes: Array<{ themeKey: string; themeLabel: string; kind: "INCIDENT" | "SUGGESTION" }>;
   fallback?: Omit<AssistantAiReportSignal, "shouldReport"> | null;
 }): Promise<AssistantAiReportSignal | null> {
@@ -441,6 +444,7 @@ export async function classifyAssistantReportSignalWithAi(input: {
         "Devuelve SOLO JSON válido con: shouldReport, kind, themeKey, themeLabel, title, summary, recommendation, plan, severity.",
         `Mensaje: ${input.message.slice(0, 2_000)}`,
         input.localReplyText ? `Respuesta local actual:\n${input.localReplyText.slice(0, 3_000)}` : "Sin respuesta local detallada.",
+        input.contextText ? `Contexto ampliado:\n${input.contextText.slice(0, 4_000)}` : "Sin contexto ampliado.",
         `Temas abiertos: ${JSON.stringify(input.existingThemes.slice(0, 50))}`,
         input.fallback ? `Clasificación determinística sugerida: ${JSON.stringify(input.fallback)}` : "Sin clasificación determinística.",
       ].join("\n\n"),

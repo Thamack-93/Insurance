@@ -274,7 +274,7 @@ export function SettingsForm({ initialSettings, updateSettings }: SettingsFormPr
                 <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
                   <p className="text-sm font-medium">Retención protegida</p>
                   <p className={fieldHint}>
-                    Se conservan 7 copias diarias, 2 semanales y 1 mensual. Restaurar solo está
+                    Se conservan 4 copias diarias, 2 semanales y 1 mensual. Restaurar solo está
                     permitido por CLI hacia una rama temporal de Neon.
                   </p>
                 </div>

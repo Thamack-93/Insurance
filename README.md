@@ -37,9 +37,9 @@ Copia `.env.example` a `.env.local` y ajusta los valores:
 |----------|-----------|-------------|
 | `SESSION_SECRET` | Producción | Secreto HMAC para cookies de sesión (mín. 32 caracteres) |
 | `DATABASE_URL` | Producción | URL de Postgres hosted para el despliegue en Vercel |
-| `CRON_SECRET` | Producción | Protege el único job diario compartido por Telegram y backups |
+| `CRON_SECRET` | Producción | Protege los jobs internos de Telegram y del backup diario |
 | `AI_GATEWAY_MODEL` | Opcional | Modelo `provider/model` usado por Nora |
-| `AI_GATEWAY_API_KEY` | Opcional | Fallback estático; Vercel OIDC es la credencial primaria |
+| `AI_GATEWAY_API_KEY` | Opcional | Credencial principal para AI Gateway; OIDC queda como respaldo |
 | `BLOB_READ_WRITE_TOKEN` | Producción | Acceso al store privado de Vercel Blob |
 | `BACKUP_ENCRYPTION_KEY` | Producción | Clave de 32 bytes para AES-256-GCM |
 | `BACKUP_ENCRYPTION_KEY_VERSION` | Producción | Versión activa de la clave de cifrado |
