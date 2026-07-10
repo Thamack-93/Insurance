@@ -29,7 +29,11 @@ describe("assistant ai fallback", () => {
       },
     });
 
-    expect(reply).toBeNull();
+    expect(reply.ok).toBe(false);
+    if (!reply.ok) {
+      expect(reply.diagnostic.code).toBe("unavailable");
+      expect(reply.diagnostic.summary).toContain("no está disponible");
+    }
   });
 
   it("uses a configurable model with a current gateway fallback", () => {

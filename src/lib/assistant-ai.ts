@@ -1,8 +1,26 @@
 import "server-only";
 
-import { gateway, generateText, Output } from "ai";
+import {
+  APICallError,
+  EmptyResponseBodyError,
+  InvalidPromptError,
+  InvalidResponseDataError,
+  JSONParseError,
+  NoContentGeneratedError,
+  NoObjectGeneratedError,
+  NoOutputGeneratedError,
+  NoSuchModelError,
+  TypeValidationError,
+  gateway,
+  generateText,
+  Output,
+} from "ai";
 import { z } from "zod";
+import { redactAssistantReportText } from "@/lib/assistant-reports";
 import type {
+  AssistantAiDiagnostic,
+  AssistantAiFailureCode,
+  AssistantAiOperation,
   AssistantMutationPlan,
   AssistantPrompt,
   AssistantReply,
@@ -80,6 +98,96 @@ const reportSignalSchema = z.object({
 });
 
 export type AssistantAiReportSignal = z.infer<typeof reportSignalSchema>;
+
+type AssistantAiResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; diagnostic: AssistantAiDiagnostic };
+
+function makeDiagnosticId() {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `diag_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function isAbortLikeError(error: unknown) {
+  return (
+    (error instanceof Error || error instanceof DOMException) &&
+    (error.name === "AbortError" || error.name === "ResponseAborted" || error.name === "TimeoutError")
+  );
+}
+
+function getAssistantAiFailureCode(error: unknown): AssistantAiFailureCode {
+  if (APICallError.isInstance(error)) return "api_call_error";
+  if (NoObjectGeneratedError.isInstance(error)) return "no_object_generated";
+  if (NoOutputGeneratedError.isInstance(error)) return "no_output_generated";
+  if (NoContentGeneratedError.isInstance(error) || EmptyResponseBodyError.isInstance(error)) return "empty_response";
+  if (InvalidPromptError.isInstance(error)) return "invalid_prompt";
+  if (TypeValidationError.isInstance(error) || InvalidResponseDataError.isInstance(error) || JSONParseError.isInstance(error)) {
+    return "invalid_output";
+  }
+  if (NoSuchModelError.isInstance(error)) return "unavailable";
+  if (isAbortLikeError(error)) {
+    const errorName = error instanceof Error || error instanceof DOMException ? error.name : "";
+    return errorName === "TimeoutError" ? "timeout" : "aborted";
+  }
+  return "unknown";
+}
+
+export function getAssistantAiOperationLabel(operation: AssistantAiOperation) {
+  switch (operation) {
+    case "assistant-reply":
+      return "la respuesta";
+    case "assistant-report-classification":
+      return "la clasificación";
+    case "policy-pdf-extract":
+      return "la extracción del PDF";
+    case "policy-pdf-review":
+      return "la revisión del PDF";
+    default:
+      return "la petición";
+  }
+}
+
+export function getAssistantAiModelLabel(model: string) {
+  if (model === "minimax/minimax-m3") return "MiniMax M3";
+  return model;
+}
+
+function createAssistantAiDiagnostic(input: {
+  operation: AssistantAiOperation;
+  model: string;
+  fallbackModels: string[];
+  startedAt: number;
+  code?: AssistantAiFailureCode;
+  error?: unknown;
+  summary?: string;
+  details?: string;
+  statusCode?: number | null;
+  finishReason?: string | null;
+  responsePreview?: string | null;
+}): AssistantAiDiagnostic {
+  const code = input.code ?? getAssistantAiFailureCode(input.error);
+  const errorMessage = input.error instanceof Error ? input.error.message : input.error ? String(input.error) : null;
+  const summary =
+    input.summary ??
+    `${getAssistantAiModelLabel(input.model)} no completó ${getAssistantAiOperationLabel(input.operation)} (${code}).`;
+  const details = input.details ?? (errorMessage ? redactAssistantReportText(errorMessage, 1_000) : summary);
+
+  return {
+    diagnosticId: makeDiagnosticId(),
+    operation: input.operation,
+    code,
+    model: input.model,
+    fallbackModels: input.fallbackModels.slice(0, 10),
+    durationMs: Math.max(0, Date.now() - input.startedAt),
+    summary: redactAssistantReportText(summary, 500),
+    details: redactAssistantReportText(details, 1_500),
+    createdAt: new Date().toISOString(),
+    statusCode: input.statusCode ?? null,
+    finishReason: input.finishReason ?? null,
+    responsePreview: input.responsePreview ? redactAssistantReportText(input.responsePreview, 600) : null,
+  };
+}
 
 const PDF_FIELD_KEYS = new Set<PolicyPdfCaptureFieldKey>([
   "policyNumber", "clientName", "clientType", "clientEmail", "clientPhone", "clientAddress", "clientRfc",
@@ -347,16 +455,31 @@ export async function buildAssistantAiReply(input: {
   localReply: AssistantReply;
   contextText?: string | null;
   themeHint?: string | null;
-}): Promise<(AssistantReply & { mutation: AssistantMutationPlan | null }) | null> {
+}): Promise<AssistantAiResult<AssistantReply & { mutation: AssistantMutationPlan | null }>> {
+  const startedAt = Date.now();
+  const model = getAssistantAiModel();
+  const fallbackModels = getAssistantGatewayFallbackModels();
+
   if (!hasGatewayAuth()) {
-    return null;
+    return {
+      ok: false,
+      diagnostic: createAssistantAiDiagnostic({
+        operation: "assistant-reply",
+        model,
+        fallbackModels,
+        startedAt,
+        code: "unavailable",
+        summary: `${getAssistantAiModelLabel(model)} no está disponible en este entorno.`,
+        details: "No hay credenciales activas para el gateway de IA.",
+      }),
+    };
   }
 
   try {
     const result = await generateText({
-      model: getAssistantGatewayModel(),
+      model: gateway(model),
       temperature: 0.2,
-      abortSignal: AbortSignal.timeout(12_000),
+      abortSignal: AbortSignal.timeout(30_000),
       system: [
         "Eres Nora, el asistente interno de una app de seguros y correduría.",
         "Solo puedes responder sobre PolicyDesk y sobre los datos incluidos en el contexto local de este mensaje.",
@@ -386,36 +509,59 @@ export async function buildAssistantAiReply(input: {
         gateway: {
           user: input.user.id,
           tags: ["feature:assistant", "feature:assistant-actions", `role:${input.user.role}`, "surface:web"],
-          models: getAssistantGatewayFallbackModels(),
+          models: fallbackModels,
         },
       },
     });
 
     const parsed = result.output;
     if (!parsed) {
-      return null;
+      return {
+        ok: false,
+        diagnostic: createAssistantAiDiagnostic({
+          operation: "assistant-reply",
+          model,
+          fallbackModels,
+          startedAt,
+          code: "invalid_output",
+          details: "La IA respondió sin una salida estructurada válida para Nora.",
+          responsePreview: result.text,
+        }),
+      };
     }
 
     return {
-      reply: parsed.reply,
-      sections: input.localReply.sections,
-      quickPrompts: parsed.quickPrompts.length > 0 ? toAssistantPrompts(parsed.quickPrompts) : input.localReply.quickPrompts,
-      mutation: parsed.mutation
-        ? {
-            entityType: parsed.mutation.entityType,
-            operation: parsed.mutation.operation,
-            targetQuery: parsed.mutation.targetQuery,
-            title: parsed.mutation.title,
-            summary: parsed.mutation.summary,
-            reply: parsed.mutation.reply,
-            fields: parsed.mutation.fields,
-            relations: parsed.mutation.relations,
-            missingFields: parsed.mutation.missingFields,
-          }
-        : null,
+      ok: true,
+      value: {
+        reply: parsed.reply,
+        sections: input.localReply.sections,
+        quickPrompts: parsed.quickPrompts.length > 0 ? toAssistantPrompts(parsed.quickPrompts) : input.localReply.quickPrompts,
+        mutation: parsed.mutation
+          ? {
+              entityType: parsed.mutation.entityType,
+              operation: parsed.mutation.operation,
+              targetQuery: parsed.mutation.targetQuery,
+              title: parsed.mutation.title,
+              summary: parsed.mutation.summary,
+              reply: parsed.mutation.reply,
+              fields: parsed.mutation.fields,
+              relations: parsed.mutation.relations,
+              missingFields: parsed.mutation.missingFields,
+            }
+          : null,
+      },
     };
-  } catch {
-    return null;
+  } catch (error) {
+    return {
+      ok: false,
+      diagnostic: createAssistantAiDiagnostic({
+        operation: "assistant-reply",
+        model,
+        fallbackModels,
+        startedAt,
+        error,
+      }),
+    };
   }
 }
 

@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { safeJson, writeActivityLog } from "@/lib/activity-log";
 import type {
+  AssistantAiDiagnostic,
   AssistantReportKind,
   AssistantReportSeverity,
   AssistantReportSnapshot,
@@ -33,6 +34,7 @@ export type AssistantReportSignalInput = {
   details?: unknown;
   input?: unknown;
   output?: unknown;
+  diagnostic?: AssistantAiDiagnostic | null;
   threshold?: number;
   client?: DbClient;
   actorId?: string | null;
@@ -73,6 +75,33 @@ function parseEvidenceJson(value: string | null | undefined) {
   }
 }
 
+function parseJsonValue(value: string | null | undefined) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return { raw: value };
+  }
+}
+
+function summarizeDiagnostic(diagnostic: AssistantAiDiagnostic) {
+  return {
+    diagnosticId: diagnostic.diagnosticId,
+    operation: diagnostic.operation,
+    code: diagnostic.code,
+    model: diagnostic.model,
+    fallbackModels: diagnostic.fallbackModels.slice(0, 5),
+    durationMs: diagnostic.durationMs,
+    summary: redactAssistantReportText(diagnostic.summary, 500),
+    details: redactAssistantReportText(diagnostic.details, 1_200),
+    createdAt: diagnostic.createdAt,
+    statusCode: diagnostic.statusCode ?? null,
+    finishReason: diagnostic.finishReason ?? null,
+    responsePreview: diagnostic.responsePreview ? redactAssistantReportText(diagnostic.responsePreview, 600) : null,
+    reportId: diagnostic.reportId ?? null,
+  };
+}
+
 function buildSnapshot(report: {
   id: string;
   kind: string;
@@ -96,6 +125,7 @@ function buildSnapshot(report: {
   createdAt: Date;
   updatedAt: Date;
   evidenceJson: string;
+  detailsJson: string;
   signals?: Array<{
     id: string;
     signalKind: string;
@@ -126,6 +156,7 @@ function buildSnapshot(report: {
     deletedAt: report.deletedAt?.toISOString() ?? null,
     createdAt: report.createdAt.toISOString(),
     updatedAt: report.updatedAt.toISOString(),
+    details: parseJsonValue(report.detailsJson),
     evidence: parseEvidenceJson(report.evidenceJson),
     signals: (report.signals ?? []).map((signal) => ({
       ...signal,
@@ -214,6 +245,7 @@ export function getNewAssistantReportStatus(input: {
 }
 
 function buildEvidenceEntry(input: AssistantReportSignalInput) {
+  const diagnostic = input.diagnostic ? summarizeDiagnostic(input.diagnostic) : null;
   return {
     signalKind: input.signalKind,
     source: input.source,
@@ -222,6 +254,7 @@ function buildEvidenceEntry(input: AssistantReportSignalInput) {
     recommendation: redactAssistantReportText(input.recommendation, 1_500),
     plan: redactAssistantReportText(input.plan, 3_000),
     severity: input.severity ?? "MEDIUM",
+    diagnostic,
     createdAt: new Date().toISOString(),
   };
 }
@@ -251,6 +284,7 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
       const activeReport = reports.find((report) => isActiveReport(report.status));
       const latestReport = reports[0] ?? null;
       const evidenceEntry = buildEvidenceEntry(input);
+      const diagnosticDetails = input.diagnostic ? summarizeDiagnostic(input.diagnostic) : null;
       const statusForNewReport = getNewAssistantReportStatus({
         kind: input.kind,
         forceOpen: input.forceOpen,
@@ -278,7 +312,13 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
             openedAt,
             lastSignalAt: now,
             evidenceJson: serializeAssistantEvidence(nextEvidence),
-            detailsJson: safeJson({ redacted: true }),
+            detailsJson: safeJson({
+              redacted: true,
+              diagnostic: diagnosticDetails,
+              signalKind: input.signalKind,
+              source: input.source,
+              themeKey,
+            }),
           },
         });
 
@@ -288,8 +328,16 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
             signalKind: input.signalKind,
             source: input.source,
             title,
-            inputJson: safeJson({ redacted: true }),
-            outputJson: safeJson({ redacted: true }),
+            inputJson: safeJson({
+              redacted: true,
+              diagnosticId: diagnosticDetails?.diagnosticId ?? null,
+              operation: diagnosticDetails?.operation ?? null,
+            }),
+            outputJson: safeJson({
+              redacted: true,
+              diagnosticId: diagnosticDetails?.diagnosticId ?? null,
+              code: diagnosticDetails?.code ?? null,
+            }),
           },
         });
 
@@ -328,7 +376,13 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
           recommendation,
           plan,
           evidenceJson: serializeAssistantEvidence([evidenceEntry]),
-          detailsJson: safeJson({ redacted: true }),
+          detailsJson: safeJson({
+            redacted: true,
+            diagnostic: diagnosticDetails,
+            signalKind: input.signalKind,
+            source: input.source,
+            themeKey,
+          }),
           signalCount: 1,
           severity: input.severity ?? "MEDIUM",
           firstSignalAt: now,
@@ -343,8 +397,16 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
           signalKind: input.signalKind,
           source: input.source,
           title,
-          inputJson: safeJson({ redacted: true }),
-          outputJson: safeJson({ redacted: true }),
+          inputJson: safeJson({
+            redacted: true,
+            diagnosticId: diagnosticDetails?.diagnosticId ?? null,
+            operation: diagnosticDetails?.operation ?? null,
+          }),
+          outputJson: safeJson({
+            redacted: true,
+            diagnosticId: diagnosticDetails?.diagnosticId ?? null,
+            code: diagnosticDetails?.code ?? null,
+          }),
         },
       });
 

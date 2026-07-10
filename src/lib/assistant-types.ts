@@ -50,6 +50,41 @@ export type AssistantAiStatus = {
   fallbackModels: string[];
 };
 
+export type AssistantAiOperation =
+  | "assistant-reply"
+  | "assistant-report-classification"
+  | "policy-pdf-extract"
+  | "policy-pdf-review";
+
+export type AssistantAiFailureCode =
+  | "unavailable"
+  | "timeout"
+  | "aborted"
+  | "api_call_error"
+  | "no_object_generated"
+  | "no_output_generated"
+  | "invalid_output"
+  | "invalid_prompt"
+  | "type_validation_error"
+  | "empty_response"
+  | "unknown";
+
+export type AssistantAiDiagnostic = {
+  diagnosticId: string;
+  operation: AssistantAiOperation;
+  code: AssistantAiFailureCode;
+  model: string;
+  fallbackModels: string[];
+  durationMs: number;
+  summary: string;
+  details: string;
+  createdAt: string;
+  statusCode?: number | null;
+  finishReason?: string | null;
+  responsePreview?: string | null;
+  reportId?: string | null;
+};
+
 export type AssistantReply = {
   reply: string;
   sections: AssistantSection[];
@@ -149,6 +184,7 @@ export type AssistantReportSnapshot = {
   deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  details: unknown;
   evidence: Array<{
     signalKind?: string;
     source?: string;
@@ -157,6 +193,21 @@ export type AssistantReportSnapshot = {
     recommendation?: string;
     plan?: string;
     severity?: string;
+    diagnostic?: {
+      diagnosticId?: string;
+      operation?: string;
+      code?: string;
+      model?: string;
+      fallbackModels?: string[];
+      durationMs?: number;
+      summary?: string;
+      details?: string;
+      createdAt?: string;
+      statusCode?: number | null;
+      finishReason?: string | null;
+      responsePreview?: string | null;
+      reportId?: string | null;
+    };
     input?: unknown;
     output?: unknown;
     evidence?: unknown;
@@ -177,5 +228,6 @@ export type AssistantConversationResponse = AssistantReply & {
   reportThemeKey: string | null;
   reportThemeLabel: string | null;
   aiFallbackNotice?: string | null;
+  aiDiagnostic?: AssistantAiDiagnostic | null;
   actionProposal?: AssistantActionProposal | null;
 };

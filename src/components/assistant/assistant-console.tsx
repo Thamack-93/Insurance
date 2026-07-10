@@ -30,6 +30,8 @@ type Message = {
   quickPrompts?: AssistantPrompt[];
   reportThemeLabel?: string | null;
   aiFallbackNotice?: string | null;
+  aiDiagnostic?: AssistantConversationResponse["aiDiagnostic"];
+  reportId?: string | null;
   capturePreview?: {
     fileName: string;
     analysisSource: "local" | "ai";
@@ -105,6 +107,12 @@ function formatCurrencyValue(amount: number, currency: string) {
   } catch {
     return `${amount.toLocaleString("es-MX", { maximumFractionDigits: 2 })} ${currency}`;
   }
+}
+
+function formatDurationMs(value: number) {
+  if (!Number.isFinite(value)) return "Sin dato";
+  if (value < 1000) return `${Math.max(0, Math.round(value))} ms`;
+  return `${(value / 1000).toFixed(1)} s`;
 }
 
 function buildCaptureSessionPayload(preview: PolicyPdfCapturePreview) {
@@ -291,6 +299,8 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
           quickPrompts: assistantResponse.quickPrompts,
           reportThemeLabel: assistantResponse.reportThemeLabel,
           aiFallbackNotice: assistantResponse.aiFallbackNotice,
+          aiDiagnostic: assistantResponse.aiDiagnostic,
+          reportId: assistantResponse.reportId,
           actionProposal: assistantResponse.actionProposal,
         },
       ]);
@@ -459,6 +469,26 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
               {message.aiFallbackNotice ? (
                 <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                   {message.aiFallbackNotice}
+                </div>
+              ) : null}
+              {message.aiDiagnostic ? (
+                <div className="mb-2 rounded-2xl border border-amber-300 bg-amber-50/90 px-3 py-3 text-xs text-amber-950">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium">Diagnóstico de IA</p>
+                    {message.reportId ? (
+                      <Link href="/settings/assistant?tab=incidentes" className="font-medium underline underline-offset-2">
+                        Ver backlog
+                      </Link>
+                    ) : null}
+                  </div>
+                  <p className="mt-1">{message.aiDiagnostic.summary}</p>
+                  <div className="mt-2 grid gap-1 text-[11px] text-amber-900/80 sm:grid-cols-2">
+                    <span>Código: {message.aiDiagnostic.code}</span>
+                    <span>Modelo: {message.aiDiagnostic.model}</span>
+                    <span>Duración: {formatDurationMs(message.aiDiagnostic.durationMs)}</span>
+                    <span>Folio: {message.aiDiagnostic.diagnosticId}</span>
+                    {message.reportId ? <span>Reporte: {message.reportId}</span> : null}
+                  </div>
                 </div>
               ) : null}
               <p className="whitespace-pre-wrap text-sm leading-6">{message.text}</p>

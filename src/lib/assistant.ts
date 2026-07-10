@@ -5,11 +5,17 @@ import {
   getAssistantHomeSnapshot as getLocalAssistantHomeSnapshot,
   searchUserPortfolio,
 } from "@/lib/assistant-local";
-import { buildAssistantAiReply, classifyAssistantReportSignalWithAi, getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
+import {
+  buildAssistantAiReply,
+  getAssistantAiConnectionStatus,
+  getAssistantAiModelLabel,
+  getAssistantAiOperationLabel,
+} from "@/lib/assistant-ai";
 import { buildAssistantActionProposalFromPlan } from "@/lib/assistant-actions";
-import { createAssistantThemeKey, listAssistantReports, recordAssistantReportSignal } from "@/lib/assistant-reports";
+import { createAssistantThemeKey, recordAssistantReportSignal } from "@/lib/assistant-reports";
 import { buildAssistantBlockedReply, evaluateAssistantInput } from "@/lib/assistant-guardrails";
 import type {
+  AssistantAiDiagnostic,
   AssistantActionProposal,
   AssistantConversationResponse,
   AssistantReportKind,
@@ -30,6 +36,30 @@ type AssistantReportTheme = {
   plan: string;
   severity: AssistantReportSeverity;
 };
+
+function buildAssistantAiFallbackNotice(diagnostic: AssistantAiDiagnostic) {
+  const parts = [
+    `${getAssistantAiModelLabel(diagnostic.model)} no completó ${getAssistantAiOperationLabel(diagnostic.operation)}: ${diagnostic.code}`,
+  ];
+  if (diagnostic.statusCode) {
+    parts.push(`HTTP ${diagnostic.statusCode}`);
+  }
+  parts.push(`diagnóstico ${diagnostic.diagnosticId}`);
+  return parts.join(" · ");
+}
+
+function buildAssistantAiFailureTheme(diagnostic: AssistantAiDiagnostic): AssistantReportTheme {
+  return {
+    kind: "INCIDENT",
+    themeKey: createAssistantThemeKey(["assistant-ai", diagnostic.operation, diagnostic.code, diagnostic.model]),
+    themeLabel: `IA · ${getAssistantAiOperationLabel(diagnostic.operation)}`,
+    title: `Nora no completó ${getAssistantAiOperationLabel(diagnostic.operation)}`,
+    summary: diagnostic.summary,
+    recommendation: "Revisar el folio del diagnóstico, la latencia y el estado del gateway antes de volver a intentar.",
+    plan: `${diagnostic.details}${diagnostic.responsePreview ? `\n\nRespuesta parcial:\n${diagnostic.responsePreview}` : ""}`,
+    severity: diagnostic.code === "timeout" ? "HIGH" : "MEDIUM",
+  };
+}
 
 function normalizeMessage(value: string) {
   return value
@@ -354,6 +384,7 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
   let source: AssistantResponseSource = "local";
   let actionProposal: AssistantActionProposal | null = null;
   let aiFallbackNotice: string | null = null;
+  let aiDiagnostic: AssistantAiDiagnostic | null = null;
 
   if (shouldTryAi) {
     const aiReply = await buildAssistantAiReply({
@@ -363,61 +394,37 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
       contextText: aiContext,
       themeHint: null,
     });
-    if (aiReply) {
+    if (aiReply.ok) {
       finalReply = {
-        reply: aiReply.reply,
-        sections: aiReply.sections,
-        quickPrompts: aiReply.quickPrompts,
+        reply: aiReply.value.reply,
+        sections: aiReply.value.sections,
+        quickPrompts: aiReply.value.quickPrompts,
       };
       source = "ai";
-      if (aiReply.mutation) {
-        actionProposal = await buildAssistantActionProposalFromPlan(aiReply.mutation, user);
+      if (aiReply.value.mutation) {
+        actionProposal = await buildAssistantActionProposalFromPlan(aiReply.value.mutation, user);
       }
     } else {
-      aiFallbackNotice = "Intenté usar IA para este caso, pero respondí con el respaldo local por una falla temporal.";
+      aiDiagnostic = aiReply.diagnostic;
+      aiFallbackNotice = buildAssistantAiFallbackNotice(aiReply.diagnostic);
     }
   }
 
   let reportTheme: AssistantReportTheme | null = theme;
-  if (shouldTryAi || theme) {
-    const activeReports = (await listAssistantReports({ limit: 100 }).catch(() => []))
-      .filter((report) => report.status === "OPEN" || report.status === "COLLECTING")
-      .map((report) => ({ themeKey: report.themeKey, themeLabel: report.themeLabel, kind: report.kind }));
-    const aiReport = await classifyAssistantReportSignalWithAi({
-      user,
-      message,
-      localReplyText: `${localReply.reply}\n\n${localReply.sections
-        .map((section) => `${section.title}\n${section.summary}\n${section.items.map((item) => `${item.title} · ${item.subtitle ?? ""} · ${item.meta ?? ""}`).join("\n")}`)
-        .join("\n\n")}`,
-      contextText: aiContext,
-      existingThemes: activeReports,
-      fallback: theme ?? null,
-    });
-    if (aiReport) {
-      reportTheme = aiReport.shouldReport
-        ? {
-            kind: aiReport.kind,
-            themeKey: aiReport.themeKey,
-            themeLabel: aiReport.themeLabel,
-            title: aiReport.title,
-            summary: aiReport.summary,
-            recommendation: aiReport.recommendation,
-            plan: aiReport.plan,
-            severity: aiReport.severity,
-          }
-        : theme?.kind === "INCIDENT" ? theme : null;
-    }
+  if (!reportTheme && aiDiagnostic && aiDiagnostic.code !== "unavailable") {
+    reportTheme = buildAssistantAiFailureTheme(aiDiagnostic);
   }
 
   let reportId: string | null = null;
   if (reportTheme) {
     try {
       const aiStatus = getAssistantAiConnectionStatus();
+      const signalKind = aiDiagnostic ? "AI_FAILURE" : source === "ai" ? "AI_RESPONSE" : "USER_MESSAGE";
       const report = await recordAssistantReportSignal({
         kind: reportTheme.kind,
         themeKey: reportTheme.themeKey,
         themeLabel: reportTheme.themeLabel,
-        signalKind: source === "ai" ? "AI_RESPONSE" : "USER_MESSAGE",
+        signalKind,
         source: "assistant",
         title: reportTheme.title,
         summary: reportTheme.summary,
@@ -431,13 +438,21 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
           messageLength: message.length,
           normalizedLength: normalized.length,
           reportTheme: reportTheme.themeLabel,
+          aiDiagnostic,
         },
         input: { redacted: true },
         output: { redacted: true },
+        diagnostic: aiDiagnostic,
         actorId: user.id,
         forceOpen: reportTheme.kind === "INCIDENT",
       });
       reportId = report.id;
+      if (aiDiagnostic) {
+        aiDiagnostic = {
+          ...aiDiagnostic,
+          reportId: report.id,
+        };
+      }
     } catch {
       reportId = null;
     }
@@ -450,6 +465,7 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
     reportThemeKey: reportTheme?.themeKey ?? null,
     reportThemeLabel: reportTheme?.themeLabel ?? null,
     aiFallbackNotice,
+    aiDiagnostic,
     actionProposal,
   };
 }

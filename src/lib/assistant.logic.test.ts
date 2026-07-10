@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   buildAssistantAiReply: vi.fn(),
   classifyAssistantReportSignalWithAi: vi.fn(),
   getAssistantAiConnectionStatus: vi.fn(),
+  getAssistantAiModelLabel: vi.fn(),
+  getAssistantAiOperationLabel: vi.fn(),
   buildAssistantActionProposalFromPlan: vi.fn(),
   createAssistantThemeKey: vi.fn(),
   listAssistantReports: vi.fn(),
@@ -27,6 +29,8 @@ vi.mock("@/lib/assistant-ai", () => ({
   buildAssistantAiReply: mocks.buildAssistantAiReply,
   classifyAssistantReportSignalWithAi: mocks.classifyAssistantReportSignalWithAi,
   getAssistantAiConnectionStatus: mocks.getAssistantAiConnectionStatus,
+  getAssistantAiModelLabel: mocks.getAssistantAiModelLabel,
+  getAssistantAiOperationLabel: mocks.getAssistantAiOperationLabel,
 }));
 
 vi.mock("@/lib/assistant-actions", () => ({
@@ -45,7 +49,7 @@ vi.mock("@/lib/assistant-guardrails", () => ({
 }));
 
 import { buildAssistantReply } from "@/lib/assistant";
-import type { AssistantReply, AssistantUser } from "@/lib/assistant-types";
+import type { AssistantAiDiagnostic, AssistantReply, AssistantUser } from "@/lib/assistant-types";
 
 const user: AssistantUser = { id: "user-1", role: "ADMIN" };
 
@@ -67,6 +71,25 @@ const localReply: AssistantReply = {
   ],
   quickPrompts: [],
 };
+
+function makeDiagnostic(overrides: Partial<AssistantAiDiagnostic> = {}): AssistantAiDiagnostic {
+  return {
+    diagnosticId: "diag-1",
+    operation: "assistant-reply",
+    code: "timeout",
+    model: "minimax/minimax-m3",
+    fallbackModels: ["openai/gpt-4o-mini"],
+    durationMs: 12_345,
+    summary: "MiniMax M3 no completó la respuesta: timeout",
+    details: "Timeout durante la generación de la respuesta principal.",
+    createdAt: new Date().toISOString(),
+    statusCode: null,
+    finishReason: null,
+    responsePreview: null,
+    reportId: null,
+    ...overrides,
+  };
+}
 
 describe("assistant router", () => {
   afterEach(() => {
@@ -93,18 +116,22 @@ describe("assistant router", () => {
       },
     ]);
     mocks.buildAssistantAiReply.mockResolvedValue({
-      reply: "IA encontró la póliza y preparó la revisión.",
-      sections: localReply.sections,
-      quickPrompts: [],
-      mutation: null,
+      ok: true,
+      value: {
+        reply: "IA encontró la póliza y preparó la revisión.",
+        sections: localReply.sections,
+        quickPrompts: [],
+        mutation: null,
+      },
     });
-    mocks.classifyAssistantReportSignalWithAi.mockResolvedValue(null);
     mocks.getAssistantAiConnectionStatus.mockReturnValue({
       available: true,
       authMode: "api-key",
       model: "minimax/minimax-m3",
       fallbackModels: ["openai/gpt-4o-mini"],
     });
+    mocks.getAssistantAiModelLabel.mockImplementation((model: string) => (model === "minimax/minimax-m3" ? "MiniMax M3" : model));
+    mocks.getAssistantAiOperationLabel.mockReturnValue("la respuesta");
     mocks.listAssistantReports.mockResolvedValue([]);
     mocks.recordAssistantReportSignal.mockResolvedValue({ id: "report-1" });
 
@@ -116,7 +143,9 @@ describe("assistant router", () => {
     expect(response.source).toBe("ai");
     expect(response.reply).toBe("IA encontró la póliza y preparó la revisión.");
     expect(response.aiFallbackNotice).toBeNull();
+    expect(response.aiDiagnostic).toBeNull();
     expect(mocks.buildAssistantAiReply).toHaveBeenCalledTimes(1);
+    expect(mocks.classifyAssistantReportSignalWithAi).not.toHaveBeenCalled();
     expect(mocks.buildAssistantAiReply.mock.calls[0]?.[0].contextText).toContain("940454625");
     expect(mocks.buildAssistantAiReply.mock.calls[0]?.[0].contextText).toContain("MARIANO MARTINEZ GRAYEB");
     expect(mocks.buildAssistantAiReply.mock.calls[0]?.[0].contextText).toContain("Qualitas Compañía de Seguros");
@@ -139,6 +168,8 @@ describe("assistant router", () => {
       model: "minimax/minimax-m3",
       fallbackModels: ["openai/gpt-4o-mini"],
     });
+    mocks.getAssistantAiModelLabel.mockImplementation((model: string) => (model === "minimax/minimax-m3" ? "MiniMax M3" : model));
+    mocks.getAssistantAiOperationLabel.mockReturnValue("la respuesta");
     mocks.listAssistantReports.mockResolvedValue([]);
     mocks.recordAssistantReportSignal.mockResolvedValue({ id: "report-1" });
 
@@ -157,21 +188,28 @@ describe("assistant router", () => {
     });
     mocks.buildLocalAssistantReply.mockResolvedValue(localReply);
     mocks.searchUserPortfolio.mockResolvedValue([]);
-    mocks.buildAssistantAiReply.mockResolvedValue(null);
-    mocks.classifyAssistantReportSignalWithAi.mockResolvedValue(null);
+    mocks.buildAssistantAiReply.mockResolvedValue({
+      ok: false,
+      diagnostic: makeDiagnostic({ code: "timeout", summary: "MiniMax M3 no completó la respuesta: timeout" }),
+    });
     mocks.getAssistantAiConnectionStatus.mockReturnValue({
       available: true,
       authMode: "api-key",
       model: "minimax/minimax-m3",
       fallbackModels: ["openai/gpt-4o-mini"],
     });
+    mocks.getAssistantAiModelLabel.mockImplementation((model: string) => (model === "minimax/minimax-m3" ? "MiniMax M3" : model));
+    mocks.getAssistantAiOperationLabel.mockReturnValue("la respuesta");
     mocks.listAssistantReports.mockResolvedValue([]);
     mocks.recordAssistantReportSignal.mockResolvedValue({ id: "report-1" });
 
     const response = await buildAssistantReply(user, "revisa la poliza 940454625");
 
     expect(response.source).toBe("local");
-    expect(response.aiFallbackNotice).toContain("Intenté usar IA");
+    expect(response.aiFallbackNotice).toContain("timeout");
+    expect(response.aiDiagnostic?.code).toBe("timeout");
+    expect(response.reportId).toBe("report-1");
+    expect(response.aiDiagnostic?.reportId).toBe("report-1");
   });
 
   it("falls back to a useful consistency audit when AI times out", async () => {
@@ -200,8 +238,10 @@ describe("assistant router", () => {
       reason: "system",
     });
     mocks.buildLocalAssistantReply.mockResolvedValue(consistencyReply);
-    mocks.buildAssistantAiReply.mockResolvedValue(null);
-    mocks.classifyAssistantReportSignalWithAi.mockResolvedValue(null);
+    mocks.buildAssistantAiReply.mockResolvedValue({
+      ok: false,
+      diagnostic: makeDiagnostic({ code: "timeout", summary: "MiniMax M3 no completó la respuesta: timeout" }),
+    });
     mocks.getAssistantAiConnectionStatus.mockReturnValue({
       available: true,
       authMode: "api-key",
@@ -219,6 +259,7 @@ describe("assistant router", () => {
     expect(response.source).toBe("local");
     expect(response.reply).toContain("fechas o vigencias");
     expect(response.sections[0]?.title).toBe("Pólizas con fechas o vigencias a revisar");
-    expect(response.aiFallbackNotice).toContain("Intenté usar IA");
+    expect(response.aiFallbackNotice).toContain("timeout");
+    expect(response.aiDiagnostic?.code).toBe("timeout");
   });
 });

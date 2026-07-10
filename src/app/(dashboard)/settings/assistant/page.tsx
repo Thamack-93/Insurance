@@ -86,6 +86,20 @@ function ReportList({
                     </div>
                     <p className="mt-1 font-medium">{entry.title ?? "Señal registrada"}</p>
                     {entry.summary ? <p className="mt-1 text-muted-foreground">{entry.summary}</p> : null}
+                    {entry.diagnostic ? (
+                      <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                        <p className="font-medium">Diagnóstico</p>
+                        <div className="mt-1 grid gap-1 sm:grid-cols-2">
+                          <span>Código: {entry.diagnostic.code ?? "unknown"}</span>
+                          <span>Operación: {entry.diagnostic.operation ?? "sin dato"}</span>
+                          <span>Modelo: {entry.diagnostic.model ?? "sin dato"}</span>
+                          <span>Duración: {entry.diagnostic.durationMs ? `${(entry.diagnostic.durationMs / 1000).toFixed(1)} s` : "sin dato"}</span>
+                          <span>Folio: {entry.diagnostic.diagnosticId ?? "sin folio"}</span>
+                          <span>Reporte: {entry.diagnostic.reportId ?? report.id}</span>
+                        </div>
+                        {entry.diagnostic.summary ? <p className="mt-2">{entry.diagnostic.summary}</p> : null}
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>
