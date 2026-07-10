@@ -44,7 +44,7 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 2. Crear una rama protegida para preview; no seedear ni resetear la base actual.
 3. Configurar las variables de entorno en Vercel.
 4. Conectar un Blob store privado.
-5. Configurar los backups diarios fuera de Vercel Cron.
+5. Dejar Vercel Cron como único programador de Telegram y del backup automatizado.
 6. Desplegar preview, validar y luego promover la rama principal.
 
 ## Validaciones mínimas
