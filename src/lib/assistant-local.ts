@@ -1,8 +1,12 @@
 import "server-only";
 
 import type { AssistantPrompt, AssistantReply, AssistantSection, AssistantSnapshot, AssistantUser } from "@/lib/assistant-types";
+import { formatDate } from "@/lib/dates";
 import { getTodayData } from "@/lib/dashboard-queries";
 import { daysUntil } from "@/lib/dates";
+import { getPolicyDataQualityScores, getReceiptReviewIssues, getRenewalReviewSuggestions } from "@/lib/data-quality";
+import { detectRisks } from "@/lib/risk-engine";
+import { getLatestMaintenanceRun } from "@/lib/vigency-maintenance";
 import { globalSearch, type GlobalSearchResult } from "@/lib/search";
 import { getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
 
@@ -12,6 +16,18 @@ function normalizeMessage(value: string) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "");
+}
+
+function isConsistencyAuditQuery(normalized: string) {
+  return (
+    (normalized.includes("coincid") ||
+      normalized.includes("inconsist") ||
+      normalized.includes("descuadr") ||
+      normalized.includes("solap") ||
+      normalized.includes("duplic") ||
+      normalized.includes("concil")) &&
+    (normalized.includes("fech") || normalized.includes("vigenc") || normalized.includes("recib") || normalized.includes("renovac"))
+  );
 }
 
 function makeSection(title: string, summary: string, items: AssistantSection["items"]): AssistantSection {
@@ -24,6 +40,15 @@ function buildQuickPrompts(): AssistantPrompt[] {
     { label: "Renovaciones 30 días", prompt: "renovaciones 30" },
     { label: "Recibos vencidos", prompt: "recibos vencidos" },
     { label: "Buscar cliente", prompt: "buscar cliente" },
+  ];
+}
+
+function buildConsistencyQuickPrompts(): AssistantPrompt[] {
+  return [
+    { label: "Fechas y vigencias", prompt: "pólizas con fechas inconsistentes" },
+    { label: "Recibos y conciliación", prompt: "recibos con diferencia" },
+    { label: "Renovaciones relacionadas", prompt: "renovaciones relacionadas" },
+    { label: "Ver riesgos", prompt: "riesgos" },
   ];
 }
 
@@ -87,6 +112,161 @@ async function buildRenewalsReply(days: number): Promise<AssistantReply> {
       ),
     ],
     quickPrompts: buildQuickPrompts(),
+  };
+}
+
+function normalizeMaintenanceSummary(summaryJson: string | null) {
+  if (!summaryJson) return null;
+  try {
+    return JSON.parse(summaryJson) as {
+      paymentFrequencyReviewSample?: Array<{
+        policyId: string;
+        policyNumber: string;
+        currentFrequency: string;
+        receiptCount: number;
+        reason: string;
+      }>;
+      receiptIssuesOpened?: number;
+      receiptIssuesResolved?: number;
+      familiesLinked?: number;
+      overlappingFamilies?: number;
+      paymentFrequenciesNormalized?: number;
+    };
+  } catch {
+    return null;
+  }
+}
+
+function buildConsistencySectionSubtitle(policy: {
+  cliente: string;
+  aseguradora: string;
+  endDate: Date;
+  issues: Array<{ etiqueta: string }>;
+}) {
+  const issueSummary = policy.issues.slice(0, 2).map((issue) => issue.etiqueta).join(" · ");
+  return [policy.cliente, policy.aseguradora, `Vence ${formatDate(policy.endDate)}`, issueSummary || null]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+async function buildConsistencyAuditReply(user: AssistantUser): Promise<AssistantReply> {
+  const portfolioOwnerId = user.role === "ADMIN" ? undefined : user.id;
+  const [riskFindings, policyScores, receiptIssues, renewalSuggestions, latestRun] = await Promise.all([
+    detectRisks(portfolioOwnerId),
+    getPolicyDataQualityScores(),
+    getReceiptReviewIssues(),
+    getRenewalReviewSuggestions(),
+    getLatestMaintenanceRun("POLICY_VIGENCY_AUDIT"),
+  ]);
+
+  const policyScoresByNumber = new Map(policyScores.map((policy) => [policy.poliza, policy]));
+  const relevantRiskTypes = new Set(["INCONSISTENT_DATES", "OVERLAPPING_POLICY_TERM", "POLICY_WITHOUT_RECEIPTS"]);
+  const consistencyRisks = riskFindings.filter((finding) => relevantRiskTypes.has(finding.alertType));
+  const policyRiskItems = consistencyRisks
+    .slice(0, 6)
+    .map((finding) => {
+      const policyNumber = finding.description.split(" · ")[0]?.trim() || finding.description;
+      const policyScore = policyScoresByNumber.get(policyNumber);
+      const subtitle = policyScore
+        ? buildConsistencySectionSubtitle(policyScore)
+        : finding.suggestedAction;
+
+      return {
+        title: policyNumber,
+        subtitle: `${finding.title}${subtitle ? ` · ${subtitle}` : ""}`,
+        href: policyScore ? `/policies/${policyScore.polizaId}` : "/risks",
+        meta: finding.severity.toLowerCase(),
+      };
+    });
+
+  const receiptItems = receiptIssues
+    .slice(0, 6)
+    .map((issue) => ({
+      title: issue.receiptNumber,
+      subtitle: [
+        issue.policyNumber,
+        issue.clientName,
+        issue.insurerName,
+        `Vence ${formatDate(issue.dueDate)}`,
+        issue.paidDate ? `Pagado ${formatDate(issue.paidDate)}` : "Pendiente de pago",
+        issue.gapDays != null ? `${issue.gapDays} días de diferencia` : null,
+        issue.dispositionLabel,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      href: `/receipts/${issue.receiptId}`,
+      meta: issue.reason,
+    }));
+
+  const renewalItems = renewalSuggestions
+    .filter((suggestion) => suggestion.status !== "RESOLVED" && suggestion.status !== "ARCHIVED" && suggestion.status !== "DELETED")
+    .slice(0, 6)
+    .map((suggestion) => ({
+      title: suggestion.sourcePolicyNumber,
+      subtitle: [
+        suggestion.clientName,
+        suggestion.insurerName,
+        `Vigencia ${formatDate(suggestion.sourceStartDate)} → ${formatDate(suggestion.sourceEndDate)}`,
+        suggestion.targetPolicyNumber ? `Vinculada a ${suggestion.targetPolicyNumber}` : "Sin vínculo aún",
+        suggestion.dispositionLabel,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      href: suggestion.targetPolicyId ? `/policies/${suggestion.targetPolicyId}` : `/policies/${suggestion.sourcePolicyId}`,
+      meta: suggestion.status,
+    }));
+
+  const maintenanceSummary = normalizeMaintenanceSummary(latestRun?.summaryJson ?? null);
+  const maintenanceSample = maintenanceSummary?.paymentFrequencyReviewSample?.slice(0, 6).map((sample) => ({
+    title: sample.policyNumber,
+    subtitle: `Frecuencia ${sample.currentFrequency} · ${sample.receiptCount} recibos · ${sample.reason}`,
+    href: `/policies/${sample.policyId}`,
+    meta: "vigencia",
+  })) ?? [];
+
+  const riskCount = policyRiskItems.length;
+  const receiptCount = receiptItems.length;
+  const renewalCount = renewalItems.length;
+  const maintenanceNote = maintenanceSummary
+    ? `Última auditoría de vigencia: ${maintenanceSummary.paymentFrequencyReviewSample?.length ?? 0} casos revisados en muestra, ${maintenanceSummary.receiptIssuesOpened ?? 0} incidencias abiertas y ${maintenanceSummary.receiptIssuesResolved ?? 0} resueltas.`
+    : "No encontré una auditoría reciente de vigencias, pero sí puedo revisar el estado actual de la cartera.";
+
+  return {
+    reply:
+      riskCount > 0 || receiptCount > 0 || renewalCount > 0
+        ? `Encontré ${riskCount} póliza${riskCount === 1 ? "" : "s"} con fechas o vigencias a revisar, ${receiptCount} recibo${receiptCount === 1 ? "" : "s"} con conciliación pendiente y ${renewalCount} renovación${renewalCount === 1 ? "" : "es"} relacionadas.`
+        : "No veo inconsistencias activas en fechas, vigencias o recibos dentro del alcance de tu usuario.",
+    sections: [
+      makeSection(
+        "Pólizas con fechas o vigencias a revisar",
+        "Fechas de vencimiento, inicio de vigencia o solapes que conviene revisar primero.",
+        policyRiskItems.length > 0
+          ? policyRiskItems
+          : [{ title: "Sin inconsistencias activas", subtitle: "No encontré pólizas con fechas o vigencias abiertas.", href: "/risks", meta: "ok" }],
+      ),
+      makeSection(
+        "Recibos con conciliación pendiente",
+        "Recibos vencidos, duplicados o con diferencias entre pago y vigencia.",
+        receiptItems.length > 0
+          ? receiptItems
+          : [{ title: "Sin recibos pendientes", subtitle: "No encontré recibos abiertos para revisar.", href: "/data-quality", meta: "ok" }],
+      ),
+      makeSection(
+        "Renovaciones relacionadas",
+        "Sugerencias de renovación o vínculos que pueden explicar la diferencia de fechas.",
+        renewalItems.length > 0
+          ? renewalItems
+          : [{ title: "Sin renovaciones relacionadas", subtitle: "No encontré sugerencias abiertas en este momento.", href: "/renewals", meta: "ok" }],
+      ),
+      makeSection(
+        "Mantenimiento de vigencia",
+        maintenanceNote,
+        maintenanceSample.length > 0
+          ? maintenanceSample
+          : [{ title: "Sin muestra reciente", subtitle: "Ejecuta la auditoría de vigencia para regenerar la muestra.", href: "/data-quality", meta: "auditoría" }],
+      ),
+    ],
+    quickPrompts: buildConsistencyQuickPrompts(),
   };
 }
 
@@ -285,6 +465,10 @@ async function buildPromptReply(user: AssistantUser, message: string): Promise<A
     (normalized.includes("resumen") && normalized.includes("dia"))
   ) {
     return buildTodayReply();
+  }
+
+  if (isConsistencyAuditQuery(normalized)) {
+    return buildConsistencyAuditReply(user);
   }
 
   if (normalized.includes("renov")) {

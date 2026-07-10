@@ -71,6 +71,138 @@ vi.mock("@/lib/search", () => {
   return { globalSearch };
 });
 
+vi.mock("@/lib/data-quality", () => ({
+  getPolicyDataQualityScores: vi.fn(async () => [
+    {
+      polizaId: "policy-1",
+      poliza: "940454625",
+      clienteId: "client-1",
+      cliente: "Cliente Vencimiento",
+      aseguradora: "Qualitas",
+      endDate: new Date("2026-07-31T00:00:00.000Z"),
+      status: "ACTIVE",
+      premiumAmount: 1000,
+      paymentFrequency: "ANNUAL",
+      insuredObject: null,
+      notes: null,
+      score: 72,
+      nivel: "Bueno",
+      completitud: 60,
+      issues: [
+        {
+          code: "POLICY_WITHOUT_RECEIPTS",
+          etiqueta: "Sin recibos",
+          descripcion: "La póliza no tiene ningún recibo registrado.",
+          penalizacion: 20,
+          entityType: "Policy",
+          entityId: "policy-1",
+        },
+      ],
+    },
+  ]),
+  getReceiptReviewIssues: vi.fn(async () => [
+    {
+      issueId: "issue-1",
+      reason: "RECEIPT_OVERDUE",
+      status: "OPEN",
+      dispositionLabel: "Abierto",
+      suppressedByRuleId: null,
+      duplicateOfId: null,
+      receiptId: "receipt-1",
+      receiptNumber: "REC-001",
+      policyId: "policy-1",
+      policyNumber: "940454625",
+      clientName: "Cliente Vencimiento",
+      insurerName: "Qualitas",
+      amount: 1500,
+      paidAmount: 0,
+      currency: "MXN",
+      dueDate: new Date("2026-07-03T00:00:00.000Z"),
+      paidDate: null,
+      paymentCount: 0,
+      gapDays: null,
+      resolutionNote: null,
+      reviewedAt: null,
+      createdAt: new Date("2026-07-04T00:00:00.000Z"),
+    },
+  ]),
+  getRenewalReviewSuggestions: vi.fn(async () => [
+    {
+      suggestionId: "renewal-1",
+      status: "OPEN",
+      dispositionLabel: "Abierto",
+      suppressedByRuleId: null,
+      duplicateOfId: null,
+      reason: "RENEWAL_SUGGESTION",
+      resolutionNote: null,
+      reviewedAt: null,
+      sourcePolicyId: "policy-1",
+      sourcePolicyNumber: "940454625",
+      sourcePolicyStatus: "ACTIVE",
+      clientName: "Cliente Vencimiento",
+      insurerName: "Qualitas",
+      sourceStartDate: new Date("2025-08-01T00:00:00.000Z"),
+      sourceEndDate: new Date("2026-07-31T00:00:00.000Z"),
+      targetPolicyId: null,
+      targetPolicyNumber: null,
+      targetPolicyStatus: null,
+      createdAt: new Date("2026-07-04T00:00:00.000Z"),
+      updatedAt: new Date("2026-07-04T00:00:00.000Z"),
+    },
+  ]),
+}));
+
+vi.mock("@/lib/risk-engine", () => ({
+  detectRisks: vi.fn(async () => [
+    {
+      alertType: "INCONSISTENT_DATES",
+      severity: "CRITICAL",
+      title: "Fechas inconsistentes",
+      description: "940454625",
+      entityType: "Policy",
+      entityId: "policy-1",
+      suggestedAction: "Corregir vigencia de poliza.",
+    },
+    {
+      alertType: "RECEIPT_OVERDUE",
+      severity: "CRITICAL",
+      title: "Recibo vencido sin pago",
+      description: "REC-001 · 940454625 · Cliente Vencimiento · MXN 1,500.00",
+      entityType: "Receipt",
+      entityId: "receipt-1",
+      suggestedAction: "Contactar cliente y registrar seguimiento.",
+    },
+  ]),
+}));
+
+vi.mock("@/lib/vigency-maintenance", () => ({
+  getLatestMaintenanceRun: vi.fn(async () => ({
+    id: "run-1",
+    type: "POLICY_VIGENCY_AUDIT",
+    status: "COMPLETED",
+    summaryJson: JSON.stringify({
+      paymentFrequencyReviewSample: [
+        {
+          policyId: "policy-1",
+          policyNumber: "940454625",
+          currentFrequency: "ANNUAL",
+          receiptCount: 2,
+          reason: "Frecuencia a revisar por recibos consecutivos.",
+        },
+      ],
+      receiptIssuesOpened: 1,
+      receiptIssuesResolved: 0,
+      familiesLinked: 0,
+      overlappingFamilies: 0,
+      paymentFrequenciesNormalized: 0,
+    }),
+    startedAt: new Date("2026-07-04T00:00:00.000Z"),
+    completedAt: new Date("2026-07-04T00:30:00.000Z"),
+    createdAt: new Date("2026-07-04T00:00:00.000Z"),
+    updatedAt: new Date("2026-07-04T00:30:00.000Z"),
+  })),
+}));
+
 import { buildAssistantReply } from "@/lib/assistant-local";
 
 describe("assistant local replies", () => {
@@ -105,5 +237,22 @@ describe("assistant local replies", () => {
     expect(reply.sections[0]?.title).toBe("Cambiar vencimiento");
     expect(reply.sections[0]?.items[0]?.title).toBe("940454625");
     expect(reply.sections[0]?.items[0]?.href).toBe("/policies/policy-1");
+  });
+
+  it("returns a targeted consistency audit for vigencia and receipts", async () => {
+    const reply = await buildAssistantReply(
+      { id: "user-1", role: "ADMIN" },
+      "necesito que me digas que polizas no coinciden sus fechas de vencimiento, renovacion, inicio de vigencia y sus recibos",
+    );
+
+    expect(reply.reply).toContain("fechas o vigencias");
+    expect(reply.sections[0]?.title).toBe("Pólizas con fechas o vigencias a revisar");
+    expect(reply.sections[0]?.items[0]?.title).toBe("940454625");
+    expect(reply.sections[1]?.title).toBe("Recibos con conciliación pendiente");
+    expect(reply.sections[1]?.items[0]?.title).toBe("REC-001");
+    expect(reply.sections[2]?.title).toBe("Renovaciones relacionadas");
+    expect(reply.sections[2]?.items[0]?.title).toBe("940454625");
+    expect(reply.sections[3]?.title).toBe("Mantenimiento de vigencia");
+    expect(reply.quickPrompts.map((prompt) => prompt.prompt)).toContain("pólizas con fechas inconsistentes");
   });
 });

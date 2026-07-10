@@ -173,4 +173,52 @@ describe("assistant router", () => {
     expect(response.source).toBe("local");
     expect(response.aiFallbackNotice).toContain("Intenté usar IA");
   });
+
+  it("falls back to a useful consistency audit when AI times out", async () => {
+    const consistencyReply: AssistantReply = {
+      reply: "Encontré 1 póliza con fechas o vigencias a revisar.",
+      sections: [
+        {
+          title: "Pólizas con fechas o vigencias a revisar",
+          summary: "Fechas de vencimiento, inicio de vigencia o solapes que conviene revisar primero.",
+          items: [
+            {
+              title: "940454625",
+              subtitle: "Fechas inconsistentes · Cliente Vencimiento · Qualitas · Vence 2026-07-31",
+              href: "/policies/policy-1",
+              meta: "critical",
+            },
+          ],
+        },
+      ],
+      quickPrompts: [],
+    };
+
+    mocks.evaluateAssistantInput.mockReturnValue({
+      allowed: true,
+      normalized: "necesito que me digas que polizas no coinciden sus fechas de vencimiento renovacion inicio de vigencia y sus recibos",
+      reason: "system",
+    });
+    mocks.buildLocalAssistantReply.mockResolvedValue(consistencyReply);
+    mocks.buildAssistantAiReply.mockResolvedValue(null);
+    mocks.classifyAssistantReportSignalWithAi.mockResolvedValue(null);
+    mocks.getAssistantAiConnectionStatus.mockReturnValue({
+      available: true,
+      authMode: "api-key",
+      model: "minimax/minimax-m3",
+      fallbackModels: ["openai/gpt-4o-mini"],
+    });
+    mocks.listAssistantReports.mockResolvedValue([]);
+    mocks.recordAssistantReportSignal.mockResolvedValue({ id: "report-1" });
+
+    const response = await buildAssistantReply(
+      user,
+      "necesito que me digas que polizas no coinciden sus fechas de vencimiento, renovacion, inicio de vigencia y sus recibos",
+    );
+
+    expect(response.source).toBe("local");
+    expect(response.reply).toContain("fechas o vigencias");
+    expect(response.sections[0]?.title).toBe("Pólizas con fechas o vigencias a revisar");
+    expect(response.aiFallbackNotice).toContain("Intenté usar IA");
+  });
 });

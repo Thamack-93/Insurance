@@ -356,7 +356,7 @@ export async function buildAssistantAiReply(input: {
     const result = await generateText({
       model: getAssistantGatewayModel(),
       temperature: 0.2,
-      abortSignal: AbortSignal.timeout(4_000),
+      abortSignal: AbortSignal.timeout(12_000),
       system: [
         "Eres Nora, el asistente interno de una app de seguros y correduría.",
         "Solo puedes responder sobre PolicyDesk y sobre los datos incluidos en el contexto local de este mensaje.",

@@ -72,6 +72,10 @@ function shouldUseAssistantAi(normalized: string) {
     normalized.includes("confirma") ||
     normalized.includes("duplica") ||
     normalized.includes("coincid") ||
+    normalized.includes("inconsist") ||
+    normalized.includes("descuadr") ||
+    normalized.includes("solap") ||
+    normalized.includes("concil") ||
     normalized.includes("simil") ||
     normalized.includes("endoso") ||
     normalized.includes("pdf") ||
