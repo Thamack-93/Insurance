@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { getDb, resetDb } from "@/lib/db";
+import { assertProductionMutationAllowed } from "./_shared.ts";
 import {
   isInsuredClientName,
   mergeTextField,
@@ -137,6 +138,12 @@ async function writeReportFile(rows: ReportRow[], summary: Record<string, unknow
 
 async function main() {
   const apply = process.argv.includes("--apply");
+  if (apply) {
+    assertProductionMutationAllowed({
+      actionLabel: "La reconciliación de clientes asegurados",
+      overrideEnv: "ALLOW_INSURED_CLIENT_RECONCILIATION_PRODUCTION",
+    });
+  }
   const db = getDb();
 
   const [allClients, candidateClients, policies] = await Promise.all([

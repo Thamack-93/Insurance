@@ -23,6 +23,14 @@ export type QuerySummary = {
   total: number;
 };
 
+export type ProductionMutationGuardOptions = {
+  actionLabel: string;
+  overrideEnv: string;
+  connectionString?: string;
+  targetEnvironment?: string;
+  extraLabels?: Array<string | undefined | null>;
+};
+
 const localEnvPath = path.join(process.cwd(), ".env.local");
 
 function loadLocalEnv() {
@@ -52,6 +60,49 @@ export function createDb() {
   const adapter = new PrismaPg({ connectionString });
 
   return new PrismaClient({ adapter });
+}
+
+function isExplicitlyNonProductionEnvironment(value: string | undefined | null) {
+  return /^(development|dev|preview|staging|test|temporary|temp)$/i.test(value?.trim() ?? "");
+}
+
+function looksLikeProductionLabels(labels: string) {
+  return /(^|[^a-z])(prod|production)([^a-z]|$)/i.test(labels);
+}
+
+export function assertProductionMutationAllowed(options: ProductionMutationGuardOptions) {
+  const connectionString = options.connectionString?.trim() ?? process.env.DATABASE_URL?.trim();
+  if (!connectionString) {
+    throw new Error("DATABASE_URL debe apuntar a Postgres para ejecutar este script.");
+  }
+
+  let url: URL;
+  try {
+    url = new URL(connectionString);
+  } catch {
+    throw new Error("DATABASE_URL debe ser una URL válida para ejecutar este script.");
+  }
+  const targetEnvironment = options.targetEnvironment?.trim() ?? process.env.SCRIPT_TARGET_ENV?.trim() ?? "";
+  const labels = [
+    process.env.NODE_ENV,
+    process.env.VERCEL_ENV,
+    process.env.APP_ENV,
+    process.env.DATABASE_ENV,
+    targetEnvironment,
+    url.hostname,
+    url.pathname,
+    ...(options.extraLabels ?? []),
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const explicitlyNonProduction = isExplicitlyNonProductionEnvironment(targetEnvironment);
+  const isProduction = !explicitlyNonProduction || looksLikeProductionLabels(labels);
+
+  if (isProduction && process.env[options.overrideEnv] !== "1") {
+    throw new Error(
+      `${options.actionLabel} rechazado para producción. Define ${options.overrideEnv}=1 solo tras autorización explícita.`,
+    );
+  }
 }
 
 export async function closeDb(db: PrismaClient) {

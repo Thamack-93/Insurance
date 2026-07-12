@@ -7,6 +7,7 @@ import { writeActivityLog } from "@/lib/activity-log";
 import { getDb } from "@/lib/db";
 import { parseDateInput } from "@/lib/form-utils";
 import { extractPolicyPdfDraftFromText, suggestPreviousPolicyNumber, type PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
+import { assertProductionMutationAllowed } from "./_shared.ts";
 
 type CliArgs = {
   apply: boolean;
@@ -393,6 +394,12 @@ async function captureRenewalCase(
 
 async function main() {
   const args = parseArgs();
+  if (args.apply) {
+    assertProductionMutationAllowed({
+      actionLabel: "La captura asistida de renovaciones",
+      overrideEnv: "ALLOW_CAPTURE_PDF_RENEWALS_PRODUCTION",
+    });
+  }
   const db = getDb();
   const actorId = await resolveActorId(db);
 
