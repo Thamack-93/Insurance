@@ -80,15 +80,24 @@ export async function GET(
     }
 
     if (user.role !== "ADMIN") {
-      const isAllowed =
-        document.createdById === user.id ||
+      const hasScopedRelation =
         document.client?.portfolioOwnerId === user.id ||
         document.policy?.client?.portfolioOwnerId === user.id ||
         document.receipt?.client?.portfolioOwnerId === user.id ||
         document.claim?.client?.portfolioOwnerId === user.id ||
         document.quote?.client?.portfolioOwnerId === user.id ||
-        document.task?.createdById === user.id ||
-        document.task?.client?.portfolioOwnerId === user.id;
+        document.task?.client?.portfolioOwnerId === user.id ||
+        (document.task?.client == null && document.task?.createdById === user.id);
+      const hasStandaloneOwnership =
+        document.createdById === user.id &&
+        !document.client &&
+        !document.policy &&
+        !document.receipt &&
+        !document.claim &&
+        !document.quote &&
+        !document.task;
+      const isAllowed =
+        hasScopedRelation || hasStandaloneOwnership;
 
       if (!isAllowed) {
         await recordSecurityAccessDenied({

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { assertTemporaryNeonRestoreTarget } from "@/lib/backup-restore-guards";
 
 const source = "postgresql://user:secret@ep-main.us-east-2.aws.neon.tech/app";
+const sourcePooler = "postgresql://user:secret@ep-main-pooler.us-east-2.aws.neon.tech/app";
 const target = "postgresql://user:secret@ep-restore.us-east-2.aws.neon.tech/app";
 
 describe("temporary Neon restore guard", () => {
@@ -36,10 +37,22 @@ describe("temporary Neon restore guard", () => {
   it("rejects pooler and direct URLs for the same Neon endpoint", () => {
     expect(() =>
       assertTemporaryNeonRestoreTarget({
-        sourceDatabaseUrl: "postgresql://user:secret@ep-current-pooler.us-east-2.aws.neon.tech/app",
-        targetDatabaseUrl: "postgresql://user:secret@ep-current.us-east-2.aws.neon.tech/app",
+        sourceDatabaseUrl: sourcePooler,
+        targetDatabaseUrl: source,
         branchName: "restore-validation",
         allowRestore: "true",
+      }),
+    ).toThrow("base actual");
+  });
+
+  it("rejects explicit production URL variants when they are listed as forbidden", () => {
+    expect(() =>
+      assertTemporaryNeonRestoreTarget({
+        sourceDatabaseUrl: source,
+        targetDatabaseUrl: sourcePooler,
+        branchName: "restore-validation",
+        allowRestore: "true",
+        forbiddenDatabaseUrls: [source, sourcePooler],
       }),
     ).toThrow("base actual");
   });

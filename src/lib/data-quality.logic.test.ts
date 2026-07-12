@@ -83,4 +83,27 @@ describe("data-quality client scoring", () => {
       nivel: "Bueno",
     });
   });
+
+  it("scopes client quality queries to the requested portfolio owner", async () => {
+    clientFindMany.mockResolvedValue([
+      {
+        id: "client-scoped",
+        fullName: "Cliente acotado",
+        email: "cliente@example.com",
+        phone: "5555555555",
+        secondaryPhone: null,
+        address: "Calle 2",
+        rfc: "XAXX010101000",
+        preferredContactMethod: "EMAIL",
+        policies: [{ status: "ACTIVE", premiumAmount: 1200 }],
+      },
+    ]);
+
+    await getClientDataQualityScores("agent-1");
+
+    expect(clientFindMany).toHaveBeenCalledWith({
+      where: { portfolioOwnerId: "agent-1", status: "ACTIVE" },
+      select: expect.any(Object),
+    });
+  });
 });

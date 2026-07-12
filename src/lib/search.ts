@@ -234,9 +234,24 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
     ? Prisma.sql`(
       EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Document"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId})
       OR EXISTS (SELECT 1 FROM "Policy" WHERE "Policy"."id" = "Document"."policyId" AND EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Policy"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId}))
+      OR EXISTS (SELECT 1 FROM "PolicyEndorsement" WHERE "PolicyEndorsement"."id" = "Document"."endorsementId" AND EXISTS (SELECT 1 FROM "Policy" WHERE "Policy"."id" = "PolicyEndorsement"."policyId" AND EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Policy"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId})))
       OR EXISTS (SELECT 1 FROM "Receipt" WHERE "Receipt"."id" = "Document"."receiptId" AND EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Receipt"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId}))
+      OR EXISTS (SELECT 1 FROM "Task" WHERE "Task"."id" = "Document"."taskId" AND (
+        EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Task"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId})
+        OR ("Task"."clientId" IS NULL AND "Task"."createdById" = ${portfolioOwnerId})
+      ))
       OR EXISTS (SELECT 1 FROM "Claim" WHERE "Claim"."id" = "Document"."claimId" AND EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Claim"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId}))
       OR EXISTS (SELECT 1 FROM "Quote" WHERE "Quote"."id" = "Document"."quoteId" AND EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Quote"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId}))
+      OR (
+        "Document"."createdById" = ${portfolioOwnerId}
+        AND "Document"."clientId" IS NULL
+        AND "Document"."policyId" IS NULL
+        AND "Document"."endorsementId" IS NULL
+        AND "Document"."receiptId" IS NULL
+        AND "Document"."taskId" IS NULL
+        AND "Document"."claimId" IS NULL
+        AND "Document"."quoteId" IS NULL
+      )
     )`
     : undefined;
 

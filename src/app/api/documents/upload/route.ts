@@ -228,7 +228,7 @@ async function assertDocumentUploadOwnership(
     const task = await db.task.findFirst({
       where: {
         id: metadata.taskId,
-        OR: [{ createdById: userId }, { client: { portfolioOwnerId: userId } }],
+        OR: [{ client: { portfolioOwnerId: userId } }, { clientId: null, createdById: userId }],
       },
       select: { id: true },
     });

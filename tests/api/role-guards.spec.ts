@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { getAdminSessionCookie } from "../helpers/db";
+import { getAdminSessionCookie, getAgentSessionCookie } from "../helpers/db";
 
 test.describe("role-based guards", () => {
   test("backup download requires authentication", async ({ request }) => {
@@ -7,6 +7,15 @@ test.describe("role-based guards", () => {
       maxRedirects: 0,
     });
     expect([307, 401, 403, 404]).toContain(res.status());
+  });
+
+  test("backup download rejects authenticated agents", async ({ request }) => {
+    const authCookie = await getAgentSessionCookie();
+    const res = await request.get("/api/backups/anything.sqlite/download", {
+      headers: { cookie: authCookie },
+      maxRedirects: 0,
+    });
+    expect(res.status()).toBe(403);
   });
 
   test("commission stats requires authentication", async ({ request }) => {

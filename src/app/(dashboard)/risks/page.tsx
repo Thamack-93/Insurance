@@ -26,6 +26,7 @@ import { formatCurrency } from "@/lib/money";
 import { ClientResolutionActions, PolicyResolutionActions, RenewalResolutionActions } from "@/components/risk-resolution/resolution-actions";
 import { PageRefreshTicker } from "@/components/risk-resolution/page-refresh-ticker";
 import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-button";
+import { requirePortfolioReadScope } from "@/lib/portfolio-access";
 
 function riskHref(entityType: string, entityId: string) {
   if (entityType === "Client") return `/clients/${entityId}`;
@@ -115,11 +116,12 @@ export default async function RisksPage({
   const query = (params.q ?? "").trim().toLowerCase();
 
   const db = getDb();
+  const scope = await requirePortfolioReadScope();
   const [risks, openNotifications, clientScores, policyScores] = await Promise.all([
-    detectRisks(),
+    detectRisks(scope.portfolioOwnerId),
     db.alert.findMany({ where: { status: "OPEN" } }),
-    getClientDataQualityScores(),
-    getPolicyDataQualityScores(),
+    getClientDataQualityScores(scope.portfolioOwnerId),
+    getPolicyDataQualityScores(scope.portfolioOwnerId),
   ]);
 
   const matchesQuery = (...values: Array<string | null | undefined>) =>

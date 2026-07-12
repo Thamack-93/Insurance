@@ -36,6 +36,7 @@ import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
 import { getLatestMaintenanceRun } from "@/lib/vigency-maintenance";
 import { getUpcomingRenewals } from "@/lib/renewals";
+import { requirePortfolioReadScope } from "@/lib/portfolio-access";
 import { RunVigencyAuditButton } from "@/components/data-quality/run-vigency-audit-button";
 import { RunPaymentAuditButton } from "@/components/data-quality/run-payment-audit-button";
 import { ReviewActionButtons } from "@/components/data-quality/review-action-buttons";
@@ -116,6 +117,7 @@ export default async function DataQualityPage({
   const { sortKey, direction } = readTableSort(params);
   const previewBatchId = typeof params.ledgerBatch === "string" ? params.ledgerBatch : null;
   const db = getDb();
+  const scope = await requirePortfolioReadScope();
   const [
     clientScores,
     policyScores,
@@ -127,15 +129,15 @@ export default async function DataQualityPage({
     ledgerReviewIssues,
     renewalFollowUps,
   ] = await Promise.all([
-    getClientDataQualityScores(),
-    getPolicyDataQualityScores(),
-    getOperationalDataHealthSummary(),
+    getClientDataQualityScores(scope.portfolioOwnerId),
+    getPolicyDataQualityScores(scope.portfolioOwnerId),
+    getOperationalDataHealthSummary(scope.portfolioOwnerId),
     getLatestMaintenanceRun("POLICY_VIGENCY_AUDIT"),
     getLatestMaintenanceRun("PAYMENT_RECONCILIATION_AUDIT"),
-    getReceiptReviewIssues(),
-    getRenewalReviewSuggestions(),
+    getReceiptReviewIssues(scope.portfolioOwnerId),
+    getRenewalReviewSuggestions(scope.portfolioOwnerId),
     getLedgerReviewIssues(),
-    getUpcomingRenewals(30),
+    getUpcomingRenewals(30, scope.portfolioOwnerId),
   ]);
   const previewBatch = previewBatchId
       ? await db.ledgerImportBatch.findUnique({
