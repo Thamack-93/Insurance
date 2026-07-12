@@ -50,6 +50,16 @@ export type AssistantAiStatus = {
   fallbackModels: string[];
 };
 
+export type AssistantAiAttempt = {
+  model: string;
+  code: AssistantAiFailureCode | null;
+  outcome: "success" | "error";
+  durationMs: number;
+  statusCode?: number | null;
+  finishReason?: string | null;
+  responsePreview?: string | null;
+};
+
 export type AssistantAiOperation =
   | "assistant-reply"
   | "assistant-report-classification"
@@ -75,6 +85,7 @@ export type AssistantAiDiagnostic = {
   code: AssistantAiFailureCode;
   model: string;
   fallbackModels: string[];
+  attempts?: AssistantAiAttempt[];
   durationMs: number;
   summary: string;
   details: string;
@@ -199,6 +210,7 @@ export type AssistantReportSnapshot = {
       code?: string;
       model?: string;
       fallbackModels?: string[];
+      attempts?: AssistantAiAttempt[];
       durationMs?: number;
       summary?: string;
       details?: string;
