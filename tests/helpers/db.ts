@@ -10,6 +10,8 @@ const SESSION_COOKIE_NAME = "pd_session";
 const DEV_SECRET = "policydesk-dev-secret-change-in-production-please-0123456789";
 const TEST_ADMIN_EMAIL = "ci-admin@policydesk.local";
 const TEST_ADMIN_NAME = "CI Admin";
+const TEST_AGENT_EMAIL = "ci-agent@policydesk.local";
+const TEST_AGENT_NAME = "CI Agent";
 const TEST_CLIENT_EMAIL = "ci-client@policydesk.local";
 const TEST_CLIENT_NAME = "CI Client";
 const TEST_INSURER_NAME = "CI Insurer";
@@ -124,6 +126,13 @@ export function getTestDb() {
   return globalForTests.prisma;
 }
 
+export function getTestOrigin() {
+  const baseUrl =
+    process.env.PLAYWRIGHT_BASE_URL ??
+    `http://${process.env.PLAYWRIGHT_HOST ?? "127.0.0.1"}:${process.env.PORT ?? "5000"}`;
+  return new URL(baseUrl).origin;
+}
+
 async function ensureBaseFixture(): Promise<SeededFixture> {
   if (!seededFixturePromise) {
     seededFixturePromise = (async () => {
@@ -140,6 +149,22 @@ async function ensureBaseFixture(): Promise<SeededFixture> {
           name: TEST_ADMIN_NAME,
           passwordHash: hashTestPassword("ci-admin-password"),
           role: "ADMIN",
+          active: true,
+        },
+      });
+
+      await db.user.upsert({
+        where: { email: TEST_AGENT_EMAIL },
+        update: {
+          name: TEST_AGENT_NAME,
+          active: true,
+          role: "AGENT",
+        },
+        create: {
+          email: TEST_AGENT_EMAIL,
+          name: TEST_AGENT_NAME,
+          passwordHash: hashTestPassword("ci-agent-password"),
+          role: "AGENT",
           active: true,
         },
       });
@@ -361,10 +386,10 @@ export async function getAgentSessionCookie(): Promise<string> {
   const db = getTestDb();
   const agent = await db.user.findFirst({
     where: {
+      email: TEST_AGENT_EMAIL,
       active: true,
       role: "AGENT",
     },
-    orderBy: { createdAt: "asc" },
   });
 
   if (!agent) {

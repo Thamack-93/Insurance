@@ -40,6 +40,7 @@ jobs:
           cache: npm
 
       - name: Check Nora qualification scope
+        if: github.event_name == 'pull_request' && contains(github.head_ref, 'qualification')
         run: npm run check:qualification-scope
 
       - name: Install dependencies

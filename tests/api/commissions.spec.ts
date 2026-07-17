@@ -5,6 +5,7 @@ import {
   cleanupRecentRenewalWorkItems,
   getTestDb,
   getAdminSessionCookie,
+  getTestOrigin,
 } from "../helpers/db";
 
 test.describe("Commissions API", () => {
@@ -101,7 +102,7 @@ test.describe("Commissions API", () => {
     test("updates commission status to PAID with session", async ({ request }) => {
       const authCookie = await getAdminSessionCookie();
       const response = await request.post(`/api/commissions/${commissionId}/status`, {
-        headers: { cookie: authCookie },
+        headers: { cookie: authCookie, origin: getTestOrigin() },
         data: { status: "PAID", actualAmount: 95 },
       });
 

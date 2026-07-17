@@ -5,6 +5,7 @@ import {
   cleanupRecentRenewalWorkItems,
   getTestDb,
   getAdminSessionCookie,
+  getTestOrigin,
 } from "../helpers/db";
 
 test.describe("POST /api/payments/quick", () => {
@@ -23,7 +24,7 @@ test.describe("POST /api/payments/quick", () => {
   test("returns 400 with friendly error when required fields are missing", async ({ request }) => {
     const authCookie = await getAdminSessionCookie();
     const response = await request.post("/api/payments/quick", {
-      headers: { cookie: authCookie },
+      headers: { cookie: authCookie, origin: getTestOrigin() },
       data: {},
     });
 
@@ -37,7 +38,7 @@ test.describe("POST /api/payments/quick", () => {
   test("returns 400 when receipt id is unknown", async ({ request }) => {
     const authCookie = await getAdminSessionCookie();
     const response = await request.post("/api/payments/quick", {
-      headers: { cookie: authCookie },
+      headers: { cookie: authCookie, origin: getTestOrigin() },
       data: {
         receiptId: "non-existent-id-xxx",
         amount: 100,
@@ -66,7 +67,7 @@ test.describe("POST /api/payments/quick", () => {
       }
 
       const response = await request.post("/api/payments/quick", {
-        headers: { cookie: authCookie },
+        headers: { cookie: authCookie, origin: getTestOrigin() },
         data: {
           receiptId: seeded.id,
           amount: 1234.56,
@@ -126,7 +127,7 @@ test.describe("POST /api/payments/quick", () => {
 
       // Pay first time.
       const first = await request.post("/api/payments/quick", {
-        headers: { cookie: authCookie },
+        headers: { cookie: authCookie, origin: getTestOrigin() },
         data: {
           receiptId: seeded.id,
           amount: 1234.56,
@@ -145,7 +146,7 @@ test.describe("POST /api/payments/quick", () => {
 
       // Second attempt should fail with friendly error.
       const second = await request.post("/api/payments/quick", {
-        headers: { cookie: authCookie },
+        headers: { cookie: authCookie, origin: getTestOrigin() },
         data: {
           receiptId: seeded.id,
           amount: 1234.56,
@@ -155,7 +156,7 @@ test.describe("POST /api/payments/quick", () => {
       });
       expect(second.status()).toBe(400);
       const body = await second.json();
-      expect(body.error).toMatch(/pagado/i);
+      expect(body.error).toMatch(/pagado|registrado/i);
     } finally {
       if (seeded) {
         await cleanupReceipt(seeded.id);

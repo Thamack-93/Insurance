@@ -3,6 +3,9 @@ import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session";
 
 const PUBLIC_PREFIXES = [
   "/login",
+  // API handlers own their authentication response; do not turn 401/403
+  // responses into a page redirect that Playwright (or API clients) follows.
+  "/api",
   "/api/auth",
   "/api/integrations/telegram/webhook",
   "/_next",
@@ -38,6 +41,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|favicon.svg|login|api/auth|api/integrations/telegram/webhook).*)",
+    "/((?!_next/static|_next/image|favicon.ico|favicon.svg|login|api(?:/|$)).*)",
   ],
 };
