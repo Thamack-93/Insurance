@@ -38,7 +38,7 @@ export default async function NotificationSettingsPage() {
         <PageHeader
           eyebrow="Sistema"
           title="Notificaciones"
-          description="Prepara Telegram, revisa el horario fijo del resumen diario y confirma el estado del cron."
+          description="Prepara Telegram, revisa el resumen diario y confirma el estado del cron de Telegram."
           actions={
             <Button asChild variant="outline" className="rounded-full">
               <Link href="/settings">
@@ -119,8 +119,8 @@ export default async function NotificationSettingsPage() {
                 </Badge>
               </div>
               <p>
-                El cron corre una sola vez al día y envía tu resumen en el horario fijo mostrado
-                arriba.
+                El cron de Telegram corre una sola vez al día y envía tu resumen en el horario
+                fijo mostrado arriba.
               </p>
             </CardContent>
           </Card>

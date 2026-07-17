@@ -9,6 +9,7 @@ export const TELEGRAM_DIGEST_SECTION_LIMIT = 10;
 export type TelegramCommandName =
   | "start"
   | "help"
+  | "ayuda"
   | "link"
   | "status"
   | "confirmar"
@@ -17,6 +18,12 @@ export type TelegramCommandName =
   | "poliza"
   | "recibos"
   | "renovaciones"
+  | "resumen"
+  | "vencidos"
+  | "hoy"
+  | "proximos"
+  | "buscar"
+  | "tareas"
   | "unknown";
 
 export type TelegramCommand = {
@@ -52,6 +59,7 @@ export function parseTelegramCommand(text: string): TelegramCommand | null {
   if (
     command === "start" ||
     command === "help" ||
+    command === "ayuda" ||
     command === "link" ||
     command === "status" ||
     command === "confirmar" ||
@@ -59,7 +67,13 @@ export function parseTelegramCommand(text: string): TelegramCommand | null {
     command === "pago" ||
     command === "poliza" ||
     command === "recibos" ||
-    command === "renovaciones"
+    command === "renovaciones" ||
+    command === "resumen" ||
+    command === "vencidos" ||
+    command === "hoy" ||
+    command === "proximos" ||
+    command === "buscar" ||
+    command === "tareas"
   ) {
     return {
       command,
@@ -75,9 +89,9 @@ export function parseTelegramCommand(text: string): TelegramCommand | null {
   };
 }
 
-export function parseTelegramQueryDays(argument: string | null) {
+export function parseTelegramQueryDays(argument: string | null, defaultDays = TELEGRAM_QUERY_DEFAULT_DAYS) {
   if (!argument) {
-    return { ok: true as const, days: TELEGRAM_QUERY_DEFAULT_DAYS };
+    return { ok: true as const, days: defaultDays };
   }
 
   const normalized = argument.trim();
@@ -104,24 +118,35 @@ export function buildTelegramStartMessage() {
     "PolicyDesk Telegram está listo para vincular este chat.",
     "",
     "Genera un código desde Configuración > Notificaciones y envía /link CÓDIGO en este chat privado.",
-    "Después podrás usar /status para revisar el estado del vínculo.",
+    "Después podrás usar /status para revisar el estado del vínculo y /ayuda para ver los comandos útiles.",
     "Los cambios reales por Telegram están desactivados por defecto; actívalos en Configuración > Notificaciones si los necesitas.",
   ].join("\n");
 }
 
 export function buildTelegramHelpMessage() {
   return [
-    "Comandos disponibles:",
-    "/start - Ver instrucciones de vinculación.",
-    "/help - Mostrar este resumen.",
+    "Comandos útiles:",
+    "/start - Instrucciones de vinculación.",
+    "/ayuda - Mostrar este resumen. /help también funciona.",
     "/link <código> - Vincular este chat con tu cuenta de PolicyDesk.",
     "/status - Ver si este chat ya está vinculado.",
-    "/pago <póliza> <recibo> [hoy|YYYY-MM-DD] <método> - Preparar un pago por el total del recibo.",
-    "/poliza [campos] - Preparar una póliza y obtener un enlace seguro para terminarla en PolicyDesk.",
+    "",
+    "Consulta:",
+    "/resumen - Resumen diario en cualquier momento.",
+    "/vencidos [página] - Cobros vencidos.",
+    "/hoy - Cobros de hoy.",
+    "/proximos [días] [página] - Cobros próximos.",
+    "/recibos [días] [página] - Cobros vencidos y próximos.",
+    "/renovaciones [días] [página] - Renovaciones próximas.",
+    "/tareas [días] [página] - Tareas abiertas próximas.",
+    "/buscar <texto> - Buscar clientes, pólizas, recibos, tareas o archivos.",
+    "",
+    "Captura:",
+    "/pago <póliza> <recibo> [hoy|YYYY-MM-DD] <método> - Preparar un pago.",
+    "/poliza [campos] - Preparar una póliza y seguirla en PolicyDesk.",
     "/confirmar - Confirmar el borrador activo.",
     "/cancelar - Cancelar el borrador activo.",
-    "/recibos [días] - Ver cobros vencidos y próximos. Predeterminado: 30.",
-    "/renovaciones [días] - Ver renovaciones próximas. Predeterminado: 30.",
+    "",
     "Si falta información, el bot te la irá pidiendo paso a paso.",
     "Los cambios reales por Telegram están desactivados por defecto; actívalos en Configuración > Notificaciones.",
   ].join("\n");
@@ -165,7 +190,7 @@ export function buildTelegramLinkedChatRequiredMessage() {
 export function buildTelegramFallbackMessage() {
   return [
     "No reconocí ese comando.",
-    "Usa /help para ver las instrucciones de vinculación.",
+    "Usa /ayuda para ver los comandos disponibles.",
   ].join("\n");
 }
 

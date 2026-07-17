@@ -26,6 +26,7 @@ export type DuePaymentsOptions = {
   from?: Date;
   to?: Date;
   limit?: number;
+  skip?: number;
   statuses?: ReceiptStatus[];
 };
 
@@ -33,6 +34,7 @@ export type RenewalOptions = {
   from?: Date;
   to?: Date;
   limit?: number;
+  skip?: number;
   statuses?: PolicyStatus[];
 };
 
@@ -40,7 +42,9 @@ export type OpenWorkItemsOptions = {
   from?: Date;
   to?: Date;
   limit?: number;
+  skip?: number;
   statuses?: WorkItemStatus[];
+  portfolioOwnerId?: string;
 };
 
 export type DuePaymentItem = {
@@ -131,6 +135,7 @@ export async function getDuePayments(options: DuePaymentsOptions = {}) {
     },
     orderBy: [{ dueDate: "asc" }, { receiptNumber: "asc" }],
     take: options.limit,
+    skip: options.skip,
   });
 
   return rows.map<DuePaymentItem>((row) => ({
@@ -163,6 +168,7 @@ export async function getRenewals(options: RenewalOptions = {}) {
     },
     orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }],
     take: options.limit,
+    skip: options.skip,
   });
 
   return rows.map<RenewalItem>((row) => ({
@@ -189,6 +195,8 @@ export async function getOpenWorkItems(options: OpenWorkItemsOptions = {}) {
     from: range?.from,
     to: range?.to,
     limit: options.limit,
+    skip: options.skip,
+    portfolioOwnerId: options.portfolioOwnerId,
   });
 
   return rows.map<OpenWorkItemItem>((row) => ({

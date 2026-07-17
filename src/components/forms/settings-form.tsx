@@ -240,8 +240,8 @@ export function SettingsForm({ initialSettings, updateSettings }: SettingsFormPr
             <div className="space-y-0.5">
               <Label>Respaldo automático</Label>
               <p className="text-sm text-muted-foreground">
-                El único job diario de Vercel comparte la ejecución con Telegram y crea un
-                respaldo cifrado en Blob privado cuando corresponde.
+                El respaldo corre en un cron aparte de Telegram y crea un respaldo cifrado en
+                Blob privado cuando corresponde.
               </p>
             </div>
             <Checkbox
