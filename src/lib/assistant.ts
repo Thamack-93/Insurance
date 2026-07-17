@@ -408,7 +408,8 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
   const localReply = await buildLocalAssistantReply(user, message);
   const theme = detectTheme(normalized);
   const shouldTryAi =
-    shouldUseAssistantAi(normalized) || (!isDeterministicQuery(normalized) && message.length > 40) || message.length > 220;
+    theme?.kind !== "INCIDENT" &&
+    (shouldUseAssistantAi(normalized) || (!isDeterministicQuery(normalized) && message.length > 40) || message.length > 220);
 
   const aiContext = shouldTryAi || theme ? await buildAssistantAiContext(user, message, localReply) : null;
 

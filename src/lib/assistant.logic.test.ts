@@ -226,6 +226,30 @@ describe("assistant router", () => {
     expect(mocks.buildAssistantAiReply).not.toHaveBeenCalled();
   });
 
+  it("records product failure reports locally without waiting for AI", async () => {
+    mocks.evaluateAssistantInput.mockReturnValue({
+      allowed: true,
+      normalized: "la captura de pdf no funciona",
+      reason: "system",
+    });
+    mocks.buildLocalAssistantReply.mockResolvedValue(localReply);
+    mocks.getAssistantAiConnectionStatus.mockReturnValue({
+      available: true,
+      authMode: "api-key",
+      model: "minimax/minimax-m3",
+      fallbackModels: ["openai/gpt-5.4-mini"],
+    });
+    mocks.createAssistantThemeKey.mockImplementation((parts: Array<string | null>) => parts.filter(Boolean).join("-"));
+    mocks.recordAssistantReportSignal.mockResolvedValue({ id: "report-incident-1" });
+
+    const response = await buildAssistantReply(user, "La captura de PDF no funciona");
+
+    expect(response.source).toBe("local");
+    expect(response.reportId).toBe("report-incident-1");
+    expect(response.reportThemeLabel).toBe("Error en captura de pólizas por PDF");
+    expect(mocks.buildAssistantAiReply).not.toHaveBeenCalled();
+  });
+
   it("shows a visible fallback notice when AI cannot answer", async () => {
     mocks.evaluateAssistantInput.mockReturnValue({
       allowed: true,
