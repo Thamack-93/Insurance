@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NORA_SCOPE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+      PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1"
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
       SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
     services:
@@ -29,11 +31,16 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
+
+      - name: Check Nora qualification scope
+        run: npm run check:qualification-scope
 
       - name: Install dependencies
         run: npm ci
@@ -55,6 +62,15 @@ jobs:
 
       - name: Unit tests
         run: npm run test:unit
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: API tests
+        run: npm run test:api
+
+      - name: E2E tests
+        run: npm run test:e2e
 
       - name: Build
         run: npm run build
