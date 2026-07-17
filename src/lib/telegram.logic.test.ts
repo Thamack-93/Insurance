@@ -35,11 +35,13 @@ describe("telegram.shared", () => {
 
   it("parses Telegram commands with optional bot usernames", () => {
     expect(parseTelegramCommand("/start")).toEqual({ command: "start", argument: null, raw: "/start" });
+    expect(parseTelegramCommand("/ayuda")).toEqual({ command: "ayuda", argument: null, raw: "/ayuda" });
     expect(parseTelegramCommand("/help@PolicyDeskBot")).toEqual({
       command: "help",
       argument: null,
       raw: "/help@PolicyDeskBot",
     });
+    expect(parseTelegramCommand("/resumen")).toEqual({ command: "resumen", argument: null, raw: "/resumen" });
     expect(parseTelegramCommand("/link ABCD12")).toEqual({
       command: "link",
       argument: "ABCD12",
@@ -51,6 +53,8 @@ describe("telegram.shared", () => {
   it("builds concise user-facing replies", () => {
     expect(buildTelegramStartMessage()).toContain("/link CÓDIGO");
     expect(buildTelegramHelpMessage()).toContain("/status");
+    expect(buildTelegramHelpMessage()).toContain("/buscar <texto>");
+    expect(buildTelegramHelpMessage()).toContain("/resumen");
     expect(buildTelegramLinkSuccessMessage()).toContain("Chat vinculado");
     expect(buildTelegramLinkErrorMessage("Código inválido")).toContain("Código inválido");
     expect(

@@ -9,9 +9,8 @@ import { errorResult, successResult, type MutationResult } from "@/lib/mutation-
 import {
   createAndDeliverTelegramNotificationEvent,
   createTelegramLinkCodeForUser,
-  markTelegramDigestAsSentForUser,
   disconnectTelegramChannelForUser,
-  buildTelegramDailyDigest,
+  sendTelegramDigestMessagesForUser,
   type TelegramLinkCodeResult,
 } from "@/lib/telegram";
 
@@ -171,42 +170,31 @@ export async function sendTelegramDigestNow(): Promise<MutationResult> {
       return errorResult("Telegram no está vinculado.");
     }
 
-    const body = await buildTelegramDailyDigest(user.id);
-    const event = await createAndDeliverTelegramNotificationEvent({
-      type: "DAILY_DIGEST",
-      title: "Resumen diario PolicyDesk",
-      body,
-      priority: "LOW",
+    const result = await sendTelegramDigestMessagesForUser({
       userId: user.id,
-      force: true,
+      markAsSent: false,
     });
-
-    if (!event) {
-      return errorResult("No se pudo enviar el resumen.");
-    }
 
     await writeActivityLog({
       entityType: "NotificationEvent",
-      entityId: event.id,
-      action: `TELEGRAM_DIGEST_NOW_${event.status}`,
+      entityId: `telegram-digest-now:${user.id}`,
+      action: result.failed === 0 ? "TELEGRAM_DIGEST_NOW_SENT" : "TELEGRAM_DIGEST_NOW_PARTIAL",
       newValue: {
-        status: event.status,
-        error: event.error,
+        sent: result.sent,
+        failed: result.failed,
+        parts: result.parts,
       },
       userId: user.id,
     });
 
-    if (event.status === "SENT") {
-      await markTelegramDigestAsSentForUser(user.id);
+    if (result.sent > 0) {
       revalidatePath("/settings/notifications");
-      return successResult(user.id, "/settings/notifications", "Resumen diario enviado.");
+      return result.failed === 0
+        ? successResult(user.id, "/settings/notifications", "Resumen diario enviado en varios mensajes.")
+        : successResult(user.id, "/settings/notifications", "Resumen diario enviado parcialmente.");
     }
 
-    if (event.status === "SKIPPED") {
-      return errorResult(event.error ?? "Telegram no está vinculado.");
-    }
-
-    return errorResult(event.error ?? "No se pudo enviar el resumen.");
+    return errorResult("No se pudo enviar el resumen.");
   } catch (error) {
     logError("settings.notifications.telegram.digestNow", error);
     return errorResult("No se pudo enviar el resumen.");

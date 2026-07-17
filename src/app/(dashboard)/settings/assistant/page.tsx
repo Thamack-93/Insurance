@@ -7,6 +7,7 @@ import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-but
 import { requireAdminOrRedirect } from "@/lib/auth";
 import { listAssistantReports } from "@/lib/assistant-reports";
 import { getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
+import { listAssistantAiRuns } from "@/lib/assistant-ai-runs";
 import { formatDate } from "@/lib/dates";
 import { AssistantReportActionButtons } from "@/components/assistant/report-action-buttons";
 import { Gauge, ShieldCheck } from "lucide-react";
@@ -140,6 +141,108 @@ function ReportList({
   );
 }
 
+function AiRunList({
+  runs,
+}: {
+  runs: Awaited<ReturnType<typeof listAssistantAiRuns>>;
+}) {
+  return (
+    <div className="space-y-4">
+      {runs.length === 0 ? (
+        <Card>
+          <CardContent className="p-6 text-sm text-muted-foreground">No hay corridas de IA registradas todavía.</CardContent>
+        </Card>
+      ) : null}
+      {runs.map((run) => (
+        <Card key={run.id} className="border-border/70 bg-card/90">
+          <CardHeader className="border-b border-border/70">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                  {run.operation}
+                  <Badge variant={run.status === "SUCCEEDED" ? "default" : run.status === "FAILED" ? "destructive" : "outline"} className="rounded-full">
+                    {run.status}
+                  </Badge>
+                  <Badge variant="outline" className="rounded-full">
+                    {run.tier}
+                  </Badge>
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  {run.requestedModel} · {run.attemptCount} intentos · {run.fallbackCount} fallback{run.fallbackCount === 1 ? "" : "s"}
+                </CardDescription>
+              </div>
+              <div className="text-right text-xs text-muted-foreground">
+                <p>{formatDurationMs(run.durationMs)}</p>
+                <p>{formatDate(new Date(run.createdAt))}</p>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4 p-5 text-sm">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Modelo final</p>
+                <p className="mt-1 font-medium">{run.finalModel ?? "Sin dato"}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Costo estimado</p>
+                <p className="mt-1 font-medium">{formatCostUsd(run.estimatedCostUsd)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Tokens</p>
+                <p className="mt-1 font-medium">
+                  {formatTokenCount(run.totalUsage?.totalTokens ?? run.usage?.totalTokens)}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Reporte</p>
+                <p className="mt-1 font-medium">{run.reportId ?? "Sin reporte"}</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <span>Intento final: {run.finishReason ?? "sin dato"}</span>
+              <span>Fallo: {run.errorCode ?? "ninguno"}</span>
+              <span>Folio corrida: {run.id}</span>
+            </div>
+            <details className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3">
+              <summary className="cursor-pointer font-medium">Intentos ({run.attempts.length})</summary>
+              <div className="mt-3 space-y-3">
+                {run.attempts.map((attempt) => (
+                  <div key={attempt.id} className="rounded-xl border border-border/60 bg-background/70 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-medium">
+                        #{attempt.attemptNumber} · {attempt.requestedModel}
+                      </p>
+                      <Badge variant="outline" className="rounded-full text-[10px] uppercase tracking-wide">
+                        {attempt.status}
+                      </Badge>
+                    </div>
+                    <div className="mt-2 grid gap-1 sm:grid-cols-2">
+                      <span>Tier: {attempt.tier}</span>
+                      <span>Final: {attempt.finalModel ?? "sin dato"}</span>
+                      <span>Motivo: {attempt.fallbackReason ?? "sin motivo"}</span>
+                      <span>Duración: {formatDurationMs(attempt.durationMs)}</span>
+                      <span>Código: {attempt.code ?? "ok"}</span>
+                      <span>Finish: {attempt.finishReason ?? "sin dato"}</span>
+                    </div>
+                    {attempt.usage ? (
+                      <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+                        <span>In: {formatTokenCount(attempt.usage.inputTokens)}</span>
+                        <span>Out: {formatTokenCount(attempt.usage.outputTokens)}</span>
+                        <span>Total: {formatTokenCount(attempt.usage.totalTokens)}</span>
+                        <span>Costo: {formatCostUsd(attempt.usage.estimatedCostUsd)}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </details>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
 export default async function AssistantSettingsPage() {
   await requireAdminOrRedirect();
   const aiStatus = getAssistantAiConnectionStatus();
@@ -147,9 +250,16 @@ export default async function AssistantSettingsPage() {
     listAssistantReports({ kind: "INCIDENT", limit: 100 }),
     listAssistantReports({ kind: "SUGGESTION", limit: 100 }),
   ]);
+  const aiRuns = await listAssistantAiRuns({ limit: 50 });
 
   const openIncidents = incidents.filter((report) => report.status === "OPEN" || report.status === "COLLECTING").length;
   const openSuggestions = suggestions.filter((report) => report.status === "OPEN" || report.status === "COLLECTING").length;
+  const succeededRuns = aiRuns.filter((run) => run.status === "SUCCEEDED").length;
+  const failedRuns = aiRuns.filter((run) => run.status === "FAILED").length;
+  const fallbackRuns = aiRuns.filter((run) => run.fallbackCount > 0).length;
+  const averageDurationMs = aiRuns.length
+    ? Math.round(aiRuns.reduce((sum, run) => sum + (run.durationMs ?? 0), 0) / aiRuns.length)
+    : 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -217,6 +327,39 @@ export default async function AssistantSettingsPage() {
         </Card>
       </section>
 
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription>Corridas registradas</CardDescription>
+            <CardTitle className="text-3xl">{aiRuns.length}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription>Corridas exitosas</CardDescription>
+            <CardTitle className="text-3xl">{succeededRuns}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription>Corridas con fallback</CardDescription>
+            <CardTitle className="text-3xl">{fallbackRuns}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription>Corridas fallidas</CardDescription>
+            <CardTitle className="text-3xl">{failedRuns}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription>Duración media</CardDescription>
+            <CardTitle className="text-3xl">{formatDurationMs(averageDurationMs)}</CardTitle>
+          </CardHeader>
+        </Card>
+      </section>
+
       <Card className="border-emerald-200/70 bg-emerald-50/60 dark:border-emerald-900/50 dark:bg-emerald-950/20">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="size-4" /> Controles activos</CardTitle>
@@ -230,12 +373,16 @@ export default async function AssistantSettingsPage() {
         <TabsList>
           <TabsTrigger value="incidentes">Incidentes</TabsTrigger>
           <TabsTrigger value="sugerencias">Sugerencias</TabsTrigger>
+          <TabsTrigger value="uso-ia">Uso IA</TabsTrigger>
         </TabsList>
         <TabsContent value="incidentes" className="space-y-4">
           <ReportList reports={incidents} />
         </TabsContent>
         <TabsContent value="sugerencias" className="space-y-4">
           <ReportList reports={suggestions} />
+        </TabsContent>
+        <TabsContent value="uso-ia" className="space-y-4">
+          <AiRunList runs={aiRuns} />
         </TabsContent>
       </UrlTabs>
     </div>

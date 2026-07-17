@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
-import { DEFAULT_TIMEZONE, formatDate } from "@/lib/dates";
+import { DEFAULT_TIMEZONE, daysUntil, formatDate } from "@/lib/dates";
 import { businessAddDays, businessEndOfDay, businessStartOfDay, parseBusinessDateInput } from "@/lib/business-dates";
+import { getOpenWorkItems } from "@/lib/list-queries";
 import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { formatCurrency, toNumber } from "@/lib/money";
@@ -21,6 +22,7 @@ import {
 import {
   TELEGRAM_DIGEST_SECTION_LIMIT,
   TELEGRAM_LINK_TOKEN_TTL_MINUTES,
+  TELEGRAM_QUERY_DEFAULT_DAYS,
   TELEGRAM_QUERY_RESULT_LIMIT,
   buildTelegramFallbackMessage,
   buildTelegramDraftCancelledMessage,
@@ -39,8 +41,10 @@ import {
   parseTelegramCommand,
   parseTelegramQueryDays,
 } from "@/lib/telegram-shared";
+import { globalSearch } from "@/lib/search";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import { checkRateLimit } from "@/lib/request-guards";
+import { OPEN_WORK_ITEM_STATUSES, countWorkItems } from "@/lib/work-queue";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -66,6 +70,11 @@ type TelegramRenewalItem = {
 type TelegramListResult<T> = {
   total: number;
   items: T[];
+};
+
+type TelegramDigestMessagePart = {
+  title: string;
+  body: string;
 };
 
 type TelegramUser = {
@@ -150,6 +159,7 @@ export type TelegramDailyDigestResult = {
   processed: number;
   sent: number;
   failed: number;
+  parts: number;
 };
 
 export type TelegramWebhookSyncResult =
@@ -215,6 +225,7 @@ type TelegramDraftState = {
 };
 
 const TELEGRAM_DRAFT_TTL_MS = 2 * 60 * 60 * 1000;
+const TELEGRAM_MESSAGE_LIMIT = 3900;
 const TELEGRAM_COMMAND_RATE_LIMIT = {
   limit: 40,
   windowMs: 15 * 60 * 1000,
@@ -538,7 +549,7 @@ function getDigestDateKey(now: Date, timeZone: string | null | undefined) {
   return getLocalDateKey(now, timeZone ?? DEFAULT_TIMEZONE);
 }
 
-export async function markTelegramDigestAsSentForUser(
+export async function markTelegramDigestAsAutoSentForUser(
   userId: string,
   sentAt = new Date(),
   client?: DbClient,
@@ -554,9 +565,9 @@ export async function markTelegramDigestAsSentForUser(
     const updated = await db.user.update({
       where: { id: userId },
       data: {
-        telegramDigestLastSentAt: sentAt,
+        telegramDigestLastAutoSentAt: sentAt,
       },
-      select: { id: true, telegramDigestLastSentAt: true },
+      select: { id: true, telegramDigestLastAutoSentAt: true },
     });
 
     return {
@@ -564,7 +575,7 @@ export async function markTelegramDigestAsSentForUser(
       digestDateKey: getDigestDateKey(sentAt, DEFAULT_TIMEZONE),
     };
   } catch (error) {
-    logError("telegram.markDigestSent", error, { userId });
+    logError("telegram.markDigestAutoSent", error, { userId });
     return null;
   }
 }
@@ -962,6 +973,7 @@ async function getTelegramReceipts(input: {
   to: Date;
   from?: Date;
   limit: number;
+  skip?: number;
   client?: DbClient;
 }): Promise<TelegramListResult<TelegramReceiptItem>> {
   const db = input.client ?? getDb();
@@ -988,6 +1000,7 @@ async function getTelegramReceipts(input: {
       },
       orderBy: [{ dueDate: "asc" }, { receiptNumber: "asc" }],
       take: input.limit,
+      skip: input.skip,
     }),
   ]);
 
@@ -1017,6 +1030,7 @@ async function getTelegramRenewals(input: {
   from: Date;
   to: Date;
   limit: number;
+  skip?: number;
   client?: DbClient;
 }): Promise<TelegramListResult<TelegramRenewalItem>> {
   const db = input.client ?? getDb();
@@ -1037,6 +1051,7 @@ async function getTelegramRenewals(input: {
       },
       orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }],
       take: input.limit,
+      skip: input.skip,
     }),
   ]);
 
@@ -1053,17 +1068,38 @@ async function getTelegramRenewals(input: {
 }
 
 function formatTelegramReceiptLine(item: TelegramReceiptItem) {
+  const diff = daysUntil(item.dueDate);
+  const dueLabel =
+    diff < 0
+      ? `vencido hace ${Math.abs(diff)} días`
+      : diff === 0
+        ? "vence hoy"
+        : `vence en ${diff} días`;
+  const balanceLabel =
+    item.balance <= 0
+      ? "pagado"
+      : item.balance >= item.amount
+        ? `por cobrar ${formatCurrency(item.balance, item.currency)}`
+        : `saldo ${formatCurrency(item.balance, item.currency)} de ${formatCurrency(item.amount, item.currency)}`;
+
   return [
-    `• ${item.receiptNumber} · ${item.clientName}`,
-    `  ${item.originLabel} · Póliza ${item.policyNumber} · ${item.insurerName}`,
-    `  Vence ${formatTelegramDate(item.dueDate)} · ${formatCurrency(item.amount, item.currency)} · saldo ${formatCurrency(item.balance, item.currency)}`,
+    `• ${item.clientName} · Póliza ${item.policyNumber} · ${item.insurerName}`,
+    `  Recibo ${item.receiptNumber} · ${formatTelegramDate(item.dueDate)} · ${dueLabel} · ${balanceLabel}`,
   ].join("\n");
 }
 
 function formatTelegramRenewalLine(item: TelegramRenewalItem) {
+  const diff = daysUntil(item.endDate);
+  const renewalLabel =
+    diff < 0
+      ? `vencida hace ${Math.abs(diff)} días`
+      : diff === 0
+        ? "vence hoy"
+        : `vence en ${diff} días`;
+
   return [
-    `• Póliza ${item.policyNumber} · ${item.clientName}`,
-    `  ${item.insurerName} · vence ${formatTelegramDate(item.endDate)}`,
+    `• ${item.clientName} · Póliza ${item.policyNumber} · ${item.insurerName}`,
+    `  ${formatTelegramDate(item.endDate)} · ${renewalLabel}`,
   ].join("\n");
 }
 
@@ -1072,22 +1108,191 @@ function buildTelegramSection(input: {
   total: number;
   lines: string[];
   emptyText: string;
-  path: string;
+  page?: number;
+  totalPages?: number;
 }) {
-  const link = buildPolicyDeskUrl(input.path);
   return [
-    `${input.title}: ${input.total}`,
+    `${input.title}: ${input.total}${input.page && input.totalPages ? ` · página ${input.page}/${input.totalPages}` : ""}`,
     ...(input.lines.length > 0 ? input.lines : [input.emptyText]),
-    ...(link ? [`Ver en PolicyDesk: ${link}`] : []),
   ].join("\n");
 }
 
-export async function buildTelegramReceiptsReply(userId: string, days: number, client?: DbClient) {
+function getTelegramTotalPages(total: number) {
+  return Math.max(1, Math.ceil(total / TELEGRAM_QUERY_RESULT_LIMIT));
+}
+
+function parseTelegramPage(argument: string | null) {
+  if (!argument) {
+    return { ok: true as const, page: 1 };
+  }
+
+  const normalized = argument.trim();
+  if (!/^\d+$/.test(normalized)) {
+    return {
+      ok: false as const,
+      error: "Usa un número de página válido.",
+    };
+  }
+
+  const page = Number(normalized);
+  if (!Number.isSafeInteger(page) || page < 1) {
+    return {
+      ok: false as const,
+      error: "Usa un número de página válido.",
+    };
+  }
+
+  return { ok: true as const, page };
+}
+
+function parseTelegramDaysAndPage(argument: string | null, defaultDays: number) {
+  if (!argument) {
+    return { ok: true as const, days: defaultDays, page: 1 };
+  }
+
+  const tokens = argument.trim().split(/\s+/).filter(Boolean);
+  const days = parseTelegramQueryDays(tokens[0] ?? null, defaultDays);
+  if (!days.ok) return days;
+
+  if (tokens.length <= 1) {
+    return { ok: true as const, days: days.days, page: 1 };
+  }
+
+  const page = parseTelegramPage(tokens[1] ?? null);
+  if (!page.ok) return page;
+
+  return { ok: true as const, days: days.days, page: page.page };
+}
+
+function splitTelegramMessageLines(lines: string[], maxLength = TELEGRAM_MESSAGE_LIMIT) {
+  const parts: string[] = [];
+  let current: string[] = [];
+
+  const pushCurrent = () => {
+    if (current.length > 0) {
+      parts.push(current.join("\n"));
+      current = [];
+    }
+  };
+
+  for (const line of lines) {
+    const candidate = current.length > 0 ? [...current, line].join("\n") : line;
+    if (candidate.length <= maxLength) {
+      current.push(line);
+      continue;
+    }
+
+    pushCurrent();
+
+    if (line.length <= maxLength) {
+      current = [line];
+      continue;
+    }
+
+    let start = 0;
+    while (start < line.length) {
+      const chunk = line.slice(start, start + maxLength);
+      if (chunk.length === maxLength && start + maxLength < line.length) {
+        parts.push(chunk);
+      } else {
+        current = [chunk];
+      }
+      start += maxLength;
+    }
+  }
+
+  pushCurrent();
+
+  return parts.filter(Boolean);
+}
+
+function getTelegramSummaryLabel(total: number, suffix: string) {
+  return total === 1 ? `1 ${suffix}` : `${total} ${suffix}s`;
+}
+
+function formatTelegramDigestSummary(input: {
+  dayStart: Date;
+  overdueReceipts: TelegramListResult<TelegramReceiptItem>;
+  todayReceipts: TelegramListResult<TelegramReceiptItem>;
+  upcomingReceipts: TelegramListResult<TelegramReceiptItem>;
+  upcomingRenewals: TelegramListResult<TelegramRenewalItem>;
+}) {
+  return [
+    "Resumen diario PolicyDesk",
+    `Fecha: ${formatTelegramDate(input.dayStart)}`,
+    "",
+    `Vencidos: ${getTelegramSummaryLabel(input.overdueReceipts.total, "recibo")}`,
+    `Hoy: ${getTelegramSummaryLabel(input.todayReceipts.total, "recibo")}`,
+    `Próximos 14 días: ${getTelegramSummaryLabel(input.upcomingReceipts.total, "recibo")}`,
+    `Renovaciones 7 días: ${getTelegramSummaryLabel(input.upcomingRenewals.total, "póliza")}`,
+  ].join("\n");
+}
+
+function formatTelegramDigestDetailLines(input: {
+  overdueReceipts: TelegramListResult<TelegramReceiptItem>;
+  todayReceipts: TelegramListResult<TelegramReceiptItem>;
+  upcomingReceipts: TelegramListResult<TelegramReceiptItem>;
+  upcomingRenewals: TelegramListResult<TelegramRenewalItem>;
+}) {
+  const sections = [
+    buildTelegramSection({
+      title: "Recibos vencidos",
+      total: input.overdueReceipts.total,
+      lines: input.overdueReceipts.items.map(formatTelegramReceiptLine),
+      emptyText: "Sin recibos vencidos.",
+    }),
+    buildTelegramSection({
+      title: "Recibos de hoy",
+      total: input.todayReceipts.total,
+      lines: input.todayReceipts.items.map(formatTelegramReceiptLine),
+      emptyText: "Sin recibos pendientes para hoy.",
+    }),
+    buildTelegramSection({
+      title: "Recibos próximos 14 días",
+      total: input.upcomingReceipts.total,
+      lines: input.upcomingReceipts.items.map(formatTelegramReceiptLine),
+      emptyText: "Sin recibos próximos.",
+    }),
+    buildTelegramSection({
+      title: "Renovaciones próximas 7 días",
+      total: input.upcomingRenewals.total,
+      lines: input.upcomingRenewals.items.map(formatTelegramRenewalLine),
+      emptyText: "Sin renovaciones próximas.",
+    }),
+  ];
+
+  return sections;
+}
+
+function buildTelegramDailyDigestMessages(input: {
+  dayStart: Date;
+  overdueReceipts: TelegramListResult<TelegramReceiptItem>;
+  todayReceipts: TelegramListResult<TelegramReceiptItem>;
+  upcomingReceipts: TelegramListResult<TelegramReceiptItem>;
+  upcomingRenewals: TelegramListResult<TelegramRenewalItem>;
+}): TelegramDigestMessagePart[] {
+  const summary = formatTelegramDigestSummary(input);
+  const detailLines = formatTelegramDigestDetailLines(input).flatMap((block, index) =>
+    index === 0 ? block.split("\n") : ["", ...block.split("\n")],
+  );
+  const detailMessages = splitTelegramMessageLines(detailLines);
+
+  return [
+    { title: "Resumen diario PolicyDesk", body: summary },
+    ...detailMessages.map((body, index) => ({
+      title: detailMessages.length > 1 ? `Resumen diario PolicyDesk · detalle ${index + 1}/${detailMessages.length}` : "Resumen diario PolicyDesk · detalle",
+      body,
+    })),
+  ];
+}
+
+export async function buildTelegramReceiptsReply(userId: string, days: number, page = 1, client?: DbClient) {
   const dayStart = businessStartOfDay(new Date());
   const receipts = await getTelegramReceipts({
     userId,
     to: businessEndOfDay(businessAddDays(dayStart, days)),
     limit: TELEGRAM_QUERY_RESULT_LIMIT,
+    skip: (page - 1) * TELEGRAM_QUERY_RESULT_LIMIT,
     client,
   });
 
@@ -1096,17 +1301,19 @@ export async function buildTelegramReceiptsReply(userId: string, days: number, c
     total: receipts.total,
     lines: receipts.items.map(formatTelegramReceiptLine),
     emptyText: "No hay cobros pendientes en este rango.",
-    path: "/due-payments",
+    page,
+    totalPages: getTelegramTotalPages(receipts.total),
   });
 }
 
-export async function buildTelegramRenewalsReply(userId: string, days: number, client?: DbClient) {
+export async function buildTelegramRenewalsReply(userId: string, days: number, page = 1, client?: DbClient) {
   const dayStart = businessStartOfDay(new Date());
   const renewals = await getTelegramRenewals({
     userId,
     from: dayStart,
     to: businessEndOfDay(businessAddDays(dayStart, days)),
     limit: TELEGRAM_QUERY_RESULT_LIMIT,
+    skip: (page - 1) * TELEGRAM_QUERY_RESULT_LIMIT,
     client,
   });
 
@@ -1115,11 +1322,186 @@ export async function buildTelegramRenewalsReply(userId: string, days: number, c
     total: renewals.total,
     lines: renewals.items.map(formatTelegramRenewalLine),
     emptyText: "No hay renovaciones próximas en este rango.",
-    path: "/renewals",
+    page,
+    totalPages: getTelegramTotalPages(renewals.total),
+  });
+}
+
+function formatTelegramTaskLine(item: Awaited<ReturnType<typeof getOpenWorkItems>>[number]) {
+  const dueLabel = item.dueDate
+    ? (() => {
+        const diff = daysUntil(item.dueDate as Date);
+        if (diff < 0) return `vencida hace ${Math.abs(diff)} días`;
+        if (diff === 0) return "vence hoy";
+        return `vence en ${diff} días`;
+      })()
+    : "sin fecha límite";
+  const context = [
+    item.client?.fullName ? `Cliente ${item.client.fullName}` : null,
+    item.policy ? `Póliza ${item.policy.policyNumber}` : null,
+    item.insurer ? item.insurer.name : null,
+  ].filter(Boolean);
+  const link = buildPolicyDeskUrl(`/tasks/${item.id}`);
+
+  return [
+    `• ${item.title}`,
+    context.length > 0 ? `  ${context.join(" · ")}` : null,
+    `  ${dueLabel} · prioridad ${item.priority.toLowerCase()}${link ? ` · Abrir: ${link}` : ""}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatTelegramSearchResultLine(result: Awaited<ReturnType<typeof globalSearch>>[number]) {
+  const labelMap: Record<Awaited<ReturnType<typeof globalSearch>>[number]["type"], string> = {
+    client: "Cliente",
+    policy: "Póliza",
+    receipt: "Recibo",
+    workItem: "Tarea",
+    claim: "Siniestro",
+    quote: "Cotización",
+    insurer: "Aseguradora",
+    document: "Documento",
+  };
+  const details = [result.subtitle, result.parentLabel, result.details?.[0]].filter(Boolean);
+  const link = buildPolicyDeskUrl(result.href);
+
+  return [
+    `• ${result.title}${labelMap[result.type] ? ` · ${labelMap[result.type]}` : ""}`,
+    details.length > 0 ? `  ${details.join(" · ")}` : null,
+    link ? `  Abrir: ${link}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function getTelegramQueryRangeFromNow(days: number) {
+  const dayStart = businessStartOfDay(new Date());
+  return {
+    from: businessAddDays(dayStart, 1),
+    to: businessEndOfDay(businessAddDays(dayStart, days)),
+    dayStart,
+  };
+}
+
+export async function buildTelegramOverdueReply(userId: string, page = 1, client?: DbClient) {
+  const dayStart = businessStartOfDay(new Date());
+  const receipts = await getTelegramReceipts({
+    userId,
+    to: new Date(dayStart.getTime() - 1),
+    limit: TELEGRAM_QUERY_RESULT_LIMIT,
+    skip: (page - 1) * TELEGRAM_QUERY_RESULT_LIMIT,
+    client,
+  });
+
+  return buildTelegramSection({
+    title: "Cobros vencidos",
+    total: receipts.total,
+    lines: receipts.items.map(formatTelegramReceiptLine),
+    emptyText: "Sin cobros vencidos.",
+    page,
+    totalPages: getTelegramTotalPages(receipts.total),
+  });
+}
+
+export async function buildTelegramTodayReply(userId: string, page = 1, client?: DbClient) {
+  const dayStart = businessStartOfDay(new Date());
+  const dayEnd = businessEndOfDay(dayStart);
+  const receipts = await getTelegramReceipts({
+    userId,
+    from: dayStart,
+    to: dayEnd,
+    limit: TELEGRAM_QUERY_RESULT_LIMIT,
+    skip: (page - 1) * TELEGRAM_QUERY_RESULT_LIMIT,
+    client,
+  });
+
+  return buildTelegramSection({
+    title: "Cobros de hoy",
+    total: receipts.total,
+    lines: receipts.items.map(formatTelegramReceiptLine),
+    emptyText: "Sin cobros para hoy.",
+    page,
+    totalPages: getTelegramTotalPages(receipts.total),
+  });
+}
+
+export async function buildTelegramUpcomingReceiptsReply(userId: string, days: number, page = 1, client?: DbClient) {
+  const { from, to } = getTelegramQueryRangeFromNow(days);
+  const receipts = await getTelegramReceipts({
+    userId,
+    from,
+    to,
+    limit: TELEGRAM_QUERY_RESULT_LIMIT,
+    skip: (page - 1) * TELEGRAM_QUERY_RESULT_LIMIT,
+    client,
+  });
+
+  return buildTelegramSection({
+    title: `Cobros próximos (${days} días)`,
+    total: receipts.total,
+    lines: receipts.items.map(formatTelegramReceiptLine),
+    emptyText: "Sin cobros próximos.",
+    page,
+    totalPages: getTelegramTotalPages(receipts.total),
+  });
+}
+
+export async function buildTelegramTasksReply(userId: string, days: number, page = 1, client?: DbClient) {
+  const dayStart = businessStartOfDay(new Date());
+  const to = businessEndOfDay(businessAddDays(dayStart, days));
+  const [total, tasks] = await Promise.all([
+    countWorkItems({
+      workItemTypes: ["TASK"],
+      statuses: OPEN_WORK_ITEM_STATUSES,
+      from: dayStart,
+      to,
+      portfolioOwnerId: userId,
+    }),
+    getOpenWorkItems({
+      from: dayStart,
+      to,
+      limit: TELEGRAM_QUERY_RESULT_LIMIT,
+      skip: (page - 1) * TELEGRAM_QUERY_RESULT_LIMIT,
+      portfolioOwnerId: userId,
+    }),
+  ]);
+
+  return buildTelegramSection({
+    title: `Tareas próximas (${days} días)`,
+    total,
+    lines: tasks.map(formatTelegramTaskLine),
+    emptyText: "Sin tareas próximas.",
+    page,
+    totalPages: getTelegramTotalPages(total),
+  });
+}
+
+export async function buildTelegramSearchReply(userId: string, query: string, client?: DbClient) {
+  const normalized = query.trim();
+  if (!normalized) {
+    return "Escribe /buscar <texto> para buscar clientes, pólizas, recibos, tareas o archivos.";
+  }
+
+  const results = await globalSearch(normalized, userId);
+  if (results.length === 0) {
+    return `No encontré resultados para "${normalized}".`;
+  }
+
+  return buildTelegramSection({
+    title: `Resultados para "${normalized}"`,
+    total: results.length,
+    lines: results.slice(0, TELEGRAM_QUERY_RESULT_LIMIT).map(formatTelegramSearchResultLine),
+    emptyText: "Sin resultados.",
   });
 }
 
 export async function buildTelegramDailyDigest(userId: string, client?: DbClient) {
+  const parts = await buildTelegramDailyDigestMessagesByUser(userId, client);
+  return parts.map((part) => part.body).join("\n\n");
+}
+
+export async function buildTelegramDailyDigestMessagesByUser(userId: string, client?: DbClient) {
   const dayStart = businessStartOfDay(new Date());
   const dayEnd = businessEndOfDay(dayStart);
   const [overdueReceipts, todayReceipts, upcomingReceipts, upcomingRenewals] = await Promise.all([
@@ -1152,41 +1534,52 @@ export async function buildTelegramDailyDigest(userId: string, client?: DbClient
     }),
   ]);
 
-  return [
-    `Fecha: ${formatTelegramDate(dayStart)}`,
-    "",
-    buildTelegramSection({
-      title: "Recibos vencidos",
-      total: overdueReceipts.total,
-      lines: overdueReceipts.items.map(formatTelegramReceiptLine),
-      emptyText: "Sin recibos vencidos.",
-      path: "/due-payments?window=overdue",
-    }),
-    "",
-    buildTelegramSection({
-      title: "Recibos pendientes de hoy",
-      total: todayReceipts.total,
-      lines: todayReceipts.items.map(formatTelegramReceiptLine),
-      emptyText: "Sin recibos pendientes para hoy.",
-      path: "/due-payments?window=today",
-    }),
-    "",
-    buildTelegramSection({
-      title: "Recibos próximos 14 días",
-      total: upcomingReceipts.total,
-      lines: upcomingReceipts.items.map(formatTelegramReceiptLine),
-      emptyText: "Sin recibos próximos.",
-      path: "/due-payments?window=30",
-    }),
-    "",
-    buildTelegramSection({
-      title: "Renovaciones próximas 7 días",
-      total: upcomingRenewals.total,
-      lines: upcomingRenewals.items.map(formatTelegramRenewalLine),
-      emptyText: "Sin renovaciones próximas.",
-      path: "/renewals",
-    }),
-  ].join("\n");
+  return buildTelegramDailyDigestMessages({
+    dayStart,
+    overdueReceipts,
+    todayReceipts,
+    upcomingReceipts,
+    upcomingRenewals,
+  });
+}
+
+export async function sendTelegramDigestMessagesForUser(input: {
+  userId: string;
+  client?: DbClient;
+  markAsSent?: boolean;
+}) {
+  const db = input.client ?? getDb();
+  const parts = await buildTelegramDailyDigestMessagesByUser(input.userId, db);
+  let sent = 0;
+  let failed = 0;
+
+  for (const part of parts) {
+    const event = await createAndDeliverTelegramNotificationEvent({
+      type: "DAILY_DIGEST",
+      title: part.title,
+      body: part.body,
+      priority: "LOW",
+      userId: input.userId,
+      force: true,
+    });
+
+    if (event?.status === "SENT") {
+      sent += 1;
+    } else {
+      failed += 1;
+    }
+  }
+
+  if (input.markAsSent !== false && sent > 0 && failed === 0) {
+    await markTelegramDigestAsAutoSentForUser(input.userId, new Date(), db);
+  }
+
+  return {
+    processed: parts.length,
+    sent,
+    failed,
+    parts: parts.length,
+  };
 }
 
 async function createTelegramPaymentDraft(input: {
@@ -1988,7 +2381,7 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
       user: {
         select: {
           timeZone: true,
-          telegramDigestLastSentAt: true,
+          telegramDigestLastAutoSentAt: true,
         },
       },
     },
@@ -1998,6 +2391,7 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
     processed: channels.length,
     sent: 0,
     failed: 0,
+    parts: 0,
   };
   const now = new Date();
 
@@ -2005,27 +2399,24 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
     if (!channel.telegramChatId) continue;
     const timeZone = DEFAULT_TIMEZONE;
     if (
-      channel.user.telegramDigestLastSentAt &&
-      getLocalDateKey(channel.user.telegramDigestLastSentAt, timeZone) === getLocalDateKey(now, timeZone)
+      channel.user.telegramDigestLastAutoSentAt &&
+      getLocalDateKey(channel.user.telegramDigestLastAutoSentAt, timeZone) === getLocalDateKey(now, timeZone)
     ) {
       continue;
     }
     try {
-      const body = await buildTelegramDailyDigest(channel.userId, db);
-      const event = await createAndDeliverTelegramNotificationEvent({
-        type: "DAILY_DIGEST",
-        title: "Resumen diario PolicyDesk",
-        body,
-        priority: "LOW",
+      const digestResult = await sendTelegramDigestMessagesForUser({
         userId: channel.userId,
-        force: true,
+        client: db,
+        markAsSent: false,
       });
 
-      if (event?.status === "SENT") {
-        result.sent += 1;
-        await markTelegramDigestAsSentForUser(channel.userId, now, db);
-      } else {
-        result.failed += 1;
+      result.sent += digestResult.sent;
+      result.failed += digestResult.failed;
+      result.parts += digestResult.parts;
+
+      if (digestResult.sent > 0 && digestResult.failed === 0) {
+        await markTelegramDigestAsAutoSentForUser(channel.userId, now, db);
       }
     } catch (error) {
       result.failed += 1;
@@ -2462,6 +2853,7 @@ export async function processTelegramWebhookUpdate(
       case "start":
         return { handled: true, chatId, replyText: buildTelegramStartMessage() };
       case "help":
+      case "ayuda":
         return { handled: true, chatId, replyText: buildTelegramHelpMessage() };
       case "status": {
         const channel = await getTelegramChannelByChatId(chatId);
@@ -2474,6 +2866,23 @@ export async function processTelegramWebhookUpdate(
           ),
         };
       }
+      case "resumen": {
+        const channel = await getTelegramChannelByChatId(chatId);
+        if (!channel?.isEnabled || !channel.telegramChatId) {
+          return {
+            handled: true,
+            chatId,
+            replyText: buildTelegramLinkedChatRequiredMessage(),
+          };
+        }
+
+        await sendTelegramDigestMessagesForUser({
+          userId: channel.userId,
+          markAsSent: false,
+        });
+
+        return { handled: true, chatId };
+      }
       case "pago": {
         const result = await createTelegramPaymentDraft({
           chatId,
@@ -2484,6 +2893,81 @@ export async function processTelegramWebhookUpdate(
           handled: true,
           chatId,
           replyText: result.replyText,
+        };
+      }
+      case "vencidos": {
+        const channel = await getTelegramChannelByChatId(chatId);
+        if (!channel?.isEnabled || !channel.telegramChatId) {
+          return {
+            handled: true,
+            chatId,
+            replyText: buildTelegramLinkedChatRequiredMessage(),
+          };
+        }
+
+        const range = parseTelegramPage(command.argument);
+        if (!range.ok) {
+          return {
+            handled: true,
+            chatId,
+            replyText: range.error,
+          };
+        }
+
+        return {
+          handled: true,
+          chatId,
+          replyText: await buildTelegramOverdueReply(channel.userId, range.page),
+        };
+      }
+      case "hoy": {
+        const channel = await getTelegramChannelByChatId(chatId);
+        if (!channel?.isEnabled || !channel.telegramChatId) {
+          return {
+            handled: true,
+            chatId,
+            replyText: buildTelegramLinkedChatRequiredMessage(),
+          };
+        }
+
+        const range = parseTelegramPage(command.argument);
+        if (!range.ok) {
+          return {
+            handled: true,
+            chatId,
+            replyText: range.error,
+          };
+        }
+
+        return {
+          handled: true,
+          chatId,
+          replyText: await buildTelegramTodayReply(channel.userId, range.page),
+        };
+      }
+      case "proximos": {
+        const channel = await getTelegramChannelByChatId(chatId);
+        if (!channel?.isEnabled || !channel.telegramChatId) {
+          return {
+            handled: true,
+            chatId,
+            replyText: buildTelegramLinkedChatRequiredMessage(),
+          };
+        }
+
+        const range = parseTelegramDaysAndPage(command.argument, 14);
+        if (!range.ok) {
+          return {
+            handled: true,
+            chatId,
+            replyText: range.error,
+          };
+        }
+
+        return {
+          handled: true,
+          chatId,
+          replyText: await buildTelegramUpcomingReceiptsReply(channel.userId, range.days, range.page),
         };
       }
       case "poliza": {
@@ -2554,7 +3038,7 @@ export async function processTelegramWebhookUpdate(
           };
         }
 
-        const range = parseTelegramQueryDays(command.argument);
+        const range = parseTelegramDaysAndPage(command.argument, TELEGRAM_QUERY_DEFAULT_DAYS);
         if (!range.ok) {
           return {
             handled: true,
@@ -2565,13 +3049,62 @@ export async function processTelegramWebhookUpdate(
 
         const replyText =
           command.command === "recibos"
-            ? await buildTelegramReceiptsReply(channel.userId, range.days)
-            : await buildTelegramRenewalsReply(channel.userId, range.days);
+            ? await buildTelegramReceiptsReply(channel.userId, range.days, range.page)
+            : await buildTelegramRenewalsReply(channel.userId, range.days, range.page);
 
         return {
           handled: true,
           chatId,
           replyText,
+        };
+      }
+      case "tareas": {
+        const channel = await getTelegramChannelByChatId(chatId);
+        if (!channel?.isEnabled || !channel.telegramChatId) {
+          return {
+            handled: true,
+            chatId,
+            replyText: buildTelegramLinkedChatRequiredMessage(),
+          };
+        }
+
+        const range = parseTelegramDaysAndPage(command.argument, TELEGRAM_QUERY_DEFAULT_DAYS);
+        if (!range.ok) {
+          return {
+            handled: true,
+            chatId,
+            replyText: range.error,
+          };
+        }
+
+        return {
+          handled: true,
+          chatId,
+          replyText: await buildTelegramTasksReply(channel.userId, range.days, range.page),
+        };
+      }
+      case "buscar": {
+        const channel = await getTelegramChannelByChatId(chatId);
+        if (!channel?.isEnabled || !channel.telegramChatId) {
+          return {
+            handled: true,
+            chatId,
+            replyText: buildTelegramLinkedChatRequiredMessage(),
+          };
+        }
+
+        if (!command.argument?.trim()) {
+          return {
+            handled: true,
+            chatId,
+            replyText: "Escribe /buscar <texto> para buscar clientes, pólizas, recibos, tareas o archivos.",
+          };
+        }
+
+        return {
+          handled: true,
+          chatId,
+          replyText: await buildTelegramSearchReply(channel.userId, command.argument),
         };
       }
       default:
