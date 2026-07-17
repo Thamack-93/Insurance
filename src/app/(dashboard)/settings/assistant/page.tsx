@@ -27,8 +27,18 @@ function statusTone(status: string): "secondary" | "outline" | "destructive" {
   return "outline";
 }
 
-function formatDurationMs(value: number) {
-  if (!Number.isFinite(value)) return "sin dato";
+function formatTokenCount(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return value.toLocaleString("es-MX");
+}
+
+function formatCostUsd(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 6 }).format(value);
+}
+
+function formatDurationMs(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—";
   if (value < 1000) return `${Math.max(0, Math.round(value))} ms`;
   return `${(value / 1000).toFixed(1)} s`;
 }
@@ -100,34 +110,11 @@ function ReportList({
                           <span>Código: {entry.diagnostic.code ?? "unknown"}</span>
                           <span>Operación: {entry.diagnostic.operation ?? "sin dato"}</span>
                           <span>Modelo: {entry.diagnostic.model ?? "sin dato"}</span>
-                          <span>Duración: {entry.diagnostic.durationMs ? formatDurationMs(entry.diagnostic.durationMs) : "sin dato"}</span>
+                          <span>Duración: {entry.diagnostic.durationMs ? `${(entry.diagnostic.durationMs / 1000).toFixed(1)} s` : "sin dato"}</span>
                           <span>Folio: {entry.diagnostic.diagnosticId ?? "sin folio"}</span>
                           <span>Reporte: {entry.diagnostic.reportId ?? report.id}</span>
                         </div>
                         {entry.diagnostic.summary ? <p className="mt-2">{entry.diagnostic.summary}</p> : null}
-                        {entry.diagnostic.attempts?.length ? (
-                          <details className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-                            <summary className="cursor-pointer font-medium">Intentos ({entry.diagnostic.attempts.length})</summary>
-                            <div className="mt-2 space-y-2">
-                              {entry.diagnostic.attempts.map((attempt, index) => (
-                                <div key={`${entry.diagnostic!.diagnosticId ?? report.id}-attempt-${index}`} className="rounded-md border border-amber-100 bg-white/80 px-2 py-2">
-                                  <div className="flex flex-wrap gap-2">
-                                    <span className="font-medium">Intento {index + 1}</span>
-                                    <span>{attempt.model}</span>
-                                    <span>{attempt.outcome}</span>
-                                  </div>
-                                  <div className="mt-1 flex flex-wrap gap-2 text-amber-900/80">
-                                    {attempt.code ? <span>Código: {attempt.code}</span> : null}
-                                    <span>Duración: {formatDurationMs(attempt.durationMs)}</span>
-                                    {attempt.statusCode ? <span>HTTP {attempt.statusCode}</span> : null}
-                                    {attempt.finishReason ? <span>Finish: {attempt.finishReason}</span> : null}
-                                  </div>
-                                  {attempt.responsePreview ? <p className="mt-1 break-words">{attempt.responsePreview}</p> : null}
-                                </div>
-                              ))}
-                            </div>
-                          </details>
-                        ) : null}
                       </div>
                     ) : null}
                   </div>

@@ -507,33 +507,6 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
                     <span>Folio: {message.aiDiagnostic.diagnosticId}</span>
                     {message.reportId ? <span>Reporte: {message.reportId}</span> : null}
                   </div>
-                  {message.aiDiagnostic.attempts?.length ? (
-                    <details className="mt-3 rounded-xl border border-amber-200/80 bg-white/70 px-3 py-2 text-[11px] text-amber-950">
-                      <summary className="cursor-pointer font-medium">
-                        Intentos ({message.aiDiagnostic.attempts.length})
-                      </summary>
-                      <div className="mt-2 space-y-2">
-                        {message.aiDiagnostic.attempts.map((attempt, index) => (
-                          <div key={`${message.aiDiagnostic!.diagnosticId}-attempt-${index}`} className="rounded-lg border border-amber-200/70 bg-amber-50/70 px-2 py-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-medium">Intento {index + 1}</span>
-                              <Badge variant="outline" className="rounded-full text-[10px] uppercase tracking-wide">
-                                {attempt.outcome}
-                              </Badge>
-                              <span>{attempt.model}</span>
-                            </div>
-                            <div className="mt-1 flex flex-wrap gap-2 text-amber-900/80">
-                              {attempt.code ? <span>Código: {attempt.code}</span> : null}
-                              <span>Duración: {formatDurationMs(attempt.durationMs)}</span>
-                              {attempt.statusCode ? <span>HTTP {attempt.statusCode}</span> : null}
-                              {attempt.finishReason ? <span>Finish: {attempt.finishReason}</span> : null}
-                            </div>
-                            {attempt.responsePreview ? <p className="mt-1 break-words text-amber-950/80">{attempt.responsePreview}</p> : null}
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  ) : null}
                 </div>
               ) : null}
               {message.aiTrace && message.aiTrace.length > 0 ? (

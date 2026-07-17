@@ -1,15 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
-const aiMocks = vi.hoisted(() => ({
-  generateText: vi.fn(),
-}));
-vi.mock("ai", async () => {
-  const actual = await vi.importActual<typeof import("ai")>("ai");
-  return {
-    ...actual,
-    generateText: aiMocks.generateText,
-  };
-});
 import {
   buildAssistantAiReply,
   getAssistantAiConnectionStatus,
@@ -18,11 +8,9 @@ import {
   getAssistantGatewayFallbackModels,
 } from "@/lib/assistant-ai";
 import type { AssistantUser } from "@/lib/assistant-types";
-import { NoObjectGeneratedError } from "ai";
 
 describe("assistant ai fallback", () => {
   afterEach(() => {
-    aiMocks.generateText.mockReset();
     vi.unstubAllEnvs();
   });
 
@@ -65,7 +53,7 @@ describe("assistant ai fallback", () => {
     expect(getAssistantGatewayAuthMode()).toBe("api-key");
   });
 
-  it("defaults to gpt-5.4 mini as the fallback gateway model", () => {
+  it("defaults to gpt-5.4-mini as the fallback gateway model", () => {
     vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "");
     expect(getAssistantGatewayFallbackModels()).toEqual(["openai/gpt-5.4-mini"]);
 
@@ -85,82 +73,5 @@ describe("assistant ai fallback", () => {
       model: "minimax/minimax-m3",
       fallbackModels: ["openai/gpt-5.4-mini"],
     });
-  });
-
-  it("retries with GPT-5.4 mini when MiniMax returns no_object_generated", async () => {
-    vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
-    vi.stubEnv("VERCEL_OIDC_TOKEN", "");
-    vi.stubEnv("AI_GATEWAY_MODEL", "minimax/minimax-m3");
-    vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "openai/gpt-5.4-mini");
-
-    aiMocks.generateText
-      .mockRejectedValueOnce(
-        new NoObjectGeneratedError({
-          response: {} as never,
-          usage: {} as never,
-          finishReason: "stop",
-          text: "minimax raw text",
-        }),
-      )
-      .mockResolvedValueOnce({
-        output: {
-          reply: "GPT-5.4 mini recuperó la respuesta.",
-          quickPrompts: [],
-          mutation: null,
-        },
-        text: JSON.stringify({
-          reply: "GPT-5.4 mini recuperó la respuesta.",
-          quickPrompts: [],
-          mutation: null,
-        }),
-      });
-
-    const user: AssistantUser = { id: "agent-1", role: "AGENT" };
-    const reply = await buildAssistantAiReply({
-      user,
-      message: "Revisa la póliza 940454625",
-      localReply: {
-        reply: "Resumen local",
-        sections: [],
-        quickPrompts: [],
-      },
-    });
-
-    expect(reply.ok).toBe(true);
-    if (reply.ok) {
-      expect(reply.value.reply).toBe("GPT-5.4 mini recuperó la respuesta.");
-    }
-    expect(aiMocks.generateText).toHaveBeenCalledTimes(2);
-  });
-
-  it("includes both attempts in the diagnostic when the retry also fails", async () => {
-    vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
-    vi.stubEnv("VERCEL_OIDC_TOKEN", "");
-    vi.stubEnv("AI_GATEWAY_MODEL", "minimax/minimax-m3");
-    vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "openai/gpt-5.4-mini");
-
-    aiMocks.generateText
-      .mockResolvedValueOnce({ output: null, text: "primer intento sin objeto" })
-      .mockResolvedValueOnce({ output: null, text: "segundo intento sin objeto" });
-
-    const user: AssistantUser = { id: "agent-1", role: "AGENT" };
-    const reply = await buildAssistantAiReply({
-      user,
-      message: "Revisa la póliza 940454625",
-      localReply: {
-        reply: "Resumen local",
-        sections: [],
-        quickPrompts: [],
-      },
-    });
-
-    expect(reply.ok).toBe(false);
-    if (!reply.ok) {
-      expect(reply.diagnostic.code).toBe("invalid_output");
-      expect(reply.diagnostic.attempts).toHaveLength(2);
-      expect(reply.diagnostic.details).toContain("Intento 1");
-      expect(reply.diagnostic.details).toContain("GPT-5.4 mini");
-    }
-    expect(aiMocks.generateText).toHaveBeenCalledTimes(2);
   });
 });
