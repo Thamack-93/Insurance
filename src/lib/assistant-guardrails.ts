@@ -2,6 +2,7 @@ const DOMAIN_TERMS = [
   "asegur", "poliza", "renov", "recibo", "pago", "cobro", "cliente", "cartera", "prima", "comision",
   "siniestro", "reclamo", "cotizacion", "endoso", "vigencia", "riesgo", "calidad", "pendiente", "tarea",
   "consolid", "vincul", "policydesk", "nora", "telegram", "dashboard",
+  "captura", "pdf", "documento", "caratula",
 ];
 
 const OFF_TOPIC_TERMS = [
