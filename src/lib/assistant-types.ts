@@ -50,6 +50,70 @@ export type AssistantAiStatus = {
   fallbackModels: string[];
 };
 
+export type AssistantAiTier = "deterministic" | "minimax" | "critical";
+export type AssistantAiRunStatus = "RUNNING" | "SUCCEEDED" | "FAILED" | "ABORTED";
+export type AssistantAiAttemptStatus = "STARTED" | "SUCCEEDED" | "FAILED" | "SKIPPED";
+
+export type AssistantAiUsageSnapshot = {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  cachedInputTokens: number | null;
+  estimatedCostUsd: number | null;
+};
+
+export type AssistantAiTraceEntry = {
+  attemptNumber: number;
+  tier: AssistantAiTier;
+  status: AssistantAiAttemptStatus;
+  requestedModel: string;
+  finalModel: string | null;
+  fallbackReason: string | null;
+  code: AssistantAiFailureCode | null;
+  durationMs: number | null;
+  finishReason: string | null;
+  statusCode: number | null;
+  usage: AssistantAiUsageSnapshot | null;
+  responsePreview: string | null;
+};
+
+export type AssistantAiAttemptSnapshot = AssistantAiTraceEntry & {
+  id: string;
+  runId: string;
+  provider: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AssistantAiRunSnapshot = {
+  id: string;
+  userId: string;
+  userRole: "ADMIN" | "AGENT";
+  operation: AssistantAiOperation;
+  tier: AssistantAiTier;
+  requestedModel: string;
+  finalModel: string | null;
+  status: AssistantAiRunStatus;
+  attemptCount: number;
+  fallbackCount: number;
+  fallbackReason: string | null;
+  reportId: string | null;
+  errorCode: AssistantAiFailureCode | null;
+  errorMessage: string | null;
+  statusCode: number | null;
+  finishReason: string | null;
+  usage: AssistantAiUsageSnapshot | null;
+  totalUsage: AssistantAiUsageSnapshot | null;
+  providerMetadata: unknown;
+  responsePreview: string | null;
+  estimatedCostUsd: number | null;
+  durationMs: number | null;
+  createdAt: string;
+  updatedAt: string;
+  attempts: AssistantAiAttemptSnapshot[];
+};
+
 export type AssistantAiOperation =
   | "assistant-reply"
   | "assistant-report-classification"
@@ -71,9 +135,13 @@ export type AssistantAiFailureCode =
 
 export type AssistantAiDiagnostic = {
   diagnosticId: string;
+  runId?: string | null;
+  attemptNumber?: number | null;
   operation: AssistantAiOperation;
+  tier?: AssistantAiTier | null;
   code: AssistantAiFailureCode;
   model: string;
+  resolvedModel?: string | null;
   fallbackModels: string[];
   durationMs: number;
   summary: string;
@@ -82,6 +150,8 @@ export type AssistantAiDiagnostic = {
   statusCode?: number | null;
   finishReason?: string | null;
   responsePreview?: string | null;
+  usage?: AssistantAiUsageSnapshot | null;
+  trace?: AssistantAiTraceEntry[];
   reportId?: string | null;
 };
 
@@ -227,6 +297,12 @@ export type AssistantConversationResponse = AssistantReply & {
   reportId: string | null;
   reportThemeKey: string | null;
   reportThemeLabel: string | null;
+  aiRunId?: string | null;
+  aiTier?: AssistantAiTier | null;
+  aiModel?: string | null;
+  aiAttempts?: number;
+  aiUsage?: AssistantAiUsageSnapshot | null;
+  aiTrace?: AssistantAiTraceEntry[];
   aiFallbackNotice?: string | null;
   aiDiagnostic?: AssistantAiDiagnostic | null;
   actionProposal?: AssistantActionProposal | null;

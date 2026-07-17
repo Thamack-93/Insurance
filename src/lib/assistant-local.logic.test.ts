@@ -28,7 +28,7 @@ vi.mock("@/lib/dashboard-queries", () => {
         id: "policy-renewal-1",
         policyNumber: "POL-300",
         client: { fullName: "Cliente Renovación" },
-        endDate: new Date("2026-07-16T00:00:00.000Z"),
+        endDate: new Date("2026-07-27T00:00:00.000Z"),
       },
     ],
     overdueWorkItems: [

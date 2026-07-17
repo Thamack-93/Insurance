@@ -53,12 +53,12 @@ describe("assistant ai fallback", () => {
     expect(getAssistantGatewayAuthMode()).toBe("api-key");
   });
 
-  it("defaults to gpt-4o-mini as the fallback gateway model", () => {
+  it("defaults to gpt-5.4-mini as the fallback gateway model", () => {
     vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "");
-    expect(getAssistantGatewayFallbackModels()).toEqual(["openai/gpt-4o-mini"]);
+    expect(getAssistantGatewayFallbackModels()).toEqual(["openai/gpt-5.4-mini"]);
 
-    vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "openai/gpt-4o-mini, deepseek/deepseek-v3");
-    expect(getAssistantGatewayFallbackModels()).toEqual(["openai/gpt-4o-mini", "deepseek/deepseek-v3"]);
+    vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "openai/gpt-5.4-mini, deepseek/deepseek-v3");
+    expect(getAssistantGatewayFallbackModels()).toEqual(["openai/gpt-5.4-mini", "deepseek/deepseek-v3"]);
   });
 
   it("treats a Vercel deployment as gateway-capable even without a local token", () => {
@@ -71,7 +71,7 @@ describe("assistant ai fallback", () => {
       available: true,
       authMode: "deployment",
       model: "minimax/minimax-m3",
-      fallbackModels: ["openai/gpt-4o-mini"],
+      fallbackModels: ["openai/gpt-5.4-mini"],
     });
   });
 });

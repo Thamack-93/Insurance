@@ -21,6 +21,9 @@ import type {
   AssistantReportKind,
   AssistantReportSeverity,
   AssistantReply,
+  AssistantAiTier,
+  AssistantAiTraceEntry,
+  AssistantAiUsageSnapshot,
   AssistantResponseSource,
   AssistantSnapshot,
   AssistantUser,
@@ -268,7 +271,27 @@ function detectTheme(normalized: string): AssistantReportTheme | null {
   return null;
 }
 
-function extractPolicyFocus(localReply: AssistantReply) {
+function extractPolicyFocus(message: string, localReply: AssistantReply) {
+  const explicitPolicyNumber = message.match(/\b\d{5,}\b/)?.[0] ?? null;
+
+  if (explicitPolicyNumber) {
+    for (const section of localReply.sections) {
+      for (const item of section.items) {
+        if (item.title === explicitPolicyNumber) {
+          const [clientName, insurerName, policyType, status] = (item.subtitle ?? "").split(" · ").map((value) => value.trim());
+          return {
+            policyNumber: item.title,
+            clientName: clientName ?? null,
+            insurerName: insurerName ?? null,
+            policyType: policyType ?? null,
+            status: status ?? null,
+            href: item.href,
+          };
+        }
+      }
+    }
+  }
+
   for (const section of localReply.sections) {
     for (const item of section.items) {
       if (!item.href.startsWith("/policies/")) continue;
@@ -301,7 +324,7 @@ function formatContextResults(results: Awaited<ReturnType<typeof searchUserPortf
 
 async function buildAssistantAiContext(user: AssistantUser, message: string, localReply: AssistantReply) {
   const baseResults = await searchUserPortfolio(user, message).catch(() => []);
-  const focus = extractPolicyFocus(localReply);
+  const focus = extractPolicyFocus(message, localReply);
   const relatedResults = focus
     ? await searchUserPortfolio(
         user,
@@ -385,6 +408,12 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
   let actionProposal: AssistantActionProposal | null = null;
   let aiFallbackNotice: string | null = null;
   let aiDiagnostic: AssistantAiDiagnostic | null = null;
+  let aiRunId: string | null = null;
+  let aiTier: AssistantAiTier | null = null;
+  let aiModel: string | null = null;
+  let aiAttempts = 0;
+  let aiUsage: AssistantAiUsageSnapshot | null = null;
+  let aiTrace: AssistantAiTraceEntry[] = [];
 
   if (shouldTryAi) {
     const aiReply = await buildAssistantAiReply({
@@ -401,12 +430,31 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
         quickPrompts: aiReply.value.quickPrompts,
       };
       source = "ai";
+      aiRunId = aiReply.value.runId ?? null;
+      aiTier = aiReply.value.tier;
+      aiModel = aiReply.value.resolvedModel;
+      aiAttempts = aiReply.value.trace.length;
+      aiUsage = aiReply.value.totalUsage
+        ? {
+            ...aiReply.value.totalUsage,
+            estimatedCostUsd: aiReply.value.totalUsage.estimatedCostUsd ?? null,
+          }
+        : aiReply.value.usage
+          ? { ...aiReply.value.usage, estimatedCostUsd: aiReply.value.usage.estimatedCostUsd ?? null }
+          : null;
+      aiTrace = aiReply.value.trace;
       if (aiReply.value.mutation) {
         actionProposal = await buildAssistantActionProposalFromPlan(aiReply.value.mutation, user);
       }
     } else {
       aiDiagnostic = aiReply.diagnostic;
       aiFallbackNotice = buildAssistantAiFallbackNotice(aiReply.diagnostic);
+      aiRunId = aiReply.diagnostic.runId ?? null;
+      aiTier = aiReply.diagnostic.tier ?? null;
+      aiModel = aiReply.diagnostic.resolvedModel ?? aiReply.diagnostic.model;
+      aiAttempts = aiReply.diagnostic.trace?.length ?? 0;
+      aiUsage = aiReply.diagnostic.usage ?? null;
+      aiTrace = aiReply.diagnostic.trace ?? [];
     }
   }
 
@@ -438,6 +486,12 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
           messageLength: message.length,
           normalizedLength: normalized.length,
           reportTheme: reportTheme.themeLabel,
+          aiRunId,
+          aiTier,
+          aiModel,
+          aiAttempts,
+          aiTrace,
+          aiUsage,
           aiDiagnostic,
         },
         input: { redacted: true },
@@ -464,6 +518,12 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
     reportId,
     reportThemeKey: reportTheme?.themeKey ?? null,
     reportThemeLabel: reportTheme?.themeLabel ?? null,
+    aiRunId,
+    aiTier,
+    aiModel,
+    aiAttempts,
+    aiUsage,
+    aiTrace,
     aiFallbackNotice,
     aiDiagnostic,
     actionProposal,
