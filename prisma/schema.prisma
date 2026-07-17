@@ -16,8 +16,9 @@ model User {
   active       Boolean   @default(true)
   lastLoginAt  DateTime?
   timeZone     String    @default("Etc/GMT+6")
-  telegramDigestHour    Int       @default(8)
-  telegramDigestLastSentAt DateTime?
+  telegramDigestHour           Int       @default(8)
+  telegramDigestLastSentAt      DateTime?
+  telegramDigestLastAutoSentAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 

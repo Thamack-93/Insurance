@@ -549,7 +549,7 @@ function getDigestDateKey(now: Date, timeZone: string | null | undefined) {
   return getLocalDateKey(now, timeZone ?? DEFAULT_TIMEZONE);
 }
 
-export async function markTelegramDigestAsSentForUser(
+export async function markTelegramDigestAsAutoSentForUser(
   userId: string,
   sentAt = new Date(),
   client?: DbClient,
@@ -565,9 +565,9 @@ export async function markTelegramDigestAsSentForUser(
     const updated = await db.user.update({
       where: { id: userId },
       data: {
-        telegramDigestLastSentAt: sentAt,
+        telegramDigestLastAutoSentAt: sentAt,
       },
-      select: { id: true, telegramDigestLastSentAt: true },
+      select: { id: true, telegramDigestLastAutoSentAt: true },
     });
 
     return {
@@ -575,7 +575,7 @@ export async function markTelegramDigestAsSentForUser(
       digestDateKey: getDigestDateKey(sentAt, DEFAULT_TIMEZONE),
     };
   } catch (error) {
-    logError("telegram.markDigestSent", error, { userId });
+    logError("telegram.markDigestAutoSent", error, { userId });
     return null;
   }
 }
@@ -1571,7 +1571,7 @@ export async function sendTelegramDigestMessagesForUser(input: {
   }
 
   if (input.markAsSent !== false && sent > 0 && failed === 0) {
-    await markTelegramDigestAsSentForUser(input.userId, new Date(), db);
+    await markTelegramDigestAsAutoSentForUser(input.userId, new Date(), db);
   }
 
   return {
@@ -2381,7 +2381,7 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
       user: {
         select: {
           timeZone: true,
-          telegramDigestLastSentAt: true,
+          telegramDigestLastAutoSentAt: true,
         },
       },
     },
@@ -2399,8 +2399,8 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
     if (!channel.telegramChatId) continue;
     const timeZone = DEFAULT_TIMEZONE;
     if (
-      channel.user.telegramDigestLastSentAt &&
-      getLocalDateKey(channel.user.telegramDigestLastSentAt, timeZone) === getLocalDateKey(now, timeZone)
+      channel.user.telegramDigestLastAutoSentAt &&
+      getLocalDateKey(channel.user.telegramDigestLastAutoSentAt, timeZone) === getLocalDateKey(now, timeZone)
     ) {
       continue;
     }
@@ -2416,7 +2416,7 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
       result.parts += digestResult.parts;
 
       if (digestResult.sent > 0 && digestResult.failed === 0) {
-        await markTelegramDigestAsSentForUser(channel.userId, now, db);
+        await markTelegramDigestAsAutoSentForUser(channel.userId, now, db);
       }
     } catch (error) {
       result.failed += 1;

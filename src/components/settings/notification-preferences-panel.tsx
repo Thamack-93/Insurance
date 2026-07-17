@@ -193,7 +193,8 @@ export function NotificationPreferencesPanel({
           </CardTitle>
           <CardDescription>
             Telegram ya puede vincularse con tu cuenta. Aquí ves el estado y haces pruebas o
-            envíos manuales del resumen diario.
+            envíos manuales del resumen diario. El envío manual no consume el envío automático
+            del cron.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -324,6 +325,7 @@ export function NotificationPreferencesPanel({
           </div>
           <p>
             El cron diario se ejecuta una vez al día y el resumen se envía en este horario fijo.
+            Si lo mandas manualmente, el automático sigue corriendo por separado.
           </p>
         </CardContent>
       </Card>
