@@ -1,12 +1,17 @@
-import { getDb } from "@/lib/db";
 import {
   mapNotificationStatusToWorkItemStatus,
   mapTaskStatusToWorkItemStatus,
   upsertWorkItemFromSource,
 } from "@/lib/work-items";
+import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
+import { assertProductionMutationAllowed } from "./_shared.ts";
 
 async function main() {
+  assertProductionMutationAllowed({
+    actionLabel: "El backfill de WorkItems",
+    overrideEnv: "ALLOW_WORK_ITEM_BACKFILL_PRODUCTION",
+  });
   const db = getDb();
 
   let taskCreated = 0;

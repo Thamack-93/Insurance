@@ -193,8 +193,47 @@ export async function getAdminSessionCookie(): Promise<string> {
   return `${SESSION_COOKIE_NAME}=${token}`;
 }
 
+export async function getAgentSessionCookie(): Promise<string> {
+  const db = getTestDb();
+  const agent = await db.user.findFirst({
+    where: {
+      active: true,
+      role: "AGENT",
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  if (!agent) {
+    throw new Error("No active agent user found in the seeded database.");
+  }
+
+  const { token } = await createSessionToken({
+    userId: agent.id,
+    email: agent.email,
+    name: agent.name,
+    role: "AGENT",
+  });
+
+  return `${SESSION_COOKIE_NAME}=${token}`;
+}
+
 export async function authenticatePageAsAdmin(page: Page): Promise<void> {
   const cookie = await getAdminSessionCookie();
+  const [name, ...rest] = cookie.split("=");
+  const value = rest.join("=");
+  const baseUrl = new URL(process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:5000").origin;
+
+  await page.context().addCookies([
+    {
+      name,
+      value,
+      url: baseUrl,
+      },
+    ]);
+}
+
+export async function authenticatePageAsAgent(page: Page): Promise<void> {
+  const cookie = await getAgentSessionCookie();
   const [name, ...rest] = cookie.split("=");
   const value = rest.join("=");
   const baseUrl = new URL(process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:5000").origin;

@@ -14,6 +14,7 @@ import { formatDate } from "@/lib/dates";
 import { UploadForm } from "@/components/documents/upload-form";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
+import { documentOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 
 function associationLabel(document: {
   policy?: { policyNumber: string } | null;
@@ -38,25 +39,32 @@ export default async function DocumentsPage({
   searchParams?: Promise<{ q?: string; page?: string }>;
 }) {
   const db = getDb();
+  const scope = await requirePortfolioReadScope();
   const documentsEnabled = areDocumentFilesEnabled();
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = Math.max(1, Number(params.page) || 1);
+  const scopedWhere = documentOperationalWhere(scope.portfolioOwnerId);
 
   const where: Prisma.DocumentWhereInput = query
     ? {
-        OR: [
-          { fileName: { contains: query } },
-          { client: { fullName: { contains: query } } },
-          { policy: { policyNumber: { contains: query } } },
-          { receipt: { receiptNumber: { contains: query } } },
+        AND: [
+          scopedWhere,
+          {
+            OR: [
+              { fileName: { contains: query } },
+              { client: { fullName: { contains: query } } },
+              { policy: { policyNumber: { contains: query } } },
+              { receipt: { receiptNumber: { contains: query } } },
+            ],
+          },
         ],
       }
-    : {};
+    : scopedWhere;
 
   const [totalCount, filteredCount, pagedDocuments, totalDocs, orphanCount, paymentProofsCount, policyDocs] =
     await Promise.all([
-      db.document.count(),
+      db.document.count({ where: scopedWhere }),
       db.document.count({ where }),
       db.document.findMany({
         where,
@@ -65,9 +73,10 @@ export default async function DocumentsPage({
         skip: (page - 1) * DEFAULT_PAGE_SIZE,
         take: DEFAULT_PAGE_SIZE,
       }),
-      db.document.count(),
+      db.document.count({ where: scopedWhere }),
       db.document.count({
         where: {
+          ...scopedWhere,
           AND: [
             { clientId: null },
             { policyId: null },
@@ -78,9 +87,9 @@ export default async function DocumentsPage({
           ],
         },
       }),
-      db.document.count({ where: { documentType: "PAYMENT_PROOF" } }),
+      db.document.count({ where: { ...scopedWhere, documentType: "PAYMENT_PROOF" } }),
       db.document.findMany({
-        where: { policyId: { not: null } },
+        where: { ...scopedWhere, policyId: { not: null } },
         include: { policy: true },
         orderBy: { uploadedAt: "desc" },
         take: 10,

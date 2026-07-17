@@ -6,6 +6,14 @@ import { matchesSuppressionCriteria } from "@/lib/data-quality-rules";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { ACTIVE_RENEWAL_POLICY_WHERE } from "@/lib/renewal-decisions";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
+import {
+  clientOperationalWhere,
+  commissionOperationalWhere,
+  documentOperationalWhere,
+  policyOperationalWhere,
+  receiptOperationalWhere,
+  workItemOperationalWhere,
+} from "@/lib/portfolio-access";
 
 export type RiskFinding = {
   alertType: string;
@@ -24,14 +32,17 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
   const now = today();
   const in60 = businessAddDays(now, 60);
   const olderThan15 = businessAddDays(now, -15);
-  const policyScope = portfolioOwnerId ? { client: { portfolioOwnerId } } : {};
-  const clientScope = portfolioOwnerId ? { portfolioOwnerId, status: "ACTIVE" } : { status: "ACTIVE" };
+  const policyScope = policyOperationalWhere(portfolioOwnerId);
+  const activeClientScope = {
+    ...clientOperationalWhere(portfolioOwnerId),
+    status: "ACTIVE",
+  };
   const activeRenewalScope = {
     ...policyScope,
     ...ACTIVE_RENEWAL_POLICY_WHERE,
   };
   const clientWithoutActivePolicyScope = {
-    ...clientScope,
+    ...activeClientScope,
     policies: {
       none: {
         OR: [
@@ -41,11 +52,10 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
       },
     },
   };
-  const receiptScope = portfolioOwnerId ? { client: { portfolioOwnerId } } : {};
-  const commissionScope = portfolioOwnerId ? { client: { portfolioOwnerId } } : {};
-  const workItemScope = portfolioOwnerId
-    ? { OR: [{ client: { portfolioOwnerId } }, { clientId: null, assignedToId: portfolioOwnerId }] }
-    : {};
+  const receiptScope = receiptOperationalWhere(portfolioOwnerId);
+  const commissionScope = commissionOperationalWhere(portfolioOwnerId);
+  const workItemScope = workItemOperationalWhere(portfolioOwnerId);
+  const documentScope = documentOperationalWhere(portfolioOwnerId);
 
   const [
     suppressionRules,
@@ -100,7 +110,7 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
       select: { id: true, sourceId: true, folio: true, title: true },
     }),
     db.client.findMany({
-      where: { ...clientScope, OR: [{ phone: null }, { email: null }] },
+      where: { ...activeClientScope, OR: [{ phone: null }, { email: null }] },
       take: TAKE_LIMIT,
       select: { id: true, fullName: true },
     }),
@@ -113,15 +123,7 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
       select: { id: true, policyNumber: true },
     }),
     db.document.findMany({
-      where: {
-        ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
-        clientId: null,
-        policyId: null,
-        receiptId: null,
-        taskId: null,
-        claimId: null,
-        quoteId: null,
-      },
+      where: { ...documentScope, clientId: null, policyId: null, receiptId: null, taskId: null, claimId: null, quoteId: null },
       take: TAKE_LIMIT,
       select: { id: true, fileName: true },
     }),

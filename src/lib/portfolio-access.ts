@@ -100,6 +100,23 @@ export function documentPortfolioWhere(userId: string): Prisma.DocumentWhereInpu
       { receipt: receiptPortfolioWhere(userId) },
       { claim: claimPortfolioWhere(userId) },
       { quote: quotePortfolioWhere(userId) },
+      {
+        task: {
+          OR: [{ client: clientPortfolioWhere(userId) }, { clientId: null, createdById: userId }],
+        },
+      },
+      {
+        AND: [
+          { createdById: userId },
+          { clientId: null },
+          { policyId: null },
+          { endorsementId: null },
+          { receiptId: null },
+          { taskId: null },
+          { claimId: null },
+          { quoteId: null },
+        ],
+      },
     ],
   };
 }

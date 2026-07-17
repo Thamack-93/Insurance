@@ -91,6 +91,7 @@ function summarizeDiagnostic(diagnostic: AssistantAiDiagnostic) {
     code: diagnostic.code,
     model: diagnostic.model,
     fallbackModels: diagnostic.fallbackModels.slice(0, 5),
+    attempts: diagnostic.attempts?.slice(0, 5),
     durationMs: diagnostic.durationMs,
     summary: redactAssistantReportText(diagnostic.summary, 500),
     details: redactAssistantReportText(diagnostic.details, 1_200),

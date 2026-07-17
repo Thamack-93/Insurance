@@ -78,7 +78,7 @@ function makeDiagnostic(overrides: Partial<AssistantAiDiagnostic> = {}): Assista
     operation: "assistant-reply",
     code: "timeout",
     model: "minimax/minimax-m3",
-    fallbackModels: ["openai/gpt-4o-mini"],
+    fallbackModels: ["openai/gpt-5.4-mini"],
     durationMs: 12_345,
     summary: "MiniMax M3 no completó la respuesta: timeout",
     details: "Timeout durante la generación de la respuesta principal.",
@@ -128,7 +128,7 @@ describe("assistant router", () => {
       available: true,
       authMode: "api-key",
       model: "minimax/minimax-m3",
-      fallbackModels: ["openai/gpt-4o-mini"],
+      fallbackModels: ["openai/gpt-5.4-mini"],
     });
     mocks.getAssistantAiModelLabel.mockImplementation((model: string) => (model === "minimax/minimax-m3" ? "MiniMax M3" : model));
     mocks.getAssistantAiOperationLabel.mockReturnValue("la respuesta");
@@ -166,7 +166,7 @@ describe("assistant router", () => {
       available: true,
       authMode: "api-key",
       model: "minimax/minimax-m3",
-      fallbackModels: ["openai/gpt-4o-mini"],
+      fallbackModels: ["openai/gpt-5.4-mini"],
     });
     mocks.getAssistantAiModelLabel.mockImplementation((model: string) => (model === "minimax/minimax-m3" ? "MiniMax M3" : model));
     mocks.getAssistantAiOperationLabel.mockReturnValue("la respuesta");
@@ -196,7 +196,7 @@ describe("assistant router", () => {
       available: true,
       authMode: "api-key",
       model: "minimax/minimax-m3",
-      fallbackModels: ["openai/gpt-4o-mini"],
+      fallbackModels: ["openai/gpt-5.4-mini"],
     });
     mocks.getAssistantAiModelLabel.mockImplementation((model: string) => (model === "minimax/minimax-m3" ? "MiniMax M3" : model));
     mocks.getAssistantAiOperationLabel.mockReturnValue("la respuesta");
@@ -246,7 +246,7 @@ describe("assistant router", () => {
       available: true,
       authMode: "api-key",
       model: "minimax/minimax-m3",
-      fallbackModels: ["openai/gpt-4o-mini"],
+      fallbackModels: ["openai/gpt-5.4-mini"],
     });
     mocks.listAssistantReports.mockResolvedValue([]);
     mocks.recordAssistantReportSignal.mockResolvedValue({ id: "report-1" });

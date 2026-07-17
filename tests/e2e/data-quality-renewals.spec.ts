@@ -5,6 +5,7 @@ import { authenticatePageAsAdmin, getTestDb } from "../helpers/db";
 type SeededRenewalCase = {
   sourcePolicyId: string;
   targetPolicyId?: string;
+  sourceReceiptId: string;
   suggestionId: string;
   workItemId: string;
   sourcePolicyNumber: string;
@@ -12,6 +13,7 @@ type SeededRenewalCase = {
 
 test.describe("Data quality renewals tab", () => {
   const policyIds = new Set<string>();
+  const receiptIds = new Set<string>();
   const suggestionIds = new Set<string>();
   const workItemIds = new Set<string>();
 
@@ -30,6 +32,15 @@ test.describe("Data quality renewals tab", () => {
       });
     }
 
+    if (receiptIds.size > 0) {
+      await db.payment.deleteMany({
+        where: { receiptId: { in: [...receiptIds] } },
+      });
+      await db.receipt.deleteMany({
+        where: { id: { in: [...receiptIds] } },
+      });
+    }
+
     if (policyIds.size > 0) {
       await db.policy.deleteMany({
         where: { id: { in: [...policyIds] } },
@@ -37,15 +48,20 @@ test.describe("Data quality renewals tab", () => {
     }
 
     policyIds.clear();
+    receiptIds.clear();
     suggestionIds.clear();
     workItemIds.clear();
   });
 
   async function seedRenewalCase(options?: { withTargetPolicy?: boolean }): Promise<SeededRenewalCase> {
     const db = getTestDb();
+    const actor = await db.user.findFirst({
+      where: { active: true },
+      select: { id: true },
+    });
     const client = await db.client.findFirst();
     const insurer = await db.insurer.findFirst();
-    if (!client || !insurer) {
+    if (!actor || !client || !insurer) {
       test.skip(true, "No client or insurer found");
     }
 
@@ -67,6 +83,37 @@ test.describe("Data quality renewals tab", () => {
     policyIds.add(sourcePolicy.id);
 
     let targetPolicyId: string | undefined;
+    const sourceReceipt = await db.receipt.create({
+      data: {
+        receiptNumber: `REN-DQ-${nonce}-REC`,
+        policyId: sourcePolicy.id,
+        clientId: client!.id,
+        insurerId: insurer!.id,
+        periodStartDate: sourcePolicy.startDate,
+        periodEndDate: sourcePolicy.endDate,
+        dueDate: sourcePolicy.endDate,
+        amount: 1800,
+        currency: "MXN",
+        status: "PAID",
+        paidDate: addDays(sourcePolicy.endDate, -1),
+      },
+    });
+    receiptIds.add(sourceReceipt.id);
+    await db.payment.create({
+      data: {
+        receiptId: sourceReceipt.id,
+        policyId: sourcePolicy.id,
+        clientId: client!.id,
+        amount: 1800,
+        currency: "MXN",
+        paidDate: addDays(sourcePolicy.endDate, -1),
+        paymentMethod: "TRANSFER",
+        reference: `REN-DQ-${nonce}`,
+        createdById: actor!.id,
+        updatedById: actor!.id,
+      },
+    });
+
     if (options?.withTargetPolicy) {
       const targetPolicy = await db.policy.create({
         data: {
@@ -122,6 +169,7 @@ test.describe("Data quality renewals tab", () => {
     return {
       sourcePolicyId: sourcePolicy.id,
       targetPolicyId,
+      sourceReceiptId: sourceReceipt.id,
       suggestionId: suggestion.id,
       workItemId,
       sourcePolicyNumber: sourcePolicy.policyNumber,
@@ -183,11 +231,13 @@ test.describe("Data quality renewals tab", () => {
     const db = getTestDb();
     await expect
       .poll(async () => {
-        const [sourcePolicy, targetPolicy, suggestion, workItem] = await Promise.all([
+        const [sourcePolicy, targetPolicy, suggestion, workItem, receipt, paymentCount] = await Promise.all([
           db.policy.findUnique({ where: { id: seeded.sourcePolicyId } }),
           db.policy.findUnique({ where: { id: seeded.targetPolicyId! } }),
           db.policyRenewalSuggestion.findUnique({ where: { id: seeded.suggestionId } }),
           db.workItem.findUnique({ where: { id: seeded.workItemId } }),
+          db.receipt.findUnique({ where: { id: seeded.sourceReceiptId } }),
+          db.payment.count({ where: { receiptId: seeded.sourceReceiptId } }),
         ]);
 
         return {
@@ -198,6 +248,8 @@ test.describe("Data quality renewals tab", () => {
           suggestionTargetPolicyId: suggestion?.targetPolicyId,
           workItemStatus: workItem?.status,
           workItemClosed: Boolean(workItem?.closedDate),
+          receiptStatus: receipt?.status,
+          paymentCount,
         };
       })
       .toMatchObject({
@@ -208,6 +260,8 @@ test.describe("Data quality renewals tab", () => {
         suggestionTargetPolicyId: seeded.targetPolicyId,
         workItemStatus: "RESOLVED",
         workItemClosed: true,
+        receiptStatus: "PAID",
+        paymentCount: 1,
       });
   });
 });

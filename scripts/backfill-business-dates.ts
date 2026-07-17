@@ -1,4 +1,4 @@
-import { createDb, closeDb, parseCliArgs } from "./_shared.ts";
+import { assertProductionMutationAllowed, createDb, closeDb, parseCliArgs } from "./_shared.ts";
 import { businessStartOfDay } from "../src/lib/business-dates.ts";
 
 type ChangeRecord = {
@@ -62,6 +62,12 @@ async function normalizeRows<T extends { id: string } & Record<string, unknown>>
 async function main() {
   const args = parseCliArgs();
   const apply = args.flags.apply === true || args.flags.apply === "true";
+  if (apply) {
+    assertProductionMutationAllowed({
+      actionLabel: "El backfill de fechas de negocio",
+      overrideEnv: "ALLOW_BUSINESS_DATES_BACKFILL_PRODUCTION",
+    });
+  }
   const db = createDb();
 
   const summaries: TableSummary[] = [];

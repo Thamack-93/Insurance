@@ -15,6 +15,7 @@ import {
 } from "@/lib/policy-pdf-capture.shared";
 import type { AssistantUser } from "@/lib/assistant-types";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
+import { clientOperationalWhere, policyOperationalWhere } from "@/lib/portfolio-access";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -54,7 +55,7 @@ async function buildSourcePolicyCandidates(
     const targetStartDate = draft.startDate ? parseDateInput(draft.startDate) : null;
     const serialPolicies = await db.policy.findMany({
       where: {
-        ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
+        ...policyOperationalWhere(portfolioOwnerId),
         ...(clientId ? { clientId } : {}),
         ...(insurerId ? { insurerId } : {}),
         policyType: "AUTO",
@@ -102,7 +103,7 @@ async function buildSourcePolicyCandidates(
     const exact = await db.policy.findMany({
       where: {
         OR: exactNumberVariants.map((variant) => ({ policyNumber: variant })),
-        ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
+        ...policyOperationalWhere(portfolioOwnerId),
         ...(clientId ? { clientId } : {}),
         ...(insurerId ? { insurerId } : {}),
       },
@@ -140,7 +141,7 @@ async function buildSourcePolicyCandidates(
   if (candidates.length === 0 && clientId && insurerId) {
     const fallback = await db.policy.findMany({
       where: {
-        ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
+        ...policyOperationalWhere(portfolioOwnerId),
         clientId,
         insurerId,
         policyType: draft.policyType,
@@ -217,7 +218,7 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
     ? (await db.client.findMany({
         where: {
           status: { not: "ARCHIVED" },
-          ...(portfolioOwnerId ? { portfolioOwnerId } : {}),
+          ...clientOperationalWhere(portfolioOwnerId),
         },
         select: { id: true, fullName: true },
         orderBy: { fullName: "asc" },
