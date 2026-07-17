@@ -16,8 +16,11 @@ import { clientTypeOptions, currencyOptions, paymentFrequencyOptions, policyType
 import { formatCurrency } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
 import {
+  buildPolicyPdfCaptureReceiptPlan,
   inferClientType,
   normalizePdfPaymentFrequencyLabel,
+  mergePolicyPdfCaptureReceiptPlan,
+  type PolicyPdfCaptureReceiptPlanItem,
   type PolicyPdfCaptureDraft,
   type PolicyPdfCaptureFieldConfidence,
   type PolicyPdfCapturePreview,
@@ -152,6 +155,7 @@ export function PolicyPdfCapturePanel() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PolicyPdfCapturePreview | null>(null);
   const [draft, setDraft] = useState<PolicyPdfCaptureDraft | null>(null);
+  const [receiptPlan, setReceiptPlan] = useState<PolicyPdfCaptureReceiptPlanItem[]>([]);
   const [fieldConfidence, setFieldConfidence] = useState<PolicyPdfCaptureFieldConfidence>(createEmptyConfidence());
   const [selectedClientId, setSelectedClientId] = useState("");
   const [selectedClientLabel, setSelectedClientLabel] = useState("");
@@ -183,10 +187,12 @@ export function PolicyPdfCapturePanel() {
         selectedSourcePolicyId: string;
         selectedSourcePolicyLabel: string;
         showInlineClient: boolean;
+        receiptPlan: PolicyPdfCaptureReceiptPlanItem[];
       }>(typeof window === "undefined" ? null : window.sessionStorage.getItem(SESSION_KEY));
 
       if (stored?.draft) {
         setDraft(stored.draft);
+        setReceiptPlan(stored.receiptPlan?.length ? stored.receiptPlan : buildPolicyPdfCaptureReceiptPlan(stored.draft));
         setFieldConfidence(stored.fieldConfidence ?? createEmptyConfidence());
         setSelectedClientId(stored.selectedClientId ?? "");
         setSelectedClientLabel(stored.selectedClientLabel ?? stored.draft.clientName ?? "");
@@ -212,7 +218,8 @@ export function PolicyPdfCapturePanel() {
       Boolean(selectedClientId) ||
       Boolean(selectedInsurerId) ||
       Boolean(selectedSourcePolicyId) ||
-      Boolean(showInlineClient);
+      Boolean(showInlineClient) ||
+      receiptPlan.length > 0;
 
     if (!hasContent || !draft) {
       window.sessionStorage.removeItem(SESSION_KEY);
@@ -231,6 +238,7 @@ export function PolicyPdfCapturePanel() {
         selectedSourcePolicyId,
         selectedSourcePolicyLabel,
         showInlineClient,
+        receiptPlan,
       }),
     );
   }, [
@@ -244,7 +252,17 @@ export function PolicyPdfCapturePanel() {
     selectedSourcePolicyId,
     selectedSourcePolicyLabel,
     showInlineClient,
+    receiptPlan,
   ]);
+
+  useEffect(() => {
+    if (!draft) {
+      setReceiptPlan([]);
+      return;
+    }
+
+    setReceiptPlan((current) => mergePolicyPdfCaptureReceiptPlan(draft, current));
+  }, [draft?.currency, draft?.endDate, draft?.paymentFrequency, draft?.premiumAmount, draft?.startDate]);
 
   useEffect(() => {
     if (!lookupOpen || !lookupKind) return;
@@ -301,6 +319,16 @@ export function PolicyPdfCapturePanel() {
       return { ...base, ...next };
     });
   }
+
+  function updateReceiptAmount(receiptNumber: string, value: string) {
+    setReceiptPlan((current) =>
+      current.map((item) =>
+        item.receiptNumber === receiptNumber ? { ...item, amount: Number(value || 0) } : item,
+      ),
+    );
+  }
+
+  const receiptPlanTotal = receiptPlan.reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0);
 
   function markFieldConfidence(field: keyof PolicyPdfCaptureFieldConfidence) {
     setFieldConfidence((current) => ({ ...current, [field]: "high" }));
@@ -422,6 +450,7 @@ export function PolicyPdfCapturePanel() {
 
       setPreview(result.preview);
       setDraft(result.preview.draft);
+      setReceiptPlan(result.preview.receiptPlan?.length ? result.preview.receiptPlan : buildPolicyPdfCaptureReceiptPlan(result.preview.draft));
       setFieldConfidence(result.preview.fieldConfidence ?? createEmptyConfidence());
       setSelectedClientId(result.preview.suggestions.clientId ?? "");
       setSelectedClientLabel(result.preview.draft.clientName);
@@ -518,6 +547,10 @@ export function PolicyPdfCapturePanel() {
           clientId: selectedClientId,
           insurerId: selectedInsurerId,
           sourcePolicyId: selectedSourcePolicyId,
+          receiptPlan: receiptPlan.map((item) => ({
+            receiptNumber: item.receiptNumber,
+            amount: item.amount,
+          })),
         }),
       });
 
@@ -551,6 +584,7 @@ export function PolicyPdfCapturePanel() {
     setSelectedSourcePolicyId("");
     setSelectedSourcePolicyLabel("");
     setShowInlineClient(false);
+    setReceiptPlan([]);
     setError(null);
     resetLookupState();
     window.sessionStorage.removeItem(SESSION_KEY);
@@ -974,6 +1008,66 @@ export function PolicyPdfCapturePanel() {
                     </div>
                   </Field>
                 </div>
+              </Section>
+
+              <Section title="Recibos" description="Edita el monto de cada recibo antes de confirmar la captura.">
+                {receiptPlan.length > 0 ? (
+                  <div className="space-y-3">
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="rounded-2xl border bg-muted/30 p-4">
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Total recibos</p>
+                        <p className="mt-1 text-lg font-semibold">{formatCurrency(receiptPlanTotal, draft.currency)}</p>
+                      </div>
+                      <div className="rounded-2xl border bg-muted/30 p-4">
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Prima total</p>
+                        <p className="mt-1 text-lg font-semibold">{formatCurrency(draft.premiumAmount, draft.currency)}</p>
+                      </div>
+                      <div className="rounded-2xl border bg-muted/30 p-4">
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Recibos generados</p>
+                        <p className="mt-1 text-lg font-semibold">{receiptPlan.length}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      {receiptPlan.map((item) => (
+                        <div key={item.receiptNumber} className="rounded-2xl border bg-background/80 p-4">
+                          <div className="grid gap-4 lg:grid-cols-[0.6fr_1fr_1fr_0.8fr] lg:items-end">
+                            <div className="space-y-1">
+                              <p className="text-xs uppercase tracking-wide text-muted-foreground">Recibo</p>
+                              <p className="text-base font-semibold">{item.receiptNumber}</p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-xs uppercase tracking-wide text-muted-foreground">Periodo</p>
+                              <p className="text-sm font-medium">
+                                {formatDate(item.periodStartDate)} · {formatDate(item.periodEndDate)}
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-xs uppercase tracking-wide text-muted-foreground">Vencimiento</p>
+                              <p className="text-sm font-medium">{formatDate(item.dueDate)}</p>
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor={`receipt-amount-${item.receiptNumber}`} className="text-xs uppercase tracking-wide text-muted-foreground">
+                                Monto
+                              </Label>
+                              <Input
+                                id={`receipt-amount-${item.receiptNumber}`}
+                                type="number"
+                                step="0.01"
+                                value={Number.isFinite(item.amount) ? String(item.amount) : "0"}
+                                onChange={(event) => updateReceiptAmount(item.receiptNumber, event.target.value)}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-border bg-muted/20 p-4 text-sm text-muted-foreground">
+                    Completa las fechas y la frecuencia de pago para generar los recibos.
+                  </div>
+                )}
               </Section>
 
               <Section title="Cliente" description="Puedes corregirlo aquí o abrir la búsqueda global para elegir un registro existente.">

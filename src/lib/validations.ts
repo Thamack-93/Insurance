@@ -71,7 +71,7 @@ export const policySchema = z
 
 export const receiptSchema = z
   .object({
-    receiptNumber: z.string().trim().min(2, "Escribe el numero de recibo."),
+    receiptNumber: z.string().trim().min(1, "Escribe el numero de recibo."),
     policyId: z.string().min(1, "Selecciona una poliza."),
     endorsementId: z.string().optional().or(z.literal("")),
     periodStartDate: requiredDate,

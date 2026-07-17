@@ -1,3 +1,4 @@
+import { addMonths } from "date-fns";
 import type { SelectOption } from "@/lib/domain-options";
 
 export type PolicyPdfCaptureDraft = {
@@ -76,6 +77,7 @@ export type PolicyPdfCapturePreview = {
     insurerId: string | null;
     sourcePolicyId: string | null;
   };
+  receiptPlan: PolicyPdfCaptureReceiptPlanItem[];
   clientOptions: PolicyCaptureOption[];
   insurerOptions: PolicyCaptureOption[];
   sourcePolicyOptions: PolicyCaptureSourceOption[];
@@ -88,6 +90,135 @@ export type PolicyPdfCapturePreview = {
   warnings: string[];
   aiReview: PolicyPdfCaptureAiReview | null;
 };
+
+export type PolicyPdfCaptureReceiptPlanItem = {
+  receiptNumber: string;
+  periodStartDate: string;
+  periodEndDate: string;
+  dueDate: string;
+  amount: number;
+  currency: string;
+};
+
+type PolicyPdfCaptureReceiptPlanDraft = Pick<
+  PolicyPdfCaptureDraft,
+  "startDate" | "endDate" | "paymentFrequency" | "premiumAmount" | "currency"
+>;
+
+function parseIsoDate(value: string) {
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const [, yearRaw, monthRaw, dayRaw] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+
+  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0));
+}
+
+function formatIsoDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function addMonthsToIsoDate(value: string, months: number) {
+  const parsed = parseIsoDate(value);
+  if (!parsed) return value;
+  return formatIsoDate(addMonths(parsed, months));
+}
+
+function getReceiptPlanCount(paymentFrequency: string) {
+  switch (paymentFrequency) {
+    case "MONTHLY":
+      return 12;
+    case "QUARTERLY":
+      return 4;
+    case "SEMIANNUAL":
+      return 2;
+    case "ANNUAL":
+    case "SINGLE":
+    case "OTHER":
+    default:
+      return 1;
+  }
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function buildSequentialReceiptNumbers(count: number) {
+  return Array.from({ length: Math.max(1, count) }, (_, index) => String(index + 1));
+}
+
+export function buildPolicyPdfCaptureReceiptPlan(draft: PolicyPdfCaptureReceiptPlanDraft): PolicyPdfCaptureReceiptPlanItem[] {
+  if (!draft.startDate || !draft.endDate) return [];
+
+  const termCount = getReceiptPlanCount(draft.paymentFrequency);
+  const receiptNumbers = buildSequentialReceiptNumbers(termCount);
+  const startDate = draft.startDate;
+  const endDate = draft.endDate;
+  const totalAmount = roundMoney(draft.premiumAmount);
+
+  if (receiptNumbers.length === 1) {
+    return [
+      {
+        receiptNumber: receiptNumbers[0] ?? "1",
+        periodStartDate: startDate,
+        periodEndDate: endDate,
+        dueDate: startDate,
+        amount: totalAmount,
+        currency: draft.currency,
+      },
+    ];
+  }
+
+  const monthsPerTerm = Math.max(1, Math.round(12 / receiptNumbers.length));
+  const baseAmount = roundMoney(totalAmount / receiptNumbers.length);
+  let remainingAmount = totalAmount;
+  let currentStartDate = startDate;
+
+  return receiptNumbers.map((receiptNumber, index) => {
+    const isLast = index === receiptNumbers.length - 1;
+    const nextStartDate = isLast ? endDate : addMonthsToIsoDate(currentStartDate, monthsPerTerm);
+    const amount = isLast ? roundMoney(remainingAmount) : baseAmount;
+    remainingAmount = roundMoney(remainingAmount - amount);
+
+    const item = {
+      receiptNumber,
+      periodStartDate: currentStartDate,
+      periodEndDate: nextStartDate,
+      dueDate: currentStartDate,
+      amount,
+      currency: draft.currency,
+    };
+
+    currentStartDate = nextStartDate;
+    return item;
+  });
+}
+
+export function mergePolicyPdfCaptureReceiptPlan(
+  draft: PolicyPdfCaptureReceiptPlanDraft,
+  existingPlan: PolicyPdfCaptureReceiptPlanItem[] = [],
+) {
+  const basePlan = buildPolicyPdfCaptureReceiptPlan(draft);
+  if (existingPlan.length === 0) return basePlan;
+
+  const amountByReceiptNumber = new Map(
+    existingPlan
+      .filter((item) => item.receiptNumber.trim())
+      .map((item) => [item.receiptNumber.trim(), item.amount] as const),
+  );
+
+  return basePlan.map((item) => {
+    const nextAmount = amountByReceiptNumber.get(item.receiptNumber);
+    return typeof nextAmount === "number" && Number.isFinite(nextAmount)
+      ? { ...item, amount: roundMoney(nextAmount) }
+      : item;
+  });
+}
 
 function compact(value: string) {
   return value.replace(/\s+/g, " ").trim();

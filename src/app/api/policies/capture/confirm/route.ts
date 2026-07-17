@@ -8,7 +8,7 @@ import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-gu
 import { parseDateInput } from "@/lib/form-utils";
 import { assertClientPortfolioAccess, assertPolicyPortfolioAccess } from "@/lib/portfolio-access";
 import { inferClientType, type PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
-import { syncAutoCaptureReceipt } from "@/lib/policy-capture-receipts";
+import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
 import { revalidatePaths } from "@/lib/mutation-utils";
 import {
   recordSecurityAccessDenied,
@@ -46,6 +46,14 @@ const confirmSchema = z.object({
   clientId: z.string().min(1),
   insurerId: z.string().min(1),
   sourcePolicyId: z.string().min(1),
+  receiptPlan: z
+    .array(
+      z.object({
+        receiptNumber: z.string().min(1),
+        amount: z.number(),
+      }),
+    )
+    .optional(),
 });
 
 function normalizeDraft(draft: z.infer<typeof confirmSchema>["draft"]): PolicyPdfCaptureDraft {
@@ -287,22 +295,25 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      const autoReceiptResult = await syncAutoCaptureReceipt(tx, {
+      const autoReceiptResults = await syncAutoCaptureReceipts(tx, {
         policyId: targetPolicy.id,
         clientId: payload.clientId,
         insurerId: payload.insurerId,
         draft: captureDraft,
         userId: user.id,
+        receiptPlan: payload.receiptPlan,
       });
 
-      await writeActivityLog({
-        entityType: "Receipt",
-        entityId: autoReceiptResult.receipt.id,
-        action: autoReceiptResult.created ? "RECEIPT_CREATE_CAPTURE_PDF" : "RECEIPT_UPDATE_CAPTURE_PDF",
-        newValue: autoReceiptResult.receipt,
-        userId: user.id,
-        db: tx,
-      });
+      for (const autoReceiptResult of autoReceiptResults) {
+        await writeActivityLog({
+          entityType: "Receipt",
+          entityId: autoReceiptResult.receipt.id,
+          action: autoReceiptResult.created ? "RECEIPT_CREATE_CAPTURE_PDF" : "RECEIPT_UPDATE_CAPTURE_PDF",
+          newValue: autoReceiptResult.receipt,
+          userId: user.id,
+          db: tx,
+        });
+      }
 
       if (sourcePolicy.status !== "RENEWED") {
         await tx.policy.update({
@@ -339,14 +350,15 @@ export async function POST(request: NextRequest) {
 
       return {
         targetPolicy,
-        receiptId: autoReceiptResult.receipt.id,
+        receiptId: autoReceiptResults[0]?.receipt.id ?? null,
+        receiptIds: autoReceiptResults.map((result) => result.receipt.id),
       };
     });
 
     revalidatePaths([
       "/receipts",
       "/due-payments",
-      `/receipts/${result.receiptId}`,
+      ...result.receiptIds.map((receiptId) => `/receipts/${receiptId}`),
       `/policies/${result.targetPolicy.id}`,
       `/clients/${payload.clientId}`,
       "/dashboard",
@@ -360,8 +372,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       policyId: result.targetPolicy.id,
+      receiptId: result.receiptId,
+      receiptIds: result.receiptIds,
       redirectTo: `/policies/${result.targetPolicy.id}`,
-      message: "Póliza capturada, recibo generado y renovación vinculada.",
+      message: "Póliza capturada, recibos generados y renovación vinculada.",
     });
   } catch (error) {
     if (error instanceof AuthError) {

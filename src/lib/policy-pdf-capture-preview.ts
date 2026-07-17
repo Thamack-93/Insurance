@@ -7,6 +7,7 @@ import { reviewPolicyPdfWithAi } from "@/lib/assistant-ai";
 import {
   extractPolicyPdfDraftFromText,
   buildPolicyPdfCaptureFieldConfidence,
+  buildPolicyPdfCaptureReceiptPlan,
   type PolicyCaptureSourceOption,
   type PolicyPdfCaptureAiReview,
   type PolicyPdfCaptureDraft,
@@ -315,6 +316,7 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
       insurerId: suggestedInsurerId,
       sourcePolicyId: suggestedSourcePolicyId,
     },
+    receiptPlan: buildPolicyPdfCaptureReceiptPlan(input.draft),
     clientOptions: clientCandidates,
     insurerOptions: insurerCandidates,
     sourcePolicyOptions: sourcePolicyCandidates,
