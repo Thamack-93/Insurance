@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, FileUp, RefreshCw, Search, ShieldCheck, Sparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -155,7 +155,7 @@ export function PolicyPdfCapturePanel() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PolicyPdfCapturePreview | null>(null);
   const [draft, setDraft] = useState<PolicyPdfCaptureDraft | null>(null);
-  const [receiptPlan, setReceiptPlan] = useState<PolicyPdfCaptureReceiptPlanItem[]>([]);
+  const [receiptPlanOverrides, setReceiptPlanOverrides] = useState<PolicyPdfCaptureReceiptPlanItem[]>([]);
   const [fieldConfidence, setFieldConfidence] = useState<PolicyPdfCaptureFieldConfidence>(createEmptyConfidence());
   const [selectedClientId, setSelectedClientId] = useState("");
   const [selectedClientLabel, setSelectedClientLabel] = useState("");
@@ -172,6 +172,11 @@ export function PolicyPdfCapturePanel() {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [hasHydrated, setHasHydrated] = useState(false);
+
+  const receiptPlan = useMemo(
+    () => (draft ? mergePolicyPdfCaptureReceiptPlan(draft, receiptPlanOverrides) : []),
+    [draft, receiptPlanOverrides],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -192,7 +197,9 @@ export function PolicyPdfCapturePanel() {
 
       if (stored?.draft) {
         setDraft(stored.draft);
-        setReceiptPlan(stored.receiptPlan?.length ? stored.receiptPlan : buildPolicyPdfCaptureReceiptPlan(stored.draft));
+        setReceiptPlanOverrides(
+          stored.receiptPlan?.length ? stored.receiptPlan : buildPolicyPdfCaptureReceiptPlan(stored.draft),
+        );
         setFieldConfidence(stored.fieldConfidence ?? createEmptyConfidence());
         setSelectedClientId(stored.selectedClientId ?? "");
         setSelectedClientLabel(stored.selectedClientLabel ?? stored.draft.clientName ?? "");
@@ -256,15 +263,6 @@ export function PolicyPdfCapturePanel() {
   ]);
 
   useEffect(() => {
-    if (!draft) {
-      setReceiptPlan([]);
-      return;
-    }
-
-    setReceiptPlan((current) => mergePolicyPdfCaptureReceiptPlan(draft, current));
-  }, [draft?.currency, draft?.endDate, draft?.paymentFrequency, draft?.premiumAmount, draft?.startDate]);
-
-  useEffect(() => {
     if (!lookupOpen || !lookupKind) return;
 
     const controller = new AbortController();
@@ -321,7 +319,7 @@ export function PolicyPdfCapturePanel() {
   }
 
   function updateReceiptAmount(receiptNumber: string, value: string) {
-    setReceiptPlan((current) =>
+    setReceiptPlanOverrides((current) =>
       current.map((item) =>
         item.receiptNumber === receiptNumber ? { ...item, amount: Number(value || 0) } : item,
       ),
@@ -450,7 +448,11 @@ export function PolicyPdfCapturePanel() {
 
       setPreview(result.preview);
       setDraft(result.preview.draft);
-      setReceiptPlan(result.preview.receiptPlan?.length ? result.preview.receiptPlan : buildPolicyPdfCaptureReceiptPlan(result.preview.draft));
+      setReceiptPlanOverrides(
+        result.preview.receiptPlan?.length
+          ? result.preview.receiptPlan
+          : buildPolicyPdfCaptureReceiptPlan(result.preview.draft),
+      );
       setFieldConfidence(result.preview.fieldConfidence ?? createEmptyConfidence());
       setSelectedClientId(result.preview.suggestions.clientId ?? "");
       setSelectedClientLabel(result.preview.draft.clientName);
@@ -584,7 +586,7 @@ export function PolicyPdfCapturePanel() {
     setSelectedSourcePolicyId("");
     setSelectedSourcePolicyLabel("");
     setShowInlineClient(false);
-    setReceiptPlan([]);
+    setReceiptPlanOverrides([]);
     setError(null);
     resetLookupState();
     window.sessionStorage.removeItem(SESSION_KEY);
