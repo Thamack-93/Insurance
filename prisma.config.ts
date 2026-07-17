@@ -43,14 +43,11 @@ function normalizePostgresConnectionString(connectionString: string) {
 
 const databaseUrl =
   process.env.DATABASE_URL_UNPOOLED?.trim() || process.env.DATABASE_URL?.trim();
-const normalizedDatabaseUrl = databaseUrl ? normalizePostgresConnectionString(databaseUrl) : "";
-const isPostgresUrl = databaseUrl ? /^postgres(ql)?:\/\//i.test(databaseUrl) : false;
-
-if (!databaseUrl) {
-  throw new Error(
-    "DATABASE_URL_UNPOOLED or DATABASE_URL is required for Prisma config. Set a Postgres URL in the environment or .env.local.",
-  );
-}
+const generatedClientFallbackUrl =
+  "postgresql://postgres:postgres@127.0.0.1:5432/policydesk?sslmode=disable";
+const resolvedDatabaseUrl = databaseUrl ?? generatedClientFallbackUrl;
+const normalizedDatabaseUrl = normalizePostgresConnectionString(resolvedDatabaseUrl);
+const isPostgresUrl = /^postgres(ql)?:\/\//i.test(resolvedDatabaseUrl);
 
 if (!isPostgresUrl) {
   throw new Error(

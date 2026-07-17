@@ -13,12 +13,31 @@ const messageSchema = z.object({
 });
 
 export async function GET() {
+  const startedAt = Date.now();
   try {
     const user = await requireUser();
+    console.log(
+      JSON.stringify({
+        level: "info",
+        msg: "assistant.get.start",
+        route: "/api/assistant",
+        requestId: null,
+        userId: user.id,
+      }),
+    );
     const snapshot = await getAssistantHomeSnapshot({
       id: user.id,
       role: user.role === "ADMIN" ? "ADMIN" : "AGENT",
     });
+    console.log(
+      JSON.stringify({
+        level: "info",
+        msg: "assistant.get.done",
+        route: "/api/assistant",
+        durationMs: Date.now() - startedAt,
+        userId: user.id,
+      }),
+    );
     return NextResponse.json({ success: true, snapshot });
   } catch (error) {
     if (error instanceof AuthError) {
@@ -30,8 +49,19 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
   try {
     const user = await requireUser();
+    const requestId = request.headers.get("x-vercel-id");
+    console.log(
+      JSON.stringify({
+        level: "info",
+        msg: "assistant.post.start",
+        route: "/api/assistant",
+        requestId,
+        userId: user.id,
+      }),
+    );
     try {
       assertSameOrigin(request, "assistant request");
     } catch {
@@ -50,12 +80,29 @@ export async function POST(request: NextRequest) {
       role: user.role === "ADMIN" ? "ADMIN" : "AGENT",
     }, payload.message);
 
+    console.log(
+      JSON.stringify({
+        level: "info",
+        msg: "assistant.post.done",
+        route: "/api/assistant",
+        requestId,
+        durationMs: Date.now() - startedAt,
+        userId: user.id,
+        source: response.source,
+        aiRunId: response.aiRunId,
+        aiTier: response.aiTier,
+        aiModel: response.aiModel,
+        aiAttempts: response.aiAttempts,
+        reportId: response.reportId,
+      }),
+    );
+
     return NextResponse.json({ success: true, response });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    logError("api.assistant.post", error);
+    logError("api.assistant.post", error, { durationMs: Date.now() - startedAt });
     return NextResponse.json({ error: "No se pudo responder la consulta." }, { status: 500 });
   }
 }

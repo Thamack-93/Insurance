@@ -72,6 +72,43 @@ const localReply: AssistantReply = {
   quickPrompts: [],
 };
 
+const aiTrace = [
+  {
+    attemptNumber: 1,
+    tier: "minimax" as const,
+    status: "SUCCEEDED" as const,
+    requestedModel: "minimax/minimax-m3",
+    finalModel: "minimax/minimax-m3",
+    fallbackReason: null,
+    code: null,
+    durationMs: 420,
+    finishReason: "stop",
+    statusCode: null,
+    usage: {
+      inputTokens: 120,
+      outputTokens: 80,
+      totalTokens: 200,
+      cachedInputTokens: 0,
+      estimatedCostUsd: 0.00022,
+    },
+    responsePreview: null,
+  },
+  {
+    attemptNumber: 2,
+    tier: "critical" as const,
+    status: "SKIPPED" as const,
+    requestedModel: "openai/gpt-5.4-mini",
+    finalModel: null,
+    fallbackReason: "MiniMax M3 respondió correctamente.",
+    code: null,
+    durationMs: null,
+    finishReason: null,
+    statusCode: null,
+    usage: null,
+    responsePreview: null,
+  },
+];
+
 function makeDiagnostic(overrides: Partial<AssistantAiDiagnostic> = {}): AssistantAiDiagnostic {
   return {
     diagnosticId: "diag-1",
@@ -118,10 +155,19 @@ describe("assistant router", () => {
     mocks.buildAssistantAiReply.mockResolvedValue({
       ok: true,
       value: {
+        runId: "run-1",
+        tier: "minimax",
         reply: "IA encontró la póliza y preparó la revisión.",
         sections: localReply.sections,
         quickPrompts: [],
         mutation: null,
+        resolvedModel: "minimax/minimax-m3",
+        usage: aiTrace[0].usage,
+        totalUsage: aiTrace[0].usage,
+        finishReason: "stop",
+        providerMetadata: {},
+        durationMs: 420,
+        trace: aiTrace,
       },
     });
     mocks.getAssistantAiConnectionStatus.mockReturnValue({
@@ -190,7 +236,11 @@ describe("assistant router", () => {
     mocks.searchUserPortfolio.mockResolvedValue([]);
     mocks.buildAssistantAiReply.mockResolvedValue({
       ok: false,
-      diagnostic: makeDiagnostic({ code: "timeout", summary: "MiniMax M3 no completó la respuesta: timeout" }),
+      diagnostic: makeDiagnostic({
+        code: "timeout",
+        summary: "MiniMax M3 no completó la respuesta: timeout",
+        trace: aiTrace,
+      }),
     });
     mocks.getAssistantAiConnectionStatus.mockReturnValue({
       available: true,

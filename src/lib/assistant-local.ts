@@ -9,6 +9,7 @@ import { detectRisks } from "@/lib/risk-engine";
 import { getLatestMaintenanceRun } from "@/lib/vigency-maintenance";
 import { globalSearch, type GlobalSearchResult } from "@/lib/search";
 import { getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
+import { searchPolicyCaptureEntities } from "@/lib/policy-capture-search";
 
 function normalizeMessage(value: string) {
   return value
@@ -270,6 +271,78 @@ async function buildConsistencyAuditReply(user: AssistantUser): Promise<Assistan
   };
 }
 
+function policyCaptureItemToSectionItem(item: Awaited<ReturnType<typeof searchPolicyCaptureEntities>>[number]) {
+  return {
+    title: item.label,
+    subtitle: item.description,
+    href: `/policies/${item.id}`,
+    meta: item.meta?.status ?? "policy",
+  };
+}
+
+async function buildTargetedConsistencyAuditReply(user: AssistantUser, policyNumber: string): Promise<AssistantReply> {
+  const portfolioOwnerId = user.role === "ADMIN" ? undefined : user.id;
+  const [policyMatches, relatedResults] = await Promise.all([
+    searchPolicyCaptureEntities("policy", policyNumber, { portfolioOwnerId }),
+    searchUserPortfolio(user, policyNumber),
+  ]);
+
+  const primaryPolicy = policyMatches[0] ?? null;
+  const policyItems = policyMatches.slice(0, 5).map(policyCaptureItemToSectionItem);
+  const relatedItems = relatedResults
+    .filter((result) => result.type !== "policy" || result.title !== policyNumber)
+    .slice(0, 5)
+    .map((result) => ({
+      title: result.title,
+      subtitle: [result.subtitle, result.details?.[0]].filter(Boolean).join(" · "),
+      href: result.href,
+      meta: result.type,
+    }));
+
+  const reply = primaryPolicy
+    ? `Encontré la póliza ${policyNumber} y voy a centrar la revisión en ese folio.`
+    : `No encontré una coincidencia exacta para la póliza ${policyNumber}, pero sí puedo revisar las coincidencias relacionadas dentro de tu cartera.`;
+
+  return {
+    reply,
+    sections: [
+      makeSection(
+        "Póliza foco",
+        primaryPolicy
+          ? "La coincidencia exacta que encontré primero."
+          : "Coincidencias cercanas al folio solicitado.",
+        policyItems.length > 0
+          ? policyItems
+          : [{ title: policyNumber, subtitle: "No encontré una coincidencia exacta todavía.", href: "/policies", meta: "buscar" }],
+      ),
+      makeSection(
+        "Coincidencias relacionadas",
+        "Resultados útiles para comparar cliente, aseguradora, serie y renovaciones.",
+        relatedItems.length > 0
+          ? relatedItems
+          : [{ title: "Sin coincidencias relacionadas", subtitle: "No encontré vínculos directos en esta revisión.", href: "/policies", meta: "ok" }],
+      ),
+      makeSection(
+        "Datos visibles",
+        primaryPolicy
+          ? "Lo más cercano que pude verificar con los datos disponibles."
+          : "Abre la póliza o afina el número para ver más contexto.",
+        primaryPolicy
+          ? [
+              {
+                title: primaryPolicy.label,
+                subtitle: primaryPolicy.description,
+                href: `/policies/${primaryPolicy.id}`,
+                meta: primaryPolicy.meta?.status ?? "policy",
+              },
+            ]
+          : [{ title: "Abrir búsqueda de póliza", subtitle: "Buscar por número, cliente o serie.", href: "/policies", meta: "buscar" }],
+      ),
+    ],
+    quickPrompts: buildConsistencyQuickPrompts(),
+  };
+}
+
 async function buildPolicyChangeReply(user: AssistantUser, message: string): Promise<AssistantReply> {
   const normalized = normalizeMessage(message);
   const policyNumber = extractPolicyNumber(normalized);
@@ -456,6 +529,7 @@ export async function searchUserPortfolio(user: AssistantUser, message: string) 
 async function buildPromptReply(user: AssistantUser, message: string): Promise<AssistantReply> {
   const normalized = normalizeMessage(message);
   const renewalWindowDays = extractRenewalWindowDays(normalized);
+  const explicitPolicyNumber = extractPolicyNumber(normalized);
 
   if (
     normalized.includes("hoy") ||
@@ -468,6 +542,9 @@ async function buildPromptReply(user: AssistantUser, message: string): Promise<A
   }
 
   if (isConsistencyAuditQuery(normalized)) {
+    if (explicitPolicyNumber) {
+      return buildTargetedConsistencyAuditReply(user, explicitPolicyNumber);
+    }
     return buildConsistencyAuditReply(user);
   }
 

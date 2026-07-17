@@ -16,12 +16,16 @@ import {
   Output,
 } from "ai";
 import { z } from "zod";
+import { estimateAssistantAiCostUsd, normalizeAssistantAiUsage } from "@/lib/assistant-ai-runs";
 import { redactAssistantReportText } from "@/lib/assistant-reports";
 import type {
   AssistantAiDiagnostic,
   AssistantAiAttempt,
   AssistantAiFailureCode,
   AssistantAiOperation,
+  AssistantAiTier,
+  AssistantAiTraceEntry,
+  AssistantAiUsageSnapshot,
   AssistantMutationPlan,
   AssistantPrompt,
   AssistantReply,
@@ -112,6 +116,23 @@ const RETRYABLE_ASSISTANT_AI_FAILURE_CODES = new Set<AssistantAiFailureCode>([
 type AssistantAiResult<T> =
   | { ok: true; value: T }
   | { ok: false; diagnostic: AssistantAiDiagnostic };
+
+type AssistantAiAttemptResult<T> =
+  | { ok: true; value: T; attempt: AssistantAiAttempt }
+  | { ok: false; code: AssistantAiFailureCode; error: unknown; attempt: AssistantAiAttempt };
+
+type AssistantAiReplyValue = AssistantReply & {
+  mutation: AssistantMutationPlan | null;
+  runId: string;
+  tier: AssistantAiTier;
+  resolvedModel: string;
+  usage: AssistantAiUsageSnapshot | null;
+  totalUsage: AssistantAiUsageSnapshot | null;
+  finishReason: string | null;
+  providerMetadata: unknown;
+  durationMs: number;
+  trace: AssistantAiTraceEntry[];
+};
 
 function makeDiagnosticId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -395,7 +416,10 @@ async function generateAssistantAiReplyAttempt(input: {
   model: string;
   fallbackModels: string[];
   timeoutMs: number;
-}) {
+  runId: string;
+  attemptNumber: number;
+  tier: AssistantAiTier;
+}): Promise<AssistantAiAttemptResult<AssistantAiReplyValue>> {
   const attemptStartedAt = Date.now();
 
   try {
@@ -442,6 +466,7 @@ async function generateAssistantAiReplyAttempt(input: {
       return {
         ok: false as const,
         code: "invalid_output" as const,
+        error: null,
         attempt: {
           model: input.model,
           code: "invalid_output" as const,
@@ -451,6 +476,12 @@ async function generateAssistantAiReplyAttempt(input: {
         },
       };
     }
+
+    const durationMs = Math.max(0, Date.now() - attemptStartedAt);
+    const usage = normalizeAssistantAiUsage(result.usage);
+    const totalUsage = normalizeAssistantAiUsage(result.totalUsage);
+    const resolvedUsage = totalUsage ?? usage;
+    const estimatedCostUsd = estimateAssistantAiCostUsd(input.model, resolvedUsage ?? usage);
 
     return {
       ok: true as const,
@@ -471,6 +502,30 @@ async function generateAssistantAiReplyAttempt(input: {
               missingFields: parsed.mutation.missingFields,
             }
           : null,
+        runId: input.runId,
+        tier: input.tier,
+        resolvedModel: input.model,
+        usage: usage ? { ...usage, estimatedCostUsd } : null,
+        totalUsage: totalUsage ? { ...totalUsage, estimatedCostUsd } : null,
+        finishReason: result.finishReason ?? null,
+        providerMetadata: result.providerMetadata ?? null,
+        durationMs,
+        trace: [
+          {
+            attemptNumber: input.attemptNumber,
+            tier: input.tier,
+            status: "SUCCEEDED",
+            requestedModel: input.model,
+            finalModel: input.model,
+            fallbackReason: null,
+            code: null,
+            durationMs,
+            finishReason: result.finishReason ?? null,
+            statusCode: null,
+            usage: resolvedUsage ? { ...resolvedUsage, estimatedCostUsd } : null,
+            responsePreview: redactAssistantReportText(parsed.reply, 500),
+          },
+        ],
       },
       attempt: {
         model: input.model,
@@ -648,10 +703,11 @@ export async function buildAssistantAiReply(input: {
   localReply: AssistantReply;
   contextText?: string | null;
   themeHint?: string | null;
-}): Promise<AssistantAiResult<AssistantReply & { mutation: AssistantMutationPlan | null }>> {
+}): Promise<AssistantAiResult<AssistantAiReplyValue>> {
   const startedAt = Date.now();
   const model = getAssistantAiModel();
   const fallbackModels = getAssistantGatewayFallbackModels();
+  const runId = makeDiagnosticId();
 
   if (!hasGatewayAuth()) {
     return {
@@ -678,6 +734,9 @@ export async function buildAssistantAiReply(input: {
       model,
       fallbackModels,
       timeoutMs: ASSISTANT_AI_ATTEMPT_TIMEOUT_MS,
+      runId,
+      attemptNumber: 1,
+      tier: "minimax",
     });
 
     if (primaryAttempt.ok) {
@@ -711,10 +770,35 @@ export async function buildAssistantAiReply(input: {
       model: ASSISTANT_AI_RETRY_MODEL,
       fallbackModels,
       timeoutMs: ASSISTANT_AI_ATTEMPT_TIMEOUT_MS,
+      runId,
+      attemptNumber: 2,
+      tier: "critical",
     });
 
     if (retryAttempt.ok) {
-      return { ok: true, value: retryAttempt.value };
+      return {
+        ok: true,
+        value: {
+          ...retryAttempt.value,
+          trace: [
+            {
+              attemptNumber: 1,
+              tier: "minimax",
+              status: "FAILED",
+              requestedModel: model,
+              finalModel: null,
+              fallbackReason: primaryAttempt.code,
+              code: primaryAttempt.code,
+              durationMs: primaryAttempt.attempt.durationMs,
+              finishReason: primaryAttempt.attempt.finishReason ?? null,
+              statusCode: primaryAttempt.attempt.statusCode ?? null,
+              usage: null,
+              responsePreview: primaryAttempt.attempt.responsePreview ?? null,
+            },
+            ...retryAttempt.value.trace,
+          ],
+        },
+      };
     }
 
     return {

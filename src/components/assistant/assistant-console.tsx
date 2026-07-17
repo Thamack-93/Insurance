@@ -7,6 +7,8 @@ import { ArrowUp, Bot, FileUp, Loader2, RotateCcw, X } from "lucide-react";
 import { upload } from "@vercel/blob/client";
 import { toast } from "sonner";
 import type {
+  AssistantAiTraceEntry,
+  AssistantAiUsageSnapshot,
   AssistantConversationResponse,
   AssistantPrompt,
   AssistantSection,
@@ -29,6 +31,12 @@ type Message = {
   sections?: AssistantSection[];
   quickPrompts?: AssistantPrompt[];
   reportThemeLabel?: string | null;
+  aiRunId?: string | null;
+  aiTier?: string | null;
+  aiModel?: string | null;
+  aiAttempts?: number;
+  aiUsage?: AssistantAiUsageSnapshot | null;
+  aiTrace?: AssistantAiTraceEntry[];
   aiFallbackNotice?: string | null;
   aiDiagnostic?: AssistantConversationResponse["aiDiagnostic"];
   reportId?: string | null;
@@ -113,6 +121,16 @@ function formatDurationMs(value: number) {
   if (!Number.isFinite(value)) return "Sin dato";
   if (value < 1000) return `${Math.max(0, Math.round(value))} ms`;
   return `${(value / 1000).toFixed(1)} s`;
+}
+
+function formatTokenCount(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return value.toLocaleString("es-MX");
+}
+
+function formatCostUsd(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 6 }).format(value);
 }
 
 function buildCaptureSessionPayload(preview: PolicyPdfCapturePreview) {
@@ -517,6 +535,83 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
                     </details>
                   ) : null}
                 </div>
+              ) : null}
+              {message.aiTrace && message.aiTrace.length > 0 ? (
+                <details className="mb-2 rounded-2xl border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                  <summary className="cursor-pointer select-none font-medium text-foreground">
+                    Traza de IA
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Corrida</p>
+                        <p className="mt-1 font-medium text-foreground">{message.aiRunId ?? "Sin folio"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Tier</p>
+                        <p className="mt-1 font-medium text-foreground">{message.aiTier ?? "Sin dato"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Modelo</p>
+                        <p className="mt-1 font-medium text-foreground">{message.aiModel ?? "Sin dato"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Intentos</p>
+                        <p className="mt-1 font-medium text-foreground">{message.aiAttempts ?? message.aiTrace.length}</p>
+                      </div>
+                    </div>
+                    {message.aiUsage ? (
+                      <div className="grid gap-2 rounded-xl border border-border/60 bg-background/80 p-3 sm:grid-cols-4">
+                        <div>
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Input</p>
+                          <p className="mt-1 font-medium text-foreground">{formatTokenCount(message.aiUsage.inputTokens)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Output</p>
+                          <p className="mt-1 font-medium text-foreground">{formatTokenCount(message.aiUsage.outputTokens)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Total</p>
+                          <p className="mt-1 font-medium text-foreground">{formatTokenCount(message.aiUsage.totalTokens)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Costo</p>
+                          <p className="mt-1 font-medium text-foreground">{formatCostUsd(message.aiUsage.estimatedCostUsd)}</p>
+                        </div>
+                      </div>
+                    ) : null}
+                    <div className="space-y-2">
+                      {message.aiTrace.map((entry) => (
+                        <div key={`${message.id}-${entry.attemptNumber}-${entry.requestedModel}`} className="rounded-xl border border-border/60 bg-background/80 p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="font-medium text-foreground">
+                              Intento {entry.attemptNumber} · {entry.requestedModel}
+                            </p>
+                            <Badge variant="outline" className="rounded-full text-[10px] uppercase tracking-wide">
+                              {entry.status}
+                            </Badge>
+                          </div>
+                          <div className="mt-2 grid gap-1 sm:grid-cols-2">
+                            <span>Tier: {entry.tier}</span>
+                            <span>Modelo final: {entry.finalModel ?? "sin dato"}</span>
+                            <span>Motivo: {entry.fallbackReason ?? "sin motivo"}</span>
+                            <span>Duración: {formatDurationMs(entry.durationMs ?? 0)}</span>
+                            <span>Finish: {entry.finishReason ?? "sin dato"}</span>
+                            <span>Código: {entry.code ?? "ok"}</span>
+                          </div>
+                          {entry.usage ? (
+                            <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+                              <span>In: {formatTokenCount(entry.usage.inputTokens)}</span>
+                              <span>Out: {formatTokenCount(entry.usage.outputTokens)}</span>
+                              <span>Total: {formatTokenCount(entry.usage.totalTokens)}</span>
+                              <span>Costo: {formatCostUsd(entry.usage.estimatedCostUsd)}</span>
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </details>
               ) : null}
               <p className="whitespace-pre-wrap text-sm leading-6">{message.text}</p>
               {message.capturePreview ? (

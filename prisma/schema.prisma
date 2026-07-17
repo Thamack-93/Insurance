@@ -61,6 +61,7 @@ model User {
   createdDataQualitySuppressionRules DataQualitySuppressionRule[] @relation("DataQualitySuppressionRuleCreatedBy")
   reviewedDataQualitySuppressionRules DataQualitySuppressionRule[] @relation("DataQualitySuppressionRuleReviewedBy")
   createdAssistantActionDrafts AssistantActionDraft[]     @relation("AssistantActionDraftUser")
+  createdAssistantAiRuns      AssistantAiRun[]            @relation("AssistantAiRunUser")
 
   @@index([email])
   @@index([role])
@@ -1015,6 +1016,7 @@ model AssistantReport {
   parentReport AssistantReport?      @relation("AssistantReportChildren", fields: [parentReportId], references: [id], onDelete: SetNull)
   childReports AssistantReport[]      @relation("AssistantReportChildren")
   signals      AssistantReportSignal[]
+  aiRuns       AssistantAiRun[]
 
   @@index([kind])
   @@index([themeKey])
@@ -1040,6 +1042,81 @@ model AssistantReportSignal {
   @@index([reportId])
   @@index([signalKind])
   @@index([source])
+  @@index([createdAt])
+}
+
+model AssistantAiRun {
+  id                 String    @id @default(cuid())
+  userId             String
+  userRole           String
+  operation          String
+  tier               String
+  requestedModel     String
+  finalModel         String?
+  status             String    @default("RUNNING")
+  attemptCount       Int       @default(0)
+  fallbackCount      Int       @default(0)
+  fallbackReason     String?
+  reportId           String?
+  errorCode          String?
+  errorMessage       String?
+  statusCode         Int?
+  finishReason       String?
+  usageJson          String?
+  totalUsageJson     String?
+  providerMetadataJson String?
+  responsePreview    String?
+  estimatedCostUsd   Decimal?
+  durationMs         Int?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  user               User             @relation("AssistantAiRunUser", fields: [userId], references: [id], onDelete: Cascade)
+  report             AssistantReport? @relation(fields: [reportId], references: [id], onDelete: SetNull)
+  attempts           AssistantAiAttempt[]
+
+  @@index([userId])
+  @@index([userRole])
+  @@index([operation])
+  @@index([tier])
+  @@index([status])
+  @@index([requestedModel])
+  @@index([finalModel])
+  @@index([reportId])
+  @@index([createdAt])
+}
+
+model AssistantAiAttempt {
+  id                 String    @id @default(cuid())
+  runId              String
+  attemptNumber      Int
+  tier               String
+  requestedModel     String
+  finalModel         String?
+  status             String    @default("STARTED")
+  fallbackReason     String?
+  provider           String?
+  errorCode          String?
+  errorMessage       String?
+  statusCode         Int?
+  finishReason       String?
+  responsePreview    String?
+  usageJson          String?
+  totalUsageJson     String?
+  providerMetadataJson String?
+  durationMs         Int?
+  estimatedCostUsd   Decimal?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  run                AssistantAiRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([attemptNumber])
+  @@index([tier])
+  @@index([status])
+  @@index([requestedModel])
+  @@index([finalModel])
   @@index([createdAt])
 }
 
