@@ -1447,7 +1447,7 @@ export async function buildTelegramUpcomingReceiptsReply(userId: string, days: n
   });
 }
 
-export async function buildTelegramTasksReply(userId: string, days: number, page = 1, client?: DbClient) {
+export async function buildTelegramTasksReply(userId: string, days: number, page = 1) {
   const dayStart = businessStartOfDay(new Date());
   const to = businessEndOfDay(businessAddDays(dayStart, days));
   const [total, tasks] = await Promise.all([
@@ -1477,7 +1477,7 @@ export async function buildTelegramTasksReply(userId: string, days: number, page
   });
 }
 
-export async function buildTelegramSearchReply(userId: string, query: string, client?: DbClient) {
+export async function buildTelegramSearchReply(userId: string, query: string) {
   const normalized = query.trim();
   if (!normalized) {
     return "Escribe /buscar <texto> para buscar clientes, pólizas, recibos, tareas o archivos.";
