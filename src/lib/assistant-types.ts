@@ -177,7 +177,7 @@ export type AssistantReply = {
   todayMetrics?: AssistantTodayBrief["metrics"];
 };
 
-export type AssistantMutationEntityType = "client" | "policy" | "receipt" | "payment" | "task";
+export type AssistantMutationEntityType = "client" | "policy" | "receipt" | "payment" | "workItem";
 export type AssistantMutationOperation = "create" | "update";
 
 export type AssistantMutationField = {

@@ -40,7 +40,6 @@ type TelegramLinkCodeResult =
 type Props = {
   channel: NotificationChannelRecord;
   timeZone: string;
-  digestHour: number;
   generateTelegramLinkCode: () => Promise<TelegramLinkCodeResult>;
   disconnectTelegram: () => Promise<MutationResult>;
   sendTelegramDigestNow: () => Promise<MutationResult>;
@@ -48,7 +47,6 @@ type Props = {
   setTelegramMutationsEnabled: (enabled: boolean) => Promise<MutationResult>;
   preferences: NotificationPreferenceRecord[];
   updateTelegramPreferences: (preferences: NotificationPreferenceInput[]) => Promise<MutationResult>;
-  setTelegramDigestHour: (hour: number) => Promise<MutationResult>;
 };
 
 function isConnected(channel: NotificationChannelRecord) {
@@ -58,7 +56,6 @@ function isConnected(channel: NotificationChannelRecord) {
 export function NotificationPreferencesPanel({
   channel,
   timeZone,
-  digestHour,
   generateTelegramLinkCode,
   disconnectTelegram,
   sendTelegramDigestNow,
@@ -66,7 +63,6 @@ export function NotificationPreferencesPanel({
   setTelegramMutationsEnabled,
   preferences: initialPreferences,
   updateTelegramPreferences,
-  setTelegramDigestHour,
 }: Props) {
   const router = useRouter();
   const [isGeneratingLink, setIsGeneratingLink] = useState(false);
@@ -80,7 +76,6 @@ export function NotificationPreferencesPanel({
   const [mutationsEnabled, setMutationsEnabled] = useState(channel.telegramMutationsEnabled);
   const [preferences, setPreferences] = useState(initialPreferences);
   const [isUpdatingPreferences, setIsUpdatingPreferences] = useState(false);
-  const [isUpdatingHour, setIsUpdatingHour] = useState(false);
 
   const connected = isConnected(channel);
 
@@ -185,18 +180,6 @@ export function NotificationPreferencesPanel({
       return;
     }
     toast.success(result.message);
-  }
-
-  async function handleDigestHourChange(hour: number) {
-    setIsUpdatingHour(true);
-    const result = await setTelegramDigestHour(hour);
-    setIsUpdatingHour(false);
-    if (!result.ok) {
-      toast.error(result.error);
-      return;
-    }
-    toast.success(result.message);
-    router.refresh();
   }
 
   async function handleCopyLinkCode() {
@@ -376,17 +359,19 @@ export function NotificationPreferencesPanel({
               {timeZone}
             </Badge>
             <Badge variant="secondary" className="rounded-full">
-              {String(digestHour).padStart(2, "0")}:00
+              08:00 CDMX
             </Badge>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <label htmlFor="telegram-digest-hour" className="text-sm font-medium text-foreground">Enviar a las</label>
-            <select id="telegram-digest-hour" value={digestHour} disabled={isUpdatingHour} onChange={(event) => void handleDigestHourChange(Number(event.target.value))} className="h-9 rounded-xl border border-border bg-background px-3 text-sm">
-              {Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{String(hour).padStart(2, "0")}:00</option>)}
-            </select>
-            <span>en {timeZone}.</span>
+          <div className="rounded-xl border border-border/70 bg-muted/30 p-3 text-foreground">
+            <p className="font-medium">Resumen automático fijo</p>
+            <p className="mt-1 text-muted-foreground">
+              Se enviará una vez al día a las 08:00, hora de Ciudad de México. La selección de
+              hora individual está temporalmente desactivada.
+            </p>
           </div>
-          <p>El cron corre cada hora y solo envía cuando llega esta hora local. Si lo mandas manualmente, el automático sigue corriendo por separado.</p>
+          <p>
+            El envío manual sigue disponible y no altera el envío automático del día.
+          </p>
         </CardContent>
       </Card>
 

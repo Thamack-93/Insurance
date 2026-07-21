@@ -6,7 +6,7 @@ import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import type { WorkItemStatus } from "@/lib/domain-values";
 
-export type WorkItemSourceType = "Task" | "Notification";
+export type WorkItemSourceType = "Task" | "WorkItem" | "Renewal" | "Notification";
 
 export type WorkItemSyncInput = {
   sourceType: WorkItemSourceType;

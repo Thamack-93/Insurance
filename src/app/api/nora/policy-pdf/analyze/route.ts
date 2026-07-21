@@ -3,7 +3,8 @@ import { del, get } from "@vercel/blob";
 import { z } from "zod";
 import { AuthError, requireUser } from "@/lib/auth";
 import { logError } from "@/lib/logger";
-import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
+import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody } from "@/lib/request-guards";
+import { rateLimitResponse } from "@/lib/api-security";
 import { getPortfolioOwnerIdForRead } from "@/lib/portfolio-access";
 import { extractPdfTextFromBytes } from "@/lib/pdf-text-extraction";
 import { buildPolicyPdfCapturePreviewFromText, buildPolicyPdfCapturePreviewFromDraft } from "@/lib/policy-pdf-capture-preview";
@@ -75,9 +76,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No autorizado." }, { status: 403 });
     }
 
-    const rateLimit = checkRateLimit(`nora-policy-pdf-analyze:${getRequestIp(request)}`, {
+    const rateLimit = await checkDistributedRateLimit(`nora-policy-pdf-analyze:${getRequestIp(request)}:${user.id}`, {
       limit: 8,
       windowMs: 15 * 60 * 1000,
+      requireDistributed: true,
     });
     if (!rateLimit.allowed) {
       await recordSecurityRateLimit({
@@ -88,18 +90,12 @@ export async function POST(request: NextRequest) {
         entityType: "SecurityEvent",
         entityId: "nora-policy-pdf-analyze:rate-limit",
       });
-      return NextResponse.json(
-        { error: "Demasiados intentos. Espera un momento e inténtalo de nuevo." },
-        {
-          status: 429,
-          headers: { "Retry-After": String(Math.max(1, Math.ceil(rateLimit.retryAfterMs / 1000))) },
-        },
-      );
+      return rateLimitResponse(rateLimit);
     }
 
     let payload: z.infer<typeof analyzeSchema>;
     try {
-      payload = analyzeSchema.parse(await request.json());
+      payload = analyzeSchema.parse(await readJsonBody(request, 256 * 1024));
     } catch {
       return NextResponse.json({ error: "El payload de análisis no es válido." }, { status: 400 });
     }

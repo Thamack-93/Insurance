@@ -47,7 +47,7 @@ type AssistantActionDraftPayload = {
 
 const ACTION_DRAFT_TTL_MS = 30 * 60 * 1000;
 
-const ENTITY_TYPES: AssistantMutationEntityType[] = ["client", "policy", "receipt", "payment", "task"];
+const ENTITY_TYPES: AssistantMutationEntityType[] = ["client", "policy", "receipt", "payment", "workItem"];
 
 const RELATION_SEARCH_TYPE: Record<string, GlobalSearchResult["type"]> = {
   clientId: "client",
@@ -111,7 +111,7 @@ const FIELD_LABELS: Record<AssistantMutationEntityType, Record<string, string>> 
     reference: "Referencia",
     notes: "Notas",
   },
-  task: {
+  workItem: {
     clientId: "Cliente",
     policyId: "Póliza",
     insurerId: "Aseguradora",
@@ -218,7 +218,7 @@ function buildActionTitle(entityType: AssistantMutationEntityType, operation: As
     policy: "póliza",
     receipt: "recibo",
     payment: "pago",
-    task: "tarea",
+    workItem: "pendiente",
   };
   return `${operation === "create" ? "Crear" : "Actualizar"} ${labels[entityType]}`;
 }
@@ -229,7 +229,7 @@ function buildActionSummary(entityType: AssistantMutationEntityType, operation: 
     policy: "póliza",
     receipt: "recibo",
     payment: "pago",
-    task: "tarea",
+    workItem: "pendiente",
   };
   const label = targetLabel ? ` sobre ${targetLabel}` : "";
   return `${operation === "create" ? "Alta" : "Edición"} de ${labels[entityType]}${label}`;
@@ -870,7 +870,7 @@ async function buildPaymentDraft(plan: AssistantMutationPlan, user: AssistantUse
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
 }
 
-async function buildTaskDraft(plan: AssistantMutationPlan, user: AssistantUser) {
+async function buildWorkItemDraft(plan: AssistantMutationPlan, user: AssistantUser) {
   const db = getDb();
   const values = createWorkItemDefaults();
   const fieldMap = new Map(plan.fields.map((field) => [field.field, field.value]));
@@ -922,16 +922,16 @@ async function buildTaskDraft(plan: AssistantMutationPlan, user: AssistantUser) 
     if (!parsed.success) return null;
 
     const payload: AssistantActionDraftPayload = {
-      title: plan.title || buildActionTitle("task", "update"),
-      summary: plan.summary || buildActionSummary("task", "update", current.title),
+      title: plan.title || buildActionTitle("workItem", "update"),
+      summary: plan.summary || buildActionSummary("workItem", "update", current.title),
       reply: plan.reply,
-      entityType: "task",
+      entityType: "workItem",
       operation: "update",
       targetId: current.sourceId ?? current.id,
       targetLabel: current.title,
       targetUpdatedAt: current.updatedAt.toISOString(),
       formValues: parsed.data,
-      changes: buildChangeList("task", toWorkItemFormValues({
+      changes: buildChangeList("workItem", toWorkItemFormValues({
         clientId: current.clientId,
         policyId: current.policyId,
         insurerId: current.insurerId,
@@ -973,16 +973,16 @@ async function buildTaskDraft(plan: AssistantMutationPlan, user: AssistantUser) 
   if (!parsed.success) return null;
 
   const payload: AssistantActionDraftPayload = {
-    title: plan.title || buildActionTitle("task", "create"),
-    summary: plan.summary || buildActionSummary("task", "create", null),
+    title: plan.title || buildActionTitle("workItem", "create"),
+    summary: plan.summary || buildActionSummary("workItem", "create", null),
     reply: plan.reply,
-    entityType: "task",
+    entityType: "workItem",
     operation: "create",
     targetId: null,
     targetLabel: null,
     targetUpdatedAt: null,
     formValues: parsed.data,
-    changes: buildChangeList("task", null, parsed.data, {}, afterDisplay),
+    changes: buildChangeList("workItem", null, parsed.data, {}, afterDisplay),
   };
   const draft = await createDraftRecord(user.id, payload, db);
   await writeActivityLog({
@@ -1022,8 +1022,8 @@ export async function buildAssistantActionProposalFromPlan(plan: AssistantMutati
         return buildReceiptDraft(normalizedPlan, user);
       case "payment":
         return buildPaymentDraft(normalizedPlan, user);
-      case "task":
-        return buildTaskDraft(normalizedPlan, user);
+      case "workItem":
+        return buildWorkItemDraft(normalizedPlan, user);
     }
     return null;
   } catch (error) {
@@ -1048,7 +1048,7 @@ async function executeDraftPayload(payload: AssistantActionDraftPayload): Promis
         : updateReceipt(payload.targetId ?? "", payload.formValues as Parameters<typeof updateReceipt>[1]);
     case "payment":
       return createPayment(payload.formValues as Parameters<typeof createPayment>[0]);
-    case "task":
+    case "workItem":
       return payload.operation === "create"
         ? createWorkItem(payload.formValues as Parameters<typeof createWorkItem>[0])
         : updateWorkItem(payload.targetId ?? "", payload.formValues as Parameters<typeof updateWorkItem>[1]);
@@ -1107,6 +1107,17 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
     return errorResult("La propuesta está corrupta.");
   }
 
+  if ((payload as { entityType?: string }).entityType === "task") {
+    await db.assistantActionDraft.update({
+      where: { id: draft.id },
+      data: {
+        status: "FAILED",
+        resultJson: JSON.stringify({ ok: false, error: "Las propuestas antiguas de tareas deben recrearse como pendientes." }),
+      },
+    });
+    return errorResult("La propuesta antigua de tarea ya no puede ejecutarse. Pide a Nora que la recree como pendiente.");
+  }
+
   if (payload.operation === "update" && (!payload.targetId || !payload.targetUpdatedAt)) {
     await db.assistantActionDraft.update({
       where: { id: draft.id },
@@ -1116,7 +1127,7 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
   }
 
   if (payload.operation === "update" && payload.targetId && payload.targetUpdatedAt) {
-    if (payload.entityType === "task") {
+    if (payload.entityType === "workItem") {
       const current = await findWorkItemByRouteId(payload.targetId, db, user.role === "ADMIN" ? undefined : user.id);
       if (!current || current.updatedAt.toISOString() !== payload.targetUpdatedAt) {
         return markDraftFailed("La tarea cambió mientras revisabas la propuesta. Pide una nueva actualización.");
@@ -1194,7 +1205,7 @@ export async function getAssistantActionDraftProposal(draftId: string, userId: s
   });
   if (!draft) return null;
   const payload = parsePayload(draft.payloadJson);
-  if (!payload) return null;
+  if (!payload || (payload as { entityType?: string }).entityType === "task") return null;
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
 }
 

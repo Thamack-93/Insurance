@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { AuthError, requireUser } from "@/lib/auth";
 import { logError } from "@/lib/logger";
-import { checkRateLimit, getRequestIp } from "@/lib/request-guards";
+import { checkDistributedRateLimit, getRequestIp, securityFingerprint } from "@/lib/request-guards";
+import { rateLimitResponse } from "@/lib/api-security";
 import { getPortfolioOwnerIdForRead } from "@/lib/portfolio-access";
 import { searchPolicyCaptureEntities } from "@/lib/policy-capture-search";
 
@@ -29,19 +30,12 @@ export async function GET(request: NextRequest) {
     query = payload.q;
     const portfolioOwnerId = getPortfolioOwnerIdForRead(user);
 
-    const rateLimit = checkRateLimit(`policy-capture-lookup:${getRequestIp(request)}`, {
+    const rateLimit = await checkDistributedRateLimit(`policy-capture-lookup:${securityFingerprint(`ip:${getRequestIp(request)}`)}:${user.id}`, {
       limit: 60,
       windowMs: 60 * 1000,
+      requireDistributed: true,
     });
-    if (!rateLimit.allowed) {
-      return NextResponse.json(
-        { error: "Demasiadas búsquedas. Intenta de nuevo en un momento." },
-        {
-          status: 429,
-          headers: { "Retry-After": String(Math.max(1, Math.ceil(rateLimit.retryAfterMs / 1000))) },
-        },
-      );
-    }
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit, "Demasiadas búsquedas. Intenta de nuevo en un momento.");
 
     const items = await searchPolicyCaptureEntities(payload.kind, payload.q, {
       clientId: payload.clientId,

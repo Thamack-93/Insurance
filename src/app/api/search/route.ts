@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { globalSearch } from "@/lib/search";
 import { logError } from "@/lib/logger";
 import { AuthError, requireUser } from "@/lib/auth";
-import { checkRateLimit, getRequestIp } from "@/lib/request-guards";
+import { checkDistributedRateLimit, getRequestIp, securityFingerprint } from "@/lib/request-guards";
+import { rateLimitResponse } from "@/lib/api-security";
 
 export async function GET(request: NextRequest) {
   let query = "";
@@ -13,19 +14,14 @@ export async function GET(request: NextRequest) {
     query = searchParams.get("q") ?? "";
     const scope = searchParams.get("scope");
 
-    const rateLimit = checkRateLimit(`search:${getRequestIp(request)}`, {
+    if (query.length > 1000) {
+      return NextResponse.json({ error: "La búsqueda es demasiado larga." }, { status: 413 });
+    }
+    const rateLimit = await checkDistributedRateLimit(`search:${securityFingerprint(`ip:${getRequestIp(request)}`)}`, {
       limit: 60,
       windowMs: 60 * 1000,
     });
-    if (!rateLimit.allowed) {
-      return NextResponse.json(
-        { error: "Demasiadas búsquedas. Intenta de nuevo en un momento." },
-        {
-          status: 429,
-          headers: { "Retry-After": String(Math.max(1, Math.ceil(rateLimit.retryAfterMs / 1000))) },
-        },
-      );
-    }
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit, "Demasiadas búsquedas.");
 
     if (!query || !query.trim()) {
       return NextResponse.json([]);

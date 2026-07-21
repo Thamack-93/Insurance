@@ -15,7 +15,6 @@ import {
   sendTelegramDigestNow,
   sendTelegramTestMessage,
   setTelegramMutationsEnabled,
-  setTelegramDigestHour,
   updateTelegramPreferences,
   syncTelegramWebhookAction,
 } from "./actions";
@@ -116,12 +115,12 @@ export default async function NotificationSettingsPage() {
                   {cronSecretConfigured ? "Cron activo" : "Cron pendiente"}
                 </Badge>
                 <Badge variant="secondary" className="rounded-full">
-                  {String(user.telegramDigestHour).padStart(2, "0")}:00
+                  08:00 CDMX
                 </Badge>
               </div>
               <p>
-                El scheduler de Telegram revisa cada hora y envía tu resumen en el horario
-                fijo mostrado arriba. El envío manual no reemplaza ni consume el automático.
+                El scheduler de Telegram envía una vez al día a las 08:00, hora de Ciudad de
+                México. El envío manual no reemplaza ni consume el automático.
               </p>
             </CardContent>
           </Card>
@@ -159,7 +158,6 @@ export default async function NotificationSettingsPage() {
             }
           }
           timeZone={timeZone}
-          digestHour={user.telegramDigestHour}
           generateTelegramLinkCode={generateTelegramLinkCode}
           disconnectTelegram={disconnectTelegram}
           sendTelegramDigestNow={sendTelegramDigestNow}
@@ -167,7 +165,6 @@ export default async function NotificationSettingsPage() {
           setTelegramMutationsEnabled={setTelegramMutationsEnabled}
           preferences={snapshot.preferences}
           updateTelegramPreferences={updateTelegramPreferences}
-          setTelegramDigestHour={setTelegramDigestHour}
         />
       </div>
     </div>

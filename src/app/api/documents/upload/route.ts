@@ -6,7 +6,8 @@ import { AuthError, requireUser } from "@/lib/auth";
 import { assertSafeDocumentPath, documentsDir } from "@/lib/files";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
 import { logError } from "@/lib/logger";
-import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
+import { assertSameOrigin, assertRequestBodySize, checkDistributedRateLimit, getRequestIp, RequestGuardError, securityFingerprint } from "@/lib/request-guards";
+import { rateLimitResponse } from "@/lib/api-security";
 import {
   assertEndorsementPortfolioAccess,
   assertClientPortfolioAccess,
@@ -25,7 +26,6 @@ const uploadSchema = z.object({
   policyId: z.string().optional(),
   endorsementId: z.string().optional(),
   receiptId: z.string().optional(),
-  taskId: z.string().optional(),
   claimId: z.string().optional(),
   quoteId: z.string().optional(),
   documentType: z.enum([
@@ -223,19 +223,6 @@ async function assertDocumentUploadOwnership(
       throw new AuthError("No tienes acceso a esta cotización.", 403);
     }
   }
-  if (metadata.taskId) {
-    const db = getDb();
-    const task = await db.task.findFirst({
-      where: {
-        id: metadata.taskId,
-        OR: [{ client: { portfolioOwnerId: userId } }, { clientId: null, createdById: userId }],
-      },
-      select: { id: true },
-    });
-    if (!task) {
-      throw new AuthError("No tienes acceso a esta tarea.", 403);
-    }
-  }
 }
 
 export async function POST(request: NextRequest) {
@@ -246,6 +233,8 @@ export async function POST(request: NextRequest) {
         { status: 501 },
       );
     }
+
+    assertRequestBodySize(request, 25 * 1024 * 1024);
 
     try {
       assertSameOrigin(request, "document upload");
@@ -260,7 +249,10 @@ export async function POST(request: NextRequest) {
       });
       return NextResponse.json({ error: "No autorizado." }, { status: 403 });
     }
-    const rateLimit = checkRateLimit(`upload:${getRequestIp(request)}`, UPLOAD_RATE_LIMIT);
+    const rateLimit = await checkDistributedRateLimit(`upload:${securityFingerprint(`ip:${getRequestIp(request)}`)}`, {
+      ...UPLOAD_RATE_LIMIT,
+      requireDistributed: true,
+    });
     if (!rateLimit.allowed) {
       await recordSecurityRateLimit({
         alertType: SECURITY_EVENT_TYPES.rateLimitedRequest,
@@ -270,22 +262,22 @@ export async function POST(request: NextRequest) {
         entityType: "SecurityEvent",
         entityId: "document-upload:rate-limit",
       });
-      return NextResponse.json(
-        { error: "Demasiadas subidas. Intenta de nuevo en unos minutos." },
-        {
-          status: 429,
-          headers: { "Retry-After": String(Math.max(1, Math.ceil(rateLimit.retryAfterMs / 1000))) },
-        },
-      );
+      return rateLimitResponse(rateLimit, "Demasiadas subidas. Intenta de nuevo en unos minutos.");
     }
 
     const formData = await request.formData();
+
+    if (String(formData.get("taskId") ?? "").trim()) {
+      return NextResponse.json(
+        { error: "Los documentos nuevos deben ligarse a un WorkItem, cliente, póliza, recibo o expediente compatible." },
+        { status: 410 },
+      );
+    }
 
     const metadata = {
       clientId: (formData.get("clientId") as string) || undefined,
       policyId: (formData.get("policyId") as string) || undefined,
       receiptId: (formData.get("receiptId") as string) || undefined,
-      taskId: (formData.get("taskId") as string) || undefined,
       claimId: (formData.get("claimId") as string) || undefined,
       quoteId: (formData.get("quoteId") as string) || undefined,
       documentType: formData.get("documentType") as string,
@@ -397,6 +389,10 @@ export async function POST(request: NextRequest) {
         { error: "Los datos del documento no son válidos.", details: error.issues },
         { status: 400 },
       );
+    }
+
+    if (error instanceof RequestGuardError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
     }
 
     return NextResponse.json(

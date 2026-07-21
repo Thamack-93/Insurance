@@ -32,6 +32,10 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 - `DATABASE_URL`
 - `ENABLE_DOCUMENT_FILES=false`
 - `CRON_SECRET`
+- `UPSTASH_REDIS_REST_URL` opcional para rate limiting distribuido
+- `UPSTASH_REDIS_REST_TOKEN` opcional para rate limiting distribuido
+- `REQUIRE_DISTRIBUTED_RATE_LIMIT=0` mientras el proyecto tenga un único usuario
+- `SECURITY_EVENT_FINGERPRINT_SECRET`
 - `AI_GATEWAY_MODEL`
 - `AI_GATEWAY_FALLBACK_MODELS`
 - `AI_GATEWAY_STRUCTURED_MODEL`
@@ -47,8 +51,9 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 2. Crear una rama protegida para preview; no seedear ni resetear la base actual.
 3. Configurar las variables de entorno en Vercel.
 4. Conectar un Blob store privado.
-5. Mantener Vercel Cron para el backup diario. En el plan Hobby, el digest horario de Telegram se ejecuta mediante `.github/workflows/telegram-digest.yml`, que llama el endpoint protegido cada hora y decide la hora local de cada usuario.
-6. Desplegar preview, validar y luego promover la rama principal.
+5. Mantener los dos cron diarios en Vercel: `/api/jobs/backup` a las `05:00 UTC` y `/api/jobs/telegram-digest` a las `14:00 UTC` (08:00, hora de Ciudad de México). El digest usa una hora fija temporalmente y protege los reenvíos con la fecha local del usuario.
+6. Mantener el fallback local de rate limiting para el despliegue actual. Cuando aumente el tráfico, configurar Redis y cambiar `REQUIRE_DISTRIBUTED_RATE_LIMIT=1` para fallar cerrado si Redis no está disponible.
+7. Desplegar preview, validar y luego promover la rama principal.
 
 ## Validaciones mínimas
 

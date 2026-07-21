@@ -372,7 +372,6 @@ export async function consolidateClientIntoTarget(
       await tx.claim.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
       await tx.quote.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
       await tx.document.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
-      await tx.task.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
       await tx.workItem.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
       await tx.notificationEvent.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
       await tx.client.updateMany({ where: { referidorId: sourceClient.id }, data: { referidorId: targetClient.id } });

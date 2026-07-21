@@ -22,7 +22,6 @@ type Associations = {
   policyId?: string;
   endorsementId?: string;
   receiptId?: string;
-  taskId?: string;
   claimId?: string;
   quoteId?: string;
 };
