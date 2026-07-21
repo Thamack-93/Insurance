@@ -7,8 +7,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-// Vercel runs this route once per day. The handler sends the daily Telegram summary
-// for any connected channel that has not already been sent today.
+// The hourly scheduler invokes this route; the handler sends the daily Telegram
+// summary only for channels whose local delivery hour is due.
 function hasValidCronSecret(request: NextRequest) {
   const secret = process.env.CRON_SECRET?.trim();
   const authorization = request.headers.get("authorization");
