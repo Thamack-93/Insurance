@@ -44,16 +44,6 @@ function formatDurationMs(value: number | null | undefined) {
   return `${(value / 1000).toFixed(1)} s`;
 }
 
-function formatTokenCount(value: number | null | undefined) {
-  return value == null || !Number.isFinite(value) ? "—" : value.toLocaleString("es-MX");
-}
-
-function formatCostUsd(value: number | null | undefined) {
-  return value == null || !Number.isFinite(value)
-    ? "—"
-    : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 6 }).format(value);
-}
-
 function ReportList({
   reports,
 }: {
