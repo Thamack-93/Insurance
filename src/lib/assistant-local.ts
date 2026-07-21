@@ -154,9 +154,9 @@ async function buildConsistencyAuditReply(user: AssistantUser): Promise<Assistan
   const portfolioOwnerId = user.role === "ADMIN" ? undefined : user.id;
   const [riskFindings, policyScores, receiptIssues, renewalSuggestions, latestRun] = await Promise.all([
     detectRisks(portfolioOwnerId),
-    getPolicyDataQualityScores(portfolioOwnerId),
-    getReceiptReviewIssues(portfolioOwnerId),
-    getRenewalReviewSuggestions(portfolioOwnerId),
+    getPolicyDataQualityScores(),
+    getReceiptReviewIssues(),
+    getRenewalReviewSuggestions(),
     getLatestMaintenanceRun("POLICY_VIGENCY_AUDIT"),
   ]);
 

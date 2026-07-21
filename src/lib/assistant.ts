@@ -393,15 +393,6 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
       reportId: null,
       reportThemeKey: null,
       reportThemeLabel: null,
-      aiRunId: null,
-      aiTier: null,
-      aiModel: null,
-      aiAttempts: 0,
-      aiUsage: null,
-      aiTrace: [],
-      aiFallbackNotice: null,
-      aiDiagnostic: null,
-      actionProposal: null,
     };
   }
 

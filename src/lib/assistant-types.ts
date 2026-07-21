@@ -157,7 +157,6 @@ export type AssistantAiDiagnostic = {
   model: string;
   resolvedModel?: string | null;
   fallbackModels: string[];
-  attempts?: AssistantAiAttempt[];
   durationMs: number;
   summary: string;
   details: string;
@@ -166,6 +165,7 @@ export type AssistantAiDiagnostic = {
   finishReason?: string | null;
   responsePreview?: string | null;
   usage?: AssistantAiUsageSnapshot | null;
+  attempts?: AssistantAiAttempt[];
   trace?: AssistantAiTraceEntry[];
   reportId?: string | null;
 };
@@ -285,7 +285,6 @@ export type AssistantReportSnapshot = {
       code?: string;
       model?: string;
       fallbackModels?: string[];
-      attempts?: AssistantAiAttempt[];
       durationMs?: number;
       summary?: string;
       details?: string;
