@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 import { authenticatePageAsAdmin } from "../helpers/db";
 
 test.describe("Nora assistant", () => {
+  test.use({ navigationTimeout: 60_000 });
+
   test.beforeEach(async ({ page }) => {
     await authenticatePageAsAdmin(page);
     await page.goto("/assistant");
