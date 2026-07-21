@@ -423,6 +423,7 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
       localReply,
       contextText: aiContext,
       themeHint: null,
+      mode: hasMutationIntent(normalized) ? "structured" : "conversation",
     });
     if (aiReply.ok) {
       finalReply = {

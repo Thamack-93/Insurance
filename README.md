@@ -39,6 +39,9 @@ Copia `.env.example` a `.env.local` y ajusta los valores:
 | `DATABASE_URL` | Producción | URL de Postgres hosted para el despliegue en Vercel |
 | `CRON_SECRET` | Producción | Protege los jobs internos de Telegram y del backup automatizado |
 | `AI_GATEWAY_MODEL` | Opcional | Modelo `provider/model` usado por Nora |
+| `AI_GATEWAY_FALLBACK_MODELS` | Opcional | Modelos de respaldo para conversación |
+| `AI_GATEWAY_STRUCTURED_MODEL` | Opcional | Modelo para acciones y salidas estructuradas |
+| `AI_GATEWAY_STRUCTURED_FALLBACK_MODELS` | Opcional | Respaldo de acciones estructuradas |
 | `AI_GATEWAY_API_KEY` | Opcional | Credencial principal para AI Gateway; OIDC queda como respaldo |
 | `BLOB_READ_WRITE_TOKEN` | Producción | Acceso al store privado de Vercel Blob |
 | `BACKUP_ENCRYPTION_KEY` | Producción | Clave de 32 bytes para AES-256-GCM |

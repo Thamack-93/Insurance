@@ -70,6 +70,7 @@ describe("assistant ai fallback", () => {
     expect(getAssistantAiConnectionStatus()).toEqual({
       available: true,
       authMode: "deployment",
+      connectionState: "configured",
       model: "minimax/minimax-m3",
       fallbackModels: ["openai/gpt-5.4-mini"],
     });

@@ -1,5 +1,6 @@
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UrlTabs } from "@/components/ui/url-tabs";
@@ -159,7 +160,7 @@ function AiRunList({
                 </CardDescription>
               </div>
               <div className="text-right text-xs text-muted-foreground">
-                <p>{formatDurationMs(run.durationMs)}</p>
+                <p>{formatDurationMs(run.durationMs ?? 0)}</p>
                 <p>{formatDate(new Date(run.createdAt))}</p>
               </div>
             </div>
@@ -207,7 +208,7 @@ function AiRunList({
                       <span>Tier: {attempt.tier}</span>
                       <span>Final: {attempt.finalModel ?? "sin dato"}</span>
                       <span>Motivo: {attempt.fallbackReason ?? "sin motivo"}</span>
-                      <span>Duración: {formatDurationMs(attempt.durationMs)}</span>
+                      <span>Duración: {formatDurationMs(attempt.durationMs ?? 0)}</span>
                       <span>Código: {attempt.code ?? "ok"}</span>
                       <span>Finish: {attempt.finishReason ?? "sin dato"}</span>
                     </div>
@@ -254,7 +255,12 @@ export default async function AssistantSettingsPage() {
         eyebrow="Sistema"
         title="Backlog de IA"
         description="Aquí viven los incidentes y sugerencias que el asistente va acumulando por tema."
-        actions={<RefreshPageButton label="Actualizar" />}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" className="rounded-full"><Link href="/api/admin/assistant/health" target="_blank">Probar conexión</Link></Button>
+            <RefreshPageButton label="Actualizar" />
+          </div>
+        }
       />
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
@@ -375,3 +381,4 @@ export default async function AssistantSettingsPage() {
     </div>
   );
 }
+import Link from "next/link";
