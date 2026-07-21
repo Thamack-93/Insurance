@@ -1,12 +1,12 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { ArrowLeft, BellRing } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { requireUserOrRedirect } from "@/lib/auth";
-import { getTelegramChannelStateForUser, syncTelegramWebhook } from "@/lib/telegram";
+import { getTelegramChannelStateForUser } from "@/lib/telegram";
+import { getNotificationPreferencesForUser } from "@/lib/notification-foundation";
 import { DEFAULT_USER_TIME_ZONE } from "@/lib/time-zones";
 import { NotificationPreferencesPanel } from "@/components/settings/notification-preferences-panel";
 import {
@@ -15,20 +15,21 @@ import {
   sendTelegramDigestNow,
   sendTelegramTestMessage,
   setTelegramMutationsEnabled,
+  setTelegramDigestHour,
+  updateTelegramPreferences,
+  syncTelegramWebhookAction,
 } from "./actions";
+
+async function syncWebhookFormAction(_formData: FormData) {
+  "use server";
+  await syncTelegramWebhookAction(_formData);
+}
 
 export default async function NotificationSettingsPage() {
   const user = await requireUserOrRedirect();
-  const channel = await getTelegramChannelStateForUser(user.id);
-  const requestHeaders = await headers();
-  const forwardedProto = requestHeaders.get("x-forwarded-proto") ?? "https";
-  const forwardedHost = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
-  const currentOrigin = forwardedHost ? `${forwardedProto}://${forwardedHost}` : null;
-  const webhookSync =
-    process.env.VERCEL_ENV === "production" && currentOrigin
-      ? await syncTelegramWebhook(currentOrigin)
-      : null;
-  const timeZone = DEFAULT_USER_TIME_ZONE;
+  const snapshot = await getNotificationPreferencesForUser(user.id);
+  const channel = snapshot.channel ?? (await getTelegramChannelStateForUser(user.id));
+  const timeZone = user.timeZone || DEFAULT_USER_TIME_ZONE;
   const cronSecretConfigured = Boolean(process.env.CRON_SECRET?.trim());
   const telegramConnected = channel.isEnabled && Boolean(channel.telegramChatId);
 
@@ -126,7 +127,7 @@ export default async function NotificationSettingsPage() {
           </Card>
         </section>
 
-        {webhookSync ? (
+        {user.role === "ADMIN" ? (
           <Card className="border-border/60 bg-card/85 shadow-sm">
             <CardHeader className="border-b border-border/70">
               <CardTitle className="text-base">Webhook de Telegram</CardTitle>
@@ -134,10 +135,11 @@ export default async function NotificationSettingsPage() {
                 Reconfigura el bot para que apunte al dominio actual de esta instalación.
               </CardDescription>
             </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
-              {webhookSync.ok
-                ? `Sincronizado con ${webhookSync.webhookUrl}.`
-                : `No se pudo sincronizar automáticamente: ${webhookSync.error}`}
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+              <span>La sincronización es manual para evitar efectos secundarios al abrir la página.</span>
+              <form action={syncWebhookFormAction}>
+                <Button type="submit" variant="outline" className="rounded-full">Sincronizar webhook</Button>
+              </form>
             </CardContent>
           </Card>
         ) : null}
@@ -163,6 +165,9 @@ export default async function NotificationSettingsPage() {
           sendTelegramDigestNow={sendTelegramDigestNow}
           sendTelegramTestMessage={sendTelegramTestMessage}
           setTelegramMutationsEnabled={setTelegramMutationsEnabled}
+          preferences={snapshot.preferences}
+          updateTelegramPreferences={updateTelegramPreferences}
+          setTelegramDigestHour={setTelegramDigestHour}
         />
       </div>
     </div>

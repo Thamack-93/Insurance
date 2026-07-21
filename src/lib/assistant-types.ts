@@ -46,6 +46,7 @@ export type AssistantSnapshot = {
 export type AssistantAiStatus = {
   available: boolean;
   authMode: "api-key" | "oidc" | "deployment" | "unavailable";
+  connectionState?: "configured" | "verified" | "degraded" | "unavailable";
   model: string;
   fallbackModels: string[];
 };
@@ -132,6 +133,9 @@ export type AssistantAiOperation =
 
 export type AssistantAiFailureCode =
   | "unavailable"
+  | "rate_limited"
+  | "budget_exceeded"
+  | "provider_unavailable"
   | "timeout"
   | "aborted"
   | "api_call_error"
@@ -170,6 +174,7 @@ export type AssistantReply = {
   reply: string;
   sections: AssistantSection[];
   quickPrompts: AssistantPrompt[];
+  todayMetrics?: AssistantTodayBrief["metrics"];
 };
 
 export type AssistantMutationEntityType = "client" | "policy" | "receipt" | "payment" | "task";

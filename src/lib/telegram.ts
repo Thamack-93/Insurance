@@ -13,6 +13,7 @@ import {
   createNotificationEvent,
   ensureNotificationDefaultsForUser,
   getLocalDateKey,
+  isDigestHourDue,
   markNotificationFailed,
   markNotificationSent,
   markNotificationSkipped,
@@ -66,6 +67,15 @@ type TelegramRenewalItem = {
   clientName: string;
   insurerName: string;
   endDate: Date;
+};
+type TelegramDigestCommissionItem = {
+  id: string;
+  clientName: string;
+  policyNumber: string | null;
+  insurerName: string;
+  expectedDate: Date | null;
+  amount: number;
+  currency: string;
 };
 type TelegramListResult<T> = {
   total: number;
@@ -529,8 +539,14 @@ function getNextPolicyStep(state: TelegramPolicyDraftState): TelegramPolicyDraft
   return "ready";
 }
 
-function formatTelegramDate(date: Date) {
-  return TELEGRAM_DATE_FORMATTER.format(date);
+function formatTelegramDate(date: Date, timeZone = DEFAULT_TIMEZONE) {
+  if (timeZone === DEFAULT_TIMEZONE) return TELEGRAM_DATE_FORMATTER.format(date);
+  return new Intl.DateTimeFormat("es-MX", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone,
+  }).format(date);
 }
 
 function formatTelegramPaymentDateLabel(paidDate: string) {
@@ -552,6 +568,7 @@ function getDigestDateKey(now: Date, timeZone: string | null | undefined) {
 export async function markTelegramDigestAsAutoSentForUser(
   userId: string,
   sentAt = new Date(),
+  timeZone = DEFAULT_TIMEZONE,
   client?: DbClient,
 ) {
   const db = client ?? getDb();
@@ -572,7 +589,7 @@ export async function markTelegramDigestAsAutoSentForUser(
 
     return {
       ...updated,
-      digestDateKey: getDigestDateKey(sentAt, DEFAULT_TIMEZONE),
+      digestDateKey: getDigestDateKey(sentAt, timeZone),
     };
   } catch (error) {
     logError("telegram.markDigestAutoSent", error, { userId });
@@ -1067,7 +1084,7 @@ async function getTelegramRenewals(input: {
   };
 }
 
-function formatTelegramReceiptLine(item: TelegramReceiptItem) {
+function formatTelegramReceiptLine(item: TelegramReceiptItem, timeZone = DEFAULT_TIMEZONE) {
   const diff = daysUntil(item.dueDate);
   const dueLabel =
     diff < 0
@@ -1084,11 +1101,11 @@ function formatTelegramReceiptLine(item: TelegramReceiptItem) {
 
   return [
     `• ${item.clientName} · Póliza ${item.policyNumber} · ${item.insurerName}`,
-    `  Recibo ${item.receiptNumber} · ${formatTelegramDate(item.dueDate)} · ${dueLabel} · ${balanceLabel}`,
+    `  Recibo ${item.receiptNumber} · ${formatTelegramDate(item.dueDate, timeZone)} · ${dueLabel} · ${balanceLabel}`,
   ].join("\n");
 }
 
-function formatTelegramRenewalLine(item: TelegramRenewalItem) {
+function formatTelegramRenewalLine(item: TelegramRenewalItem, timeZone = DEFAULT_TIMEZONE) {
   const diff = daysUntil(item.endDate);
   const renewalLabel =
     diff < 0
@@ -1099,8 +1116,12 @@ function formatTelegramRenewalLine(item: TelegramRenewalItem) {
 
   return [
     `• ${item.clientName} · Póliza ${item.policyNumber} · ${item.insurerName}`,
-    `  ${formatTelegramDate(item.endDate)} · ${renewalLabel}`,
+    `  ${formatTelegramDate(item.endDate, timeZone)} · ${renewalLabel}`,
   ].join("\n");
+}
+
+function formatTelegramCommissionLine(item: TelegramDigestCommissionItem, timeZone = DEFAULT_TIMEZONE) {
+  return `• ${item.clientName} · ${item.policyNumber ?? "Sin póliza"} · ${item.insurerName}\n  ${item.expectedDate ? formatTelegramDate(item.expectedDate, timeZone) : "Sin fecha"} · ${formatCurrency(item.amount, item.currency)}`;
 }
 
 function buildTelegramSection(input: {
@@ -1212,52 +1233,72 @@ function getTelegramSummaryLabel(total: number, suffix: string) {
 
 function formatTelegramDigestSummary(input: {
   dayStart: Date;
+  timeZone: string;
   overdueReceipts: TelegramListResult<TelegramReceiptItem>;
   todayReceipts: TelegramListResult<TelegramReceiptItem>;
   upcomingReceipts: TelegramListResult<TelegramReceiptItem>;
   upcomingRenewals: TelegramListResult<TelegramRenewalItem>;
+  pendingWorkItems: TelegramListResult<Awaited<ReturnType<typeof getOpenWorkItems>>[number]>;
+  commissions: TelegramListResult<TelegramDigestCommissionItem>;
 }) {
   return [
     "Resumen diario PolicyDesk",
-    `Fecha: ${formatTelegramDate(input.dayStart)}`,
+    `Fecha: ${formatTelegramDate(input.dayStart, input.timeZone)}`,
     "",
     `Vencidos: ${getTelegramSummaryLabel(input.overdueReceipts.total, "recibo")}`,
     `Hoy: ${getTelegramSummaryLabel(input.todayReceipts.total, "recibo")}`,
     `Próximos 14 días: ${getTelegramSummaryLabel(input.upcomingReceipts.total, "recibo")}`,
     `Renovaciones 7 días: ${getTelegramSummaryLabel(input.upcomingRenewals.total, "póliza")}`,
+    `Pendientes atrasados: ${getTelegramSummaryLabel(input.pendingWorkItems.total, "tarea")}`,
+    `Comisiones por revisar: ${getTelegramSummaryLabel(input.commissions.total, "comisión")}`,
   ].join("\n");
 }
 
 function formatTelegramDigestDetailLines(input: {
+  timeZone: string;
   overdueReceipts: TelegramListResult<TelegramReceiptItem>;
   todayReceipts: TelegramListResult<TelegramReceiptItem>;
   upcomingReceipts: TelegramListResult<TelegramReceiptItem>;
   upcomingRenewals: TelegramListResult<TelegramRenewalItem>;
+  pendingWorkItems: TelegramListResult<Awaited<ReturnType<typeof getOpenWorkItems>>[number]>;
+  commissions: TelegramListResult<TelegramDigestCommissionItem>;
 }) {
   const sections = [
     buildTelegramSection({
       title: "Recibos vencidos",
       total: input.overdueReceipts.total,
-      lines: input.overdueReceipts.items.map(formatTelegramReceiptLine),
+      lines: input.overdueReceipts.items.map((item) => formatTelegramReceiptLine(item, input.timeZone)),
       emptyText: "Sin recibos vencidos.",
     }),
     buildTelegramSection({
       title: "Recibos de hoy",
       total: input.todayReceipts.total,
-      lines: input.todayReceipts.items.map(formatTelegramReceiptLine),
+      lines: input.todayReceipts.items.map((item) => formatTelegramReceiptLine(item, input.timeZone)),
       emptyText: "Sin recibos pendientes para hoy.",
     }),
     buildTelegramSection({
       title: "Recibos próximos 14 días",
       total: input.upcomingReceipts.total,
-      lines: input.upcomingReceipts.items.map(formatTelegramReceiptLine),
+      lines: input.upcomingReceipts.items.map((item) => formatTelegramReceiptLine(item, input.timeZone)),
       emptyText: "Sin recibos próximos.",
     }),
     buildTelegramSection({
       title: "Renovaciones próximas 7 días",
       total: input.upcomingRenewals.total,
-      lines: input.upcomingRenewals.items.map(formatTelegramRenewalLine),
+      lines: input.upcomingRenewals.items.map((item) => formatTelegramRenewalLine(item, input.timeZone)),
       emptyText: "Sin renovaciones próximas.",
+    }),
+    buildTelegramSection({
+      title: "Pendientes atrasados",
+      total: input.pendingWorkItems.total,
+      lines: input.pendingWorkItems.items.map((item) => formatTelegramTaskLine(item)),
+      emptyText: "Sin tareas atrasadas.",
+    }),
+    buildTelegramSection({
+      title: "Comisiones por revisar",
+      total: input.commissions.total,
+      lines: input.commissions.items.map((item) => formatTelegramCommissionLine(item, input.timeZone)),
+      emptyText: "Sin comisiones por revisar.",
     }),
   ];
 
@@ -1266,10 +1307,13 @@ function formatTelegramDigestDetailLines(input: {
 
 function buildTelegramDailyDigestMessages(input: {
   dayStart: Date;
+  timeZone: string;
   overdueReceipts: TelegramListResult<TelegramReceiptItem>;
   todayReceipts: TelegramListResult<TelegramReceiptItem>;
   upcomingReceipts: TelegramListResult<TelegramReceiptItem>;
   upcomingRenewals: TelegramListResult<TelegramRenewalItem>;
+  pendingWorkItems: TelegramListResult<Awaited<ReturnType<typeof getOpenWorkItems>>[number]>;
+  commissions: TelegramListResult<TelegramDigestCommissionItem>;
 }): TelegramDigestMessagePart[] {
   const summary = formatTelegramDigestSummary(input);
   const detailLines = formatTelegramDigestDetailLines(input).flatMap((block, index) =>
@@ -1287,6 +1331,7 @@ function buildTelegramDailyDigestMessages(input: {
 }
 
 export async function buildTelegramReceiptsReply(userId: string, days: number, page = 1, client?: DbClient) {
+  void client;
   const dayStart = businessStartOfDay(new Date());
   const receipts = await getTelegramReceipts({
     userId,
@@ -1299,7 +1344,7 @@ export async function buildTelegramReceiptsReply(userId: string, days: number, p
   return buildTelegramSection({
     title: `Cobros vencidos y próximos (${days} días)`,
     total: receipts.total,
-    lines: receipts.items.map(formatTelegramReceiptLine),
+    lines: receipts.items.map((item) => formatTelegramReceiptLine(item)),
     emptyText: "No hay cobros pendientes en este rango.",
     page,
     totalPages: getTelegramTotalPages(receipts.total),
@@ -1307,6 +1352,7 @@ export async function buildTelegramReceiptsReply(userId: string, days: number, p
 }
 
 export async function buildTelegramRenewalsReply(userId: string, days: number, page = 1, client?: DbClient) {
+  void client;
   const dayStart = businessStartOfDay(new Date());
   const renewals = await getTelegramRenewals({
     userId,
@@ -1320,7 +1366,7 @@ export async function buildTelegramRenewalsReply(userId: string, days: number, p
   return buildTelegramSection({
     title: `Renovaciones próximas (${days} días)`,
     total: renewals.total,
-    lines: renewals.items.map(formatTelegramRenewalLine),
+    lines: renewals.items.map((item) => formatTelegramRenewalLine(item)),
     emptyText: "No hay renovaciones próximas en este rango.",
     page,
     totalPages: getTelegramTotalPages(renewals.total),
@@ -1397,7 +1443,7 @@ export async function buildTelegramOverdueReply(userId: string, page = 1, client
   return buildTelegramSection({
     title: "Cobros vencidos",
     total: receipts.total,
-    lines: receipts.items.map(formatTelegramReceiptLine),
+    lines: receipts.items.map((item) => formatTelegramReceiptLine(item)),
     emptyText: "Sin cobros vencidos.",
     page,
     totalPages: getTelegramTotalPages(receipts.total),
@@ -1419,7 +1465,7 @@ export async function buildTelegramTodayReply(userId: string, page = 1, client?:
   return buildTelegramSection({
     title: "Cobros de hoy",
     total: receipts.total,
-    lines: receipts.items.map(formatTelegramReceiptLine),
+    lines: receipts.items.map((item) => formatTelegramReceiptLine(item)),
     emptyText: "Sin cobros para hoy.",
     page,
     totalPages: getTelegramTotalPages(receipts.total),
@@ -1440,7 +1486,7 @@ export async function buildTelegramUpcomingReceiptsReply(userId: string, days: n
   return buildTelegramSection({
     title: `Cobros próximos (${days} días)`,
     total: receipts.total,
-    lines: receipts.items.map(formatTelegramReceiptLine),
+    lines: receipts.items.map((item) => formatTelegramReceiptLine(item)),
     emptyText: "Sin cobros próximos.",
     page,
     totalPages: getTelegramTotalPages(receipts.total),
@@ -1448,6 +1494,7 @@ export async function buildTelegramUpcomingReceiptsReply(userId: string, days: n
 }
 
 export async function buildTelegramTasksReply(userId: string, days: number, page = 1, client?: DbClient) {
+  void client;
   const dayStart = businessStartOfDay(new Date());
   const to = businessEndOfDay(businessAddDays(dayStart, days));
   const [total, tasks] = await Promise.all([
@@ -1478,6 +1525,7 @@ export async function buildTelegramTasksReply(userId: string, days: number, page
 }
 
 export async function buildTelegramSearchReply(userId: string, query: string, client?: DbClient) {
+  void client;
   const normalized = query.trim();
   if (!normalized) {
     return "Escribe /buscar <texto> para buscar clientes, pólizas, recibos, tareas o archivos.";
@@ -1501,10 +1549,38 @@ export async function buildTelegramDailyDigest(userId: string, client?: DbClient
   return parts.map((part) => part.body).join("\n\n");
 }
 
-export async function buildTelegramDailyDigestMessagesByUser(userId: string, client?: DbClient) {
-  const dayStart = businessStartOfDay(new Date());
-  const dayEnd = businessEndOfDay(dayStart);
-  const [overdueReceipts, todayReceipts, upcomingReceipts, upcomingRenewals] = await Promise.all([
+function getTimeZoneDateParts(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone, hour12: false, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date);
+  return {
+    year: Number(parts.find((part) => part.type === "year")?.value ?? 1970),
+    month: Number(parts.find((part) => part.type === "month")?.value ?? 1),
+    day: Number(parts.find((part) => part.type === "day")?.value ?? 1),
+  };
+}
+
+function startOfDayInTimeZone(date: Date, timeZone: string) {
+  const parts = getTimeZoneDateParts(date, timeZone);
+  const utcMidnight = Date.UTC(parts.year, parts.month - 1, parts.day);
+  const probe = new Date(utcMidnight);
+  const probeParts = new Intl.DateTimeFormat("en-GB", { timeZone, hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).formatToParts(probe);
+  const localAsUtc = Date.UTC(
+    Number(probeParts.find((part) => part.type === "year")?.value ?? parts.year),
+    Number(probeParts.find((part) => part.type === "month")?.value ?? parts.month) - 1,
+    Number(probeParts.find((part) => part.type === "day")?.value ?? parts.day),
+    Number(probeParts.find((part) => part.type === "hour")?.value ?? 0),
+    Number(probeParts.find((part) => part.type === "minute")?.value ?? 0),
+  );
+  return new Date(utcMidnight - (localAsUtc - utcMidnight));
+}
+
+export async function buildTelegramDailyDigestMessagesByUser(userId: string, client?: DbClient, timeZone = DEFAULT_TIMEZONE) {
+  const db = client ?? getDb();
+  const dayStart = startOfDayInTimeZone(new Date(), timeZone);
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
+  const tomorrowStart = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+  const upcomingEnd = new Date(dayStart.getTime() + 14 * 24 * 60 * 60 * 1000 - 1);
+  const renewalEnd = new Date(dayStart.getTime() + 7 * 24 * 60 * 60 * 1000 - 1);
+  const [overdueReceipts, todayReceipts, upcomingReceipts, upcomingRenewals, pendingRows, commissionRows] = await Promise.all([
     getTelegramReceipts({
       userId,
       to: new Date(dayStart.getTime() - 1),
@@ -1520,26 +1596,53 @@ export async function buildTelegramDailyDigestMessagesByUser(userId: string, cli
     }),
     getTelegramReceipts({
       userId,
-      from: businessAddDays(dayStart, 1),
-      to: businessEndOfDay(businessAddDays(dayStart, 14)),
+      from: tomorrowStart,
+      to: upcomingEnd,
       limit: TELEGRAM_DIGEST_SECTION_LIMIT,
       client,
     }),
     getTelegramRenewals({
       userId,
       from: dayStart,
-      to: businessEndOfDay(businessAddDays(dayStart, 7)),
+      to: renewalEnd,
       limit: TELEGRAM_DIGEST_SECTION_LIMIT,
       client,
     }),
+    getOpenWorkItems({ to: dayStart, limit: TELEGRAM_DIGEST_SECTION_LIMIT, portfolioOwnerId: userId }),
+    db.commission.findMany({
+      where: {
+        client: { portfolioOwnerId: userId },
+        expectedDate: { gte: dayStart, lte: new Date(dayStart.getTime() + 30 * 24 * 60 * 60 * 1000) },
+        status: { in: ["EXPECTED", "PENDING", "OVERDUE"] },
+      },
+      include: { client: { select: { fullName: true } }, policy: { select: { policyNumber: true } }, insurer: { select: { name: true } } },
+      orderBy: { expectedDate: "asc" },
+      take: TELEGRAM_DIGEST_SECTION_LIMIT,
+    }),
   ]);
+
+  const commissions: TelegramListResult<TelegramDigestCommissionItem> = {
+    total: commissionRows.length,
+    items: commissionRows.map((row) => ({
+      id: row.id,
+      clientName: row.client.fullName,
+      policyNumber: row.policy?.policyNumber ?? null,
+      insurerName: row.insurer.name,
+      expectedDate: row.expectedDate,
+      amount: toNumber(row.actualAmount ?? row.expectedAmount),
+      currency: "MXN",
+    })),
+  };
 
   return buildTelegramDailyDigestMessages({
     dayStart,
+    timeZone,
     overdueReceipts,
     todayReceipts,
     upcomingReceipts,
     upcomingRenewals,
+    pendingWorkItems: { total: pendingRows.length, items: pendingRows },
+    commissions,
   });
 }
 
@@ -1547,9 +1650,11 @@ export async function sendTelegramDigestMessagesForUser(input: {
   userId: string;
   client?: DbClient;
   markAsSent?: boolean;
+  timeZone?: string;
 }) {
   const db = input.client ?? getDb();
-  const parts = await buildTelegramDailyDigestMessagesByUser(input.userId, db);
+  const timeZone = input.timeZone ?? DEFAULT_TIMEZONE;
+  const parts = await buildTelegramDailyDigestMessagesByUser(input.userId, db, timeZone);
   let sent = 0;
   let failed = 0;
 
@@ -1571,7 +1676,7 @@ export async function sendTelegramDigestMessagesForUser(input: {
   }
 
   if (input.markAsSent !== false && sent > 0 && failed === 0) {
-    await markTelegramDigestAsAutoSentForUser(input.userId, new Date(), db);
+    await markTelegramDigestAsAutoSentForUser(input.userId, new Date(), timeZone, db);
   }
 
   return {
@@ -2378,10 +2483,11 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
     select: {
       userId: true,
       telegramChatId: true,
-      user: {
-        select: {
-          timeZone: true,
-          telegramDigestLastAutoSentAt: true,
+        user: {
+          select: {
+            timeZone: true,
+            telegramDigestHour: true,
+            telegramDigestLastAutoSentAt: true,
         },
       },
     },
@@ -2397,7 +2503,10 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
 
   for (const channel of channels) {
     if (!channel.telegramChatId) continue;
-    const timeZone = DEFAULT_TIMEZONE;
+    const timeZone = channel.user.timeZone || DEFAULT_TIMEZONE;
+    if (!isDigestHourDue(now, channel.user.telegramDigestHour, timeZone)) {
+      continue;
+    }
     if (
       channel.user.telegramDigestLastAutoSentAt &&
       getLocalDateKey(channel.user.telegramDigestLastAutoSentAt, timeZone) === getLocalDateKey(now, timeZone)
@@ -2409,6 +2518,7 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
         userId: channel.userId,
         client: db,
         markAsSent: false,
+        timeZone,
       });
 
       result.sent += digestResult.sent;
@@ -2416,7 +2526,7 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
       result.parts += digestResult.parts;
 
       if (digestResult.sent > 0 && digestResult.failed === 0) {
-        await markTelegramDigestAsAutoSentForUser(channel.userId, now, db);
+        await markTelegramDigestAsAutoSentForUser(channel.userId, now, timeZone, db);
       }
     } catch (error) {
       result.failed += 1;

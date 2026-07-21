@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Bot, FileUp, Loader2, RotateCcw, X } from "lucide-react";
+import { ArrowUp, Bot, Check, Clipboard, FileUp, Loader2, RotateCcw, X } from "lucide-react";
 import { upload } from "@vercel/blob/client";
 import { toast } from "sonner";
 import type {
@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { AssistantActionProposalCard } from "@/components/assistant/assistant-action-proposal-card";
+import { MessageResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
 import { extractPdfTextFromFile } from "@/lib/pdf-text-extraction.browser";
 import { buildNoraPolicyPdfPathname, NORA_POLICY_PDF_MAX_BYTES } from "@/lib/nora-pdf-storage.shared";
@@ -46,6 +47,7 @@ type Message = {
     preview: PolicyPdfCapturePreview;
   };
   actionProposal?: AssistantConversationResponse["actionProposal"];
+  todayMetrics?: AssistantConversationResponse["todayMetrics"];
 };
 
 const CAPTURE_SESSION_KEY = "policydesk.policyPdfCapture.v2";
@@ -67,11 +69,15 @@ function initialMessage(snapshot: AssistantSnapshot): Message {
 }
 
 function ResultSection({ section }: { section: AssistantSection }) {
+  const isPriority = /cobro|pendiente|riesgo|resultado/i.test(section.title);
   return (
-    <div className="mt-3 overflow-hidden rounded-2xl border border-border/70 bg-background/80">
-      <div className="border-b border-border/60 px-4 py-3">
+    <div className={cn("mt-3 overflow-hidden rounded-2xl border bg-background/80", isPriority ? "border-amber-200/80" : "border-border/70")}>
+      <div className="flex items-start justify-between gap-3 border-b border-border/60 px-4 py-3">
+        <div>
         <p className="text-sm font-medium">{section.title}</p>
         <p className="mt-0.5 text-xs text-muted-foreground">{section.summary}</p>
+        </div>
+        {section.items.length > 0 ? <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">{section.items.length}</Badge> : null}
       </div>
       {section.items.length > 0 ? (
         <div className="divide-y divide-border/60">
@@ -90,6 +96,27 @@ function ResultSection({ section }: { section: AssistantSection }) {
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function TodayMetrics({ metrics }: { metrics: NonNullable<Message["todayMetrics"]> }) {
+  const cards = [
+    ["Vencidos", metrics.overdueCount, "text-red-700"],
+    ["Hoy", metrics.dueTodayCount, "text-amber-700"],
+    ["7 días", metrics.due7Count, "text-blue-700"],
+    ["Renovaciones", metrics.renewals30Count, "text-violet-700"],
+    ["Pendientes", metrics.openWorkItemsCount, "text-orange-700"],
+    ["Comisiones", metrics.commissionsCount, "text-emerald-700"],
+  ] as const;
+  return (
+    <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      {cards.map(([label, value, color]) => (
+        <div key={label} className="rounded-2xl border border-border/70 bg-background/80 px-3 py-3">
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+          <p className={cn("mt-1 text-2xl font-semibold tracking-tight", color)}>{value}</p>
+        </div>
+      ))}
     </div>
   );
 }
@@ -234,6 +261,7 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
   const [attachedPdf, setAttachedPdf] = useState<File | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const [lastPrompt, setLastPrompt] = useState<string | null>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -287,6 +315,7 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
     const message = value.trim();
     if (!message || isSending) return;
 
+    setLastPrompt(message);
     setMessages((current) => [...current, { id: makeId(), role: "user", text: message }]);
     setInput("");
     setIsSending(true);
@@ -318,8 +347,15 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
           reportThemeLabel: assistantResponse.reportThemeLabel,
           aiFallbackNotice: assistantResponse.aiFallbackNotice,
           aiDiagnostic: assistantResponse.aiDiagnostic,
+          aiRunId: assistantResponse.aiRunId,
+          aiTier: assistantResponse.aiTier,
+          aiModel: assistantResponse.aiModel,
+          aiAttempts: assistantResponse.aiAttempts,
+          aiUsage: assistantResponse.aiUsage,
+          aiTrace: assistantResponse.aiTrace,
           reportId: assistantResponse.reportId,
           actionProposal: assistantResponse.actionProposal,
+          todayMetrics: assistantResponse.todayMetrics,
         },
       ]);
     } catch (error) {
@@ -450,8 +486,17 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
     clearAttachment();
   }
 
+  async function copyResponse(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Respuesta copiada");
+    } catch {
+      toast.error("No pude copiar la respuesta.");
+    }
+  }
+
   return (
-    <section className="mx-auto flex h-[calc(100dvh-9rem)] min-h-0 w-full max-w-4xl flex-col overflow-hidden rounded-[2rem] border border-border/70 bg-card/90 shadow-sm">
+    <section className="mx-auto flex h-[calc(100dvh-7.5rem)] min-h-[34rem] w-full max-w-none flex-col overflow-hidden rounded-[1.5rem] border border-border/70 bg-card/90 shadow-sm lg:h-[calc(100dvh-8rem)]">
       <header className="flex items-center justify-between border-b border-border/70 px-5 py-4 sm:px-7">
         <div className="flex items-center gap-3">
           <div className="grid size-10 place-items-center rounded-2xl bg-foreground text-background">
@@ -462,7 +507,7 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span>Asistente de PolicyDesk · {snapshot.scopeLabel}</span>
               <Badge variant={snapshot.ai.available ? "default" : "outline"} className="rounded-full text-[10px] uppercase tracking-wide">
-                {snapshot.ai.available ? `IA conectada · ${snapshot.ai.model}` : "IA desconectada"}
+                {snapshot.ai.available ? `IA configurada · ${snapshot.ai.model}` : "IA no disponible"}
               </Badge>
             </div>
           </div>
@@ -473,10 +518,10 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
         </Button>
       </header>
 
-      <div className="min-h-0 flex-1 space-y-7 overflow-y-auto px-4 py-7 sm:px-8">
+      <div className="min-h-0 flex-1 space-y-7 overflow-y-auto px-3 py-5 sm:px-8 lg:px-12" aria-live="polite">
         {messages.map((message) => (
           <article key={message.id} className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}>
-            <div className={cn("max-w-[88%] sm:max-w-[78%]", message.role === "user" && "rounded-3xl rounded-br-lg bg-foreground px-4 py-3 text-background")}>
+            <div className={cn("w-full max-w-5xl", message.role === "user" && "max-w-[88%] rounded-3xl rounded-br-lg bg-foreground px-4 py-3 text-background sm:max-w-[72%]")}>
               {message.role === "assistant" ? (
                 <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground">Nora</span>
@@ -500,6 +545,14 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
                     ) : null}
                   </div>
                   <p className="mt-1">{message.aiDiagnostic.summary}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {lastPrompt ? (
+                      <Button type="button" size="sm" variant="outline" className="h-7 rounded-full border-amber-300 bg-white/70 text-[11px]" onClick={() => sendMessage(lastPrompt)} disabled={isSending}>
+                        <RotateCcw className="mr-1.5 size-3" /> Reintentar
+                      </Button>
+                    ) : null}
+                    <Link href="/settings/assistant?tab=incidentes" className="inline-flex h-7 items-center rounded-full border border-amber-300 bg-white/70 px-3 font-medium underline-offset-2 hover:underline">Abrir diagnóstico</Link>
+                  </div>
                   <div className="mt-2 grid gap-1 text-[11px] text-amber-900/80 sm:grid-cols-2">
                     <span>Código: {message.aiDiagnostic.code}</span>
                     <span>Modelo: {message.aiDiagnostic.model}</span>
@@ -613,7 +666,14 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
                   </div>
                 </details>
               ) : null}
-              <p className="whitespace-pre-wrap text-sm leading-6">{message.text}</p>
+              {message.todayMetrics ? <TodayMetrics metrics={message.todayMetrics} /> : null}
+              {message.role === "assistant" ? <MessageResponse className="text-sm leading-6" isAnimating={false}>{message.text}</MessageResponse> : <p className="whitespace-pre-wrap text-sm leading-6">{message.text}</p>}
+              {message.role === "assistant" && message.text ? (
+                <div className="mt-2 flex items-center gap-1">
+                  <Button type="button" size="icon-sm" variant="ghost" className="rounded-full text-muted-foreground" onClick={() => copyResponse(message.text)} aria-label="Copiar respuesta" title="Copiar respuesta"><Clipboard className="size-3.5" /></Button>
+                  {message.aiDiagnostic ? <Check className="hidden size-3.5 text-muted-foreground" aria-hidden="true" /> : null}
+                </div>
+              ) : null}
               {message.capturePreview ? (
                 <CapturePreviewCard
                   fileName={message.capturePreview.fileName}
@@ -624,7 +684,7 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
               ) : null}
               {message.actionProposal ? <AssistantActionProposalCard proposal={message.actionProposal} /> : null}
               {message.sections?.map((section) => <ResultSection key={`${message.id}-${section.title}`} section={section} />)}
-              {message.quickPrompts && message.role === "assistant" ? (
+              {message.quickPrompts && message.role === "assistant" && message.id === messages[messages.length - 1]?.id ? (
                 <div className="mt-4 flex flex-wrap gap-2">
                   {message.quickPrompts.slice(0, 4).map((prompt) => (
                     <Button

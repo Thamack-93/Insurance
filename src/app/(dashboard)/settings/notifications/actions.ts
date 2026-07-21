@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { getDb } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { writeActivityLog } from "@/lib/activity-log";
@@ -11,8 +12,11 @@ import {
   createTelegramLinkCodeForUser,
   disconnectTelegramChannelForUser,
   sendTelegramDigestMessagesForUser,
+  syncTelegramWebhook,
   type TelegramLinkCodeResult,
 } from "@/lib/telegram";
+import { updateNotificationPreferences } from "@/lib/notification-foundation";
+import type { NotificationPreferenceInput } from "@/lib/notification-foundation-shared";
 
 export async function setTelegramMutationsEnabled(enabled: boolean): Promise<MutationResult> {
   try {
@@ -198,5 +202,50 @@ export async function sendTelegramDigestNow(): Promise<MutationResult> {
   } catch (error) {
     logError("settings.notifications.telegram.digestNow", error);
     return errorResult("No se pudo enviar el resumen.");
+  }
+}
+
+export async function updateTelegramPreferences(preferences: NotificationPreferenceInput[]): Promise<MutationResult> {
+  try {
+    const user = await requireUser();
+    const updated = await updateNotificationPreferences({ userId: user.id, actorId: user.id, preferences });
+    if (!updated) return errorResult("No se pudieron actualizar las preferencias.");
+    revalidatePath("/settings/notifications");
+    return successResult(user.id, "/settings/notifications", "Preferencias de Telegram actualizadas.");
+  } catch (error) {
+    logError("settings.notifications.telegram.preferences", error);
+    return errorResult("No se pudieron actualizar las preferencias.");
+  }
+}
+
+export async function setTelegramDigestHour(hour: number): Promise<MutationResult> {
+  try {
+    const user = await requireUser();
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23) return errorResult("La hora debe estar entre 00 y 23.");
+    await getDb().user.update({ where: { id: user.id }, data: { telegramDigestHour: hour } });
+    revalidatePath("/settings/notifications");
+    return successResult(user.id, "/settings/notifications", "Horario del resumen actualizado.");
+  } catch (error) {
+    logError("settings.notifications.telegram.digestHour", error);
+    return errorResult("No se pudo actualizar el horario.");
+  }
+}
+
+export async function syncTelegramWebhookAction(_formData?: FormData): Promise<MutationResult> {
+  void _formData;
+  try {
+    const user = await requireUser();
+    if (user.role !== "ADMIN") return errorResult("Solo un administrador puede sincronizar el webhook.");
+    const requestHeaders = await headers();
+    const proto = requestHeaders.get("x-forwarded-proto") ?? "https";
+    const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
+    if (!host) return errorResult("No se pudo determinar el dominio actual.");
+    const result = await syncTelegramWebhook(`${proto}://${host}`);
+    if (!result.ok) return errorResult(result.error);
+    revalidatePath("/settings/notifications");
+    return successResult(user.id, "/settings/notifications", result.message);
+  } catch (error) {
+    logError("settings.notifications.telegram.syncWebhook", error);
+    return errorResult("No se pudo sincronizar el webhook.");
   }
 }

@@ -57,7 +57,7 @@ function buildTodaySectionItems<T extends { id: string }>(
   rows: T[],
   mapRow: (row: T) => AssistantSection["items"][number] | null,
 ) {
-  return rows.slice(0, 4).map(mapRow).filter(Boolean) as AssistantSection["items"];
+  return rows.slice(0, 5).map(mapRow).filter(Boolean) as AssistantSection["items"];
 }
 
 function extractPolicyNumber(normalized: string) {
@@ -435,6 +435,12 @@ async function buildTodayReply(): Promise<AssistantReply> {
       href: `/receipts/${receipt.id}`,
       meta: "hoy",
     })),
+    ...buildTodaySectionItems(todayData.paymentsDue7, (receipt) => ({
+      title: `${receipt.client.fullName} · ${receipt.policy.policyNumber}`,
+      subtitle: `${receipt.receiptNumber} · ${receipt.insurer.name}`,
+      href: `/receipts/${receipt.id}`,
+      meta: "7 días",
+    })),
   ];
   const pendingItems = [
     ...buildTodaySectionItems(todayData.overdueWorkItems, (workItem) => ({
@@ -461,7 +467,7 @@ async function buildTodayReply(): Promise<AssistantReply> {
   return {
     reply,
     sections: [
-      makeSection("Cobros de hoy", "Recibos vencidos, los de hoy y los próximos siete días.", cashFlowItems.length > 0 ? cashFlowItems : [
+      makeSection("Cobros de hoy", `Vencidos: ${overdueCount} · Hoy: ${dueTodayCount} · Próximos 7 días: ${due7Count}.`, cashFlowItems.length > 0 ? cashFlowItems : [
         { title: "Sin cobros urgentes", subtitle: "No hay recibos vencidos ni de hoy.", href: "/today", meta: "ok" },
       ]),
       makeSection(
@@ -481,6 +487,14 @@ async function buildTodayReply(): Promise<AssistantReply> {
       ]),
     ],
     quickPrompts: buildQuickPrompts(),
+    todayMetrics: {
+      dueTodayCount,
+      overdueCount,
+      due7Count,
+      renewals30Count: renewalsCount,
+      openWorkItemsCount: overdueWorkItemsCount,
+      commissionsCount,
+    },
   };
 }
 

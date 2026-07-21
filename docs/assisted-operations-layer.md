@@ -1,7 +1,7 @@
 # Assisted Operations Layer
 
-PolicyDesk now has a first-pass notification foundation on top of the live Postgres CRM.
-This document captures what was implemented in the current sprint and what is still deferred.
+PolicyDesk has an assisted-operations layer on top of the live Postgres CRM. Chat state stays
+in memory in the browser and is never written to localStorage, sessionStorage or the database.
 
 ## Current Status
 
@@ -11,9 +11,11 @@ This document captures what was implemented in the current sprint and what is st
   - `NotificationChannel`
   - `NotificationPreference`
   - `NotificationEvent`
-- Telegram linking and the basic webhook flow are now available.
-- The settings UI can generate a link code, send a test message, and disconnect Telegram.
-- The AI assistant and AI write actions are still deferred to future phases.
+- Telegram linking, deterministic commands and daily digests are available.
+- The digest cron runs hourly and evaluates each user's `timeZone` and `telegramDigestHour`.
+- Nora has deterministic answers plus AI fallback, structured action proposals and PDF review.
+- AI status distinguishes configured from verified; admins can test the gateway at
+  `/api/admin/assistant/health`.
 
 ## Implemented This Sprint
 
@@ -46,11 +48,12 @@ This document captures what was implemented in the current sprint and what is st
 
 ### Settings UI
 
-- `/settings/notifications` lets each authenticated user view:
+- `/settings/notifications` lets each authenticated user view and update:
   - Telegram connection status
   - their preference rows
-  - quiet hours
-  - minimum priority thresholds
+  - delivery preferences
+  - timezone and digest hour
+  - test, send now and disconnect controls
 - A link card was added from `/settings`.
 - Users can generate a temporary Telegram link code and send a test message once linked.
 
@@ -65,6 +68,18 @@ This document captures what was implemented in the current sprint and what is st
   - `/status`
 - Telegram linking uses one-time codes stored as hashes with expiry.
 - Telegram test messages use the live bot token and update `NotificationEvent` status.
+- The digest contains overdue/today/upcoming receipts, renewals, overdue work and commissions.
+- Webhook synchronization is an explicit admin action; opening settings has no external side effect.
+- Telegram remains deterministic. Freeform AI replies are intentionally not enabled there.
+
+### Nora AI
+
+- Normal replies use the configured MiniMax model with gateway fallback.
+- Action proposals use `AI_GATEWAY_STRUCTURED_MODEL` and strict schemas where every property is
+  required; nullable values are `null` and empty collections are `[]`.
+- Gateway failures are mapped to actionable codes such as `rate_limited`, `budget_exceeded`,
+  `provider_unavailable` and `invalid_output`.
+- PDF extraction/review remains human-confirmed and does not save changes automatically.
 
 ### Seeds / validation
 
@@ -74,10 +89,12 @@ This document captures what was implemented in the current sprint and what is st
   - quiet hours detection
   - event catalog defaults
 
-## What Is Not Built Yet
+## Deliberate boundaries
 
-- The web AI assistant on `/assistant`.
-- AI write actions.
+- No local conversation history is stored.
+- Telegram does not interpret freeform AI commands.
+- AI never directly writes a client, policy, receipt, payment or task without the existing
+  confirmation flow.
 
 ## Environment Variables
 
@@ -99,9 +116,13 @@ This document captures what was implemented in the current sprint and what is st
   - `url=<APP_BASE_URL>/api/integrations/telegram/webhook`
   - `secret_token=<TELEGRAM_WEBHOOK_SECRET>`
 
-### Future sprint variables
+### AI variables
 
-- AI model routing / gateway variables for the assistant sprint
+- `AI_GATEWAY_MODEL`
+- `AI_GATEWAY_FALLBACK_MODELS`
+- `AI_GATEWAY_STRUCTURED_MODEL`
+- `AI_GATEWAY_STRUCTURED_FALLBACK_MODELS`
+- `AI_GATEWAY_API_KEY` or Vercel OIDC
 
 ## Manual Test Checklist
 
@@ -115,8 +136,12 @@ This document captures what was implemented in the current sprint and what is st
 - Confirm `ActivityLog` records the preference change.
 - Confirm `npm run db:check-drift` stays clean after the migration.
 
-## Next Sprint
+## Verification checklist
 
-- Telegram digest automation and richer outbound notification routing.
-- Read-only web AI assistant.
-- Limited AI write actions for `WorkItem` only.
+- `npm run db:generate && npm run typecheck`
+- `npm run lint`
+- `npm run test:unit`
+- Open `/assistant` at desktop and mobile widths; confirm the chat uses the available width,
+  today metrics are coherent, technical traces are collapsed and retry does not restore history.
+- Open `/settings/assistant` and use `Probar conexión` as an admin.
+- Open `/settings/notifications`, change the digest hour, toggle a preference and send a test.

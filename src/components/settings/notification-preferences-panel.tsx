@@ -20,6 +20,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import type { NotificationChannelRecord } from "@/lib/notification-foundation-shared";
+import { notificationEventCatalog } from "@/lib/notification-foundation-shared";
+import type { NotificationPreferenceInput, NotificationPreferenceRecord } from "@/lib/notification-foundation-shared";
 import type { MutationResult } from "@/lib/mutation-utils";
 
 type TelegramLinkCodeResult =
@@ -44,6 +46,9 @@ type Props = {
   sendTelegramDigestNow: () => Promise<MutationResult>;
   sendTelegramTestMessage: () => Promise<MutationResult>;
   setTelegramMutationsEnabled: (enabled: boolean) => Promise<MutationResult>;
+  preferences: NotificationPreferenceRecord[];
+  updateTelegramPreferences: (preferences: NotificationPreferenceInput[]) => Promise<MutationResult>;
+  setTelegramDigestHour: (hour: number) => Promise<MutationResult>;
 };
 
 function isConnected(channel: NotificationChannelRecord) {
@@ -59,6 +64,9 @@ export function NotificationPreferencesPanel({
   sendTelegramDigestNow,
   sendTelegramTestMessage,
   setTelegramMutationsEnabled,
+  preferences: initialPreferences,
+  updateTelegramPreferences,
+  setTelegramDigestHour,
 }: Props) {
   const router = useRouter();
   const [isGeneratingLink, setIsGeneratingLink] = useState(false);
@@ -70,6 +78,9 @@ export function NotificationPreferencesPanel({
     null,
   );
   const [mutationsEnabled, setMutationsEnabled] = useState(channel.telegramMutationsEnabled);
+  const [preferences, setPreferences] = useState(initialPreferences);
+  const [isUpdatingPreferences, setIsUpdatingPreferences] = useState(false);
+  const [isUpdatingHour, setIsUpdatingHour] = useState(false);
 
   const connected = isConnected(channel);
 
@@ -162,6 +173,32 @@ export function NotificationPreferencesPanel({
     }
   }
 
+  async function handlePreferenceToggle(eventType: string, enabled: boolean) {
+    const next = preferences.map((preference) => preference.eventType === eventType ? { ...preference, enabled } : preference);
+    setPreferences(next);
+    setIsUpdatingPreferences(true);
+    const result = await updateTelegramPreferences(next.map((preference) => ({ eventType: preference.eventType, enabled: preference.enabled, minPriority: preference.minPriority as NotificationPreferenceInput["minPriority"] })));
+    setIsUpdatingPreferences(false);
+    if (!result.ok) {
+      setPreferences(preferences);
+      toast.error(result.error);
+      return;
+    }
+    toast.success(result.message);
+  }
+
+  async function handleDigestHourChange(hour: number) {
+    setIsUpdatingHour(true);
+    const result = await setTelegramDigestHour(hour);
+    setIsUpdatingHour(false);
+    if (!result.ok) {
+      toast.error(result.error);
+      return;
+    }
+    toast.success(result.message);
+    router.refresh();
+  }
+
   async function handleCopyLinkCode() {
     if (!generatedLink) return;
     try {
@@ -185,6 +222,25 @@ export function NotificationPreferencesPanel({
 
   return (
     <div className="space-y-6">
+      <Card className="border-border/60 bg-card/85 shadow-sm">
+        <CardHeader className="border-b border-border/70">
+          <CardTitle className="flex items-center gap-2 text-base"><BellRing className="size-4" />Preferencias de entrega</CardTitle>
+          <CardDescription>Controla qué eventos puede enviar Telegram. Los cambios se aplican sin guardar conversaciones.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 p-5 md:grid-cols-2">
+          {notificationEventCatalog.map((event) => {
+            const preference = preferences.find((item) => item.eventType === event.eventType);
+            const enabled = preference?.enabled ?? event.defaultEnabled;
+            return (
+              <label key={event.eventType} className="flex items-start gap-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
+                <Checkbox checked={enabled} disabled={isUpdatingPreferences || !connected} onCheckedChange={(checked) => void handlePreferenceToggle(event.eventType, Boolean(checked))} />
+                <span className="space-y-1"><span className="block text-sm font-medium">{event.title}</span><span className="block text-xs text-muted-foreground">{event.description}</span></span>
+              </label>
+            );
+          })}
+        </CardContent>
+      </Card>
+
       <Card className="border-border/60 bg-card/85 shadow-sm">
         <CardHeader className="border-b border-border/70">
           <CardTitle className="flex items-center gap-2 text-base">
@@ -323,10 +379,14 @@ export function NotificationPreferencesPanel({
               {String(digestHour).padStart(2, "0")}:00
             </Badge>
           </div>
-          <p>
-            El cron diario se ejecuta una vez al día y el resumen se envía en este horario fijo.
-            Si lo mandas manualmente, el automático sigue corriendo por separado.
-          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <label htmlFor="telegram-digest-hour" className="text-sm font-medium text-foreground">Enviar a las</label>
+            <select id="telegram-digest-hour" value={digestHour} disabled={isUpdatingHour} onChange={(event) => void handleDigestHourChange(Number(event.target.value))} className="h-9 rounded-xl border border-border bg-background px-3 text-sm">
+              {Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{String(hour).padStart(2, "0")}:00</option>)}
+            </select>
+            <span>en {timeZone}.</span>
+          </div>
+          <p>El cron corre cada hora y solo envía cuando llega esta hora local. Si lo mandas manualmente, el automático sigue corriendo por separado.</p>
         </CardContent>
       </Card>
 
