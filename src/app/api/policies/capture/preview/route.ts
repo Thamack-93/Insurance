@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { AuthError, requireUser } from "@/lib/auth";
 import { logError } from "@/lib/logger";
-import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
+import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody } from "@/lib/request-guards";
+import { rateLimitResponse } from "@/lib/api-security";
 import { buildPolicyPdfCapturePreviewFromText } from "@/lib/policy-pdf-capture-preview";
 import { getPortfolioOwnerIdForRead } from "@/lib/portfolio-access";
 import {
@@ -53,9 +54,10 @@ export async function POST(request: NextRequest) {
       });
       return NextResponse.json({ error: "No autorizado." }, { status: 403 });
     }
-    const rateLimit = checkRateLimit(`policy-pdf-preview:${getRequestIp(request)}`, {
+    const rateLimit = await checkDistributedRateLimit(`policy-pdf-preview:${getRequestIp(request)}:${user.id}`, {
       limit: 8,
       windowMs: 15 * 60 * 1000,
+      requireDistributed: true,
     });
     if (!rateLimit.allowed) {
       await recordSecurityRateLimit({
@@ -66,13 +68,7 @@ export async function POST(request: NextRequest) {
         entityType: "SecurityEvent",
         entityId: "policy-capture-preview:rate-limit",
       });
-      return NextResponse.json(
-        { error: "Demasiados intentos. Espera un momento e inténtalo de nuevo." },
-        {
-          status: 429,
-          headers: { "Retry-After": String(Math.max(1, Math.ceil(rateLimit.retryAfterMs / 1000))) },
-        },
-      );
+      return rateLimitResponse(rateLimit);
     }
 
     const contentType = request.headers.get("content-type") ?? "";
@@ -85,7 +81,7 @@ export async function POST(request: NextRequest) {
 
     let payload: z.infer<typeof previewRequestSchema>;
     try {
-      payload = previewRequestSchema.parse(await request.json());
+      payload = previewRequestSchema.parse(await readJsonBody(request, 256 * 1024));
     } catch {
       return NextResponse.json({ error: "El payload de análisis no es válido." }, { status: 400 });
     }

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { handleUpload } from "@vercel/blob/client";
 import { AuthError, requireUser } from "@/lib/auth";
 import { logError } from "@/lib/logger";
-import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
+import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody, RequestGuardError } from "@/lib/request-guards";
+import { guardErrorResponse, rateLimitResponse } from "@/lib/api-security";
 import {
   NORA_POLICY_PDF_MAX_BYTES,
   isNoraPolicyPdfPathname,
@@ -20,21 +21,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No autorizado." }, { status: 403 });
     }
 
-    const rateLimit = checkRateLimit(`nora-policy-pdf-upload:${getRequestIp(request)}`, {
+    const rateLimit = await checkDistributedRateLimit(`nora-policy-pdf-upload:${getRequestIp(request)}:${user.id}`, {
       limit: 8,
       windowMs: 15 * 60 * 1000,
+      requireDistributed: true,
     });
-    if (!rateLimit.allowed) {
-      return NextResponse.json(
-        { error: "Demasiados intentos. Espera un momento e inténtalo de nuevo." },
-        {
-          status: 429,
-          headers: { "Retry-After": String(Math.max(1, Math.ceil(rateLimit.retryAfterMs / 1000))) },
-        },
-      );
-    }
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
-    const body = await request.json().catch(() => null);
+    const body = await readJsonBody<Parameters<typeof handleUpload>[0]["body"]>(request, 16 * 1024);
     if (!body || typeof body !== "object") {
       return NextResponse.json({ error: "El payload de subida no es válido." }, { status: 400 });
     }
@@ -60,6 +54,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error) {
+    if (error instanceof RequestGuardError) return guardErrorResponse(error);
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

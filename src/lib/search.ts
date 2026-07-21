@@ -236,9 +236,9 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       OR EXISTS (SELECT 1 FROM "Policy" WHERE "Policy"."id" = "Document"."policyId" AND EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Policy"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId}))
       OR EXISTS (SELECT 1 FROM "PolicyEndorsement" WHERE "PolicyEndorsement"."id" = "Document"."endorsementId" AND EXISTS (SELECT 1 FROM "Policy" WHERE "Policy"."id" = "PolicyEndorsement"."policyId" AND EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Policy"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId})))
       OR EXISTS (SELECT 1 FROM "Receipt" WHERE "Receipt"."id" = "Document"."receiptId" AND EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Receipt"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId}))
-      OR EXISTS (SELECT 1 FROM "Task" WHERE "Task"."id" = "Document"."taskId" AND (
-        EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Task"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId})
-        OR ("Task"."clientId" IS NULL AND "Task"."createdById" = ${portfolioOwnerId})
+      OR EXISTS (SELECT 1 FROM "WorkItem" WHERE "WorkItem"."sourceType" = 'Task' AND "WorkItem"."sourceId" = "Document"."taskId" AND (
+        EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "WorkItem"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId})
+        OR ("WorkItem"."clientId" IS NULL AND "WorkItem"."assignedToId" = ${portfolioOwnerId})
       ))
       OR EXISTS (SELECT 1 FROM "Claim" WHERE "Claim"."id" = "Document"."claimId" AND EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Claim"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId}))
       OR EXISTS (SELECT 1 FROM "Quote" WHERE "Quote"."id" = "Document"."quoteId" AND EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Quote"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId}))
@@ -382,8 +382,8 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
     ),
     rawSearch<WorkItemRow>(
       "WorkItem",
-      ["id", "sourceType", "sourceId", "folio", "title", "taskType", "status", "notes", "updatedAt"],
-      ["sourceType", "sourceId", "folio", "title", "taskType", "notes"],
+      ["id", "folio", "title", "taskType", "status", "notes", "updatedAt"],
+      ["folio", "title", "taskType", "notes"],
       needle,
       5,
       undefined,

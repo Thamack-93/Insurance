@@ -5,8 +5,9 @@ import { getDb } from "@/lib/db";
 import { setSessionCookie, verifyPassword, SYSTEM_USER_ID } from "@/lib/auth";
 import type { UserRoleSession } from "@/lib/session";
 import { writeActivityLog } from "@/lib/activity-log";
-import { checkRateLimit } from "@/lib/request-guards";
+import { getRequestIp, checkDistributedRateLimit, securityFingerprint } from "@/lib/request-guards";
 import { recordSecurityEvent, SECURITY_EVENT_TYPES } from "@/lib/security-events";
+import { headers } from "next/headers";
 
 export type LoginResult = { ok: true } | { ok: false; error: string };
 
@@ -19,19 +20,26 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
     return { ok: false, error: "Captura tu correo y contraseña." };
   }
 
-  const rateLimit = checkRateLimit(`login:${email}`, {
-    limit: 5,
-    windowMs: 15 * 60 * 1000,
-  });
+  const requestHeaders = await headers();
+  const ip = getRequestIp({ headers: requestHeaders });
+  const emailFingerprint = securityFingerprint(`email:${email}`);
+  const ipFingerprint = securityFingerprint(`ip:${ip}`);
+  const [emailLimit, ipLimit, pairLimit] = await Promise.all([
+    checkDistributedRateLimit(`login:email:${emailFingerprint}`, { limit: 5, windowMs: 15 * 60 * 1000, requireDistributed: true }),
+    checkDistributedRateLimit(`login:ip:${ipFingerprint}`, { limit: 20, windowMs: 15 * 60 * 1000, requireDistributed: true }),
+    checkDistributedRateLimit(`login:pair:${emailFingerprint}:${ipFingerprint}`, { limit: 5, windowMs: 15 * 60 * 1000, requireDistributed: true }),
+  ]);
+  const rateLimit = [emailLimit, ipLimit, pairLimit].find((result) => !result.allowed) ?? emailLimit;
   if (!rateLimit.allowed) {
     await recordSecurityEvent({
       alertType: SECURITY_EVENT_TYPES.rateLimitedLogin,
       title: "Demasiados intentos de inicio de sesión",
-      description: `Se bloqueó el inicio de sesión para ${email} por exceder el límite permitido.`,
+      description: "Se bloqueó un inicio de sesión por exceder el límite permitido.",
       severity: "WARNING",
       entityType: "SecurityEvent",
-      entityId: `login-rate-limit:${email || "unknown"}`,
+      entityId: `login-rate-limit:${emailFingerprint}:${ipFingerprint}`,
       userId: SYSTEM_USER_ID,
+      fingerprint: `login:${emailFingerprint}:${ipFingerprint}`,
     });
     return { ok: false, error: "Demasiados intentos. Intenta de nuevo en unos minutos." };
   }
@@ -43,11 +51,12 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
     await recordSecurityEvent({
       alertType: SECURITY_EVENT_TYPES.loginFailed,
       title: "Inicio de sesión fallido",
-      description: `Se rechazó el acceso para ${email}.`,
+      description: "Se rechazó un intento de inicio de sesión.",
       severity: "WARNING",
       entityType: "SecurityEvent",
-      entityId: `login-failed:${email || "unknown"}`,
+      entityId: `login-failed:${emailFingerprint}:${ipFingerprint}`,
       userId: SYSTEM_USER_ID,
+      fingerprint: `login-failed:${emailFingerprint}:${ipFingerprint}`,
     });
     return { ok: false, error: "Correo o contraseña incorrectos." };
   }
@@ -56,13 +65,14 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
     await recordSecurityEvent({
       alertType: SECURITY_EVENT_TYPES.loginDisabled,
       title: "Inicio de sesión bloqueado",
-      description: `Se intentó entrar con la cuenta deshabilitada ${user.email}.`,
+      description: "Se rechazó un intento de inicio de sesión para una cuenta no activa.",
       severity: "WARNING",
       entityType: "SecurityEvent",
-      entityId: `login-disabled:${user.id}`,
+      entityId: `login-disabled:${securityFingerprint(`user:${user.id}`)}:${ipFingerprint}`,
       userId: SYSTEM_USER_ID,
+      fingerprint: `login-disabled:${securityFingerprint(`user:${user.id}`)}:${ipFingerprint}`,
     });
-    return { ok: false, error: "Tu cuenta está deshabilitada. Contacta al administrador." };
+    return { ok: false, error: "Correo o contraseña incorrectos." };
   }
 
   await db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });

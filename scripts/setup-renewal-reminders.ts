@@ -48,7 +48,7 @@ async function main() {
       const existing = await db.workItem.findUnique({
         where: {
           sourceType_sourceId: {
-            sourceType: "Task",
+            sourceType: "Renewal",
             sourceId,
           },
         },
@@ -64,7 +64,7 @@ async function main() {
 
       await db.workItem.create({
         data: {
-          sourceType: "Task",
+          sourceType: "Renewal",
           sourceId,
           workItemType: "TASK",
           taskType: "RENEWAL",

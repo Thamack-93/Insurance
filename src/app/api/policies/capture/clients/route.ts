@@ -3,7 +3,8 @@ import { z } from "zod";
 import { AuthError, requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
-import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
+import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody, securityFingerprint } from "@/lib/request-guards";
+import { guardErrorResponse, rateLimitResponse } from "@/lib/api-security";
 import { writeActivityLog } from "@/lib/activity-log";
 import { inferClientType } from "@/lib/policy-pdf-capture.shared";
 
@@ -35,21 +36,14 @@ export async function POST(request: NextRequest) {
     }
 
     assertSameOrigin(request, "policy capture client create");
-    const rateLimit = checkRateLimit(`policy-capture-client-create:${getRequestIp(request)}`, {
+    const rateLimit = await checkDistributedRateLimit(`policy-capture-client-create:${securityFingerprint(`ip:${getRequestIp(request)}`)}:${user.id}`, {
       limit: 20,
       windowMs: 60 * 1000,
+      requireDistributed: true,
     });
-    if (!rateLimit.allowed) {
-      return NextResponse.json(
-        { error: "Demasiados intentos. Intenta de nuevo en un momento." },
-        {
-          status: 429,
-          headers: { "Retry-After": String(Math.max(1, Math.ceil(rateLimit.retryAfterMs / 1000))) },
-        },
-      );
-    }
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
-    const payload = createClientSchema.parse(await request.json());
+    const payload = createClientSchema.parse(await readJsonBody(request, 16 * 1024));
     const db = getDb();
     const inferredType = payload.type ?? inferClientType(payload.fullName, normalizeText(payload.rfc));
     const rfc = normalizeText(payload.rfc)?.toUpperCase() ?? null;
@@ -144,6 +138,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    if (error instanceof Error && "status" in error) return guardErrorResponse(error);
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

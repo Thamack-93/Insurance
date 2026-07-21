@@ -1142,3 +1142,28 @@ model Alert {
   @@index([readAt])
   @@index([status, readAt])
 }
+
+model SecurityEventAggregate {
+  id              String   @id @default(cuid())
+  alertType       String
+  fingerprint     String
+  windowStart     DateTime
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+  occurrenceCount Int      @default(1)
+  title           String
+  description     String?
+  severity        String
+
+  @@unique([alertType, fingerprint, windowStart])
+  @@index([alertType])
+  @@index([lastSeenAt])
+}
+
+model TelegramWebhookUpdate {
+  id         String   @id @default(cuid())
+  updateId   Int      @unique
+  receivedAt DateTime @default(now())
+
+  @@index([receivedAt])
+}

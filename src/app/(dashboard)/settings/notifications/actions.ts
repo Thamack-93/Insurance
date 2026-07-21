@@ -176,7 +176,7 @@ export async function sendTelegramDigestNow(): Promise<MutationResult> {
 
     const result = await sendTelegramDigestMessagesForUser({
       userId: user.id,
-      markAsSent: false,
+      mode: "manual",
     });
 
     await writeActivityLog({
