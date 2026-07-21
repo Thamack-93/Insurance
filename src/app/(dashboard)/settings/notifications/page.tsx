@@ -120,7 +120,7 @@ export default async function NotificationSettingsPage() {
                 </Badge>
               </div>
               <p>
-                El cron de Telegram corre una sola vez al día y envía tu resumen en el horario
+                El scheduler de Telegram revisa cada hora y envía tu resumen en el horario
                 fijo mostrado arriba. El envío manual no reemplaza ni consume el automático.
               </p>
             </CardContent>
