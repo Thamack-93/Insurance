@@ -101,7 +101,7 @@ export default async function DuePaymentsPage({
         policy: true,
         insurer: true,
         endorsement: true,
-        _count: { select: { payments: true } },
+        _count: { select: { payments: { where: { status: "POSTED" } } } },
       },
       orderBy,
       skip: (page - 1) * DEFAULT_PAGE_SIZE,

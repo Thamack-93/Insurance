@@ -82,7 +82,7 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
         ...receiptScope,
         dueDate: { lt: now },
         status: { notIn: ["PAID", "CANCELLED"] },
-        payments: { none: {} },
+        payments: { none: { status: "POSTED" } },
       },
       take: TAKE_LIMIT,
       select: {

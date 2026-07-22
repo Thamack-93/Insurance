@@ -162,6 +162,7 @@ export async function runPaymentReconciliationAudit(input: {
         client: { select: { fullName: true } },
         insurer: { select: { name: true } },
         payments: {
+          where: { status: "POSTED" },
           select: {
             id: true,
             amount: true,

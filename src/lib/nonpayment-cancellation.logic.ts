@@ -1,0 +1,1 @@
+export const NON_PAYMENT_CANCELLATION_DAYS = 65;

@@ -31,8 +31,8 @@ export function CancelReceiptButton({
       title={`Cancelar recibo ${receiptNumber}`}
       description={
         <>
-          Si el cliente no pagó, esta acción cancela el recibo, la póliza y cualquier otro recibo abierto de esa póliza.
-          Los recibos ya pagados no se tocan. Si este recibo tiene pagos que no deben quedar, elimínalos primero desde el detalle del recibo.
+          Esta acción permite cancelar manualmente por falta de pago aun antes de 65 días.
+          Se cancelarán también los recibos abiertos de la póliza y quedarán disponibles para rehabilitación.
         </>
       }
       confirmLabel="Cancelar"

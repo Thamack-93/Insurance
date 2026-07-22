@@ -31,7 +31,11 @@ export type ReceiptReconciliationResult = {
   reasons: string[];
 };
 
-const AMOUNT_TOLERANCE = 0.01;
+export const PAYMENT_CLOSE_TOLERANCE = 5;
+
+export function isPaidWithinTolerance(amount: number, paidAmount: number, tolerance = PAYMENT_CLOSE_TOLERANCE) {
+  return paidAmount > 0 && Math.abs(paidAmount - amount) <= tolerance;
+}
 
 function isTruthyText(value: string | null | undefined) {
   return !!value && value.trim().length > 0;
@@ -65,8 +69,9 @@ export function reconcileReceiptState(input: ReceiptReconciliationInput): Receip
   }
 
   const now = input.now ?? new Date();
-  const closeTolerance = Math.max(input.closeTolerance ?? AMOUNT_TOLERANCE, AMOUNT_TOLERANCE);
-  const isFullyPaid = paidAmount >= Math.max(input.amount, 0) - closeTolerance;
+  const closeTolerance = Math.max(input.closeTolerance ?? PAYMENT_CLOSE_TOLERANCE, 0);
+  const amountDifference = Math.abs(paidAmount - input.amount);
+  const isFullyPaid = isPaidWithinTolerance(input.amount, paidAmount, closeTolerance);
   const nextStatus: ReceiptStatus = isFullyPaid ? "PAID" : isBusinessDateOverdue(input.dueDate, now) ? "OVERDUE" : "PENDING";
   const nextPaidDate = isFullyPaid ? latestPaymentDate ?? input.paidDate : null;
   const nextPaymentMethod = isFullyPaid ? latestPaymentMethod ?? input.paymentMethod : null;
@@ -86,17 +91,21 @@ export function reconcileReceiptState(input: ReceiptReconciliationInput): Receip
     if (input.paidDate || input.paymentMethod) {
       reasons.push("cleared_paid_fields");
     }
-    if (paidAmount > AMOUNT_TOLERANCE && paidAmount < input.amount - AMOUNT_TOLERANCE) {
+    if (paidAmount > 0 && amountDifference > closeTolerance && paidAmount < input.amount) {
       reasons.push("partial_payment");
     }
-    if (paidAmount > input.amount + AMOUNT_TOLERANCE) {
+    if (paidAmount > input.amount && amountDifference > closeTolerance) {
       reasons.push("overpayment");
     }
+  }
+  if (paymentCount > 1) {
+    reasons.push("multiple_payments");
   }
 
   const shouldReview =
     reasons.includes("partial_payment") ||
     reasons.includes("overpayment") ||
+    reasons.includes("multiple_payments") ||
     (paymentCount > 0 && !isFullyPaid) ||
     (input.status === "PAID" && !isFullyPaid);
 

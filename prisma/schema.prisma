@@ -33,6 +33,7 @@ model User {
   updatedReceipts            Receipt[]                    @relation("ReceiptUpdatedBy")
   createdPayments            Payment[]                    @relation("PaymentCreatedBy")
   updatedPayments            Payment[]                    @relation("PaymentUpdatedBy")
+  reversedPayments           Payment[]                    @relation("PaymentReversedBy")
   createdClaims              Claim[]                      @relation("ClaimCreatedBy")
   updatedClaims              Claim[]                      @relation("ClaimUpdatedBy")
   createdQuotes              Quote[]                      @relation("QuoteCreatedBy")
@@ -160,6 +161,9 @@ model Policy {
   familyRootId        String?
   renewedFromPolicyId String?
   isMultiYearContract Boolean  @default(false)
+  cancellationReason  String?
+  cancellationBatchId String?
+  cancelledAt         DateTime?
 
   client                      Client                       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   insurer                     Insurer                      @relation(fields: [insurerId], references: [id], onDelete: Restrict)
@@ -219,6 +223,9 @@ model Receipt {
   updatedById              String?
   reconciliationAdjustment Decimal   @default(0)
   reconciliationNote       String?
+  cancellationReason       String?
+  cancellationBatchId      String?
+  cancelledAt              DateTime?
 
   policy               Policy                       @relation(fields: [policyId], references: [id], onDelete: Cascade)
   endorsement          PolicyEndorsement?            @relation(fields: [endorsementId], references: [id], onDelete: SetNull)
@@ -289,6 +296,7 @@ model Payment {
   clientId          String
   amount            Decimal
   currency          String   @default("MXN")
+  status            String   @default("POSTED")
   paidDate          DateTime
   paymentMethod     String?
   reference         String?
@@ -297,6 +305,9 @@ model Payment {
   updatedAt         DateTime @updatedAt
   createdById       String?
   updatedById       String?
+  reversedById      String?
+  reversedAt        DateTime?
+  reversalReason    String?
   sourceEvidenceKey String?  @unique
 
   receipt   Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
@@ -304,11 +315,14 @@ model Payment {
   client    Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
   createdBy User?   @relation("PaymentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   updatedBy User?   @relation("PaymentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  reversedBy User?   @relation("PaymentReversedBy", fields: [reversedById], references: [id], onDelete: SetNull)
 
   @@index([receiptId])
   @@index([policyId])
   @@index([clientId])
   @@index([paidDate])
+  @@index([status])
+  @@index([reversedById])
   @@index([createdById])
   @@index([updatedById])
 }

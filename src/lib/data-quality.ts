@@ -294,6 +294,7 @@ export async function getReceiptReviewIssues(portfolioOwnerId?: string): Promise
       receipt: {
         include: {
           payments: {
+            where: { status: "POSTED" },
             orderBy: [{ paidDate: "desc" }, { createdAt: "desc" }],
           },
           client: true,

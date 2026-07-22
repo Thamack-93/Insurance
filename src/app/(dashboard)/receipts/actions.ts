@@ -7,6 +7,8 @@ import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib
 import { receiptSchema, type ReceiptFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { recordPayment } from "@/lib/payment-service";
+import { cancelPolicyForNonPayment } from "@/lib/nonpayment-cancellation";
+import { NON_PAYMENT_CANCELLATION_DAYS } from "@/lib/nonpayment-cancellation.logic";
 import {
   assertEndorsementPortfolioAccess,
   assertPolicyPortfolioAccess,
@@ -154,143 +156,16 @@ export async function updateReceipt(id: string, values: ReceiptFormValues): Prom
 
 export async function cancelReceiptAndPolicy(id: string): Promise<MutationResult> {
   try {
-    const db = getDb();
     const userId = await getCurrentUserId();
     await assertReceiptPortfolioAccess(id, userId);
-
-    const existingReceipt = await db.receipt.findUnique({
-      where: { id },
-      include: {
-        policy: {
-          select: {
-            id: true,
-            policyNumber: true,
-            status: true,
-            clientId: true,
-          },
-        },
-        payments: {
-          select: { id: true },
-        },
-      },
-    });
-
-    if (!existingReceipt) {
-      return errorResult("El recibo ya no existe.");
-    }
-
-    if (existingReceipt.status === "CANCELLED") {
-      return successResult(existingReceipt.id, `/receipts/${existingReceipt.id}`, "El recibo ya estaba cancelado.");
-    }
-
-    if (existingReceipt.payments.length > 0) {
-      return errorResult("No se puede cancelar: elimina primero los pagos registrados desde el detalle del recibo.");
-    }
-
-    const openPolicyReceipts = await db.receipt.findMany({
-      where: {
-        policyId: existingReceipt.policyId,
-        status: { notIn: ["PAID", "CANCELLED"] },
-      },
-      select: {
-        id: true,
-        receiptNumber: true,
-        status: true,
-        payments: {
-          select: { id: true },
-        },
-      },
-      orderBy: [{ dueDate: "asc" }, { createdAt: "asc" }],
-    });
-
-    const blockedReceipts = openPolicyReceipts.filter((receipt) => receipt.payments.length > 0);
-    if (blockedReceipts.length > 0) {
-      const numbers = blockedReceipts.map((receipt) => receipt.receiptNumber).join(", ");
-      return errorResult(
-        `No se puede cancelar la póliza: elimina primero los pagos registrados de ${blockedReceipts.length} recibo${blockedReceipts.length !== 1 ? "s" : ""} abierto${blockedReceipts.length !== 1 ? "s" : ""} (${numbers}).`,
-      );
-    }
-
-    if (openPolicyReceipts.length === 0) {
-      return errorResult("No hay recibos abiertos para cancelar en esta póliza.");
-    }
-
-    const now = new Date();
-    const cancelledReceipts: Array<{ id: string; receiptNumber: string }> = [];
-    let updatedPolicy: { id: string; policyNumber: string; status: string; clientId: string } | null = null;
-
-    await db.$transaction(async (tx) => {
-      updatedPolicy = await tx.policy.update({
-        where: { id: existingReceipt.policy.id },
-        data: {
-          status: "CANCELLED",
-          updatedById: userId,
-        },
-        select: { id: true, policyNumber: true, status: true, clientId: true },
-      });
-
-      for (const receipt of openPolicyReceipts) {
-        const updatedReceipt = await tx.receipt.update({
-          where: { id: receipt.id },
-          data: {
-            status: "CANCELLED",
-            paidDate: null,
-            paymentMethod: null,
-            updatedById: userId,
-          },
-          select: {
-            id: true,
-            receiptNumber: true,
-            status: true,
-            policyId: true,
-            clientId: true,
-          },
-        });
-
-        cancelledReceipts.push({ id: updatedReceipt.id, receiptNumber: updatedReceipt.receiptNumber });
-
-        await writeActivityLog({
-          entityType: "Receipt",
-          entityId: updatedReceipt.id,
-          action: "RECEIPT_CANCEL_NON_PAYMENT",
-          oldValue: receipt,
-          newValue: updatedReceipt,
-          userId,
-          db: tx,
-        });
-      }
-
-      await tx.receiptReconciliationIssue.updateMany({
-        where: {
-          receiptId: { in: cancelledReceipts.map((receipt) => receipt.id) },
-          status: "OPEN",
-        },
-        data: {
-          status: "RESOLVED",
-          reviewedAt: now,
-          reviewedById: userId,
-          resolutionNote: "Cancelado por falta de pago desde Receipts & Payments.",
-        },
-      });
-
-      await writeActivityLog({
-        entityType: "Policy",
-        entityId: existingReceipt.policy.id,
-        action: "POLICY_CANCEL_NON_PAYMENT",
-        oldValue: existingReceipt.policy,
-        newValue: updatedPolicy,
-        userId,
-        db: tx,
-      });
-    });
+    const result = await cancelPolicyForNonPayment(id, userId, new Date(), { enforceCutoff: false });
 
     revalidatePaths([
       "/receipts",
       "/due-payments",
-      `/receipts/${existingReceipt.id}`,
-      ...cancelledReceipts.map((receipt) => `/receipts/${receipt.id}`),
-      `/policies/${existingReceipt.policy.id}`,
-      `/clients/${existingReceipt.policy.clientId}`,
+      `/receipts/${id}`,
+      `/policies/${result.policyId}`,
+      "/clients",
       "/dashboard",
       "/today",
       "/portfolio",
@@ -300,15 +175,13 @@ export async function cancelReceiptAndPolicy(id: string): Promise<MutationResult
     ]);
 
     return successResult(
-      existingReceipt.id,
-      `/receipts/${existingReceipt.id}`,
-      cancelledReceipts.length > 1
-        ? `Póliza cancelada por falta de pago y ${cancelledReceipts.length} recibos abiertos cerrados.`
-        : "Recibo cancelado por falta de pago y póliza cerrada.",
+      id,
+      `/receipts/${id}`,
+      `Póliza ${result.policyNumber} cancelada por falta de pago; ${result.cancelledReceiptCount ?? 0} recibo(s) cerrado(s).`,
     );
   } catch (error) {
     if (error instanceof AuthError) return errorResult(error.message);
-    return errorResult(error instanceof Error ? error.message : "No se pudo cancelar el recibo.");
+    return errorResult(error instanceof Error ? error.message : `No se pudo cancelar el recibo después de ${NON_PAYMENT_CANCELLATION_DAYS} días.`);
   }
 }
 
@@ -329,6 +202,7 @@ export async function cancelReceipt(id: string): Promise<MutationResult> {
           },
         },
         payments: {
+          where: { status: "POSTED" },
           select: { id: true },
         },
       },
@@ -352,6 +226,9 @@ export async function cancelReceipt(id: string): Promise<MutationResult> {
         status: "CANCELLED",
         paidDate: null,
         paymentMethod: null,
+        cancellationReason: "MANUAL",
+        cancellationBatchId: null,
+        cancelledAt: new Date(),
         updatedById: userId,
       },
     });

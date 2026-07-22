@@ -43,6 +43,9 @@ import {
 } from "@/lib/telegram-shared";
 import { globalSearch } from "@/lib/search";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
+import { isPaidWithinTolerance } from "@/lib/receipt-reconciliation";
+import { ACTIVE_RENEWAL_POLICY_WHERE } from "@/lib/renewal-decisions";
+import { shouldIncludeInRenewals } from "@/lib/renewals.logic";
 import { checkDistributedRateLimit, securityFingerprint } from "@/lib/request-guards";
 import { OPEN_WORK_ITEM_STATUSES, countWorkItems } from "@/lib/work-queue";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
@@ -1003,26 +1006,31 @@ async function getTelegramReceipts(input: {
     status: { in: ["PENDING", "OVERDUE"] },
   };
 
-  const [total, rows] = await Promise.all([
-    db.receipt.count({ where }),
-    db.receipt.findMany({
-      where,
-      include: {
-        client: { select: { fullName: true } },
-        insurer: { select: { name: true } },
-        policy: { select: { policyNumber: true } },
-        endorsement: { select: { endorsementNumber: true } },
-        payments: { select: { amount: true } },
-      },
-      orderBy: [{ dueDate: "asc" }, { receiptNumber: "asc" }],
-      take: input.limit,
-      skip: input.skip,
-    }),
-  ]);
+  const rows = await db.receipt.findMany({
+    where: {
+      ...where,
+      policy: { status: { not: "CANCELLED" } },
+    },
+    include: {
+      client: { select: { fullName: true } },
+      insurer: { select: { name: true } },
+      policy: { select: { policyNumber: true, status: true } },
+      endorsement: { select: { endorsementNumber: true } },
+      payments: { where: { status: "POSTED" }, select: { amount: true } },
+    },
+    orderBy: [{ dueDate: "asc" }, { receiptNumber: "asc" }],
+  });
+
+  const eligibleRows = rows.filter((row) => {
+    const amount = toNumber(row.amount);
+    const paidAmount = row.payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
+    return !isPaidWithinTolerance(amount, paidAmount);
+  });
+  const pagedRows = eligibleRows.slice(input.skip ?? 0, (input.skip ?? 0) + input.limit);
 
   return {
-    total,
-    items: rows.map((row) => {
+    total: eligibleRows.length,
+    items: pagedRows.map((row) => {
       const amount = toNumber(row.amount);
       const paidAmount = row.payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
       return {
@@ -1034,7 +1042,7 @@ async function getTelegramReceipts(input: {
         originLabel: getReceiptOriginLabel(row),
         dueDate: row.dueDate,
         amount,
-        balance: Math.max(amount - paidAmount, 0),
+        balance: isPaidWithinTolerance(amount, paidAmount) ? 0 : Math.max(amount - paidAmount, 0),
         currency: row.currency,
       };
     }),
@@ -1054,26 +1062,31 @@ async function getTelegramRenewals(input: {
   const where: Prisma.PolicyWhereInput = {
     client: { portfolioOwnerId: input.userId },
     endDate: { gte: input.from, lte: input.to },
-    status: "ACTIVE",
+    ...ACTIVE_RENEWAL_POLICY_WHERE,
   };
 
-  const [total, rows] = await Promise.all([
-    db.policy.count({ where }),
-    db.policy.findMany({
-      where,
-      include: {
-        client: { select: { fullName: true } },
-        insurer: { select: { name: true } },
+  const rows = await db.policy.findMany({
+    where,
+    include: {
+      client: { select: { fullName: true } },
+      insurer: { select: { name: true } },
+      receipts: {
+        orderBy: [{ periodEndDate: "desc" }, { dueDate: "desc" }, { createdAt: "desc" }],
+        take: 1,
+        select: { status: true },
       },
-      orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }],
-      take: input.limit,
-      skip: input.skip,
-    }),
-  ]);
+    },
+    orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }],
+  });
+
+  const eligibleRows = rows.filter((row) =>
+    shouldIncludeInRenewals(row.status, row.endDate, row.receipts[0]?.status ?? null),
+  );
+  const pagedRows = eligibleRows.slice(input.skip ?? 0, (input.skip ?? 0) + input.limit);
 
   return {
-    total,
-    items: rows.map((row) => ({
+    total: eligibleRows.length,
+    items: pagedRows.map((row) => ({
       id: row.id,
       policyNumber: row.policyNumber,
       clientName: row.client.fullName,
