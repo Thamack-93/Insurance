@@ -195,7 +195,7 @@ export async function deleteEndorsement(id: string): Promise<MutationResult> {
           select: { id: true, clientId: true, policyNumber: true },
         },
         receipts: {
-          select: { id: true, receiptNumber: true, payments: { select: { id: true } } },
+          select: { id: true, receiptNumber: true, payments: { where: { status: "POSTED" }, select: { id: true } } },
         },
         documents: {
           select: { id: true },

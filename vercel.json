@@ -4,6 +4,10 @@
     {
       "path": "/api/jobs/backup",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/jobs/nonpayment-cancellation",
+      "schedule": "0 6 * * *"
     }
   ]
 }

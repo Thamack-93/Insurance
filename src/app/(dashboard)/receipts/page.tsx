@@ -114,14 +114,14 @@ export default async function ReceiptsPage({
         policy: true,
         insurer: true,
         endorsement: true,
-        _count: { select: { payments: true } },
+        _count: { select: { payments: { where: { status: "POSTED" } } } },
       },
       orderBy,
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
     db.payment.findMany({
-      where: scopedPaymentWhere,
+      where: { ...scopedPaymentWhere, status: "POSTED" },
       include: {
         receipt: { select: { id: true, receiptNumber: true, dueDate: true, endorsement: { select: { id: true, endorsementNumber: true } } } },
         client: { select: { id: true, fullName: true } },
@@ -136,7 +136,7 @@ export default async function ReceiptsPage({
         status: "OPEN",
       },
       include: {
-        receipt: { include: { payments: true, client: true } },
+        receipt: { include: { payments: { where: { status: "POSTED" } }, client: true } },
         policy: true,
       },
       orderBy: { createdAt: "desc" },

@@ -3,11 +3,15 @@ import "server-only";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
 import { getDb } from "@/lib/db";
-import { reconcileReceiptState } from "@/lib/receipt-reconciliation";
+import {
+  PAYMENT_CLOSE_TOLERANCE,
+  reconcileReceiptState,
+} from "@/lib/receipt-reconciliation";
+import { isBusinessDateOverdue } from "@/lib/business-dates";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
-const CLOSE_TOLERANCE = 5;
+const CLOSE_TOLERANCE = PAYMENT_CLOSE_TOLERANCE;
 
 export type RecordPaymentInput = {
   receiptId: string;
@@ -40,6 +44,7 @@ export async function reconcileReceiptById(
     where: { id: receiptId },
     include: {
       payments: {
+        where: { status: "POSTED" },
         orderBy: [{ paidDate: "desc" }, { createdAt: "desc" }],
       },
     },
@@ -161,6 +166,10 @@ export async function recordPayment(input: RecordPaymentInput, client?: DbClient
       include: {
         client: true,
         policy: true,
+        payments: {
+          where: { status: "POSTED" },
+          select: { id: true },
+        },
       },
     });
 
@@ -170,6 +179,15 @@ export async function recordPayment(input: RecordPaymentInput, client?: DbClient
 
     if (receipt.status === "CANCELLED") {
       throw new Error("No puedes aplicar pagos a un recibo cancelado.");
+    }
+
+    if (receipt.payments.length > 0) {
+      throw new PaymentConflictError("No se permiten abonos: este recibo ya tiene un pago registrado.");
+    }
+
+    const amountDifference = Math.round(Math.abs(input.amount - Number(receipt.amount)) * 100) / 100;
+    if (amountDifference > CLOSE_TOLERANCE) {
+      throw new Error(`El pago debe cubrir el recibo dentro de una diferencia máxima de $${CLOSE_TOLERANCE.toFixed(2)}.`);
     }
 
     if (input.sourceEvidenceKey) {
@@ -241,4 +259,176 @@ export async function recordPayment(input: RecordPaymentInput, client?: DbClient
   }
 
   return db.$transaction(applyPayment);
+}
+
+export type RehabilitateReceiptPaymentInput = Omit<RecordPaymentInput, "receiptId"> & {
+  receiptId: string;
+};
+
+export async function rehabilitateReceiptPayment(
+  input: RehabilitateReceiptPaymentInput,
+  client?: DbClient,
+) {
+  const db = client ?? getDb();
+  const reference = normalizedReference(input.reference);
+
+  if (!Number.isFinite(input.amount) || input.amount <= 0) {
+    throw new Error("El monto del pago debe ser mayor a cero.");
+  }
+
+  const applyRehabilitation = async (tx: DbClient) => {
+    const receipt = await tx.receipt.findUnique({
+      where: { id: input.receiptId },
+      include: {
+        client: true,
+        policy: true,
+        payments: {
+          where: { status: "POSTED" },
+          select: { id: true },
+        },
+      },
+    });
+
+    if (!receipt) throw new Error("El recibo no existe o fue eliminado.");
+    if (receipt.status !== "CANCELLED" || receipt.cancellationReason !== "NON_PAYMENT" || !receipt.cancellationBatchId) {
+      throw new Error("Este recibo no está disponible para rehabilitación por falta de pago.");
+    }
+    if (receipt.payments.length > 0) {
+      throw new PaymentConflictError("Este recibo ya tiene un pago de rehabilitación registrado.");
+    }
+
+    const amountDifference = Math.round(Math.abs(input.amount - Number(receipt.amount)) * 100) / 100;
+    if (amountDifference > CLOSE_TOLERANCE) {
+      throw new Error(`El pago debe cubrir el recibo dentro de una diferencia máxima de $${CLOSE_TOLERANCE.toFixed(2)}.`);
+    }
+
+    if (input.sourceEvidenceKey) {
+      const evidenceMatch = await tx.payment.findUnique({
+        where: { sourceEvidenceKey: input.sourceEvidenceKey },
+        select: { id: true },
+      });
+      if (evidenceMatch) throw new PaymentConflictError("Este comprobante ya fue aplicado anteriormente.");
+    }
+
+    const batchReceipts = await tx.receipt.findMany({
+      where: {
+        policyId: receipt.policyId,
+        status: "CANCELLED",
+        cancellationReason: "NON_PAYMENT",
+        cancellationBatchId: receipt.cancellationBatchId,
+      },
+      select: {
+        id: true,
+        receiptNumber: true,
+        amount: true,
+        dueDate: true,
+        status: true,
+      },
+    });
+    const cancellationBatchId = receipt.cancellationBatchId;
+
+    const payment = await tx.payment.create({
+      data: {
+        receiptId: receipt.id,
+        policyId: receipt.policyId,
+        clientId: receipt.clientId,
+        amount: input.amount,
+        currency: receipt.currency,
+        paidDate: input.paidDate,
+        paymentMethod: input.paymentMethod,
+        reference,
+        notes: input.notes?.trim() || null,
+        sourceEvidenceKey: input.sourceEvidenceKey?.trim() || null,
+        createdById: input.actorId,
+        updatedById: input.actorId,
+      },
+    });
+
+    const adjustment = Math.round((Number(receipt.amount) - input.amount) * 100) / 100;
+    const paymentDate = input.paidDate;
+    await tx.receipt.update({
+      where: { id: receipt.id },
+      data: {
+        status: "PAID",
+        paidDate: paymentDate,
+        paymentMethod: input.paymentMethod,
+        reconciliationAdjustment: adjustment,
+        reconciliationNote:
+          adjustment !== 0 ? `Ajuste auditado de rehabilitación: ${adjustment.toFixed(2)} ${receipt.currency}.` : null,
+        cancellationReason: null,
+        cancellationBatchId: null,
+        cancelledAt: null,
+        updatedById: input.actorId,
+      },
+    });
+
+    for (const batchReceipt of batchReceipts) {
+      if (batchReceipt.id === receipt.id) continue;
+      await tx.receipt.update({
+        where: { id: batchReceipt.id },
+        data: {
+          status: isBusinessDateOverdue(batchReceipt.dueDate) ? "OVERDUE" : "PENDING",
+          cancellationReason: null,
+          cancellationBatchId: null,
+          cancelledAt: null,
+          updatedById: input.actorId,
+        },
+      });
+    }
+
+    const updatedPolicy = await tx.policy.update({
+      where: { id: receipt.policyId },
+      data: {
+        status: "ACTIVE",
+        cancellationReason: null,
+        cancellationBatchId: null,
+        cancelledAt: null,
+        updatedById: input.actorId,
+      },
+    });
+
+    await tx.receiptReconciliationIssue.updateMany({
+      where: { receiptId: { in: batchReceipts.map((item) => item.id) }, status: "OPEN" },
+      data: {
+        status: "RESOLVED",
+        reviewedAt: new Date(),
+        reviewedById: input.actorId,
+        resolutionNote: "Resuelto mediante rehabilitación por falta de pago.",
+      },
+    });
+
+    await writeActivityLog({
+      entityType: "Payment",
+      entityId: payment.id,
+      action: "PAYMENT_REHABILITATION_CREATE",
+      newValue: {
+        receiptId: receipt.id,
+        receiptNumber: receipt.receiptNumber,
+        policyId: receipt.policyId,
+        policyNumber: receipt.policy.policyNumber,
+        amount: input.amount,
+        paymentMethod: input.paymentMethod,
+        paidDate: dateKey(input.paidDate),
+        reference,
+        cancellationBatchId,
+      },
+      userId: input.actorId,
+      db: tx,
+    });
+
+    await writeActivityLog({
+      entityType: "Policy",
+      entityId: updatedPolicy.id,
+      action: "POLICY_REHABILITATED",
+      oldValue: { status: receipt.policy.status, cancellationBatchId: receipt.cancellationBatchId },
+      newValue: { status: updatedPolicy.status, reopenedReceiptIds: batchReceipts.map((item) => item.id) },
+      userId: input.actorId,
+      db: tx,
+    });
+
+    return { payment, receipt: updatedPolicy, reopenedReceiptCount: Math.max(batchReceipts.length - 1, 0) };
+  };
+
+  if (client) return applyRehabilitation(db);
+  return db.$transaction(applyRehabilitation);
 }
