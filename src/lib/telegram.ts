@@ -13,7 +13,6 @@ import {
   createNotificationEvent,
   ensureNotificationDefaultsForUser,
   getLocalDateKey,
-  isDigestHourDue,
   markNotificationFailed,
   markNotificationSent,
   markNotificationSkipped,
@@ -47,7 +46,7 @@ import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import { isPaidWithinTolerance } from "@/lib/receipt-reconciliation";
 import { ACTIVE_RENEWAL_POLICY_WHERE } from "@/lib/renewal-decisions";
 import { shouldIncludeInRenewals } from "@/lib/renewals.logic";
-import { checkRateLimit } from "@/lib/request-guards";
+import { checkDistributedRateLimit, securityFingerprint } from "@/lib/request-guards";
 import { OPEN_WORK_ITEM_STATUSES, countWorkItems } from "@/lib/work-queue";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 
@@ -1662,7 +1661,7 @@ export async function buildTelegramDailyDigestMessagesByUser(userId: string, cli
 export async function sendTelegramDigestMessagesForUser(input: {
   userId: string;
   client?: DbClient;
-  markAsSent?: boolean;
+  mode: "manual" | "automatic";
   timeZone?: string;
 }) {
   const db = input.client ?? getDb();
@@ -1688,7 +1687,7 @@ export async function sendTelegramDigestMessagesForUser(input: {
     }
   }
 
-  if (input.markAsSent !== false && sent > 0 && failed === 0) {
+  if (input.mode === "automatic" && sent > 0 && failed === 0) {
     await markTelegramDigestAsAutoSentForUser(input.userId, new Date(), timeZone, db);
   }
 
@@ -2496,11 +2495,10 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
     select: {
       userId: true,
       telegramChatId: true,
-        user: {
-          select: {
-            timeZone: true,
-            telegramDigestHour: true,
-            telegramDigestLastAutoSentAt: true,
+      user: {
+        select: {
+          timeZone: true,
+          telegramDigestLastAutoSentAt: true,
         },
       },
     },
@@ -2517,9 +2515,6 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
   for (const channel of channels) {
     if (!channel.telegramChatId) continue;
     const timeZone = channel.user.timeZone || DEFAULT_TIMEZONE;
-    if (!isDigestHourDue(now, channel.user.telegramDigestHour, timeZone)) {
-      continue;
-    }
     if (
       channel.user.telegramDigestLastAutoSentAt &&
       getLocalDateKey(channel.user.telegramDigestLastAutoSentAt, timeZone) === getLocalDateKey(now, timeZone)
@@ -2530,7 +2525,7 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
       const digestResult = await sendTelegramDigestMessagesForUser({
         userId: channel.userId,
         client: db,
-        markAsSent: false,
+        mode: "automatic",
         timeZone,
       });
 
@@ -2538,9 +2533,6 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
       result.failed += digestResult.failed;
       result.parts += digestResult.parts;
 
-      if (digestResult.sent > 0 && digestResult.failed === 0) {
-        await markTelegramDigestAsAutoSentForUser(channel.userId, now, timeZone, db);
-      }
     } catch (error) {
       result.failed += 1;
       logError("telegram.sendDailyDigest", error, { userId: channel.userId });
@@ -2909,7 +2901,10 @@ export async function processTelegramWebhookUpdate(
       return { handled: true, chatId };
     }
 
-    const rateLimit = checkRateLimit(`telegram:pdf:${chatId}`, TELEGRAM_DRAFT_CONTINUATION_RATE_LIMIT);
+    const rateLimit = await checkDistributedRateLimit(`telegram:pdf:${securityFingerprint(`chat:${chatId}`)}`, {
+      ...TELEGRAM_DRAFT_CONTINUATION_RATE_LIMIT,
+      requireDistributed: true,
+    });
     if (!rateLimit.allowed) {
       return {
         handled: true,
@@ -2939,7 +2934,10 @@ export async function processTelegramWebhookUpdate(
       return { handled: true, chatId };
     }
 
-    const rateLimit = checkRateLimit(`telegram:draft:${chatId}`, TELEGRAM_DRAFT_CONTINUATION_RATE_LIMIT);
+    const rateLimit = await checkDistributedRateLimit(`telegram:draft:${securityFingerprint(`chat:${chatId}`)}`, {
+      ...TELEGRAM_DRAFT_CONTINUATION_RATE_LIMIT,
+      requireDistributed: true,
+    });
     if (!rateLimit.allowed) {
       return {
         handled: true,
@@ -2963,7 +2961,10 @@ export async function processTelegramWebhookUpdate(
       };
     }
 
-    const rateLimit = checkRateLimit(`telegram:${chatId}:${command.command}`, TELEGRAM_COMMAND_RATE_LIMIT);
+    const rateLimit = await checkDistributedRateLimit(`telegram:${securityFingerprint(`chat:${chatId}:${command.command}`)}`, {
+      ...TELEGRAM_COMMAND_RATE_LIMIT,
+      requireDistributed: true,
+    });
     if (!rateLimit.allowed) {
       return {
         handled: true,
@@ -3001,7 +3002,7 @@ export async function processTelegramWebhookUpdate(
 
         await sendTelegramDigestMessagesForUser({
           userId: channel.userId,
-          markAsSent: false,
+          mode: "manual",
         });
 
         return { handled: true, chatId };

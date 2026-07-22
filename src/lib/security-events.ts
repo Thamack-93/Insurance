@@ -3,6 +3,7 @@ import { SYSTEM_USER_ID } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { writeActivityLog } from "@/lib/activity-log";
+import { securityFingerprint } from "@/lib/request-guards";
 
 export type SecurityEventSeverity = "INFO" | "WARNING" | "CRITICAL";
 
@@ -30,20 +31,51 @@ export type SecurityEventInput = {
   entityId?: string;
   userId?: string;
   db?: PrismaClient | Prisma.TransactionClient;
+  fingerprint?: string;
 };
 
 export async function recordSecurityEvent(input: SecurityEventInput) {
   const db = input.db ?? getDb();
+  const now = new Date();
+  const windowStart = new Date(Math.floor(now.getTime() / 60_000) * 60_000);
+  const fingerprint = input.fingerprint ?? securityFingerprint(input.entityId ?? input.alertType);
   const alertData = {
     alertType: input.alertType,
     severity: input.severity ?? "WARNING",
     title: input.title,
     description: input.description,
     entityType: input.entityType ?? "SecurityEvent",
-    entityId: input.entityId ?? input.alertType,
+    entityId: fingerprint,
   };
 
   try {
+    const aggregate = await db.securityEventAggregate.upsert({
+      where: {
+        alertType_fingerprint_windowStart: {
+          alertType: alertData.alertType,
+          fingerprint,
+          windowStart,
+        },
+      },
+      create: {
+        alertType: alertData.alertType,
+        fingerprint,
+        windowStart,
+        firstSeenAt: now,
+        lastSeenAt: now,
+        occurrenceCount: 1,
+        title: alertData.title,
+        description: alertData.description,
+        severity: alertData.severity,
+      },
+      update: {
+        lastSeenAt: now,
+        occurrenceCount: { increment: 1 },
+      },
+    });
+
+    if (aggregate.occurrenceCount > 1) return null;
+
     const alert = await db.alert.create({ data: alertData });
     await writeActivityLog({
       entityType: alertData.entityType,

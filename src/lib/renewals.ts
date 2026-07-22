@@ -169,7 +169,7 @@ export async function createRenewalWorkItems() {
       const workItemSourceId = `policy:${renewal.policyId}:renewal-workItem`;
       if (renewal.daysUntilRenewal <= 30) {
         const workItem = await upsertWorkItemFromSource({
-          sourceType: "Task",
+          sourceType: "Renewal",
           sourceId: workItemSourceId,
           workItemType: "TASK",
           taskType: "RENEWAL",
