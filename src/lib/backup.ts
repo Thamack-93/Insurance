@@ -7,9 +7,12 @@ import {
   BACKUP_AUTH_TAG_BYTES,
   BACKUP_FORMAT,
   BACKUP_FORMAT_VERSION,
+  assertValidKeyVersion,
   canonicalJson,
   createBackupContainerHeader,
   createBackupManifest,
+  decryptBackupPayload,
+  encryptBackupPayload,
   parseBackupEncryptionKey,
   selectBackupRetention,
   verifyBackupManifest,
@@ -17,6 +20,9 @@ import {
 } from "@/lib/backup-logic";
 
 const BACKUP_PREFIX = "database-backups/";
+// Copies created during a key migration are deliberately outside BACKUP_PREFIX so
+// regular retention can never prune either the source or the migration copy.
+const BACKUP_REKEY_PREFIX = "database-backup-rekeys/";
 const BACKUP_EXTENSION = ".ndjson.gz.enc";
 const MANIFEST_SUFFIX = ".manifest.json";
 const EXPORT_BATCH_SIZE = 500;
@@ -64,6 +70,12 @@ export type BackupPreflightCheck = {
 export type BackupPreflightStatus = {
   ready: boolean;
   checks: BackupPreflightCheck[];
+};
+
+export type BackupRekeyStatus = {
+  ready: boolean;
+  detail: string;
+  targetKeyVersion?: string;
 };
 
 export type BackupVerification =
@@ -155,8 +167,54 @@ export function formatBackupPreflightError(status: BackupPreflightStatus) {
 function getEncryptionConfiguration() {
   return {
     key: parseBackupEncryptionKey(requireEnvironment("BACKUP_ENCRYPTION_KEY")),
-    keyVersion: requireEnvironment("BACKUP_ENCRYPTION_KEY_VERSION"),
+    keyVersion: assertValidKeyVersion(requireEnvironment("BACKUP_ENCRYPTION_KEY_VERSION")),
   };
+}
+
+function versionedBackupEncryptionKeyName(keyVersion: string) {
+  return `BACKUP_ENCRYPTION_KEY_${assertValidKeyVersion(keyVersion)
+    .replace(/[^A-Za-z0-9]/g, "_")
+    .toUpperCase()}`;
+}
+
+function getEncryptionKeyForVersion(keyVersion: string) {
+  const activeVersion = assertValidKeyVersion(requireEnvironment("BACKUP_ENCRYPTION_KEY_VERSION"));
+  const environmentName = keyVersion === activeVersion
+    ? "BACKUP_ENCRYPTION_KEY"
+    : versionedBackupEncryptionKeyName(keyVersion);
+  return parseBackupEncryptionKey(requireEnvironment(environmentName));
+}
+
+export function getBackupRekeyStatus(): BackupRekeyStatus {
+  if (process.env.BACKUP_REKEY_ENABLED !== "true") {
+    return {
+      ready: false,
+      detail: "La migración está desactivada. Define BACKUP_REKEY_ENABLED=true solo durante la migración.",
+    };
+  }
+
+  const targetKeyVersion = process.env.BACKUP_REKEY_TARGET_KEY_VERSION?.trim();
+  if (!targetKeyVersion) {
+    return { ready: false, detail: "Falta BACKUP_REKEY_TARGET_KEY_VERSION." };
+  }
+
+  try {
+    assertValidKeyVersion(targetKeyVersion);
+    const activeVersion = assertValidKeyVersion(requireEnvironment("BACKUP_ENCRYPTION_KEY_VERSION"));
+    if (targetKeyVersion === activeVersion) {
+      return {
+        ready: false,
+        detail: "La nueva versión debe ser distinta de BACKUP_ENCRYPTION_KEY_VERSION.",
+      };
+    }
+    parseBackupEncryptionKey(requireEnvironment(versionedBackupEncryptionKeyName(targetKeyVersion)));
+    return { ready: true, detail: `Lista para crear copias con la versión ${targetKeyVersion}.`, targetKeyVersion };
+  } catch (error) {
+    return {
+      ready: false,
+      detail: error instanceof Error ? error.message : "La configuración de migración no es válida.",
+    };
+  }
 }
 
 function quoteIdentifier(value: string) {
@@ -356,24 +414,24 @@ async function* encryptedBackupStream(
   yield authTag;
 }
 
-async function listAllBackupBlobs() {
+async function listAllBackupBlobs(prefix: string) {
   const blobs: Awaited<ReturnType<typeof list>>["blobs"] = [];
   let cursor: string | undefined;
   do {
-    const page = await list({ prefix: BACKUP_PREFIX, limit: 1000, cursor });
+    const page = await list({ prefix, limit: 1000, cursor });
     blobs.push(...page.blobs);
     cursor = page.hasMore ? page.cursor : undefined;
   } while (cursor);
   return blobs;
 }
 
-export async function listBackups(): Promise<BackupEntry[]> {
-  const blobs = await listAllBackupBlobs();
+async function listBackupsInPrefix(prefix: string): Promise<BackupEntry[]> {
+  const blobs = await listAllBackupBlobs(prefix);
   const pathnames = new Set(blobs.map((blob) => blob.pathname));
   return blobs
     .filter((blob) => blob.pathname.endsWith(BACKUP_EXTENSION))
     .map((blob) => {
-      const filename = blob.pathname.slice(BACKUP_PREFIX.length);
+      const filename = blob.pathname.slice(prefix.length);
       if (!BACKUP_FILENAME_PATTERN.test(filename)) return null;
       return {
         filename,
@@ -385,6 +443,14 @@ export async function listBackups(): Promise<BackupEntry[]> {
     })
     .filter((entry): entry is BackupEntry => entry !== null)
     .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
+}
+
+export function listBackups(): Promise<BackupEntry[]> {
+  return listBackupsInPrefix(BACKUP_PREFIX);
+}
+
+export function listRekeyedBackups(): Promise<BackupEntry[]> {
+  return listBackupsInPrefix(BACKUP_REKEY_PREFIX);
 }
 
 export async function rotateBackups() {
@@ -498,13 +564,24 @@ async function readStream(stream: ReadableStream<Uint8Array>, maximumBytes?: num
   return Buffer.concat(chunks, size);
 }
 
+async function findBackupManifest(filename: string) {
+  for (const prefix of [BACKUP_PREFIX, BACKUP_REKEY_PREFIX]) {
+    const pathname = `${prefix}${filename}`;
+    const manifestResult = await get(`${pathname}${MANIFEST_SUFFIX}`, { access: "private" });
+    if (manifestResult?.statusCode === 200 && manifestResult.stream) {
+      return { pathname, manifestResult };
+    }
+  }
+  return null;
+}
+
 export async function verifyStoredBackup(filename: string): Promise<BackupVerification> {
   assertSafeBackupFilename(filename);
-  const pathname = `${BACKUP_PREFIX}${filename}`;
-  const manifestResult = await get(`${pathname}${MANIFEST_SUFFIX}`, { access: "private" });
-  if (manifestResult?.statusCode !== 200 || !manifestResult.stream) {
+  const stored = await findBackupManifest(filename);
+  if (!stored) {
     return { valid: false, filename, reason: "No se encontró el manifiesto privado." };
   }
+  const { pathname, manifestResult } = stored;
 
   let parsed: unknown;
   try {
@@ -547,5 +624,110 @@ export async function verifyStoredBackup(filename: string): Promise<BackupVerifi
 
 export async function getBackupDownload(filename: string) {
   assertSafeBackupFilename(filename);
-  return get(`${BACKUP_PREFIX}${filename}`, { access: "private" });
+  const primary = await get(`${BACKUP_PREFIX}${filename}`, { access: "private" });
+  if (primary?.statusCode === 200 && primary.stream) return primary;
+  return get(`${BACKUP_REKEY_PREFIX}${filename}`, { access: "private" });
+}
+
+export type RekeyedBackup = {
+  sourceFilename: string;
+  filename: string;
+  pathname: string;
+  size: number;
+  manifest: BackupManifest;
+};
+
+/**
+ * Creates a separately stored copy encrypted with a new key. This intentionally
+ * never calls `del`, `rotateBackups`, or overwrites a source object.
+ */
+export async function rekeyStoredBackup(
+  sourceFilename: string,
+  now = new Date(),
+): Promise<RekeyedBackup> {
+  assertSafeBackupFilename(sourceFilename);
+  const rekeyStatus = getBackupRekeyStatus();
+  if (!rekeyStatus.ready || !rekeyStatus.targetKeyVersion) {
+    throw new Error(rekeyStatus.detail);
+  }
+
+  const source = await verifyStoredBackup(sourceFilename);
+  if (!source.valid) throw new Error(`El respaldo origen no es válido: ${source.reason}`);
+
+  const sourceDownload = await getBackupDownload(sourceFilename);
+  if (sourceDownload?.statusCode !== 200 || !sourceDownload.stream) {
+    throw new Error("No se pudo leer el payload cifrado de origen.");
+  }
+
+  const encryptedSource = await readStream(sourceDownload.stream);
+  const sourceKey = getEncryptionKeyForVersion(source.manifest.encryption.keyVersion);
+  const decryptedSource = decryptBackupPayload(encryptedSource, sourceKey);
+  if (decryptedSource.header.keyVersion !== source.manifest.encryption.keyVersion) {
+    throw new Error("La versión de la clave del payload no coincide con el manifiesto.");
+  }
+  if (decryptedSource.header.keyVersion === rekeyStatus.targetKeyVersion) {
+    throw new Error("El respaldo ya usa la versión de clave destino.");
+  }
+
+  const targetKey = parseBackupEncryptionKey(
+    requireEnvironment(versionedBackupEncryptionKeyName(rekeyStatus.targetKeyVersion)),
+  );
+  const iv = randomBytes(12);
+  const encryptedTarget = encryptBackupPayload(
+    decryptedSource.plaintext,
+    targetKey,
+    rekeyStatus.targetKeyVersion,
+    iv,
+  );
+  const locallyVerified = decryptBackupPayload(encryptedTarget, targetKey);
+  if (!locallyVerified.plaintext.equals(decryptedSource.plaintext)) {
+    throw new Error("La copia re-cifrada no pasó la verificación local.");
+  }
+
+  const nonce = randomBytes(6).toString("hex");
+  const filename = `policydesk-${compactTimestamp(now)}-${nonce}-kv-${rekeyStatus.targetKeyVersion}${BACKUP_EXTENSION}`;
+  assertSafeBackupFilename(filename);
+  const pathname = `${BACKUP_REKEY_PREFIX}${filename}`;
+  const uploaded = await put(pathname, encryptedTarget, {
+    access: "private",
+    addRandomSuffix: false,
+    allowOverwrite: false,
+    cacheControlMaxAge: 60,
+    contentType: "application/octet-stream",
+  });
+  const manifest = createBackupManifest({
+    format: source.manifest.format,
+    version: source.manifest.version,
+    createdAt: source.manifest.createdAt,
+    completedAt: now.toISOString(),
+    payload: {
+      filename,
+      pathname: uploaded.pathname,
+      size: encryptedTarget.length,
+      sha256: createHash("sha256").update(encryptedTarget).digest("hex"),
+    },
+    encryption: {
+      algorithm: "AES-256-GCM",
+      keyVersion: rekeyStatus.targetKeyVersion,
+      iv: iv.toString("base64"),
+      authTagBytes: BACKUP_AUTH_TAG_BYTES,
+    },
+    compression: source.manifest.compression,
+    tables: source.manifest.tables,
+    totals: source.manifest.totals,
+  });
+  await put(`${pathname}${MANIFEST_SUFFIX}`, canonicalJson(manifest), {
+    access: "private",
+    addRandomSuffix: false,
+    allowOverwrite: false,
+    cacheControlMaxAge: 60,
+    contentType: "application/json",
+  });
+
+  const verification = await verifyStoredBackup(filename);
+  if (!verification.valid) {
+    throw new Error(`La copia fue creada pero no pasó su verificación: ${verification.reason}`);
+  }
+
+  return { sourceFilename, filename, pathname: uploaded.pathname, size: encryptedTarget.length, manifest };
 }

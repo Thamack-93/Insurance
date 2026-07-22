@@ -46,6 +46,9 @@ Copia `.env.example` a `.env.local` y ajusta los valores:
 | `BLOB_READ_WRITE_TOKEN` | Producción | Acceso al store privado de Vercel Blob |
 | `BACKUP_ENCRYPTION_KEY` | Producción | Clave de 32 bytes para AES-256-GCM |
 | `BACKUP_ENCRYPTION_KEY_VERSION` | Producción | Versión activa de la clave de cifrado |
+| `BACKUP_REKEY_ENABLED` | Producción, temporal | Activa la creación manual de copias re-cifradas (`true`) |
+| `BACKUP_REKEY_TARGET_KEY_VERSION` | Producción, temporal | Versión de la clave nueva, distinta de la activa |
+| `BACKUP_ENCRYPTION_KEY_V2` | Producción, temporal | Ejemplo de clave de 32 bytes para la versión `v2` |
 | `ENABLE_DOCUMENT_FILES` | Opcional | `false` para la demo publicada sin archivos |
 | `AUTH_SECRET` | Dev | Alias de `SESSION_SECRET` en desarrollo |
 
@@ -75,6 +78,12 @@ RESTORE_DATABASE_URL=... RESTORE_NEON_BRANCH=restore-prueba \
 ALLOW_TEMPORARY_NEON_RESTORE=true \
 npm run restore:backup:temp-neon -- <archivo.ndjson.gz.enc>
 ```
+
+### Migrar una clave sin borrar backups
+
+Para conservar backups cifrados con una clave anterior, no sustituyas la clave activa primero. Guarda una nueva clave de 32 bytes en un gestor seguro y configura temporalmente `BACKUP_ENCRYPTION_KEY_V2`, `BACKUP_REKEY_TARGET_KEY_VERSION=v2` y `BACKUP_REKEY_ENABLED=true` en Vercel. Desde Configuración → Respaldos, un administrador puede crear y verificar una copia de cada backup. Las copias se escriben en `database-backup-rekeys/`, no reemplazan los originales y quedan fuera de la retención automática.
+
+Tras verificar y probar las copias que necesites restaurar, conserva también la clave anterior mientras existan originales que puedan necesitarse. Antes de cambiar la versión activa, guárdala además como `BACKUP_ENCRYPTION_KEY_V1` (sustituye `V1` por su versión real); así el restaurador puede seguir abriendo originales. Solo entonces desactiva `BACKUP_REKEY_ENABLED`; cambiar la clave activa es una operación posterior y separada.
 
 ## Flujo de desarrollo
 

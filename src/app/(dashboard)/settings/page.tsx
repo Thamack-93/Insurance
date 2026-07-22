@@ -18,6 +18,8 @@ import {
   listBackupsAction,
 } from "./backups-actions";
 
+export const maxDuration = 300;
+
 export default async function SettingsPage() {
   const now = today();
   const liveUser = await getCurrentUser();

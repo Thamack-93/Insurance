@@ -5,9 +5,11 @@ vi.mock("server-only", () => ({}));
 const requireAdmin = vi.hoisted(() => vi.fn());
 const createDatabaseBackup = vi.hoisted(() => vi.fn());
 const listBackups = vi.hoisted(() => vi.fn());
+const listRekeyedBackups = vi.hoisted(() => vi.fn());
 const getBackupPreflightStatus = vi.hoisted(() => vi.fn());
 const formatBackupPreflightError = vi.hoisted(() => vi.fn());
 const verifyStoredBackup = vi.hoisted(() => vi.fn());
+const rekeyStoredBackup = vi.hoisted(() => vi.fn());
 const revalidatePath = vi.hoisted(() => vi.fn());
 
 vi.mock("next/cache", () => ({ revalidatePath }));
@@ -16,12 +18,14 @@ vi.mock("@/lib/backup", () => ({
   createDatabaseBackup,
   formatBackupPreflightError,
   listBackups,
+  listRekeyedBackups,
   getBackupPreflightStatus,
   verifyStoredBackup,
+  rekeyStoredBackup,
 }));
 vi.mock("@/lib/logger", () => ({ logError: vi.fn() }));
 
-import { createBackup, listBackupsAction, verifyBackupAction } from "./backups-actions";
+import { createBackup, listBackupsAction, rekeyBackupAction, verifyBackupAction } from "./backups-actions";
 
 describe("backups actions", () => {
   beforeEach(() => {
@@ -32,6 +36,7 @@ describe("backups actions", () => {
     listBackups.mockResolvedValue([
       { filename: "backup-1", pathname: "database-backups/backup-1", size: 10, createdAt: new Date("2026-07-04T00:00:00.000Z"), manifestAvailable: true },
     ]);
+    listRekeyedBackups.mockResolvedValue([]);
     createDatabaseBackup.mockResolvedValue({
       filename: "backup-2",
       pathname: "database-backups/backup-2",
@@ -48,6 +53,13 @@ describe("backups actions", () => {
       sha256: "a".repeat(64),
       manifest: { totals: { rows: 12 } },
     });
+    rekeyStoredBackup.mockResolvedValue({
+      sourceFilename: "backup-1",
+      filename: "backup-2",
+      pathname: "database-backup-rekeys/backup-2",
+      size: 11,
+      manifest: {},
+    });
   });
 
   it("requires admin access before listing backups", async () => {
@@ -61,6 +73,7 @@ describe("backups actions", () => {
         size: 10,
         createdAt: "2026-07-04T00:00:00.000Z",
         manifestAvailable: true,
+        storage: "original",
       },
     ]);
   });
@@ -88,5 +101,14 @@ describe("backups actions", () => {
       id: "backup-1",
       redirectTo: "/settings",
     });
+  });
+
+  it("requires admin access before creating an immutable re-encrypted copy", async () => {
+    const result = await rekeyBackupAction("backup-1");
+
+    expect(requireAdmin).toHaveBeenCalledTimes(1);
+    expect(rekeyStoredBackup).toHaveBeenCalledWith("backup-1");
+    expect(revalidatePath).toHaveBeenCalledWith("/settings");
+    expect(result).toMatchObject({ ok: true, id: "backup-2", redirectTo: "/settings" });
   });
 });

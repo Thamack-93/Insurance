@@ -7,7 +7,11 @@ import {
   selectBackupRetention,
   verifyBackupManifest,
 } from "@/lib/backup-logic";
-import { formatBackupPreflightError, getBackupPreflightStatus } from "@/lib/backup";
+import {
+  formatBackupPreflightError,
+  getBackupPreflightStatus,
+  getBackupRekeyStatus,
+} from "@/lib/backup";
 
 const KEY = Buffer.from(
   "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
@@ -138,5 +142,24 @@ describe("backup preflight", () => {
 
     expect(status.ready).toBe(true);
     expect(status.checks.every((check) => check.ok)).toBe(true);
+  });
+});
+
+describe("backup key migration preflight", () => {
+  it("requires an explicit enabled flag and a distinct versioned target key", () => {
+    vi.stubEnv("BACKUP_ENCRYPTION_KEY_VERSION", "v1");
+    vi.stubEnv("BACKUP_REKEY_ENABLED", "true");
+    vi.stubEnv("BACKUP_REKEY_TARGET_KEY_VERSION", "v2");
+    vi.stubEnv("BACKUP_ENCRYPTION_KEY_V2", `hex:${KEY.toString("hex")}`);
+
+    expect(getBackupRekeyStatus()).toMatchObject({ ready: true, targetKeyVersion: "v2" });
+
+    vi.stubEnv("BACKUP_REKEY_TARGET_KEY_VERSION", "v1");
+    expect(getBackupRekeyStatus()).toMatchObject({ ready: false });
+  });
+
+  it("stays disabled unless explicitly enabled", () => {
+    vi.stubEnv("BACKUP_REKEY_ENABLED", "false");
+    expect(getBackupRekeyStatus()).toMatchObject({ ready: false });
   });
 });
