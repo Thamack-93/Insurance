@@ -198,6 +198,7 @@ model Policy {
   @@index([updatedById])
   @@index([familyRootId])
   @@index([renewedFromPolicyId])
+  @@index([cancellationBatchId])
 }
 
 model Receipt {
@@ -253,6 +254,7 @@ model Receipt {
   @@index([policyId, receiptNumber])
   @@index([createdById])
   @@index([updatedById])
+  @@index([cancellationBatchId])
 }
 
 model PolicyEndorsement {
