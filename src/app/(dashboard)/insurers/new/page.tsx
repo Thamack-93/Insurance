@@ -2,8 +2,11 @@ import { createInsurer } from "@/app/(dashboard)/insurers/actions";
 import { InsurerForm } from "@/components/forms/insurer-form";
 import { createInsurerDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
+import { requireAdminOrRedirect } from "@/lib/auth";
 
 export default async function NewInsurerPage() {
+  await requireAdminOrRedirect();
+
   return (
     <div className="flex flex-col gap-6">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">

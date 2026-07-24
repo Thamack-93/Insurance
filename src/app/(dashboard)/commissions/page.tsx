@@ -76,7 +76,7 @@ export default async function CommissionsPage({
       take: DEFAULT_PAGE_SIZE,
     }),
     db.commission.findMany({
-      where: { status: "PAID" },
+      where: { ...commissionOperationalWhere(scope.portfolioOwnerId), status: "PAID" },
       include: { client: true, insurer: true, policy: true, receipt: true },
       orderBy: [{ paidDate: "desc" }, { expectedDate: "desc" }],
       take: 10,
@@ -102,8 +102,8 @@ export default async function CommissionsPage({
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="Finanzas"
-          title="Comisiones"
-          description="Seguimiento de ingreso esperado, cobrado y vencido por póliza."
+          title="Comisiones y bonos"
+          description="Seguimiento de comisiones esperadas, cobradas y vencidas. Los bonos se incorporarán cuando existan datos reales."
           actions={
             <Button asChild className="rounded-full">
               <Link href="/reports">

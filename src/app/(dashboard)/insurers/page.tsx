@@ -11,6 +11,7 @@ import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
 import { getDb } from "@/lib/db";
 import { formatCurrency, toNumber } from "@/lib/money";
+import { claimOperationalWhere, policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 
 const PAGE_SIZE = 25;
 
@@ -22,6 +23,10 @@ export default async function InsurersPage({
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = Math.max(1, Number(params.page) || 1);
+  const scope = await requirePortfolioReadScope();
+  const isAdmin = scope.role === "ADMIN";
+  const policyScope = policyOperationalWhere(scope.portfolioOwnerId);
+  const claimScope = claimOperationalWhere(scope.portfolioOwnerId);
 
   const db = getDb();
 
@@ -46,10 +51,10 @@ export default async function InsurersPage({
   ] = await Promise.all([
     db.insurer.count({ where: { status: "ACTIVE" } }),
     db.insurer.count({ where: { status: "ARCHIVED" } }),
-    db.policy.count(),
-    db.claim.count(),
+    db.policy.count({ where: policyScope }),
+    db.claim.count({ where: claimScope }),
     db.policy.aggregate({
-      where: { status: "ACTIVE" },
+      where: { status: "ACTIVE", ...policyScope },
       _sum: { premiumAmount: true },
     }),
     db.insurer.count({ where }),
@@ -57,9 +62,14 @@ export default async function InsurersPage({
       where,
       orderBy: { name: "asc" },
       include: {
-        _count: { select: { policies: true, claims: true } },
+        _count: {
+          select: {
+            policies: { where: policyScope },
+            claims: { where: claimScope },
+          },
+        },
         policies: {
-          where: { status: "ACTIVE" },
+          where: { status: "ACTIVE", ...policyScope },
           select: { premiumAmount: true },
         },
       },
@@ -79,12 +89,14 @@ export default async function InsurersPage({
           description="Directorio de compañías aseguradoras, volumen de negocio y concentración de cartera."
           actions={
             <>
-              <Button asChild variant="outline" className="rounded-full">
-                <Link href="/insurers/new">
-                  <Plus className="mr-2 size-4" />
-                  Nueva aseguradora
-                </Link>
-              </Button>
+              {isAdmin ? (
+                <Button asChild variant="outline" className="rounded-full">
+                  <Link href="/insurers/new">
+                    <Plus className="mr-2 size-4" />
+                    Nueva aseguradora
+                  </Link>
+                </Button>
+              ) : null}
               <Button asChild className="rounded-full">
                 <Link href="/policies">
                   Ver pólizas
@@ -145,9 +157,8 @@ export default async function InsurersPage({
                 <EmptyState
                   icon={Building2}
                   title="Aún no hay aseguradoras"
-                  description="Registra tu primera compañía aseguradora para enlazar pólizas."
-                  action="Nueva aseguradora"
-                  actionHref="/insurers/new"
+                  description={isAdmin ? "Registra tu primera compañía aseguradora para enlazar pólizas." : "Aún no hay compañías disponibles para consulta."}
+                  {...(isAdmin ? { action: "Nueva aseguradora", actionHref: "/insurers/new" } : {})}
                 />
               </div>
             )

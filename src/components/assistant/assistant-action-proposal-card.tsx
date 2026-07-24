@@ -15,6 +15,7 @@ const ENTITY_LABELS: Record<AssistantActionProposal["entityType"], string> = {
   receipt: "Recibo",
   payment: "Pago",
   task: "Tarea",
+  endorsement: "Endoso",
 };
 
 export function AssistantActionProposalCard({ proposal }: { proposal: AssistantActionProposal }) {

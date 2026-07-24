@@ -152,13 +152,13 @@ export async function requireUserOrRedirect() {
 
 /**
  * Like requireUserOrRedirect() but additionally enforces ADMIN role. Demoted
- * admins are sent to /dashboard on their next request.
+ * admins are sent to the canonical Today destination on their next request.
  */
 export async function requireAdminOrRedirect() {
   const { redirect } = await import("next/navigation");
   const user = await requireUserOrRedirect();
   if (user.role !== "ADMIN") {
-    redirect("/dashboard");
+    redirect("/today");
   }
   return user;
 }

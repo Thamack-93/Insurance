@@ -23,6 +23,8 @@ import { MessageResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
 import { extractPdfTextFromFile } from "@/lib/pdf-text-extraction.browser";
 import { buildNoraPolicyPdfPathname, NORA_POLICY_PDF_MAX_BYTES } from "@/lib/nora-pdf-storage.shared";
+import type { NoraContextRef } from "@/lib/nora-context";
+import { NoraExcelDownload } from "@/components/assistant/nora-excel-download";
 
 type Message = {
   id: string;
@@ -252,7 +254,21 @@ function CapturePreviewCard({
   );
 }
 
-export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnapshot; userId: string }) {
+const CONVERSATION_SESSION_KEY = "policydesk.nora.conversation.v1";
+
+export function AssistantConsole({
+  snapshot,
+  userId,
+  variant = "workspace",
+  context = null,
+  initialPrompt,
+}: {
+  snapshot: AssistantSnapshot;
+  userId: string;
+  variant?: "workspace" | "panel";
+  context?: NoraContextRef | null;
+  initialPrompt?: string;
+}) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [input, setInput] = useState("");
@@ -262,6 +278,43 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const [lastPrompt, setLastPrompt] = useState<string | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      try {
+        const stored = window.sessionStorage.getItem(CONVERSATION_SESSION_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored) as { messages?: Message[]; input?: string };
+          if (Array.isArray(parsed.messages) && parsed.messages.length) setMessages(parsed.messages);
+          if (typeof parsed.input === "string") setInput(parsed.input);
+        } else if (initialPrompt) {
+          setInput(initialPrompt);
+        }
+      } catch {
+        window.sessionStorage.removeItem(CONVERSATION_SESSION_KEY);
+      } finally {
+        if (!cancelled) setSessionReady(true);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [initialPrompt]);
+
+  useEffect(() => {
+    if (!sessionReady) return;
+    try {
+      window.sessionStorage.setItem(CONVERSATION_SESSION_KEY, JSON.stringify({ messages, input }));
+    } catch {
+      // A full browser storage quota must not interrupt the conversation.
+    }
+  }, [input, messages, sessionReady]);
+
+  useEffect(() => {
+    if (!sessionReady || !initialPrompt || input.trim()) return;
+    queueMicrotask(() => setInput(initialPrompt));
+  }, [initialPrompt, input, sessionReady]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -324,7 +377,7 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
       const response = await fetch("/api/assistant", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message, context }),
       });
       const payload = (await response.json().catch(() => null)) as
         | { success?: boolean; response?: AssistantConversationResponse; error?: string }
@@ -496,14 +549,20 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
   }
 
   return (
-    <section className="mx-auto flex h-[calc(100dvh-7.5rem)] min-h-[34rem] w-full max-w-none flex-col overflow-hidden rounded-[1.5rem] border border-border/70 bg-card/90 shadow-sm lg:h-[calc(100dvh-8rem)]">
-      <header className="flex items-center justify-between border-b border-border/70 px-5 py-4 sm:px-7">
+    <section className={cn(
+      "mx-auto flex w-full max-w-none flex-col overflow-hidden bg-card/90",
+      variant === "workspace"
+        ? "h-[calc(100dvh-7.5rem)] min-h-[34rem] rounded-[1.5rem] border border-border/70 shadow-sm lg:h-[calc(100dvh-8rem)]"
+        : "min-h-0 flex-1 rounded-none border-0 shadow-none",
+    )}>
+      <header className={cn("flex items-center justify-between border-b border-border/70", variant === "workspace" ? "px-5 py-4 sm:px-7" : "px-3 py-2")}>
+        {variant === "workspace" ? (
         <div className="flex items-center gap-3">
           <div className="grid size-10 place-items-center rounded-2xl bg-foreground text-background">
             <Bot className="size-5" />
           </div>
           <div>
-            <h1 className="font-serif text-xl font-semibold tracking-tight">Nora</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Nora</h1>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span>Asistente de PolicyDesk · {snapshot.scopeLabel}</span>
               <Badge variant={snapshot.ai.available ? "default" : "outline"} className="rounded-full text-[10px] uppercase tracking-wide">
@@ -512,10 +571,14 @@ export function AssistantConsole({ snapshot, userId }: { snapshot: AssistantSnap
             </div>
           </div>
         </div>
-        <Button type="button" variant="ghost" size="sm" className="rounded-full" onClick={resetConversation} disabled={isSending}>
-          <RotateCcw className="mr-2 size-4" />
-          Nuevo chat
-        </Button>
+        ) : <p className="text-xs text-muted-foreground">Conversación activa</p>}
+        <div className="flex items-center gap-1">
+          <NoraExcelDownload compact={variant === "panel"} />
+          <Button type="button" variant="ghost" size="sm" onClick={resetConversation} disabled={isSending} aria-label="Iniciar un nuevo chat">
+            <RotateCcw className="size-4" />
+            {variant === "workspace" ? "Nuevo chat" : null}
+          </Button>
+        </div>
       </header>
 
       <div className="min-h-0 flex-1 space-y-7 overflow-y-auto px-3 py-5 sm:px-8 lg:px-12" aria-live="polite">

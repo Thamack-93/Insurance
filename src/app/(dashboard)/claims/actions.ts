@@ -4,6 +4,11 @@ import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { getCurrentUserId } from "@/lib/auth";
 import { logError } from "@/lib/logger";
+import {
+  assertClaimPortfolioAccess,
+  assertClientPortfolioAccess,
+  assertPolicyPortfolioAccess,
+} from "@/lib/portfolio-access";
 import type { ClaimFormValues } from "@/lib/validations";
 import {
   errorResult,
@@ -35,6 +40,8 @@ export async function createClaim(values: ClaimFormValues): Promise<MutationResu
     const db = getDb();
 
     const userId = await getCurrentUserId();
+    await assertClientPortfolioAccess(values.clientId, userId);
+    await assertPolicyPortfolioAccess(values.policyId, userId);
     const claim = await db.claim.create({
       data: { ...normalizeClaimInput(values), createdById: userId, updatedById: userId },
     });
@@ -65,6 +72,10 @@ export async function createClaim(values: ClaimFormValues): Promise<MutationResu
 export async function updateClaim(id: string, values: ClaimFormValues): Promise<MutationResult> {
   try {
     const db = getDb();
+    const userId = await getCurrentUserId();
+    await assertClaimPortfolioAccess(id, userId);
+    await assertClientPortfolioAccess(values.clientId, userId);
+    await assertPolicyPortfolioAccess(values.policyId, userId);
 
     const existingClaim = await db.claim.findUnique({
       where: { id },
@@ -74,7 +85,6 @@ export async function updateClaim(id: string, values: ClaimFormValues): Promise<
       return errorResult("Siniestro no encontrado.");
     }
 
-    const userId = await getCurrentUserId();
     const claim = await db.claim.update({
       where: { id },
       data: { ...normalizeClaimInput(values), updatedById: userId },
@@ -107,6 +117,8 @@ export async function updateClaim(id: string, values: ClaimFormValues): Promise<
 export async function deleteClaim(id: string): Promise<MutationResult> {
   try {
     const db = getDb();
+    const userId = await getCurrentUserId();
+    await assertClaimPortfolioAccess(id, userId);
 
     const existingClaim = await db.claim.findUnique({
       where: { id },

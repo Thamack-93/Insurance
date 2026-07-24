@@ -6,15 +6,62 @@ on:
   pull_request:
     branches: [main, master]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
-  verify:
+  quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       NORA_SCOPE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Check Nora qualification scope
+        if: github.event_name == 'pull_request' && contains(github.head_ref, 'qualification')
+        run: npm run check:qualification-scope
+
+      - name: Check legacy WorkItem references
+        run: npm run check:legacy-workitem-refs -- --static-only
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit
+
+  application:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1"
+      PLAYWRIGHT_USE_PRODUCTION_SERVER: "1"
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
       SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
+      SESSION_SECRET: ci-session-secret-minimum-32-characters-long
     services:
       postgres:
         image: postgres:16-alpine
@@ -39,10 +86,6 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - name: Check Nora qualification scope
-        if: github.event_name == 'pull_request' && contains(github.head_ref, 'qualification')
-        run: npm run check:qualification-scope
-
       - name: Install dependencies
         run: npm ci
 
@@ -55,25 +98,25 @@ jobs:
       - name: Check migration drift
         run: npm run db:check-drift
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Unit tests
-        run: npm run test:unit
+      - name: Build production application
+        run: npm run build
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      - name: API tests
+      - name: API tests against production server
         run: npm run test:api
 
-      - name: E2E tests
+      - name: E2E tests against production server
         run: npm run test:e2e
 
-      - name: Build
-        run: npm run build
-        env:
-          SESSION_SECRET: ci-session-secret-minimum-32-characters-long
+      - name: Upload Playwright artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts-${{ github.run_attempt }}
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 14

@@ -2,7 +2,13 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
 const ROOT = path.join(process.cwd(), "scripts");
-const ALLOWED_FILES = new Set(["backfill-work-items.ts", "check-legacy-workitem-refs.ts"]);
+const ALLOWED_FILES = new Set([
+  "backfill-work-items.ts",
+  // Historical compatibility backfill: it normalizes dates in both legacy Task
+  // records and their WorkItem successors during an explicitly guarded migration.
+  "backfill-business-dates.ts",
+  "check-legacy-workitem-refs.ts",
+]);
 const BLOCKED_PATTERNS = [
   { label: "legacy-db-task", regex: /\bdb\.task\b/ },
   { label: "legacy-public-task", regex: /public\."Task"/ },

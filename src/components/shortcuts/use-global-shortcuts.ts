@@ -35,7 +35,7 @@ function detailListingFor(pathname: string): string | null {
 }
 
 const NAV_KEYS: Record<string, string> = {
-  d: "/dashboard",
+  d: "/today?view=insights",
   h: "/today",
   c: "/clients",
   p: "/policies",

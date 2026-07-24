@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
 import { getDb } from "@/lib/db";
 import { reconcileReceiptState } from "@/lib/receipt-reconciliation";
+import { validatePaymentAgainstBalance } from "@/lib/payment-amount";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -161,6 +162,7 @@ export async function recordPayment(input: RecordPaymentInput, client?: DbClient
       include: {
         client: true,
         policy: true,
+        payments: { select: { amount: true } },
       },
     });
 
@@ -168,9 +170,14 @@ export async function recordPayment(input: RecordPaymentInput, client?: DbClient
       throw new Error("El recibo no existe o fue eliminado.");
     }
 
-    if (receipt.status === "CANCELLED") {
-      throw new Error("No puedes aplicar pagos a un recibo cancelado.");
-    }
+    const paymentValidationError = validatePaymentAgainstBalance({
+      amount: input.amount,
+      totalAmount: Number(receipt.amount),
+      paidAmounts: receipt.payments.map((payment) => Number(payment.amount)),
+      receiptStatus: receipt.status,
+      currency: receipt.currency,
+    });
+    if (paymentValidationError) throw new PaymentConflictError(paymentValidationError);
 
     if (input.sourceEvidenceKey) {
       const evidenceMatch = await tx.payment.findUnique({

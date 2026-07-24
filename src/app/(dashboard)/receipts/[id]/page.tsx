@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, CircleDollarSign, FileText, History, ReceiptText, CalendarClock } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
+import { NoraContextButton } from "@/components/assistant/nora-session-provider";
 import { AuditByline } from "@/components/audit/audit-byline";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
@@ -70,6 +71,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
           description={`${receipt.client.fullName} · ${receipt.policy.policyNumber} · ${getReceiptOriginLabel(receipt)} · ${receipt.insurer.name}`}
           actions={
             <>
+              <NoraContextButton context={{ type: "receipt", id: receipt.id }} label="Registrar con Nora" />
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/receipts/${receipt.id}/edit`}>Editar recibo</Link>
               </Button>

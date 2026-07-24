@@ -12,6 +12,7 @@ import { RuntimeSettingsHydrator } from "@/components/settings/runtime-settings-
 import { getUnreadNotificationCount, getRecentNotifications } from "@/lib/notifications";
 import type { NotificationRecord } from "@/lib/notifications";
 import { requireUserOrRedirect } from "@/lib/auth";
+import { NoraSessionProvider } from "@/components/assistant/nora-session-provider";
 
 const fallbackSettings: Settings = {
   firmName: "PG",
@@ -49,7 +50,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   // Re-validate the user against the database on every dashboard request so
   // deactivations and role changes take effect immediately, rather than
   // waiting for the signed session token to expire.
-  await requireUserOrRedirect();
+  const user = await requireUserOrRedirect();
   // Load settings once per request: hydrates the server runtime cache and
   // is forwarded to the client so format helpers stay consistent on both sides.
   const { settings, unreadNotificationCount, recentNotifications } = await getSafeDashboardShellData();
@@ -66,28 +67,31 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   }));
   return (
     <SearchProvider>
-      <RuntimeSettingsHydrator settings={settings} />
-      <div className="min-h-screen">
-        <a
-          href="#main-content"
-          className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground"
-        >
-          Saltar al contenido principal
-        </a>
-        <div className="flex min-h-screen">
-          <AppSidebar />
-          <div className="min-w-0 flex-1">
-            <AppTopbar
-              userMenu={<UserMenu />}
-              unreadNotificationCount={unreadNotificationCount}
-              notifications={bellNotifications}
-            />
-            <main id="main-content" className="mx-auto w-full max-w-[1560px] px-3 py-6 sm:px-5 sm:py-8 lg:px-8">{children}</main>
+      <NoraSessionProvider userId={user.id}>
+        <RuntimeSettingsHydrator settings={settings} />
+        <div className="min-h-screen">
+          <a
+            href="#main-content"
+            className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground"
+          >
+            Saltar al contenido principal
+          </a>
+          <div className="flex min-h-screen">
+            <AppSidebar isAdmin={user.role === "ADMIN"} />
+            <div className="min-w-0 flex-1">
+              <AppTopbar
+                isAdmin={user.role === "ADMIN"}
+                userMenu={<UserMenu />}
+                unreadNotificationCount={unreadNotificationCount}
+                notifications={bellNotifications}
+              />
+              <main id="main-content" className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">{children}</main>
+            </div>
           </div>
+          <CommandPaletteWrapper isAdmin={user.role === "ADMIN"} />
+          <ShortcutsHelp />
         </div>
-        <CommandPaletteWrapper />
-        <ShortcutsHelp />
-      </div>
+      </NoraSessionProvider>
     </SearchProvider>
   );
 }

@@ -145,12 +145,12 @@ export default async function ActivityPage({
     user = await requireUser();
   } catch (error) {
     if (error instanceof AuthError) {
-      redirect("/dashboard");
+      redirect("/today");
     }
     throw error;
   }
   if (user.role !== "ADMIN") {
-    redirect("/dashboard");
+    redirect("/today");
   }
 
   const sp = await searchParams;
@@ -222,7 +222,7 @@ export default async function ActivityPage({
           description="Historial cronológico y panel de seguridad con vistas rápidas."
           actions={
             <Button asChild variant="outline" className="rounded-full bg-card/70">
-              <Link href="/dashboard">Volver al panel</Link>
+              <Link href="/today">Volver a Hoy</Link>
             </Button>
           }
         />

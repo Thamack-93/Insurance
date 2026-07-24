@@ -4,6 +4,7 @@ import { RecordPageView } from "@/components/recently-viewed/record-page-view";
 import { Mail, Phone, MapPin, BadgeInfo, FileText, ClipboardList, History, Pencil, ShieldCheck } from "lucide-react";
 import { DeleteClientButton } from "@/components/clients/delete-client-button";
 import { PageHeader } from "@/components/layout/page-header";
+import { NoraContextButton } from "@/components/assistant/nora-session-provider";
 import { AuditByline } from "@/components/audit/audit-byline";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
@@ -127,6 +128,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           description={`${client.type === "COMPANY" ? "Empresa" : "Persona"} · expediente central del cliente y su actividad vinculada.`}
           actions={
             <div className="flex items-center gap-2">
+              <NoraContextButton context={{ type: "client", id: client.id }} />
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/clients/${id}/edit`}>
                   <Pencil className="mr-2 size-4" />

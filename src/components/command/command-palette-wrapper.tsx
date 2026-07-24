@@ -3,24 +3,15 @@
 import { useState, useEffect, useCallback, useMemo, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import {
-  LayoutDashboard,
-  Home,
-  BriefcaseBusiness,
   Building2,
   Calculator,
-  CalendarClock,
-  ShieldCheck,
   CheckSquare,
   Users,
   FolderKanban,
   ReceiptText,
-  CircleDollarSign,
   FileText,
   AlertTriangle,
-  BarChart3,
-  BadgeCheck,
-  Bot,
-  Settings,
+  Sparkles,
   Plus,
   Clock,
 } from "lucide-react";
@@ -28,6 +19,7 @@ import { CommandPalette, type CommandPaletteGroup } from "./command-palette";
 import { EMPTY_RECENT_ITEMS, getRecentItems, RECENTLY_VIEWED_EVENT } from "@/lib/recently-viewed";
 import type { SearchResult, SearchResultType } from "@/components/search/search-provider";
 import { Highlight } from "@/components/search/highlight";
+import { getUtilityNavigation, globalNavigation } from "@/lib/navigation";
 
 const dynamicEntityIcon: Record<SearchResultType, React.ReactNode> = {
   client: <Users className="size-4" />,
@@ -66,7 +58,7 @@ function getServerRecentItems() {
   return EMPTY_RECENT_ITEMS;
 }
 
-export function CommandPaletteWrapper() {
+export function CommandPaletteWrapper({ isAdmin = false }: { isAdmin?: boolean }) {
   const [open, setOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -200,47 +192,16 @@ export function CommandPaletteWrapper() {
 
   const staticGroups: CommandPaletteGroup[] = [
     {
-      label: "Operación",
-      items: [
-        { id: "today", label: "Hoy", icon: <Home className="size-4" />, onSelect: () => handleSelect("/today") },
-        { id: "tasks", label: "Pendientes", icon: <CheckSquare className="size-4" />, onSelect: () => handleSelect("/tasks") },
-        { id: "due-payments", label: "Vencimientos", icon: <CalendarClock className="size-4" />, onSelect: () => handleSelect("/due-payments") },
-        { id: "renewals", label: "Renovaciones", icon: <ShieldCheck className="size-4" />, onSelect: () => handleSelect("/renewals") },
-        { id: "claims", label: "Siniestros", icon: <AlertTriangle className="size-4" />, onSelect: () => handleSelect("/claims") },
-      ],
-    },
-    {
-      label: "Cartera",
-      items: [
-        { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard className="size-4" />, onSelect: () => handleSelect("/dashboard") },
-        { id: "portfolio", label: "Cartera", icon: <BriefcaseBusiness className="size-4" />, onSelect: () => handleSelect("/portfolio") },
-        { id: "clients", label: "Clientes", icon: <Users className="size-4" />, onSelect: () => handleSelect("/clients") },
-        { id: "policies", label: "Pólizas", icon: <FolderKanban className="size-4" />, onSelect: () => handleSelect("/policies") },
-        { id: "quotes", label: "Cotizaciones", icon: <Calculator className="size-4" />, onSelect: () => handleSelect("/quotes") },
-      ],
-    },
-    {
-      label: "Finanzas",
-      items: [
-        { id: "receipts-cobrar", label: "Recibos por cobrar", icon: <ReceiptText className="size-4" />, onSelect: () => handleSelect("/receipts?tab=cobrar") },
-        { id: "receipts-historico", label: "Histórico de pagos", icon: <ReceiptText className="size-4" />, onSelect: () => handleSelect("/receipts?tab=historico") },
-        { id: "commissions", label: "Comisiones", icon: <CircleDollarSign className="size-4" />, onSelect: () => handleSelect("/commissions") },
-      ],
-    },
-    {
-      label: "Operación interna",
-      items: [
-        { id: "insurers", label: "Aseguradoras", icon: <Building2 className="size-4" />, onSelect: () => handleSelect("/insurers") },
-        { id: "documents", label: "Documentos", icon: <FileText className="size-4" />, onSelect: () => handleSelect("/documents") },
-      ],
-    },
-    {
-      label: "Calidad",
-      items: [
-        { id: "risks-hallazgos", label: "Riesgos · Hallazgos", icon: <AlertTriangle className="size-4" />, onSelect: () => handleSelect("/risks?tab=hallazgos") },
-        { id: "risks-completitud", label: "Calidad · Completitud", icon: <BadgeCheck className="size-4" />, onSelect: () => handleSelect("/risks?tab=completitud") },
-        { id: "reports", label: "Reportes", icon: <BarChart3 className="size-4" />, onSelect: () => handleSelect("/reports") },
-      ],
+      label: "PolicyDesk",
+      items: globalNavigation.map((item) => {
+        const Icon = item.icon;
+        return {
+          id: item.id,
+          label: item.label,
+          icon: <Icon className="size-4" />,
+          onSelect: () => handleSelect(item.href),
+        };
+      }),
     },
     {
       label: "Acciones rápidas",
@@ -249,13 +210,22 @@ export function CommandPaletteWrapper() {
         { id: "new-policy", label: "Nueva póliza", icon: <Plus className="size-4" />, onSelect: () => handleSelect("/policies/new") },
         { id: "new-task", label: "Nuevo pendiente", icon: <Plus className="size-4" />, onSelect: () => handleSelect("/tasks/new") },
         { id: "new-receipt", label: "Nuevo recibo", icon: <Plus className="size-4" />, onSelect: () => handleSelect("/receipts/new") },
+        { id: "new-quote", label: "Nueva cotización", icon: <Calculator className="size-4" />, onSelect: () => handleSelect("/quotes/new") },
       ],
     },
     {
-      label: "Sistema",
+      label: "Herramientas",
       items: [
-        { id: "assistant", label: "Asistente", icon: <Bot className="size-4" />, onSelect: () => handleSelect("/assistant") },
-        { id: "settings", label: "Configuración", icon: <Settings className="size-4" />, onSelect: () => handleSelect("/settings") },
+        { id: "assistant", label: "Abrir workspace de Nora", icon: <Sparkles className="size-4" />, onSelect: () => handleSelect("/assistant") },
+        ...getUtilityNavigation(isAdmin).map((item) => {
+          const Icon = item.icon;
+          return {
+            id: item.id,
+            label: item.label,
+            icon: <Icon className="size-4" />,
+            onSelect: () => handleSelect(item.href),
+          };
+        }),
       ],
     },
     ...recentGroup,
@@ -279,7 +249,7 @@ export function CommandPaletteWrapper() {
       groups={groups}
       placeholder="Buscar páginas, clientes, pólizas, documentos..."
       title="Command Palette"
-      description="Navegación rápida y acciones de PG"
+      description="Navegación rápida y acciones de PolicyDesk"
       inputValue={inputValue}
       onInputValueChange={setInputValue}
       shouldFilter={!isDynamic}

@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
+import { ShieldCheck } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import { LoginForm } from "./login-form";
 
 export const metadata = {
-  title: "Iniciar sesión · PG Insurance",
+  title: "Iniciar sesión · PolicyDesk",
 };
 
 export default async function LoginPage({
@@ -12,7 +13,7 @@ export default async function LoginPage({
   searchParams: Promise<{ redirect?: string }>;
 }) {
   const params = await searchParams;
-  const redirectTo = params.redirect && params.redirect.startsWith("/") ? params.redirect : "/dashboard";
+  const redirectTo = params.redirect && params.redirect.startsWith("/") ? params.redirect : "/today";
 
   const user = await getCurrentUser();
   if (user && user.active) {
@@ -20,16 +21,19 @@ export default async function LoginPage({
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-stone-100 via-white to-stone-100 px-4 py-16">
+    <main className="min-h-screen bg-background px-4 py-16">
       <div className="mx-auto flex max-w-md flex-col gap-6">
         <div className="text-center">
-          <p className="text-xs uppercase tracking-widest text-muted-foreground">PG Insurance</p>
-          <h1 className="mt-2 text-2xl font-semibold">Acceso al cockpit</h1>
+          <span className="mx-auto grid size-11 place-items-center rounded-xl bg-[#06283b] text-white">
+            <ShieldCheck className="size-6" aria-hidden />
+          </span>
+          <p className="mt-3 text-sm font-semibold tracking-tight text-foreground">PolicyDesk</p>
+          <h1 className="mt-2 text-2xl font-semibold">Acceso a tu centro operativo</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Ingresa con tu cuenta para continuar.
           </p>
         </div>
-        <div className="rounded-2xl border border-border/70 bg-white p-6 shadow-sm dark:bg-stone-900/60">
+        <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
           <LoginForm redirectTo={redirectTo} />
         </div>
         <p className="text-center text-xs text-muted-foreground">

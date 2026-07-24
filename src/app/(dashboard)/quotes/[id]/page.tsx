@@ -12,13 +12,16 @@ import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
+import { quoteOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function QuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const scope = await requirePortfolioReadScope();
+  const quoteScope = quoteOperationalWhere(scope.portfolioOwnerId);
   const db = getDb();
 
-  const quote = await db.quote.findUnique({
-    where: { id },
+  const quote = await db.quote.findFirst({
+    where: { id, ...quoteScope },
     include: {
       client: true,
       insurer: true,
@@ -31,7 +34,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   }
 
   const relatedQuotes = await db.quote.findMany({
-    where: { clientId: quote.clientId, id: { not: id } },
+    where: { ...quoteScope, clientId: quote.clientId, id: { not: id } },
     orderBy: { createdAt: "desc" },
     take: 5,
   });

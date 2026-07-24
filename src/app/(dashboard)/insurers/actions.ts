@@ -26,6 +26,7 @@ function normalizeInsurerInput(values: InsurerFormValues) {
 
 export async function createInsurer(values: InsurerFormValues): Promise<MutationResult> {
   try {
+    await requireAdmin();
     const db = getDb();
 
     const insurer = await db.insurer.create({
@@ -43,6 +44,7 @@ export async function createInsurer(values: InsurerFormValues): Promise<Mutation
 
     return successResult(insurer.id, `/insurers/${insurer.id}`, "Aseguradora creada exitosamente.");
   } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
     logError("insurers.createInsurer", error);
     return errorResult("No se pudo crear la aseguradora. Intenta de nuevo.");
   }
@@ -50,6 +52,7 @@ export async function createInsurer(values: InsurerFormValues): Promise<Mutation
 
 export async function updateInsurer(id: string, values: InsurerFormValues): Promise<MutationResult> {
   try {
+    await requireAdmin();
     const db = getDb();
 
     const existingInsurer = await db.insurer.findUnique({
@@ -77,6 +80,7 @@ export async function updateInsurer(id: string, values: InsurerFormValues): Prom
 
     return successResult(insurer.id, `/insurers/${insurer.id}`, "Aseguradora actualizada exitosamente.");
   } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
     logError("insurers.updateInsurer", error, { id });
     return errorResult("No se pudo actualizar la aseguradora. Intenta de nuevo.");
   }

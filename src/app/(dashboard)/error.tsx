@@ -47,7 +47,7 @@ export default function DashboardError({
             Reintentar
           </Button>
           <Button asChild variant="outline" className="rounded-full bg-card/80">
-            <Link href="/dashboard">Volver al panel</Link>
+            <Link href="/today">Volver a Hoy</Link>
           </Button>
         </div>
       </div>

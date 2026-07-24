@@ -3,17 +3,29 @@ import { ClaimForm } from "@/components/forms/claim-form";
 import { createClaimDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
+import {
+  clientOperationalWhere,
+  policyOperationalWhere,
+  requirePortfolioReadScope,
+} from "@/lib/portfolio-access";
 
 export default async function NewClaimPage() {
+  const scope = await requirePortfolioReadScope();
   const db = getDb();
   const [clients, policies, insurers] = await Promise.all([
     db.client.findMany({
-      where: { status: { not: "ARCHIVED" } },
+      where: {
+        ...clientOperationalWhere(scope.portfolioOwnerId),
+        status: { not: "ARCHIVED" },
+      },
       orderBy: { fullName: "asc" },
       select: { id: true, fullName: true },
     }),
     db.policy.findMany({
-      where: { status: { not: "CANCELLED" } },
+      where: {
+        ...policyOperationalWhere(scope.portfolioOwnerId),
+        status: { not: "CANCELLED" },
+      },
       orderBy: { policyNumber: "asc" },
       select: { id: true, policyNumber: true },
     }),

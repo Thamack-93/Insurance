@@ -194,4 +194,45 @@ describe("confirmAssistantActionDraft", () => {
     expect(db.assistantActionDraft.updateMany).not.toHaveBeenCalled();
     expect(createClient).not.toHaveBeenCalled();
   });
+
+  it("rejects a draft owned by a different user without executing it", async () => {
+    const db = makeDb({
+      assistantActionDraft: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn(),
+        update: vi.fn(),
+        create: vi.fn(),
+      },
+    });
+    getDb.mockReturnValue(db);
+
+    const result = await confirmAssistantActionDraft("someone-elses-draft", user.id);
+
+    expect(result).toEqual(expect.objectContaining({ ok: false }));
+    expect(db.assistantActionDraft.findFirst).toHaveBeenCalledWith({
+      where: { id: "someone-elses-draft", userId: user.id },
+    });
+    expect(db.assistantActionDraft.updateMany).not.toHaveBeenCalled();
+    expect(createClient).not.toHaveBeenCalled();
+  });
+
+  it("does not execute when another confirmation has already claimed the draft", async () => {
+    const draft = makeDraft();
+    const db = makeDb({
+      assistantActionDraft: {
+        findFirst: vi.fn().mockResolvedValue(draft),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        update: vi.fn(),
+        create: vi.fn(),
+      },
+    });
+    getDb.mockReturnValue(db);
+
+    const result = await confirmAssistantActionDraft(draft.id, user.id);
+
+    expect(result).toEqual(expect.objectContaining({ ok: false }));
+    expect(db.assistantActionDraft.updateMany).toHaveBeenCalledTimes(1);
+    expect(createClient).not.toHaveBeenCalled();
+    expect(db.assistantActionDraft.update).not.toHaveBeenCalled();
+  });
 });

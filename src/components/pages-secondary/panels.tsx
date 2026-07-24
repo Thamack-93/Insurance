@@ -3,14 +3,6 @@ import type { LucideIcon } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-const toneMap = {
-  slate: "from-stone-500/14 via-stone-500/8 to-transparent text-foreground/80 dark:from-stone-400/14 dark:via-stone-400/8",
-  blue: "from-sky-500/16 via-sky-500/8 to-transparent text-sky-700 dark:from-sky-400/16 dark:via-sky-400/8 dark:text-sky-300",
-  emerald: "from-emerald-500/16 via-emerald-500/8 to-transparent text-emerald-700 dark:from-emerald-400/16 dark:via-emerald-400/8 dark:text-emerald-300",
-  amber: "from-amber-500/16 via-amber-500/8 to-transparent text-amber-800 dark:from-amber-400/16 dark:via-amber-400/8 dark:text-amber-200",
-  rose: "from-rose-500/16 via-rose-500/8 to-transparent text-rose-700 dark:from-rose-400/16 dark:via-rose-400/8 dark:text-rose-300",
-};
-
 const iconToneMap = {
   slate: "text-foreground/80",
   blue: "text-sky-700 dark:text-sky-300",
@@ -30,24 +22,23 @@ export function MetricCard({
   value: string | number;
   description: string;
   icon?: LucideIcon;
-  tone?: keyof typeof toneMap;
+  tone?: keyof typeof iconToneMap;
 }) {
   return (
-    <Card className="relative overflow-hidden border-border/60 bg-card/85 shadow-sm backdrop-blur">
-      <div className={cn("absolute inset-x-0 top-0 h-24 bg-gradient-to-br", toneMap[tone])} />
-      <CardContent className="relative p-5">
+    <Card className="overflow-hidden bg-card shadow-none">
+      <CardContent className="p-4">
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-medium text-muted-foreground">{title}</p>
-            <p className="mt-3 text-3xl font-semibold tracking-tight text-foreground">{value}</p>
+            <p className="mt-2 font-mono text-2xl font-semibold tracking-tight text-foreground">{value}</p>
           </div>
           {Icon ? (
-            <div className="rounded-2xl border bg-card/75 p-2.5 shadow-sm">
-              <Icon className={cn("size-5", iconToneMap[tone])} />
+            <div className="grid size-9 place-items-center rounded-lg bg-muted">
+              <Icon className={cn("size-4", iconToneMap[tone])} />
             </div>
           ) : null}
         </div>
-        <p className="mt-4 text-sm text-muted-foreground">{description}</p>
+        <p className="mt-3 text-xs text-muted-foreground">{description}</p>
       </CardContent>
     </Card>
   );
@@ -67,7 +58,7 @@ export function SectionCard({
   className?: string;
 }) {
   return (
-    <Card className={cn("border-border/60 bg-card/85 shadow-sm", className)}>
+    <Card className={cn("bg-card shadow-none", className)}>
       <CardHeader className="border-b border-border/70 pb-4">
         <div className="flex items-start justify-between gap-3">
           <div>

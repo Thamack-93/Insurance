@@ -188,8 +188,8 @@ export default async function ReceiptsPage({
               </Link>
             </Button>
             <Button asChild className="rounded-full">
-              <Link href="/due-payments">
-                Cobranza
+              <Link href="/payments/new">
+                Registrar pago
                 <ArrowRight className="ml-2 size-4" />
               </Link>
             </Button>
@@ -229,16 +229,18 @@ export default async function ReceiptsPage({
       </section>
 
       <UrlTabs defaultValue={initialTab}>
-        <TabsList className="rounded-full bg-card/70 p-1">
-          <TabsTrigger value="cobrar" className="rounded-full px-4">
-            Cobrar
+        <TabsList className="rounded-lg bg-muted p-1">
+          <TabsTrigger value="cobrar" className="rounded-md px-4">
+            Por cobrar
           </TabsTrigger>
-          <TabsTrigger value="historico" className="rounded-full px-4">
-            Histórico
+          <TabsTrigger value="historico" className="rounded-md px-4">
+            Pagos
           </TabsTrigger>
-          <TabsTrigger value="revision" className="rounded-full px-4">
-            Revisión
-          </TabsTrigger>
+          {scope.role === "ADMIN" ? (
+            <TabsTrigger value="revision" className="rounded-md px-4">
+              Revisión
+            </TabsTrigger>
+          ) : null}
         </TabsList>
 
         <TabsContent value="cobrar" className="space-y-4">

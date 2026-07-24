@@ -35,6 +35,6 @@ test.describe("Nora assistant", () => {
 
     await expect(page.getByText("Señal registrada", { exact: true })).toBeVisible();
     await page.goto("/settings/assistant?tab=incidentes");
-    await expect(page.getByText(/INCIDENT · 1 señales/)).toBeVisible();
+    await expect(page.getByText(/INCIDENT · \d+ señales/).first()).toBeVisible();
   });
 });

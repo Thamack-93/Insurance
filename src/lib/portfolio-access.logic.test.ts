@@ -3,9 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 import {
   clientOperationalWhere,
+  claimOperationalWhere,
   documentOperationalWhere,
   getPortfolioOwnerIdForRead,
   policyOperationalWhere,
+  quoteOperationalWhere,
   receiptOperationalWhere,
   workItemOperationalWhere,
 } from "@/lib/portfolio-access";
@@ -20,6 +22,8 @@ describe("portfolio access helpers", () => {
     expect(clientOperationalWhere("agent-1")).toEqual({ portfolioOwnerId: "agent-1" });
     expect(policyOperationalWhere("agent-1")).toEqual({ client: { portfolioOwnerId: "agent-1" } });
     expect(receiptOperationalWhere("agent-1")).toEqual({ client: { portfolioOwnerId: "agent-1" } });
+    expect(claimOperationalWhere("agent-1")).toEqual({ client: { portfolioOwnerId: "agent-1" } });
+    expect(quoteOperationalWhere("agent-1")).toEqual({ client: { portfolioOwnerId: "agent-1" } });
     expect(workItemOperationalWhere("agent-1")).toEqual({
       OR: [{ client: { portfolioOwnerId: "agent-1" } }, { clientId: null, assignedToId: "agent-1" }],
     });
@@ -52,6 +56,8 @@ describe("portfolio access helpers", () => {
     expect(clientOperationalWhere()).toEqual({});
     expect(policyOperationalWhere()).toEqual({});
     expect(receiptOperationalWhere()).toEqual({});
+    expect(claimOperationalWhere()).toEqual({});
+    expect(quoteOperationalWhere()).toEqual({});
     expect(documentOperationalWhere()).toEqual({});
     expect(workItemOperationalWhere()).toEqual({});
   });

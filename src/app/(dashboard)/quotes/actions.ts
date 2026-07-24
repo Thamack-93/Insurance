@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { getCurrentUserId } from "@/lib/auth";
 import { logError } from "@/lib/logger";
+import { assertClientPortfolioAccess, assertQuotePortfolioAccess } from "@/lib/portfolio-access";
 import type { QuoteFormValues } from "@/lib/validations";
 import {
   errorResult,
@@ -31,6 +32,7 @@ export async function createQuote(values: QuoteFormValues): Promise<MutationResu
     const db = getDb();
 
     const userId = await getCurrentUserId();
+    await assertClientPortfolioAccess(values.clientId, userId);
     const quote = await db.quote.create({
       data: { ...normalizeQuoteInput(values), createdById: userId, updatedById: userId },
     });
@@ -60,6 +62,9 @@ export async function createQuote(values: QuoteFormValues): Promise<MutationResu
 export async function updateQuote(id: string, values: QuoteFormValues): Promise<MutationResult> {
   try {
     const db = getDb();
+    const userId = await getCurrentUserId();
+    await assertQuotePortfolioAccess(id, userId);
+    await assertClientPortfolioAccess(values.clientId, userId);
 
     const existingQuote = await db.quote.findUnique({
       where: { id },
@@ -69,7 +74,6 @@ export async function updateQuote(id: string, values: QuoteFormValues): Promise<
       return errorResult("Cotización no encontrada.");
     }
 
-    const userId = await getCurrentUserId();
     const quote = await db.quote.update({
       where: { id },
       data: { ...normalizeQuoteInput(values), updatedById: userId },
@@ -101,6 +105,8 @@ export async function updateQuote(id: string, values: QuoteFormValues): Promise<
 export async function deleteQuote(id: string): Promise<MutationResult> {
   try {
     const db = getDb();
+    const userId = await getCurrentUserId();
+    await assertQuotePortfolioAccess(id, userId);
 
     const existingQuote = await db.quote.findUnique({
       where: { id },

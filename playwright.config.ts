@@ -3,6 +3,11 @@ import { defineConfig, devices } from "@playwright/test";
 const PORT = Number(process.env.PORT ?? 5000);
 const HOST = process.env.PLAYWRIGHT_HOST ?? "127.0.0.1";
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? `http://${HOST}:${PORT}`;
+const useProductionServer = process.env.PLAYWRIGHT_USE_PRODUCTION_SERVER === "1";
+
+const webServerCommand = useProductionServer
+  ? `npm run start -- --hostname ${HOST} -p ${PORT}`
+  : `npm run dev -- --hostname ${HOST} -p ${PORT}`;
 
 export default defineConfig({
   testDir: "./tests",
@@ -11,10 +16,14 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  reporter: process.env.CI ? "list" : [["list"]],
+  reporter: process.env.CI
+    ? [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]]
+    : [["list"]],
+  outputDir: "test-results",
   use: {
     baseURL: BASE_URL,
     trace: "retain-on-failure",
+    screenshot: "only-on-failure",
     actionTimeout: 10_000,
     navigationTimeout: 20_000,
   },
@@ -29,9 +38,11 @@ export default defineConfig({
     ? {}
     : {
         webServer: {
-          command: `npm run dev -- --hostname ${HOST} -p ${PORT}`,
+          command: webServerCommand,
           url: BASE_URL,
-          reuseExistingServer: true,
+          // Production-mode verification must never attach to a stale server
+          // from another checkout or with a different environment/database.
+          reuseExistingServer: !process.env.CI && !useProductionServer,
           timeout: 120_000,
         },
       }),
