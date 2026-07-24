@@ -14,7 +14,7 @@ const ENTITY_LABELS: Record<AssistantActionProposal["entityType"], string> = {
   policy: "Póliza",
   receipt: "Recibo",
   payment: "Pago",
-  task: "Tarea",
+  workItem: "Pendiente",
   endorsement: "Endoso",
 };
 

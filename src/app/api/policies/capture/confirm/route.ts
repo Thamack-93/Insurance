@@ -4,7 +4,8 @@ import { AuthError, requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
-import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
+import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody, securityFingerprint } from "@/lib/request-guards";
+import { rateLimitResponse, guardErrorResponse } from "@/lib/api-security";
 import { parseDateInput } from "@/lib/form-utils";
 import { assertClientPortfolioAccess, assertPolicyPortfolioAccess } from "@/lib/portfolio-access";
 import { inferClientType, type PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
@@ -133,9 +134,10 @@ export async function POST(request: NextRequest) {
       });
       return NextResponse.json({ error: "No autorizado." }, { status: 403 });
     }
-    const rateLimit = checkRateLimit(`policy-pdf-confirm:${getRequestIp(request)}`, {
+    const rateLimit = await checkDistributedRateLimit(`policy-pdf-confirm:${securityFingerprint(`ip:${getRequestIp(request)}`)}:${user.id}`, {
       limit: 6,
       windowMs: 15 * 60 * 1000,
+      requireDistributed: true,
     });
     if (!rateLimit.allowed) {
       await recordSecurityRateLimit({
@@ -146,16 +148,10 @@ export async function POST(request: NextRequest) {
         entityType: "SecurityEvent",
         entityId: "policy-capture-confirm:rate-limit",
       });
-      return NextResponse.json(
-        { error: "Demasiados intentos. Espera un momento e inténtalo de nuevo." },
-        {
-          status: 429,
-          headers: { "Retry-After": String(Math.max(1, Math.ceil(rateLimit.retryAfterMs / 1000))) },
-        },
-      );
+      return rateLimitResponse(rateLimit, "Demasiados intentos. Espera un momento e inténtalo de nuevo.");
     }
 
-    const payload = confirmSchema.parse(await request.json());
+    const payload = confirmSchema.parse(await readJsonBody(request, 64 * 1024));
     const draft = normalizeDraft(payload.draft);
     const db = getDb();
 
@@ -378,6 +374,7 @@ export async function POST(request: NextRequest) {
       message: "Póliza capturada, recibos generados y renovación vinculada.",
     });
   } catch (error) {
+    if (error instanceof Error && "status" in error) return guardErrorResponse(error);
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

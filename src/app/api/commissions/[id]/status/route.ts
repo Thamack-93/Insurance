@@ -3,7 +3,8 @@ import { AuthError, requireAdmin } from "@/lib/auth";
 import { updateCommissionStatus } from "@/lib/commissions";
 import { logError } from "@/lib/logger";
 import { COMMISSION_STATUSES, type CommissionStatus } from "@/lib/domain-values";
-import { assertSameOrigin } from "@/lib/request-guards";
+import { assertSameOrigin, checkDistributedRateLimit, readJsonBody, securityFingerprint, getRequestIp } from "@/lib/request-guards";
+import { rateLimitResponse, guardErrorResponse } from "@/lib/api-security";
 import { recordSecurityAccessDenied, SECURITY_EVENT_TYPES } from "@/lib/security-events";
 
 const VALID_STATUSES: readonly CommissionStatus[] = COMMISSION_STATUSES;
@@ -49,7 +50,14 @@ export async function POST(
   }
 
   try {
-    const body = await request.json();
+    const rateLimit = await checkDistributedRateLimit(`commission-status:${params.id}:${securityFingerprint(`ip:${getRequestIp(request)}`)}`, {
+      limit: 20,
+      windowMs: 15 * 60 * 1000,
+      requireDistributed: true,
+    });
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
+
+    const body = await readJsonBody<Record<string, unknown>>(request, 16 * 1024);
     const { status, actualAmount } = body;
 
     if (!status || typeof status !== "string") {
@@ -83,6 +91,7 @@ export async function POST(
       redirectTo: result.redirectTo,
     });
   } catch (error) {
+    if (error instanceof Error && "status" in error) return guardErrorResponse(error);
     logError("api.commissions.status", error, { commissionId: params.id });
     return NextResponse.json(
       { error: "No se pudo actualizar el estado de la comisión." },

@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DeleteReceiptButton } from "@/components/receipts/delete-receipt-button";
 import { CancelReceiptButton } from "@/components/receipts/cancel-receipt-button";
+import { RehabilitateReceiptButton } from "@/components/receipts/rehabilitate-receipt-button";
 import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
 import { getDb } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
@@ -20,6 +21,7 @@ import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import { policyTypeLabel } from "@/lib/status";
+import { isPaidWithinTolerance } from "@/lib/receipt-reconciliation";
 
 export default async function ReceiptDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -59,8 +61,11 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
     getActivityForEntity("Receipt", id, 20),
   ]);
 
-  const paidAmount = payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
-  const remainingAmount = toNumber(receipt.amount) - paidAmount;
+  const postedPayments = payments.filter((payment) => payment.status === "POSTED");
+  const paidAmount = postedPayments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
+  const remainingAmount = isPaidWithinTolerance(toNumber(receipt.amount), paidAmount)
+    ? 0
+    : toNumber(receipt.amount) - paidAmount;
 
   return (
     <div className="flex flex-col gap-6">
@@ -75,8 +80,16 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/receipts/${receipt.id}/edit`}>Editar recibo</Link>
               </Button>
-              {receipt.status !== "CANCELLED" && payments.length === 0 ? (
+              {receipt.status !== "CANCELLED" && postedPayments.length === 0 ? (
                 <CancelReceiptButton id={receipt.id} receiptNumber={receipt.receiptNumber} />
+              ) : null}
+              {receipt.status === "CANCELLED" && receipt.cancellationReason === "NON_PAYMENT" ? (
+                <RehabilitateReceiptButton
+                  receiptId={receipt.id}
+                  receiptNumber={receipt.receiptNumber}
+                  amount={toNumber(receipt.amount)}
+                  currency={receipt.currency}
+                />
               ) : null}
               {isAdmin ? <DeleteReceiptButton id={receipt.id} receiptNumber={receipt.receiptNumber} /> : null}
               <Button asChild variant="outline" className="rounded-full bg-card/70">

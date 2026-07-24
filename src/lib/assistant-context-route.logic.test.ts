@@ -6,6 +6,9 @@ const requirePortfolioReadScope = vi.hoisted(() => vi.fn());
 const resolveAuthorizedNoraContext = vi.hoisted(() => vi.fn());
 const buildAssistantReply = vi.hoisted(() => vi.fn());
 const assertSameOrigin = vi.hoisted(() => vi.fn());
+const checkDistributedRateLimit = vi.hoisted(() => vi.fn());
+const getRequestIp = vi.hoisted(() => vi.fn());
+const readJsonBody = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth", () => ({
   AuthError: class AuthError extends Error {
@@ -23,7 +26,17 @@ vi.mock("@/lib/assistant", () => ({
   buildAssistantReply,
   getAssistantHomeSnapshot: vi.fn(),
 }));
-vi.mock("@/lib/request-guards", () => ({ assertSameOrigin }));
+vi.mock("@/lib/request-guards", () => ({
+  assertSameOrigin,
+  checkDistributedRateLimit,
+  getRequestIp,
+  readJsonBody,
+  RequestGuardError: class RequestGuardError extends Error {},
+}));
+vi.mock("@/lib/api-security", () => ({
+  rateLimitResponse: vi.fn(),
+  guardErrorResponse: vi.fn(),
+}));
 vi.mock("@/lib/logger", () => ({ logError: vi.fn() }));
 
 import { POST } from "@/app/api/assistant/route";
@@ -45,6 +58,9 @@ describe("Nora explicit context API", () => {
     requireUser.mockResolvedValue(user);
     requirePortfolioReadScope.mockResolvedValue(scope);
     assertSameOrigin.mockReturnValue(undefined);
+    checkDistributedRateLimit.mockResolvedValue({ allowed: true });
+    getRequestIp.mockReturnValue("127.0.0.1");
+    readJsonBody.mockImplementation(async (request: NextRequest) => request.json());
     buildAssistantReply.mockResolvedValue({ source: "local", reply: "Respuesta", sections: [], quickPrompts: [] });
   });
 

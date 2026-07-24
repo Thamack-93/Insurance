@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { reconcileReceiptState } from "./receipt-reconciliation";
 
 describe("receipt-reconciliation", () => {
-  it("keeps a fully paid receipt as PAID and uses the latest payment metadata", () => {
+  it("keeps a legacy receipt with multiple payments as PAID but flags it for review", () => {
     const result = reconcileReceiptState({
       amount: 1000,
       status: "PENDING",
@@ -27,7 +27,8 @@ describe("receipt-reconciliation", () => {
     expect(result.nextStatus).toBe("PAID");
     expect(result.nextPaidDate?.toISOString()).toBe("2024-06-06T10:00:00.000Z");
     expect(result.nextPaymentMethod).toBe("SPEI");
-    expect(result.shouldReview).toBe(false);
+    expect(result.shouldReview).toBe(true);
+    expect(result.reasons).toContain("multiple_payments");
   });
 
   it("downgrades a stale PAID receipt without payments to OVERDUE and clears paid fields", () => {
@@ -69,6 +70,47 @@ describe("receipt-reconciliation", () => {
     expect(result.nextPaymentMethod).toBeNull();
     expect(result.shouldReview).toBe(true);
     expect(result.reasons).toContain("partial_payment");
+  });
+
+  it("closes a receipt when the single payment is within the $5 tolerance", () => {
+    const result = reconcileReceiptState({
+      amount: 2000,
+      status: "PENDING",
+      dueDate: new Date("2024-07-01T00:00:00Z"),
+      paidDate: null,
+      paymentMethod: null,
+      payments: [{ amount: 1995, paidDate: new Date("2024-07-02T00:00:00Z"), paymentMethod: "TRANSFER" }],
+      now: new Date("2024-07-07T00:00:00Z"),
+    });
+
+    expect(result.nextStatus).toBe("PAID");
+    expect(result.shouldReview).toBe(false);
+  });
+
+  it("does not close a receipt when the payment is more than $5 short or over", () => {
+    const short = reconcileReceiptState({
+      amount: 2000,
+      status: "PENDING",
+      dueDate: new Date("2024-07-01T00:00:00Z"),
+      paidDate: null,
+      paymentMethod: null,
+      payments: [{ amount: 1994, paidDate: new Date("2024-07-02T00:00:00Z"), paymentMethod: "TRANSFER" }],
+      now: new Date("2024-07-07T00:00:00Z"),
+    });
+    const over = reconcileReceiptState({
+      amount: 2000,
+      status: "PENDING",
+      dueDate: new Date("2024-07-01T00:00:00Z"),
+      paidDate: null,
+      paymentMethod: null,
+      payments: [{ amount: 2006, paidDate: new Date("2024-07-02T00:00:00Z"), paymentMethod: "TRANSFER" }],
+      now: new Date("2024-07-07T00:00:00Z"),
+    });
+
+    expect(short.nextStatus).toBe("OVERDUE");
+    expect(short.reasons).toContain("partial_payment");
+    expect(over.nextStatus).toBe("OVERDUE");
+    expect(over.reasons).toContain("overpayment");
   });
 
   it("keeps a receipt pending throughout its business due date", () => {

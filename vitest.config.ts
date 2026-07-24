@@ -6,7 +6,10 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   test: {
-    include: ["src/lib/**/*.logic.test.ts"],
+    include: [
+      "src/lib/**/*.logic.test.ts",
+      "src/app/(dashboard)/settings/backups-actions.logic.test.ts",
+    ],
     environment: "node",
     pool: "forks",
     maxWorkers: 1,

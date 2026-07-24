@@ -5,7 +5,7 @@ import { AuthError, getCurrentUserId } from "@/lib/auth";
 import { logError } from "@/lib/logger";
 import { parseDateInput } from "@/lib/form-utils";
 import { writeActivityLog } from "@/lib/activity-log";
-import { PaymentConflictError, recordPayment } from "@/lib/payment-service";
+import { PaymentConflictError, recordPayment, rehabilitateReceiptPayment } from "@/lib/payment-service";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import {
   assertReceiptPortfolioAccess,
@@ -86,16 +86,65 @@ export async function createPayment(data: CreatePaymentInput): Promise<MutationR
     return successResult(payment.id, `/receipts/${receipt.id}`, "Pago registrado exitosamente.");
   } catch (error) {
     logError("payments.createPayment", error, { receiptId: data.receiptId });
-    const message =
-      error instanceof Error &&
-      (error instanceof AuthError ||
-        error instanceof PaymentConflictError ||
-        [
-          "El recibo no existe o fue eliminado.",
-          "No puedes aplicar pagos a un recibo cancelado.",
-        ].includes(error.message))
+    const message = error instanceof Error && (
+      error instanceof AuthError ||
+      error instanceof PaymentConflictError ||
+      [
+        "El recibo no existe o fue eliminado.",
+        "No puedes aplicar pagos a un recibo cancelado.",
+      ].includes(error.message) ||
+      error.message.startsWith("El pago debe cubrir el recibo")
+    )
+      ? error.message
+      : "No se pudo registrar el pago. Intenta de nuevo.";
+    return errorResult(message);
+  }
+}
+
+export async function rehabilitatePayment(data: CreatePaymentInput): Promise<MutationResult> {
+  if (!data.receiptId) return errorResult("Selecciona un recibo para rehabilitar.");
+  if (!data.amount || data.amount <= 0) return errorResult("El monto del pago debe ser mayor a cero.");
+  if (!data.paidDate) return errorResult("Indica la fecha del pago.");
+  if (!data.paymentMethod) return errorResult("Selecciona un método de pago.");
+
+  try {
+    const userId = await getCurrentUserId();
+    await assertReceiptPortfolioAccess(data.receiptId, userId);
+    const result = await rehabilitateReceiptPayment({
+      receiptId: data.receiptId,
+      amount: data.amount,
+      paidDate: parseDateInput(data.paidDate),
+      paymentMethod: data.paymentMethod,
+      reference: data.reference,
+      notes: data.notes,
+      actorId: userId,
+    });
+
+    revalidatePaths([
+      "/payments",
+      "/receipts",
+      `/receipts/${data.receiptId}`,
+      `/policies/${result.payment.policyId}`,
+      "/dashboard",
+      "/today",
+      "/portfolio",
+      "/renewals",
+      "/risks",
+      "/data-quality",
+    ]);
+
+    return successResult(
+      result.payment.id,
+      `/receipts/${data.receiptId}`,
+      `Pago registrado y póliza rehabilitada. ${result.reopenedReceiptCount} recibo(s) reabierto(s).`,
+    );
+  } catch (error) {
+    logError("payments.rehabilitatePayment", error, { receiptId: data.receiptId });
+    const message = error instanceof Error && (error instanceof AuthError || error instanceof PaymentConflictError)
+      ? error.message
+      : error instanceof Error && (error.message.includes("rehabilitación") || error.message.startsWith("El pago debe cubrir el recibo"))
         ? error.message
-        : "No se pudo registrar el pago. Intenta de nuevo.";
+        : "No se pudo rehabilitar la póliza. Intenta de nuevo.";
     return errorResult(message);
   }
 }
@@ -135,16 +184,26 @@ export async function deletePayment(id: string): Promise<MutationResult> {
     if (!payment) {
       return errorResult("El pago no existe o no tienes acceso.");
     }
+    if (payment.status !== "POSTED") {
+      return successResult(payment.id, `/receipts/${payment.receiptId}`, "El pago ya estaba revertido.");
+    }
 
     await db.$transaction(async (tx) => {
-      const deletedPayment = await tx.payment.delete({
+      const reversedPayment = await tx.payment.update({
         where: { id: payment.id },
+        data: {
+          status: "REVERSED",
+          reversedAt: new Date(),
+          reversedById: userId,
+          reversalReason: "REVERSAL_FROM_RECEIPT_DETAIL",
+          updatedById: userId,
+        },
       });
 
       await writeActivityLog({
         entityType: "Payment",
-        entityId: deletedPayment.id,
-        action: "PAYMENT_DELETE",
+        entityId: reversedPayment.id,
+        action: "PAYMENT_REVERSE",
         oldValue: {
           receiptId: payment.receiptId,
           receiptNumber: payment.receipt.receiptNumber,
@@ -152,14 +211,20 @@ export async function deletePayment(id: string): Promise<MutationResult> {
           policyNumber: payment.policy.policyNumber,
           clientId: payment.clientId,
           clientName: payment.client.fullName,
-          amount: Number(deletedPayment.amount),
-          paymentMethod: deletedPayment.paymentMethod,
-          paidDate: deletedPayment.paidDate.toISOString(),
-          reference: deletedPayment.reference,
-          notes: deletedPayment.notes,
-          sourceEvidenceKey: deletedPayment.sourceEvidenceKey,
+          amount: Number(reversedPayment.amount),
+          paymentMethod: reversedPayment.paymentMethod,
+          paidDate: reversedPayment.paidDate.toISOString(),
+          reference: reversedPayment.reference,
+          notes: reversedPayment.notes,
+          sourceEvidenceKey: reversedPayment.sourceEvidenceKey,
+          status: reversedPayment.status,
         },
-        newValue: null,
+        newValue: {
+          status: reversedPayment.status,
+          reversedAt: reversedPayment.reversedAt,
+          reversedById: reversedPayment.reversedById,
+          reversalReason: reversedPayment.reversalReason,
+        },
         userId,
         db: tx,
       });
@@ -182,7 +247,7 @@ export async function deletePayment(id: string): Promise<MutationResult> {
       "/data-quality",
     ]);
 
-    return successResult(payment.id, `/receipts/${payment.receiptId}`, "Pago eliminado y recibo conciliado de nuevo.");
+    return successResult(payment.id, `/receipts/${payment.receiptId}`, "Pago revertido y recibo conciliado de nuevo.");
   } catch (error) {
     if (error instanceof AuthError) return errorResult(error.message);
     logError("payments.deletePayment", error, { paymentId: id });
@@ -251,7 +316,7 @@ export async function getPaymentHistory(limit?: number) {
   try {
     const userId = await getCurrentUserId();
     const payments = await db.payment.findMany({
-      where: paymentPortfolioWhere(userId),
+      where: { ...paymentPortfolioWhere(userId), status: "POSTED" },
       take: limit || 50,
       include: {
         receipt: {

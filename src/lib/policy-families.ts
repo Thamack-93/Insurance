@@ -67,7 +67,7 @@ export async function getPolicyFamilyPolicies(policyId: string) {
       _count: {
         select: {
           receipts: true,
-          payments: true,
+          payments: { where: { status: "POSTED" } },
           commissions: true,
         },
       },

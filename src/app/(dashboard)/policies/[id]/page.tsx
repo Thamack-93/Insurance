@@ -138,7 +138,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       _sum: { amount: true },
     }),
     db.payment.findMany({
-      where: { policyId: id },
+      where: { policyId: id, status: "POSTED" },
       include: { client: true },
       orderBy: { paidDate: "desc" },
       take: 10,

@@ -35,7 +35,6 @@ describe("portfolio access helpers", () => {
         { receipt: { client: { portfolioOwnerId: "agent-1" } } },
         { claim: { client: { portfolioOwnerId: "agent-1" } } },
         { quote: { client: { portfolioOwnerId: "agent-1" } } },
-        { task: { OR: [{ client: { portfolioOwnerId: "agent-1" } }, { clientId: null, createdById: "agent-1" }] } },
         {
           AND: [
             { createdById: "agent-1" },

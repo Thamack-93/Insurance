@@ -80,7 +80,7 @@ const assistantAiResponseSchema = z.object({
   quickPrompts: z.array(aiQuickPromptSchema).max(4),
   mutation: z
     .object({
-      entityType: z.enum(["client", "policy", "receipt", "payment", "task", "endorsement"]),
+      entityType: z.enum(["client", "policy", "receipt", "payment", "workItem", "endorsement"]),
       operation: z.enum(["create", "update"]),
       targetQuery: z.string().min(1).nullable(),
       title: z.string().min(1).max(200),

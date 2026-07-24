@@ -4,6 +4,14 @@
     {
       "path": "/api/jobs/backup",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/jobs/nonpayment-cancellation",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/jobs/telegram-digest",
+      "schedule": "0 14 * * *"
     }
   ]
 }

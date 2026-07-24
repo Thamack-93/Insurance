@@ -267,6 +267,7 @@ export async function runPolicyVigencyAudit(input: {
         periodStartDate: true,
         periodEndDate: true,
         payments: {
+          where: { status: "POSTED" },
           select: {
             id: true,
             policyId: true,

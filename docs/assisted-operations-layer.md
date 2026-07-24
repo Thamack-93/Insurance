@@ -12,7 +12,8 @@ in memory in the browser and is never written to localStorage, sessionStorage or
   - `NotificationPreference`
   - `NotificationEvent`
 - Telegram linking, deterministic commands and daily digests are available.
-- The digest cron runs hourly and evaluates each user's `timeZone` and `telegramDigestHour`.
+- The digest cron runs once daily at 14:00 UTC (08:00, Mexico City time). Individual digest hours
+  are temporarily disabled, while duplicate protection still uses each user's local date.
 - Nora has deterministic answers plus AI fallback, structured action proposals and PDF review.
 - AI status distinguishes configured from verified; admins can test the gateway at
   `/api/admin/assistant/health`.
@@ -52,7 +53,7 @@ in memory in the browser and is never written to localStorage, sessionStorage or
   - Telegram connection status
   - their preference rows
   - delivery preferences
-  - timezone and digest hour
+  - timezone (the individual digest hour is temporarily fixed)
   - test, send now and disconnect controls
 - A link card was added from `/settings`.
 - Users can generate a temporary Telegram link code and send a test message once linked.

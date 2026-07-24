@@ -1,9 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createPayment } from "@/app/(dashboard)/payments/actions";
 import { AuthError, requireUser } from "@/lib/auth";
 import { logError } from "@/lib/logger";
-import { assertSameOrigin, checkRateLimit, getRequestIp } from "@/lib/request-guards";
+import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody, securityFingerprint } from "@/lib/request-guards";
+import { rateLimitResponse, guardErrorResponse } from "@/lib/api-security";
 import { recordSecurityAccessDenied, recordSecurityRateLimit, SECURITY_EVENT_TYPES } from "@/lib/security-events";
+
+const quickPaymentSchema = z.object({
+  receiptId: z.string().min(1),
+  amount: z.number().positive(),
+  paidDate: z.string().min(1),
+  paymentMethod: z.string().min(1),
+  reference: z.string().optional(),
+  notes: z.string().optional(),
+});
 
 export async function POST(request: NextRequest) {
   try {
@@ -37,9 +48,10 @@ export async function POST(request: NextRequest) {
       });
       return NextResponse.json({ error: "No autorizado." }, { status: 403 });
     }
-    const rateLimit = checkRateLimit(`quick-payment:${getRequestIp(request)}`, {
+    const rateLimit = await checkDistributedRateLimit(`quick-payment:${securityFingerprint(`ip:${getRequestIp(request)}`)}`, {
       limit: 20,
       windowMs: 15 * 60 * 1000,
+      requireDistributed: true,
     });
     if (!rateLimit.allowed) {
       await recordSecurityRateLimit({
@@ -50,20 +62,10 @@ export async function POST(request: NextRequest) {
         entityType: "SecurityEvent",
         entityId: "quick-payment:rate-limit",
       });
-      return NextResponse.json(
-        { error: "Demasiados intentos. Espera un momento e inténtalo de nuevo." },
-        {
-          status: 429,
-          headers: { "Retry-After": String(Math.max(1, Math.ceil(rateLimit.retryAfterMs / 1000))) },
-        },
-      );
+      return rateLimitResponse(rateLimit, "Demasiados intentos. Espera un momento e inténtalo de nuevo.");
     }
 
-    const body = await request.json();
-
-    if (!body.receiptId || !body.amount || !body.paidDate || !body.paymentMethod) {
-      return NextResponse.json({ error: "Faltan campos requeridos" }, { status: 400 });
-    }
+    const body = quickPaymentSchema.parse(await readJsonBody(request, 16 * 1024));
 
     const result = await createPayment({
       receiptId: body.receiptId,
@@ -85,6 +87,10 @@ export async function POST(request: NextRequest) {
       message: result.message,
     });
   } catch (error) {
+    if (error instanceof Error && "status" in error) return guardErrorResponse(error);
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ error: "Faltan campos requeridos o tienen un formato inválido." }, { status: 400 });
+    }
     logError("api.payments.quick", error);
     return NextResponse.json({ error: "Error al procesar el pago" }, { status: 500 });
   }

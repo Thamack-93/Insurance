@@ -51,13 +51,15 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
 
   const [documents, activityLogs] = await Promise.all([
     db.document.findMany({
-      where: { taskId: id },
+      // WorkItem keeps sourceId stable when a legacy Task is normalized, so
+      // this remains a narrow compatibility lookup without loading all docs.
+      where: { taskId: workItem.sourceId ?? workItem.id },
       orderBy: { uploadedAt: "desc" },
     }),
     db.activityLog.findMany({
       where: {
-        entityId: id,
-        OR: [{ entityType: "WorkItem" }, { entityType: "Task" }],
+        entityId: { in: [id, workItem.id] },
+        entityType: "WorkItem",
       },
       orderBy: { createdAt: "desc" },
       take: 10,

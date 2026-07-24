@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import {
   createDatabaseBackup,
   formatBackupPreflightError,
+  rekeyStoredBackup,
   listBackups,
+  listRekeyedBackups,
   getBackupPreflightStatus,
   verifyStoredBackup,
   type BackupEntry,
@@ -18,20 +20,26 @@ export type BackupListItem = {
   size: number;
   createdAt: string;
   manifestAvailable: boolean;
+  storage: "original" | "rekeyed";
 };
 
-function toItem(entry: BackupEntry): BackupListItem {
+function toItem(entry: BackupEntry, storage: BackupListItem["storage"]): BackupListItem {
   return {
     filename: entry.filename,
     size: entry.size,
     createdAt: entry.createdAt.toISOString(),
     manifestAvailable: entry.manifestAvailable,
+    storage,
   };
 }
 
 export async function listBackupsAction(): Promise<BackupListItem[]> {
   await requireAdmin();
-  return (await listBackups()).map(toItem);
+  const [originals, rekeyed] = await Promise.all([listBackups(), listRekeyedBackups()]);
+  return [
+    ...originals.map((entry) => toItem(entry, "original")),
+    ...rekeyed.map((entry) => toItem(entry, "rekeyed")),
+  ];
 }
 
 export async function createBackup(): Promise<MutationResult> {
@@ -70,5 +78,23 @@ export async function verifyBackupAction(filename: string): Promise<MutationResu
     if (error instanceof AuthError) return errorResult(error.message);
     logError("settings.backups.verify", error, { filename });
     return errorResult("No se pudo verificar el respaldo.");
+  }
+}
+
+export async function rekeyBackupAction(filename: string): Promise<MutationResult> {
+  try {
+    await requireAdmin();
+    const copy = await rekeyStoredBackup(filename);
+    revalidatePath("/settings");
+    return successResult(
+      copy.filename,
+      "/settings",
+      `Copia re-cifrada y verificada: ${copy.filename}. El respaldo original no fue modificado.`,
+    );
+  } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
+    if (error instanceof Error) return errorResult(error.message);
+    logError("settings.backups.rekey", error, { filename });
+    return errorResult("No se pudo crear la copia re-cifrada.");
   }
 }

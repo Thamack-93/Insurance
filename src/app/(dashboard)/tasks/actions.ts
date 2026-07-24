@@ -121,7 +121,7 @@ export async function createWorkItem(values: WorkItemFormValues): Promise<Mutati
       const createdWorkItem = await tx.workItem.create({
         data: {
           id: workItemId,
-          sourceType: "Task",
+          sourceType: "WorkItem",
           sourceId: workItemId,
           workItemType: "TASK",
           taskType: payload.taskType,
@@ -208,7 +208,7 @@ export async function updateWorkItem(id: string, values: WorkItemFormValues): Pr
       const updatedWorkItem = await tx.workItem.update({
         where: { id: previousWorkItem.id },
         data: {
-          sourceType: previousWorkItem.sourceType ?? "Task",
+          sourceType: previousWorkItem.sourceType === "Task" ? "WorkItem" : previousWorkItem.sourceType ?? "WorkItem",
           sourceId: previousWorkItem.sourceId ?? previousWorkItem.id,
           workItemType: "TASK",
           taskType: payload.taskType,

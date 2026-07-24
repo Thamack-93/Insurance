@@ -40,7 +40,12 @@ function formatDateTime(iso: string) {
   }
 }
 
-export function BackupsPanel({ initialBackups, backupStatus, createBackup, listBackups }: Props) {
+export function BackupsPanel({
+  initialBackups,
+  backupStatus,
+  createBackup,
+  listBackups,
+}: Props) {
   const [backups, setBackups] = useState<BackupListItem[]>(initialBackups);
   const [pendingCreate, startCreate] = useTransition();
   const [verifying, setVerifying] = useState<string | null>(null);
@@ -139,7 +144,8 @@ export function BackupsPanel({ initialBackups, backupStatus, createBackup, listB
                 <p className="truncate text-sm font-medium text-foreground">{backup.filename}</p>
                 <p className="text-xs text-muted-foreground">
                   {formatDateTime(backup.createdAt)} · {formatSize(backup.size)} ·{" "}
-                  {backup.manifestAvailable ? "manifiesto disponible" : "sin manifiesto"}
+                  {backup.manifestAvailable ? "manifiesto disponible" : "sin manifiesto"} · {" "}
+                  {backup.storage === "rekeyed" ? "copia re-cifrada" : "original"}
                 </p>
               </div>
               <div className="flex items-center gap-2">

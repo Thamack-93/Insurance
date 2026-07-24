@@ -20,7 +20,6 @@ interface UploadFormProps {
     policyId?: string;
     endorsementId?: string;
     receiptId?: string;
-    taskId?: string;
     claimId?: string;
     quoteId?: string;
   };
@@ -70,7 +69,6 @@ export function UploadForm({
     policyId?: string;
     endorsementId?: string;
     receiptId?: string;
-    taskId?: string;
     claimId?: string;
     quoteId?: string;
   }>({

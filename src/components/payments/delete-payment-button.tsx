@@ -39,10 +39,10 @@ export function DeletePaymentButton({
       triggerClassName={triggerClassName}
       description={
         <>
-          ¿Seguro que quieres eliminar el pago de <strong>{formatCurrency(amount, currency)}</strong>{" "}
+          ¿Seguro que quieres revertir el pago de <strong>{formatCurrency(amount, currency)}</strong>{" "}
           registrado el <strong>{formatDate(paidDate)}</strong>
-          {paymentMethod ? <> con método <strong>{paymentMethod}</strong></> : null}? Esta acción recalcula el recibo
-          y, si era el último obstáculo, te permitirá cancelar la póliza después.
+          {paymentMethod ? <> con método <strong>{paymentMethod}</strong></> : null}? El pago se conservará en la auditoría
+          y el recibo se volverá a conciliar.
         </>
       }
     />

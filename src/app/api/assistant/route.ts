@@ -3,9 +3,10 @@ import { z } from "zod";
 import { AuthError, requireUser } from "@/lib/auth";
 import { buildAssistantReply, getAssistantHomeSnapshot } from "@/lib/assistant";
 import { logError } from "@/lib/logger";
-import { assertSameOrigin } from "@/lib/request-guards";
+import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody, RequestGuardError } from "@/lib/request-guards";
 import { noraContextRefSchema, resolveAuthorizedNoraContext } from "@/lib/nora-context";
 import { requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { rateLimitResponse, guardErrorResponse } from "@/lib/api-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,9 +72,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No autorizado." }, { status: 403 });
     }
 
+    const rateLimit = await checkDistributedRateLimit(`assistant:${user.id}:${getRequestIp(request)}`, {
+      limit: 20,
+      windowMs: 15 * 60 * 1000,
+      requireDistributed: true,
+    });
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit, "Demasiadas consultas al asistente.");
+
     let payload: z.infer<typeof messageSchema>;
     try {
-      payload = messageSchema.parse(await request.json());
+      payload = messageSchema.parse(await readJsonBody(request, 16 * 1024));
     } catch {
       return NextResponse.json({ error: "El mensaje no es válido." }, { status: 400 });
     }
@@ -115,6 +123,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
+    if (error instanceof RequestGuardError) return guardErrorResponse(error, "No se pudo procesar la consulta.");
     logError("api.assistant.post", error, { durationMs: Date.now() - startedAt });
     return NextResponse.json({ error: "No se pudo responder la consulta." }, { status: 500 });
   }

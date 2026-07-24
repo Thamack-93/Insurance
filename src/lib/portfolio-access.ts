@@ -100,11 +100,8 @@ export function documentPortfolioWhere(userId: string): Prisma.DocumentWhereInpu
       { receipt: receiptPortfolioWhere(userId) },
       { claim: claimPortfolioWhere(userId) },
       { quote: quotePortfolioWhere(userId) },
-      {
-        task: {
-          OR: [{ client: clientPortfolioWhere(userId) }, { clientId: null, createdById: userId }],
-        },
-      },
+      // Legacy Task-linked documents are intentionally hidden from agent
+      // scopes until they are explicitly reattached to a WorkItem.
       {
         AND: [
           { createdById: userId },
