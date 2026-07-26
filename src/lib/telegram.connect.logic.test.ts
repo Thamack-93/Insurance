@@ -32,6 +32,9 @@ type TelegramConnectTx = {
     findUnique: typeof notificationChannelFindUniqueMock;
     findFirst: typeof notificationChannelFindFirstMock;
   };
+  notificationPreference: {
+    upsert: typeof notificationPreferenceUpsertMock;
+  };
 };
 
 const telegramLinkTokenFindFirstMock = vi.hoisted(() => vi.fn());
@@ -39,6 +42,7 @@ const telegramLinkTokenUpdateMock = vi.hoisted(() => vi.fn());
 const notificationChannelUpsertMock = vi.hoisted(() => vi.fn());
 const notificationChannelFindUniqueMock = vi.hoisted(() => vi.fn());
 const notificationChannelFindFirstMock = vi.hoisted(() => vi.fn());
+const notificationPreferenceUpsertMock = vi.hoisted(() => vi.fn());
 const transactionMock = vi.hoisted(() => vi.fn());
 const logErrorMock = vi.hoisted(() => vi.fn());
 const writeActivityLogMock = vi.hoisted(() => vi.fn());
@@ -72,6 +76,7 @@ describe("telegram connect flow", () => {
     notificationChannelUpsertMock.mockReset();
     notificationChannelFindUniqueMock.mockReset();
     notificationChannelFindFirstMock.mockReset();
+    notificationPreferenceUpsertMock.mockReset();
     transactionMock.mockReset();
     logErrorMock.mockReset();
     writeActivityLogMock.mockReset();
@@ -86,6 +91,9 @@ describe("telegram connect flow", () => {
           upsert: notificationChannelUpsertMock,
           findUnique: notificationChannelFindUniqueMock,
           findFirst: notificationChannelFindFirstMock,
+        },
+        notificationPreference: {
+          upsert: notificationPreferenceUpsertMock,
         },
       }),
     );

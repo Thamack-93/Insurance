@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 const notificationChannelUpsert = vi.hoisted(() => vi.fn());
 const notificationChannelFindUnique = vi.hoisted(() => vi.fn());
+const notificationPreferenceUpsert = vi.hoisted(() => vi.fn());
 const logErrorMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", () => {
@@ -12,6 +13,9 @@ vi.mock("@/lib/db", () => {
       notificationChannel: {
         upsert: notificationChannelUpsert,
         findUnique: notificationChannelFindUnique,
+      },
+      notificationPreference: {
+        upsert: notificationPreferenceUpsert,
       },
     }),
   };
@@ -29,6 +33,7 @@ describe("telegram channel state", () => {
   beforeEach(() => {
     notificationChannelUpsert.mockReset();
     notificationChannelFindUnique.mockReset();
+    notificationPreferenceUpsert.mockReset();
     logErrorMock.mockReset();
   });
 
