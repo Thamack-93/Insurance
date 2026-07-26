@@ -1,16 +1,16 @@
 import Link from "next/link";
-import { ArrowUpRight, CheckCircle2, ChevronRight, CircleAlert, CircleDollarSign, Clock3, FileText, RefreshCw } from "lucide-react";
+import { ArrowUpRight, BellRing, CalendarDays, CheckCircle2, ChevronRight, CircleAlert, CircleDollarSign, Clock3, FileText, ReceiptText, RefreshCw, ShieldCheck } from "lucide-react";
 import { formatCurrency } from "@/lib/money";
 import type { FocusItemModel, OperationalMetricModel, SemanticTone } from "@/lib/today-operations";
 import { cn } from "@/lib/utils";
 
-const toneStyles: Record<SemanticTone, { dot: string; text: string; soft: string }> = {
-  critical: { dot: "bg-critical", text: "text-critical", soft: "bg-critical/10" },
-  warning: { dot: "bg-warning", text: "text-warning", soft: "bg-warning/10" },
-  success: { dot: "bg-success", text: "text-success", soft: "bg-success/10" },
-  information: { dot: "bg-information", text: "text-information", soft: "bg-information/10" },
-  ai: { dot: "bg-ai", text: "text-ai", soft: "bg-ai/10" },
-  neutral: { dot: "bg-muted-foreground", text: "text-muted-foreground", soft: "bg-muted" },
+const toneStyles: Record<SemanticTone, { dot: string; text: string; soft: string; card: string }> = {
+  critical: { dot: "bg-critical", text: "text-critical", soft: "bg-critical/10", card: "border-critical/15 bg-critical/[0.06] dark:bg-critical/[0.08]" },
+  warning: { dot: "bg-warning", text: "text-warning", soft: "bg-warning/10", card: "border-warning/20 bg-warning/[0.08] dark:bg-warning/[0.07]" },
+  success: { dot: "bg-success", text: "text-success", soft: "bg-success/10", card: "border-success/15 bg-success/[0.06] dark:bg-success/[0.07]" },
+  information: { dot: "bg-information", text: "text-information", soft: "bg-information/10", card: "border-information/15 bg-information/[0.06] dark:bg-information/[0.07]" },
+  ai: { dot: "bg-ai", text: "text-ai", soft: "bg-ai/10", card: "border-ai/15 bg-ai/[0.06] dark:bg-ai/[0.07]" },
+  neutral: { dot: "bg-muted-foreground", text: "text-muted-foreground", soft: "bg-muted", card: "border-border bg-muted/35" },
 };
 
 const toneIconMap: Record<SemanticTone, typeof CircleAlert> = {
@@ -22,6 +22,15 @@ const toneIconMap: Record<SemanticTone, typeof CircleAlert> = {
   neutral: RefreshCw,
 };
 
+const metricIconMap: Record<string, typeof CircleAlert> = {
+  overdue: BellRing,
+  "due-today": ReceiptText,
+  "due-7": CalendarDays,
+  renewals: ShieldCheck,
+  "overdue-work": CheckCircle2,
+  commissions: CircleDollarSign,
+};
+
 export function SemanticStatusDot({ tone, label }: { tone: SemanticTone; label: string }) {
   return <span className={cn("inline-flex items-center gap-1.5 text-xs", toneStyles[tone].text)}><span className={cn("size-2 rounded-full", toneStyles[tone].dot)} aria-hidden />{label}</span>;
 }
@@ -31,22 +40,28 @@ export function EntityMeta({ children }: { children: React.ReactNode }) {
 }
 
 export function OperationalMetric({ metric }: { metric: OperationalMetricModel }) {
+  const Icon = metricIconMap[metric.id] ?? toneIconMap[metric.tone];
   const content = (
-    <span className="flex min-w-[148px] items-center gap-3 px-4 py-3 sm:min-w-0 sm:flex-1">
-      <span className={cn("size-2 shrink-0 rounded-full", toneStyles[metric.tone].dot)} aria-hidden />
-      <span className="min-w-0">
-        <span className="block truncate text-xs text-muted-foreground">{metric.label}</span>
-        <span className={cn("mt-0.5 block font-mono text-lg font-semibold", toneStyles[metric.tone].text)} aria-label={`${metric.label}: ${metric.accessibleValue}`}>
+    <span className={cn("flex min-h-28 min-w-[164px] flex-col justify-between rounded-xl border p-3.5", toneStyles[metric.tone].card)}>
+      <span className="flex items-start justify-between gap-3">
+        <span className="min-w-0 text-xs font-medium text-muted-foreground">{metric.label}</span>
+        <span className={cn("grid size-8 shrink-0 place-items-center rounded-full border bg-background/80", toneStyles[metric.tone].text)} aria-hidden>
+          <Icon className="size-4" />
+        </span>
+      </span>
+      <span>
+        <span className={cn("block font-mono text-2xl font-semibold tracking-tight", toneStyles[metric.tone].text)} aria-label={`${metric.label}: ${metric.accessibleValue}`}>
           {metric.value}
         </span>
+        {metric.description ? <span className="mt-0.5 block text-[11px] text-muted-foreground">{metric.description}</span> : null}
       </span>
     </span>
   );
-  return metric.href ? <Link href={metric.href} className="rounded-md transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{content}</Link> : content;
+  return metric.href ? <Link href={metric.href} className="rounded-xl transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transform-none">{content}</Link> : content;
 }
 
 export function OperationalSummary({ metrics }: { metrics: OperationalMetricModel[] }) {
-  return <section aria-label="Resumen operativo" className="overflow-x-auto rounded-xl border bg-card"><div className="flex min-w-max divide-x sm:min-w-0">{metrics.map((metric) => <OperationalMetric key={metric.id} metric={metric} />)}</div></section>;
+  return <section aria-label="Resumen operativo" className="overflow-x-auto pb-1"><div className="grid min-w-max grid-flow-col auto-cols-[164px] gap-2.5 sm:min-w-0 sm:grid-flow-row sm:grid-cols-3 xl:grid-cols-6">{metrics.map((metric) => <OperationalMetric key={metric.id} metric={metric} />)}</div></section>;
 }
 
 export function FocusQueueItem({ item }: { item: FocusItemModel }) {

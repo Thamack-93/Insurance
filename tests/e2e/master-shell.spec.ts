@@ -63,14 +63,32 @@ test.describe("PolicyDesk master shell", () => {
     await page.goto("/today");
 
     await page.getByRole("button", { name: "Abrir Nora" }).click();
-    await expect(page.getByRole("dialog").getByText("Asistente operativo")).toBeVisible();
+    const noraDialog = page.getByRole("dialog");
+    await expect(noraDialog.getByText("Asistente operativo")).toBeVisible();
     await expect(page.getByPlaceholder(/Pregunta por una póliza/)).toBeVisible();
+    const dialogBox = await noraDialog.boundingBox();
+    expect(dialogBox?.width).toBeGreaterThanOrEqual(500);
+    expect(dialogBox?.width).toBeLessThanOrEqual(560);
+    await expect.poll(() => noraDialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
     await page.getByRole("button", { name: "Excel", exact: true }).click();
     await expect(page.getByRole("dialog").getByRole("heading", { name: "Generar reporte con Nora" })).toBeVisible();
     await expect(page.getByText("Cobranza vencida", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: /Renovaciones próximas/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /Cartera activa/ })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("nora-report-preview.png"), fullPage: true });
+  });
+
+  test("generates filtered reports in place instead of navigating to operational pages", async ({ page }) => {
+    await authenticatePageAsAdmin(page);
+    await page.goto("/reports");
+
+    await expect(page.getByRole("heading", { name: "Reportes" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Reporte de cobranza" })).toBeVisible();
+    await expect(page.getByLabel("Alcance")).toBeVisible();
+    await page.getByRole("button", { name: "Vista previa" }).click();
+    await expect(page.getByText(/registros listos para descargar/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Descargar Excel" })).toBeVisible();
+    await expect(page).toHaveURL(/\/reports(?:\?|$)/);
   });
 
   test("hides Administration for agents without hiding their own profile", async ({ page }) => {

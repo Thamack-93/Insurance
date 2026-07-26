@@ -12,6 +12,7 @@ import { formatDate } from "@/lib/dates";
 import { claimOperationalWhere, policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 import { getWorkItems, OPEN_WORK_ITEM_STATUSES, type WorkQueueItem } from "@/lib/work-queue";
 import { cn } from "@/lib/utils";
+import { getWorkItemHref } from "@/lib/work-item-navigation";
 
 type OperationsView = "all" | "pending" | "renewals" | "claims";
 
@@ -27,14 +28,18 @@ function readView(value?: string): OperationsView {
 }
 
 function WorkItemRow({ item }: { item: WorkQueueItem }) {
+  const href = getWorkItemHref(item);
+  const policyContext = item.policy
+    ? `${item.policy.policyNumber} · ${item.policy.policyType}`
+    : null;
   return (
-    <li className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b px-4 py-2.5 last:border-b-0">
-      <Link href={`/tasks/${item.id}`} className="min-w-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    <li className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b px-4 py-2.5 last:border-b-0">
+      <Link href={href} className="min-w-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <p className="truncate text-sm font-medium">{item.title}</p>
-        <p className="truncate text-xs text-muted-foreground">
-          {item.client?.fullName ?? "Sin cliente"}
-          {item.policy?.policyNumber ? ` · ${item.policy.policyNumber}` : ""}
-          {item.dueDate ? ` · ${formatBusinessDateRelative(item.dueDate)}` : " · Sin fecha"}
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.client?.fullName ?? "Sin cliente"}{policyContext ? ` · ${policyContext}` : ""}{item.insurer?.name ? ` · ${item.insurer.name}` : ""}</p>
+        <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+          {item.policy ? `Vigencia ${formatDate(item.policy.startDate)}–${formatDate(item.policy.endDate)} · ` : ""}
+          {item.dueDate ? formatBusinessDateRelative(item.dueDate) : "Sin fecha límite"}
         </p>
       </Link>
       <PriorityBadge priority={item.priority} className="px-2 py-0.5 text-[11px]" />

@@ -95,6 +95,25 @@ describe("today operations presentation logic", () => {
     expect(model.greeting).toBe("Buenas tardes, Pedro");
     expect(model.summary).toContain("Tienes 0 acciones");
     expect(model.summary).toContain("0 afectan a clientes hoy");
+    expect(model.summaryMetrics).toHaveLength(6);
+    expect(model.summaryMetrics.map((metric) => metric.label)).toEqual([
+      "Vencidos",
+      "Vencen hoy",
+      "Próx. 7 días",
+      "Renovaciones",
+      "Pendientes atrasados",
+      "Comisiones",
+    ]);
     expect(model.focusItems).toEqual([]);
+  });
+
+  it("uses capped wording for the upcoming-receipts metric", () => {
+    const data = emptyTodayData();
+    data.paymentsDue7 = Array.from({ length: 8 }, (_, index) => ({ id: `receipt-${index}` })) as never;
+
+    const model = buildTodayOperationsModel(data, { now: new Date("2026-07-21T16:00:00Z") });
+    const upcoming = model.summaryMetrics.find((metric) => metric.id === "due-7");
+
+    expect(upcoming).toMatchObject({ value: "8+", accessibleValue: "8 o más" });
   });
 });

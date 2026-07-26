@@ -288,7 +288,15 @@ export async function getTodayData() {
   ]);
 
   const overdueWorkItemRows = overdueWorkItems.map((item) => ({
-    id: item.sourceId ?? item.id,
+    id: item.id,
+    sourceType: item.sourceType,
+    sourceId: item.sourceId,
+    workItemType: item.workItemType,
+    entityType: item.entityType,
+    entityId: item.entityId,
+    clientId: item.clientId,
+    policyId: item.policyId,
+    receiptId: item.receiptId,
     folio: item.folio ?? item.sourceId ?? item.id,
     title: item.title,
     status: item.status,

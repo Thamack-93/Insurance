@@ -11,6 +11,13 @@ test.describe("Today operations center", () => {
     await expect(page.getByRole("heading", { name: "Enfoque ahora" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Insights" })).toBeVisible();
     await expect(page.getByText("PolicyDesk").first()).toBeVisible();
+
+    const summary = page.getByRole("region", { name: "Resumen operativo" });
+    await expect(summary.getByRole("link")).toHaveCount(6);
+    await expect(summary.getByText("Próx. 7 días", { exact: true })).toBeVisible();
+    const quickActions = page.getByRole("region", { name: "Acciones rápidas" });
+    await expect(quickActions.getByRole("button", { name: "Registrar pago" })).toBeVisible();
+    await expect(quickActions.getByRole("link", { name: "Capturar póliza" })).toBeVisible();
   });
 
   test("keeps mobile navigation keyboard-operable", async ({ page }) => {

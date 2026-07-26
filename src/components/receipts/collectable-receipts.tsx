@@ -42,9 +42,9 @@ export function CollectableReceipts({ receipts }: { receipts: CollectableReceipt
 
   return (
     <BulkActionsProvider>
-      <div className="space-y-3">
+      <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
         <BulkToolbar receipts={receipts} />
-        <div className="divide-y divide-border/70 rounded-lg border border-border/70 bg-card">
+        <div className="divide-y divide-border/70">
           {receipts.map((receipt) => (
             <ReceiptRow key={receipt.id} receipt={receipt} />
           ))}
@@ -88,7 +88,7 @@ function BulkToolbar({ receipts }: { receipts: CollectableReceipt[] }) {
 
   if (!hasSelection) {
     return (
-      <div className="flex items-center justify-end">
+      <div className="flex min-h-10 items-center justify-end border-b border-border/70 bg-muted/20 px-3">
         <Button
           variant="ghost"
           size="sm"
@@ -103,7 +103,7 @@ function BulkToolbar({ receipts }: { receipts: CollectableReceipt[] }) {
 
   return (
     <>
-      <div className="sticky top-2 z-10 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-300/70 bg-emerald-50/90 px-4 py-2 shadow-sm backdrop-blur">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-300/70 bg-emerald-50/90 px-4 py-2">
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-emerald-900">
             {selectedCount} recibo{selectedCount !== 1 ? "s" : ""} seleccionado{selectedCount !== 1 ? "s" : ""}
@@ -150,7 +150,7 @@ function ReceiptRow({ receipt }: { receipt: CollectableReceipt }) {
 
   return (
     <div
-      className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between"
+      className="flex flex-col gap-3 px-3 py-3 md:flex-row md:items-center md:justify-between"
       data-selected={isSelected}
     >
       <div className="flex min-w-0 flex-1 items-start gap-3">

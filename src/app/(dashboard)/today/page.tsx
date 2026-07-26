@@ -51,11 +51,11 @@ export default async function TodayPage({ searchParams }: { searchParams?: Promi
         metadata={<time dateTime={new Date().toISOString()}>{model.dateLabel}</time>}
         actions={
           <>
-            <Link href="/receipts?tab=cobrar" className={cn(buttonVariants({ variant: "outline" }), "min-h-10") }>
+            <Link href="/receipts?tab=cobrar" className={cn(buttonVariants({ variant: "outline" }), "min-h-11") }>
               <ReceiptText className="size-4" aria-hidden />
               Cobrar recibos
             </Link>
-            <Link href="/tasks/new" className={cn(buttonVariants(), "min-h-10") }>
+            <Link href="/tasks/new" className={cn(buttonVariants(), "min-h-11") }>
               <Plus className="size-4" aria-hidden />
               Crear pendiente
             </Link>
@@ -67,11 +67,11 @@ export default async function TodayPage({ searchParams }: { searchParams?: Promi
 
       <section aria-labelledby="today-quick-actions">
         <h2 id="today-quick-actions" className="mb-2 text-sm font-semibold">Acciones rápidas</h2>
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          <NoraOpenButton label="Registrar pago con Nora" prompt="Quiero registrar un pago. Ayúdame a localizar el recibo." className="min-h-11 justify-start" />
-          <Link href="/policies/capture" className={cn(buttonVariants({ variant: "outline" }), "min-h-11 justify-start")}><FileUp className="size-4" />Capturar póliza</Link>
-          <NoraOpenButton label="Capturar endoso" prompt="Quiero capturar un endoso. Primero ayúdame a seleccionar la póliza." className="min-h-11 justify-start" />
-          <Link href="/tasks/new" className={cn(buttonVariants({ variant: "outline" }), "min-h-11 justify-start")}><FileSignature className="size-4" />Crear pendiente</Link>
+        <div className="flex flex-col gap-2 rounded-xl border bg-card p-2.5 sm:flex-row sm:flex-wrap">
+          <NoraOpenButton label="Registrar pago" prompt="Quiero registrar un pago. Ayúdame a localizar el recibo." variant="default" className="min-h-11 justify-start sm:w-auto" />
+          <Link href="/policies/capture" className={cn(buttonVariants({ variant: "outline" }), "min-h-11 justify-start sm:w-auto")}><FileUp className="size-4" />Capturar póliza</Link>
+          <NoraOpenButton label="Capturar endoso" prompt="Quiero capturar un endoso. Primero ayúdame a seleccionar la póliza." className="min-h-11 justify-start sm:w-auto" />
+          <Link href="/tasks/new" className={cn(buttonVariants({ variant: "ghost" }), "min-h-11 justify-start sm:ml-auto sm:w-auto")}><FileSignature className="size-4" />Crear pendiente</Link>
         </div>
       </section>
 
