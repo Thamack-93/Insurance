@@ -44,10 +44,11 @@ describe("notification-foundation", () => {
   });
 
   it("exposes the default notification catalog in the expected order", () => {
-    expect(notificationEventCatalog.map((item) => item.eventType)).toEqual([
-      "TEST_MESSAGE",
-      "DAILY_DIGEST",
-    ]);
+      expect(notificationEventCatalog.map((item) => item.eventType)).toEqual([
+        "TEST_MESSAGE",
+        "DAILY_DIGEST",
+        "BIRTHDAY_REMINDER",
+      ]);
     expect(comparePriority("URGENT", "HIGH")).toBeGreaterThan(0);
   });
 });

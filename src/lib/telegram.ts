@@ -48,6 +48,11 @@ import { ACTIVE_RENEWAL_POLICY_WHERE } from "@/lib/renewal-decisions";
 import { shouldIncludeInRenewals } from "@/lib/renewals.logic";
 import { checkDistributedRateLimit, securityFingerprint } from "@/lib/request-guards";
 import { OPEN_WORK_ITEM_STATUSES, countWorkItems } from "@/lib/work-queue";
+import {
+  birthdayAutomaticDedupeKey,
+  buildBirthdayReminderMessage,
+  getBirthdayRemindersForUser,
+} from "@/lib/birthday-reminders";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -172,6 +177,22 @@ export type TelegramDailyDigestResult = {
   sent: number;
   failed: number;
   parts: number;
+};
+
+export type TelegramBirthdayReminderResult = {
+  processed: number;
+  sent: number;
+  skipped: number;
+  failed: number;
+  birthdayCount: number;
+};
+
+export type TelegramDailyBirthdaysResult = {
+  processed: number;
+  sent: number;
+  skipped: number;
+  failed: number;
+  birthdayCount: number;
 };
 
 export type TelegramWebhookSyncResult =
@@ -1699,6 +1720,91 @@ export async function sendTelegramDigestMessagesForUser(input: {
   };
 }
 
+export async function sendTelegramBirthdayReminderForUser(input: {
+  userId: string;
+  mode: "manual" | "automatic";
+  client?: DbClient;
+  timeZone?: string;
+  now?: Date;
+}): Promise<TelegramBirthdayReminderResult> {
+  const db = input.client ?? getDb();
+  const timeZone = input.timeZone ?? DEFAULT_TIMEZONE;
+  const now = input.now ?? new Date();
+  const birthdays = await getBirthdayRemindersForUser({
+    userId: input.userId,
+    client: db,
+    timeZone,
+    now,
+  });
+
+  if (birthdays.length === 0) {
+    return { processed: 0, sent: 0, skipped: 0, failed: 0, birthdayCount: 0 };
+  }
+
+  const message = buildBirthdayReminderMessage(birthdays, now, timeZone);
+  const event = await createAndDeliverTelegramNotificationEvent({
+    type: "BIRTHDAY_REMINDER",
+    title: message.title,
+    body: message.body,
+    priority: "LOW",
+    userId: input.userId,
+    dedupeKey: input.mode === "automatic" ? birthdayAutomaticDedupeKey(input.userId, now, timeZone) : null,
+    force: input.mode === "manual",
+  });
+
+  if (event?.status === "SENT") {
+    return { processed: 1, sent: 1, skipped: 0, failed: 0, birthdayCount: birthdays.length };
+  }
+  if (event?.status === "SKIPPED") {
+    return { processed: 1, sent: 0, skipped: 1, failed: 0, birthdayCount: birthdays.length };
+  }
+  return { processed: 1, sent: 0, skipped: 0, failed: 1, birthdayCount: birthdays.length };
+}
+
+export async function sendDailyTelegramBirthdays(client?: DbClient): Promise<TelegramDailyBirthdaysResult> {
+  const db = client ?? getDb();
+  const channels = await db.notificationChannel.findMany({
+    where: {
+      type: "TELEGRAM",
+      isEnabled: true,
+      telegramChatId: { not: null },
+      user: { active: true },
+    },
+    select: {
+      userId: true,
+      user: { select: { timeZone: true } },
+    },
+  });
+
+  const result: TelegramDailyBirthdaysResult = {
+    processed: channels.length,
+    sent: 0,
+    skipped: 0,
+    failed: 0,
+    birthdayCount: 0,
+  };
+
+  for (const channel of channels) {
+    try {
+      const reminder = await sendTelegramBirthdayReminderForUser({
+        userId: channel.userId,
+        client: db,
+        mode: "automatic",
+        timeZone: channel.user.timeZone || DEFAULT_TIMEZONE,
+      });
+      result.sent += reminder.sent;
+      result.skipped += reminder.skipped;
+      result.failed += reminder.failed;
+      result.birthdayCount += reminder.birthdayCount;
+    } catch (error) {
+      result.failed += 1;
+      logError("telegram.sendDailyBirthdays", error, { userId: channel.userId });
+    }
+  }
+
+  return result;
+}
+
 async function createTelegramPaymentDraft(input: {
   chatId: string;
   argument: string;
@@ -2864,6 +2970,7 @@ export async function createAndDeliverTelegramNotificationEvent(input: {
   clientId?: string | null;
   policyId?: string | null;
   receiptId?: string | null;
+  dedupeKey?: string | null;
   force?: boolean;
 }): Promise<NotificationEventRecord | null> {
   const event = await createNotificationEvent({
@@ -2876,6 +2983,7 @@ export async function createAndDeliverTelegramNotificationEvent(input: {
     clientId: input.clientId ?? null,
     policyId: input.policyId ?? null,
     receiptId: input.receiptId ?? null,
+    dedupeKey: input.dedupeKey ?? null,
     channelType: "TELEGRAM",
     force: input.force,
   });

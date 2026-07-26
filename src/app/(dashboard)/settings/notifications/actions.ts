@@ -11,6 +11,7 @@ import {
   createAndDeliverTelegramNotificationEvent,
   createTelegramLinkCodeForUser,
   disconnectTelegramChannelForUser,
+  sendTelegramBirthdayReminderForUser,
   sendTelegramDigestMessagesForUser,
   syncTelegramWebhook,
   type TelegramLinkCodeResult,
@@ -202,6 +203,56 @@ export async function sendTelegramDigestNow(): Promise<MutationResult> {
   } catch (error) {
     logError("settings.notifications.telegram.digestNow", error);
     return errorResult("No se pudo enviar el resumen.");
+  }
+}
+
+export async function sendTelegramBirthdaysNow(): Promise<MutationResult> {
+  try {
+    const user = await requireUser();
+    const channel = await getDb().notificationChannel.findUnique({
+      where: {
+        userId_type: {
+          userId: user.id,
+          type: "TELEGRAM",
+        },
+      },
+      select: { telegramChatId: true, isEnabled: true },
+    });
+
+    if (!channel?.isEnabled || !channel.telegramChatId) {
+      return errorResult("Telegram no está vinculado.");
+    }
+
+    const result = await sendTelegramBirthdayReminderForUser({
+      userId: user.id,
+      mode: "manual",
+    });
+
+    await writeActivityLog({
+      entityType: "NotificationEvent",
+      entityId: `telegram-birthdays-now:${user.id}:${Date.now()}`,
+      action: result.failed === 0 ? "TELEGRAM_BIRTHDAYS_NOW_SENT" : "TELEGRAM_BIRTHDAYS_NOW_PARTIAL",
+      newValue: {
+        sent: result.sent,
+        skipped: result.skipped,
+        failed: result.failed,
+        birthdayCount: result.birthdayCount,
+        mode: "manual",
+      },
+      userId: user.id,
+    });
+
+    if (result.birthdayCount === 0) {
+      return errorResult("No hay cumpleaños de clientes hoy.");
+    }
+    if (result.sent > 0) {
+      revalidatePath("/settings/notifications");
+      return successResult(user.id, "/settings/notifications", "Aviso de cumpleaños enviado. El envío automático sigue programado.");
+    }
+    return errorResult("No se pudo enviar el aviso de cumpleaños.");
+  } catch (error) {
+    logError("settings.notifications.telegram.birthdaysNow", error);
+    return errorResult("No se pudo enviar el aviso de cumpleaños.");
   }
 }
 

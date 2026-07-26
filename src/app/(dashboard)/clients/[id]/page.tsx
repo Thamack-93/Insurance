@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RecordPageView } from "@/components/recently-viewed/record-page-view";
-import { Mail, Phone, MapPin, BadgeInfo, FileText, ClipboardList, History, Pencil, ShieldCheck } from "lucide-react";
+import { Mail, Phone, MapPin, BadgeInfo, FileText, ClipboardList, History, Pencil, ShieldCheck, Cake } from "lucide-react";
 import { DeleteClientButton } from "@/components/clients/delete-client-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { AuditByline } from "@/components/audit/audit-byline";
@@ -19,6 +19,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
+import { calculateAge, formatBirthdayDate } from "@/lib/birthday-reminders";
 
 const quoteStatusLabels: Record<string, string> = {
   REQUESTED: "Solicitada",
@@ -197,6 +198,19 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                   <Phone className="size-4 text-muted-foreground" />
                   <span>{client.phone ?? "Sin teléfono"}</span>
                 </div>
+                {client.birthDate ? (
+                  <div className="flex items-center gap-3">
+                    <Cake className="size-4 text-muted-foreground" />
+                    <span>
+                      Nacimiento: {formatBirthdayDate(client.birthDate)} de {client.birthDate.getUTCFullYear()} · {calculateAge(client.birthDate)} años
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 text-muted-foreground">
+                    <Cake className="size-4" />
+                    <span>Sin fecha de nacimiento</span>
+                  </div>
+                )}
                 <div className="flex items-center gap-3">
                   <MapPin className="size-4 text-muted-foreground" />
                   <span>{client.address ?? "Sin dirección"}</span>

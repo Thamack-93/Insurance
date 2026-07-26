@@ -9,6 +9,7 @@ export type PolicyPdfCaptureDraft = {
   clientPhone: string | null;
   clientAddress: string | null;
   clientRfc: string | null;
+  clientBirthDate?: string | null;
   insurerName: string;
   policyType: string;
   serialNumber: string | null;
@@ -34,6 +35,7 @@ export type PolicyPdfCaptureFieldKey =
   | "clientPhone"
   | "clientAddress"
   | "clientRfc"
+  | "clientBirthDate"
   | "insurerName"
   | "policyType"
   | "serialNumber"
@@ -946,6 +948,14 @@ function parsePolicyType(lines: string[], fullText: string): string {
   return normalizePolicyType(labeled ?? (normalizedFullText.includes("gmm") ? "GMM" : ""));
 }
 
+function parseClientBirthDate(lines: string[]) {
+  const labels = ["Fecha de nacimiento", "Fecha nacimiento", "Nacimiento", "F. Nac.", "DOB", "Date of Birth"];
+  const inline = extractDateFromMatchingLine(lines, labels, "first");
+  if (inline) return inline;
+  const nearby = extractValueFromLabelWindow(lines, labels, 1);
+  return normalizeDateString(nearby) ?? extractSpanishDate(nearby);
+}
+
 function parseSourcePolicyNumber(lines: string[], fullText: string, policyNumber: string) {
   const labeled = extractValueFromLabelWindow(lines, ["RENUEVA A", "Renueva a", "Póliza origen", "Poliza origen", "Vigencia anterior"], 2);
   if (labeled) {
@@ -982,6 +992,7 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
   const clientPhoneResult = parseClientPhone(lines);
   const clientEmailResult = parseClientEmail(lines);
   const clientAddressResult = parseClientAddress(lines);
+  const clientBirthDate = parseClientBirthDate(lines);
   const clientContext = (() => {
     const nameIndex = clientNameResult.value
       ? lines.findIndex((line) => normalizeText(line).includes(normalizeText(clientNameResult.value)))
@@ -1064,6 +1075,7 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
     clientPhone: clientPhoneResult.value,
     clientAddress: clientAddressResult.value,
     clientRfc: clientRfcResult.value,
+    clientBirthDate,
     insurerName: insurerNameResult.value,
     policyType,
     serialNumber,
@@ -1113,6 +1125,7 @@ export function buildPolicyPdfCaptureFieldConfidence(text: string, draft: Policy
   ]);
   const hasInsurerLabel = includesAnyLabel(lines, ["Aseguradora", "Compañía", "Compañia"]);
   const hasAddressLabel = includesAnyLabel(lines, ["Domicilio", "Dirección", "Direccion"]);
+  const hasBirthDateLabel = includesAnyLabel(lines, ["Fecha de nacimiento", "Fecha nacimiento", "Nacimiento", "F. Nac.", "DOB", "Date of Birth"]);
   const hasPremiumLabel = includesAnyLabel(lines, ["Prima total", "Prima anual", "Prima", "Importe total"]);
   const hasIssueLabel = includesAnyLabel(lines, [
     "Condiciones generales aplicables",
@@ -1134,6 +1147,7 @@ export function buildPolicyPdfCaptureFieldConfidence(text: string, draft: Policy
     clientPhone: draft.clientPhone ? (includesAnyLabel(lines, ["Teléfono", "Telefono", "Celular"]) ? "high" : "medium") : "low",
     clientAddress: draft.clientAddress ? (hasAddressLabel ? "high" : "medium") : "low",
     clientRfc: draft.clientRfc ? (includesAnyLabel(lines, ["RFC", "R.F.C.", "Registro Federal de Contribuyentes"]) && valueLooksLikeRfc(draft.clientRfc) ? "high" : "medium") : "low",
+    clientBirthDate: draft.clientBirthDate ? (hasBirthDateLabel ? "high" : "medium") : "low",
     insurerName: draft.insurerName ? (hasInsurerLabel || /qualitas|axa seguros|seguros/i.test(fullText) ? "high" : "medium") : "low",
     policyType: draft.policyType ? "high" : "low",
     serialNumber: draft.serialNumber ? (includesAnyLabel(lines, ["Serie", "Numero de serie", "Número de serie", "No. Serie"]) ? "high" : "medium") : "low",

@@ -1,4 +1,4 @@
-import { daysBetweenBusinessDates, parseBusinessDateInput } from "@/lib/business-dates";
+import { businessToday, daysBetweenBusinessDates, parseBusinessDateInput } from "@/lib/business-dates";
 import { z } from "zod";
 import {
   CLAIM_STATUSES,
@@ -28,6 +28,22 @@ function daysBetweenDateInputs(startDate: string, endDate: string) {
   return daysBetweenBusinessDates(dateOnly(endDate), dateOnly(startDate));
 }
 
+function isValidDateOnly(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const [, yearRaw, monthRaw, dayRaw] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const parsed = parseBusinessDateInput(value);
+  return (
+    Number.isFinite(parsed.getTime()) &&
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() + 1 === month &&
+    parsed.getUTCDate() === day
+  );
+}
+
 export const clientSchema = z.object({
   fullName: z.string().trim().min(2, "Escribe el nombre del cliente."),
   type: z.enum(CLIENT_TYPES),
@@ -36,10 +52,20 @@ export const clientSchema = z.object({
   secondaryPhone: optionalText,
   rfc: optionalText,
   address: optionalText,
+  birthDate: optionalDate,
   preferredContactMethod: optionalText,
   referidorId: z.string().trim().optional().or(z.literal("")),
   notes: optionalText,
   status: z.enum(ENTITY_STATUSES),
+}).superRefine((values, context) => {
+  if (!values.birthDate) return;
+  if (!isValidDateOnly(values.birthDate)) {
+    context.addIssue({ code: "custom", path: ["birthDate"], message: "La fecha de nacimiento no es válida." });
+    return;
+  }
+  if (parseBusinessDateInput(values.birthDate) > businessToday()) {
+    context.addIssue({ code: "custom", path: ["birthDate"], message: "La fecha de nacimiento no puede ser futura." });
+  }
 });
 
 export const policySchema = z

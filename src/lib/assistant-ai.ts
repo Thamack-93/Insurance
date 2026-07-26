@@ -515,7 +515,7 @@ export async function buildAssistantAiReply(input: {
 }
 
 const PDF_FIELD_KEYS = new Set<PolicyPdfCaptureFieldKey>([
-  "policyNumber", "clientName", "clientType", "clientEmail", "clientPhone", "clientAddress", "clientRfc", "insurerName", "policyType", "serialNumber", "startDate", "endDate", "issueDate", "paymentFrequency", "premiumAmount", "sourcePolicyNumber",
+  "policyNumber", "clientName", "clientType", "clientEmail", "clientPhone", "clientAddress", "clientRfc", "clientBirthDate", "insurerName", "policyType", "serialNumber", "startDate", "endDate", "issueDate", "paymentFrequency", "premiumAmount", "sourcePolicyNumber",
 ]);
 const confidence = z.enum(["high", "medium", "low"]);
 const pdfFieldConfidenceSchema = z.object(Object.fromEntries([...PDF_FIELD_KEYS].map((key) => [key, confidence])) as Record<PolicyPdfCaptureFieldKey, typeof confidence>);
@@ -527,7 +527,7 @@ const pdfAiReviewSchema = z.object({
 });
 const nullableString = z.string().nullable();
 const pdfDraftSchema = z.object({
-  policyNumber: z.string().min(1), clientName: z.string().min(1), clientType: z.enum(["PERSON", "COMPANY"]), clientEmail: nullableString, clientPhone: nullableString, clientAddress: nullableString, clientRfc: nullableString, insurerName: z.string().min(1), policyType: z.string().min(1), serialNumber: nullableString, startDate: z.string().min(1), endDate: z.string().min(1), issueDate: nullableString, paymentFrequency: z.string().min(1), paymentPlan: nullableString, premiumAmount: z.coerce.number(), currency: z.string().min(1), requestNumber: nullableString, insuredObject: nullableString, beneficiaryInfo: nullableString, notes: nullableString, sourcePolicyNumber: nullableString,
+  policyNumber: z.string().min(1), clientName: z.string().min(1), clientType: z.enum(["PERSON", "COMPANY"]), clientEmail: nullableString, clientPhone: nullableString, clientAddress: nullableString, clientRfc: nullableString, clientBirthDate: nullableString, insurerName: z.string().min(1), policyType: z.string().min(1), serialNumber: nullableString, startDate: z.string().min(1), endDate: z.string().min(1), issueDate: nullableString, paymentFrequency: z.string().min(1), paymentPlan: nullableString, premiumAmount: z.coerce.number(), currency: z.string().min(1), requestNumber: nullableString, insuredObject: nullableString, beneficiaryInfo: nullableString, notes: nullableString, sourcePolicyNumber: nullableString,
 });
 const pdfFileExtractionSchema = z.object({ draft: pdfDraftSchema, fieldConfidence: pdfFieldConfidenceSchema, warnings: z.array(z.string().min(1)), aiReview: pdfAiReviewSchema });
 
@@ -535,7 +535,7 @@ function getAssistantCriticalModel() { return getAssistantStructuredModel(); }
 function normalizePdfDraft(draft: z.infer<typeof pdfDraftSchema>): PolicyPdfCaptureDraft {
   return {
     ...draft,
-    policyNumber: draft.policyNumber.trim(), clientName: draft.clientName.trim(), clientEmail: draft.clientEmail?.trim() || null, clientPhone: draft.clientPhone?.trim() || null, clientAddress: draft.clientAddress?.trim() || null, clientRfc: draft.clientRfc?.trim() || null, insurerName: draft.insurerName.trim(), policyType: draft.policyType.trim(), serialNumber: draft.serialNumber?.trim() || null, startDate: draft.startDate.trim(), endDate: draft.endDate.trim(), issueDate: draft.issueDate?.trim() || null, paymentFrequency: draft.paymentFrequency.trim(), paymentPlan: draft.paymentPlan?.trim() || null, currency: draft.currency.trim(), requestNumber: draft.requestNumber?.trim() || null, insuredObject: draft.insuredObject?.trim() || null, beneficiaryInfo: draft.beneficiaryInfo?.trim() || null, notes: draft.notes?.trim() || null, sourcePolicyNumber: draft.sourcePolicyNumber?.trim() || null,
+    policyNumber: draft.policyNumber.trim(), clientName: draft.clientName.trim(), clientEmail: draft.clientEmail?.trim() || null, clientPhone: draft.clientPhone?.trim() || null, clientAddress: draft.clientAddress?.trim() || null, clientRfc: draft.clientRfc?.trim() || null, clientBirthDate: draft.clientBirthDate?.trim() || null, insurerName: draft.insurerName.trim(), policyType: draft.policyType.trim(), serialNumber: draft.serialNumber?.trim() || null, startDate: draft.startDate.trim(), endDate: draft.endDate.trim(), issueDate: draft.issueDate?.trim() || null, paymentFrequency: draft.paymentFrequency.trim(), paymentPlan: draft.paymentPlan?.trim() || null, currency: draft.currency.trim(), requestNumber: draft.requestNumber?.trim() || null, insuredObject: draft.insuredObject?.trim() || null, beneficiaryInfo: draft.beneficiaryInfo?.trim() || null, notes: draft.notes?.trim() || null, sourcePolicyNumber: draft.sourcePolicyNumber?.trim() || null,
   };
 }
 

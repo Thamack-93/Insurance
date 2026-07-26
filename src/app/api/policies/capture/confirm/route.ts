@@ -7,6 +7,7 @@ import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody, securityFingerprint } from "@/lib/request-guards";
 import { rateLimitResponse, guardErrorResponse } from "@/lib/api-security";
 import { parseDateInput } from "@/lib/form-utils";
+import { businessToday } from "@/lib/business-dates";
 import { assertClientPortfolioAccess, assertPolicyPortfolioAccess } from "@/lib/portfolio-access";
 import { inferClientType, type PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
 import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
@@ -28,6 +29,7 @@ const confirmSchema = z.object({
     clientPhone: z.string().nullable().optional(),
     clientAddress: z.string().nullable().optional(),
     clientRfc: z.string().nullable().optional(),
+    clientBirthDate: z.string().nullable().optional(),
     insurerName: z.string().min(1),
     policyType: z.string().min(1),
     startDate: z.string().min(1),
@@ -66,6 +68,7 @@ function normalizeDraft(draft: z.infer<typeof confirmSchema>["draft"]): PolicyPd
     clientPhone: draft.clientPhone?.trim() || null,
     clientAddress: draft.clientAddress?.trim() || null,
     clientRfc: draft.clientRfc?.trim() || null,
+    clientBirthDate: draft.clientBirthDate?.trim() || null,
     insurerName: draft.insurerName.trim(),
     policyType: draft.policyType.trim(),
     startDate: draft.startDate.trim(),
@@ -153,6 +156,10 @@ export async function POST(request: NextRequest) {
 
     const payload = confirmSchema.parse(await readJsonBody(request, 64 * 1024));
     const draft = normalizeDraft(payload.draft);
+    const parsedBirthDate = draft.clientType === "PERSON" && draft.clientBirthDate ? parseDateInput(draft.clientBirthDate) : null;
+    if (draft.clientBirthDate && (!parsedBirthDate || Number.isNaN(parsedBirthDate.getTime()) || parsedBirthDate > businessToday())) {
+      return NextResponse.json({ error: "La fecha de nacimiento no es válida." }, { status: 400 });
+    }
     const db = getDb();
 
     try {
@@ -235,6 +242,40 @@ export async function POST(request: NextRequest) {
         sourcePolicyNumber: draft.sourcePolicyNumber ?? sourcePolicy.policyNumber,
       } satisfies PolicyPdfCaptureDraft;
       const notes = buildCaptureNotes(captureDraft, existingTarget?.notes ?? null);
+
+      const selectedClient = await tx.client.findUnique({
+        where: { id: payload.clientId },
+        select: { id: true, type: true, birthDate: true },
+      });
+
+      if (selectedClient?.type === "PERSON" && parsedBirthDate) {
+        if (!selectedClient.birthDate) {
+          const updatedClient = await tx.client.update({
+            where: { id: selectedClient.id },
+            data: { birthDate: parsedBirthDate, updatedById: user.id },
+            select: { id: true, birthDate: true },
+          });
+          await writeActivityLog({
+            entityType: "Client",
+            entityId: selectedClient.id,
+            action: "CLIENT_BIRTHDATE_CONFIRMED_FROM_PDF",
+            oldValue: { birthDate: null },
+            newValue: { birthDate: updatedClient.birthDate, source: "PDF", policyId: sourcePolicy.id },
+            userId: user.id,
+            db: tx,
+          });
+        } else if (selectedClient.birthDate.getTime() !== parsedBirthDate.getTime()) {
+          await writeActivityLog({
+            entityType: "Client",
+            entityId: selectedClient.id,
+            action: "CLIENT_BIRTHDATE_CONFLICT_FROM_PDF",
+            oldValue: { birthDate: selectedClient.birthDate },
+            newValue: { birthDate: parsedBirthDate, source: "PDF", policyId: sourcePolicy.id },
+            userId: user.id,
+            db: tx,
+          });
+        }
+      }
 
       const policyData = {
         policyNumber: captureDraft.policyNumber,

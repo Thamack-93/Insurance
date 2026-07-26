@@ -51,6 +51,7 @@ type InlineClientResponse = {
     phone?: string | null;
     rfc?: string | null;
     address?: string | null;
+    birthDate?: string | null;
     reused?: boolean;
   };
   error?: string;
@@ -68,6 +69,7 @@ function createEmptyDraft(): PolicyPdfCaptureDraft {
     clientPhone: null,
     clientAddress: null,
     clientRfc: null,
+    clientBirthDate: null,
     insurerName: "",
     policyType: "AUTO",
     serialNumber: null,
@@ -95,6 +97,7 @@ function createEmptyConfidence(): PolicyPdfCaptureFieldConfidence {
     clientPhone: "low",
     clientAddress: "low",
     clientRfc: "low",
+    clientBirthDate: "low",
     insurerName: "low",
     policyType: "low",
     serialNumber: "low",
@@ -369,9 +372,10 @@ export function PolicyPdfCapturePanel() {
         clientPhone: item.meta?.phone ?? null,
         clientAddress: item.meta?.address ?? null,
         clientRfc: item.meta?.rfc ?? null,
+        clientBirthDate: null,
         sourcePolicyNumber: null,
       });
-      setFieldConfidence((current) => ({ ...current, clientName: "high", clientType: "high", clientEmail: item.meta?.email ? "high" : "low", clientPhone: item.meta?.phone ? "high" : "low", clientAddress: item.meta?.address ? "high" : "low", clientRfc: item.meta?.rfc ? "high" : "low" }));
+      setFieldConfidence((current) => ({ ...current, clientName: "high", clientType: "high", clientEmail: item.meta?.email ? "high" : "low", clientPhone: item.meta?.phone ? "high" : "low", clientAddress: item.meta?.address ? "high" : "low", clientRfc: item.meta?.rfc ? "high" : "low", clientBirthDate: "low" }));
     } else if (kind === "insurer") {
       setSelectedInsurerId(item.id);
       setSelectedInsurerLabel(item.label);
@@ -490,6 +494,7 @@ export function PolicyPdfCapturePanel() {
             phone: draft.clientPhone ?? "",
             address: draft.clientAddress ?? "",
             rfc: draft.clientRfc ?? "",
+            birthDate: draft.clientBirthDate ?? "",
           }),
         });
 
@@ -509,8 +514,9 @@ export function PolicyPdfCapturePanel() {
           clientPhone: createdClient.phone ?? null,
           clientAddress: createdClient.address ?? null,
           clientRfc: createdClient.rfc ?? null,
+          clientBirthDate: createdClient.birthDate ?? draft.clientBirthDate ?? null,
         });
-        setFieldConfidence((current) => ({ ...current, clientName: "high", clientType: "high", clientEmail: createdClient.email ? "high" : current.clientEmail, clientPhone: createdClient.phone ? "high" : current.clientPhone, clientAddress: createdClient.address ? "high" : current.clientAddress, clientRfc: createdClient.rfc ? "high" : current.clientRfc }));
+        setFieldConfidence((current) => ({ ...current, clientName: "high", clientType: "high", clientEmail: createdClient.email ? "high" : current.clientEmail, clientPhone: createdClient.phone ? "high" : current.clientPhone, clientAddress: createdClient.address ? "high" : current.clientAddress, clientRfc: createdClient.rfc ? "high" : current.clientRfc, clientBirthDate: current.clientBirthDate }));
         toast.success(createdClient.reused ? "Cliente existente reutilizado." : "Cliente creado y seleccionado.");
       } catch (createError) {
         const message = createError instanceof Error ? createError.message : "No se pudo crear el cliente.";
@@ -1128,6 +1134,17 @@ export function PolicyPdfCapturePanel() {
                         setSelectedSourcePolicyLabel("");
                         markFieldConfidence("clientRfc");
                         markFieldConfidence("clientType");
+                      }}
+                    />
+                  </Field>
+
+                  <Field label="Fecha de nacimiento" confidence={fieldConfidence.clientBirthDate}>
+                    <Input
+                      type="date"
+                      value={draft.clientBirthDate ?? ""}
+                      onChange={(event) => {
+                        updateDraft({ clientBirthDate: event.target.value || null });
+                        markFieldConfidence("clientBirthDate");
                       }}
                     />
                   </Field>

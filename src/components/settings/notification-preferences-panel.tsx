@@ -43,6 +43,7 @@ type Props = {
   generateTelegramLinkCode: () => Promise<TelegramLinkCodeResult>;
   disconnectTelegram: () => Promise<MutationResult>;
   sendTelegramDigestNow: () => Promise<MutationResult>;
+  sendTelegramBirthdaysNow: () => Promise<MutationResult>;
   sendTelegramTestMessage: () => Promise<MutationResult>;
   setTelegramMutationsEnabled: (enabled: boolean) => Promise<MutationResult>;
   preferences: NotificationPreferenceRecord[];
@@ -59,6 +60,7 @@ export function NotificationPreferencesPanel({
   generateTelegramLinkCode,
   disconnectTelegram,
   sendTelegramDigestNow,
+  sendTelegramBirthdaysNow,
   sendTelegramTestMessage,
   setTelegramMutationsEnabled,
   preferences: initialPreferences,
@@ -67,6 +69,7 @@ export function NotificationPreferencesPanel({
   const router = useRouter();
   const [isGeneratingLink, setIsGeneratingLink] = useState(false);
   const [isSendingDigestNow, setIsSendingDigestNow] = useState(false);
+  const [isSendingBirthdaysNow, setIsSendingBirthdaysNow] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [isUpdatingMutations, setIsUpdatingMutations] = useState(false);
@@ -130,6 +133,22 @@ export function NotificationPreferencesPanel({
     }
   }
 
+  async function handleSendTelegramBirthdaysNow() {
+    setIsSendingBirthdaysNow(true);
+    try {
+      const result = await sendTelegramBirthdaysNow();
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+
+      toast.success(result.message);
+      router.refresh();
+    } finally {
+      setIsSendingBirthdaysNow(false);
+    }
+  }
+
   async function handleDisconnectTelegram() {
     if (!window.confirm("¿Desconectar Telegram de esta cuenta?")) return;
 
@@ -169,7 +188,21 @@ export function NotificationPreferencesPanel({
   }
 
   async function handlePreferenceToggle(eventType: string, enabled: boolean) {
-    const next = preferences.map((preference) => preference.eventType === eventType ? { ...preference, enabled } : preference);
+    const next = notificationEventCatalog.map((event) => {
+      const existing = preferences.find((preference) => preference.eventType === event.eventType);
+      return {
+        ...(existing ?? {
+          id: `draft:${event.eventType}`,
+          userId: channel.userId,
+          channelType: "TELEGRAM",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
+        eventType: event.eventType,
+        enabled: event.eventType === eventType ? enabled : existing?.enabled ?? event.defaultEnabled,
+        minPriority: existing?.minPriority ?? event.defaultMinPriority,
+      };
+    });
     setPreferences(next);
     setIsUpdatingPreferences(true);
     const result = await updateTelegramPreferences(next.map((preference) => ({ eventType: preference.eventType, enabled: preference.enabled, minPriority: preference.minPriority as NotificationPreferenceInput["minPriority"] })));
@@ -207,8 +240,8 @@ export function NotificationPreferencesPanel({
     <div className="space-y-6">
       <Card className="border-border/60 bg-card/85 shadow-sm">
         <CardHeader className="border-b border-border/70">
-          <CardTitle className="flex items-center gap-2 text-base"><BellRing className="size-4" />Preferencias de entrega</CardTitle>
-          <CardDescription>Controla qué eventos puede enviar Telegram. Los cambios se aplican sin guardar conversaciones.</CardDescription>
+              <CardTitle className="flex items-center gap-2 text-base"><BellRing className="size-4" />Preferencias de entrega</CardTitle>
+              <CardDescription>Controla qué eventos puede enviar Telegram. El brief sale a las 08:00 y los cumpleaños a las 09:00.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 p-5 md:grid-cols-2">
           {notificationEventCatalog.map((event) => {
@@ -288,6 +321,16 @@ export function NotificationPreferencesPanel({
                 type="button"
                 variant="outline"
                 size="sm"
+                onClick={handleSendTelegramBirthdaysNow}
+                disabled={isSendingBirthdaysNow || !connected}
+              >
+                <Send className="mr-2 size-4" />
+                {isSendingBirthdaysNow ? "Enviando…" : "Cumpleaños de hoy"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
                 onClick={handleSendTelegramTestMessage}
                 disabled={isSendingTest || !connected}
               >
@@ -359,14 +402,14 @@ export function NotificationPreferencesPanel({
               {timeZone}
             </Badge>
             <Badge variant="secondary" className="rounded-full">
-              08:00 CDMX
+              08:00 brief · 09:00 cumpleaños
             </Badge>
           </div>
           <div className="rounded-xl border border-border/70 bg-muted/30 p-3 text-foreground">
-            <p className="font-medium">Resumen automático fijo</p>
+            <p className="font-medium">Horarios automáticos fijos</p>
             <p className="mt-1 text-muted-foreground">
-              Se enviará una vez al día a las 08:00, hora de Ciudad de México. La selección de
-              hora individual está temporalmente desactivada.
+              El brief se enviará a las 08:00 y los cumpleaños a las 09:00, hora de Ciudad de México.
+              La selección de hora individual está temporalmente desactivada.
             </p>
           </div>
           <p>

@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import {
@@ -56,6 +56,7 @@ export function ClientForm({
     resolver: zodResolver(clientSchema) as never,
     defaultValues,
   });
+  const clientType = useWatch({ control, name: "type" });
 
   async function onSubmit(values: ClientFormValues) {
     startTransition(async () => {
@@ -131,6 +132,12 @@ export function ClientForm({
               <FormField label="RFC" htmlFor="rfc" error={errors.rfc?.message}>
                 <Input id="rfc" {...register("rfc")} />
               </FormField>
+
+              {clientType === "PERSON" ? (
+                <FormField label="Fecha de nacimiento" htmlFor="birthDate" error={errors.birthDate?.message}>
+                  <Input id="birthDate" type="date" {...register("birthDate")} />
+                </FormField>
+              ) : null}
 
               <FormField label="Estado" error={errors.status?.message}>
                 <Controller
