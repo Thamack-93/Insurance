@@ -1,5 +1,6 @@
 import type { getTodayData } from "@/lib/dashboard-queries";
 import { daysSince, formatDate, formatRelativeDate } from "@/lib/dates";
+import { getWorkItemHref } from "@/lib/work-item-navigation";
 
 export type TodayData = Awaited<ReturnType<typeof getTodayData>>;
 
@@ -8,6 +9,7 @@ export type SemanticTone = "critical" | "warning" | "success" | "information" | 
 export type OperationalMetricModel = {
   id: string;
   label: string;
+  description?: string;
   value: number | string;
   accessibleValue: string;
   tone: SemanticTone;
@@ -101,8 +103,8 @@ export function buildFocusItems(data: TodayData): FocusItemModel[] {
     title: workItem.title,
     context: workItem.client?.fullName ?? workItem.folio,
     dueText: workItem.dueDate ? `Vencido ${formatRelativeDate(workItem.dueDate)}` : `Inició hace ${daysSince(workItem.startDate)} días`,
-    href: `/tasks/${workItem.id}`,
-    actionLabel: "Abrir pendiente",
+    href: getWorkItemHref(workItem),
+    actionLabel: workItem.sourceType === "Renewal" ? "Ver póliza" : "Abrir pendiente",
   }));
 
   const renewals = [...data.urgentRenewals].sort(compareByDateAndId).map((policy) => ({
@@ -133,6 +135,7 @@ export function buildTodayOperationsModel(
   const count = (items: unknown[], cappedAt?: number) => formatCount(items.length, cappedAt);
   const overdue = count(data.overduePayments, 8);
   const dueToday = count(data.paymentsDueToday);
+  const due7 = count(data.paymentsDue7, 8);
   const renewals = count(data.urgentRenewals);
   const overdueWork = count(data.overdueWorkItems, 8);
   const commissions = count(data.commissionsToReview, 8);
@@ -147,11 +150,12 @@ export function buildTodayOperationsModel(
     }).format(now),
     summary: `Tienes ${actionLabel} ${actionCount === 1 ? "acción" : "acciones"} que requieren atención. ${data.paymentsDueToday.length} ${data.paymentsDueToday.length === 1 ? "afecta" : "afectan"} a clientes hoy.`,
     summaryMetrics: [
-      { id: "overdue", label: "Vencidos", ...overdue, tone: "critical", href: "/receipts?tab=cobrar" },
-      { id: "due-today", label: "Vencen hoy", ...dueToday, tone: "warning", href: "/receipts?tab=cobrar" },
-      { id: "renewals", label: "Renovaciones próximas", ...renewals, tone: "success", href: "/operations?view=renewals" },
-      { id: "overdue-work", label: "Pendientes atrasados", ...overdueWork, tone: "critical", href: "/operations?view=pending" },
-      { id: "commissions", label: "Comisiones por revisar", ...commissions, tone: "information", href: "/commissions" },
+      { id: "overdue", label: "Vencidos", description: "Recibos atrasados", ...overdue, tone: "critical", href: "/receipts?tab=cobrar&status=overdue" },
+      { id: "due-today", label: "Vencen hoy", description: "Recibos del día", ...dueToday, tone: "warning", href: "/receipts?tab=cobrar&status=today" },
+      { id: "due-7", label: "Próx. 7 días", description: "Recibos por cobrar", ...due7, tone: "success", href: "/receipts?tab=cobrar&status=upcoming" },
+      { id: "renewals", label: "Renovaciones", description: "Pólizas en 30 días", ...renewals, tone: "information", href: "/operations?view=renewals" },
+      { id: "overdue-work", label: "Pendientes atrasados", description: "Trabajo fuera de fecha", ...overdueWork, tone: "critical", href: "/operations?view=pending" },
+      { id: "commissions", label: "Comisiones", description: "Por revisar pronto", ...commissions, tone: "success", href: "/commissions" },
     ],
     focusItems: buildFocusItems(data),
   };

@@ -40,6 +40,7 @@ type TableToolbarProps = {
   clearLabel?: string;
   actions?: ReactNode;
   className?: string;
+  tableControls?: boolean;
 };
 
 export function TableToolbar({
@@ -48,6 +49,7 @@ export function TableToolbar({
   clearLabel = "Limpiar",
   actions,
   className,
+  tableControls = true,
 }: TableToolbarProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -135,7 +137,8 @@ export function TableToolbar({
           </Button>
         ) : null}
       </div>
-      <div className="flex flex-wrap items-center gap-2">
+      {tableControls || actions ? <div className="flex flex-wrap items-center gap-2">
+        {tableControls ? <>
         <DropdownMenu>
             <DropdownMenuTrigger render={<Button type="button" variant="outline" size="sm" className="rounded-full" onClick={inspectTable} />}>
               <Columns3 className="mr-2 size-4" /> Columnas
@@ -163,8 +166,9 @@ export function TableToolbar({
         <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={exportCurrentPage}>
           <Download className="mr-2 size-4" /> CSV
         </Button>
+        </> : null}
         {actions}
-      </div>
+      </div> : null}
     </div>
   );
 }

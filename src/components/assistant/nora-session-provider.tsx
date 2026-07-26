@@ -8,6 +8,7 @@ import type { AssistantSnapshot } from "@/lib/assistant-types";
 import type { NoraContextRef } from "@/lib/nora-context";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { cn } from "@/lib/utils";
 
 const LazyAssistantConsole = dynamic(
   () => import("@/components/assistant/assistant-console").then((module) => module.AssistantConsole),
@@ -68,7 +69,7 @@ export function NoraSessionProvider({ children, userId }: { children: ReactNode;
     <NoraSessionContext.Provider value={value}>
       <Sheet open={open} onOpenChange={setOpen}>
         {children}
-        <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-[460px]" showCloseButton={false}>
+        <SheetContent side="right" className="gap-0 overflow-hidden p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[min(540px,calc(100vw-1rem))]" showCloseButton={false}>
           <SheetHeader className="border-b px-4 py-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-2.5">
@@ -105,7 +106,7 @@ export function NoraContextButton({ context, label = "Trabajar con Nora" }: { co
   return <Button type="button" variant="outline" onClick={() => suggestContext(context)}><Sparkles className="size-4 text-ai" />{label}</Button>;
 }
 
-export function NoraOpenButton({ label, prompt, className }: { label: string; prompt?: string; className?: string }) {
+export function NoraOpenButton({ label, prompt, className, variant = "outline" }: { label: string; prompt?: string; className?: string; variant?: "default" | "outline" | "secondary" | "ghost" }) {
   const { openNora } = useNoraSession();
-  return <Button type="button" variant="outline" className={className} onClick={() => openNora(prompt)}><Sparkles className="size-4 text-ai" />{label}</Button>;
+  return <Button type="button" variant={variant} className={className} onClick={() => openNora(prompt)}><Sparkles className={cn("size-4", variant === "default" ? "text-primary-foreground" : "text-ai")} />{label}</Button>;
 }

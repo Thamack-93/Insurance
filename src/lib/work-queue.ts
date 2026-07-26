@@ -57,6 +57,9 @@ export const workQueueSelect = {
       id: true,
       policyNumber: true,
       policyType: true,
+      status: true,
+      startDate: true,
+      endDate: true,
     },
   },
   insurer: {

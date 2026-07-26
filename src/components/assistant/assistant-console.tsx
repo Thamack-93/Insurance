@@ -25,6 +25,7 @@ import { extractPdfTextFromFile } from "@/lib/pdf-text-extraction.browser";
 import { buildNoraPolicyPdfPathname, NORA_POLICY_PDF_MAX_BYTES } from "@/lib/nora-pdf-storage.shared";
 import type { NoraContextRef } from "@/lib/nora-context";
 import { NoraExcelDownload } from "@/components/assistant/nora-excel-download";
+import { Conversation, ConversationContent, ConversationScrollButton } from "@/components/ai-elements/conversation";
 
 type Message = {
   id: string;
@@ -70,12 +71,12 @@ function initialMessage(snapshot: AssistantSnapshot): Message {
   };
 }
 
-function ResultSection({ section }: { section: AssistantSection }) {
+function ResultSection({ section, compact = false }: { section: AssistantSection; compact?: boolean }) {
   const isPriority = /cobro|pendiente|riesgo|resultado/i.test(section.title);
   return (
     <div className={cn("mt-3 overflow-hidden rounded-2xl border bg-background/80", isPriority ? "border-amber-200/80" : "border-border/70")}>
-      <div className="flex items-start justify-between gap-3 border-b border-border/60 px-4 py-3">
-        <div>
+      <div className="flex items-start justify-between gap-3 border-b border-border/60 px-3 py-2.5">
+        <div className="min-w-0">
         <p className="text-sm font-medium">{section.title}</p>
         <p className="mt-0.5 text-xs text-muted-foreground">{section.summary}</p>
         </div>
@@ -87,11 +88,11 @@ function ResultSection({ section }: { section: AssistantSection }) {
             <Link
               key={`${item.href}-${item.title}`}
               href={item.href}
-              className="flex items-start justify-between gap-4 px-4 py-3 transition-colors hover:bg-muted/50"
+              className={cn("gap-3 px-3 py-2.5 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring", compact ? "grid grid-cols-[minmax(0,1fr)_auto]" : "flex items-start justify-between")}
             >
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{item.title}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">{item.subtitle}</p>
+                <p className="break-words text-sm font-medium">{item.title}</p>
+                <p className="mt-0.5 break-words text-xs text-muted-foreground">{item.subtitle}</p>
               </div>
               {item.meta ? <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">{item.meta}</Badge> : null}
             </Link>
@@ -102,7 +103,7 @@ function ResultSection({ section }: { section: AssistantSection }) {
   );
 }
 
-function TodayMetrics({ metrics }: { metrics: NonNullable<Message["todayMetrics"]> }) {
+function TodayMetrics({ metrics, compact = false }: { metrics: NonNullable<Message["todayMetrics"]>; compact?: boolean }) {
   const cards = [
     ["Vencidos", metrics.overdueCount, "text-red-700"],
     ["Hoy", metrics.dueTodayCount, "text-amber-700"],
@@ -112,11 +113,11 @@ function TodayMetrics({ metrics }: { metrics: NonNullable<Message["todayMetrics"
     ["Comisiones", metrics.commissionsCount, "text-emerald-700"],
   ] as const;
   return (
-    <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+    <div className={cn("mb-4 grid gap-2", compact ? "grid-cols-3" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-6")}>
       {cards.map(([label, value, color]) => (
-        <div key={label} className="rounded-2xl border border-border/70 bg-background/80 px-3 py-3">
-          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
-          <p className={cn("mt-1 text-2xl font-semibold tracking-tight", color)}>{value}</p>
+        <div key={label} className={cn("min-w-0 rounded-xl border border-border/70 bg-background/80", compact ? "px-2 py-2.5" : "px-3 py-3")}>
+          <p className="truncate text-[9px] font-medium uppercase tracking-wide text-muted-foreground" title={label}>{label}</p>
+          <p className={cn("mt-1 font-mono text-xl font-semibold tracking-tight", color)}>{value}</p>
         </div>
       ))}
     </div>
@@ -186,11 +187,13 @@ function CapturePreviewCard({
   analysisSource,
   preview,
   onOpenCapture,
+  compact = false,
 }: {
   fileName: string;
   analysisSource: "local" | "ai";
   preview: PolicyPdfCapturePreview;
   onOpenCapture: (preview: PolicyPdfCapturePreview) => void;
+  compact?: boolean;
 }) {
   const { draft } = preview;
   const warnings = preview.warnings.slice(0, 3);
@@ -206,14 +209,14 @@ function CapturePreviewCard({
           {analysisSource === "ai" ? "IA" : "Local"}
         </Badge>
       </div>
-      <div className="grid gap-3 px-4 py-4 sm:grid-cols-2">
+      <div className={cn("grid gap-3 px-4 py-4", compact ? "grid-cols-1" : "sm:grid-cols-2")}>
         <div>
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Póliza</p>
-          <p className="mt-1 text-sm font-medium">{draft.policyNumber || "Sin dato"}</p>
+          <p className="mt-1 break-words text-sm font-medium">{draft.policyNumber || "Sin dato"}</p>
         </div>
         <div>
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Cliente</p>
-          <p className="mt-1 text-sm font-medium">{draft.clientName || "Sin dato"}</p>
+          <p className="mt-1 break-words text-sm font-medium">{draft.clientName || "Sin dato"}</p>
         </div>
         <div>
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Aseguradora</p>
@@ -244,9 +247,9 @@ function CapturePreviewCard({
           </ul>
         </div>
       ) : null}
-      <div className="flex items-center justify-between gap-3 border-t border-border/60 px-4 py-3">
+      <div className={cn("gap-3 border-t border-border/60 px-4 py-3", compact ? "grid" : "flex items-center justify-between")}>
         <p className="text-xs text-muted-foreground">Abre la captura para revisar, ajustar y confirmar.</p>
-        <Button type="button" size="sm" className="rounded-full" onClick={() => onOpenCapture(preview)}>
+        <Button type="button" size="sm" className={cn("rounded-full", compact && "w-full")} onClick={() => onOpenCapture(preview)}>
           Revisar captura
         </Button>
       </div>
@@ -276,7 +279,6 @@ export function AssistantConsole({
   const [isSending, setIsSending] = useState(false);
   const [attachedPdf, setAttachedPdf] = useState<File | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  const endRef = useRef<HTMLDivElement>(null);
   const [lastPrompt, setLastPrompt] = useState<string | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
 
@@ -315,10 +317,6 @@ export function AssistantConsole({
     if (!sessionReady || !initialPrompt || input.trim()) return;
     queueMicrotask(() => setInput(initialPrompt));
   }, [initialPrompt, input, sessionReady]);
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, isSending]);
 
   function clearAttachment() {
     setAttachedPdf(null);
@@ -548,6 +546,8 @@ export function AssistantConsole({
     }
   }
 
+  const compact = variant === "panel";
+
   return (
     <section className={cn(
       "mx-auto flex w-full max-w-none flex-col overflow-hidden bg-card/90",
@@ -581,10 +581,11 @@ export function AssistantConsole({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 space-y-7 overflow-y-auto px-3 py-5 sm:px-8 lg:px-12" aria-live="polite">
+      <Conversation className="min-h-0" aria-live="polite">
+        <ConversationContent className={cn("mx-auto w-full", compact ? "gap-5 px-4 py-4" : "max-w-5xl gap-7 px-4 py-6 sm:px-8")}>
         {messages.map((message) => (
-          <article key={message.id} className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}>
-            <div className={cn("w-full max-w-5xl", message.role === "user" && "max-w-[88%] rounded-3xl rounded-br-lg bg-foreground px-4 py-3 text-background sm:max-w-[72%]")}>
+          <article key={message.id} className={cn("flex min-w-0", message.role === "user" ? "justify-end" : "justify-start")}>
+            <div className={cn("min-w-0", message.role === "assistant" ? "w-full" : "max-w-[85%] rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-background")}>
               {message.role === "assistant" ? (
                 <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground">Nora</span>
@@ -616,7 +617,7 @@ export function AssistantConsole({
                     ) : null}
                     <Link href="/settings/assistant?tab=incidentes" className="inline-flex h-7 items-center rounded-full border border-amber-300 bg-white/70 px-3 font-medium underline-offset-2 hover:underline">Abrir diagnóstico</Link>
                   </div>
-                  <div className="mt-2 grid gap-1 text-[11px] text-amber-900/80 sm:grid-cols-2">
+                  <div className={cn("mt-2 grid gap-1 text-[11px] text-amber-900/80", !compact && "sm:grid-cols-2")}>
                     <span>Código: {message.aiDiagnostic.code}</span>
                     <span>Modelo: {message.aiDiagnostic.model}</span>
                     <span>Duración: {formatDurationMs(message.aiDiagnostic.durationMs)}</span>
@@ -631,7 +632,7 @@ export function AssistantConsole({
                     Traza de IA
                   </summary>
                   <div className="mt-3 space-y-3">
-                    <div className="grid gap-2 sm:grid-cols-2">
+                    <div className={cn("grid gap-2", !compact && "sm:grid-cols-2")}>
                       <div>
                         <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Corrida</p>
                         <p className="mt-1 font-medium text-foreground">{message.aiRunId ?? "Sin folio"}</p>
@@ -650,7 +651,7 @@ export function AssistantConsole({
                       </div>
                     </div>
                     {message.aiUsage ? (
-                      <div className="grid gap-2 rounded-xl border border-border/60 bg-background/80 p-3 sm:grid-cols-4">
+                      <div className={cn("grid gap-2 rounded-xl border border-border/60 bg-background/80 p-3", compact ? "grid-cols-2" : "sm:grid-cols-4")}>
                         <div>
                           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Input</p>
                           <p className="mt-1 font-medium text-foreground">{formatTokenCount(message.aiUsage.inputTokens)}</p>
@@ -680,7 +681,7 @@ export function AssistantConsole({
                               {entry.status}
                             </Badge>
                           </div>
-                          <div className="mt-2 grid gap-1 sm:grid-cols-2">
+                          <div className={cn("mt-2 grid gap-1", !compact && "sm:grid-cols-2")}>
                             <span>Tier: {entry.tier}</span>
                             <span>Modelo final: {entry.finalModel ?? "sin dato"}</span>
                             <span>Motivo: {entry.fallbackReason ?? "sin motivo"}</span>
@@ -702,7 +703,7 @@ export function AssistantConsole({
                   </div>
                 </details>
               ) : null}
-              {message.todayMetrics ? <TodayMetrics metrics={message.todayMetrics} /> : null}
+              {message.todayMetrics ? <TodayMetrics metrics={message.todayMetrics} compact={compact} /> : null}
               {message.role === "assistant" ? <MessageResponse className="text-sm leading-6" isAnimating={false}>{message.text}</MessageResponse> : <p className="whitespace-pre-wrap text-sm leading-6">{message.text}</p>}
               {message.role === "assistant" && message.text ? (
                 <div className="mt-2 flex items-center gap-1">
@@ -716,10 +717,11 @@ export function AssistantConsole({
                   analysisSource={message.capturePreview.analysisSource}
                   preview={message.capturePreview.preview}
                   onOpenCapture={goToPolicyCapture}
+                  compact={compact}
                 />
               ) : null}
               {message.actionProposal ? <AssistantActionProposalCard proposal={message.actionProposal} /> : null}
-              {message.sections?.map((section) => <ResultSection key={`${message.id}-${section.title}`} section={section} />)}
+              {message.sections?.map((section) => <ResultSection key={`${message.id}-${section.title}`} section={section} compact={compact} />)}
               {message.quickPrompts && message.role === "assistant" && message.id === messages[messages.length - 1]?.id ? (
                 <div className="mt-4 flex flex-wrap gap-2">
                   {message.quickPrompts.slice(0, 4).map((prompt) => (
@@ -746,10 +748,11 @@ export function AssistantConsole({
             Nora está revisando tu cartera…
           </div>
         ) : null}
-        <div ref={endRef} />
-      </div>
+        </ConversationContent>
+        <ConversationScrollButton className="bottom-3" aria-label="Ir al mensaje más reciente" />
+      </Conversation>
 
-      <footer className="shrink-0 border-t border-border/70 bg-background/70 p-4 backdrop-blur sm:p-5">
+      <footer className={cn("shrink-0 border-t border-border/70 bg-background/95 backdrop-blur", compact ? "p-3" : "p-4 sm:p-5")}>
         <input
           ref={fileInputRef}
           type="file"
@@ -776,7 +779,7 @@ export function AssistantConsole({
             </Button>
           </div>
         ) : null}
-        <div className="flex items-end gap-2 rounded-3xl border border-border bg-card px-4 py-3 shadow-sm focus-within:ring-2 focus-within:ring-ring/30">
+        <div className={cn("flex items-end gap-2 border border-border bg-card shadow-sm focus-within:ring-2 focus-within:ring-ring/30", compact ? "rounded-2xl px-3 py-2.5" : "rounded-3xl px-4 py-3")}>
           <Button
             type="button"
             variant="ghost"
@@ -813,9 +816,10 @@ export function AssistantConsole({
             <ArrowUp className="size-4" />
           </Button>
         </div>
-        <p className="mt-2 text-center text-[11px] text-muted-foreground">
-          Nora solo responde sobre PolicyDesk y únicamente usa información accesible para tu usuario.
-          {snapshot.ai.available ? ` IA conectada con ${snapshot.ai.model}.` : " IA no disponible por ahora."} También puedes adjuntar un PDF de póliza.
+        <p className="mt-2 text-center text-[10px] leading-4 text-muted-foreground">
+          {compact ? "Verifica la información importante antes de confirmar." : "Nora solo responde sobre PolicyDesk y únicamente usa información accesible para tu usuario."}
+          {!compact ? (snapshot.ai.available ? ` IA conectada con ${snapshot.ai.model}.` : " IA no disponible por ahora.") : null}
+          {!compact ? " También puedes adjuntar un PDF de póliza." : null}
         </p>
       </footer>
     </section>

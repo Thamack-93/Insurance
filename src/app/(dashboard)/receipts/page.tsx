@@ -14,7 +14,7 @@ import { CollectableReceipts, type CollectableReceipt } from "@/components/recei
 import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
 import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
-import { businessStartOfMonth } from "@/lib/business-dates";
+import { businessAddDays, businessStartOfMonth } from "@/lib/business-dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import {
@@ -30,17 +30,20 @@ const PAGE_SIZE = 25;
 export default async function ReceiptsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ tab?: string; q?: string; page?: string; sort?: string; dir?: string }>;
+  searchParams?: Promise<{ tab?: string; q?: string; page?: string; sort?: string; dir?: string; status?: string }>;
 }) {
   const params = (await searchParams) ?? {};
   const initialTab = params.tab === "historico" || params.tab === "revision" ? params.tab : "cobrar";
   const query = (params.q ?? "").trim().slice(0, 100);
+  const statusFilter = params.status === "overdue" || params.status === "today" || params.status === "upcoming" ? params.status : undefined;
   const page = readTablePage(params);
   const { sortKey, direction } = readTableSort(params);
 
   const db = getDb();
   const scope = await requirePortfolioReadScope();
   const now = today();
+  const tomorrow = businessAddDays(now, 1);
+  const in7 = businessAddDays(now, 7);
   const monthStart = businessStartOfMonth(now);
 
   const baseWhere: Prisma.ReceiptWhereInput = {
@@ -52,21 +55,27 @@ export default async function ReceiptsPage({
   const scopedReceiptIssueWhere: Prisma.ReceiptReconciliationIssueWhereInput = scope.portfolioOwnerId
     ? { receipt: receiptPortfolioWhere(scope.portfolioOwnerId) }
     : {};
-  const where: Prisma.ReceiptWhereInput = query
-    ? {
-        AND: [
-          baseWhere,
-          {
+  const dueDateWhere: Prisma.ReceiptWhereInput = statusFilter === "overdue"
+    ? { dueDate: { lt: now } }
+    : statusFilter === "today"
+      ? { dueDate: { gte: now, lt: tomorrow } }
+      : statusFilter === "upcoming"
+        ? { dueDate: { gte: tomorrow, lte: in7 } }
+        : {};
+  const where: Prisma.ReceiptWhereInput = {
+    AND: [
+      baseWhere,
+      dueDateWhere,
+      ...(query ? [{
             OR: [
               { receiptNumber: { contains: query } },
               { client: { fullName: { contains: query } } },
               { policy: { policyNumber: { contains: query } } },
               { insurer: { name: { contains: query } } },
             ],
-          },
-        ],
-      }
-    : baseWhere;
+          }] : []),
+    ],
+  };
 
   const orderBy =
     sortKey === "receiptNumber"
@@ -247,7 +256,21 @@ export default async function ReceiptsPage({
           <SectionCard
             title="Por cobrar"
             description="Búsqueda y paginación sobre todos los recibos abiertos."
-            action={<TableToolbar searchPlaceholder="Buscar por número, cliente, póliza o aseguradora..." />}
+            action={(
+              <TableToolbar
+                searchPlaceholder="Buscar por número, cliente, póliza o aseguradora..."
+                filters={[{
+                  key: "status",
+                  label: "Vencimiento",
+                  options: [
+                    { label: "Vencidos", value: "overdue" },
+                    { label: "Vencen hoy", value: "today" },
+                    { label: "Próximos 7 días", value: "upcoming" },
+                  ],
+                }]}
+                tableControls={false}
+              />
+            )}
           >
             {filteredCount === 0 ? (
               query ? (
@@ -256,6 +279,14 @@ export default async function ReceiptsPage({
                     icon={ReceiptText}
                     title="Sin resultados"
                     description={`No encontramos recibos que coincidan con "${query}".`}
+                  />
+                </div>
+              ) : statusFilter ? (
+                <div className="p-4">
+                  <EmptyState
+                    icon={ReceiptText}
+                    title="Sin recibos en este filtro"
+                    description="No hay recibos abiertos que coincidan con el vencimiento seleccionado."
                   />
                 </div>
               ) : (
@@ -285,14 +316,14 @@ export default async function ReceiptsPage({
                 />
               </div>
             ) : (
-              <div className="space-y-3 px-4 py-4">
+              <div className="px-3 py-3">
                 <CollectableReceipts receipts={collectableRows} />
                 <Pagination
                   page={page}
                   pageSize={PAGE_SIZE}
                   total={filteredCount}
                   basePath="/receipts"
-                  searchParams={{ tab: "cobrar", q: query, sort: sortKey ?? undefined, dir: direction ?? undefined }}
+                  searchParams={{ tab: "cobrar", q: query, status: statusFilter, sort: sortKey ?? undefined, dir: direction ?? undefined }}
                 />
               </div>
             )}
