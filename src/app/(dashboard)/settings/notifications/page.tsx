@@ -13,6 +13,7 @@ import {
   disconnectTelegram,
   generateTelegramLinkCode,
   sendTelegramDigestNow,
+  sendTelegramBirthdaysNow,
   sendTelegramTestMessage,
   setTelegramMutationsEnabled,
   updateTelegramPreferences,
@@ -107,7 +108,7 @@ export default async function NotificationSettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Resumen diario</CardTitle>
-              <CardDescription>La hora fija del resumen diario en Telegram.</CardDescription>
+              <CardDescription>Horarios fijos del resumen y de los cumpleaños en Telegram.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
               <div className="flex flex-wrap gap-2">
@@ -115,12 +116,12 @@ export default async function NotificationSettingsPage() {
                   {cronSecretConfigured ? "Cron activo" : "Cron pendiente"}
                 </Badge>
                 <Badge variant="secondary" className="rounded-full">
-                  08:00 CDMX
+                  08:00 brief · 09:00 cumpleaños
                 </Badge>
               </div>
               <p>
-                El scheduler de Telegram envía una vez al día a las 08:00, hora de Ciudad de
-                México. El envío manual no reemplaza ni consume el automático.
+                El brief se envía a las 08:00 y los cumpleaños a las 09:00, hora de Ciudad de
+                México. Los envíos manuales no reemplazan ni consumen los automáticos.
               </p>
             </CardContent>
           </Card>
@@ -161,6 +162,7 @@ export default async function NotificationSettingsPage() {
           generateTelegramLinkCode={generateTelegramLinkCode}
           disconnectTelegram={disconnectTelegram}
           sendTelegramDigestNow={sendTelegramDigestNow}
+          sendTelegramBirthdaysNow={sendTelegramBirthdaysNow}
           sendTelegramTestMessage={sendTelegramTestMessage}
           setTelegramMutationsEnabled={setTelegramMutationsEnabled}
           preferences={snapshot.preferences}

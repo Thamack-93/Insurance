@@ -18,6 +18,7 @@ export const API_SECURITY_MANIFEST = {
   "/api/integrations/telegram/webhook": "telegram-webhook",
   "/api/jobs/backup": "cron-secret",
   "/api/jobs/telegram-digest": "cron-secret",
+  "/api/jobs/telegram-birthdays": "cron-secret",
   "/api/nora/policy-pdf/upload": "authenticated",
   "/api/nora/policy-pdf/analyze": "authenticated",
   "/api/payments/quick": "authenticated",

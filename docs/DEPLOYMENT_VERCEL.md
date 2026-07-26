@@ -51,7 +51,7 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 2. Crear una rama protegida para preview; no seedear ni resetear la base actual.
 3. Configurar las variables de entorno en Vercel.
 4. Conectar un Blob store privado.
-5. Mantener los dos cron diarios en Vercel: `/api/jobs/backup` a las `05:00 UTC` y `/api/jobs/telegram-digest` a las `14:00 UTC` (08:00, hora de Ciudad de México). El digest usa una hora fija temporalmente y protege los reenvíos con la fecha local del usuario.
+5. Mantener los tres cron diarios en Vercel: `/api/jobs/backup` a las `05:00 UTC`, `/api/jobs/telegram-digest` a las `14:00 UTC` (08:00, hora de Ciudad de México) y `/api/jobs/telegram-birthdays` a las `15:00 UTC` (09:00, hora de Ciudad de México). El aviso de cumpleaños se deduplica por usuario y fecha local; el reenvío manual es independiente.
 6. Mantener el fallback local de rate limiting para el despliegue actual. Cuando aumente el tráfico, configurar Redis y cambiar `REQUIRE_DISTRIBUTED_RATE_LIMIT=1` para fallar cerrado si Redis no está disponible.
 7. Desplegar preview, validar y luego promover la rama principal.
 

@@ -7,6 +7,8 @@ import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody
 import { guardErrorResponse, rateLimitResponse } from "@/lib/api-security";
 import { writeActivityLog } from "@/lib/activity-log";
 import { inferClientType } from "@/lib/policy-pdf-capture.shared";
+import { parseDateInput } from "@/lib/form-utils";
+import { businessToday } from "@/lib/business-dates";
 
 export const runtime = "nodejs";
 
@@ -17,10 +19,21 @@ const createClientSchema = z.object({
   phone: z.string().trim().optional().or(z.literal("")),
   address: z.string().trim().optional().or(z.literal("")),
   rfc: z.string().trim().optional().or(z.literal("")),
+  birthDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
 });
 
 function normalizeText(value: string | null | undefined) {
   return value?.trim() ? value.trim() : null;
+}
+
+function normalizeBirthDate(value: string | null | undefined) {
+  const normalized = normalizeText(value);
+  if (!normalized) return null;
+  const parsed = parseDateInput(normalized);
+  if (Number.isNaN(parsed.getTime()) || parsed > businessToday()) {
+    throw new Error("La fecha de nacimiento no es válida.");
+  }
+  return parsed;
 }
 
 export async function POST(request: NextRequest) {
@@ -50,6 +63,7 @@ export async function POST(request: NextRequest) {
     const email = normalizeText(payload.email);
     const phone = normalizeText(payload.phone);
     const address = normalizeText(payload.address);
+    const birthDate = inferredType === "PERSON" ? normalizeBirthDate(payload.birthDate) : null;
 
     const existing = await db.client.findFirst({
       where: {
@@ -73,6 +87,7 @@ export async function POST(request: NextRequest) {
         phone: true,
         rfc: true,
         address: true,
+        birthDate: true,
       },
     });
 
@@ -87,6 +102,7 @@ export async function POST(request: NextRequest) {
           phone: existing.phone,
           rfc: existing.rfc,
           address: existing.address,
+          birthDate: existing.birthDate,
           reused: true,
         },
       });
@@ -100,6 +116,7 @@ export async function POST(request: NextRequest) {
         phone,
         address,
         rfc,
+        birthDate,
         status: "ACTIVE",
         portfolioOwnerId: user.id,
         createdById: user.id,
@@ -113,6 +130,7 @@ export async function POST(request: NextRequest) {
         phone: true,
         rfc: true,
         address: true,
+        birthDate: true,
       },
     });
 
@@ -134,6 +152,7 @@ export async function POST(request: NextRequest) {
         phone: client.phone,
         rfc: client.rfc,
         address: client.address,
+        birthDate: client.birthDate,
         reused: false,
       },
     });

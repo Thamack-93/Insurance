@@ -21,6 +21,7 @@ export function createClientDefaults(values?: Partial<ClientFormValues>): Client
     secondaryPhone: values?.secondaryPhone ?? "",
     rfc: values?.rfc ?? "",
     address: values?.address ?? "",
+    birthDate: values?.birthDate ?? "",
     preferredContactMethod: values?.preferredContactMethod ?? "",
     referidorId: values?.referidorId ?? NO_REFERIDOR_VALUE,
     notes: values?.notes ?? "",

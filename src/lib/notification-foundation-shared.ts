@@ -16,6 +16,13 @@ export const notificationEventCatalog = [
     defaultEnabled: true,
     defaultMinPriority: "LOW",
   },
+  {
+    eventType: "BIRTHDAY_REMINDER",
+    title: "Cumpleaños de clientes",
+    description: "Recibe a las 09:00 los cumpleaños de hoy de tu cartera.",
+    defaultEnabled: true,
+    defaultMinPriority: "LOW",
+  },
 ] as const;
 
 export type NotificationEventType = (typeof notificationEventCatalog)[number]["eventType"];
@@ -58,6 +65,7 @@ export type NotificationEventRecord = {
   clientId: string | null;
   policyId: string | null;
   receiptId: string | null;
+  dedupeKey: string | null;
   channelType: string;
   status: string;
   sentAt: Date | null;

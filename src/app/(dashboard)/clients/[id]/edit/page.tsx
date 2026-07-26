@@ -4,6 +4,7 @@ import { ClientForm } from "@/components/forms/client-form";
 import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
 import { createClientDefaults } from "@/lib/form-defaults";
+import { formatDateInput } from "@/lib/form-utils";
 import type { SelectOption } from "@/lib/domain-options";
 import type { ClientFormValues } from "@/lib/validations";
 
@@ -50,6 +51,7 @@ export default async function EditClientPage({ params }: { params: Promise<{ id:
             secondaryPhone: client.secondaryPhone ?? "",
             rfc: client.rfc ?? "",
             address: client.address ?? "",
+            birthDate: formatDateInput(client.birthDate),
             preferredContactMethod: client.preferredContactMethod ?? "",
             referidorId: client.referidorId ?? "NONE",
             notes: client.notes ?? "",

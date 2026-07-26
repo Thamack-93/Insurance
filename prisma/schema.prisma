@@ -79,6 +79,7 @@ model Client {
   secondaryPhone         String?
   rfc                    String?
   address                String?
+  birthDate              DateTime? @db.Date
   preferredContactMethod String?
   referidorId            String?
   notes                  String?
@@ -666,6 +667,7 @@ model NotificationEvent {
   clientId    String?
   policyId    String?
   receiptId   String?
+  dedupeKey   String?   @unique
   channelType String
   status      String    @default("PENDING")
   sentAt      DateTime?

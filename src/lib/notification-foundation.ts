@@ -3,10 +3,8 @@ import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
 import type { NotificationChannelType, Priority } from "@/lib/domain-values";
-import type {
-  Prisma,
-  PrismaClient,
-} from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
+import type { PrismaClient } from "@/generated/prisma/client";
 
 export const notificationEventCatalog = [
   {
@@ -20,6 +18,13 @@ export const notificationEventCatalog = [
     eventType: "DAILY_DIGEST",
     title: "Resumen diario",
     description: "Compacta la actividad del día para envío programado.",
+    defaultEnabled: true,
+    defaultMinPriority: "LOW",
+  },
+  {
+    eventType: "BIRTHDAY_REMINDER",
+    title: "Cumpleaños de clientes",
+    description: "Recibe a las 09:00 los cumpleaños de hoy de tu cartera.",
     defaultEnabled: true,
     defaultMinPriority: "LOW",
   },
@@ -65,6 +70,7 @@ export type NotificationEventRecord = {
   clientId: string | null;
   policyId: string | null;
   receiptId: string | null;
+  dedupeKey: string | null;
   channelType: string;
   status: string;
   sentAt: Date | null;
@@ -185,6 +191,7 @@ function toEventRecord(row: {
   clientId: string | null;
   policyId: string | null;
   receiptId: string | null;
+  dedupeKey: string | null;
   channelType: string;
   status: string;
   sentAt: Date | null;
@@ -214,6 +221,28 @@ export async function ensureNotificationDefaultsForUser(userId: string, client?:
         telegramMutationsEnabled: false,
       },
     });
+
+  await Promise.all(
+    notificationEventCatalog.map((event) =>
+      db.notificationPreference.upsert({
+        where: {
+          userId_eventType_channelType: {
+            userId,
+            eventType: event.eventType,
+            channelType: "TELEGRAM",
+          },
+        },
+        update: {},
+        create: {
+          userId,
+          eventType: event.eventType,
+          channelType: "TELEGRAM",
+          enabled: event.defaultEnabled,
+          minPriority: event.defaultMinPriority,
+        },
+      }),
+    ),
+  );
 }
 
 export async function getNotificationPreferencesForUser(
@@ -309,6 +338,7 @@ export async function createNotificationEvent(
     clientId?: string | null;
     policyId?: string | null;
     receiptId?: string | null;
+    dedupeKey?: string | null;
   },
   client?: DbClient,
 ) {
@@ -324,6 +354,20 @@ export async function createNotificationEvent(
         client: db,
       });
 
+  if (input.dedupeKey) {
+    const existing = await db.notificationEvent.findUnique({ where: { dedupeKey: input.dedupeKey } });
+    if (existing) {
+      if (existing.status === "FAILED") {
+        const retried = await db.notificationEvent.update({
+          where: { id: existing.id },
+          data: { status: "PENDING", error: null },
+        });
+        return toEventRecord(retried);
+      }
+      return toEventRecord(existing);
+    }
+  }
+
   try {
     const event = await db.notificationEvent.create({
       data: {
@@ -336,6 +380,7 @@ export async function createNotificationEvent(
         clientId: input.clientId ?? null,
         policyId: input.policyId ?? null,
         receiptId: input.receiptId ?? null,
+        dedupeKey: input.dedupeKey ?? null,
         channelType,
         status: shouldSend ? "PENDING" : "SKIPPED",
         error: shouldSend ? null : "Notification skipped by preferences or channel state.",
@@ -343,6 +388,10 @@ export async function createNotificationEvent(
     });
     return toEventRecord(event);
   } catch (error) {
+    if (input.dedupeKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const existing = await db.notificationEvent.findUnique({ where: { dedupeKey: input.dedupeKey } });
+      return existing ? toEventRecord(existing) : null;
+    }
     logError("notification-foundation.createNotificationEvent", error, {
       userId: input.userId,
       type: input.type,

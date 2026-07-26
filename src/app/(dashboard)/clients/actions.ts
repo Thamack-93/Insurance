@@ -3,7 +3,7 @@
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { AuthError, getCurrentUserId, requireAdmin } from "@/lib/auth";
-import { normalizeOptionalText, optionalRelationId } from "@/lib/form-utils";
+import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
 import { NO_REFERIDOR_VALUE } from "@/lib/constants";
 import { clientSchema, type ClientFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
@@ -20,6 +20,7 @@ function normalizeClientInput(values: ClientFormValues) {
     secondaryPhone: normalizeOptionalText(values.secondaryPhone),
     rfc: normalizeOptionalText(values.rfc),
     address: normalizeOptionalText(values.address),
+    birthDate: values.type === "PERSON" && values.birthDate ? parseDateInput(values.birthDate) : null,
     preferredContactMethod: normalizeOptionalText(values.preferredContactMethod),
     referidorId: referidorId && referidorId !== NO_REFERIDOR_VALUE ? referidorId : null,
     notes: normalizeOptionalText(values.notes),
@@ -34,6 +35,7 @@ function mergeClientMetadata(target: {
   secondaryPhone: string | null;
   rfc: string | null;
   address: string | null;
+  birthDate: Date | null;
   preferredContactMethod: string | null;
   notes: string | null;
   portfolioOwnerId: string | null;
@@ -44,6 +46,7 @@ function mergeClientMetadata(target: {
   secondaryPhone: string | null;
   rfc: string | null;
   address: string | null;
+  birthDate: Date | null;
   preferredContactMethod: string | null;
   notes: string | null;
   portfolioOwnerId: string | null;
@@ -55,6 +58,7 @@ function mergeClientMetadata(target: {
     secondaryPhone: target.secondaryPhone ?? source.secondaryPhone,
     rfc: target.rfc ?? source.rfc,
     address: target.address ?? source.address,
+    birthDate: target.birthDate ?? source.birthDate,
     preferredContactMethod: target.preferredContactMethod ?? source.preferredContactMethod,
     notes: target.notes ?? source.notes,
     portfolioOwnerId: target.portfolioOwnerId ?? source.portfolioOwnerId,
@@ -226,6 +230,7 @@ export async function updateClientQualityFields(
     secondaryPhone?: string;
     rfc?: string;
     address?: string;
+    birthDate?: string;
     preferredContactMethod?: string;
     notes?: string;
   },
@@ -244,6 +249,7 @@ export async function updateClientQualityFields(
         secondaryPhone: true,
         rfc: true,
         address: true,
+        birthDate: true,
         preferredContactMethod: true,
         notes: true,
         status: true,
@@ -263,6 +269,7 @@ export async function updateClientQualityFields(
         ...(values.secondaryPhone !== undefined ? { secondaryPhone: normalizeOptionalText(values.secondaryPhone) } : {}),
         ...(values.rfc !== undefined ? { rfc: normalizeOptionalText(values.rfc) } : {}),
         ...(values.address !== undefined ? { address: normalizeOptionalText(values.address) } : {}),
+        ...(values.birthDate !== undefined ? { birthDate: values.birthDate ? parseDateInput(values.birthDate) : null } : {}),
         ...(values.preferredContactMethod !== undefined
           ? { preferredContactMethod: normalizeOptionalText(values.preferredContactMethod) }
           : {}),
@@ -319,6 +326,7 @@ export async function consolidateClientIntoTarget(
         secondaryPhone: true,
         rfc: true,
         address: true,
+        birthDate: true,
         preferredContactMethod: true,
         notes: true,
         portfolioOwnerId: true,
@@ -336,6 +344,7 @@ export async function consolidateClientIntoTarget(
         secondaryPhone: true,
         rfc: true,
         address: true,
+        birthDate: true,
         preferredContactMethod: true,
         notes: true,
         portfolioOwnerId: true,
