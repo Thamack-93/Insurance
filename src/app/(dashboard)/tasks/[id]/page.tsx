@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, CalendarClock, CheckSquare, ClipboardList, FileText, MessageSquare } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
+import { NoraContextButton } from "@/components/assistant/nora-session-provider";
 import { AuditByline } from "@/components/audit/audit-byline";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
@@ -78,12 +79,13 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
           description={workItem.title}
           actions={
             <>
+              <NoraContextButton context={{ type: "workItem", id: workItem.id }} />
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/tasks/${workItem.sourceId ?? workItem.id}/edit`}>Editar pendiente</Link>
               </Button>
               <DeleteWorkItemButton id={workItem.sourceId ?? workItem.id} folio={workItem.folio ?? workItem.sourceId ?? workItem.id} />
               <Button asChild variant="outline" className="rounded-full bg-card/70">
-                <Link href="/tasks">
+                <Link href="/operations?view=pending">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
                 </Link>

@@ -14,6 +14,8 @@ import { getDb } from "@/lib/db";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { entityStatusOptions } from "@/lib/domain-options";
 import { buildTableHref, readAllowedTableParam, readTablePage, readTableSort } from "@/lib/table-query";
+import { LocalNavigation } from "@/components/layout/local-navigation";
+import { clientOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 
 const PAGE_SIZE = 25;
 
@@ -30,8 +32,11 @@ export default async function ClientsPage({
   const { sortKey, direction } = readTableSort(params);
 
   const db = getDb();
+  const scope = await requirePortfolioReadScope();
+  const portfolioWhere = clientOperationalWhere(scope.portfolioOwnerId);
 
   const where: Prisma.ClientWhereInput = {
+    ...portfolioWhere,
     ...(statusFilter ? { status: statusFilter } : {}),
     ...(typeFilter ? { type: typeFilter } : {}),
     ...(query
@@ -66,10 +71,10 @@ export default async function ClientsPage({
     pagedClients,
     topPortfolio,
   ] = await Promise.all([
-    db.client.count({ where: { status: "ACTIVE" } }),
-    db.client.count({ where: { type: "COMPANY" } }),
-    db.client.count({ where: { policies: { none: {} } } }),
-    db.client.count(),
+    db.client.count({ where: { ...portfolioWhere, status: "ACTIVE" } }),
+    db.client.count({ where: { ...portfolioWhere, type: "COMPANY" } }),
+    db.client.count({ where: { ...portfolioWhere, policies: { none: {} } } }),
+    db.client.count({ where: portfolioWhere }),
     db.client.count({ where }),
     db.client.findMany({
       where,
@@ -81,7 +86,7 @@ export default async function ClientsPage({
       take: PAGE_SIZE,
     }),
     db.client.findMany({
-      where: { status: "ACTIVE" },
+      where: { ...portfolioWhere, status: "ACTIVE" },
       include: {
         policies: { where: { status: "ACTIVE" }, select: { premiumAmount: true } },
       },
@@ -124,6 +129,15 @@ export default async function ClientsPage({
               </Button>
             </>
           }
+        />
+
+        <LocalNavigation
+          label="Tipos de cliente"
+          items={[
+            { label: "Todos", href: "/clients", excludeQueryKeys: ["type"] },
+            { label: "Personas", href: "/clients?type=PERSON" },
+            { label: "Empresas", href: "/clients?type=COMPANY" },
+          ]}
         />
 
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">

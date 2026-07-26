@@ -35,7 +35,7 @@ test.describe("Commissions Page (/commissions)", () => {
     await page.goto("/commissions");
 
     // Wait for page to load - check for main title
-    await expect(page.getByRole("heading", { name: "Comisiones", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Comisiones y bonos", exact: true })).toBeVisible();
 
     // Check for metric cards
     await expect(page.getByText("Esperado").first()).toBeVisible();

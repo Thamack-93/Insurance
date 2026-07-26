@@ -202,3 +202,37 @@ export async function assertReceiptPortfolioAccess(receiptId: string, userId: st
     throw new AuthError("No tienes acceso a este recibo.", 403);
   }
 }
+
+export async function assertQuotePortfolioAccess(quoteId: string, userId: string) {
+  const db = getDb();
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { role: true },
+  });
+  if (user?.role === "ADMIN") return;
+  const quote = await db.quote.findFirst({
+    where: { id: quoteId, ...quotePortfolioWhere(userId) },
+    select: { id: true },
+  });
+
+  if (!quote) {
+    throw new AuthError("No tienes acceso a esta cotización.", 403);
+  }
+}
+
+export async function assertClaimPortfolioAccess(claimId: string, userId: string) {
+  const db = getDb();
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { role: true },
+  });
+  if (user?.role === "ADMIN") return;
+  const claim = await db.claim.findFirst({
+    where: { id: claimId, ...claimPortfolioWhere(userId) },
+    select: { id: true },
+  });
+
+  if (!claim) {
+    throw new AuthError("No tienes acceso a este siniestro.", 403);
+  }
+}

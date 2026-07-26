@@ -13,6 +13,7 @@ import { TableToolbar } from "@/components/tables/table-toolbar";
 import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
+import { quoteOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
 
 const PAGE_SIZE = 25;
@@ -26,17 +27,22 @@ export default async function QuotesPage({
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = readTablePage(params);
   const { sortKey, direction } = readTableSort(params);
+  const scope = await requirePortfolioReadScope();
+  const quoteScope = quoteOperationalWhere(scope.portfolioOwnerId);
 
   const db = getDb();
 
-  const where: Prisma.QuoteWhereInput = query
-    ? {
+  const where: Prisma.QuoteWhereInput = {
+    ...quoteScope,
+    ...(query
+      ? {
         OR: [
           { client: { fullName: { contains: query } } },
           { insurer: { name: { contains: query } } },
         ],
       }
-    : {};
+      : {}),
+  };
 
   const orderBy =
     sortKey === "folio"
@@ -68,13 +74,13 @@ export default async function QuotesPage({
     sentQuotes,
   ] = await Promise.all([
     db.quote.count({
-      where: { status: { notIn: ["EXPIRED", "CANCELLED", "REJECTED"] } },
+      where: { ...quoteScope, status: { notIn: ["EXPIRED", "CANCELLED", "REJECTED"] } },
     }),
-    db.quote.count({ where: { status: { in: ["REQUESTED", "IN_PROGRESS"] } } }),
-    db.quote.count({ where: { status: "SENT" } }),
-    db.quote.count({ where: { status: "ACCEPTED" } }),
-    db.quote.count({ where: { status: "EXPIRED" } }),
-    db.quote.aggregate({ _sum: { quotedAmount: true } }),
+    db.quote.count({ where: { ...quoteScope, status: { in: ["REQUESTED", "IN_PROGRESS"] } } }),
+    db.quote.count({ where: { ...quoteScope, status: "SENT" } }),
+    db.quote.count({ where: { ...quoteScope, status: "ACCEPTED" } }),
+    db.quote.count({ where: { ...quoteScope, status: "EXPIRED" } }),
+    db.quote.aggregate({ where: quoteScope, _sum: { quotedAmount: true } }),
     db.quote.count({ where }),
     db.quote.findMany({
       where,
@@ -84,13 +90,13 @@ export default async function QuotesPage({
       take: PAGE_SIZE,
     }),
     db.quote.findMany({
-      where: { status: { in: ["REQUESTED", "IN_PROGRESS"] } },
+      where: { ...quoteScope, status: { in: ["REQUESTED", "IN_PROGRESS"] } },
       include: { client: true },
       orderBy: { createdAt: "desc" },
       take: 5,
     }),
     db.quote.findMany({
-      where: { status: "SENT" },
+      where: { ...quoteScope, status: "SENT" },
       include: { client: true },
       orderBy: { sentDate: "desc" },
       take: 5,

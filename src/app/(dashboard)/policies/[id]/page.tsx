@@ -4,6 +4,7 @@ import { RecordPageView } from "@/components/recently-viewed/record-page-view";
 import { ArrowLeft, FileClock, History, Pencil, Plus, ReceiptText, Repeat, Shield } from "lucide-react";
 import { DeletePolicyButton } from "@/components/policies/delete-policy-button";
 import { PageHeader } from "@/components/layout/page-header";
+import { NoraContextButton } from "@/components/assistant/nora-session-provider";
 import { AuditByline } from "@/components/audit/audit-byline";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
@@ -211,6 +212,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           description={`${policy.client.fullName} · ${policy.insurer.name} · ${policyTypeLabel(policy.policyType)}`}
           actions={
             <div className="flex items-center gap-2">
+              <NoraContextButton context={{ type: "policy", id: policy.id }} />
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/policies/${id}/edit`}>
                   <Pencil className="mr-2 size-4" />

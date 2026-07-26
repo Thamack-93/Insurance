@@ -50,7 +50,7 @@ export default async function EditWorkItemPage({ params }: { params: Promise<{ i
 
         <WorkItemForm
           title="Edición de pendiente"
-          description="Los cambios afectan Hoy, Dashboard, renovaciones y cobranza cuando aplique."
+          description="Los cambios afectan Hoy, Insights, renovaciones y cobranza cuando aplique."
           submitLabel="Guardar cambios"
           cancelHref="/tasks"
           defaultValues={createWorkItemDefaults({

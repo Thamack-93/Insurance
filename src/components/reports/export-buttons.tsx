@@ -62,7 +62,7 @@ export function ExportButtons({ exports }: { exports: ExportData[] }) {
         }
       });
 
-      XLSX.writeFile(workbook, `pg-report-${formatDateInput(new Date())}.xlsx`);
+      XLSX.writeFile(workbook, `policydesk-reporte-${formatDateInput(new Date())}.xlsx`);
     } finally {
       setIsExporting(false);
     }

@@ -18,6 +18,12 @@ import { policyTypeLabel } from "@/lib/status";
 import { policyTypeOptions } from "@/lib/domain-options";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
+import {
+  clientOperationalWhere,
+  policyOperationalWhere,
+  receiptOperationalWhere,
+  requirePortfolioReadScope,
+} from "@/lib/portfolio-access";
 import { buildTableHref, readAllowedTableParam, readTablePage, readTableSort } from "@/lib/table-query";
 
 export default async function PortfolioPage({
@@ -25,6 +31,10 @@ export default async function PortfolioPage({
 }: {
   searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string; type?: string }>;
 }) {
+  const scope = await requirePortfolioReadScope();
+  const policyScope = policyOperationalWhere(scope.portfolioOwnerId);
+  const clientScope = clientOperationalWhere(scope.portfolioOwnerId);
+  const receiptScope = receiptOperationalWhere(scope.portfolioOwnerId);
   const db = getDb();
   const now = today();
   const in60 = new Date(now);
@@ -36,7 +46,7 @@ export default async function PortfolioPage({
         lte: in60,
       },
     },
-    undefined,
+    scope.portfolioOwnerId,
   );
 
   const params = (await searchParams) ?? {};
@@ -46,6 +56,7 @@ export default async function PortfolioPage({
   const { sortKey, direction } = readTableSort(params);
 
   const where: Prisma.PolicyWhereInput = {
+    ...policyScope,
     status: "ACTIVE",
     ...(typeFilter ? { policyType: typeFilter } : {}),
     ...(query
@@ -93,28 +104,37 @@ export default async function PortfolioPage({
       take: DEFAULT_PAGE_SIZE,
     }),
     db.policy.aggregate({
-      where: { status: "ACTIVE" },
+      where: { ...policyScope, status: "ACTIVE" },
       _sum: { premiumAmount: true },
     }),
-    db.policy.count({ where: { status: "ACTIVE" } }),
-    db.client.count({ where: { status: "ACTIVE" } }),
-    db.insurer.count({ where: { status: "ACTIVE" } }),
+    db.policy.count({ where: { ...policyScope, status: "ACTIVE" } }),
+    db.client.count({ where: { ...clientScope, status: "ACTIVE" } }),
+    db.insurer.count({
+      where: {
+        status: "ACTIVE",
+        ...(scope.portfolioOwnerId ? { policies: { some: policyScope } } : {}),
+      },
+    }),
     renewalSoonPromise,
     db.receipt.findMany({
-      where: { dueDate: { gte: now, lte: in60 }, status: { in: ["PENDING", "OVERDUE"] } },
+      where: {
+        ...receiptScope,
+        dueDate: { gte: now, lte: in60 },
+        status: { in: ["PENDING", "OVERDUE"] },
+      },
       include: { client: true, policy: true, insurer: true },
       orderBy: { dueDate: "asc" },
       take: 10,
     }),
     db.policy.groupBy({
       by: ["insurerId"],
-      where: { status: "ACTIVE" },
+      where: { ...policyScope, status: "ACTIVE" },
       _count: { _all: true },
       _sum: { premiumAmount: true },
     }),
     db.policy.groupBy({
       by: ["clientId"],
-      where: { status: "ACTIVE" },
+      where: { ...policyScope, status: "ACTIVE" },
       _count: { _all: true },
       _sum: { premiumAmount: true },
       orderBy: { _sum: { premiumAmount: "desc" } },
@@ -125,7 +145,7 @@ export default async function PortfolioPage({
   const topClientNames = topClientIds.length
     ? new Map(
         (await db.client.findMany({
-          where: { id: { in: topClientIds } },
+          where: { ...clientScope, id: { in: topClientIds } },
           select: { id: true, fullName: true },
         })).map((c) => [c.id, c.fullName] as const),
       )

@@ -4,6 +4,8 @@ import { AuthError, requireUser } from "@/lib/auth";
 import { buildAssistantReply, getAssistantHomeSnapshot } from "@/lib/assistant";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody, RequestGuardError } from "@/lib/request-guards";
+import { noraContextRefSchema, resolveAuthorizedNoraContext } from "@/lib/nora-context";
+import { requirePortfolioReadScope } from "@/lib/portfolio-access";
 import { rateLimitResponse, guardErrorResponse } from "@/lib/api-security";
 
 export const runtime = "nodejs";
@@ -11,6 +13,7 @@ export const dynamic = "force-dynamic";
 
 const messageSchema = z.object({
   message: z.string().trim().min(1).max(2_000),
+  context: noraContextRefSchema.nullish(),
 });
 
 export async function GET() {
@@ -83,10 +86,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "El mensaje no es válido." }, { status: 400 });
     }
 
+    let contextualMessage = payload.message;
+    if (payload.context) {
+      const scope = await requirePortfolioReadScope();
+      const context = await resolveAuthorizedNoraContext(payload.context, scope.portfolioOwnerId);
+      if (!context) {
+        return NextResponse.json({ error: "El contexto de Nora no existe o no está autorizado." }, { status: 400 });
+      }
+      contextualMessage = `${payload.message}\n\nContexto explícitamente aceptado: ${context.type} ${context.label}.`;
+    }
+
     const response = await buildAssistantReply({
       id: user.id,
       role: user.role === "ADMIN" ? "ADMIN" : "AGENT",
-    }, payload.message);
+    }, contextualMessage);
 
     console.log(
       JSON.stringify({

@@ -20,6 +20,7 @@ import { policyStatusOptions, policyTypeOptions } from "@/lib/domain-options";
 import { policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 import { buildTableHref, readAllowedTableParam, readTablePage, readTableSort } from "@/lib/table-query";
+import { LocalNavigation } from "@/components/layout/local-navigation";
 
 const PAGE_SIZE = 25;
 
@@ -155,6 +156,16 @@ export default async function PoliciesPage({
               </Button>
             </>
           }
+        />
+
+        <LocalNavigation
+          label="Vistas de pólizas"
+          items={[
+            { label: "Activas", href: "/policies?status=ACTIVE" },
+            { label: "Por vencer", href: "/operations?view=renewals" },
+            { label: "Cotizaciones", href: "/quotes" },
+            { label: "Archivadas", href: "/policies?status=ARCHIVED" },
+          ]}
         />
 
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">

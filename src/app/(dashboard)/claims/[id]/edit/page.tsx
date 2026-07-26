@@ -6,20 +6,33 @@ import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
 import { formatDateInput } from "@/lib/form-utils";
 import type { ClaimFormValues } from "@/lib/validations";
+import {
+  claimOperationalWhere,
+  clientOperationalWhere,
+  policyOperationalWhere,
+  requirePortfolioReadScope,
+} from "@/lib/portfolio-access";
 
 export default async function EditClaimPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const scope = await requirePortfolioReadScope();
   const db = getDb();
 
   const [claim, clients, policies, insurers] = await Promise.all([
-    db.claim.findUnique({ where: { id } }),
+    db.claim.findFirst({ where: { id, ...claimOperationalWhere(scope.portfolioOwnerId) } }),
     db.client.findMany({
-      where: { status: { not: "ARCHIVED" } },
+      where: {
+        ...clientOperationalWhere(scope.portfolioOwnerId),
+        status: { not: "ARCHIVED" },
+      },
       orderBy: { fullName: "asc" },
       select: { id: true, fullName: true },
     }),
     db.policy.findMany({
-      where: { status: { not: "CANCELLED" } },
+      where: {
+        ...policyOperationalWhere(scope.portfolioOwnerId),
+        status: { not: "CANCELLED" },
+      },
       orderBy: { policyNumber: "asc" },
       select: { id: true, policyNumber: true },
     }),

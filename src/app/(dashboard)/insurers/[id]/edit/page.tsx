@@ -5,8 +5,10 @@ import { createInsurerDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
 import type { InsurerFormValues } from "@/lib/validations";
+import { requireAdminOrRedirect } from "@/lib/auth";
 
 export default async function EditInsurerPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireAdminOrRedirect();
   const { id } = await params;
   const db = getDb();
 

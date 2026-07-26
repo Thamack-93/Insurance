@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import localFont from "next/font/local";
 import { cookies } from "next/headers";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -6,9 +7,24 @@ import { ThemeProvider } from "@/components/theme/theme-provider";
 import { THEME_COOKIE } from "@/lib/settings-runtime";
 import "./globals.css";
 
+// Next bundles the Geist webfonts used by its devtools. Referencing those
+// local assets keeps production builds deterministic and avoids a build-time
+// dependency on fonts.googleapis.com.
+const geistSans = localFont({
+  src: "../../node_modules/next/dist/next-devtools/server/font/geist-latin.woff2",
+  variable: "--font-geist-sans",
+  display: "swap",
+});
+
+const geistMono = localFont({
+  src: "../../node_modules/next/dist/next-devtools/server/font/geist-mono-latin.woff2",
+  variable: "--font-geist-mono",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "PG Insurance",
-  description: "Cockpit local para operar una cartera de seguros.",
+  title: "PolicyDesk",
+  description: "Centro operativo para una cartera de seguros.",
   icons: {
     icon: "/favicon.svg",
   },
@@ -25,7 +41,7 @@ export default async function RootLayout({
   return (
     <html
       lang="es"
-      className={`h-full antialiased ${initialTheme === "dark" ? "dark" : ""}`}
+      className={`h-full antialiased ${geistSans.variable} ${geistMono.variable} ${initialTheme === "dark" ? "dark" : ""}`}
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col font-sans">

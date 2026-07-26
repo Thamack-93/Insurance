@@ -13,7 +13,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     label: "Navegación",
     items: [
-      { keys: ["g", "d"], description: "Ir a Dashboard" },
+      { keys: ["g", "d"], description: "Ir a Insights" },
       { keys: ["g", "h"], description: "Ir a Hoy" },
       { keys: ["g", "c"], description: "Ir a Clientes" },
       { keys: ["g", "p"], description: "Ir a Pólizas" },

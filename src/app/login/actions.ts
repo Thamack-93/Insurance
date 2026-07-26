@@ -14,7 +14,7 @@ export type LoginResult = { ok: true } | { ok: false; error: string };
 export async function loginAction(_prev: LoginResult | null, formData: FormData): Promise<LoginResult> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
-  const redirectTo = String(formData.get("redirect") ?? "/dashboard") || "/dashboard";
+  const redirectTo = String(formData.get("redirect") ?? "/today") || "/today";
 
   if (!email || !password) {
     return { ok: false, error: "Captura tu correo y contraseña." };
@@ -91,6 +91,6 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
     userId: user.id,
   });
 
-  const safeRedirect = redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/dashboard";
+  const safeRedirect = redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/today";
   redirect(safeRedirect);
 }

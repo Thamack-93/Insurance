@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, BadgeCheck, CalendarClock, FileText, History, Pencil, ShieldCheck } from "lucide-react";
 import { DeleteClaimButton } from "@/components/claims/delete-claim-button";
 import { PageHeader } from "@/components/layout/page-header";
+import { NoraContextButton } from "@/components/assistant/nora-session-provider";
 import { AuditByline } from "@/components/audit/audit-byline";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
@@ -15,13 +16,16 @@ import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
+import { claimOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function ClaimDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const scope = await requirePortfolioReadScope();
+  const claimScope = claimOperationalWhere(scope.portfolioOwnerId);
   const db = getDb();
 
-  const claim = await db.claim.findUnique({
-    where: { id },
+  const claim = await db.claim.findFirst({
+    where: { id, ...claimScope },
     include: {
       client: true,
       policy: { include: { insurer: true } },
@@ -36,7 +40,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
 
   const [relatedClaims, activity] = await Promise.all([
     db.claim.findMany({
-      where: { policyId: claim.policyId, id: { not: id } },
+      where: { ...claimScope, policyId: claim.policyId, id: { not: id } },
       orderBy: { createdAt: "desc" },
       take: 5,
     }),
@@ -55,6 +59,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
           description={`${claim.claimType} · ${claim.client.fullName}`}
           actions={
             <div className="flex items-center gap-2">
+              <NoraContextButton context={{ type: "claim", id: claim.id }} />
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/claims/${claim.id}/edit`}>
                   <Pencil className="mr-2 size-4" />
@@ -63,7 +68,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
               </Button>
               <DeleteClaimButton id={claim.id} folio={claim.folio} />
               <Button asChild variant="outline" className="rounded-full bg-card/70">
-                <Link href="/claims">
+                <Link href="/operations?view=claims">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
                 </Link>

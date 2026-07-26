@@ -12,14 +12,17 @@ import { createClientDefaults } from "@/lib/form-defaults";
 import { createPolicyDefaults } from "@/lib/form-defaults";
 import { createReceiptDefaults } from "@/lib/form-defaults";
 import { createWorkItemDefaults } from "@/lib/form-defaults";
-import { clientSchema, policySchema, receiptSchema, workItemSchema } from "@/lib/validations";
+import { clientSchema, endorsementSchema, policySchema, receiptSchema, workItemSchema } from "@/lib/validations";
 import { errorResult, type MutationResult } from "@/lib/mutation-utils";
 import { createClient, updateClient } from "@/app/(dashboard)/clients/actions";
 import { createPolicy, updatePolicy } from "@/app/(dashboard)/policies/actions";
 import { createReceipt, updateReceipt } from "@/app/(dashboard)/receipts/actions";
 import { createPayment } from "@/app/(dashboard)/payments/actions";
 import { createWorkItem, updateWorkItem } from "@/app/(dashboard)/tasks/actions";
+import { createEndorsement, updateEndorsement } from "@/app/(dashboard)/policies/endorsements/actions";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
+import { policyOperationalWhere, receiptOperationalWhere } from "@/lib/portfolio-access";
+import { PAYMENT_CLOSE_TOLERANCE } from "@/lib/receipt-reconciliation";
 import type {
   AssistantActionProposal,
   AssistantMutationEntityType,
@@ -47,7 +50,7 @@ type AssistantActionDraftPayload = {
 
 const ACTION_DRAFT_TTL_MS = 30 * 60 * 1000;
 
-const ENTITY_TYPES: AssistantMutationEntityType[] = ["client", "policy", "receipt", "payment", "workItem"];
+const ENTITY_TYPES: AssistantMutationEntityType[] = ["client", "policy", "receipt", "payment", "workItem", "endorsement"];
 
 const RELATION_SEARCH_TYPE: Record<string, GlobalSearchResult["type"]> = {
   clientId: "client",
@@ -123,6 +126,18 @@ const FIELD_LABELS: Record<AssistantMutationEntityType, Record<string, string>> 
     priority: "Prioridad",
     startDate: "Inicio",
     dueDate: "Vencimiento",
+    notes: "Notas",
+  },
+  endorsement: {
+    endorsementNumber: "Número de endoso",
+    policyId: "Póliza",
+    status: "Estado",
+    startDate: "Inicio",
+    endDate: "Fin",
+    amount: "Importe",
+    currency: "Moneda",
+    reference: "Referencia",
+    concept: "Concepto",
     notes: "Notas",
   },
 };
@@ -219,6 +234,7 @@ function buildActionTitle(entityType: AssistantMutationEntityType, operation: As
     receipt: "recibo",
     payment: "pago",
     workItem: "pendiente",
+    endorsement: "endoso",
   };
   return `${operation === "create" ? "Crear" : "Actualizar"} ${labels[entityType]}`;
 }
@@ -230,6 +246,7 @@ function buildActionSummary(entityType: AssistantMutationEntityType, operation: 
     receipt: "recibo",
     payment: "pago",
     workItem: "pendiente",
+    endorsement: "endoso",
   };
   const label = targetLabel ? ` sobre ${targetLabel}` : "";
   return `${operation === "create" ? "Alta" : "Edición"} de ${labels[entityType]}${label}`;
@@ -427,14 +444,10 @@ async function createDraftRecord(
   });
 }
 
-async function getDraftOrThrow(draftId: string, userId: string, client: DbClient = getDb()) {
-  const draft = await client.assistantActionDraft.findFirst({
+async function findOwnedDraft(draftId: string, userId: string, client: DbClient = getDb()) {
+  return client.assistantActionDraft.findFirst({
     where: { id: draftId, userId },
   });
-  if (!draft) {
-    throw new Error("La propuesta ya no existe o no te pertenece.");
-  }
-  return draft;
 }
 
 async function buildClientDraft(plan: AssistantMutationPlan, user: AssistantUser) {
@@ -834,6 +847,26 @@ async function buildPaymentDraft(plan: AssistantMutationPlan, user: AssistantUse
     return null;
   }
 
+  const receipt = await db.receipt.findFirst({
+    where: { AND: [{ id: String(next.receiptId) }, receiptOperationalWhere(getSearchScope(user))] },
+    select: {
+      id: true,
+      receiptNumber: true,
+      status: true,
+      amount: true,
+      currency: true,
+      client: { select: { fullName: true } },
+      policy: { select: { policyNumber: true } },
+      payments: { where: { status: "POSTED" }, select: { id: true } },
+    },
+  });
+  if (!receipt || receipt.status === "CANCELLED" || receipt.payments.length > 0) return null;
+  const proposedAmount = Number(next.amount);
+  if (!Number.isFinite(proposedAmount) || proposedAmount <= 0) return null;
+  const amountDifference = Math.round(Math.abs(proposedAmount - Number(receipt.amount)) * 100) / 100;
+  if (amountDifference > PAYMENT_CLOSE_TOLERANCE) return null;
+  selectedReceiptLabel = selectedReceiptLabel ?? receipt.receiptNumber;
+
   const payload: AssistantActionDraftPayload = {
     title: plan.title || buildActionTitle("payment", "create"),
     summary: plan.summary || buildActionSummary("payment", "create", selectedReceiptLabel),
@@ -853,10 +886,83 @@ async function buildPaymentDraft(plan: AssistantMutationPlan, user: AssistantUse
     },
     changes: [
       { label: "Recibo", before: null, after: selectedReceiptLabel ?? String(next.receiptId) },
+      { label: "Cliente", before: null, after: receipt.client.fullName },
+      { label: "Póliza", before: null, after: receipt.policy.policyNumber },
+      { label: "Saldo pendiente", before: null, after: `${Number(receipt.amount).toFixed(2)} ${receipt.currency}` },
       { label: "Monto", before: null, after: String(next.amount) },
       { label: "Fecha de pago", before: null, after: String(next.paidDate) },
       { label: "Método de pago", before: null, after: String(next.paymentMethod) },
     ],
+  };
+  const draft = await createDraftRecord(user.id, payload, db);
+  await writeActivityLog({
+    entityType: "AssistantActionDraft",
+    entityId: draft.id,
+    action: "ASSISTANT_ACTION_DRAFT_CREATED",
+    newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel },
+    userId: user.id,
+    db,
+  });
+  return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
+}
+
+async function buildEndorsementDraft(plan: AssistantMutationPlan, user: AssistantUser) {
+  if (plan.operation !== "create") return null;
+  const db = getDb();
+  const fields = new Map(plan.fields.map((field) => [field.field, field.value]));
+  const next: Record<string, unknown> = {
+    endorsementNumber: "",
+    policyId: "",
+    status: "ACTIVE",
+    startDate: "",
+    endDate: "",
+    amount: "",
+    currency: "",
+    reference: "",
+    concept: "",
+    notes: "",
+  };
+  applyPlanFields(next, plan.fields);
+  let policyLabel: string | null = null;
+
+  for (const relation of plan.relations) {
+    const resolved = await resolveRelation(user, relation);
+    if (!resolved || "error" in resolved) return null;
+    next[resolved.field] = resolved.id;
+    if (resolved.field === "policyId") policyLabel = resolved.label;
+  }
+
+  if (!next.policyId) {
+    const targetQuery = plan.targetQuery ?? fields.get("policyId") ?? "";
+    if (!targetQuery) return null;
+    const candidates = (await globalSearch(targetQuery, getSearchScope(user))).filter((result) => result.type === "policy");
+    const chosen = exactMatch(candidates, targetQuery, "policy") ?? (candidates.length === 1 ? candidates[0] : null);
+    if (!chosen) return null;
+    next.policyId = chosen.id;
+    policyLabel = candidateLabel(chosen);
+  }
+
+  const policy = await db.policy.findFirst({
+    where: { AND: [{ id: String(next.policyId) }, policyOperationalWhere(getSearchScope(user))] },
+    select: { id: true, policyNumber: true, currency: true, client: { select: { fullName: true } } },
+  });
+  if (!policy) return null;
+  next.currency = next.currency || policy.currency;
+  const parsed = endorsementSchema.safeParse(next);
+  if (!parsed.success) return null;
+  policyLabel = policyLabel ?? `${policy.policyNumber} · ${policy.client.fullName}`;
+
+  const payload: AssistantActionDraftPayload = {
+    title: plan.title || buildActionTitle("endorsement", "create"),
+    summary: plan.summary || buildActionSummary("endorsement", "create", policyLabel),
+    reply: plan.reply,
+    entityType: "endorsement",
+    operation: "create",
+    targetId: policy.id,
+    targetLabel: policyLabel,
+    targetUpdatedAt: null,
+    formValues: parsed.data,
+    changes: buildChangeList("endorsement", null, parsed.data, {}, { policyId: policyLabel }),
   };
   const draft = await createDraftRecord(user.id, payload, db);
   await writeActivityLog({
@@ -1024,6 +1130,8 @@ export async function buildAssistantActionProposalFromPlan(plan: AssistantMutati
         return buildPaymentDraft(normalizedPlan, user);
       case "workItem":
         return buildWorkItemDraft(normalizedPlan, user);
+      case "endorsement":
+        return buildEndorsementDraft(normalizedPlan, user);
     }
     return null;
   } catch (error) {
@@ -1052,6 +1160,10 @@ async function executeDraftPayload(payload: AssistantActionDraftPayload): Promis
       return payload.operation === "create"
         ? createWorkItem(payload.formValues as Parameters<typeof createWorkItem>[0])
         : updateWorkItem(payload.targetId ?? "", payload.formValues as Parameters<typeof updateWorkItem>[1]);
+    case "endorsement":
+      return payload.operation === "create"
+        ? createEndorsement(payload.formValues as Parameters<typeof createEndorsement>[0])
+        : updateEndorsement(payload.targetId ?? "", payload.formValues as Parameters<typeof updateEndorsement>[1]);
   }
   return errorResult("La acción solicitada no está soportada.");
 }
@@ -1063,10 +1175,14 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
     return errorResult("No tienes permiso para confirmar esta propuesta.");
   }
 
-  const draft = await getDraftOrThrow(draftId, userId, db);
+  const draft = await findOwnedDraft(draftId, userId, db);
+  if (!draft) {
+    return errorResult("La propuesta ya no existe o no está disponible.");
+  }
+  const ownedDraft = draft;
   async function markDraftFailed(message: string) {
     await db.assistantActionDraft.update({
-      where: { id: draft.id },
+      where: { id: ownedDraft.id },
       data: { status: "FAILED" },
     });
     return errorResult(message);

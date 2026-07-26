@@ -36,7 +36,7 @@ import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
 import { getLatestMaintenanceRun } from "@/lib/vigency-maintenance";
 import { getUpcomingRenewals } from "@/lib/renewals";
-import { requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { requireAdminOrRedirect } from "@/lib/auth";
 import { RunVigencyAuditButton } from "@/components/data-quality/run-vigency-audit-button";
 import { RunPaymentAuditButton } from "@/components/data-quality/run-payment-audit-button";
 import { ReviewActionButtons } from "@/components/data-quality/review-action-buttons";
@@ -107,6 +107,7 @@ export default async function DataQualityPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  await requireAdminOrRedirect();
   const params = (await searchParams) ?? {};
   const initialTab =
     params.tab === "salud" || params.tab === "vigencias" || params.tab === "pagos" || params.tab === "renovaciones" || params.tab === "ledger"
@@ -117,7 +118,7 @@ export default async function DataQualityPage({
   const { sortKey, direction } = readTableSort(params);
   const previewBatchId = typeof params.ledgerBatch === "string" ? params.ledgerBatch : null;
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
+  const portfolioOwnerId = undefined;
   const [
     clientScores,
     policyScores,
@@ -129,15 +130,15 @@ export default async function DataQualityPage({
     ledgerReviewIssues,
     renewalFollowUps,
   ] = await Promise.all([
-    getClientDataQualityScores(scope.portfolioOwnerId),
-    getPolicyDataQualityScores(scope.portfolioOwnerId),
-    getOperationalDataHealthSummary(scope.portfolioOwnerId),
+    getClientDataQualityScores(portfolioOwnerId),
+    getPolicyDataQualityScores(portfolioOwnerId),
+    getOperationalDataHealthSummary(portfolioOwnerId),
     getLatestMaintenanceRun("POLICY_VIGENCY_AUDIT"),
     getLatestMaintenanceRun("PAYMENT_RECONCILIATION_AUDIT"),
-    getReceiptReviewIssues(scope.portfolioOwnerId),
-    getRenewalReviewSuggestions(scope.portfolioOwnerId),
+    getReceiptReviewIssues(portfolioOwnerId),
+    getRenewalReviewSuggestions(portfolioOwnerId),
     getLedgerReviewIssues(),
-    getUpcomingRenewals(30, scope.portfolioOwnerId),
+    getUpcomingRenewals(30, portfolioOwnerId),
   ]);
   const previewBatch = previewBatchId
       ? await db.ledgerImportBatch.findUnique({
@@ -430,7 +431,7 @@ export default async function DataQualityPage({
   const pagedOpenLedgerIssues = sortedOpenLedgerIssues.slice(ledgerStart, ledgerStart + DEFAULT_PAGE_SIZE);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-stone-50/70 px-4 py-6 md:px-6 lg:px-8">
+    <main className="min-h-screen bg-background px-4 py-6 md:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageRefreshTicker />
         <PageHeader
