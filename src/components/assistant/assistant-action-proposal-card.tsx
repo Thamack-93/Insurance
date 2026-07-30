@@ -18,7 +18,7 @@ const ENTITY_LABELS: Record<AssistantActionProposal["entityType"], string> = {
   endorsement: "Endoso",
 };
 
-export function AssistantActionProposalCard({ proposal }: { proposal: AssistantActionProposal }) {
+export function AssistantActionProposalCard({ proposal, onConfirmed }: { proposal: AssistantActionProposal; onConfirmed?: () => void }) {
   const router = useRouter();
   const [status, setStatus] = useState<"pending" | "confirming" | "confirmed">("pending");
 
@@ -42,6 +42,7 @@ export function AssistantActionProposalCard({ proposal }: { proposal: AssistantA
 
       toast.success(payload.result.message || "Cambios aplicados.");
       setStatus("confirmed");
+      onConfirmed?.();
       router.refresh();
       if (payload.result.redirectTo) {
         router.push(payload.result.redirectTo);

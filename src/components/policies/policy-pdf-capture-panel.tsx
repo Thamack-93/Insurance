@@ -27,6 +27,7 @@ import {
 } from "@/lib/policy-pdf-capture.shared";
 import { extractPdfTextFromFile } from "@/lib/pdf-text-extraction.browser";
 import type { PolicyCaptureSearchItem, PolicyCaptureSearchKind } from "@/lib/policy-capture-search";
+import { consumePolicyCaptureHandoff, savePolicyCaptureHandoff, clearPolicyCaptureHandoff } from "@/lib/nora-browser-session";
 
 type PreviewResponse = {
   success?: boolean;
@@ -58,8 +59,6 @@ type InlineClientResponse = {
 };
 
 const MAX_PDF_BYTES = 10 * 1024 * 1024;
-const SESSION_KEY = "policydesk.policyPdfCapture.v2";
-
 function createEmptyDraft(): PolicyPdfCaptureDraft {
   return {
     policyNumber: "",
@@ -110,15 +109,6 @@ function createEmptyConfidence(): PolicyPdfCaptureFieldConfidence {
   };
 }
 
-function parseJson<T>(value: string | null): T | null {
-  if (!value) return null;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return null;
-  }
-}
-
 async function readJsonResponse<T>(response: Response) {
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {
@@ -150,7 +140,7 @@ function fieldConfidenceBadge(confidence: "high" | "medium" | "low") {
   );
 }
 
-export function PolicyPdfCapturePanel() {
+export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
   const router = useRouter();
   const [isConfirming, setIsConfirming] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -185,42 +175,33 @@ export function PolicyPdfCapturePanel() {
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
-      const stored = parseJson<{
-        draft: PolicyPdfCaptureDraft;
-        fieldConfidence: PolicyPdfCaptureFieldConfidence;
-        selectedClientId: string;
-        selectedClientLabel: string;
-        selectedInsurerId: string;
-        selectedInsurerLabel: string;
-        selectedSourcePolicyId: string;
-        selectedSourcePolicyLabel: string;
-        showInlineClient: boolean;
-        receiptPlan: PolicyPdfCaptureReceiptPlanItem[];
-      }>(typeof window === "undefined" ? null : window.sessionStorage.getItem(SESSION_KEY));
+      const stored = consumePolicyCaptureHandoff(userId);
+      const payload = stored?.payload;
 
-      if (stored?.draft) {
-        setDraft(stored.draft);
+      if (payload?.draft) {
+        const restoredDraft = payload.draft as unknown as PolicyPdfCaptureDraft;
+        setDraft(restoredDraft);
         setReceiptPlanOverrides(
-          stored.receiptPlan?.length ? stored.receiptPlan : buildPolicyPdfCaptureReceiptPlan(stored.draft),
+          payload.receiptPlan?.length ? payload.receiptPlan as PolicyPdfCaptureReceiptPlanItem[] : buildPolicyPdfCaptureReceiptPlan(restoredDraft),
         );
-        setFieldConfidence(stored.fieldConfidence ?? createEmptyConfidence());
-        setSelectedClientId(stored.selectedClientId ?? "");
-        setSelectedClientLabel(stored.selectedClientLabel ?? stored.draft.clientName ?? "");
-        setSelectedInsurerId(stored.selectedInsurerId ?? "");
-        setSelectedInsurerLabel(stored.selectedInsurerLabel ?? stored.draft.insurerName ?? "");
-        setSelectedSourcePolicyId(stored.selectedSourcePolicyId ?? "");
-        setSelectedSourcePolicyLabel(stored.selectedSourcePolicyLabel ?? stored.draft.sourcePolicyNumber ?? "");
-        setShowInlineClient(Boolean(stored.showInlineClient));
+        setFieldConfidence((payload.fieldConfidence as PolicyPdfCaptureFieldConfidence | undefined) ?? createEmptyConfidence());
+        setSelectedClientId(payload.selectedClientId ?? "");
+        setSelectedClientLabel(payload.selectedClientLabel ?? restoredDraft.clientName ?? "");
+        setSelectedInsurerId(payload.selectedInsurerId ?? "");
+        setSelectedInsurerLabel(payload.selectedInsurerLabel ?? restoredDraft.insurerName ?? "");
+        setSelectedSourcePolicyId(payload.selectedSourcePolicyId ?? "");
+        setSelectedSourcePolicyLabel(payload.selectedSourcePolicyLabel ?? restoredDraft.sourcePolicyNumber ?? "");
+        setShowInlineClient(Boolean(payload.showInlineClient));
       }
       setHasHydrated(true);
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
-    if (!hasHydrated || typeof window === "undefined") return;
+    if (!hasHydrated) return;
     const hasContent =
       Boolean(draft?.policyNumber) ||
       Boolean(draft?.clientName) ||
@@ -232,13 +213,11 @@ export function PolicyPdfCapturePanel() {
       receiptPlan.length > 0;
 
     if (!hasContent || !draft) {
-      window.sessionStorage.removeItem(SESSION_KEY);
+      clearPolicyCaptureHandoff(userId);
       return;
     }
 
-    window.sessionStorage.setItem(
-      SESSION_KEY,
-      JSON.stringify({
+    savePolicyCaptureHandoff(userId, {
         draft,
         fieldConfidence,
         selectedClientId,
@@ -249,8 +228,7 @@ export function PolicyPdfCapturePanel() {
         selectedSourcePolicyLabel,
         showInlineClient,
         receiptPlan,
-      }),
-    );
+    });
   }, [
     draft,
     fieldConfidence,
@@ -263,6 +241,7 @@ export function PolicyPdfCapturePanel() {
     selectedSourcePolicyLabel,
     showInlineClient,
     receiptPlan,
+    userId,
   ]);
 
   useEffect(() => {
@@ -568,7 +547,7 @@ export function PolicyPdfCapturePanel() {
       }
 
       toast.success(result.message || "Póliza capturada.");
-      window.sessionStorage.removeItem(SESSION_KEY);
+      clearPolicyCaptureHandoff(userId);
       router.push(result.redirectTo);
       router.refresh();
     } catch (confirmError) {
@@ -595,7 +574,7 @@ export function PolicyPdfCapturePanel() {
     setReceiptPlanOverrides([]);
     setError(null);
     resetLookupState();
-    window.sessionStorage.removeItem(SESSION_KEY);
+    clearPolicyCaptureHandoff(userId);
   }
 
   const lookupGroups = (() => {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -8,18 +8,22 @@ vi.mock("@/lib/dashboard-queries", () => {
       {
         id: "receipt-today-1",
         client: { fullName: "Cliente Hoy" },
-        policy: { policyNumber: "POL-100" },
+        policy: { id: "policy-today-1", policyNumber: "POL-100" },
         receiptNumber: "REC-100",
         insurer: { name: "Aseguradora Uno" },
+        dueDate: new Date("2026-07-26T00:00:00.000Z"),
+        amount: 1200,
       },
     ],
     overduePayments: [
       {
         id: "receipt-overdue-1",
         client: { fullName: "Cliente Vencido" },
-        policy: { policyNumber: "POL-200" },
+        policy: { id: "policy-overdue-1", policyNumber: "POL-200" },
         receiptNumber: "REC-200",
         insurer: { name: "Aseguradora Dos" },
+        dueDate: new Date("2026-07-20T00:00:00.000Z"),
+        amount: 2300,
       },
     ],
     paymentsDue7: [],
@@ -28,6 +32,9 @@ vi.mock("@/lib/dashboard-queries", () => {
         id: "policy-renewal-1",
         policyNumber: "POL-300",
         client: { fullName: "Cliente Renovación" },
+        insurer: { name: "Aseguradora Renovación" },
+        premiumAmount: 4500,
+        currency: "MXN",
         endDate: new Date("2026-07-27T00:00:00.000Z"),
       },
     ],
@@ -36,14 +43,18 @@ vi.mock("@/lib/dashboard-queries", () => {
         id: "task-1",
         title: "Llamar a cliente",
         folio: "T-1",
-        policy: { policyNumber: "POL-400" },
+        client: { fullName: "Cliente Pendiente" },
+        policy: { id: "policy-task-1", policyNumber: "POL-400", endDate: new Date("2026-07-30T00:00:00.000Z") },
+        insurer: { name: "Aseguradora Pendiente" },
+        dueDate: new Date("2026-07-25T00:00:00.000Z"),
+        priority: "HIGH",
       },
     ],
     commissionsToReview: [
       {
         id: "commission-1",
         client: { fullName: "Cliente Comisión" },
-        policy: { policyNumber: "POL-500" },
+        policy: { id: "policy-commission-1", policyNumber: "POL-500" },
         insurer: { name: "Aseguradora Tres" },
       },
     ],
@@ -204,29 +215,71 @@ vi.mock("@/lib/vigency-maintenance", () => ({
 }));
 
 import { buildAssistantReply } from "@/lib/assistant-local";
+import { getTodayData } from "@/lib/dashboard-queries";
 
 describe("assistant local replies", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-26T12:00:00-06:00"));
     vi.clearAllMocks();
   });
 
-  it("returns the today summary for hoy", async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns the today summary and details as plain text", async () => {
     const reply = await buildAssistantReply({ id: "user-1", role: "ADMIN" }, "hoy");
 
     expect(reply.reply).toContain("Hoy tienes 1 recibo vencido");
     expect(reply.reply).toContain("1 que vencen hoy");
-    expect(reply.sections[0]?.title).toBe("Cobros de hoy");
-    expect(reply.sections[0]?.items[0]?.title).toContain("Cliente Vencido");
-    expect(reply.quickPrompts.map((prompt) => prompt.prompt)).toContain("hoy");
+    expect(reply.reply).toContain("Cliente Vencido");
+    expect(reply.reply).toContain("[Ver recibo](/receipts/receipt-overdue-1)");
+    expect(reply.reply).toContain("Cliente Renovación");
+    expect(reply.sections).toEqual([]);
+    expect(reply.quickPrompts).toEqual([]);
+  });
+
+  it("returns operational receipt details as plain text for overdue queries", async () => {
+    const reply = await buildAssistantReply({ id: "user-1", role: "ADMIN" }, "recibos vencidos");
+
+    expect(reply.reply).toContain("1 recibo vencido");
+    expect(reply.reply).toContain("Cliente Vencido");
+    expect(reply.reply).toContain("REC-200");
+    expect(reply.reply).toContain("2,300");
+    expect(reply.reply).toContain("/receipts/receipt-overdue-1");
+    expect(reply.sections).toEqual([]);
+    expect(reply.quickPrompts).toEqual([]);
+  });
+
+  it("uses capped wording when a local list reaches its query limit", async () => {
+    const current = await getTodayData();
+    const first = current.overduePayments[0];
+    vi.mocked(getTodayData).mockResolvedValueOnce({
+      ...current,
+      overduePayments: [
+        ...current.overduePayments,
+        ...Array.from({ length: 7 }, (_, index) => ({ ...first, id: `receipt-overdue-${index + 2}` })),
+      ],
+    });
+
+    const reply = await buildAssistantReply({ id: "user-1", role: "ADMIN" }, "hoy");
+
+    expect(reply.reply).toContain("8 o más recibos vencidos");
+    expect(reply.reply).toContain("Muestro 3 de al menos 8");
   });
 
   it("returns the requested renewal window for renovaciones 10 dias", async () => {
     const reply = await buildAssistantReply({ id: "user-1", role: "ADMIN" }, "dime mis renovaciones a 10 dias");
 
     expect(reply.reply).toContain("10 días");
-    expect(reply.sections[0]?.title).toBe("Renovaciones en 10 días");
-    expect(reply.sections[0]?.items[0]?.title).toBe("POL-300");
-    expect(reply.sections[0]?.items[0]?.subtitle).toContain("Cliente Renovación");
+    expect(reply.reply).toContain("POL-300");
+    expect(reply.reply).toContain("Cliente Renovación");
+    expect(reply.reply).toContain("Aseguradora Renovación");
+    expect(reply.reply).toContain("Prima");
+    expect(reply.reply).toContain("/policies/policy-renewal-1");
+    expect(reply.sections).toEqual([]);
+    expect(reply.quickPrompts).toEqual([]);
   });
 
   it("starts a policy change flow instead of a generic search", async () => {
@@ -246,13 +299,28 @@ describe("assistant local replies", () => {
     );
 
     expect(reply.reply).toContain("fechas o vigencias");
-    expect(reply.sections[0]?.title).toBe("Pólizas con fechas o vigencias a revisar");
-    expect(reply.sections[0]?.items[0]?.title).toBe("940454625");
-    expect(reply.sections[1]?.title).toBe("Recibos con conciliación pendiente");
-    expect(reply.sections[1]?.items[0]?.title).toBe("REC-001");
-    expect(reply.sections[2]?.title).toBe("Renovaciones relacionadas");
-    expect(reply.sections[2]?.items[0]?.title).toBe("940454625");
-    expect(reply.sections[3]?.title).toBe("Mantenimiento de vigencia");
-    expect(reply.quickPrompts.map((prompt) => prompt.prompt)).toContain("pólizas con fechas inconsistentes");
+    expect(reply.reply).toContain("Pólizas con fechas o vigencias a revisar");
+    expect(reply.reply).toContain("[940454625](/policies/policy-1)");
+    expect(reply.reply).toContain("REC-001");
+    expect(reply.reply).toContain("Renovaciones relacionadas");
+    expect(reply.reply).toContain("Mantenimiento de vigencia");
+    expect(reply.sections).toEqual([]);
+    expect(reply.quickPrompts).toEqual([]);
+  });
+
+  it("keeps mutation preparation structured while local reads stay text-only", async () => {
+    const reply = await buildAssistantReply({ id: "user-1", role: "ADMIN" }, "cambiar la fecha de vencimiento de la poliza 940454625");
+
+    expect(reply.sections).toHaveLength(1);
+    expect(reply.sections[0]?.title).toBe("Cambiar vencimiento");
+    expect(reply.quickPrompts.length).toBeGreaterThan(0);
+  });
+
+  it("formats search results as inline links without result cards", async () => {
+    const reply = await buildAssistantReply({ id: "user-1", role: "ADMIN" }, "buscar póliza 940454625");
+
+    expect(reply.reply).toContain("[940454625](/policies/policy-1)");
+    expect(reply.sections).toEqual([]);
+    expect(reply.quickPrompts).toEqual([]);
   });
 });

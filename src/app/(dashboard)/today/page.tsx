@@ -48,7 +48,7 @@ export default async function TodayPage({ searchParams }: { searchParams?: Promi
         eyebrow="Hoy"
         title={model.greeting}
         description={model.summary}
-        metadata={<time dateTime={new Date().toISOString()}>{model.dateLabel}</time>}
+        metadata={<time dateTime={model.dateTime}>{model.dateLabel}</time>}
         actions={
           <>
             <Link href="/receipts?tab=cobrar" className={cn(buttonVariants({ variant: "outline" }), "min-h-11") }>

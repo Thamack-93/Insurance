@@ -1,7 +1,8 @@
 # Assisted Operations Layer
 
-PolicyDesk has an assisted-operations layer on top of the live Postgres CRM. Chat state stays
-in memory in the browser and is never written to localStorage, sessionStorage or the database.
+PolicyDesk has an assisted-operations layer on top of the live Postgres CRM. Nora keeps a bounded,
+versioned session handoff in `sessionStorage`, scoped to the authenticated user and browser tab.
+It expires automatically and is removed on logout; it is never written to the database.
 
 ## Current Status
 
@@ -92,7 +93,13 @@ in memory in the browser and is never written to localStorage, sessionStorage or
 
 ## Deliberate boundaries
 
-- No local conversation history is stored.
+- Nora does not keep a durable conversation history. The browser may retain up to 20 sanitized
+  text messages for 30 minutes to preserve a panel-to-workspace handoff. Diagnostic traces,
+  provider payloads, auth data, PDF bytes, report rows and pending mutation drafts are excluded.
+- Policy capture handoffs are user-scoped, expire after 15 minutes and are consumed once when the
+  capture screen opens. Logout clears both current and legacy browser keys.
+- `NEXT_PUBLIC_NORA_SESSION_PERSISTENCE=false` is an emergency rollback switch. Nora falls back to
+  in-memory state for the current tab without changing database or provider behavior.
 - Telegram does not interpret freeform AI commands.
 - AI never directly writes a client, policy, receipt, payment or task without the existing
   confirmation flow.

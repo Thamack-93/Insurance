@@ -336,4 +336,56 @@ describe("assistant router", () => {
     expect(response.aiFallbackNotice).toContain("timeout");
     expect(response.aiDiagnostic?.code).toBe("timeout");
   });
+
+  it("keeps an explicitly informational request free of mutation actions", async () => {
+    mocks.evaluateAssistantInput.mockReturnValue({
+      allowed: true,
+      normalized: "revisa los recibos vencidos y no modifiques datos",
+      reason: "system",
+    });
+    mocks.buildLocalAssistantReply.mockResolvedValue(localReply);
+    mocks.buildAssistantAiReply.mockResolvedValue({
+      ok: true,
+      value: {
+        runId: "run-read-only",
+        tier: "minimax",
+        reply: "Encontré los recibos que requieren revisión.",
+        sections: localReply.sections,
+        quickPrompts: [],
+        mutation: {
+          entityType: "policy",
+          operation: "update",
+          targetQuery: "940454625",
+          title: "Cambiar vencimiento",
+          summary: "Propuesta que no debe mostrarse.",
+          reply: "Confirmar cambio",
+          fields: [],
+          relations: [],
+          missingFields: [],
+        },
+        resolvedModel: "minimax/minimax-m3",
+        usage: aiTrace[0].usage,
+        totalUsage: aiTrace[0].usage,
+        finishReason: "stop",
+        providerMetadata: {},
+        durationMs: 420,
+        trace: aiTrace,
+      },
+    });
+    mocks.getAssistantAiConnectionStatus.mockReturnValue({
+      available: true,
+      authMode: "api-key",
+      model: "minimax/minimax-m3",
+      fallbackModels: ["openai/gpt-5.4-mini"],
+    });
+    mocks.getAssistantAiModelLabel.mockImplementation((model: string) => model);
+    mocks.getAssistantAiOperationLabel.mockReturnValue("la respuesta");
+    mocks.recordAssistantReportSignal.mockResolvedValue({ id: "report-read-only" });
+
+    const response = await buildAssistantReply(user, "Revisa los recibos vencidos y no modifiques datos");
+
+    expect(response.actionProposal).toBeNull();
+    expect(response.sections).toEqual([]);
+    expect(mocks.buildAssistantActionProposalFromPlan).not.toHaveBeenCalled();
+  });
 });

@@ -61,6 +61,9 @@ export type AssistantAiUsageSnapshot = {
   totalTokens: number | null;
   cachedInputTokens: number | null;
   estimatedCostUsd: number | null;
+  billedCostUsd?: number | null;
+  costSource?: "gateway" | "estimated" | "unknown";
+  generationId?: string | null;
 };
 
 export type AssistantAiAttempt = {
@@ -71,6 +74,9 @@ export type AssistantAiAttempt = {
   statusCode?: number | null;
   finishReason?: string | null;
   responsePreview?: string | null;
+  usage?: AssistantAiUsageSnapshot | null;
+  totalUsage?: AssistantAiUsageSnapshot | null;
+  providerMetadata?: unknown;
 };
 
 export type AssistantAiTraceEntry = {

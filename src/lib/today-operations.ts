@@ -35,6 +35,7 @@ export type FocusItemModel = {
 export type TodayOperationsModel = {
   greeting: string;
   dateLabel: string;
+  dateTime: string;
   summary: string;
   summaryMetrics: OperationalMetricModel[];
   focusItems: FocusItemModel[];
@@ -144,6 +145,7 @@ export function buildTodayOperationsModel(
 
   return {
     greeting: getTimeGreeting(businessHour, options.name),
+    dateTime: now.toISOString(),
     dateLabel: new Intl.DateTimeFormat("es-MX", {
       dateStyle: "full",
       timeZone: "Etc/GMT+6",

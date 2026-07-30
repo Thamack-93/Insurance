@@ -5,6 +5,7 @@ import { formatDate } from "@/lib/dates";
 import { getTodayData } from "@/lib/dashboard-queries";
 import { daysUntil } from "@/lib/dates";
 import { getPolicyDataQualityScores, getReceiptReviewIssues, getRenewalReviewSuggestions } from "@/lib/data-quality";
+import { formatCurrency } from "@/lib/money";
 import { detectRisks } from "@/lib/risk-engine";
 import { getLatestMaintenanceRun } from "@/lib/vigency-maintenance";
 import { globalSearch, type GlobalSearchResult } from "@/lib/search";
@@ -44,20 +45,84 @@ function buildQuickPrompts(): AssistantPrompt[] {
   ];
 }
 
-function buildConsistencyQuickPrompts(): AssistantPrompt[] {
-  return [
-    { label: "Fechas y vigencias", prompt: "pólizas con fechas inconsistentes" },
-    { label: "Recibos y conciliación", prompt: "recibos con diferencia" },
-    { label: "Renovaciones relacionadas", prompt: "renovaciones relacionadas" },
-    { label: "Ver riesgos", prompt: "riesgos" },
-  ];
+const INFORMATIONAL_QUICK_PROMPTS: AssistantPrompt[] = [];
+
+function inlineLink(label: string, href: string) {
+  return `[${label}](${href})`;
 }
 
-function buildTodaySectionItems<T extends { id: string }>(
-  rows: T[],
-  mapRow: (row: T) => AssistantSection["items"][number] | null,
-) {
-  return rows.slice(0, 5).map(mapRow).filter(Boolean) as AssistantSection["items"];
+function formatCount(total: number, cap?: number) {
+  return cap && total >= cap ? `${cap} o más` : String(total);
+}
+
+function formatMoreCount(total: number, shown: number, cap?: number) {
+  if (cap && total >= cap) return `\nMuestro ${shown} de al menos ${cap}.`;
+  const remaining = total - shown;
+  return remaining > 0 ? `\nY ${remaining} más.` : "";
+}
+
+function formatReceiptDueState(dueDate: Date, state: "overdue" | "today" | "upcoming") {
+  const days = daysUntil(dueDate);
+  if (state === "overdue") {
+    return `Venció el ${formatDate(dueDate)}${days < 0 ? ` (hace ${Math.abs(days)} días)` : ""}`;
+  }
+  if (state === "today") return "Vence hoy";
+  return `Vence el ${formatDate(dueDate)}${days > 0 ? ` (en ${days} días)` : ""}`;
+}
+
+function formatRenewalText(policy: {
+  id: string;
+  policyNumber: string;
+  client: { fullName: string };
+  insurer?: { name: string };
+  premiumAmount?: unknown;
+  currency?: string;
+  endDate: Date;
+}) {
+  const days = daysUntil(policy.endDate);
+  const relative = days === 0 ? "hoy" : days > 0 ? `en ${days} días` : `hace ${Math.abs(days)} días`;
+  const premium = policy.premiumAmount != null
+    ? ` · Prima: ${formatCurrency(policy.premiumAmount, policy.currency ?? "MXN")}`
+    : "";
+  const insurer = policy.insurer?.name ? ` · ${policy.insurer.name}` : "";
+  return `- ${inlineLink(`Póliza ${policy.policyNumber}`, `/policies/${policy.id}`)} — ${policy.client.fullName}${insurer}${premium} · Vence el ${formatDate(policy.endDate)} (${relative}).`;
+}
+
+function formatReceiptText(receipt: {
+  id: string;
+  receiptNumber: string;
+  client: { fullName: string };
+  policy: { id?: string; policyNumber: string };
+  insurer?: { name: string };
+  dueDate: Date;
+  amount: unknown;
+  currency?: string;
+}, state: "overdue" | "today" | "upcoming") {
+  const insurer = receipt.insurer?.name ? ` · ${receipt.insurer.name}` : "";
+  const policy = receipt.policy.id
+    ? inlineLink(`Póliza ${receipt.policy.policyNumber}`, `/policies/${receipt.policy.id}`)
+    : `Póliza ${receipt.policy.policyNumber}`;
+  return `- ${receipt.client.fullName} — ${policy} · Recibo ${receipt.receiptNumber}${insurer} · ${formatCurrency(receipt.amount, receipt.currency ?? "MXN")} · ${formatReceiptDueState(receipt.dueDate, state)} [Ver recibo](/receipts/${receipt.id}).`;
+}
+
+function formatPlainGroup(title: string, total: number, lines: string[], limit: number, cap?: number) {
+  if (total === 0) return `${title}: ninguno.`;
+  const shown = Math.min(total, limit);
+  return `${title} (${formatCount(total, cap)}):\n${lines.slice(0, limit).join("\n")}${formatMoreCount(total, shown, cap)}`;
+}
+
+function formatSectionItemsAsText(items: AssistantSection["items"], total: number, title: string, limit: number) {
+  const lines = items.map((item) => `- ${inlineLink(item.title, item.href)} — ${item.subtitle}${item.meta ? ` · ${item.meta}` : ""}.`);
+  return formatPlainGroup(title, total, lines, limit);
+}
+
+function informationalReply(reply: string, todayMetrics?: AssistantReply["todayMetrics"]): AssistantReply {
+  return {
+    reply,
+    sections: [],
+    quickPrompts: INFORMATIONAL_QUICK_PROMPTS,
+    ...(todayMetrics ? { todayMetrics } : {}),
+  };
 }
 
 function extractPolicyNumber(normalized: string) {
@@ -75,45 +140,28 @@ function extractRenewalWindowDays(normalized: string) {
   return null;
 }
 
-function buildRenewalSectionItems(days: number, todayData: Awaited<ReturnType<typeof getTodayData>>) {
+function getRenewalsInWindow(days: number, todayData: Awaited<ReturnType<typeof getTodayData>>) {
   return todayData.urgentRenewals
     .filter((policy) => {
       const distance = daysUntil(policy.endDate);
       return distance >= 0 && distance <= days;
     })
-    .sort((a, b) => daysUntil(a.endDate) - daysUntil(b.endDate))
-    .slice(0, 6)
-    .map((policy) => ({
-      title: policy.policyNumber,
-      subtitle: `${policy.client.fullName} · Vence ${policy.endDate.toISOString().slice(0, 10)}`,
-      href: `/policies/${policy.id}`,
-      meta: `${daysUntil(policy.endDate)} días`,
-    }));
+    .sort((a, b) => daysUntil(a.endDate) - daysUntil(b.endDate) || a.id.localeCompare(b.id));
 }
 
 async function buildRenewalsReply(days: number): Promise<AssistantReply> {
   const todayData = await getTodayData();
-  const renewals = buildRenewalSectionItems(days, todayData);
+  const renewals = getRenewalsInWindow(days, todayData);
   const dueSoonCount = renewals.length;
   const overdueCount = todayData.urgentRenewals.filter((policy) => daysUntil(policy.endDate) < 0).length;
-  const reply =
+  const summary =
     days === 30
       ? `Tienes ${dueSoonCount} renovación${dueSoonCount === 1 ? "" : "es"} dentro de los próximos 30 días${overdueCount > 0 ? ` y ${overdueCount} vencida${overdueCount === 1 ? "" : "s"}` : ""}.`
       : `Tienes ${dueSoonCount} renovación${dueSoonCount === 1 ? "" : "es"} dentro de los próximos ${days} días${overdueCount > 0 ? ` y ${overdueCount} vencida${overdueCount === 1 ? "" : "s"}` : ""}.`;
-
-  return {
-    reply,
-    sections: [
-      makeSection(
-        `Renovaciones en ${days} días`,
-        "Pólizas que vencen dentro del periodo solicitado.",
-        renewals.length > 0
-          ? renewals
-          : [{ title: "Sin renovaciones en este rango", subtitle: "Prueba con 30 días o abre Renovaciones.", href: "/renewals", meta: "ok" }],
-      ),
-    ],
-    quickPrompts: buildQuickPrompts(),
-  };
+  const detail = renewals.length > 0
+    ? `\n\n${renewals.slice(0, 6).map(formatRenewalText).join("\n")}${formatMoreCount(renewals.length, 6)}`
+    : "\n\nNo hay pólizas que venzan dentro de este periodo.";
+  return informationalReply(`${summary}${detail}`);
 }
 
 function normalizeMaintenanceSummary(summaryJson: string | null) {
@@ -232,43 +280,29 @@ async function buildConsistencyAuditReply(user: AssistantUser): Promise<Assistan
     ? `Última auditoría de vigencia: ${maintenanceSummary.paymentFrequencyReviewSample?.length ?? 0} casos revisados en muestra, ${maintenanceSummary.receiptIssuesOpened ?? 0} incidencias abiertas y ${maintenanceSummary.receiptIssuesResolved ?? 0} resueltas.`
     : "No encontré una auditoría reciente de vigencias, pero sí puedo revisar el estado actual de la cartera.";
 
-  return {
-    reply:
-      riskCount > 0 || receiptCount > 0 || renewalCount > 0
-        ? `Encontré ${riskCount} póliza${riskCount === 1 ? "" : "s"} con fechas o vigencias a revisar, ${receiptCount} recibo${receiptCount === 1 ? "" : "s"} con conciliación pendiente y ${renewalCount} renovación${renewalCount === 1 ? "" : "es"} relacionadas.`
-        : "No veo inconsistencias activas en fechas, vigencias o recibos dentro del alcance de tu usuario.",
-    sections: [
-      makeSection(
-        "Pólizas con fechas o vigencias a revisar",
-        "Fechas de vencimiento, inicio de vigencia o solapes que conviene revisar primero.",
-        policyRiskItems.length > 0
-          ? policyRiskItems
-          : [{ title: "Sin inconsistencias activas", subtitle: "No encontré pólizas con fechas o vigencias abiertas.", href: "/risks", meta: "ok" }],
-      ),
-      makeSection(
-        "Recibos con conciliación pendiente",
-        "Recibos vencidos, duplicados o con diferencias entre pago y vigencia.",
-        receiptItems.length > 0
-          ? receiptItems
-          : [{ title: "Sin recibos pendientes", subtitle: "No encontré recibos abiertos para revisar.", href: "/data-quality", meta: "ok" }],
-      ),
-      makeSection(
-        "Renovaciones relacionadas",
-        "Sugerencias de renovación o vínculos que pueden explicar la diferencia de fechas.",
-        renewalItems.length > 0
-          ? renewalItems
-          : [{ title: "Sin renovaciones relacionadas", subtitle: "No encontré sugerencias abiertas en este momento.", href: "/renewals", meta: "ok" }],
-      ),
-      makeSection(
-        "Mantenimiento de vigencia",
-        maintenanceNote,
-        maintenanceSample.length > 0
-          ? maintenanceSample
-          : [{ title: "Sin muestra reciente", subtitle: "Ejecuta la auditoría de vigencia para regenerar la muestra.", href: "/data-quality", meta: "auditoría" }],
-      ),
-    ],
-    quickPrompts: buildConsistencyQuickPrompts(),
-  };
+  const policyText = consistencyRisks.length > 0
+    ? formatSectionItemsAsText(policyRiskItems, consistencyRisks.length, "Pólizas con fechas o vigencias a revisar", 6)
+    : `Pólizas con fechas o vigencias a revisar: ninguno. ${inlineLink("Ver riesgos", "/risks")}.`;
+  const receiptText = receiptIssues.length > 0
+    ? formatSectionItemsAsText(receiptItems, receiptIssues.length, "Recibos con conciliación pendiente", 6)
+    : `Recibos con conciliación pendiente: ninguno. ${inlineLink("Abrir control de datos", "/data-quality")}.`;
+  const openRenewalCount = renewalSuggestions.filter((suggestion) => !["RESOLVED", "ARCHIVED", "DELETED"].includes(suggestion.status)).length;
+  const renewalText = openRenewalCount > 0
+    ? formatSectionItemsAsText(renewalItems, openRenewalCount, "Renovaciones relacionadas", 6)
+    : `Renovaciones relacionadas: ninguno. ${inlineLink("Ver renovaciones", "/operations?view=renewals")}.`;
+  const maintenanceText = maintenanceSample.length > 0
+    ? formatSectionItemsAsText(maintenanceSample, maintenanceSample.length, "Mantenimiento de vigencia", 6)
+    : `Mantenimiento de vigencia:\n${maintenanceNote} ${inlineLink("Abrir auditoría", "/data-quality")}.`;
+
+  return informationalReply([
+    riskCount > 0 || receiptCount > 0 || renewalCount > 0
+      ? `Encontré ${riskCount} póliza${riskCount === 1 ? "" : "s"} con fechas o vigencias a revisar, ${receiptCount} recibo${receiptCount === 1 ? "" : "s"} con conciliación pendiente y ${renewalCount} renovación${renewalCount === 1 ? "" : "es"} relacionadas.`
+      : "No veo inconsistencias activas en fechas, vigencias o recibos dentro del alcance de tu usuario.",
+    policyText,
+    receiptText,
+    renewalText,
+    maintenanceText,
+  ].join("\n\n"));
 }
 
 function policyCaptureItemToSectionItem(item: Awaited<ReturnType<typeof searchPolicyCaptureEntities>>[number]) {
@@ -303,44 +337,22 @@ async function buildTargetedConsistencyAuditReply(user: AssistantUser, policyNum
     ? `Encontré la póliza ${policyNumber} y voy a centrar la revisión en ese folio.`
     : `No encontré una coincidencia exacta para la póliza ${policyNumber}, pero sí puedo revisar las coincidencias relacionadas dentro de tu cartera.`;
 
-  return {
+  const focusItems = policyItems.length > 0
+    ? policyItems
+    : [{ title: policyNumber, subtitle: "No encontré una coincidencia exacta todavía.", href: "/policies", meta: "buscar" }];
+  const related = relatedItems.length > 0
+    ? relatedItems
+    : [{ title: "Sin coincidencias relacionadas", subtitle: "No encontré vínculos directos en esta revisión.", href: "/policies", meta: "ok" }];
+  const visibleItems = primaryPolicy
+    ? [{ title: primaryPolicy.label, subtitle: primaryPolicy.description, href: `/policies/${primaryPolicy.id}`, meta: primaryPolicy.meta?.status ?? "policy" }]
+    : [{ title: "Abrir búsqueda de póliza", subtitle: "Buscar por número, cliente o serie.", href: "/policies", meta: "buscar" }];
+
+  return informationalReply([
     reply,
-    sections: [
-      makeSection(
-        "Póliza foco",
-        primaryPolicy
-          ? "La coincidencia exacta que encontré primero."
-          : "Coincidencias cercanas al folio solicitado.",
-        policyItems.length > 0
-          ? policyItems
-          : [{ title: policyNumber, subtitle: "No encontré una coincidencia exacta todavía.", href: "/policies", meta: "buscar" }],
-      ),
-      makeSection(
-        "Coincidencias relacionadas",
-        "Resultados útiles para comparar cliente, aseguradora, serie y renovaciones.",
-        relatedItems.length > 0
-          ? relatedItems
-          : [{ title: "Sin coincidencias relacionadas", subtitle: "No encontré vínculos directos en esta revisión.", href: "/policies", meta: "ok" }],
-      ),
-      makeSection(
-        "Datos visibles",
-        primaryPolicy
-          ? "Lo más cercano que pude verificar con los datos disponibles."
-          : "Abre la póliza o afina el número para ver más contexto.",
-        primaryPolicy
-          ? [
-              {
-                title: primaryPolicy.label,
-                subtitle: primaryPolicy.description,
-                href: `/policies/${primaryPolicy.id}`,
-                meta: primaryPolicy.meta?.status ?? "policy",
-              },
-            ]
-          : [{ title: "Abrir búsqueda de póliza", subtitle: "Buscar por número, cliente o serie.", href: "/policies", meta: "buscar" }],
-      ),
-    ],
-    quickPrompts: buildConsistencyQuickPrompts(),
-  };
+    formatSectionItemsAsText(focusItems, policyMatches.length || focusItems.length, "Póliza foco", 5),
+    formatSectionItemsAsText(related, relatedResults.length, "Coincidencias relacionadas", 5),
+    formatSectionItemsAsText(visibleItems, visibleItems.length, "Datos visibles", 1),
+  ].join("\n\n"));
 }
 
 async function buildPolicyChangeReply(user: AssistantUser, message: string): Promise<AssistantReply> {
@@ -397,7 +409,7 @@ function buildHomeSections(user: AssistantUser): AssistantSection[] {
       "Puntos de partida",
       "Atajos para consultar lo más útil sin salir del contexto.",
       [
-        { title: "Renovaciones", subtitle: "Pólizas próximas a vencer o sin seguimiento", href: "/renewals", meta: "seguimiento" },
+        { title: "Renovaciones", subtitle: "Pólizas próximas a vencer o sin seguimiento", href: "/operations?view=renewals", meta: "seguimiento" },
         { title: "Riesgos", subtitle: "Hallazgos críticos y advertencias", href: "/risks", meta: "auditoría" },
         { title: "Calidad de datos", subtitle: "Resumen de completitud y hallazgos", href: "/data-quality", meta: "control" },
       ],
@@ -408,10 +420,50 @@ function buildHomeSections(user: AssistantUser): AssistantSection[] {
       [
         { title: "Buscar póliza", subtitle: "Abrir una póliza por número o cliente", href: "/policies", meta: "consulta" },
         { title: "Crear renovación", subtitle: "Ir al flujo de alta con vínculo", href: "/policies/new", meta: "alta" },
-        { title: "Revisar pendientes", subtitle: "Ver pendientes y seguimientos abiertos", href: "/work-items", meta: "operación" },
+        { title: "Revisar pendientes", subtitle: "Ver pendientes y seguimientos abiertos", href: "/operations?view=pending", meta: "operación" },
       ],
     ),
   ];
+}
+
+function formatWorkItemText(item: {
+  id: string;
+  title: string;
+  folio?: string | null;
+  client?: { fullName: string } | null;
+  policy?: { id?: string; policyNumber: string; endDate?: Date | null } | null;
+  insurer?: { name: string } | null;
+  dueDate?: Date | null;
+  priority?: string | null;
+}) {
+  const client = item.client?.fullName ?? "Cliente no vinculado";
+  const policy = item.policy?.id
+    ? inlineLink(`Póliza ${item.policy.policyNumber}`, `/policies/${item.policy.id}`)
+    : `Póliza ${item.policy?.policyNumber ?? "no vinculada"}`;
+  const insurer = item.insurer?.name ? ` · ${item.insurer.name}` : "";
+  const due = item.dueDate ? ` · Vence ${formatDate(item.dueDate)}` : "";
+  const priority = item.priority ? ` · Prioridad ${item.priority.toLowerCase()}` : "";
+  return `- ${item.title} — ${client} · ${policy}${insurer}${due}${priority} [Ver pendiente](/tasks/${item.id}).`;
+}
+
+function formatCommissionText(commission: {
+  id: string;
+  client: { fullName: string };
+  policy?: { id?: string; policyNumber: string } | null;
+  insurer?: { name: string } | null;
+  expectedDate?: Date | null;
+  expectedAmount?: unknown;
+  actualAmount?: unknown;
+  currency?: string;
+}) {
+  const policy = commission.policy?.id
+    ? inlineLink(`Póliza ${commission.policy.policyNumber}`, `/policies/${commission.policy.id}`)
+    : `Póliza ${commission.policy?.policyNumber ?? "no vinculada"}`;
+  const amount = commission.actualAmount ?? commission.expectedAmount;
+  const amountText = amount != null ? ` · ${formatCurrency(amount, commission.currency ?? "MXN")}` : "";
+  const date = commission.expectedDate ? ` · Fecha esperada ${formatDate(commission.expectedDate)}` : "";
+  const insurer = commission.insurer?.name ? ` · ${commission.insurer.name}` : "";
+  return `- ${commission.client.fullName} · ${policy}${insurer}${amountText}${date} [Ver comisiones](/commissions).`;
 }
 
 async function buildTodayReply(): Promise<AssistantReply> {
@@ -422,80 +474,50 @@ async function buildTodayReply(): Promise<AssistantReply> {
   const renewalsCount = todayData.urgentRenewals.length;
   const overdueWorkItemsCount = todayData.overdueWorkItems.length;
   const commissionsCount = todayData.commissionsToReview.length;
-  const cashFlowItems = [
-    ...buildTodaySectionItems(todayData.overduePayments, (receipt) => ({
-      title: `${receipt.client.fullName} · ${receipt.policy.policyNumber}`,
-      subtitle: `${receipt.receiptNumber} · ${receipt.insurer.name}`,
-      href: `/receipts/${receipt.id}`,
-      meta: "vencido",
-    })),
-    ...buildTodaySectionItems(todayData.paymentsDueToday, (receipt) => ({
-      title: `${receipt.client.fullName} · ${receipt.policy.policyNumber}`,
-      subtitle: `${receipt.receiptNumber} · ${receipt.insurer.name}`,
-      href: `/receipts/${receipt.id}`,
-      meta: "hoy",
-    })),
-    ...buildTodaySectionItems(todayData.paymentsDue7, (receipt) => ({
-      title: `${receipt.client.fullName} · ${receipt.policy.policyNumber}`,
-      subtitle: `${receipt.receiptNumber} · ${receipt.insurer.name}`,
-      href: `/receipts/${receipt.id}`,
-      meta: "7 días",
-    })),
-  ];
-  const pendingItems = [
-    ...buildTodaySectionItems(todayData.overdueWorkItems, (workItem) => ({
-      title: workItem.title,
-      subtitle: `${workItem.folio ?? workItem.id} · ${workItem.policy?.policyNumber ?? "Sin póliza"}`,
-      href: `/tasks/${workItem.id}`,
-      meta: "atrasado",
-    })),
-    ...buildTodaySectionItems(todayData.commissionsToReview, (commission) => ({
-      title: commission.client.fullName,
-      subtitle: `${commission.policy?.policyNumber ?? "Sin póliza"} · ${commission.insurer.name}`,
-      href: "/commissions",
-      meta: "comisión",
-    })),
-  ];
-
   const reply =
-    `Hoy tienes ${overdueCount} recibo${overdueCount === 1 ? "" : "s"} vencido${overdueCount === 1 ? "" : "s"}, ` +
-    `${dueTodayCount} que vencen hoy, ${due7Count} en los próximos 7 días, ` +
-    `${renewalsCount} renovación${renewalsCount === 1 ? "" : "es"} en 30 días, ` +
-    `${overdueWorkItemsCount} pendiente${overdueWorkItemsCount === 1 ? "" : "s"} atrasado${overdueWorkItemsCount === 1 ? "" : "s"} y ` +
-    `${commissionsCount} comisión${commissionsCount === 1 ? "" : "es"} por revisar.`;
+    `Hoy tienes ${formatCount(overdueCount, 8)} recibo${overdueCount === 1 ? "" : "s"} vencido${overdueCount === 1 ? "" : "s"}, ` +
+    `${formatCount(dueTodayCount)} que vencen hoy, ${formatCount(due7Count, 8)} en los próximos 7 días, ` +
+    `${formatCount(renewalsCount)} renovación${renewalsCount === 1 ? "" : "es"} en 30 días, ` +
+    `${formatCount(overdueWorkItemsCount, 8)} pendiente${overdueWorkItemsCount === 1 ? "" : "s"} atrasado${overdueWorkItemsCount === 1 ? "" : "s"} y ` +
+    `${formatCount(commissionsCount, 8)} comisión${commissionsCount === 1 ? "" : "es"} por revisar.`;
 
-  return {
+  const todayText = [
     reply,
-    sections: [
-      makeSection("Cobros de hoy", `Vencidos: ${overdueCount} · Hoy: ${dueTodayCount} · Próximos 7 días: ${due7Count}.`, cashFlowItems.length > 0 ? cashFlowItems : [
-        { title: "Sin cobros urgentes", subtitle: "No hay recibos vencidos ni de hoy.", href: "/today", meta: "ok" },
-      ]),
-      makeSection(
-        "Renovaciones",
-        "Pólizas que vencen pronto.",
-        todayData.urgentRenewals.length > 0
-          ? buildTodaySectionItems(todayData.urgentRenewals, (policy) => ({
-              title: policy.policyNumber,
-              subtitle: `${policy.client.fullName} · Renovación ${policy.endDate.toISOString().slice(0, 10)}`,
-              href: `/policies/${policy.id}`,
-              meta: "30 días",
-            }))
-          : [{ title: "Sin renovaciones urgentes", subtitle: "No hay pólizas en el periodo de 30 días.", href: "/today", meta: "ok" }],
-      ),
-      makeSection("Pendientes", "Tareas atrasadas y comisiones próximas.", pendingItems.length > 0 ? pendingItems : [
-        { title: "Sin pendientes urgentes", subtitle: "No hay tareas atrasadas ni comisiones inmediatas.", href: "/today", meta: "ok" },
-      ]),
-    ],
-    quickPrompts: buildQuickPrompts(),
-    todayMetrics: {
-      dueTodayCount,
-      overdueCount,
-      due7Count,
-      renewals30Count: renewalsCount,
-      openWorkItemsCount: overdueWorkItemsCount,
-      commissionsCount,
-    },
-  };
+    formatPlainGroup("Recibos vencidos", overdueCount, todayData.overduePayments.map((receipt) => formatReceiptText(receipt, "overdue")), 3, 8),
+    formatPlainGroup("Recibos que vencen hoy", dueTodayCount, todayData.paymentsDueToday.map((receipt) => formatReceiptText(receipt, "today")), 3),
+    formatPlainGroup("Renovaciones próximas", renewalsCount, todayData.urgentRenewals.map(formatRenewalText), 3),
+    formatPlainGroup("Pendientes atrasados", overdueWorkItemsCount, todayData.overdueWorkItems.map(formatWorkItemText), 3, 8),
+    formatPlainGroup("Comisiones por revisar", commissionsCount, todayData.commissionsToReview.map(formatCommissionText), 3, 8),
+  ].join("\n\n");
+
+  return informationalReply(todayText, {
+    dueTodayCount,
+    overdueCount,
+    due7Count,
+    renewals30Count: renewalsCount,
+    openWorkItemsCount: overdueWorkItemsCount,
+    commissionsCount,
+  });
+}
+
+async function buildReceiptsReply(kind: "overdue" | "today" | "upcoming"): Promise<AssistantReply> {
+  const todayData = await getTodayData();
+  const receipts = kind === "overdue"
+    ? todayData.overduePayments
+    : kind === "today"
+      ? todayData.paymentsDueToday
+      : todayData.paymentsDue7;
+  const label = kind === "overdue" ? "vencidos" : kind === "today" ? "que vencen hoy" : "de los próximos 7 días";
+  const count = receipts.length;
+  const state = kind === "overdue" ? "overdue" : kind === "today" ? "today" : "upcoming";
+  const cap = kind === "today" ? undefined : 8;
+  const summary = count > 0
+    ? `Encontré ${formatCount(count, cap)} recibo${count === 1 ? "" : "s"} ${label}.`
+    : `No encontré recibos ${label} dentro de tu cartera accesible.`;
+  const detail = count > 0
+    ? `\n\n${receipts.slice(0, 8).map((receipt) => formatReceiptText(receipt, state)).join("\n")}${formatMoreCount(count, Math.min(count, 8), cap)}`
+    : "";
+  return informationalReply(`${summary}${detail}`);
 }
 
 function buildSearchTerms(message: string) {
@@ -521,15 +543,32 @@ function buildSearchTerms(message: string) {
   return [...terms].slice(0, 3);
 }
 
-function toSearchItem(result: GlobalSearchResult) {
-  return {
-    title: result.title,
-    subtitle: [result.subtitle, result.parentLabel, result.match ? `Coincide en ${result.match.fieldLabel}` : null]
-      .filter(Boolean)
-      .join(" · "),
-    href: result.href,
-    meta: result.type,
-  };
+function formatSearchResultText(result: GlobalSearchResult) {
+  const context = [result.subtitle, result.parentLabel, result.match ? `Coincide en ${result.match.fieldLabel}` : null]
+    .filter(Boolean)
+    .join(" · ");
+  return `- ${inlineLink(result.title, result.href)}${context ? ` — ${context}` : ""}.`;
+}
+
+function formatRiskText(finding: {
+  alertType: string;
+  severity: string;
+  title: string;
+  description: string;
+  entityType: string;
+  entityId: string;
+  suggestedAction: string;
+}) {
+  const href = finding.entityType === "Policy"
+    ? `/policies/${finding.entityId}`
+    : finding.entityType === "Receipt"
+      ? `/receipts/${finding.entityId}`
+      : finding.entityType === "WorkItem"
+        ? `/tasks/${finding.entityId}`
+        : finding.entityType === "Client"
+          ? `/clients/${finding.entityId}`
+          : "/risks";
+  return `- ${inlineLink(finding.title, href)} — ${finding.description} · Prioridad ${finding.severity.toLowerCase()} · Siguiente paso: ${finding.suggestedAction}.`;
 }
 
 export async function searchUserPortfolio(user: AssistantUser, message: string) {
@@ -562,21 +601,23 @@ async function buildPromptReply(user: AssistantUser, message: string): Promise<A
     return buildConsistencyAuditReply(user);
   }
 
+  if (normalized.includes("recibo") || normalized.includes("cobro")) {
+    if (normalized.includes("vencid") || normalized.includes("atrasad")) return buildReceiptsReply("overdue");
+    if (normalized.includes("hoy")) return buildReceiptsReply("today");
+    if (normalized.includes("proxim") || normalized.includes("7 dia") || normalized.includes("abiert")) return buildReceiptsReply("upcoming");
+    return informationalReply(
+      `Puedo mostrarte ${inlineLink("recibos vencidos", "/receipts?tab=cobrar&status=overdue")}, ${inlineLink("recibos de hoy", "/receipts?tab=cobrar&status=today")} o ${inlineLink("todos los recibos", "/receipts")}.`,
+    );
+  }
+
   if (normalized.includes("renov")) {
     if (renewalWindowDays) {
       return buildRenewalsReply(renewalWindowDays);
     }
 
-    return {
-      reply: "Puedo ayudarte a revisar renovaciones próximas, vencidas o sin seguimiento. Si quieres, abre Renovaciones para ver los casos más urgentes o crea una póliza nueva vinculándola a la póliza anterior.",
-      sections: [
-        makeSection("Renovaciones", "Accesos directos para continuar el seguimiento.", [
-          { title: "Ver renovaciones", subtitle: "Polizas próximas y vencidas", href: "/renewals", meta: "seguimiento" },
-          { title: "Polizas sin seguimiento", subtitle: "Hallazgos que requieren vinculación", href: "/data-quality", meta: "hallazgos" },
-        ]),
-      ],
-      quickPrompts: buildQuickPrompts(),
-    };
+    return informationalReply(
+      `Puedo ayudarte a revisar renovaciones próximas, vencidas o sin seguimiento. ${inlineLink("Ver renovaciones", "/operations?view=renewals")} o ${inlineLink("revisar calidad de datos", "/data-quality")} para encontrar vínculos faltantes.`,
+    );
   }
 
   if (
@@ -587,48 +628,32 @@ async function buildPromptReply(user: AssistantUser, message: string): Promise<A
   }
 
   if (normalized.includes("riesg")) {
-    return {
-      reply: "Si estás revisando riesgos, te conviene abrir el tablero de Riesgos y también Calidad de datos para ver hallazgos relacionados con renovación, recibos y completitud.",
-      sections: [
-        makeSection("Riesgos", "Hallazgos de mayor prioridad para revisar primero.", [
-          { title: "Ver riesgos", subtitle: "Alertas activas y críticas", href: "/risks", meta: "prioridad" },
-          { title: "Calidad de datos", subtitle: "Problemas de seguimiento y consistencia", href: "/data-quality", meta: "señales" },
-        ]),
-      ],
-      quickPrompts: buildQuickPrompts(),
-    };
+    const findings = await detectRisks(user.role === "ADMIN" ? undefined : user.id);
+    const visible = findings.slice(0, 6);
+    const detail = visible.length > 0
+      ? `\n\n${visible.map(formatRiskText).join("\n")}${formatMoreCount(findings.length, visible.length, 25)}`
+      : "\n\nNo encontré riesgos activos dentro de tu cartera accesible.";
+    return informationalReply(
+      `Encontré ${findings.length} riesgo${findings.length === 1 ? "" : "s"} activo${findings.length === 1 ? "" : "s"}. ${inlineLink("Abrir tablero de riesgos", "/risks")} o ${inlineLink("revisar calidad de datos", "/data-quality")}.${detail}`,
+    );
   }
 
   if (normalized.includes("buscar") || normalized.includes("cliente") || normalized.includes("poliza") || normalized.includes("póliza")) {
     const results = await searchUserPortfolio(user, message);
-    return {
-      reply: results.length > 0
-        ? `Encontré ${results.length} resultado${results.length === 1 ? "" : "s"} dentro de tu cartera.`
-        : "No encontré coincidencias dentro de tu cartera. Prueba con el número de póliza, nombre completo, RFC, teléfono, serie o número de recibo.",
-      sections: [
-        makeSection(
-          "Resultados",
-          results.length > 0 ? "Coincidencias accesibles para tu usuario." : "No se muestran datos de otras carteras.",
-          results.length > 0
-            ? results.map(toSearchItem)
-            : [{ title: "Abrir búsqueda", subtitle: "Buscar con más campos en PolicyDesk", href: "/policies", meta: "buscador" }],
-        ),
-      ],
-      quickPrompts: buildQuickPrompts(),
-    };
+    if (results.length === 0) {
+      return informationalReply(
+        `No encontré coincidencias dentro de tu cartera. Prueba con el número de póliza, nombre completo, RFC, teléfono, serie o número de recibo. ${inlineLink("Abrir búsqueda", "/policies")}.`,
+      );
+    }
+    const visible = results.slice(0, 8);
+    return informationalReply(
+      `Encontré ${formatCount(results.length, 8)} resultado${results.length === 1 ? "" : "s"} dentro de tu cartera:\n\n${visible.map(formatSearchResultText).join("\n")}${formatMoreCount(results.length, visible.length, 8)}`,
+    );
   }
 
-  return {
-    reply: "Te puedo ayudar a revisar renovaciones, riesgos, calidad de datos o a encontrar una póliza para continuar el flujo correcto. Si me dices qué estás buscando, te llevo a la sección más útil.",
-    sections: [
-      makeSection("Atajos", "Opciones comunes para arrancar rápido.", [
-        { title: "Renovaciones", subtitle: "Casos próximos o vencidos", href: "/renewals", meta: "seguimiento" },
-        { title: "Riesgos", subtitle: "Hallazgos críticos", href: "/risks", meta: "alertas" },
-        { title: "Calidad de datos", subtitle: "Pendientes y consistencia", href: "/data-quality", meta: "control" },
-      ]),
-    ],
-    quickPrompts: buildQuickPrompts(),
-  };
+  return informationalReply(
+    `Te puedo ayudar a revisar ${inlineLink("renovaciones", "/operations?view=renewals")}, ${inlineLink("riesgos", "/risks")}, ${inlineLink("calidad de datos", "/data-quality")} o a encontrar una póliza. Dime qué estás buscando y te llevo a la sección más útil.`,
+  );
 }
 
 export async function getAssistantHomeSnapshot(user: AssistantUser): Promise<AssistantSnapshot> {
@@ -640,7 +665,7 @@ export async function getAssistantHomeSnapshot(user: AssistantUser): Promise<Ass
         : "Consulta renovaciones, riesgos y calidad de datos desde una vista operativa.",
     ai: getAssistantAiConnectionStatus(),
     summaryCards: [
-      { label: "Renovaciones", value: "Abrir", description: "Ver próximos vencimientos y seguimientos.", href: "/renewals" },
+      { label: "Renovaciones", value: "Abrir", description: "Ver próximos vencimientos y seguimientos.", href: "/operations?view=renewals" },
       { label: "Riesgos", value: "Abrir", description: "Revisar alertas y hallazgos críticos.", href: "/risks" },
       { label: "Calidad", value: "Abrir", description: "Inspeccionar datos y vínculos faltantes.", href: "/data-quality" },
     ],
