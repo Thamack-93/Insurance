@@ -37,6 +37,11 @@ export function normalizeAssistantAiUsage(value: unknown): AssistantAiUsageSnaps
   const outputTokens = toNumber(record.outputTokens ?? record.completionTokens ?? record.completionTokenCount ?? record.generatedTokens);
   const totalTokens = toNumber(record.totalTokens ?? record.totalTokenCount ?? record.totalUsage ?? record.tokenCount) ?? (inputTokens != null || outputTokens != null ? (inputTokens ?? 0) + (outputTokens ?? 0) : null);
   const cachedInputTokens = toNumber(record.cachedInputTokens ?? record.cachedTokens ?? record.inputTokensCached ?? record.promptTokensCached);
+  const billedCostUsd = toNumber(record.billedCostUsd ?? record.totalCost ?? record.costUsd);
+  const costSource = record.costSource === "gateway" || record.costSource === "estimated" || record.costSource === "unknown"
+    ? record.costSource
+    : undefined;
+  const generationId = typeof record.generationId === "string" && record.generationId.trim() ? record.generationId : null;
 
   return {
     inputTokens,
@@ -44,30 +49,36 @@ export function normalizeAssistantAiUsage(value: unknown): AssistantAiUsageSnaps
     totalTokens,
     cachedInputTokens,
     estimatedCostUsd: null,
+    billedCostUsd,
+    ...(costSource ? { costSource } : {}),
+    generationId,
   };
 }
 
 const DEFAULT_MODEL_COSTS: Record<string, { input: number; output: number }> = {
-  "minimax/minimax-m3": { input: 0.60 / 1_000_000, output: 2.40 / 1_000_000 },
+  "minimax/minimax-m3": { input: 0.30 / 1_000_000, output: 1.20 / 1_000_000 },
   "openai/gpt-5.4-mini": { input: 0.75 / 1_000_000, output: 4.50 / 1_000_000 },
 };
 
 export function estimateAssistantAiCostUsd(model: string, usage: AssistantAiUsageSnapshot | null | undefined) {
   if (!usage) return null;
+  if (usage.inputTokens == null && usage.outputTokens == null) return null;
   const cost = DEFAULT_MODEL_COSTS[model];
   if (!cost) return null;
   const inputCost = (usage.inputTokens ?? 0) * cost.input;
   const outputCost = (usage.outputTokens ?? 0) * cost.output;
   const estimated = inputCost + outputCost;
-  return Number.isFinite(estimated) ? Number(estimated.toFixed(6)) : null;
+  return Number.isFinite(estimated) ? Number(estimated.toFixed(9)) : null;
 }
 
 function toSnapshotUsage(value: unknown, model: string) {
   const usage = normalizeAssistantAiUsage(value);
   if (!usage) return null;
+  const estimatedCostUsd = usage.estimatedCostUsd ?? estimateAssistantAiCostUsd(model, usage);
   return {
     ...usage,
-    estimatedCostUsd: estimateAssistantAiCostUsd(model, usage),
+    estimatedCostUsd,
+    costSource: usage.costSource ?? (usage.billedCostUsd != null ? "gateway" : estimatedCostUsd != null ? "estimated" : "unknown"),
   };
 }
 
@@ -109,7 +120,7 @@ function toTraceEntry(attempt: {
   const usage = attempt.usageJson ? normalizeAssistantAiUsage(JSON.parse(attempt.usageJson)) : null;
   const totalUsage = attempt.totalUsageJson ? normalizeAssistantAiUsage(JSON.parse(attempt.totalUsageJson)) : null;
   const effectiveUsage = totalUsage ?? usage;
-  const cost = attempt.estimatedCostUsd == null ? effectiveUsage?.estimatedCostUsd ?? null : toNumber(attempt.estimatedCostUsd);
+  const cost = attempt.estimatedCostUsd == null ? effectiveUsage?.billedCostUsd ?? effectiveUsage?.estimatedCostUsd ?? null : toNumber(attempt.estimatedCostUsd);
 
   return {
     attemptNumber: attempt.attemptNumber,
@@ -126,6 +137,7 @@ function toTraceEntry(attempt: {
       ? {
           ...effectiveUsage,
           estimatedCostUsd: cost,
+          costSource: effectiveUsage.costSource ?? (effectiveUsage.billedCostUsd != null ? "gateway" : cost != null ? "estimated" : "unknown"),
         }
       : null,
     responsePreview: attempt.responsePreview,

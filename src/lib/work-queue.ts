@@ -1,4 +1,4 @@
-import type { Prisma } from "@/generated/prisma/client";
+import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import type { Priority, WorkItemStatus, WorkItemType } from "@/lib/domain-values";
 import { getDb } from "@/lib/db";
 import { businessEndOfDay, businessStartOfDay } from "@/lib/business-dates";
@@ -18,6 +18,29 @@ export const CLOSED_WORK_ITEM_STATUSES = [
   "ARCHIVED",
   "DISMISSED",
 ] as const satisfies readonly WorkItemStatus[];
+
+type WorkQueueDb = PrismaClient | Prisma.TransactionClient;
+
+const policyQueueSelect = {
+  id: true,
+  policyNumber: true,
+  policyType: true,
+  status: true,
+  startDate: true,
+  endDate: true,
+  client: {
+    select: {
+      id: true,
+      fullName: true,
+    },
+  },
+  insurer: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+} as const satisfies Prisma.PolicySelect;
 
 export const workQueueSelect = {
   id: true,
@@ -53,14 +76,7 @@ export const workQueueSelect = {
     },
   },
   policy: {
-    select: {
-      id: true,
-      policyNumber: true,
-      policyType: true,
-      status: true,
-      startDate: true,
-      endDate: true,
-    },
+    select: policyQueueSelect,
   },
   insurer: {
     select: {
@@ -100,12 +116,56 @@ export async function getWorkItems(filters: WorkQueueFilters = {}) {
   const db = getDb();
   const where = buildWhere(filters);
 
-  return db.workItem.findMany({
+  const items = await db.workItem.findMany({
     where,
     select: workQueueSelect,
     orderBy: buildOrderBy(filters),
     skip: filters.skip,
     take: filters.limit,
+  });
+
+  return resolveLegacyRenewalRelations(items, filters, db);
+}
+
+/**
+ * Renewal reminders created before WorkItem kept their policy/client foreign
+ * keys. They still carry the policy id in entityId, so resolve that relation
+ * for display and navigation without mutating the historical record.
+ */
+async function resolveLegacyRenewalRelations(
+  items: WorkQueueItem[],
+  filters: WorkQueueFilters,
+  db: WorkQueueDb,
+) {
+  const legacyPolicyIds = [...new Set(items
+    .filter((item) => item.sourceType?.toLowerCase() === "renewal" && item.entityType?.toLowerCase() === "policy" && !item.policyId && item.entityId)
+    .map((item) => item.entityId)
+    .filter((id): id is string => Boolean(id)))];
+
+  if (!legacyPolicyIds.length) return items;
+
+  const policies = await db.policy.findMany({
+    where: {
+      id: { in: legacyPolicyIds },
+      ...(filters.portfolioOwnerId ? { client: { portfolioOwnerId: filters.portfolioOwnerId } } : {}),
+    },
+    select: policyQueueSelect,
+  });
+  const policyById = new Map(policies.map((policy) => [policy.id, policy]));
+
+  return items.map((item) => {
+    const policy = item.policy ?? policyById.get(item.entityId);
+    if (!policy) return item;
+
+    return {
+      ...item,
+      client: item.client ?? policy.client ?? null,
+      insurer: item.insurer ?? policy.insurer ?? null,
+      policyId: item.policyId ?? policy.id,
+      clientId: item.clientId ?? policy.client?.id ?? null,
+      insurerId: item.insurerId ?? policy.insurer?.id ?? null,
+      policy,
+    };
   });
 }
 

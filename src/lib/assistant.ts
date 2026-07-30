@@ -119,6 +119,20 @@ function shouldUseAssistantAi(normalized: string) {
 }
 
 function hasMutationIntent(normalized: string) {
+  const explicitReadOnly = [
+    "no modifi",
+    "sin modifi",
+    "no cambies",
+    "sin cambiar",
+    "consulta informativa",
+    "solo analiza",
+    "solo revisa",
+    "no ejecutes",
+    "no guardes",
+    "no registres",
+  ].some((phrase) => normalized.includes(phrase));
+  if (explicitReadOnly) return false;
+
   return (
     normalized.includes("actualiz") ||
     normalized.includes("cambi") ||
@@ -415,6 +429,7 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
   let aiAttempts = 0;
   let aiUsage: AssistantAiUsageSnapshot | null = null;
   let aiTrace: AssistantAiTraceEntry[] = [];
+  const aiMode = hasMutationIntent(normalized) ? "structured" as const : "conversation" as const;
 
   if (shouldTryAi) {
     const aiReply = await buildAssistantAiReply({
@@ -423,12 +438,12 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
       localReply,
       contextText: aiContext,
       themeHint: null,
-      mode: hasMutationIntent(normalized) ? "structured" : "conversation",
+      mode: aiMode,
     });
     if (aiReply.ok) {
       finalReply = {
         reply: aiReply.value.reply,
-        sections: aiReply.value.sections,
+        sections: [],
         quickPrompts: aiReply.value.quickPrompts,
       };
       source = "ai";
@@ -445,7 +460,7 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
           ? { ...aiReply.value.usage, estimatedCostUsd: aiReply.value.usage.estimatedCostUsd ?? null }
           : null;
       aiTrace = aiReply.value.trace;
-      if (aiReply.value.mutation) {
+      if (aiMode === "structured" && aiReply.value.mutation) {
         actionProposal = await buildAssistantActionProposalFromPlan(aiReply.value.mutation, user);
       }
     } else {

@@ -115,6 +115,14 @@ type AssistantAiAttemptResult<T> =
   | { ok: true; value: T; attempt: AssistantAiAttempt }
   | { ok: false; code: AssistantAiFailureCode; error: unknown; attempt: AssistantAiAttempt };
 
+type AssistantAiGeneratedValue = {
+  result: Awaited<ReturnType<typeof generateText>>;
+  parsed?: z.infer<typeof assistantAiResponseSchema>;
+  text?: string;
+  usageOverride?: AssistantAiUsageSnapshot | null;
+  totalUsageOverride?: AssistantAiUsageSnapshot | null;
+};
+
 type AssistantAiReplyValue = AssistantReply & {
   mutation: AssistantMutationPlan | null;
   runId: string;
@@ -227,9 +235,74 @@ export function getAssistantAiConnectionStatus(): AssistantAiStatus {
   };
 }
 
-function toUsage(value: unknown, model: string): AssistantAiUsageSnapshot | null {
+function getGatewayGenerationId(providerMetadata: unknown) {
+  if (!providerMetadata || typeof providerMetadata !== "object") return null;
+  const gatewayMetadata = (providerMetadata as { gateway?: unknown }).gateway;
+  if (!gatewayMetadata || typeof gatewayMetadata !== "object") return null;
+  const generationId = (gatewayMetadata as { generationId?: unknown }).generationId;
+  return typeof generationId === "string" && generationId.trim() ? generationId : null;
+}
+
+function toUsage(value: unknown, model: string, providerMetadata?: unknown): AssistantAiUsageSnapshot | null {
   const usage = normalizeAssistantAiUsage(value);
-  return usage ? { ...usage, estimatedCostUsd: estimateAssistantAiCostUsd(model, usage) } : null;
+  if (!usage) return null;
+  const generationId = usage.generationId ?? getGatewayGenerationId(providerMetadata);
+  const estimatedCostUsd = estimateAssistantAiCostUsd(model, usage);
+  return {
+    ...usage,
+    estimatedCostUsd,
+    costSource: usage.billedCostUsd != null ? "gateway" : estimatedCostUsd != null ? "estimated" : "unknown",
+    generationId,
+  };
+}
+
+function bestUsageCost(usage: AssistantAiUsageSnapshot | null | undefined) {
+  if (!usage) return null;
+  return usage.billedCostUsd ?? usage.estimatedCostUsd ?? null;
+}
+
+function sumAttemptUsage(attempts: AssistantAiAttempt[]) {
+  const usages = attempts.map((attempt) => attempt.totalUsage ?? attempt.usage).filter((usage): usage is AssistantAiUsageSnapshot => Boolean(usage));
+  if (!usages.length) return null;
+  const sum = (key: "inputTokens" | "outputTokens" | "totalTokens" | "cachedInputTokens") => {
+    const values = usages.map((usage) => usage[key]).filter((value): value is number => value != null && Number.isFinite(value));
+    return values.length ? values.reduce((total, value) => total + value, 0) : null;
+  };
+  const billedValues = usages.map((usage) => usage.billedCostUsd);
+  const allBilled = billedValues.every((value) => value != null && Number.isFinite(value));
+  const bestValues = usages.map(bestUsageCost).filter((value): value is number => value != null && Number.isFinite(value));
+  const aggregateCost = bestValues.length ? bestValues.reduce((total, value) => total + value, 0) : null;
+  const billedCostUsd = allBilled && aggregateCost != null ? aggregateCost : null;
+  const estimatedCostUsd = aggregateCost;
+  return {
+    inputTokens: sum("inputTokens"),
+    outputTokens: sum("outputTokens"),
+    totalTokens: sum("totalTokens"),
+    cachedInputTokens: sum("cachedInputTokens"),
+    estimatedCostUsd,
+    billedCostUsd,
+    costSource: billedCostUsd != null ? "gateway" as const : estimatedCostUsd != null ? "estimated" as const : "unknown" as const,
+    generationId: null,
+  } satisfies AssistantAiUsageSnapshot;
+}
+
+async function lookupGatewayUsage(usage: AssistantAiUsageSnapshot | null, model: string) {
+  if (!usage?.generationId) return usage;
+  try {
+    const generation = await gateway.getGenerationInfo({ id: usage.generationId });
+    return {
+      ...usage,
+      inputTokens: generation.promptTokens ?? usage.inputTokens,
+      outputTokens: generation.completionTokens ?? usage.outputTokens,
+      totalTokens: (generation.promptTokens ?? usage.inputTokens ?? 0) + (generation.completionTokens ?? usage.outputTokens ?? 0),
+      cachedInputTokens: generation.cachedTokens ?? usage.cachedInputTokens,
+      billedCostUsd: generation.totalCost,
+      estimatedCostUsd: estimateAssistantAiCostUsd(model, usage),
+      costSource: "gateway" as const,
+    } satisfies AssistantAiUsageSnapshot;
+  } catch {
+    return usage;
+  }
 }
 
 function serializeSections(sections: AssistantReply["sections"]) {
@@ -291,7 +364,7 @@ function buildDiagnostic(input: {
     statusCode: last?.statusCode ?? null,
     finishReason: last?.finishReason ?? null,
     responsePreview: last?.responsePreview ?? null,
-    usage: null,
+    usage: sumAttemptUsage(input.attempts),
     trace: input.attempts.map((attempt, index) => ({
       attemptNumber: index + 1,
       tier: index === 0 ? input.tier : "critical",
@@ -303,7 +376,7 @@ function buildDiagnostic(input: {
       durationMs: attempt.durationMs,
       finishReason: attempt.finishReason ?? null,
       statusCode: attempt.statusCode ?? null,
-      usage: null,
+      usage: attempt.totalUsage ?? attempt.usage ?? null,
       responsePreview: attempt.responsePreview ?? null,
     })),
   };
@@ -317,7 +390,7 @@ const assistantSystemPrompt = [
   "Para endosos usa entityType endorsement y exige una póliza inequívoca antes de proponer el alta.",
 ].join("\n");
 
-async function runStructuredAttempt(input: {
+async function runAssistantAttempt(input: {
   user: AssistantUser;
   message: string;
   localReply: AssistantReply;
@@ -327,16 +400,16 @@ async function runStructuredAttempt(input: {
   fallbackModels: string[];
   timeoutMs: number;
   mode: "conversation" | "structured";
-}) : Promise<AssistantAiAttemptResult<{ parsed: z.infer<typeof assistantAiResponseSchema>; result: Awaited<ReturnType<typeof generateText>> }>> {
+}) : Promise<AssistantAiAttemptResult<AssistantAiGeneratedValue>> {
   const startedAt = Date.now();
   try {
-    const result = await generateText({
+    const generationInput = {
       model: gateway(input.model),
       temperature: input.mode === "structured" ? 0.1 : 0.2,
       abortSignal: AbortSignal.timeout(input.timeoutMs),
       system: input.mode === "structured"
         ? `${assistantSystemPrompt}\nDevuelve un plan de cambio estricto. Todas las propiedades deben existir; usa null para targetQuery y [] para listas vacías.`
-        : `${assistantSystemPrompt}\nDevuelve un objeto exacto con reply, quickPrompts y mutation. Si no hay cambio solicitado, mutation debe ser null.`,
+        : `${assistantSystemPrompt}\nResponde únicamente con texto claro y conciso en español. No devuelvas JSON, tarjetas ni acciones para una consulta informativa. Usa únicamente la evidencia local proporcionada.`,
       prompt: [
         `Rol: ${input.user.role}`,
         `Mensaje: ${input.message}`,
@@ -345,7 +418,6 @@ async function runStructuredAttempt(input: {
         input.contextText ? `Contexto ampliado:\n${input.contextText}` : "Sin contexto ampliado.",
         input.themeHint ? `Tema sugerido: ${input.themeHint}` : null,
       ].filter(Boolean).join("\n\n"),
-      output: Output.object({ schema: assistantAiResponseSchema }),
       providerOptions: {
         gateway: {
           user: input.user.id,
@@ -353,23 +425,88 @@ async function runStructuredAttempt(input: {
           models: input.fallbackModels,
         },
       },
-    });
-    const parsed = result.output;
+    };
+    const result = input.mode === "structured"
+      ? await generateText({ ...generationInput, output: Output.object({ schema: assistantAiResponseSchema }) })
+      : await generateText(generationInput);
+
+    if (input.mode === "conversation") {
+      const usage = await lookupGatewayUsage(toUsage(result.usage, input.model, result.providerMetadata), input.model);
+      const totalUsage = await lookupGatewayUsage(toUsage(result.totalUsage, input.model, result.providerMetadata), input.model);
+      if (!result.text?.trim()) {
+        return {
+          ok: false,
+          code: "no_output_generated",
+          error: new Error("AI returned no conversational text"),
+          attempt: {
+            model: input.model,
+            code: "no_output_generated",
+            outcome: "error",
+            durationMs: Date.now() - startedAt,
+            finishReason: result.finishReason ?? null,
+            responsePreview: null,
+            usage,
+            totalUsage: totalUsage ?? usage,
+            providerMetadata: result.providerMetadata ?? null,
+          },
+        };
+      }
+      return {
+        ok: true,
+        value: { result, text: result.text, usageOverride: usage, totalUsageOverride: totalUsage ?? usage },
+        attempt: {
+          model: input.model,
+          code: null,
+          outcome: "success",
+          durationMs: Date.now() - startedAt,
+          finishReason: result.finishReason ?? null,
+          usage,
+          totalUsage: totalUsage ?? usage,
+          providerMetadata: result.providerMetadata ?? null,
+          responsePreview: result.text.slice(0, 500),
+        },
+      };
+    }
+
+    const usage = await lookupGatewayUsage(toUsage(result.usage, input.model, result.providerMetadata), input.model);
+    const totalUsage = await lookupGatewayUsage(toUsage(result.totalUsage, input.model, result.providerMetadata), input.model);
+    const parsed = result.output as z.infer<typeof assistantAiResponseSchema> | undefined;
     if (!parsed) {
       return {
         ok: false,
         code: "invalid_output",
         error: new Error("AI returned no structured object"),
-        attempt: { model: input.model, code: "invalid_output", outcome: "error", durationMs: Date.now() - startedAt, responsePreview: result.text },
+        attempt: {
+          model: input.model,
+          code: "invalid_output",
+          outcome: "error",
+          durationMs: Date.now() - startedAt,
+          responsePreview: result.text,
+          usage,
+          totalUsage: totalUsage ?? usage,
+          providerMetadata: result.providerMetadata ?? null,
+        },
       };
     }
     return {
       ok: true,
-      value: { parsed, result },
-      attempt: { model: input.model, code: null, outcome: "success", durationMs: Date.now() - startedAt, finishReason: result.finishReason ?? null },
+      value: { parsed, result, usageOverride: usage, totalUsageOverride: totalUsage ?? usage },
+      attempt: {
+        model: input.model,
+        code: null,
+        outcome: "success",
+        durationMs: Date.now() - startedAt,
+        finishReason: result.finishReason ?? null,
+        usage,
+        totalUsage: totalUsage ?? usage,
+        providerMetadata: result.providerMetadata ?? null,
+        responsePreview: parsed.reply,
+      },
     };
   } catch (error) {
     const code = getAssistantAiFailureCode(error);
+    const errorUsage = NoObjectGeneratedError.isInstance(error) ? toUsage(error.usage, input.model, error.response) : null;
+    const errorProviderMetadata = NoObjectGeneratedError.isInstance(error) ? error.response ?? null : null;
     return {
       ok: false,
       code,
@@ -382,6 +519,9 @@ async function runStructuredAttempt(input: {
         statusCode: APICallError.isInstance(error) ? error.statusCode : null,
         finishReason: NoObjectGeneratedError.isInstance(error) ? error.finishReason ?? null : null,
         responsePreview: NoObjectGeneratedError.isInstance(error) ? error.text ?? null : error instanceof Error ? error.message : null,
+        usage: errorUsage,
+        totalUsage: errorUsage,
+        providerMetadata: errorProviderMetadata,
       },
     };
   }
@@ -393,25 +533,26 @@ function valueFromAttempt(input: {
   model: string;
   attemptNumber: number;
   localReply: AssistantReply;
-  result: Awaited<ReturnType<typeof generateText>>;
-  parsed: z.infer<typeof assistantAiResponseSchema>;
+  generated: AssistantAiGeneratedValue;
 }): AssistantAiReplyValue {
-  const usage = toUsage(input.result.usage, input.model);
-  const totalUsage = toUsage(input.result.totalUsage, input.model);
+  const usage = input.generated.usageOverride ?? toUsage(input.generated.result.usage, input.model, input.generated.result.providerMetadata);
+  const totalUsage = input.generated.totalUsageOverride ?? toUsage(input.generated.result.totalUsage, input.model, input.generated.result.providerMetadata);
   const effectiveUsage = totalUsage ?? usage;
+  const reply = input.generated.text ?? input.generated.parsed?.reply ?? input.localReply.reply;
+  const parsed = input.generated.parsed;
   return {
     ...input.localReply,
-    reply: input.parsed.reply,
-    quickPrompts: input.parsed.quickPrompts.length ? toAssistantPrompts(input.parsed.quickPrompts) : input.localReply.quickPrompts,
-    mutation: toMutation(input.parsed.mutation),
+    reply,
+    quickPrompts: parsed?.quickPrompts.length ? toAssistantPrompts(parsed.quickPrompts) : input.localReply.quickPrompts,
+    mutation: parsed ? toMutation(parsed.mutation) : null,
     runId: input.runId,
     tier: input.tier,
     resolvedModel: input.model,
     usage,
     totalUsage,
-    finishReason: input.result.finishReason ?? null,
-    providerMetadata: input.result.providerMetadata ?? null,
-    durationMs: Date.now(),
+    finishReason: input.generated.result.finishReason ?? null,
+    providerMetadata: input.generated.result.providerMetadata ?? null,
+    durationMs: 0,
     trace: [{
       attemptNumber: input.attemptNumber,
       tier: input.tier,
@@ -421,10 +562,10 @@ function valueFromAttempt(input: {
       fallbackReason: null,
       code: null,
       durationMs: 0,
-      finishReason: input.result.finishReason ?? null,
+      finishReason: input.generated.result.finishReason ?? null,
       statusCode: null,
       usage: effectiveUsage,
-      responsePreview: redactAssistantReportText(input.parsed.reply, 500),
+      responsePreview: redactAssistantReportText(reply, 500),
     }],
   };
 }
@@ -432,8 +573,9 @@ function valueFromAttempt(input: {
 async function recordAttempt(runId: string, attempt: AssistantAiAttempt, number: number, tier: AssistantAiTier) {
   const attemptId = makeId("attempt");
   if (!canPersistAiRuns()) return;
-  void createAssistantAiAttempt({ id: attemptId, runId, attemptNumber: number, tier, requestedModel: attempt.model, status: "STARTED" });
-  void finalizeAssistantAiAttempt(attemptId, {
+  const created = await createAssistantAiAttempt({ id: attemptId, runId, attemptNumber: number, tier, requestedModel: attempt.model, status: "STARTED" });
+  if (!created) return;
+  await finalizeAssistantAiAttempt(attemptId, {
     status: attempt.outcome === "success" ? "SUCCEEDED" : "FAILED",
     finalModel: attempt.outcome === "success" ? attempt.model : null,
     errorCode: attempt.code,
@@ -441,6 +583,10 @@ async function recordAttempt(runId: string, attempt: AssistantAiAttempt, number:
     finishReason: attempt.finishReason ?? null,
     responsePreview: attempt.responsePreview ?? null,
     durationMs: attempt.durationMs,
+    usage: attempt.usage ?? undefined,
+    totalUsage: attempt.totalUsage ?? undefined,
+    providerMetadata: attempt.providerMetadata ?? undefined,
+    estimatedCostUsd: (attempt.totalUsage ?? attempt.usage)?.billedCostUsd ?? (attempt.totalUsage ?? attempt.usage)?.estimatedCostUsd ?? null,
   });
 }
 
@@ -480,12 +626,16 @@ export async function buildAssistantAiReply(input: {
   if (canPersistAiRuns()) void createAssistantAiRun({ id: runId, user: input.user, operation: "assistant-reply", tier, requestedModel: model, fallbackReason: null });
 
   const attempts: AssistantAiAttempt[] = [];
-  const primary = await runStructuredAttempt({ ...input, model, fallbackModels, timeoutMs: ASSISTANT_AI_ATTEMPT_TIMEOUT_MS, mode: input.mode ?? "conversation" });
+  const mode = input.mode ?? "conversation";
+  const primary = await runAssistantAttempt({ ...input, model, fallbackModels, timeoutMs: ASSISTANT_AI_ATTEMPT_TIMEOUT_MS, mode });
   attempts.push(primary.attempt);
-  void recordAttempt(runId, primary.attempt, 1, tier);
+  await recordAttempt(runId, primary.attempt, 1, tier);
   if (primary.ok) {
-    const value = valueFromAttempt({ runId, tier, model, attemptNumber: 1, localReply: input.localReply, result: primary.value.result, parsed: primary.value.parsed });
-    if (canPersistAiRuns()) void finalizeAssistantAiRun(runId, { status: "SUCCEEDED", finalModel: model, finishReason: value.finishReason, usage: value.usage, totalUsage: value.totalUsage, providerMetadata: value.providerMetadata, durationMs: Date.now() - startedAt, attemptCount: 1, fallbackCount: 0 });
+    const value = valueFromAttempt({ runId, tier, model, attemptNumber: 1, localReply: input.localReply, generated: primary.value });
+    value.trace[0]!.durationMs = primary.attempt.durationMs;
+    value.durationMs = primary.attempt.durationMs;
+    value.totalUsage = sumAttemptUsage(attempts);
+    if (canPersistAiRuns()) void finalizeAssistantAiRun(runId, { status: "SUCCEEDED", finalModel: model, finishReason: value.finishReason, usage: value.usage, totalUsage: value.totalUsage, providerMetadata: value.providerMetadata, durationMs: Date.now() - startedAt, attemptCount: 1, fallbackCount: 0, estimatedCostUsd: bestUsageCost(value.totalUsage) });
     return { ok: true, value };
   }
 
@@ -498,16 +648,19 @@ export async function buildAssistantAiReply(input: {
   }
 
   const fallbackTier: AssistantAiTier = input.mode === "structured" ? "critical" : "critical";
-  const fallback = await runStructuredAttempt({ ...input, model: retryModel, fallbackModels: [], timeoutMs: ASSISTANT_AI_ATTEMPT_TIMEOUT_MS, mode: input.mode ?? "conversation" });
+  const fallback = await runAssistantAttempt({ ...input, model: retryModel, fallbackModels: [], timeoutMs: ASSISTANT_AI_ATTEMPT_TIMEOUT_MS, mode });
   attempts.push(fallback.attempt);
-  void recordAttempt(runId, fallback.attempt, 2, fallbackTier);
+  await recordAttempt(runId, fallback.attempt, 2, fallbackTier);
   if (fallback.ok) {
-    const value = valueFromAttempt({ runId, tier: fallbackTier, model: retryModel, attemptNumber: 2, localReply: input.localReply, result: fallback.value.result, parsed: fallback.value.parsed });
+    const value = valueFromAttempt({ runId, tier: fallbackTier, model: retryModel, attemptNumber: 2, localReply: input.localReply, generated: fallback.value });
+    value.trace[0]!.durationMs = fallback.attempt.durationMs;
+    value.durationMs = fallback.attempt.durationMs;
     value.trace = [
-      { attemptNumber: 1, tier, status: "FAILED", requestedModel: model, finalModel: null, fallbackReason: primary.code, code: primary.code, durationMs: primary.attempt.durationMs, finishReason: primary.attempt.finishReason ?? null, statusCode: primary.attempt.statusCode ?? null, usage: null, responsePreview: primary.attempt.responsePreview ?? null },
+      { attemptNumber: 1, tier, status: "FAILED", requestedModel: model, finalModel: null, fallbackReason: primary.code, code: primary.code, durationMs: primary.attempt.durationMs, finishReason: primary.attempt.finishReason ?? null, statusCode: primary.attempt.statusCode ?? null, usage: primary.attempt.totalUsage ?? primary.attempt.usage ?? null, responsePreview: primary.attempt.responsePreview ?? null },
       ...value.trace,
     ];
-    if (canPersistAiRuns()) void finalizeAssistantAiRun(runId, { status: "SUCCEEDED", finalModel: retryModel, finishReason: value.finishReason, usage: value.usage, totalUsage: value.totalUsage, providerMetadata: value.providerMetadata, durationMs: Date.now() - startedAt, attemptCount: 2, fallbackCount: 1 });
+    value.totalUsage = sumAttemptUsage(attempts);
+    if (canPersistAiRuns()) void finalizeAssistantAiRun(runId, { status: "SUCCEEDED", finalModel: retryModel, finishReason: value.finishReason, usage: value.usage, totalUsage: value.totalUsage, providerMetadata: value.providerMetadata, durationMs: Date.now() - startedAt, attemptCount: 2, fallbackCount: 1, estimatedCostUsd: bestUsageCost(value.totalUsage) });
     return { ok: true, value };
   }
   const diagnostic = buildDiagnostic({ operation: "assistant-reply", tier: fallbackTier, model, fallbackModels, startedAt, runId, code: fallback.code, attempts });

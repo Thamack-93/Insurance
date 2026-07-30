@@ -1,8 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import Link from "next/link";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { createContext, useCallback, useEffect, useMemo, useRef, useContext, useState, type ReactNode } from "react";
 import { ExternalLink, Loader2, Sparkles, X } from "lucide-react";
 import type { AssistantSnapshot } from "@/lib/assistant-types";
 import type { NoraContextRef } from "@/lib/nora-context";
@@ -22,6 +22,7 @@ type NoraSessionValue = {
   closeNora: () => void;
   suggestContext: (context: NoraContextRef) => void;
   clearContext: () => void;
+  refreshSnapshot: () => void;
 };
 
 const NoraSessionContext = createContext<NoraSessionValue | null>(null);
@@ -33,26 +34,42 @@ export function useNoraSession() {
 }
 
 export function NoraSessionProvider({ children, userId }: { children: ReactNode; userId: string }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [context, setContext] = useState<NoraContextRef | null>(null);
   const [snapshot, setSnapshot] = useState<AssistantSnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [starterPrompt, setStarterPrompt] = useState<string | undefined>();
+  const [snapshotAt, setSnapshotAt] = useState(0);
+  const requestRef = useRef<Promise<void> | null>(null);
+  const handoffRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    if (!open || snapshot || loadError) return;
+    if (!open || requestRef.current || (snapshot && snapshotAt && Date.now() - snapshotAt < 60_000)) return;
     const controller = new AbortController();
-    fetch("/api/assistant", { signal: controller.signal })
+    const request = fetch("/api/assistant", { signal: controller.signal })
       .then(async (response) => {
         const payload = await response.json();
         if (!response.ok || !payload?.success || !payload.snapshot) throw new Error(payload?.error || "No pude abrir Nora.");
         setSnapshot(payload.snapshot as AssistantSnapshot);
+        setSnapshotAt(Date.now());
+        setLoadError(null);
       })
       .catch((error) => {
         if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : "No pude abrir Nora.");
-      });
+      })
+      .finally(() => { requestRef.current = null; });
+    requestRef.current = request;
     return () => controller.abort();
-  }, [loadError, open, snapshot]);
+  }, [open, snapshot, snapshotAt]);
+
+  useEffect(() => {
+    if (!open) return;
+    const timer = window.setInterval(() => {
+      if (snapshotAt && Date.now() - snapshotAt >= 60_000) setSnapshotAt(0);
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [open, snapshotAt]);
 
   const value = useMemo<NoraSessionValue>(() => ({
     open,
@@ -61,9 +78,16 @@ export function NoraSessionProvider({ children, userId }: { children: ReactNode;
     closeNora: () => setOpen(false),
     suggestContext: (next) => { setContext(next); setOpen(true); },
     clearContext: () => setContext(null),
+    refreshSnapshot: () => { setSnapshotAt(0); setSnapshot(null); setLoadError(null); },
   }), [context, open]);
 
-  const retry = useCallback(() => { setLoadError(null); setSnapshot(null); }, []);
+  const retry = useCallback(() => { setLoadError(null); setSnapshotAt(0); setSnapshot(null); }, []);
+
+  const openWorkspace = useCallback(() => {
+    handoffRef.current?.();
+    setOpen(false);
+    router.push("/assistant?source=panel");
+  }, [router]);
 
   return (
     <NoraSessionContext.Provider value={value}>
@@ -77,7 +101,7 @@ export function NoraSessionProvider({ children, userId }: { children: ReactNode;
                 <div className="min-w-0"><SheetTitle>Nora</SheetTitle><SheetDescription className="truncate">Asistente operativo</SheetDescription></div>
               </div>
               <div className="flex items-center gap-1">
-                <Button asChild variant="ghost" size="icon" aria-label="Abrir Nora en espacio completo"><Link href="/assistant"><ExternalLink className="size-4" /></Link></Button>
+                <Button type="button" variant="ghost" size="icon" onClick={openWorkspace} aria-label="Abrir Nora en espacio completo"><ExternalLink className="size-4" /></Button>
                 <Button type="button" variant="ghost" size="icon" onClick={() => setOpen(false)} aria-label="Cerrar Nora"><X className="size-4" /></Button>
               </div>
             </div>
@@ -91,7 +115,16 @@ export function NoraSessionProvider({ children, userId }: { children: ReactNode;
           {loadError ? (
             <div className="grid flex-1 place-items-center p-6 text-center"><div><p className="text-sm text-muted-foreground">{loadError}</p><Button className="mt-3" variant="outline" onClick={retry}>Reintentar</Button></div></div>
           ) : snapshot ? (
-            <LazyAssistantConsole snapshot={snapshot} userId={userId} variant="panel" context={context} initialPrompt={starterPrompt} />
+            <LazyAssistantConsole
+              snapshot={snapshot}
+              userId={userId}
+              variant="panel"
+              context={context}
+              initialPrompt={starterPrompt}
+              onHandoffReady={(handoff) => { handoffRef.current = handoff; }}
+              onContextChange={setContext}
+              onConfirmed={value.refreshSnapshot}
+            />
           ) : (
             <div className="grid flex-1 place-items-center"><Loader2 className="size-5 animate-spin text-ai" /><span className="sr-only">Cargando Nora</span></div>
           )}

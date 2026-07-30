@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
 import {
   ButtonGroup,
   ButtonGroupText,
@@ -323,13 +324,29 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
 const streamdownPlugins = { cjk, code, math, mermaid };
 
+function MessageLink({
+  href,
+  children,
+  className,
+  ...props
+}: ComponentProps<"a"> & { node?: unknown }) {
+  const safeProps = { ...props };
+  delete (safeProps as { node?: unknown }).node;
+  const linkClassName = cn("wrap-anywhere font-medium text-primary underline", className);
+  if (href?.startsWith("/")) {
+    return <Link href={href} className={linkClassName} {...safeProps}>{children}</Link>;
+  }
+  return <a href={href} className={linkClassName} target="_blank" rel="noreferrer noopener" {...safeProps}>{children}</a>;
+}
+
 export const MessageResponse = memo(
   ({ className, ...props }: MessageResponseProps) => (
     <Streamdown
       className={cn(
-        "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+        "w-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
         className
       )}
+      components={{ a: MessageLink }}
       plugins={streamdownPlugins}
       {...props}
     />

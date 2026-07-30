@@ -29,14 +29,16 @@ function readView(value?: string): OperationsView {
 
 function WorkItemRow({ item }: { item: WorkQueueItem }) {
   const href = getWorkItemHref(item);
+  const clientLabel = item.client?.fullName ?? "Cliente no vinculado";
   const policyContext = item.policy
     ? `${item.policy.policyNumber} · ${item.policy.policyType}`
-    : null;
+    : "Póliza no vinculada";
+  const insurerLabel = item.insurer?.name ?? "Aseguradora no vinculada";
   return (
     <li className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b px-4 py-2.5 last:border-b-0">
       <Link href={href} className="min-w-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <p className="truncate text-sm font-medium">{item.title}</p>
-        <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.client?.fullName ?? "Sin cliente"}{policyContext ? ` · ${policyContext}` : ""}{item.insurer?.name ? ` · ${item.insurer.name}` : ""}</p>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">{clientLabel} · {policyContext} · {insurerLabel}</p>
         <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
           {item.policy ? `Vigencia ${formatDate(item.policy.startDate)}–${formatDate(item.policy.endDate)} · ` : ""}
           {item.dueDate ? formatBusinessDateRelative(item.dueDate) : "Sin fecha límite"}

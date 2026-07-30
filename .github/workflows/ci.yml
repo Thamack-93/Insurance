@@ -59,6 +59,9 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1"
       PLAYWRIGHT_USE_PRODUCTION_SERVER: "1"
+      PLAYWRIGHT_HOST: localhost
+      PLAYWRIGHT_BASE_URL: http://localhost:4173
+      PORT: "4173"
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
       SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
       SESSION_SECRET: ci-session-secret-minimum-32-characters-long

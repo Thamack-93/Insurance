@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, Bot, Check, Clipboard, FileUp, Loader2, RotateCcw, X } from "lucide-react";
 import { upload } from "@vercel/blob/client";
 import { toast } from "sonner";
@@ -26,6 +26,7 @@ import { buildNoraPolicyPdfPathname, NORA_POLICY_PDF_MAX_BYTES } from "@/lib/nor
 import type { NoraContextRef } from "@/lib/nora-context";
 import { NoraExcelDownload } from "@/components/assistant/nora-excel-download";
 import { Conversation, ConversationContent, ConversationScrollButton } from "@/components/ai-elements/conversation";
+import { cleanupLegacyNoraState, getNoraStorageMode, loadNoraSession, NORA_SESSION_EVENT, saveNoraSession, savePolicyCaptureHandoff, type NoraStorageMode } from "@/lib/nora-browser-session";
 
 type Message = {
   id: string;
@@ -53,8 +54,6 @@ type Message = {
   todayMetrics?: AssistantConversationResponse["todayMetrics"];
 };
 
-const CAPTURE_SESSION_KEY = "policydesk.policyPdfCapture.v2";
-
 function makeId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
@@ -69,59 +68,6 @@ function initialMessage(snapshot: AssistantSnapshot): Message {
     source: "local",
     quickPrompts: snapshot.quickPrompts,
   };
-}
-
-function ResultSection({ section, compact = false }: { section: AssistantSection; compact?: boolean }) {
-  const isPriority = /cobro|pendiente|riesgo|resultado/i.test(section.title);
-  return (
-    <div className={cn("mt-3 overflow-hidden rounded-2xl border bg-background/80", isPriority ? "border-amber-200/80" : "border-border/70")}>
-      <div className="flex items-start justify-between gap-3 border-b border-border/60 px-3 py-2.5">
-        <div className="min-w-0">
-        <p className="text-sm font-medium">{section.title}</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">{section.summary}</p>
-        </div>
-        {section.items.length > 0 ? <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">{section.items.length}</Badge> : null}
-      </div>
-      {section.items.length > 0 ? (
-        <div className="divide-y divide-border/60">
-          {section.items.map((item) => (
-            <Link
-              key={`${item.href}-${item.title}`}
-              href={item.href}
-              className={cn("gap-3 px-3 py-2.5 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring", compact ? "grid grid-cols-[minmax(0,1fr)_auto]" : "flex items-start justify-between")}
-            >
-              <div className="min-w-0">
-                <p className="break-words text-sm font-medium">{item.title}</p>
-                <p className="mt-0.5 break-words text-xs text-muted-foreground">{item.subtitle}</p>
-              </div>
-              {item.meta ? <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">{item.meta}</Badge> : null}
-            </Link>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function TodayMetrics({ metrics, compact = false }: { metrics: NonNullable<Message["todayMetrics"]>; compact?: boolean }) {
-  const cards = [
-    ["Vencidos", metrics.overdueCount, "text-red-700"],
-    ["Hoy", metrics.dueTodayCount, "text-amber-700"],
-    ["7 días", metrics.due7Count, "text-blue-700"],
-    ["Renovaciones", metrics.renewals30Count, "text-violet-700"],
-    ["Pendientes", metrics.openWorkItemsCount, "text-orange-700"],
-    ["Comisiones", metrics.commissionsCount, "text-emerald-700"],
-  ] as const;
-  return (
-    <div className={cn("mb-4 grid gap-2", compact ? "grid-cols-3" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-6")}>
-      {cards.map(([label, value, color]) => (
-        <div key={label} className={cn("min-w-0 rounded-xl border border-border/70 bg-background/80", compact ? "px-2 py-2.5" : "px-3 py-3")}>
-          <p className="truncate text-[9px] font-medium uppercase tracking-wide text-muted-foreground" title={label}>{label}</p>
-          <p className={cn("mt-1 font-mono text-xl font-semibold tracking-tight", color)}>{value}</p>
-        </div>
-      ))}
-    </div>
-  );
 }
 
 function formatDateValue(value: string | null | undefined) {
@@ -160,7 +106,15 @@ function formatTokenCount(value: number | null | undefined) {
 
 function formatCostUsd(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return "—";
+  if (value > 0 && value < 0.000001) return "<$0.000001";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 6 }).format(value);
+}
+
+function formatUsageCost(usage: AssistantAiUsageSnapshot | null | undefined) {
+  if (!usage) return "No disponible";
+  const value = usage.billedCostUsd ?? usage.estimatedCostUsd;
+  const suffix = usage.costSource === "gateway" ? " · Gateway" : usage.costSource === "estimated" ? " · estimado" : "";
+  return `${formatCostUsd(value)}${suffix}`;
 }
 
 function buildCaptureSessionPayload(preview: PolicyPdfCapturePreview) {
@@ -257,20 +211,24 @@ function CapturePreviewCard({
   );
 }
 
-const CONVERSATION_SESSION_KEY = "policydesk.nora.conversation.v1";
-
 export function AssistantConsole({
   snapshot,
   userId,
   variant = "workspace",
   context = null,
   initialPrompt,
+  onHandoffReady,
+  onContextChange,
+  onConfirmed,
 }: {
   snapshot: AssistantSnapshot;
   userId: string;
   variant?: "workspace" | "panel";
   context?: NoraContextRef | null;
   initialPrompt?: string;
+  onHandoffReady?: (handoff: () => void) => void;
+  onContextChange?: (context: NoraContextRef | null) => void;
+  onConfirmed?: () => void;
 }) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -281,37 +239,101 @@ export function AssistantConsole({
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [lastPrompt, setLastPrompt] = useState<string | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
+  const [activeContext, setActiveContext] = useState<NoraContextRef | null>(context);
+  const [storageMode, setStorageMode] = useState<NoraStorageMode>("persistent");
+  const restoredUserIdRef = useRef<string | null>(null);
+  const contextInitializedRef = useRef(false);
+  const instanceIdRef = useRef(makeId());
+  const lastSessionUpdatedAtRef = useRef(0);
+
+  function updateContext(next: NoraContextRef | null) {
+    setActiveContext(next);
+    onContextChange?.(next);
+  }
 
   useEffect(() => {
+    if (restoredUserIdRef.current === userId) return;
+    restoredUserIdRef.current = userId;
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
       try {
-        const stored = window.sessionStorage.getItem(CONVERSATION_SESSION_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored) as { messages?: Message[]; input?: string };
-          if (Array.isArray(parsed.messages) && parsed.messages.length) setMessages(parsed.messages);
-          if (typeof parsed.input === "string") setInput(parsed.input);
+        cleanupLegacyNoraState();
+        const stored = loadNoraSession(userId);
+        if (stored?.messages.length) {
+          setMessages(stored.messages as Message[]);
+          setInput(stored.input);
+          lastSessionUpdatedAtRef.current = stored.updatedAt;
+          if (!context && stored.context) {
+            setActiveContext(stored.context);
+            onContextChange?.(stored.context);
+          }
         } else if (initialPrompt) {
           setInput(initialPrompt);
         }
+        if (variant === "workspace" && window.location.search.includes("source=panel")) {
+          router.replace("/assistant", { scroll: false });
+        }
       } catch {
-        window.sessionStorage.removeItem(CONVERSATION_SESSION_KEY);
+        // Browser storage is optional; continue with in-memory state.
       } finally {
         if (!cancelled) setSessionReady(true);
       }
     });
     return () => { cancelled = true; };
-  }, [initialPrompt]);
+  }, [context, initialPrompt, onContextChange, router, userId, variant]);
 
   useEffect(() => {
     if (!sessionReady) return;
-    try {
-      window.sessionStorage.setItem(CONVERSATION_SESSION_KEY, JSON.stringify({ messages, input }));
-    } catch {
-      // A full browser storage quota must not interrupt the conversation.
+    const onSessionUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId?: string; updatedAt?: number; sourceId?: string }>).detail;
+      if (detail?.userId !== userId || detail.sourceId === instanceIdRef.current || !detail.updatedAt || detail.updatedAt <= lastSessionUpdatedAtRef.current) return;
+      const stored = loadNoraSession(userId);
+      if (!stored?.messages.length) return;
+      lastSessionUpdatedAtRef.current = stored.updatedAt;
+      setMessages(stored.messages as Message[]);
+      setInput(stored.input);
+      if (stored.context) {
+        setActiveContext(stored.context);
+        onContextChange?.(stored.context);
+      }
+    };
+    window.addEventListener(NORA_SESSION_EVENT, onSessionUpdated);
+    return () => window.removeEventListener(NORA_SESSION_EVENT, onSessionUpdated);
+  }, [onContextChange, sessionReady, userId]);
+
+  const saveSession = useCallback(() => {
+    const saved = saveNoraSession(userId, {
+      messages,
+      input,
+      context: activeContext,
+      welcome: initialMessage(snapshot),
+    }, { sourceId: instanceIdRef.current });
+    if (saved) {
+      const stored = loadNoraSession(userId);
+      if (stored) lastSessionUpdatedAtRef.current = stored.updatedAt;
     }
-  }, [input, messages, sessionReady]);
+    return saved;
+  }, [activeContext, input, messages, snapshot, userId]);
+
+  useEffect(() => {
+    if (!sessionReady) return;
+    saveSession();
+    queueMicrotask(() => setStorageMode(getNoraStorageMode()));
+  }, [saveSession, sessionReady]);
+
+  useEffect(() => {
+    if (!onHandoffReady) return;
+    onHandoffReady(() => { saveSession(); });
+  }, [onHandoffReady, saveSession, sessionReady]);
+
+  useEffect(() => {
+    if (!contextInitializedRef.current) {
+      contextInitializedRef.current = true;
+      return;
+    }
+    queueMicrotask(() => setActiveContext(context));
+  }, [context]);
 
   useEffect(() => {
     if (!sessionReady || !initialPrompt || input.trim()) return;
@@ -352,9 +374,7 @@ export function AssistantConsole({
   }
 
   function savePolicyCapturePreview(preview: PolicyPdfCapturePreview) {
-    if (typeof window !== "undefined") {
-      window.sessionStorage.setItem(CAPTURE_SESSION_KEY, JSON.stringify(buildCaptureSessionPayload(preview)));
-    }
+    savePolicyCaptureHandoff(userId, buildCaptureSessionPayload(preview));
   }
 
   function goToPolicyCapture(preview: PolicyPdfCapturePreview) {
@@ -375,7 +395,7 @@ export function AssistantConsole({
       const response = await fetch("/api/assistant", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message, context }),
+        body: JSON.stringify({ message, context: activeContext }),
       });
       const payload = (await response.json().catch(() => null)) as
         | { success?: boolean; response?: AssistantConversationResponse; error?: string }
@@ -552,7 +572,7 @@ export function AssistantConsole({
     <section className={cn(
       "mx-auto flex w-full max-w-none flex-col overflow-hidden bg-card/90",
       variant === "workspace"
-        ? "h-[calc(100dvh-7.5rem)] min-h-[34rem] rounded-[1.5rem] border border-border/70 shadow-sm lg:h-[calc(100dvh-8rem)]"
+        ? "min-h-0 flex-1 rounded-[1.5rem] border border-border/70 shadow-sm"
         : "min-h-0 flex-1 rounded-none border-0 shadow-none",
     )}>
       <header className={cn("flex items-center justify-between border-b border-border/70", variant === "workspace" ? "px-5 py-4 sm:px-7" : "px-3 py-2")}>
@@ -569,6 +589,16 @@ export function AssistantConsole({
                 {snapshot.ai.available ? `IA configurada · ${snapshot.ai.model}` : "IA no disponible"}
               </Badge>
             </div>
+            {activeContext ? (
+              <div className="mt-2 flex max-w-full items-center gap-2 text-xs">
+                <Badge variant="outline" className="max-w-full truncate rounded-full border-ai/30 bg-ai/5 text-ai">
+                  Contexto: {activeContext.type} · {activeContext.id}
+                </Badge>
+                <Button type="button" variant="ghost" size="sm" className="h-6 shrink-0 px-2 text-xs" onClick={() => updateContext(null)}>
+                  Quitar
+                </Button>
+              </div>
+            ) : null}
           </div>
         </div>
         ) : <p className="text-xs text-muted-foreground">Conversación activa</p>}
@@ -580,9 +610,14 @@ export function AssistantConsole({
           </Button>
         </div>
       </header>
+      {storageMode === "memory" ? (
+        <div role="status" className={cn("border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100", compact ? "sm:px-4" : "sm:px-7")}>
+          Nora continúa en memoria. El chat no sobrevivirá a una recarga y una captura PDF puede requerir volver a subir el archivo.
+        </div>
+      ) : null}
 
       <Conversation className="min-h-0" aria-live="polite">
-        <ConversationContent className={cn("mx-auto w-full", compact ? "gap-5 px-4 py-4" : "max-w-5xl gap-7 px-4 py-6 sm:px-8")}>
+        <ConversationContent className={cn("mx-auto w-full", compact ? "gap-3 px-4 py-4" : "max-w-5xl gap-4 px-4 py-5 sm:px-8")}>
         {messages.map((message) => (
           <article key={message.id} className={cn("flex min-w-0", message.role === "user" ? "justify-end" : "justify-start")}>
             <div className={cn("min-w-0", message.role === "assistant" ? "w-full" : "max-w-[85%] rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-background")}>
@@ -666,7 +701,7 @@ export function AssistantConsole({
                         </div>
                         <div>
                           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Costo</p>
-                          <p className="mt-1 font-medium text-foreground">{formatCostUsd(message.aiUsage.estimatedCostUsd)}</p>
+                          <p className="mt-1 font-medium text-foreground">{formatUsageCost(message.aiUsage)}</p>
                         </div>
                       </div>
                     ) : null}
@@ -694,7 +729,7 @@ export function AssistantConsole({
                               <span>In: {formatTokenCount(entry.usage.inputTokens)}</span>
                               <span>Out: {formatTokenCount(entry.usage.outputTokens)}</span>
                               <span>Total: {formatTokenCount(entry.usage.totalTokens)}</span>
-                              <span>Costo: {formatCostUsd(entry.usage.estimatedCostUsd)}</span>
+                              <span>Costo: {formatUsageCost(entry.usage)}</span>
                             </div>
                           ) : null}
                         </div>
@@ -703,7 +738,6 @@ export function AssistantConsole({
                   </div>
                 </details>
               ) : null}
-              {message.todayMetrics ? <TodayMetrics metrics={message.todayMetrics} compact={compact} /> : null}
               {message.role === "assistant" ? <MessageResponse className="text-sm leading-6" isAnimating={false}>{message.text}</MessageResponse> : <p className="whitespace-pre-wrap text-sm leading-6">{message.text}</p>}
               {message.role === "assistant" && message.text ? (
                 <div className="mt-2 flex items-center gap-1">
@@ -720,9 +754,8 @@ export function AssistantConsole({
                   compact={compact}
                 />
               ) : null}
-              {message.actionProposal ? <AssistantActionProposalCard proposal={message.actionProposal} /> : null}
-              {message.sections?.map((section) => <ResultSection key={`${message.id}-${section.title}`} section={section} compact={compact} />)}
-              {message.quickPrompts && message.role === "assistant" && message.id === messages[messages.length - 1]?.id ? (
+              {message.actionProposal ? <AssistantActionProposalCard proposal={message.actionProposal} onConfirmed={onConfirmed} /> : null}
+              {message.quickPrompts && message.quickPrompts.length > 0 && message.role === "assistant" && message.id === messages[messages.length - 1]?.id ? (
                 <div className="mt-4 flex flex-wrap gap-2">
                   {message.quickPrompts.slice(0, 4).map((prompt) => (
                     <Button
@@ -779,7 +812,7 @@ export function AssistantConsole({
             </Button>
           </div>
         ) : null}
-        <div className={cn("flex items-end gap-2 border border-border bg-card shadow-sm focus-within:ring-2 focus-within:ring-ring/30", compact ? "rounded-2xl px-3 py-2.5" : "rounded-3xl px-4 py-3")}>
+        <div className={cn("flex min-w-0 items-end gap-2 border border-border bg-card shadow-sm focus-within:ring-2 focus-within:ring-ring/30", compact ? "rounded-2xl px-3 py-2.5" : "rounded-3xl px-4 py-3")}>
           <Button
             type="button"
             variant="ghost"
@@ -793,11 +826,17 @@ export function AssistantConsole({
           </Button>
           <Textarea
             value={input}
-            onChange={(event) => setInput(event.target.value)}
+            onChange={(event) => {
+              setInput(event.target.value);
+              event.currentTarget.scrollLeft = 0;
+            }}
             placeholder="Pregunta por una póliza, cliente, renovación, recibo o reporte…"
             rows={1}
             maxLength={2_000}
-            className="max-h-36 min-h-8 resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
+            className="min-w-0 max-h-36 min-h-8 resize-none overflow-x-hidden border-0 bg-transparent p-0 leading-6 shadow-none focus-visible:ring-0"
+            onFocus={(event) => {
+              event.currentTarget.scrollLeft = 0;
+            }}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();

@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = Number(process.env.PORT ?? 5000);
-const HOST = process.env.PLAYWRIGHT_HOST ?? "127.0.0.1";
+const PORT = Number(process.env.PORT ?? 4173);
+const HOST = process.env.PLAYWRIGHT_HOST ?? "localhost";
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? `http://${HOST}:${PORT}`;
 const useProductionServer = process.env.PLAYWRIGHT_USE_PRODUCTION_SERVER === "1";
 
