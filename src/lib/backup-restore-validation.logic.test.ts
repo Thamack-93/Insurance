@@ -70,6 +70,25 @@ describe("foreign-key validation", () => {
     const results = await validateForeignKeys(client);
     expect(results[0]?.orphanCount).toBe(0);
   });
+
+  it("normalizes PostgreSQL text-array output returned as a string", async () => {
+    const client = {
+      query: vi
+        .fn()
+        .mockResolvedValueOnce({
+          rows: [{
+            constraint_name: "child_parent_fkey",
+            table_name: "Child",
+            referenced_table: "Parent",
+            columns: "{one,two}",
+            referenced_columns: "{one,two}",
+          }],
+        })
+        .mockResolvedValueOnce({ rows: [{ count: "0" }] }),
+    } as never;
+    const results = await validateForeignKeys(client);
+    expect(results[0]?.columns).toEqual(["one", "two"]);
+  });
 });
 
 describe("schema validation", () => {

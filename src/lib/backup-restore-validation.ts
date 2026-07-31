@@ -290,9 +290,23 @@ type ForeignKeyRow = {
   constraint_name: string;
   table_name: string;
   referenced_table: string;
-  columns: string[];
-  referenced_columns: string[];
+  columns: string[] | string;
+  referenced_columns: string[] | string;
 };
+
+function normalizePostgresTextArray(value: string[] | string) {
+  if (Array.isArray(value)) return value.map(String);
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    throw new RestoreIntegrityError("La definición de una FK contiene columnas inválidas.");
+  }
+  const body = trimmed.slice(1, -1);
+  if (!body) return [];
+  return body.split(",").map((entry) => {
+    const unquoted = entry.trim().replace(/^"|"$/g, "");
+    return unquoted.replaceAll('\\"', '"').replaceAll("\\\\", "\\");
+  });
+}
 
 export async function validateForeignKeys(client: PoolClient): Promise<ForeignKeyResult[]> {
   const foreignKeys = await client.query<ForeignKeyRow>(`
@@ -318,13 +332,18 @@ export async function validateForeignKeys(client: PoolClient): Promise<ForeignKe
 
   const results: ForeignKeyResult[] = [];
   for (const foreignKey of foreignKeys.rows) {
+    const columns = normalizePostgresTextArray(foreignKey.columns);
+    const referencedColumns = normalizePostgresTextArray(foreignKey.referenced_columns);
+    if (columns.length === 0 || columns.length !== referencedColumns.length) {
+      throw new RestoreIntegrityError(`La definición de la FK ${foreignKey.constraint_name} es inválida.`);
+    }
     const childAlias = "child_row";
     const parentAlias = "parent_row";
-    const join = foreignKey.columns
-      .map((column, index) => `${parentAlias}.${quoteIdentifier(foreignKey.referenced_columns[index])} = ${childAlias}.${quoteIdentifier(column)}`)
+    const join = columns
+      .map((column, index) => `${parentAlias}.${quoteIdentifier(referencedColumns[index])} = ${childAlias}.${quoteIdentifier(column)}`)
       .join(" AND ");
-    const notNull = foreignKey.columns.map((column) => `${childAlias}.${quoteIdentifier(column)} IS NOT NULL`).join(" AND ");
-    const firstParentColumn = quoteIdentifier(foreignKey.referenced_columns[0]);
+    const notNull = columns.map((column) => `${childAlias}.${quoteIdentifier(column)} IS NOT NULL`).join(" AND ");
+    const firstParentColumn = quoteIdentifier(referencedColumns[0]);
     const result = await client.query<{ count: string }>(
       `SELECT count(*)::text AS count
          FROM ${tableReference("public", foreignKey.table_name)} ${childAlias}
@@ -339,8 +358,8 @@ export async function validateForeignKeys(client: PoolClient): Promise<ForeignKe
       constraint: foreignKey.constraint_name,
       table: foreignKey.table_name,
       referencedTable: foreignKey.referenced_table,
-      columns: foreignKey.columns,
-      referencedColumns: foreignKey.referenced_columns,
+      columns,
+      referencedColumns,
       orphanCount,
     });
   }
