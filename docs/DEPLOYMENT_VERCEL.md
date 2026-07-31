@@ -24,7 +24,7 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 
 ## Qué queda fuera por ahora
 
-- Restauración de backups desde la UI; la restauración solo se permite por CLI hacia una rama temporal de Neon.
+- Restauración de backups desde la UI; la restauración y el restore drill solo se permiten por CLI hacia una rama temporal de Neon.
 
 ## Variables de entorno
 
@@ -44,6 +44,7 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 - `BLOB_READ_WRITE_TOKEN`
 - `BACKUP_ENCRYPTION_KEY`
 - `BACKUP_ENCRYPTION_KEY_VERSION`
+- `RESTORE_DATABASE_URL`, `RESTORE_NEON_BRANCH` y `ALLOW_TEMPORARY_NEON_RESTORE` solo para operaciones CLI autorizadas
 
 ## Flujo de despliegue
 
@@ -51,7 +52,7 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 2. Crear una rama protegida para preview; no seedear ni resetear la base actual.
 3. Configurar las variables de entorno en Vercel.
 4. Conectar un Blob store privado.
-5. Mantener los tres cron diarios en Vercel: `/api/jobs/backup` a las `05:00 UTC`, `/api/jobs/telegram-digest` a las `14:00 UTC` (08:00, hora de Ciudad de México) y `/api/jobs/telegram-birthdays` a las `15:00 UTC` (09:00, hora de Ciudad de México). El aviso de cumpleaños se deduplica por usuario y fecha local; el reenvío manual es independiente.
+5. Mantener los cuatro cron diarios en Vercel, todos protegidos por `CRON_SECRET`: `/api/jobs/backup` a las `05:00 UTC`, `/api/jobs/nonpayment-cancellation` a las `06:00 UTC`, `/api/jobs/telegram-digest` a las `14:00 UTC` (08:00, hora de Ciudad de México) y `/api/jobs/telegram-birthdays` a las `15:00 UTC` (09:00, hora de Ciudad de México). El aviso de cumpleaños se deduplica por usuario y fecha local; el reenvío manual es independiente.
 6. Mantener el fallback local de rate limiting para el despliegue actual. Cuando aumente el tráfico, configurar Redis y cambiar `REQUIRE_DISTRIBUTED_RATE_LIMIT=1` para fallar cerrado si Redis no está disponible.
 7. Desplegar preview, validar y luego promover la rama principal.
 
@@ -61,3 +62,4 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 - No debe intentar escribir archivos PDF en runtime.
 - `Document` debe operar solo como metadata en esta fase.
 - Los backups deben poder crearse, listarse y verificarse solo por admin.
+- Un backup verificado criptográficamente no sustituye un restore drill. El drill sigue siendo CLI-only, hacia una rama temporal explícitamente autorizada y nunca hacia producción.

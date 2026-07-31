@@ -19,6 +19,7 @@
 # local generated data
 /data/backups/*
 /data/exports/*
+/artifacts/restore-drills/
 
 # next.js
 /.next/

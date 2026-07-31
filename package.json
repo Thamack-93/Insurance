@@ -34,6 +34,7 @@
     "export:commissions": "tsx scripts/export-commissions.ts",
     "import:policy-ledger": "tsx scripts/import-policy-ledger.ts",
     "restore:backup:temp-neon": "tsx scripts/restore-backup-to-neon-branch.ts",
+    "drill:backup:temp-neon": "tsx scripts/run-backup-restore-drill.ts",
     "split:policy-vigencies": "tsx scripts/split-policy-vigencies.ts",
     "test": "playwright test",
     "test:unit": "vitest run",

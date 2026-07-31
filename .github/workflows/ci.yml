@@ -65,6 +65,8 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
       SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
       SESSION_SECRET: ci-session-secret-minimum-32-characters-long
+      RESTORE_INTEGRATION: "1"
+      RESTORE_INTEGRATION_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
     services:
       postgres:
         image: postgres:16-alpine
@@ -101,6 +103,9 @@ jobs:
       - name: Check migration drift
         run: npm run db:check-drift
 
+      - name: Backup restore integration against disposable PostgreSQL
+        run: npm run test:unit -- src/lib/backup-restore.integration.logic.test.ts
+
       - name: Build production application
         run: npm run build
 
@@ -123,3 +128,12 @@ jobs:
             test-results
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Upload sanitized restore drill reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: restore-drill-reports-${{ github.run_attempt }}
+          path: artifacts/restore-drills
+          if-no-files-found: ignore
+          retention-days: 90

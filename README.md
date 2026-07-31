@@ -37,7 +37,7 @@ Copia `.env.example` a `.env.local` y ajusta los valores:
 |----------|-----------|-------------|
 | `SESSION_SECRET` | Producción | Secreto HMAC para cookies de sesión (mín. 32 caracteres) |
 | `DATABASE_URL` | Producción | URL de Postgres hosted para el despliegue en Vercel |
-| `CRON_SECRET` | Producción | Protege los jobs internos de Telegram y del backup automatizado |
+| `CRON_SECRET` | Producción | Protege los cuatro jobs internos de Vercel Cron |
 | `AI_GATEWAY_MODEL` | Opcional | Modelo `provider/model` usado por Nora |
 | `AI_GATEWAY_FALLBACK_MODELS` | Opcional | Modelos de respaldo para conversación |
 | `AI_GATEWAY_STRUCTURED_MODEL` | Opcional | Modelo para acciones y salidas estructuradas |
@@ -51,6 +51,7 @@ Copia `.env.example` a `.env.local` y ajusta los valores:
 | `BACKUP_ENCRYPTION_KEY_V2` | Producción, temporal | Ejemplo de clave de 32 bytes para la versión `v2` |
 | `ENABLE_DOCUMENT_FILES` | Opcional | `false` para la demo publicada sin archivos |
 | `AUTH_SECRET` | Dev | Alias de `SESSION_SECRET` en desarrollo |
+| `RESTORE_DRILL_APP_SMOKE` | Opcional | `1` habilita el smoke E2E opt-in contra el target temporal |
 
 ## Comandos
 
@@ -78,6 +79,21 @@ RESTORE_DATABASE_URL=... RESTORE_NEON_BRANCH=restore-prueba \
 ALLOW_TEMPORARY_NEON_RESTORE=true \
 npm run restore:backup:temp-neon -- <archivo.ndjson.gz.enc>
 ```
+
+Para probar recuperación completa (conteos, foreign keys, invariantes, WorkItem,
+lecturas y reporte JSON), el operador debe provisionar la rama temporal por separado:
+
+```bash
+RESTORE_DATABASE_URL=... RESTORE_NEON_BRANCH=restore-2026-07-30 \
+ALLOW_TEMPORARY_NEON_RESTORE=true \
+npm run drill:backup:temp-neon -- <archivo.ndjson.gz.enc>
+```
+
+El drill no crea, promueve ni elimina ramas Neon. La verificación criptográfica por sí
+sola no demuestra recuperabilidad. Los reportes sanitizados se escriben en
+`artifacts/restore-drills/` y nunca contienen URLs, credenciales ni datos de clientes.
+Consulta el [runbook de disaster recovery](docs/internal/disaster-recovery-runbook.md)
+para el procedimiento completo.
 
 ### Migrar una clave sin borrar backups
 

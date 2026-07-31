@@ -37,7 +37,7 @@ export function assertTemporaryNeonRestoreTarget(input: RestoreTargetInput) {
     throw new Error("ALLOW_TEMPORARY_NEON_RESTORE=true es obligatorio.");
   }
   const branchName = input.branchName?.trim() ?? "";
-  if (!/^(restore|preview|temp)[-_][a-z0-9._-]+$/i.test(branchName)) {
+  if (!/^(restore|preview|temp)-[a-z0-9._-]+$/i.test(branchName)) {
     throw new Error("RESTORE_NEON_BRANCH debe identificar una rama restore-, preview- o temp-.");
   }
   if (!input.sourceDatabaseUrl?.trim() || !input.targetDatabaseUrl?.trim()) {

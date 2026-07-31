@@ -56,4 +56,31 @@ describe("temporary Neon restore guard", () => {
       }),
     ).toThrow("base actual");
   });
+
+  it("accepts only restore, preview or temp branch prefixes", () => {
+    expect(() =>
+      assertTemporaryNeonRestoreTarget({
+        sourceDatabaseUrl: source,
+        targetDatabaseUrl: target,
+        branchName: "production",
+        allowRestore: "true",
+      }),
+    ).toThrow("rama restore-");
+    expect(() =>
+      assertTemporaryNeonRestoreTarget({
+        sourceDatabaseUrl: source,
+        targetDatabaseUrl: target,
+        branchName: "staging",
+        allowRestore: "true",
+      }),
+    ).toThrow("rama restore-");
+    expect(() =>
+      assertTemporaryNeonRestoreTarget({
+        sourceDatabaseUrl: source,
+        targetDatabaseUrl: target,
+        branchName: "restore_2026-07-30",
+        allowRestore: "true",
+      }),
+    ).toThrow("rama restore-");
+  });
 });
