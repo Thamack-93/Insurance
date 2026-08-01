@@ -15,7 +15,7 @@ const parsed: ParsedBackup = {
 describe("restore count validation", () => {
   it("rejects a manifest count mismatch", async () => {
     const client = { query: vi.fn().mockResolvedValue({ rows: [{ count: "1" }] }) } as never;
-    await expect(validateTableCounts(client, parsed, [{ schema: "public", name: "User", rowCount: 2 }], 2)).rejects.toThrow("backup y manifiesto");
+    await expect(validateTableCounts(client, parsed, [{ schema: "public", name: "User", rowCount: 2 }], 2)).rejects.toMatchObject({ code: "COUNT_MISMATCH" });
   });
 
   it("accepts equal backup, manifest and target counts", async () => {
@@ -49,7 +49,7 @@ describe("foreign-key validation", () => {
         })
         .mockResolvedValueOnce({ rows: [{ count: "1" }] }),
     } as never;
-    await expect(validateForeignKeys(client)).rejects.toThrow("huérfanos");
+    await expect(validateForeignKeys(client)).rejects.toMatchObject({ code: "FOREIGN_KEY_VIOLATION" });
   });
 
   it("accepts valid single-column foreign keys", async () => {
@@ -71,7 +71,7 @@ describe("foreign-key validation", () => {
     expect(results[0]?.orphanCount).toBe(0);
   });
 
-  it("normalizes PostgreSQL text-array output returned as a string", async () => {
+  it("accepts JSON FK metadata when the postgres driver returns text", async () => {
     const client = {
       query: vi
         .fn()
@@ -80,8 +80,8 @@ describe("foreign-key validation", () => {
             constraint_name: "child_parent_fkey",
             table_name: "Child",
             referenced_table: "Parent",
-            columns: "{one,two}",
-            referenced_columns: "{one,two}",
+            columns: '["one","two"]',
+            referenced_columns: '["one","two"]',
           }],
         })
         .mockResolvedValueOnce({ rows: [{ count: "0" }] }),
@@ -94,7 +94,7 @@ describe("foreign-key validation", () => {
 describe("schema validation", () => {
   it("rejects a target missing required tables", async () => {
     const client = { query: vi.fn().mockResolvedValue({ rows: [] }) } as never;
-    await expect(validateRestoreSchema(client, parsed)).rejects.toThrow(/target|tablas actuales/);
+    await expect(validateRestoreSchema(client, parsed)).rejects.toMatchObject({ code: "BACKUP_SCHEMA_INCOMPATIBLE" });
   });
 });
 

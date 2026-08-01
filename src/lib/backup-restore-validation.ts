@@ -1,4 +1,5 @@
 import type { PoolClient, QueryResultRow } from "pg";
+import type { RestoreFailureCode } from "@/lib/backup-restore-errors";
 
 export const RESTORE_SKIPPED_TABLES = new Set(["_prisma_migrations"]);
 
@@ -65,9 +66,16 @@ export type SequenceSyncResult = {
 export class RestoreIntegrityError extends Error {
   readonly stage = "integrity";
 
-  constructor(message: string) {
+  constructor(message: string, readonly code: RestoreFailureCode = "DOMAIN_INVARIANT_FAILED") {
     super(message);
     this.name = "RestoreIntegrityError";
+  }
+}
+
+export class RestoreSchemaCompatibilityError extends RestoreIntegrityError {
+  constructor(message: string) {
+    super(message, "BACKUP_SCHEMA_INCOMPATIBLE");
+    this.name = "RestoreSchemaCompatibilityError";
   }
 }
 
@@ -164,8 +172,16 @@ export function parseBackupRecords(plaintext: Buffer): ParsedBackup {
   return { tables, rows, tableEnds, declaredTotalRows };
 }
 
-function assertCount(condition: boolean, message: string): asserts condition {
-  if (!condition) throw new RestoreIntegrityError(message);
+function assertCount(
+  condition: boolean,
+  message: string,
+  code: RestoreFailureCode = "COUNT_MISMATCH",
+): asserts condition {
+  if (!condition) throw new RestoreIntegrityError(message, code);
+}
+
+function assertSchema(condition: boolean, message: string): asserts condition {
+  if (!condition) throw new RestoreSchemaCompatibilityError(message);
 }
 
 async function queryTableExists(client: PoolClient, schema: string, table: string) {
@@ -205,13 +221,13 @@ export async function validateRestoreSchema(client: PoolClient, parsed: ParsedBa
       missingTables.push(tableKey(target.table_schema, target.table_name));
     }
   }
-  assertCount(missingTables.length === 0, `El backup no contiene tablas actuales: ${missingTables.join(", ")}.`);
+  assertSchema(missingTables.length === 0, `El backup no contiene tablas actuales: ${missingTables.join(", ")}.`);
 
   for (const table of parsed.tables.values()) {
-    assertCount(await queryTableExists(client, table.schema, table.name), `La tabla ${tableKey(table.schema, table.name)} no existe en el target.`);
+    assertSchema(await queryTableExists(client, table.schema, table.name), `La tabla ${tableKey(table.schema, table.name)} no existe en el target.`);
     const targetColumns = await queryColumns(client, table.schema, table.name);
     const missingColumns = table.columns.filter((column) => !targetColumns.has(column.name)).map((column) => column.name);
-    assertCount(missingColumns.length === 0, `El target no tiene columnas de ${tableKey(table.schema, table.name)}: ${missingColumns.join(", ")}.`);
+    assertSchema(missingColumns.length === 0, `El target no tiene columnas de ${tableKey(table.schema, table.name)}: ${missingColumns.join(", ")}.`);
   }
 
   const requiredColumns: Record<string, string[]> = {
@@ -232,9 +248,9 @@ export async function validateRestoreSchema(client: PoolClient, parsed: ParsedBa
   };
   for (const [table, columns] of Object.entries(requiredColumns)) {
     const actual = await queryColumns(client, "public", table);
-    assertCount(actual.size > 0, `Falta la tabla crítica public.${table}.`);
+    assertSchema(actual.size > 0, `Falta la tabla crítica public.${table}.`);
     const missing = columns.filter((column) => !actual.has(column));
-    assertCount(missing.length === 0, `Faltan columnas críticas en public.${table}: ${missing.join(", ")}.`);
+    assertSchema(missing.length === 0, `Faltan columnas críticas en public.${table}: ${missing.join(", ")}.`);
   }
   return { missingTables, requiredTables: Object.keys(requiredColumns) };
 }
@@ -276,8 +292,8 @@ export async function validateTableCounts(
   }
 
   for (const [key, manifestCount] of manifestByKey) {
-    if (!parsed.tables.has(key)) throw new RestoreIntegrityError(`El manifiesto contiene una tabla ausente en el backup: ${key}.`);
-    if (!Number.isSafeInteger(manifestCount) || manifestCount < 0) throw new RestoreIntegrityError(`Conteo inválido en manifiesto para ${key}.`);
+    assertCount(parsed.tables.has(key), `El manifiesto contiene una tabla ausente en el backup: ${key}.`);
+    assertCount(Number.isSafeInteger(manifestCount) && manifestCount >= 0, `Conteo inválido en manifiesto para ${key}.`);
   }
   assertCount(manifestSum === manifestTotalRows, "El total del manifiesto no coincide con sus conteos de tabla.");
   if (parsed.declaredTotalRows !== null) assertCount(parsed.declaredTotalRows === backupSum, "El total declarado por el backup no coincide con sus filas.");
@@ -290,22 +306,21 @@ type ForeignKeyRow = {
   constraint_name: string;
   table_name: string;
   referenced_table: string;
-  columns: string[] | string;
-  referenced_columns: string[] | string;
+  columns: unknown;
+  referenced_columns: unknown;
 };
 
-function normalizePostgresTextArray(value: string[] | string) {
+export function normalizePostgresJsonTextArray(value: unknown) {
   if (Array.isArray(value)) return value.map(String);
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
-    throw new RestoreIntegrityError("La definición de una FK contiene columnas inválidas.");
+  if (typeof value === "string") {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {
+      // Fall through to the integrity error below.
+    }
   }
-  const body = trimmed.slice(1, -1);
-  if (!body) return [];
-  return body.split(",").map((entry) => {
-    const unquoted = entry.trim().replace(/^"|"$/g, "");
-    return unquoted.replaceAll('\\"', '"').replaceAll("\\\\", "\\");
-  });
+  throw new RestoreIntegrityError("La definición de una FK contiene columnas inválidas.", "FOREIGN_KEY_VIOLATION");
 }
 
 export async function validateForeignKeys(client: PoolClient): Promise<ForeignKeyResult[]> {
@@ -314,8 +329,8 @@ export async function validateForeignKeys(client: PoolClient): Promise<ForeignKe
       constraint_definition.conname AS constraint_name,
       child.relname AS table_name,
       parent.relname AS referenced_table,
-      array_agg(child_attr.attname ORDER BY key.position) AS columns,
-      array_agg(parent_attr.attname ORDER BY key.position) AS referenced_columns
+      json_agg(child_attr.attname ORDER BY key.position) AS columns,
+      json_agg(parent_attr.attname ORDER BY key.position) AS referenced_columns
     FROM pg_constraint constraint_definition
     JOIN pg_class child ON child.oid = constraint_definition.conrelid
     JOIN pg_namespace child_namespace ON child_namespace.oid = child.relnamespace
@@ -332,10 +347,10 @@ export async function validateForeignKeys(client: PoolClient): Promise<ForeignKe
 
   const results: ForeignKeyResult[] = [];
   for (const foreignKey of foreignKeys.rows) {
-    const columns = normalizePostgresTextArray(foreignKey.columns);
-    const referencedColumns = normalizePostgresTextArray(foreignKey.referenced_columns);
+    const columns = normalizePostgresJsonTextArray(foreignKey.columns);
+    const referencedColumns = normalizePostgresJsonTextArray(foreignKey.referenced_columns);
     if (columns.length === 0 || columns.length !== referencedColumns.length) {
-      throw new RestoreIntegrityError(`La definición de la FK ${foreignKey.constraint_name} es inválida.`);
+      throw new RestoreIntegrityError(`La definición de la FK ${foreignKey.constraint_name} es inválida.`, "FOREIGN_KEY_VIOLATION");
     }
     const childAlias = "child_row";
     const parentAlias = "parent_row";
@@ -352,7 +367,7 @@ export async function validateForeignKeys(client: PoolClient): Promise<ForeignKe
     );
     const orphanCount = Number(result.rows[0]?.count ?? "0");
     if (orphanCount > 0) {
-      throw new RestoreIntegrityError(`La FK ${foreignKey.constraint_name} tiene ${orphanCount} huérfanos.`);
+      throw new RestoreIntegrityError(`La FK ${foreignKey.constraint_name} tiene ${orphanCount} huérfanos.`, "FOREIGN_KEY_VIOLATION");
     }
     results.push({
       constraint: foreignKey.constraint_name,
@@ -403,6 +418,11 @@ export async function validateDomainInvariants(client: PoolClient): Promise<Doma
   add("receipt_cancellation_batch_missing_timestamp", await count(client, `SELECT count(*)::text AS count FROM "Receipt" WHERE "cancellationBatchId" IS NOT NULL AND "cancelledAt" IS NULL`));
   add("notification_event_missing_user", await count(client, `SELECT count(*)::text AS count FROM "NotificationEvent" event LEFT JOIN "User" user_row ON user_row.id = event."userId" WHERE user_row.id IS NULL`));
   add("activity_log_missing_user", await count(client, `SELECT count(*)::text AS count FROM "ActivityLog" log LEFT JOIN "User" user_row ON user_row.id = log."userId" WHERE user_row.id IS NULL`));
+  add("system_user_reference_missing", await count(client, `
+    SELECT count(*)::text AS count
+      FROM "ActivityLog" log
+      LEFT JOIN "User" user_row ON user_row.id = 'system-user-0000'
+     WHERE log."userId" = 'system-user-0000' AND user_row.id IS NULL`));
 
   add("workitem_empty_entity_reference", await count(client, `SELECT count(*)::text AS count FROM "WorkItem" WHERE NULLIF(btrim("entityType"), '') IS NULL OR NULLIF(btrim("entityId"), '') IS NULL`));
   add("workitem_partial_source_reference", await count(client, `SELECT count(*)::text AS count FROM "WorkItem" WHERE ("sourceType" IS NULL) <> ("sourceId" IS NULL)`));

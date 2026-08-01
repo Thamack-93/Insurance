@@ -1,21 +1,25 @@
 import { createHash, randomBytes, scryptSync } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import { getBackupDownload, verifyStoredBackup } from "../src/lib/backup.ts";
-import { decryptBackupPayload, parseBackupContainerHeader, parseBackupEncryptionKey } from "../src/lib/backup-logic.ts";
+import { decryptBackupPayload, parseBackupContainerHeader, parseBackupEncryptionKey, type BackupManifest } from "../src/lib/backup-logic.ts";
 import {
   applyCurrentMigrations,
   checkTargetMigrationDrift,
+  checkRestoreTargetConnection,
   restoreVerifiedBackup,
   RestoreStageError,
 } from "../src/lib/backup-restore.ts";
 import {
+  runBackupRestoreDrill,
+  type FixtureLifecycleResult,
+  type PlaywrightSmokeResult,
+} from "../src/lib/backup-restore-drill.ts";
+import {
   createEmptyDrillReport,
   sanitizeRestoreDrillError,
   writeRestoreDrillReport,
-  type DrillStage,
-  type RestoreDrillReport,
 } from "../src/lib/backup-restore-report.ts";
 import { assertTemporaryNeonRestoreTarget } from "../src/lib/backup-restore-guards.ts";
 
@@ -64,47 +68,36 @@ function childEnvironment(target: string, extra: Record<string, string> = {}) {
 }
 
 async function runLegacyAudit(target: string) {
-  const result = await execFileAsync("npm", ["run", "check:legacy-workitem-refs", "--", "--json"], {
-    cwd: process.cwd(),
-    env: childEnvironment(target),
-    maxBuffer: 4 * 1024 * 1024,
-  });
+  let stdout = "";
   try {
-    return JSON.parse(result.stdout);
-  } catch {
-    return { status: "PASS", output: "Auditor completado." };
+    const result = await execFileAsync(process.execPath, ["--import", "tsx", "scripts/check-legacy-workitem-refs.ts", "--json", "--read-only"], {
+      cwd: process.cwd(),
+      env: childEnvironment(target),
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    stdout = result.stdout;
+  } catch (error) {
+    stdout = typeof (error as { stdout?: unknown }).stdout === "string" ? (error as { stdout: string }).stdout : "";
+    if (!stdout) throw error;
   }
-}
-
-async function postCommitSmoke(target: string) {
-  const pool = new Pool({ connectionString: target, max: 1, application_name: "policydesk-restore-drill-smoke" });
-  const client = await pool.connect();
   try {
-    const tables = ["User", "Client", "Policy", "Receipt", "Payment", "WorkItem", "Claim", "Commission", "NotificationChannel", "NotificationPreference", "NotificationEvent"];
-    const counts: Record<string, number> = {};
-    for (const table of tables) {
-      const result = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "${table}"`);
-      counts[table] = Number(result.rows[0]?.count ?? "0");
-    }
-    const latestActivity = await client.query("SELECT 1 FROM \"ActivityLog\" ORDER BY \"createdAt\" DESC LIMIT 1");
-    return {
-      ok: true,
-      reads: {
-        oneUser: counts.User > 0,
-        clientCount: counts.Client,
-        policyCount: counts.Policy,
-        receiptCount: counts.Receipt,
-        paymentCount: counts.Payment,
-        workItemCount: counts.WorkItem,
-        claimsCount: counts.Claim,
-        commissionCount: counts.Commission,
-        latestActivityLog: (latestActivity.rowCount ?? 0) > 0,
-        notificationConfiguration: counts.NotificationChannel + counts.NotificationPreference + counts.NotificationEvent,
-      },
+    const parsed = JSON.parse(stdout) as {
+      status?: unknown;
+      runtimeWrites?: unknown;
+      staticReferences?: unknown;
+      data?: Record<string, unknown> | null;
     };
-  } finally {
-    client.release();
-    await pool.end().catch(() => undefined);
+    const data = parsed.data && typeof parsed.data === "object"
+      ? Object.fromEntries(Object.entries(parsed.data).filter(([, value]) => typeof value === "number" || value === null))
+      : null;
+    return {
+      status: parsed.status === "PASS" ? "PASS" : "FAIL",
+      runtimeWriteCount: Array.isArray(parsed.runtimeWrites) ? parsed.runtimeWrites.length : 0,
+      staticReferenceCount: Array.isArray(parsed.staticReferences) ? parsed.staticReferences.length : 0,
+      data,
+    };
+  } catch {
+    return { status: "FAIL", failureCode: "WORKITEM_AUDIT_FAILED", output: "La salida del auditor no fue JSON válido." };
   }
 }
 
@@ -115,7 +108,7 @@ function fixturePasswordHash(password: string) {
 
 async function createSmokeFixture(target: string) {
   const pool = new Pool({ connectionString: target, max: 1, application_name: "policydesk-restore-drill-fixture" });
-  const client = await pool.connect();
+  let client: PoolClient | undefined;
   const id = `restore-drill-${Date.now()}`;
   const email = `${id}@policydesk.local`;
   const agentId = `${id}-agent`;
@@ -124,6 +117,8 @@ async function createSmokeFixture(target: string) {
   const agentPassword = randomBytes(24).toString("base64url");
   const clientId = `${id}-client`;
   try {
+    client = await pool.connect();
+    await client.query("BEGIN");
     await client.query(
       `INSERT INTO "User" (id, email, name, "passwordHash", role, active, "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, 'ADMIN', true, now(), now())`,
       [id, email, "Restore Drill Fixture", fixturePasswordHash(password)],
@@ -136,27 +131,68 @@ async function createSmokeFixture(target: string) {
       `INSERT INTO "Client" (id, "fullName", status, "portfolioOwnerId", "createdAt", "updatedAt") VALUES ($1, $2, 'ACTIVE', $3, now(), now())`,
       [clientId, "Restore Drill Scoped Client", agentId],
     );
+    await client.query("COMMIT");
     return { id, email, password, agentId, agentEmail, agentPassword, clientId };
+  } catch (error) {
+    await client?.query("ROLLBACK").catch(() => undefined);
+    throw error;
   } finally {
-    client.release();
+    client?.release();
     await pool.end().catch(() => undefined);
   }
 }
 
 async function deleteSmokeFixture(target: string, fixture: { id: string; agentId: string; clientId: string }) {
   const pool = new Pool({ connectionString: target, max: 1, application_name: "policydesk-restore-drill-fixture-cleanup" });
-  const client = await pool.connect();
+  let client: PoolClient | undefined;
+  let transactionStarted = false;
   try {
+    client = await pool.connect();
+    await client.query("BEGIN");
+    transactionStarted = true;
     await client.query(`DELETE FROM "Client" WHERE id = $1`, [fixture.clientId]);
     await client.query(`DELETE FROM "User" WHERE id IN ($1, $2)`, [fixture.id, fixture.agentId]);
+    const remaining = await client.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM (
+        SELECT id FROM "Client" WHERE id = $1
+        UNION ALL
+        SELECT id FROM "User" WHERE id IN ($2, $3)
+      ) fixture_rows`,
+      [fixture.clientId, fixture.id, fixture.agentId],
+    );
+    if (Number(remaining.rows[0]?.count ?? "0") !== 0) throw new Error("fixture_cleanup_not_verified");
+    await client.query("COMMIT");
+    transactionStarted = false;
   } finally {
-    client.release();
+    if (transactionStarted) await client?.query("ROLLBACK").catch(() => undefined);
+    client?.release();
     await pool.end().catch(() => undefined);
   }
 }
 
 async function runAppSmoke(target: string) {
-  const fixture = await createSmokeFixture(target);
+  const fixtureLifecycle: FixtureLifecycleResult = {
+    enabled: true,
+    created: false,
+    cleanupAttempted: false,
+    cleanupVerified: false,
+    ok: false,
+  };
+  let fixture: Awaited<ReturnType<typeof createSmokeFixture>>;
+  try {
+    fixture = await createSmokeFixture(target);
+    fixtureLifecycle.created = true;
+  } catch {
+    return {
+      playwrightSmoke: {
+        ok: false,
+        failureCode: "FIXTURE_CREATION_FAILED",
+        sanitizedError: sanitizeRestoreDrillError("No se pudo crear el fixture de smoke."),
+      } satisfies PlaywrightSmokeResult,
+      fixtureLifecycle,
+    };
+  }
+  let playwrightSmoke: PlaywrightSmokeResult = { ok: true };
   try {
     await execFileAsync("npm", ["run", "build"], {
       cwd: process.cwd(),
@@ -181,76 +217,117 @@ async function runAppSmoke(target: string) {
       }),
       maxBuffer: 4 * 1024 * 1024,
     });
-    return { ok: true, fixture: "created-and-removed" };
+  } catch (error) {
+    playwrightSmoke = {
+      ok: false,
+      failureCode: "APP_SMOKE_FAILED",
+      sanitizedError: sanitizeRestoreDrillError(error),
+    };
   } finally {
-    await deleteSmokeFixture(target, fixture).catch(() => undefined);
+    fixtureLifecycle.cleanupAttempted = true;
+    try {
+      await deleteSmokeFixture(target, fixture);
+      fixtureLifecycle.cleanupVerified = true;
+    } catch {
+      playwrightSmoke = {
+        ...playwrightSmoke,
+        ok: false,
+        failureCode: "FIXTURE_CLEANUP_FAILED",
+        sanitizedError: sanitizeRestoreDrillError("No se pudo verificar la limpieza del fixture."),
+      };
+    }
   }
+  fixtureLifecycle.ok = fixtureLifecycle.created && fixtureLifecycle.cleanupVerified;
+  return { playwrightSmoke, fixtureLifecycle };
 }
 
 async function main() {
   const filename = process.argv[2]?.trim();
   if (!filename) throw new Error("Uso: npm run drill:backup:temp-neon -- <archivo.ndjson.gz.enc>");
   const startedAt = new Date();
-  const report: RestoreDrillReport = createEmptyDrillReport({ backupFilename: filename, startedAt: startedAt.toISOString() });
-  let stage: DrillStage = "preflight";
   let targetUrl = "";
-
+  let manifest: BackupManifest | null = null;
   try {
-    const target = assertTemporaryNeonRestoreTarget({
-      sourceDatabaseUrl: process.env.DATABASE_URL,
-      targetDatabaseUrl: process.env.RESTORE_DATABASE_URL,
-      branchName: process.env.RESTORE_NEON_BRANCH,
-      allowRestore: process.env.ALLOW_TEMPORARY_NEON_RESTORE,
-      forbiddenDatabaseUrls: [process.env.DIRECT_URL, process.env.DATABASE_URL_DIRECT, process.env.DATABASE_URL_POOLER, process.env.POOLER_URL, process.env.PRISMA_DIRECT_URL],
-    });
+    let target: ReturnType<typeof assertTemporaryNeonRestoreTarget>;
+    try {
+      target = assertTemporaryNeonRestoreTarget({
+        sourceDatabaseUrl: process.env.DATABASE_URL,
+        targetDatabaseUrl: process.env.RESTORE_DATABASE_URL,
+        branchName: process.env.RESTORE_NEON_BRANCH,
+        allowRestore: process.env.ALLOW_TEMPORARY_NEON_RESTORE,
+        forbiddenDatabaseUrls: [process.env.DIRECT_URL, process.env.DATABASE_URL_DIRECT, process.env.DATABASE_URL_POOLER, process.env.POOLER_URL, process.env.PRISMA_DIRECT_URL],
+      });
+    } catch (error) {
+      throw new RestoreStageError("preflight", "El target no está autorizado para restore.", error, "TARGET_NOT_AUTHORIZED");
+    }
     targetUrl = target.target.toString();
-    report.sanitizedTargetFingerprint = targetFingerprint(targetUrl);
+    let verification: Awaited<ReturnType<typeof verifyStoredBackup>>;
+    try {
+      verification = await verifyStoredBackup(filename);
+    } catch (error) {
+      throw new RestoreStageError("backup-verification", "No se pudo verificar el backup almacenado.", error, "BACKUP_VERIFICATION_FAILED");
+    }
+    if (!verification.valid) throw new RestoreStageError("backup-verification", verification.reason, undefined, "BACKUP_VERIFICATION_FAILED");
+    const verifiedManifest = verification.manifest;
+    manifest = verifiedManifest;
+    let plaintext: Buffer;
+    try {
+      const download = await getBackupDownload(filename);
+      if (download?.statusCode !== 200 || !download.stream) throw new Error("No se encontró el backup privado.");
+      const container = await readStream(download.stream);
+      const header = parseBackupContainerHeader(container).header;
+      if (header.keyVersion !== verifiedManifest.encryption.keyVersion) throw new Error("La versión de clave no coincide con el manifiesto.");
+      plaintext = decryptBackupPayload(container, getEncryptionKey(header.keyVersion)).plaintext;
+    } catch (error) {
+      if (error instanceof RestoreStageError) throw error;
+      throw new RestoreStageError("backup-verification", "El backup no pasó la verificación o descifrado.", error, "BACKUP_VERIFICATION_FAILED");
+    }
 
-    stage = "backup-verification";
-    const verification = await verifyStoredBackup(filename);
-    if (!verification.valid) throw new RestoreStageError("backup-verification", verification.reason);
-    report.backupCreatedAt = verification.manifest.createdAt;
-    report.keyVersion = verification.manifest.encryption.keyVersion;
-    report.manifestHash = verification.manifest.manifestSha256;
-    const download = await getBackupDownload(filename);
-    if (download?.statusCode !== 200 || !download.stream) throw new RestoreStageError("backup-verification", "No se encontró el backup privado.");
-    const container = await readStream(download.stream);
-    const header = parseBackupContainerHeader(container).header;
-    if (header.keyVersion !== verification.manifest.encryption.keyVersion) throw new RestoreStageError("backup-verification", "La versión de clave no coincide con el manifiesto.");
-    const plaintext = decryptBackupPayload(container, getEncryptionKey(header.keyVersion)).plaintext;
-
-    stage = "preflight";
-    report.migrationResult = await applyCurrentMigrations(targetUrl);
-    stage = "insertion";
-    const restored = await restoreVerifiedBackup({ targetDatabaseUrl: targetUrl, plaintext, manifest: verification.manifest });
-    report.tableCounts = restored.tableCounts.tables;
-    report.totalRows = restored.tableCounts;
-    report.fkChecks = restored.foreignKeys;
-    report.domainChecks = restored.domainChecks;
-    report.sanitizedTargetFingerprint = restored.targetFingerprint;
-
-    stage = "post-commit-smoke";
-    const applicationReads = await postCommitSmoke(targetUrl);
-    report.workItemAudit = await runLegacyAudit(targetUrl);
-    const drift = await checkTargetMigrationDrift(targetUrl);
-    report.migrationResult = { deploy: report.migrationResult, drift };
-    const playwrightSmoke = process.env.RESTORE_DRILL_APP_SMOKE === "1" ? await runAppSmoke(targetUrl) : { ok: true, skipped: true };
-    report.appSmoke = { ok: applicationReads.ok && playwrightSmoke.ok, applicationReads, playwright: playwrightSmoke };
-    report.finalStatus = "PASS";
-    report.failureStage = null;
-    console.log(`Restore drill PASS. Reporte: artifacts/restore-drills/`);
+    const report = await runBackupRestoreDrill({
+      backupFilename: filename,
+      targetDatabaseUrl: targetUrl,
+      manifest: verifiedManifest,
+      appSmokeEnabled: process.env.RESTORE_DRILL_APP_SMOKE === "1",
+      dependencies: {
+        preflight: () => checkRestoreTargetConnection(targetUrl),
+        applyMigrations: () => applyCurrentMigrations(targetUrl),
+        restore: () => restoreVerifiedBackup({ targetDatabaseUrl: targetUrl, plaintext, manifest: verifiedManifest }),
+        workItemAudit: () => runLegacyAudit(targetUrl),
+        migrationDrift: () => checkTargetMigrationDrift(targetUrl),
+        appSmoke: () => runAppSmoke(targetUrl),
+        writeReport: async (currentReport) => {
+          currentReport.sanitizedTargetFingerprint ??= targetFingerprint(targetUrl);
+          currentReport.backupCreatedAt ??= verifiedManifest.createdAt;
+          currentReport.keyVersion ??= verifiedManifest.encryption.keyVersion;
+          currentReport.manifestHash ??= verifiedManifest.manifestSha256;
+          return writeRestoreDrillReport(currentReport);
+        },
+      },
+    });
+    if (report.finalStatus === "PASS") console.log(`Restore drill PASS. Reporte: artifacts/restore-drills/`);
+    else {
+      console.error(`Restore drill FAIL [${report.failureStage ?? "post-commit-smoke"}/${report.failureCode ?? "UNKNOWN"}]: ${report.sanitizedError ?? "Falló el drill."}`);
+      process.exitCode = 1;
+    }
   } catch (error) {
-    report.finalStatus = "FAIL";
-    report.failureStage = error instanceof RestoreStageError ? error.stage : stage;
+    const report = createEmptyDrillReport({
+      backupFilename: filename,
+      startedAt: startedAt.toISOString(),
+      backupCreatedAt: manifest?.createdAt ?? null,
+      keyVersion: manifest?.encryption.keyVersion ?? null,
+      manifestHash: manifest?.manifestSha256 ?? null,
+      targetFingerprint: targetUrl ? targetFingerprint(targetUrl) : null,
+    });
+    report.failureStage = error instanceof RestoreStageError ? error.stage : "preflight";
+    report.failureCode = error instanceof RestoreStageError ? error.code : "UNKNOWN";
     report.sanitizedError = sanitizeRestoreDrillError(error);
-    console.error(`Restore drill FAIL [${report.failureStage}]: ${report.sanitizedError}`);
-    process.exitCode = 1;
-  } finally {
     const completedAt = new Date();
     report.completedAt = completedAt.toISOString();
-    report.durationMs = completedAt.getTime() - new Date(report.startedAt).getTime();
+    report.durationMs = completedAt.getTime() - startedAt.getTime();
     const reportPath = await writeRestoreDrillReport(report);
+    console.error(`Restore drill FAIL [${report.failureStage}/${report.failureCode ?? "UNKNOWN"}]: ${report.sanitizedError}`);
     console.error(`Reporte: ${reportPath}`);
+    process.exitCode = 1;
   }
 }
 

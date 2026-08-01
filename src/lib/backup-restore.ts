@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Pool, type PoolClient } from "pg";
 import type { BackupManifest } from "@/lib/backup-logic";
+import type { RestoreFailureCode } from "@/lib/backup-restore-errors";
 import {
   parseBackupRecords,
   quoteIdentifier,
@@ -27,6 +28,7 @@ export class RestoreStageError extends Error {
     readonly stage: RestoreStage,
     message: string,
     readonly cause?: unknown,
+    readonly code: RestoreFailureCode = "UNKNOWN",
   ) {
     super(message);
     this.name = "RestoreStageError";
@@ -93,7 +95,7 @@ async function restoreTable(client: PoolClient, table: BackupTableRecord, record
 async function assertTargetIsPostgres(client: PoolClient) {
   const result = await client.query<{ version: string }>("SELECT version() AS version");
   const version = result.rows[0]?.version ?? "";
-  if (!/^PostgreSQL\s/i.test(version)) throw new RestoreStageError("preflight", "El target no es PostgreSQL.");
+  if (!/^PostgreSQL\s/i.test(version)) throw new RestoreStageError("preflight", "El target no es PostgreSQL.", undefined, "TARGET_NOT_AUTHORIZED");
 }
 
 function migrationEnvironment(targetDatabaseUrl: string) {
@@ -114,7 +116,27 @@ export async function applyCurrentMigrations(targetDatabaseUrl: string) {
     });
     return { ok: true as const, command: "prisma migrate deploy" };
   } catch (error) {
-    throw new RestoreStageError("preflight", "No se pudieron aplicar las migraciones actuales al target.", error);
+    throw new RestoreStageError("preflight", "No se pudieron aplicar las migraciones actuales al target.", error, "UNKNOWN");
+  }
+}
+
+export async function checkRestoreTargetConnection(targetDatabaseUrl: string) {
+  if (!/^postgres(ql)?:\/\//i.test(targetDatabaseUrl)) {
+    throw new RestoreStageError("preflight", "RESTORE_DATABASE_URL debe apuntar a PostgreSQL.", undefined, "TARGET_NOT_AUTHORIZED");
+  }
+  const pool = new Pool({ connectionString: targetDatabaseUrl, max: 1, application_name: "policydesk-restore-preflight" });
+  let client: PoolClient | undefined;
+  try {
+    client = await pool.connect();
+    await client.query("SELECT 1");
+    await assertTargetIsPostgres(client);
+    return { ok: true as const, database: "postgresql" as const };
+  } catch (error) {
+    if (error instanceof RestoreStageError) throw error;
+    throw new RestoreStageError("preflight", "No se pudo conectar al target de restore.", error, "TARGET_NOT_AUTHORIZED");
+  } finally {
+    client?.release();
+    await pool.end().catch(() => undefined);
   }
 }
 
@@ -127,27 +149,33 @@ export async function checkTargetMigrationDrift(targetDatabaseUrl: string) {
     });
     return { ok: true as const, command: "npm run db:check-drift" };
   } catch (error) {
-    throw new RestoreStageError("post-commit-smoke", "El target presenta drift de Prisma.", error);
+    throw new RestoreStageError("post-commit-smoke", "El target presenta drift de Prisma.", error, "PRISMA_DRIFT_FAILED");
   }
 }
 
 export async function restoreVerifiedBackup(input: RestoreInput): Promise<RestoreResult> {
   if (!/^postgres(ql)?:\/\//i.test(input.targetDatabaseUrl)) {
-    throw new RestoreStageError("preflight", "RESTORE_DATABASE_URL debe apuntar a PostgreSQL.");
+    throw new RestoreStageError("preflight", "RESTORE_DATABASE_URL debe apuntar a PostgreSQL.", undefined, "TARGET_NOT_AUTHORIZED");
   }
   let parsed: ReturnType<typeof parseBackupRecords>;
   try {
     parsed = parseBackupRecords(input.plaintext);
   } catch (error) {
     if (error instanceof RestoreStageError) throw error;
-    throw new RestoreStageError("backup-verification", "El contenido del backup no tiene un formato NDJSON válido.", error);
+    throw new RestoreStageError("backup-verification", "El contenido del backup no tiene un formato NDJSON válido.", error, "BACKUP_VERIFICATION_FAILED");
   }
   const pool = new Pool({
     connectionString: input.targetDatabaseUrl,
     max: 1,
     application_name: "policydesk-restore-drill",
   });
-  const client = await pool.connect();
+  let client: PoolClient;
+  try {
+    client = await pool.connect();
+  } catch (error) {
+    await pool.end().catch(() => undefined);
+    throw new RestoreStageError("preflight", "No se pudo conectar al target de restore.", error, "TARGET_NOT_AUTHORIZED");
+  }
   let transactionStarted = false;
   try {
     await assertTargetIsPostgres(client);
@@ -189,8 +217,13 @@ export async function restoreVerifiedBackup(input: RestoreInput): Promise<Restor
   } catch (error) {
     if (transactionStarted) await client.query("ROLLBACK").catch(() => undefined);
     if (error instanceof RestoreStageError) throw error;
-    if (error instanceof RestoreIntegrityError) throw new RestoreStageError("integrity", error.message, error);
-    throw new RestoreStageError(transactionStarted ? "insertion" : "preflight", error instanceof Error ? error.message : "Falló la restauración.", error);
+    if (error instanceof RestoreIntegrityError) throw new RestoreStageError("integrity", error.message, error, error.code);
+    throw new RestoreStageError(
+      transactionStarted ? "insertion" : "preflight",
+      error instanceof Error ? error.message : "Falló la restauración.",
+      error,
+      transactionStarted ? "INSERTION_FAILED" : "UNKNOWN",
+    );
   } finally {
     client.release();
     await pool.end().catch(() => undefined);

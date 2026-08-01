@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { Pool } from "pg";
 import { createBackupManifest, encryptBackupPayload } from "@/lib/backup-logic";
 import { restoreVerifiedBackup } from "@/lib/backup-restore";
+import { runBackupRestoreDrill } from "@/lib/backup-restore-drill";
+import { runRestoreApplicationReads } from "@/lib/backup-restore-smoke";
 import { createEmptyDrillReport, writeRestoreDrillReport } from "@/lib/backup-restore-report";
 
 const execFileAsync = promisify(execFile);
@@ -177,6 +179,22 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
       const valid = encodeSnapshot(snapshot);
       const restored = await restoreVerifiedBackup({ targetDatabaseUrl: targetUrl, plaintext: valid.plaintext, manifest: valid.manifest });
       expect(restored.tableCounts.totalRows).toBeGreaterThan(0);
+      const orchestrationReport = await runBackupRestoreDrill({
+        backupFilename: valid.manifest.payload.filename,
+        targetDatabaseUrl: targetUrl,
+        manifest: valid.manifest,
+        appSmokeEnabled: false,
+        dependencies: {
+          applyMigrations: async () => ({ ok: true, synthetic: true }),
+          restore: async () => restored,
+          applicationReads: runRestoreApplicationReads,
+          workItemAudit: async () => ({ status: "PASS", synthetic: true }),
+          migrationDrift: async () => ({ ok: true, synthetic: true }),
+          writeReport: async () => "synthetic-report.json",
+        },
+      });
+      expect(orchestrationReport.finalStatus).toBe("PASS");
+      expect(orchestrationReport.applicationReads).toMatchObject({ ok: true });
       const report = createEmptyDrillReport({
         backupFilename: valid.manifest.payload.filename,
         startedAt: valid.manifest.createdAt,
@@ -189,9 +207,22 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
       report.completedAt = new Date().toISOString();
       report.durationMs = Date.parse(report.completedAt) - Date.parse(report.startedAt);
       report.tableCounts = restored.tableCounts.tables;
-      report.totalRows = restored.tableCounts;
+      report.totalRows = restored.tableCounts.totalRows;
       report.fkChecks = restored.foreignKeys;
       report.domainChecks = restored.domainChecks;
+      report.restoreIntegrity = {
+        ok: true,
+        targetFingerprint: restored.targetFingerprint,
+        tableCounts: restored.tableCounts,
+        foreignKeys: restored.foreignKeys,
+        domainChecks: restored.domainChecks,
+        sequences: restored.sequences,
+      };
+      report.applicationReads = orchestrationReport.applicationReads;
+      report.workItemAudit = orchestrationReport.workItemAudit;
+      report.migrationResult = orchestrationReport.migrationResult;
+      report.playwrightSmoke = orchestrationReport.playwrightSmoke;
+      report.fixtureLifecycle = orchestrationReport.fixtureLifecycle;
       await writeRestoreDrillReport(report);
       const sourceCountsBefore = await tableCounts(sourceUrl);
       const sourceCountBefore = await scalarCount(sourceUrl, "Payment");

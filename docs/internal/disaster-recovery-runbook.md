@@ -52,6 +52,11 @@ restaura todas las tablas exportadas excepto `_prisma_migrations`, vuelve
 `session_replication_role` a `origin`, valida antes del commit y escribe un JSON
 en `artifacts/restore-drills/`. Un fallo revierte toda la transacción.
 
+Después del commit el propio drill reconecta al target, ejecuta las lecturas
+mínimas, `check:legacy-workitem-refs -- --read-only` y `db:check-drift`. No
+ejecutes el auditor apuntando a `DATABASE_URL` de producción durante este
+procedimiento.
+
 Salida esperada:
 
 ```text
@@ -101,6 +106,18 @@ header/manifiesto y nunca imprime su valor.
 Si el drill falla, conserva el reporte sanitizado, no promuevas la rama y corrige
 la causa antes de repetirlo. La única operación de rollback del drill es el
 rollback transaccional; la limpieza de Neon es una acción manual autorizada.
+
+Un fallo `BACKUP_SCHEMA_INCOMPATIBLE` es fail-closed: el motor valida tablas y
+columnas antes de truncar y no debe reintentarse con una copia que provenga de
+un schema distinto. Genera un backup nuevo después de aplicar migraciones y
+verifica que su versión sea compatible con el target temporal.
+
+## Plantilla de resultados
+
+Usa `docs/internal/restore-drill-results/README.md` como checklist de evidencia.
+Adjunta el JSON sanitizado, registra el `failureCode` si aplica y anota el RTO
+observado. Un reporte `PASS` requiere también lecturas de aplicación, auditoría
+WorkItem, drift de Prisma y cleanup verificado cuando se habilitó Playwright.
 
 Los artifacts sintéticos de CI se retienen 90 días; los reportes locales quedan
 bajo control del operador y no se configuran en almacenamiento externo en este PR.

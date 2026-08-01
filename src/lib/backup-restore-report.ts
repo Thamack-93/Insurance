@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { RestoreFailureCode } from "@/lib/backup-restore-errors";
 
 export type DrillStage = "preflight" | "backup-verification" | "insertion" | "integrity" | "post-commit-smoke";
 export type DrillStatus = "PASS" | "FAIL";
@@ -20,9 +21,13 @@ export type RestoreDrillReport = {
   fkChecks: unknown;
   domainChecks: unknown;
   workItemAudit: unknown;
-  appSmoke: unknown;
+  restoreIntegrity: unknown;
+  applicationReads: unknown;
+  playwrightSmoke: unknown;
+  fixtureLifecycle: unknown;
   finalStatus: DrillStatus;
   failureStage: DrillStage | null;
+  failureCode: RestoreFailureCode | null;
   sanitizedError: string | null;
 };
 
@@ -62,9 +67,13 @@ export function createEmptyDrillReport(input: {
     fkChecks: null,
     domainChecks: null,
     workItemAudit: null,
-    appSmoke: null,
+    restoreIntegrity: null,
+    applicationReads: null,
+    playwrightSmoke: null,
+    fixtureLifecycle: null,
     finalStatus: "FAIL",
     failureStage: null,
+    failureCode: null,
     sanitizedError: null,
   };
 }

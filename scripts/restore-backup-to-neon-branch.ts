@@ -2,6 +2,7 @@ import { getBackupDownload, verifyStoredBackup } from "../src/lib/backup.ts";
 import { decryptBackupPayload, parseBackupContainerHeader, parseBackupEncryptionKey } from "../src/lib/backup-logic.ts";
 import {
   applyCurrentMigrations,
+  checkRestoreTargetConnection,
   restoreVerifiedBackup,
   RestoreStageError,
 } from "../src/lib/backup-restore.ts";
@@ -50,7 +51,7 @@ async function main() {
       ],
     });
   } catch (error) {
-    throw new RestoreStageError("preflight", error instanceof Error ? error.message : "Falló el preflight del target.", error);
+    throw new RestoreStageError("preflight", error instanceof Error ? error.message : "Falló el preflight del target.", error, "TARGET_NOT_AUTHORIZED");
   }
 
   let verification: Awaited<ReturnType<typeof verifyStoredBackup>>;
@@ -68,8 +69,9 @@ async function main() {
     plaintext = decryptBackupPayload(container, getEncryptionKey(header.keyVersion)).plaintext;
   } catch (error) {
     if (error instanceof RestoreStageError) throw error;
-    throw new RestoreStageError("backup-verification", "El backup no pasó la verificación o descifrado.", error);
+    throw new RestoreStageError("backup-verification", "El backup no pasó la verificación o descifrado.", error, "BACKUP_VERIFICATION_FAILED");
   }
+  await checkRestoreTargetConnection(target.target.toString());
   await applyCurrentMigrations(target.target.toString());
   const result = await restoreVerifiedBackup({
     targetDatabaseUrl: target.target.toString(),
@@ -80,7 +82,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  const stage = error instanceof RestoreStageError ? `[${error.stage}] ` : "";
+  const stage = error instanceof RestoreStageError ? `[${error.stage}${error.code ? `/${error.code}` : ""}] ` : "";
   console.error(`${stage}${error instanceof Error ? error.message : "Falló la restauración."}`);
   process.exitCode = 1;
 });

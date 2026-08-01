@@ -139,6 +139,7 @@ async function auditData(): Promise<DataAudit> {
 async function main() {
   const json = process.argv.includes("--json");
   const staticOnly = process.argv.includes("--static-only");
+  const readOnly = process.argv.includes("--read-only");
   const references = await collectStaticReferences();
   const data = staticOnly ? null : await auditData();
   const runtimeWrites = references.filter((reference) => reference.classification === "runtime-write");
@@ -152,6 +153,7 @@ async function main() {
       "Task se conserva como histórico; este comando no modifica datos.",
       "tasksWithoutLegacyWorkItem y legacyDocumentCount son deuda histórica, no errores por sí mismos.",
       ...(staticOnly ? ["Se omitió la auditoría de datos porque se solicitó --static-only."] : []),
+      ...(readOnly ? ["La auditoría de datos se ejecutó en modo explícito de solo lectura."] : []),
     ],
   };
 
