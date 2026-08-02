@@ -37,7 +37,7 @@ export function KpiCard({ title, value, description, href, icon: Icon, tone = "s
           </div>
           <div className="mt-3 flex items-center justify-between gap-3 text-xs">
             <span className="text-muted-foreground">{description}</span>
-            <ArrowUpRight className="size-4 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-primary" />
+            <ArrowUpRight data-motion-target="icon-shift" className="size-4 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-primary motion-reduce:transform-none" />
           </div>
         </CardContent>
       </Card>

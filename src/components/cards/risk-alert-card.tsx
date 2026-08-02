@@ -28,9 +28,8 @@ export function RiskAlertCard({
       </div>
       <div className="mt-3 flex items-center gap-2 text-sm font-medium text-primary">
         {action}
-        <ArrowUpRight className="size-3.5 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+        <ArrowUpRight data-motion-target="icon-shift" className="size-3.5 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5 motion-reduce:transform-none" />
       </div>
     </div>
   );
 }
-

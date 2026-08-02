@@ -36,7 +36,7 @@ function DocumentCard({
   className,
 }: DocumentCardProps) {
   return (
-    <Card className={cn("transition-all hover:-translate-y-0.5 hover:shadow-md", className)}>
+    <Card data-motion-target="lift" className={cn("transition-all hover:-translate-y-0.5 hover:shadow-md motion-reduce:transform-none", className)}>
       <CardHeader className="gap-3">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">

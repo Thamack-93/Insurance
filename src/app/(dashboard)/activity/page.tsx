@@ -245,8 +245,9 @@ export default async function ActivityPage({
                 <Link
                   key={view.value}
                   href={href}
+                  data-motion-target="lift"
                   className={cn(
-                    "flex min-h-28 flex-col justify-between rounded-2xl border px-4 py-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md",
+                    "flex min-h-28 flex-col justify-between rounded-2xl border px-4 py-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transform-none",
                     view.highlight,
                     isSelected ? "border-primary ring-2 ring-primary/15" : "border-border/60",
                   )}

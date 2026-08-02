@@ -57,11 +57,11 @@ export function OperationalMetric({ metric }: { metric: OperationalMetricModel }
       </span>
     </span>
   );
-  return metric.href ? <Link href={metric.href} className="rounded-xl transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transform-none">{content}</Link> : content;
+  return metric.href ? <Link href={metric.href} data-motion-target="lift" className="rounded-xl transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transform-none">{content}</Link> : content;
 }
 
 export function OperationalSummary({ metrics }: { metrics: OperationalMetricModel[] }) {
-  return <section aria-label="Resumen operativo" className="overflow-x-auto pb-1"><div className="grid min-w-max grid-flow-col auto-cols-[164px] gap-2.5 sm:min-w-0 sm:grid-flow-row sm:grid-cols-3 xl:grid-cols-6">{metrics.map((metric) => <OperationalMetric key={metric.id} metric={metric} />)}</div></section>;
+  return <section aria-label="Resumen operativo" className="overflow-x-auto py-1"><div className="grid min-w-max grid-flow-col auto-cols-[164px] gap-2.5 sm:min-w-0 sm:grid-flow-row sm:grid-cols-3 xl:grid-cols-6">{metrics.map((metric) => <OperationalMetric key={metric.id} metric={metric} />)}</div></section>;
 }
 
 export function FocusQueueItem({ item }: { item: FocusItemModel }) {
