@@ -20,3 +20,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - `NotificationChannel` and `TelegramWebhookUpdate` are platform-global. `SecurityEventAggregate.organizationId` is optional attribution and must not be auto-assigned or backfilled.
 - The bootstrap organization is intentionally singleton. Do not remove the singleton index, deletion guard, assignment triggers, or legacy User-to-membership synchronization until the explicit tenant-context rollout and two-organization validation criteria are complete.
 - Restore runs with `session_replication_role = replica`, so normal transition triggers preserve backup values. After returning to `origin`, `check:tenant-backfill` must pass, including trigger/index and membership-consistency audit.
+
+## Global platform administration
+
+- `User.platformRole` is limited to `NONE` or `SUPERADMIN`; it is not a tenant role and does not grant an implicit organization context.
+- `/platform` is the only global operator surface. SUPERADMIN actions must use explicit organization IDs, never edit operational tenant records directly, and always write an `ActivityLog` entry.
+- SUPERADMIN accounts do not receive legacy tenant memberships. The Cycle 1 User sync trigger must keep this exemption until the singleton barrier is retired.
+- `Plan`, `OrganizationSubscription`, and `BillingCharge` are classified platform-billing models with explicit organization scope; amounts are minor units and totals never mix currencies.
+- Do not run `provision-platform-admin -- --apply` or `split:pedro-organization -- --apply` without explicit operator authorization. Pedro's organization remains blocked while the singleton index and guards exist.
