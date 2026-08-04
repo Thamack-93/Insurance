@@ -156,7 +156,7 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
       JOIN pg_class t ON t.oid = x.indrelid
       JOIN pg_namespace n ON n.oid = t.relnamespace
      WHERE n.nspname = 'public' AND i.relname = ANY($1::text[])
-  `, ["Organization_transition_singleton_idx", "OrganizationMembership_transition_owner_idx"]);
+  `, [["Organization_transition_singleton_idx", "OrganizationMembership_transition_owner_idx"]]);
   const indexByName = new Map(indexes.rows.map((row) => [row.indexname, row]));
   const singleton = indexByName.get("Organization_transition_singleton_idx");
   if (!singleton || singleton.table_name !== "Organization" || !singleton.indisunique || !singleton.indexdef.replace(/\s+/g, "").includes("((1))")) issues.push("singleton expression index is not the required unique constant index");
