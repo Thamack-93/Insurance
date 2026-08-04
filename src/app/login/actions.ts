@@ -14,7 +14,7 @@ export type LoginResult = { ok: true } | { ok: false; error: string };
 export async function loginAction(_prev: LoginResult | null, formData: FormData): Promise<LoginResult> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
-  const redirectTo = String(formData.get("redirect") ?? "/today") || "/today";
+  const requestedRedirect = String(formData.get("redirect") ?? "").trim();
 
   if (!email || !password) {
     return { ok: false, error: "Captura tu correo y contraseña." };
@@ -82,6 +82,7 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
     email: user.email,
     name: user.name,
     role: user.role as UserRoleSession,
+    platformRole: user.platformRole === "SUPERADMIN" ? "SUPERADMIN" : "NONE",
   });
 
   await writeActivityLog({
@@ -91,6 +92,7 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
     userId: user.id,
   });
 
-  const safeRedirect = redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/today";
+  const fallback = user.platformRole === "SUPERADMIN" ? "/platform" : "/today";
+  const safeRedirect = requestedRedirect.startsWith("/") && !requestedRedirect.startsWith("//") ? requestedRedirect : fallback;
   redirect(safeRedirect);
 }
