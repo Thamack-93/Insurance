@@ -279,6 +279,13 @@ BEGIN
     RETURN NEW;
   END IF;
 
+  -- Global SUPERADMIN accounts are intentionally outside tenant memberships.
+  -- This is still a Cycle 1 compatibility trigger and will be removed with
+  -- the singleton barrier after explicit tenant context ships.
+  IF NEW."platformRole" = 'SUPERADMIN' THEN
+    RETURN NEW;
+  END IF;
+
   IF NEW."role" NOT IN ('ADMIN','AGENT') THEN
     RAISE EXCEPTION 'POLICYDESK_LEGACY_USER_ROLE_UNSUPPORTED' USING ERRCODE = 'P0001';
   END IF;
