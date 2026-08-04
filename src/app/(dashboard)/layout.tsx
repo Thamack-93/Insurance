@@ -77,10 +77,11 @@ export default async function DashboardLayout({ children }: { children: ReactNod
             Saltar al contenido principal
           </a>
           <div className="flex min-h-screen">
-            <AppSidebar isAdmin={user.role === "ADMIN"} />
+            <AppSidebar isAdmin={user.role === "ADMIN"} isSuperAdmin={user.platformRole === "SUPERADMIN"} />
             <div className="min-w-0 flex-1">
               <AppTopbar
                 isAdmin={user.role === "ADMIN"}
+                isSuperAdmin={user.platformRole === "SUPERADMIN"}
                 userMenu={<UserMenu />}
                 unreadNotificationCount={unreadNotificationCount}
                 notifications={bellNotifications}
@@ -88,7 +89,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
               <main id="main-content" className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">{children}</main>
             </div>
           </div>
-          <CommandPaletteWrapper isAdmin={user.role === "ADMIN"} />
+          <CommandPaletteWrapper isAdmin={user.role === "ADMIN"} isSuperAdmin={user.platformRole === "SUPERADMIN"} />
           <ShortcutsHelp />
         </div>
       </NoraSessionProvider>
