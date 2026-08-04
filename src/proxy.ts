@@ -36,6 +36,16 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // SUPERADMIN has no implicit tenant context. Keep the global operator in
+  // the platform surface until a future explicit organization selector is
+  // implemented; server pages still revalidate the live platformRole.
+  if (session.platformRole === "SUPERADMIN" && pathname !== "/platform" && !pathname.startsWith("/platform/")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/platform";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
   return NextResponse.next();
 }
 
