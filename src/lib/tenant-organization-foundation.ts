@@ -23,6 +23,12 @@ export const OPTIONAL_ORGANIZATION_TABLES = ["SecurityEventAggregate"] as const;
 /** These rows are platform-scoped and must not acquire a Cycle 1 organization column. */
 export const PLATFORM_GLOBAL_TABLES = ["User", "Organization", "OrganizationMembership", "SystemSetting", "NotificationChannel", "TelegramWebhookUpdate"] as const;
 
+/** Platform-owned billing records still carry an explicit organization scope;
+ * they are written only through SUPERADMIN actions in Cycle 1 and therefore
+ * do not receive the legacy singleton trigger. */
+export const PLATFORM_BILLING_TABLES = ["Plan", "OrganizationSubscription", "BillingCharge"] as const;
+export const PLATFORM_AUDIT_TABLES = ["OrganizationMigrationConflict"] as const;
+
 export const EXPECTED_TENANT_TRIGGERS = Object.fromEntries(
   PROTECTED_TENANT_TABLES.map((table) => [table, `${table}_transition_singleton_organization`]),
 ) as Record<(typeof PROTECTED_TENANT_TABLES)[number], string>;
@@ -77,16 +83,18 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
   const ownerLegacyRole = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE m."organizationId" = $1 AND m."role" = 'OWNER' AND (u."role" <> 'ADMIN' OR NOT u."active")`, [BOOTSTRAP_ORGANIZATION_ID]);
   if (Number(ownerLegacyRole.rows[0]?.count ?? 0) > 0) issues.push("active Owner is not backed by an active legacy ADMIN user");
 
-  const missingMemberships = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "User" u LEFT JOIN "OrganizationMembership" m ON m."userId" = u."id" AND m."organizationId" = $1 WHERE u."id" <> $2 AND m."id" IS NULL`, [BOOTSTRAP_ORGANIZATION_ID, SYSTEM_USER_ID]);
+  const missingMemberships = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "User" u LEFT JOIN "OrganizationMembership" m ON m."userId" = u."id" AND m."organizationId" = $1 WHERE u."id" <> $2 AND u."platformRole" <> 'SUPERADMIN' AND m."id" IS NULL`, [BOOTSTRAP_ORGANIZATION_ID, SYSTEM_USER_ID]);
   const missing = Number(missingMemberships.rows[0]?.count ?? 0);
   summary.usersMissingMembership = missing;
   if (missing > 0) issues.push(`${missing} non-technical users without membership`);
 
   const systemMemberships = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" WHERE "userId" = $1`, [SYSTEM_USER_ID]);
   if (Number(systemMemberships.rows[0]?.count ?? 0) > 0) issues.push("technical system user has a membership");
-  const membershipActiveMismatch = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE m."active" IS DISTINCT FROM u."active"`);
+  const platformMemberships = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE u."platformRole" = 'SUPERADMIN'`);
+  if (Number(platformMemberships.rows[0]?.count ?? 0) > 0) issues.push("SUPERADMIN user has a tenant membership");
+  const membershipActiveMismatch = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE u."platformRole" <> 'SUPERADMIN' AND m."active" IS DISTINCT FROM u."active"`);
   if (Number(membershipActiveMismatch.rows[0]?.count ?? 0) > 0) issues.push("membership active state differs from User.active");
-  const membershipRoleMismatch = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE (m."role" NOT IN ('OWNER','ADMIN','AGENT')) OR (m."role" <> 'OWNER' AND (u."role" NOT IN ('ADMIN','AGENT') OR m."role" <> u."role"))`);
+  const membershipRoleMismatch = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE u."platformRole" <> 'SUPERADMIN' AND ((m."role" NOT IN ('OWNER','ADMIN','AGENT')) OR (m."role" <> 'OWNER' AND (u."role" NOT IN ('ADMIN','AGENT') OR m."role" <> u."role")))`);
   if (Number(membershipRoleMismatch.rows[0]?.count ?? 0) > 0) issues.push("membership role is invalid or differs from legacy User.role");
 
   for (const table of PROTECTED_TENANT_TABLES) {
