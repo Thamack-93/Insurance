@@ -9,11 +9,13 @@ import {
   verifySessionToken,
   type SessionPayload,
   type UserRoleSession,
+  type PlatformRoleSession,
 } from "@/lib/session";
 
 const SCRYPT_KEYLEN = 64;
 
 export type UserRole = UserRoleSession;
+export type PlatformRole = PlatformRoleSession;
 
 export class AuthError extends Error {
   status: number;
@@ -125,6 +127,31 @@ export async function requireAdmin() {
   return user;
 }
 
+/** Global platform gate. This is deliberately independent of tenant role and
+ * memberships; every request is revalidated against the live User row. */
+export async function requireSuperAdmin() {
+  const user = await requireUser();
+  if (user.platformRole !== "SUPERADMIN") {
+    throw new AuthError("Esta acción requiere permisos de plataforma.", 403);
+  }
+  return user;
+}
+
+/** Tenant gate for operational pages. SUPERADMIN is intentionally not a
+ * substitute for membership: callers must select an organization explicitly. */
+export async function requireOrganizationMembership(organizationId: string, allowedRoles?: string[]) {
+  const user = await requireUser();
+  const db = getDb();
+  const membership = await db.organizationMembership.findUnique({
+    where: { organizationId_userId: { organizationId, userId: user.id } },
+    include: { organization: { select: { id: true, status: true } } },
+  });
+  if (!membership || !membership.active || membership.organization.status !== "ACTIVE" || (allowedRoles && !allowedRoles.includes(membership.role))) {
+    throw new AuthError("No tienes acceso a esta organización.", 403);
+  }
+  return { user, membership, organization: membership.organization };
+}
+
 export const SYSTEM_USER_ID = "system-user-0000";
 
 /**
@@ -161,4 +188,20 @@ export async function requireAdminOrRedirect() {
     redirect("/today");
   }
   return user;
+}
+
+export async function requireSuperAdminOrRedirect() {
+  const { redirect } = await import("next/navigation");
+  try {
+    return await requireSuperAdmin();
+  } catch (error) {
+    if (error instanceof AuthError) {
+      if (error.status === 401) {
+        try { await clearSessionCookie(); } catch { /* best effort */ }
+        redirect("/login");
+      }
+      redirect("/today");
+    }
+    throw error;
+  }
 }
