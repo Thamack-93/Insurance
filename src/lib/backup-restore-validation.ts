@@ -1,6 +1,6 @@
 import type { PoolClient, QueryResultRow } from "pg";
 import type { RestoreFailureCode } from "@/lib/backup-restore-errors";
-import { auditTenantFoundation } from "@/lib/tenant-organization-foundation";
+import { auditTenantFoundation, OPTIONAL_ORGANIZATION_TABLES, PROTECTED_TENANT_TABLES } from "@/lib/tenant-organization-foundation";
 
 export const RESTORE_SKIPPED_TABLES = new Set(["_prisma_migrations"]);
 
@@ -249,7 +249,7 @@ export async function validateRestoreSchema(client: PoolClient, parsed: ParsedBa
     NotificationEvent: ["id", "userId", "channelType"],
     SystemSetting: ["id", "key", "value"],
   };
-  for (const table of ["Client", "Insurer", "Policy", "Receipt", "PolicyEndorsement", "Payment", "Commission", "Task", "WorkItem", "Claim", "Quote", "Document", "ActivityLog", "AssistantActionDraft", "NotificationChannel", "NotificationPreference", "NotificationEvent", "PolicyInsuredParty", "PolicyInsuredAsset", "TelegramLinkToken", "LedgerImportBatch", "LedgerImportRow", "LedgerImportAction", "LedgerImportIssue", "TelegramDraft", "MaintenanceRun", "ReceiptReconciliationIssue", "PolicyRenewalSuggestion", "DataQualitySuppressionRule", "AssistantReport", "AssistantReportSignal", "AssistantAiRun", "AssistantAiAttempt", "Alert", "SecurityEventAggregate", "TelegramWebhookUpdate"]) {
+  for (const table of [...PROTECTED_TENANT_TABLES, ...OPTIONAL_ORGANIZATION_TABLES]) {
     requiredColumns[table] = [...(requiredColumns[table] ?? ["id"]), "organizationId"];
   }
   for (const [table, columns] of Object.entries(requiredColumns)) {

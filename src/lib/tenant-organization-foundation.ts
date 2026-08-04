@@ -8,10 +8,20 @@ export const BOOTSTRAP_TIME_ZONE = "Etc/GMT+6";
 export const BOOTSTRAP_CURRENCY = "MXN";
 export const BACKFILL_LOCK_KEY = "policydesk-organization-backfill";
 
-/** Explicit Cycle 1 inventory. A new tenant model must be added here and to the SQL migration. */
+/**
+ * Explicit Cycle 1 inventory. New models must be classified here before they
+ * can be merged. Only protected tables receive the temporary assignment
+ * trigger; global tables are deliberately outside the singleton boundary.
+ */
 export const PROTECTED_TENANT_TABLES = [
-  "Client", "Insurer", "Policy", "Receipt", "PolicyEndorsement", "Payment", "Commission", "Task", "WorkItem", "Claim", "Quote", "Document", "ActivityLog", "AssistantActionDraft", "NotificationChannel", "NotificationPreference", "NotificationEvent", "PolicyInsuredParty", "PolicyInsuredAsset", "TelegramLinkToken", "LedgerImportBatch", "LedgerImportRow", "LedgerImportAction", "LedgerImportIssue", "TelegramDraft", "MaintenanceRun", "ReceiptReconciliationIssue", "PolicyRenewalSuggestion", "DataQualitySuppressionRule", "AssistantReport", "AssistantReportSignal", "AssistantAiRun", "AssistantAiAttempt", "Alert", "SecurityEventAggregate", "TelegramWebhookUpdate",
+  "Client", "Insurer", "Policy", "Receipt", "PolicyEndorsement", "Payment", "Commission", "Task", "WorkItem", "Claim", "Quote", "Document", "ActivityLog", "AssistantActionDraft", "NotificationPreference", "NotificationEvent", "PolicyInsuredParty", "PolicyInsuredAsset", "TelegramLinkToken", "LedgerImportBatch", "LedgerImportRow", "LedgerImportAction", "LedgerImportIssue", "TelegramDraft", "MaintenanceRun", "ReceiptReconciliationIssue", "PolicyRenewalSuggestion", "DataQualitySuppressionRule", "AssistantReport", "AssistantReportSignal", "AssistantAiRun", "AssistantAiAttempt", "Alert",
 ] as const;
+
+/** Global security telemetry may be attributed later, but is never auto-tagged in Cycle 1. */
+export const OPTIONAL_ORGANIZATION_TABLES = ["SecurityEventAggregate"] as const;
+
+/** These rows are platform-scoped and must not acquire a Cycle 1 organization column. */
+export const PLATFORM_GLOBAL_TABLES = ["User", "Organization", "OrganizationMembership", "SystemSetting", "NotificationChannel", "TelegramWebhookUpdate"] as const;
 
 export const EXPECTED_TENANT_TRIGGERS = Object.fromEntries(
   PROTECTED_TENANT_TABLES.map((table) => [table, `${table}_transition_singleton_organization`]),
@@ -21,8 +31,8 @@ const relationChecks: Array<[string, string, string]> = [
   ["Client", "referidorId", "Client"],
   ["Policy", "familyRootId", "Policy"], ["Policy", "renewedFromPolicyId", "Policy"],
   ["Policy", "clientId", "Client"], ["Policy", "insurerId", "Insurer"],
-  ["Receipt", "policyId", "Policy"], ["Receipt", "clientId", "Client"], ["Receipt", "insurerId", "Insurer"],
-  ["PolicyEndorsement", "policyId", "Policy"], ["Payment", "receiptId", "Receipt"], ["Payment", "policyId", "Policy"], ["Payment", "clientId", "Client"],
+  ["Receipt", "policyId", "Policy"], ["Receipt", "clientId", "Client"], ["Receipt", "insurerId", "Insurer"], ["Receipt", "endorsementId", "PolicyEndorsement"], ["Receipt", "documentId", "Document"],
+  ["PolicyEndorsement", "policyId", "Policy"], ["PolicyEndorsement", "documentId", "Document"], ["Payment", "receiptId", "Receipt"], ["Payment", "policyId", "Policy"], ["Payment", "clientId", "Client"],
   ["Commission", "policyId", "Policy"], ["Commission", "receiptId", "Receipt"], ["Commission", "clientId", "Client"], ["Commission", "insurerId", "Insurer"],
   ["Task", "clientId", "Client"], ["Task", "policyId", "Policy"], ["Task", "insurerId", "Insurer"], ["Task", "receiptId", "Receipt"],
   ["WorkItem", "clientId", "Client"], ["WorkItem", "policyId", "Policy"], ["WorkItem", "insurerId", "Insurer"], ["WorkItem", "receiptId", "Receipt"],
@@ -33,7 +43,6 @@ const relationChecks: Array<[string, string, string]> = [
   ["NotificationEvent", "workItemId", "WorkItem"], ["NotificationEvent", "clientId", "Client"], ["NotificationEvent", "policyId", "Policy"], ["NotificationEvent", "receiptId", "Receipt"],
   ["LedgerImportRow", "batchId", "LedgerImportBatch"], ["LedgerImportRow", "policyId", "Policy"], ["LedgerImportRow", "receiptId", "Receipt"], ["LedgerImportRow", "paymentId", "Payment"],
   ["LedgerImportAction", "batchId", "LedgerImportBatch"], ["LedgerImportAction", "rowId", "LedgerImportRow"], ["LedgerImportIssue", "batchId", "LedgerImportBatch"], ["LedgerImportIssue", "rowId", "LedgerImportRow"], ["LedgerImportIssue", "suppressedByRuleId", "DataQualitySuppressionRule"],
-  ["TelegramDraft", "channelId", "NotificationChannel"],
   ["ReceiptReconciliationIssue", "maintenanceRunId", "MaintenanceRun"], ["ReceiptReconciliationIssue", "receiptId", "Receipt"], ["ReceiptReconciliationIssue", "policyId", "Policy"], ["ReceiptReconciliationIssue", "suppressedByRuleId", "DataQualitySuppressionRule"],
   ["PolicyRenewalSuggestion", "maintenanceRunId", "MaintenanceRun"], ["PolicyRenewalSuggestion", "sourcePolicyId", "Policy"], ["PolicyRenewalSuggestion", "targetPolicyId", "Policy"], ["PolicyRenewalSuggestion", "suppressedByRuleId", "DataQualitySuppressionRule"],
   ["AssistantReport", "parentReportId", "AssistantReport"], ["AssistantReportSignal", "reportId", "AssistantReport"], ["AssistantAiRun", "reportId", "AssistantReport"], ["AssistantAiAttempt", "runId", "AssistantAiRun"],
@@ -73,6 +82,13 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
   summary.usersMissingMembership = missing;
   if (missing > 0) issues.push(`${missing} non-technical users without membership`);
 
+  const systemMemberships = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" WHERE "userId" = $1`, [SYSTEM_USER_ID]);
+  if (Number(systemMemberships.rows[0]?.count ?? 0) > 0) issues.push("technical system user has a membership");
+  const membershipActiveMismatch = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE m."active" IS DISTINCT FROM u."active"`);
+  if (Number(membershipActiveMismatch.rows[0]?.count ?? 0) > 0) issues.push("membership active state differs from User.active");
+  const membershipRoleMismatch = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE (m."role" NOT IN ('OWNER','ADMIN','AGENT')) OR (m."role" <> 'OWNER' AND (u."role" NOT IN ('ADMIN','AGENT') OR m."role" <> u."role"))`);
+  if (Number(membershipRoleMismatch.rows[0]?.count ?? 0) > 0) issues.push("membership role is invalid or differs from legacy User.role");
+
   for (const table of PROTECTED_TENANT_TABLES) {
     const nullResult = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM ${identifier(table)} WHERE "organizationId" IS NULL`);
     const nullCount = Number(nullResult.rows[0]?.count ?? 0);
@@ -81,6 +97,11 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
     const dangling = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM ${identifier(table)} t LEFT JOIN "Organization" o ON o."id" = t."organizationId" WHERE t."organizationId" IS NOT NULL AND o."id" IS NULL`);
     const danglingCount = Number(dangling.rows[0]?.count ?? 0);
     if (danglingCount > 0) issues.push(`${table} has dangling organization references`);
+  }
+
+  for (const table of OPTIONAL_ORGANIZATION_TABLES) {
+    const dangling = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM ${identifier(table)} t LEFT JOIN "Organization" o ON o."id" = t."organizationId" WHERE t."organizationId" IS NOT NULL AND o."id" IS NULL`);
+    if (Number(dangling.rows[0]?.count ?? 0) > 0) issues.push(`${table} has dangling optional organization references`);
   }
 
   for (const [child, column, parent] of relationChecks) {
@@ -96,18 +117,52 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
 
   const functionResult = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'policydesk_assign_singleton_organization'`);
   if (Number(functionResult.rows[0]?.count ?? 0) !== 1) issues.push("singleton assignment function is missing");
-  const triggerNames = [...Object.values(EXPECTED_TENANT_TRIGGERS), "User_transition_membership_sync", "User_transition_owner_delete_guard", "OrganizationMembership_transition_guard", "Organization_transition_delete_guard", "Organization_transition_truncate_guard"];
-  const triggerResult = await client.query<{ tgname: string; tgenabled: string }>(`SELECT t.tgname, t.tgenabled FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND NOT t.tgisinternal AND t.tgname = ANY($1::text[])`, [triggerNames]);
-  const installed = new Map(triggerResult.rows.map((row) => [row.tgname, row.tgenabled]));
-  for (const trigger of triggerNames) {
-    if (!installed.has(trigger)) issues.push(`expected trigger ${trigger} is missing`);
-    else if (installed.get(trigger) !== "O") issues.push(`trigger ${trigger} is not a normal enabled trigger`);
+  const triggerResult = await client.query<{ tgname: string; tgenabled: string; table_name: string; function_name: string; definition: string }>(`
+    SELECT t.tgname, t.tgenabled, c.relname AS table_name, p.proname AS function_name,
+           pg_get_triggerdef(t.oid, true) AS definition
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_proc p ON p.oid = t.tgfoid
+     WHERE n.nspname = 'public' AND NOT t.tgisinternal
+  `);
+  const installed = new Map(triggerResult.rows.map((row) => [row.tgname, row]));
+  for (const [table, trigger] of Object.entries(EXPECTED_TENANT_TRIGGERS)) {
+    const row = installed.get(trigger);
+    if (!row) { issues.push(`expected trigger ${trigger} is missing`); continue; }
+    const definition = row.definition.replaceAll('"', '').replace(/\s+/g, " ");
+    if (row.tgenabled !== "O") issues.push(`trigger ${trigger} is not a normal enabled trigger`);
+    if (row.table_name !== table) issues.push(`trigger ${trigger} is attached to ${row.table_name}, not ${table}`);
+    if (row.function_name !== "policydesk_assign_singleton_organization") issues.push(`trigger ${trigger} calls the wrong function`);
+    if (!/BEFORE INSERT OR UPDATE OF organizationId ON/.test(definition)) issues.push(`trigger ${trigger} is not BEFORE INSERT OR UPDATE OF organizationId`);
   }
-  const indexes = await client.query<{ indexname: string; indexdef: string }>(`SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1::text[])`, ["Organization_transition_singleton_idx", "OrganizationMembership_transition_owner_idx"]);
-  const indexNames = new Set(indexes.rows.map((row) => row.indexname));
-  if (!indexNames.has("Organization_transition_singleton_idx")) issues.push("singleton expression index is missing");
-  if (!indexNames.has("OrganizationMembership_transition_owner_idx")) issues.push("Owner singleton index is missing");
-  for (const index of indexes.rows) if (!index.indexdef.includes("((1))")) issues.push(`${index.indexname} is not the expected constant expression index`);
+  const expectedGuards: Record<string, [string, string]> = {
+    Organization_transition_delete_guard: ["Organization", "policydesk_guard_organization_delete"],
+    Organization_transition_truncate_guard: ["Organization", "policydesk_guard_organization_delete"],
+    OrganizationMembership_transition_guard: ["OrganizationMembership", "policydesk_guard_singleton_membership"],
+    User_transition_membership_sync: ["User", "policydesk_sync_user_membership"],
+    User_transition_owner_delete_guard: ["User", "policydesk_guard_user_owner_delete"],
+  };
+  for (const [trigger, [table, fn]] of Object.entries(expectedGuards)) {
+    const row = installed.get(trigger);
+    if (!row) issues.push(`expected guard trigger ${trigger} is missing`);
+    else if (row.tgenabled !== "O" || row.table_name !== table || row.function_name !== fn) issues.push(`guard trigger ${trigger} has an unexpected definition`);
+  }
+  const indexes = await client.query<{ indexname: string; table_name: string; indisunique: boolean; indexdef: string; predicate: string | null }>(`
+    SELECT i.relname AS indexname, t.relname AS table_name, x.indisunique,
+           pg_get_indexdef(x.indexrelid) AS indexdef, pg_get_expr(x.indpred, x.indrelid) AS predicate
+      FROM pg_index x
+      JOIN pg_class i ON i.oid = x.indexrelid
+      JOIN pg_class t ON t.oid = x.indrelid
+      JOIN pg_namespace n ON n.oid = t.relnamespace
+     WHERE n.nspname = 'public' AND i.relname = ANY($1::text[])
+  `, ["Organization_transition_singleton_idx", "OrganizationMembership_transition_owner_idx"]);
+  const indexByName = new Map(indexes.rows.map((row) => [row.indexname, row]));
+  const singleton = indexByName.get("Organization_transition_singleton_idx");
+  if (!singleton || singleton.table_name !== "Organization" || !singleton.indisunique || !singleton.indexdef.replace(/\s+/g, "").includes("((1))")) issues.push("singleton expression index is not the required unique constant index");
+  const ownerIndex = indexByName.get("OrganizationMembership_transition_owner_idx");
+  const ownerPredicate = ownerIndex?.predicate?.replaceAll('"', '') ?? "";
+  if (!ownerIndex || ownerIndex.table_name !== "OrganizationMembership" || !ownerIndex.indisunique || !ownerIndex.indexdef.replace(/\s+/g, "").includes("((1))") || !/role\s*=\s*'OWNER'/.test(ownerPredicate)) issues.push("Owner singleton index is not the required unique partial constant index");
 
   return { ok: issues.length === 0, issues, summary };
 }

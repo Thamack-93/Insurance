@@ -29,13 +29,19 @@ function requiredEnv(name: string) {
 }
 
 function inputs(): Inputs {
-  return {
+  const value = {
     name: requiredEnv("LEGACY_ORGANIZATION_NAME"),
     slug: requiredEnv("LEGACY_ORGANIZATION_SLUG"),
     timeZone: requiredEnv("LEGACY_ORGANIZATION_TIME_ZONE"),
     currency: requiredEnv("LEGACY_ORGANIZATION_DEFAULT_CURRENCY"),
     ownerEmail: requiredEnv("LEGACY_ORGANIZATION_OWNER_EMAIL").toLowerCase(),
   };
+  if (value.name.length > 120) throw new Error("POLICYDESK_ORGANIZATION_NAME_INVALID");
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value.slug) || value.slug.length < 3 || value.slug.length > 63) throw new Error("POLICYDESK_ORGANIZATION_SLUG_INVALID");
+  if (!/^[A-Z]{3}$/.test(value.currency)) throw new Error("POLICYDESK_ORGANIZATION_CURRENCY_INVALID");
+  try { Intl.DateTimeFormat("en-US", { timeZone: value.timeZone }).format(); }
+  catch { throw new Error("POLICYDESK_ORGANIZATION_TIME_ZONE_INVALID"); }
+  return value;
 }
 
 function connectionString() {
@@ -64,13 +70,14 @@ async function counts(client: PoolClient) {
 }
 
 async function run(client: PoolClient, input: Inputs, apply: boolean) {
-  const organization = await client.query<{ id: string; name: string; slug: string; status: string }>(`SELECT "id","name","slug","status" FROM "Organization" WHERE "id" = $1 FOR UPDATE`, [BOOTSTRAP_ORGANIZATION_ID]);
+  const lockClause = apply ? " FOR UPDATE" : "";
+  const organization = await client.query<{ id: string; name: string; slug: string; status: string }>(`SELECT "id","name","slug","status" FROM "Organization" WHERE "id" = $1${lockClause}`, [BOOTSTRAP_ORGANIZATION_ID]);
   if (organization.rowCount !== 1) throw new Error("POLICYDESK_ORGANIZATION_NOT_BOOTSTRAPPED");
-  const owner = await client.query<{ id: string; email: string; role: string; active: boolean }>(`SELECT "id","email","role","active" FROM "User" WHERE lower("email") = $1 AND "id" <> $2 FOR UPDATE`, [input.ownerEmail, SYSTEM_USER_ID]);
+  const owner = await client.query<{ id: string; email: string; role: string; active: boolean }>(`SELECT "id","email","role","active" FROM "User" WHERE lower("email") = $1 AND "id" <> $2${lockClause}`, [input.ownerEmail, SYSTEM_USER_ID]);
   if (owner.rowCount !== 1) throw new Error("El email del Owner debe identificar exactamente un usuario no técnico.");
   if (owner.rows[0].role !== "ADMIN" || !owner.rows[0].active) throw new Error("El Owner seleccionado debe ser un ADMIN activo; no se modifica User.role en este backfill.");
 
-  const existingOwner = await client.query<{ id: string; userId: string; active: boolean }>(`SELECT "id","userId","active" FROM "OrganizationMembership" WHERE "organizationId" = $1 AND "role" = 'OWNER' FOR UPDATE`, [BOOTSTRAP_ORGANIZATION_ID]);
+  const existingOwner = await client.query<{ id: string; userId: string; active: boolean }>(`SELECT "id","userId","active" FROM "OrganizationMembership" WHERE "organizationId" = $1 AND "role" = 'OWNER'${lockClause}`, [BOOTSTRAP_ORGANIZATION_ID]);
   if (existingOwner.rows.some((row) => row.userId !== owner.rows[0].id)) throw new Error("POLICYDESK_MULTIPLE_OWNERS");
 
   const nullCounts = await counts(client);
@@ -102,7 +109,11 @@ async function main() {
   const client = await pool.connect();
   try {
     await client.query(apply ? "BEGIN ISOLATION LEVEL SERIALIZABLE" : "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    if (apply) await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [BACKFILL_LOCK_KEY]);
+    if (apply) {
+      await client.query("SET LOCAL lock_timeout = '30s'");
+      await client.query("SET LOCAL statement_timeout = '5min'");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [BACKFILL_LOCK_KEY]);
+    }
     const result = await run(client, input, apply);
     await client.query("COMMIT");
     const payload = { mode: apply ? "apply" : "preview", ok: true, result };
@@ -110,7 +121,8 @@ async function main() {
     else console.log(`${apply ? "Backfill aplicado" : "Preview de backfill"}. Organización ${result.organization.status}; filas null detectadas: ${Object.values(result.nullCounts).reduce((a, b) => a + b, 0)}.`);
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
-    const payload = { mode: apply ? "apply" : "preview", ok: false, error: error instanceof Error ? error.message : String(error) };
+    const message = error instanceof Error ? error.message : String(error);
+    const payload = { mode: apply ? "apply" : "preview", ok: false, error: /lock timeout|55P03/i.test(message) ? "POLICYDESK_BACKFILL_LOCK_TIMEOUT" : message };
     if (json) console.error(JSON.stringify(payload, null, 2)); else console.error(payload.error);
     process.exitCode = 1;
   } finally {

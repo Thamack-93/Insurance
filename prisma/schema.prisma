@@ -17,7 +17,7 @@ model Organization {
   timeZone        String   @default("Etc/GMT+6")
   defaultCurrency String   @default("MXN")
   createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  updatedAt       DateTime @default(now()) @updatedAt
 
   memberships OrganizationMembership[]
   clients Client[]
@@ -34,7 +34,6 @@ model Organization {
   documents Document[]
   activityLogs ActivityLog[]
   assistantActionDrafts AssistantActionDraft[]
-  notificationChannels NotificationChannel[]
   notificationPreferences NotificationPreference[]
   notificationEvents NotificationEvent[]
   policyInsuredParties PolicyInsuredParty[]
@@ -55,7 +54,6 @@ model Organization {
   assistantAiAttempts AssistantAiAttempt[]
   alerts Alert[]
   securityEventAggregates SecurityEventAggregate[]
-  telegramWebhookUpdates TelegramWebhookUpdate[]
 
   @@index([status])
 }
@@ -67,7 +65,7 @@ model OrganizationMembership {
   role           String
   active         Boolean  @default(true)
   createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  updatedAt      DateTime @default(now()) @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -737,8 +735,6 @@ model AssistantActionDraft {
 }
 
 model NotificationChannel {
-  organizationId String?
-  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String   @id @default(cuid())
   userId         String
   type           String
@@ -755,7 +751,6 @@ model NotificationChannel {
   @@index([userId])
   @@index([type])
   @@index([telegramChatId])
-  @@index([organizationId])
 }
 
 model NotificationPreference {
@@ -1359,12 +1354,9 @@ model SecurityEventAggregate {
 }
 
 model TelegramWebhookUpdate {
-  organizationId String?
-  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id         String   @id @default(cuid())
   updateId   Int      @unique
   receivedAt DateTime @default(now())
 
   @@index([receivedAt])
-  @@index([organizationId])
 }

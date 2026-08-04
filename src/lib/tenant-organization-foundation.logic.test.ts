@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   BOOTSTRAP_ORGANIZATION_ID,
   EXPECTED_TENANT_TRIGGERS,
+  OPTIONAL_ORGANIZATION_TABLES,
+  PLATFORM_GLOBAL_TABLES,
   PROTECTED_TENANT_TABLES,
   SYSTEM_USER_ID,
 } from "./tenant-organization-foundation";
@@ -14,6 +16,8 @@ describe("tenant organization transition foundation", () => {
     expect(SYSTEM_USER_ID).toBe("system-user-0000");
     expect(PROTECTED_TENANT_TABLES.length).toBeGreaterThan(30);
     expect(Object.keys(EXPECTED_TENANT_TRIGGERS)).toHaveLength(PROTECTED_TENANT_TABLES.length);
+    expect(OPTIONAL_ORGANIZATION_TABLES).toEqual(["SecurityEventAggregate"]);
+    expect(PLATFORM_GLOBAL_TABLES).toEqual(expect.arrayContaining(["NotificationChannel", "TelegramWebhookUpdate"]));
   });
 
   it("ships normal, inspectable SQL guards", () => {
@@ -25,5 +29,9 @@ describe("tenant organization transition foundation", () => {
     expect(migration).not.toMatch(/(?:ALTER|CREATE)\s+TRIGGER[^;]*ENABLE ALWAYS/i);
     expect(migration).toContain("POLICYDESK_ORGANIZATION_IMMUTABLE");
     expect(migration).toContain("User_transition_membership_sync");
+    expect(migration).toContain('CREATE INDEX "User_platformRole_idx"');
+    expect(migration).not.toContain('NotificationChannel_transition_singleton_organization');
+    expect(migration).not.toContain('SecurityEventAggregate_transition_singleton_organization');
+    expect(migration).not.toContain('TelegramWebhookUpdate_transition_singleton_organization');
   });
 });

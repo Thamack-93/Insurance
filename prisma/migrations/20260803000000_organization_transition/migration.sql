@@ -36,6 +36,7 @@ CREATE INDEX "OrganizationMembership_role_idx" ON "OrganizationMembership"("role
 CREATE INDEX "OrganizationMembership_active_idx" ON "OrganizationMembership"("active");
 
 ALTER TABLE "User" ADD COLUMN "platformRole" TEXT NOT NULL DEFAULT 'NONE';
+CREATE INDEX "User_platformRole_idx" ON "User"("platformRole");
 ALTER TABLE "Client" ADD COLUMN "organizationId" TEXT;
 CREATE INDEX "Client_organizationId_idx" ON "Client"("organizationId");
 ALTER TABLE "Client" ADD CONSTRAINT "Client_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -78,9 +79,6 @@ ALTER TABLE "ActivityLog" ADD CONSTRAINT "ActivityLog_organizationId_fkey" FOREI
 ALTER TABLE "AssistantActionDraft" ADD COLUMN "organizationId" TEXT;
 CREATE INDEX "AssistantActionDraft_organizationId_idx" ON "AssistantActionDraft"("organizationId");
 ALTER TABLE "AssistantActionDraft" ADD CONSTRAINT "AssistantActionDraft_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "NotificationChannel" ADD COLUMN "organizationId" TEXT;
-CREATE INDEX "NotificationChannel_organizationId_idx" ON "NotificationChannel"("organizationId");
-ALTER TABLE "NotificationChannel" ADD CONSTRAINT "NotificationChannel_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE "NotificationPreference" ADD COLUMN "organizationId" TEXT;
 CREATE INDEX "NotificationPreference_organizationId_idx" ON "NotificationPreference"("organizationId");
 ALTER TABLE "NotificationPreference" ADD CONSTRAINT "NotificationPreference_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -141,9 +139,6 @@ ALTER TABLE "Alert" ADD CONSTRAINT "Alert_organizationId_fkey" FOREIGN KEY ("org
 ALTER TABLE "SecurityEventAggregate" ADD COLUMN "organizationId" TEXT;
 CREATE INDEX "SecurityEventAggregate_organizationId_idx" ON "SecurityEventAggregate"("organizationId");
 ALTER TABLE "SecurityEventAggregate" ADD CONSTRAINT "SecurityEventAggregate_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "TelegramWebhookUpdate" ADD COLUMN "organizationId" TEXT;
-CREATE INDEX "TelegramWebhookUpdate_organizationId_idx" ON "TelegramWebhookUpdate"("organizationId");
-ALTER TABLE "TelegramWebhookUpdate" ADD CONSTRAINT "TelegramWebhookUpdate_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 CREATE UNIQUE INDEX "Organization_transition_singleton_idx" ON "Organization" ((1));
 CREATE UNIQUE INDEX "OrganizationMembership_transition_owner_idx"
@@ -434,12 +429,6 @@ FOR EACH ROW EXECUTE FUNCTION policydesk_assign_singleton_organization();
 
 COMMENT ON TRIGGER "AssistantActionDraft_transition_singleton_organization" ON "AssistantActionDraft" IS
   'Cycle 1 temporary singleton organization assignment; normal trigger intentionally not ENABLE ALWAYS.';
-CREATE TRIGGER "NotificationChannel_transition_singleton_organization"
-BEFORE INSERT OR UPDATE OF "organizationId" ON "NotificationChannel"
-FOR EACH ROW EXECUTE FUNCTION policydesk_assign_singleton_organization();
-
-COMMENT ON TRIGGER "NotificationChannel_transition_singleton_organization" ON "NotificationChannel" IS
-  'Cycle 1 temporary singleton organization assignment; normal trigger intentionally not ENABLE ALWAYS.';
 CREATE TRIGGER "NotificationPreference_transition_singleton_organization"
 BEFORE INSERT OR UPDATE OF "organizationId" ON "NotificationPreference"
 FOR EACH ROW EXECUTE FUNCTION policydesk_assign_singleton_organization();
@@ -553,18 +542,6 @@ BEFORE INSERT OR UPDATE OF "organizationId" ON "Alert"
 FOR EACH ROW EXECUTE FUNCTION policydesk_assign_singleton_organization();
 
 COMMENT ON TRIGGER "Alert_transition_singleton_organization" ON "Alert" IS
-  'Cycle 1 temporary singleton organization assignment; normal trigger intentionally not ENABLE ALWAYS.';
-CREATE TRIGGER "SecurityEventAggregate_transition_singleton_organization"
-BEFORE INSERT OR UPDATE OF "organizationId" ON "SecurityEventAggregate"
-FOR EACH ROW EXECUTE FUNCTION policydesk_assign_singleton_organization();
-
-COMMENT ON TRIGGER "SecurityEventAggregate_transition_singleton_organization" ON "SecurityEventAggregate" IS
-  'Cycle 1 temporary singleton organization assignment; normal trigger intentionally not ENABLE ALWAYS.';
-CREATE TRIGGER "TelegramWebhookUpdate_transition_singleton_organization"
-BEFORE INSERT OR UPDATE OF "organizationId" ON "TelegramWebhookUpdate"
-FOR EACH ROW EXECUTE FUNCTION policydesk_assign_singleton_organization();
-
-COMMENT ON TRIGGER "TelegramWebhookUpdate_transition_singleton_organization" ON "TelegramWebhookUpdate" IS
   'Cycle 1 temporary singleton organization assignment; normal trigger intentionally not ENABLE ALWAYS.';
 
 

@@ -276,6 +276,12 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
       });
       await expect(restoreVerifiedBackup({ targetDatabaseUrl: targetUrl, plaintext: duplicate.plaintext, manifest: duplicate.manifest })).rejects.toThrow(/duplicate|posted_payment|recibo/i);
       expect(await scalarCount(targetUrl, "Payment")).toBe(1);
+
+      const inconsistentMembership = encodeSnapshot(snapshot, (copy) => {
+        copy.find((table) => table.name === "OrganizationMembership")!.rows[0].data.active = false;
+      });
+      await expect(restoreVerifiedBackup({ targetDatabaseUrl: targetUrl, plaintext: inconsistentMembership.plaintext, manifest: inconsistentMembership.manifest })).rejects.toThrow(/Owner|membership|tenant/i);
+      expect(await scalarCount(targetUrl, "Payment")).toBe(1);
       expect(await tableCounts(sourceUrl)).toEqual(sourceCountsBefore);
       const sourceCountAfter = await scalarCount(sourceUrl, "Payment");
       expect(sourceCountAfter).toBe(sourceCountBefore);
