@@ -13,11 +13,13 @@ import { getBreadcrumbSegments } from "@/lib/navigation";
 export function AppTopbar({
   userMenu,
   isAdmin = false,
+  isSuperAdmin = false,
   unreadNotificationCount,
   notifications,
 }: {
   userMenu?: ReactNode;
   isAdmin?: boolean;
+  isSuperAdmin?: boolean;
   unreadNotificationCount: number;
   notifications: BellNotification[];
 }) {
@@ -28,7 +30,7 @@ export function AppTopbar({
   return (
     <header className="sticky top-0 z-30 border-b border-border/70 bg-background/80 backdrop-blur-xl">
       <div className="flex h-16 items-center gap-3 px-3 sm:px-5 lg:gap-4 lg:px-8">
-        <AppMobileSidebar isAdmin={isAdmin} />
+        <AppMobileSidebar isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} />
         <nav aria-label="Breadcrumb" className="hidden shrink-0 items-center gap-2 text-sm text-muted-foreground md:flex">
           <span>PolicyDesk</span>
           {segments.map(({ segment, label }, index) => (
