@@ -13,11 +13,11 @@ export default async function LoginPage({
   searchParams: Promise<{ redirect?: string }>;
 }) {
   const params = await searchParams;
-  const redirectTo = params.redirect && params.redirect.startsWith("/") ? params.redirect : "/today";
+  const redirectTo = params.redirect && params.redirect.startsWith("/") ? params.redirect : "";
 
   const user = await getCurrentUser();
   if (user && user.active) {
-    redirect(redirectTo);
+    redirect(redirectTo || (user.platformRole === "SUPERADMIN" ? "/platform" : "/today"));
   }
 
   return (
