@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import {
   seedPendingReceipt,
-  cleanupReceipt,
+  cleanupSeededReceipt,
   cleanupRecentRenewalWorkItems,
   getTestDb,
   getAdminSessionCookie,
@@ -39,12 +39,13 @@ test.describe("Commissions API", () => {
   test.describe("POST /api/commissions/:id/status", () => {
     let receiptId = "";
     let policyId = "";
+    let seeded: Awaited<ReturnType<typeof seedPendingReceipt>> | undefined;
     let commissionId = "";
     let startedAt = 0;
 
     test.beforeEach(async () => {
       startedAt = Date.now();
-      const seeded = await seedPendingReceipt("COMM-API");
+      seeded = await seedPendingReceipt("COMM-API");
       receiptId = seeded.id;
       policyId = seeded.policyId;
 
@@ -88,7 +89,7 @@ test.describe("Commissions API", () => {
         await cleanupRecentRenewalWorkItems(policyId, startedAt);
       }
       if (receiptId) {
-        await cleanupReceipt(receiptId);
+        if (seeded) await cleanupSeededReceipt(seeded);
       }
     });
 

@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import {
   seedPendingReceipt,
-  cleanupReceipt,
+  cleanupSeededReceipt,
   cleanupRecentRenewalWorkItems,
   getTestDb,
   getAdminSessionCookie,
@@ -105,7 +105,7 @@ test.describe("POST /api/payments/quick", () => {
       expect(updatedReceipt?.status).toBe("PAID");
     } finally {
       if (seeded) {
-        await cleanupReceipt(seeded.id);
+        await cleanupSeededReceipt(seeded);
         await cleanupRecentRenewalWorkItems(seeded.policyId, start);
       }
     }
@@ -159,7 +159,7 @@ test.describe("POST /api/payments/quick", () => {
       expect(body.error).toMatch(/pagado|registrado/i);
     } finally {
       if (seeded) {
-        await cleanupReceipt(seeded.id);
+        await cleanupSeededReceipt(seeded);
         await cleanupRecentRenewalWorkItems(seeded.policyId, start);
       }
     }

@@ -227,6 +227,62 @@ export async function setUserActive(userId: string, active: boolean): Promise<Mu
   }
 }
 
+export async function deleteUser(userId: string, replacementUserId?: string): Promise<MutationResult> {
+  try {
+    const actor = await requireAdmin();
+    if (userId === SYSTEM_USER_ID) return errorResult("No puedes eliminar el usuario del sistema.");
+    if (actor.id === userId) return errorResult("No puedes eliminar tu propia cuenta.");
+
+    const db = getDb();
+    const target = await db.user.findUnique({ where: { id: userId } });
+    if (!target) return errorResult("El usuario ya no existe.");
+    if (target.active && target.role === "ADMIN") {
+      const remainingAdmins = await ensureNotLastAdmin(db, target.id);
+      if (remainingAdmins === 0) return errorResult("No puedes eliminar al último administrador activo.");
+    }
+    if (target.active) return errorResult("Desactiva el usuario antes de eliminarlo.");
+
+    const portfolioClients = await db.client.count({ where: { portfolioOwnerId: target.id } });
+    const replacementId = replacementUserId?.trim() || null;
+    if (portfolioClients > 0 && !replacementId) {
+      return errorResult("Selecciona un usuario activo para reasignar la cartera.");
+    }
+
+    let replacement: { id: string; active: boolean } | null = null;
+    if (replacementId) {
+      if (replacementId === target.id || replacementId === SYSTEM_USER_ID) {
+        return errorResult("El usuario de destino no es válido.");
+      }
+      replacement = await db.user.findUnique({ where: { id: replacementId }, select: { id: true, active: true } });
+      if (!replacement || !replacement.active) return errorResult("El usuario de destino debe estar activo.");
+    }
+
+    await db.$transaction(async (tx) => {
+      if (replacement) {
+        await tx.client.updateMany({ where: { portfolioOwnerId: target.id }, data: { portfolioOwnerId: replacement.id } });
+      }
+      await tx.activityLog.updateMany({ where: { userId: target.id }, data: { userId: SYSTEM_USER_ID } });
+      await writeActivityLog({
+        entityType: "User",
+        entityId: target.id,
+        action: "USER_DELETE",
+        oldValue: { email: target.email, role: target.role, active: target.active, portfolioClients },
+        newValue: { replacementUserId: replacement?.id ?? null },
+        userId: actor.id,
+        db: tx,
+      });
+      await tx.user.delete({ where: { id: target.id } });
+    });
+
+    revalidatePath("/settings/users");
+    return successResult(userId, "/settings/users", "Usuario eliminado.");
+  } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
+    logError("settings.users.delete", error);
+    return errorResult("No se pudo eliminar el usuario sin afectar los datos operativos.");
+  }
+}
+
 export type ResetPasswordResult =
   | { ok: true; tempPassword: string; message: string }
   | { ok: false; error: string };

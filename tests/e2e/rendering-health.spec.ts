@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { authenticatePageAsAdmin, getTestDb } from "../helpers/db";
+import { authenticatePageAsAdmin, cleanupPolicyFixture, seedPolicyFixture } from "../helpers/db";
 
 function isHydrationError(message: string) {
   return /hydration failed|hydration mismatch|minified react error #418|text content does not match/i.test(message);
@@ -16,17 +16,17 @@ test.describe("authenticated rendering health", () => {
     });
 
     await authenticatePageAsAdmin(page);
-    const policy = await getTestDb().policy.findFirst({
-      where: { policyNumber: "CI-POL-0001" },
-      select: { id: true },
-    });
-    expect(policy).not.toBeNull();
+    const fixture = await seedPolicyFixture("RENDERING");
 
-    for (const path of ["/today", "/assistant", "/operations", `/policies/${policy!.id}`]) {
-      errors.length = 0;
-      await page.goto(path);
-      await page.waitForLoadState("networkidle");
-      expect(errors, `Hydration errors on ${path}`).toEqual([]);
+    try {
+      for (const path of ["/today", "/assistant", "/operations", `/policies/${fixture.policyId}`]) {
+        errors.length = 0;
+        await page.goto(path);
+        await page.waitForLoadState("networkidle");
+        expect(errors, `Hydration errors on ${path}`).toEqual([]);
+      }
+    } finally {
+      await cleanupPolicyFixture(fixture);
     }
   });
 });

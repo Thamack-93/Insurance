@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Copy, KeyRound, ShieldCheck, UserPlus, UserX, UserCheck } from "lucide-react";
+import { Copy, KeyRound, ShieldCheck, UserPlus, UserX, UserCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,6 +43,7 @@ import {
   changeUserRole,
   setUserActive,
   resetUserPassword,
+  deleteUser,
   type AdminUserRow,
 } from "@/app/(dashboard)/settings/users/actions";
 import type { UserRole } from "@/lib/auth";
@@ -79,6 +80,8 @@ export function UsersAdminPanel({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<UserRole>("AGENT");
+  const [deleteTarget, setDeleteTarget] = useState<AdminUserRow | null>(null);
+  const [replacementUserId, setReplacementUserId] = useState("");
 
   function refresh() {
     router.refresh();
@@ -136,6 +139,21 @@ export function UsersAdminPanel({
       }
       toast.success(result.message);
       setTempCredential({ email: user.email, password: result.tempPassword });
+    });
+  }
+
+  function handleDelete() {
+    if (!deleteTarget) return;
+    startTransition(async () => {
+      const result = await deleteUser(deleteTarget.id, replacementUserId || undefined);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(result.message);
+      setDeleteTarget(null);
+      setReplacementUserId("");
+      refresh();
     });
   }
 
@@ -237,6 +255,19 @@ export function UsersAdminPanel({
                         >
                           {user.active ? <UserX className="size-4" /> : <UserCheck className="size-4" />}
                         </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={pending || isMe || user.active}
+                          onClick={() => {
+                            setDeleteTarget(user);
+                            setReplacementUserId("");
+                          }}
+                          title={user.active ? "Desactiva antes de eliminar" : "Eliminar usuario"}
+                          aria-label={user.active ? "Desactiva antes de eliminar" : "Eliminar usuario"}
+                        >
+                          <Trash2 className="size-4 text-destructive" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   );
@@ -299,6 +330,67 @@ export function UsersAdminPanel({
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null);
+            setReplacementUserId("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Eliminar usuario</DialogTitle>
+            <DialogDescription>
+              Esta acción elimina la cuenta, pero conserva clientes, pólizas, recibos, pagos y operaciones.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteTarget ? (
+            <div className="space-y-4">
+              <p className="text-sm">
+                Confirma la eliminación de <strong>{deleteTarget.name}</strong> ({deleteTarget.email}).
+              </p>
+              {deleteTarget.portfolioClients > 0 ? (
+                <div className="space-y-2">
+                  <Label htmlFor="delete-replacement">Reasignar cartera</Label>
+                  <Select value={replacementUserId} onValueChange={(value) => setReplacementUserId(value ?? "")}>
+                    <SelectTrigger id="delete-replacement">
+                      <SelectValue placeholder="Selecciona un usuario activo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {initialUsers
+                        .filter((candidate) => candidate.id !== deleteTarget.id && candidate.active)
+                        .map((candidate) => (
+                          <SelectItem key={candidate.id} value={candidate.id}>
+                            {candidate.name} · {candidate.email}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Se reasignarán {deleteTarget.portfolioClients} cliente{deleteTarget.portfolioClients === 1 ? "" : "s"}.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeleteTarget(null)}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={pending || (Boolean(deleteTarget?.portfolioClients) && !replacementUserId)}
+              onClick={handleDelete}
+            >
+              {pending ? "Eliminando…" : "Eliminar usuario"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

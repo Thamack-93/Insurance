@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import {
   seedPendingReceipt,
-  cleanupReceipt,
+  cleanupSeededReceipt,
   cleanupRecentRenewalWorkItems,
   getTestDb,
   authenticatePageAsAdmin,
@@ -10,11 +10,12 @@ import {
 test.describe("Commissions Page (/commissions)", () => {
   let receiptId = "";
   let policyId = "";
+  let seeded: Awaited<ReturnType<typeof seedPendingReceipt>> | undefined;
   let startedAt = 0;
 
   test.beforeEach(async () => {
     startedAt = Date.now();
-    const seeded = await seedPendingReceipt("COMM-E2E");
+    seeded = await seedPendingReceipt("COMM-E2E");
     receiptId = seeded.id;
     policyId = seeded.policyId;
   });
@@ -26,7 +27,7 @@ test.describe("Commissions Page (/commissions)", () => {
       await cleanupRecentRenewalWorkItems(policyId, startedAt);
     }
     if (receiptId) {
-      await cleanupReceipt(receiptId);
+      if (seeded) await cleanupSeededReceipt(seeded);
     }
   });
 

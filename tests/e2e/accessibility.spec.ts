@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { expectNoSeriousAxeViolations } from "../helpers/axe";
-import { authenticatePageAsAdmin, getTestDb } from "../helpers/db";
+import { authenticatePageAsAdmin, cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../helpers/db";
 
 test.describe("Critical accessibility surfaces", () => {
   test.beforeEach(async ({ page }) => {
@@ -24,19 +24,24 @@ test.describe("Critical accessibility surfaces", () => {
   });
 
   test("audits receipts and an authorized policy detail", async ({ page }) => {
-    await page.goto("/receipts");
-    await expect(page.getByRole("heading", { name: "Recibos y pagos", exact: true })).toBeVisible();
-    await expectNoSeriousAxeViolations(page, "main");
+    const fixture = await seedPolicyFixture("ACCESSIBILITY");
+    try {
+      await page.goto("/receipts");
+      await expect(page.getByRole("heading", { name: "Recibos y pagos", exact: true })).toBeVisible();
+      await expectNoSeriousAxeViolations(page, "main");
 
-    const policy = await getTestDb().policy.findFirst({
-      where: { policyNumber: "CI-POL-0001" },
-      select: { id: true },
-    });
-    expect(policy).not.toBeNull();
+      const policy = await getTestDb().policy.findUnique({
+        where: { id: fixture.policyId },
+        select: { id: true },
+      });
+      expect(policy).not.toBeNull();
 
-    await page.goto(`/policies/${policy!.id}`);
-    await expect(page.getByRole("heading", { name: "CI-POL-0001", exact: true })).toBeVisible();
-    await expectNoSeriousAxeViolations(page, "main");
+      await page.goto(`/policies/${policy!.id}`);
+      await expect(page.getByRole("heading", { name: fixture.policyNumber, exact: true })).toBeVisible();
+      await expectNoSeriousAxeViolations(page, "main");
+    } finally {
+      await cleanupPolicyFixture(fixture);
+    }
   });
 });
 

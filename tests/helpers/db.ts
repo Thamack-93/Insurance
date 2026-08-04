@@ -12,10 +12,7 @@ const TEST_ADMIN_EMAIL = "ci-admin@policydesk.local";
 const TEST_ADMIN_NAME = "CI Admin";
 const TEST_AGENT_EMAIL = "ci-agent@policydesk.local";
 const TEST_AGENT_NAME = "CI Agent";
-const TEST_CLIENT_EMAIL = "ci-client@policydesk.local";
-const TEST_CLIENT_NAME = "CI Client";
-const TEST_INSURER_NAME = "CI Insurer";
-const TEST_POLICY_NUMBER = "CI-POL-0001";
+const TEST_INSURER_NAME = "Test Insurer";
 
 function loadLocalEnvFile(filePath: string) {
   if (!fs.existsSync(filePath)) return;
@@ -44,14 +41,11 @@ const globalForTests = globalThis as unknown as {
   prisma?: PrismaClient;
 };
 
-type SeededFixture = {
+type AuthFixture = {
   adminId: string;
-  clientId: string;
-  insurerId: string;
-  policyId: string;
 };
 
-let seededFixturePromise: Promise<SeededFixture> | null = null;
+let authFixturePromise: Promise<AuthFixture> | null = null;
 
 function normalizePostgresConnectionString(connectionString: string) {
   try {
@@ -133,9 +127,9 @@ export function getTestOrigin() {
   return new URL(baseUrl).origin;
 }
 
-async function ensureBaseFixture(): Promise<SeededFixture> {
-  if (!seededFixturePromise) {
-    seededFixturePromise = (async () => {
+async function ensureAuthFixture(): Promise<AuthFixture> {
+  if (!authFixturePromise) {
+    authFixturePromise = (async () => {
       const db = getTestDb();
       const admin = await db.user.upsert({
         where: { email: TEST_ADMIN_EMAIL },
@@ -169,107 +163,11 @@ async function ensureBaseFixture(): Promise<SeededFixture> {
         },
       });
 
-      const insurer =
-        (await db.insurer.findFirst({
-          where: { name: TEST_INSURER_NAME },
-          orderBy: { createdAt: "asc" },
-        })) ??
-        (await db.insurer.create({
-          data: {
-            name: TEST_INSURER_NAME,
-            status: "ACTIVE",
-          },
-        }));
-      await db.insurer.update({
-        where: { id: insurer.id },
-        data: {
-          name: TEST_INSURER_NAME,
-          status: "ACTIVE",
-        },
-      });
-
-      const client =
-        (await db.client.findFirst({
-          where: { email: TEST_CLIENT_EMAIL },
-          orderBy: { createdAt: "asc" },
-        })) ??
-        (await db.client.create({
-          data: {
-            fullName: TEST_CLIENT_NAME,
-            email: TEST_CLIENT_EMAIL,
-            status: "ACTIVE",
-            type: "PERSON",
-            portfolioOwnerId: admin.id,
-            createdById: admin.id,
-            updatedById: admin.id,
-          },
-        }));
-      await db.client.update({
-        where: { id: client.id },
-        data: {
-          fullName: TEST_CLIENT_NAME,
-          email: TEST_CLIENT_EMAIL,
-          status: "ACTIVE",
-          type: "PERSON",
-          portfolioOwnerId: admin.id,
-          createdById: admin.id,
-          updatedById: admin.id,
-        },
-      });
-
-      const policy =
-        (await db.policy.findFirst({
-          where: {
-            policyNumber: TEST_POLICY_NUMBER,
-            clientId: client.id,
-            insurerId: insurer.id,
-          },
-          orderBy: { createdAt: "asc" },
-        })) ??
-        (await db.policy.create({
-          data: {
-            policyNumber: TEST_POLICY_NUMBER,
-            clientId: client.id,
-            insurerId: insurer.id,
-            policyType: "AUTO",
-            status: "ACTIVE",
-            paymentFrequency: "ANNUAL",
-            startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-            endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-            premiumAmount: 1234.56,
-            currency: "MXN",
-            createdById: admin.id,
-            updatedById: admin.id,
-          },
-        }));
-      await db.policy.update({
-        where: { id: policy.id },
-        data: {
-          policyNumber: TEST_POLICY_NUMBER,
-          clientId: client.id,
-          insurerId: insurer.id,
-          policyType: "AUTO",
-          status: "ACTIVE",
-          paymentFrequency: "ANNUAL",
-          startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-          premiumAmount: 1234.56,
-          currency: "MXN",
-          createdById: admin.id,
-          updatedById: admin.id,
-        },
-      });
-
-      return {
-        adminId: admin.id,
-        clientId: client.id,
-        insurerId: insurer.id,
-        policyId: policy.id,
-      };
+      return { adminId: admin.id };
     })();
   }
 
-  return seededFixturePromise;
+  return authFixturePromise;
 }
 
 export type SeededReceipt = {
@@ -280,22 +178,73 @@ export type SeededReceipt = {
   insurerId: string;
 };
 
+export type SeededPolicyFixture = {
+  clientId: string;
+  insurerId: string;
+  policyId: string;
+  clientName: string;
+  insurerName: string;
+  policyNumber: string;
+};
+
+export async function seedPolicyFixture(prefix: string): Promise<SeededPolicyFixture> {
+  const db = getTestDb();
+  const { adminId } = await ensureAuthFixture();
+  const suffix = `${prefix}-${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`.toUpperCase();
+  const clientName = `Test Client ${suffix}`;
+  const insurerName = `${TEST_INSURER_NAME} ${suffix}`;
+  const policyNumber = `TEST-POL-${suffix}`;
+  const insurer = await db.insurer.create({ data: { name: insurerName, status: "ACTIVE" } });
+  const client = await db.client.create({
+    data: {
+      fullName: clientName,
+      email: `${suffix.toLowerCase()}@policydesk.local`,
+      status: "ACTIVE",
+      type: "PERSON",
+      portfolioOwnerId: adminId,
+      createdById: adminId,
+      updatedById: adminId,
+    },
+  });
+  const policy = await db.policy.create({
+    data: {
+      policyNumber,
+      clientId: client.id,
+      insurerId: insurer.id,
+      policyType: "AUTO",
+      status: "ACTIVE",
+      paymentFrequency: "ANNUAL",
+      startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+      endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      premiumAmount: 1234.56,
+      currency: "MXN",
+      createdById: adminId,
+      updatedById: adminId,
+    },
+  });
+  return { clientId: client.id, insurerId: insurer.id, policyId: policy.id, clientName, insurerName, policyNumber };
+}
+
+export async function cleanupPolicyFixture(fixture: SeededPolicyFixture): Promise<void> {
+  const db = getTestDb();
+  await db.payment.deleteMany({ where: { policyId: fixture.policyId } });
+  await db.commission.deleteMany({ where: { policyId: fixture.policyId } });
+  await db.receipt.deleteMany({ where: { policyId: fixture.policyId } });
+  await db.workItem.deleteMany({ where: { policyId: fixture.policyId } });
+  await db.policy.deleteMany({ where: { id: fixture.policyId } });
+  await db.client.deleteMany({ where: { id: fixture.clientId } });
+  await db.insurer.deleteMany({ where: { id: fixture.insurerId } });
+}
+
 /**
- * Creates a PENDING receipt on the shared test fixture policy. Returns the
- * receipt id and a unique number.
+ * Creates a PENDING receipt on a temporary per-test policy. Returns the
+ * receipt id and the fixture identifiers needed for cleanup.
  */
 export async function seedPendingReceipt(prefix: string): Promise<SeededReceipt> {
   const db = getTestDb();
-  const fixture = await ensureBaseFixture();
-
-  const policy = await db.policy.findUnique({
-    where: { id: fixture.policyId },
-    include: { client: true, insurer: true },
-  });
-
-  if (!policy || policy.status === "CANCELLED") {
-    throw new Error("No active policy found in the isolated test database.");
-  }
+  const fixture = await seedPolicyFixture(prefix);
+  const policy = await db.policy.findUnique({ where: { id: fixture.policyId }, include: { client: true, insurer: true } });
+  if (!policy) throw new Error("No active policy found in the isolated test database.");
 
   const receiptNumber = `${prefix}-${Date.now().toString(36).slice(-6).toUpperCase()}`;
   const now = new Date();
@@ -325,17 +274,15 @@ export async function seedPendingReceipt(prefix: string): Promise<SeededReceipt>
   };
 }
 
-/**
- * Removes a receipt and its child payments. Safe to call even if already deleted.
- */
-export async function cleanupReceipt(receiptId: string): Promise<void> {
+export async function cleanupSeededReceipt(seed: SeededReceipt): Promise<void> {
   const db = getTestDb();
-  try {
-    await db.payment.deleteMany({ where: { receiptId } });
-    await db.receipt.deleteMany({ where: { id: receiptId } });
-  } catch {
-    // ignore — best-effort cleanup
-  }
+  await db.payment.deleteMany({ where: { receiptId: seed.id } });
+  await db.commission.deleteMany({ where: { policyId: seed.policyId } });
+  await db.receipt.deleteMany({ where: { id: seed.id } });
+  await db.workItem.deleteMany({ where: { policyId: seed.policyId } });
+  await db.policy.deleteMany({ where: { id: seed.policyId } });
+  await db.client.deleteMany({ where: { id: seed.clientId } });
+  await db.insurer.deleteMany({ where: { id: seed.insurerId } });
 }
 
 /**
@@ -366,7 +313,7 @@ export async function cleanupRecentRenewalWorkItems(policyId: string, sinceMs: n
 
 export async function getAdminSessionCookie(): Promise<string> {
   const db = getTestDb();
-  const fixture = await ensureBaseFixture();
+  const fixture = await ensureAuthFixture();
   const admin = await db.user.findUnique({ where: { id: fixture.adminId } });
   if (!admin) {
     throw new Error("No active admin user found in the seeded database.");

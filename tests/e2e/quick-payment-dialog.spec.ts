@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import {
   seedPendingReceipt,
-  cleanupReceipt,
+  cleanupSeededReceipt,
   cleanupRecentRenewalWorkItems,
   getTestDb,
   authenticatePageAsAdmin,
@@ -27,7 +27,7 @@ test.describe("Quick payment dialog (/receipts cobrar tab)", () => {
 
   test.afterEach(async () => {
     if (seeded) {
-      await cleanupReceipt(seeded.id);
+      await cleanupSeededReceipt(seeded);
       await cleanupRecentRenewalWorkItems(seeded.policyId, startedAt);
     }
   });
