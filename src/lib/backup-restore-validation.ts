@@ -248,6 +248,10 @@ export async function validateRestoreSchema(client: PoolClient, parsed: ParsedBa
     NotificationPreference: ["id", "userId", "eventType", "channelType"],
     NotificationEvent: ["id", "userId", "channelType"],
     SystemSetting: ["id", "key", "value"],
+    Plan: ["id", "code", "name", "monthlyAmountMinor", "currency", "active"],
+    OrganizationSubscription: ["id", "organizationId", "planId", "status", "monthlyAmountMinor", "currency"],
+    BillingCharge: ["id", "organizationId", "subscriptionId", "periodStart", "periodEnd", "amountMinor", "currency", "status", "reason"],
+    OrganizationMigrationConflict: ["id", "sourceOrganizationId", "targetOrganizationId", "tableName", "rowId", "reason", "status"],
   };
   for (const table of [...PROTECTED_TENANT_TABLES, ...OPTIONAL_ORGANIZATION_TABLES]) {
     requiredColumns[table] = [...(requiredColumns[table] ?? ["id"]), "organizationId"];
@@ -434,6 +438,12 @@ export async function validateDomainInvariants(client: PoolClient): Promise<Doma
       FROM "ActivityLog" log
       LEFT JOIN "User" user_row ON user_row.id = 'system-user-0000'
      WHERE log."userId" = 'system-user-0000' AND user_row.id IS NULL`));
+  add("platform_role_invalid", await count(client, `SELECT count(*)::text AS count FROM "User" WHERE "platformRole" NOT IN ('NONE', 'SUPERADMIN')`));
+  add("superadmin_tenant_membership", await count(client, `SELECT count(*)::text AS count FROM "OrganizationMembership" membership JOIN "User" user_row ON user_row.id = membership."userId" WHERE user_row."platformRole" = 'SUPERADMIN'`));
+  add("subscription_missing_organization", await count(client, `SELECT count(*)::text AS count FROM "OrganizationSubscription" subscription LEFT JOIN "Organization" organization ON organization.id = subscription."organizationId" WHERE organization.id IS NULL`));
+  add("billing_charge_missing_organization", await count(client, `SELECT count(*)::text AS count FROM "BillingCharge" charge LEFT JOIN "Organization" organization ON organization.id = charge."organizationId" WHERE organization.id IS NULL`));
+  add("billing_charge_invalid_status", await count(client, `SELECT count(*)::text AS count FROM "BillingCharge" WHERE status NOT IN ('PAID', 'VOID', 'REFUNDED')`));
+  add("billing_charge_invalid_currency", await count(client, `SELECT count(*)::text AS count FROM "BillingCharge" WHERE currency !~ '^[A-Z]{3}$'`));
 
   add("workitem_empty_entity_reference", await count(client, `SELECT count(*)::text AS count FROM "WorkItem" WHERE NULLIF(btrim("entityType"), '') IS NULL OR NULLIF(btrim("entityId"), '') IS NULL`));
   add("workitem_partial_source_reference", await count(client, `SELECT count(*)::text AS count FROM "WorkItem" WHERE ("sourceType" IS NULL) <> ("sourceId" IS NULL)`));
