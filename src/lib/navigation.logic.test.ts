@@ -56,6 +56,11 @@ describe("utility navigation", () => {
     expect(getUtilityNavigation(true).map((item) => item.id)).toEqual(["administration", "profile"]);
   });
 
+  it("shows the global platform entry only to superadmins", () => {
+    expect(getUtilityNavigation(false, true).map((item) => item.id)).toEqual(["platform", "profile"]);
+    expect(getUtilityNavigation(true, false).map((item) => item.id)).not.toContain("platform");
+  });
+
   it("keeps only Profile active inside its more-specific settings route", () => {
     const utilities = getUtilityNavigation(true);
     expect(isUtilityNavigationItemActive(utilities[0], "/settings/account")).toBe(false);
