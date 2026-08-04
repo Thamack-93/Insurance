@@ -4,13 +4,15 @@ import {
   EXPECTED_TENANT_TRIGGERS,
   OPTIONAL_ORGANIZATION_TABLES,
   PLATFORM_GLOBAL_TABLES,
+  PLATFORM_BILLING_TABLES,
+  PLATFORM_AUDIT_TABLES,
   PROTECTED_TENANT_TABLES,
 } from "../src/lib/tenant-organization-foundation.ts";
 
 const schema = fs.readFileSync(path.join(process.cwd(), "prisma/schema.prisma"), "utf8");
 const migration = fs.readFileSync(path.join(process.cwd(), "prisma/migrations/20260803000000_organization_transition/migration.sql"), "utf8");
 const modelNames = [...schema.matchAll(/^model\s+(\w+)\s*\{/gm)].map((match) => match[1]);
-const expected = new Set<string>([...PROTECTED_TENANT_TABLES, ...OPTIONAL_ORGANIZATION_TABLES, ...PLATFORM_GLOBAL_TABLES]);
+const expected = new Set<string>([...PROTECTED_TENANT_TABLES, ...OPTIONAL_ORGANIZATION_TABLES, ...PLATFORM_GLOBAL_TABLES, ...PLATFORM_BILLING_TABLES, ...PLATFORM_AUDIT_TABLES]);
 const issues: string[] = [];
 
 function modelBlock(model: string) {
@@ -42,9 +44,21 @@ for (const table of PLATFORM_GLOBAL_TABLES) {
   if (migration.includes(`ALTER TABLE "${table}" ADD COLUMN "organizationId" TEXT`) || migration.includes(`CREATE TRIGGER "${table}_transition_singleton_organization"`)) issues.push(`${table} is platform-global but migration scopes it to the singleton organization`);
 }
 
+for (const table of PLATFORM_BILLING_TABLES) {
+  const block = modelBlock(table);
+  if (table !== "Plan" && !block.includes("organizationId")) issues.push(`${table} must retain an explicit organizationId`);
+  if (table !== "Plan" && !block.includes("@relation(fields: [organizationId]")) issues.push(`${table} must keep its Organization foreign key`);
+  if (migration.includes(`CREATE TRIGGER "${table}_transition_singleton_organization"`)) issues.push(`${table} must not use the legacy singleton trigger; writes supply explicit platform scope`);
+}
+
+for (const table of PLATFORM_AUDIT_TABLES) {
+  const block = modelBlock(table);
+  if (!block.includes("sourceOrganizationId") || !block.includes("targetOrganizationId")) issues.push(`${table} must retain source and target organization references`);
+}
+
 if (issues.length) {
   for (const issue of issues) console.error(issue);
   process.exitCode = 1;
 } else {
-  console.log(`Tenant inventory PASS (${PROTECTED_TENANT_TABLES.length} protected, ${OPTIONAL_ORGANIZATION_TABLES.length} optional-attribution, ${PLATFORM_GLOBAL_TABLES.length} platform-global models).`);
+  console.log(`Tenant inventory PASS (${PROTECTED_TENANT_TABLES.length} protected, ${OPTIONAL_ORGANIZATION_TABLES.length} optional-attribution, ${PLATFORM_GLOBAL_TABLES.length} platform-global, ${PLATFORM_BILLING_TABLES.length} platform-billing, ${PLATFORM_AUDIT_TABLES.length} platform-audit models).`);
 }
