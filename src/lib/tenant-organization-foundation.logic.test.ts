@@ -6,6 +6,7 @@ import {
   EXPECTED_TENANT_TRIGGERS,
   OPTIONAL_ORGANIZATION_TABLES,
   PLATFORM_GLOBAL_TABLES,
+  PLATFORM_BILLING_TABLES,
   PROTECTED_TENANT_TABLES,
   SYSTEM_USER_ID,
 } from "./tenant-organization-foundation";
@@ -18,6 +19,7 @@ describe("tenant organization transition foundation", () => {
     expect(Object.keys(EXPECTED_TENANT_TRIGGERS)).toHaveLength(PROTECTED_TENANT_TABLES.length);
     expect(OPTIONAL_ORGANIZATION_TABLES).toEqual(["SecurityEventAggregate"]);
     expect(PLATFORM_GLOBAL_TABLES).toEqual(expect.arrayContaining(["NotificationChannel", "TelegramWebhookUpdate"]));
+    expect(PLATFORM_BILLING_TABLES).toEqual(["Plan", "OrganizationSubscription", "BillingCharge"]);
   });
 
   it("ships normal, inspectable SQL guards", () => {
