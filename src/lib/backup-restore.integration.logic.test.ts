@@ -206,7 +206,7 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
       try {
         await expect(guardClient.query(`INSERT INTO "Organization" (id,name,slug,status,"timeZone","defaultCurrency","createdAt","updatedAt") VALUES ('org-second','Second','second','ACTIVE','Etc/GMT+6','MXN',now(),now())`)).rejects.toThrow();
         await expect(guardClient.query(`DELETE FROM "Organization" WHERE id = $1`, [BOOTSTRAP_ORGANIZATION_ID])).rejects.toThrow(/POLICYDESK_BOOTSTRAP_ORGANIZATION_IMMUTABLE/);
-        await expect(guardClient.query(`TRUNCATE "Organization"`)).rejects.toThrow(/POLICYDESK_BOOTSTRAP_ORGANIZATION_IMMUTABLE/);
+        await expect(guardClient.query(`TRUNCATE "Organization" CASCADE`)).rejects.toThrow(/POLICYDESK_BOOTSTRAP_ORGANIZATION_IMMUTABLE/);
         await guardClient.query(`INSERT INTO "Client" (id,"fullName",status,"createdAt","updatedAt") VALUES ('guard-client','Guard Client','ACTIVE',now(),now())`);
         expect((await guardClient.query(`SELECT "organizationId" FROM "Client" WHERE id = 'guard-client'`)).rows[0].organizationId).toBe(BOOTSTRAP_ORGANIZATION_ID);
         await expect(guardClient.query(`UPDATE "Client" SET "organizationId" = 'wrong-org' WHERE id = 'guard-client'`)).rejects.toThrow(/POLICYDESK_ORGANIZATION/);
