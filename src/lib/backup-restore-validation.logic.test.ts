@@ -1,4 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/tenant-organization-foundation", () => ({
+  auditTenantFoundation: vi.fn().mockResolvedValue({ ok: true, issues: [], summary: {} }),
+  PROTECTED_TENANT_TABLES: [],
+  OPTIONAL_ORGANIZATION_TABLES: [],
+}));
+
 import { synchronizeSequences, validateForeignKeys, validateRestoreSchema, validateTableCounts, validateDomainInvariants, type ParsedBackup } from "@/lib/backup-restore-validation";
 
 const parsed: ParsedBackup = {

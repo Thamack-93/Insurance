@@ -43,6 +43,9 @@ jobs:
       - name: Check legacy WorkItem references
         run: npm run check:legacy-workitem-refs -- --static-only
 
+      - name: Check Cycle 1 tenant inventory
+        run: node --import tsx scripts/check-tenant-inventory.ts
+
       - name: Lint
         run: npm run lint
 
@@ -102,6 +105,12 @@ jobs:
 
       - name: Check migration drift
         run: npm run db:check-drift
+
+      - name: Check Cycle 1 tenant guards
+        run: npm run check:tenant-guards
+
+      - name: Organization transition integration against disposable PostgreSQL
+        run: npm run test:unit -- src/lib/organization-transition.integration.logic.test.ts
 
       - name: Backup restore integration against disposable PostgreSQL
         run: npm run test:unit -- src/lib/backup-restore.integration.logic.test.ts
