@@ -8,6 +8,7 @@ import { restoreVerifiedBackup } from "@/lib/backup-restore";
 import { runBackupRestoreDrill } from "@/lib/backup-restore-drill";
 import { runRestoreApplicationReads } from "@/lib/backup-restore-smoke";
 import { createEmptyDrillReport, writeRestoreDrillReport } from "@/lib/backup-restore-report";
+import { BOOTSTRAP_ORGANIZATION_ID, PROTECTED_TENANT_TABLES } from "@/lib/tenant-organization-foundation";
 
 const execFileAsync = promisify(execFile);
 const enabled = process.env.RESTORE_INTEGRATION === "1";
@@ -71,6 +72,11 @@ async function seedFixture(databaseUrl: string) {
     await client.query(`INSERT INTO "NotificationPreference" (id,"userId","eventType","channelType","createdAt","updatedAt") VALUES ('drill-preference','drill-user','DRILL','TELEGRAM',now(),now())`);
     await client.query(`INSERT INTO "NotificationEvent" (id,type,title,body,"userId","channelType","createdAt","updatedAt") VALUES ('drill-event','DRILL','Drill','Drill event','drill-user','TELEGRAM',now(),now())`);
     await client.query(`INSERT INTO "SystemSetting" (id,key,value,"createdAt","updatedAt") VALUES ('drill-setting','drill','true',now(),now())`);
+    await client.query(`UPDATE "OrganizationMembership" SET role = 'OWNER' WHERE "organizationId" = $1 AND "userId" = 'drill-user'`, [BOOTSTRAP_ORGANIZATION_ID]);
+    for (const table of PROTECTED_TENANT_TABLES) {
+      await client.query(`UPDATE "${table}" SET "organizationId" = $1 WHERE "organizationId" IS NULL`, [BOOTSTRAP_ORGANIZATION_ID]);
+    }
+    await client.query(`UPDATE "Organization" SET status = 'ACTIVE' WHERE id = $1`, [BOOTSTRAP_ORGANIZATION_ID]);
   } finally {
     client.release();
     await pool.end();
@@ -195,6 +201,27 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
       });
       expect(orchestrationReport.finalStatus).toBe("PASS");
       expect(orchestrationReport.applicationReads).toMatchObject({ ok: true });
+      const guardPool = new Pool({ connectionString: targetUrl, max: 1 });
+      const guardClient = await guardPool.connect();
+      try {
+        await expect(guardClient.query(`INSERT INTO "Organization" (id,name,slug,status,"timeZone","defaultCurrency","createdAt","updatedAt") VALUES ('org-second','Second','second','ACTIVE','Etc/GMT+6','MXN',now(),now())`)).rejects.toThrow();
+        await expect(guardClient.query(`DELETE FROM "Organization" WHERE id = $1`, [BOOTSTRAP_ORGANIZATION_ID])).rejects.toThrow(/POLICYDESK_BOOTSTRAP_ORGANIZATION_IMMUTABLE/);
+        await expect(guardClient.query(`TRUNCATE "Organization"`)).rejects.toThrow(/POLICYDESK_BOOTSTRAP_ORGANIZATION_IMMUTABLE/);
+        await guardClient.query(`INSERT INTO "Client" (id,"fullName",status,"createdAt","updatedAt") VALUES ('guard-client','Guard Client','ACTIVE',now(),now())`);
+        expect((await guardClient.query(`SELECT "organizationId" FROM "Client" WHERE id = 'guard-client'`)).rows[0].organizationId).toBe(BOOTSTRAP_ORGANIZATION_ID);
+        await expect(guardClient.query(`UPDATE "Client" SET "organizationId" = 'wrong-org' WHERE id = 'guard-client'`)).rejects.toThrow(/POLICYDESK_ORGANIZATION/);
+        await expect(guardClient.query(`UPDATE "Client" SET "organizationId" = NULL WHERE id = 'guard-client'`)).rejects.toThrow(/POLICYDESK_ORGANIZATION_IMMUTABLE/);
+        await guardClient.query(`DELETE FROM "Client" WHERE id = 'guard-client'`);
+        await guardClient.query("BEGIN");
+        await guardClient.query("SET LOCAL session_replication_role = replica");
+        await guardClient.query(`INSERT INTO "Client" (id,"fullName",status,"createdAt","updatedAt") VALUES ('replica-client','Replica Client','ACTIVE',now(),now())`);
+        await guardClient.query("SET LOCAL session_replication_role = origin");
+        expect((await guardClient.query(`SELECT "organizationId" FROM "Client" WHERE id = 'replica-client'`)).rows[0].organizationId).toBeNull();
+        await guardClient.query("ROLLBACK");
+      } finally {
+        guardClient.release();
+        await guardPool.end();
+      }
       const report = createEmptyDrillReport({
         backupFilename: valid.manifest.payload.filename,
         startedAt: valid.manifest.createdAt,

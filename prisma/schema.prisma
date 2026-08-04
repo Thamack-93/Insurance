@@ -7,12 +7,85 @@ datasource db {
   provider = "postgresql"
 }
 
+/// Cycle 1 transition singleton. The PostgreSQL migration owns the temporary
+/// trigger/index implementation; these models expose the additive data shape.
+model Organization {
+  id              String   @id
+  name            String
+  slug            String   @unique
+  status          String   @default("ACTIVE")
+  timeZone        String   @default("Etc/GMT+6")
+  defaultCurrency String   @default("MXN")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  memberships OrganizationMembership[]
+  clients Client[]
+  insurers Insurer[]
+  policies Policy[]
+  receipts Receipt[]
+  policyEndorsements PolicyEndorsement[]
+  payments Payment[]
+  commissions Commission[]
+  tasks Task[]
+  workItems WorkItem[]
+  claims Claim[]
+  quotes Quote[]
+  documents Document[]
+  activityLogs ActivityLog[]
+  assistantActionDrafts AssistantActionDraft[]
+  notificationChannels NotificationChannel[]
+  notificationPreferences NotificationPreference[]
+  notificationEvents NotificationEvent[]
+  policyInsuredParties PolicyInsuredParty[]
+  policyInsuredAssets PolicyInsuredAsset[]
+  telegramLinkTokens TelegramLinkToken[]
+  ledgerImportBatches LedgerImportBatch[]
+  ledgerImportRows LedgerImportRow[]
+  ledgerImportActions LedgerImportAction[]
+  ledgerImportIssues LedgerImportIssue[]
+  telegramDrafts TelegramDraft[]
+  maintenanceRuns MaintenanceRun[]
+  receiptReconciliationIssues ReceiptReconciliationIssue[]
+  policyRenewalSuggestions PolicyRenewalSuggestion[]
+  dataQualitySuppressionRules DataQualitySuppressionRule[]
+  assistantReports AssistantReport[]
+  assistantReportSignals AssistantReportSignal[]
+  assistantAiRuns AssistantAiRun[]
+  assistantAiAttempts AssistantAiAttempt[]
+  alerts Alert[]
+  securityEventAggregates SecurityEventAggregate[]
+  telegramWebhookUpdates TelegramWebhookUpdate[]
+
+  @@index([status])
+}
+
+model OrganizationMembership {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  role           String
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+  @@index([role])
+  @@index([active])
+}
+
 model User {
   id           String    @id @default(cuid())
   email        String    @unique
   name         String
   passwordHash String
   role         String    @default("AGENT")
+  platformRole String    @default("NONE")
   active       Boolean   @default(true)
   lastLoginAt  DateTime?
   timeZone     String    @default("Etc/GMT+6")
@@ -64,13 +137,17 @@ model User {
   reviewedDataQualitySuppressionRules DataQualitySuppressionRule[] @relation("DataQualitySuppressionRuleReviewedBy")
   createdAssistantActionDrafts AssistantActionDraft[]     @relation("AssistantActionDraftUser")
   createdAssistantAiRuns      AssistantAiRun[]            @relation("AssistantAiRunUser")
+  organizationMemberships     OrganizationMembership[]
 
   @@index([email])
   @@index([role])
   @@index([active])
+  @@index([platformRole])
 }
 
 model Client {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                     String   @id @default(cuid())
   fullName               String
   type                   String   @default("PERSON")
@@ -112,9 +189,12 @@ model Client {
   @@index([createdById])
   @@index([updatedById])
   @@index([portfolioOwnerId])
+  @@index([organizationId])
 }
 
 model Insurer {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String   @id @default(cuid())
   name           String
   portalUrl      String?
@@ -137,9 +217,12 @@ model Insurer {
 
   @@index([name])
   @@index([status])
+  @@index([organizationId])
 }
 
 model Policy {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                  String   @id @default(cuid())
   policyNumber        String
   clientId            String
@@ -200,9 +283,12 @@ model Policy {
   @@index([familyRootId])
   @@index([renewedFromPolicyId])
   @@index([cancellationBatchId])
+  @@index([organizationId])
 }
 
 model Receipt {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                       String    @id @default(cuid())
   receiptNumber            String
   policyId                 String
@@ -256,9 +342,12 @@ model Receipt {
   @@index([createdById])
   @@index([updatedById])
   @@index([cancellationBatchId])
+  @@index([organizationId])
 }
 
 model PolicyEndorsement {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                String   @id @default(cuid())
   endorsementNumber  String
   policyId          String
@@ -290,9 +379,12 @@ model PolicyEndorsement {
   @@index([endDate])
   @@index([createdById])
   @@index([updatedById])
+  @@index([organizationId])
 }
 
 model Payment {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                String   @id @default(cuid())
   receiptId         String
   policyId          String
@@ -328,9 +420,12 @@ model Payment {
   @@index([reversedById])
   @@index([createdById])
   @@index([updatedById])
+  @@index([organizationId])
 }
 
 model Commission {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String    @id @default(cuid())
   policyId       String
   receiptId      String?
@@ -357,9 +452,12 @@ model Commission {
   @@index([insurerId])
   @@index([status])
   @@index([expectedDate])
+  @@index([organizationId])
 }
 
 model Task {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id          String    @id @default(cuid())
   folio       String
   clientId    String?
@@ -398,9 +496,12 @@ model Task {
   @@index([dueDate])
   @@index([createdById])
   @@index([updatedById])
+  @@index([organizationId])
 }
 
 model WorkItem {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id           String    @id @default(cuid())
   sourceType   String?
   sourceId     String?
@@ -452,9 +553,12 @@ model WorkItem {
   @@index([createdById])
   @@index([updatedById])
   @@index([assignedToId])
+  @@index([organizationId])
 }
 
 model Claim {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id            String    @id @default(cuid())
   folio         String
   clientId      String
@@ -488,9 +592,12 @@ model Claim {
   @@index([status])
   @@index([createdById])
   @@index([updatedById])
+  @@index([organizationId])
 }
 
 model Quote {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id            String    @id @default(cuid())
   clientId      String
   insurerId     String?
@@ -519,9 +626,12 @@ model Quote {
   @@index([validUntil])
   @@index([createdById])
   @@index([updatedById])
+  @@index([organizationId])
 }
 
 model Document {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id           String   @id @default(cuid())
   clientId     String?
   policyId     String?
@@ -564,6 +674,7 @@ model Document {
   @@index([uploadedAt])
   @@index([createdById])
   @@index([updatedById])
+  @@index([organizationId])
 }
 
 model SystemSetting {
@@ -577,6 +688,8 @@ model SystemSetting {
 }
 
 model ActivityLog {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id         String   @id @default(cuid())
   entityType String
   entityId   String
@@ -591,9 +704,12 @@ model ActivityLog {
   @@index([createdAt])
   @@index([action])
   @@index([userId])
+  @@index([organizationId])
 }
 
 model AssistantActionDraft {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id           String   @id @default(cuid())
   userId       String
   title        String
@@ -617,9 +733,12 @@ model AssistantActionDraft {
   @@index([status])
   @@index([expiresAt])
   @@index([createdAt])
+  @@index([organizationId])
 }
 
 model NotificationChannel {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String   @id @default(cuid())
   userId         String
   type           String
@@ -636,9 +755,12 @@ model NotificationChannel {
   @@index([userId])
   @@index([type])
   @@index([telegramChatId])
+  @@index([organizationId])
 }
 
 model NotificationPreference {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id              String   @id @default(cuid())
   userId          String
   eventType       String
@@ -654,9 +776,12 @@ model NotificationPreference {
   @@index([userId])
   @@index([eventType])
   @@index([channelType])
+  @@index([organizationId])
 }
 
 model NotificationEvent {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id          String    @id @default(cuid())
   type        String
   title       String
@@ -690,9 +815,12 @@ model NotificationEvent {
   @@index([clientId])
   @@index([policyId])
   @@index([receiptId])
+  @@index([organizationId])
 }
 
 model PolicyInsuredParty {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id          String   @id @default(cuid())
   policyId    String
   fullName    String
@@ -706,10 +834,13 @@ model PolicyInsuredParty {
   @@index([policyId])
   @@index([fullName])
   @@index([isPrimary])
+  @@index([organizationId])
   @@unique([policyId, fullName])
 }
 
 model PolicyInsuredAsset {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id           String   @id @default(cuid())
   policyId     String
   assetType    String
@@ -725,10 +856,13 @@ model PolicyInsuredAsset {
   @@index([assetType])
   @@index([serialNumber])
   @@index([isPrimary])
+  @@index([organizationId])
   @@unique([policyId, assetType, description, serialNumber], map: "PolicyInsuredAsset_policyId_assetType_description_serialNumber_")
 }
 
 model TelegramLinkToken {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id        String    @id @default(cuid())
   userId    String
   tokenHash String    @unique
@@ -741,9 +875,12 @@ model TelegramLinkToken {
   @@index([userId])
   @@index([expiresAt])
   @@index([usedAt])
+  @@index([organizationId])
 }
 
 model LedgerImportBatch {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id            String   @id @default(cuid())
   sourceCsvName  String
   sourceCsvHash  String
@@ -768,9 +905,12 @@ model LedgerImportBatch {
   @@index([createdById])
   @@index([approvedById])
   @@index([createdAt])
+  @@index([organizationId])
 }
 
 model LedgerImportRow {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id            String   @id @default(cuid())
   batchId       String
   sourceType    String
@@ -797,9 +937,12 @@ model LedgerImportRow {
   @@index([policyId])
   @@index([receiptId])
   @@index([paymentId])
+  @@index([organizationId])
 }
 
 model LedgerImportAction {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id            String   @id @default(cuid())
   batchId       String
   rowId         String?
@@ -817,9 +960,12 @@ model LedgerImportAction {
   @@index([actionType])
   @@index([performedById])
   @@index([createdAt])
+  @@index([organizationId])
 }
 
 model LedgerImportIssue {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id            String   @id @default(cuid())
   batchId       String
   rowId         String?
@@ -854,9 +1000,12 @@ model LedgerImportIssue {
   @@index([reviewedById])
   @@index([mergedById])
   @@index([createdAt])
+  @@index([organizationId])
 }
 
 model TelegramDraft {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id          String    @id @default(cuid())
   userId      String
   channelId   String?
@@ -878,9 +1027,12 @@ model TelegramDraft {
   @@index([status])
   @@index([expiresAt])
   @@index([userId, status])
+  @@index([organizationId])
 }
 
 model MaintenanceRun {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id          String    @id @default(cuid())
   type        String
   status      String    @default("PENDING")
@@ -899,9 +1051,12 @@ model MaintenanceRun {
   @@index([status])
   @@index([startedAt])
   @@index([createdById])
+  @@index([organizationId])
 }
 
 model ReceiptReconciliationIssue {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id               String    @id @default(cuid())
   maintenanceRunId String?
   receiptId        String?
@@ -938,9 +1093,12 @@ model ReceiptReconciliationIssue {
   @@index([reviewedById])
   @@index([mergedById])
   @@index([createdAt])
+  @@index([organizationId])
 }
 
 model PolicyRenewalSuggestion {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id               String    @id @default(cuid())
   maintenanceRunId String?
   sourcePolicyId   String
@@ -976,9 +1134,12 @@ model PolicyRenewalSuggestion {
   @@index([reviewedById])
   @@index([mergedById])
   @@index([createdAt])
+  @@index([organizationId])
 }
 
 model DataQualitySuppressionRule {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id           String   @id @default(cuid())
   category     String
   issueCode    String
@@ -1005,9 +1166,12 @@ model DataQualitySuppressionRule {
   @@index([createdById])
   @@index([reviewedById])
   @@index([createdAt])
+  @@index([organizationId])
 }
 
 model AssistantReport {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id              String    @id @default(cuid())
   kind            String
   themeKey        String
@@ -1044,9 +1208,12 @@ model AssistantReport {
   @@index([parentReportId])
   @@index([lastSignalAt])
   @@index([createdAt])
+  @@index([organizationId])
 }
 
 model AssistantReportSignal {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id          String   @id @default(cuid())
   reportId    String
   signalKind  String
@@ -1062,9 +1229,12 @@ model AssistantReportSignal {
   @@index([signalKind])
   @@index([source])
   @@index([createdAt])
+  @@index([organizationId])
 }
 
 model AssistantAiRun {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                 String    @id @default(cuid())
   userId             String
   userRole           String
@@ -1103,9 +1273,12 @@ model AssistantAiRun {
   @@index([finalModel])
   @@index([reportId])
   @@index([createdAt])
+  @@index([organizationId])
 }
 
 model AssistantAiAttempt {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                 String    @id @default(cuid())
   runId              String
   attemptNumber      Int
@@ -1137,9 +1310,12 @@ model AssistantAiAttempt {
   @@index([requestedModel])
   @@index([finalModel])
   @@index([createdAt])
+  @@index([organizationId])
 }
 
 model Alert {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id          String    @id @default(cuid())
   alertType   String
   severity    String
@@ -1159,9 +1335,12 @@ model Alert {
   @@index([createdAt])
   @@index([readAt])
   @@index([status, readAt])
+  @@index([organizationId])
 }
 
 model SecurityEventAggregate {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id              String   @id @default(cuid())
   alertType       String
   fingerprint     String
@@ -1176,12 +1355,16 @@ model SecurityEventAggregate {
   @@unique([alertType, fingerprint, windowStart])
   @@index([alertType])
   @@index([lastSeenAt])
+  @@index([organizationId])
 }
 
 model TelegramWebhookUpdate {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id         String   @id @default(cuid())
   updateId   Int      @unique
   receivedAt DateTime @default(now())
 
   @@index([receivedAt])
+  @@index([organizationId])
 }

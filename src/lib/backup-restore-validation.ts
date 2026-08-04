@@ -1,5 +1,6 @@
 import type { PoolClient, QueryResultRow } from "pg";
 import type { RestoreFailureCode } from "@/lib/backup-restore-errors";
+import { auditTenantFoundation } from "@/lib/tenant-organization-foundation";
 
 export const RESTORE_SKIPPED_TABLES = new Set(["_prisma_migrations"]);
 
@@ -231,7 +232,9 @@ export async function validateRestoreSchema(client: PoolClient, parsed: ParsedBa
   }
 
   const requiredColumns: Record<string, string[]> = {
-    User: ["id", "email", "active"],
+    Organization: ["id", "name", "slug", "status", "timeZone", "defaultCurrency"],
+    OrganizationMembership: ["id", "organizationId", "userId", "role", "active"],
+    User: ["id", "email", "active", "platformRole"],
     Client: ["id", "fullName"],
     Insurer: ["id", "name"],
     Policy: ["id", "clientId", "insurerId", "status", "endDate", "renewedFromPolicyId", "cancellationReason", "cancellationBatchId", "cancelledAt"],
@@ -246,6 +249,9 @@ export async function validateRestoreSchema(client: PoolClient, parsed: ParsedBa
     NotificationEvent: ["id", "userId", "channelType"],
     SystemSetting: ["id", "key", "value"],
   };
+  for (const table of ["Client", "Insurer", "Policy", "Receipt", "PolicyEndorsement", "Payment", "Commission", "Task", "WorkItem", "Claim", "Quote", "Document", "ActivityLog", "AssistantActionDraft", "NotificationChannel", "NotificationPreference", "NotificationEvent", "PolicyInsuredParty", "PolicyInsuredAsset", "TelegramLinkToken", "LedgerImportBatch", "LedgerImportRow", "LedgerImportAction", "LedgerImportIssue", "TelegramDraft", "MaintenanceRun", "ReceiptReconciliationIssue", "PolicyRenewalSuggestion", "DataQualitySuppressionRule", "AssistantReport", "AssistantReportSignal", "AssistantAiRun", "AssistantAiAttempt", "Alert", "SecurityEventAggregate", "TelegramWebhookUpdate"]) {
+    requiredColumns[table] = [...(requiredColumns[table] ?? ["id"]), "organizationId"];
+  }
   for (const [table, columns] of Object.entries(requiredColumns)) {
     const actual = await queryColumns(client, "public", table);
     assertSchema(actual.size > 0, `Falta la tabla crítica public.${table}.`);
@@ -393,6 +399,11 @@ export async function validateDomainInvariants(client: PoolClient): Promise<Doma
     checks.push(check);
     if (!check.ok) throw new RestoreIntegrityError(`${name} falló con ${countValue} registros.`);
   };
+
+  const tenantAudit = await auditTenantFoundation(client, { requireActive: true });
+  const tenantCheck = { name: "tenant_backfill", count: tenantAudit.issues.length, ok: tenantAudit.ok, detail: tenantAudit.issues.join("; ") || "singleton tenant audit passed" };
+  checks.push(tenantCheck);
+  if (!tenantAudit.ok) throw new RestoreIntegrityError(`La auditoría tenant falló: ${tenantAudit.issues.join("; ")}`, "TENANT_AUDIT_FAILED");
 
   add("payment_invalid_status", await count(client, `SELECT count(*)::text AS count FROM "Payment" WHERE status NOT IN ('POSTED', 'REVERSED')`));
   add("posted_payment_duplicate_receipt", await count(client, `SELECT count(*)::text AS count FROM (SELECT "receiptId" FROM "Payment" WHERE status = 'POSTED' GROUP BY "receiptId" HAVING count(*) > 1) duplicates`));
