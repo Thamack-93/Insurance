@@ -41,6 +41,10 @@ const LEGACY_READ_FILES = new Set([
   "src/app/(dashboard)/risks/page.tsx",
 ]);
 
+// Read-only tenant relation inventory. Keep this exact allow-list narrow so
+// the Task write detector remains strict everywhere else.
+const AUDIT_COMPAT_FILES = new Set(["src/lib/tenant-organization-foundation.ts"]);
+
 const MIGRATION_FILES = new Set([
   "scripts/backfill-work-items.ts",
   "scripts/backfill-business-dates.ts",
@@ -52,6 +56,7 @@ const MIGRATION_FILES = new Set([
 function classify(file: string, snippet: string): Classification {
   if (MIGRATION_FILES.has(file)) return "migration-only";
   if (file === "scripts/check-legacy-workitem-refs.ts") return "migration-only";
+  if (AUDIT_COMPAT_FILES.has(file)) return "legacy-read-compat";
   if (file === "src/app/api/documents/upload/route.ts" && snippet.includes("formData.get(\"taskId\")")) {
     return "legacy-read-compat";
   }
