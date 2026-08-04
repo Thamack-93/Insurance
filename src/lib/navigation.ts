@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   BarChart3,
   CircleDollarSign,
+  Crown,
   FileText,
   Home,
   ReceiptText,
@@ -29,11 +30,12 @@ export type GlobalNavigationItem = {
 };
 
 export type UtilityNavigationItem = {
-  id: "administration" | "profile";
+  id: "platform" | "administration" | "profile";
   label: string;
   href: string;
   icon: LucideIcon;
   requiresAdmin?: boolean;
+  requiresSuperAdmin?: boolean;
 };
 
 export const globalNavigation: GlobalNavigationItem[] = [
@@ -59,6 +61,7 @@ export const globalNavigation: GlobalNavigationItem[] = [
 ];
 
 export const utilityNavigation: UtilityNavigationItem[] = [
+  { id: "platform", label: "Plataforma", href: "/platform", icon: Crown, requiresSuperAdmin: true },
   { id: "administration", label: "Administración", href: "/settings", icon: Settings, requiresAdmin: true },
   { id: "profile", label: "Perfil", href: "/settings/account", icon: UserRound },
 ];
@@ -78,6 +81,7 @@ const breadcrumbLabels: Record<string, string> = {
   operations: "Operación",
   payments: "Pagos",
   policies: "Pólizas",
+  platform: "Plataforma",
   portfolio: "Cartera",
   quotes: "Cotizaciones",
   receipts: "Recibos",
@@ -113,8 +117,10 @@ export function getPrimaryNavigationId(pathname: string): GlobalNavigationId | u
   return getPrimaryNavigationItem(pathname)?.id;
 }
 
-export function getUtilityNavigation(isAdmin: boolean) {
-  return utilityNavigation.filter((item) => !item.requiresAdmin || isAdmin);
+export function getUtilityNavigation(isAdmin: boolean, isSuperAdmin = false) {
+  return utilityNavigation.filter((item) =>
+    (!item.requiresAdmin || isAdmin) && (!item.requiresSuperAdmin || isSuperAdmin),
+  );
 }
 
 export function getActiveUtilityNavigationItem(pathname: string) {
