@@ -1,12 +1,15 @@
 const encoder = new TextEncoder();
 
 export type UserRoleSession = "ADMIN" | "AGENT";
+export type PlatformRoleSession = "NONE" | "SUPERADMIN";
 
 export type SessionPayload = {
   userId: string;
   email: string;
   name: string;
   role: UserRoleSession;
+  /** Signed hint only; request-time authorization always re-reads the User row. */
+  platformRole?: PlatformRoleSession;
   exp: number;
 };
 
@@ -113,6 +116,9 @@ export async function verifySessionToken(token: string | undefined | null): Prom
     if (payload.role !== "ADMIN" && payload.role !== "AGENT") {
       // Older tokens without a role default to AGENT for safety.
       payload.role = "AGENT";
+    }
+    if (payload.platformRole !== "SUPERADMIN") {
+      payload.platformRole = "NONE";
     }
     return payload;
   } catch {
