@@ -87,6 +87,10 @@ async function run(client: PoolClient, input: Inputs, apply: boolean) {
   const users = await client.query<{ id: string; role: string; active: boolean }>(`SELECT "id","role","active" FROM "User" WHERE "id" <> $1 ORDER BY "id"`, [SYSTEM_USER_ID]);
   for (const user of users.rows) {
     if (user.role !== "ADMIN" && user.role !== "AGENT") throw new Error("POLICYDESK_LEGACY_USER_ROLE_UNSUPPORTED");
+    // PostgreSQL evaluates BEFORE INSERT guards before ON CONFLICT chooses its
+    // update path. Once ACTIVE, leave the protected Owner row untouched so a
+    // re-run remains idempotent without weakening the Owner guard.
+    if (organization.rows[0].status === "ACTIVE" && user.id === owner.rows[0].id && existingOwner.rows.some((row) => row.userId === user.id)) continue;
     const membershipRole = user.id === owner.rows[0].id ? "OWNER" : user.role;
     await client.query(`INSERT INTO "OrganizationMembership" ("id","organizationId","userId","role","active") VALUES ($1,$2,$3,$4,$5) ON CONFLICT ("organizationId","userId") DO UPDATE SET "role" = EXCLUDED."role", "active" = EXCLUDED."active", "updatedAt" = CURRENT_TIMESTAMP`, [`om_${user.id}`, BOOTSTRAP_ORGANIZATION_ID, user.id, membershipRole, user.active]);
   }
