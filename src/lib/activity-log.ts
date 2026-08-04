@@ -20,6 +20,7 @@ export async function writeActivityLog({
   oldValue,
   newValue,
   userId,
+  organizationId,
   db: client,
 }: {
   entityType: string;
@@ -28,6 +29,7 @@ export async function writeActivityLog({
   oldValue?: unknown;
   newValue?: unknown;
   userId?: string;
+  organizationId?: string | null;
   db?: PrismaClient | Prisma.TransactionClient;
 }) {
   const db = client ?? getDb();
@@ -41,6 +43,7 @@ export async function writeActivityLog({
       oldValue: oldValue === undefined ? null : safeJson(oldValue),
       newValue: newValue === undefined ? null : safeJson(newValue),
       userId: resolvedUserId,
+      organizationId: organizationId ?? null,
     },
   });
 }
