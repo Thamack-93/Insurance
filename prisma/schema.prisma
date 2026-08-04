@@ -54,6 +54,10 @@ model Organization {
   assistantAiAttempts AssistantAiAttempt[]
   alerts Alert[]
   securityEventAggregates SecurityEventAggregate[]
+  subscriptions OrganizationSubscription[]
+  billingCharges BillingCharge[]
+  migrationConflictsAsSource OrganizationMigrationConflict[] @relation("MigrationConflictSource")
+  migrationConflictsAsTarget OrganizationMigrationConflict[] @relation("MigrationConflictTarget")
 
   @@index([status])
 }
@@ -141,6 +145,88 @@ model User {
   @@index([role])
   @@index([active])
   @@index([platformRole])
+}
+
+/// Global plan catalog. Prices are stored in minor currency units and are
+/// intentionally independent of Stripe; a future adapter may mirror these
+/// records without changing the platform dashboard contract.
+model Plan {
+  id                 String   @id @default(cuid())
+  code               String   @unique
+  name               String
+  monthlyAmountMinor Int
+  currency           String   @db.VarChar(3)
+  active             Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  subscriptions OrganizationSubscription[]
+
+  @@index([active])
+}
+
+model OrganizationSubscription {
+  id                 String   @id @default(cuid())
+  organizationId     String
+  planId             String
+  status             String   @default("TRIAL")
+  startedAt          DateTime @default(now())
+  endsAt             DateTime?
+  monthlyAmountMinor Int
+  currency           String   @db.VarChar(3)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  plan         Plan         @relation(fields: [planId], references: [id], onDelete: Restrict)
+  charges      BillingCharge[]
+
+  @@index([organizationId, status])
+  @@index([planId])
+  @@index([startedAt])
+}
+
+model BillingCharge {
+  id                 String   @id @default(cuid())
+  organizationId     String
+  subscriptionId     String?
+  periodStart        DateTime
+  periodEnd          DateTime
+  amountMinor        Int
+  currency           String   @db.VarChar(3)
+  status             String   @default("PAID")
+  paidAt             DateTime?
+  externalReference  String?
+  reason             String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  organizationRef Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subscription OrganizationSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, periodStart])
+  @@index([status, paidAt])
+  @@index([subscriptionId])
+}
+
+model OrganizationMigrationConflict {
+  id                   String   @id @default(cuid())
+  sourceOrganizationId String
+  targetOrganizationId String
+  tableName            String
+  rowId                String
+  reason               String
+  detailsJson          String?
+  status               String   @default("OPEN")
+  createdAt            DateTime @default(now())
+  resolvedAt           DateTime?
+
+  sourceOrganization Organization @relation("MigrationConflictSource", fields: [sourceOrganizationId], references: [id], onDelete: Restrict)
+  targetOrganization Organization @relation("MigrationConflictTarget", fields: [targetOrganizationId], references: [id], onDelete: Restrict)
+
+  @@index([sourceOrganizationId, status])
+  @@index([targetOrganizationId, status])
+  @@index([tableName, rowId])
 }
 
 model Client {
