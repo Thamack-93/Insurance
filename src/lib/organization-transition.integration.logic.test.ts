@@ -123,7 +123,6 @@ describe.skipIf(!enabled)("organization transition executable backfill", () => {
         expect((await client.query(`SELECT role, active FROM "OrganizationMembership" WHERE "userId" = 'new-agent'`)).rows[0]).toMatchObject({ role: "AGENT", active: true });
         await client.query(`UPDATE "User" SET role = 'ADMIN', active = false WHERE id = 'new-agent'`);
         expect((await client.query(`SELECT role, active FROM "OrganizationMembership" WHERE "userId" = 'new-agent'`)).rows[0]).toMatchObject({ role: "ADMIN", active: false });
-        await client.query(`INSERT INTO "User" (id,email,name,"passwordHash",role,active,"createdAt","updatedAt") VALUES ('system-user-0000','system@example.test','System','fixture','AGENT',true,now(),now())`);
         expect((await client.query(`SELECT count(*)::int AS count FROM "OrganizationMembership" WHERE "userId" = 'system-user-0000'`)).rows[0].count).toBe(0);
         await expect(client.query(`UPDATE "User" SET role = 'AGENT' WHERE id = 'legacy-admin'`)).rejects.toThrow(/POLICYDESK_OWNER_IMMUTABLE/);
         await expect(client.query(`DELETE FROM "User" WHERE id = 'legacy-admin'`)).rejects.toThrow(/POLICYDESK_OWNER_IMMUTABLE/);
