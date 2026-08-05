@@ -58,7 +58,15 @@ function getServerRecentItems() {
   return EMPTY_RECENT_ITEMS;
 }
 
-export function CommandPaletteWrapper({ isAdmin = false, isSuperAdmin = false }: { isAdmin?: boolean; isSuperAdmin?: boolean }) {
+export function CommandPaletteWrapper({
+  isAdmin = false,
+  isSuperAdmin = false,
+  hasOrganizationContext = false,
+}: {
+  isAdmin?: boolean;
+  isSuperAdmin?: boolean;
+  hasOrganizationContext?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -85,6 +93,7 @@ export function CommandPaletteWrapper({ isAdmin = false, isSuperAdmin = false }:
   }, [router]);
 
   useEffect(() => {
+    if (!hasOrganizationContext) return;
     const down = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
@@ -98,16 +107,25 @@ export function CommandPaletteWrapper({ isAdmin = false, isSuperAdmin = false }:
       document.removeEventListener("keydown", down);
       window.removeEventListener("pg:open-command-palette", openHandler);
     };
-  }, []);
+  }, [hasOrganizationContext]);
 
   useEffect(() => {
+    if (!hasOrganizationContext) {
+      queueMicrotask(() => {
+        setOpen(false);
+        setInputValue("");
+        setSearchResults([]);
+        setIsSearching(false);
+      });
+      return;
+    }
     if (open) return;
     queueMicrotask(() => {
       setInputValue("");
       setSearchResults([]);
       setIsSearching(false);
     });
-  }, [open]);
+  }, [hasOrganizationContext, open]);
 
   // Debounced server search whenever the user types 2+ chars in the palette.
   useEffect(() => {
@@ -138,7 +156,7 @@ export function CommandPaletteWrapper({ isAdmin = false, isSuperAdmin = false }:
       ctrl.abort();
       clearTimeout(timer);
     };
-  }, [inputValue]);
+  }, [hasOrganizationContext, inputValue]);
 
   const dynamicGroups = useMemo<CommandPaletteGroup[]>(() => {
     if (inputValue.trim().length < 2) return [];
@@ -207,7 +225,6 @@ export function CommandPaletteWrapper({ isAdmin = false, isSuperAdmin = false }:
       label: "Acciones rápidas",
       items: [
         { id: "new-client", label: "Nuevo cliente", icon: <Plus className="size-4" />, onSelect: () => handleSelect("/clients/new") },
-        { id: "new-policy", label: "Nueva póliza", icon: <Plus className="size-4" />, onSelect: () => handleSelect("/policies/new") },
         { id: "new-task", label: "Nuevo pendiente", icon: <Plus className="size-4" />, onSelect: () => handleSelect("/tasks/new") },
         { id: "new-receipt", label: "Nuevo recibo", icon: <Plus className="size-4" />, onSelect: () => handleSelect("/receipts/new") },
         { id: "new-quote", label: "Nueva cotización", icon: <Calculator className="size-4" />, onSelect: () => handleSelect("/quotes/new") },
@@ -241,6 +258,8 @@ export function CommandPaletteWrapper({ isAdmin = false, isSuperAdmin = false }:
         ? [{ label: "Resultados", items: [{ id: "loading", label: "Buscando...", disabled: true }] }]
         : [{ label: "Resultados", items: [{ id: "empty", label: "Sin resultados", disabled: true }] }]
     : staticGroups;
+
+  if (!hasOrganizationContext) return null;
 
   return (
     <CommandPalette

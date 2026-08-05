@@ -1,7 +1,7 @@
 # Contexto de organización autenticado
 
 Esta slice introduce el contexto de organización para lecturas y escrituras de
-clientes, pólizas, Today, búsquedas de Nora y exportaciones. La selección se
+clientes, lectura de pólizas, Today, búsquedas informativas de Nora y exportaciones. La selección se
 guarda como una sugerencia firmada en `pd_session`; nunca sustituye la
 revalidación de `OrganizationMembership` y `Organization` en PostgreSQL.
 
@@ -18,8 +18,9 @@ usar `/platform` y no obtiene acceso operativo sin contexto explícito.
 
 - Today: métricas, recibos, renovaciones, tareas, actividad, alertas y riesgos.
 - Clients: listado, búsqueda, detalle, alta, edición y exportación Excel.
-- Policies: listado, detalle y acciones de alta/edición/borrado accesibles desde
-  estas páginas.
+- Policies: listado, detalle y relaciones defensivamente filtradas por
+  organización. Las mutaciones de crear, editar, borrar y actualizar calidad
+  están bloqueadas con `POLICY_TENANT_MUTATION_PENDING` hasta Cycle 2B.
 - Nora: búsquedas informativas y referencias autorizadas dentro de la
   organización seleccionada.
 
@@ -28,10 +29,11 @@ escapa valores que podrían interpretarse como fórmulas.
 
 ## Pendientes explícitos
 
-Receipts, payments, claims, quotes, insurers, documents, WorkItems/tasks,
-reports, commissions, risks, data-quality, Telegram, imports, maintenance y
-jobs requieren migraciones tenant-aware propias antes de retirar la barrera
-singleton.
+Filtrado defensivo, pendiente de slice completa: receipts, payments, claims,
+quotes, insurers, documents, WorkItems/tasks y risks. Fuera de alcance de esta
+PR: mutaciones de esas áreas, reports, commissions, data-quality, Telegram,
+imports, maintenance y jobs. Ninguna de estas áreas permite asumir contexto
+tenant para escribir.
 
 ## Retirada de singleton
 

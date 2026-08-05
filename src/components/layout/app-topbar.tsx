@@ -57,15 +57,17 @@ export function AppTopbar({
 
         <div className="flex items-center gap-2 shrink-0">
           <ThemeToggle />
-          <button
-            type="button"
-            onClick={() => openNora()}
-            aria-label="Abrir Nora"
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-ai transition-colors hover:bg-ai/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Sparkles className="size-4" aria-hidden />
-            <span className="hidden sm:inline">Nora</span>
-          </button>
+          {hasOrganizationContext ? (
+            <button
+              type="button"
+              onClick={() => openNora()}
+              aria-label="Abrir Nora"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-ai transition-colors hover:bg-ai/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Sparkles className="size-4" aria-hidden />
+              <span className="hidden sm:inline">Nora</span>
+            </button>
+          ) : null}
           {hasOrganizationContext ? <NotificationsBell unreadCount={unreadNotificationCount} notifications={notifications} /> : null}
           {userMenu}
         </div>

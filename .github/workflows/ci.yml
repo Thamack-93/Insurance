@@ -60,9 +60,13 @@ jobs:
     timeout-minutes: 30
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NODE_ENV: test
       TENANT_ISOLATION_TEST_DB: "1"
       PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1"
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
+      TENANT_ISOLATION_RUN_ID: "${{ github.run_id }}_${{ github.run_attempt }}"
+      TENANT_ISOLATION_DB_NAME: "policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}"
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      DATABASE_URL_UNPOOLED: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
       SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
       SESSION_SECRET: tenant-isolation-ci-secret-minimum-32-characters
       VERCEL_ENV: ""
@@ -98,6 +102,28 @@ jobs:
         run: npm ci
       - name: Generate Prisma client
         run: npm run db:generate
+
+      - name: Create and mark dedicated tenant database
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          db_name="${TENANT_ISOLATION_DB_NAME}"
+          host_name="127.0.0.1"
+          fingerprint="$(printf 'local-postgres:%s:%s:%s' "$TENANT_ISOLATION_RUN_ID" "$db_name" "$host_name" | sha256sum | awk '{print $1}')"
+          createdb -h "$host_name" -U postgres "$db_name"
+          psql -h "$host_name" -U postgres -d "$db_name" -v ON_ERROR_STOP=1 <<SQL
+          CREATE TABLE "__policydesk_tenant_isolation_run" (
+            run_id text PRIMARY KEY,
+            database_name text NOT NULL,
+            host text NOT NULL,
+            fingerprint text NOT NULL,
+            created_at timestamptz NOT NULL DEFAULT now()
+          );
+          INSERT INTO "__policydesk_tenant_isolation_run" (run_id, database_name, host, fingerprint)
+          VALUES ('$TENANT_ISOLATION_RUN_ID', '$db_name', '$host_name', '$fingerprint');
+          SQL
+          printf 'TENANT_ISOLATION_FINGERPRINT=%s\n' "$fingerprint" >> "$GITHUB_ENV"
       - name: Apply migrations to disposable PostgreSQL
         run: npx prisma migrate deploy
       - name: Create protected two-organization fixture
@@ -110,6 +136,13 @@ jobs:
         run: npm run build
       - name: Tenant isolation Chromium E2E
         run: npm run test:e2e -- tests/e2e/tenant-isolation.spec.ts
+
+      - name: Drop dedicated tenant database
+        if: always()
+        shell: bash
+        run: |
+          export PGPASSWORD=postgres
+          dropdb -h 127.0.0.1 -U postgres --if-exists "$TENANT_ISOLATION_DB_NAME"
 
   application:
     runs-on: ubuntu-latest

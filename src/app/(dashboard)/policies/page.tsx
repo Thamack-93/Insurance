@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, FileUp, Plus, Shield, CalendarClock, AlertCircle, BadgeDollarSign, FolderKanban } from "lucide-react";
+import { ArrowRight, FileUp, Shield, CalendarClock, AlertCircle, BadgeDollarSign, FolderKanban } from "lucide-react";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
@@ -137,12 +137,6 @@ export default async function PoliciesPage({
           description="Inventario vivo de pólizas, con foco en estado, valor y renovación."
           actions={
             <>
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
-                <Link href="/policies/new">
-                  <Plus className="mr-2 size-4" />
-                  Nueva póliza
-                </Link>
-              </Button>
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href="/policies/capture">
                   <FileUp className="mr-2 size-4" />

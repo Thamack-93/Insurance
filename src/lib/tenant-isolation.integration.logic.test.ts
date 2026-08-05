@@ -22,4 +22,40 @@ describeDisposable("tenant isolation disposable fixture", () => {
       await db.$disconnect();
     }
   });
+
+  it("proves scoped writes cannot cross organizations or portfolios", async () => {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) throw new Error("DATABASE_URL is required");
+    const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+    try {
+      const foreignUpdate = await db.client.updateMany({
+        where: { id: "tenant-client-b", organizationId: "org_test_a_0001", portfolioOwnerId: "tenant-agent-a" },
+        data: { notes: "must not cross tenant" },
+      });
+      expect(foreignUpdate.count).toBe(0);
+
+      const foreignOwnerUpdate = await db.client.updateMany({
+        where: { id: "tenant-client-a", organizationId: "org_test_a_0001", portfolioOwnerId: "tenant-agent-b" },
+        data: { notes: "must not cross portfolio" },
+      });
+      expect(foreignOwnerUpdate.count).toBe(0);
+
+      const created = await db.client.create({
+        data: {
+          id: "tenant-client-a-created",
+          organizationId: "org_test_a_0001",
+          fullName: "Created only in A",
+          type: "PERSON",
+          status: "ACTIVE",
+          portfolioOwnerId: "tenant-agent-a",
+          createdById: "tenant-admin-a",
+          updatedById: "tenant-admin-a",
+        },
+      });
+      expect(created.organizationId).toBe("org_test_a_0001");
+      await db.client.delete({ where: { id: created.id } });
+    } finally {
+      await db.$disconnect();
+    }
+  });
 });

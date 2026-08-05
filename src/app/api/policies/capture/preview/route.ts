@@ -5,7 +5,7 @@ import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody } from "@/lib/request-guards";
 import { rateLimitResponse } from "@/lib/api-security";
 import { buildPolicyPdfCapturePreviewFromText } from "@/lib/policy-pdf-capture-preview";
-import { getPortfolioOwnerIdForRead } from "@/lib/portfolio-access";
+import { requireOrganizationContext } from "@/lib/organization-context";
 import {
   recordSecurityAccessDenied,
   recordSecurityRateLimit,
@@ -23,9 +23,12 @@ export async function POST(request: NextRequest) {
   try {
     let user: Awaited<ReturnType<typeof requireUser>>;
     let portfolioOwnerId: string | undefined;
+    let assistantRole: "ADMIN" | "AGENT";
     try {
       user = await requireUser();
-      portfolioOwnerId = getPortfolioOwnerIdForRead(user);
+      const organization = await requireOrganizationContext();
+      assistantRole = organization.membershipRole === "AGENT" ? "AGENT" : "ADMIN";
+      portfolioOwnerId = assistantRole === "AGENT" ? organization.userId : undefined;
     } catch (error) {
       if (error instanceof AuthError) {
         await recordSecurityAccessDenied({
@@ -99,7 +102,7 @@ export async function POST(request: NextRequest) {
 
     const preview = await buildPolicyPdfCapturePreviewFromText(extractedText, undefined, {
       portfolioOwnerId,
-      user: { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" },
+      user: { id: user.id, role: assistantRole },
     });
     return NextResponse.json({ success: true, preview });
   } catch (error) {

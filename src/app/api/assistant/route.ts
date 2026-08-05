@@ -33,7 +33,7 @@ export async function GET() {
     );
     const snapshot = await getAssistantHomeSnapshot({
       id: user.id,
-      role: user.role === "ADMIN" ? "ADMIN" : "AGENT",
+      role: organization.membershipRole === "AGENT" ? "AGENT" : "ADMIN",
       organizationId: organization.organizationId,
     });
     console.log(
@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
 
     const response = await buildAssistantReply({
       id: user.id,
-      role: user.role === "ADMIN" ? "ADMIN" : "AGENT",
+      role: organization.membershipRole === "AGENT" ? "AGENT" : "ADMIN",
       organizationId: organization.organizationId,
     }, contextualMessage);
 

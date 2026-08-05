@@ -166,7 +166,7 @@ export async function selectOrganization(organizationId: string) {
       active: true,
       organization: { status: "ACTIVE" },
     },
-    select: { id: true, organizationId: true },
+    select: { id: true, organizationId: true, role: true },
   });
 
   if (!membership) throw new AuthError("No tienes acceso a esta organización.", 403);
@@ -175,7 +175,7 @@ export async function selectOrganization(organizationId: string) {
     userId: user.id,
     email: user.email,
     name: user.name,
-    role: user.role === "ADMIN" ? "ADMIN" : "AGENT",
+    role: membership.role === "AGENT" ? "AGENT" : "ADMIN",
     platformRole: user.platformRole === "SUPERADMIN" ? "SUPERADMIN" : "NONE",
     organizationId: membership.organizationId,
   });

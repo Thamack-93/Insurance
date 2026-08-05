@@ -2084,8 +2084,10 @@ async function createTelegramPolicyDraftFromPdf(input: {
     extractedText,
     db,
     {
-      portfolioOwnerId: user?.role === "ADMIN" ? undefined : user?.id,
-      user: user ? { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" } : null,
+      // Telegram capture is outside the authenticated tenant slice. Keep its
+      // assistant scope fail-closed until the channel carries explicit org context.
+      portfolioOwnerId: user?.id,
+      user: user ? { id: user.id, role: "AGENT" } : null,
     },
   );
 

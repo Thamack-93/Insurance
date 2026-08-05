@@ -1,21 +1,17 @@
 import { redirect } from "next/navigation";
 import { Building2 } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
-import { getOrganizationOptions } from "@/lib/organization-context";
+import { getOrganizationOptions, resolveOrganizationContext } from "@/lib/organization-context";
 import { clearSelectedOrganizationAction, selectOrganizationAction } from "./actions";
-import { selectOrganization } from "@/lib/organization-context";
 
 export const dynamic = "force-dynamic";
 
 export default async function OrganizationSelectPage() {
   const user = await getCurrentUser();
   if (!user || !user.active) redirect("/login");
+  const resolution = await resolveOrganizationContext();
   const options = await getOrganizationOptions();
   if (options.length === 0) redirect("/organization/no-access");
-  if (options.length === 1) {
-    await selectOrganization(options[0].id);
-    redirect("/today");
-  }
 
   return (
     <main className="min-h-screen bg-background px-4 py-16">
@@ -24,6 +20,11 @@ export default async function OrganizationSelectPage() {
           <p className="text-sm font-semibold text-muted-foreground">PolicyDesk</p>
           <h1 className="mt-2 text-2xl font-semibold">Selecciona una organización</h1>
           <p className="mt-1 text-sm text-muted-foreground">Tus datos operativos solo estarán disponibles dentro de la organización elegida.</p>
+          {resolution.status === "stale-selection" ? (
+            <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              La selección anterior ya no está disponible. Elige explícitamente una organización activa.
+            </p>
+          ) : null}
         </div>
         <div className="grid gap-3">
           {options.map((option) => (

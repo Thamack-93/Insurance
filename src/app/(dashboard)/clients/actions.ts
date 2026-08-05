@@ -2,13 +2,13 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
-import { AuthError, getCurrentUserId, requireAdmin } from "@/lib/auth";
+import { AuthError, requireUser } from "@/lib/auth";
 import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
 import { NO_REFERIDOR_VALUE } from "@/lib/constants";
 import { clientSchema, type ClientFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
-import { assertClientPortfolioAccess } from "@/lib/portfolio-access";
-import { requireOrganizationContext } from "@/lib/organization-context";
+import { assertClientOrganizationAccess } from "@/lib/portfolio-access";
+import { requireOrganizationContext, requireOrganizationRole } from "@/lib/organization-context";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 
 function normalizeClientInput(values: ClientFormValues) {
@@ -192,7 +192,9 @@ export async function updateClient(id: string, values: ClientFormValues): Promis
     const db = getDb();
     const context = await requireOrganizationContext();
     const userId = context.userId;
-    const previousClient = await db.client.findFirst({ where: { id, organizationId: context.organizationId } });
+    await assertClientOrganizationAccess(id, context);
+    const ownerScope = context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {};
+    const previousClient = await db.client.findFirst({ where: { id, organizationId: context.organizationId, ...ownerScope } });
 
     if (!previousClient) {
       return errorResult("El cliente ya no existe.");
@@ -201,11 +203,11 @@ export async function updateClient(id: string, values: ClientFormValues): Promis
     const normalized = normalizeClientInput(parsed.data);
     normalized.referidorId = await ensureValidReferidor(db, normalized.referidorId, id, context.organizationId);
     const updated = await db.client.updateMany({
-      where: { id, organizationId: context.organizationId },
+      where: { id, organizationId: context.organizationId, ...ownerScope },
       data: { ...normalized, updatedById: userId },
     });
     if (updated.count !== 1) return errorResult("El cliente ya no existe o no está disponible.");
-    const client = await db.client.findFirstOrThrow({ where: { id, organizationId: context.organizationId } });
+    const client = await db.client.findFirstOrThrow({ where: { id, organizationId: context.organizationId, ...ownerScope } });
     const referidos = await db.client.findMany({
       where: { referidorId: id, organizationId: context.organizationId },
       select: { id: true },
@@ -245,10 +247,12 @@ export async function updateClientQualityFields(
 ): Promise<MutationResult> {
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
-    await assertClientPortfolioAccess(id, userId);
-    const previousClient = await db.client.findUnique({
-      where: { id },
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
+    await assertClientOrganizationAccess(id, context);
+    const ownerScope = context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {};
+    const previousClient = await db.client.findFirst({
+      where: { id, organizationId: context.organizationId, ...ownerScope },
       select: {
         id: true,
         fullName: true,
@@ -269,8 +273,8 @@ export async function updateClientQualityFields(
       return errorResult("El cliente ya no existe.");
     }
 
-    const client = await db.client.update({
-      where: { id },
+    const updated = await db.client.updateMany({
+      where: { id, organizationId: context.organizationId, ...ownerScope },
       data: {
         ...(values.email !== undefined ? { email: normalizeOptionalText(values.email) } : {}),
         ...(values.phone !== undefined ? { phone: normalizeOptionalText(values.phone) } : {}),
@@ -286,6 +290,8 @@ export async function updateClientQualityFields(
       },
     });
 
+    if (updated.count !== 1) return errorResult("El cliente ya no existe o no está disponible.");
+    const client = await db.client.findFirstOrThrow({ where: { id, organizationId: context.organizationId, ...ownerScope } });
     await writeActivityLog({
       entityType: "Client",
       entityId: client.id,
@@ -293,6 +299,7 @@ export async function updateClientQualityFields(
       oldValue: previousClient,
       newValue: client,
       userId,
+      organizationId: context.organizationId,
     });
 
     revalidatePaths([
@@ -317,14 +324,15 @@ export async function consolidateClientIntoTarget(
   reason: string,
 ): Promise<MutationResult> {
   try {
-    const actor = await requireAdmin();
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+    const actor = await requireUser();
     if (sourceClientId === targetClientId) {
       return errorResult("Selecciona un cliente distinto para consolidar.");
     }
 
     const db = getDb();
-    const sourceClient = await db.client.findUnique({
-      where: { id: sourceClientId },
+    const sourceClient = await db.client.findFirst({
+      where: { id: sourceClientId, organizationId: context.organizationId },
       select: {
         id: true,
         fullName: true,
@@ -341,8 +349,8 @@ export async function consolidateClientIntoTarget(
         status: true,
       },
     });
-    const targetClient = await db.client.findUnique({
-      where: { id: targetClientId },
+    const targetClient = await db.client.findFirst({
+      where: { id: targetClientId, organizationId: context.organizationId },
       select: {
         id: true,
         fullName: true,
@@ -382,16 +390,16 @@ export async function consolidateClientIntoTarget(
         },
       });
 
-      await tx.policy.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
-      await tx.receipt.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
-      await tx.payment.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
-      await tx.commission.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
-      await tx.claim.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
-      await tx.quote.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
-      await tx.document.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
-      await tx.workItem.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
-      await tx.notificationEvent.updateMany({ where: { clientId: sourceClient.id }, data: { clientId: targetClient.id } });
-      await tx.client.updateMany({ where: { referidorId: sourceClient.id }, data: { referidorId: targetClient.id } });
+      await tx.policy.updateMany({ where: { clientId: sourceClient.id, organizationId: context.organizationId }, data: { clientId: targetClient.id } });
+      await tx.receipt.updateMany({ where: { clientId: sourceClient.id, organizationId: context.organizationId }, data: { clientId: targetClient.id } });
+      await tx.payment.updateMany({ where: { clientId: sourceClient.id, organizationId: context.organizationId }, data: { clientId: targetClient.id } });
+      await tx.commission.updateMany({ where: { clientId: sourceClient.id, organizationId: context.organizationId }, data: { clientId: targetClient.id } });
+      await tx.claim.updateMany({ where: { clientId: sourceClient.id, organizationId: context.organizationId }, data: { clientId: targetClient.id } });
+      await tx.quote.updateMany({ where: { clientId: sourceClient.id, organizationId: context.organizationId }, data: { clientId: targetClient.id } });
+      await tx.document.updateMany({ where: { clientId: sourceClient.id, organizationId: context.organizationId }, data: { clientId: targetClient.id } });
+      await tx.workItem.updateMany({ where: { clientId: sourceClient.id, organizationId: context.organizationId }, data: { clientId: targetClient.id } });
+      await tx.notificationEvent.updateMany({ where: { clientId: sourceClient.id, organizationId: context.organizationId }, data: { clientId: targetClient.id } });
+      await tx.client.updateMany({ where: { referidorId: sourceClient.id, organizationId: context.organizationId }, data: { referidorId: targetClient.id } });
 
       await tx.client.update({
         where: { id: sourceClient.id },
@@ -405,6 +413,7 @@ export async function consolidateClientIntoTarget(
       const openWorkItems = await tx.workItem.findMany({
         where: {
           clientId: targetClient.id,
+          organizationId: context.organizationId,
           status: { in: [...OPEN_WORK_ITEM_STATUSES] },
         },
         select: { id: true },
@@ -422,6 +431,7 @@ export async function consolidateClientIntoTarget(
           openWorkItemsOnTarget: openWorkItems.length,
         },
         userId: actor.id,
+        organizationId: context.organizationId,
         db: tx,
       });
     });
@@ -444,22 +454,38 @@ export async function consolidateClientIntoTarget(
   }
 }
 export async function bulkArchiveClients(ids: string[]): Promise<MutationResult> {
-  const { bulkUpdateStatus } = await import("@/lib/bulk-actions");
   try {
-    await requireAdmin();
-    return bulkUpdateStatus(ids, "client", "INACTIVE", "/clients");
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+    const scopedIds = Array.from(new Set(ids.filter((id) => typeof id === "string" && id.length > 0)));
+    if (scopedIds.length === 0) return errorResult("Selecciona al menos un cliente para archivar.");
+    const db = getDb();
+    const ownerScope = context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {};
+    const result = await db.client.updateMany({
+      where: { id: { in: scopedIds }, organizationId: context.organizationId, ...ownerScope },
+      data: { status: "INACTIVE" },
+    });
+    await writeActivityLog({
+      action: "BULK_UPDATE_STATUS",
+      entityType: "CLIENT",
+      entityId: scopedIds.join(","),
+      newValue: { status: "INACTIVE", count: result.count },
+      organizationId: context.organizationId,
+    });
+    revalidatePaths(["/clients"]);
+    return successResult("", "/clients", `Estado actualizado para ${result.count} clientes.`);
   } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
     return errorResult(error instanceof Error ? error.message : "No se pudo archivar los clientes.");
   }
 }
 
 export async function deleteClient(id: string): Promise<MutationResult> {
   try {
-    await requireAdmin();
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
     const db = getDb();
 
-    const existingClient = await db.client.findUnique({
-      where: { id },
+    const existingClient = await db.client.findFirst({
+      where: { id, organizationId: context.organizationId },
       include: {
         referidor: { select: { id: true } },
         referidos: { select: { id: true } },
@@ -502,6 +528,7 @@ export async function deleteClient(id: string): Promise<MutationResult> {
       entityId: id,
       action: "CLIENT_DELETE",
       oldValue: { fullName: existingClient.fullName },
+      organizationId: context.organizationId,
     });
 
     revalidatePaths(
@@ -521,18 +548,19 @@ export async function reassignClientPortfolio(input: {
   reason: string;
 }): Promise<MutationResult> {
   try {
-    const actor = await requireAdmin();
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+    const actor = await requireUser();
     const reason = input.reason.trim();
     if (!reason) return errorResult("Captura el motivo de la reasignación.");
 
     const db = getDb();
     const [client, owner] = await Promise.all([
-      db.client.findUnique({
-        where: { id: input.clientId },
+      db.client.findFirst({
+        where: { id: input.clientId, organizationId: context.organizationId },
         select: { id: true, fullName: true, portfolioOwnerId: true },
       }),
       db.user.findFirst({
-        where: { id: input.portfolioOwnerId, active: true },
+        where: { id: input.portfolioOwnerId, active: true, organizationMemberships: { some: { organizationId: context.organizationId, active: true } } },
         select: { id: true, name: true },
       }),
     ]);
@@ -590,6 +618,7 @@ export async function reassignClientPortfolio(input: {
           openWorkItemsPendingAssignment: openWorkItems.length,
         },
         userId: actor.id,
+        organizationId: context.organizationId,
         db: tx,
       });
     });

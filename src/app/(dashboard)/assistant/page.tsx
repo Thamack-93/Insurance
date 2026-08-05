@@ -8,7 +8,7 @@ export default async function AssistantPage() {
   const organization = await requireOrganizationContext();
   const snapshot = await getAssistantHomeSnapshot({
     id: user.id,
-    role: user.role === "ADMIN" ? "ADMIN" : "AGENT",
+    role: organization.membershipRole === "AGENT" ? "AGENT" : "ADMIN",
     organizationId: organization.organizationId,
   });
 

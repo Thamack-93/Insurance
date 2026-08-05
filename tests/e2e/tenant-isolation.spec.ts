@@ -25,3 +25,24 @@ test("dual membership requires an explicit organization selection", async ({ pag
   await expect(page.getByText("Tenant Fixture A")).toBeVisible();
   await expect(page.getByText("Tenant Fixture B")).toBeVisible();
 });
+
+test("superadmin without membership is confined to the platform shell", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByLabel("Correo electrónico").fill("tenant-superadmin@policydesk.local");
+  await page.getByLabel("Contraseña").fill("tenant-fixture-password");
+  await page.getByRole("button", { name: "Iniciar sesión" }).click();
+  await expect(page).toHaveURL(/\/platform$/);
+  await page.goto("/today");
+  await expect(page).toHaveURL(/\/platform$/);
+});
+
+test("tenant policy mutation route is visibly blocked while reads remain available", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByLabel("Correo electrónico").fill("tenant-admin-a@policydesk.local");
+  await page.getByLabel("Contraseña").fill("tenant-fixture-password");
+  await page.getByRole("button", { name: "Iniciar sesión" }).click();
+  await page.goto("/policies/new");
+  await expect(page.getByText("Mutación temporalmente bloqueada")).toBeVisible();
+  await page.goto("/policies/tenant-policy-a");
+  await expect(page.getByText("OVERLAP-A")).toBeVisible();
+});

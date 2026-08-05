@@ -5,7 +5,7 @@ import { AuthError, requireUser } from "@/lib/auth";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody } from "@/lib/request-guards";
 import { rateLimitResponse } from "@/lib/api-security";
-import { getPortfolioOwnerIdForRead } from "@/lib/portfolio-access";
+import { requireOrganizationContext } from "@/lib/organization-context";
 import { extractPdfTextFromBytes } from "@/lib/pdf-text-extraction";
 import { buildPolicyPdfCapturePreviewFromText, buildPolicyPdfCapturePreviewFromDraft } from "@/lib/policy-pdf-capture-preview";
 import { extractPolicyPdfDraftFromAiFile } from "@/lib/assistant-ai";
@@ -44,9 +44,12 @@ export async function POST(request: NextRequest) {
   try {
     let user: Awaited<ReturnType<typeof requireUser>>;
     let portfolioOwnerId: string | undefined;
+    let assistantRole: "ADMIN" | "AGENT";
     try {
       user = await requireUser();
-      portfolioOwnerId = getPortfolioOwnerIdForRead(user);
+      const organization = await requireOrganizationContext();
+      assistantRole = organization.membershipRole === "AGENT" ? "AGENT" : "ADMIN";
+      portfolioOwnerId = assistantRole === "AGENT" ? organization.userId : undefined;
     } catch (error) {
       if (error instanceof AuthError) {
         await recordSecurityAccessDenied({
@@ -105,7 +108,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (payload.text) {
-      const result = await responseFromText(payload.text, user.id, user.role === "ADMIN" ? "ADMIN" : "AGENT");
+      const result = await responseFromText(payload.text, user.id, assistantRole);
       return NextResponse.json({ success: true, ...result });
     }
 
@@ -137,12 +140,12 @@ export async function POST(request: NextRequest) {
     try {
       const extracted = await extractPdfTextFromBytes(bytes);
       if (extracted.text.trim()) {
-        const result = await responseFromText(extracted.text, user.id, user.role === "ADMIN" ? "ADMIN" : "AGENT");
+        const result = await responseFromText(extracted.text, user.id, assistantRole);
         preview = result.preview;
         analysisSource = result.analysisSource;
       } else {
         const aiExtraction = await extractPolicyPdfDraftFromAiFile({
-          user: { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" },
+          user: { id: user.id, role: assistantRole },
           fileName: payload.fileName ?? blob.blob.pathname.split("/").pop() ?? "policy.pdf",
           fileData: bytes,
           instruction: payload.prompt ?? null,
@@ -165,7 +168,7 @@ export async function POST(request: NextRequest) {
           aiReview: aiExtraction.aiReview,
           context: {
             portfolioOwnerId,
-            user: { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" },
+            user: { id: user.id, role: assistantRole },
           },
         });
         analysisSource = "ai";
