@@ -10,10 +10,10 @@ import { SidebarNav } from "./sidebar-nav";
 import { cn } from "@/lib/utils";
 import { getUtilityNavigation, isUtilityNavigationItemActive } from "@/lib/navigation";
 
-export function AppMobileSidebar({ isAdmin = false }: { isAdmin?: boolean }) {
+export function AppMobileSidebar({ isAdmin = false, isSuperAdmin = false }: { isAdmin?: boolean; isSuperAdmin?: boolean }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
-  const utilities = getUtilityNavigation(isAdmin);
+  const utilities = getUtilityNavigation(isAdmin, isSuperAdmin);
 
   return (
     <Sheet key={pathname} open={open} onOpenChange={setOpen}>

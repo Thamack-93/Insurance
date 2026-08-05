@@ -15,7 +15,7 @@ import { formatCurrency, toNumber } from "@/lib/money";
 import { entityStatusOptions } from "@/lib/domain-options";
 import { buildTableHref, readAllowedTableParam, readTablePage, readTableSort } from "@/lib/table-query";
 import { LocalNavigation } from "@/components/layout/local-navigation";
-import { clientOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { clientOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 const PAGE_SIZE = 25;
 
@@ -32,8 +32,8 @@ export default async function ClientsPage({
   const { sortKey, direction } = readTableSort(params);
 
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
-  const portfolioWhere = clientOperationalWhere(scope.portfolioOwnerId);
+  const scope = await requireOrganizationPortfolioReadScope();
+  const portfolioWhere = clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
 
   const where: Prisma.ClientWhereInput = {
     ...portfolioWhere,
@@ -120,6 +120,9 @@ export default async function ClientsPage({
             <>
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href="/clients/new">Nuevo cliente</Link>
+              </Button>
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
+                <a href="/api/exports/clients">Exportar Excel</a>
               </Button>
               <Button asChild className="rounded-full">
                 <Link href="/policies">

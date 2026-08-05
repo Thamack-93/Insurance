@@ -8,6 +8,7 @@ import { NO_REFERIDOR_VALUE } from "@/lib/constants";
 import { clientSchema, type ClientFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { assertClientPortfolioAccess } from "@/lib/portfolio-access";
+import { requireOrganizationContext } from "@/lib/organization-context";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 
 function normalizeClientInput(values: ClientFormValues) {
@@ -76,6 +77,7 @@ async function ensureValidReferidor(
   db: ReturnType<typeof getDb>,
   referidorId: string | null,
   currentClientId?: string,
+  organizationId?: string,
 ) {
   if (!referidorId) {
     return null;
@@ -85,8 +87,8 @@ async function ensureValidReferidor(
     throw new Error("Un cliente no puede ser su propio referidor.");
   }
 
-  const referidor = await db.client.findUnique({
-    where: { id: referidorId },
+  const referidor = await db.client.findFirst({
+    where: { id: referidorId, ...(organizationId ? { organizationId } : {}) },
     select: { id: true, referidorId: true },
   });
 
@@ -108,8 +110,8 @@ async function ensureValidReferidor(
     }
 
     visited.add(cursor.referidorId);
-    const next = await db.client.findUnique({
-      where: { id: cursor.referidorId },
+    const next = await db.client.findFirst({
+      where: { id: cursor.referidorId, ...(organizationId ? { organizationId } : {}) },
       select: { id: true, referidorId: true },
     });
 
@@ -149,12 +151,14 @@ export async function createClient(values: ClientFormValues): Promise<MutationRe
 
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
     const normalized = normalizeClientInput(parsed.data);
-    normalized.referidorId = await ensureValidReferidor(db, normalized.referidorId);
+    normalized.referidorId = await ensureValidReferidor(db, normalized.referidorId, undefined, context.organizationId);
     const client = await db.client.create({
       data: {
         ...normalized,
+        organizationId: context.organizationId,
         portfolioOwnerId: userId,
         createdById: userId,
         updatedById: userId,
@@ -166,6 +170,7 @@ export async function createClient(values: ClientFormValues): Promise<MutationRe
       entityId: client.id,
       action: "CLIENT_CREATE",
       newValue: client,
+      organizationId: context.organizationId,
     });
 
     revalidatePaths(collectRevalidatePaths(client.id, [client.referidorId]));
@@ -185,22 +190,24 @@ export async function updateClient(id: string, values: ClientFormValues): Promis
 
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
-    await assertClientPortfolioAccess(id, userId);
-    const previousClient = await db.client.findUnique({ where: { id } });
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
+    const previousClient = await db.client.findFirst({ where: { id, organizationId: context.organizationId } });
 
     if (!previousClient) {
       return errorResult("El cliente ya no existe.");
     }
 
     const normalized = normalizeClientInput(parsed.data);
-    normalized.referidorId = await ensureValidReferidor(db, normalized.referidorId, id);
-    const client = await db.client.update({
-      where: { id },
+    normalized.referidorId = await ensureValidReferidor(db, normalized.referidorId, id, context.organizationId);
+    const updated = await db.client.updateMany({
+      where: { id, organizationId: context.organizationId },
       data: { ...normalized, updatedById: userId },
     });
+    if (updated.count !== 1) return errorResult("El cliente ya no existe o no está disponible.");
+    const client = await db.client.findFirstOrThrow({ where: { id, organizationId: context.organizationId } });
     const referidos = await db.client.findMany({
-      where: { referidorId: id },
+      where: { referidorId: id, organizationId: context.organizationId },
       select: { id: true },
     });
 
@@ -210,6 +217,7 @@ export async function updateClient(id: string, values: ClientFormValues): Promis
       action: "CLIENT_UPDATE",
       oldValue: previousClient,
       newValue: client,
+      organizationId: context.organizationId,
     });
 
     revalidatePaths(

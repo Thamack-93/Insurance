@@ -44,6 +44,7 @@
     "test:unit:watch": "vitest",
     "test:e2e": "playwright test tests/e2e",
     "test:api": "playwright test tests/api"
+    ,"test:tenant-fixture": "node --import tsx scripts/setup-tenant-isolation-fixture.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

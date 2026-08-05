@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
+import { getDb } from "@/lib/db";
 import { LoginForm } from "./login-form";
 
 export const metadata = {
@@ -17,7 +18,11 @@ export default async function LoginPage({
 
   const user = await getCurrentUser();
   if (user && user.active) {
-    redirect(redirectTo);
+    if (user.platformRole === "SUPERADMIN") redirect("/platform");
+    const memberships = await getDb().organizationMembership.count({
+      where: { userId: user.id, active: true, organization: { status: "ACTIVE" } },
+    });
+    redirect(memberships === 0 ? "/organization/no-access" : memberships === 1 ? redirectTo : "/organization/select");
   }
 
   return (

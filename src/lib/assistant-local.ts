@@ -201,7 +201,7 @@ function buildConsistencySectionSubtitle(policy: {
 async function buildConsistencyAuditReply(user: AssistantUser): Promise<AssistantReply> {
   const portfolioOwnerId = user.role === "ADMIN" ? undefined : user.id;
   const [riskFindings, policyScores, receiptIssues, renewalSuggestions, latestRun] = await Promise.all([
-    detectRisks(portfolioOwnerId),
+    detectRisks(portfolioOwnerId, user.organizationId),
     getPolicyDataQualityScores(),
     getReceiptReviewIssues(),
     getRenewalReviewSuggestions(),
@@ -573,7 +573,7 @@ function formatRiskText(finding: {
 
 export async function searchUserPortfolio(user: AssistantUser, message: string) {
   const terms = buildSearchTerms(message);
-  const resultGroups = await Promise.all(terms.map((term) => globalSearch(term, user.role === "ADMIN" ? undefined : user.id)));
+  const resultGroups = await Promise.all(terms.map((term) => globalSearch(term, user.role === "ADMIN" ? undefined : user.id, user.organizationId)));
   const unique = new Map<string, GlobalSearchResult>();
   for (const result of resultGroups.flat()) unique.set(`${result.type}:${result.id}`, result);
   return [...unique.values()].slice(0, 8);
@@ -628,7 +628,7 @@ async function buildPromptReply(user: AssistantUser, message: string): Promise<A
   }
 
   if (normalized.includes("riesg")) {
-    const findings = await detectRisks(user.role === "ADMIN" ? undefined : user.id);
+    const findings = await detectRisks(user.role === "ADMIN" ? undefined : user.id, user.organizationId);
     const visible = findings.slice(0, 6);
     const detail = visible.length > 0
       ? `\n\n${visible.map(formatRiskText).join("\n")}${formatMoreCount(findings.length, visible.length, 25)}`

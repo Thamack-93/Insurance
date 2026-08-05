@@ -110,6 +110,7 @@ export type WorkQueueFilters = {
   receiptId?: string;
   entityType?: string;
   portfolioOwnerId?: string;
+  organizationId?: string;
 };
 
 export async function getWorkItems(filters: WorkQueueFilters = {}) {
@@ -148,6 +149,7 @@ async function resolveLegacyRenewalRelations(
     where: {
       id: { in: legacyPolicyIds },
       ...(filters.portfolioOwnerId ? { client: { portfolioOwnerId: filters.portfolioOwnerId } } : {}),
+      ...(filters.organizationId ? { organizationId: filters.organizationId } : {}),
     },
     select: policyQueueSelect,
   });
@@ -177,6 +179,8 @@ export async function countWorkItems(filters: WorkQueueFilters = {}) {
 
 function buildWhere(filters: WorkQueueFilters): Prisma.WorkItemWhereInput {
   const where: Prisma.WorkItemWhereInput = {};
+
+  if (filters.organizationId) where.organizationId = filters.organizationId;
 
   if (filters.query) {
     const query = filters.query.trim();

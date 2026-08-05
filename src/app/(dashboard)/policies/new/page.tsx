@@ -11,6 +11,7 @@ import {
   clientOperationalWhere,
   policyOperationalWhere,
 } from "@/lib/portfolio-access";
+import { requireOrganizationContext } from "@/lib/organization-context";
 import type { PolicyFormValues } from "@/lib/validations";
 
 type TelegramDraftAiReview = {
@@ -81,23 +82,24 @@ export default async function NewPolicyPage({
   searchParams?: Promise<{ telegramDraft?: string; renewalFrom?: string }>;
 }) {
   const user = await requireUserOrRedirect();
+  const context = await requireOrganizationContext();
   const params = (await searchParams) ?? {};
   const db = getDb();
-  const portfolioOwnerId = user.role === "ADMIN" ? undefined : user.id;
+  const portfolioOwnerId = context.membershipRole === "ADMIN" || context.membershipRole === "OWNER" ? undefined : context.userId;
   const [clients, insurers, mostUsedInsurer] = await Promise.all([
     db.client.findMany({
-      where: { status: { not: "ARCHIVED" }, ...clientOperationalWhere(portfolioOwnerId) },
+      where: { status: { not: "ARCHIVED" }, ...clientOperationalWhere(portfolioOwnerId, context.organizationId) },
       orderBy: { fullName: "asc" },
       select: { id: true, fullName: true },
     }),
     db.insurer.findMany({
-      where: { status: { not: "ARCHIVED" } },
+      where: { status: { not: "ARCHIVED" }, organizationId: context.organizationId },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
     db.policy.groupBy({
       by: ["insurerId"],
-      where: { status: "ACTIVE", ...policyOperationalWhere(portfolioOwnerId) },
+      where: { status: "ACTIVE", ...policyOperationalWhere(portfolioOwnerId, context.organizationId) },
       _count: { insurerId: true },
       orderBy: { _count: { insurerId: "desc" } },
       take: 1,

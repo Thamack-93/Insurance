@@ -36,6 +36,20 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  if (session.platformRole === "SUPERADMIN" && !session.organizationId && pathname !== "/platform" && !pathname.startsWith("/platform/")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/platform";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
+  if (!session.organizationId && session.platformRole !== "SUPERADMIN" && !pathname.startsWith("/organization/")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/organization/select";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
   return NextResponse.next();
 }
 

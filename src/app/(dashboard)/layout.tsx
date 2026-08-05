@@ -13,6 +13,7 @@ import { getUnreadNotificationCount, getRecentNotifications } from "@/lib/notifi
 import type { NotificationRecord } from "@/lib/notifications";
 import { requireUserOrRedirect } from "@/lib/auth";
 import { NoraSessionProvider } from "@/components/assistant/nora-session-provider";
+import { resolveOrganizationContext } from "@/lib/organization-context";
 
 const fallbackSettings: Settings = {
   firmName: "PG",
@@ -30,11 +31,11 @@ const fallbackSettings: Settings = {
   retentionDays: 30,
 };
 
-async function getSafeDashboardShellData() {
+async function getSafeDashboardShellData(organizationId?: string) {
   const [settingsResult, unreadResult, notificationsResult] = await Promise.allSettled([
     getSettings(),
-    getUnreadNotificationCount(),
-    getRecentNotifications(10),
+    organizationId ? getUnreadNotificationCount(organizationId) : Promise.resolve(0),
+    organizationId ? getRecentNotifications(10, organizationId) : Promise.resolve([] as NotificationRecord[]),
   ]);
 
   return {
@@ -51,9 +52,11 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   // deactivations and role changes take effect immediately, rather than
   // waiting for the signed session token to expire.
   const user = await requireUserOrRedirect();
+  const organizationResolution = await resolveOrganizationContext();
+  const organization = organizationResolution.status === "ready" ? organizationResolution.context : null;
   // Load settings once per request: hydrates the server runtime cache and
   // is forwarded to the client so format helpers stay consistent on both sides.
-  const { settings, unreadNotificationCount, recentNotifications } = await getSafeDashboardShellData();
+  const { settings, unreadNotificationCount, recentNotifications } = await getSafeDashboardShellData(organization?.organizationId);
   const bellNotifications = recentNotifications.map((notification) => ({
     id: notification.id,
     alertType: notification.alertType,
@@ -77,10 +80,12 @@ export default async function DashboardLayout({ children }: { children: ReactNod
             Saltar al contenido principal
           </a>
           <div className="flex min-h-screen">
-            <AppSidebar isAdmin={user.role === "ADMIN"} />
+            <AppSidebar isAdmin={user.role === "ADMIN"} isSuperAdmin={user.platformRole === "SUPERADMIN"} />
             <div className="min-w-0 flex-1">
               <AppTopbar
                 isAdmin={user.role === "ADMIN"}
+                isSuperAdmin={user.platformRole === "SUPERADMIN"}
+                hasOrganizationContext={Boolean(organization)}
                 userMenu={<UserMenu />}
                 unreadNotificationCount={unreadNotificationCount}
                 notifications={bellNotifications}
@@ -88,7 +93,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
               <main id="main-content" className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">{children}</main>
             </div>
           </div>
-          <CommandPaletteWrapper isAdmin={user.role === "ADMIN"} />
+          <CommandPaletteWrapper isAdmin={user.role === "ADMIN"} isSuperAdmin={user.platformRole === "SUPERADMIN"} />
           <ShortcutsHelp />
         </div>
       </NoraSessionProvider>

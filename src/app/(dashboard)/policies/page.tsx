@@ -17,7 +17,7 @@ import { daysUntil, formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
 import { policyStatusOptions, policyTypeOptions } from "@/lib/domain-options";
-import { policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { policyOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 import { buildTableHref, readAllowedTableParam, readTablePage, readTableSort } from "@/lib/table-query";
 import { LocalNavigation } from "@/components/layout/local-navigation";
@@ -41,10 +41,10 @@ export default async function PoliciesPage({
   const { sortKey, direction } = readTableSort(params);
 
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const now = today();
   const in60 = businessAddDays(now, 60);
-  const portfolioWhere = policyOperationalWhere(scope.portfolioOwnerId);
+  const portfolioWhere = policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const renewals60Promise = loadEligibleRenewalPolicies(
     {
       endDate: {
@@ -53,6 +53,7 @@ export default async function PoliciesPage({
       },
     },
     scope.portfolioOwnerId,
+    scope.organizationId,
   );
 
   const where: Prisma.PolicyWhereInput = query

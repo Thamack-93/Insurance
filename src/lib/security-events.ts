@@ -32,6 +32,7 @@ export type SecurityEventInput = {
   userId?: string;
   db?: PrismaClient | Prisma.TransactionClient;
   fingerprint?: string;
+  organizationId?: string | null;
 };
 
 export async function recordSecurityEvent(input: SecurityEventInput) {
@@ -46,6 +47,7 @@ export async function recordSecurityEvent(input: SecurityEventInput) {
     description: input.description,
     entityType: input.entityType ?? "SecurityEvent",
     entityId: fingerprint,
+    ...(input.organizationId !== undefined ? { organizationId: input.organizationId } : {}),
   };
 
   try {
@@ -67,6 +69,7 @@ export async function recordSecurityEvent(input: SecurityEventInput) {
         title: alertData.title,
         description: alertData.description,
         severity: alertData.severity,
+        ...(input.organizationId !== undefined ? { organizationId: input.organizationId } : {}),
       },
       update: {
         lastSeenAt: now,
@@ -91,6 +94,7 @@ export async function recordSecurityEvent(input: SecurityEventInput) {
       },
       userId: input.userId ?? SYSTEM_USER_ID,
       db,
+      organizationId: input.organizationId,
     });
     return alert;
   } catch (error) {

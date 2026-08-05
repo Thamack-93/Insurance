@@ -16,7 +16,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { DocumentDropZone } from "@/components/documents/document-drop-zone";
 import { DocumentList } from "@/components/documents/document-list";
 import { getDb } from "@/lib/db";
-import { getCurrentUser } from "@/lib/auth";
+import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
+import { clientOperationalWhere, claimOperationalWhere, quoteOperationalWhere, documentOperationalWhere } from "@/lib/portfolio-access";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
@@ -34,12 +35,12 @@ const quoteStatusLabels: Record<string, string> = {
 
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const liveUser = await getCurrentUser();
-  const isAdmin = !!liveUser && liveUser.active && liveUser.role === "ADMIN";
+  const scope = await requireOrganizationPortfolioReadScope();
+  const isAdmin = scope.membershipRole !== "AGENT";
   const db = getDb();
 
-  const client = await db.client.findUnique({
-    where: { id },
+  const client = await db.client.findFirst({
+    where: { id, ...clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
     include: {
       referidor: {
         select: {
@@ -62,13 +63,13 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
   const [policies, receipts, workItems, claims, quotes, documents, referidos, activity] = await Promise.all([
     db.policy.findMany({
-      where: { clientId: id },
+      where: { clientId: id, organizationId: scope.organizationId, client: { organizationId: scope.organizationId } },
       include: { insurer: true },
       orderBy: [{ status: "asc" }, { endDate: "asc" }],
       take: 10,
     }),
     db.receipt.findMany({
-      where: { clientId: id },
+      where: { clientId: id, organizationId: scope.organizationId, client: { organizationId: scope.organizationId } },
       include: { policy: true, insurer: true },
       orderBy: { dueDate: "desc" },
       take: 10,
@@ -77,27 +78,28 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       workItemTypes: ["TASK"],
       clientId: id,
       limit: 10,
+      organizationId: scope.organizationId,
     }),
     db.claim.findMany({
-      where: { clientId: id },
+      where: { clientId: id, ...claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: { policy: true, insurer: true },
       orderBy: { reportedDate: "desc" },
       take: 5,
     }),
     db.quote.findMany({
-      where: { clientId: id },
+      where: { clientId: id, ...quoteOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: { insurer: true },
       orderBy: { requestedDate: "desc" },
       take: 5,
     }),
     db.document.findMany({
-      where: { clientId: id },
+      where: { clientId: id, ...documentOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: { policy: true, receipt: true, task: true, claim: true, quote: true },
       orderBy: { uploadedAt: "desc" },
       take: 20,
     }),
     db.client.findMany({
-      where: { referidorId: id },
+      where: { referidorId: id, organizationId: scope.organizationId },
       select: {
         id: true,
         fullName: true,
@@ -107,7 +109,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       orderBy: { fullName: "asc" },
       take: 10,
     }),
-    getActivityForEntity("Client", id, 20),
+    getActivityForEntity("Client", id, 20, scope.organizationId),
   ]);
 
   const activePolicies = policies.filter((policy) => policy.status === "ACTIVE");
@@ -116,6 +118,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     workItemTypes: ["TASK"],
     statuses: OPEN_WORK_ITEM_STATUSES,
     clientId: id,
+    organizationId: scope.organizationId,
   });
   const activePremium = activePolicies.reduce((sum, policy) => sum + toNumber(policy.premiumAmount), 0);
 

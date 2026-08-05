@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { AuthError, requireUser } from "@/lib/auth";
+import { requireOrganizationContext } from "@/lib/organization-context";
 import { buildAssistantReply, getAssistantHomeSnapshot } from "@/lib/assistant";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody, RequestGuardError } from "@/lib/request-guards";
@@ -20,6 +21,7 @@ export async function GET() {
   const startedAt = Date.now();
   try {
     const user = await requireUser();
+    const organization = await requireOrganizationContext();
     console.log(
       JSON.stringify({
         level: "info",
@@ -32,6 +34,7 @@ export async function GET() {
     const snapshot = await getAssistantHomeSnapshot({
       id: user.id,
       role: user.role === "ADMIN" ? "ADMIN" : "AGENT",
+      organizationId: organization.organizationId,
     });
     console.log(
       JSON.stringify({
@@ -56,6 +59,7 @@ export async function POST(request: NextRequest) {
   const startedAt = Date.now();
   try {
     const user = await requireUser();
+    const organization = await requireOrganizationContext();
     const requestId = request.headers.get("x-vercel-id");
     console.log(
       JSON.stringify({
@@ -89,7 +93,11 @@ export async function POST(request: NextRequest) {
     let contextualMessage = payload.message;
     if (payload.context) {
       const scope = await requirePortfolioReadScope();
-      const context = await resolveAuthorizedNoraContext(payload.context, scope.portfolioOwnerId);
+      const context = await resolveAuthorizedNoraContext(payload.context, {
+        organizationId: organization.organizationId,
+        membershipRole: organization.membershipRole,
+        portfolioOwnerId: scope.portfolioOwnerId,
+      });
       if (!context) {
         return NextResponse.json({ error: "El contexto de Nora no existe o no está autorizado." }, { status: 400 });
       }
@@ -99,6 +107,7 @@ export async function POST(request: NextRequest) {
     const response = await buildAssistantReply({
       id: user.id,
       role: user.role === "ADMIN" ? "ADMIN" : "AGENT",
+      organizationId: organization.organizationId,
     }, contextualMessage);
 
     console.log(

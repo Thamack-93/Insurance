@@ -63,3 +63,13 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 - `Document` debe operar solo como metadata en esta fase.
 - Los backups deben poder crearse, listarse y verificarse solo por admin.
 - Un backup verificado criptográficamente no sustituye un restore drill. El drill sigue siendo CLI-only, hacia una rama temporal explícitamente autorizada y nunca hacia producción.
+
+## Preview con contexto tenant
+
+Cada Preview que valide `agent/authenticated-tenant-context` debe apuntar a una
+rama Neon aislada, con `DATABASE_URL` pooled y `DATABASE_URL_UNPOOLED` directos
+de la misma rama. No se ejecutan migraciones desde `postinstall`, build ni
+startup. Antes del login, el operador debe comprobar que ambos hosts no son los
+de producción, que pertenecen a la misma rama y que los cron, Telegram, email y
+webhooks productivos están deshabilitados. El shell no carga búsqueda,
+notificaciones ni Nora mientras no exista un contexto de organización válido.

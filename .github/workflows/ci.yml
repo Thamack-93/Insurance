@@ -55,6 +55,62 @@ jobs:
       - name: Unit tests
         run: npm run test:unit
 
+  tenant-isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      TENANT_ISOLATION_TEST_DB: "1"
+      PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1"
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
+      SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
+      SESSION_SECRET: tenant-isolation-ci-secret-minimum-32-characters
+      VERCEL_ENV: ""
+      PLAYWRIGHT_E2E: "1"
+      TENANT_ISOLATION_E2E: "1"
+      PLAYWRIGHT_USE_PRODUCTION_SERVER: "1"
+      PLAYWRIGHT_HOST: localhost
+      PLAYWRIGHT_BASE_URL: http://localhost:4173
+      PORT: "4173"
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npm run db:generate
+      - name: Apply migrations to disposable PostgreSQL
+        run: npx prisma migrate deploy
+      - name: Create protected two-organization fixture
+        run: npm run test:tenant-fixture
+      - name: Run tenant context and export tests
+        run: npm run test:unit -- src/lib/organization-context.logic.test.ts src/lib/export.logic.test.ts src/lib/tenant-isolation.integration.logic.test.ts
+      - name: Check tenant inventory
+        run: node --import tsx scripts/check-tenant-inventory.ts
+      - name: Build tenant-isolation application
+        run: npm run build
+      - name: Tenant isolation Chromium E2E
+        run: npm run test:e2e -- tests/e2e/tenant-isolation.spec.ts
+
   application:
     runs-on: ubuntu-latest
     timeout-minutes: 35

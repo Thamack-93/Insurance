@@ -20,3 +20,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - `NotificationChannel` and `TelegramWebhookUpdate` are platform-global. `SecurityEventAggregate.organizationId` is optional attribution and must not be auto-assigned or backfilled.
 - The bootstrap organization is intentionally singleton. Do not remove the singleton index, deletion guard, assignment triggers, or legacy User-to-membership synchronization until the explicit tenant-context rollout and two-organization validation criteria are complete.
 - Restore runs with `session_replication_role = replica`, so normal transition triggers preserve backup values. After returning to `origin`, `check:tenant-backfill` must pass, including trigger/index and membership-consistency audit.
+
+## Authenticated tenant context (Cycle 2A)
+
+- `pd_session.organizationId` is only a signed selection hint. Every protected request must revalidate the active user, membership and organization in PostgreSQL.
+- Use `resolveOrganizationContext`, `requireOrganizationContext` and `requireOrganizationPortfolioReadScope`; never use a global tenant query from an authenticated route.
+- A `SUPERADMIN` without membership may use `/platform` only. It must select an organization before accessing operational data.
+- Tenant test fixtures must use a disposable local PostgreSQL database with `TENANT_ISOLATION_TEST_DB=1` and `PLAYWRIGHT_ENFORCE_DISPOSABLE_DB=1`; never production or Vercel Preview credentials.
+- The first slice covers Today, Clients, Policies, informational Nora searches and the Clients Excel export. Receipts, payments, claims, quotes, insurers, documents, WorkItems/tasks, reports, commissions, risks, data-quality, Telegram, imports, maintenance and jobs remain explicitly pending.

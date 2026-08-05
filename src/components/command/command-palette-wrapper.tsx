@@ -58,7 +58,7 @@ function getServerRecentItems() {
   return EMPTY_RECENT_ITEMS;
 }
 
-export function CommandPaletteWrapper({ isAdmin = false }: { isAdmin?: boolean }) {
+export function CommandPaletteWrapper({ isAdmin = false, isSuperAdmin = false }: { isAdmin?: boolean; isSuperAdmin?: boolean }) {
   const [open, setOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -217,7 +217,7 @@ export function CommandPaletteWrapper({ isAdmin = false }: { isAdmin?: boolean }
       label: "Herramientas",
       items: [
         { id: "assistant", label: "Abrir workspace de Nora", icon: <Sparkles className="size-4" />, onSelect: () => handleSelect("/assistant") },
-        ...getUtilityNavigation(isAdmin).map((item) => {
+        ...getUtilityNavigation(isAdmin, isSuperAdmin).map((item) => {
           const Icon = item.icon;
           return {
             id: item.id,

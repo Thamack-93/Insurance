@@ -17,8 +17,7 @@ import { DocumentDropZone } from "@/components/documents/document-drop-zone";
 import { DocumentList } from "@/components/documents/document-list";
 import { PolicyReceiptsTable } from "@/components/policies/policy-receipts-table";
 import { getDb } from "@/lib/db";
-import { getCurrentUser } from "@/lib/auth";
-import { policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { policyOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
@@ -37,13 +36,12 @@ const frequencyLabels: Record<string, string> = {
 
 export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const scope = await requirePortfolioReadScope();
-  const liveUser = await getCurrentUser();
-  const isAdmin = !!liveUser && liveUser.active && liveUser.role === "ADMIN";
+  const scope = await requireOrganizationPortfolioReadScope();
+  const isAdmin = scope.membershipRole !== "AGENT";
   const db = getDb();
 
   const policy = await db.policy.findFirst({
-    where: { id, ...policyOperationalWhere(scope.portfolioOwnerId) },
+    where: { id, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
     include: {
       client: true,
       insurer: true,
@@ -90,27 +88,27 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     family,
   ] = await Promise.all([
     db.receipt.findMany({
-      where: { policyId: id, endorsementId: null },
+      where: { policyId: id, organizationId: scope.organizationId, endorsementId: null },
       include: { client: true, insurer: true, endorsement: true },
       orderBy: { dueDate: "desc" },
       take: 10,
     }),
     db.receipt.count({
       where: {
-        policyId: id,
+        policyId: id, organizationId: scope.organizationId,
         endorsementId: null,
       },
     }),
     db.receipt.count({
       where: {
-        policyId: id,
+        policyId: id, organizationId: scope.organizationId,
         endorsementId: null,
         status: { notIn: ["PAID", "CANCELLED"] },
       },
     }),
     db.receipt.aggregate({
       where: {
-        policyId: id,
+        policyId: id, organizationId: scope.organizationId,
         endorsementId: null,
         status: { notIn: ["PAID", "CANCELLED"] },
       },
@@ -118,33 +116,33 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     }),
     db.receipt.count({
       where: {
-        policyId: id,
+        policyId: id, organizationId: scope.organizationId,
         endorsementId: { not: null },
       },
     }),
     db.receipt.count({
       where: {
-        policyId: id,
+        policyId: id, organizationId: scope.organizationId,
         endorsementId: { not: null },
         status: { notIn: ["PAID", "CANCELLED"] },
       },
     }),
     db.receipt.aggregate({
       where: {
-        policyId: id,
+        policyId: id, organizationId: scope.organizationId,
         endorsementId: { not: null },
         status: { notIn: ["PAID", "CANCELLED"] },
       },
       _sum: { amount: true },
     }),
     db.payment.findMany({
-      where: { policyId: id, status: "POSTED" },
+      where: { policyId: id, organizationId: scope.organizationId, status: "POSTED" },
       include: { client: true },
       orderBy: { paidDate: "desc" },
       take: 10,
     }),
     db.commission.findMany({
-      where: { policyId: id },
+      where: { policyId: id, organizationId: scope.organizationId },
       include: { client: true, insurer: true, receipt: true },
       orderBy: { expectedDate: "desc" },
       take: 10,
@@ -153,15 +151,16 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       workItemTypes: ["TASK"],
       policyId: id,
       limit: 10,
+      organizationId: scope.organizationId,
     }),
     db.document.findMany({
-      where: { policyId: id },
+      where: { policyId: id, organizationId: scope.organizationId },
       include: { receipt: true, task: true, claim: true, quote: true, endorsement: true },
       orderBy: { uploadedAt: "desc" },
       take: 10,
     }),
     db.policyEndorsement.findMany({
-      where: { policyId: id },
+      where: { policyId: id, organizationId: scope.organizationId },
       include: {
         receipts: {
           include: { client: true, insurer: true, endorsement: true },
@@ -176,8 +175,8 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       },
       orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
     }),
-    getActivityForEntity("Policy", id, 20),
-    getPolicyFamilyPolicies(id),
+    getActivityForEntity("Policy", id, 20, scope.organizationId),
+    getPolicyFamilyPolicies(id, scope.organizationId),
   ]);
 
   const policyReceiptRows = receipts.map((receipt) => ({
@@ -199,6 +198,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     workItemTypes: ["TASK"],
     statuses: OPEN_WORK_ITEM_STATUSES,
     policyId: id,
+    organizationId: scope.organizationId,
   });
   const paymentsTotal = payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
 

@@ -4,10 +4,13 @@ import { ClientForm } from "@/components/forms/client-form";
 import { createClient } from "@/app/(dashboard)/clients/actions";
 import { createClientDefaults } from "@/lib/form-defaults";
 import type { SelectOption } from "@/lib/domain-options";
+import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function NewClientPage() {
+  const scope = await requireOrganizationPortfolioReadScope();
   const db = getDb();
   const clients = await db.client.findMany({
+    where: { organizationId: scope.organizationId },
     select: { id: true, fullName: true, type: true },
     orderBy: [{ fullName: "asc" }],
   });

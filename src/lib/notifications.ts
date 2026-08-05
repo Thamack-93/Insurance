@@ -72,11 +72,11 @@ export async function createNotification(input: NotificationInput): Promise<Noti
   }
 }
 
-export async function getUnreadNotificationCount(): Promise<number> {
+export async function getUnreadNotificationCount(organizationId?: string): Promise<number> {
   const db = getDb();
   try {
     return await db.alert.count({
-      where: { readAt: null, status: { not: "RESOLVED" } },
+      where: { readAt: null, status: { not: "RESOLVED" }, ...(organizationId ? { organizationId } : {}) },
     });
   } catch (error) {
     logError("notifications.getUnreadNotificationCount", error);
@@ -103,11 +103,11 @@ export async function getUnreadNotifications(limit = 10): Promise<NotificationRe
  * Latest N notifications (read or unread) for the bell dropdown. Excludes
  * RESOLVED so dismissed/resolved noise stays out of the tray.
  */
-export async function getRecentNotifications(limit = 10): Promise<NotificationRecord[]> {
+export async function getRecentNotifications(limit = 10, organizationId?: string): Promise<NotificationRecord[]> {
   const db = getDb();
   try {
     const rows = await db.alert.findMany({
-      where: { status: { not: "RESOLVED" } },
+      where: { status: { not: "RESOLVED" }, ...(organizationId ? { organizationId } : {}) },
       orderBy: [{ createdAt: "desc" }],
       take: limit,
     });

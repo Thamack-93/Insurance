@@ -61,7 +61,7 @@ export function sheetToCsv<T>(sheet: ExportSheet<T>) {
   return toCsv(sheet.filas, sheet.columnas);
 }
 
-function normalizeCell(value: unknown): ExportCell {
+export function normalizeCell(value: unknown): ExportCell {
   if (value instanceof Date) {
     return value.toISOString();
   }
@@ -74,7 +74,8 @@ function normalizeCell(value: unknown): ExportCell {
     return "";
   }
 
-  return String(value);
+  const text = String(value);
+  return /^[=+\-@]/.test(text) ? `'${text}` : text;
 }
 
 function escapeCsv(value: unknown) {

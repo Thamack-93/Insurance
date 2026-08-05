@@ -77,11 +77,19 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
 
   await db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
+  const activeMemberships = await db.organizationMembership.findMany({
+    where: { userId: user.id, active: true, organization: { status: "ACTIVE" } },
+    select: { organizationId: true },
+  });
+  const initialOrganizationId = activeMemberships.length === 1 ? activeMemberships[0].organizationId : undefined;
+
   await setSessionCookie({
     userId: user.id,
     email: user.email,
     name: user.name,
     role: user.role as UserRoleSession,
+    platformRole: user.platformRole === "SUPERADMIN" ? "SUPERADMIN" : "NONE",
+    organizationId: initialOrganizationId,
   });
 
   await writeActivityLog({
@@ -91,6 +99,13 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
     userId: user.id,
   });
 
-  const safeRedirect = redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/today";
+  const fallback = user.platformRole === "SUPERADMIN"
+    ? "/platform"
+    : activeMemberships.length === 0
+      ? "/organization/no-access"
+      : activeMemberships.length > 1
+        ? "/organization/select"
+        : "/today";
+  const safeRedirect = redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : fallback;
   redirect(safeRedirect);
 }

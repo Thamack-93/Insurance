@@ -125,6 +125,14 @@ export async function requireAdmin() {
   return user;
 }
 
+export async function requireSuperAdmin() {
+  const user = await requireUser();
+  if (user.platformRole !== "SUPERADMIN") {
+    throw new AuthError("Esta acción requiere permisos de plataforma.", 403);
+  }
+  return user;
+}
+
 export const SYSTEM_USER_ID = "system-user-0000";
 
 /**
@@ -161,4 +169,38 @@ export async function requireAdminOrRedirect() {
     redirect("/today");
   }
   return user;
+}
+
+export async function requireSuperAdminOrRedirect() {
+  const { redirect } = await import("next/navigation");
+  try {
+    return await requireSuperAdmin();
+  } catch (error) {
+    if (error instanceof AuthError) {
+      if (error.status === 401) {
+        try { await clearSessionCookie(); } catch { /* best effort */ }
+        redirect("/login");
+      }
+      redirect("/today");
+    }
+    throw error;
+  }
+}
+
+export async function requireOrganizationContextOrRedirect() {
+  const { redirect } = await import("next/navigation");
+  const { requireOrganizationContext } = await import("@/lib/organization-context");
+  try {
+    return await requireOrganizationContext();
+  } catch (error) {
+    if (error instanceof AuthError) {
+      if (error.status === 401) {
+        try { await clearSessionCookie(); } catch { /* best effort */ }
+        redirect("/login");
+      }
+      if (error.status === 409) redirect("/organization/select");
+      redirect("/organization/no-access");
+    }
+    throw error;
+  }
 }

@@ -45,10 +45,10 @@ export async function resolvePolicyFamilyRootId(input: {
   return existing.familyRootId ?? existing.id;
 }
 
-export async function getPolicyFamilyPolicies(policyId: string) {
+export async function getPolicyFamilyPolicies(policyId: string, organizationId?: string) {
   const db = getDb();
-  const current = await db.policy.findUnique({
-    where: { id: policyId },
+  const current = await db.policy.findFirst({
+    where: { id: policyId, ...(organizationId ? { organizationId } : {}) },
     select: { id: true, familyRootId: true },
   });
 
@@ -60,6 +60,7 @@ export async function getPolicyFamilyPolicies(policyId: string) {
   const policies = await db.policy.findMany({
     where: {
       OR: [{ id: familyRootId }, { familyRootId }],
+      ...(organizationId ? { organizationId } : {}),
     },
     include: {
       client: { select: { id: true, fullName: true } },

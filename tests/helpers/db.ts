@@ -93,7 +93,7 @@ function hashTestPassword(password: string): string {
   return `scrypt$${salt}$${derived}`;
 }
 
-async function createSessionToken(payload: { userId: string; email: string; name: string; role: "ADMIN" | "AGENT" }) {
+async function createSessionToken(payload: { userId: string; email: string; name: string; role: "ADMIN" | "AGENT"; organizationId?: string }) {
   const exp = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30;
   const data = { ...payload, exp };
   const payloadB64 = Buffer.from(JSON.stringify(data)).toString("base64url");
@@ -131,6 +131,7 @@ async function ensureAuthFixture(): Promise<AuthFixture> {
   if (!authFixturePromise) {
     authFixturePromise = (async () => {
       const db = getTestDb();
+      await db.organization.update({ where: { id: "org_legacy_singleton_0001" }, data: { status: "ACTIVE" } });
       const admin = await db.user.upsert({
         where: { email: TEST_ADMIN_EMAIL },
         update: {
@@ -162,6 +163,17 @@ async function ensureAuthFixture(): Promise<AuthFixture> {
           active: true,
         },
       });
+
+      for (const [userId, role] of [[admin.id, "OWNER"], [
+        (await db.user.findUniqueOrThrow({ where: { email: TEST_AGENT_EMAIL } })).id,
+        "AGENT",
+      ]] as const) {
+        await db.organizationMembership.upsert({
+          where: { organizationId_userId: { organizationId: "org_legacy_singleton_0001", userId } },
+          update: { role, active: true },
+          create: { organizationId: "org_legacy_singleton_0001", userId, role, active: true },
+        });
+      }
 
       return { adminId: admin.id };
     })();
@@ -324,6 +336,7 @@ export async function getAdminSessionCookie(): Promise<string> {
     email: admin.email,
     name: admin.name,
     role: "ADMIN",
+    organizationId: "org_legacy_singleton_0001",
   });
 
   return `${SESSION_COOKIE_NAME}=${token}`;
@@ -348,6 +361,7 @@ export async function getAgentSessionCookie(): Promise<string> {
     email: agent.email,
     name: agent.name,
     role: "AGENT",
+    organizationId: "org_legacy_singleton_0001",
   });
 
   return `${SESSION_COOKIE_NAME}=${token}`;
