@@ -41,6 +41,7 @@ test("tenant policy mutation route is visibly blocked while reads remain availab
   await page.getByLabel("Correo electrónico").fill("tenant-admin-a@policydesk.local");
   await page.getByLabel("Contraseña").fill("tenant-fixture-password");
   await page.getByRole("button", { name: "Iniciar sesión" }).click();
+  await expect(page).toHaveURL(/\/today$/);
   await page.goto("/policies/new");
   await expect(page.getByText("Mutación temporalmente bloqueada")).toBeVisible();
   await page.goto("/policies/tenant-policy-a");
