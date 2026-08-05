@@ -143,6 +143,8 @@ jobs:
         run: node --import tsx scripts/check-tenant-inventory.ts
       - name: Build tenant-isolation application
         run: npm run build
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
       - name: Tenant isolation Chromium E2E
         run: npm run test:e2e -- tests/e2e/tenant-isolation.spec.ts
 

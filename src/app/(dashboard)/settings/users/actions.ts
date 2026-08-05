@@ -271,6 +271,10 @@ export async function deleteUser(userId: string, replacementUserId?: string): Pr
         userId: actor.id,
         db: tx,
       });
+      // Cycle 1 keeps a synchronized membership for every legacy user. Remove
+      // the inactive membership explicitly so its transition guard runs before
+      // the user delete instead of relying on FK cascade ordering.
+      await tx.organizationMembership.deleteMany({ where: { userId: target.id } });
       await tx.user.delete({ where: { id: target.id } });
     });
 
