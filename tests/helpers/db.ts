@@ -164,15 +164,23 @@ async function ensureAuthFixture(): Promise<AuthFixture> {
         },
       });
 
-      for (const [userId, role] of [[admin.id, "OWNER"], [
-        (await db.user.findUniqueOrThrow({ where: { email: TEST_AGENT_EMAIL } })).id,
-        "AGENT",
-      ]] as const) {
-        await db.organizationMembership.upsert({
-          where: { organizationId_userId: { organizationId: "org_legacy_singleton_0001", userId } },
-          update: { role, active: true },
-          create: { organizationId: "org_legacy_singleton_0001", userId, role, active: true },
-        });
+      const agent = await db.user.findUniqueOrThrow({ where: { email: TEST_AGENT_EMAIL } });
+      const memberships = await db.organizationMembership.findMany({
+        where: {
+          organizationId: "org_legacy_singleton_0001",
+          userId: { in: [admin.id, agent.id] },
+          active: true,
+        },
+        select: { userId: true, role: true },
+      });
+      const membershipByUserId = new Map(memberships.map((membership) => [membership.userId, membership.role]));
+      const adminMembershipRole = membershipByUserId.get(admin.id);
+      const agentMembershipRole = membershipByUserId.get(agent.id);
+      if (
+        (adminMembershipRole !== "ADMIN" && adminMembershipRole !== "OWNER") ||
+        agentMembershipRole !== "AGENT"
+      ) {
+        throw new Error("Cycle 1 User-to-membership synchronization did not create the expected test memberships.");
       }
 
       return { adminId: admin.id };

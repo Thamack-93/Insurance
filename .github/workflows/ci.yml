@@ -103,7 +103,18 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
-      - name: Create and mark dedicated tenant database
+      - name: Create dedicated tenant database
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          db_name="${TENANT_ISOLATION_DB_NAME}"
+          createdb -h 127.0.0.1 -U postgres "$db_name"
+
+      - name: Apply migrations to disposable PostgreSQL
+        run: npx prisma migrate deploy
+
+      - name: Mark migrated tenant database
         shell: bash
         run: |
           set -euo pipefail
@@ -111,7 +122,6 @@ jobs:
           db_name="${TENANT_ISOLATION_DB_NAME}"
           host_name="127.0.0.1"
           fingerprint="$(printf 'local-postgres:%s:%s:%s' "$TENANT_ISOLATION_RUN_ID" "$db_name" "$host_name" | sha256sum | awk '{print $1}')"
-          createdb -h "$host_name" -U postgres "$db_name"
           psql -h "$host_name" -U postgres -d "$db_name" -v ON_ERROR_STOP=1 <<SQL
           CREATE TABLE "__policydesk_tenant_isolation_run" (
             run_id text PRIMARY KEY,
@@ -124,8 +134,7 @@ jobs:
           VALUES ('$TENANT_ISOLATION_RUN_ID', '$db_name', '$host_name', '$fingerprint');
           SQL
           printf 'TENANT_ISOLATION_FINGERPRINT=%s\n' "$fingerprint" >> "$GITHUB_ENV"
-      - name: Apply migrations to disposable PostgreSQL
-        run: npx prisma migrate deploy
+
       - name: Create protected two-organization fixture
         run: npm run test:tenant-fixture
       - name: Run tenant context and export tests
