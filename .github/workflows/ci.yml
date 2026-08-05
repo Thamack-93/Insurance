@@ -146,7 +146,7 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
       - name: Tenant isolation Chromium E2E
-        run: npm run test:e2e -- tests/e2e/tenant-isolation.spec.ts
+        run: npx playwright test tests/e2e/tenant-isolation.spec.ts
 
       - name: Drop dedicated tenant database
         if: always()
