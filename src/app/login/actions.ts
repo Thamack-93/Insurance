@@ -106,6 +106,13 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
       : activeMemberships.length > 1
         ? "/organization/select"
         : "/today";
-  const safeRedirect = redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : fallback;
+  // A requested route is safe only after the login has established exactly one
+  // active tenant. Global users and users with multiple/no memberships must go
+  // through their controlled landing page first; otherwise a stale `/today`
+  // redirect bypasses the selector or sends a SUPERADMIN into tenant routes.
+  const canHonorRedirect = user.platformRole !== "SUPERADMIN" && activeMemberships.length === 1;
+  const safeRedirect = canHonorRedirect && redirectTo.startsWith("/") && !redirectTo.startsWith("//")
+    ? redirectTo
+    : fallback;
   redirect(safeRedirect);
 }
