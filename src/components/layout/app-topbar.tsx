@@ -30,7 +30,7 @@ export function AppTopbar({
       <div className="flex h-16 items-center gap-3 px-3 sm:px-5 lg:gap-4 lg:px-8">
         <AppMobileSidebar isAdmin={isAdmin} />
         <nav aria-label="Breadcrumb" className="hidden shrink-0 items-center gap-2 text-sm text-muted-foreground md:flex">
-          <span>PolicyDesk</span>
+          <span className="font-display text-[15px] text-foreground">PolicyDesk</span>
           {segments.map(({ segment, label }, index) => (
             <span key={`${index}-${segment}`} className="flex items-center gap-2">
               <span aria-hidden>/</span>
@@ -39,7 +39,7 @@ export function AppTopbar({
           ))}
         </nav>
 
-        <div className="mx-auto flex w-full max-w-2xl items-center gap-2 rounded-lg border bg-background px-3 py-1.5">
+        <div className="mx-auto flex w-full max-w-2xl items-center gap-2 rounded-md border bg-card px-3 py-1.5 shadow-[0_1px_2px_rgb(0_0_0/0.04)]">
           <SearchInput />
           <button
             type="button"

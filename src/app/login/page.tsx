@@ -24,12 +24,12 @@ export default async function LoginPage({
     <main className="min-h-screen bg-background px-4 py-16">
       <div className="mx-auto flex max-w-md flex-col gap-6">
         <div className="text-center">
-          <span className="mx-auto grid size-11 place-items-center rounded-xl bg-[#06283b] text-white">
+          <span className="mx-auto grid size-11 place-items-center rounded-md bg-sidebar text-sidebar-primary">
             <ShieldCheck className="size-6" aria-hidden />
           </span>
-          <p className="mt-3 text-sm font-semibold tracking-tight text-foreground">PolicyDesk</p>
-          <h1 className="mt-2 text-2xl font-semibold">Acceso a tu centro operativo</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="mt-3 text-xs font-semibold uppercase tracking-[0.24em] text-bronze">PolicyDesk</p>
+          <h1 className="font-display mt-2 text-3xl font-medium tracking-tight">Acceso a tu centro operativo</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">
             Ingresa con tu cuenta para continuar.
           </p>
         </div>

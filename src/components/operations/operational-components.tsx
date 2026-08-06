@@ -50,7 +50,7 @@ export function OperationalMetric({ metric }: { metric: OperationalMetricModel }
         </span>
       </span>
       <span>
-        <span className={cn("block font-mono text-2xl font-semibold tracking-tight", toneStyles[metric.tone].text)} aria-label={`${metric.label}: ${metric.accessibleValue}`}>
+        <span className={cn("font-display block text-[28px] font-medium tracking-tight", toneStyles[metric.tone].text)} aria-label={`${metric.label}: ${metric.accessibleValue}`}>
           {metric.value}
         </span>
         {metric.description ? <span className="mt-0.5 block text-[11px] text-muted-foreground">{metric.description}</span> : null}
