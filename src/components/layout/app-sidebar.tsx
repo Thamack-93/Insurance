@@ -50,10 +50,8 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
                 collapsed && "justify-center px-0",
               )}
             >
-              <span className="grid size-9 shrink-0 place-items-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
-                <ShieldCheck className="size-5" aria-hidden />
-              </span>
-              {!collapsed ? <span className="font-display text-[17px] tracking-tight">PolicyDesk</span> : null}
+              <ShieldCheck className="size-6 shrink-0 text-sidebar-primary" aria-hidden />
+              {!collapsed ? <span className="font-display text-[19px] tracking-tight text-sidebar-accent-foreground">PolicyDesk</span> : null}
             </Link>
             {!collapsed ? (
               <button
@@ -125,8 +123,8 @@ function SidebarUtilityLink({
       href={href}
       aria-label={collapsed ? label : undefined}
       className={cn(
-        "flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-        active && "bg-sidebar-accent text-sidebar-accent-foreground",
+        "flex min-h-11 items-center gap-3 rounded-md px-3 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+        active && "bg-sidebar-accent font-semibold text-sidebar-accent-foreground",
         collapsed && "justify-center px-0",
       )}
       aria-current={active ? "page" : undefined}

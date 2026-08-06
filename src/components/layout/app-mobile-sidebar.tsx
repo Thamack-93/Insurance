@@ -39,12 +39,10 @@ export function AppMobileSidebar({ isAdmin = false }: { isAdmin?: boolean }) {
             onClick={() => setOpen(false)}
             className="flex min-h-11 items-center gap-3 rounded-lg px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
           >
-            <div className="grid size-9 place-items-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
-              <ShieldCheck className="size-5" />
-            </div>
+            <ShieldCheck className="size-6 shrink-0 text-sidebar-primary" aria-hidden />
             <div>
-              <p className="font-display text-base tracking-tight">PolicyDesk</p>
-              <p className="text-xs text-sidebar-foreground/60">Operación de seguros</p>
+              <p className="font-display text-lg tracking-tight text-sidebar-accent-foreground">PolicyDesk</p>
+              <p className="text-xs text-sidebar-foreground/70">Operación de seguros</p>
             </div>
           </Link>
           <div className="mt-5 flex min-h-0 flex-1 flex-col">
@@ -61,8 +59,8 @@ export function AppMobileSidebar({ isAdmin = false }: { isAdmin?: boolean }) {
                   onClick={() => setOpen(false)}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-                    active && "bg-sidebar-accent text-sidebar-accent-foreground",
+                    "flex min-h-11 items-center gap-3 rounded-md px-3 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                    active && "bg-primary/[0.07] font-semibold text-primary",
                   )}
                 >
                   <Icon className="size-[18px]" aria-hidden /> {item.label}

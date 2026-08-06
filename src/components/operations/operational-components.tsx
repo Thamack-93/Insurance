@@ -5,12 +5,12 @@ import type { FocusItemModel, OperationalMetricModel, SemanticTone } from "@/lib
 import { cn } from "@/lib/utils";
 
 const toneStyles: Record<SemanticTone, { dot: string; text: string; soft: string; card: string }> = {
-  critical: { dot: "bg-critical", text: "text-critical", soft: "bg-critical/10", card: "border-critical/15 bg-critical/[0.06] dark:bg-critical/[0.08]" },
-  warning: { dot: "bg-warning", text: "text-warning", soft: "bg-warning/10", card: "border-warning/20 bg-warning/[0.08] dark:bg-warning/[0.07]" },
-  success: { dot: "bg-success", text: "text-success", soft: "bg-success/10", card: "border-success/15 bg-success/[0.06] dark:bg-success/[0.07]" },
-  information: { dot: "bg-information", text: "text-information", soft: "bg-information/10", card: "border-information/15 bg-information/[0.06] dark:bg-information/[0.07]" },
-  ai: { dot: "bg-ai", text: "text-ai", soft: "bg-ai/10", card: "border-ai/15 bg-ai/[0.06] dark:bg-ai/[0.07]" },
-  neutral: { dot: "bg-muted-foreground", text: "text-muted-foreground", soft: "bg-muted", card: "border-border bg-muted/35" },
+  critical: { dot: "bg-critical", text: "text-critical", soft: "bg-critical/10", card: "border-border bg-card" },
+  warning: { dot: "bg-warning", text: "text-warning", soft: "bg-warning/10", card: "border-border bg-card" },
+  success: { dot: "bg-success", text: "text-success", soft: "bg-success/10", card: "border-border bg-card" },
+  information: { dot: "bg-information", text: "text-information", soft: "bg-information/10", card: "border-border bg-card" },
+  ai: { dot: "bg-ai", text: "text-ai", soft: "bg-ai/10", card: "border-border bg-card" },
+  neutral: { dot: "bg-muted-foreground", text: "text-muted-foreground", soft: "bg-muted", card: "border-border bg-card" },
 };
 
 const toneIconMap: Record<SemanticTone, typeof CircleAlert> = {
@@ -42,10 +42,10 @@ export function EntityMeta({ children }: { children: React.ReactNode }) {
 export function OperationalMetric({ metric }: { metric: OperationalMetricModel }) {
   const Icon = metricIconMap[metric.id] ?? toneIconMap[metric.tone];
   const content = (
-    <span className={cn("flex min-h-28 min-w-[164px] flex-col justify-between rounded-xl border p-3.5", toneStyles[metric.tone].card)}>
+    <span className={cn("flex min-h-28 min-w-[164px] flex-col justify-between rounded-xl border p-3.5 shadow-[0_1px_2px_rgb(0_0_0/0.04)]", toneStyles[metric.tone].card)}>
       <span className="flex items-start justify-between gap-3">
         <span className="min-w-0 text-xs font-medium text-muted-foreground">{metric.label}</span>
-        <span className={cn("grid size-8 shrink-0 place-items-center rounded-full border bg-background/80", toneStyles[metric.tone].text)} aria-hidden>
+        <span className={cn("grid size-8 shrink-0 place-items-center rounded-md", toneStyles[metric.tone].soft, toneStyles[metric.tone].text)} aria-hidden>
           <Icon className="size-4" />
         </span>
       </span>
