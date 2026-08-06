@@ -60,7 +60,7 @@ export function AppMobileSidebar({ isAdmin = false }: { isAdmin?: boolean }) {
                   aria-current={active ? "page" : undefined}
                   className={cn(
                     "flex min-h-11 items-center gap-3 rounded-md px-3 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-                    active && "bg-primary/[0.07] font-semibold text-primary",
+                    active && "bg-sidebar-accent font-semibold text-sidebar-accent-foreground",
                   )}
                 >
                   <Icon className="size-[18px]" aria-hidden /> {item.label}
