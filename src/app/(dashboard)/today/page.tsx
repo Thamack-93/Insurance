@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowUpRight, FileSignature, FileUp, Plus, ReceiptText } from "lucide-react";
 import { getSession } from "@/lib/auth";
-import { getTodayData } from "@/lib/dashboard-queries";
+import { getTodayDashboardData, getTodayData } from "@/lib/dashboard-queries";
 import { formatDate, formatRelativeDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { buildTodayOperationsModel } from "@/lib/today-operations";
@@ -9,13 +9,13 @@ import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/layout/page-header";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { InsightsView } from "@/components/dashboard/insights-view";
+import { AlertsPanel, PolicyActivityChart, PolicyStatusDonut, RecentPoliciesTable, TodayMetricCards } from "@/components/dashboard/today-dashboard";
 import {
   EmptyOperationalState,
   EntityMeta,
   FocusQueue,
   OperationalRow,
   OperationalSection,
-  OperationalSummary,
   SemanticStatusDot,
 } from "@/components/operations/operational-components";
 import { buttonVariants } from "@/components/ui/button";
@@ -38,7 +38,7 @@ export default async function TodayPage({ searchParams }: { searchParams?: Promi
     );
   }
 
-  const [data, session] = await Promise.all([getTodayData(), getSession()]);
+  const [data, session, dashboard] = await Promise.all([getTodayData(), getSession(), getTodayDashboardData()]);
   const model = buildTodayOperationsModel(data, { name: session?.name });
 
   return (
@@ -63,7 +63,17 @@ export default async function TodayPage({ searchParams }: { searchParams?: Promi
         }
       />
 
-      <OperationalSummary metrics={model.summaryMetrics} />
+      <TodayMetricCards metrics={dashboard.metrics} prevMonthLabel={dashboard.prevMonthLabel} />
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <div className="xl:col-span-2"><PolicyActivityChart data={dashboard.activity} /></div>
+        <PolicyStatusDonut data={dashboard.statusDistribution} />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <div className="xl:col-span-2"><RecentPoliciesTable policies={dashboard.recentPolicies} /></div>
+        <AlertsPanel alerts={dashboard.alerts} />
+      </div>
 
       <section aria-labelledby="today-quick-actions">
         <h2 id="today-quick-actions" className="mb-2 text-sm font-semibold">Acciones rápidas</h2>

@@ -1,12 +1,12 @@
 ---
 name: PolicyDesk design direction
-description: The accepted UI design language for PolicyDesk is "Studio Paper" — cream editorial, ink black, terracotta accent. Lists the rejected looks that must not return.
+description: The accepted UI design language for PolicyDesk is a teal-sidebar analytics dashboard (per a user-supplied reference). Lists the rejected looks that must not return.
 ---
 
-# PolicyDesk design direction: Studio Paper
+# PolicyDesk design direction: teal dashboard
 
-The UI uses "Studio Paper": warm cream background (#F6F2E9), cream-white cards (#FFFDF8), pure ink-black text and primary buttons (#141210), terracotta accent (#C2410C), serif display type (Source Serif 4) with Inter body, sharp radius (0.25rem), hairline warm-gray borders. Dark mode is a warm charcoal "night studio" variant, not blue-gray. Purple is reserved exclusively for the Nora AI assistant.
+The UI follows a user-supplied reference dashboard: deep teal sidebar, very light neutral content background, white cards with hairline borders, dark-teal primary buttons, status colors (green/amber/red/blue), clean sans typography (no serif display), and a rich /today dashboard with real-data charts (Recharts): metric cards with sparklines and month-over-month deltas, a 6-month activity line chart, a policy-status donut, an alerts panel, and a recent-policies table.
 
-**Why:** The user has rejected three looks: (1) the original navy/cyan SaaS theme, (2) "Ledger" ivory/forest-green/bronze ("los colores están horribles"), (3) "Porcelain Cobalt" white + #0F62FE blue ("demasiado blanco" — looked like every generic white dashboard). Studio Paper was chosen from an options form specifically because it reads editorial/magazine, not SaaS.
+**Why:** The user rejected four looks in a row: (1) original navy/cyan SaaS, (2) "Ledger" ivory/forest/bronze ("horrible"), (3) "Porcelain Cobalt" white+blue ("demasiado blanco"), (4) "Studio Paper" cream/ink/terracotta editorial ("apagados y muertos"). The teal analytics-dashboard reference was the first one they explicitly liked ("algo así me gusta").
 
-**How to apply:** Any new screen or restyle must stay in this palette and feel (cream base, ink-black primary buttons, terracotta accent, serif display headlines, sharp corners); don't reintroduce cobalt/blue primary buttons, all-white backgrounds, or forest/bronze combos.
+**How to apply:** New screens must follow this teal dashboard language; don't reintroduce cream/terracotta editorial styling, serif display headings, cobalt blue, or all-white palettes. Dashboard charts must always use real database data, never mocks.

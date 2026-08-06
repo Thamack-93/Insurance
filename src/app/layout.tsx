@@ -22,14 +22,6 @@ const geistMono = localFont({
   display: "swap",
 });
 
-// Variable Source Serif 4 (latin subset, weights 400–700) ships with the repo
-// so builds stay deterministic without a fonts.googleapis.com dependency.
-const sourceSerif = localFont({
-  src: "./fonts/source-serif-4-latin.woff2",
-  variable: "--font-source-serif",
-  display: "swap",
-});
-
 export const metadata: Metadata = {
   title: "PolicyDesk",
   description: "Centro operativo para una cartera de seguros.",
@@ -49,7 +41,7 @@ export default async function RootLayout({
   return (
     <html
       lang="es"
-      className={`h-full antialiased ${geistSans.variable} ${geistMono.variable} ${sourceSerif.variable} ${initialTheme === "dark" ? "dark" : ""}`}
+      className={`h-full antialiased ${geistSans.variable} ${geistMono.variable} ${initialTheme === "dark" ? "dark" : ""}`}
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col font-sans">
