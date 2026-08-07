@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "@/components/icons";
 import { getCurrentUser } from "@/lib/auth";
 import { LoginForm } from "./login-form";
 

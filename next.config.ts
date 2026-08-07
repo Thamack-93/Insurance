@@ -3,10 +3,11 @@ import type { NextConfig } from "next";
 const isProduction = process.env.NODE_ENV === "production";
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ["*.janeway.replit.dev", "*.replit.dev"],
+  allowedDevOrigins: ["*.janeway.replit.dev", "*.replit.dev", "*.picard.replit.dev", "127.0.0.1"],
   experimental: {
     turbopackFileSystemCacheForDev: false,
     turbopackFileSystemCacheForBuild: false,
+    optimizePackageImports: ["lucide-react"],
   },
   async headers() {
     return [
