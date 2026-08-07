@@ -49,4 +49,70 @@ test.describe("operation queue context", () => {
       await cleanupPolicyFixture(fixture);
     }
   });
+
+  test("links unresolved overdue renewals to a complete operational list and preserves expired history", async ({ page }) => {
+    const db = getTestDb();
+    const fixture = await seedPolicyFixture("RENEWAL-RISK");
+
+    try {
+      await db.policy.update({
+        where: { id: fixture.policyId },
+        data: { endDate: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      });
+
+      await authenticatePageAsAdmin(page);
+      await page.goto("/policies");
+
+      const riskLink = page.getByRole("link", { name: /Renovaciones vencidas sin resolver:/ });
+      await expect(riskLink).toBeVisible();
+      await expect(riskLink).toHaveAttribute("href", "/operations?view=renewals");
+
+      await riskLink.click();
+      await expect(page).toHaveURL(/\/operations\?view=renewals$/);
+      await expect(page.getByRole("link", { name: fixture.policyNumber, exact: true })).toBeVisible();
+      await expect(page.getByText("Renovaciones vencidas sin resolver", { exact: true })).toBeVisible();
+
+      await db.policy.update({ where: { id: fixture.policyId }, data: { status: "EXPIRED" } });
+      await page.goto("/policies?status=EXPIRED");
+      await expect(page.getByRole("link", { name: fixture.policyNumber, exact: true })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Vigencias terminadas", exact: true })).toBeVisible();
+      await expect(page.getByRole("columnheader", { name: "Fin de vigencia" })).toBeVisible();
+      await expect(page.getByText("Terminó:", { exact: false }).first()).toBeVisible();
+      await expect(page.getByText("Vigencias terminadas para consulta histórica", { exact: false })).toBeVisible();
+    } finally {
+      await cleanupPolicyFixture(fixture);
+    }
+  });
+
+  test("excludes an overdue renewal whose latest receipt is cancelled", async ({ page }) => {
+    const db = getTestDb();
+    const fixture = await seedPolicyFixture("RENEWAL-CANCELLED-RECEIPT");
+
+    try {
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      await db.policy.update({ where: { id: fixture.policyId }, data: { endDate: yesterday } });
+      await db.receipt.create({
+        data: {
+          receiptNumber: `CANCELLED-${Date.now()}`,
+          policyId: fixture.policyId,
+          clientId: fixture.clientId,
+          insurerId: fixture.insurerId,
+          periodStartDate: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000),
+          periodEndDate: yesterday,
+          dueDate: yesterday,
+          amount: 1234.56,
+          currency: "MXN",
+          status: "CANCELLED",
+        },
+      });
+
+      await authenticatePageAsAdmin(page);
+      await page.goto("/operations?view=renewals");
+
+      await expect(page.getByRole("link", { name: fixture.policyNumber, exact: true })).toHaveCount(0);
+      await expect(page.getByText("No hay renovaciones pendientes.", { exact: true })).toBeVisible();
+    } finally {
+      await cleanupPolicyFixture(fixture);
+    }
+  });
 });

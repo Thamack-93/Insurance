@@ -39,6 +39,7 @@ export type PoliciesListTableProps = {
   pageSize: number;
   total: number;
   searchParams?: Record<string, string | undefined>;
+  historical?: boolean;
   /** Bulk status changes are only offered when the viewer may edit policies. */
   canBulkEdit?: boolean;
 };
@@ -49,12 +50,13 @@ export function PoliciesListTable({
   pageSize,
   total,
   searchParams = {},
+  historical = false,
   canBulkEdit = false,
 }: PoliciesListTableProps) {
   return (
     <BulkActionsProvider>
       {canBulkEdit ? <PoliciesBulkToolbar policies={policies} /> : null}
-      <PoliciesCards policies={policies} selectable={canBulkEdit} />
+      <PoliciesCards policies={policies} selectable={canBulkEdit} historical={historical} />
       <div className="hidden md:block">
         <Table>
           <TableHeader>
@@ -64,7 +66,7 @@ export function PoliciesListTable({
               <SortableTableHead sortKey="client">Cliente</SortableTableHead>
               <SortableTableHead sortKey="insurer">Aseguradora</SortableTableHead>
               <SortableTableHead sortKey="type">Tipo</SortableTableHead>
-              <SortableTableHead sortKey="endDate">Renovación</SortableTableHead>
+              <SortableTableHead sortKey="endDate">{historical ? "Fin de vigencia" : "Renovación"}</SortableTableHead>
               <SortableTableHead sortKey="premiumAmount" className="text-right">
                 Prima
               </SortableTableHead>
@@ -73,7 +75,7 @@ export function PoliciesListTable({
           </TableHeader>
           <TableBody>
             {policies.map((policy) => (
-              <PolicyRow key={policy.id} policy={policy} selectable={canBulkEdit} />
+              <PolicyRow key={policy.id} policy={policy} selectable={canBulkEdit} historical={historical} />
             ))}
           </TableBody>
         </Table>
@@ -120,14 +122,15 @@ function PoliciesBulkToolbar({ policies }: { policies: PolicyListRow[] }) {
   );
 }
 
-function renewalLabel(policy: PolicyListRow) {
+function renewalLabel(policy: PolicyListRow, historical = false) {
   if (!policy.endDateLabel) return "Sin fecha";
+  if (historical) return policy.endDateLabel;
   return policy.daysToRenewal === null
     ? policy.endDateLabel
     : `${policy.endDateLabel} · ${policy.daysToRenewal} días`;
 }
 
-function PolicyRow({ policy, selectable }: { policy: PolicyListRow; selectable: boolean }) {
+function PolicyRow({ policy, selectable, historical }: { policy: PolicyListRow; selectable: boolean; historical: boolean }) {
   const { selectedItems, toggleItem } = useBulkActions();
 
   return (
@@ -158,7 +161,7 @@ function PolicyRow({ policy, selectable }: { policy: PolicyListRow; selectable: 
         </Badge>
       </TableCell>
       <TableCell>
-        <span className="text-sm text-muted-foreground">{renewalLabel(policy)}</span>
+        <span className="text-sm text-muted-foreground">{renewalLabel(policy, historical)}</span>
       </TableCell>
       <TableCell className="text-right font-medium">
         {formatCurrency(policy.premiumAmount, policy.currency)}
@@ -170,7 +173,7 @@ function PolicyRow({ policy, selectable }: { policy: PolicyListRow; selectable: 
   );
 }
 
-function PoliciesCards({ policies, selectable }: { policies: PolicyListRow[]; selectable: boolean }) {
+function PoliciesCards({ policies, selectable, historical }: { policies: PolicyListRow[]; selectable: boolean; historical: boolean }) {
   const { selectedItems, toggleItem } = useBulkActions();
 
   const items: RecordCardItem[] = policies.map((policy) => ({
@@ -188,7 +191,7 @@ function PoliciesCards({ policies, selectable }: { policies: PolicyListRow[]; se
     ) : undefined,
     fields: [
       { label: "Prima", value: formatCurrency(policy.premiumAmount, policy.currency), emphasis: true },
-      { label: "Renovación", value: renewalLabel(policy) },
+      { label: historical ? "Fin de vigencia" : "Renovación", value: renewalLabel(policy, historical) },
       { label: "Tipo", value: policyTypeLabel(policy.policyType) },
     ],
   }));

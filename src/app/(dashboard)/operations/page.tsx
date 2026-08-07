@@ -6,11 +6,14 @@ import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Pagination } from "@/components/lists/pagination";
 import { getDb } from "@/lib/db";
 import { businessAddDays, businessStartOfDay, businessToday, formatBusinessDateRelative } from "@/lib/business-dates";
 import { formatDate } from "@/lib/dates";
-import { claimOperationalWhere, policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { claimOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 import { getWorkItems, OPEN_WORK_ITEM_STATUSES, type WorkQueueItem } from "@/lib/work-queue";
+import { readTablePage } from "@/lib/table-query";
 import { cn } from "@/lib/utils";
 import { getWorkItemHref } from "@/lib/work-item-navigation";
 import { RenewalBoard } from "@/components/renewals/renewal-board";
@@ -26,6 +29,8 @@ const localItems = [
   { label: "Tablero de renovaciones", href: "/operations?view=renewal-board" },
   { label: "Siniestros", href: "/operations?view=claims" },
 ];
+
+const RENEWAL_PAGE_SIZE = 25;
 
 function readView(value?: string): OperationsView {
   return value === "pending" || value === "renewals" || value === "renewal-board" || value === "claims"
@@ -80,10 +85,12 @@ export default async function OperationsPage({
 }) {
   const params = (await searchParams) ?? {};
   const view = readView(typeof params.view === "string" ? params.view : undefined);
+  const page = readTablePage(params);
   const scope = await requirePortfolioReadScope();
   const db = getDb();
   const today = businessToday();
   const nextSeven = businessAddDays(today, 7);
+  const nextThirty = businessAddDays(today, 30);
 
   const boardFilters = readRenewalBoardFilters(params);
   const [board, boardOwners] =
@@ -94,19 +101,9 @@ export default async function OperationsPage({
         ])
       : [null, []];
 
-  const [workItems, renewals, claims] = await Promise.all([
+  const [workItems, renewalPolicies, claims] = await Promise.all([
     getWorkItems({ statuses: OPEN_WORK_ITEM_STATUSES, portfolioOwnerId: scope.portfolioOwnerId, limit: 100 }),
-    db.policy.findMany({
-      where: {
-        AND: [
-          policyOperationalWhere(scope.portfolioOwnerId),
-          { status: "ACTIVE", endDate: { lte: businessAddDays(today, 30) } },
-        ],
-      },
-      select: { id: true, policyNumber: true, endDate: true, client: { select: { fullName: true } }, insurer: { select: { name: true } } },
-      orderBy: [{ endDate: "asc" }, { id: "asc" }],
-      take: 50,
-    }),
+    loadEligibleRenewalPolicies({ endDate: { lte: nextThirty } }, scope.portfolioOwnerId),
     db.claim.findMany({
       where: { AND: [claimOperationalWhere(scope.portfolioOwnerId), { status: { notIn: ["RESOLVED", "CANCELLED"] } }] },
       select: { id: true, folio: true, claimType: true, status: true, incidentDate: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } },
@@ -119,8 +116,13 @@ export default async function OperationsPage({
   const dueToday = workItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate).getTime() === today.getTime());
   const upcoming = workItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate) > today && businessStartOfDay(item.dueDate) <= nextSeven);
   const unscheduled = workItems.filter((item) => !item.dueDate || businessStartOfDay(item.dueDate) > nextSeven);
-  const overdueRenewals = renewals.filter((policy) => businessStartOfDay(policy.endDate) < today);
-  const upcomingRenewals = renewals.filter((policy) => businessStartOfDay(policy.endDate) >= today);
+  const renewalCount = renewalPolicies.length;
+  const overdueRenewalCount = renewalPolicies.filter((policy) => businessStartOfDay(policy.endDate) < today).length;
+  const upcomingRenewalCount = renewalPolicies.filter((policy) => businessStartOfDay(policy.endDate) >= today).length;
+  const renewals = renewalPolicies.slice(
+    view === "renewals" ? (page - 1) * RENEWAL_PAGE_SIZE : 0,
+    view === "renewals" ? page * RENEWAL_PAGE_SIZE : 8,
+  );
   const pageCopy = {
     all: {
       title: "Operación",
@@ -132,7 +134,7 @@ export default async function OperationsPage({
     },
     renewals: {
       title: "Renovaciones",
-      description: "Pólizas vencidas y próximas a vencer listas para seguimiento.",
+      description: "Pólizas activas con renovación pendiente, separadas entre vencidas y próximas.",
     },
     "renewal-board": {
       title: "Tablero de renovaciones",
@@ -185,7 +187,7 @@ export default async function OperationsPage({
           <section className="grid gap-3 sm:grid-cols-3" aria-label="Resumen operativo">
             {[
               { label: "Pendientes abiertos", value: workItems.length, href: "/operations?view=pending", icon: ClipboardList },
-              { label: "Renovaciones próximas", value: renewals.length, href: "/operations?view=renewals", icon: ShieldCheck },
+              { label: "Renovaciones pendientes", value: renewalCount, href: "/operations?view=renewals", icon: ShieldCheck },
               { label: "Siniestros abiertos", value: claims.length, href: "/operations?view=claims", icon: AlertTriangle },
             ].map(({ label, value, href, icon: Icon }) => (
               <Link key={label} href={href} className="rounded-xl bg-card p-4 ring-1 ring-foreground/10 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -197,7 +199,7 @@ export default async function OperationsPage({
           <div className="grid gap-4 lg:grid-cols-2">
             <WorkItemColumn title="Requieren atención" count={overdue.length + dueToday.length} items={[...overdue, ...dueToday].slice(0, 8)} tone="text-destructive" />
             <Card size="sm" className="gap-0 py-0">
-              <CardHeader className="border-b py-3"><CardTitle>Renovaciones próximas</CardTitle></CardHeader>
+              <CardHeader className="border-b py-3"><CardTitle>Renovaciones pendientes</CardTitle></CardHeader>
               <CardContent className="px-0">
                 {renewals.slice(0, 8).map((policy) => (
                   <div key={policy.id} className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b px-4 py-2.5 last:border-b-0">
@@ -226,13 +228,13 @@ export default async function OperationsPage({
       {view === "renewals" ? (
         <div className="space-y-4">
           <section className="grid gap-3 sm:grid-cols-2" aria-label="Resumen de renovaciones">
-            <Card size="sm"><CardHeader><CardTitle>Vencidas</CardTitle></CardHeader><CardContent className="font-mono text-2xl font-semibold text-destructive">{overdueRenewals.length}</CardContent></Card>
-            <Card size="sm"><CardHeader><CardTitle>Próximos 30 días</CardTitle></CardHeader><CardContent className="font-mono text-2xl font-semibold text-amber-700 dark:text-amber-300">{upcomingRenewals.length}</CardContent></Card>
+            <Card size="sm"><CardHeader><CardTitle>Renovaciones vencidas sin resolver</CardTitle></CardHeader><CardContent className="font-mono text-2xl font-semibold text-destructive">{overdueRenewalCount}</CardContent></Card>
+            <Card size="sm"><CardHeader><CardTitle>Próximos 30 días</CardTitle></CardHeader><CardContent className="font-mono text-2xl font-semibold text-amber-700 dark:text-amber-300">{upcomingRenewalCount}</CardContent></Card>
           </section>
           <Card className="gap-0 py-0">
-            <CardHeader className="border-b py-4"><CardTitle className="flex items-center gap-2"><CalendarClock className="size-4" />Renovaciones urgentes</CardTitle></CardHeader>
+            <CardHeader className="border-b py-4"><CardTitle className="flex items-center gap-2"><CalendarClock className="size-4" />Renovaciones pendientes</CardTitle></CardHeader>
             <CardContent className="px-0">
-              {renewals.length ? (
+              {renewalCount > 0 && renewals.length > 0 ? (
                 <Table>
                   <TableHeader>
                     <TableRow><TableHead>Póliza</TableHead><TableHead>Cliente</TableHead><TableHead>Aseguradora</TableHead><TableHead>Vencimiento</TableHead><TableHead className="text-right">Acción</TableHead></TableRow>
@@ -249,7 +251,16 @@ export default async function OperationsPage({
                     ))}
                   </TableBody>
                 </Table>
-              ) : <p className="p-8 text-center text-sm text-muted-foreground">No hay renovaciones urgentes.</p>}
+              ) : <p className="p-8 text-center text-sm text-muted-foreground">{renewalCount ? "No hay pólizas en esta página." : "No hay renovaciones pendientes."}</p>}
+              {renewalCount ? (
+                <Pagination
+                  page={page}
+                  pageSize={RENEWAL_PAGE_SIZE}
+                  total={renewalCount}
+                  basePath="/operations"
+                  searchParams={{ view: "renewals" }}
+                />
+              ) : null}
             </CardContent>
           </Card>
         </div>

@@ -71,7 +71,7 @@ export function buildFocusItems(data: TodayData): FocusItemModel[] {
     category: "Recibo vencido",
     title: receipt.client.fullName,
     context: `${receipt.policy.policyNumber} · ${receipt.receiptNumber}`,
-    dueText: `Vencido ${formatRelativeDate(receipt.dueDate)}`,
+    dueText: `Vencimiento: ${formatDate(receipt.dueDate)} · Vencido ${formatRelativeDate(receipt.dueDate)}`,
     amount: receipt.amount,
     currency: receipt.currency,
     href: "/receipts?tab=cobrar",
@@ -87,7 +87,7 @@ export function buildFocusItems(data: TodayData): FocusItemModel[] {
     category: "Recibo vence hoy",
     title: receipt.client.fullName,
     context: `${receipt.policy.policyNumber} · ${receipt.receiptNumber}`,
-    dueText: "Vence hoy",
+    dueText: `Vencimiento: ${formatDate(receipt.dueDate)} · Vence hoy`,
     amount: receipt.amount,
     currency: receipt.currency,
     href: "/receipts?tab=cobrar",
@@ -103,7 +103,9 @@ export function buildFocusItems(data: TodayData): FocusItemModel[] {
     category: "Pendiente atrasado",
     title: workItem.title,
     context: workItem.client?.fullName ?? workItem.folio,
-    dueText: workItem.dueDate ? `Vencido ${formatRelativeDate(workItem.dueDate)}` : `Inició hace ${daysSince(workItem.startDate)} días`,
+    dueText: workItem.dueDate
+      ? `Fecha límite: ${formatDate(workItem.dueDate)} · Vencido ${formatRelativeDate(workItem.dueDate)}`
+      : `Inició hace ${daysSince(workItem.startDate)} días`,
     href: getWorkItemHref(workItem),
     actionLabel: workItem.sourceType === "Renewal" ? "Ver póliza" : "Abrir pendiente",
   }));
