@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { connection } from "next/server";
-import { ArrowRight, BadgeCheck, CircleAlert, HandCoins, TrendingUp } from "lucide-react";
+import { ArrowRight, BadgeCheck, CircleAlert, HandCoins, TrendingUp } from "@/components/icons";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowUpRight, FileSignature, FileUp, Plus, ReceiptText } from "lucide-react";
+import { ArrowUpRight, FileSignature, FileUp, Plus, ReceiptText } from "@/components/icons";
 import { getSession } from "@/lib/auth";
 import { getTodayDashboardData, getTodayData } from "@/lib/dashboard-queries";
 import { formatDate, formatRelativeDate } from "@/lib/dates";

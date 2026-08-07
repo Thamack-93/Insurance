@@ -1,7 +1,7 @@
 import { reconstructPdfTextFromTextContent } from "@/lib/pdf-text-reconstruction";
 
 export async function extractPdfTextFromFile(file: File) {
-  const pdfjs = await import("pdfjs-dist/webpack.mjs");
+  const pdfjs = await import("pdfjs-dist/build/pdf.min.mjs");
   const loadingTask = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
   const pdf = await loadingTask.promise;
 

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowUpRight, BellRing, CalendarDays, CheckCircle2, ChevronRight, CircleAlert, CircleDollarSign, Clock3, FileText, ReceiptText, RefreshCw, ShieldCheck } from "lucide-react";
+import { ArrowUpRight, BellRing, CalendarDays, CheckCircle2, ChevronRight, CircleAlert, CircleDollarSign, Clock3, FileText, ReceiptText, RefreshCw, ShieldCheck } from "@/components/icons";
 import { formatCurrency } from "@/lib/money";
 import type { FocusItemModel, OperationalMetricModel, SemanticTone } from "@/lib/today-operations";
 import { cn } from "@/lib/utils";

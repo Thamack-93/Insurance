@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CircleDollarSign, FileText, History, ReceiptText, CalendarClock } from "lucide-react";
+import { ArrowLeft, CircleDollarSign, FileText, History, ReceiptText, CalendarClock } from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
 import { NoraContextButton } from "@/components/assistant/nora-session-provider";
 import { AuditByline } from "@/components/audit/audit-byline";

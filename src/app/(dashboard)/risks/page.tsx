@@ -8,7 +8,7 @@ import {
   FolderKanban,
   ShieldAlert,
   Users,
-} from "lucide-react";
+} from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { SeverityBadge } from "@/components/badges/status-badge";

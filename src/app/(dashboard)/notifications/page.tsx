@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Bell, CheckCheck } from "lucide-react";
+import { ArrowRight, Bell, CheckCheck } from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
 import { SectionCard } from "@/components/pages-secondary/panels";
 import { EmptyState } from "@/components/empty-states/empty-state";

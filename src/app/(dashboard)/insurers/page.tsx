@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Building2, FileText, Plus, ShieldCheck, TrendingUp } from "lucide-react";
+import { ArrowRight, Building2, FileText, Plus, ShieldCheck, TrendingUp } from "@/components/icons";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";

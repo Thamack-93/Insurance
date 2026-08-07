@@ -21,9 +21,17 @@ Replit injects its own `DATABASE_URL` (local Postgres) at runtime, silently over
 
 **Rule:** Server Components must not import from `lucide-react` directly. Use `@/components/icons` instead.
 
-**Why:** lucide-react v1.x calls `react.createContext` at module evaluation time. Turbopack's SSR bundler uses a stripped React that lacks `createContext`, causing a runtime TypeError. The `"use client"` re-export wrapper in `src/components/icons.tsx` moves the evaluation to the client bundle.
+**Why:** lucide-react calls `react.createContext` at module evaluation time. Turbopack's SSR bundler uses a stripped React that lacks `createContext`, causing a runtime TypeError. The `"use client"` re-export wrapper in `src/components/icons.tsx` moves the evaluation to the client bundle.
 
-**How to apply:** Any new icon needed in a Server Component must be added to `src/components/icons.tsx`.
+**How to apply:** Any new icon needed in a Server Component must be added to `src/components/icons.tsx`. All existing Server Components across `src/app/(dashboard)/` and `src/components/` have already been fixed to import from `@/components/icons`. `import type { LucideIcon }` is also exported from `icons.tsx`.
+
+## mermaid / pdfjs-dist missing modules
+
+**Rule:** If `@streamdown/mermaid` gives "Can't resolve 'mermaid'" or `pdfjs-dist/webpack.mjs` gives "module not found", the packages need reinstalling and the import path needs fixing.
+
+**Why:** `mermaid` can be installed without `dist/mermaid.core.mjs` (corrupt npm install). `pdfjs-dist` v5 removed the `webpack.mjs` entry — the correct import is `pdfjs-dist/build/pdf.min.mjs`.
+
+**How to apply:** Run `npm install mermaid pdfjs-dist --save` to fix mermaid. The pdfjs fix is in `src/lib/pdf-text-extraction.browser.ts` (already applied).
 
 ## allowedDevOrigins
 

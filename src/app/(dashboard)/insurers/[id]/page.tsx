@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Building2, FileText, History, Pencil, ShieldCheck, TrendingUp } from "lucide-react";
+import { ArrowLeft, Building2, FileText, History, Pencil, ShieldCheck, TrendingUp } from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";

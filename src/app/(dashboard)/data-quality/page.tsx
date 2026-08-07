@@ -9,7 +9,7 @@ import {
   ReceiptText,
   ShieldAlert,
   Users,
-} from "lucide-react";
+} from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { Badge } from "@/components/ui/badge";

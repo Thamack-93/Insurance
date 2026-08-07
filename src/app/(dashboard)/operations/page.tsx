@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, CalendarClock, CheckCircle2, ClipboardList, Plus, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CalendarClock, CheckCircle2, ClipboardList, Plus, ShieldCheck } from "@/components/icons";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { PageHeader } from "@/components/layout/page-header";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";

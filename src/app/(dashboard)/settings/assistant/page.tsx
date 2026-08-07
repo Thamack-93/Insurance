@@ -11,7 +11,7 @@ import { getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
 import { listAssistantAiRuns } from "@/lib/assistant-ai-runs";
 import { formatDate } from "@/lib/dates";
 import { AssistantReportActionButtons } from "@/components/assistant/report-action-buttons";
-import { Gauge, ShieldCheck } from "lucide-react";
+import { Gauge, ShieldCheck } from "@/components/icons";
 import {
   archiveAssistantReportAction,
   closeAssistantReportAction,

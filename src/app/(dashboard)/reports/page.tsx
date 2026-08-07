@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BarChart3, CalendarClock, CircleDollarSign, ClipboardList, Settings2, ShieldAlert } from "lucide-react";
+import { BarChart3, CalendarClock, CircleDollarSign, ClipboardList, Settings2, ShieldAlert } from "@/components/icons";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard } from "@/components/pages-secondary/panels";

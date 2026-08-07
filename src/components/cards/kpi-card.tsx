@@ -1,6 +1,6 @@
 import Link from "next/link";
-import type { LucideIcon } from "lucide-react";
-import { ArrowUpRight } from "lucide-react";
+import type { LucideIcon } from "@/components/icons";
+import { ArrowUpRight } from "@/components/icons";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 

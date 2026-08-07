@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Calculator, Clock, Plus, TrendingUp, CheckCircle } from "lucide-react";
+import { ArrowRight, Calculator, Clock, Plus, TrendingUp, CheckCircle } from "@/components/icons";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";

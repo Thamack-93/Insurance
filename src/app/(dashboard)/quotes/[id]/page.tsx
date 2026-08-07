@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, BadgeCheck, Calculator, CalendarClock, FileText, Pencil } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Calculator, CalendarClock, FileText, Pencil } from "@/components/icons";
 import { DeleteQuoteButton } from "@/components/quotes/delete-quote-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { AuditByline } from "@/components/audit/audit-byline";

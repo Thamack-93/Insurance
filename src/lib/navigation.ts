@@ -1,4 +1,4 @@
-import type { LucideIcon } from "lucide-react";
+import type { LucideIcon } from "@/components/icons";
 import {
   BarChart3,
   CircleDollarSign,
@@ -9,7 +9,7 @@ import {
   ShieldCheck,
   UserRound,
   Users,
-} from "lucide-react";
+} from "@/components/icons";
 
 export type GlobalNavigationId =
   | "today"

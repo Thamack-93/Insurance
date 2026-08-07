@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import type { LucideIcon } from "lucide-react";
+import type { LucideIcon } from "@/components/icons";
 import {
   Activity,
   Ban,
@@ -10,7 +10,7 @@ import {
   ShieldAlert,
   TimerReset,
   ArrowRight,
-} from "lucide-react";
+} from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
 import { SectionCard } from "@/components/pages-secondary/panels";
 import { EmptyState } from "@/components/empty-states/empty-state";

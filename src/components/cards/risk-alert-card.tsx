@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowUpRight } from "lucide-react";
+import { AlertTriangle, ArrowUpRight } from "@/components/icons";
 import { SeverityBadge } from "@/components/badges/status-badge";
 
 export function RiskAlertCard({

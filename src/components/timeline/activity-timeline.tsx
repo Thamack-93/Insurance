@@ -10,8 +10,8 @@ import {
   Siren,
   Trash2,
   Wallet,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+} from "@/components/icons";
+import type { LucideIcon } from "@/components/icons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { getDb } from "@/lib/db";
 import { cn } from "@/lib/utils";

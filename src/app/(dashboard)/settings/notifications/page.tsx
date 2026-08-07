@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, BellRing } from "lucide-react";
+import { ArrowLeft, BellRing } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";

@@ -1,7 +1,7 @@
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard } from "@/components/pages-secondary/panels";
 import { Button } from "@/components/ui/button";
-import { BellRing, Bot, Database, Globe2, ArrowRight, Settings2, KeyRound, Users } from "lucide-react";
+import { BellRing, Bot, Database, Globe2, ArrowRight, Settings2, KeyRound, Users } from "@/components/icons";
 import { getCurrentUser } from "@/lib/auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { today, formatDate } from "@/lib/dates";
