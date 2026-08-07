@@ -27,6 +27,7 @@
     "check:navigation": "node scripts/check-navigation-reachability.mjs",
     "list:payments": "tsx scripts/list-next-payments.ts",
     "list:renewals": "tsx scripts/list-renewals.ts",
+    "audit:renewals": "tsx scripts/audit-renewal-consistency.ts",
     "list:work-items": "tsx scripts/list-open-work-items.ts",
     "reconcile:receipts": "tsx scripts/reconcile-receipt-statuses.ts",
     "maintenance:historical-receipts": "tsx scripts/apply-historical-receipts.ts",
