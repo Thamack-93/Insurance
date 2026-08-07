@@ -114,13 +114,13 @@ export default async function QuotesPage({
           description="Seguimiento de propuestas, cotizaciones activas y tasas de conversión."
           actions={
             <>
-              <Button asChild variant="outline" className="rounded-full">
+              <Button asChild variant="outline">
                 <Link href="/quotes/new">
                   <Plus className="mr-2 size-4" />
                   Nueva cotización
                 </Link>
               </Button>
-              <Button asChild className="rounded-full">
+              <Button asChild>
                 <Link href="/policies">
                   Ver pólizas
                   <ArrowRight className="ml-2 size-4" />
@@ -181,8 +181,7 @@ export default async function QuotesPage({
                   icon={Calculator}
                   title="Aún no hay cotizaciones"
                   description="Captura tu primera propuesta para arrancar el embudo comercial."
-                  action="Nueva cotización"
-                  actionHref="/quotes/new"
+                  action={{ label: "Nueva cotización", href: "/quotes/new" }}
                 />
               </div>
             )
@@ -192,12 +191,7 @@ export default async function QuotesPage({
                   icon={Calculator}
                   title="Página fuera de rango"
                   description="No hay cotizaciones en esta página. Vuelve al inicio del listado."
-                  action="Volver al inicio"
-                  actionHref={buildTableHref("/quotes", params, {
-                    q: query || null,
-                    sort: sortKey ?? null,
-                    dir: direction ?? null,
-                  })}
+                  action={{ label: "Volver al inicio", href: buildTableHref("/quotes", params, { q: query || null, sort: sortKey ?? null, dir: direction ?? null, }) }}
                 />
               </div>
             ) : (

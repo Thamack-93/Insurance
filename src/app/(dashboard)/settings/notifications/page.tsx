@@ -41,7 +41,7 @@ export default async function NotificationSettingsPage() {
           title="Notificaciones"
           description="Prepara Telegram, revisa el resumen diario y confirma el estado del cron de Telegram."
           actions={
-            <Button asChild variant="outline" className="rounded-full">
+            <Button asChild variant="outline">
               <Link href="/settings">
                 <ArrowLeft className="mr-2 size-4" />
                 Volver a configuración
@@ -138,7 +138,7 @@ export default async function NotificationSettingsPage() {
             <CardContent className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
               <span>La sincronización es manual para evitar efectos secundarios al abrir la página.</span>
               <form action={syncWebhookFormAction}>
-                <Button type="submit" variant="outline" className="rounded-full">Sincronizar webhook</Button>
+                <Button type="submit" variant="outline">Sincronizar webhook</Button>
               </form>
             </CardContent>
           </Card>

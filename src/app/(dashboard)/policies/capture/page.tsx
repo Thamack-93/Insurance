@@ -15,7 +15,7 @@ export default async function PolicyPdfCapturePage() {
           title="Capturar póliza desde PDF"
           description="Sube la carátula, revisa la sugerencia de renovación y confirma para crear la nueva vigencia."
           actions={
-            <Button asChild variant="outline" className="rounded-full bg-card/70">
+            <Button asChild variant="outline" className="bg-card/70">
               <Link href="/policies">
                 <ArrowLeftRight className="mr-2 size-4" />
                 Volver a pólizas

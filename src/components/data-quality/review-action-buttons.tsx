@@ -61,7 +61,7 @@ export function ReviewActionButtons({
           type="button"
           size="sm"
           variant="outline"
-          className="rounded-full"
+
           disabled={isPending}
           onClick={() => run(approveAction, "Aprobado.")}
         >
@@ -73,7 +73,7 @@ export function ReviewActionButtons({
           type="button"
           size="sm"
           variant="outline"
-          className="rounded-full"
+
           disabled={isPending}
           onClick={() => run(denyAction, "Denegado.")}
         >
@@ -85,7 +85,7 @@ export function ReviewActionButtons({
           type="button"
           size="sm"
           variant="outline"
-          className="rounded-full"
+
           disabled={isPending}
           onClick={() => run(suppressAction, "Suprimido.")}
         >
@@ -97,14 +97,14 @@ export function ReviewActionButtons({
           type="button"
           size="sm"
           variant="outline"
-          className="rounded-full"
+
           disabled={isPending}
           onClick={() => run(reopenAction, "Reabierto.")}
         >
           {reopenLabel}
         </Button>
       ) : null}
-      <Button asChild type="button" size="sm" variant="ghost" className="rounded-full">
+      <Button asChild type="button" size="sm" variant="ghost">
         <Link href={modifyHref}>{modifyLabel}</Link>
       </Button>
     </div>

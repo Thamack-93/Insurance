@@ -32,7 +32,7 @@ export default async function NewPaymentPage() {
           title="Registrar pago"
           description="Selecciona un recibo pendiente y registra su pago."
           actions={
-            <Button asChild variant="outline" className="rounded-full bg-card/70">
+            <Button asChild variant="outline" className="bg-card/70">
               <Link href="/receipts">
                 <ArrowLeft className="mr-2 size-4" />
                 Volver a recibos

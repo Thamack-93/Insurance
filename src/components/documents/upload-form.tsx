@@ -185,7 +185,7 @@ export function UploadForm({
       </CardHeader>
       <CardContent className="space-y-6">
         {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+          <div className="rounded-md border border-red-200 bg-red-50 p-3">
             <div className="flex items-center gap-2 text-red-800">
               <AlertCircle className="size-4" />
               <span className="text-sm">{error}</span>

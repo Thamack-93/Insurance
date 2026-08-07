@@ -130,14 +130,14 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           actions={
             <div className="flex items-center gap-2">
               <NoraContextButton context={{ type: "client", id: client.id }} />
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href={`/clients/${id}/edit`}>
                   <Pencil className="mr-2 size-4" />
                   Editar
                 </Link>
               </Button>
               {isAdmin ? <DeleteClientButton id={id} name={client.fullName} /> : null}
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/clients">Volver a clientes</Link>
               </Button>
             </div>
@@ -441,7 +441,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         >
           {activity.length === 0 ? (
             <div className="p-4">
-              <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
+              <div className="rounded-xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
                 <History className="mx-auto mb-2 size-5 text-muted-foreground" />
                 Sin actividad registrada para este cliente todavía.
               </div>

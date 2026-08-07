@@ -39,12 +39,22 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  /*
+   * Radius scale — reduced to four steps so components at the same visual
+   * level always share the same corner:
+   *   sm  (4px)  → nested items inside a surface (menu items, checkbox, kbd)
+   *   md  (8px)  → controls (buttons, inputs, selects, tabs, triggers)
+   *   xl  (12px) → containers (cards, dialogs, popovers, panels)
+   *   full       → pills (badges, status chips, avatars, dots)
+   * lg/2xl/3xl are kept as aliases of the control/container steps so legacy
+   * class names can never reintroduce a fifth radius.
+   */
   --radius-sm: 4px;
-  --radius-md: 6px;
+  --radius-md: 8px;
   --radius-lg: 8px;
-  --radius-xl: 10px;
-  --radius-2xl: 14px;
-  --radius-3xl: 16px;
+  --radius-xl: 12px;
+  --radius-2xl: 12px;
+  --radius-3xl: 12px;
   --radius-4xl: 999px;
 }
 
@@ -72,7 +82,7 @@
   --chart-3: #b45309;
   --chart-4: #dc2626;
   --chart-5: #64748b;
-  --radius: 0.5rem;
+  --radius: 8px;
   --sidebar: #0b3540;
   --sidebar-foreground: #a9c6ce;
   --sidebar-primary: #2dd4bf;
@@ -134,7 +144,10 @@
   body {
     @apply bg-background text-foreground antialiased;
     background: var(--background);
-    font-size: 14px;
+    /* Body copy sits at 15px so long sessions stay readable; tables and
+       secondary text stay at text-sm (14px) to keep the hierarchy. */
+    font-size: 15px;
+    line-height: 1.5;
     font-variant-numeric: tabular-nums;
   }
   html {

@@ -13,10 +13,10 @@ export function RiskAlertCard({
   action: string;
 }) {
   return (
-    <div className="group rounded-2xl border bg-card/74 p-4 shadow-sm transition hover:border-primary/20 hover:shadow-md">
+    <div className="group rounded-xl border bg-card/74 p-4 shadow-sm transition hover:border-primary/20 hover:shadow-md">
       <div className="flex items-start justify-between gap-3">
         <div className="flex gap-3">
-          <div className="rounded-2xl bg-amber-50 p-2 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+          <div className="rounded-xl bg-amber-50 p-2 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
             <AlertTriangle className="size-4" />
           </div>
           <div>

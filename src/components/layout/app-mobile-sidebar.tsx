@@ -23,7 +23,7 @@ export function AppMobileSidebar({ isAdmin = false }: { isAdmin?: boolean }) {
             variant="outline"
             size="icon"
             aria-label="Abrir menú de navegación"
-            className="rounded-lg bg-card lg:hidden"
+            className="rounded-md bg-card lg:hidden"
           />
         }
       >
@@ -37,7 +37,7 @@ export function AppMobileSidebar({ isAdmin = false }: { isAdmin?: boolean }) {
           <Link
             href="/today"
             onClick={() => setOpen(false)}
-            className="flex min-h-11 items-center gap-3 rounded-lg px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+            className="flex min-h-11 items-center gap-3 rounded-md px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
           >
             <ShieldCheck className="size-6 shrink-0 text-sidebar-primary" aria-hidden />
             <div>

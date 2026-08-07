@@ -46,7 +46,7 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
               href="/today"
               aria-label="PolicyDesk, ir a Hoy"
               className={cn(
-                "flex min-h-11 items-center gap-3 rounded-lg px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                "flex min-h-11 items-center gap-3 rounded-md px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
                 collapsed && "justify-center px-0",
               )}
             >
@@ -58,7 +58,7 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
                 type="button"
                 onClick={toggleCollapsed}
                 aria-label="Colapsar menú lateral"
-                className="grid size-9 place-items-center rounded-lg text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                className="grid size-9 place-items-center rounded-md text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
               >
                 <ChevronLeft className="size-4" aria-hidden />
               </button>
@@ -73,7 +73,7 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
                     type="button"
                     onClick={toggleCollapsed}
                     aria-label="Expandir menú lateral"
-                    className="mt-2 grid min-h-10 w-full place-items-center rounded-lg text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                    className="mt-2 grid min-h-10 w-full place-items-center rounded-md text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
                   />
                 }
               >

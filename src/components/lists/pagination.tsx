@@ -42,7 +42,7 @@ export function Pagination({
   const nextPage = Math.min(totalPages, safePage + 1);
 
   const baseClass =
-    "inline-flex h-8 items-center gap-1 rounded-full border bg-card px-3 text-xs font-medium text-foreground transition hover:bg-muted/40";
+    "inline-flex h-8 items-center gap-1 rounded-md border bg-card px-3 text-xs font-medium text-foreground transition hover:bg-muted/40";
   const disabledClass = "pointer-events-none opacity-40";
 
   return (

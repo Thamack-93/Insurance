@@ -46,7 +46,7 @@ export function RehabilitateReceiptButton({ receiptId, receiptNumber, amount, cu
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button variant="outline" className="rounded-full bg-card/70" />}>
+      <DialogTrigger render={<Button variant="outline" className="bg-card/70" />}>
         <RotateCcw className="mr-2 size-4" />
         Rehabilitar y pagar
       </DialogTrigger>

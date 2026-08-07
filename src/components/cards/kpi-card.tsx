@@ -31,7 +31,7 @@ export function KpiCard({ title, value, description, href, icon: Icon, tone = "s
               <p className="text-sm font-medium text-muted-foreground">{title}</p>
               <p className="mt-2 font-mono text-2xl font-semibold tracking-tight text-foreground">{value}</p>
             </div>
-            <div className={cn("grid size-9 place-items-center rounded-lg", toneMap[tone])}>
+            <div className={cn("grid size-9 place-items-center rounded-md", toneMap[tone])}>
               <Icon className="size-4" />
             </div>
           </div>

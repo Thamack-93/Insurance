@@ -61,7 +61,7 @@ export function DocumentPreviewDialog({
           <DialogDescription>{mimeType}</DialogDescription>
         </DialogHeader>
 
-        <div className="h-[70vh] overflow-auto rounded-lg border bg-muted/20">
+        <div className="h-[70vh] overflow-auto rounded-md border bg-muted/20">
           {isPdf && open ? (
             <iframe
               src={inlineUrl}

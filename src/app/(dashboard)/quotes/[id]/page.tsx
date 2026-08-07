@@ -52,14 +52,14 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           description={`${quote.policyType} · ${quote.client.fullName}`}
           actions={
             <div className="flex items-center gap-2">
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href={`/quotes/${quote.id}/edit`}>
                   <Pencil className="mr-2 size-4" />
                   Editar
                 </Link>
               </Button>
               <DeleteQuoteButton id={quote.id} label={quote.id.slice(0, 8)} />
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/quotes">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
@@ -110,7 +110,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
                 <span className="text-xs text-muted-foreground">ID: {quote.id.slice(0, 8)}</span>
               </div>
 
-              <div className="rounded-2xl border bg-muted/40 p-4">
+              <div className="rounded-xl border bg-muted/40 p-4">
                 <p className="font-medium text-foreground">Tipo de póliza</p>
                 <p className="mt-1">{policyTypeLabel(quote.policyType)}</p>
                 {quote.notes && (

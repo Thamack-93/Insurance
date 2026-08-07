@@ -104,7 +104,7 @@ function DataTable<TData extends object>({
             value={globalFilter}
             onChange={(event) => setGlobalFilter(event.target.value)}
             placeholder={searchPlaceholder}
-            className="h-9 w-full rounded-lg border border-input bg-background pr-3 pl-9 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/40"
+            className="h-9 w-full rounded-md border border-input bg-background pr-3 pl-9 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/40"
           />
         </div>
         {toolbar ? <div className="flex items-center gap-2">{toolbar}</div> : null}

@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { Command, Sparkles } from "lucide-react";
 import { SearchInput } from "@/components/search/search-input";
-import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { ThemeToggle, type ThemeMode } from "@/components/theme/theme-toggle";
 import { NotificationsBell, type BellNotification } from "@/components/notifications/notifications-bell";
 import { AppMobileSidebar } from "@/components/layout/app-mobile-sidebar";
 import { useNoraSession } from "@/components/assistant/nora-session-provider";
@@ -15,11 +15,13 @@ export function AppTopbar({
   isAdmin = false,
   unreadNotificationCount,
   notifications,
+  initialTheme,
 }: {
   userMenu?: ReactNode;
   isAdmin?: boolean;
   unreadNotificationCount: number;
   notifications: BellNotification[];
+  initialTheme: ThemeMode;
 }) {
   const pathname = usePathname();
   const { openNora } = useNoraSession();
@@ -52,12 +54,12 @@ export function AppTopbar({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <ThemeToggle />
+          <ThemeToggle initialTheme={initialTheme} />
           <button
             type="button"
             onClick={() => openNora()}
             aria-label="Abrir Nora"
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-ai transition-colors hover:bg-ai/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ai transition-colors hover:bg-ai/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Sparkles className="size-4" aria-hidden />
             <span className="hidden sm:inline">Nora</span>

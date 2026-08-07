@@ -80,11 +80,11 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
           actions={
             <>
               <NoraContextButton context={{ type: "workItem", id: workItem.id }} />
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href={`/tasks/${workItem.sourceId ?? workItem.id}/edit`}>Editar pendiente</Link>
               </Button>
               <DeleteWorkItemButton id={workItem.sourceId ?? workItem.id} folio={workItem.folio ?? workItem.sourceId ?? workItem.id} />
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/operations?view=pending">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
@@ -140,7 +140,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
                 </Badge>
               </div>
 
-              <div className="rounded-2xl border bg-muted/40 p-4">
+              <div className="rounded-xl border bg-muted/40 p-4">
                 <p className="font-medium text-foreground">Título</p>
                 <p className="mt-1">{workItem.title}</p>
                 {workItem.description ? (
@@ -206,7 +206,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
               ) : null}
 
               {workItem.notes ? (
-                <div className="rounded-2xl border bg-card/70 p-4 text-sm text-muted-foreground">
+                <div className="rounded-xl border bg-card/70 p-4 text-sm text-muted-foreground">
                   <p className="font-medium text-foreground">Notas internas</p>
                   <p className="mt-1">{workItem.notes}</p>
                 </div>
@@ -265,7 +265,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
 
         <SectionCard title="Comunicación" description="Resumen de interacciones relacionadas.">
           <div className="grid gap-4 p-4 md:grid-cols-2">
-            <div className="rounded-2xl border bg-card/70 p-4">
+            <div className="rounded-xl border bg-card/70 p-4">
               <div className="flex items-center gap-3">
                 <MessageSquare className="size-4 text-muted-foreground" />
                 <p className="font-medium">Estado actual</p>
@@ -278,7 +278,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
                     : "Este pendiente está activo y en seguimiento normal."}
               </p>
             </div>
-            <div className="rounded-2xl border bg-card/70 p-4">
+            <div className="rounded-xl border bg-card/70 p-4">
               <div className="flex items-center gap-3">
                 <CalendarClock className="size-4 text-muted-foreground" />
                 <p className="font-medium">Próximos pasos</p>

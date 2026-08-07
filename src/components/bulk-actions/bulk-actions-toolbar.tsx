@@ -27,7 +27,7 @@ export function BulkActionsToolbar({
   const selectedCount = selectedItems.size;
 
   return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border bg-muted/40 px-4 py-3">
+    <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/40 px-4 py-3">
       <div className="flex items-center gap-3">
         <Badge variant="secondary" className="rounded-full">
           {selectedCount} seleccionados

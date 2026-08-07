@@ -190,13 +190,13 @@ export default async function ReceiptsPage({
         description="Una sola vista para cobrar lo abierto y auditar lo cobrado."
         actions={
           <>
-            <Button asChild variant="outline" className="rounded-full bg-card/70">
+            <Button asChild variant="outline" className="bg-card/70">
               <Link href="/receipts/new">
                 <Plus className="mr-2 size-4" />
                 Nuevo recibo
               </Link>
             </Button>
-            <Button asChild className="rounded-full">
+            <Button asChild>
               <Link href="/payments/new">
                 Registrar pago
                 <ArrowRight className="ml-2 size-4" />
@@ -238,7 +238,7 @@ export default async function ReceiptsPage({
       </section>
 
       <UrlTabs defaultValue={initialTab}>
-        <TabsList className="rounded-lg bg-muted p-1">
+        <TabsList className="rounded-md bg-muted p-1">
           <TabsTrigger value="cobrar" className="rounded-md px-4">
             Por cobrar
           </TabsTrigger>
@@ -295,8 +295,7 @@ export default async function ReceiptsPage({
                     icon={BadgeCheck}
                     title="¡Cartera al día!"
                     description="No hay recibos abiertos por cobrar."
-                    action="Nuevo recibo"
-                    actionHref="/receipts/new"
+                    action={{ label: "Nuevo recibo", href: "/receipts/new" }}
                   />
                 </div>
               )
@@ -306,13 +305,7 @@ export default async function ReceiptsPage({
                   icon={ReceiptText}
                   title="Página fuera de rango"
                   description="No hay recibos en esta página. Vuelve al inicio del listado."
-                  action="Volver al inicio"
-                  actionHref={buildTableHref("/receipts", params, {
-                    tab: "cobrar",
-                    q: query || null,
-                    sort: sortKey ?? null,
-                    dir: direction ?? null,
-                  })}
+                  action={{ label: "Volver al inicio", href: buildTableHref("/receipts", params, { tab: "cobrar", q: query || null, sort: sortKey ?? null, dir: direction ?? null, }) }}
                 />
               </div>
             ) : (
@@ -399,7 +392,7 @@ export default async function ReceiptsPage({
                           currency={payment.currency}
                           paymentMethod={payment.paymentMethod}
                           triggerLabel="Eliminar"
-                          triggerClassName="h-7 rounded-full bg-card/70 px-2.5 text-xs text-destructive hover:text-destructive"
+                          triggerClassName="h-7 bg-card/70 px-2.5 text-xs text-destructive hover:text-destructive"
                         />
                       </TableCell>
                     </TableRow>

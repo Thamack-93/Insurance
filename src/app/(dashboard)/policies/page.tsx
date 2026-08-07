@@ -136,19 +136,19 @@ export default async function PoliciesPage({
           description="Inventario vivo de pólizas, con foco en estado, valor y renovación."
           actions={
             <>
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/policies/new">
                   <Plus className="mr-2 size-4" />
                   Nueva póliza
                 </Link>
               </Button>
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/policies/capture">
                   <FileUp className="mr-2 size-4" />
                   Capturar PDF
                 </Link>
               </Button>
-              <Button asChild className="rounded-full">
+              <Button asChild>
                 <Link href="/portfolio">
                   Portfolio
                   <ArrowRight className="ml-2 size-4" />
@@ -235,8 +235,7 @@ export default async function PoliciesPage({
                   icon={FolderKanban}
                   title="Aún no hay pólizas"
                   description="Registra tu primera póliza para construir el inventario."
-                  action="Nueva póliza"
-                  actionHref="/policies/new"
+                  action={{ label: "Nueva póliza", href: "/policies/new" }}
                 />
               </div>
             )
@@ -246,12 +245,7 @@ export default async function PoliciesPage({
                   icon={FolderKanban}
                   title="Página fuera de rango"
                   description="No hay pólizas en esta página. Vuelve al inicio del listado."
-                  action="Volver al inicio"
-                  actionHref={buildTableHref("/policies", params, {
-                    q: query || null,
-                    status: statusFilter || null,
-                    type: typeFilter || null,
-                  })}
+                  action={{ label: "Volver al inicio", href: buildTableHref("/policies", params, { q: query || null, status: statusFilter || null, type: typeFilter || null, }) }}
                 />
               </div>
           ) : (

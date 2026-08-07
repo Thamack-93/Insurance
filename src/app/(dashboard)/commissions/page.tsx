@@ -105,7 +105,7 @@ export default async function CommissionsPage({
           title="Comisiones y bonos"
           description="Seguimiento de comisiones esperadas, cobradas y vencidas. Los bonos se incorporarán cuando existan datos reales."
           actions={
-            <Button asChild className="rounded-full">
+            <Button asChild>
               <Link href="/reports">
                 Reportes
                 <ArrowRight className="ml-2 size-4" />
@@ -168,12 +168,7 @@ export default async function CommissionsPage({
                 icon={HandCoins}
                 title="Página fuera de rango"
                 description="Vuelve al inicio del listado."
-                action="Volver al inicio"
-                actionHref={buildTableHref("/commissions", params, {
-                  q: query || null,
-                  sort: sortKey ?? null,
-                  dir: direction ?? null,
-                })}
+                action={{ label: "Volver al inicio", href: buildTableHref("/commissions", params, { q: query || null, sort: sortKey ?? null, dir: direction ?? null, }) }}
               />
             </div>
           ) : (

@@ -69,7 +69,7 @@ export function FocusQueueItem({ item }: { item: FocusItemModel }) {
   return (
     <div className="flex flex-col gap-3 border-b px-4 py-4 last:border-b-0 sm:flex-row sm:items-center sm:justify-between sm:gap-5">
       <div className="flex min-w-0 items-start gap-3">
-        <span className={cn("mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg", toneStyles[item.tone].soft, toneStyles[item.tone].text)}><Icon className="size-4" aria-hidden /></span>
+        <span className={cn("mt-0.5 grid size-8 shrink-0 place-items-center rounded-md", toneStyles[item.tone].soft, toneStyles[item.tone].text)}><Icon className="size-4" aria-hidden /></span>
         <div className="min-w-0">
           <SemanticStatusDot tone={item.tone} label={item.category} />
           <p className="mt-1 truncate text-sm font-medium text-foreground">{item.title}</p>
@@ -78,15 +78,15 @@ export function FocusQueueItem({ item }: { item: FocusItemModel }) {
       </div>
       <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
         {item.amount !== undefined ? <span className="font-mono text-sm font-medium">{formatCurrency(item.amount, item.currency)}</span> : null}
-        {item.detailsHref ? <Link href={item.detailsHref} className="inline-flex min-h-10 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{item.detailsLabel ?? "Detalles"}<FileText className="size-3.5" aria-hidden /></Link> : null}
-        <Link href={item.href} className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-primary/25 px-3 text-xs font-medium text-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{item.actionLabel}<ArrowUpRight className="size-3.5" aria-hidden /></Link>
+        {item.detailsHref ? <Link href={item.detailsHref} className="inline-flex min-h-10 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{item.detailsLabel ?? "Detalles"}<FileText className="size-3.5" aria-hidden /></Link> : null}
+        <Link href={item.href} className="inline-flex min-h-10 items-center gap-1 rounded-md border border-primary/25 px-3 text-xs font-medium text-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{item.actionLabel}<ArrowUpRight className="size-3.5" aria-hidden /></Link>
       </div>
     </div>
   );
 }
 
 export function FocusQueue({ items }: { items: FocusItemModel[] }) {
-  return <section aria-labelledby="focus-queue-title" className="rounded-xl border bg-card"><div className="flex items-center justify-between border-b px-4 py-4"><div><h2 id="focus-queue-title" className="text-base font-semibold">Enfoque ahora</h2><p className="mt-1 text-xs text-muted-foreground">Lo que requiere una acción primero.</p></div><Link href="/operations?view=pending" className="inline-flex min-h-10 items-center gap-1 rounded-lg px-2 text-xs text-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Ver pendientes<ChevronRight className="size-3.5" aria-hidden /></Link></div>{items.length ? <div>{items.map((item) => <FocusQueueItem key={item.id} item={item} />)}</div> : <EmptyOperationalState message="Todo el trabajo está dentro de fecha." />}</section>;
+  return <section aria-labelledby="focus-queue-title" className="rounded-xl border bg-card"><div className="flex items-center justify-between border-b px-4 py-4"><div><h2 id="focus-queue-title" className="text-base font-semibold">Enfoque ahora</h2><p className="mt-1 text-xs text-muted-foreground">Lo que requiere una acción primero.</p></div><Link href="/operations?view=pending" className="inline-flex min-h-10 items-center gap-1 rounded-md px-2 text-xs text-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Ver pendientes<ChevronRight className="size-3.5" aria-hidden /></Link></div>{items.length ? <div>{items.map((item) => <FocusQueueItem key={item.id} item={item} />)}</div> : <EmptyOperationalState message="Todo el trabajo está dentro de fecha." />}</section>;
 }
 
 export function OperationalRow({ children }: { children: React.ReactNode }) {

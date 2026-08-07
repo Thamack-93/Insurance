@@ -25,6 +25,18 @@ Replit injects its own `DATABASE_URL` (local Postgres) at runtime, silently over
 
 **How to apply:** Any new icon needed in a Server Component must be added to `src/components/icons.tsx`. All existing Server Components across `src/app/(dashboard)/` and `src/components/` have already been fixed to import from `@/components/icons`. `import type { LucideIcon }` is also exported from `icons.tsx`.
 
+## Missing types usually mean a truncated install, not a missing @types package
+
+**Rule:** when `tsc` reports TS7016 for a package that ships its own types, treat it as a partial extraction
+in `node_modules` and verify the installed tree against the published tarball before doing anything else.
+Never paper over it with `@types/<pkg>` or a bare `declare module '<pkg>';` — that turns the whole library
+into `any`. A genuinely untyped **deep import path** is a separate case: give it a narrow declaration in
+`src/types/` that re-exports the package's real types.
+
+**Why:** this container truncates npm extractions often enough that it should be the first hypothesis. A
+plain reinstall does not fix it, because npm treats the version as satisfied and its cache holds the same
+bad copy — the package directory and cache both have to go first.
+
 ## mermaid / pdfjs-dist missing modules
 
 **Rule:** If `@streamdown/mermaid` gives "Can't resolve 'mermaid'" or `pdfjs-dist/webpack.mjs` gives "module not found", the packages need reinstalling and the import path needs fixing.

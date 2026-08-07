@@ -92,7 +92,7 @@ function ReportList({
               <span>Inicio: {formatDate(new Date(report.firstSignalAt))}</span>
               {report.openedAt ? <span>Apertura: {formatDate(new Date(report.openedAt))}</span> : null}
             </div>
-            <details className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3">
+            <details className="rounded-xl border border-border/70 bg-muted/20 px-4 py-3">
               <summary className="cursor-pointer font-medium">Evidencia y señales ({report.signalCount})</summary>
               <div className="mt-3 space-y-3">
                 {report.evidence.slice(-10).reverse().map((entry, index) => (
@@ -105,7 +105,7 @@ function ReportList({
                     <p className="mt-1 font-medium">{entry.title ?? "Señal registrada"}</p>
                     {entry.summary ? <p className="mt-1 text-muted-foreground">{entry.summary}</p> : null}
                     {entry.diagnostic ? (
-                      <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                      <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
                         <p className="font-medium">Diagnóstico</p>
                         <div className="mt-1 grid gap-1 sm:grid-cols-2">
                           <span>Código: {entry.diagnostic.code ?? "unknown"}</span>
@@ -191,7 +191,7 @@ function AiRunList({
               <span>Fallo: {run.errorCode ?? "ninguno"}</span>
               <span>Folio corrida: {run.id}</span>
             </div>
-            <details className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3">
+            <details className="rounded-xl border border-border/70 bg-muted/20 px-4 py-3">
               <summary className="cursor-pointer font-medium">Intentos ({run.attempts.length})</summary>
               <div className="mt-3 space-y-3">
                 {run.attempts.map((attempt) => (
@@ -257,7 +257,7 @@ export default async function AssistantSettingsPage() {
         description="Aquí viven los incidentes y sugerencias que el asistente va acumulando por tema."
         actions={
           <div className="flex flex-wrap gap-2">
-            <Button asChild variant="outline" className="rounded-full"><Link href="/api/admin/assistant/health" target="_blank">Probar conexión</Link></Button>
+            <Button asChild variant="outline"><Link href="/api/admin/assistant/health" target="_blank">Probar conexión</Link></Button>
             <RefreshPageButton label="Actualizar" />
           </div>
         }

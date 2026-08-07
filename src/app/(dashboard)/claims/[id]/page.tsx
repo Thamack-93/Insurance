@@ -60,14 +60,14 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
           actions={
             <div className="flex items-center gap-2">
               <NoraContextButton context={{ type: "claim", id: claim.id }} />
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href={`/claims/${claim.id}/edit`}>
                   <Pencil className="mr-2 size-4" />
                   Editar
                 </Link>
               </Button>
               <DeleteClaimButton id={claim.id} folio={claim.folio} />
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/operations?view=claims">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
@@ -118,7 +118,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
                 <span className="text-xs text-muted-foreground">Folio: {claim.folio}</span>
               </div>
 
-              <div className="rounded-2xl border bg-muted/40 p-4">
+              <div className="rounded-xl border bg-muted/40 p-4">
                 <p className="font-medium text-foreground">Tipo de siniestro</p>
                 <p className="mt-1">{claim.claimType}</p>
                 {claim.description && (
@@ -169,7 +169,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
               </div>
 
               {claim.notes && (
-                <div className="rounded-2xl border bg-card/70 p-4 text-sm text-muted-foreground">
+                <div className="rounded-xl border bg-card/70 p-4 text-sm text-muted-foreground">
                   <p className="font-medium text-foreground">Notas internas</p>
                   <p className="mt-1">{claim.notes}</p>
                 </div>
@@ -232,7 +232,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
         >
           {activity.length === 0 ? (
             <div className="p-4">
-              <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
+              <div className="rounded-xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
                 <History className="mx-auto mb-2 size-5 text-muted-foreground" />
                 Sin actividad registrada para este siniestro todavía.
               </div>

@@ -118,10 +118,10 @@ export default async function ClientsPage({
           description="Mapa de clientes, exposición de cartera y actividad operativa asociada."
           actions={
             <>
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/clients/new">Nuevo cliente</Link>
               </Button>
-              <Button asChild className="rounded-full">
+              <Button asChild>
                 <Link href="/policies">
                   Ver pólizas
                   <ArrowRight className="ml-2 size-4" />
@@ -210,8 +210,7 @@ export default async function ClientsPage({
                   icon={Users2}
                   title="Aún no hay clientes"
                   description="Crea tu primer cliente para empezar a operar la cartera."
-                  action="Nuevo cliente"
-                  actionHref="/clients/new"
+                  action={{ label: "Nuevo cliente", href: "/clients/new" }}
                 />
               </div>
             )
@@ -221,12 +220,7 @@ export default async function ClientsPage({
                 icon={Users2}
                 title="Página fuera de rango"
                 description="No hay clientes en esta página. Vuelve al inicio del listado."
-                action="Volver al inicio"
-                actionHref={buildTableHref("/clients", params, {
-                  q: query || null,
-                  status: statusFilter || null,
-                  type: typeFilter || null,
-                })}
+                action={{ label: "Volver al inicio", href: buildTableHref("/clients", params, { q: query || null, status: statusFilter || null, type: typeFilter || null, }) }}
               />
             </div>
           ) : (

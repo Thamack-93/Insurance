@@ -95,7 +95,7 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
             <CancelReceiptOnlyButton
               id={receipt.id}
               receiptNumber={receipt.receiptNumber}
-              triggerClassName="rounded-full border-destructive/40 bg-card/80 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              triggerClassName="border-destructive/40 bg-card/80 text-destructive hover:bg-destructive/10 hover:text-destructive"
             />
           }
         />

@@ -12,7 +12,7 @@ export function ListLoading() {
         </header>
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {Array.from({ length: 4 }).map((_, idx) => (
-            <Skeleton key={idx} className="h-28 rounded-2xl" />
+            <Skeleton key={idx} className="h-28 rounded-xl" />
           ))}
         </section>
         <SectionSkeleton rows={6} />

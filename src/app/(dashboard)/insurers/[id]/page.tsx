@@ -71,7 +71,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
             <div className="flex items-center gap-2">
               {isAdmin ? (
                 <>
-                  <Button asChild variant="outline" className="rounded-full bg-card/70">
+                  <Button asChild variant="outline" className="bg-card/70">
                     <Link href={`/insurers/${id}/edit`}>
                       <Pencil className="mr-2 size-4" />
                       Editar
@@ -80,7 +80,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
                   <DeleteInsurerButton id={id} name={insurer.name} />
                 </>
               ) : null}
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/insurers">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
@@ -171,7 +171,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
               )}
 
               {insurer.portalUrl && (
-                <Button asChild variant="outline" className="w-full rounded-full">
+                <Button asChild variant="outline" className="w-full">
                   <a href={insurer.portalUrl} target="_blank" rel="noopener noreferrer">
                     Acceder al portal
                   </a>
@@ -306,7 +306,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
         >
           {activity.length === 0 ? (
             <div className="p-4">
-              <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
+              <div className="rounded-xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
                 <History className="mx-auto mb-2 size-5 text-muted-foreground" />
                 Sin actividad registrada para esta aseguradora todavía.
               </div>

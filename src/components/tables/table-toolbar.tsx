@@ -132,7 +132,7 @@ export function TableToolbar({
           <ColumnFilter key={filter.key} filterKey={filter.key} label={filter.label} options={filter.options} placeholder={filter.placeholder ?? filter.label} />
         ))}
         {hasSearch || activeFilters.length > 0 || hasSort ? (
-          <Button type="button" variant="outline" className="rounded-full" onClick={clearAll}>
+          <Button type="button" variant="outline" onClick={clearAll}>
             {clearLabel}
           </Button>
         ) : null}
@@ -140,7 +140,7 @@ export function TableToolbar({
       {tableControls || actions ? <div className="flex flex-wrap items-center gap-2">
         {tableControls ? <>
         <DropdownMenu>
-            <DropdownMenuTrigger render={<Button type="button" variant="outline" size="sm" className="rounded-full" onClick={inspectTable} />}>
+            <DropdownMenuTrigger render={<Button type="button" variant="outline" size="sm" onClick={inspectTable} />}>
               <Columns3 className="mr-2 size-4" /> Columnas
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
@@ -160,10 +160,10 @@ export function TableToolbar({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
-        <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={cycleDensity} title={`Densidad: ${density}`}>
+        <Button type="button" variant="outline" size="sm" onClick={cycleDensity} title={`Densidad: ${density}`}>
           <Rows3 className="mr-2 size-4" /> Densidad
         </Button>
-        <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={exportCurrentPage}>
+        <Button type="button" variant="outline" size="sm" onClick={exportCurrentPage}>
           <Download className="mr-2 size-4" /> CSV
         </Button>
         </> : null}

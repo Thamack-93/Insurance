@@ -647,7 +647,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
           </CardHeader>
           <CardContent className="space-y-4 p-5">
             {error ? (
-              <div className="flex items-start gap-3 rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+              <div className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
                 <AlertCircle className="mt-0.5 size-4 shrink-0" />
                 <p>{error}</p>
               </div>
@@ -671,7 +671,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
             </div>
 
             <div className="flex gap-2">
-              <Button type="button" onClick={analyzeFile} disabled={!file || isAnalyzing || isConfirming} className="rounded-full">
+              <Button type="button" onClick={analyzeFile} disabled={!file || isAnalyzing || isConfirming}>
                 {isAnalyzing ? (
                   <>
                     <RefreshCw className="mr-2 size-4 animate-spin" />
@@ -684,12 +684,12 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
                   </>
                 )}
               </Button>
-              <Button type="button" variant="outline" className="rounded-full bg-card/70" onClick={clearAll} disabled={isAnalyzing || isConfirming}>
+              <Button type="button" variant="outline" className="bg-card/70" onClick={clearAll} disabled={isAnalyzing || isConfirming}>
                 Limpiar
               </Button>
             </div>
 
-            <div className="rounded-2xl border border-dashed border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+            <div className="rounded-xl border border-dashed border-border bg-muted/30 p-4 text-sm text-muted-foreground">
               El PDF no se adjunta como documento. Solo se usa para capturar, revisar y crear la póliza nueva.
             </div>
           </CardContent>
@@ -734,7 +734,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
           </CardHeader>
           <CardContent className="space-y-4 p-5">
             {error ? (
-              <div className="flex items-start gap-3 rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+              <div className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
                 <AlertCircle className="mt-0.5 size-4 shrink-0" />
                 <p>{error}</p>
               </div>
@@ -758,7 +758,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
             </div>
 
             <div className="flex gap-2">
-              <Button type="button" onClick={analyzeFile} disabled={!file || isAnalyzing || isConfirming} className="rounded-full">
+              <Button type="button" onClick={analyzeFile} disabled={!file || isAnalyzing || isConfirming}>
                 {isAnalyzing ? (
                   <>
                     <RefreshCw className="mr-2 size-4 animate-spin" />
@@ -771,12 +771,12 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
                   </>
                 )}
               </Button>
-              <Button type="button" variant="outline" className="rounded-full bg-card/70" onClick={clearAll} disabled={isAnalyzing || isConfirming}>
+              <Button type="button" variant="outline" className="bg-card/70" onClick={clearAll} disabled={isAnalyzing || isConfirming}>
                 Limpiar
               </Button>
             </div>
 
-            <div className="rounded-2xl border border-dashed border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+            <div className="rounded-xl border border-dashed border-border bg-muted/30 p-4 text-sm text-muted-foreground">
               El PDF no se adjunta como documento. Solo se usa para capturar, revisar y crear la póliza nueva.
             </div>
           </CardContent>
@@ -795,7 +795,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
             </CardHeader>
             <CardContent className="space-y-6 p-5">
               {preview?.warnings.length ? (
-                <div className="space-y-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
+                <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
                   {preview.warnings.map((warning) => (
                     <p key={warning}>{warning}</p>
                   ))}
@@ -803,7 +803,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
               ) : null}
 
               {preview?.aiReview ? (
-                <div className="space-y-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-100">
+                <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-100">
                   <div>
                     <p className="font-medium">Revisión IA</p>
                     <p className="mt-1">{preview.aiReview.summary}</p>
@@ -835,7 +835,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
               ) : null}
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border bg-muted/30 p-4">
+                <div className="rounded-xl border bg-muted/30 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Nueva póliza</p>
                   <p className="mt-1 text-lg font-semibold">{draft.policyNumber || "Sin detectar"}</p>
                   <p className="mt-1 text-sm text-muted-foreground">
@@ -843,7 +843,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
                   </p>
                   <p className="mt-1 text-sm text-muted-foreground">Origen: {selectedSourcePolicyLabel || draft.sourcePolicyNumber || "Sin sugerencia"}</p>
                 </div>
-                <div className="rounded-2xl border bg-muted/30 p-4">
+                <div className="rounded-xl border bg-muted/30 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Confianza general</p>
                   <p className="mt-1 text-lg font-semibold">
                     {selectedSourcePolicyId ? "Póliza origen resuelta" : "Falta elegir póliza origen"}
@@ -987,7 +987,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
                         type="button"
                         variant="outline"
                         onClick={() => openLookup("policy")}
-                        className="shrink-0 rounded-full"
+                        className="shrink-0"
                       >
                         <Search className="mr-2 size-4" />
                         Buscar
@@ -1001,15 +1001,15 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
                 {receiptPlan.length > 0 ? (
                   <div className="space-y-3">
                     <div className="grid gap-3 sm:grid-cols-3">
-                      <div className="rounded-2xl border bg-muted/30 p-4">
+                      <div className="rounded-xl border bg-muted/30 p-4">
                         <p className="text-xs uppercase tracking-wide text-muted-foreground">Total recibos</p>
                         <p className="mt-1 text-lg font-semibold">{formatCurrency(receiptPlanTotal, draft.currency)}</p>
                       </div>
-                      <div className="rounded-2xl border bg-muted/30 p-4">
+                      <div className="rounded-xl border bg-muted/30 p-4">
                         <p className="text-xs uppercase tracking-wide text-muted-foreground">Prima total</p>
                         <p className="mt-1 text-lg font-semibold">{formatCurrency(draft.premiumAmount, draft.currency)}</p>
                       </div>
-                      <div className="rounded-2xl border bg-muted/30 p-4">
+                      <div className="rounded-xl border bg-muted/30 p-4">
                         <p className="text-xs uppercase tracking-wide text-muted-foreground">Recibos generados</p>
                         <p className="mt-1 text-lg font-semibold">{receiptPlan.length}</p>
                       </div>
@@ -1017,7 +1017,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
 
                     <div className="space-y-3">
                       {receiptPlan.map((item) => (
-                        <div key={item.receiptNumber} className="rounded-2xl border bg-background/80 p-4">
+                        <div key={item.receiptNumber} className="rounded-xl border bg-background/80 p-4">
                           <div className="grid gap-4 lg:grid-cols-[0.6fr_1fr_1fr_0.8fr] lg:items-end">
                             <div className="space-y-1">
                               <p className="text-xs uppercase tracking-wide text-muted-foreground">Recibo</p>
@@ -1051,7 +1051,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
                     </div>
                   </div>
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-border bg-muted/20 p-4 text-sm text-muted-foreground">
+                  <div className="rounded-xl border border-dashed border-border bg-muted/20 p-4 text-sm text-muted-foreground">
                     Completa las fechas y la frecuencia de pago para generar los recibos.
                   </div>
                 )}
@@ -1078,7 +1078,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
                         }}
                         className="flex-1"
                       />
-                      <Button type="button" variant="outline" onClick={() => openLookup("client")} className="shrink-0 rounded-full">
+                      <Button type="button" variant="outline" onClick={() => openLookup("client")} className="shrink-0">
                         <Search className="mr-2 size-4" />
                         Buscar
                       </Button>
@@ -1187,19 +1187,19 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
                       Cliente nuevo o sin vínculo
                     </Badge>
                   )}
-                  <Button type="button" variant="outline" className="rounded-full" onClick={() => setShowInlineClient((current) => !current)}>
+                  <Button type="button" variant="outline" onClick={() => setShowInlineClient((current) => !current)}>
                     <Sparkles className="mr-2 size-4" />
                     {showInlineClient ? "Ocultar alta inline" : "Alta inline de cliente"}
                   </Button>
                   {!selectedClientId ? (
-                    <Button type="button" variant="secondary" className="rounded-full" onClick={createInlineClient} disabled={isCreatingClient}>
+                    <Button type="button" variant="secondary" onClick={createInlineClient} disabled={isCreatingClient}>
                       {isCreatingClient ? "Creando cliente..." : "Guardar cliente y seguir"}
                     </Button>
                   ) : null}
                 </div>
 
                 {showInlineClient ? (
-                  <div className="mt-4 rounded-2xl border border-dashed border-border bg-muted/20 p-4">
+                  <div className="mt-4 rounded-xl border border-dashed border-border bg-muted/20 p-4">
                     <p className="text-sm font-medium">Alta inline mínima</p>
                     <p className="mt-1 text-sm text-muted-foreground">
                       Usa los campos capturados para crear el cliente sin salir de la captura. Si ya existe, el sistema lo reutiliza.
@@ -1273,24 +1273,24 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
             </CardHeader>
             <CardContent className="space-y-5 p-5">
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border bg-muted/30 p-4">
+                <div className="rounded-xl border bg-muted/30 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Cliente</p>
                   <p className="mt-1 text-sm font-semibold">{selectedClientLabel || draft.clientName || "Sin seleccionar"}</p>
                   <p className="mt-1 text-xs text-muted-foreground">{selectedClientId || "No resuelto todavía"}</p>
                 </div>
-                <div className="rounded-2xl border bg-muted/30 p-4">
+                <div className="rounded-xl border bg-muted/30 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Aseguradora</p>
                   <p className="mt-1 text-sm font-semibold">{selectedInsurerLabel || draft.insurerName || "Sin seleccionar"}</p>
                   <p className="mt-1 text-xs text-muted-foreground">{selectedInsurerId || "No resuelta todavía"}</p>
                 </div>
-                <div className="rounded-2xl border bg-muted/30 p-4 sm:col-span-2">
+                <div className="rounded-xl border bg-muted/30 p-4 sm:col-span-2">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Póliza origen</p>
                   <p className="mt-1 text-sm font-semibold">{selectedSourcePolicyLabel || draft.sourcePolicyNumber || "Sin sugerencia exacta"}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {selectedSourcePolicyId ? "Seleccionada manualmente o por match exacto." : "Debes buscar y elegir una póliza válida antes de confirmar."}
                   </p>
                   <div className="mt-3">
-                    <Button type="button" variant="outline" className="rounded-full" onClick={() => openLookup("policy")}>
+                    <Button type="button" variant="outline" onClick={() => openLookup("policy")}>
                       <Search className="mr-2 size-4" />
                       Buscar póliza origen
                     </Button>
@@ -1300,22 +1300,22 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="Vigencia" confidence="high">
-                  <div className="rounded-2xl border bg-muted/30 p-4 text-sm font-medium">
+                  <div className="rounded-xl border bg-muted/30 p-4 text-sm font-medium">
                     {draft.startDate && draft.endDate ? `${formatDate(draft.startDate)} · ${formatDate(draft.endDate)}` : "Sin capturar"}
                   </div>
                 </Field>
                 <Field label="Prima" confidence={fieldConfidence.premiumAmount}>
-                  <div className="rounded-2xl border bg-muted/30 p-4 text-sm font-medium">
+                  <div className="rounded-xl border bg-muted/30 p-4 text-sm font-medium">
                     {formatCurrency(draft.premiumAmount, draft.currency)}
                   </div>
                 </Field>
                 <Field label="Frecuencia" confidence={fieldConfidence.paymentFrequency}>
-                  <div className="rounded-2xl border bg-muted/30 p-4 text-sm font-medium">
+                  <div className="rounded-xl border bg-muted/30 p-4 text-sm font-medium">
                     {normalizePdfPaymentFrequencyLabel(draft.paymentFrequency)}
                   </div>
                 </Field>
                 <Field label="Serie" confidence={fieldConfidence.serialNumber}>
-                  <div className="rounded-2xl border bg-muted/30 p-4 text-sm font-medium">
+                  <div className="rounded-xl border bg-muted/30 p-4 text-sm font-medium">
                     {draft.serialNumber || "Sin capturar"}
                   </div>
                 </Field>
@@ -1323,7 +1323,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
 
               <Button
                 type="button"
-                className="w-full rounded-full"
+                className="w-full"
                 onClick={confirmCapture}
                 disabled={isConfirming || !selectedClientId || !selectedInsurerId || !selectedSourcePolicyId}
               >
