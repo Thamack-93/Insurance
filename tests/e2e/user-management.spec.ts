@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { hashPassword } from "../../src/lib/auth";
 import {
   authenticatePageAsAdmin,
+  hashTestPassword,
   cleanupPolicyFixture,
   getTestDb,
   seedPolicyFixture,
@@ -14,10 +14,10 @@ test.describe("administración de usuarios", () => {
     const targetEmail = `delete-target-${suffix}@policydesk.local`;
     const replacementEmail = `delete-replacement-${suffix}@policydesk.local`;
     const target = await db.user.create({
-      data: { email: targetEmail, name: "Delete Target", passwordHash: hashPassword("delete-target-123"), role: "AGENT", active: false },
+      data: { email: targetEmail, name: "Delete Target", passwordHash: hashTestPassword("delete-target-123"), role: "AGENT", active: false },
     });
     const replacement = await db.user.create({
-      data: { email: replacementEmail, name: "Delete Replacement", passwordHash: hashPassword("delete-replacement-123"), role: "AGENT", active: true },
+      data: { email: replacementEmail, name: "Delete Replacement", passwordHash: hashTestPassword("delete-replacement-123"), role: "AGENT", active: true },
     });
     let fixture: Awaited<ReturnType<typeof seedPolicyFixture>> | undefined;
 
