@@ -87,7 +87,7 @@ function getSessionSecret() {
   return DEV_SECRET;
 }
 
-function hashTestPassword(password: string): string {
+export function hashTestPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
   const derived = scryptSync(password, salt, 64).toString("hex");
   return `scrypt$${salt}$${derived}`;
@@ -103,7 +103,7 @@ async function createSessionToken(payload: { userId: string; email: string; name
 
 export function getTestDb() {
   if (!globalForTests.prisma) {
-    const rawConnectionString = process.env.DATABASE_URL?.trim();
+    const rawConnectionString = (process.env.DATABASE_URL_UNPOOLED?.trim()) || (process.env.DATABASE_URL?.trim());
     const connectionString = rawConnectionString ? normalizePostgresConnectionString(rawConnectionString) : "";
     if (!connectionString) {
       throw new Error("DATABASE_URL is required to initialize Prisma for tests.");

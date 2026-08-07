@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => {
   const tx = {
     client: { updateMany: vi.fn() },
     activityLog: { updateMany: vi.fn() },
+    organizationMembership: { deleteMany: vi.fn() },
     user: { delete: vi.fn() },
   };
   const db = {
@@ -99,6 +100,7 @@ describe("deleteUser", () => {
       where: { userId: "target-1" },
       data: { userId: "system-user-0000" },
     });
+    expect(mocks.tx.organizationMembership.deleteMany).toHaveBeenCalledWith({ where: { userId: "target-1" } });
     expect(mocks.tx.user.delete).toHaveBeenCalledWith({ where: { id: "target-1" } });
     expect(mocks.writeActivityLog).toHaveBeenCalledWith(expect.objectContaining({ action: "USER_DELETE", db: mocks.tx }));
   });
