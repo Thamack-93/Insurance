@@ -36,7 +36,7 @@ async function responseFromText(text: string, userId: string, role: "ADMIN" | "A
   });
   return {
     preview,
-    analysisSource: preview.aiReview ? "ai" : "local",
+    provenance: preview.provenance,
   } as const;
 }
 
@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
       if (extracted.text.trim()) {
         const result = await responseFromText(extracted.text, user.id, user.role === "ADMIN" ? "ADMIN" : "AGENT");
         preview = result.preview;
-        analysisSource = result.analysisSource;
+        analysisSource = result.provenance.extractionSource;
       } else {
         const aiExtraction = await extractPolicyPdfDraftFromAiFile({
           user: { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" },
@@ -148,7 +148,7 @@ export async function POST(request: NextRequest) {
           instruction: payload.prompt ?? null,
         });
 
-        if (!aiExtraction) {
+        if (!aiExtraction.value) {
           return NextResponse.json(
             {
               error:
@@ -159,10 +159,14 @@ export async function POST(request: NextRequest) {
         }
 
         preview = await buildPolicyPdfCapturePreviewFromDraft({
-          draft: aiExtraction.draft,
-          fieldConfidence: aiExtraction.fieldConfidence,
-          warnings: aiExtraction.warnings,
-          aiReview: aiExtraction.aiReview,
+          draft: aiExtraction.value.draft,
+          fieldConfidence: aiExtraction.value.fieldConfidence,
+          warnings: aiExtraction.value.warnings,
+          aiReview: aiExtraction.value?.aiReview ?? null,
+          aiReviewTelemetry: aiExtraction,
+          extractionSource: "ai",
+          aiRunIds: aiExtraction.runId ? [aiExtraction.runId] : [],
+          trackingStatus: aiExtraction.trackingStatus,
           context: {
             portfolioOwnerId,
             user: { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" },
@@ -177,7 +181,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    return NextResponse.json({ success: true, analysisSource, preview });
+    return NextResponse.json({ success: true, analysisSource, provenance: preview?.provenance, preview });
   } catch (error) {
     logError("api.nora.policyPdf.analyze", error);
     return NextResponse.json({ error: "No se pudo analizar el PDF." }, { status: 500 });

@@ -261,6 +261,11 @@ function bestUsageCost(usage: AssistantAiUsageSnapshot | null | undefined) {
   return usage.billedCostUsd ?? usage.estimatedCostUsd ?? null;
 }
 
+function safeAiProviderMetadata(value: unknown) {
+  const generationId = getGatewayGenerationId(value);
+  return generationId ? { gateway: { generationId } } : null;
+}
+
 function sumAttemptUsage(attempts: AssistantAiAttempt[]) {
   const usages = attempts.map((attempt) => attempt.totalUsage ?? attempt.usage).filter((usage): usage is AssistantAiUsageSnapshot => Boolean(usage));
   if (!usages.length) return null;
@@ -302,6 +307,143 @@ async function lookupGatewayUsage(usage: AssistantAiUsageSnapshot | null, model:
     } satisfies AssistantAiUsageSnapshot;
   } catch {
     return usage;
+  }
+}
+
+export type AssistantAiTrackedOperationResult<T> = {
+  value: T | null;
+  runId: string | null;
+  trackingStatus: "recorded" | "unavailable";
+  attempted: boolean;
+};
+
+async function runTrackedStructuredOperation<T>(input: {
+  user: AssistantUser;
+  operation: Extract<AssistantAiOperation, "policy-pdf-extract" | "policy-pdf-review">;
+  model: string;
+  responsePreview: string;
+  execute: () => Promise<{
+    result: Awaited<ReturnType<typeof generateText>>;
+    value: T | null;
+  }>;
+}): Promise<AssistantAiTrackedOperationResult<T>> {
+  const runId = makeId("run");
+  const startedAt = Date.now();
+  const persistedRun = canPersistAiRuns()
+    ? await createAssistantAiRun({
+        id: runId,
+        user: input.user,
+        operation: input.operation,
+        tier: "critical",
+        requestedModel: input.model,
+        fallbackReason: null,
+      })
+    : null;
+  const trackedRunId = persistedRun ? runId : null;
+  const trackingStatus = trackedRunId ? "recorded" : "unavailable";
+
+  async function persistAttempt(inputAttempt: {
+    status: "SUCCEEDED" | "FAILED";
+    code: AssistantAiFailureCode | null;
+    result?: Awaited<ReturnType<typeof generateText>>;
+    error?: unknown;
+  }) {
+    if (!trackedRunId) return;
+
+    const attemptId = makeId("attempt");
+    const created = await createAssistantAiAttempt({
+      id: attemptId,
+      runId: trackedRunId,
+      attemptNumber: 1,
+      tier: "critical",
+      requestedModel: input.model,
+      status: "STARTED",
+    });
+    if (!created) return;
+
+    const resultUsage = inputAttempt.result
+      ? await lookupGatewayUsage(toUsage(inputAttempt.result.usage, input.model, inputAttempt.result.providerMetadata), input.model)
+      : null;
+    const resultTotalUsage = inputAttempt.result
+      ? await lookupGatewayUsage(toUsage(inputAttempt.result.totalUsage, input.model, inputAttempt.result.providerMetadata), input.model)
+      : null;
+    const errorUsage = !inputAttempt.result && NoObjectGeneratedError.isInstance(inputAttempt.error)
+      ? await lookupGatewayUsage(toUsage(inputAttempt.error.usage, input.model, inputAttempt.error.response), input.model)
+      : null;
+    const usage = resultTotalUsage ?? resultUsage ?? errorUsage;
+    const providerMetadata = safeAiProviderMetadata(
+      inputAttempt.result?.providerMetadata
+        ?? (NoObjectGeneratedError.isInstance(inputAttempt.error) ? inputAttempt.error.response : null),
+    );
+    const statusCode = APICallError.isInstance(inputAttempt.error) ? inputAttempt.error.statusCode : null;
+    const finishReason = inputAttempt.result?.finishReason
+      ?? (NoObjectGeneratedError.isInstance(inputAttempt.error) ? inputAttempt.error.finishReason ?? null : null);
+
+    await finalizeAssistantAiAttempt(attemptId, {
+      status: inputAttempt.status,
+      finalModel: inputAttempt.status === "SUCCEEDED" ? input.model : null,
+      errorCode: inputAttempt.code,
+      errorMessage: inputAttempt.status === "FAILED" ? inputAttempt.code ?? "unknown" : null,
+      statusCode,
+      finishReason,
+      responsePreview: inputAttempt.status === "SUCCEEDED" ? input.responsePreview : null,
+      usage: resultUsage ?? errorUsage,
+      totalUsage: resultTotalUsage ?? resultUsage ?? errorUsage,
+      providerMetadata: providerMetadata ?? undefined,
+      durationMs: Date.now() - startedAt,
+      estimatedCostUsd: bestUsageCost(usage),
+    });
+  }
+
+  try {
+    const generated = await input.execute();
+    const code = generated.value == null ? "invalid_output" : null;
+    await persistAttempt({
+      status: code ? "FAILED" : "SUCCEEDED",
+      code,
+      result: generated.result,
+    });
+
+    if (trackedRunId) {
+      const usage = await lookupGatewayUsage(toUsage(generated.result.usage, input.model, generated.result.providerMetadata), input.model);
+      const totalUsage = await lookupGatewayUsage(toUsage(generated.result.totalUsage, input.model, generated.result.providerMetadata), input.model);
+      await finalizeAssistantAiRun(trackedRunId, {
+        status: code ? "FAILED" : "SUCCEEDED",
+        finalModel: code ? null : input.model,
+        errorCode: code,
+        finishReason: generated.result.finishReason ?? null,
+        responsePreview: code ? null : input.responsePreview,
+        usage,
+        totalUsage: totalUsage ?? usage,
+        providerMetadata: safeAiProviderMetadata(generated.result.providerMetadata) ?? undefined,
+        durationMs: Date.now() - startedAt,
+        attemptCount: 1,
+        fallbackCount: 0,
+        estimatedCostUsd: bestUsageCost(totalUsage ?? usage),
+      });
+    }
+
+    return { value: generated.value, runId: trackedRunId, trackingStatus, attempted: true };
+  } catch (error) {
+    const code = getAssistantAiFailureCode(error);
+    await persistAttempt({ status: "FAILED", code, error });
+    if (trackedRunId) {
+      const errorUsage = NoObjectGeneratedError.isInstance(error)
+        ? await lookupGatewayUsage(toUsage(error.usage, input.model, error.response), input.model)
+        : null;
+      await finalizeAssistantAiRun(trackedRunId, {
+        status: "FAILED",
+        errorCode: code,
+        errorMessage: code,
+        usage: errorUsage,
+        totalUsage: errorUsage,
+        providerMetadata: NoObjectGeneratedError.isInstance(error) ? safeAiProviderMetadata(error.response) ?? undefined : undefined,
+        durationMs: Date.now() - startedAt,
+        attemptCount: 1,
+        fallbackCount: 0,
+      });
+    }
+    return { value: null, runId: trackedRunId, trackingStatus, attempted: true };
   }
 }
 
@@ -693,20 +835,41 @@ function normalizePdfDraft(draft: z.infer<typeof pdfDraftSchema>): PolicyPdfCapt
   };
 }
 
-export async function extractPolicyPdfDraftFromAiFile(input: { user: AssistantUser; fileName: string; fileData: Uint8Array; instruction?: string | null }): Promise<{ draft: PolicyPdfCaptureDraft; fieldConfidence: PolicyPdfCaptureFieldConfidence; warnings: string[]; aiReview: PolicyPdfCaptureAiReview } | null> {
-  if (!hasGatewayAuth()) return null;
-  try {
-    const result = await generateText({
-      model: gateway(getAssistantCriticalModel()), temperature: 0.1, abortSignal: AbortSignal.timeout(12_000),
-      system: "Extrae únicamente la carátula del PDF. Todas las propiedades del esquema son obligatorias; usa null para datos ausentes y [] para listas vacías. No inventes valores.",
-      messages: [{ role: "user", content: [{ type: "text", text: input.instruction?.trim() ?? "Extrae un borrador revisable." }, { type: "file", data: input.fileData, filename: input.fileName, mediaType: "application/pdf" }] }],
-      output: Output.object({ schema: pdfFileExtractionSchema }),
-      providerOptions: { gateway: { user: input.user.id, tags: ["feature:assistant", "feature:pdf-review", "surface:web", `role:${input.user.role}`] } },
-    });
-    const parsed = result.output;
-    if (!parsed) return null;
-    return { draft: normalizePdfDraft(parsed.draft), fieldConfidence: parsed.fieldConfidence, warnings: parsed.warnings, aiReview: { ...parsed.aiReview, corrections: parsed.aiReview.corrections.filter((item) => PDF_FIELD_KEYS.has(item.field as PolicyPdfCaptureFieldKey)).map((item) => ({ ...item, field: item.field as PolicyPdfCaptureFieldKey })) } };
-  } catch { return null; }
+export async function extractPolicyPdfDraftFromAiFile(input: { user: AssistantUser; fileName: string; fileData: Uint8Array; instruction?: string | null }): Promise<AssistantAiTrackedOperationResult<{ draft: PolicyPdfCaptureDraft; fieldConfidence: PolicyPdfCaptureFieldConfidence; warnings: string[]; aiReview: PolicyPdfCaptureAiReview }>> {
+  if (!hasGatewayAuth()) return { value: null, runId: null, trackingStatus: "unavailable", attempted: false };
+
+  const model = getAssistantCriticalModel();
+  return runTrackedStructuredOperation({
+    user: input.user,
+    operation: "policy-pdf-extract",
+    model,
+    responsePreview: "Policy PDF extraction completed.",
+    execute: async () => {
+      const result = await generateText({
+        model: gateway(model), temperature: 0.1, abortSignal: AbortSignal.timeout(12_000),
+        system: "Extrae únicamente la carátula del PDF. Todas las propiedades del esquema son obligatorias; usa null para datos ausentes y [] para listas vacías. No inventes valores.",
+        messages: [{ role: "user", content: [{ type: "text", text: input.instruction?.trim() ?? "Extrae un borrador revisable." }, { type: "file", data: input.fileData, filename: input.fileName, mediaType: "application/pdf" }] }],
+        output: Output.object({ schema: pdfFileExtractionSchema }),
+        providerOptions: { gateway: { user: input.user.id, tags: ["feature:assistant", "feature:pdf-extract", "surface:web", `role:${input.user.role}`] } },
+      });
+      const parsed = pdfFileExtractionSchema.safeParse(result.output);
+      if (!parsed.success) return { result, value: null };
+      return {
+        result,
+        value: {
+          draft: normalizePdfDraft(parsed.data.draft),
+          fieldConfidence: parsed.data.fieldConfidence,
+          warnings: parsed.data.warnings,
+          aiReview: {
+            ...parsed.data.aiReview,
+            corrections: parsed.data.aiReview.corrections
+              .filter((item) => PDF_FIELD_KEYS.has(item.field as PolicyPdfCaptureFieldKey))
+              .map((item) => ({ ...item, field: item.field as PolicyPdfCaptureFieldKey })),
+          },
+        },
+      };
+    },
+  });
 }
 
 function parseJsonResponse<T>(text: string, schema: z.ZodType<T>): T | null {
@@ -721,18 +884,34 @@ export async function classifyAssistantReportSignalWithAi(input: { user: Assista
   } catch { return null; }
 }
 
-export async function reviewPolicyPdfWithAi(input: { user: AssistantUser; text?: string | null; draft: PolicyPdfCaptureDraft; warnings: string[]; themeHint?: string | null }): Promise<PolicyPdfCaptureAiReview | null> {
-  if (!hasGatewayAuth()) return null;
-  try {
-    const result = await generateText({
-      model: gateway(getAssistantCriticalModel()), temperature: 0.1, abortSignal: AbortSignal.timeout(8_000),
-      system: "Revisa una carátula de seguro. No guardes ni confirmes cambios. Devuelve solo JSON válido según el esquema; usa [] cuando no existan advertencias, sugerencias o correcciones.",
-      prompt: [`Tipo de usuario: ${input.user.role}`, `Tema: ${input.themeHint ?? "policy-pdf-review"}`, `Borrador: ${JSON.stringify(input.draft)}`, `Advertencias locales: ${JSON.stringify(input.warnings)}`, input.text ? `Texto extraído:\n${input.text.slice(0, 12_000)}` : "Sin texto completo."].join("\n\n"),
-      output: Output.object({ schema: pdfAiReviewSchema }),
-      providerOptions: { gateway: { user: input.user.id, tags: ["feature:assistant", "feature:pdf-review", `role:${input.user.role}`] } },
-    });
-    const parsed = result.output;
-    if (!parsed) return null;
-    return { ...parsed, corrections: parsed.corrections.filter((item) => PDF_FIELD_KEYS.has(item.field as PolicyPdfCaptureFieldKey)).map((item) => ({ ...item, field: item.field as PolicyPdfCaptureFieldKey })) };
-  } catch { return null; }
+export async function reviewPolicyPdfWithAi(input: { user: AssistantUser; text?: string | null; draft: PolicyPdfCaptureDraft; warnings: string[]; themeHint?: string | null }): Promise<AssistantAiTrackedOperationResult<PolicyPdfCaptureAiReview>> {
+  if (!hasGatewayAuth()) return { value: null, runId: null, trackingStatus: "unavailable", attempted: false };
+
+  const model = getAssistantCriticalModel();
+  return runTrackedStructuredOperation({
+    user: input.user,
+    operation: "policy-pdf-review",
+    model,
+    responsePreview: "Policy PDF review completed.",
+    execute: async () => {
+      const result = await generateText({
+        model: gateway(model), temperature: 0.1, abortSignal: AbortSignal.timeout(8_000),
+        system: "Revisa una carátula de seguro. No guardes ni confirmes cambios. Devuelve solo JSON válido según el esquema; usa [] cuando no existan advertencias, sugerencias o correcciones.",
+        prompt: [`Tipo de usuario: ${input.user.role}`, `Tema: ${input.themeHint ?? "policy-pdf-review"}`, `Borrador: ${JSON.stringify(input.draft)}`, `Advertencias locales: ${JSON.stringify(input.warnings)}`, input.text ? `Texto extraído:\n${input.text.slice(0, 12_000)}` : "Sin texto completo."].join("\n\n"),
+        output: Output.object({ schema: pdfAiReviewSchema }),
+        providerOptions: { gateway: { user: input.user.id, tags: ["feature:assistant", "feature:pdf-review", `role:${input.user.role}`] } },
+      });
+      const parsed = pdfAiReviewSchema.safeParse(result.output);
+      if (!parsed.success) return { result, value: null };
+      return {
+        result,
+        value: {
+          ...parsed.data,
+          corrections: parsed.data.corrections
+            .filter((item) => PDF_FIELD_KEYS.has(item.field as PolicyPdfCaptureFieldKey))
+            .map((item) => ({ ...item, field: item.field as PolicyPdfCaptureFieldKey })),
+        },
+      };
+    },
+  });
 }

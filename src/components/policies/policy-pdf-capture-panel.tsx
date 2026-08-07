@@ -24,6 +24,7 @@ import {
   type PolicyPdfCaptureDraft,
   type PolicyPdfCaptureFieldConfidence,
   type PolicyPdfCapturePreview,
+  type PolicyPdfCaptureProvenance,
 } from "@/lib/policy-pdf-capture.shared";
 import { extractPdfTextFromFile } from "@/lib/pdf-text-extraction.browser";
 import type { PolicyCaptureSearchItem, PolicyCaptureSearchKind } from "@/lib/policy-capture-search";
@@ -180,11 +181,20 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
 
       if (payload?.draft) {
         const restoredDraft = payload.draft as unknown as PolicyPdfCaptureDraft;
+        const restoredFieldConfidence = (payload.fieldConfidence as PolicyPdfCaptureFieldConfidence | undefined) ?? createEmptyConfidence();
+        const restoredReceiptPlan = payload.receiptPlan?.length
+          ? payload.receiptPlan as PolicyPdfCaptureReceiptPlanItem[]
+          : buildPolicyPdfCaptureReceiptPlan(restoredDraft);
+        const restoredProvenance: PolicyPdfCaptureProvenance = payload.provenance ?? {
+          extractionSource: "local",
+          reviewSource: payload.aiReview ? "ai" : "none",
+          aiRunIds: [],
+          trackingStatus: "recorded",
+          aiAttempted: Boolean(payload.aiReview),
+        };
         setDraft(restoredDraft);
-        setReceiptPlanOverrides(
-          payload.receiptPlan?.length ? payload.receiptPlan as PolicyPdfCaptureReceiptPlanItem[] : buildPolicyPdfCaptureReceiptPlan(restoredDraft),
-        );
-        setFieldConfidence((payload.fieldConfidence as PolicyPdfCaptureFieldConfidence | undefined) ?? createEmptyConfidence());
+        setReceiptPlanOverrides(restoredReceiptPlan);
+        setFieldConfidence(restoredFieldConfidence);
         setSelectedClientId(payload.selectedClientId ?? "");
         setSelectedClientLabel(payload.selectedClientLabel ?? restoredDraft.clientName ?? "");
         setSelectedInsurerId(payload.selectedInsurerId ?? "");
@@ -192,6 +202,27 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
         setSelectedSourcePolicyId(payload.selectedSourcePolicyId ?? "");
         setSelectedSourcePolicyLabel(payload.selectedSourcePolicyLabel ?? restoredDraft.sourcePolicyNumber ?? "");
         setShowInlineClient(Boolean(payload.showInlineClient));
+        setPreview({
+          draft: restoredDraft,
+          suggestions: {
+            clientId: payload.selectedClientId ?? null,
+            insurerId: payload.selectedInsurerId ?? null,
+            sourcePolicyId: payload.selectedSourcePolicyId ?? null,
+          },
+          receiptPlan: restoredReceiptPlan,
+          clientOptions: [],
+          insurerOptions: [],
+          sourcePolicyOptions: [],
+          fieldConfidence: restoredFieldConfidence,
+          confidence: {
+            client: Boolean(payload.selectedClientId),
+            insurer: Boolean(payload.selectedInsurerId),
+            sourcePolicy: Boolean(payload.selectedSourcePolicyId),
+          },
+          warnings: payload.warnings ?? [],
+          aiReview: payload.aiReview ?? null,
+          provenance: restoredProvenance,
+        });
       }
       setHasHydrated(true);
     });
@@ -228,6 +259,9 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
         selectedSourcePolicyLabel,
         showInlineClient,
         receiptPlan,
+        warnings: preview?.warnings ?? [],
+        aiReview: preview?.aiReview ?? null,
+        provenance: preview?.provenance,
     });
   }, [
     draft,
@@ -241,6 +275,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
     selectedSourcePolicyLabel,
     showInlineClient,
     receiptPlan,
+    preview,
     userId,
   ]);
 
