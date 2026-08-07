@@ -87,7 +87,7 @@ function getSessionSecret() {
   return DEV_SECRET;
 }
 
-function hashTestPassword(password: string): string {
+export function hashTestPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
   const derived = scryptSync(password, salt, 64).toString("hex");
   return `scrypt$${salt}$${derived}`;
