@@ -93,6 +93,33 @@ describe("nora browser session", () => {
     expect(loadPolicyCaptureHandoff("user-a", { storage: store, now: 100 + 15 * 60 * 1000 + 1 })).toBeNull();
   });
 
+  it("persists AI review, warnings, provenance, and run folios through the capture handoff", () => {
+    const store = storage();
+    savePolicyCaptureHandoff("user-a", {
+      draft: { policyNumber: "1009578", clientName: "CLIENTE DEMO" },
+      warnings: ["No encontramos póliza origen"],
+      aiReview: {
+        summary: "La vigencia requiere confirmación.",
+        warnings: ["Confirma la fecha final."],
+        suggestions: ["Revisa el origen."],
+        corrections: [{ field: "endDate", proposedValue: "2027-08-01", reason: "Detectada en la carátula.", confidence: "high" }],
+      },
+      provenance: {
+        extractionSource: "local",
+        reviewSource: "ai",
+        aiRunIds: ["run-review-1", "run-review-2"],
+        trackingStatus: "recorded",
+        aiAttempted: true,
+      },
+    }, { storage: store, now: 100 });
+
+    expect(loadPolicyCaptureHandoff("user-a", { storage: store, now: 100 } )?.payload).toMatchObject({
+      warnings: ["No encontramos póliza origen"],
+      aiReview: { summary: "La vigencia requiere confirmación.", corrections: [{ field: "endDate", proposedValue: "2027-08-01" }] },
+      provenance: { extractionSource: "local", reviewSource: "ai", aiRunIds: ["run-review-1", "run-review-2"], trackingStatus: "recorded", aiAttempted: true },
+    });
+  });
+
   it("clears scoped and legacy keys on logout", () => {
     const store = storage();
     saveNoraSession("user-a", { messages: [{ id: "m", role: "user", text: "Hola" }] }, { storage: store, now: 100 });
