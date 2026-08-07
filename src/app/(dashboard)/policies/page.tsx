@@ -23,6 +23,7 @@ import {
   readPolicyListFilters,
 } from "@/lib/list-filters";
 import { LocalNavigation } from "@/components/layout/local-navigation";
+import { policyNavigation } from "@/lib/navigation";
 
 const PAGE_SIZE = 25;
 
@@ -123,7 +124,7 @@ export default async function PoliciesPage({
               </Button>
               <Button asChild>
                 <Link href="/portfolio">
-                  Portfolio
+                  Cartera
                   <ArrowRight className="ml-2 size-4" />
                 </Link>
               </Button>
@@ -133,12 +134,7 @@ export default async function PoliciesPage({
 
         <LocalNavigation
           label="Vistas de pólizas"
-          items={[
-            { label: "Activas", href: "/policies?status=ACTIVE" },
-            { label: "Por vencer", href: "/operations?view=renewals" },
-            { label: "Cotizaciones", href: "/quotes" },
-            { label: "Archivadas", href: "/policies?status=ARCHIVED" },
-          ]}
+          items={policyNavigation}
         />
 
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
