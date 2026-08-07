@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { Command, Sparkles } from "lucide-react";
 import { SearchInput } from "@/components/search/search-input";
 import { ThemeToggle, type ThemeMode } from "@/components/theme/theme-toggle";
@@ -24,8 +24,9 @@ export function AppTopbar({
   initialTheme: ThemeMode;
 }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { openNora } = useNoraSession();
-  const segments = getBreadcrumbSegments(pathname);
+  const segments = getBreadcrumbSegments(pathname, searchParams);
 
   return (
     <header className="sticky top-0 z-30 border-b border-border/70 bg-background/80 backdrop-blur-xl">
