@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { getPriorityTone, getStatusTone, priorityLabels, statusLabels } from "@/lib/status";
+import { getPriorityTone, getStatusTone, priorityLabels, statusLabel, type StatusEntity } from "@/lib/status";
 
 const toneClass = {
   neutral: "border-border bg-muted text-muted-foreground",
@@ -11,12 +11,21 @@ const toneClass = {
   critical: "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300",
 };
 
-export function StatusBadge({ status, className }: { status: string; className?: string }) {
+export function StatusBadge({
+  status,
+  entity,
+  className,
+}: {
+  status: string;
+  /** Entity the status belongs to, so the Spanish label agrees in gender. */
+  entity?: StatusEntity;
+  className?: string;
+}) {
   const tone = getStatusTone(status);
 
   return (
     <Badge variant="outline" className={cn("rounded-full px-2.5 py-1 font-medium", toneClass[tone], className)}>
-      {statusLabels[status] ?? status}
+      {statusLabel(status, entity)}
     </Badge>
   );
 }

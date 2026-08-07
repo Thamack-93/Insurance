@@ -1,4 +1,4 @@
-import { User as UserIcon } from "lucide-react";
+import { User as UserIcon } from "@/components/icons";
 import { getCurrentUser } from "@/lib/auth";
 import { LogoutButton } from "@/components/layout/logout-button";
 

@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "@/components/icons";
 import { getCurrentUser } from "@/lib/auth";
 import { LoginForm } from "./login-form";
 
@@ -24,16 +24,14 @@ export default async function LoginPage({
     <main className="min-h-screen bg-background px-4 py-16">
       <div className="mx-auto flex max-w-md flex-col gap-6">
         <div className="text-center">
-          <span className="mx-auto grid size-11 place-items-center rounded-xl bg-[#06283b] text-white">
-            <ShieldCheck className="size-6" aria-hidden />
-          </span>
-          <p className="mt-3 text-sm font-semibold tracking-tight text-foreground">PolicyDesk</p>
-          <h1 className="mt-2 text-2xl font-semibold">Acceso a tu centro operativo</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <ShieldCheck className="mx-auto size-8 text-primary" aria-hidden />
+          <p className="mt-3 text-xs font-semibold uppercase tracking-[0.28em] text-primary">PolicyDesk</p>
+          <h1 className="font-display mt-2 text-3xl font-medium tracking-tight">Acceso a tu centro operativo</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">
             Ingresa con tu cuenta para continuar.
           </p>
         </div>
-        <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
+        <div className="rounded-xl border border-border bg-card p-6 shadow-[0_1px_2px_rgb(0_0_0/0.04),0_8px_24px_-12px_rgb(0_0_0/0.08)]">
           <LoginForm redirectTo={redirectTo} />
         </div>
         <p className="text-center text-xs text-muted-foreground">

@@ -170,7 +170,7 @@ function PolicySearchDialogBody({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="max-w-full rounded-full truncate text-left"
+                className="max-w-full truncate text-left"
                 title={suggestion}
                 onClick={() => {
                   setQuery(suggestion);
@@ -184,7 +184,7 @@ function PolicySearchDialogBody({
           </div>
         ) : null}
 
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-2xl border border-border/70 bg-muted/20">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-xl border border-border/70 bg-muted/20">
           {error ? (
             <div className="px-4 py-6 text-sm text-destructive">{error}</div>
           ) : isLoading ? (
@@ -240,7 +240,7 @@ function PolicySearchDialogBody({
       </div>
 
       <DialogFooter className="gap-2">
-        <Button type="button" variant="outline" className="rounded-full" onClick={onRequestClose} disabled={isSubmitting}>
+        <Button type="button" variant="outline" onClick={onRequestClose} disabled={isSubmitting}>
           Cancelar
         </Button>
       </DialogFooter>

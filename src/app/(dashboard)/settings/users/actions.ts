@@ -262,6 +262,7 @@ export async function deleteUser(userId: string, replacementUserId?: string): Pr
         await tx.client.updateMany({ where: { portfolioOwnerId: target.id }, data: { portfolioOwnerId: replacement.id } });
       }
       await tx.activityLog.updateMany({ where: { userId: target.id }, data: { userId: SYSTEM_USER_ID } });
+      await tx.organizationMembership.deleteMany({ where: { userId: target.id } });
       await writeActivityLog({
         entityType: "User",
         entityId: target.id,

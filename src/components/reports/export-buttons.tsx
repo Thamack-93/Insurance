@@ -80,7 +80,7 @@ export function ExportButtons({ exports }: { exports: ExportData[] }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<Button variant="outline" className="rounded-full bg-card/70" disabled={isExporting} />}
+        render={<Button variant="outline" className="bg-card/70" disabled={isExporting} />}
       >
         <Download className="mr-2 size-4" />
         {isExporting ? "Exportando..." : "Exportar"}

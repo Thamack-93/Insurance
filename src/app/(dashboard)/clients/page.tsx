@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Building2, FileText, Users2, UserRound } from "lucide-react";
-import type { Prisma } from "@/generated/prisma/client";
+import { ArrowRight, Building2, FileText, Users2, UserRound } from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
@@ -9,11 +8,17 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableHead, TableHeader, TableRow, TableCell } from "@/components/ui/table";
 import { ClientsListTable } from "@/components/clients/clients-list-table";
 import { EmptyState } from "@/components/empty-states/empty-state";
+import { TableEmptyState } from "@/components/tables/table-empty-state";
 import { TableToolbar } from "@/components/tables/table-toolbar";
 import { getDb } from "@/lib/db";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { entityStatusOptions } from "@/lib/domain-options";
-import { buildTableHref, readAllowedTableParam, readTablePage, readTableSort } from "@/lib/table-query";
+import { buildTableHref } from "@/lib/table-query";
+import {
+  buildClientListOrderBy,
+  buildClientListWhere,
+  readClientListFilters,
+} from "@/lib/list-filters";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { clientOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 
@@ -25,42 +30,24 @@ export default async function ClientsPage({
   searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string; status?: string; type?: string }>;
 }) {
   const params = (await searchParams) ?? {};
-  const query = (params.q ?? "").trim().slice(0, 100);
-  const page = readTablePage(params);
-  const statusFilter = readAllowedTableParam(params, "status", ["ACTIVE", "INACTIVE", "ARCHIVED"]);
-  const typeFilter = readAllowedTableParam(params, "type", ["PERSON", "COMPANY"]);
-  const { sortKey, direction } = readTableSort(params);
+  const filters = readClientListFilters(params);
+  const { query, page, sortKey, direction } = filters;
+  const statusFilter = filters.status;
+  const typeFilter = filters.type;
+  const isFiltered = Boolean(query || statusFilter || typeFilter);
 
   const db = getDb();
   const scope = await requirePortfolioReadScope();
   const portfolioWhere = clientOperationalWhere(scope.portfolioOwnerId);
+  const clearFiltersHref = buildTableHref("/clients", params, {
+    q: null,
+    status: null,
+    type: null,
+    page: null,
+  });
 
-  const where: Prisma.ClientWhereInput = {
-    ...portfolioWhere,
-    ...(statusFilter ? { status: statusFilter } : {}),
-    ...(typeFilter ? { type: typeFilter } : {}),
-    ...(query
-      ? {
-          OR: [
-            { fullName: { contains: query } },
-            { email: { contains: query } },
-            { phone: { contains: query } },
-            { rfc: { contains: query } },
-          ],
-        }
-      : {}),
-  };
-
-  const orderBy =
-    sortKey === "fullName"
-      ? [{ fullName: direction ?? "asc" }, { createdAt: "desc" as const }]
-      : sortKey === "type"
-        ? [{ type: direction ?? "asc" }, { createdAt: "desc" as const }]
-        : sortKey === "status"
-          ? [{ status: direction ?? "asc" }, { createdAt: "desc" as const }]
-          : sortKey === "createdAt"
-            ? [{ createdAt: direction ?? "desc" }]
-            : [{ createdAt: "desc" as const }];
+  const where = buildClientListWhere(filters, scope.portfolioOwnerId);
+  const orderBy = buildClientListOrderBy(filters);
 
   const [
     activeCount,
@@ -118,10 +105,10 @@ export default async function ClientsPage({
           description="Mapa de clientes, exposición de cartera y actividad operativa asociada."
           actions={
             <>
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/clients/new">Nuevo cliente</Link>
               </Button>
-              <Button asChild className="rounded-full">
+              <Button asChild>
                 <Link href="/policies">
                   Ver pólizas
                   <ArrowRight className="ml-2 size-4" />
@@ -177,6 +164,10 @@ export default async function ClientsPage({
           action={
             <TableToolbar
               searchPlaceholder="Buscar por nombre, email, teléfono o RFC..."
+              resultCount={filteredCount}
+              totalCount={totalCount}
+              resultNoun={["cliente", "clientes"]}
+              exportDataset="clients"
               filters={[
                 {
                   key: "type",
@@ -196,37 +187,23 @@ export default async function ClientsPage({
           }
         >
           {filteredCount === 0 ? (
-            query ? (
-              <div className="p-4">
-                <EmptyState
-                  icon={Users2}
-                  title="Sin resultados"
-                  description={`No encontramos clientes que coincidan con "${query}".`}
-                />
-              </div>
-            ) : (
-              <div className="p-4">
-                <EmptyState
-                  icon={Users2}
-                  title="Aún no hay clientes"
-                  description="Crea tu primer cliente para empezar a operar la cartera."
-                  action="Nuevo cliente"
-                  actionHref="/clients/new"
-                />
-              </div>
-            )
+            <TableEmptyState
+              icon={Users2}
+              isFiltered={isFiltered}
+              clearHref={clearFiltersHref}
+              noun="clientes"
+              query={query}
+              emptyTitle="Aún no hay clientes"
+              emptyDescription="Crea tu primer cliente para empezar a operar la cartera."
+              emptyAction={{ label: "Nuevo cliente", href: "/clients/new" }}
+            />
           ) : pagedClients.length === 0 ? (
             <div className="p-4">
               <EmptyState
                 icon={Users2}
                 title="Página fuera de rango"
                 description="No hay clientes en esta página. Vuelve al inicio del listado."
-                action="Volver al inicio"
-                actionHref={buildTableHref("/clients", params, {
-                  q: query || null,
-                  status: statusFilter || null,
-                  type: typeFilter || null,
-                })}
+                action={{ label: "Volver al inicio", href: buildTableHref("/clients", params, { q: query || null, status: statusFilter || null, type: typeFilter || null, }) }}
               />
             </div>
           ) : (
@@ -245,6 +222,7 @@ export default async function ClientsPage({
               pageSize={PAGE_SIZE}
               total={filteredCount}
               query={query}
+              canBulkEdit={scope.role === "ADMIN"}
               searchParams={{
                 status: statusFilter ?? undefined,
                 type: typeFilter ?? undefined,
@@ -299,7 +277,7 @@ export default async function ClientsPage({
                       {formatCurrency(client.totalPremium)}
                     </TableCell>
                     <TableCell>
-                      <StatusBadge status={client.status} />
+                      <StatusBadge status={client.status} entity="client" />
                     </TableCell>
                   </TableRow>
                 ))}

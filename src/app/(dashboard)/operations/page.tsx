@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, CalendarClock, CheckCircle2, ClipboardList, Plus, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CalendarClock, CheckCircle2, ClipboardList, Plus, ShieldCheck } from "@/components/icons";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { PageHeader } from "@/components/layout/page-header";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
@@ -16,20 +16,26 @@ import { getWorkItems, OPEN_WORK_ITEM_STATUSES, type WorkQueueItem } from "@/lib
 import { readTablePage } from "@/lib/table-query";
 import { cn } from "@/lib/utils";
 import { getWorkItemHref } from "@/lib/work-item-navigation";
+import { RenewalBoard } from "@/components/renewals/renewal-board";
+import { getRenewalBoardOwners, loadRenewalBoard } from "@/lib/renewal-board";
+import { readRenewalBoardFilters } from "@/lib/renewal-board.logic";
 
-type OperationsView = "all" | "pending" | "renewals" | "claims";
+type OperationsView = "all" | "pending" | "renewals" | "renewal-board" | "claims";
 
 const localItems = [
   { label: "Todo", href: "/operations", excludeQueryKeys: ["view"] },
   { label: "Pendientes", href: "/operations?view=pending" },
   { label: "Renovaciones", href: "/operations?view=renewals" },
+  { label: "Tablero de renovaciones", href: "/operations?view=renewal-board" },
   { label: "Siniestros", href: "/operations?view=claims" },
 ];
 
 const RENEWAL_PAGE_SIZE = 25;
 
 function readView(value?: string): OperationsView {
-  return value === "pending" || value === "renewals" || value === "claims" ? value : "all";
+  return value === "pending" || value === "renewals" || value === "renewal-board" || value === "claims"
+    ? value
+    : "all";
 }
 
 function WorkItemRow({ item }: { item: WorkQueueItem }) {
@@ -72,9 +78,13 @@ function WorkItemColumn({ title, count, items, tone }: { title: string; count: n
   );
 }
 
-export default async function OperationsPage({ searchParams }: { searchParams?: Promise<{ view?: string; page?: string }> }) {
+export default async function OperationsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const params = (await searchParams) ?? {};
-  const view = readView(params.view);
+  const view = readView(typeof params.view === "string" ? params.view : undefined);
   const page = readTablePage(params);
   const scope = await requirePortfolioReadScope();
   const db = getDb();
@@ -82,14 +92,18 @@ export default async function OperationsPage({ searchParams }: { searchParams?: 
   const nextSeven = businessAddDays(today, 7);
   const nextThirty = businessAddDays(today, 30);
 
+  const boardFilters = readRenewalBoardFilters(params);
+  const [board, boardOwners] =
+    view === "renewal-board"
+      ? await Promise.all([
+          loadRenewalBoard(boardFilters, scope.portfolioOwnerId),
+          getRenewalBoardOwners(scope.portfolioOwnerId),
+        ])
+      : [null, []];
+
   const [workItems, renewalPolicies, claims] = await Promise.all([
     getWorkItems({ statuses: OPEN_WORK_ITEM_STATUSES, portfolioOwnerId: scope.portfolioOwnerId, limit: 100 }),
-    loadEligibleRenewalPolicies(
-      {
-        endDate: { lte: nextThirty },
-      },
-      scope.portfolioOwnerId,
-    ),
+    loadEligibleRenewalPolicies({ endDate: { lte: nextThirty } }, scope.portfolioOwnerId),
     db.claim.findMany({
       where: { AND: [claimOperationalWhere(scope.portfolioOwnerId), { status: { notIn: ["RESOLVED", "CANCELLED"] } }] },
       select: { id: true, folio: true, claimType: true, status: true, incidentDate: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } },
@@ -98,8 +112,10 @@ export default async function OperationsPage({ searchParams }: { searchParams?: 
     }),
   ]);
 
-  // Keep the count, split metrics and paginated rows on the same filtered set.
-  // loadEligibleRenewalPolicies also removes a policy whose latest receipt is cancelled.
+  const overdue = workItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate) < today);
+  const dueToday = workItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate).getTime() === today.getTime());
+  const upcoming = workItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate) > today && businessStartOfDay(item.dueDate) <= nextSeven);
+  const unscheduled = workItems.filter((item) => !item.dueDate || businessStartOfDay(item.dueDate) > nextSeven);
   const renewalCount = renewalPolicies.length;
   const overdueRenewalCount = renewalPolicies.filter((policy) => businessStartOfDay(policy.endDate) < today).length;
   const upcomingRenewalCount = renewalPolicies.filter((policy) => businessStartOfDay(policy.endDate) >= today).length;
@@ -107,11 +123,6 @@ export default async function OperationsPage({ searchParams }: { searchParams?: 
     view === "renewals" ? (page - 1) * RENEWAL_PAGE_SIZE : 0,
     view === "renewals" ? page * RENEWAL_PAGE_SIZE : 8,
   );
-
-  const overdue = workItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate) < today);
-  const dueToday = workItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate).getTime() === today.getTime());
-  const upcoming = workItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate) > today && businessStartOfDay(item.dueDate) <= nextSeven);
-  const unscheduled = workItems.filter((item) => !item.dueDate || businessStartOfDay(item.dueDate) > nextSeven);
   const pageCopy = {
     all: {
       title: "Operación",
@@ -124,6 +135,10 @@ export default async function OperationsPage({ searchParams }: { searchParams?: 
     renewals: {
       title: "Renovaciones",
       description: "Pólizas activas con renovación pendiente, separadas entre vencidas y próximas.",
+    },
+    "renewal-board": {
+      title: "Tablero de renovaciones",
+      description: "Cada renovación en la etapa en la que va, para trabajarla y no sólo consultarla.",
     },
     claims: {
       title: "Siniestros",
@@ -145,8 +160,18 @@ export default async function OperationsPage({ searchParams }: { searchParams?: 
               </Link>
             ) : null}
             {view === "renewals" ? (
-              <Link href="/policies/new" className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}>
-                Capturar póliza
+              <>
+                <Link href="/operations?view=renewal-board" className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}>
+                  Ver como tablero
+                </Link>
+                <Link href="/policies/new" className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}>
+                  Capturar póliza
+                </Link>
+              </>
+            ) : null}
+            {view === "renewal-board" ? (
+              <Link href="/operations?view=renewals" className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}>
+                Ver como lista
               </Link>
             ) : null}
             <Link href="/tasks/new" className={cn(buttonVariants(), "min-h-11")}>
@@ -241,6 +266,15 @@ export default async function OperationsPage({ searchParams }: { searchParams?: 
         </div>
       ) : null}
 
+      {view === "renewal-board" && board ? (
+        <RenewalBoard
+          board={board}
+          filters={boardFilters}
+          owners={boardOwners}
+          canFilterByOwner={!scope.portfolioOwnerId}
+        />
+      ) : null}
+
       {view === "claims" ? (
         <Card className="gap-0 py-0">
           <CardHeader className="border-b py-4"><CardTitle>Siniestros abiertos</CardTitle></CardHeader>
@@ -251,7 +285,7 @@ export default async function OperationsPage({ searchParams }: { searchParams?: 
                   <p className="truncate text-sm font-medium">{claim.client.fullName} · {claim.claimType}</p>
                   <p className="truncate font-mono text-xs text-muted-foreground">{claim.folio} · {claim.policy.policyNumber} · {formatDate(claim.incidentDate)}</p>
                 </Link>
-                <StatusBadge status={claim.status} className="px-2 py-0.5 text-[11px]" />
+                <StatusBadge status={claim.status} entity="claim" className="px-2 py-0.5 text-[11px]" />
               </div>
             )) : <p className="p-8 text-center text-sm text-muted-foreground"><CheckCircle2 className="mx-auto mb-2 size-5 text-emerald-600" />No hay siniestros abiertos.</p>}
           </CardContent>

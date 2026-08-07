@@ -2,7 +2,7 @@ import { getDb } from "@/lib/db";
 import { businessAddDays, businessEndOfDay, businessStartOfDay } from "@/lib/business-dates";
 import { today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
-import { policyTypeLabel, statusLabels } from "@/lib/status";
+import { policyTypeLabel, statusLabel } from "@/lib/status";
 import {
   clientOperationalWhere,
   commissionOperationalWhere,
@@ -263,7 +263,7 @@ export async function getCommissionSummary(options: CommissionSummaryOptions = {
     const currentState =
       porEstado.get(commission.status) ?? {
         estado: commission.status as CommissionStatus,
-        etiqueta: statusLabels[commission.status] ?? commission.status,
+        etiqueta: statusLabel(commission.status, "commission"),
         cantidad: 0,
         montoEsperado: 0,
         montoCobrado: 0,

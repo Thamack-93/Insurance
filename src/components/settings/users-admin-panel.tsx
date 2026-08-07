@@ -179,7 +179,7 @@ export function UsersAdminPanel({
               {initialUsers.length} usuario{initialUsers.length !== 1 ? "s" : ""} con acceso a la correduría.
             </CardDescription>
           </div>
-          <Button onClick={() => setInviteOpen(true)} className="rounded-full">
+          <Button onClick={() => setInviteOpen(true)}>
             <UserPlus className="mr-2 size-4" />
             Invitar usuario
           </Button>

@@ -17,7 +17,7 @@ export function LogoutButton({ userId }: { userId: string }) {
         size="icon"
         aria-label="Cerrar sesión"
         title="Cerrar sesión"
-        className="cursor-pointer rounded-full bg-white/75 dark:bg-stone-800/75"
+        className="cursor-pointer bg-white/75 dark:bg-stone-800/75"
       >
         <LogOut className="size-4" aria-hidden />
       </Button>

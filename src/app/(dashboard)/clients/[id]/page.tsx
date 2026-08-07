@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RecordPageView } from "@/components/recently-viewed/record-page-view";
-import { Mail, Phone, MapPin, BadgeInfo, FileText, ClipboardList, History, Pencil, ShieldCheck, Cake } from "lucide-react";
+import { Mail, Phone, MapPin, BadgeInfo, FileText, ClipboardList, History, Pencil, ShieldCheck, Cake } from "@/components/icons";
 import { DeleteClientButton } from "@/components/clients/delete-client-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { NoraContextButton } from "@/components/assistant/nora-session-provider";
@@ -18,19 +18,10 @@ import { DocumentList } from "@/components/documents/document-list";
 import { getDb } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { formatDate } from "@/lib/dates";
+import { statusLabel } from "@/lib/status";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { calculateAge, formatBirthdayDate } from "@/lib/birthday-reminders";
-
-const quoteStatusLabels: Record<string, string> = {
-  REQUESTED: "Solicitada",
-  IN_PROGRESS: "En proceso",
-  SENT: "Enviada",
-  ACCEPTED: "Aceptada",
-  REJECTED: "Rechazada",
-  EXPIRED: "Expirada",
-  CANCELLED: "Cancelada",
-};
 
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -130,14 +121,14 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           actions={
             <div className="flex items-center gap-2">
               <NoraContextButton context={{ type: "client", id: client.id }} />
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href={`/clients/${id}/edit`}>
                   <Pencil className="mr-2 size-4" />
                   Editar
                 </Link>
               </Button>
               {isAdmin ? <DeleteClientButton id={id} name={client.fullName} /> : null}
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/clients">Volver a clientes</Link>
               </Button>
             </div>
@@ -182,7 +173,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             <div className="grid gap-4 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <StatusBadge status={client.status} />
+                  <StatusBadge status={client.status} entity="client" />
                   <p className="mt-3 text-sm text-muted-foreground">
                     Alta {formatDate(client.createdAt)} · Actualizado {formatDate(client.updatedAt)}
                   </p>
@@ -233,7 +224,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                     {client.referidor ? (
                       <Link href={`/clients/${client.referidor.id}`} className="mt-1 inline-flex items-center gap-2 text-foreground hover:text-primary">
                         {client.referidor.fullName}
-                        <StatusBadge status={client.referidor.status} />
+                        <StatusBadge status={client.referidor.status} entity="client" />
                       </Link>
                     ) : (
                       <p className="mt-1">Sin referidor</p>
@@ -316,7 +307,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                     </TableCell>
                     <TableCell>{formatDate(receipt.dueDate)}</TableCell>
                     <TableCell>
-                      <StatusBadge status={receipt.status} />
+                      <StatusBadge status={receipt.status} entity="receipt" />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -364,7 +355,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                   <div key={claim.id} className="px-4 py-4">
                     <div className="flex items-center justify-between gap-3">
                       <p className="font-medium text-foreground">{claim.folio}</p>
-                      <StatusBadge status={claim.status} />
+                      <StatusBadge status={claim.status} entity="claim" />
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">{claim.claimType}</p>
                     <p className="mt-2 text-xs text-muted-foreground">
@@ -387,7 +378,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                       <div className="flex items-center justify-between gap-3">
                         <p className="font-medium text-foreground">{quote.policyType}</p>
                         <Badge variant="outline" className="rounded-full">
-                          {quoteStatusLabels[quote.status] ?? quote.status}
+                          {statusLabel(quote.status, "quote")}
                         </Badge>
                       </div>
                       <p className="mt-1 text-sm text-muted-foreground">
@@ -441,7 +432,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         >
           {activity.length === 0 ? (
             <div className="p-4">
-              <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
+              <div className="rounded-xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
                 <History className="mx-auto mb-2 size-5 text-muted-foreground" />
                 Sin actividad registrada para este cliente todavía.
               </div>

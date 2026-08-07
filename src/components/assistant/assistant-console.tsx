@@ -14,7 +14,7 @@ import type {
   AssistantSection,
   AssistantSnapshot,
 } from "@/lib/assistant-types";
-import type { PolicyPdfCapturePreview } from "@/lib/policy-pdf-capture.shared";
+import type { PolicyPdfCapturePreview, PolicyPdfCaptureProvenance } from "@/lib/policy-pdf-capture.shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -47,7 +47,7 @@ type Message = {
   reportId?: string | null;
   capturePreview?: {
     fileName: string;
-    analysisSource: "local" | "ai";
+    provenance: PolicyPdfCaptureProvenance;
     preview: PolicyPdfCapturePreview;
   };
   actionProposal?: AssistantConversationResponse["actionProposal"];
@@ -133,18 +133,32 @@ function buildCaptureSessionPayload(preview: PolicyPdfCapturePreview) {
       preview.draft.sourcePolicyNumber ??
       "",
     showInlineClient: false,
+    warnings: preview.warnings,
+    aiReview: preview.aiReview,
+    provenance: preview.provenance,
+    receiptPlan: preview.receiptPlan,
   };
+}
+
+function captureProvenanceLabel(provenance: PolicyPdfCaptureProvenance) {
+  if (provenance.extractionSource === "ai") return "Extracción IA";
+  if (provenance.reviewSource === "ai") return "Local + revisión IA";
+  return "Local";
+}
+
+function captureProvenanceSource(provenance: PolicyPdfCaptureProvenance): "local" | "ai" {
+  return provenance.extractionSource === "ai" || provenance.reviewSource === "ai" ? "ai" : "local";
 }
 
 function CapturePreviewCard({
   fileName,
-  analysisSource,
+  provenance,
   preview,
   onOpenCapture,
   compact = false,
 }: {
   fileName: string;
-  analysisSource: "local" | "ai";
+  provenance: PolicyPdfCaptureProvenance;
   preview: PolicyPdfCapturePreview;
   onOpenCapture: (preview: PolicyPdfCapturePreview) => void;
   compact?: boolean;
@@ -160,7 +174,7 @@ function CapturePreviewCard({
           <p className="mt-0.5 truncate text-xs text-muted-foreground">{fileName}</p>
         </div>
         <Badge variant="outline" className="rounded-full text-[10px] uppercase tracking-wide">
-          {analysisSource === "ai" ? "IA" : "Local"}
+          {captureProvenanceLabel(provenance)}
         </Badge>
       </div>
       <div className={cn("grid gap-3 px-4 py-4", compact ? "grid-cols-1" : "sm:grid-cols-2")}>
@@ -485,6 +499,7 @@ export function AssistantConsole({
         | {
             success?: boolean;
             analysisSource?: "local" | "ai";
+            provenance?: PolicyPdfCaptureProvenance;
             preview?: PolicyPdfCapturePreview;
             error?: string;
           }
@@ -495,6 +510,7 @@ export function AssistantConsole({
       }
 
       const capturePreview = payload.preview;
+      const provenance = payload.provenance ?? capturePreview.provenance;
       savePolicyCapturePreview(capturePreview);
 
       setMessages((current) => [
@@ -503,10 +519,12 @@ export function AssistantConsole({
           id: makeId(),
           role: "assistant",
           text:
-            payload.analysisSource === "ai"
-              ? "Ya revisé la carátula con IA y dejé la captura lista para confirmación."
-              : "Ya revisé la carátula con el texto extraído y dejé la captura lista para confirmación.",
-          source: payload.analysisSource,
+            provenance.extractionSource === "ai"
+              ? "Extraje la carátula con IA y dejé la captura lista para confirmación."
+              : provenance.reviewSource === "ai"
+                ? "Extraje la carátula localmente y la revisé con IA; dejé la captura lista para confirmación."
+                : "Extraje la carátula localmente y dejé la captura lista para confirmación.",
+          source: captureProvenanceSource(provenance),
           sections: [
             {
               title: "Siguiente paso",
@@ -523,7 +541,7 @@ export function AssistantConsole({
           ],
           capturePreview: {
             fileName: file.name,
-            analysisSource: payload.analysisSource ?? "local",
+            provenance,
             preview: capturePreview,
           },
         },
@@ -748,7 +766,7 @@ export function AssistantConsole({
               {message.capturePreview ? (
                 <CapturePreviewCard
                   fileName={message.capturePreview.fileName}
-                  analysisSource={message.capturePreview.analysisSource}
+                  provenance={message.capturePreview.provenance}
                   preview={message.capturePreview.preview}
                   onOpenCapture={goToPolicyCapture}
                   compact={compact}

@@ -13,6 +13,7 @@ import {
   type PolicyPdfCaptureDraft,
   type PolicyPdfCaptureFieldConfidence,
   type PolicyPdfCapturePreview,
+  type PolicyPdfCaptureProvenance,
 } from "@/lib/policy-pdf-capture.shared";
 import type { AssistantUser } from "@/lib/assistant-types";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
@@ -188,6 +189,14 @@ type PolicyPdfCapturePreviewInput = {
   fieldConfidence: PolicyPdfCaptureFieldConfidence;
   warnings?: string[];
   aiReview?: PolicyPdfCaptureAiReview | null;
+  aiReviewTelemetry?: {
+    runId: string | null;
+    trackingStatus: "recorded" | "unavailable";
+    attempted: boolean;
+  } | null;
+  extractionSource?: "local" | "ai";
+  aiRunIds?: string[];
+  trackingStatus?: "recorded" | "unavailable";
   reviewText?: string | null;
   context?: PolicyPdfCapturePreviewContext;
 };
@@ -292,15 +301,47 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
         insurerCandidates.length === 0 ||
         sourcePolicyCandidates.length === 0),
   );
-  const aiReview = input.aiReview ?? (shouldRequestAiReview && user
-    ? await reviewPolicyPdfWithAi({
+  const aiReviewResult = input.aiReview !== undefined
+    ? {
+        value: input.aiReview,
+        runId: input.aiReviewTelemetry?.runId ?? null,
+        trackingStatus: input.aiReviewTelemetry?.trackingStatus ?? "recorded" as const,
+        attempted: input.aiReviewTelemetry?.attempted ?? false,
+      }
+    : shouldRequestAiReview && user
+      ? await reviewPolicyPdfWithAi({
         user,
         text: input.reviewText ?? null,
         draft: input.draft,
         warnings,
         themeHint: "policy-pdf-review",
       })
-    : null);
+      : null;
+  const aiReview = aiReviewResult?.value ?? null;
+  const aiRunIds = Array.from(new Set([
+    ...(input.aiRunIds ?? []),
+    ...(aiReviewResult?.runId ? [aiReviewResult.runId] : []),
+  ]));
+  const aiAttempted = Boolean(aiReviewResult?.attempted);
+  const trackingStatus = aiReviewResult
+    ? aiReviewResult.trackingStatus
+    : input.trackingStatus ?? "recorded";
+  const provenance: PolicyPdfCaptureProvenance = {
+    extractionSource: input.extractionSource ?? "local",
+    reviewSource: aiReview ? "ai" : "none",
+    aiRunIds,
+    trackingStatus,
+    aiAttempted,
+  };
+  if (aiAttempted && !aiReview) {
+    warnings.push("No pudimos completar la revisión IA; revisa los campos marcados antes de confirmar.");
+  }
+  if (aiAttempted && trackingStatus === "unavailable") {
+    warnings.push("La revisión IA terminó, pero no pudimos registrar su uso administrativo.");
+  }
+  if (aiReviewResult && !aiAttempted && trackingStatus === "unavailable") {
+    warnings.push("La revisión IA no está disponible en este entorno; valida la captura manualmente.");
+  }
   if (aiReview) {
     for (const warning of aiReview.warnings) {
       if (!warnings.includes(warning)) {
@@ -328,6 +369,7 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
     },
     warnings,
     aiReview,
+    provenance,
   } satisfies PolicyPdfCapturePreview;
 }
 
