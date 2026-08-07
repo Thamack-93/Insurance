@@ -182,7 +182,8 @@ export function isLocalNavigationItemActive(
 
 export const policyNavigation: LocalNavigationItem[] = [
   { label: "Activas", href: "/policies?status=ACTIVE" },
-  { label: "Por vencer", href: "/operations?view=renewals" },
+  { label: "Renovaciones", href: "/operations?view=renewals" },
+  { label: "Vigencias terminadas", href: "/policies?status=EXPIRED" },
   { label: "Cotizaciones", href: "/quotes" },
   { label: "Archivadas", href: "/policies?status=ARCHIVED" },
 ];
