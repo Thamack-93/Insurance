@@ -2,6 +2,8 @@ import Link from "next/link";
 import { ArrowRight, Building2, CalendarDays, ShieldCheck, Users } from "@/components/icons";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
+import { LocalNavigation } from "@/components/layout/local-navigation";
+import { reportsNavigation } from "@/lib/navigation";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -198,6 +200,8 @@ export default async function PortfolioPage({
             </>
           }
         />
+
+        <LocalNavigation items={reportsNavigation} label="Secciones de reportes" />
 
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
