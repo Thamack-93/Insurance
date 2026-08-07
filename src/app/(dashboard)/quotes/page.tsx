@@ -1,65 +1,49 @@
 import Link from "next/link";
 import { ArrowRight, Calculator, Clock, Plus, TrendingUp, CheckCircle } from "@/components/icons";
-import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-states/empty-state";
-import { Pagination } from "@/components/lists/pagination";
-import { SortableTableHead } from "@/components/tables/sortable-table-head";
+import { QuotesListTable } from "@/components/quotes/quotes-list-table";
+import { TableEmptyState } from "@/components/tables/table-empty-state";
 import { TableToolbar } from "@/components/tables/table-toolbar";
 import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
-import { formatCurrency } from "@/lib/money";
+import { formatCurrency, toNumber } from "@/lib/money";
+import { quoteStatusOptions } from "@/lib/domain-options";
 import { quoteOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
-import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
+import { buildTableHref } from "@/lib/table-query";
+import {
+  buildQuoteListOrderBy,
+  buildQuoteListWhere,
+  readQuoteListFilters,
+} from "@/lib/list-filters";
 
 const PAGE_SIZE = 25;
 
 export default async function QuotesPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string }>;
+  searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string; status?: string }>;
 }) {
   const params = (await searchParams) ?? {};
-  const query = (params.q ?? "").trim().slice(0, 100);
-  const page = readTablePage(params);
-  const { sortKey, direction } = readTableSort(params);
+  const filters = readQuoteListFilters(params);
+  const { query, page, sortKey, direction } = filters;
+  const statusFilter = filters.status;
+  const isFiltered = Boolean(query || statusFilter);
   const scope = await requirePortfolioReadScope();
   const quoteScope = quoteOperationalWhere(scope.portfolioOwnerId);
+  const clearFiltersHref = buildTableHref("/quotes", params, {
+    q: null,
+    status: null,
+    page: null,
+  });
 
   const db = getDb();
 
-  const where: Prisma.QuoteWhereInput = {
-    ...quoteScope,
-    ...(query
-      ? {
-        OR: [
-          { client: { fullName: { contains: query } } },
-          { insurer: { name: { contains: query } } },
-        ],
-      }
-      : {}),
-  };
-
-  const orderBy =
-    sortKey === "folio"
-      ? [{ id: direction ?? "asc" }]
-      : sortKey === "client"
-        ? [{ client: { fullName: direction ?? "asc" } }, { createdAt: "desc" as const }]
-        : sortKey === "type"
-          ? [{ policyType: direction ?? "asc" }, { createdAt: "desc" as const }]
-          : sortKey === "insurer"
-            ? [{ insurer: { name: direction ?? "asc" } }, { createdAt: "desc" as const }]
-            : sortKey === "status"
-              ? [{ status: direction ?? "asc" }, { createdAt: "desc" as const }]
-              : sortKey === "createdAt"
-                ? [{ createdAt: direction ?? "desc" }]
-                : sortKey === "value"
-                  ? [{ quotedAmount: direction ?? "desc" }, { createdAt: "desc" as const }]
-                  : [{ createdAt: "desc" as const }];
+  const where = buildQuoteListWhere(filters, scope.portfolioOwnerId);
+  const orderBy = buildQuoteListOrderBy(filters);
 
   const [
     activeCount,
@@ -68,6 +52,7 @@ export default async function QuotesPage({
     acceptedCount,
     expiredCount,
     valueAgg,
+    totalCount,
     filteredCount,
     pagedQuotes,
     pendingQuotes,
@@ -81,6 +66,7 @@ export default async function QuotesPage({
     db.quote.count({ where: { ...quoteScope, status: "ACCEPTED" } }),
     db.quote.count({ where: { ...quoteScope, status: "EXPIRED" } }),
     db.quote.aggregate({ where: quoteScope, _sum: { quotedAmount: true } }),
+    db.quote.count({ where: quoteScope }),
     db.quote.count({ where }),
     db.quote.findMany({
       where,
@@ -164,27 +150,28 @@ export default async function QuotesPage({
         <SectionCard
           title="Cotizaciones"
           description="Listado completo de propuestas."
-          action={<TableToolbar searchPlaceholder="Buscar por cliente, tipo o aseguradora..." />}
+          action={
+            <TableToolbar
+              searchPlaceholder="Buscar por cliente, tipo, aseguradora, prima o fecha..."
+              resultCount={filteredCount}
+              totalCount={totalCount}
+              resultNoun={["cotización", "cotizaciones"]}
+              exportDataset="quotes"
+              filters={[{ key: "status", label: "Estado", options: quoteStatusOptions }]}
+            />
+          }
         >
           {filteredCount === 0 ? (
-            query ? (
-              <div className="p-4">
-                <EmptyState
-                  icon={Calculator}
-                  title="Sin resultados"
-                  description={`No encontramos cotizaciones que coincidan con "${query}".`}
-                />
-              </div>
-            ) : (
-              <div className="p-4">
-                <EmptyState
-                  icon={Calculator}
-                  title="Aún no hay cotizaciones"
-                  description="Captura tu primera propuesta para arrancar el embudo comercial."
-                  action={{ label: "Nueva cotización", href: "/quotes/new" }}
-                />
-              </div>
-            )
+            <TableEmptyState
+              icon={Calculator}
+              isFiltered={isFiltered}
+              clearHref={clearFiltersHref}
+              noun="cotizaciones"
+              query={query}
+              emptyTitle="Aún no hay cotizaciones"
+              emptyDescription="Captura tu primera propuesta para arrancar el embudo comercial."
+              emptyAction={{ label: "Nueva cotización", href: "/quotes/new" }}
+            />
           ) : pagedQuotes.length === 0 ? (
             <div className="p-4">
                 <EmptyState
@@ -195,61 +182,29 @@ export default async function QuotesPage({
                 />
               </div>
             ) : (
-              <>
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/40">
-                      <SortableTableHead sortKey="folio">Folio</SortableTableHead>
-                      <SortableTableHead sortKey="client">Cliente</SortableTableHead>
-                      <SortableTableHead sortKey="type">Tipo</SortableTableHead>
-                      <SortableTableHead sortKey="insurer">Aseguradora</SortableTableHead>
-                      <SortableTableHead sortKey="status">Estado</SortableTableHead>
-                      <SortableTableHead sortKey="createdAt">Creada</SortableTableHead>
-                      <SortableTableHead sortKey="value" className="text-right">
-                        Prima
-                      </SortableTableHead>
-                    </TableRow>
-                  </TableHeader>
-                <TableBody>
-                  {pagedQuotes.map((quote) => (
-                    <TableRow key={quote.id}>
-                      <TableCell>
-                        <Link
-                          href={`/quotes/${quote.id}`}
-                          className="font-medium text-foreground hover:text-primary"
-                        >
-                          {quote.id.slice(0, 8)}
-                        </Link>
-                      </TableCell>
-                      <TableCell>{quote.client.fullName}</TableCell>
-                      <TableCell>{quote.policyType}</TableCell>
-                      <TableCell>{quote.insurer?.name ?? "—"}</TableCell>
-                      <TableCell>
-                        <StatusBadge status={quote.status} entity="quote" />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                          <Clock className="size-3" />
-                          {formatDate(quote.createdAt)}
-                          <span className="text-xs">({daysSince(quote.createdAt)} d)</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {quote.quotedAmount ? formatCurrency(quote.quotedAmount) : "—"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              <Pagination
+              <QuotesListTable
+                quotes={pagedQuotes.map((quote) => ({
+                  id: quote.id,
+                  folio: quote.id.slice(0, 8),
+                  clientName: quote.client.fullName,
+                  policyType: quote.policyType,
+                  insurerName: quote.insurer?.name ?? "",
+                  status: quote.status,
+                  createdAtLabel: formatDate(quote.createdAt),
+                  daysSinceCreated: daysSince(quote.createdAt),
+                  quotedAmount: quote.quotedAmount === null ? null : toNumber(quote.quotedAmount),
+                }))}
                 page={page}
                 pageSize={PAGE_SIZE}
                 total={filteredCount}
-                basePath="/quotes"
-                searchParams={{ q: query, sort: sortKey ?? undefined, dir: direction ?? undefined }}
+                searchParams={{
+                  q: query,
+                  status: statusFilter ?? undefined,
+                  sort: sortKey ?? undefined,
+                  dir: direction ?? undefined,
+                }}
               />
-            </>
-          )}
+            )}
         </SectionCard>
 
         <section className="grid gap-6 xl:grid-cols-2">

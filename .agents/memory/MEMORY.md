@@ -7,3 +7,5 @@
 - [Do not run auto-formatters on PolicyDesk](policydesk-formatting.md) — neither prettier nor `prisma format`; both rewrite thousands of unrelated lines. Use targeted edits and eslint.
 - [PolicyDesk status vocabulary](policydesk-status-labels.md) — EXPIRED is "Expirado/a", never "Vencida" (that's OVERDUE); status.ts is the only place labels may be defined; enum columns need `::text` in raw SQL.
 - [PolicyDesk Replit Setup Quirks](policydesk-replit-setup.md) — Node 22 required (Node 20 ships corrupt @next/swc); lucide-react must be imported via @/components/icons in Server Components; allowedDevOrigins needs *.picard.replit.dev.
+- [PolicyDesk table & export architecture](policydesk-table-export-architecture.md) — real screens use the server table stack, not DataTable; pages/exports/bulk share filter builders and resolve portfolio scope server-side.
+- [Verifying authenticated PolicyDesk screens](policydesk-local-auth-verification.md) — mint a pd_session cookie to curl dashboard routes; dev db has no AGENT user, so role-scoping bugs stay invisible by hand.

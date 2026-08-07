@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Columns3, Download, Rows3 } from "lucide-react";
+import { Columns3, Rows3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -14,6 +14,8 @@ import {
 import { ListSearch } from "@/components/lists/list-search";
 import { buildTableHref } from "@/lib/table-query";
 import { ColumnFilter, type ColumnFilterOption } from "./column-filter";
+import { ExportMenu } from "./export-menu";
+import { TableResultCount } from "./table-result-count";
 
 export type TableFilter = {
   key: string;
@@ -41,6 +43,14 @@ type TableToolbarProps = {
   actions?: ReactNode;
   className?: string;
   tableControls?: boolean;
+  /** Rows matching the active filters. Shown next to the search field. */
+  resultCount?: number;
+  /** Rows available with no filters applied, to render "N de M". */
+  totalCount?: number;
+  /** Singular/plural noun used in the count, e.g. `["póliza", "pólizas"]`. */
+  resultNoun?: [string, string];
+  /** Dataset key from `src/lib/export-datasets.ts`; enables CSV/Excel export. */
+  exportDataset?: string;
 };
 
 export function TableToolbar({
@@ -50,6 +60,10 @@ export function TableToolbar({
   actions,
   className,
   tableControls = true,
+  resultCount,
+  totalCount,
+  resultNoun,
+  exportDataset,
 }: TableToolbarProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -95,24 +109,6 @@ export function TableToolbar({
     setDensity((current) => current === "comfortable" ? "compact" : current === "compact" ? "spacious" : "comfortable");
   }
 
-  function exportCurrentPage() {
-    const table = getTable();
-    if (!table) return;
-    const rows = [...table.querySelectorAll("tr")].map((row) =>
-      [...row.children]
-        .filter((cell) => cell instanceof HTMLElement && !cell.hidden)
-        .map((cell) => `"${(cell.textContent ?? "").replace(/\s+/g, " ").trim().replaceAll('"', '""')}"`)
-        .join(","),
-    );
-    const blob = new Blob([`\uFEFF${rows.join("\n")}`], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${pathname.split("/").filter(Boolean).join("-") || "tabla"}.csv`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  }
-
   function clearAll() {
     const updates = Object.fromEntries([
       ["q", null],
@@ -124,6 +120,8 @@ export function TableToolbar({
     router.replace(buildTableHref(pathname, searchParams, updates, { resetPage: false }), { scroll: false });
   }
 
+  const isFiltered = hasSearch || activeFilters.length > 0;
+
   return (
     <div ref={rootRef} className={className ?? "flex w-full flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"}>
       <div className="flex flex-1 flex-wrap items-center gap-2">
@@ -131,13 +129,21 @@ export function TableToolbar({
         {filters.map((filter) => (
           <ColumnFilter key={filter.key} filterKey={filter.key} label={filter.label} options={filter.options} placeholder={filter.placeholder ?? filter.label} />
         ))}
-        {hasSearch || activeFilters.length > 0 || hasSort ? (
+        {isFiltered || hasSort ? (
           <Button type="button" variant="outline" onClick={clearAll}>
             {clearLabel}
           </Button>
         ) : null}
+        {resultCount === undefined ? null : (
+          <TableResultCount
+            count={resultCount}
+            total={totalCount}
+            isFiltered={isFiltered}
+            noun={resultNoun}
+          />
+        )}
       </div>
-      {tableControls || actions ? <div className="flex flex-wrap items-center gap-2">
+      {tableControls || actions || exportDataset ? <div className="flex flex-wrap items-center gap-2">
         {tableControls ? <>
         <DropdownMenu>
             <DropdownMenuTrigger render={<Button type="button" variant="outline" size="sm" onClick={inspectTable} />}>
@@ -163,10 +169,8 @@ export function TableToolbar({
         <Button type="button" variant="outline" size="sm" onClick={cycleDensity} title={`Densidad: ${density}`}>
           <Rows3 className="mr-2 size-4" /> Densidad
         </Button>
-        <Button type="button" variant="outline" size="sm" onClick={exportCurrentPage}>
-          <Download className="mr-2 size-4" /> CSV
-        </Button>
         </> : null}
+        {exportDataset ? <ExportMenu dataset={exportDataset} /> : null}
         {actions}
       </div> : null}
     </div>

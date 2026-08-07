@@ -1,26 +1,27 @@
 import Link from "next/link";
 import { ArrowRight, FileUp, Plus, Shield, CalendarClock, AlertCircle, BadgeDollarSign, FolderKanban } from "@/components/icons";
-import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-states/empty-state";
-import { Pagination } from "@/components/lists/pagination";
+import { PoliciesListTable } from "@/components/policies/policies-list-table";
+import { TableEmptyState } from "@/components/tables/table-empty-state";
 import { TableToolbar } from "@/components/tables/table-toolbar";
-import { SortableTableHead } from "@/components/tables/sortable-table-head";
 import { getDb } from "@/lib/db";
 import { businessAddDays } from "@/lib/business-dates";
 import { daysUntil, formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
 import { policyStatusOptions, policyTypeOptions } from "@/lib/domain-options";
-import { POLICY_STATUSES } from "@/lib/domain-values";
 import { policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
-import { buildTableHref, readAllowedTableParam, readTablePage, readTableSort } from "@/lib/table-query";
+import { buildTableHref } from "@/lib/table-query";
+import {
+  buildPolicyListOrderBy,
+  buildPolicyListWhere,
+  readPolicyListFilters,
+} from "@/lib/list-filters";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 
 const PAGE_SIZE = 25;
@@ -31,11 +32,11 @@ export default async function PoliciesPage({
   searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string; status?: string; type?: string }>;
 }) {
   const params = (await searchParams) ?? {};
-  const query = (params.q ?? "").trim().slice(0, 100);
-  const page = readTablePage(params);
-  const statusFilter = readAllowedTableParam(params, "status", POLICY_STATUSES);
-  const typeFilter = readAllowedTableParam(params, "type", policyTypeOptions.map((option) => option.value));
-  const { sortKey, direction } = readTableSort(params);
+  const filters = readPolicyListFilters(params);
+  const { query, page, sortKey, direction } = filters;
+  const statusFilter = filters.status;
+  const typeFilter = filters.type;
+  const isFiltered = Boolean(query || statusFilter || typeFilter);
 
   const db = getDb();
   const scope = await requirePortfolioReadScope();
@@ -52,41 +53,14 @@ export default async function PoliciesPage({
     scope.portfolioOwnerId,
   );
 
-  const where: Prisma.PolicyWhereInput = query
-    ? {
-        AND: [
-          portfolioWhere,
-          ...(statusFilter ? [{ status: statusFilter }] : []),
-          ...(typeFilter ? [{ policyType: typeFilter }] : []),
-          {
-            OR: [
-              { policyNumber: { contains: query } },
-              { client: { fullName: { contains: query } } },
-              { insurer: { name: { contains: query } } },
-            ],
-          },
-        ],
-      }
-    : {
-        ...portfolioWhere,
-        ...(statusFilter ? { status: statusFilter } : {}),
-        ...(typeFilter ? { policyType: typeFilter } : {}),
-      };
-
-  const orderBy =
-    sortKey === "policyNumber"
-      ? [{ policyNumber: direction ?? "asc" }, { endDate: "desc" as const }, { updatedAt: "desc" as const }]
-      : sortKey === "client"
-        ? [{ client: { fullName: direction ?? "asc" } }, { endDate: "desc" as const }, { updatedAt: "desc" as const }]
-        : sortKey === "insurer"
-          ? [{ insurer: { name: direction ?? "asc" } }, { endDate: "desc" as const }, { updatedAt: "desc" as const }]
-          : sortKey === "type"
-            ? [{ policyType: direction ?? "asc" }, { endDate: "desc" as const }, { updatedAt: "desc" as const }]
-            : sortKey === "endDate"
-              ? [{ endDate: direction ?? "desc" }, { updatedAt: "desc" as const }]
-              : sortKey === "premiumAmount"
-                ? [{ premiumAmount: direction ?? "desc" }, { endDate: "desc" as const }]
-                : [{ endDate: "desc" as const }, { startDate: "desc" as const }, { updatedAt: "desc" as const }];
+  const where = buildPolicyListWhere(filters, scope.portfolioOwnerId);
+  const orderBy = buildPolicyListOrderBy(filters);
+  const clearFiltersHref = buildTableHref("/policies", params, {
+    q: null,
+    status: null,
+    type: null,
+    page: null,
+  });
 
   const [
     activeCount,
@@ -94,6 +68,7 @@ export default async function PoliciesPage({
     expiredCount,
     renewals60Policies,
     portfolioAgg,
+    totalCount,
     filteredCount,
     pagedPolicies,
     attentionPolicies,
@@ -106,6 +81,7 @@ export default async function PoliciesPage({
       where: { ...portfolioWhere, status: "ACTIVE" },
       _sum: { premiumAmount: true },
     }),
+    db.policy.count({ where: portfolioWhere }),
     db.policy.count({ where }),
     db.policy.findMany({
       where,
@@ -201,7 +177,11 @@ export default async function PoliciesPage({
           description="Búsqueda y paginación sobre todas las pólizas."
           action={
             <TableToolbar
-              searchPlaceholder="Buscar por número, cliente o aseguradora..."
+              searchPlaceholder="Buscar por número, cliente, aseguradora, prima o fecha..."
+              resultCount={filteredCount}
+              totalCount={totalCount}
+              resultNoun={["póliza", "pólizas"]}
+              exportDataset="policies"
               filters={[
                 {
                   key: "status",
@@ -218,24 +198,16 @@ export default async function PoliciesPage({
           }
         >
           {filteredCount === 0 ? (
-            query ? (
-              <div className="p-4">
-                <EmptyState
-                  icon={FolderKanban}
-                  title="Sin resultados"
-                  description={`No encontramos pólizas que coincidan con "${query}".`}
-                />
-              </div>
-            ) : (
-              <div className="p-4">
-                <EmptyState
-                  icon={FolderKanban}
-                  title="Aún no hay pólizas"
-                  description="Registra tu primera póliza para construir el inventario."
-                  action={{ label: "Nueva póliza", href: "/policies/new" }}
-                />
-              </div>
-            )
+            <TableEmptyState
+              icon={FolderKanban}
+              isFiltered={isFiltered}
+              clearHref={clearFiltersHref}
+              noun="pólizas"
+              query={query}
+              emptyTitle="Aún no hay pólizas"
+              emptyDescription="Registra tu primera póliza para construir el inventario."
+              emptyAction={{ label: "Nueva póliza", href: "/policies/new" }}
+            />
           ) : pagedPolicies.length === 0 ? (
             <div className="p-4">
                 <EmptyState
@@ -246,74 +218,32 @@ export default async function PoliciesPage({
                 />
               </div>
           ) : (
-            <>
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/40">
-                    <SortableTableHead sortKey="policyNumber">Póliza</SortableTableHead>
-                    <SortableTableHead sortKey="client">Cliente</SortableTableHead>
-                    <SortableTableHead sortKey="insurer">Aseguradora</SortableTableHead>
-                    <SortableTableHead sortKey="type">Tipo</SortableTableHead>
-                    <SortableTableHead sortKey="endDate">Renovación</SortableTableHead>
-                    <TableHead className="text-right">Prima</TableHead>
-                    <TableHead>Estado</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pagedPolicies.map((policy) => (
-                    <TableRow key={policy.id}>
-                      <TableCell>
-                        <Link
-                          href={`/policies/${policy.id}`}
-                          className="font-medium text-foreground hover:text-primary"
-                        >
-                          {policy.policyNumber}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link href={`/clients/${policy.clientId}`} className="text-foreground hover:text-primary">
-                          {policy.client.fullName}
-                        </Link>
-                      </TableCell>
-                      <TableCell>{policy.insurer.name}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="rounded-full">
-                          {policyTypeLabel(policy.policyType)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {policy.endDate ? (
-                          <span className="text-sm text-muted-foreground">
-                            {formatDate(policy.endDate)} · {daysUntil(policy.endDate)} días
-                          </span>
-                        ) : (
-                          <span className="text-sm text-muted-foreground">Sin fecha</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {formatCurrency(policy.premiumAmount, policy.currency)}
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={policy.status} entity="policy" />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              <Pagination
-                page={page}
-                pageSize={PAGE_SIZE}
-                total={filteredCount}
-                basePath="/policies"
-                searchParams={{
-                  q: query,
-                  status: statusFilter ?? undefined,
-                  type: typeFilter ?? undefined,
-                  sort: sortKey ?? undefined,
-                  dir: direction ?? undefined,
-                }}
-              />
-            </>
+            <PoliciesListTable
+              policies={pagedPolicies.map((policy) => ({
+                id: policy.id,
+                policyNumber: policy.policyNumber,
+                clientId: policy.clientId,
+                clientName: policy.client.fullName,
+                insurerName: policy.insurer.name,
+                policyType: policy.policyType,
+                status: policy.status,
+                currency: policy.currency,
+                premiumAmount: toNumber(policy.premiumAmount),
+                endDateLabel: policy.endDate ? formatDate(policy.endDate) : "",
+                daysToRenewal: policy.endDate ? daysUntil(policy.endDate) : null,
+              }))}
+              page={page}
+              pageSize={PAGE_SIZE}
+              total={filteredCount}
+              canBulkEdit
+              searchParams={{
+                q: query,
+                status: statusFilter ?? undefined,
+                type: typeFilter ?? undefined,
+                sort: sortKey ?? undefined,
+                dir: direction ?? undefined,
+              }}
+            />
           )}
         </SectionCard>
 

@@ -9,12 +9,14 @@ import { UrlTabs } from "@/components/ui/url-tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-states/empty-state";
 import { Pagination } from "@/components/lists/pagination";
+import { RecordCards } from "@/components/tables/record-cards";
+import { TableEmptyState } from "@/components/tables/table-empty-state";
 import { TableToolbar } from "@/components/tables/table-toolbar";
 import { CollectableReceipts, type CollectableReceipt } from "@/components/receipts/collectable-receipts";
 import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
 import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
-import { businessAddDays, businessStartOfMonth } from "@/lib/business-dates";
+import { businessStartOfMonth } from "@/lib/business-dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import {
@@ -23,7 +25,13 @@ import {
   receiptPortfolioWhere,
   requirePortfolioReadScope,
 } from "@/lib/portfolio-access";
-import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
+import { buildTableHref } from "@/lib/table-query";
+import {
+  buildOpenReceiptBaseWhere,
+  buildReceiptListOrderBy,
+  buildReceiptListWhere,
+  readReceiptListFilters,
+} from "@/lib/list-filters";
 
 const PAGE_SIZE = 25;
 
@@ -34,63 +42,31 @@ export default async function ReceiptsPage({
 }) {
   const params = (await searchParams) ?? {};
   const initialTab = params.tab === "historico" || params.tab === "revision" ? params.tab : "cobrar";
-  const query = (params.q ?? "").trim().slice(0, 100);
-  const statusFilter = params.status === "overdue" || params.status === "today" || params.status === "upcoming" ? params.status : undefined;
-  const page = readTablePage(params);
-  const { sortKey, direction } = readTableSort(params);
+  const filters = readReceiptListFilters(params);
+  const { query, page, sortKey, direction } = filters;
+  const statusFilter = filters.status;
+  const isFiltered = Boolean(query || statusFilter);
 
   const db = getDb();
   const scope = await requirePortfolioReadScope();
   const now = today();
-  const tomorrow = businessAddDays(now, 1);
-  const in7 = businessAddDays(now, 7);
   const monthStart = businessStartOfMonth(now);
+  const clearFiltersHref = buildTableHref("/receipts", params, {
+    q: null,
+    status: null,
+    page: null,
+    tab: "cobrar",
+  });
 
-  const baseWhere: Prisma.ReceiptWhereInput = {
-    ...receiptOperationalWhere(scope.portfolioOwnerId),
-    status: { notIn: ["PAID", "CANCELLED"] },
-  };
+  const baseWhere = buildOpenReceiptBaseWhere(scope.portfolioOwnerId);
   const scopedReceiptWhere = receiptOperationalWhere(scope.portfolioOwnerId);
   const scopedPaymentWhere = paymentOperationalWhere(scope.portfolioOwnerId);
   const scopedReceiptIssueWhere: Prisma.ReceiptReconciliationIssueWhereInput = scope.portfolioOwnerId
     ? { receipt: receiptPortfolioWhere(scope.portfolioOwnerId) }
     : {};
-  const dueDateWhere: Prisma.ReceiptWhereInput = statusFilter === "overdue"
-    ? { dueDate: { lt: now } }
-    : statusFilter === "today"
-      ? { dueDate: { gte: now, lt: tomorrow } }
-      : statusFilter === "upcoming"
-        ? { dueDate: { gte: tomorrow, lte: in7 } }
-        : {};
-  const where: Prisma.ReceiptWhereInput = {
-    AND: [
-      baseWhere,
-      dueDateWhere,
-      ...(query ? [{
-            OR: [
-              { receiptNumber: { contains: query } },
-              { client: { fullName: { contains: query } } },
-              { policy: { policyNumber: { contains: query } } },
-              { insurer: { name: { contains: query } } },
-            ],
-          }] : []),
-    ],
-  };
+  const where = buildReceiptListWhere(filters, scope.portfolioOwnerId);
 
-  const orderBy =
-    sortKey === "receiptNumber"
-      ? [{ receiptNumber: direction ?? "asc" }, { dueDate: "asc" as const }]
-      : sortKey === "client"
-        ? [{ client: { fullName: direction ?? "asc" } }, { dueDate: "asc" as const }]
-        : sortKey === "policy"
-          ? [{ policy: { policyNumber: direction ?? "asc" } }, { dueDate: "asc" as const }]
-          : sortKey === "insurer"
-            ? [{ insurer: { name: direction ?? "asc" } }, { dueDate: "asc" as const }]
-            : sortKey === "dueDate"
-              ? [{ dueDate: direction ?? "asc" }, { receiptNumber: "asc" as const }]
-              : sortKey === "amount"
-                ? [{ amount: direction ?? "desc" }, { dueDate: "asc" as const }]
-                : [{ dueDate: "asc" as const }];
+  const orderBy = buildReceiptListOrderBy(filters);
 
   const [
     openCount,
@@ -98,6 +74,7 @@ export default async function ReceiptsPage({
     paidThisMonth,
     outstandingAgg,
     overdueAgg,
+    totalOpenCount,
     filteredCount,
     pagedReceipts,
     paymentHistory,
@@ -115,6 +92,7 @@ export default async function ReceiptsPage({
       _sum: { amount: true },
       where: { ...baseWhere, dueDate: { lt: now } },
     }),
+    db.receipt.count({ where: baseWhere }),
     db.receipt.count({ where }),
     db.receipt.findMany({
       where,
@@ -258,7 +236,11 @@ export default async function ReceiptsPage({
             description="Búsqueda y paginación sobre todos los recibos abiertos."
             action={(
               <TableToolbar
-                searchPlaceholder="Buscar por número, cliente, póliza o aseguradora..."
+                searchPlaceholder="Buscar por número, cliente, póliza, monto o vencimiento..."
+                resultCount={filteredCount}
+                totalCount={totalOpenCount}
+                resultNoun={["recibo", "recibos"]}
+                exportDataset="receipts"
                 filters={[{
                   key: "status",
                   label: "Vencimiento",
@@ -273,32 +255,16 @@ export default async function ReceiptsPage({
             )}
           >
             {filteredCount === 0 ? (
-              query ? (
-                <div className="p-4">
-                  <EmptyState
-                    icon={ReceiptText}
-                    title="Sin resultados"
-                    description={`No encontramos recibos que coincidan con "${query}".`}
-                  />
-                </div>
-              ) : statusFilter ? (
-                <div className="p-4">
-                  <EmptyState
-                    icon={ReceiptText}
-                    title="Sin recibos en este filtro"
-                    description="No hay recibos abiertos que coincidan con el vencimiento seleccionado."
-                  />
-                </div>
-              ) : (
-                <div className="p-4">
-                  <EmptyState
-                    icon={BadgeCheck}
-                    title="¡Cartera al día!"
-                    description="No hay recibos abiertos por cobrar."
-                    action={{ label: "Nuevo recibo", href: "/receipts/new" }}
-                  />
-                </div>
-              )
+              <TableEmptyState
+                icon={isFiltered ? ReceiptText : BadgeCheck}
+                isFiltered={isFiltered}
+                clearHref={clearFiltersHref}
+                noun="recibos abiertos"
+                query={query}
+                emptyTitle="¡Cartera al día!"
+                emptyDescription="No hay recibos abiertos por cobrar."
+                emptyAction={{ label: "Nuevo recibo", href: "/receipts/new" }}
+              />
             ) : pagedReceipts.length === 0 ? (
               <div className="p-4">
                 <EmptyState
@@ -337,7 +303,41 @@ export default async function ReceiptsPage({
                 />
               </div>
             ) : (
-              <Table>
+              <>
+              <RecordCards
+                label="Pagos registrados"
+                items={safePaymentHistory.map((payment) => ({
+                  id: payment.id,
+                  title: payment.receipt.receiptNumber,
+                  href: `/receipts/${payment.receipt.id}`,
+                  subtitle: payment.client.fullName,
+                  fields: [
+                    { label: "Póliza", value: payment.policy.policyNumber },
+                    { label: "Origen", value: getReceiptOriginLabel(payment.receipt) },
+                    { label: "Fecha", value: formatDate(payment.paidDate) },
+                    { label: "Método", value: payment.paymentMethod ?? "Sin método" },
+                    {
+                      label: "Monto",
+                      value: formatCurrency(payment.amount, payment.currency),
+                      emphasis: true,
+                    },
+                  ],
+                  actions: (
+                    <DeletePaymentButton
+                      id={payment.id}
+                      receiptId={payment.receipt.id}
+                      receiptNumber={payment.receipt.receiptNumber}
+                      paidDate={payment.paidDate}
+                      amount={Number(payment.amount)}
+                      currency={payment.currency}
+                      paymentMethod={payment.paymentMethod}
+                      triggerLabel="Eliminar"
+                      triggerClassName="h-7 bg-card/70 px-2.5 text-xs text-destructive hover:text-destructive"
+                    />
+                  ),
+                }))}
+              />
+              <Table className="hidden md:table">
               <TableHeader>
                   <TableRow className="bg-muted/40">
                     <TableHead>Recibo</TableHead>
@@ -399,6 +399,7 @@ export default async function ReceiptsPage({
                   ))}
                 </TableBody>
               </Table>
+              </>
             )}
           </SectionCard>
 
@@ -415,7 +416,32 @@ export default async function ReceiptsPage({
                 />
               </div>
             ) : (
-              <Table>
+              <>
+              <RecordCards
+                label="Recibos cobrados este mes"
+                items={paidThisMonth.slice(0, 30).map((receipt) => ({
+                  id: receipt.id,
+                  title: receipt.receiptNumber,
+                  href: `/receipts/${receipt.id}`,
+                  subtitle: receipt.client?.fullName ?? "Cliente eliminado",
+                  fields: [
+                    {
+                      label: "Origen",
+                      value: receipt.endorsement
+                        ? `Endoso ${receipt.endorsement.endorsementNumber}`
+                        : "Póliza base",
+                    },
+                    { label: "Pago", value: receipt.paidDate ? formatDate(receipt.paidDate) : "—" },
+                    { label: "Método", value: receipt.paymentMethod ?? "Sin método" },
+                    {
+                      label: "Monto",
+                      value: formatCurrency(receipt.amount, receipt.currency),
+                      emphasis: true,
+                    },
+                  ],
+                }))}
+              />
+              <Table className="hidden md:table">
                 <TableHeader>
                   <TableRow className="bg-muted/40">
                     <TableHead>Recibo</TableHead>
@@ -456,6 +482,7 @@ export default async function ReceiptsPage({
                   ))}
                 </TableBody>
               </Table>
+              </>
             )}
           </SectionCard>
         </TabsContent>
@@ -474,7 +501,41 @@ export default async function ReceiptsPage({
                 />
               </div>
             ) : (
-              <Table>
+              <>
+              <RecordCards
+                label="Inconsistencias por revisar"
+                items={reviewIssues
+                  .filter((issue) => issue.receipt && issue.policy)
+                  .map((issue) => {
+                    const receipt = issue.receipt!;
+                    const policy = issue.policy!;
+                    const paidAmount = receipt.payments.reduce(
+                      (sum, payment) => sum + toNumber(payment.amount),
+                      0,
+                    );
+                    return {
+                      id: issue.id,
+                      title: receipt.receiptNumber,
+                      href: `/receipts/${receipt.id}`,
+                      subtitle: receipt.client.fullName,
+                      fields: [
+                        { label: "Póliza", value: policy.policyNumber },
+                        { label: "Motivo", value: issue.reason },
+                        {
+                          label: "Recibo",
+                          value: formatCurrency(receipt.amount, receipt.currency),
+                          emphasis: true,
+                        },
+                        {
+                          label: "Pagos reales",
+                          value: formatCurrency(paidAmount, receipt.currency),
+                          emphasis: true,
+                        },
+                      ],
+                    };
+                  })}
+              />
+              <Table className="hidden md:table">
                 <TableHeader>
                   <TableRow className="bg-muted/40">
                     <TableHead>Recibo</TableHead>
@@ -520,6 +581,7 @@ export default async function ReceiptsPage({
                   })}
                 </TableBody>
               </Table>
+              </>
             )}
           </SectionCard>
         </TabsContent>
