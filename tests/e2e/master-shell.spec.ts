@@ -34,7 +34,7 @@ test.describe("PolicyDesk master shell", () => {
     await expect(page.getByRole("heading", { name: "Visión operativa y financiera" })).toBeVisible();
   });
 
-  test("maps every legacy section to the correct primary destination", async ({ page }) => {
+  test("maps canonical and legacy sections to the correct primary destination", async ({ page }) => {
     await authenticatePageAsAdmin(page);
 
     const cases = [
@@ -55,6 +55,42 @@ test.describe("PolicyDesk master shell", () => {
           .getByRole("link", { name: legacyCase.destination, exact: true }),
       ).toHaveAttribute("aria-current", "page");
     }
+  });
+
+  test("reaches hidden views through their owning section navigation", async ({ page }) => {
+    await authenticatePageAsAdmin(page);
+
+    await page.goto("/policies");
+    await page.getByRole("navigation", { name: "Vistas de pólizas" })
+      .getByRole("link", { name: "Cotizaciones", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/quotes$/);
+    await expect(page.getByRole("heading", { name: "Cotizaciones", exact: true })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Vistas de pólizas" })
+      .getByRole("link", { name: "Cotizaciones", exact: true })).toHaveAttribute("aria-current", "page");
+
+    await page.goto("/reports");
+    await page.getByRole("navigation", { name: "Secciones de reportes" })
+      .getByRole("link", { name: "Cartera", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/portfolio$/);
+    await expect(page.getByRole("heading", { name: "Cartera", exact: true })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Secciones de reportes" })
+      .getByRole("link", { name: "Cartera", exact: true })).toHaveAttribute("aria-current", "page");
+
+    await page.goto("/reports?view=portfolio");
+    await expect(page.getByRole("heading", { name: "Reporte de cartera", exact: true })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Secciones de reportes" })
+      .getByRole("link", { name: "Reporte de cartera", exact: true })).toHaveAttribute("aria-current", "page");
+  });
+
+  test("shows contextual breadcrumbs for Insights", async ({ page }) => {
+    await authenticatePageAsAdmin(page);
+    await page.goto("/today?view=insights");
+
+    const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" });
+    await expect(breadcrumb.getByText("Hoy", { exact: true })).toBeVisible();
+    await expect(breadcrumb.getByText("Insights", { exact: true })).toBeVisible();
   });
 
   test("opens Nora as a contextual panel and previews authorized Excel reports", async ({ page }, testInfo) => {
