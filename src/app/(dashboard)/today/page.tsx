@@ -8,6 +8,7 @@ import { buildTodayOperationsModel } from "@/lib/today-operations";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/layout/page-header";
 import { LocalNavigation } from "@/components/layout/local-navigation";
+import { todayNavigation } from "@/lib/navigation";
 import { InsightsView } from "@/components/dashboard/insights-view";
 import { AlertsPanel, PolicyActivityChart, PolicyStatusDonut, RecentPoliciesTable, TodayMetricCards } from "@/components/dashboard/today-dashboard";
 import {
@@ -22,10 +23,6 @@ import {
 import { buttonVariants } from "@/components/ui/button";
 import { NoraOpenButton } from "@/components/assistant/nora-session-provider";
 
-const todayNavigation = [
-  { label: "Mi día", href: "/today", excludeQueryKeys: ["view"] },
-  { label: "Insights", href: "/today?view=insights" },
-];
 
 export default async function TodayPage({ searchParams }: { searchParams?: Promise<{ view?: string }> }) {
   const params = (await searchParams) ?? {};
