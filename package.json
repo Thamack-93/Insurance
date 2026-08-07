@@ -24,6 +24,7 @@
     "reconcile:insured-clients": "tsx scripts/reconcile-insured-clients.ts",
     "check:legacy-workitem-refs": "node --import tsx scripts/check-legacy-workitem-refs.ts",
     "check:qualification-scope": "node scripts/check-qualification-scope.mjs",
+    "check:navigation": "node scripts/check-navigation-reachability.mjs",
     "list:payments": "tsx scripts/list-next-payments.ts",
     "list:renewals": "tsx scripts/list-renewals.ts",
     "audit:renewals": "tsx scripts/audit-renewal-consistency.ts",
