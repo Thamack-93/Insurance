@@ -13,18 +13,24 @@ import { claimOperationalWhere, policyOperationalWhere, requirePortfolioReadScop
 import { getWorkItems, OPEN_WORK_ITEM_STATUSES, type WorkQueueItem } from "@/lib/work-queue";
 import { cn } from "@/lib/utils";
 import { getWorkItemHref } from "@/lib/work-item-navigation";
+import { RenewalBoard } from "@/components/renewals/renewal-board";
+import { getRenewalBoardOwners, loadRenewalBoard } from "@/lib/renewal-board";
+import { readRenewalBoardFilters } from "@/lib/renewal-board.logic";
 
-type OperationsView = "all" | "pending" | "renewals" | "claims";
+type OperationsView = "all" | "pending" | "renewals" | "renewal-board" | "claims";
 
 const localItems = [
   { label: "Todo", href: "/operations", excludeQueryKeys: ["view"] },
   { label: "Pendientes", href: "/operations?view=pending" },
   { label: "Renovaciones", href: "/operations?view=renewals" },
+  { label: "Tablero de renovaciones", href: "/operations?view=renewal-board" },
   { label: "Siniestros", href: "/operations?view=claims" },
 ];
 
 function readView(value?: string): OperationsView {
-  return value === "pending" || value === "renewals" || value === "claims" ? value : "all";
+  return value === "pending" || value === "renewals" || value === "renewal-board" || value === "claims"
+    ? value
+    : "all";
 }
 
 function WorkItemRow({ item }: { item: WorkQueueItem }) {
@@ -67,13 +73,26 @@ function WorkItemColumn({ title, count, items, tone }: { title: string; count: n
   );
 }
 
-export default async function OperationsPage({ searchParams }: { searchParams?: Promise<{ view?: string }> }) {
+export default async function OperationsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const params = (await searchParams) ?? {};
-  const view = readView(params.view);
+  const view = readView(typeof params.view === "string" ? params.view : undefined);
   const scope = await requirePortfolioReadScope();
   const db = getDb();
   const today = businessToday();
   const nextSeven = businessAddDays(today, 7);
+
+  const boardFilters = readRenewalBoardFilters(params);
+  const [board, boardOwners] =
+    view === "renewal-board"
+      ? await Promise.all([
+          loadRenewalBoard(boardFilters, scope.portfolioOwnerId),
+          getRenewalBoardOwners(scope.portfolioOwnerId),
+        ])
+      : [null, []];
 
   const [workItems, renewals, claims] = await Promise.all([
     getWorkItems({ statuses: OPEN_WORK_ITEM_STATUSES, portfolioOwnerId: scope.portfolioOwnerId, limit: 100 }),
@@ -115,6 +134,10 @@ export default async function OperationsPage({ searchParams }: { searchParams?: 
       title: "Renovaciones",
       description: "Pólizas vencidas y próximas a vencer listas para seguimiento.",
     },
+    "renewal-board": {
+      title: "Tablero de renovaciones",
+      description: "Cada renovación en la etapa en la que va, para trabajarla y no sólo consultarla.",
+    },
     claims: {
       title: "Siniestros",
       description: "Casos abiertos que requieren seguimiento operativo.",
@@ -135,8 +158,18 @@ export default async function OperationsPage({ searchParams }: { searchParams?: 
               </Link>
             ) : null}
             {view === "renewals" ? (
-              <Link href="/policies/new" className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}>
-                Capturar póliza
+              <>
+                <Link href="/operations?view=renewal-board" className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}>
+                  Ver como tablero
+                </Link>
+                <Link href="/policies/new" className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}>
+                  Capturar póliza
+                </Link>
+              </>
+            ) : null}
+            {view === "renewal-board" ? (
+              <Link href="/operations?view=renewals" className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}>
+                Ver como lista
               </Link>
             ) : null}
             <Link href="/tasks/new" className={cn(buttonVariants(), "min-h-11")}>
@@ -220,6 +253,15 @@ export default async function OperationsPage({ searchParams }: { searchParams?: 
             </CardContent>
           </Card>
         </div>
+      ) : null}
+
+      {view === "renewal-board" && board ? (
+        <RenewalBoard
+          board={board}
+          filters={boardFilters}
+          owners={boardOwners}
+          canFilterByOwner={!scope.portfolioOwnerId}
+        />
       ) : null}
 
       {view === "claims" ? (

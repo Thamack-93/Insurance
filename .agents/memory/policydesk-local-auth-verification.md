@@ -1,22 +1,21 @@
 ---
-name: Verifying authenticated PolicyDesk screens locally
-description: How to reach logged-in pages from the shell, and the dev-data gap that hides role-scoping bugs.
+name: Verifying authenticated PolicyDesk screens
+description: Screens and role behavior cannot be judged from an unauthenticated request, and the dev data hides role-scoping bugs.
 ---
 
-# Reaching authenticated screens from the shell
+Every dashboard route redirects to the login form, so an unauthenticated
+request — screenshot or fetch — only ever proves that the login screen renders.
+Judge a screen by driving it with a session cookie minted from the app's own
+token helper for an existing user.
 
-Every dashboard route redirects to the login form, and the screenshot tool
-cannot carry a cookie — so a bare screenshot of a list page only ever shows
-"Acceso a tu centro operativo".
+**Why:** there is no middleware bypass and no unauthenticated route that renders
+a real screen, so without a cookie you are reviewing the login page.
 
-To verify a real screen, mint a session for an existing user with the app's own
-token helper (a temporary `tsx` script that reads a user from the db and signs a
-payload), then send it as the `pd_session` cookie with `curl`. This is read-only:
-do not create users or reset passwords in the dev database just to log in.
-
-Two gotchas: the script runner compiles to CJS, so wrap the script in an
-`async main()` rather than using top-level `await`; and delete the temporary
-script afterwards so it does not land in `scripts/`.
+**How to apply:** fetching with the cookie proves a route renders and lets you
+grep the HTML; to judge layout or interaction you have to give the same cookie
+to a browser. Never create users or reset passwords in the dev database just to
+get in. When measuring horizontal overflow, trust `body`, not
+`documentElement` — the dev overlay inflates the latter.
 
 ## The dev database has no AGENT user
 
@@ -27,6 +26,6 @@ by hand** — every request sees the whole book of business.
 exercises the unrestricted branch of every one of those checks.
 
 **How to apply:** when a change touches `portfolioOwnerId` filtering, treat
-manual verification as insufficient and cover it with a test that seeds an agent,
-or say plainly in the summary that agent scoping was verified by reading the code
-rather than by exercising it.
+manual verification as insufficient — cover it with a test that seeds an agent,
+or say plainly that agent scoping was verified by reading the code rather than
+by exercising it.

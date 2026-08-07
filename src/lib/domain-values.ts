@@ -113,3 +113,12 @@ export type NotificationEventStatus = (typeof NOTIFICATION_EVENT_STATUSES)[numbe
 
 export const USER_ROLES = ["ADMIN", "AGENT"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
+
+/**
+ * Etapas del tablero de renovaciones, en el orden en que avanza el embudo.
+ * WON y LOST son terminales.
+ */
+export const RENEWAL_STAGES = ["PENDING", "CONTACTED", "QUOTED", "WON", "LOST"] as const;
+export type RenewalStage = (typeof RENEWAL_STAGES)[number];
+
+export const TERMINAL_RENEWAL_STAGES = ["WON", "LOST"] as const satisfies readonly RenewalStage[];

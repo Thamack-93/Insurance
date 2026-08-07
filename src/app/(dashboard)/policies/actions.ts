@@ -18,6 +18,7 @@ import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { buildPolicyDeleteBlockedMessage } from "@/lib/policy-delete";
 import { logError } from "@/lib/logger";
 import { statusLabel } from "@/lib/status";
+import { closeRenewalFollowUp } from "@/lib/renewal-followups";
 
 function normalizePolicyInput(values: PolicyFormValues) {
   return {
@@ -142,6 +143,10 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
             updatedById: userId,
           },
         });
+
+        // La renovación quedó cerrada: su recordatorio de "sin avance" ya no
+        // tiene a quién reclamarle.
+        await closeRenewalFollowUp(renewalSource.id, userId, tx);
       }
 
       await writeActivityLog({
@@ -165,6 +170,7 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
       `/clients/${policy.clientId}`,
       "/dashboard",
       "/today",
+      "/operations",
       "/portfolio",
       "/renewals",
       "/risks",
@@ -266,6 +272,8 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
               updatedById: userId,
             },
           });
+
+          await closeRenewalFollowUp(nextRenewalSource.id, userId, tx);
         } else {
           await tx.policy.update({
             where: { id },
@@ -308,6 +316,7 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
       `/clients/${policy.clientId}`,
       "/dashboard",
       "/today",
+      "/operations",
       "/portfolio",
       "/renewals",
       "/risks",
@@ -402,6 +411,7 @@ export async function updatePolicyQualityFields(
       `/clients/${policy.clientId}`,
       "/dashboard",
       "/today",
+      "/operations",
       "/portfolio",
       "/renewals",
       "/risks",

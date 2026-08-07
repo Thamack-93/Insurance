@@ -111,6 +111,33 @@ export function statusLabel(status: string | null | undefined, entity?: StatusEn
   );
 }
 
+/**
+ * Etapas del tablero de renovaciones. Es un vocabulario propio y no una
+ * variante de los estatus del dominio: "Por vencer" describe dónde va la
+ * gestión, mientras que la póliza sigue estando "Activa". Vive aquí para que
+ * ninguna pantalla vuelva a inventar su propia traducción.
+ */
+export const renewalStageLabels: Record<string, string> = {
+  PENDING: "Por vencer",
+  CONTACTED: "Contactado",
+  QUOTED: "Cotizado",
+  WON: "Renovado",
+  LOST: "Perdido",
+};
+
+export function renewalStageLabel(stage: string | null | undefined): string {
+  if (!stage) return "Sin etapa";
+  return renewalStageLabels[stage] ?? stage;
+}
+
+export function getRenewalStageTone(stage: string): BadgeTone {
+  if (stage === "WON") return "success";
+  if (stage === "LOST") return "danger";
+  if (stage === "QUOTED") return "info";
+  if (stage === "CONTACTED") return "warning";
+  return "neutral";
+}
+
 export const priorityLabels: Record<string, string> = {
   LOW: "Baja",
   MEDIUM: "Media",

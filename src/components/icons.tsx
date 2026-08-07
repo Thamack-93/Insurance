@@ -32,6 +32,7 @@ export {
   CheckCircle,
   CheckCircle2,
   CheckSquare,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CircleAlert,

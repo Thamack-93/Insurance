@@ -1,5 +1,7 @@
 import {
   Activity,
+  ArrowRight,
+  BellRing,
   CircleCheck,
   CircleX,
   FilePlus2,
@@ -39,6 +41,11 @@ const actionIconMap: Record<string, IconTone> = {
   CANCEL: { icon: CircleX, tone: "bg-muted text-muted-foreground" },
   CLOSE: { icon: CircleCheck, tone: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
   REOPEN: { icon: PlayCircle, tone: "bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300" },
+  // Las claves se resuelven por prefijo y en orden de inserción: todo lo que
+  // empiece con RENEWAL_ debe ir antes que RENEW o quedaría rotulado "Renovado".
+  RENEWAL_STAGE_CHANGE: { icon: ArrowRight, tone: "bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300" },
+  RENEWAL_FOLLOWUP_REMINDER: { icon: BellRing, tone: "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" },
+  RENEWAL_DECLINED: { icon: CircleX, tone: "bg-muted text-muted-foreground" },
   RENEW: { icon: History, tone: "bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300" },
   SECURITY_LOGIN_FAILED: { icon: ShieldAlert, tone: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300" },
   SECURITY_LOGIN_DISABLED: { icon: ShieldAlert, tone: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300" },
@@ -64,6 +71,10 @@ const actionLabelMap: Record<string, string> = {
   CANCEL: "Cancelado",
   CLOSE: "Cerrado",
   REOPEN: "Reabierto",
+  RENEWAL_STAGE_CHANGE: "Etapa de renovación",
+  RENEWAL_FOLLOWUP_REMINDER: "Recordatorio de renovación",
+  RENEWAL_DECLINED: "No renueva",
+  RENEWAL_LINKED: "Renovación vinculada",
   RENEW: "Renovado",
   SECURITY_LOGIN_FAILED: "Inicio de sesión fallido",
   SECURITY_LOGIN_DISABLED: "Acceso bloqueado",
