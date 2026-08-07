@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ArrowRight, Calculator, Clock, Plus, TrendingUp, CheckCircle } from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
+import { LocalNavigation } from "@/components/layout/local-navigation";
+import { policyNavigation } from "@/lib/navigation";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
@@ -115,6 +117,8 @@ export default async function QuotesPage({
             </>
           }
         />
+
+        <LocalNavigation items={policyNavigation} label="Vistas de pólizas" />
 
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
