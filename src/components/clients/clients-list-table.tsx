@@ -153,7 +153,7 @@ function ClientRow({ client }: { client: ClientListRow }) {
       <TableCell className="text-right">{client._count.tasks}</TableCell>
       <TableCell className="text-sm text-muted-foreground">{formatDate(new Date(client.createdAt))}</TableCell>
       <TableCell>
-        <StatusBadge status={client.status} />
+        <StatusBadge status={client.status} entity="client" />
       </TableCell>
     </TableRow>
   );

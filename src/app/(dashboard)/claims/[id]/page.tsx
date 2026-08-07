@@ -114,7 +114,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
           <SectionCard title="Ficha del siniestro" description="Datos del reclamo y vínculos operativos.">
             <div className="grid gap-4 p-4 text-sm">
               <div className="flex items-start justify-between gap-3">
-                <StatusBadge status={claim.status} />
+                <StatusBadge status={claim.status} entity="claim" />
                 <span className="text-xs text-muted-foreground">Folio: {claim.folio}</span>
               </div>
 
@@ -211,7 +211,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
                       {related.claimType} · {formatDate(related.incidentDate)}
                     </p>
                   </div>
-                  <StatusBadge status={related.status} />
+                  <StatusBadge status={related.status} entity="claim" />
                 </div>
               ))}
             </div>

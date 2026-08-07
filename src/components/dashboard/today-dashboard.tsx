@@ -6,7 +6,7 @@ import { Area, AreaChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, R
 import type { TodayDashboardData } from "@/lib/dashboard-queries";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
-import { policyTypeLabel, statusLabels } from "@/lib/status";
+import { policyTypeLabel, statusLabel } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { ChartSrSummary } from "@/components/charts/chart-sr-summary";
@@ -133,7 +133,7 @@ export function PolicyStatusDonut({ data }: { data: TodayDashboardData["statusDi
   const total = data.reduce((sum, item) => sum + item.value, 0);
   const chartData = data.map((item, index) => ({
     ...item,
-    label: statusLabels[item.status] ?? item.status,
+    label: statusLabel(item.status, "policy"),
     fill: statusColorMap[item.status] ?? `var(--chart-${(index % 5) + 1})`,
   }));
 
@@ -248,7 +248,7 @@ export function RecentPoliciesTable({ policies }: { policies: TodayDashboardData
                     {formatDate(policy.startDate)} – {formatDate(policy.endDate)}
                   </td>
                   <td className="px-2 py-3 text-right align-middle font-medium whitespace-nowrap">{formatCurrency(policy.premiumAmount, policy.currency)}</td>
-                  <td className="px-4 py-3 align-middle"><StatusBadge status={policy.status} /></td>
+                  <td className="px-4 py-3 align-middle"><StatusBadge status={policy.status} entity="policy" /></td>
                 </tr>
               ))
             ) : (

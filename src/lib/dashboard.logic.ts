@@ -5,7 +5,7 @@ import { toNumber } from "@/lib/money";
 
 // Commissions counted in the monthly "Comisiones del mes" KPI and its trend:
 // everything the month produced, whether still expected or already paid.
-export const MONTHLY_COMMISSION_STATUSES = ["EXPECTED", "PENDING", "OVERDUE", "PAID"];
+export const MONTHLY_COMMISSION_STATUSES = ["EXPECTED", "PENDING", "OVERDUE", "PAID"] as const;
 
 const monthKeyFormatter = new Intl.DateTimeFormat("en-CA", {
   year: "numeric",

@@ -271,7 +271,7 @@ function WorkItemsTableInner({ workItems }: { workItems: WorkItemRow[] }) {
               <TableCell>
                 <div className="flex flex-wrap gap-2">
                   <PriorityBadge priority={workItem.priority} />
-                  <StatusBadge status={workItem.status} />
+                  <StatusBadge status={workItem.status} entity="workItem" />
                 </div>
               </TableCell>
               <TableCell className="text-right">

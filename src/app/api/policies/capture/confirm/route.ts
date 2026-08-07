@@ -282,7 +282,7 @@ export async function POST(request: NextRequest) {
         clientId: payload.clientId,
         insurerId: payload.insurerId,
         policyType: captureDraft.policyType,
-        status: "ACTIVE",
+        status: "ACTIVE" as const,
         startDate: targetStartDate,
         endDate: targetEndDate,
         premiumAmount: captureDraft.premiumAmount,

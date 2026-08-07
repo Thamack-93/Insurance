@@ -125,7 +125,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
           <SectionCard title="Ficha de aseguradora" description="Datos de contacto y operación.">
             <div className="grid gap-4 p-4 text-sm">
               <div className="flex items-start justify-between gap-3">
-                <StatusBadge status={insurer.status} />
+                <StatusBadge status={insurer.status} entity="insurer" />
                 {insurer.portalUrl && (
                   <Badge variant="outline" className="rounded-full">
                     <a href={insurer.portalUrl} target="_blank" rel="noopener noreferrer">
@@ -210,7 +210,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
                       <TableCell>{policy.client.fullName}</TableCell>
                       <TableCell>{policyTypeLabel(policy.policyType)}</TableCell>
                       <TableCell>
-                        <StatusBadge status={policy.status} />
+                        <StatusBadge status={policy.status} entity="policy" />
                       </TableCell>
                       <TableCell className="text-right font-medium">
                         {formatCurrency(policy.premiumAmount, policy.currency)}
@@ -247,7 +247,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
                       >
                         {claim.folio}
                       </Link>
-                      <StatusBadge status={claim.status} />
+                      <StatusBadge status={claim.status} entity="claim" />
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {claim.client.fullName} · {formatDate(claim.incidentDate)}
@@ -276,7 +276,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
                       <p className="font-medium text-foreground">
                         {formatCurrency(commission.expectedAmount)}
                       </p>
-                      <StatusBadge status={commission.status} />
+                      <StatusBadge status={commission.status} entity="commission" />
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {commission.client.fullName}

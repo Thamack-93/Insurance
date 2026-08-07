@@ -18,7 +18,7 @@ export const POLICY_TYPES = [
 ] as const;
 export type PolicyType = (typeof POLICY_TYPES)[number];
 
-export const POLICY_STATUSES = ["ACTIVE", "EXPIRED", "CANCELLED", "RENEWED", "PENDING"] as const;
+export const POLICY_STATUSES = ["ACTIVE", "PENDING", "RENEWED", "EXPIRED", "CANCELLED"] as const;
 export type PolicyStatus = (typeof POLICY_STATUSES)[number];
 
 export const ENDORSEMENT_STATUSES = ["ACTIVE", "PENDING", "EXPIRED", "CANCELLED"] as const;
@@ -39,6 +39,9 @@ export type ReceiptStatus = (typeof RECEIPT_STATUSES)[number];
 
 export const COMMISSION_STATUSES = ["EXPECTED", "PENDING", "PAID", "OVERDUE", "CANCELLED"] as const;
 export type CommissionStatus = (typeof COMMISSION_STATUSES)[number];
+
+export const PAYMENT_STATUSES = ["POSTED", "REVERSED"] as const;
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
 export const TASK_TYPES = ["GENERAL", "CLAIM", "QUOTE", "RENEWAL", "PAYMENT", "DOCUMENT", "COMMISSION", "OTHER"] as const;
 export type TaskType = (typeof TASK_TYPES)[number];

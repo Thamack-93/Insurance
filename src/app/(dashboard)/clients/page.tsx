@@ -14,6 +14,7 @@ import { getDb } from "@/lib/db";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { entityStatusOptions } from "@/lib/domain-options";
 import { buildTableHref, readAllowedTableParam, readTablePage, readTableSort } from "@/lib/table-query";
+import { ENTITY_STATUSES } from "@/lib/domain-values";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { clientOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 
@@ -27,7 +28,7 @@ export default async function ClientsPage({
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = readTablePage(params);
-  const statusFilter = readAllowedTableParam(params, "status", ["ACTIVE", "INACTIVE", "ARCHIVED"]);
+  const statusFilter = readAllowedTableParam(params, "status", ENTITY_STATUSES);
   const typeFilter = readAllowedTableParam(params, "type", ["PERSON", "COMPANY"]);
   const { sortKey, direction } = readTableSort(params);
 
@@ -293,7 +294,7 @@ export default async function ClientsPage({
                       {formatCurrency(client.totalPremium)}
                     </TableCell>
                     <TableCell>
-                      <StatusBadge status={client.status} />
+                      <StatusBadge status={client.status} entity="client" />
                     </TableCell>
                   </TableRow>
                 ))}

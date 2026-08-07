@@ -439,7 +439,7 @@ export default async function PortfolioPage({
                       <TableCell>
                         <div className="flex flex-col">
                           <span>{formatDate(receipt.dueDate)}</span>
-                          <StatusBadge status={receipt.status} className="mt-1 w-fit" />
+                          <StatusBadge status={receipt.status} entity="receipt" className="mt-1 w-fit" />
                         </div>
                       </TableCell>
                       <TableCell className="text-right font-medium">

@@ -232,7 +232,7 @@ export default async function OperationsPage({ searchParams }: { searchParams?: 
                   <p className="truncate text-sm font-medium">{claim.client.fullName} · {claim.claimType}</p>
                   <p className="truncate font-mono text-xs text-muted-foreground">{claim.folio} · {claim.policy.policyNumber} · {formatDate(claim.incidentDate)}</p>
                 </Link>
-                <StatusBadge status={claim.status} className="px-2 py-0.5 text-[11px]" />
+                <StatusBadge status={claim.status} entity="claim" className="px-2 py-0.5 text-[11px]" />
               </div>
             )) : <p className="p-8 text-center text-sm text-muted-foreground"><CheckCircle2 className="mx-auto mb-2 size-5 text-emerald-600" />No hay siniestros abiertos.</p>}
           </CardContent>

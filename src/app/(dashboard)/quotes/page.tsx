@@ -225,7 +225,7 @@ export default async function QuotesPage({
                       <TableCell>{quote.policyType}</TableCell>
                       <TableCell>{quote.insurer?.name ?? "—"}</TableCell>
                       <TableCell>
-                        <StatusBadge status={quote.status} />
+                        <StatusBadge status={quote.status} entity="quote" />
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1 text-sm text-muted-foreground">
@@ -274,7 +274,7 @@ export default async function QuotesPage({
                         {quote.client.fullName} · {quote.policyType}
                       </p>
                     </div>
-                    <StatusBadge status={quote.status} />
+                    <StatusBadge status={quote.status} entity="quote" />
                   </div>
                 ))}
               </div>

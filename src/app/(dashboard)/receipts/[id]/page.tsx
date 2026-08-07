@@ -139,7 +139,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
           <SectionCard title="Ficha del recibo" description="Datos de periodo, vencimiento y contexto.">
             <div className="grid gap-4 p-4 text-sm">
               <div className="flex items-start justify-between gap-3">
-                <StatusBadge status={receipt.status} />
+                <StatusBadge status={receipt.status} entity="receipt" />
                 <div className="flex flex-wrap justify-end gap-2">
                   <Badge variant="outline" className="rounded-full">
                     {receipt.currency}
@@ -286,7 +286,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                       <p className="font-medium text-foreground">
                         {formatCurrency(commission.expectedAmount)}
                       </p>
-                      <StatusBadge status={commission.status} />
+                      <StatusBadge status={commission.status} entity="commission" />
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {commission.insurer.name}
@@ -352,7 +352,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                     </TableCell>
                     <TableCell>{formatDate(related.dueDate)}</TableCell>
                     <TableCell>
-                      <StatusBadge status={related.status} />
+                      <StatusBadge status={related.status} entity="receipt" />
                     </TableCell>
                     <TableCell className="text-right font-medium">
                       {formatCurrency(related.amount, related.currency)}

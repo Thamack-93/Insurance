@@ -204,7 +204,7 @@ export default async function InsurersPage({
                           )}
                         </TableCell>
                         <TableCell>
-                          <StatusBadge status={insurer.status} />
+                          <StatusBadge status={insurer.status} entity="insurer" />
                         </TableCell>
                         <TableCell className="text-right">{insurer._count.policies}</TableCell>
                         <TableCell className="text-right">{insurer._count.claims}</TableCell>

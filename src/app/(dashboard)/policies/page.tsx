@@ -17,6 +17,7 @@ import { daysUntil, formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
 import { policyStatusOptions, policyTypeOptions } from "@/lib/domain-options";
+import { POLICY_STATUSES } from "@/lib/domain-values";
 import { policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 import { buildTableHref, readAllowedTableParam, readTablePage, readTableSort } from "@/lib/table-query";
@@ -32,11 +33,7 @@ export default async function PoliciesPage({
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = readTablePage(params);
-  const statusFilter = readAllowedTableParam(
-    params,
-    "status",
-    policyStatusOptions.map((option) => option.value),
-  );
+  const statusFilter = readAllowedTableParam(params, "status", POLICY_STATUSES);
   const typeFilter = readAllowedTableParam(params, "type", policyTypeOptions.map((option) => option.value));
   const { sortKey, direction } = readTableSort(params);
 
@@ -297,7 +294,7 @@ export default async function PoliciesPage({
                         {formatCurrency(policy.premiumAmount, policy.currency)}
                       </TableCell>
                       <TableCell>
-                        <StatusBadge status={policy.status} />
+                        <StatusBadge status={policy.status} entity="policy" />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -350,7 +347,7 @@ export default async function PoliciesPage({
                       {policy.endDate ? formatDate(policy.endDate) : "Sin renovación"} · {policyTypeLabel(policy.policyType)}
                     </p>
                   </div>
-                  <StatusBadge status={policy.status} className="w-fit" />
+                  <StatusBadge status={policy.status} entity="policy" className="w-fit" />
                 </div>
               ))}
             </div>

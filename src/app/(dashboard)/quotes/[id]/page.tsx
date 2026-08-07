@@ -106,7 +106,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           <SectionCard title="Ficha de cotización" description="Datos de la propuesta y vínculos operativos.">
             <div className="grid gap-4 p-4 text-sm">
               <div className="flex items-start justify-between gap-3">
-                <StatusBadge status={quote.status} />
+                <StatusBadge status={quote.status} entity="quote" />
                 <span className="text-xs text-muted-foreground">ID: {quote.id.slice(0, 8)}</span>
               </div>
 
@@ -208,7 +208,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
                         {formatCurrency(related.quotedAmount)}
                       </span>
                     )}
-                    <StatusBadge status={related.status} />
+                    <StatusBadge status={related.status} entity="quote" />
                   </div>
                 </div>
               ))}

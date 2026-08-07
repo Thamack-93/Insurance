@@ -281,7 +281,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           <SectionCard title="Póliza base" description="Contexto operativo y comercial de la vigencia base.">
             <div className="grid gap-4 p-4 text-sm">
               <div className="flex items-start justify-between gap-3">
-                <StatusBadge status={policy.status} />
+                <StatusBadge status={policy.status} entity="policy" />
                 <Badge variant="outline" className="rounded-full">
                   {policyTypeLabel(policy.policyType)}
                 </Badge>
@@ -464,7 +464,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                           >
                             Endoso {endorsement.endorsementNumber}
                           </Link>
-                          <StatusBadge status={endorsement.status} />
+                          <StatusBadge status={endorsement.status} entity="endorsement" />
                         </div>
                         <p className="text-sm text-muted-foreground">
                           {formatDate(endorsement.startDate)} · {formatDate(endorsement.endDate)} ·{" "}
@@ -580,7 +580,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                       {formatDate(term.startDate)} · {formatDate(term.endDate)}
                     </TableCell>
                     <TableCell>
-                      <StatusBadge status={term.status} />
+                      <StatusBadge status={term.status} entity="policy" />
                     </TableCell>
                     <TableCell className="text-right font-medium">{formatCurrency(term.premiumAmount, term.currency)}</TableCell>
                     <TableCell className="text-right">{term._count.receipts}</TableCell>
@@ -626,7 +626,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                   <div key={commission.id} className="px-4 py-4">
                     <div className="flex items-center justify-between gap-3">
                       <p className="font-medium text-foreground">{formatCurrency(commission.expectedAmount, policy.currency)}</p>
-                      <StatusBadge status={commission.status} />
+                      <StatusBadge status={commission.status} entity="commission" />
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {commission.expectedDate ? formatDate(commission.expectedDate) : "Sin fecha"} · {commission.insurer.name}
@@ -647,7 +647,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                       </Link>
                       <div className="flex gap-2">
                         <PriorityBadge priority={task.priority} />
-                        <StatusBadge status={task.status} />
+                        <StatusBadge status={task.status} entity="workItem" />
                       </div>
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">{task.title}</p>

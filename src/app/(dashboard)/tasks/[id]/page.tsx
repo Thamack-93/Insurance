@@ -14,6 +14,7 @@ import { getDb } from "@/lib/db";
 import { daysSince, daysUntil, formatDate } from "@/lib/dates";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
+import { statusLabel } from "@/lib/status";
 
 const workItemTypeLabels: Record<string, string> = {
   GENERAL: "General",
@@ -24,19 +25,6 @@ const workItemTypeLabels: Record<string, string> = {
   DOCUMENT: "Documento",
   COMMISSION: "Comisión",
   OTHER: "Otro",
-};
-
-const workItemStatusLabels: Record<string, string> = {
-  OPEN: "Abierta",
-  IN_PROGRESS: "En progreso",
-  WAITING_CLIENT: "Esperando cliente",
-  WAITING_INSURER: "Esperando aseguradora",
-  WAITING_DOCUMENT: "Esperando documento",
-  SENT: "Enviada",
-  RESOLVED: "Resuelta",
-  CANCELLED: "Cancelada",
-  ARCHIVED: "Archivada",
-  DISMISSED: "Descartada",
 };
 
 export default async function WorkItemDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -99,7 +87,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
             title="Estado"
-            value={workItemStatusLabels[workItem.status] ?? workItem.status}
+            value={statusLabel(workItem.status, "workItem")}
             description={isClosed ? "Pendiente cerrada" : isOverdue ? "Vencida" : "Activa"}
             icon={CheckSquare}
             tone={isClosed ? "blue" : isOverdue ? "rose" : "emerald"}
@@ -133,7 +121,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
               <div className="flex items-start justify-between gap-3">
                 <div className="flex gap-2">
                   <PriorityBadge priority={workItem.priority} />
-                  <StatusBadge status={workItem.status} />
+                  <StatusBadge status={workItem.status} entity="workItem" />
                 </div>
                 <Badge variant="outline" className="rounded-full">
                   {workItemTypeLabels[workItem.taskType ?? "GENERAL"] ?? workItem.taskType ?? "GENERAL"}

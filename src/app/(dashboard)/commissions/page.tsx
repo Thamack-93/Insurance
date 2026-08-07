@@ -199,7 +199,7 @@ export default async function CommissionsPage({
                       <TableCell>{formatDate(commission.expectedDate)}</TableCell>
                       <TableCell className="text-right font-medium">{formatCurrency(toNumber(commission.expectedAmount))}</TableCell>
                       <TableCell>
-                        <StatusBadge status={commission.status} />
+                        <StatusBadge status={commission.status} entity="commission" />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -242,7 +242,7 @@ export default async function CommissionsPage({
                   </div>
                   <div className="text-right">
                     <p className="font-medium">{formatCurrency(toNumber(commission.actualAmount ?? commission.expectedAmount))}</p>
-                    <StatusBadge status={commission.status} className="mt-1 w-fit" />
+                    <StatusBadge status={commission.status} entity="commission" className="mt-1 w-fit" />
                   </div>
                 </div>
               ))}
