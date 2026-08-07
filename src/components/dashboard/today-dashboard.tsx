@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useId } from "react";
 import { ArrowDownRight, ArrowUpRight, CalendarDays, ChevronRight, CircleDollarSign, ClipboardList, ReceiptText, RefreshCw, ShieldAlert, ShieldCheck, type LucideIcon } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { TodayDashboardData } from "@/lib/dashboard-queries";
@@ -9,7 +10,13 @@ import { formatCurrency } from "@/lib/money";
 import { policyTypeLabel, statusLabel } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "@/components/badges/status-badge";
+import { ChartEmptyState } from "@/components/charts/chart-empty";
+import { ChartFrame } from "@/components/charts/chart-frame";
+import { ChartLegend } from "@/components/charts/chart-legend";
+import { ChartPatternDefs, chartPattern } from "@/components/charts/chart-patterns";
 import { ChartSrSummary } from "@/components/charts/chart-sr-summary";
+import { chartTooltip } from "@/components/charts/chart-tooltip";
+import { CHART_AXIS_PROPS, CHART_CURSOR_LINE, CHART_GRID_STROKE, chartSeriesColor } from "@/components/charts/chart-theme";
 
 type DashboardMetrics = TodayDashboardData["metrics"];
 
@@ -99,77 +106,128 @@ export function TodayMetricCards({ metrics, prevMonthLabel }: { metrics: Dashboa
 }
 
 export function PolicyActivityChart({ data }: { data: TodayDashboardData["activity"] }) {
+  const policiesSeries = data.map((point) => ({ name: point.name, value: point.pólizas }));
+  const receiptsSeries = data.map((point) => ({ name: point.name, value: point.recibos }));
+  const seriesTotals = {
+    "pólizas": policiesSeries.reduce((sum, point) => sum + point.value, 0),
+    recibos: receiptsSeries.reduce((sum, point) => sum + point.value, 0),
+  };
+  const hasData = data.some((point) => point.pólizas > 0 || point.recibos > 0);
+
   return (
-    <section className="rounded-xl border bg-card p-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)]" aria-labelledby="policy-activity-title">
-      <div className="mb-3 flex items-center justify-between">
+    <section className="flex h-full flex-col rounded-xl border bg-card p-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)]" aria-labelledby="policy-activity-title">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 id="policy-activity-title" className="text-sm font-semibold">Actividad de pólizas</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">Últimos 6 meses</p>
         </div>
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 rounded-full" style={{ background: "var(--chart-1)" }} aria-hidden />Emitidas</span>
-          <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 rounded-full" style={{ background: "var(--chart-2)" }} aria-hidden />Recibos</span>
+          <span className="flex items-center gap-1.5"><span className="w-4 border-t-2 border-dashed" style={{ borderColor: "var(--chart-2)" }} aria-hidden />Recibos</span>
         </div>
       </div>
-      <div role="img" aria-label="Gráfica de líneas de actividad de pólizas y recibos de los últimos 6 meses">
-        <ChartSrSummary title="Pólizas emitidas por mes" data={data.map((point) => ({ name: point.name, value: point.pólizas }))} />
-        <ChartSrSummary title="Recibos generados por mes" data={data.map((point) => ({ name: point.name, value: point.recibos }))} />
-        <ResponsiveContainer width="100%" height={260} debounce={1}>
-          <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-            <XAxis dataKey="name" tickLine={false} axisLine={false} fontSize={12} stroke="var(--muted-foreground)" />
-            <YAxis tickLine={false} axisLine={false} fontSize={12} stroke="var(--muted-foreground)" allowDecimals={false} />
-            <Tooltip />
-            <Line type="monotone" dataKey="pólizas" stroke="var(--chart-1)" strokeWidth={2.25} dot={{ r: 3 }} name="Emitidas" />
-            <Line type="monotone" dataKey="recibos" stroke="var(--chart-2)" strokeWidth={2.25} dot={{ r: 3 }} name="Recibos" />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
+      {hasData ? (
+        <>
+          {/* The screen-reader tables stay outside role="img": assistive tech
+              does not expose the contents of an image role. */}
+          <ChartSrSummary title="Pólizas emitidas por mes" data={policiesSeries} />
+          <ChartSrSummary title="Recibos generados por mes" data={receiptsSeries} />
+          <div className="flex flex-1 flex-col" role="img" aria-label="Gráfica de líneas de actividad de pólizas y recibos de los últimos 6 meses">
+            <ChartFrame>
+              <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
+                <XAxis dataKey="name" {...CHART_AXIS_PROPS} />
+                <YAxis allowDecimals={false} {...CHART_AXIS_PROPS} />
+                <Tooltip
+                  cursor={CHART_CURSOR_LINE}
+                  content={chartTooltip({ total: seriesTotals, shareLabel: "Proporción de los últimos 6 meses." })}
+                />
+                <Line type="monotone" dataKey="pólizas" stroke="var(--chart-1)" strokeWidth={2.25} dot={{ r: 3 }} name="Emitidas" />
+                <Line type="monotone" dataKey="recibos" stroke="var(--chart-2)" strokeWidth={2.25} strokeDasharray="5 3" dot={{ r: 3 }} name="Recibos" />
+              </LineChart>
+            </ChartFrame>
+          </div>
+        </>
+      ) : (
+        <ChartEmptyState message="Todavía no hay actividad en los últimos 6 meses." hint="Aquí verás las pólizas emitidas y los recibos generados por mes." />
+      )}
     </section>
   );
 }
 
 export function PolicyStatusDonut({ data }: { data: TodayDashboardData["statusDistribution"] }) {
+  const patternPrefix = useId().replace(/:/g, "");
   const total = data.reduce((sum, item) => sum + item.value, 0);
   const chartData = data.map((item, index) => ({
     ...item,
     label: statusLabel(item.status, "policy"),
-    fill: statusColorMap[item.status] ?? `var(--chart-${(index % 5) + 1})`,
+    color: statusColorMap[item.status] ?? chartSeriesColor(index),
+    pattern: chartPattern(index),
+    patternId: `${patternPrefix}-status-${index}`,
   }));
 
   return (
-    <section className="rounded-xl border bg-card p-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)]" aria-labelledby="policy-status-title">
+    <section className="flex h-full flex-col rounded-xl border bg-card p-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)]" aria-labelledby="policy-status-title">
       <h2 id="policy-status-title" className="text-sm font-semibold">Estado de pólizas</h2>
-      <div className="relative" role="img" aria-label={`Distribución de pólizas por estado, total ${total}`}>
-        <ResponsiveContainer width="100%" height={200} debounce={1}>
-          <PieChart>
-            <Pie data={chartData} dataKey="value" nameKey="label" innerRadius={58} outerRadius={84} paddingAngle={3} strokeWidth={0}>
-              {chartData.map((item) => (
-                <Cell key={item.status} fill={item.fill} />
-              ))}
-            </Pie>
-            <Tooltip />
-          </PieChart>
-        </ResponsiveContainer>
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-2xl font-semibold tracking-tight">{total.toLocaleString("es-MX")}</span>
-          <span className="text-xs text-muted-foreground">Total</span>
-        </div>
-      </div>
-      <ul className="mt-2 space-y-1.5">
-        {chartData.map((item) => (
-          <li key={item.status} className="flex items-center justify-between gap-2 text-xs">
-            <span className="flex items-center gap-2 text-muted-foreground">
-              <span className="size-2.5 rounded-full" style={{ background: item.fill }} aria-hidden />
-              {item.label}
-            </span>
-            <span className="font-medium text-foreground">
-              {item.value.toLocaleString("es-MX")}
-              <span className="ml-1 text-muted-foreground">({total ? Math.round((item.value / total) * 100) : 0}%)</span>
-            </span>
-          </li>
-        ))}
-      </ul>
+      <ChartSrSummary
+        title="Pólizas por estado"
+        data={chartData.map((item) => ({ name: item.label, value: item.value }))}
+      />
+      {total > 0 ? (
+        <>
+          <div className="relative flex flex-1 flex-col" role="img" aria-label={`Distribución de pólizas por estado, total ${total}`}>
+            <ChartFrame className="min-h-40">
+              <PieChart>
+                <ChartPatternDefs
+                  items={chartData.map((item) => ({ id: item.patternId, color: item.color, pattern: item.pattern }))}
+                />
+                <Pie
+                  data={chartData}
+                  dataKey="value"
+                  nameKey="label"
+                  innerRadius="60%"
+                  outerRadius="86%"
+                  paddingAngle={3}
+                  stroke="var(--card)"
+                  strokeWidth={1}
+                >
+                  {chartData.map((item) => (
+                    <Cell key={item.status} fill={`url(#${item.patternId})`} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  content={chartTooltip({
+                    total,
+                    headingFromPayload: true,
+                    valueLabel: "Pólizas",
+                    shareLabel: "Proporción de la cartera.",
+                  })}
+                />
+              </PieChart>
+            </ChartFrame>
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-2xl font-semibold tracking-tight">{total.toLocaleString("es-MX")}</span>
+              <span className="text-xs text-muted-foreground">Total</span>
+            </div>
+          </div>
+          <ChartLegend
+            total={total}
+            items={chartData.map((item) => ({
+              key: item.status,
+              label: item.label,
+              value: item.value,
+              color: item.color,
+              pattern: item.pattern,
+            }))}
+          />
+        </>
+      ) : (
+        <ChartEmptyState
+          className="mt-3"
+          message="Aún no hay pólizas en cartera."
+          hint="El estado de las pólizas se graficará al registrar la primera."
+        />
+      )}
     </section>
   );
 }
