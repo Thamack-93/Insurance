@@ -53,7 +53,7 @@ function Sparkline({ data }: { data: number[] }) {
   return (
     <div className="h-9 w-24" aria-hidden>
       <ResponsiveContainer width="100%" height="100%" debounce={1}>
-        <AreaChart data={points} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
+        <AreaChart accessibilityLayer={false} data={points} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
           <defs>
             <linearGradient id="sparkGradient" x1="0" x2="0" y1="0" y2="1">
               <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.3} />
