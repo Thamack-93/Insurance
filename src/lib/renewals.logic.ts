@@ -44,6 +44,24 @@ export function shouldIncludeInRenewals(
   return true;
 }
 
+export function isUnresolvedOverdueRenewal(
+  policy: {
+    status: string;
+    endDate: Date | null;
+    hasSuccessor: boolean;
+    hasDecision: boolean;
+  },
+  today: Date = businessToday(),
+): boolean {
+  return (
+    policy.status === "ACTIVE" &&
+    policy.endDate !== null &&
+    policy.endDate < today &&
+    !policy.hasSuccessor &&
+    !policy.hasDecision
+  );
+}
+
 export function createRenewalWorkItemTitle(
   priority: RenewalPriority,
   policyNumber: string
