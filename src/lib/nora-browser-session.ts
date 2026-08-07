@@ -1,9 +1,14 @@
 "use client";
 
 import type { NoraContextRef } from "@/lib/nora-context";
+import type {
+  PolicyPdfCaptureAiReview,
+  PolicyPdfCaptureFieldKey,
+  PolicyPdfCaptureProvenance,
+} from "@/lib/policy-pdf-capture.shared";
 
 export const NORA_BROWSER_SESSION_VERSION = 2 as const;
-export const POLICY_CAPTURE_SESSION_VERSION = 3 as const;
+export const POLICY_CAPTURE_SESSION_VERSION = 4 as const;
 export const NORA_SESSION_TTL_MS = 30 * 60 * 1000;
 export const POLICY_CAPTURE_TTL_MS = 15 * 60 * 1000;
 export const NORA_MAX_MESSAGES = 20;
@@ -12,7 +17,7 @@ export const NORA_MAX_SESSION_BYTES = 64 * 1024;
 export const NORA_SESSION_EVENT = "policydesk:nora-session-updated";
 
 const NORA_KEY_PREFIX = "policydesk.nora.session.v2:";
-const CAPTURE_KEY_PREFIX = "policydesk.policyCapture.v3:";
+const CAPTURE_KEY_PREFIX = "policydesk.policyCapture.v4:";
 const LEGACY_KEYS = [
   "policydesk.nora.conversation.v1",
   "policydesk.policyPdfCapture.v2",
@@ -69,6 +74,9 @@ export type PolicyCaptureHandoffPayload = {
   selectedSourcePolicyLabel?: string;
   showInlineClient?: boolean;
   receiptPlan?: Array<Record<string, unknown>>;
+  warnings?: string[];
+  aiReview?: PolicyPdfCaptureAiReview | null;
+  provenance?: PolicyPdfCaptureProvenance;
 };
 
 export type PersistedPolicyCaptureHandoff = {
@@ -333,12 +341,74 @@ function sanitizeCapturePayload(value: unknown): PolicyCaptureHandoffPayload | n
         return [{ receiptNumber: row.receiptNumber.slice(0, 120), periodStartDate: row.periodStartDate.slice(0, 20), periodEndDate: row.periodEndDate.slice(0, 20), dueDate: row.dueDate.slice(0, 20), amount: row.amount, currency: row.currency.slice(0, 10) }];
       }).slice(0, 25)
     : undefined;
+  const safeWarnings = Array.isArray(candidate.warnings)
+    ? candidate.warnings.flatMap((warning) => typeof warning === "string" && warning.trim() ? [cleanText(warning, 500)] : []).slice(0, 20)
+    : undefined;
+  const captureFieldKeys = new Set<PolicyPdfCaptureFieldKey>([
+    "policyNumber", "clientName", "clientType", "clientEmail", "clientPhone", "clientAddress", "clientRfc",
+    "clientBirthDate", "insurerName", "policyType", "serialNumber", "startDate", "endDate", "issueDate",
+    "paymentFrequency", "premiumAmount", "sourcePolicyNumber",
+  ]);
+  const rawAiReview = candidate.aiReview && typeof candidate.aiReview === "object"
+    ? candidate.aiReview as unknown as Record<string, unknown>
+    : null;
+  const safeAiReview = rawAiReview && typeof rawAiReview.summary === "string"
+    ? {
+        summary: cleanText(rawAiReview.summary, 1_200),
+        warnings: Array.isArray(rawAiReview.warnings)
+          ? rawAiReview.warnings.flatMap((warning) => typeof warning === "string" && warning.trim() ? [cleanText(warning, 500)] : []).slice(0, 20)
+          : [],
+        suggestions: Array.isArray(rawAiReview.suggestions)
+          ? rawAiReview.suggestions.flatMap((suggestion) => typeof suggestion === "string" && suggestion.trim() ? [cleanText(suggestion, 500)] : []).slice(0, 20)
+          : [],
+        corrections: Array.isArray(rawAiReview.corrections)
+          ? rawAiReview.corrections.flatMap((correction) => {
+              if (!correction || typeof correction !== "object") return [];
+              const item = correction as Record<string, unknown>;
+              const field = item.field;
+              const confidence = item.confidence;
+              if (
+                typeof field !== "string" || !captureFieldKeys.has(field as PolicyPdfCaptureFieldKey) ||
+                typeof item.proposedValue !== "string" || typeof item.reason !== "string" ||
+                !["high", "medium", "low"].includes(String(confidence))
+              ) return [];
+              return [{
+                field: field as PolicyPdfCaptureFieldKey,
+                proposedValue: cleanText(item.proposedValue, 500),
+                reason: cleanText(item.reason, 700),
+                confidence: confidence as "high" | "medium" | "low",
+              }];
+            }).slice(0, 12)
+          : [],
+      } satisfies PolicyPdfCaptureAiReview
+    : undefined;
+  const rawProvenance = candidate.provenance && typeof candidate.provenance === "object"
+    ? candidate.provenance as unknown as Record<string, unknown>
+    : null;
+  const safeProvenance = rawProvenance &&
+      (rawProvenance.extractionSource === "local" || rawProvenance.extractionSource === "ai") &&
+      (rawProvenance.reviewSource === "none" || rawProvenance.reviewSource === "ai") &&
+      (rawProvenance.trackingStatus === "recorded" || rawProvenance.trackingStatus === "unavailable") &&
+      typeof rawProvenance.aiAttempted === "boolean"
+    ? {
+        extractionSource: rawProvenance.extractionSource,
+        reviewSource: rawProvenance.reviewSource,
+        aiRunIds: Array.isArray(rawProvenance.aiRunIds)
+          ? rawProvenance.aiRunIds.flatMap((runId) => typeof runId === "string" && runId.trim() ? [runId.slice(0, 160)] : []).slice(0, 10)
+          : [],
+        trackingStatus: rawProvenance.trackingStatus,
+        aiAttempted: rawProvenance.aiAttempted,
+      } satisfies PolicyPdfCaptureProvenance
+    : undefined;
   return {
     draft: safeDraft,
     ...(safeConfidence ? { fieldConfidence: safeConfidence } : {}),
     ...Object.fromEntries(["selectedClientId", "selectedClientLabel", "selectedInsurerId", "selectedInsurerLabel", "selectedSourcePolicyId", "selectedSourcePolicyLabel"].flatMap((key) => typeof candidate[key as keyof PolicyCaptureHandoffPayload] === "string" ? [[key, cleanText(candidate[key as keyof PolicyCaptureHandoffPayload], 300)]] : [])),
     ...(typeof candidate.showInlineClient === "boolean" ? { showInlineClient: candidate.showInlineClient } : {}),
     ...(safeReceiptPlan ? { receiptPlan: safeReceiptPlan } : {}),
+    ...(safeWarnings ? { warnings: safeWarnings } : {}),
+    ...(safeAiReview ? { aiReview: safeAiReview } : candidate.aiReview === null ? { aiReview: null } : {}),
+    ...(safeProvenance ? { provenance: safeProvenance } : {}),
   };
 }
 
