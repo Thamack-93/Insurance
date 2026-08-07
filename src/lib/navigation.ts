@@ -1,6 +1,8 @@
 import type { LucideIcon } from "@/components/icons";
 import {
   BarChart3,
+  Calculator,
+  FolderKanban,
   CircleDollarSign,
   FileText,
   Home,
@@ -25,7 +27,8 @@ export type GlobalNavigationItem = {
   label: string;
   href: string;
   icon: LucideIcon;
-  aliases?: string[];
+  redirectAliases?: string[];
+  activePaths?: string[];
 };
 
 export type UtilityNavigationItem = {
@@ -37,25 +40,26 @@ export type UtilityNavigationItem = {
 };
 
 export const globalNavigation: GlobalNavigationItem[] = [
-  { id: "today", label: "Hoy", href: "/today", icon: Home, aliases: ["/dashboard"] },
+  { id: "today", label: "Hoy", href: "/today", icon: Home, redirectAliases: ["/dashboard"] },
   {
     id: "operations",
     label: "Operación",
     href: "/operations",
     icon: ShieldCheck,
-    aliases: ["/tasks", "/renewals", "/claims"],
+    redirectAliases: ["/tasks", "/renewals", "/claims"],
   },
   { id: "clients", label: "Clientes", href: "/clients", icon: Users },
-  { id: "policies", label: "Pólizas", href: "/policies", icon: FileText, aliases: ["/quotes"] },
+  { id: "policies", label: "Pólizas", href: "/policies", icon: FileText, activePaths: ["/quotes"] },
   {
     id: "receipts",
     label: "Recibos",
     href: "/receipts",
     icon: ReceiptText,
-    aliases: ["/due-payments", "/payments"],
+    redirectAliases: ["/due-payments"],
+    activePaths: ["/payments"],
   },
   { id: "commissions", label: "Comisiones y bonos", href: "/commissions", icon: CircleDollarSign },
-  { id: "reports", label: "Reportes", href: "/reports", icon: BarChart3, aliases: ["/portfolio"] },
+  { id: "reports", label: "Reportes", href: "/reports", icon: BarChart3, activePaths: ["/portfolio"] },
 ];
 
 export const utilityNavigation: UtilityNavigationItem[] = [
@@ -89,6 +93,19 @@ const breadcrumbLabels: Record<string, string> = {
   today: "Hoy",
 };
 
+const contextualBreadcrumbLabels: Record<string, Record<string, string>> = {
+  reports: {
+    collections: "Cobranza",
+    renewals: "Renovaciones",
+    portfolio: "Reporte de cartera",
+    commissions: "Comisiones",
+    operations: "Operación",
+  },
+  today: {
+    insights: "Insights",
+  },
+};
+
 function normalizePathname(pathname: string) {
   if (!pathname || pathname === "/") return "/";
   return pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
@@ -101,7 +118,7 @@ function matchesPath(pathname: string, href: string) {
 }
 
 export function isNavigationItemActive(item: GlobalNavigationItem, pathname: string) {
-  const candidates = [item.href, ...(item.aliases ?? [])];
+  const candidates = [item.href, ...(item.activePaths ?? []), ...(item.redirectAliases ?? [])];
   return candidates.some((href) => matchesPath(pathname, href));
 }
 
@@ -127,15 +144,66 @@ export function isUtilityNavigationItemActive(item: UtilityNavigationItem, pathn
   return getActiveUtilityNavigationItem(pathname)?.id === item.id;
 }
 
-export function getBreadcrumbSegments(pathname: string) {
-  return normalizePathname(pathname)
+export function getBreadcrumbSegments(pathname: string, searchParams?: { get(name: string): string | null }) {
+  const normalizedPathname = normalizePathname(pathname);
+  const segments = normalizedPathname
     .split("/")
     .filter(Boolean)
     .map((segment) => ({ segment, label: breadcrumbLabels[segment] ?? segment }));
+
+  const rootSegment = segments[0]?.segment;
+  const view = searchParams?.get("view");
+  const contextualLabel = rootSegment && view ? contextualBreadcrumbLabels[rootSegment]?.[view] : undefined;
+  if (contextualLabel && view) segments.push({ segment: view, label: contextualLabel });
+
+  return segments;
 }
 
 export type LocalNavigationItem = {
   label: string;
   href: string;
   excludeQueryKeys?: string[];
+  activeHrefs?: string[];
 };
+
+export function isLocalNavigationItemActive(
+  item: LocalNavigationItem,
+  pathname: string,
+  searchParams: { get(name: string): string | null },
+) {
+  return [item.href, ...(item.activeHrefs ?? [])].some((href) => {
+    const [itemPathname, itemQuery = ""] = href.split("?");
+    const expectedParams = new URLSearchParams(itemQuery);
+    return pathname === itemPathname
+      && [...expectedParams].every(([key, value]) => searchParams.get(key) === value)
+      && (item.excludeQueryKeys ?? []).every((key) => !searchParams.get(key));
+  });
+}
+
+export const policyNavigation: LocalNavigationItem[] = [
+  { label: "Activas", href: "/policies?status=ACTIVE" },
+  { label: "Por vencer", href: "/operations?view=renewals" },
+  { label: "Cotizaciones", href: "/quotes" },
+  { label: "Archivadas", href: "/policies?status=ARCHIVED" },
+];
+
+export const todayNavigation: LocalNavigationItem[] = [
+  { label: "Mi día", href: "/today", excludeQueryKeys: ["view"] },
+  { label: "Insights", href: "/today?view=insights" },
+];
+
+export const reportsNavigation: LocalNavigationItem[] = [
+  { label: "Reportes", href: "/reports", excludeQueryKeys: ["view"] },
+  { label: "Cartera", href: "/portfolio" },
+  { label: "Cobranza", href: "/reports?view=collections" },
+  { label: "Renovaciones", href: "/reports?view=renewals" },
+  { label: "Reporte de cartera", href: "/reports?view=portfolio" },
+  { label: "Comisiones", href: "/reports?view=commissions" },
+  { label: "Operación", href: "/reports?view=operations" },
+];
+
+export const contextualNavigation = [
+  { id: "quotes", label: "Cotizaciones", href: "/quotes", icon: Calculator },
+  { id: "portfolio", label: "Cartera", href: "/portfolio", icon: FolderKanban },
+  { id: "insights", label: "Insights", href: "/today?view=insights", icon: BarChart3 },
+] as const;
