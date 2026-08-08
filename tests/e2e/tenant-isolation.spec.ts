@@ -22,8 +22,8 @@ test("dual membership requires an explicit organization selection", async ({ pag
   await page.getByLabel("Contraseña").fill("tenant-fixture-password");
   await page.getByRole("button", { name: "Iniciar sesión" }).click();
   await expect(page).toHaveURL(/\/organization\/select$/);
-  await expect(page.getByText("Tenant Fixture A")).toBeVisible();
-  await expect(page.getByText("Tenant Fixture B")).toBeVisible();
+  await expect(page.getByText("PolicyDesk Legacy Organization")).toBeVisible();
+  await expect(page.getByText("Pedro Alfredo Gómez Lorenzo")).toBeVisible();
 });
 
 test("superadmin without membership is confined to the platform shell", async ({ page }) => {
@@ -46,4 +46,17 @@ test("tenant policy mutation route is visibly blocked while reads remain availab
   await expect(page.getByText("Mutación temporalmente bloqueada")).toBeVisible();
   await page.goto("/policies/tenant-policy-a");
   await expect(page.getByText("OVERLAP-A")).toBeVisible();
+});
+
+test("Pedro signs into his isolated organization and cannot see legacy clients", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByLabel("Correo electrónico").fill("pedroagl93@gmail.com");
+  await page.getByLabel("Contraseña").fill("tenant-fixture-password");
+  await page.getByRole("button", { name: "Iniciar sesión" }).click();
+  await expect(page).toHaveURL(/\/today$/);
+
+  await page.goto("/clients/tenant-client-pedro");
+  await expect(page.getByText("Pedro Client Private").first()).toBeVisible();
+  await page.goto("/clients/tenant-client-a");
+  await expect(page.getByText("Overlap Client").first()).not.toBeVisible();
 });

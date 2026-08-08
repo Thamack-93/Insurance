@@ -6,18 +6,29 @@ const enabled = process.env.TENANT_ISOLATION_TEST_DB === "1" && process.env.PLAY
 const describeDisposable = enabled ? describe : describe.skip;
 
 describeDisposable("tenant isolation disposable fixture", () => {
-  it("contains two organizations and a membership-free superadmin", async () => {
+  it("contains legacy and Pedro organizations plus a membership-free superadmin", async () => {
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) throw new Error("DATABASE_URL is required");
     const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
     try {
-      const organizations = await db.organization.findMany({ where: { id: { in: ["org_test_a_0001", "org_test_b_0001"] } } });
+      const organizations = await db.organization.findMany({ where: { id: { in: ["org_legacy_singleton_0001", "org_pedro_gomez_0001"] } } });
       expect(organizations).toHaveLength(2);
+      expect(organizations.find((organization) => organization.id === "org_pedro_gomez_0001")).toMatchObject({
+        name: "Pedro Alfredo Gómez Lorenzo",
+        slug: "pedro-alfredo-gomez-lorenzo",
+        status: "ACTIVE",
+      });
+      const pedro = await db.user.findUnique({ where: { id: "tenant-pedro-gomez" }, include: { organizationMemberships: true } });
+      expect(pedro?.email).toBe("pedroagl93@gmail.com");
+      expect(pedro?.organizationMemberships).toEqual([
+        expect.objectContaining({ organizationId: "org_pedro_gomez_0001", role: "OWNER", active: true }),
+      ]);
       const superadmin = await db.user.findUnique({ where: { id: "tenant-superadmin" }, include: { organizationMemberships: true } });
       expect(superadmin?.platformRole).toBe("SUPERADMIN");
       expect(superadmin?.organizationMemberships).toHaveLength(0);
       const clients = await db.client.findMany({ where: { id: { in: ["tenant-client-a", "tenant-client-b"] } }, select: { id: true, organizationId: true } });
-      expect(new Set(clients.map((client) => client.organizationId))).toEqual(new Set(["org_test_a_0001", "org_test_b_0001"]));
+      expect(new Set(clients.map((client) => client.organizationId))).toEqual(new Set(["org_legacy_singleton_0001", "org_pedro_gomez_0001"]));
+      expect((await db.client.findUnique({ where: { id: "tenant-client-pedro" } }))?.organizationId).toBe("org_pedro_gomez_0001");
     } finally {
       await db.$disconnect();
     }
@@ -29,13 +40,13 @@ describeDisposable("tenant isolation disposable fixture", () => {
     const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
     try {
       const foreignUpdate = await db.client.updateMany({
-        where: { id: "tenant-client-b", organizationId: "org_test_a_0001", portfolioOwnerId: "tenant-agent-a" },
+        where: { id: "tenant-client-b", organizationId: "org_legacy_singleton_0001", portfolioOwnerId: "tenant-agent-a" },
         data: { notes: "must not cross tenant" },
       });
       expect(foreignUpdate.count).toBe(0);
 
       const foreignOwnerUpdate = await db.client.updateMany({
-        where: { id: "tenant-client-a", organizationId: "org_test_a_0001", portfolioOwnerId: "tenant-agent-b" },
+        where: { id: "tenant-client-a", organizationId: "org_legacy_singleton_0001", portfolioOwnerId: "tenant-agent-b" },
         data: { notes: "must not cross portfolio" },
       });
       expect(foreignOwnerUpdate.count).toBe(0);
@@ -43,7 +54,7 @@ describeDisposable("tenant isolation disposable fixture", () => {
       const created = await db.client.create({
         data: {
           id: "tenant-client-a-created",
-          organizationId: "org_test_a_0001",
+          organizationId: "org_legacy_singleton_0001",
           fullName: "Created only in A",
           type: "PERSON",
           status: "ACTIVE",
@@ -52,7 +63,7 @@ describeDisposable("tenant isolation disposable fixture", () => {
           updatedById: "tenant-admin-a",
         },
       });
-      expect(created.organizationId).toBe("org_test_a_0001");
+      expect(created.organizationId).toBe("org_legacy_singleton_0001");
       await db.client.delete({ where: { id: created.id } });
     } finally {
       await db.$disconnect();

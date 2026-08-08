@@ -49,6 +49,10 @@ const hash = (password: string) => {
   return `scrypt$${salt}$${scryptSync(password, salt, 64).toString("hex")}`;
 };
 
+const LEGACY_ORGANIZATION_ID = "org_legacy_singleton_0001";
+const PEDRO_ORGANIZATION_ID = "org_pedro_gomez_0001";
+const PEDRO_USER_ID = "tenant-pedro-gomez";
+
 async function validateMarker() {
   const marker = await db.$queryRaw<Array<{ run_id: string; database_name: string; host: string; fingerprint: string }>>`
     SELECT run_id, database_name, host, fingerprint
@@ -84,20 +88,25 @@ async function main() {
   await db.$transaction(async (tx) => {
     await removeSingletonGuards(tx);
     const orgA = await tx.organization.upsert({
-      where: { id: "org_test_a_0001" },
-      update: { name: "Tenant Fixture A", slug: "tenant-fixture-a", status: "ACTIVE" },
-      create: { id: "org_test_a_0001", name: "Tenant Fixture A", slug: "tenant-fixture-a", status: "ACTIVE", timeZone: "Etc/GMT+6", defaultCurrency: "MXN" },
+      where: { id: LEGACY_ORGANIZATION_ID },
+      update: { name: "PolicyDesk Legacy Organization", slug: "legacy-organization", status: "ACTIVE" },
+      create: { id: LEGACY_ORGANIZATION_ID, name: "PolicyDesk Legacy Organization", slug: "legacy-organization", status: "ACTIVE", timeZone: "Etc/GMT+6", defaultCurrency: "MXN" },
     });
     const orgB = await tx.organization.upsert({
-      where: { id: "org_test_b_0001" },
-      update: { name: "Tenant Fixture B", slug: "tenant-fixture-b", status: "ACTIVE" },
-      create: { id: "org_test_b_0001", name: "Tenant Fixture B", slug: "tenant-fixture-b", status: "ACTIVE", timeZone: "Etc/GMT+6", defaultCurrency: "MXN" },
+      where: { id: PEDRO_ORGANIZATION_ID },
+      update: { name: "Pedro Alfredo Gómez Lorenzo", slug: "pedro-alfredo-gomez-lorenzo", status: "ACTIVE" },
+      create: { id: PEDRO_ORGANIZATION_ID, name: "Pedro Alfredo Gómez Lorenzo", slug: "pedro-alfredo-gomez-lorenzo", status: "ACTIVE", timeZone: "Etc/GMT+6", defaultCurrency: "MXN" },
     });
+    const organizations = await tx.organization.findMany({ select: { id: true }, orderBy: { id: "asc" } });
+    if (organizations.length !== 2 || organizations.some(({ id }) => ![LEGACY_ORGANIZATION_ID, PEDRO_ORGANIZATION_ID].includes(id))) {
+      throw new Error("Tenant isolation fixture refuses unexpected organizations in the disposable database.");
+    }
     const users = [
       { id: "tenant-admin-a", email: "tenant-admin-a@policydesk.local", name: "Tenant Admin A", role: "ADMIN", org: orgA.id, membershipRole: "ADMIN" },
       { id: "tenant-agent-a", email: "tenant-agent-a@policydesk.local", name: "Tenant Agent A", role: "AGENT", org: orgA.id, membershipRole: "AGENT" },
       { id: "tenant-admin-b", email: "tenant-admin-b@policydesk.local", name: "Tenant Admin B", role: "ADMIN", org: orgB.id, membershipRole: "ADMIN" },
       { id: "tenant-agent-b", email: "tenant-agent-b@policydesk.local", name: "Tenant Agent B", role: "AGENT", org: orgB.id, membershipRole: "AGENT" },
+      { id: PEDRO_USER_ID, email: "pedroagl93@gmail.com", name: "Pedro Alfredo Gómez Lorenzo", role: "ADMIN", org: orgB.id, membershipRole: "OWNER" },
       { id: "tenant-dual-user", email: "tenant-dual@policydesk.local", name: "Tenant Dual User", role: "AGENT", org: orgA.id, membershipRole: "AGENT" },
       { id: "tenant-superadmin", email: "tenant-superadmin@policydesk.local", name: "Tenant Superadmin", role: "ADMIN", org: null, membershipRole: null },
     ] as const;
@@ -142,6 +151,51 @@ async function main() {
         create: { id: `tenant-policy-${suffix.toLowerCase()}`, organizationId: orgId, clientId: client.id, insurerId: insurer.id, policyNumber: `OVERLAP-${suffix}`, policyType: "AUTO", status: "ACTIVE", paymentFrequency: "ANNUAL", startDate: new Date("2026-01-01"), endDate: new Date("2026-12-31"), premiumAmount: 1000, currency: "MXN" },
       });
     }
+    const pedroClient = await tx.client.upsert({
+      where: { id: "tenant-client-pedro" },
+      update: {
+        organizationId: orgB.id,
+        fullName: "Pedro Client Private",
+        portfolioOwnerId: PEDRO_USER_ID,
+        createdById: PEDRO_USER_ID,
+        updatedById: PEDRO_USER_ID,
+        status: "ACTIVE",
+      },
+      create: {
+        id: "tenant-client-pedro",
+        organizationId: orgB.id,
+        fullName: "Pedro Client Private",
+        type: "PERSON",
+        status: "ACTIVE",
+        portfolioOwnerId: PEDRO_USER_ID,
+        createdById: PEDRO_USER_ID,
+        updatedById: PEDRO_USER_ID,
+      },
+    });
+    await tx.policy.upsert({
+      where: { id: "tenant-policy-pedro" },
+      update: {
+        organizationId: orgB.id,
+        clientId: pedroClient.id,
+        insurerId: "tenant-insurer-b",
+        policyNumber: "PEDRO-PRIVATE-001",
+        status: "ACTIVE",
+      },
+      create: {
+        id: "tenant-policy-pedro",
+        organizationId: orgB.id,
+        clientId: pedroClient.id,
+        insurerId: "tenant-insurer-b",
+        policyNumber: "PEDRO-PRIVATE-001",
+        policyType: "AUTO",
+        status: "ACTIVE",
+        paymentFrequency: "ANNUAL",
+        startDate: new Date("2026-01-01"),
+        endDate: new Date("2026-12-31"),
+        premiumAmount: 1500,
+        currency: "MXN",
+      },
+    });
     console.log(JSON.stringify({ ok: true, organizations: [orgA.id, orgB.id], users: users.map((user) => user.id) }));
   });
 }

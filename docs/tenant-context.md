@@ -43,3 +43,13 @@ tenant-aware, la suite de dos organizaciones y el restore drill con dos
 organizaciones pasen. La prueba local de aislamiento debe usar exclusivamente
 PostgreSQL desechable con `TENANT_ISOLATION_TEST_DB=1` y
 `PLAYWRIGHT_ENFORCE_DISPOSABLE_DB=1`.
+
+## Fixture de separación de Pedro
+
+El job `tenant-isolation` crea únicamente en su base desechable las organizaciones
+`org_legacy_singleton_0001` y `org_pedro_gomez_0001`. La segunda usa el nombre
+visible `Pedro Alfredo Gómez Lorenzo` y el slug
+`pedro-alfredo-gomez-lorenzo`; `pedroagl93@gmail.com` recibe `OWNER` únicamente
+en esa fixture. Esta identidad no se provisiona en Preview ni en producción
+durante Cycle 2A. La creación productiva requiere completar los gates de
+aislamiento y restore con dos organizaciones.
