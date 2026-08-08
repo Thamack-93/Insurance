@@ -23,6 +23,12 @@ import { MessageResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
 import { extractPdfTextFromFile } from "@/lib/pdf-text-extraction.browser";
 import { buildNoraPolicyPdfPathname, NORA_POLICY_PDF_MAX_BYTES } from "@/lib/nora-pdf-storage.shared";
+import {
+  fetchPdfCaptureWithTimeout,
+  PDF_CAPTURE_ANALYSIS_TIMEOUT_MS,
+  PDF_CAPTURE_UPLOAD_TIMEOUT_MS,
+  withOperationTimeout,
+} from "@/lib/pdf-capture-client";
 import type { NoraContextRef } from "@/lib/nora-context";
 import { NoraExcelDownload } from "@/components/assistant/nora-excel-download";
 import { Conversation, ConversationContent, ConversationScrollButton } from "@/components/ai-elements/conversation";
@@ -37,6 +43,7 @@ type Message = {
   quickPrompts?: AssistantPrompt[];
   reportThemeLabel?: string | null;
   aiRunId?: string | null;
+  aiTrackingStatus?: "recorded" | "unavailable";
   aiTier?: string | null;
   aiModel?: string | null;
   aiAttempts?: number;
@@ -433,6 +440,7 @@ export function AssistantConsole({
           aiFallbackNotice: assistantResponse.aiFallbackNotice,
           aiDiagnostic: assistantResponse.aiDiagnostic,
           aiRunId: assistantResponse.aiRunId,
+          aiTrackingStatus: assistantResponse.aiTrackingStatus,
           aiTier: assistantResponse.aiTier,
           aiModel: assistantResponse.aiModel,
           aiAttempts: assistantResponse.aiAttempts,
@@ -464,35 +472,39 @@ export function AssistantConsole({
     setIsSending(true);
 
     try {
-      const extractedText = await extractPdfTextFromFile(file).catch(() => "");
+      const extractedText = await extractPdfTextFromFile(file, { timeoutMs: 12_000 }).catch(() => "");
       const commonPayload = { fileName: file.name, prompt };
       let response: Response;
 
       if (extractedText.trim()) {
-        response = await fetch("/api/nora/policy-pdf/analyze", {
+        response = await fetchPdfCaptureWithTimeout("/api/nora/policy-pdf/analyze", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ ...commonPayload, text: extractedText }),
-        });
+        }, PDF_CAPTURE_ANALYSIS_TIMEOUT_MS, "El análisis del PDF tardó demasiado en responder.");
       } else {
         const pathname = buildNoraPolicyPdfPathname(userId, file.name);
-        const uploaded = await upload(pathname, file, {
-          access: "private",
-          handleUploadUrl: "/api/nora/policy-pdf/upload",
-          contentType: "application/pdf",
-          multipart: file.size > 5 * 1024 * 1024,
-          clientPayload: JSON.stringify({
-            userId,
-            purpose: "nora-policy-pdf",
-            fileName: file.name,
+        const uploaded = await withOperationTimeout(
+          upload(pathname, file, {
+            access: "private",
+            handleUploadUrl: "/api/nora/policy-pdf/upload",
+            contentType: "application/pdf",
+            multipart: file.size > 5 * 1024 * 1024,
+            clientPayload: JSON.stringify({
+              userId,
+              purpose: "nora-policy-pdf",
+              fileName: file.name,
+            }),
           }),
-        });
+          PDF_CAPTURE_UPLOAD_TIMEOUT_MS,
+          "La subida temporal del PDF tardó demasiado. Revisa tu conexión e inténtalo de nuevo.",
+        );
 
-        response = await fetch("/api/nora/policy-pdf/analyze", {
+        response = await fetchPdfCaptureWithTimeout("/api/nora/policy-pdf/analyze", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ ...commonPayload, blobUrl: uploaded.url }),
-        });
+        }, PDF_CAPTURE_ANALYSIS_TIMEOUT_MS, "El análisis del PDF tardó demasiado en responder.");
       }
 
       const payload = (await response.json().catch(() => null)) as
