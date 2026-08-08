@@ -65,7 +65,7 @@ export function PolicyReceiptsTable({ receipts }: { receipts: PolicyReceiptRow[]
             </TableCell>
             <TableCell>{formatDate(receipt.dueDate)}</TableCell>
             <TableCell>
-              <StatusBadge status={receipt.status} />
+              <StatusBadge status={receipt.status} entity="receipt" />
             </TableCell>
             <TableCell className="text-right font-medium">
               {formatCurrency(receipt.amount, receipt.currency)}

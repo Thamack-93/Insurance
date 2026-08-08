@@ -1,3 +1,4 @@
+import type { Prisma } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
 import { businessAddDays } from "@/lib/business-dates";
@@ -36,7 +37,7 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
   const activeClientScope = {
     ...clientOperationalWhere(portfolioOwnerId),
     status: "ACTIVE",
-  };
+  } satisfies Prisma.ClientWhereInput;
   const activeRenewalScope = {
     ...policyScope,
     ...ACTIVE_RENEWAL_POLICY_WHERE,

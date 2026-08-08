@@ -248,7 +248,7 @@ export function NotificationPreferencesPanel({
             const preference = preferences.find((item) => item.eventType === event.eventType);
             const enabled = preference?.enabled ?? event.defaultEnabled;
             return (
-              <label key={event.eventType} className="flex items-start gap-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
+              <label key={event.eventType} className="flex items-start gap-3 rounded-xl border border-border/70 bg-muted/20 p-4">
                 <Checkbox checked={enabled} disabled={isUpdatingPreferences || !connected} onCheckedChange={(checked) => void handlePreferenceToggle(event.eventType, Boolean(checked))} />
                 <span className="space-y-1"><span className="block text-sm font-medium">{event.title}</span><span className="block text-xs text-muted-foreground">{event.description}</span></span>
               </label>
@@ -284,7 +284,7 @@ export function NotificationPreferencesPanel({
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:items-end">
-            <div className="flex items-center gap-2 rounded-2xl border bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 rounded-xl border bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
               {connected ? (
                 <>
                   <CheckCircle2 className="size-4 text-emerald-600" />
@@ -364,7 +364,7 @@ export function NotificationPreferencesPanel({
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 p-5">
-          <div className="flex items-start gap-3 rounded-2xl border bg-muted/20 px-4 py-3">
+          <div className="flex items-start gap-3 rounded-xl border bg-muted/20 px-4 py-3">
             <Checkbox
               id="telegram-mutations-enabled"
               checked={mutationsEnabled}

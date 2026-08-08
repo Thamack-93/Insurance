@@ -48,10 +48,10 @@ function normalizePostgresConnectionString(connectionString: string) {
 
 export function getDb() {
   if (!globalForPrisma.prisma) {
-    const rawConnectionString = process.env.DATABASE_URL?.trim();
+    const rawConnectionString = (process.env.DATABASE_URL_UNPOOLED?.trim()) || (process.env.DATABASE_URL?.trim());
     const connectionString = rawConnectionString ? normalizePostgresConnectionString(rawConnectionString) : "";
     if (!connectionString) {
-      throw new Error("DATABASE_URL is required to initialize Prisma.");
+      throw new Error("DATABASE_URL_UNPOOLED or DATABASE_URL is required to initialize Prisma.");
     }
     if (!/^postgres(ql)?:\/\//i.test(connectionString)) {
       throw new Error(

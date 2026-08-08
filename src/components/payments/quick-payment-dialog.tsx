@@ -81,7 +81,7 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="rounded-lg bg-muted/40 p-4">
+          <div className="rounded-md bg-muted/40 p-4">
             <div className="grid gap-3 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-muted-foreground">Recibo:</span>

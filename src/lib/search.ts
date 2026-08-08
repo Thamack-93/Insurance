@@ -1,6 +1,6 @@
 import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
-import { policyStatusOptions } from "@/lib/domain-options";
+import { statusLabel } from "@/lib/status";
 import { normalize, unaccentSql } from "@/lib/search-utils";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { Prisma } from "@/generated/prisma/client";
@@ -81,8 +81,7 @@ function cleanStrings(values: Array<string | null | undefined>) {
 }
 
 export function formatPolicyStatusLabel(status: string | null | undefined) {
-  if (!status) return "Sin estado";
-  return policyStatusOptions.find((option) => option.value === status)?.label ?? status;
+  return statusLabel(status, "policy");
 }
 
 export function formatPolicyValidity(startDate: Date, endDate: Date) {
@@ -173,6 +172,14 @@ function quotedColumn(column: string) {
   return `"${column.replaceAll('"', '""')}"`;
 }
 
+/**
+ * Expresión de búsqueda para una columna. El `::text` es obligatorio desde que
+ * los estatus del dominio son enums: LOWER/REPLACE sólo operan sobre texto.
+ */
+function searchableColumn(column: string) {
+  return `${quotedColumn(column)}::text`;
+}
+
 async function rawSearch<T extends RowWithId>(
   table: SearchTable,
   selectCols: string[],
@@ -194,7 +201,7 @@ async function rawSearch<T extends RowWithId>(
   const tableSql = Prisma.raw(`"${table}"`);
   const cols = Prisma.join(selectCols.map((column) => Prisma.raw(`"${column}"`)), ", ");
   const where = Prisma.join(
-    searchCols.map((column) => Prisma.sql`${Prisma.raw(unaccentSql(quotedColumn(column)))} LIKE ${`%${needle}%`}`),
+    searchCols.map((column) => Prisma.sql`${Prisma.raw(unaccentSql(searchableColumn(column)))} LIKE ${`%${needle}%`}`),
     " OR ",
   );
   const searchWhere = extraWhere ? Prisma.sql`(${where}) OR (${extraWhere})` : Prisma.sql`(${where})`;
@@ -445,8 +452,8 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       id: c.id,
       type: "client",
       title: c.fullName,
-      subtitle: `${c.status} · ${c.email || c.phone || "Sin contacto"}`,
-      details: cleanStrings([c.status, c.email, c.phone, c.rfc, c.address]),
+      subtitle: `${statusLabel(c.status, "client")} · ${c.email || c.phone || "Sin contacto"}`,
+      details: cleanStrings([statusLabel(c.status, "client"), c.email, c.phone, c.rfc, c.address]),
       href: `/clients/${c.id}`,
       match,
     });
@@ -476,8 +483,8 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       id: r.id,
       type: "receipt",
       title: r.receiptNumber,
-      subtitle: `${r.clientName ?? "Sin cliente"} · ${r.status}`,
-      details: cleanStrings([r.status]),
+      subtitle: `${r.clientName ?? "Sin cliente"} · ${statusLabel(r.status, "receipt")}`,
+      details: cleanStrings([statusLabel(r.status, "receipt")]),
       href: `/receipts/${r.id}`,
       match,
     });
@@ -489,7 +496,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       id: w.id,
       type: "workItem",
       title: w.title,
-      subtitle: `${w.clientName ?? "Sin cliente"} · ${w.status}`,
+      subtitle: `${w.clientName ?? "Sin cliente"} · ${statusLabel(w.status, "workItem")}`,
       details: cleanStrings([w.folio, w.taskType, w.sourceType, w.sourceId]),
       href: `/tasks/${w.sourceId ?? w.id}`,
       match,

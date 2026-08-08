@@ -30,8 +30,8 @@ export function RouteError({
       aria-live="assertive"
       className="min-h-screen bg-background px-4 py-12 md:px-6 lg:px-8"
     >
-      <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-5 rounded-3xl border bg-card/80 p-8 text-center shadow-sm">
-        <div className="rounded-3xl border bg-rose-50 p-4 text-rose-600 dark:bg-rose-950/40 dark:text-rose-300">
+      <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-5 rounded-xl border bg-card/80 p-8 text-center shadow-sm">
+        <div className="rounded-xl border bg-rose-50 p-4 text-rose-600 dark:bg-rose-950/40 dark:text-rose-300">
           <AlertTriangle className="size-7" aria-hidden />
         </div>
         <div className="space-y-2">
@@ -44,11 +44,11 @@ export function RouteError({
           ) : null}
         </div>
         <div className="flex flex-wrap items-center justify-center gap-2">
-          <Button onClick={() => reset()} className="rounded-full">
+          <Button onClick={() => reset()}>
             <RefreshCcw className="mr-2 size-4" aria-hidden />
             Reintentar
           </Button>
-          <Button asChild variant="outline" className="rounded-full bg-card/80">
+          <Button asChild variant="outline" className="bg-card/80">
             <Link href="/today">Volver a Hoy</Link>
           </Button>
         </div>

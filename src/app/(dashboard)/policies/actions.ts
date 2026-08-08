@@ -8,9 +8,17 @@ import { resolvePolicyFamilyRootId } from "@/lib/policy-families";
 import type { Prisma } from "@/generated/prisma/client";
 import { policySchema, type PolicyFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
-import { assertClientPortfolioAccess, assertPolicyPortfolioAccess } from "@/lib/portfolio-access";
+import {
+  assertClientPortfolioAccess,
+  assertPolicyPortfolioAccess,
+  policyOperationalWhere,
+  requirePortfolioReadScope,
+} from "@/lib/portfolio-access";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { buildPolicyDeleteBlockedMessage } from "@/lib/policy-delete";
+import { logError } from "@/lib/logger";
+import { statusLabel } from "@/lib/status";
+import { closeRenewalFollowUp } from "@/lib/renewal-followups";
 
 function normalizePolicyInput(values: PolicyFormValues) {
   return {
@@ -135,6 +143,10 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
             updatedById: userId,
           },
         });
+
+        // La renovación quedó cerrada: su recordatorio de "sin avance" ya no
+        // tiene a quién reclamarle.
+        await closeRenewalFollowUp(renewalSource.id, userId, tx);
       }
 
       await writeActivityLog({
@@ -158,6 +170,7 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
       `/clients/${policy.clientId}`,
       "/dashboard",
       "/today",
+      "/operations",
       "/portfolio",
       "/renewals",
       "/risks",
@@ -259,6 +272,8 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
               updatedById: userId,
             },
           });
+
+          await closeRenewalFollowUp(nextRenewalSource.id, userId, tx);
         } else {
           await tx.policy.update({
             where: { id },
@@ -301,6 +316,7 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
       `/clients/${policy.clientId}`,
       "/dashboard",
       "/today",
+      "/operations",
       "/portfolio",
       "/renewals",
       "/risks",
@@ -395,6 +411,7 @@ export async function updatePolicyQualityFields(
       `/clients/${policy.clientId}`,
       "/dashboard",
       "/today",
+      "/operations",
       "/portfolio",
       "/renewals",
       "/risks",
@@ -459,5 +476,82 @@ export async function deletePolicy(id: string): Promise<MutationResult> {
   } catch (error) {
     if (error instanceof AuthError) return errorResult(error.message);
     return errorResult(error instanceof Error ? error.message : "No se pudo eliminar la póliza.");
+  }
+}
+
+/** Statuses a bulk edit may assign; the rest need the full policy form. */
+const BULK_POLICY_STATUSES = ["ACTIVE", "EXPIRED", "CANCELLED"] as const;
+export type BulkPolicyStatus = (typeof BULK_POLICY_STATUSES)[number];
+
+/**
+ * Applies a status to several policies at once. Ids outside the caller's
+ * portfolio are dropped rather than failing the whole batch, and the result
+ * message reports exactly what happened to the selection.
+ */
+export async function bulkUpdatePolicyStatus(
+  ids: string[],
+  status: string,
+): Promise<MutationResult> {
+  if (ids.length === 0) return errorResult("No hay pólizas seleccionadas.");
+  if (!BULK_POLICY_STATUSES.includes(status as BulkPolicyStatus)) {
+    return errorResult("Ese estado no se puede aplicar en lote.");
+  }
+
+  try {
+    const scope = await requirePortfolioReadScope();
+    const db = getDb();
+
+    const permitted = await db.policy.findMany({
+      where: { id: { in: ids }, ...policyOperationalWhere(scope.portfolioOwnerId) },
+      select: { id: true, status: true, clientId: true },
+    });
+
+    const outOfScope = ids.length - permitted.length;
+    const target = permitted.filter((policy) => policy.status !== status);
+
+    if (target.length === 0) {
+      return errorResult(
+        outOfScope > 0
+          ? "Ninguna de las pólizas seleccionadas está en tu cartera."
+          : "Las pólizas seleccionadas ya tienen ese estado.",
+      );
+    }
+
+    const targetIds = target.map((policy) => policy.id);
+    const result = await db.policy.updateMany({
+      where: { id: { in: targetIds } },
+      data: { status: status as BulkPolicyStatus },
+    });
+
+    await writeActivityLog({
+      action: "BULK_UPDATE_STATUS",
+      entityType: "Policy",
+      entityId: targetIds.join(","),
+      newValue: { status, count: result.count },
+    });
+
+    revalidatePaths([
+      "/policies",
+      "/dashboard",
+      "/today",
+      "/portfolio",
+      "/renewals",
+      "/risks",
+      ...[...new Set(target.map((policy) => `/clients/${policy.clientId}`))],
+    ]);
+
+    const label = statusLabel(status, "policy");
+    const parts = [
+      `${result.count} póliza${result.count !== 1 ? "s" : ""} ${result.count !== 1 ? "quedaron" : "quedó"} como “${label}”.`,
+    ];
+    const unchanged = permitted.length - target.length;
+    if (unchanged > 0) parts.push(`${unchanged} ya ${unchanged !== 1 ? "tenían" : "tenía"} ese estado.`);
+    if (outOfScope > 0) parts.push(`${outOfScope} no ${outOfScope !== 1 ? "están" : "está"} en tu cartera.`);
+
+    return successResult("bulk", "", parts.join(" "));
+  } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
+    logError("policies.bulkUpdatePolicyStatus", error, { count: ids.length, status });
+    return errorResult("No se pudo actualizar el estado de las pólizas seleccionadas.");
   }
 }

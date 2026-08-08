@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import type { LucideIcon } from "lucide-react";
+import type { LucideIcon } from "@/components/icons";
 import {
   Activity,
   Ban,
@@ -10,7 +10,7 @@ import {
   ShieldAlert,
   TimerReset,
   ArrowRight,
-} from "lucide-react";
+} from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
 import { SectionCard } from "@/components/pages-secondary/panels";
 import { EmptyState } from "@/components/empty-states/empty-state";
@@ -221,7 +221,7 @@ export default async function ActivityPage({
           title="Actividad y seguridad"
           description="Historial cronológico y panel de seguridad con vistas rápidas."
           actions={
-            <Button asChild variant="outline" className="rounded-full bg-card/70">
+            <Button asChild variant="outline" className="bg-card/70">
               <Link href="/today">Volver a Hoy</Link>
             </Button>
           }
@@ -247,7 +247,7 @@ export default async function ActivityPage({
                   href={href}
                   data-motion-target="lift"
                   className={cn(
-                    "flex min-h-28 flex-col justify-between rounded-2xl border px-4 py-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transform-none",
+                    "flex min-h-28 flex-col justify-between rounded-xl border px-4 py-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transform-none",
                     view.highlight,
                     isSelected ? "border-primary ring-2 ring-primary/15" : "border-border/60",
                   )}
@@ -257,7 +257,7 @@ export default async function ActivityPage({
                       <p className="text-sm font-semibold text-foreground">{view.label}</p>
                       <p className="mt-1 text-xs text-muted-foreground">{view.description}</p>
                     </div>
-                    <span className="rounded-full border border-border/70 bg-card/90 p-2 text-muted-foreground shadow-sm">
+                    <span className="rounded-md border border-border/70 bg-card/90 p-2 text-muted-foreground shadow-sm">
                       <Icon className="size-4" />
                     </span>
                   </div>
@@ -315,10 +315,10 @@ export default async function ActivityPage({
               />
             </div>
             <div className="flex items-end gap-2 md:col-span-2">
-              <Button type="submit" className="h-10 rounded-full">
+              <Button type="submit" className="h-10">
                 Aplicar
               </Button>
-              <Button asChild type="button" variant="outline" className="h-10 rounded-full bg-card/70">
+              <Button asChild type="button" variant="outline" className="h-10 bg-card/70">
                 <Link href="/activity">Limpiar</Link>
               </Button>
             </div>

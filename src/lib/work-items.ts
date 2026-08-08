@@ -11,9 +11,15 @@ export type WorkItemSourceType = "Task" | "WorkItem" | "Renewal" | "Notification
 export type WorkItemSyncInput = {
   sourceType: WorkItemSourceType;
   sourceId: string;
+  /**
+   * Vínculo tipado hacia la alerta que el pendiente refleja. El par
+   * sourceType/sourceId sigue siendo la identidad histórica; esta columna es la
+   * que la base de datos protege con integridad referencial.
+   */
+  sourceAlertId?: string | null;
   workItemType: string;
   taskType?: string | null;
-  status: string;
+  status: WorkItemStatus;
   priority?: string | null;
   severity?: string | null;
   folio?: string | null;
@@ -58,6 +64,7 @@ export async function upsertWorkItemFromSource(input: WorkItemSyncInput, client?
   const createData: Prisma.WorkItemUncheckedCreateInput = {
     sourceType: input.sourceType,
     sourceId: input.sourceId,
+    sourceAlertId: normalizeNullableText(input.sourceAlertId),
     workItemType: input.workItemType,
     taskType: input.taskType ?? null,
     status: input.status,
@@ -82,6 +89,9 @@ export async function upsertWorkItemFromSource(input: WorkItemSyncInput, client?
   };
 
   const updateData: Prisma.WorkItemUncheckedUpdateInput = {
+    ...(input.sourceAlertId === undefined
+      ? {}
+      : { sourceAlertId: normalizeNullableText(input.sourceAlertId) }),
     workItemType: input.workItemType,
     ...(input.taskType === undefined ? {} : { taskType: input.taskType ?? null }),
     status: input.status,

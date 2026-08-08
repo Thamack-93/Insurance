@@ -11,12 +11,14 @@ export function ChartCard({
   children: ReactNode;
 }) {
   return (
-    <Card className="bg-card shadow-none">
+    // `h-full` + a flex column so the chart inside can claim the leftover
+    // height instead of sitting on a fixed one.
+    <Card className="flex h-full flex-col bg-card shadow-none">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">{title}</CardTitle>
         {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
       </CardHeader>
-      <CardContent>{children}</CardContent>
+      <CardContent className="flex flex-1 flex-col">{children}</CardContent>
     </Card>
   );
 }

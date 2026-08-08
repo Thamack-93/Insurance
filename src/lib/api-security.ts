@@ -19,6 +19,7 @@ export const API_SECURITY_MANIFEST = {
   "/api/jobs/backup": "cron-secret",
   "/api/jobs/telegram-digest": "cron-secret",
   "/api/jobs/telegram-birthdays": "cron-secret",
+  "/api/jobs/renewal-followups": "cron-secret",
   "/api/nora/policy-pdf/upload": "authenticated",
   "/api/nora/policy-pdf/analyze": "authenticated",
   "/api/payments/quick": "authenticated",

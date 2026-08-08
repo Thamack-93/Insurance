@@ -78,7 +78,7 @@ function ResolutionActionButton({
       type="button"
       size="sm"
       variant={variant}
-      className={cn("rounded-full", className)}
+      className={cn("", className)}
       onClick={onClick}
       disabled={disabled}
     >
@@ -210,7 +210,7 @@ function SearchDialog({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="max-w-full rounded-full truncate text-left"
+                  className="max-w-full truncate text-left"
                   title={suggestion}
                   onClick={() => setQuery(suggestion)}
                   disabled={isSubmitting}
@@ -221,7 +221,7 @@ function SearchDialog({
             </div>
           ) : null}
 
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-2xl border border-border/70 bg-muted/20">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-xl border border-border/70 bg-muted/20">
             {error ? (
               <div className="px-4 py-6 text-sm text-destructive">{error}</div>
           ) : isLoading ? (
@@ -285,7 +285,7 @@ function SearchDialog({
         </div>
 
         <DialogFooter className="gap-2">
-          <Button type="button" variant="outline" className="rounded-full" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
             Cancelar
           </Button>
         </DialogFooter>
@@ -631,13 +631,13 @@ export function ClientResolutionActions({
           ) : null}
 
           <DialogFooter className="gap-2">
-            <Button type="button" variant="outline" className="rounded-full" onClick={() => setEditOpen(false)} disabled={isSaving}>
+            <Button type="button" variant="outline" onClick={() => setEditOpen(false)} disabled={isSaving}>
               Cancelar
             </Button>
-            <Button type="button" variant="outline" className="rounded-full" onClick={() => void closeClientCase()} disabled={isSaving || !allowClose}>
+            <Button type="button" variant="outline" onClick={() => void closeClientCase()} disabled={isSaving || !allowClose}>
               {closeLabel}
             </Button>
-            <Button type="button" className="rounded-full" onClick={() => void saveClientAndClose()} disabled={isSaving}>
+            <Button type="button" onClick={() => void saveClientAndClose()} disabled={isSaving}>
               {isSaving ? "Guardando..." : "Guardar y cerrar"}
             </Button>
           </DialogFooter>
@@ -796,7 +796,7 @@ export function PolicyResolutionActions({
                 id={`policy-payment-frequency-${policyId}`}
                 value={paymentFrequencyValue}
                 onChange={(event) => setPaymentFrequencyValue(event.target.value)}
-                className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="h-8 w-full rounded-md border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
               >
                 {paymentFrequencyOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -811,7 +811,7 @@ export function PolicyResolutionActions({
                 id={`policy-status-${policyId}`}
                 value={statusValue}
                 onChange={(event) => setStatusValue(event.target.value)}
-                className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="h-8 w-full rounded-md border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
               >
                 {policyStatusOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -834,13 +834,13 @@ export function PolicyResolutionActions({
           </div>
 
           <DialogFooter className="gap-2">
-            <Button type="button" variant="outline" className="rounded-full" onClick={() => setEditOpen(false)} disabled={isSaving}>
+            <Button type="button" variant="outline" onClick={() => setEditOpen(false)} disabled={isSaving}>
               Cancelar
             </Button>
-            <Button type="button" variant="outline" className="rounded-full" onClick={() => void closePolicyCase()} disabled={isSaving || !allowClose}>
+            <Button type="button" variant="outline" onClick={() => void closePolicyCase()} disabled={isSaving || !allowClose}>
               {closeLabel}
             </Button>
-            <Button type="button" className="rounded-full" onClick={() => void savePolicyAndClose()} disabled={isSaving}>
+            <Button type="button" onClick={() => void savePolicyAndClose()} disabled={isSaving}>
               {isSaving ? "Guardando..." : "Guardar y cerrar"}
             </Button>
           </DialogFooter>

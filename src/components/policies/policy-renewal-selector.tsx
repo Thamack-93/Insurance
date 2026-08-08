@@ -63,7 +63,7 @@ export function PolicyRenewalSelector({
             type="button"
             variant="ghost"
             size="sm"
-            className="h-7 rounded-full px-2 text-xs"
+            className="h-7 px-2 text-xs"
             onClick={() => {
               onChange("");
               setPickedPolicy(null);
@@ -76,7 +76,7 @@ export function PolicyRenewalSelector({
         ) : null}
       </div>
 
-      <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
+      <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
         {selectedLabel ? (
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -97,7 +97,7 @@ export function PolicyRenewalSelector({
           <Button
             type="button"
             variant="outline"
-            className="rounded-full bg-card/70"
+            className="bg-card/70"
             onClick={() => setOpen(true)}
             disabled={disabled}
           >

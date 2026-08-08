@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Building2, FileText, Plus, ShieldCheck, TrendingUp } from "lucide-react";
+import { ArrowRight, Building2, FileText, Plus, ShieldCheck, TrendingUp } from "@/components/icons";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
@@ -90,14 +90,14 @@ export default async function InsurersPage({
           actions={
             <>
               {isAdmin ? (
-                <Button asChild variant="outline" className="rounded-full">
+                <Button asChild variant="outline">
                   <Link href="/insurers/new">
                     <Plus className="mr-2 size-4" />
                     Nueva aseguradora
                   </Link>
                 </Button>
               ) : null}
-              <Button asChild className="rounded-full">
+              <Button asChild>
                 <Link href="/policies">
                   Ver pólizas
                   <ArrowRight className="ml-2 size-4" />
@@ -158,7 +158,7 @@ export default async function InsurersPage({
                   icon={Building2}
                   title="Aún no hay aseguradoras"
                   description={isAdmin ? "Registra tu primera compañía aseguradora para enlazar pólizas." : "Aún no hay compañías disponibles para consulta."}
-                  {...(isAdmin ? { action: "Nueva aseguradora", actionHref: "/insurers/new" } : {})}
+                  action={isAdmin ? { label: "Nueva aseguradora", href: "/insurers/new" } : undefined}
                 />
               </div>
             )
@@ -168,8 +168,7 @@ export default async function InsurersPage({
                 icon={Building2}
                 title="Página fuera de rango"
                 description="No hay aseguradoras en esta página. Vuelve al inicio del listado."
-                action="Volver al inicio"
-                actionHref={query ? `/insurers?q=${encodeURIComponent(query)}` : "/insurers"}
+                action={{ label: "Volver al inicio", href: query ? `/insurers?q=${encodeURIComponent(query)}` : "/insurers" }}
               />
             </div>
           ) : (
@@ -205,7 +204,7 @@ export default async function InsurersPage({
                           )}
                         </TableCell>
                         <TableCell>
-                          <StatusBadge status={insurer.status} />
+                          <StatusBadge status={insurer.status} entity="insurer" />
                         </TableCell>
                         <TableCell className="text-right">{insurer._count.policies}</TableCell>
                         <TableCell className="text-right">{insurer._count.claims}</TableCell>

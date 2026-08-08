@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@/generated/prisma/client";
 import { AuthError } from "@/lib/auth";
 import { businessAddDays, businessEndOfDay, businessToday, formatBusinessDateInput, parseBusinessDateInput } from "@/lib/business-dates";
 import { getDb } from "@/lib/db";
@@ -32,11 +33,8 @@ export async function GET(request: NextRequest) {
 
     if (type === "overdue") {
       const overdueEndExclusive = to < today ? businessAddDays(to, 1) : today;
-      const receiptStatus = filter === "all"
-        ? undefined
-        : filter === "open"
-          ? { notIn: ["PAID", "CANCELLED"] }
-          : { notIn: ["PAID", "CANCELLED"] };
+      const receiptStatus: Prisma.EnumReceiptStatusFilter<"Receipt"> | undefined =
+        filter === "all" ? undefined : { notIn: ["PAID", "CANCELLED"] };
       const receipts = await db.receipt.findMany({
         where: {
           ...receiptOperationalWhere(scope.portfolioOwnerId),
@@ -161,7 +159,8 @@ export async function GET(request: NextRequest) {
     }
 
     if (type === "commissions") {
-      const status = filter === "paid" ? "PAID" : filter === "all" ? undefined : { in: ["EXPECTED", "PENDING", "OVERDUE"] };
+      const status: Prisma.EnumCommissionStatusFilter<"Commission"> | undefined =
+        filter === "paid" ? { equals: "PAID" } : filter === "all" ? undefined : { in: ["EXPECTED", "PENDING", "OVERDUE"] };
       const commissions = await db.commission.findMany({
         where: {
           ...commissionOperationalWhere(scope.portfolioOwnerId),

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { cookies } from "next/headers";
 import { connection } from "next/server";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppTopbar } from "@/components/layout/app-topbar";
@@ -12,6 +13,7 @@ import { RuntimeSettingsHydrator } from "@/components/settings/runtime-settings-
 import { getUnreadNotificationCount, getRecentNotifications } from "@/lib/notifications";
 import type { NotificationRecord } from "@/lib/notifications";
 import { requireUserOrRedirect } from "@/lib/auth";
+import { THEME_COOKIE } from "@/lib/settings-runtime";
 import { NoraSessionProvider } from "@/components/assistant/nora-session-provider";
 
 const fallbackSettings: Settings = {
@@ -51,6 +53,10 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   // deactivations and role changes take effect immediately, rather than
   // waiting for the signed session token to expire.
   const user = await requireUserOrRedirect();
+  // Mirrors the root layout: the theme is known server-side from the cookie, so
+  // the theme toggle can render its destination label without a hydration gap.
+  const themeCookie = (await cookies()).get(THEME_COOKIE)?.value;
+  const initialTheme = themeCookie === "dark" ? "dark" : "light";
   // Load settings once per request: hydrates the server runtime cache and
   // is forwarded to the client so format helpers stay consistent on both sides.
   const { settings, unreadNotificationCount, recentNotifications } = await getSafeDashboardShellData();
@@ -84,6 +90,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
                 userMenu={<UserMenu />}
                 unreadNotificationCount={unreadNotificationCount}
                 notifications={bellNotifications}
+                initialTheme={initialTheme}
               />
               <main id="main-content" className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">{children}</main>
             </div>

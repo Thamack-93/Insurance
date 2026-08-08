@@ -58,7 +58,7 @@ export function NotificationsBell({
             variant="outline"
             size="icon"
             aria-label={`Ver notificaciones${unreadCount > 0 ? ` (${unreadCount} sin leer)` : ""}`}
-            className="relative rounded-full bg-card/75"
+            className="relative bg-card/75"
           >
             <Bell className="size-4" aria-hidden />
             {unreadCount > 0 ? (
@@ -92,7 +92,7 @@ export function NotificationsBell({
             size="sm"
             onClick={handleMarkAll}
             disabled={isPending || unreadCount === 0}
-            className="h-7 gap-1 rounded-full px-2 text-xs"
+            className="h-7 gap-1 px-2 text-xs"
           >
             <CheckCheck className="size-3.5" aria-hidden />
             Marcar todas
@@ -162,7 +162,7 @@ export function NotificationsBell({
                           onClick={() => handleMarkOne(notification.id)}
                           disabled={isPending}
                           className={cn(
-                            "shrink-0 rounded-full px-2 py-1 text-[11px] font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground",
+                            "shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground",
                             isPending && "opacity-50",
                           )}
                           aria-label={`Marcar como leída ${notification.title}`}
@@ -182,7 +182,7 @@ export function NotificationsBell({
           <Link
             href="/notifications"
             onClick={() => setOpen(false)}
-            className="inline-flex w-full items-center justify-center rounded-full px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/5"
+            className="inline-flex w-full items-center justify-center rounded-md px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/5"
           >
             Ver todas
           </Link>

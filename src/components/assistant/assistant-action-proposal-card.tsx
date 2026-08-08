@@ -55,7 +55,7 @@ export function AssistantActionProposalCard({ proposal, onConfirmed }: { proposa
   }
 
   return (
-    <div className="mt-3 overflow-hidden rounded-3xl border border-border/70 bg-background/95 shadow-sm">
+    <div className="mt-3 overflow-hidden rounded-xl border border-border/70 bg-background/95 shadow-sm">
       <div className="border-b border-border/60 px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm font-medium">{proposal.title}</p>
@@ -72,7 +72,7 @@ export function AssistantActionProposalCard({ proposal, onConfirmed }: { proposa
       <div className="px-4 py-4">
         <div className="space-y-2">
           {proposal.changes.map((change) => (
-            <div key={`${change.label}-${change.after}`} className="rounded-2xl border border-border/60 bg-muted/20 px-3 py-2">
+            <div key={`${change.label}-${change.after}`} className="rounded-xl border border-border/60 bg-muted/20 px-3 py-2">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{change.label}</p>
               <p className="mt-1 text-sm font-medium">{change.after || "Sin dato"}</p>
               {change.before ? <p className="mt-0.5 text-xs text-muted-foreground">Antes: {change.before}</p> : null}
@@ -87,7 +87,7 @@ export function AssistantActionProposalCard({ proposal, onConfirmed }: { proposa
         <Button
           type="button"
           size="sm"
-          className={cn("rounded-full", status === "confirmed" && "opacity-80")}
+          className={cn("", status === "confirmed" && "opacity-80")}
           disabled={status !== "pending"}
           onClick={confirmProposal}
         >
