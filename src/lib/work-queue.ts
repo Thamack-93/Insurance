@@ -94,6 +94,18 @@ export const workQueueSelect = {
 
 export type WorkQueueItem = Prisma.WorkItemGetPayload<{ select: typeof workQueueSelect }>;
 
+export function getRenewalPolicyId(item: Pick<WorkQueueItem, "sourceType" | "sourceId" | "entityType" | "entityId" | "policyId">) {
+  if (item.policyId || item.sourceType?.toLowerCase() !== "renewal") return null;
+  if (item.entityType?.toLowerCase() === "policy" && item.entityId) return item.entityId;
+
+  for (const reference of [item.entityId, item.sourceId]) {
+    const match = reference?.match(/^policy:([^:]+):renewal-workItem$/i);
+    if (match?.[1]) return match[1];
+  }
+
+  return null;
+}
+
 export type WorkQueueFilters = {
   query?: string;
   from?: Date;
@@ -128,25 +140,28 @@ export async function getWorkItems(filters: WorkQueueFilters = {}) {
 }
 
 /**
- * Renewal reminders created before WorkItem kept their policy/client foreign
- * keys. They still carry the policy id in entityId, so resolve that relation
- * for display and navigation without mutating the historical record.
+ * Renewal reminders can be found in two persisted shapes: historical rows
+ * keep the policy id in entityId, while current rows use the canonical
+ * policy:<id>:renewal-workItem source reference. Resolve either shape for
+ * display and navigation without mutating the historical record.
  */
 async function resolveLegacyRenewalRelations(
   items: WorkQueueItem[],
   filters: WorkQueueFilters,
   db: WorkQueueDb,
 ) {
-  const legacyPolicyIds = [...new Set(items
-    .filter((item) => item.sourceType?.toLowerCase() === "renewal" && item.entityType?.toLowerCase() === "policy" && !item.policyId && item.entityId)
-    .map((item) => item.entityId)
-    .filter((id): id is string => Boolean(id)))];
+  const renewalPolicyIdsByWorkItem = new Map(
+    items
+      .map((item) => [item.id, getRenewalPolicyId(item)] as const)
+      .filter((entry): entry is readonly [string, string] => Boolean(entry[1])),
+  );
+  const renewalPolicyIds = [...new Set(renewalPolicyIdsByWorkItem.values())];
 
-  if (!legacyPolicyIds.length) return items;
+  if (!renewalPolicyIds.length) return items;
 
   const policies = await db.policy.findMany({
     where: {
-      id: { in: legacyPolicyIds },
+      id: { in: renewalPolicyIds },
       ...(filters.portfolioOwnerId ? { client: { portfolioOwnerId: filters.portfolioOwnerId } } : {}),
     },
     select: policyQueueSelect,
@@ -154,7 +169,7 @@ async function resolveLegacyRenewalRelations(
   const policyById = new Map(policies.map((policy) => [policy.id, policy]));
 
   return items.map((item) => {
-    const policy = item.policy ?? policyById.get(item.entityId);
+    const policy = item.policy ?? policyById.get(renewalPolicyIdsByWorkItem.get(item.id) ?? "");
     if (!policy) return item;
 
     return {

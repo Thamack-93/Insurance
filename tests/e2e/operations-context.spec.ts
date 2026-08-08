@@ -50,6 +50,49 @@ test.describe("operation queue context", () => {
     }
   });
 
+  test("resolves the current renewal work item reference and shows the renewal date", async ({ page }) => {
+    const db = getTestDb();
+    const fixture = await seedPolicyFixture("OPERATIONS-CURRENT");
+    const policy = await db.policy.findUnique({ where: { id: fixture.policyId }, select: { id: true, policyNumber: true, endDate: true } });
+    const reference = `policy:${policy!.id}:renewal-workItem`;
+    let workItemId: string | null = null;
+
+    try {
+      const workItem = await db.workItem.create({
+        data: {
+          sourceType: "Renewal",
+          sourceId: reference,
+          workItemType: "TASK",
+          taskType: "RENEWAL",
+          status: "OPEN",
+          priority: "HIGH",
+          title: `Renovación: ${policy!.policyNumber}`,
+          entityType: "WORKITEM",
+          entityId: reference,
+          clientId: null,
+          policyId: null,
+          insurerId: null,
+          dueDate: policy!.endDate,
+          startDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+        },
+      });
+      workItemId = workItem.id;
+
+      await authenticatePageAsAdmin(page);
+      await page.goto("/operations");
+
+      const renewalLink = page.getByRole("link", { name: new RegExp(`Renovación: ${policy!.policyNumber}`) }).first();
+      await expect(renewalLink).toBeVisible();
+      await expect(renewalLink).toContainText(fixture.clientName);
+      await expect(renewalLink).toContainText(fixture.insurerName);
+      await expect(renewalLink).toContainText("Renovación");
+      await expect(renewalLink).toHaveAttribute("href", `/policies/${policy!.id}`);
+    } finally {
+      if (workItemId) await db.workItem.delete({ where: { id: workItemId } }).catch(() => undefined);
+      await cleanupPolicyFixture(fixture);
+    }
+  });
+
   test("links unresolved overdue renewals to a complete operational list and preserves expired history", async ({ page }) => {
     const db = getTestDb();
     const fixture = await seedPolicyFixture("RENEWAL-RISK");
@@ -77,7 +120,7 @@ test.describe("operation queue context", () => {
       await expect(page.getByRole("link", { name: fixture.policyNumber, exact: true })).toBeVisible();
       await expect(page.getByRole("link", { name: "Vigencias terminadas", exact: true })).toBeVisible();
       await expect(page.getByRole("columnheader", { name: "Fin de vigencia" })).toBeVisible();
-      await expect(page.getByText("Terminó:", { exact: false }).first()).toBeVisible();
+      await expect(page.getByRole("cell", { name: /Terminó:/ }).first()).toBeVisible();
       await expect(page.getByText("Vigencias terminadas para consulta histórica", { exact: false })).toBeVisible();
     } finally {
       await cleanupPolicyFixture(fixture);

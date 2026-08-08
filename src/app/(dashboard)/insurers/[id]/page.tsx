@@ -14,17 +14,16 @@ import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
 import { DeleteInsurerButton } from "@/components/insurers/delete-insurer-button";
+import { requireAdminOrRedirect } from "@/lib/auth";
 import {
   claimOperationalWhere,
   commissionOperationalWhere,
   policyOperationalWhere,
-  requirePortfolioReadScope,
 } from "@/lib/portfolio-access";
 
 export default async function InsurerDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireAdminOrRedirect();
   const { id } = await params;
-  const scope = await requirePortfolioReadScope();
-  const isAdmin = scope.role === "ADMIN";
   const db = getDb();
 
   const insurer = await db.insurer.findUnique({
@@ -37,23 +36,23 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
 
   const [policies, claims, commissions, activity] = await Promise.all([
     db.policy.findMany({
-      where: { insurerId: id, ...policyOperationalWhere(scope.portfolioOwnerId) },
+      where: { insurerId: id, ...policyOperationalWhere() },
       include: { client: true },
       orderBy: { createdAt: "desc" },
     }),
     db.claim.findMany({
-      where: { insurerId: id, ...claimOperationalWhere(scope.portfolioOwnerId) },
+      where: { insurerId: id, ...claimOperationalWhere() },
       include: { client: true },
       orderBy: { createdAt: "desc" },
       take: 10,
     }),
     db.commission.findMany({
-      where: { insurerId: id, ...commissionOperationalWhere(scope.portfolioOwnerId) },
+      where: { insurerId: id, ...commissionOperationalWhere() },
       include: { policy: true, client: true },
       orderBy: { expectedDate: "desc" },
       take: 10,
     }),
-    isAdmin ? getActivityForEntity("Insurer", id, 20) : Promise.resolve([]),
+    getActivityForEntity("Insurer", id, 20),
   ]);
 
   const activePolicies = policies.filter((p) => p.status === "ACTIVE");
@@ -69,18 +68,14 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
           description="Detalle de aseguradora, cartera vinculada y métricas comerciales."
           actions={
             <div className="flex items-center gap-2">
-              {isAdmin ? (
-                <>
-                  <Button asChild variant="outline" className="bg-card/70">
-                    <Link href={`/insurers/${id}/edit`}>
-                      <Pencil className="mr-2 size-4" />
-                      Editar
-                    </Link>
-                  </Button>
-                  <DeleteInsurerButton id={id} name={insurer.name} />
-                </>
-              ) : null}
-              <Button asChild variant="outline" className="bg-card/70">
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
+                <Link href={`/insurers/${id}/edit`}>
+                  <Pencil className="mr-2 size-4" />
+                  Editar
+                </Link>
+              </Button>
+              <DeleteInsurerButton id={id} name={insurer.name} />
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href="/insurers">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver

@@ -4,8 +4,11 @@ import {
   getPrimaryNavigationId,
   getUtilityNavigation,
   globalNavigation,
+  isLocalNavigationItemActive,
   isNavigationItemActive,
   isUtilityNavigationItemActive,
+  policyNavigation,
+  reportsNavigation,
 } from "./navigation";
 
 describe("global navigation", () => {
@@ -45,6 +48,36 @@ describe("global navigation", () => {
     expect(receipts).toBeDefined();
     expect(isNavigationItemActive(receipts!, "/due-payments/")).toBe(true);
   });
+
+  it("keeps functional section routes separate from redirect aliases", () => {
+    const policies = globalNavigation.find((item) => item.id === "policies");
+    const reports = globalNavigation.find((item) => item.id === "reports");
+
+    expect(policies?.redirectAliases).toBeUndefined();
+    expect(policies?.activePaths).toContain("/quotes");
+    expect(reports?.redirectAliases).toBeUndefined();
+    expect(reports?.activePaths).toContain("/portfolio");
+  });
+});
+
+describe("local navigation", () => {
+  it("marks functional section views active without changing their canonical paths", () => {
+    expect(isLocalNavigationItemActive(
+      policyNavigation.find((item) => item.href === "/quotes")!,
+      "/quotes",
+      new URLSearchParams(),
+    )).toBe(true);
+    expect(isLocalNavigationItemActive(
+      reportsNavigation.find((item) => item.href === "/portfolio")!,
+      "/portfolio",
+      new URLSearchParams(),
+    )).toBe(true);
+    expect(isLocalNavigationItemActive(
+      reportsNavigation.find((item) => item.href === "/reports?view=portfolio")!,
+      "/reports",
+      new URLSearchParams("view=portfolio"),
+    )).toBe(true);
+  });
 });
 
 describe("utility navigation", () => {
@@ -73,6 +106,24 @@ describe("breadcrumbs", () => {
   it("uses Nora rather than the deprecated assistant label", () => {
     expect(getBreadcrumbSegments("/assistant")).toEqual([
       { segment: "assistant", label: "Nora" },
+    ]);
+  });
+
+  it("labels the administrative operational center", () => {
+    expect(getBreadcrumbSegments("/settings/centro-operativo")).toEqual([
+      { segment: "settings", label: "Configuración" },
+      { segment: "centro-operativo", label: "Centro Operativo" },
+    ]);
+  });
+
+  it("adds contextual breadcrumbs for Today Insights and portfolio reports", () => {
+    expect(getBreadcrumbSegments("/today", new URLSearchParams("view=insights"))).toEqual([
+      { segment: "today", label: "Hoy" },
+      { segment: "insights", label: "Insights" },
+    ]);
+    expect(getBreadcrumbSegments("/reports", new URLSearchParams("view=portfolio"))).toEqual([
+      { segment: "reports", label: "Reportes" },
+      { segment: "portfolio", label: "Reporte de cartera" },
     ]);
   });
 });

@@ -10,6 +10,7 @@ import { Pagination } from "@/components/lists/pagination";
 import { getDb } from "@/lib/db";
 import { businessAddDays, businessStartOfDay, businessToday, formatBusinessDateRelative } from "@/lib/business-dates";
 import { formatDate } from "@/lib/dates";
+import { policyTypeLabel } from "@/lib/status";
 import { claimOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 import { getWorkItems, OPEN_WORK_ITEM_STATUSES, type WorkQueueItem } from "@/lib/work-queue";
@@ -40,19 +41,25 @@ function readView(value?: string): OperationsView {
 
 function WorkItemRow({ item }: { item: WorkQueueItem }) {
   const href = getWorkItemHref(item);
-  const clientLabel = item.client?.fullName ?? "Cliente no vinculado";
+  const clientLabel = item.client?.fullName ?? "Sin cliente asociado";
   const policyContext = item.policy
-    ? `${item.policy.policyNumber} · ${item.policy.policyType}`
-    : "Póliza no vinculada";
-  const insurerLabel = item.insurer?.name ?? "Aseguradora no vinculada";
+    ? `${item.policy.policyNumber} · ${policyTypeLabel(item.policy.policyType)}`
+    : "Sin póliza asociada";
+  const insurerLabel = item.insurer?.name ?? "Sin aseguradora asociada";
+  const isRenewal = item.sourceType?.toLowerCase() === "renewal" || item.taskType?.toLowerCase() === "renewal";
+  const renewalDate = item.policy?.endDate ?? (isRenewal ? item.dueDate : null);
+  const dueDateLabel = item.dueDate
+    ? `Seguimiento ${formatDate(item.dueDate)} · ${formatBusinessDateRelative(item.dueDate)}`
+    : "Sin fecha de seguimiento";
   return (
-    <li className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b px-4 py-2.5 last:border-b-0">
+    <li className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b px-4 py-3 last:border-b-0">
       <Link href={href} className="min-w-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <p className="truncate text-sm font-medium">{item.title}</p>
-        <p className="mt-0.5 truncate text-xs text-muted-foreground">{clientLabel} · {policyContext} · {insurerLabel}</p>
-        <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">Cliente: {clientLabel} · Póliza: {policyContext} · Aseguradora: {insurerLabel}</p>
+        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
           {item.policy ? `Vigencia ${formatDate(item.policy.startDate)}–${formatDate(item.policy.endDate)} · ` : ""}
-          {item.dueDate ? formatBusinessDateRelative(item.dueDate) : "Sin fecha límite"}
+          {renewalDate ? `Renovación ${formatDate(renewalDate)} · ` : isRenewal ? "Renovación sin fecha · " : ""}
+          {dueDateLabel}
         </p>
       </Link>
       <PriorityBadge priority={item.priority} className="px-2 py-0.5 text-[11px]" />

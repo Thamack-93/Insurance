@@ -11,7 +11,8 @@ import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
 import { getDb } from "@/lib/db";
 import { formatCurrency, toNumber } from "@/lib/money";
-import { claimOperationalWhere, policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { requireAdminOrRedirect } from "@/lib/auth";
+import { claimOperationalWhere, policyOperationalWhere } from "@/lib/portfolio-access";
 
 const PAGE_SIZE = 25;
 
@@ -20,13 +21,13 @@ export default async function InsurersPage({
 }: {
   searchParams?: Promise<{ q?: string; page?: string }>;
 }) {
+  const user = await requireAdminOrRedirect();
+  const isAdmin = user.role === "ADMIN";
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = Math.max(1, Number(params.page) || 1);
-  const scope = await requirePortfolioReadScope();
-  const isAdmin = scope.role === "ADMIN";
-  const policyScope = policyOperationalWhere(scope.portfolioOwnerId);
-  const claimScope = claimOperationalWhere(scope.portfolioOwnerId);
+  const policyScope = policyOperationalWhere();
+  const claimScope = claimOperationalWhere();
 
   const db = getDb();
 

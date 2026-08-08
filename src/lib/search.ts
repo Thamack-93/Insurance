@@ -3,6 +3,7 @@ import { formatDate } from "@/lib/dates";
 import { statusLabel } from "@/lib/status";
 import { normalize, unaccentSql } from "@/lib/search-utils";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
+import { getInsurerHref } from "@/lib/insurer-navigation";
 import { Prisma } from "@/generated/prisma/client";
 
 export { normalize, unaccentSql };
@@ -237,6 +238,15 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
   const scopedQuoteWhere = portfolioOwnerId
     ? Prisma.sql`EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Quote"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId})`
     : undefined;
+  const scopedInsurerWhere = portfolioOwnerId
+    ? Prisma.sql`EXISTS (
+      SELECT 1
+      FROM "Policy"
+      INNER JOIN "Client" ON "Client"."id" = "Policy"."clientId"
+      WHERE "Policy"."insurerId" = "Insurer"."id"
+        AND "Client"."portfolioOwnerId" = ${portfolioOwnerId}
+    )`
+    : undefined;
   const scopedDocumentWhere = portfolioOwnerId
     ? Prisma.sql`(
       EXISTS (SELECT 1 FROM "Client" WHERE "Client"."id" = "Document"."clientId" AND "Client"."portfolioOwnerId" = ${portfolioOwnerId})
@@ -427,6 +437,9 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       needle,
       5,
       undefined,
+      Prisma.empty,
+      undefined,
+      scopedInsurerWhere,
     ),
     rawSearch<DocumentRow>(
       "Document",
@@ -537,7 +550,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       title: ins.name,
       subtitle: ins.contactName || "Sin contacto",
       details: cleanStrings([ins.contactName, ins.notes]),
-      href: `/insurers/${ins.id}`,
+      href: getInsurerHref(ins.id, !portfolioOwnerId),
       match,
     });
   }

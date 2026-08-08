@@ -145,9 +145,13 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
                 </div>
                 <div>
                   <p className="text-muted-foreground">Aseguradora</p>
-                  <Link href={`/insurers/${claim.insurerId}`} className="font-medium text-foreground hover:text-primary">
-                    {claim.insurer.name}
-                  </Link>
+                  {scope.role === "ADMIN" ? (
+                    <Link href={`/insurers/${claim.insurerId}`} className="font-medium text-foreground hover:text-primary">
+                      {claim.insurer.name}
+                    </Link>
+                  ) : (
+                    <p className="font-medium">{claim.insurer.name}</p>
+                  )}
                 </div>
               </div>
 
