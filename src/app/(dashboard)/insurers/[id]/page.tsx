@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Building2, FileText, History, Pencil, ShieldCheck, TrendingUp } from "lucide-react";
+import { ArrowLeft, Building2, FileText, History, Pencil, ShieldCheck, TrendingUp } from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
@@ -120,7 +120,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
           <SectionCard title="Ficha de aseguradora" description="Datos de contacto y operación.">
             <div className="grid gap-4 p-4 text-sm">
               <div className="flex items-start justify-between gap-3">
-                <StatusBadge status={insurer.status} />
+                <StatusBadge status={insurer.status} entity="insurer" />
                 {insurer.portalUrl && (
                   <Badge variant="outline" className="rounded-full">
                     <a href={insurer.portalUrl} target="_blank" rel="noopener noreferrer">
@@ -166,7 +166,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
               )}
 
               {insurer.portalUrl && (
-                <Button asChild variant="outline" className="w-full rounded-full">
+                <Button asChild variant="outline" className="w-full">
                   <a href={insurer.portalUrl} target="_blank" rel="noopener noreferrer">
                     Acceder al portal
                   </a>
@@ -205,7 +205,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
                       <TableCell>{policy.client.fullName}</TableCell>
                       <TableCell>{policyTypeLabel(policy.policyType)}</TableCell>
                       <TableCell>
-                        <StatusBadge status={policy.status} />
+                        <StatusBadge status={policy.status} entity="policy" />
                       </TableCell>
                       <TableCell className="text-right font-medium">
                         {formatCurrency(policy.premiumAmount, policy.currency)}
@@ -242,7 +242,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
                       >
                         {claim.folio}
                       </Link>
-                      <StatusBadge status={claim.status} />
+                      <StatusBadge status={claim.status} entity="claim" />
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {claim.client.fullName} · {formatDate(claim.incidentDate)}
@@ -271,7 +271,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
                       <p className="font-medium text-foreground">
                         {formatCurrency(commission.expectedAmount)}
                       </p>
-                      <StatusBadge status={commission.status} />
+                      <StatusBadge status={commission.status} entity="commission" />
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {commission.client.fullName}
@@ -301,7 +301,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
         >
           {activity.length === 0 ? (
             <div className="p-4">
-              <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
+              <div className="rounded-xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
                 <History className="mx-auto mb-2 size-5 text-muted-foreground" />
                 Sin actividad registrada para esta aseguradora todavía.
               </div>

@@ -19,6 +19,13 @@ describe("assistant AI cost accounting", () => {
     expect(estimateAssistantAiCostUsd("minimax/minimax-m3", usage)).toBeNull();
   });
 
+  it("estimates discounted Luna and Nano prices", () => {
+    const usage = normalizeAssistantAiUsage({ inputTokens: 1_000_000, outputTokens: 1_000_000 });
+
+    expect(estimateAssistantAiCostUsd("openai/gpt-5.6-luna", usage)).toBe(1.4);
+    expect(estimateAssistantAiCostUsd("openai/gpt-5.4-nano", usage)).toBe(1.45);
+  });
+
   it("preserves Gateway billed cost and generation id", () => {
     const usage = normalizeAssistantAiUsage({
       inputTokens: 10,

@@ -33,7 +33,7 @@ export function MetricCard({
             <p className="mt-2 font-mono text-2xl font-semibold tracking-tight text-foreground">{value}</p>
           </div>
           {Icon ? (
-            <div className="grid size-9 place-items-center rounded-lg bg-muted">
+            <div className="grid size-9 place-items-center rounded-md bg-muted">
               <Icon className={cn("size-4", iconToneMap[tone])} />
             </div>
           ) : null}
@@ -83,8 +83,8 @@ export function EmptyPanel({
   description: string;
 }) {
   return (
-    <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-10 text-center">
-      <div className="mx-auto flex size-14 items-center justify-center rounded-2xl border bg-card shadow-sm">
+    <div className="rounded-xl border border-dashed border-border bg-muted/40 px-6 py-10 text-center">
+      <div className="mx-auto flex size-14 items-center justify-center rounded-xl border bg-card shadow-sm">
         <Icon className="size-6 text-primary" />
       </div>
       <h3 className="mt-4 text-base font-semibold text-foreground">{title}</h3>

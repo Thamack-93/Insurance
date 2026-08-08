@@ -16,6 +16,10 @@
     {
       "path": "/api/jobs/telegram-birthdays",
       "schedule": "0 15 * * *"
+    },
+    {
+      "path": "/api/jobs/renewal-followups",
+      "schedule": "30 13 * * *"
     }
   ]
 }

@@ -1,5 +1,7 @@
+import { subMonths } from "date-fns";
 import { getDb } from "@/lib/db";
 import { today } from "@/lib/dates";
+import { bucketCommissionsByMonth, MONTHLY_COMMISSION_STATUSES, pctChange } from "@/lib/dashboard.logic";
 import { BUSINESS_TIME_ZONE, businessAddDays, businessEndOfMonth, businessStartOfMonth } from "@/lib/business-dates";
 import { toNumber } from "@/lib/money";
 import { detectRisks } from "@/lib/risk-engine";
@@ -356,4 +358,228 @@ function groupCommissionsByMonth(
   }
 
   return [...buckets.entries()].map(([name, value]) => ({ name, value }));
+}
+
+// --- Panel principal de /today: métricas con sparkline, gráficas y tablas ---
+
+const monthKeyFormatter = new Intl.DateTimeFormat("en-CA", {
+  year: "numeric",
+  month: "2-digit",
+  timeZone: BUSINESS_TIME_ZONE,
+});
+const monthLabelFormatter = new Intl.DateTimeFormat("es-MX", {
+  month: "short",
+  timeZone: BUSINESS_TIME_ZONE,
+});
+const prevMonthLabelFormatter = new Intl.DateTimeFormat("es-MX", {
+  month: "short",
+  year: "numeric",
+  timeZone: BUSINESS_TIME_ZONE,
+});
+
+function lastSixMonths(now: Date) {
+  const months: Array<{ key: string; label: string }> = [];
+  for (let i = 5; i >= 0; i--) {
+    const monthDate = subMonths(now, i);
+    months.push({
+      key: monthKeyFormatter.format(monthDate),
+      label: monthLabelFormatter.format(monthDate).replace(".", ""),
+    });
+  }
+  return months;
+}
+
+function bucketByMonth(dates: Date[], months: Array<{ key: string; label: string }>) {
+  const index = new Map(months.map((month, i) => [month.key, i]));
+  const counts = months.map(() => 0);
+  for (const date of dates) {
+    const bucket = index.get(monthKeyFormatter.format(date));
+    if (bucket !== undefined) counts[bucket] += 1;
+  }
+  return counts;
+}
+
+export type TodayDashboardData = Awaited<ReturnType<typeof getTodayDashboardData>>;
+
+export async function getTodayDashboardData() {
+  const db = getDb();
+  const scope = await requirePortfolioReadScope();
+  const now = today();
+  const in30 = businessAddDays(now, 30);
+  const monthStart = businessStartOfMonth(now);
+  const monthEnd = businessEndOfMonth(now);
+  const prevMonthStart = businessStartOfMonth(subMonths(now, 1));
+  const prevMonthEnd = businessEndOfMonth(subMonths(now, 1));
+  const trendStart = businessStartOfMonth(subMonths(now, 5));
+  const policyWhere = policyOperationalWhere(scope.portfolioOwnerId);
+  const receiptWhere = receiptOperationalWhere(scope.portfolioOwnerId);
+  const commissionWhere = commissionOperationalWhere(scope.portfolioOwnerId);
+  const commissionMonthStatuses = { in: [...MONTHLY_COMMISSION_STATUSES] };
+
+  const [
+    activePolicies,
+    newPoliciesMonth,
+    newPoliciesPrevMonth,
+    renewalsMonth,
+    renewalsPrevMonth,
+    renewals30,
+    pendingMonthAgg,
+    pendingPrevMonthAgg,
+    commissionMonthActual,
+    commissionMonthExpected,
+    commissionPrevActual,
+    commissionPrevExpected,
+    policiesForTrends,
+    renewalsForTrends,
+    receiptsForTrends,
+    commissionsForTrends,
+    policyStatusRows,
+    recentPolicies,
+    overdueReceiptsCount,
+    expiredPoliciesCount,
+    openTasksCount,
+  ] = await Promise.all([
+    db.policy.count({ where: { ...policyWhere, status: "ACTIVE" } }),
+    db.policy.count({ where: { ...policyWhere, startDate: { gte: monthStart, lte: monthEnd } } }),
+    db.policy.count({ where: { ...policyWhere, startDate: { gte: prevMonthStart, lte: prevMonthEnd } } }),
+    db.policy.count({ where: { ...policyWhere, status: "ACTIVE", endDate: { gte: monthStart, lte: monthEnd } } }),
+    db.policy.count({
+      where: { ...policyWhere, status: "ACTIVE", endDate: { gte: prevMonthStart, lte: prevMonthEnd } },
+    }),
+    db.policy.count({ where: { ...policyWhere, status: "ACTIVE", endDate: { gte: now, lte: in30 } } }),
+    db.receipt.aggregate({
+      where: { ...receiptWhere, dueDate: { gte: monthStart, lte: monthEnd }, status: { in: ["PENDING", "OVERDUE"] } },
+      _sum: { amount: true },
+    }),
+    db.receipt.aggregate({
+      where: { ...receiptWhere, dueDate: { gte: prevMonthStart, lte: prevMonthEnd }, status: { in: ["PENDING", "OVERDUE"] } },
+      _sum: { amount: true },
+    }),
+    db.commission.aggregate({
+      where: { ...commissionWhere, expectedDate: { gte: monthStart, lte: monthEnd }, status: commissionMonthStatuses, actualAmount: { not: null } },
+      _sum: { actualAmount: true },
+    }),
+    db.commission.aggregate({
+      where: { ...commissionWhere, expectedDate: { gte: monthStart, lte: monthEnd }, status: commissionMonthStatuses, actualAmount: null },
+      _sum: { expectedAmount: true },
+    }),
+    db.commission.aggregate({
+      where: { ...commissionWhere, expectedDate: { gte: prevMonthStart, lte: prevMonthEnd }, status: commissionMonthStatuses, actualAmount: { not: null } },
+      _sum: { actualAmount: true },
+    }),
+    db.commission.aggregate({
+      where: { ...commissionWhere, expectedDate: { gte: prevMonthStart, lte: prevMonthEnd }, status: commissionMonthStatuses, actualAmount: null },
+      _sum: { expectedAmount: true },
+    }),
+    db.policy.findMany({
+      where: { ...policyWhere, startDate: { gte: trendStart } },
+      select: { startDate: true },
+      take: 5000,
+    }),
+    db.policy.findMany({
+      where: { ...policyWhere, status: "ACTIVE", endDate: { gte: trendStart } },
+      select: { endDate: true },
+      take: 5000,
+    }),
+    db.receipt.findMany({
+      where: { ...receiptWhere, createdAt: { gte: trendStart }, status: { notIn: ["CANCELLED"] } },
+      select: { createdAt: true, amount: true },
+      take: 5000,
+    }),
+    db.commission.findMany({
+      where: { ...commissionWhere, expectedDate: { gte: trendStart }, status: commissionMonthStatuses },
+      select: { expectedDate: true, expectedAmount: true, actualAmount: true },
+      take: 2000,
+    }),
+    db.policy.groupBy({ by: ["status"], where: policyWhere, _count: { status: true } }),
+    db.policy.findMany({
+      where: policyWhere,
+      include: { client: { select: { fullName: true } }, insurer: { select: { name: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 6,
+    }),
+    db.receipt.count({ where: { ...receiptWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } } }),
+    db.policy.count({ where: { ...policyWhere, status: "EXPIRED" } }),
+    countWorkItems({
+      workItemTypes: ["TASK"],
+      statuses: OPEN_WORK_ITEM_STATUSES,
+      portfolioOwnerId: scope.portfolioOwnerId,
+    }),
+  ]);
+
+  const months = lastSixMonths(now);
+  const newPoliciesSpark = bucketByMonth(policiesForTrends.map((row) => row.startDate), months);
+  const renewalsSpark = bucketByMonth(renewalsForTrends.map((row) => row.endDate), months);
+
+  const pendingByMonth = months.map(() => 0);
+  const pendingIndex = new Map(months.map((month, i) => [month.key, i]));
+  const receiptsPerMonth = months.map(() => 0);
+  for (const receipt of receiptsForTrends) {
+    const bucket = pendingIndex.get(monthKeyFormatter.format(receipt.createdAt));
+    if (bucket !== undefined) {
+      pendingByMonth[bucket] += toNumber(receipt.amount);
+      receiptsPerMonth[bucket] += 1;
+    }
+  }
+
+  const commissionsSpark = bucketCommissionsByMonth(commissionsForTrends, months.map((month) => month.key));
+
+  const pendingMonth = toNumber(pendingMonthAgg._sum.amount);
+  const pendingPrevMonth = toNumber(pendingPrevMonthAgg._sum.amount);
+  const commissionsMonth =
+    toNumber(commissionMonthActual._sum.actualAmount) + toNumber(commissionMonthExpected._sum.expectedAmount);
+  const commissionsPrevMonth =
+    toNumber(commissionPrevActual._sum.actualAmount) + toNumber(commissionPrevExpected._sum.expectedAmount);
+
+  return {
+    metrics: {
+      activePolicies: {
+        value: activePolicies,
+        delta: pctChange(newPoliciesMonth, newPoliciesPrevMonth),
+        spark: newPoliciesSpark,
+      },
+      renewals: {
+        value: renewals30,
+        delta: pctChange(renewalsMonth, renewalsPrevMonth),
+        spark: renewalsSpark,
+      },
+      pendingReceipts: {
+        value: pendingMonth,
+        delta: pctChange(pendingMonth, pendingPrevMonth),
+        spark: pendingByMonth,
+      },
+      commissions: {
+        value: commissionsMonth,
+        delta: pctChange(commissionsMonth, commissionsPrevMonth),
+        spark: commissionsSpark,
+      },
+    },
+    activity: months.map((month, i) => ({
+      name: month.label.charAt(0).toUpperCase() + month.label.slice(1),
+      pólizas: newPoliciesSpark[i],
+      recibos: receiptsPerMonth[i],
+    })),
+    statusDistribution: policyStatusRows
+      .map((row) => ({ status: row.status, value: row._count.status }))
+      .sort((a, b) => b.value - a.value),
+    recentPolicies: recentPolicies.map((policy) => ({
+      id: policy.id,
+      policyNumber: policy.policyNumber,
+      clientName: policy.client.fullName,
+      insurerName: policy.insurer.name,
+      policyType: policy.policyType,
+      startDate: policy.startDate,
+      endDate: policy.endDate,
+      premiumAmount: toNumber(policy.premiumAmount),
+      currency: policy.currency,
+      status: policy.status,
+    })),
+    alerts: [
+      { id: "renewals", label: "Renovaciones próximas", detail: "Próximos 30 días", count: renewals30, tone: "warning" as const, href: "/operations?view=renewals" },
+      { id: "overdue", label: "Cobros vencidos", detail: "Requieren atención", count: overdueReceiptsCount, tone: "critical" as const, href: "/receipts?tab=cobrar" },
+      { id: "expired", label: "Pólizas vencidas", detail: "En cartera", count: expiredPoliciesCount, tone: "critical" as const, href: "/policies" },
+      { id: "tasks", label: "Pendientes abiertos", detail: "Por resolver", count: openTasksCount, tone: "information" as const, href: "/operations?view=pending" },
+    ],
+    prevMonthLabel: prevMonthLabelFormatter.format(subMonths(now, 1)).replace(".", ""),
+  };
 }

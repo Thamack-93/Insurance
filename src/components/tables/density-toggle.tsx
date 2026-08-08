@@ -19,7 +19,7 @@ const densityOptions: Array<{ value: TableDensity; label: string }> = [
 
 function DensityToggle({ value, onValueChange, className }: DensityToggleProps) {
   return (
-    <div className={cn("inline-flex items-center rounded-lg border bg-background p-1 shadow-sm", className)}>
+    <div className={cn("inline-flex items-center rounded-md border bg-background p-1 shadow-sm", className)}>
       {densityOptions.map((option) => (
         <Button
           key={option.value}

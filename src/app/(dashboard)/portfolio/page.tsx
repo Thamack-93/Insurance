@@ -1,7 +1,9 @@
 import Link from "next/link";
-import { ArrowRight, Building2, CalendarDays, ShieldCheck, Users } from "lucide-react";
+import { ArrowRight, Building2, CalendarDays, ShieldCheck, Users } from "@/components/icons";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
+import { LocalNavigation } from "@/components/layout/local-navigation";
+import { reportsNavigation } from "@/lib/navigation";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -219,10 +221,10 @@ export default async function PortfolioPage({
             : "Vista ejecutiva de la cartera activa, su concentración y las renovaciones más cercanas."}
           actions={
             <>
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/renewals">Renovaciones</Link>
               </Button>
-              <Button asChild className="rounded-full">
+              <Button asChild>
                 <Link href="/policies">
                   Ver pólizas
                   <ArrowRight className="ml-2 size-4" />
@@ -231,6 +233,8 @@ export default async function PortfolioPage({
             </>
           }
         />
+
+        <LocalNavigation items={reportsNavigation} label="Secciones de reportes" />
 
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
@@ -294,8 +298,7 @@ export default async function PortfolioPage({
                     ? `No encontramos pólizas activas que coincidan con "${query}".`
                     : "Cuando registres pólizas activas, aparecerán aquí ordenadas por prima."
                 }
-                action={query ? undefined : "Nueva póliza"}
-                actionHref={query ? undefined : "/policies/new"}
+                action={query ? undefined : { label: "Nueva póliza", href: "/policies/new" }}
               />
             </div>
           ) : pagedPolicies.length === 0 ? (
@@ -304,11 +307,7 @@ export default async function PortfolioPage({
                 icon={ShieldCheck}
                 title="Página fuera de rango"
                 description="Vuelve al inicio del listado."
-                action="Volver al inicio"
-                actionHref={buildTableHref("/portfolio", params, {
-                  q: query || null,
-                  type: typeFilter || null,
-                })}
+                action={{ label: "Volver al inicio", href: buildTableHref("/portfolio", params, { q: query || null, type: typeFilter || null, }) }}
               />
             </div>
           ) : (
@@ -491,7 +490,7 @@ export default async function PortfolioPage({
                       <TableCell>
                         <div className="flex flex-col">
                           <span>{formatDate(receipt.dueDate)}</span>
-                          <StatusBadge status={receipt.status} className="mt-1 w-fit" />
+                          <StatusBadge status={receipt.status} entity="receipt" className="mt-1 w-fit" />
                         </div>
                       </TableCell>
                       <TableCell className="text-right font-medium">

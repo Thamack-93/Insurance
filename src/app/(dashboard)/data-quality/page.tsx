@@ -9,7 +9,7 @@ import {
   ReceiptText,
   ShieldAlert,
   Users,
-} from "lucide-react";
+} from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { Badge } from "@/components/ui/badge";
@@ -441,7 +441,7 @@ export default async function DataQualityPage({
           actions={
             <>
               <RefreshPageButton />
-              <Button asChild className="rounded-full">
+              <Button asChild>
                 <Link href="/risks">
                   Ver riesgos
                   <ArrowRight className="ml-2 size-4" />
@@ -452,20 +452,20 @@ export default async function DataQualityPage({
         />
 
         <UrlTabs defaultValue={initialTab} className="space-y-6">
-          <TabsList className="rounded-full bg-card/70 p-1">
-            <TabsTrigger value="salud" className="rounded-full px-4">
+          <TabsList className="bg-card/70 p-1">
+            <TabsTrigger value="salud" className="px-4">
               Salud
             </TabsTrigger>
-            <TabsTrigger value="vigencias" className="rounded-full px-4">
+            <TabsTrigger value="vigencias" className="px-4">
               Vigencias
             </TabsTrigger>
-            <TabsTrigger value="pagos" className="rounded-full px-4">
+            <TabsTrigger value="pagos" className="px-4">
               Pagos
             </TabsTrigger>
-            <TabsTrigger value="renovaciones" className="rounded-full px-4">
+            <TabsTrigger value="renovaciones" className="px-4">
               Renovaciones
             </TabsTrigger>
-            <TabsTrigger value="ledger" className="rounded-full px-4">
+            <TabsTrigger value="ledger" className="px-4">
               Ledger
             </TabsTrigger>
           </TabsList>
@@ -743,7 +743,7 @@ export default async function DataQualityPage({
                               </div>
                             </TableCell>
                             <TableCell>
-                              <Button asChild size="sm" variant="outline" className="rounded-full">
+                              <Button asChild size="sm" variant="outline">
                                 <Link href={`/clients/${client.clienteId}`}>Ver cliente</Link>
                               </Button>
                             </TableCell>
@@ -816,7 +816,7 @@ export default async function DataQualityPage({
                                   {client.items.length} póliza{client.items.length === 1 ? "" : "s"}
                                 </p>
                                 {client.items.slice(0, 3).map((item) => (
-                                  <div key={item.policyId} className="rounded-2xl border border-stone-200/80 bg-white/80 p-3">
+                                  <div key={item.policyId} className="rounded-xl border border-stone-200/80 bg-white/80 p-3">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                       <Link href={`/policies/${item.policyId}`} className="font-medium text-foreground hover:text-primary">
                                         {item.policyNumber}
@@ -828,7 +828,7 @@ export default async function DataQualityPage({
                                     <p className="mt-1 text-xs text-muted-foreground">
                                       {formatDate(item.endDate)} · {item.clientName} · {item.insurerName}
                                     </p>
-                                    <Button asChild size="sm" variant="outline" className="mt-2 rounded-full">
+                                    <Button asChild size="sm" variant="outline" className="mt-2">
                                       <Link href={`/policies/new?renewalFrom=${encodeURIComponent(item.policyId)}`}>Ver y renovar</Link>
                                     </Button>
                                   </div>
@@ -860,22 +860,22 @@ export default async function DataQualityPage({
               action={<RunVigencyAuditButton runVigencyAudit={runVigencyAuditAction} />}
             >
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Última corrida</p>
                   <p className="mt-1 text-sm font-medium">
                     {latestMaintenanceRun ? latestMaintenanceRun.startedAt.toLocaleString("es-MX") : "Sin auditorías"}
                   </p>
                   <p className="text-xs text-muted-foreground">{latestMaintenanceRun?.status ?? "Ningún run registrado todavía"}</p>
                 </div>
-                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Familias revisadas</p>
                   <p className="mt-1 text-2xl font-semibold">{latestAuditSummary?.familiesReviewed ?? 0}</p>
                 </div>
-                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Recibos reconciliados</p>
                   <p className="mt-1 text-2xl font-semibold">{latestAuditSummary?.receiptsReconciled ?? 0}</p>
                 </div>
-                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Issues abiertos</p>
                   <p className="mt-1 text-2xl font-semibold">{latestAuditSummary?.receiptIssuesOpened ?? 0}</p>
                 </div>
@@ -893,7 +893,7 @@ export default async function DataQualityPage({
                 </div>
               ) : null}
               {latestAuditSummary?.paymentFrequencyReviewSample?.length ? (
-                <div className="mt-5 overflow-hidden rounded-2xl border border-stone-200/80">
+                <div className="mt-5 overflow-hidden rounded-xl border border-stone-200/80">
                   <Table>
                     <TableHeader>
                       <TableRow className="bg-stone-50/70">
@@ -930,29 +930,29 @@ export default async function DataQualityPage({
               action={
                 <div className="flex flex-wrap gap-2">
                   <RunPaymentAuditButton runPaymentAudit={runPaymentAuditAction} />
-                  <Button asChild variant="outline" className="rounded-full bg-card/70">
+                  <Button asChild variant="outline" className="bg-card/70">
                     <Link href="/receipts?tab=revision">Ver revisión</Link>
                   </Button>
                 </div>
               }
             >
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Última corrida</p>
                   <p className="mt-1 text-sm font-medium">
                     {latestPaymentMaintenanceRun ? latestPaymentMaintenanceRun.startedAt.toLocaleString("es-MX") : "Sin auditorías"}
                   </p>
                   <p className="text-xs text-muted-foreground">{latestPaymentMaintenanceRun?.status ?? "Ningún run registrado todavía"}</p>
                 </div>
-                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Recibos revisados</p>
                   <p className="mt-1 text-2xl font-semibold">{latestPaymentAuditSummary?.receiptsScanned ?? 0}</p>
                 </div>
-                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Recibos actualizados</p>
                   <p className="mt-1 text-2xl font-semibold">{latestPaymentAuditSummary?.receiptsUpdated ?? 0}</p>
                 </div>
-                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Casos en revisión</p>
                   <p className="mt-1 text-2xl font-semibold">{latestPaymentAuditSummary?.receiptsFlaggedForReview ?? 0}</p>
                 </div>
@@ -966,7 +966,7 @@ export default async function DataQualityPage({
                 </div>
               ) : null}
               {latestPaymentAuditSummary?.reviewReceipts?.length ? (
-                <div className="mt-5 overflow-hidden rounded-2xl border border-stone-200/80">
+                <div className="mt-5 overflow-hidden rounded-xl border border-stone-200/80">
                   <Table>
                     <TableHeader>
                       <TableRow className="bg-stone-50/70">
@@ -1013,19 +1013,19 @@ export default async function DataQualityPage({
               description="Estos son los 28 casos revisados: todos requieren validación porque el pago quedó después del vencimiento."
             >
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Casos</p>
                   <p className="mt-1 text-2xl font-semibold">{openPaymentAfterDueDateIssues.length}</p>
                 </div>
-                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Dentro de 30 días</p>
                   <p className="mt-1 text-2xl font-semibold">{paymentWithin30Days}</p>
                 </div>
-                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Más de 30 días</p>
                   <p className="mt-1 text-2xl font-semibold">{paymentOver30Days}</p>
                 </div>
-                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Máxima brecha</p>
                   <p className="mt-1 text-2xl font-semibold">{formatGapDays(paymentMaxGap)}</p>
                 </div>
@@ -1049,7 +1049,7 @@ export default async function DataQualityPage({
               ) : (
                 <div className="mt-5 space-y-4">
                   <form action={bulkReceiptReviewIssuesAction} className="space-y-4">
-                    <div className="overflow-hidden rounded-2xl border border-stone-200/80">
+                    <div className="overflow-hidden rounded-xl border border-stone-200/80">
                       <Table>
                         <TableHeader>
                           <TableRow className="bg-stone-50/70">
@@ -1112,31 +1112,31 @@ export default async function DataQualityPage({
                         </TableBody>
                       </Table>
                     </div>
-                    <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                       <p className="text-sm text-muted-foreground">
                         Selecciona filas para resolverlas en lote. También puedes dejar la fila individual con aprobar, denegar, suprimir o reabrir.
                       </p>
                       <div className="ml-auto flex flex-wrap gap-2">
-                        <Button type="submit" name="operation" value="APPROVE" className="rounded-full">
+                        <Button type="submit" name="operation" value="APPROVE">
                           Aprobar selección
                         </Button>
-                        <Button type="submit" name="operation" value="DENY" variant="outline" className="rounded-full">
+                        <Button type="submit" name="operation" value="DENY" variant="outline">
                           Denegar selección
                         </Button>
-                        <Button type="submit" name="operation" value="SUPPRESS" variant="outline" className="rounded-full">
+                        <Button type="submit" name="operation" value="SUPPRESS" variant="outline">
                           Suprimir selección
                         </Button>
-                        <Button type="submit" name="operation" value="MERGE" variant="outline" className="rounded-full">
+                        <Button type="submit" name="operation" value="MERGE" variant="outline">
                           Fusionar selección
                         </Button>
-                        <Button type="submit" name="operation" value="REOPEN" variant="ghost" className="rounded-full">
+                        <Button type="submit" name="operation" value="REOPEN" variant="ghost">
                           Reabrir selección
                         </Button>
                       </div>
                     </div>
                   </form>
                   {closedPaymentAfterDueDateIssues.length ? (
-                    <div className="overflow-hidden rounded-2xl border border-stone-200/80">
+                    <div className="overflow-hidden rounded-xl border border-stone-200/80">
                       <div className="border-b border-stone-200/80 bg-stone-50/70 px-4 py-3">
                         <p className="text-sm font-semibold">Historial reciente</p>
                         <p className="text-xs text-muted-foreground">Casos resueltos, descartados, suprimidos o fusionados.</p>
@@ -1196,7 +1196,7 @@ export default async function DataQualityPage({
               title="Renovaciones"
               description="Aquí puedes revisar qué está pendiente, qué ya se cerró y qué sigue en contexto para aprobación."
               action={
-                <Button asChild className="rounded-full">
+                <Button asChild>
                   <Link href="/renewals">
                     Abrir renovaciones
                     <ArrowRight className="ml-2 size-4" />
@@ -1205,15 +1205,15 @@ export default async function DataQualityPage({
               }
             >
               <div className="grid gap-4 md:grid-cols-3">
-                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Pendientes</p>
                   <p className="mt-1 text-2xl font-semibold">{filteredOpenRenewalSuggestions.length}</p>
                 </div>
-                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Cerradas</p>
                   <p className="mt-1 text-2xl font-semibold">{filteredClosedRenewalSuggestions.length}</p>
                 </div>
-                <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Coincidencias</p>
                   <p className="mt-1 text-2xl font-semibold">{filteredOpenRenewalSuggestions.length + filteredClosedRenewalSuggestions.length}</p>
                 </div>
@@ -1241,7 +1241,7 @@ export default async function DataQualityPage({
               ) : (
                 <div className="mt-5 space-y-4">
                   <form action={bulkRenewalSuggestionReviewsAction} className="space-y-4">
-                    <div className="overflow-hidden rounded-2xl border border-stone-200/80">
+                    <div className="overflow-hidden rounded-xl border border-stone-200/80">
                       <Table>
                         <TableHeader>
                           <TableRow className="bg-stone-50/70">
@@ -1322,31 +1322,31 @@ export default async function DataQualityPage({
                         dir: direction ?? undefined,
                       }}
                     />
-                    <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                       <p className="text-sm text-muted-foreground">
                         Aprobar selección vincula la renovación con su póliza destino y cierra el origen usando la lógica real de renovaciones.
                       </p>
                       <div className="ml-auto flex flex-wrap gap-2">
-                        <Button type="submit" name="operation" value="APPROVE" className="rounded-full">
+                        <Button type="submit" name="operation" value="APPROVE">
                           Aprobar selección
                         </Button>
-                        <Button type="submit" name="operation" value="DENY" variant="outline" className="rounded-full">
+                        <Button type="submit" name="operation" value="DENY" variant="outline">
                           Denegar selección
                         </Button>
-                        <Button type="submit" name="operation" value="SUPPRESS" variant="outline" className="rounded-full">
+                        <Button type="submit" name="operation" value="SUPPRESS" variant="outline">
                           Suprimir selección
                         </Button>
-                        <Button type="submit" name="operation" value="MERGE" variant="outline" className="rounded-full">
+                        <Button type="submit" name="operation" value="MERGE" variant="outline">
                           Fusionar selección
                         </Button>
-                        <Button type="submit" name="operation" value="REOPEN" variant="ghost" className="rounded-full">
+                        <Button type="submit" name="operation" value="REOPEN" variant="ghost">
                           Reabrir selección
                         </Button>
                       </div>
                     </div>
                   </form>
                   {filteredClosedRenewalSuggestions.length ? (
-                    <div className="overflow-hidden rounded-2xl border border-stone-200/80">
+                    <div className="overflow-hidden rounded-xl border border-stone-200/80">
                       <div className="border-b border-stone-200/80 bg-stone-50/70 px-4 py-3">
                         <p className="text-sm font-semibold">Historial reciente</p>
                         <p className="text-xs text-muted-foreground">Sugerencias resueltas, descartadas, suprimidas o fusionadas.</p>
@@ -1419,7 +1419,7 @@ export default async function DataQualityPage({
                       name="ledgerCsv"
                       accept=".csv,.xls,.xlsx"
                       required
-                      className="block w-full rounded-2xl border border-border bg-background px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-full file:border-0 file:bg-primary file:px-4 file:py-2 file:text-primary-foreground"
+                      className="block w-full rounded-xl border border-border bg-background px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-full file:border-0 file:bg-primary file:px-4 file:py-2 file:text-primary-foreground"
                     />
                   </label>
                   <label className="space-y-2">
@@ -1429,12 +1429,12 @@ export default async function DataQualityPage({
                       name="ledgerPaid"
                       accept=".xls,.xlsx,.csv"
                       required
-                      className="block w-full rounded-2xl border border-border bg-background px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-full file:border-0 file:bg-primary file:px-4 file:py-2 file:text-primary-foreground"
+                      className="block w-full rounded-xl border border-border bg-background px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-full file:border-0 file:bg-primary file:px-4 file:py-2 file:text-primary-foreground"
                     />
                   </label>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <Button type="submit" className="rounded-full">
+                  <Button type="submit">
                     Generar preview
                   </Button>
                   <p className="text-sm text-muted-foreground">
@@ -1446,19 +1446,19 @@ export default async function DataQualityPage({
               {previewBatch ? (
                 <div className="border-t border-border/70 px-4 py-4">
                   <div className="grid gap-4 md:grid-cols-4">
-                    <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                    <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                       <p className="text-xs uppercase tracking-wide text-muted-foreground">CSV</p>
                       <p className="mt-1 text-sm font-medium">{previewBatch.sourceCsvName}</p>
                     </div>
-                    <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                    <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                       <p className="text-xs uppercase tracking-wide text-muted-foreground">XLS</p>
                       <p className="mt-1 text-sm font-medium">{previewBatch.sourcePaidName}</p>
                     </div>
-                    <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                    <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                       <p className="text-xs uppercase tracking-wide text-muted-foreground">Estado</p>
                       <p className="mt-1 text-sm font-medium">{previewBatch.status}</p>
                     </div>
-                    <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                    <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                       <p className="text-xs uppercase tracking-wide text-muted-foreground">Creado</p>
                       <p className="mt-1 text-sm font-medium">{previewBatch.createdAt.toLocaleString("es-MX")}</p>
                     </div>
@@ -1469,7 +1469,7 @@ export default async function DataQualityPage({
                         if (key === "sampleIssues") return null;
                         if (Array.isArray(value)) return null;
                         return (
-                          <div key={key} className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4 text-sm">
+                          <div key={key} className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4 text-sm">
                             <p className="text-xs uppercase tracking-wide text-muted-foreground">{key}</p>
                             <p className="mt-1 font-medium">{String(value)}</p>
                           </div>
@@ -1478,7 +1478,7 @@ export default async function DataQualityPage({
                     </div>
                   ) : null}
 
-                  <div className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                  <div className="mt-5 flex flex-wrap items-center gap-3 rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-foreground">Aprobación ADMIN por bloque</p>
                       <p className="mt-1 text-sm text-muted-foreground">
@@ -1489,7 +1489,7 @@ export default async function DataQualityPage({
                       <input type="hidden" name="batchId" value={previewBatch.id} />
                       <Button
                         type="submit"
-                        className="rounded-full"
+
                         disabled={!["PREVIEW_READY", "APPROVED", "PARTIAL_APPLIED"].includes(previewBatch.status) || readyRowCount === 0}
                       >
                         Aprobar y aplicar pagos
@@ -1498,7 +1498,7 @@ export default async function DataQualityPage({
                   </div>
 
                   {previewBatch.issues.length ? (
-                    <div className="mt-5 overflow-hidden rounded-2xl border border-stone-200/80">
+                    <div className="mt-5 overflow-hidden rounded-xl border border-stone-200/80">
                       <Table>
                         <TableHeader>
                           <TableRow className="bg-stone-50/70">
@@ -1558,7 +1558,7 @@ export default async function DataQualityPage({
               ) : (
                 <div className="space-y-4">
                   <form action={bulkLedgerIssuesAction} className="space-y-4">
-                    <div className="overflow-hidden rounded-2xl border border-stone-200/80">
+                    <div className="overflow-hidden rounded-xl border border-stone-200/80">
                       <Table>
                         <TableHeader>
                           <TableRow className="bg-stone-50/70">
@@ -1628,31 +1628,31 @@ export default async function DataQualityPage({
                         ledgerBatch: previewBatchId ?? undefined,
                       }}
                     />
-                    <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200/80 bg-stone-50/80 p-4">
+                    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                       <p className="text-sm text-muted-foreground">
                         Puedes resolver varios issues iguales al mismo tiempo o fusionarlos si representan el mismo origen.
                       </p>
                       <div className="ml-auto flex flex-wrap gap-2">
-                        <Button type="submit" name="operation" value="APPROVE" className="rounded-full">
+                        <Button type="submit" name="operation" value="APPROVE">
                           Aprobar selección
                         </Button>
-                        <Button type="submit" name="operation" value="DENY" variant="outline" className="rounded-full">
+                        <Button type="submit" name="operation" value="DENY" variant="outline">
                           Denegar selección
                         </Button>
-                        <Button type="submit" name="operation" value="SUPPRESS" variant="outline" className="rounded-full">
+                        <Button type="submit" name="operation" value="SUPPRESS" variant="outline">
                           Suprimir selección
                         </Button>
-                        <Button type="submit" name="operation" value="MERGE" variant="outline" className="rounded-full">
+                        <Button type="submit" name="operation" value="MERGE" variant="outline">
                           Fusionar selección
                         </Button>
-                        <Button type="submit" name="operation" value="REOPEN" variant="ghost" className="rounded-full">
+                        <Button type="submit" name="operation" value="REOPEN" variant="ghost">
                           Reabrir selección
                         </Button>
                       </div>
                     </div>
                   </form>
                   {filteredClosedLedgerIssues.length ? (
-                    <div className="overflow-hidden rounded-2xl border border-stone-200/80">
+                    <div className="overflow-hidden rounded-xl border border-stone-200/80">
                       <div className="border-b border-stone-200/80 bg-stone-50/70 px-4 py-3">
                         <p className="text-sm font-semibold">Historial reciente</p>
                         <p className="text-xs text-muted-foreground">Issues resueltos, descartados, suprimidos o fusionados.</p>

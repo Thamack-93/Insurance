@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Download, FileText, FileImage, FileType2, File as FileIcon } from "lucide-react";
+import { Download, FileText, FileImage, FileType2, File as FileIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-states/empty-state";

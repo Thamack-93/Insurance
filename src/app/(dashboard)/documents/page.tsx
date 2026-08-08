@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, FileDigit, FolderOpen, Link2, ShieldAlert, Download } from "lucide-react";
+import { ArrowRight, FileDigit, FolderOpen, Link2, ShieldAlert, Download } from "@/components/icons";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
@@ -107,7 +107,7 @@ export default async function DocumentsPage({
           title="Documentos"
           description="Control de documentos, asociaciones y huecos de expediente."
           actions={
-            <Button asChild className="rounded-full">
+            <Button asChild>
               <Link href="/risks">
                 Riesgos
                 <ArrowRight className="ml-2 size-4" />
@@ -170,8 +170,7 @@ export default async function DocumentsPage({
                 icon={FolderOpen}
                 title="Página fuera de rango"
                 description="Vuelve al inicio del listado."
-                action="Volver al inicio"
-                actionHref={query ? `/documents?q=${encodeURIComponent(query)}` : "/documents"}
+                action={{ label: "Volver al inicio", href: query ? `/documents?q=${encodeURIComponent(query)}` : "/documents" }}
               />
             </div>
           ) : (
@@ -286,7 +285,7 @@ export default async function DocumentsPage({
           {documentsEnabled ? (
             <UploadForm />
           ) : (
-            <div className="rounded-2xl border border-dashed bg-muted/30 p-6 text-sm text-muted-foreground">
+            <div className="rounded-xl border border-dashed bg-muted/30 p-6 text-sm text-muted-foreground">
               La carga de archivos está deshabilitada en la demo publicada. Esta sección queda como metadata del expediente.
             </div>
           )}

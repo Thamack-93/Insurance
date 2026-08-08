@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RecordPageView } from "@/components/recently-viewed/record-page-view";
-import { ArrowLeft, FileClock, History, Pencil, Plus, ReceiptText, Repeat, Shield } from "lucide-react";
+import { ArrowLeft, FileClock, History, Pencil, Plus, ReceiptText, Repeat, Shield } from "@/components/icons";
 import { DeletePolicyButton } from "@/components/policies/delete-policy-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { NoraContextButton } from "@/components/assistant/nora-session-provider";
@@ -213,14 +213,14 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           actions={
             <div className="flex items-center gap-2">
               <NoraContextButton context={{ type: "policy", id: policy.id }} />
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href={`/policies/${id}/edit`}>
                   <Pencil className="mr-2 size-4" />
                   Editar
                 </Link>
               </Button>
               {isAdmin ? <DeletePolicyButton id={id} policyNumber={policy.policyNumber} /> : null}
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/policies">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
@@ -281,23 +281,23 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           <SectionCard title="Póliza base" description="Contexto operativo y comercial de la vigencia base.">
             <div className="grid gap-4 p-4 text-sm">
               <div className="flex items-start justify-between gap-3">
-                <StatusBadge status={policy.status} />
+                <StatusBadge status={policy.status} entity="policy" />
                 <Badge variant="outline" className="rounded-full">
                   {policyTypeLabel(policy.policyType)}
                 </Badge>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                <div className="rounded-2xl border border-border/70 bg-muted/30 p-4">
+                <div className="rounded-xl border border-border/70 bg-muted/30 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Saldo póliza</p>
                   <p className="mt-1 text-lg font-semibold">{formatCurrency(basePendingAmount, policy.currency)}</p>
                   <p className="mt-1 text-xs text-muted-foreground">{basePendingCount} recibo(s) abiertos</p>
                 </div>
-                <div className="rounded-2xl border border-border/70 bg-muted/30 p-4">
+                <div className="rounded-xl border border-border/70 bg-muted/30 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Saldo endosos</p>
                   <p className="mt-1 text-lg font-semibold">{formatCurrency(endorsementPendingAmount, policy.currency)}</p>
                   <p className="mt-1 text-xs text-muted-foreground">{endorsementPendingCount} recibo(s) abiertos</p>
                 </div>
-                <div className="rounded-2xl border border-border/70 bg-muted/30 p-4">
+                <div className="rounded-xl border border-border/70 bg-muted/30 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Endosos vigentes</p>
                   <p className="mt-1 text-lg font-semibold">{activeEndorsements.length}</p>
                   <p className="mt-1 text-xs text-muted-foreground">{expiredEndorsements.length} vencidos · {cancelledEndorsements.length} cancelados</p>
@@ -397,7 +397,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                     {policy.insuredAssets.length ? (
                       <ul className="mt-2 space-y-2 text-muted-foreground">
                         {policy.insuredAssets.map((asset) => (
-                          <li key={asset.id} className="flex flex-col gap-1 rounded-2xl border border-border/60 bg-muted/20 p-3">
+                          <li key={asset.id} className="flex flex-col gap-1 rounded-xl border border-border/60 bg-muted/20 p-3">
                             <div className="flex items-center justify-between gap-3">
                               <span>{asset.assetType}</span>
                               <span className="text-xs uppercase tracking-wide">{asset.isPrimary ? "Principal" : "Secundario"}</span>
@@ -421,7 +421,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             title="Recibos de la póliza"
             description="Calendario de cobro derivado solo de la vigencia base."
             action={
-              <Button asChild size="sm" className="rounded-full">
+              <Button asChild size="sm">
                 <Link href={`/receipts/new?policyId=${id}`}>
                   <Plus className="mr-2 size-4" />
                   Nuevo recibo de póliza
@@ -436,7 +436,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             title="Endosos"
             description="Ajustes ligados a esta póliza base, cada uno con sus propios recibos y documentos."
             action={
-              <Button asChild size="sm" className="rounded-full">
+              <Button asChild size="sm">
                 <Link href={`/policies/${id}/endorsements/new`}>
                   <Plus className="mr-2 size-4" />
                   Nuevo endoso
@@ -446,7 +446,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           >
             {endorsements.length === 0 ? (
               <div className="p-4">
-                <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
+                <div className="rounded-xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
                   <ReceiptText className="mx-auto mb-2 size-5 text-muted-foreground" />
                   Todavía no hay endosos para esta póliza.
                 </div>
@@ -454,7 +454,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
             ) : (
               <div className="space-y-4 p-4">
                 {endorsements.map((endorsement) => (
-                  <div key={endorsement.id} className="rounded-3xl border border-border/70 bg-card p-4 shadow-sm">
+                  <div key={endorsement.id} className="rounded-xl border border-border/70 bg-card p-4 shadow-sm">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div className="space-y-2">
                         <div className="flex flex-wrap items-center gap-2">
@@ -464,7 +464,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                           >
                             Endoso {endorsement.endorsementNumber}
                           </Link>
-                          <StatusBadge status={endorsement.status} />
+                          <StatusBadge status={endorsement.status} entity="endorsement" />
                         </div>
                         <p className="text-sm text-muted-foreground">
                           {formatDate(endorsement.startDate)} · {formatDate(endorsement.endDate)} ·{" "}
@@ -479,10 +479,10 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                         {endorsement.notes ? <p className="text-xs text-muted-foreground">{endorsement.notes}</p> : null}
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <Button asChild variant="outline" size="sm" className="rounded-full bg-card/70">
+                        <Button asChild variant="outline" size="sm" className="bg-card/70">
                           <Link href={`/policies/${id}/endorsements/${endorsement.id}/edit`}>Editar</Link>
                         </Button>
-                        <Button asChild size="sm" className="rounded-full">
+                        <Button asChild size="sm">
                           <Link href={`/receipts/new?policyId=${id}&endorsementId=${endorsement.id}`}>Nuevo recibo de endoso</Link>
                         </Button>
                       </div>
@@ -508,7 +508,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                           }))}
                         />
                       ) : (
-                        <div className="rounded-2xl border border-dashed border-border bg-muted/30 px-4 py-6 text-sm text-muted-foreground">
+                        <div className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-6 text-sm text-muted-foreground">
                           Este endoso todavía no tiene recibos asociados.
                         </div>
                       )}
@@ -580,7 +580,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                       {formatDate(term.startDate)} · {formatDate(term.endDate)}
                     </TableCell>
                     <TableCell>
-                      <StatusBadge status={term.status} />
+                      <StatusBadge status={term.status} entity="policy" />
                     </TableCell>
                     <TableCell className="text-right font-medium">{formatCurrency(term.premiumAmount, term.currency)}</TableCell>
                     <TableCell className="text-right">{term._count.receipts}</TableCell>
@@ -626,7 +626,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                   <div key={commission.id} className="px-4 py-4">
                     <div className="flex items-center justify-between gap-3">
                       <p className="font-medium text-foreground">{formatCurrency(commission.expectedAmount, policy.currency)}</p>
-                      <StatusBadge status={commission.status} />
+                      <StatusBadge status={commission.status} entity="commission" />
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {commission.expectedDate ? formatDate(commission.expectedDate) : "Sin fecha"} · {commission.insurer.name}
@@ -647,7 +647,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                       </Link>
                       <div className="flex gap-2">
                         <PriorityBadge priority={task.priority} />
-                        <StatusBadge status={task.status} />
+                        <StatusBadge status={task.status} entity="workItem" />
                       </div>
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">{task.title}</p>
@@ -698,7 +698,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         >
           {activity.length === 0 ? (
             <div className="p-4">
-              <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
+              <div className="rounded-xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
                 <History className="mx-auto mb-2 size-5 text-muted-foreground" />
                 Sin actividad registrada para esta póliza todavía.
               </div>

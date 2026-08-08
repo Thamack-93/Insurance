@@ -1,7 +1,8 @@
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard } from "@/components/pages-secondary/panels";
 import { Button } from "@/components/ui/button";
-import { BellRing, Bot, Database, Globe2, ArrowRight, Settings2, KeyRound, Users, Wrench } from "lucide-react";
+import { BellRing, Bot, Database, Globe2, ArrowRight, Settings2, KeyRound, Users } from "@/components/icons";
+import { Wrench } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { today, formatDate } from "@/lib/dates";
@@ -40,7 +41,7 @@ export default async function SettingsPage() {
           title="Configuración"
           description="Personaliza los datos de tu firma y las preferencias del sistema."
           actions={
-            <Button asChild className="rounded-full">
+            <Button asChild>
               <Link href="/reports">
                 Ir a reportes
                 <ArrowRight className="ml-2 size-4" />
@@ -91,7 +92,7 @@ export default async function SettingsPage() {
               <CardDescription>Cambia tu contraseña y revisa tu rol.</CardDescription>
             </CardHeader>
             <CardContent>
-              <Button asChild variant="outline" className="rounded-full">
+              <Button asChild variant="outline">
                 <Link href="/settings/account">
                   Ir a mi cuenta
                   <ArrowRight className="ml-2 size-4" />
@@ -107,7 +108,7 @@ export default async function SettingsPage() {
               <CardDescription>Configura Telegram y tus preferencias de aviso.</CardDescription>
             </CardHeader>
             <CardContent>
-              <Button asChild variant="outline" className="rounded-full">
+              <Button asChild variant="outline">
                 <Link href="/settings/notifications">
                   Abrir notificaciones
                   <ArrowRight className="ml-2 size-4" />
@@ -124,7 +125,7 @@ export default async function SettingsPage() {
                 <CardDescription>Invita y administra a tu equipo.</CardDescription>
               </CardHeader>
               <CardContent>
-                <Button asChild variant="outline" className="rounded-full">
+                <Button asChild variant="outline">
                   <Link href="/settings/users">
                     Administrar usuarios
                     <ArrowRight className="ml-2 size-4" />
@@ -147,7 +148,7 @@ export default async function SettingsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Button asChild variant="outline" className="rounded-full">
+                <Button asChild variant="outline">
                   <Link href="/settings/assistant">
                     Abrir panel IA
                     <ArrowRight className="ml-2 size-4" />

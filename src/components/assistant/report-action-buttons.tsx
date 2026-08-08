@@ -48,7 +48,7 @@ export function AssistantReportActionButtons({
   return (
     <div className="flex flex-wrap gap-2">
       {closeAction ? (
-        <Button type="button" size="sm" variant="outline" className="rounded-full" disabled={isPending} onClick={() => run(closeAction, "Cerrado.")}>
+        <Button type="button" size="sm" variant="outline" disabled={isPending} onClick={() => run(closeAction, "Cerrado.")}>
           Cerrar
         </Button>
       ) : null}
@@ -57,7 +57,7 @@ export function AssistantReportActionButtons({
           type="button"
           size="sm"
           variant="outline"
-          className="rounded-full"
+
           disabled={isPending}
           onClick={() => run(archiveAction, "Archivado.")}
         >
@@ -65,12 +65,12 @@ export function AssistantReportActionButtons({
         </Button>
       ) : null}
       {reopenAction ? (
-        <Button type="button" size="sm" variant="outline" className="rounded-full" disabled={isPending} onClick={() => run(reopenAction, "Reabierto.")}>
+        <Button type="button" size="sm" variant="outline" disabled={isPending} onClick={() => run(reopenAction, "Reabierto.")}>
           Reabrir
         </Button>
       ) : null}
       {deleteAction ? (
-        <Button type="button" size="sm" variant="destructive" className="rounded-full" disabled={isPending} onClick={confirmDelete}>
+        <Button type="button" size="sm" variant="destructive" disabled={isPending} onClick={confirmDelete}>
           Eliminar
         </Button>
       ) : null}

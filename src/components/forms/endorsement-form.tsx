@@ -77,7 +77,7 @@ export function EndorsementForm({
       <CardContent className="space-y-6 p-5">
         <FormErrorBanner message={errors.root?.message} />
 
-        {policySummary ? <div className="rounded-2xl border border-border/70 bg-muted/30 p-4 text-sm">{policySummary}</div> : null}
+        {policySummary ? <div className="rounded-xl border border-border/70 bg-muted/30 p-4 text-sm">{policySummary}</div> : null}
 
         <form className="space-y-6" onSubmit={handleSubmit(onSubmit)}>
           <input type="hidden" {...register("policyId")} />

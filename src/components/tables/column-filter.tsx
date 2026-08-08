@@ -41,7 +41,7 @@ export function ColumnFilter({
           );
         }}
       >
-        <SelectTrigger className="h-9 rounded-full px-3 text-sm">
+        <SelectTrigger className="h-9 px-3 text-sm">
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>

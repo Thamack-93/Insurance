@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, CalendarClock, CheckSquare, CircleDollarSign, ReceiptText, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CalendarClock, CheckSquare, CircleDollarSign, ReceiptText, ShieldCheck } from "@/components/icons";
 import { KpiCard } from "@/components/cards/kpi-card";
 import { StatGrid } from "@/components/cards/stat-grid";
 import { ChartCard } from "@/components/charts/chart-card";

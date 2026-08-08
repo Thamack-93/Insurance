@@ -122,7 +122,7 @@ export function FormSection({
   children: ReactNode;
 }) {
   return (
-    <section className="space-y-4 rounded-3xl border bg-card/70 p-5">
+    <section className="space-y-4 rounded-xl border bg-card/70 p-5">
       <div>
         <h2 className="text-base font-semibold tracking-tight">{title}</h2>
         {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
@@ -140,7 +140,7 @@ export function FormErrorBanner({ message }: { message?: string | null }) {
   return (
     <div
       role="alert"
-      className="flex items-start gap-3 rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+      className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive"
     >
       <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden />
       <p>{message}</p>
@@ -220,10 +220,10 @@ export function FormActions({
     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-5">
       <div className="flex flex-wrap gap-2">{leftContent}</div>
       <div className="flex flex-wrap justify-end gap-2">
-        <Button asChild type="button" variant="outline" className="rounded-full bg-card/80">
+        <Button asChild type="button" variant="outline" className="bg-card/80">
           <Link href={cancelHref}>Cancelar</Link>
         </Button>
-        <Button type="submit" className="rounded-full" disabled={pending}>
+        <Button type="submit" disabled={pending}>
           {pending ? "Guardando..." : submitLabel}
         </Button>
       </div>

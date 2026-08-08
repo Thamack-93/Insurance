@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Agent skill sources and downloaded tool caches are not application code.
+    ".local/**",
+    ".cache/**",
   ]),
 ]);
 

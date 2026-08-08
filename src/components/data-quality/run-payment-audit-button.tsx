@@ -29,7 +29,7 @@ export function RunPaymentAuditButton({ runPaymentAudit }: Props) {
   }
 
   return (
-    <Button type="button" onClick={handleRun} disabled={isPending} className="rounded-full">
+    <Button type="button" onClick={handleRun} disabled={isPending}>
       <RefreshCw className="mr-2 size-4" />
       {isPending ? "Ejecutando…" : "Revisar pagos"}
     </Button>

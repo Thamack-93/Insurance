@@ -193,6 +193,71 @@ describe("policy-pdf-capture", () => {
     expect(draft.sourcePolicyNumber).toBeNull();
   });
 
+  it("extracts the Banorte cover page without mistaking its phone or URL for policy data", () => {
+    const draft = extractPolicyPdfDraftFromText(`
+      8008371133
+      www.segurosbanorte.com.mx
+      SEGUROS BANORTE
+      DATOS DEL ASEGURADO
+      Nombre del Contratante: MOTORES ANGELOPOLIS, S.A. DE C.V. R.F.C.: MAGD900101AB1
+      Calle y No.: VIA ATLIXCAYOTL NO.3202 1
+      C.P.: 72840 Estado: PUEBLA Teléfono: (222)-4038925
+      DATOS DE LA PÓLIZA
+      No. de Póliza
+      1009578 0 986 70 01 1
+      Fecha de emisión: 01/AGO/2026
+      Inicio Vigencia:
+      12:00 hrs 01/AGO/2026
+      Fin Vigencia:
+      12:00 hrs 01/AGO/2027
+      Descripción del vehículo asegurado
+      CHEVROLET DEMO SEDAN AUT.
+      Serie: 1G1F66S0XN4124102
+      Prima Total: $31,920.29
+    `);
+
+    expect(draft.policyNumber).toBe("1009578");
+    expect(draft.clientName).toBe("MOTORES ANGELOPOLIS, S.A. DE C.V.");
+    expect(draft.clientType).toBe("COMPANY");
+    expect(draft.clientRfc).toBe("MAGD900101AB1");
+    expect(draft.clientAddress).toContain("VIA ATLIXCAYOTL NO.3202");
+    expect(draft.clientAddress).not.toContain("4038925");
+    expect(draft.clientPhone).toBe("(222)-4038925");
+    expect(draft.insurerName).toBe("Seguros Banorte, S.A. de C.V.");
+    expect(draft.policyType).toBe("AUTO");
+    expect(draft.startDate).toBe("2026-08-01");
+    expect(draft.endDate).toBe("2027-08-01");
+    expect(draft.issueDate).toBe("2026-08-01");
+    expect(draft.premiumAmount).toBeCloseTo(31920.29);
+    expect(draft.serialNumber).toBe("1G1F66S0XN4124102");
+  });
+
+  it("keeps request numbers, policy numbers, and insurer labels separate across a generic layout", () => {
+    const draft = extractPolicyPdfDraftFromText(`
+      Centro de atención: 800-555-0101
+      No. de Solicitud
+      40583993
+      Aseguradora
+      www.example-insurer.test
+      Compañía: Seguros Delta, S.A. de C.V.
+      Asegurado: CARLOS DEMO PEREZ
+      No. de Póliza: 1234567
+      Inicio de vigencia:
+      01/09/2026
+      Fin de vigencia:
+      01/09/2027
+      Prima total: $12,345.67
+    `);
+
+    expect(draft.requestNumber).toBe("40583993");
+    expect(draft.policyNumber).toBe("1234567");
+    expect(draft.clientName).toBe("CARLOS DEMO PEREZ");
+    expect(draft.insurerName).toBe("Seguros Delta, S.A. de C.V.");
+    expect(draft.startDate).toBe("2026-09-01");
+    expect(draft.endDate).toBe("2027-09-01");
+    expect(draft.premiumAmount).toBeCloseTo(12345.67);
+  });
+
   it("extracts the real Buick renewal fields from the provided PDF layout", () => {
     const text = `
       Quálitas Compañía de Seguros, S.A. de C.V.
@@ -489,6 +554,7 @@ describe("policy-pdf-capture", () => {
 
     expect(preview.warnings).toContain("Advertencia local");
     expect(preview.warnings).toContain("Advertencia IA");
+    expect(preview.provenance).toMatchObject({ extractionSource: "local", reviewSource: "ai" });
   });
 
   it("does not auto-select a source policy when there is no exact match", async () => {

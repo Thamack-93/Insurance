@@ -19,7 +19,7 @@ import { CommandPalette, type CommandPaletteGroup } from "./command-palette";
 import { EMPTY_RECENT_ITEMS, getRecentItems, RECENTLY_VIEWED_EVENT } from "@/lib/recently-viewed";
 import type { SearchResult, SearchResultType } from "@/components/search/search-provider";
 import { Highlight } from "@/components/search/highlight";
-import { getUtilityNavigation, globalNavigation } from "@/lib/navigation";
+import { contextualNavigation, getUtilityNavigation, globalNavigation } from "@/lib/navigation";
 
 const dynamicEntityIcon: Record<SearchResultType, React.ReactNode> = {
   client: <Users className="size-4" />,
@@ -204,6 +204,18 @@ export function CommandPaletteWrapper({ isAdmin = false }: { isAdmin?: boolean }
       }),
     },
     {
+      label: "Vistas de sección",
+      items: contextualNavigation.map((item) => {
+        const Icon = item.icon;
+        return {
+          id: item.id,
+          label: item.label,
+          icon: <Icon className="size-4" />,
+          onSelect: () => handleSelect(item.href),
+        };
+      }),
+    },
+    {
       label: "Acciones rápidas",
       items: [
         { id: "new-client", label: "Nuevo cliente", icon: <Plus className="size-4" />, onSelect: () => handleSelect("/clients/new") },
@@ -248,7 +260,7 @@ export function CommandPaletteWrapper({ isAdmin = false }: { isAdmin?: boolean }
       onOpenChange={setOpen}
       groups={groups}
       placeholder="Buscar páginas, clientes, pólizas, documentos..."
-      title="Command Palette"
+      title="Paleta de comandos"
       description="Navegación rápida y acciones de PolicyDesk"
       inputValue={inputValue}
       onInputValueChange={setInputValue}

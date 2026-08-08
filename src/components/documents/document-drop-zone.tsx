@@ -216,7 +216,7 @@ export function DocumentDropZone({
 
   if (disabled) {
     return (
-      <div className={cn("rounded-2xl border border-dashed border-border bg-muted/30 p-6 text-center", className)}>
+      <div className={cn("rounded-xl border border-dashed border-border bg-muted/30 p-6 text-center", className)}>
         <Upload className="mx-auto size-6 text-muted-foreground" />
         <p className="mt-3 text-sm font-medium text-foreground">{title}</p>
         <p className="mt-1 text-xs text-muted-foreground">
@@ -246,7 +246,7 @@ export function DocumentDropZone({
           if (e.key === "Enter" || e.key === " ") inputRef.current?.click();
         }}
         className={cn(
-          "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed p-6 text-center transition-colors",
+          "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-6 text-center transition-colors",
           isDragging
             ? "border-primary bg-primary/5"
             : "border-border bg-muted/30 hover:border-primary/60 hover:bg-muted/50",
@@ -298,7 +298,7 @@ export function DocumentDropZone({
           {items.map((it) => (
             <li
               key={it.id}
-              className="flex items-center gap-3 rounded-lg border bg-card/50 p-3 text-sm"
+              className="flex items-center gap-3 rounded-md border bg-card/50 p-3 text-sm"
             >
               <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
                 {it.status === "uploading" && <Loader2 className="size-4 animate-spin text-muted-foreground" />}

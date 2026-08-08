@@ -23,6 +23,13 @@ export const notificationEventCatalog = [
     defaultEnabled: true,
     defaultMinPriority: "LOW",
   },
+  {
+    eventType: "RENEWAL_FOLLOWUP",
+    title: "Renovaciones sin avance",
+    description: "Avisa cuando una renovación lleva demasiados días en la misma etapa del tablero.",
+    defaultEnabled: true,
+    defaultMinPriority: "LOW",
+  },
 ] as const;
 
 export type NotificationEventType = (typeof notificationEventCatalog)[number]["eventType"];

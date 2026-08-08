@@ -65,14 +65,14 @@ export const ListSearch = memo(function ListSearch({
         onChange={(event) => setValue(event.target.value)}
         placeholder={placeholder}
         aria-label={placeholder}
-        className="h-9 rounded-full pl-9 pr-9"
+        className="h-9 pl-9 pr-9"
       />
       {value ? (
         <button
           type="button"
           aria-label="Limpiar búsqueda"
           onClick={() => setValue("")}
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-muted-foreground hover:bg-muted"
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:bg-muted"
         >
           <X className="size-3" />
         </button>

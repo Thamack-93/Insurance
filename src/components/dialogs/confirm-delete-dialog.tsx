@@ -62,7 +62,7 @@ export function ConfirmDeleteDialog({
             variant="outline"
             className={
               triggerClassName ??
-              "rounded-full bg-card/70 text-destructive hover:text-destructive"
+              "bg-card/70 text-destructive hover:text-destructive"
             }
           />
         }

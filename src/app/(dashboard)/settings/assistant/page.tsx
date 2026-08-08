@@ -7,7 +7,7 @@ import { UrlTabs } from "@/components/ui/url-tabs";
 import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-button";
 import { requireAdminOrRedirect } from "@/lib/auth";
 import { listAssistantReports } from "@/lib/assistant-reports";
-import { getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
+import { getAssistantAiConnectionStatus, getAssistantAiOperationLabel } from "@/lib/assistant-ai";
 import { listAssistantAiRuns } from "@/lib/assistant-ai-runs";
 import { formatDate } from "@/lib/dates";
 import { AssistantReportActionButtons } from "@/components/assistant/report-action-buttons";
@@ -147,7 +147,7 @@ function AiRunList({
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-                  {run.operation}
+                  {getAssistantAiOperationLabel(run.operation)}
                   <Badge variant={run.status === "SUCCEEDED" ? "default" : run.status === "FAILED" ? "destructive" : "outline"} className="rounded-full">
                     {run.status}
                   </Badge>

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { upload } from "@vercel/blob/client";
 import { AlertCircle, FileUp, RefreshCw, Search, ShieldCheck, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -24,14 +25,23 @@ import {
   type PolicyPdfCaptureDraft,
   type PolicyPdfCaptureFieldConfidence,
   type PolicyPdfCapturePreview,
+  type PolicyPdfCaptureProvenance,
 } from "@/lib/policy-pdf-capture.shared";
 import { extractPdfTextFromFile } from "@/lib/pdf-text-extraction.browser";
+import { buildNoraPolicyPdfPathname } from "@/lib/nora-pdf-storage.shared";
+import {
+  fetchPdfCaptureWithTimeout,
+  PDF_CAPTURE_ANALYSIS_TIMEOUT_MS,
+  PDF_CAPTURE_UPLOAD_TIMEOUT_MS,
+  withOperationTimeout,
+} from "@/lib/pdf-capture-client";
 import type { PolicyCaptureSearchItem, PolicyCaptureSearchKind } from "@/lib/policy-capture-search";
 import { consumePolicyCaptureHandoff, savePolicyCaptureHandoff, clearPolicyCaptureHandoff } from "@/lib/nora-browser-session";
 
 type PreviewResponse = {
   success?: boolean;
   preview?: PolicyPdfCapturePreview;
+  provenance?: PolicyPdfCaptureProvenance;
   error?: string;
 };
 
@@ -180,11 +190,20 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
 
       if (payload?.draft) {
         const restoredDraft = payload.draft as unknown as PolicyPdfCaptureDraft;
+        const restoredFieldConfidence = (payload.fieldConfidence as PolicyPdfCaptureFieldConfidence | undefined) ?? createEmptyConfidence();
+        const restoredReceiptPlan = payload.receiptPlan?.length
+          ? payload.receiptPlan as PolicyPdfCaptureReceiptPlanItem[]
+          : buildPolicyPdfCaptureReceiptPlan(restoredDraft);
+        const restoredProvenance: PolicyPdfCaptureProvenance = payload.provenance ?? {
+          extractionSource: "local",
+          reviewSource: payload.aiReview ? "ai" : "none",
+          aiRunIds: [],
+          trackingStatus: "recorded",
+          aiAttempted: Boolean(payload.aiReview),
+        };
         setDraft(restoredDraft);
-        setReceiptPlanOverrides(
-          payload.receiptPlan?.length ? payload.receiptPlan as PolicyPdfCaptureReceiptPlanItem[] : buildPolicyPdfCaptureReceiptPlan(restoredDraft),
-        );
-        setFieldConfidence((payload.fieldConfidence as PolicyPdfCaptureFieldConfidence | undefined) ?? createEmptyConfidence());
+        setReceiptPlanOverrides(restoredReceiptPlan);
+        setFieldConfidence(restoredFieldConfidence);
         setSelectedClientId(payload.selectedClientId ?? "");
         setSelectedClientLabel(payload.selectedClientLabel ?? restoredDraft.clientName ?? "");
         setSelectedInsurerId(payload.selectedInsurerId ?? "");
@@ -192,6 +211,27 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
         setSelectedSourcePolicyId(payload.selectedSourcePolicyId ?? "");
         setSelectedSourcePolicyLabel(payload.selectedSourcePolicyLabel ?? restoredDraft.sourcePolicyNumber ?? "");
         setShowInlineClient(Boolean(payload.showInlineClient));
+        setPreview({
+          draft: restoredDraft,
+          suggestions: {
+            clientId: payload.selectedClientId ?? null,
+            insurerId: payload.selectedInsurerId ?? null,
+            sourcePolicyId: payload.selectedSourcePolicyId ?? null,
+          },
+          receiptPlan: restoredReceiptPlan,
+          clientOptions: [],
+          insurerOptions: [],
+          sourcePolicyOptions: [],
+          fieldConfidence: restoredFieldConfidence,
+          confidence: {
+            client: Boolean(payload.selectedClientId),
+            insurer: Boolean(payload.selectedInsurerId),
+            sourcePolicy: Boolean(payload.selectedSourcePolicyId),
+          },
+          warnings: payload.warnings ?? [],
+          aiReview: payload.aiReview ?? null,
+          provenance: restoredProvenance,
+        });
       }
       setHasHydrated(true);
     });
@@ -228,6 +268,9 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
         selectedSourcePolicyLabel,
         showInlineClient,
         receiptPlan,
+        warnings: preview?.warnings ?? [],
+        aiReview: preview?.aiReview ?? null,
+        provenance: preview?.provenance,
     });
   }, [
     draft,
@@ -241,6 +284,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
     selectedSourcePolicyLabel,
     showInlineClient,
     receiptPlan,
+    preview,
     userId,
   ]);
 
@@ -410,19 +454,36 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
     setPreview(null);
 
     try {
-      const extractedText = await extractPdfTextFromFile(file);
-      if (!extractedText.trim()) {
-        throw new Error("El PDF no tiene texto extraíble. Puede ser una imagen, un escaneo o un archivo sin capa de texto.");
+      const extractedText = await extractPdfTextFromFile(file, { timeoutMs: 12_000 }).catch(() => "");
+      let response: Response;
+      if (extractedText.trim()) {
+        response = await fetchPdfCaptureWithTimeout("/api/policies/capture/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: extractedText,
+            fileName: file.name,
+          }),
+        }, PDF_CAPTURE_ANALYSIS_TIMEOUT_MS, "El análisis del PDF tardó demasiado en responder.");
+      } else {
+        const pathname = buildNoraPolicyPdfPathname(userId, file.name);
+        const uploaded = await withOperationTimeout(
+          upload(pathname, file, {
+            access: "private",
+            handleUploadUrl: "/api/nora/policy-pdf/upload",
+            contentType: "application/pdf",
+            multipart: file.size > 5 * 1024 * 1024,
+            clientPayload: JSON.stringify({ userId, purpose: "policy-capture", fileName: file.name }),
+          }),
+          PDF_CAPTURE_UPLOAD_TIMEOUT_MS,
+          "La subida temporal del PDF tardó demasiado. Revisa tu conexión e inténtalo de nuevo.",
+        );
+        response = await fetchPdfCaptureWithTimeout("/api/nora/policy-pdf/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileName: file.name, blobUrl: uploaded.url }),
+        }, PDF_CAPTURE_ANALYSIS_TIMEOUT_MS, "El análisis del PDF tardó demasiado en responder.");
       }
-
-      const response = await fetch("/api/policies/capture/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: extractedText,
-          fileName: file.name,
-        }),
-      });
 
       const result = await readJsonResponse<PreviewResponse>(response);
       if (!response.ok || !result.preview) {

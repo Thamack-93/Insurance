@@ -118,7 +118,7 @@ export function BackupsPanel({
         </div>
         <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 xl:grid-cols-4">
           {backupStatus.checks.map((check) => (
-            <div key={check.key} className="rounded-2xl border border-border/60 bg-background/70 px-3 py-2">
+            <div key={check.key} className="rounded-xl border border-border/60 bg-background/70 px-3 py-2">
               <p className="font-medium text-foreground">{check.label}</p>
               <p className="mt-1">{check.detail}</p>
             </div>

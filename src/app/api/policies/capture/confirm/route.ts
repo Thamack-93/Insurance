@@ -12,6 +12,7 @@ import { assertClientPortfolioAccess, assertPolicyPortfolioAccess } from "@/lib/
 import { inferClientType, type PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
 import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
 import { revalidatePaths } from "@/lib/mutation-utils";
+import { closeRenewalFollowUp } from "@/lib/renewal-followups";
 import {
   recordSecurityAccessDenied,
   recordSecurityRateLimit,
@@ -282,7 +283,7 @@ export async function POST(request: NextRequest) {
         clientId: payload.clientId,
         insurerId: payload.insurerId,
         policyType: captureDraft.policyType,
-        status: "ACTIVE",
+        status: "ACTIVE" as const,
         startDate: targetStartDate,
         endDate: targetEndDate,
         premiumAmount: captureDraft.premiumAmount,
@@ -358,6 +359,9 @@ export async function POST(request: NextRequest) {
           data: { status: "RENEWED", updatedById: user.id },
         });
       }
+
+      // La renovación quedó cerrada: su recordatorio de "sin avance" sobra.
+      await closeRenewalFollowUp(sourcePolicy.id, user.id, tx);
 
       await writeActivityLog({
         entityType: "Policy",

@@ -18,7 +18,7 @@ export const POLICY_TYPES = [
 ] as const;
 export type PolicyType = (typeof POLICY_TYPES)[number];
 
-export const POLICY_STATUSES = ["ACTIVE", "EXPIRED", "CANCELLED", "RENEWED", "PENDING"] as const;
+export const POLICY_STATUSES = ["ACTIVE", "PENDING", "RENEWED", "EXPIRED", "CANCELLED"] as const;
 export type PolicyStatus = (typeof POLICY_STATUSES)[number];
 
 export const ENDORSEMENT_STATUSES = ["ACTIVE", "PENDING", "EXPIRED", "CANCELLED"] as const;
@@ -39,6 +39,9 @@ export type ReceiptStatus = (typeof RECEIPT_STATUSES)[number];
 
 export const COMMISSION_STATUSES = ["EXPECTED", "PENDING", "PAID", "OVERDUE", "CANCELLED"] as const;
 export type CommissionStatus = (typeof COMMISSION_STATUSES)[number];
+
+export const PAYMENT_STATUSES = ["POSTED", "REVERSED"] as const;
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
 export const TASK_TYPES = ["GENERAL", "CLAIM", "QUOTE", "RENEWAL", "PAYMENT", "DOCUMENT", "COMMISSION", "OTHER"] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
@@ -110,3 +113,12 @@ export type NotificationEventStatus = (typeof NOTIFICATION_EVENT_STATUSES)[numbe
 
 export const USER_ROLES = ["ADMIN", "AGENT"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
+
+/**
+ * Etapas del tablero de renovaciones, en el orden en que avanza el embudo.
+ * WON y LOST son terminales.
+ */
+export const RENEWAL_STAGES = ["PENDING", "CONTACTED", "QUOTED", "WON", "LOST"] as const;
+export type RenewalStage = (typeof RENEWAL_STAGES)[number];
+
+export const TERMINAL_RENEWAL_STAGES = ["WON", "LOST"] as const satisfies readonly RenewalStage[];
