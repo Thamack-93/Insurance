@@ -7,6 +7,7 @@ test.describe("role visibility smoke tests", () => {
     await page.goto("/settings");
 
     await expect(page.getByRole("heading", { name: "Configuración", exact: true })).toBeVisible();
+    await expect(page.getByText("Nora y reportes IA", { exact: true })).toBeVisible();
     await expect(page.getByText("Respaldos cifrados")).toBeVisible();
     await expect(page.getByRole("button", { name: "Crear respaldo ahora" })).toBeVisible();
   });
@@ -35,7 +36,6 @@ test.describe("role visibility smoke tests", () => {
       ["/risks", "Riesgos y calidad"],
       ["/data-quality", "Data Quality"],
       ["/activity", "Actividad y seguridad"],
-      ["/settings/assistant", "Backlog de IA"],
     ] as const) {
       await page.goto(path);
       await expect(page).toHaveURL(new RegExp(`${path.replaceAll("/", "\\/")}(?:\\?.*)?$`));

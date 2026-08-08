@@ -93,6 +93,48 @@ test.describe("operation queue context", () => {
     }
   });
 
+  test("resolves a task-backed renewal from its policy number", async ({ page }) => {
+    const db = getTestDb();
+    const fixture = await seedPolicyFixture("OPERATIONS-TASK-RENEWAL");
+    const sourceId = `legacy-renewal-task-${Date.now()}`;
+    let workItemId: string | null = null;
+
+    try {
+      const workItem = await db.workItem.create({
+        data: {
+          sourceType: "Task",
+          sourceId,
+          workItemType: "TASK",
+          taskType: "RENEWAL",
+          status: "OPEN",
+          priority: "HIGH",
+          title: `Renovación: ${fixture.policyNumber}`,
+          entityType: "WorkItem",
+          entityId: sourceId,
+          clientId: null,
+          policyId: null,
+          insurerId: null,
+          dueDate: new Date(Date.now() - 24 * 60 * 60 * 1000),
+          startDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+        },
+      });
+      workItemId = workItem.id;
+
+      await authenticatePageAsAdmin(page);
+      await page.goto("/operations");
+
+      const renewalLink = page.getByRole("link", { name: new RegExp(`Renovación: ${fixture.policyNumber}`) }).first();
+      await expect(renewalLink).toBeVisible();
+      await expect(renewalLink).toContainText(fixture.clientName);
+      await expect(renewalLink).toContainText(fixture.insurerName);
+      await expect(renewalLink).toContainText("Vigencia");
+      await expect(renewalLink).toHaveAttribute("href", `/policies/${fixture.policyId}`);
+    } finally {
+      if (workItemId) await db.workItem.delete({ where: { id: workItemId } }).catch(() => undefined);
+      await cleanupPolicyFixture(fixture);
+    }
+  });
+
   test("links unresolved overdue renewals to a complete operational list and preserves expired history", async ({ page }) => {
     const db = getTestDb();
     const fixture = await seedPolicyFixture("RENEWAL-RISK");

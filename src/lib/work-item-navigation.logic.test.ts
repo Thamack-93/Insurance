@@ -34,4 +34,17 @@ describe("work item navigation", () => {
       entityId: "wi-3",
     })).toBe("/tasks/wi-3");
   });
+
+  it("routes task-backed renewals to their resolved policy", () => {
+    expect(getWorkItemHref({
+      id: "wi-4",
+      sourceType: "Task",
+      sourceId: "legacy-task-4",
+      workItemType: "TASK",
+      taskType: "RENEWAL",
+      entityType: "WorkItem",
+      entityId: "legacy-task-4",
+      policyId: "pol-4",
+    })).toBe("/policies/pol-4");
+  });
 });
