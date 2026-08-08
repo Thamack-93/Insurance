@@ -72,6 +72,7 @@ const breadcrumbLabels: Record<string, string> = {
   dashboard: "Insights",
   "data-quality": "Calidad de datos",
   documents: "Documentos",
+  "centro-operativo": "Centro Operativo",
   "due-payments": "Recibos",
   insurers: "Aseguradoras",
   notifications: "Notificaciones",

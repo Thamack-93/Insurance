@@ -131,9 +131,13 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
                 {quote.insurer && (
                   <div>
                     <p className="text-muted-foreground">Aseguradora</p>
-                    <Link href={`/insurers/${quote.insurerId}`} className="font-medium text-foreground hover:text-primary">
-                      {quote.insurer.name}
-                    </Link>
+                    {scope.role === "ADMIN" ? (
+                      <Link href={`/insurers/${quote.insurerId}`} className="font-medium text-foreground hover:text-primary">
+                        {quote.insurer.name}
+                      </Link>
+                    ) : (
+                      <p className="font-medium">{quote.insurer.name}</p>
+                    )}
                   </div>
                 )}
               </div>

@@ -75,4 +75,11 @@ describe("breadcrumbs", () => {
       { segment: "assistant", label: "Nora" },
     ]);
   });
+
+  it("labels the administrative operational center", () => {
+    expect(getBreadcrumbSegments("/settings/centro-operativo")).toEqual([
+      { segment: "settings", label: "Configuración" },
+      { segment: "centro-operativo", label: "Centro Operativo" },
+    ]);
+  });
 });

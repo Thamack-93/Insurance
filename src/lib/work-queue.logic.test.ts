@@ -41,6 +41,16 @@ function legacyRenewal() {
   };
 }
 
+function currentRenewal() {
+  const reference = "policy:policy-1:renewal-workItem";
+  return {
+    ...legacyRenewal(),
+    sourceId: reference,
+    entityType: "WORKITEM",
+    entityId: reference,
+  };
+}
+
 describe("work queue legacy renewal context", () => {
   const db = {
     workItem: { findMany: vi.fn() },
@@ -89,5 +99,28 @@ describe("work queue legacy renewal context", () => {
     expect(item.client).toBeNull();
     expect(item.policy).toBeNull();
     expect(item.policyId).toBeNull();
+  });
+
+  it("resolves the current renewal reference shape", async () => {
+    db.workItem.findMany.mockResolvedValue([currentRenewal()]);
+    db.policy.findMany.mockResolvedValue([{
+      id: "policy-1",
+      policyNumber: "POL-001",
+      policyType: "Auto",
+      status: "ACTIVE",
+      startDate: new Date("2025-07-01T00:00:00.000Z"),
+      endDate: new Date("2026-07-01T00:00:00.000Z"),
+      client: { id: "client-1", fullName: "María García" },
+      insurer: { id: "insurer-1", name: "Seguros Atlas" },
+    }]);
+
+    const [item] = await getWorkItems({ portfolioOwnerId: "owner-1" });
+
+    expect(item.client?.fullName).toBe("María García");
+    expect(item.policyId).toBe("policy-1");
+    expect(item.insurer?.name).toBe("Seguros Atlas");
+    expect(db.policy.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: { in: ["policy-1"] } }),
+    }));
   });
 });

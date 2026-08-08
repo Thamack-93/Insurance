@@ -62,7 +62,7 @@ export function AppTopbar({
             <Sparkles className="size-4" aria-hidden />
             <span className="hidden sm:inline">Nora</span>
           </button>
-          <NotificationsBell unreadCount={unreadNotificationCount} notifications={notifications} />
+          <NotificationsBell isAdmin={isAdmin} unreadCount={unreadNotificationCount} notifications={notifications} />
           {userMenu}
         </div>
       </div>

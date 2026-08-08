@@ -27,9 +27,11 @@ export type BellNotification = {
 export function NotificationsBell({
   unreadCount,
   notifications,
+  isAdmin = false,
 }: {
   unreadCount: number;
   notifications: BellNotification[];
+  isAdmin?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -111,7 +113,7 @@ export function NotificationsBell({
           ) : (
             <ul className="divide-y divide-border/70">
               {notifications.map((notification) => {
-                const href = notificationLink(notification.entityType, notification.entityId);
+                const href = notificationLink(notification.entityType, notification.entityId, isAdmin);
                 const relative = formatRelativeDate(notification.createdAt);
                 const isUnread = notification.readAt === null;
                 return (

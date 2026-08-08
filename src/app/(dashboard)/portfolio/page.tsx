@@ -24,12 +24,13 @@ import {
   receiptOperationalWhere,
   requirePortfolioReadScope,
 } from "@/lib/portfolio-access";
-import { buildTableHref, readAllowedTableParam, readTablePage, readTableSort } from "@/lib/table-query";
+import { getInsurerHref } from "@/lib/insurer-navigation";
+import { buildTableHref, readAllowedTableParam, readTablePage, readTableParam, readTableSort } from "@/lib/table-query";
 
 export default async function PortfolioPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string; type?: string }>;
+  searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string; type?: string; insurerId?: string }>;
 }) {
   const scope = await requirePortfolioReadScope();
   const policyScope = policyOperationalWhere(scope.portfolioOwnerId);
@@ -39,25 +40,31 @@ export default async function PortfolioPage({
   const now = today();
   const in60 = new Date(now);
   in60.setDate(in60.getDate() + 60);
+  const params = (await searchParams) ?? {};
+  const query = (params.q ?? "").trim().slice(0, 100);
+  const page = readTablePage(params);
+  const typeFilter = readAllowedTableParam(params, "type", policyTypeOptions.map((option) => option.value));
+  const insurerFilter = readTableParam(params, "insurerId");
+  const { sortKey, direction } = readTableSort(params);
+
+  const activePolicyWhere: Prisma.PolicyWhereInput = {
+    ...policyScope,
+    status: "ACTIVE",
+    ...(insurerFilter ? { insurerId: insurerFilter } : {}),
+  };
   const renewalSoonPromise = loadEligibleRenewalPolicies(
     {
       endDate: {
         gte: now,
         lte: in60,
       },
+      ...(insurerFilter ? { insurerId: insurerFilter } : {}),
     },
     scope.portfolioOwnerId,
   );
 
-  const params = (await searchParams) ?? {};
-  const query = (params.q ?? "").trim().slice(0, 100);
-  const page = readTablePage(params);
-  const typeFilter = readAllowedTableParam(params, "type", policyTypeOptions.map((option) => option.value));
-  const { sortKey, direction } = readTableSort(params);
-
   const where: Prisma.PolicyWhereInput = {
-    ...policyScope,
-    status: "ACTIVE",
+    ...activePolicyWhere,
     ...(typeFilter ? { policyType: typeFilter } : {}),
     ...(query
       ? {
@@ -104,21 +111,31 @@ export default async function PortfolioPage({
       take: DEFAULT_PAGE_SIZE,
     }),
     db.policy.aggregate({
-      where: { ...policyScope, status: "ACTIVE" },
+      where: activePolicyWhere,
       _sum: { premiumAmount: true },
     }),
-    db.policy.count({ where: { ...policyScope, status: "ACTIVE" } }),
-    db.client.count({ where: { ...clientScope, status: "ACTIVE" } }),
+    db.policy.count({ where: activePolicyWhere }),
+    db.client.count({
+      where: {
+        ...clientScope,
+        status: "ACTIVE",
+        ...(insurerFilter ? { policies: { some: { status: "ACTIVE", insurerId: insurerFilter } } } : {}),
+      },
+    }),
     db.insurer.count({
       where: {
         status: "ACTIVE",
-        ...(scope.portfolioOwnerId ? { policies: { some: policyScope } } : {}),
+        ...(insurerFilter ? { id: insurerFilter } : {}),
+        ...(scope.portfolioOwnerId || insurerFilter
+          ? { policies: { some: activePolicyWhere } }
+          : {}),
       },
     }),
     renewalSoonPromise,
     db.receipt.findMany({
       where: {
         ...receiptScope,
+        ...(insurerFilter ? { insurerId: insurerFilter } : {}),
         dueDate: { gte: now, lte: in60 },
         status: { in: ["PENDING", "OVERDUE"] },
       },
@@ -128,13 +145,13 @@ export default async function PortfolioPage({
     }),
     db.policy.groupBy({
       by: ["insurerId"],
-      where: { ...policyScope, status: "ACTIVE" },
+      where: activePolicyWhere,
       _count: { _all: true },
       _sum: { premiumAmount: true },
     }),
     db.policy.groupBy({
       by: ["clientId"],
-      where: { ...policyScope, status: "ACTIVE" },
+      where: activePolicyWhere,
       _count: { _all: true },
       _sum: { premiumAmount: true },
       orderBy: { _sum: { premiumAmount: "desc" } },
@@ -176,6 +193,20 @@ export default async function PortfolioPage({
     }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 10);
+  const selectedInsurer = insurerFilter
+    ? await db.insurer.findFirst({
+        where: {
+          id: insurerFilter,
+          ...(scope.portfolioOwnerId || insurerFilter
+            ? { policies: { some: activePolicyWhere } }
+            : {}),
+        },
+        select: { id: true, name: true },
+      })
+    : null;
+  const insurerOptions = activeByInsurer.map((insurer) => ({ value: insurer.id, label: insurer.name }));
+  const selectedInsurerName = selectedInsurer?.name ?? (insurerFilter ? "Aseguradora seleccionada" : null);
+  const insurerHref = (id: string) => getInsurerHref(id, scope.role === "ADMIN");
 
   return (
     <div className="flex flex-col gap-6">
@@ -183,7 +214,9 @@ export default async function PortfolioPage({
         <PageHeader
           eyebrow="Cartera"
           title="Cartera"
-          description="Vista ejecutiva de la cartera activa, su concentración y las renovaciones más cercanas."
+          description={selectedInsurerName
+            ? `Cartera activa de ${selectedInsurerName}, sus renovaciones y concentración.`
+            : "Vista ejecutiva de la cartera activa, su concentración y las renovaciones más cercanas."}
           actions={
             <>
               <Button asChild variant="outline" className="rounded-full bg-card/70">
@@ -242,6 +275,11 @@ export default async function PortfolioPage({
                   label: "Tipo",
                   options: policyTypeOptions,
                 },
+                {
+                  key: "insurerId",
+                  label: "Aseguradora",
+                  options: insurerOptions,
+                },
               ]}
             />
           }
@@ -299,7 +337,11 @@ export default async function PortfolioPage({
                           {policy.client.fullName}
                         </Link>
                       </TableCell>
-                      <TableCell>{policy.insurer.name}</TableCell>
+                      <TableCell>
+                        <Link href={insurerHref(policy.insurerId)} className="text-foreground hover:text-primary">
+                          {policy.insurer.name}
+                        </Link>
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline" className="rounded-full">
                           {policyTypeLabel(policy.policyType)}
@@ -329,6 +371,7 @@ export default async function PortfolioPage({
                 searchParams={{
                   q: query,
                   type: typeFilter ?? undefined,
+                  insurerId: insurerFilter ?? undefined,
                   sort: sortKey ?? undefined,
                   dir: direction ?? undefined,
                 }}
@@ -359,7 +402,11 @@ export default async function PortfolioPage({
                 <TableBody>
                   {activeByInsurer.map((insurer) => (
                     <TableRow key={insurer.id}>
-                      <TableCell className="font-medium">{insurer.name}</TableCell>
+                      <TableCell className="font-medium">
+                        <Link href={insurerHref(insurer.id)} className="text-foreground hover:text-primary">
+                          {insurer.name}
+                        </Link>
+                      </TableCell>
                       <TableCell className="text-right">{insurer.policies}</TableCell>
                       <TableCell className="text-right font-medium">{formatCurrency(insurer.value)}</TableCell>
                     </TableRow>

@@ -11,7 +11,8 @@ import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
 import { getDb } from "@/lib/db";
 import { formatCurrency, toNumber } from "@/lib/money";
-import { claimOperationalWhere, policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { requireAdminOrRedirect } from "@/lib/auth";
+import { claimOperationalWhere, policyOperationalWhere } from "@/lib/portfolio-access";
 
 const PAGE_SIZE = 25;
 
@@ -20,13 +21,12 @@ export default async function InsurersPage({
 }: {
   searchParams?: Promise<{ q?: string; page?: string }>;
 }) {
+  await requireAdminOrRedirect();
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = Math.max(1, Number(params.page) || 1);
-  const scope = await requirePortfolioReadScope();
-  const isAdmin = scope.role === "ADMIN";
-  const policyScope = policyOperationalWhere(scope.portfolioOwnerId);
-  const claimScope = claimOperationalWhere(scope.portfolioOwnerId);
+  const policyScope = policyOperationalWhere();
+  const claimScope = claimOperationalWhere();
 
   const db = getDb();
 
@@ -89,14 +89,12 @@ export default async function InsurersPage({
           description="Directorio de compañías aseguradoras, volumen de negocio y concentración de cartera."
           actions={
             <>
-              {isAdmin ? (
-                <Button asChild variant="outline" className="rounded-full">
-                  <Link href="/insurers/new">
-                    <Plus className="mr-2 size-4" />
-                    Nueva aseguradora
-                  </Link>
-                </Button>
-              ) : null}
+              <Button asChild variant="outline" className="rounded-full">
+                <Link href="/insurers/new">
+                  <Plus className="mr-2 size-4" />
+                  Nueva aseguradora
+                </Link>
+              </Button>
               <Button asChild className="rounded-full">
                 <Link href="/policies">
                   Ver pólizas
@@ -157,8 +155,9 @@ export default async function InsurersPage({
                 <EmptyState
                   icon={Building2}
                   title="Aún no hay aseguradoras"
-                  description={isAdmin ? "Registra tu primera compañía aseguradora para enlazar pólizas." : "Aún no hay compañías disponibles para consulta."}
-                  {...(isAdmin ? { action: "Nueva aseguradora", actionHref: "/insurers/new" } : {})}
+                  description="Registra tu primera compañía aseguradora para enlazar pólizas."
+                  action="Nueva aseguradora"
+                  actionHref="/insurers/new"
                 />
               </div>
             )

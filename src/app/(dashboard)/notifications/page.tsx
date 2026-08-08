@@ -15,6 +15,7 @@ import {
 } from "@/lib/notifications";
 import { MarkOneButton, MarkAllReadButton } from "@/components/notifications/notifications-page-actions";
 import { formatDate, formatRelativeDate } from "@/lib/dates";
+import { requireUser } from "@/lib/auth";
 
 const PAGE_SIZE = 25;
 
@@ -30,6 +31,7 @@ export default async function NotificationsPage({
   searchParams?: Promise<{ type?: string; read?: string; page?: string }>;
 }) {
   const params = (await searchParams) ?? {};
+  const user = await requireUser();
   const type = (params.type ?? "").trim() || undefined;
   const readParam = (params.read ?? "").trim();
   const read: NotificationFilter["read"] =
@@ -120,7 +122,7 @@ export default async function NotificationsPage({
         ) : (
           <ul className="divide-y divide-border/70">
             {entries.map((notification) => {
-              const href = notificationLink(notification.entityType, notification.entityId);
+              const href = notificationLink(notification.entityType, notification.entityId, user.role === "ADMIN");
               const isRead = Boolean(notification.readAt);
               const relative = formatRelativeDate(notification.createdAt);
               return (
