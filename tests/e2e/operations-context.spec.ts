@@ -77,7 +77,7 @@ test.describe("operation queue context", () => {
       await expect(page.getByRole("link", { name: fixture.policyNumber, exact: true })).toBeVisible();
       await expect(page.getByRole("link", { name: "Vigencias terminadas", exact: true })).toBeVisible();
       await expect(page.getByRole("columnheader", { name: "Fin de vigencia" })).toBeVisible();
-      await expect(page.getByText("Terminó:", { exact: false }).first()).toBeVisible();
+      await expect(page.getByRole("cell", { name: /Terminó:/ }).first()).toBeVisible();
       await expect(page.getByText("Vigencias terminadas para consulta histórica", { exact: false })).toBeVisible();
     } finally {
       await cleanupPolicyFixture(fixture);
