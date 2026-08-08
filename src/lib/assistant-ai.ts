@@ -25,6 +25,7 @@ import {
   normalizeAssistantAiUsage,
 } from "@/lib/assistant-ai-runs";
 import { redactAssistantReportText } from "@/lib/assistant-reports";
+import { withOperationTimeout } from "@/lib/operation-timeout";
 import type {
   AssistantAiAttempt,
   AssistantAiDiagnostic,
@@ -46,9 +47,10 @@ import type {
   PolicyPdfCaptureFieldKey,
 } from "@/lib/policy-pdf-capture.shared";
 
-const ASSISTANT_AI_PRIMARY_MODEL = "minimax/minimax-m3";
-const ASSISTANT_AI_RETRY_MODEL = "openai/gpt-5.4-mini";
+const ASSISTANT_AI_PRIMARY_MODEL = "openai/gpt-5.6-luna";
+const ASSISTANT_AI_FALLBACK_MODELS = ["minimax/minimax-m3", "openai/gpt-5.4-nano"];
 const ASSISTANT_AI_ATTEMPT_TIMEOUT_MS = 15_000;
+const ASSISTANT_AI_TRACKING_TIMEOUT_MS = 2_000;
 
 const aiQuickPromptSchema = z.object({
   label: z.string().min(1),
@@ -125,9 +127,10 @@ type AssistantAiGeneratedValue = {
 
 type AssistantAiReplyValue = AssistantReply & {
   mutation: AssistantMutationPlan | null;
-  runId: string;
+  runId: string | null;
   tier: AssistantAiTier;
   resolvedModel: string;
+  trackingStatus: "recorded" | "unavailable";
   usage: AssistantAiUsageSnapshot | null;
   totalUsage: AssistantAiUsageSnapshot | null;
   finishReason: string | null;
@@ -179,8 +182,10 @@ export function getAssistantAiOperationLabel(operation: AssistantAiOperation) {
 }
 
 export function getAssistantAiModelLabel(model: string) {
-  if (model === ASSISTANT_AI_PRIMARY_MODEL) return "MiniMax M3";
-  if (model === ASSISTANT_AI_RETRY_MODEL) return "GPT-5.4 mini";
+  if (model === ASSISTANT_AI_PRIMARY_MODEL) return "GPT-5.6 Luna";
+  if (model === "minimax/minimax-m3") return "MiniMax M3";
+  if (model === "openai/gpt-5.4-nano") return "GPT-5.4 nano";
+  if (model === "openai/gpt-5.4-mini") return "GPT-5.4 mini";
   return model;
 }
 
@@ -210,17 +215,17 @@ export function getAssistantGatewayAuthMode(): "oidc" | "api-key" | "unavailable
 
 export function getAssistantGatewayFallbackModels() {
   const configured = process.env.AI_GATEWAY_FALLBACK_MODELS?.split(",").map((value) => value.trim()).filter(Boolean);
-  return configured?.length ? configured : [ASSISTANT_AI_RETRY_MODEL];
+  return configured?.length ? configured : ASSISTANT_AI_FALLBACK_MODELS;
 }
 
 export function getAssistantStructuredModel() {
   const configured = process.env.AI_GATEWAY_STRUCTURED_MODEL?.trim();
-  return configured?.includes("/") ? configured : ASSISTANT_AI_RETRY_MODEL;
+  return configured?.includes("/") ? configured : ASSISTANT_AI_PRIMARY_MODEL;
 }
 
 export function getAssistantStructuredFallbackModels() {
   const configured = process.env.AI_GATEWAY_STRUCTURED_FALLBACK_MODELS?.split(",").map((value) => value.trim()).filter(Boolean);
-  return configured?.length ? configured : [ASSISTANT_AI_RETRY_MODEL];
+  return configured?.length ? configured : ASSISTANT_AI_FALLBACK_MODELS;
 }
 
 export function getAssistantAiConnectionStatus(): AssistantAiStatus {
@@ -243,6 +248,24 @@ function getGatewayGenerationId(providerMetadata: unknown) {
   return typeof generationId === "string" && generationId.trim() ? generationId : null;
 }
 
+function getGatewayMetadata(providerMetadata: unknown) {
+  if (!providerMetadata || typeof providerMetadata !== "object") return null;
+  const gatewayMetadata = (providerMetadata as { gateway?: unknown }).gateway;
+  return gatewayMetadata && typeof gatewayMetadata === "object"
+    ? gatewayMetadata as Record<string, unknown>
+    : null;
+}
+
+function getGatewayResolvedModel(providerMetadata: unknown, requestedModel: string) {
+  const metadata = getGatewayMetadata(providerMetadata);
+  if (!metadata) return requestedModel;
+  for (const key of ["model", "modelId", "resolvedModel", "resolvedModelId", "servedModel"]) {
+    const value = metadata[key];
+    if (typeof value === "string" && value.trim().includes("/")) return value.trim();
+  }
+  return requestedModel;
+}
+
 function toUsage(value: unknown, model: string, providerMetadata?: unknown): AssistantAiUsageSnapshot | null {
   const usage = normalizeAssistantAiUsage(value);
   if (!usage) return null;
@@ -262,8 +285,14 @@ function bestUsageCost(usage: AssistantAiUsageSnapshot | null | undefined) {
 }
 
 function safeAiProviderMetadata(value: unknown) {
-  const generationId = getGatewayGenerationId(value);
-  return generationId ? { gateway: { generationId } } : null;
+  const metadata = getGatewayMetadata(value);
+  if (!metadata) return null;
+  const gateway: Record<string, string> = {};
+  const generationId = metadata.generationId;
+  if (typeof generationId === "string" && generationId.trim()) gateway.generationId = generationId;
+  const resolvedModel = getGatewayResolvedModel(value, "");
+  if (resolvedModel) gateway.model = resolvedModel;
+  return Object.keys(gateway).length ? { gateway } : null;
 }
 
 function sumAttemptUsage(attempts: AssistantAiAttempt[]) {
@@ -317,6 +346,18 @@ export type AssistantAiTrackedOperationResult<T> = {
   attempted: boolean;
 };
 
+async function tryAssistantAiTracking<T>(operation: () => Promise<T>, fallback: T) {
+  try {
+    return await withOperationTimeout(
+      operation(),
+      ASSISTANT_AI_TRACKING_TIMEOUT_MS,
+      "La persistencia de trazabilidad IA excedió el tiempo permitido.",
+    );
+  } catch {
+    return fallback;
+  }
+}
+
 async function runTrackedStructuredOperation<T>(input: {
   user: AssistantUser;
   operation: Extract<AssistantAiOperation, "policy-pdf-extract" | "policy-pdf-review">;
@@ -329,18 +370,28 @@ async function runTrackedStructuredOperation<T>(input: {
 }): Promise<AssistantAiTrackedOperationResult<T>> {
   const runId = makeId("run");
   const startedAt = Date.now();
-  const persistedRun = canPersistAiRuns()
-    ? await createAssistantAiRun({
+  const persistedRunPromise = canPersistAiRuns()
+    ? tryAssistantAiTracking(() => createAssistantAiRun({
         id: runId,
         user: input.user,
         operation: input.operation,
         tier: "critical",
         requestedModel: input.model,
         fallbackReason: null,
-      })
-    : null;
-  const trackedRunId = persistedRun ? runId : null;
-  const trackingStatus = trackedRunId ? "recorded" : "unavailable";
+      }), null)
+    : Promise.resolve(null);
+  let trackedRunId: string | null = null;
+  let trackingStatus: "recorded" | "unavailable" = "unavailable";
+
+  async function ensureTrackedRun() {
+    if (trackedRunId) return trackedRunId;
+    const persistedRun = await persistedRunPromise;
+    if (persistedRun) {
+      trackedRunId = runId;
+      trackingStatus = "recorded";
+    }
+    return trackedRunId;
+  }
 
   async function persistAttempt(inputAttempt: {
     status: "SUCCEEDED" | "FAILED";
@@ -348,40 +399,49 @@ async function runTrackedStructuredOperation<T>(input: {
     result?: Awaited<ReturnType<typeof generateText>>;
     error?: unknown;
   }) {
-    if (!trackedRunId) return;
+    await ensureTrackedRun();
+    if (!trackedRunId) return false;
 
     const attemptId = makeId("attempt");
-    const created = await createAssistantAiAttempt({
+    const created = await tryAssistantAiTracking(() => createAssistantAiAttempt({
       id: attemptId,
-      runId: trackedRunId,
+      runId: trackedRunId!,
       attemptNumber: 1,
       tier: "critical",
       requestedModel: input.model,
       status: "STARTED",
-    });
-    if (!created) return;
+    }), null);
+    if (!created) {
+      trackingStatus = "unavailable";
+      return false;
+    }
 
+    const attemptResult = inputAttempt.result;
+    const attemptError = NoObjectGeneratedError.isInstance(inputAttempt.error) ? inputAttempt.error : null;
+    const resolvedModel = inputAttempt.result
+      ? getGatewayResolvedModel(inputAttempt.result.providerMetadata, input.model)
+      : input.model;
     const resultUsage = inputAttempt.result
-      ? await lookupGatewayUsage(toUsage(inputAttempt.result.usage, input.model, inputAttempt.result.providerMetadata), input.model)
+      ? await tryAssistantAiTracking(() => lookupGatewayUsage(toUsage(attemptResult!.usage, resolvedModel, attemptResult!.providerMetadata), resolvedModel), null)
       : null;
     const resultTotalUsage = inputAttempt.result
-      ? await lookupGatewayUsage(toUsage(inputAttempt.result.totalUsage, input.model, inputAttempt.result.providerMetadata), input.model)
+      ? await tryAssistantAiTracking(() => lookupGatewayUsage(toUsage(attemptResult!.totalUsage, resolvedModel, attemptResult!.providerMetadata), resolvedModel), null)
       : null;
-    const errorUsage = !inputAttempt.result && NoObjectGeneratedError.isInstance(inputAttempt.error)
-      ? await lookupGatewayUsage(toUsage(inputAttempt.error.usage, input.model, inputAttempt.error.response), input.model)
+    const errorUsage = !inputAttempt.result && attemptError
+      ? await tryAssistantAiTracking(() => lookupGatewayUsage(toUsage(attemptError.usage, resolvedModel, attemptError.response), resolvedModel), null)
       : null;
     const usage = resultTotalUsage ?? resultUsage ?? errorUsage;
     const providerMetadata = safeAiProviderMetadata(
       inputAttempt.result?.providerMetadata
-        ?? (NoObjectGeneratedError.isInstance(inputAttempt.error) ? inputAttempt.error.response : null),
+        ?? attemptError?.response
     );
     const statusCode = APICallError.isInstance(inputAttempt.error) ? inputAttempt.error.statusCode : null;
     const finishReason = inputAttempt.result?.finishReason
-      ?? (NoObjectGeneratedError.isInstance(inputAttempt.error) ? inputAttempt.error.finishReason ?? null : null);
+      ?? attemptError?.finishReason ?? null;
 
-    await finalizeAssistantAiAttempt(attemptId, {
+    const finalized = await tryAssistantAiTracking(() => finalizeAssistantAiAttempt(attemptId, {
       status: inputAttempt.status,
-      finalModel: inputAttempt.status === "SUCCEEDED" ? input.model : null,
+      finalModel: inputAttempt.status === "SUCCEEDED" ? resolvedModel : null,
       errorCode: inputAttempt.code,
       errorMessage: inputAttempt.status === "FAILED" ? inputAttempt.code ?? "unknown" : null,
       statusCode,
@@ -392,7 +452,9 @@ async function runTrackedStructuredOperation<T>(input: {
       providerMetadata: providerMetadata ?? undefined,
       durationMs: Date.now() - startedAt,
       estimatedCostUsd: bestUsageCost(usage),
-    });
+    }), null);
+    if (!finalized) trackingStatus = "unavailable";
+    return Boolean(finalized);
   }
 
   try {
@@ -404,12 +466,14 @@ async function runTrackedStructuredOperation<T>(input: {
       result: generated.result,
     });
 
+    await ensureTrackedRun();
     if (trackedRunId) {
-      const usage = await lookupGatewayUsage(toUsage(generated.result.usage, input.model, generated.result.providerMetadata), input.model);
-      const totalUsage = await lookupGatewayUsage(toUsage(generated.result.totalUsage, input.model, generated.result.providerMetadata), input.model);
-      await finalizeAssistantAiRun(trackedRunId, {
+      const resolvedModel = getGatewayResolvedModel(generated.result.providerMetadata, input.model);
+      const usage = await tryAssistantAiTracking(() => lookupGatewayUsage(toUsage(generated.result.usage, resolvedModel, generated.result.providerMetadata), resolvedModel), null);
+      const totalUsage = await tryAssistantAiTracking(() => lookupGatewayUsage(toUsage(generated.result.totalUsage, resolvedModel, generated.result.providerMetadata), resolvedModel), null);
+      const finalized = await tryAssistantAiTracking(() => finalizeAssistantAiRun(trackedRunId!, {
         status: code ? "FAILED" : "SUCCEEDED",
-        finalModel: code ? null : input.model,
+        finalModel: code ? null : resolvedModel,
         errorCode: code,
         finishReason: generated.result.finishReason ?? null,
         responsePreview: code ? null : input.responsePreview,
@@ -420,18 +484,23 @@ async function runTrackedStructuredOperation<T>(input: {
         attemptCount: 1,
         fallbackCount: 0,
         estimatedCostUsd: bestUsageCost(totalUsage ?? usage),
-      });
+      }), null);
+      if (!finalized) trackingStatus = "unavailable";
     }
 
     return { value: generated.value, runId: trackedRunId, trackingStatus, attempted: true };
   } catch (error) {
     const code = getAssistantAiFailureCode(error);
     await persistAttempt({ status: "FAILED", code, error });
+    await ensureTrackedRun();
     if (trackedRunId) {
       const errorUsage = NoObjectGeneratedError.isInstance(error)
-        ? await lookupGatewayUsage(toUsage(error.usage, input.model, error.response), input.model)
+        ? await tryAssistantAiTracking(() => {
+            const resolvedModel = getGatewayResolvedModel(error.response, input.model);
+            return lookupGatewayUsage(toUsage(error.usage, resolvedModel, error.response), resolvedModel);
+          }, null)
         : null;
-      await finalizeAssistantAiRun(trackedRunId, {
+      const finalized = await tryAssistantAiTracking(() => finalizeAssistantAiRun(trackedRunId!, {
         status: "FAILED",
         errorCode: code,
         errorMessage: code,
@@ -441,7 +510,8 @@ async function runTrackedStructuredOperation<T>(input: {
         durationMs: Date.now() - startedAt,
         attemptCount: 1,
         fallbackCount: 0,
-      });
+      }), null);
+      if (!finalized) trackingStatus = "unavailable";
     }
     return { value: null, runId: trackedRunId, trackingStatus, attempted: true };
   }
@@ -479,7 +549,7 @@ function buildDiagnostic(input: {
   model: string;
   fallbackModels: string[];
   startedAt: number;
-  runId: string;
+  runId: string | null;
   code: AssistantAiFailureCode;
   attempts: AssistantAiAttempt[];
 }): AssistantAiDiagnostic {
@@ -511,7 +581,7 @@ function buildDiagnostic(input: {
       attemptNumber: index + 1,
       tier: index === 0 ? input.tier : "critical",
       status: "FAILED",
-      requestedModel: attempt.model,
+      requestedModel: attempt.requestedModel ?? attempt.model,
       finalModel: null,
       fallbackReason: index ? input.attempts[index - 1]?.code ?? null : null,
       code: attempt.code,
@@ -573,15 +643,17 @@ async function runAssistantAttempt(input: {
       : await generateText(generationInput);
 
     if (input.mode === "conversation") {
-      const usage = await lookupGatewayUsage(toUsage(result.usage, input.model, result.providerMetadata), input.model);
-      const totalUsage = await lookupGatewayUsage(toUsage(result.totalUsage, input.model, result.providerMetadata), input.model);
+      const resolvedModel = getGatewayResolvedModel(result.providerMetadata, input.model);
+      const usage = await lookupGatewayUsage(toUsage(result.usage, resolvedModel, result.providerMetadata), resolvedModel);
+      const totalUsage = await lookupGatewayUsage(toUsage(result.totalUsage, resolvedModel, result.providerMetadata), resolvedModel);
       if (!result.text?.trim()) {
         return {
           ok: false,
           code: "no_output_generated",
           error: new Error("AI returned no conversational text"),
           attempt: {
-            model: input.model,
+            model: resolvedModel,
+            requestedModel: input.model,
             code: "no_output_generated",
             outcome: "error",
             durationMs: Date.now() - startedAt,
@@ -597,7 +669,8 @@ async function runAssistantAttempt(input: {
         ok: true,
         value: { result, text: result.text, usageOverride: usage, totalUsageOverride: totalUsage ?? usage },
         attempt: {
-          model: input.model,
+          model: resolvedModel,
+          requestedModel: input.model,
           code: null,
           outcome: "success",
           durationMs: Date.now() - startedAt,
@@ -610,8 +683,9 @@ async function runAssistantAttempt(input: {
       };
     }
 
-    const usage = await lookupGatewayUsage(toUsage(result.usage, input.model, result.providerMetadata), input.model);
-    const totalUsage = await lookupGatewayUsage(toUsage(result.totalUsage, input.model, result.providerMetadata), input.model);
+    const resolvedModel = getGatewayResolvedModel(result.providerMetadata, input.model);
+    const usage = await lookupGatewayUsage(toUsage(result.usage, resolvedModel, result.providerMetadata), resolvedModel);
+    const totalUsage = await lookupGatewayUsage(toUsage(result.totalUsage, resolvedModel, result.providerMetadata), resolvedModel);
     const parsed = result.output as z.infer<typeof assistantAiResponseSchema> | undefined;
     if (!parsed) {
       return {
@@ -619,11 +693,12 @@ async function runAssistantAttempt(input: {
         code: "invalid_output",
         error: new Error("AI returned no structured object"),
         attempt: {
-          model: input.model,
+          model: resolvedModel,
+          requestedModel: input.model,
           code: "invalid_output",
           outcome: "error",
           durationMs: Date.now() - startedAt,
-          responsePreview: result.text,
+          responsePreview: null,
           usage,
           totalUsage: totalUsage ?? usage,
           providerMetadata: result.providerMetadata ?? null,
@@ -634,7 +709,8 @@ async function runAssistantAttempt(input: {
       ok: true,
       value: { parsed, result, usageOverride: usage, totalUsageOverride: totalUsage ?? usage },
       attempt: {
-        model: input.model,
+        model: resolvedModel,
+        requestedModel: input.model,
         code: null,
         outcome: "success",
         durationMs: Date.now() - startedAt,
@@ -647,20 +723,22 @@ async function runAssistantAttempt(input: {
     };
   } catch (error) {
     const code = getAssistantAiFailureCode(error);
-    const errorUsage = NoObjectGeneratedError.isInstance(error) ? toUsage(error.usage, input.model, error.response) : null;
     const errorProviderMetadata = NoObjectGeneratedError.isInstance(error) ? error.response ?? null : null;
+    const resolvedModel = getGatewayResolvedModel(errorProviderMetadata, input.model);
+    const errorUsage = NoObjectGeneratedError.isInstance(error) ? toUsage(error.usage, resolvedModel, error.response) : null;
     return {
       ok: false,
       code,
       error,
       attempt: {
-        model: input.model,
+        model: resolvedModel,
+        requestedModel: input.model,
         code,
         outcome: "error",
         durationMs: Date.now() - startedAt,
         statusCode: APICallError.isInstance(error) ? error.statusCode : null,
         finishReason: NoObjectGeneratedError.isInstance(error) ? error.finishReason ?? null : null,
-        responsePreview: NoObjectGeneratedError.isInstance(error) ? error.text ?? null : error instanceof Error ? error.message : null,
+        responsePreview: null,
         usage: errorUsage,
         totalUsage: errorUsage,
         providerMetadata: errorProviderMetadata,
@@ -670,12 +748,14 @@ async function runAssistantAttempt(input: {
 }
 
 function valueFromAttempt(input: {
-  runId: string;
+  runId: string | null;
   tier: AssistantAiTier;
   model: string;
+  requestedModel: string;
   attemptNumber: number;
   localReply: AssistantReply;
   generated: AssistantAiGeneratedValue;
+  trackingStatus: "recorded" | "unavailable";
 }): AssistantAiReplyValue {
   const usage = input.generated.usageOverride ?? toUsage(input.generated.result.usage, input.model, input.generated.result.providerMetadata);
   const totalUsage = input.generated.totalUsageOverride ?? toUsage(input.generated.result.totalUsage, input.model, input.generated.result.providerMetadata);
@@ -690,6 +770,7 @@ function valueFromAttempt(input: {
     runId: input.runId,
     tier: input.tier,
     resolvedModel: input.model,
+    trackingStatus: input.trackingStatus,
     usage,
     totalUsage,
     finishReason: input.generated.result.finishReason ?? null,
@@ -699,7 +780,7 @@ function valueFromAttempt(input: {
       attemptNumber: input.attemptNumber,
       tier: input.tier,
       status: "SUCCEEDED",
-      requestedModel: input.model,
+      requestedModel: input.requestedModel,
       finalModel: input.model,
       fallbackReason: null,
       code: null,
@@ -712,24 +793,25 @@ function valueFromAttempt(input: {
   };
 }
 
-async function recordAttempt(runId: string, attempt: AssistantAiAttempt, number: number, tier: AssistantAiTier) {
+async function recordAttempt(runId: string | null, attempt: AssistantAiAttempt, number: number, tier: AssistantAiTier) {
   const attemptId = makeId("attempt");
-  if (!canPersistAiRuns()) return;
-  const created = await createAssistantAiAttempt({ id: attemptId, runId, attemptNumber: number, tier, requestedModel: attempt.model, status: "STARTED" });
-  if (!created) return;
-  await finalizeAssistantAiAttempt(attemptId, {
+  if (!canPersistAiRuns() || !runId) return false;
+  const created = await tryAssistantAiTracking(() => createAssistantAiAttempt({ id: attemptId, runId, attemptNumber: number, tier, requestedModel: attempt.requestedModel ?? attempt.model, status: "STARTED" }), null);
+  if (!created) return false;
+  const finalized = await tryAssistantAiTracking(() => finalizeAssistantAiAttempt(attemptId, {
     status: attempt.outcome === "success" ? "SUCCEEDED" : "FAILED",
     finalModel: attempt.outcome === "success" ? attempt.model : null,
     errorCode: attempt.code,
     statusCode: attempt.statusCode ?? null,
     finishReason: attempt.finishReason ?? null,
-    responsePreview: attempt.responsePreview ?? null,
+    responsePreview: attempt.outcome === "success" ? redactAssistantReportText(attempt.responsePreview ?? "", 500) : null,
     durationMs: attempt.durationMs,
     usage: attempt.usage ?? undefined,
     totalUsage: attempt.totalUsage ?? undefined,
-    providerMetadata: attempt.providerMetadata ?? undefined,
+    providerMetadata: safeAiProviderMetadata(attempt.providerMetadata) ?? undefined,
     estimatedCostUsd: (attempt.totalUsage ?? attempt.usage)?.billedCostUsd ?? (attempt.totalUsage ?? attempt.usage)?.estimatedCostUsd ?? null,
-  });
+  }), null);
+  return Boolean(finalized);
 }
 
 export async function buildAssistantAiReply(input: {
@@ -765,48 +847,92 @@ export async function buildAssistantAiReply(input: {
       },
     };
   }
-  if (canPersistAiRuns()) void createAssistantAiRun({ id: runId, user: input.user, operation: "assistant-reply", tier, requestedModel: model, fallbackReason: null });
+  const mode = input.mode ?? "conversation";
+  const persistedRunPromise = canPersistAiRuns()
+    ? tryAssistantAiTracking(() => createAssistantAiRun({ id: runId, user: input.user, operation: "assistant-reply", tier, requestedModel: model, fallbackReason: null }), null)
+    : Promise.resolve(null);
+  let trackedRunId: string | null = null;
+  let trackingStatus: "recorded" | "unavailable" = "unavailable";
+  async function ensureTrackedRun() {
+    if (trackedRunId) return trackedRunId;
+    const persistedRun = await persistedRunPromise;
+    if (persistedRun) {
+      trackedRunId = runId;
+      trackingStatus = "recorded";
+    }
+    return trackedRunId;
+  }
+  async function finalizeRun(payload: Parameters<typeof finalizeAssistantAiRun>[1]) {
+    await ensureTrackedRun();
+    if (!trackedRunId) return;
+    const finalized = await tryAssistantAiTracking(() => finalizeAssistantAiRun(trackedRunId!, payload), null);
+    if (!finalized) trackingStatus = "unavailable";
+  }
 
   const attempts: AssistantAiAttempt[] = [];
-  const mode = input.mode ?? "conversation";
-  const primary = await runAssistantAttempt({ ...input, model, fallbackModels, timeoutMs: ASSISTANT_AI_ATTEMPT_TIMEOUT_MS, mode });
-  attempts.push(primary.attempt);
-  await recordAttempt(runId, primary.attempt, 1, tier);
-  if (primary.ok) {
-    const value = valueFromAttempt({ runId, tier, model, attemptNumber: 1, localReply: input.localReply, generated: primary.value });
-    value.trace[0]!.durationMs = primary.attempt.durationMs;
-    value.durationMs = primary.attempt.durationMs;
-    value.totalUsage = sumAttemptUsage(attempts);
-    if (canPersistAiRuns()) void finalizeAssistantAiRun(runId, { status: "SUCCEEDED", finalModel: model, finishReason: value.finishReason, usage: value.usage, totalUsage: value.totalUsage, providerMetadata: value.providerMetadata, durationMs: Date.now() - startedAt, attemptCount: 1, fallbackCount: 0, estimatedCostUsd: bestUsageCost(value.totalUsage) });
-    return { ok: true, value };
+  const candidateModels = [model, ...fallbackModels.filter((candidate) => candidate && candidate !== model)];
+  for (let index = 0; index < candidateModels.length; index += 1) {
+    const candidateModel = candidateModels[index]!;
+    const attemptResult = await runAssistantAttempt({ ...input, model: candidateModel, fallbackModels: [], timeoutMs: ASSISTANT_AI_ATTEMPT_TIMEOUT_MS, mode });
+    attempts.push(attemptResult.attempt);
+    await ensureTrackedRun();
+    if (!(await recordAttempt(trackedRunId, attemptResult.attempt, index + 1, index === 0 ? tier : "critical"))) trackingStatus = "unavailable";
+
+    if (attemptResult.ok) {
+      const value = valueFromAttempt({
+        runId: trackedRunId,
+        tier: index === 0 ? tier : "critical",
+        model: attemptResult.attempt.model,
+        requestedModel: candidateModel,
+        attemptNumber: index + 1,
+        localReply: input.localReply,
+        generated: attemptResult.value,
+        trackingStatus,
+      });
+      value.trace[0]!.durationMs = attemptResult.attempt.durationMs;
+      value.durationMs = attemptResult.attempt.durationMs;
+      value.trace = [
+        ...attempts.slice(0, -1).map((attempt, attemptIndex) => ({
+          attemptNumber: attemptIndex + 1,
+          tier: attemptIndex === 0 ? tier : "critical" as const,
+          status: "FAILED" as const,
+          requestedModel: attempt.requestedModel ?? attempt.model,
+          finalModel: null,
+          fallbackReason: attempt.code,
+          code: attempt.code,
+          durationMs: attempt.durationMs,
+          finishReason: attempt.finishReason ?? null,
+          statusCode: attempt.statusCode ?? null,
+          usage: attempt.totalUsage ?? attempt.usage ?? null,
+          responsePreview: attempt.responsePreview ?? null,
+        })),
+        ...value.trace,
+      ];
+      value.totalUsage = sumAttemptUsage(attempts);
+      value.runId = trackedRunId;
+      value.trackingStatus = trackingStatus;
+      await finalizeRun({
+        status: "SUCCEEDED",
+        finalModel: attemptResult.attempt.model,
+        finishReason: value.finishReason,
+        usage: value.usage,
+        totalUsage: value.totalUsage,
+        providerMetadata: safeAiProviderMetadata(value.providerMetadata) ?? undefined,
+        durationMs: Date.now() - startedAt,
+        attemptCount: attempts.length,
+        fallbackCount: index,
+        estimatedCostUsd: bestUsageCost(value.totalUsage),
+      });
+      value.trackingStatus = trackingStatus;
+      return { ok: true, value };
+    }
+
+    if (["invalid_prompt", "aborted", "budget_exceeded"].includes(attemptResult.code)) break;
   }
 
-  const retryModel = fallbackModels.find((candidate) => candidate && candidate !== model);
-  const retryable = !["invalid_prompt", "aborted", "budget_exceeded"].includes(primary.code);
-  if (!retryModel || !retryable) {
-    const diagnostic = buildDiagnostic({ operation: "assistant-reply", tier, model, fallbackModels, startedAt, runId, code: primary.code, attempts });
-    if (canPersistAiRuns()) void finalizeAssistantAiRun(runId, { status: "FAILED", errorCode: diagnostic.code, errorMessage: diagnostic.summary, durationMs: diagnostic.durationMs, attemptCount: attempts.length, fallbackCount: 0 });
-    return { ok: false, diagnostic };
-  }
-
-  const fallbackTier: AssistantAiTier = input.mode === "structured" ? "critical" : "critical";
-  const fallback = await runAssistantAttempt({ ...input, model: retryModel, fallbackModels: [], timeoutMs: ASSISTANT_AI_ATTEMPT_TIMEOUT_MS, mode });
-  attempts.push(fallback.attempt);
-  await recordAttempt(runId, fallback.attempt, 2, fallbackTier);
-  if (fallback.ok) {
-    const value = valueFromAttempt({ runId, tier: fallbackTier, model: retryModel, attemptNumber: 2, localReply: input.localReply, generated: fallback.value });
-    value.trace[0]!.durationMs = fallback.attempt.durationMs;
-    value.durationMs = fallback.attempt.durationMs;
-    value.trace = [
-      { attemptNumber: 1, tier, status: "FAILED", requestedModel: model, finalModel: null, fallbackReason: primary.code, code: primary.code, durationMs: primary.attempt.durationMs, finishReason: primary.attempt.finishReason ?? null, statusCode: primary.attempt.statusCode ?? null, usage: primary.attempt.totalUsage ?? primary.attempt.usage ?? null, responsePreview: primary.attempt.responsePreview ?? null },
-      ...value.trace,
-    ];
-    value.totalUsage = sumAttemptUsage(attempts);
-    if (canPersistAiRuns()) void finalizeAssistantAiRun(runId, { status: "SUCCEEDED", finalModel: retryModel, finishReason: value.finishReason, usage: value.usage, totalUsage: value.totalUsage, providerMetadata: value.providerMetadata, durationMs: Date.now() - startedAt, attemptCount: 2, fallbackCount: 1, estimatedCostUsd: bestUsageCost(value.totalUsage) });
-    return { ok: true, value };
-  }
-  const diagnostic = buildDiagnostic({ operation: "assistant-reply", tier: fallbackTier, model, fallbackModels, startedAt, runId, code: fallback.code, attempts });
-  if (canPersistAiRuns()) void finalizeAssistantAiRun(runId, { status: "FAILED", errorCode: diagnostic.code, errorMessage: diagnostic.summary, durationMs: diagnostic.durationMs, attemptCount: attempts.length, fallbackCount: 1 });
+  const lastAttempt = attempts[attempts.length - 1];
+  const diagnostic = buildDiagnostic({ operation: "assistant-reply", tier, model, fallbackModels, startedAt, runId, code: lastAttempt?.code ?? "unknown", attempts });
+  await finalizeRun({ status: "FAILED", errorCode: diagnostic.code, errorMessage: diagnostic.summary, durationMs: diagnostic.durationMs, attemptCount: attempts.length, fallbackCount: Math.max(0, attempts.length - 1) });
   return { ok: false, diagnostic };
 }
 
@@ -850,7 +976,7 @@ export async function extractPolicyPdfDraftFromAiFile(input: { user: AssistantUs
         system: "Extrae únicamente la carátula del PDF. Todas las propiedades del esquema son obligatorias; usa null para datos ausentes y [] para listas vacías. No inventes valores.",
         messages: [{ role: "user", content: [{ type: "text", text: input.instruction?.trim() ?? "Extrae un borrador revisable." }, { type: "file", data: input.fileData, filename: input.fileName, mediaType: "application/pdf" }] }],
         output: Output.object({ schema: pdfFileExtractionSchema }),
-        providerOptions: { gateway: { user: input.user.id, tags: ["feature:assistant", "feature:pdf-extract", "surface:web", `role:${input.user.role}`] } },
+        providerOptions: { gateway: { user: input.user.id, tags: ["feature:assistant", "feature:pdf-extract", "surface:web", `role:${input.user.role}`], models: getAssistantStructuredFallbackModels() } },
       });
       const parsed = pdfFileExtractionSchema.safeParse(result.output);
       if (!parsed.success) return { result, value: null };
@@ -879,7 +1005,7 @@ function parseJsonResponse<T>(text: string, schema: z.ZodType<T>): T | null {
 export async function classifyAssistantReportSignalWithAi(input: { user: AssistantUser; message: string; localReplyText?: string; contextText?: string | null; existingThemes: Array<{ themeKey: string; themeLabel: string; kind: "INCIDENT" | "SUGGESTION" }>; fallback?: Omit<AssistantAiReportSignal, "shouldReport"> | null }): Promise<AssistantAiReportSignal | null> {
   if (!hasGatewayAuth()) return null;
   try {
-    const result = await generateText({ model: gateway(getAssistantCriticalModel()), temperature: 0.1, abortSignal: AbortSignal.timeout(4_000), system: "Clasifica señales de producto de PolicyDesk y devuelve solo JSON válido según el esquema.", prompt: [`Mensaje: ${input.message.slice(0, 2_000)}`, input.localReplyText ? `Respuesta local:\n${input.localReplyText.slice(0, 3_000)}` : "Sin respuesta local.", input.contextText ? `Contexto:\n${input.contextText.slice(0, 4_000)}` : "Sin contexto.", `Temas abiertos: ${JSON.stringify(input.existingThemes.slice(0, 50))}`, input.fallback ? `Sugerencia determinística: ${JSON.stringify(input.fallback)}` : null].filter(Boolean).join("\n\n"), providerOptions: { gateway: { user: input.user.id, tags: ["feature:assistant", "feature:improvement-report", `role:${input.user.role}`] } } });
+    const result = await generateText({ model: gateway(getAssistantCriticalModel()), temperature: 0.1, abortSignal: AbortSignal.timeout(4_000), system: "Clasifica señales de producto de PolicyDesk y devuelve solo JSON válido según el esquema.", prompt: [`Mensaje: ${input.message.slice(0, 2_000)}`, input.localReplyText ? `Respuesta local:\n${input.localReplyText.slice(0, 3_000)}` : "Sin respuesta local.", input.contextText ? `Contexto:\n${input.contextText.slice(0, 4_000)}` : "Sin contexto.", `Temas abiertos: ${JSON.stringify(input.existingThemes.slice(0, 50))}`, input.fallback ? `Sugerencia determinística: ${JSON.stringify(input.fallback)}` : null].filter(Boolean).join("\n\n"), providerOptions: { gateway: { user: input.user.id, tags: ["feature:assistant", "feature:improvement-report", `role:${input.user.role}`], models: getAssistantStructuredFallbackModels() } } });
     return parseJsonResponse(result.text, reportSignalSchema);
   } catch { return null; }
 }
@@ -899,7 +1025,7 @@ export async function reviewPolicyPdfWithAi(input: { user: AssistantUser; text?:
         system: "Revisa una carátula de seguro. No guardes ni confirmes cambios. Devuelve solo JSON válido según el esquema; usa [] cuando no existan advertencias, sugerencias o correcciones.",
         prompt: [`Tipo de usuario: ${input.user.role}`, `Tema: ${input.themeHint ?? "policy-pdf-review"}`, `Borrador: ${JSON.stringify(input.draft)}`, `Advertencias locales: ${JSON.stringify(input.warnings)}`, input.text ? `Texto extraído:\n${input.text.slice(0, 12_000)}` : "Sin texto completo."].join("\n\n"),
         output: Output.object({ schema: pdfAiReviewSchema }),
-        providerOptions: { gateway: { user: input.user.id, tags: ["feature:assistant", "feature:pdf-review", `role:${input.user.role}`] } },
+        providerOptions: { gateway: { user: input.user.id, tags: ["feature:assistant", "feature:pdf-review", `role:${input.user.role}`], models: getAssistantStructuredFallbackModels() } },
       });
       const parsed = pdfAiReviewSchema.safeParse(result.output);
       if (!parsed.success) return { result, value: null };

@@ -68,6 +68,7 @@ export type AssistantAiUsageSnapshot = {
 
 export type AssistantAiAttempt = {
   model: string;
+  requestedModel?: string;
   code: AssistantAiFailureCode | null;
   outcome: "success" | "error";
   durationMs: number;
@@ -320,6 +321,7 @@ export type AssistantConversationResponse = AssistantReply & {
   reportThemeKey: string | null;
   reportThemeLabel: string | null;
   aiRunId?: string | null;
+  aiTrackingStatus?: "recorded" | "unavailable";
   aiTier?: AssistantAiTier | null;
   aiModel?: string | null;
   aiAttempts?: number;
