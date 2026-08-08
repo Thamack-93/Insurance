@@ -4,6 +4,8 @@ import type { NoraContextRef } from "@/lib/nora-context";
 import type {
   PolicyPdfCaptureAiReview,
   PolicyPdfCaptureFieldKey,
+  PolicyPdfCaptureReceiptEvidence,
+  PolicyPdfCaptureRelatedDocument,
   PolicyPdfCaptureProvenance,
 } from "@/lib/policy-pdf-capture.shared";
 
@@ -77,6 +79,13 @@ export type PolicyCaptureHandoffPayload = {
   warnings?: string[];
   aiReview?: PolicyPdfCaptureAiReview | null;
   provenance?: PolicyPdfCaptureProvenance;
+  receiptEvidence?: PolicyPdfCaptureReceiptEvidence | null;
+  relatedDocuments?: PolicyPdfCaptureRelatedDocument[];
+  pdfReference?: {
+    url: string;
+    fileName: string;
+    expiresAt: number;
+  };
 };
 
 export type PersistedPolicyCaptureHandoff = {
@@ -386,11 +395,13 @@ function sanitizeCapturePayload(value: unknown): PolicyCaptureHandoffPayload | n
     ? candidate.provenance as unknown as Record<string, unknown>
     : null;
   const safeProvenance = rawProvenance &&
+      (rawProvenance.requestedMode === undefined || rawProvenance.requestedMode === "local" || rawProvenance.requestedMode === "ai") &&
       (rawProvenance.extractionSource === "local" || rawProvenance.extractionSource === "ai") &&
       (rawProvenance.reviewSource === "none" || rawProvenance.reviewSource === "ai") &&
       (rawProvenance.trackingStatus === "recorded" || rawProvenance.trackingStatus === "unavailable") &&
       typeof rawProvenance.aiAttempted === "boolean"
     ? {
+        requestedMode: rawProvenance.requestedMode === "ai" ? "ai" : "local",
         extractionSource: rawProvenance.extractionSource,
         reviewSource: rawProvenance.reviewSource,
         aiRunIds: Array.isArray(rawProvenance.aiRunIds)
@@ -398,7 +409,43 @@ function sanitizeCapturePayload(value: unknown): PolicyCaptureHandoffPayload | n
           : [],
         trackingStatus: rawProvenance.trackingStatus,
         aiAttempted: rawProvenance.aiAttempted,
+        ...(typeof rawProvenance.aiFailureCode === "string" ? { aiFailureCode: cleanText(rawProvenance.aiFailureCode, 120) } : {}),
       } satisfies PolicyPdfCaptureProvenance
+    : undefined;
+  const safeReceiptEvidence = candidate.receiptEvidence && typeof candidate.receiptEvidence === "object"
+    ? (() => {
+        const row = candidate.receiptEvidence as unknown as Record<string, unknown>;
+        if (row.paymentConfirmed !== false) return undefined;
+        return {
+          policyNumber: typeof row.policyNumber === "string" ? cleanText(row.policyNumber, 80) : null,
+          receiptControlNumber: typeof row.receiptControlNumber === "string" ? cleanText(row.receiptControlNumber, 80) : null,
+          dueDate: typeof row.dueDate === "string" ? cleanText(row.dueDate, 30) : null,
+          periodLabel: typeof row.periodLabel === "string" ? cleanText(row.periodLabel, 30) : null,
+          amountDue: typeof row.amountDue === "number" && Number.isFinite(row.amountDue) ? row.amountDue : null,
+          depositAmount: typeof row.depositAmount === "number" && Number.isFinite(row.depositAmount) ? row.depositAmount : null,
+          currency: typeof row.currency === "string" ? cleanText(row.currency, 10) : "MXN",
+          paymentMethod: typeof row.paymentMethod === "string" ? cleanText(row.paymentMethod, 80) : null,
+          paymentConfirmed: false as const,
+          warnings: Array.isArray(row.warnings)
+            ? row.warnings.flatMap((warning) => typeof warning === "string" && warning.trim() ? [cleanText(warning, 500)] : []).slice(0, 10)
+            : [],
+        } satisfies PolicyPdfCaptureReceiptEvidence;
+      })()
+    : undefined;
+  const safeRelatedDocuments = Array.isArray(candidate.relatedDocuments)
+    ? candidate.relatedDocuments.flatMap((document) => {
+        if (!document || typeof document !== "object") return [];
+        const row = document as unknown as Record<string, unknown>;
+        if (typeof row.id !== "string" || typeof row.fileName !== "string" || !["policy", "receipt", "endorsement", "inciso", "unknown"].includes(String(row.kind)) || !["local", "ai"].includes(String(row.source))) return [];
+        return [{
+          id: cleanText(row.id, 160),
+          fileName: cleanText(row.fileName, 255),
+          kind: row.kind as PolicyPdfCaptureRelatedDocument["kind"],
+          source: row.source as PolicyPdfCaptureRelatedDocument["source"],
+          policyNumber: typeof row.policyNumber === "string" ? cleanText(row.policyNumber, 80) : null,
+          warnings: Array.isArray(row.warnings) ? row.warnings.flatMap((warning) => typeof warning === "string" && warning.trim() ? [cleanText(warning, 500)] : []).slice(0, 10) : [],
+        } satisfies PolicyPdfCaptureRelatedDocument];
+      }).slice(0, 20)
     : undefined;
   return {
     draft: safeDraft,
@@ -409,6 +456,11 @@ function sanitizeCapturePayload(value: unknown): PolicyCaptureHandoffPayload | n
     ...(safeWarnings ? { warnings: safeWarnings } : {}),
     ...(safeAiReview ? { aiReview: safeAiReview } : candidate.aiReview === null ? { aiReview: null } : {}),
     ...(safeProvenance ? { provenance: safeProvenance } : {}),
+    ...(safeReceiptEvidence ? { receiptEvidence: safeReceiptEvidence } : candidate.receiptEvidence === null ? { receiptEvidence: null } : {}),
+    ...(safeRelatedDocuments ? { relatedDocuments: safeRelatedDocuments } : {}),
+    ...(candidate.pdfReference && typeof candidate.pdfReference === "object" && typeof candidate.pdfReference.url === "string" && typeof candidate.pdfReference.fileName === "string" && typeof candidate.pdfReference.expiresAt === "number"
+      ? { pdfReference: { url: candidate.pdfReference.url.slice(0, 2_000), fileName: cleanText(candidate.pdfReference.fileName, 255), expiresAt: candidate.pdfReference.expiresAt } }
+      : {}),
   };
 }
 

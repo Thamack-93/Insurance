@@ -1,6 +1,7 @@
 import { getDb } from "@/lib/db";
 import { normalize } from "@/lib/search-utils";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
+import { normalizeCaptureIdentity } from "@/lib/policy-pdf-capture.shared";
 
 export type PolicyCaptureSearchKind = "client" | "insurer" | "policy";
 
@@ -47,13 +48,14 @@ function includesNormalized(haystack: string | null | undefined, needle: string)
 async function searchClients(query: string, portfolioOwnerId?: string | null) {
   const db = getDb();
   const needle = normalize(query);
+  const databaseQuery = normalizeCaptureIdentity(query).split(" ").filter(Boolean).slice(0, 2).join(" ") || query;
   const rows = await db.client.findMany({
     where: needle
       ? {
           status: { not: "ARCHIVED" },
           ...(portfolioOwnerId ? { portfolioOwnerId } : {}),
           OR: [
-            { fullName: { contains: query, mode: "insensitive" } },
+            { fullName: { contains: databaseQuery, mode: "insensitive" } },
             { email: { contains: query, mode: "insensitive" } },
             { phone: { contains: query, mode: "insensitive" } },
             { secondaryPhone: { contains: query, mode: "insensitive" } },
@@ -104,12 +106,13 @@ async function searchClients(query: string, portfolioOwnerId?: string | null) {
 async function searchInsurers(query: string) {
   const db = getDb();
   const needle = normalize(query);
+  const databaseQuery = normalizeCaptureIdentity(query).split(" ").filter(Boolean).slice(0, 2).join(" ") || query;
   const rows = await db.insurer.findMany({
     where: needle
       ? {
           status: { not: "ARCHIVED" },
           OR: [
-            { name: { contains: query, mode: "insensitive" } },
+            { name: { contains: databaseQuery, mode: "insensitive" } },
             { contactName: { contains: query, mode: "insensitive" } },
             { contactEmail: { contains: query, mode: "insensitive" } },
             { contactPhone: { contains: query, mode: "insensitive" } },

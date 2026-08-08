@@ -2,10 +2,10 @@ import "server-only";
 
 import { getDb } from "@/lib/db";
 import { parseDateInput } from "@/lib/form-utils";
-import { normalize } from "@/lib/search-utils";
 import { reviewPolicyPdfWithAi } from "@/lib/assistant-ai";
 import {
   extractPolicyPdfDraftFromText,
+  extractPolicyPdfReceiptEvidence,
   buildPolicyPdfCaptureFieldConfidence,
   buildPolicyPdfCaptureReceiptPlan,
   type PolicyCaptureSourceOption,
@@ -14,6 +14,7 @@ import {
   type PolicyPdfCaptureFieldConfidence,
   type PolicyPdfCapturePreview,
   type PolicyPdfCaptureProvenance,
+  scoreCaptureIdentity,
 } from "@/lib/policy-pdf-capture.shared";
 import type { AssistantUser } from "@/lib/assistant-types";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
@@ -28,26 +29,14 @@ type PolicyPdfCapturePreviewContext = {
 };
 
 function scoreTextMatch(needle: string, candidate: string) {
-  const normalizedNeedle = normalize(needle).trim();
-  const normalizedCandidate = normalize(candidate).trim();
-  if (!normalizedNeedle || !normalizedCandidate) return 0;
-  if (normalizedNeedle === normalizedCandidate) return 100;
-  if (normalizedCandidate.includes(normalizedNeedle) || normalizedNeedle.includes(normalizedCandidate)) return 80;
-
-  const needleTokens = normalizedNeedle.split(/\s+/).filter(Boolean);
-  const candidateTokens = normalizedCandidate.split(/\s+/).filter(Boolean);
-  const matches = needleTokens.filter((token) =>
-    candidateTokens.some((candidateToken) => candidateToken.includes(token) || token.includes(candidateToken)),
-  );
-
-  return matches.length * 10;
+  return scoreCaptureIdentity(needle, candidate);
 }
 
 async function buildSourcePolicyCandidates(
   db: DbClient,
   draft: PolicyPdfCaptureDraft,
   clientId: string | null,
-  insurerId: string | null,
+  _insurerId: string | null,
   portfolioOwnerId?: string,
 ) {
   const candidates: Array<PolicyCaptureSourceOption> = [];
@@ -59,7 +48,6 @@ async function buildSourcePolicyCandidates(
       where: {
         ...policyOperationalWhere(portfolioOwnerId),
         ...(clientId ? { clientId } : {}),
-        ...(insurerId ? { insurerId } : {}),
         policyType: "AUTO",
         status: { in: ["ACTIVE", "EXPIRED", "RENEWED"] },
         ...(targetStartDate ? { endDate: { lt: targetStartDate } } : {}),
@@ -107,7 +95,6 @@ async function buildSourcePolicyCandidates(
         OR: exactNumberVariants.map((variant) => ({ policyNumber: variant })),
         ...policyOperationalWhere(portfolioOwnerId),
         ...(clientId ? { clientId } : {}),
-        ...(insurerId ? { insurerId } : {}),
       },
       orderBy: [{ startDate: "desc" }, { updatedAt: "desc" }],
       select: {
@@ -140,12 +127,11 @@ async function buildSourcePolicyCandidates(
     );
   }
 
-  if (candidates.length === 0 && clientId && insurerId) {
+  if (candidates.length === 0 && clientId) {
     const fallback = await db.policy.findMany({
       where: {
         ...policyOperationalWhere(portfolioOwnerId),
         clientId,
-        insurerId,
         policyType: draft.policyType,
         status: { in: ["ACTIVE", "EXPIRED", "RENEWED"] },
         ...(exactNumberVariants.length > 0 ? { OR: exactNumberVariants.map((variant) => ({ policyNumber: variant })) } : {}),
@@ -195,8 +181,14 @@ type PolicyPdfCapturePreviewInput = {
     attempted: boolean;
   } | null;
   extractionSource?: "local" | "ai";
+  requestedMode?: "local" | "ai";
   aiRunIds?: string[];
   trackingStatus?: "recorded" | "unavailable";
+  aiFailureCode?: string | null;
+  skipAiReview?: boolean;
+  extraWarnings?: string[];
+  receiptEvidence?: import("@/lib/policy-pdf-capture.shared").PolicyPdfCaptureReceiptEvidence | null;
+  relatedDocuments?: import("@/lib/policy-pdf-capture.shared").PolicyPdfCaptureRelatedDocument[];
   reviewText?: string | null;
   context?: PolicyPdfCapturePreviewContext;
 };
@@ -206,7 +198,7 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
   db: DbClient = getDb(),
 ): Promise<PolicyPdfCapturePreview> {
   const { portfolioOwnerId, user } = input.context ?? {};
-  const warnings = [...(input.warnings ?? [])];
+  const warnings = [...(input.warnings ?? []), ...(input.extraWarnings ?? [])];
   const policyNumberSuggestion = input.draft.sourcePolicyNumber;
   const policyNumberVariants = buildPolicyNumberSearchVariants(input.draft.policyNumber);
   const existingPolicyMatches = policyNumberVariants.length > 0
@@ -295,6 +287,7 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
   const shouldRequestAiReview = Boolean(
     user &&
       !input.aiReview &&
+      !input.skipAiReview &&
       (warnings.length > 0 ||
         hasLowConfidence ||
         clientCandidates.length === 0 ||
@@ -327,11 +320,13 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
     ? aiReviewResult.trackingStatus
     : input.trackingStatus ?? "recorded";
   const provenance: PolicyPdfCaptureProvenance = {
+    requestedMode: input.requestedMode ?? "local",
     extractionSource: input.extractionSource ?? "local",
     reviewSource: aiReview ? "ai" : "none",
     aiRunIds,
     trackingStatus,
     aiAttempted,
+    aiFailureCode: input.aiFailureCode ?? null,
   };
   if (aiAttempted && !aiReview) {
     warnings.push("No pudimos completar la revisión IA; revisa los campos marcados antes de confirmar.");
@@ -370,6 +365,8 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
     warnings,
     aiReview,
     provenance,
+    relatedDocuments: input.relatedDocuments,
+    receiptEvidence: input.receiptEvidence ?? null,
   } satisfies PolicyPdfCapturePreview;
 }
 
@@ -377,13 +374,17 @@ export async function buildPolicyPdfCapturePreviewFromText(
   text: string,
   db: DbClient = getDb(),
   context: PolicyPdfCapturePreviewContext = {},
+  options: Pick<PolicyPdfCapturePreviewInput, "requestedMode" | "skipAiReview" | "extraWarnings" | "aiFailureCode" | "relatedDocuments"> = {},
 ): Promise<PolicyPdfCapturePreview> {
   const draft = extractPolicyPdfDraftFromText(text);
   const fieldConfidence = buildPolicyPdfCaptureFieldConfidence(text, draft);
+  const receiptEvidence = extractPolicyPdfReceiptEvidence(text);
   return buildPolicyPdfCapturePreviewFromDraft({
     draft,
     fieldConfidence,
     reviewText: text,
+    ...options,
+    receiptEvidence,
     context,
   }, db);
 }

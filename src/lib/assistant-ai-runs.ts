@@ -115,6 +115,7 @@ function toTraceEntry(attempt: {
   durationMs: number | null;
   finishReason: string | null;
   statusCode: number | null;
+  errorMessage?: string | null;
   responsePreview: string | null;
   usageJson: string | null;
   totalUsageJson: string | null;
@@ -136,6 +137,7 @@ function toTraceEntry(attempt: {
     durationMs: attempt.durationMs,
     finishReason: attempt.finishReason,
     statusCode: attempt.statusCode,
+    errorMessage: attempt.errorMessage ?? null,
     usage: effectiveUsage
       ? {
           ...effectiveUsage,

@@ -4,6 +4,8 @@ import {
   extractPolicyPdfDraftFromText,
   inferClientType,
   normalizePdfPaymentFrequencyLabel,
+  extractPolicyPdfReceiptEvidence,
+  scoreCaptureIdentity,
   suggestPreviousPolicyNumber,
 } from "@/lib/policy-pdf-capture.shared";
 import { buildPolicyPdfCapturePreviewFromDraft, buildPolicyPdfCapturePreviewFromText } from "@/lib/policy-pdf-capture-preview";
@@ -14,6 +16,12 @@ describe("policy-pdf-capture", () => {
   it("suggests the prior renewal policy number", () => {
     expect(suggestPreviousPolicyNumber("19941U01")).toBe("19941U00");
     expect(suggestPreviousPolicyNumber("ABC123")).toBeNull();
+  });
+
+  it("matches legal suffixes, punctuation and accents without confusing insurers", () => {
+    expect(scoreCaptureIdentity("MOTORES ANGELOPOLIS, S.A. DE C.V.", "MOTORES ANGELOPOLIS SA DE CV")).toBe(100);
+    expect(scoreCaptureIdentity("Seguros Banorte, S.A. de C.V.", "Seguros Banorte")).toBe(100);
+    expect(scoreCaptureIdentity("Seguros Banorte, S.A. de C.V.", "BUPA MÉXICO, COMPAÑÍA DE SEGUROS")).toBe(0);
   });
 
   it("normalizes payment frequency labels to readable Spanish", () => {
@@ -191,6 +199,41 @@ describe("policy-pdf-capture", () => {
     expect(draft.premiumAmount).toBeCloseTo(14324.39);
     expect(draft.requestNumber).toBeNull();
     expect(draft.sourcePolicyNumber).toBeNull();
+  });
+
+  it("prioritizes the Quálitas policy block over the CONDUSEF registry and reads receipt evidence", () => {
+    const coverText = `
+      Quálitas Compañía de Seguros, S.A. de C.V.
+      RENUEVA A: 0940424458
+      PÓLIZA ENDOSO INCISO
+      PÓLIZA DE SEGURO DE AUTOMÓVILES
+      0940457241 000000 0001
+      CONDUSEF-002429-22
+      INFORMACIÓN DEL ASEGURADO
+      INES BARRADAS ALARCON
+      Serie: YJU787B3VVHP65N5NM156546
+      Vigencia Desde las 12:00 P.M. del: 16/AGO/2026 Hasta las 12:00 P.M. del: 16/AGO/2027
+      IMPORTE TOTAL 6,359.33
+    `;
+    const draft = extractPolicyPdfDraftFromText(coverText);
+    expect(draft.policyNumber).toBe("0940457241");
+    expect(draft.sourcePolicyNumber).toBe("0940424458");
+    expect(draft.clientName).toBe("INES BARRADAS ALARCON");
+    expect(draft.serialNumber).toBe("YJU787B3VVHP65N5NM156546");
+
+    const receipt = extractPolicyPdfReceiptEvidence(`
+      AVISO DE COBRO
+      Póliza 0940457241
+      Número control 0307563244
+      Fecha de vencimiento 30/08/2026
+      Serie 01/01
+      Total a pagar $6,359.33
+      FICHA DE DEPOSITO
+      Total a pagar $6,359.00
+      Forma de pago CONTADO
+    `);
+    expect(receipt).toMatchObject({ policyNumber: "0940457241", receiptControlNumber: "0307563244", dueDate: "2026-08-30", periodLabel: "01/01", amountDue: 6359.33, depositAmount: 6359, paymentConfirmed: false });
+    expect(receipt?.warnings.join(" ")).toContain("6359.33");
   });
 
   it("extracts the Banorte cover page without mistaking its phone or URL for policy data", () => {

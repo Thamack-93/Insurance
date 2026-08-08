@@ -37,11 +37,13 @@ import {
 } from "@/lib/pdf-capture-client";
 import type { PolicyCaptureSearchItem, PolicyCaptureSearchKind } from "@/lib/policy-capture-search";
 import { consumePolicyCaptureHandoff, savePolicyCaptureHandoff, clearPolicyCaptureHandoff } from "@/lib/nora-browser-session";
+import { PolicyPdfFilePicker } from "@/components/policies/policy-pdf-file-picker";
 
 type PreviewResponse = {
   success?: boolean;
   preview?: PolicyPdfCapturePreview;
   provenance?: PolicyPdfCaptureProvenance;
+  pdfReference?: { url: string; fileName: string; expiresAt: number } | null;
   error?: string;
 };
 
@@ -155,7 +157,9 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
   const [isConfirming, setIsConfirming] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isCreatingClient, startCreateClientTransition] = useTransition();
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [documentMode, setDocumentMode] = useState<"independent" | "group">("independent");
+  const [pdfReference, setPdfReference] = useState<{ url: string; fileName: string; expiresAt: number } | null>(null);
   const [preview, setPreview] = useState<PolicyPdfCapturePreview | null>(null);
   const [draft, setDraft] = useState<PolicyPdfCaptureDraft | null>(null);
   const [receiptPlanOverrides, setReceiptPlanOverrides] = useState<PolicyPdfCaptureReceiptPlanItem[]>([]);
@@ -175,6 +179,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [hasHydrated, setHasHydrated] = useState(false);
+  const file = files[0] ?? null;
 
   const receiptPlan = useMemo(
     () => (draft ? mergePolicyPdfCaptureReceiptPlan(draft, receiptPlanOverrides) : []),
@@ -195,6 +200,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
           ? payload.receiptPlan as PolicyPdfCaptureReceiptPlanItem[]
           : buildPolicyPdfCaptureReceiptPlan(restoredDraft);
         const restoredProvenance: PolicyPdfCaptureProvenance = payload.provenance ?? {
+          requestedMode: "local",
           extractionSource: "local",
           reviewSource: payload.aiReview ? "ai" : "none",
           aiRunIds: [],
@@ -211,6 +217,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
         setSelectedSourcePolicyId(payload.selectedSourcePolicyId ?? "");
         setSelectedSourcePolicyLabel(payload.selectedSourcePolicyLabel ?? restoredDraft.sourcePolicyNumber ?? "");
         setShowInlineClient(Boolean(payload.showInlineClient));
+        setPdfReference(payload.pdfReference ?? null);
         setPreview({
           draft: restoredDraft,
           suggestions: {
@@ -231,6 +238,8 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
           warnings: payload.warnings ?? [],
           aiReview: payload.aiReview ?? null,
           provenance: restoredProvenance,
+          receiptEvidence: payload.receiptEvidence ?? null,
+          relatedDocuments: payload.relatedDocuments,
         });
       }
       setHasHydrated(true);
@@ -271,6 +280,9 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
         warnings: preview?.warnings ?? [],
         aiReview: preview?.aiReview ?? null,
         provenance: preview?.provenance,
+        receiptEvidence: preview?.receiptEvidence ?? null,
+        relatedDocuments: preview?.relatedDocuments,
+        ...(pdfReference ? { pdfReference } : {}),
     });
   }, [
     draft,
@@ -285,8 +297,23 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
     showInlineClient,
     receiptPlan,
     preview,
+    pdfReference,
     userId,
   ]);
+
+  useEffect(() => {
+    const onPageHide = () => {
+      if (!pdfReference || pdfReference.expiresAt <= Date.now()) return;
+      void fetch("/api/nora/policy-pdf/cleanup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: pdfReference.url }),
+        keepalive: true,
+      }).catch(() => {});
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, [pdfReference]);
 
   useEffect(() => {
     if (!lookupOpen || !lookupKind) return;
@@ -301,7 +328,6 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
         url.searchParams.set("q", lookupQuery);
         if (lookupKind === "policy") {
           if (selectedClientId) url.searchParams.set("clientId", selectedClientId);
-          if (selectedInsurerId) url.searchParams.set("insurerId", selectedInsurerId);
         }
         const response = await fetch(url.toString(), { signal: controller.signal });
         const result = await readJsonResponse<{ items: PolicyCaptureSearchItem[] }>(response);
@@ -374,7 +400,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
         ? draft?.clientName ?? selectedClientLabel
         : kind === "insurer"
           ? draft?.insurerName ?? selectedInsurerLabel
-          : draft?.sourcePolicyNumber ?? selectedSourcePolicyLabel,
+          : draft?.sourcePolicyNumber ?? draft?.serialNumber ?? selectedSourcePolicyLabel,
     );
     setLookupOpen(true);
   }
@@ -420,18 +446,11 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
         setSelectedClientId(item.meta.clientId);
         setSelectedClientLabel(item.meta.clientName ?? item.meta.clientId);
       }
-      if (item.meta?.insurerId) {
-        setSelectedInsurerId(item.meta.insurerId);
-        setSelectedInsurerLabel(item.meta.insurerName ?? item.meta.insurerId);
-      }
       if (item.meta?.clientName) {
         updateDraft({
           clientName: item.meta.clientName,
           clientType: inferClientType(item.meta.clientName, draft.clientRfc),
         });
-      }
-      if (item.meta?.insurerName) {
-        updateDraft({ insurerName: item.meta.insurerName });
       }
       setFieldConfidence((current) => ({ ...current, sourcePolicyNumber: item.meta?.policyNumber ? "high" : "medium" }));
     }
@@ -439,49 +458,49 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
     resetLookupState();
   }
 
-  async function analyzeFile() {
-    if (!file) {
+  async function analyzeSingleFile(targetFile: File, options: { combinedText?: string; relatedDocuments?: Array<{ id: string; fileName: string; kind: "policy" | "receipt" | "endorsement" | "inciso" | "unknown"; source: "local" | "ai"; policyNumber: string | null; warnings: string[] }> } = {}) {
+    if (!targetFile) {
       setError("Selecciona un PDF para analizar.");
       return;
     }
-    if (file.size > MAX_PDF_BYTES) {
+    if (targetFile.size > MAX_PDF_BYTES) {
       setError("El PDF supera el tamaño máximo de 10 MB.");
       return;
     }
 
-    setIsAnalyzing(true);
-    setError(null);
-    setPreview(null);
-
     try {
-      const extractedText = await extractPdfTextFromFile(file, { timeoutMs: 12_000 }).catch(() => "");
+      const extractedText = options.combinedText ?? await extractPdfTextFromFile(targetFile, { timeoutMs: 12_000 }).catch(() => "");
+      const pathname = buildNoraPolicyPdfPathname(userId, targetFile.name);
+      const uploaded = await withOperationTimeout(
+        upload(pathname, targetFile, {
+          access: "private",
+          handleUploadUrl: "/api/nora/policy-pdf/upload",
+          contentType: "application/pdf",
+          multipart: targetFile.size > 5 * 1024 * 1024,
+          clientPayload: JSON.stringify({ userId, purpose: "policy-capture", fileName: targetFile.name }),
+        }),
+        PDF_CAPTURE_UPLOAD_TIMEOUT_MS,
+        "La subida temporal del PDF tardó demasiado. Revisa tu conexión e inténtalo de nuevo.",
+      );
       let response: Response;
       if (extractedText.trim()) {
-        response = await fetchPdfCaptureWithTimeout("/api/policies/capture/preview", {
+        response = await fetchPdfCaptureWithTimeout("/api/nora/policy-pdf/analyze", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             text: extractedText,
-            fileName: file.name,
+            fileName: targetFile.name,
+            blobUrl: uploaded.url,
+            retainBlob: true,
+            mode: "local",
+            relatedDocuments: options.relatedDocuments,
           }),
         }, PDF_CAPTURE_ANALYSIS_TIMEOUT_MS, "El análisis del PDF tardó demasiado en responder.");
       } else {
-        const pathname = buildNoraPolicyPdfPathname(userId, file.name);
-        const uploaded = await withOperationTimeout(
-          upload(pathname, file, {
-            access: "private",
-            handleUploadUrl: "/api/nora/policy-pdf/upload",
-            contentType: "application/pdf",
-            multipart: file.size > 5 * 1024 * 1024,
-            clientPayload: JSON.stringify({ userId, purpose: "policy-capture", fileName: file.name }),
-          }),
-          PDF_CAPTURE_UPLOAD_TIMEOUT_MS,
-          "La subida temporal del PDF tardó demasiado. Revisa tu conexión e inténtalo de nuevo.",
-        );
         response = await fetchPdfCaptureWithTimeout("/api/nora/policy-pdf/analyze", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileName: file.name, blobUrl: uploaded.url }),
+          body: JSON.stringify({ fileName: targetFile.name, blobUrl: uploaded.url, retainBlob: true, mode: "local", relatedDocuments: options.relatedDocuments }),
         }, PDF_CAPTURE_ANALYSIS_TIMEOUT_MS, "El análisis del PDF tardó demasiado en responder.");
       }
 
@@ -491,6 +510,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
       }
 
       setPreview(result.preview);
+      setPdfReference(result.pdfReference ?? { url: uploaded.url, fileName: targetFile.name, expiresAt: Date.now() + 30 * 60 * 1000 });
       setDraft(result.preview.draft);
       setReceiptPlanOverrides(
         result.preview.receiptPlan?.length
@@ -508,6 +528,72 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
       toast.success("PDF analizado. Revisa la propuesta y confirma.");
     } catch (analysisError) {
       const message = analysisError instanceof Error ? analysisError.message : "No se pudo analizar el PDF.";
+      setError(message);
+      toast.error(message);
+    }
+  }
+
+  async function analyzeFile() {
+    if (!files.length) {
+      setError("Selecciona un PDF para analizar.");
+      return;
+    }
+    setIsAnalyzing(true);
+    setError(null);
+    setPreview(null);
+    try {
+      if (documentMode === "group" && files.length > 1) {
+        const documents = await Promise.all(files.map(async (nextFile) => ({
+          id: `${nextFile.name}-${nextFile.size}-${nextFile.lastModified}`,
+          fileName: nextFile.name,
+          kind: /recibo|receipt|pago|cobro/i.test(nextFile.name) ? "receipt" as const : /endoso/i.test(nextFile.name) ? "endorsement" as const : /inciso/i.test(nextFile.name) ? "inciso" as const : "policy" as const,
+          source: "local" as const,
+          policyNumber: null,
+          warnings: [],
+          text: await extractPdfTextFromFile(nextFile, { timeoutMs: 12_000 }).catch(() => ""),
+        })));
+        await analyzeSingleFile(files[0]!, {
+          combinedText: documents.map((document) => `\n--- ${document.fileName} ---\n${document.text}`).join("\n"),
+          relatedDocuments: documents.map((document) => ({ id: document.id, fileName: document.fileName, kind: document.kind, source: document.source, policyNumber: document.policyNumber, warnings: document.warnings })),
+        });
+        return;
+      }
+      for (const targetFile of files) {
+        await analyzeSingleFile(targetFile);
+      }
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
+  async function reanalyzeWithAi() {
+    if (!pdfReference || isAnalyzing || isConfirming) {
+      setError("Vuelve a adjuntar la carátula para revisarla con IA.");
+      return;
+    }
+    setIsAnalyzing(true);
+    setError(null);
+    try {
+      const response = await fetchPdfCaptureWithTimeout("/api/nora/policy-pdf/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: pdfReference.fileName, blobUrl: pdfReference.url, retainBlob: true, mode: "ai", prompt: "Revisa y extrae esta captura con IA." }),
+      }, PDF_CAPTURE_ANALYSIS_TIMEOUT_MS, "La revisión IA del PDF tardó demasiado en responder.");
+      const result = await readJsonResponse<PreviewResponse>(response);
+      if (!response.ok || !result.preview) throw new Error(result.error || "La revisión IA no pudo completar este PDF.");
+      setPreview(result.preview);
+      setDraft(result.preview.draft);
+      setReceiptPlanOverrides(result.preview.receiptPlan ?? buildPolicyPdfCaptureReceiptPlan(result.preview.draft));
+      setFieldConfidence(result.preview.fieldConfidence ?? createEmptyConfidence());
+      setSelectedClientId(result.preview.suggestions.clientId ?? "");
+      setSelectedClientLabel(result.preview.draft.clientName);
+      setSelectedInsurerId(result.preview.suggestions.insurerId ?? "");
+      setSelectedInsurerLabel(result.preview.draft.insurerName);
+      setSelectedSourcePolicyId(result.preview.suggestions.sourcePolicyId ?? "");
+      setSelectedSourcePolicyLabel(result.preview.suggestions.sourcePolicyId ? result.preview.draft.sourcePolicyNumber ?? "" : "");
+      toast.success("La revisión IA terminó. Revisa las propuestas antes de confirmar.");
+    } catch (reanalyzeError) {
+      const message = reanalyzeError instanceof Error ? reanalyzeError.message : "La revisión IA no pudo completar este PDF.";
       setError(message);
       toast.error(message);
     } finally {
@@ -599,6 +685,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
             receiptNumber: item.receiptNumber,
             amount: item.amount,
           })),
+          receiptEvidence: preview?.receiptEvidence ?? null,
         }),
       });
 
@@ -608,6 +695,9 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
       }
 
       toast.success(result.message || "Póliza capturada.");
+      if (pdfReference) {
+        await fetch("/api/nora/policy-pdf/cleanup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: pdfReference.url }) }).catch(() => {});
+      }
       clearPolicyCaptureHandoff(userId);
       router.push(result.redirectTo);
       router.refresh();
@@ -621,7 +711,11 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
   }
 
   function clearAll() {
-    setFile(null);
+    if (pdfReference) {
+      void fetch("/api/nora/policy-pdf/cleanup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: pdfReference.url }), keepalive: true }).catch(() => {});
+    }
+    setFiles([]);
+    setPdfReference(null);
     setPreview(null);
     setDraft(null);
     setFieldConfidence(createEmptyConfidence());
@@ -716,23 +810,38 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
 
             <div className="space-y-2">
               <Label htmlFor="pdf-file">Carátula PDF</Label>
+              <PolicyPdfFilePicker
+                files={files}
+                onFilesChange={(nextFiles) => {
+                  setFiles(nextFiles);
+                  setPreview(null);
+                  setError(null);
+                }}
+                disabled={isAnalyzing || isConfirming}
+              />
               <Input
                 id="pdf-file"
                 type="file"
                 accept="application/pdf"
                 onChange={(event) => {
                   const nextFile = event.target.files?.[0] ?? null;
-                  setFile(nextFile);
+                  setFiles(nextFile ? [nextFile] : []);
                   setPreview(null);
                   setError(null);
                 }}
                 disabled={isAnalyzing || isConfirming}
               />
               {file ? <p className="text-xs text-muted-foreground">{file.name}</p> : null}
+              {files.length > 1 ? (
+                <div className="flex flex-wrap gap-2 pt-1" role="group" aria-label="Modo de documentos">
+                  <Button type="button" size="sm" variant={documentMode === "independent" ? "default" : "outline"} className="h-7 rounded-full text-[11px]" onClick={() => setDocumentMode("independent")} disabled={isAnalyzing || isConfirming}>Pólizas independientes</Button>
+                  <Button type="button" size="sm" variant={documentMode === "group" ? "default" : "outline"} className="h-7 rounded-full text-[11px]" onClick={() => setDocumentMode("group")} disabled={isAnalyzing || isConfirming}>Agrupar relacionados</Button>
+                </div>
+              ) : null}
             </div>
 
             <div className="flex gap-2">
-              <Button type="button" onClick={analyzeFile} disabled={!file || isAnalyzing || isConfirming} className="rounded-full">
+              <Button type="button" onClick={analyzeFile} disabled={!files.length || isAnalyzing || isConfirming} className="rounded-full">
                 {isAnalyzing ? (
                   <>
                     <RefreshCw className="mr-2 size-4 animate-spin" />
@@ -741,7 +850,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
                 ) : (
                   <>
                     <FileUp className="mr-2 size-4" />
-                    Analizar PDF
+                    {files.length > 1 ? `Analizar ${files.length} PDFs` : "Analizar PDF"}
                   </>
                 )}
               </Button>
@@ -803,23 +912,38 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
 
             <div className="space-y-2">
               <Label htmlFor="pdf-file">Carátula PDF</Label>
+              <PolicyPdfFilePicker
+                files={files}
+                onFilesChange={(nextFiles) => {
+                  setFiles(nextFiles);
+                  setPreview(null);
+                  setError(null);
+                }}
+                disabled={isAnalyzing || isConfirming}
+              />
               <Input
                 id="pdf-file"
                 type="file"
                 accept="application/pdf"
                 onChange={(event) => {
                   const nextFile = event.target.files?.[0] ?? null;
-                  setFile(nextFile);
+                  setFiles(nextFile ? [nextFile] : []);
                   setPreview(null);
                   setError(null);
                 }}
                 disabled={isAnalyzing || isConfirming}
               />
               {file ? <p className="text-xs text-muted-foreground">{file.name}</p> : null}
+              {files.length > 1 ? (
+                <div className="flex flex-wrap gap-2 pt-1" role="group" aria-label="Modo de documentos">
+                  <Button type="button" size="sm" variant={documentMode === "independent" ? "default" : "outline"} className="h-7 rounded-full text-[11px]" onClick={() => setDocumentMode("independent")} disabled={isAnalyzing || isConfirming}>Pólizas independientes</Button>
+                  <Button type="button" size="sm" variant={documentMode === "group" ? "default" : "outline"} className="h-7 rounded-full text-[11px]" onClick={() => setDocumentMode("group")} disabled={isAnalyzing || isConfirming}>Agrupar relacionados</Button>
+                </div>
+              ) : null}
             </div>
 
             <div className="flex gap-2">
-              <Button type="button" onClick={analyzeFile} disabled={!file || isAnalyzing || isConfirming} className="rounded-full">
+              <Button type="button" onClick={analyzeFile} disabled={!files.length || isAnalyzing || isConfirming} className="rounded-full">
                 {isAnalyzing ? (
                   <>
                     <RefreshCw className="mr-2 size-4 animate-spin" />
@@ -828,7 +952,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
                 ) : (
                   <>
                     <FileUp className="mr-2 size-4" />
-                    Analizar PDF
+                    {files.length > 1 ? `Analizar ${files.length} PDFs` : "Analizar PDF"}
                   </>
                 )}
               </Button>
@@ -895,6 +1019,15 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
                 </div>
               ) : null}
 
+              {pdfReference ? (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-ai/20 bg-ai/5 px-4 py-3 text-sm">
+                  <p className="text-muted-foreground">El PDF temporal está disponible para una nueva revisión IA.</p>
+                  <Button type="button" variant="outline" className="rounded-full" onClick={() => void reanalyzeWithAi()} disabled={isAnalyzing || isConfirming}>
+                    {isAnalyzing ? "Revisando..." : "Revisar con IA"}
+                  </Button>
+                </div>
+              ) : null}
+
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl border bg-muted/30 p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Nueva póliza</p>
@@ -914,6 +1047,22 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
                   </p>
                 </div>
               </div>
+
+              {preview?.receiptEvidence ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-950 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-100">
+                  <p className="font-medium">Información del recibo</p>
+                  <div className="mt-2 grid gap-1 text-xs sm:grid-cols-2">
+                    <span>Póliza: {preview.receiptEvidence.policyNumber ?? "Sin dato"}</span>
+                    <span>Control: {preview.receiptEvidence.receiptControlNumber ?? "Sin dato"}</span>
+                    <span>Vencimiento: {preview.receiptEvidence.dueDate ?? "Sin dato"}</span>
+                    <span>Periodo: {preview.receiptEvidence.periodLabel ?? "Sin dato"}</span>
+                    <span>Aviso: {preview.receiptEvidence.amountDue ?? "Sin dato"} {preview.receiptEvidence.currency}</span>
+                    <span>Ficha: {preview.receiptEvidence.depositAmount ?? "Sin dato"} {preview.receiptEvidence.currency}</span>
+                  </div>
+                  <p className="mt-2 text-xs">El recibo se guardará como pendiente; esta evidencia no confirma un pago.</p>
+                  {preview.receiptEvidence.warnings.map((warning) => <p key={warning} className="mt-1 text-xs">• {warning}</p>)}
+                </div>
+              ) : null}
 
               {previewSummary ? (
                 <div className="flex flex-wrap gap-2">
