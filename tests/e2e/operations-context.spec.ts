@@ -72,7 +72,7 @@ test.describe("operation queue context", () => {
           clientId: null,
           policyId: null,
           insurerId: null,
-          dueDate: policy!.endDate,
+          dueDate: new Date(Date.now() - 24 * 60 * 60 * 1000),
           startDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
         },
       });

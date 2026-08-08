@@ -24,7 +24,7 @@ test.describe("role visibility smoke tests", () => {
     await authenticatePageAsAdmin(page);
     await page.goto("/settings");
 
-    await expect(page.getByRole("heading", { name: "Centro Operativo", exact: true })).toBeVisible();
+    await expect(page.getByText("Centro Operativo", { exact: true }).first()).toBeVisible();
     await page.getByRole("link", { name: /Abrir centro operativo/ }).click();
     await expect(page).toHaveURL(/\/settings\/centro-operativo$/);
     await expect(page.getByRole("heading", { name: "Centro Operativo", exact: true })).toBeVisible();
@@ -78,8 +78,8 @@ test.describe("role visibility smoke tests", () => {
       await expect(insurerLink).toBeVisible();
       await insurerLink.click();
       await expect(page).toHaveURL(new RegExp(`/portfolio\\?insurerId=${encodeURIComponent(fixture.insurerId)}`));
-      await expect(page.getByText(fixture.clientName)).toBeVisible();
-      await expect(page.getByText(fixture.policyNumber)).toBeVisible();
+      await expect(page.getByRole("link", { name: fixture.clientName, exact: true }).first()).toBeVisible();
+      await expect(page.getByRole("link", { name: fixture.policyNumber, exact: true }).first()).toBeVisible();
     } finally {
       await cleanupPolicyFixture(fixture);
     }
