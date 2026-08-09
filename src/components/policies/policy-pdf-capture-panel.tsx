@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { upload } from "@vercel/blob/client";
 import { AlertCircle, FileUp, RefreshCw, Search, ShieldCheck, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -32,8 +31,8 @@ import { buildNoraPolicyPdfPathname } from "@/lib/nora-pdf-storage.shared";
 import {
   fetchPdfCaptureWithTimeout,
   PDF_CAPTURE_ANALYSIS_TIMEOUT_MS,
-  PDF_CAPTURE_UPLOAD_TIMEOUT_MS,
-  withOperationTimeout,
+  PdfCaptureUploadError,
+  uploadPdfWithRetry,
 } from "@/lib/pdf-capture-client";
 import type { PolicyCaptureSearchItem, PolicyCaptureSearchKind } from "@/lib/policy-capture-search";
 import { consumePolicyCaptureHandoff, savePolicyCaptureHandoff, clearPolicyCaptureHandoff } from "@/lib/nora-browser-session";
@@ -119,6 +118,23 @@ function createEmptyConfidence(): PolicyPdfCaptureFieldConfidence {
     premiumAmount: "low",
     sourcePolicyNumber: "low",
   };
+}
+
+function withStorageStatus(preview: PolicyPdfCapturePreview, status: PolicyPdfCaptureProvenance["storageStatus"], options: { errorCode?: string | null; attempts?: number; retryable?: boolean } = {}) {
+  const warning = status === "unavailable" || status === "retryable"
+    ? "No pudimos conservar temporalmente el PDF; puedes reintentar la subida antes de pedir una revisión IA."
+    : null;
+  return {
+    ...preview,
+    warnings: warning && !preview.warnings.includes(warning) ? [...preview.warnings, warning] : preview.warnings,
+    provenance: {
+      ...preview.provenance,
+      storageStatus: status,
+      storageErrorCode: options.errorCode ?? null,
+      ...(options.attempts != null ? { uploadAttemptCount: options.attempts } : {}),
+      ...(options.retryable != null ? { uploadRetryable: options.retryable } : {}),
+    },
+  } satisfies PolicyPdfCapturePreview;
 }
 
 async function readJsonResponse<T>(response: Response) {
@@ -470,18 +486,28 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
 
     try {
       const extractedText = options.combinedText ?? await extractPdfTextFromFile(targetFile, { timeoutMs: 12_000 }).catch(() => "");
-      const pathname = buildNoraPolicyPdfPathname(userId, targetFile.name);
-      const uploaded = await withOperationTimeout(
-        upload(pathname, targetFile, {
-          access: "private",
-          handleUploadUrl: "/api/nora/policy-pdf/upload",
-          contentType: "application/pdf",
-          multipart: targetFile.size > 5 * 1024 * 1024,
-          clientPayload: JSON.stringify({ userId, purpose: "policy-capture", fileName: targetFile.name }),
-        }),
-        PDF_CAPTURE_UPLOAD_TIMEOUT_MS,
-        "La subida temporal del PDF tardó demasiado. Revisa tu conexión e inténtalo de nuevo.",
-      );
+      const retentionPromise = extractedText.trim()
+        ? uploadPdfWithRetry({
+            pathname: buildNoraPolicyPdfPathname(userId, targetFile.name),
+            file: targetFile,
+            handleUploadUrl: "/api/nora/policy-pdf/upload",
+            clientPayload: JSON.stringify({ userId, purpose: "policy-capture", fileName: targetFile.name }),
+          })
+        : null;
+      if (retentionPromise) void retentionPromise.catch(() => undefined);
+      let uploaded: Awaited<ReturnType<typeof uploadPdfWithRetry>> | null = null;
+      if (!retentionPromise) {
+        try {
+          uploaded = await uploadPdfWithRetry({
+            pathname: buildNoraPolicyPdfPathname(userId, targetFile.name),
+            file: targetFile,
+            handleUploadUrl: "/api/nora/policy-pdf/upload",
+            clientPayload: JSON.stringify({ userId, purpose: "policy-capture", fileName: targetFile.name }),
+          });
+        } catch (error) {
+          throw error;
+        }
+      }
       let response: Response;
       if (extractedText.trim()) {
         response = await fetchPdfCaptureWithTimeout("/api/nora/policy-pdf/analyze", {
@@ -490,8 +516,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
           body: JSON.stringify({
             text: extractedText,
             fileName: targetFile.name,
-            blobUrl: uploaded.url,
-            retainBlob: true,
+            retainBlob: false,
             mode: "local",
             relatedDocuments: options.relatedDocuments,
           }),
@@ -500,7 +525,7 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
         response = await fetchPdfCaptureWithTimeout("/api/nora/policy-pdf/analyze", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileName: targetFile.name, blobUrl: uploaded.url, retainBlob: true, mode: "local", relatedDocuments: options.relatedDocuments }),
+          body: JSON.stringify({ fileName: targetFile.name, blobUrl: uploaded!.url, retainBlob: true, mode: "local", relatedDocuments: options.relatedDocuments }),
         }, PDF_CAPTURE_ANALYSIS_TIMEOUT_MS, "El análisis del PDF tardó demasiado en responder.");
       }
 
@@ -509,23 +534,39 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
         throw new Error(result.error || "No se pudo analizar el PDF.");
       }
 
-      setPreview(result.preview);
-      setPdfReference(result.pdfReference ?? { url: uploaded.url, fileName: targetFile.name, expiresAt: Date.now() + 30 * 60 * 1000 });
-      setDraft(result.preview.draft);
+      let nextPreview = result.preview;
+      if (retentionPromise) nextPreview = withStorageStatus(nextPreview, "pending", { retryable: true });
+      else if (uploaded) nextPreview = withStorageStatus(nextPreview, "retained", { attempts: uploaded.attempts, retryable: false });
+      setPreview(nextPreview);
+      const reference = result.pdfReference ?? (uploaded ? { url: uploaded.url, fileName: targetFile.name, expiresAt: Date.now() + 30 * 60 * 1000 } : null);
+      setPdfReference(reference);
+      setDraft(nextPreview.draft);
       setReceiptPlanOverrides(
-        result.preview.receiptPlan?.length
-          ? result.preview.receiptPlan
-          : buildPolicyPdfCaptureReceiptPlan(result.preview.draft),
+        nextPreview.receiptPlan?.length
+          ? nextPreview.receiptPlan
+          : buildPolicyPdfCaptureReceiptPlan(nextPreview.draft),
       );
-      setFieldConfidence(result.preview.fieldConfidence ?? createEmptyConfidence());
-      setSelectedClientId(result.preview.suggestions.clientId ?? "");
-      setSelectedClientLabel(result.preview.draft.clientName);
-      setSelectedInsurerId(result.preview.suggestions.insurerId ?? "");
-      setSelectedInsurerLabel(result.preview.draft.insurerName);
-      setSelectedSourcePolicyId(result.preview.suggestions.sourcePolicyId ?? "");
-      setSelectedSourcePolicyLabel(result.preview.suggestions.sourcePolicyId ? result.preview.draft.sourcePolicyNumber ?? "" : "");
-      setShowInlineClient(!result.preview.suggestions.clientId);
+      setFieldConfidence(nextPreview.fieldConfidence ?? createEmptyConfidence());
+      setSelectedClientId(nextPreview.suggestions.clientId ?? "");
+      setSelectedClientLabel(nextPreview.draft.clientName);
+      setSelectedInsurerId(nextPreview.suggestions.insurerId ?? "");
+      setSelectedInsurerLabel(nextPreview.draft.insurerName);
+      setSelectedSourcePolicyId(nextPreview.suggestions.sourcePolicyId ?? "");
+      setSelectedSourcePolicyLabel(nextPreview.suggestions.sourcePolicyId ? nextPreview.draft.sourcePolicyNumber ?? "" : "");
+      setShowInlineClient(!nextPreview.suggestions.clientId);
       toast.success("PDF analizado. Revisa la propuesta y confirma.");
+      if (retentionPromise) {
+        void retentionPromise.then((retained) => {
+          const retainedPreview = withStorageStatus(nextPreview, "retained", { attempts: retained.attempts, retryable: false });
+          setPreview(retainedPreview);
+          setPdfReference({ url: retained.url, fileName: targetFile.name, expiresAt: Date.now() + 30 * 60 * 1000 });
+        }).catch((error) => {
+          const uploadError = error instanceof PdfCaptureUploadError ? error : null;
+          const failedPreview = withStorageStatus(nextPreview, uploadError?.retryable ? "retryable" : "unavailable", { errorCode: uploadError?.code ?? "UPLOAD_UNKNOWN", attempts: uploadError?.attempts, retryable: uploadError?.retryable ?? false });
+          setPreview(failedPreview);
+          toast.error(error instanceof Error ? error.message : "No se pudo conservar temporalmente el PDF.");
+        });
+      }
     } catch (analysisError) {
       const message = analysisError instanceof Error ? analysisError.message : "No se pudo analizar el PDF.";
       setError(message);
@@ -581,16 +622,17 @@ export function PolicyPdfCapturePanel({ userId }: { userId: string }) {
       }, PDF_CAPTURE_ANALYSIS_TIMEOUT_MS, "La revisión IA del PDF tardó demasiado en responder.");
       const result = await readJsonResponse<PreviewResponse>(response);
       if (!response.ok || !result.preview) throw new Error(result.error || "La revisión IA no pudo completar este PDF.");
-      setPreview(result.preview);
-      setDraft(result.preview.draft);
-      setReceiptPlanOverrides(result.preview.receiptPlan ?? buildPolicyPdfCaptureReceiptPlan(result.preview.draft));
-      setFieldConfidence(result.preview.fieldConfidence ?? createEmptyConfidence());
-      setSelectedClientId(result.preview.suggestions.clientId ?? "");
-      setSelectedClientLabel(result.preview.draft.clientName);
-      setSelectedInsurerId(result.preview.suggestions.insurerId ?? "");
-      setSelectedInsurerLabel(result.preview.draft.insurerName);
-      setSelectedSourcePolicyId(result.preview.suggestions.sourcePolicyId ?? "");
-      setSelectedSourcePolicyLabel(result.preview.suggestions.sourcePolicyId ? result.preview.draft.sourcePolicyNumber ?? "" : "");
+      const nextPreview = withStorageStatus(result.preview, "retained", { retryable: false });
+      setPreview(nextPreview);
+      setDraft(nextPreview.draft);
+      setReceiptPlanOverrides(nextPreview.receiptPlan ?? buildPolicyPdfCaptureReceiptPlan(nextPreview.draft));
+      setFieldConfidence(nextPreview.fieldConfidence ?? createEmptyConfidence());
+      setSelectedClientId(nextPreview.suggestions.clientId ?? "");
+      setSelectedClientLabel(nextPreview.draft.clientName);
+      setSelectedInsurerId(nextPreview.suggestions.insurerId ?? "");
+      setSelectedInsurerLabel(nextPreview.draft.insurerName);
+      setSelectedSourcePolicyId(nextPreview.suggestions.sourcePolicyId ?? "");
+      setSelectedSourcePolicyLabel(nextPreview.suggestions.sourcePolicyId ? nextPreview.draft.sourcePolicyNumber ?? "" : "");
       toast.success("La revisión IA terminó. Revisa las propuestas antes de confirmar.");
     } catch (reanalyzeError) {
       const message = reanalyzeError instanceof Error ? reanalyzeError.message : "La revisión IA no pudo completar este PDF.";

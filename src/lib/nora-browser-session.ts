@@ -411,6 +411,14 @@ function sanitizeCapturePayload(value: unknown): PolicyCaptureHandoffPayload | n
         trackingStatus: rawProvenance.trackingStatus,
         aiAttempted: rawProvenance.aiAttempted,
         ...(typeof rawProvenance.aiFailureCode === "string" ? { aiFailureCode: cleanText(rawProvenance.aiFailureCode, 120) } : {}),
+        ...(rawProvenance.storageStatus === "pending" || rawProvenance.storageStatus === "retained" || rawProvenance.storageStatus === "unavailable" || rawProvenance.storageStatus === "retryable"
+          ? { storageStatus: rawProvenance.storageStatus }
+          : {}),
+        ...(typeof rawProvenance.storageErrorCode === "string" ? { storageErrorCode: cleanText(rawProvenance.storageErrorCode, 120) } : {}),
+        ...(typeof rawProvenance.uploadAttemptCount === "number" && Number.isInteger(rawProvenance.uploadAttemptCount) && rawProvenance.uploadAttemptCount >= 0 && rawProvenance.uploadAttemptCount <= 10
+          ? { uploadAttemptCount: rawProvenance.uploadAttemptCount }
+          : {}),
+        ...(typeof rawProvenance.uploadRetryable === "boolean" ? { uploadRetryable: rawProvenance.uploadRetryable } : {}),
       } satisfies PolicyPdfCaptureProvenance
     : undefined;
   const safeReceiptEvidence = candidate.receiptEvidence && typeof candidate.receiptEvidence === "object"

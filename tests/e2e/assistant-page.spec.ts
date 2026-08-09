@@ -16,15 +16,17 @@ test.describe("Nora assistant", () => {
     await expect(page.getByText("Backlog de IA")).toHaveCount(0);
   });
 
-  test("accepts a PDF dropped over the conversation, not only over the picker", async ({ page }) => {
-    const workspace = page.getByRole("main").locator("section").first();
-    await workspace.evaluate((section) => {
+  test("accepts a PDF dropped over the chat composer", async ({ page }) => {
+    const input = page.getByPlaceholder(/pregunta por una póliza/i);
+    const composer = input.locator("xpath=../..");
+    await composer.evaluate((section) => {
       const dataTransfer = new DataTransfer();
       dataTransfer.items.add(new File(["%PDF-1.7"], "arrastre.pdf", { type: "application/pdf" }));
       section.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer }));
     });
 
     await expect(page.getByText("arrastre.pdf", { exact: false })).toBeVisible();
+    await expect(page.getByText("Arrastra PDFs aquí o selecciónalos", { exact: true })).toHaveCount(0);
   });
 
   test("uses the full workspace without nested scroll gaps and reports AI usage", async ({ page }) => {

@@ -111,6 +111,10 @@ describe("nora browser session", () => {
         aiRunIds: ["run-review-1", "run-review-2"],
         trackingStatus: "recorded",
         aiAttempted: true,
+        storageStatus: "retained",
+        storageErrorCode: null,
+        uploadAttemptCount: 1,
+        uploadRetryable: false,
       },
       pdfReference: { url: "https://blob.test/policydesk/nora-policy-pdf/user-a/p.pdf", fileName: "p.pdf", expiresAt: 1_800_100 },
       receiptEvidence: {
@@ -131,7 +135,7 @@ describe("nora browser session", () => {
     expect(loadPolicyCaptureHandoff("user-a", { storage: store, now: 100 } )?.payload).toMatchObject({
       warnings: ["No encontramos póliza origen"],
       aiReview: { summary: "La vigencia requiere confirmación.", corrections: [{ field: "endDate", proposedValue: "2027-08-01" }] },
-      provenance: { requestedMode: "ai", extractionSource: "local", reviewSource: "ai", aiRunIds: ["run-review-1", "run-review-2"], trackingStatus: "recorded", aiAttempted: true },
+      provenance: { requestedMode: "ai", extractionSource: "local", reviewSource: "ai", aiRunIds: ["run-review-1", "run-review-2"], trackingStatus: "recorded", aiAttempted: true, storageStatus: "retained", uploadAttemptCount: 1, uploadRetryable: false },
       pdfReference: { fileName: "p.pdf" },
       receiptEvidence: { receiptControlNumber: "0307563244" },
       relatedDocuments: [{ id: "doc-1", kind: "receipt" }],

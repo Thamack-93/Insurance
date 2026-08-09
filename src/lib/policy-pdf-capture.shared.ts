@@ -64,6 +64,7 @@ export type PolicyPdfCaptureSource = "local" | "ai";
 export type PolicyPdfCaptureReviewSource = "none" | "ai";
 export type PolicyPdfCaptureTrackingStatus = "recorded" | "unavailable";
 export type PolicyPdfCaptureRequestedMode = "local" | "ai";
+export type PolicyPdfCaptureStorageStatus = "pending" | "retained" | "unavailable" | "retryable";
 
 export type PolicyPdfCaptureProvenance = {
   requestedMode?: PolicyPdfCaptureRequestedMode;
@@ -73,6 +74,10 @@ export type PolicyPdfCaptureProvenance = {
   trackingStatus: PolicyPdfCaptureTrackingStatus;
   aiAttempted: boolean;
   aiFailureCode?: string | null;
+  storageStatus?: PolicyPdfCaptureStorageStatus;
+  storageErrorCode?: string | null;
+  uploadAttemptCount?: number;
+  uploadRetryable?: boolean;
 };
 
 export type PolicyPdfCaptureDocumentKind = "policy" | "receipt" | "endorsement" | "inciso" | "unknown";

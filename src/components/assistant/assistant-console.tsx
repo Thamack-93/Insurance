@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { ArrowUp, Bot, Check, Clipboard, FileUp, Loader2, RotateCcw, UploadCloud } from "lucide-react";
-import { upload } from "@vercel/blob/client";
 import { toast } from "sonner";
 import type {
   AssistantAiTraceEntry,
@@ -26,8 +25,9 @@ import { buildNoraPolicyPdfPathname } from "@/lib/nora-pdf-storage.shared";
 import {
   fetchPdfCaptureWithTimeout,
   PDF_CAPTURE_ANALYSIS_TIMEOUT_MS,
-  PDF_CAPTURE_UPLOAD_TIMEOUT_MS,
-  withOperationTimeout,
+  PdfCaptureUploadError,
+  uploadPdfWithRetry,
+  type PdfCaptureUploadProgress,
 } from "@/lib/pdf-capture-client";
 import type { NoraContextRef } from "@/lib/nora-context";
 import { NoraExcelDownload } from "@/components/assistant/nora-excel-download";
@@ -172,6 +172,35 @@ function captureProvenanceSource(provenance: PolicyPdfCaptureProvenance): "local
   return provenance.extractionSource === "ai" || provenance.reviewSource === "ai" ? "ai" : "local";
 }
 
+function fileKey(file: File) {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+function makePdfReference(url: string, fileName: string) {
+  return { url, fileName, expiresAt: Date.now() + 30 * 60 * 1000 };
+}
+
+function withStorageStatus(
+  preview: PolicyPdfCapturePreview,
+  status: PolicyPdfCaptureProvenance["storageStatus"],
+  options: { errorCode?: string | null; attempts?: number; retryable?: boolean } = {},
+) {
+  const warning = status === "unavailable" || status === "retryable"
+    ? "No pudimos conservar temporalmente el PDF; puedes reintentar la subida antes de pedir una revisión IA."
+    : null;
+  return {
+    ...preview,
+    warnings: warning && !preview.warnings.includes(warning) ? [...preview.warnings, warning] : preview.warnings,
+    provenance: {
+      ...preview.provenance,
+      storageStatus: status,
+      storageErrorCode: options.errorCode ?? null,
+      ...(options.attempts != null ? { uploadAttemptCount: options.attempts } : {}),
+      ...(options.retryable != null ? { uploadRetryable: options.retryable } : {}),
+    },
+  } satisfies PolicyPdfCapturePreview;
+}
+
 function wantsExplicitAi(prompt: string) {
   return /\b(?:con|usando|usa|utiliza|necesito)\s+ia\b|\bia\s+(?:real|directa)\b/i.test(prompt);
 }
@@ -187,6 +216,7 @@ function CapturePreviewCard({
   preview,
   onOpenCapture,
   onReanalyzeAi,
+  onRetryRetention,
   compact = false,
 }: {
   fileName: string;
@@ -194,6 +224,7 @@ function CapturePreviewCard({
   preview: PolicyPdfCapturePreview;
   onOpenCapture: (preview: PolicyPdfCapturePreview) => void;
   onReanalyzeAi?: () => void;
+  onRetryRetention?: () => void;
   compact?: boolean;
 }) {
   const { draft } = preview;
@@ -248,11 +279,24 @@ function CapturePreviewCard({
           </ul>
         </div>
       ) : null}
+      {provenance.storageStatus === "pending" ? (
+        <p className="border-t border-border/60 px-4 py-3 text-xs text-muted-foreground">Conservando temporalmente el PDF para permitir una revisión IA posterior…</p>
+      ) : null}
+      {provenance.storageStatus === "unavailable" || provenance.storageStatus === "retryable" ? (
+        <div className="border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
+          La captura local está disponible, pero el PDF no quedó conservado temporalmente.
+        </div>
+      ) : null}
       <div className={cn("gap-3 border-t border-border/60 px-4 py-3", compact ? "grid" : "flex items-center justify-between")}>
         <p className="text-xs text-muted-foreground">Abre la captura para revisar, ajustar y confirmar.</p>
         <Button type="button" size="sm" className={cn("rounded-full", compact && "w-full")} onClick={() => onOpenCapture(preview)}>
           Revisar captura
         </Button>
+        {onRetryRetention ? (
+          <Button type="button" size="sm" variant="outline" className={cn("rounded-full", compact && "w-full")} onClick={onRetryRetention}>
+            Reintentar conservación
+          </Button>
+        ) : null}
         {onReanalyzeAi ? (
           <Button type="button" size="sm" variant="outline" className={cn("rounded-full", compact && "w-full")} onClick={onReanalyzeAi}>
             Revisar con IA
@@ -292,6 +336,7 @@ export function AssistantConsole({
   const [activeCapture, setActiveCapture] = useState<ActiveCapture | null>(null);
   const [isFileDragOver, setIsFileDragOver] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [uploadStates, setUploadStates] = useState<Record<string, { status: "pending" | "uploading" | "retained" | "unavailable" | "retryable"; progress: number; label: string; retryable: boolean }>>({});
   const [lastPrompt, setLastPrompt] = useState<string | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
   const [activeContext, setActiveContext] = useState<NoraContextRef | null>(context);
@@ -299,8 +344,8 @@ export function AssistantConsole({
   const restoredUserIdRef = useRef<string | null>(null);
   const contextInitializedRef = useRef(false);
   const instanceIdRef = useRef(makeId());
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const lastSessionUpdatedAtRef = useRef(0);
-  const attachedPdf = attachedPdfs[0] ?? null;
 
   function updateContext(next: NoraContextRef | null) {
     setActiveContext(next);
@@ -425,23 +470,122 @@ export function AssistantConsole({
       setLastPdfReference(null);
     }
     setAttachedPdfs([]);
+    setUploadStates({});
     setAttachmentError(null);
     setActiveCapture(null);
     clearPolicyCaptureHandoff(userId);
   }
 
-  function onPdfSelected(files: File[] | FileList) {
-    const result = mergePolicyPdfFiles([], Array.from(files));
-    setAttachedPdfs(result.files);
-    setAttachmentError(result.error);
-    setActiveCapture(null);
+  function updateUploadState(file: File, state: { status: "pending" | "uploading" | "retained" | "unavailable" | "retryable"; progress?: number; label?: string; retryable?: boolean }) {
+    setUploadStates((current) => ({
+      ...current,
+      [fileKey(file)]: {
+        status: state.status,
+        progress: state.progress ?? current[fileKey(file)]?.progress ?? 0,
+        label: state.label ?? current[fileKey(file)]?.label ?? "",
+        retryable: state.retryable ?? current[fileKey(file)]?.retryable ?? false,
+      },
+    }));
+  }
+
+  async function retainPdf(file: File, purpose: "nora-policy-pdf" | "policy-capture") {
+    updateUploadState(file, { status: "uploading", progress: 0, label: "Subiendo…", retryable: false });
+    try {
+      const uploaded = await uploadPdfWithRetry({
+        pathname: buildNoraPolicyPdfPathname(userId, file.name),
+        file,
+        handleUploadUrl: "/api/nora/policy-pdf/upload",
+        clientPayload: JSON.stringify({ userId, purpose, fileName: file.name }),
+        onProgress: (progress: PdfCaptureUploadProgress) => {
+          updateUploadState(file, { status: "uploading", progress: progress.percentage, label: `Subiendo (${progress.attempt}/${progress.maxAttempts})…`, retryable: false });
+        },
+      });
+      updateUploadState(file, { status: "retained", progress: 100, label: "Conservado", retryable: false });
+      return uploaded;
+    } catch (error) {
+      const uploadError = error instanceof PdfCaptureUploadError
+        ? error
+        : new PdfCaptureUploadError("No se pudo conservar temporalmente el PDF.", { code: "UPLOAD_UNKNOWN", retryable: false, attempts: 0 });
+      updateUploadState(file, {
+        status: uploadError.retryable ? "retryable" : "unavailable",
+        progress: 0,
+        label: uploadError.code,
+        retryable: uploadError.retryable,
+      });
+      throw uploadError;
+    }
   }
 
   function savePolicyCapturePreview(preview: PolicyPdfCapturePreview, pdfReference?: { url: string; fileName: string; expiresAt: number } | null, handoffId = makeId()) {
-    const payload = buildCaptureSessionPayload(preview, pdfReference ?? lastPdfReference ?? activeCapture?.payload.pdfReference, handoffId);
+    const resolvedPdfReference = pdfReference === undefined ? lastPdfReference ?? activeCapture?.payload.pdfReference : pdfReference;
+    const payload = buildCaptureSessionPayload(preview, resolvedPdfReference, handoffId);
     savePolicyCaptureHandoff(userId, payload);
     setActiveCapture({ handoffId, fileName: payload.pdfReference?.fileName ?? activeCapture?.fileName ?? "captura.pdf", payload });
     return handoffId;
+  }
+
+  function updateCaptureMessage(messageId: string, preview: PolicyPdfCapturePreview, pdfReference?: { url: string; fileName: string; expiresAt: number } | null) {
+    setMessages((current) => current.map((message) => {
+      if (message.id !== messageId || !message.capturePreview) return message;
+      return {
+        ...message,
+        source: captureProvenanceSource(preview.provenance),
+        capturePreview: {
+          ...message.capturePreview,
+          provenance: preview.provenance,
+          preview,
+          pdfReference: pdfReference ?? null,
+        },
+      };
+    }));
+  }
+
+  async function retryPdfRetention(file: File, messageId: string, handoffId: string, preview: PolicyPdfCapturePreview) {
+    const pendingPreview = withStorageStatus(preview, "pending", { attempts: 0, retryable: true });
+    savePolicyCapturePreview(pendingPreview, null, handoffId);
+    updateCaptureMessage(messageId, pendingPreview, null);
+    try {
+      const uploaded = await retainPdf(file, "nora-policy-pdf");
+      const retainedPreview = withStorageStatus(pendingPreview, "retained", { attempts: uploaded.attempts, retryable: false });
+      const pdfReference = makePdfReference(uploaded.url, file.name);
+      setLastPdfReference(pdfReference);
+      savePolicyCapturePreview(retainedPreview, pdfReference, handoffId);
+      updateCaptureMessage(messageId, retainedPreview, pdfReference);
+      toast.success("PDF conservado temporalmente. Ya puedes revisarlo con IA.");
+    } catch (error) {
+      const uploadError = error instanceof PdfCaptureUploadError ? error : null;
+      const failedPreview = withStorageStatus(pendingPreview, uploadError?.retryable ? "retryable" : "unavailable", {
+        errorCode: uploadError?.code ?? "UPLOAD_UNKNOWN",
+        attempts: uploadError?.attempts,
+        retryable: uploadError?.retryable ?? false,
+      });
+      setLastPdfReference(null);
+      savePolicyCapturePreview(failedPreview, null, handoffId);
+      updateCaptureMessage(messageId, failedPreview, null);
+      toast.error(error instanceof Error ? error.message : "No se pudo conservar temporalmente el PDF.");
+    }
+  }
+
+  async function reanalyzeStoredPdf(reference: { url: string; fileName: string; expiresAt: number }, messageId: string, handoffId: string) {
+    if (isSending) return;
+    setIsSending(true);
+    try {
+      const response = await fetchPdfCaptureWithTimeout("/api/nora/policy-pdf/analyze", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fileName: reference.fileName, blobUrl: reference.url, retainBlob: true, mode: "ai", prompt: "Revisa y extrae esta captura con IA." }),
+      }, PDF_CAPTURE_ANALYSIS_TIMEOUT_MS, "La revisión IA del PDF tardó demasiado en responder.");
+      const payload = await response.json().catch(() => null) as { preview?: PolicyPdfCapturePreview; error?: string } | null;
+      if (!response.ok || !payload?.preview) throw new Error(payload?.error || "La revisión IA no pudo completar este PDF.");
+      const preview = withStorageStatus(payload.preview, "retained", { retryable: false });
+      savePolicyCapturePreview(preview, reference, handoffId);
+      updateCaptureMessage(messageId, preview, reference);
+      toast.success("La revisión IA terminó. Revisa las propuestas antes de confirmar.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "La revisión IA no pudo completar este PDF.");
+    } finally {
+      setIsSending(false);
+    }
   }
 
   function goToPolicyCapture(preview: PolicyPdfCapturePreview) {
@@ -609,31 +753,41 @@ export function AssistantConsole({
       const extractedText = options.combinedText ?? await extractPdfTextFromFile(file, { timeoutMs: 12_000 }).catch(() => "");
       const mode = wantsExplicitAi(prompt) ? "ai" : "local";
       const commonPayload = { fileName: file.name, prompt };
-      const pathname = buildNoraPolicyPdfPathname(userId, file.name);
-      const uploaded = await withOperationTimeout(
-        upload(pathname, file, {
-          access: "private",
-          handleUploadUrl: "/api/nora/policy-pdf/upload",
-          contentType: "application/pdf",
-          multipart: file.size > 5 * 1024 * 1024,
-          clientPayload: JSON.stringify({ userId, purpose: "nora-policy-pdf", fileName: file.name }),
-        }),
-        PDF_CAPTURE_UPLOAD_TIMEOUT_MS,
-        "La subida temporal del PDF tardó demasiado. Revisa tu conexión e inténtalo de nuevo.",
-      );
+      const retentionPromise = extractedText.trim() && mode === "local"
+        ? retainPdf(file, "nora-policy-pdf")
+        : null;
+      if (retentionPromise) void retentionPromise.catch(() => undefined);
+      let uploaded: Awaited<ReturnType<typeof uploadPdfWithRetry>> | null = null;
+      let storageFallbackError: PdfCaptureUploadError | null = null;
+      if (!retentionPromise) {
+        try {
+          uploaded = await retainPdf(file, "nora-policy-pdf");
+        } catch (error) {
+          storageFallbackError = error instanceof PdfCaptureUploadError
+            ? error
+            : new PdfCaptureUploadError("No se pudo conservar temporalmente el PDF.", { code: "UPLOAD_UNKNOWN", retryable: false, attempts: 0 });
+          if (!(mode === "ai" && extractedText.trim())) throw error;
+        }
+      }
       let response: Response;
 
       if (extractedText.trim() && mode === "local") {
         response = await fetchPdfCaptureWithTimeout("/api/nora/policy-pdf/analyze", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ...commonPayload, text: extractedText, blobUrl: uploaded.url, retainBlob: true, mode, relatedDocuments: options.relatedDocuments }),
+          body: JSON.stringify({ ...commonPayload, text: extractedText, retainBlob: false, mode, relatedDocuments: options.relatedDocuments }),
         }, PDF_CAPTURE_ANALYSIS_TIMEOUT_MS, "El análisis del PDF tardó demasiado en responder.");
       } else {
         response = await fetchPdfCaptureWithTimeout("/api/nora/policy-pdf/analyze", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ...commonPayload, blobUrl: uploaded.url, retainBlob: true, mode, relatedDocuments: options.relatedDocuments }),
+          body: JSON.stringify({
+            ...commonPayload,
+            ...(uploaded ? { blobUrl: uploaded.url } : { text: extractedText }),
+            retainBlob: Boolean(uploaded),
+            mode: uploaded ? mode : "local",
+            relatedDocuments: options.relatedDocuments,
+          }),
         }, PDF_CAPTURE_ANALYSIS_TIMEOUT_MS, "El análisis del PDF tardó demasiado en responder.");
       }
 
@@ -652,16 +806,47 @@ export function AssistantConsole({
         throw new Error(payload?.error || "No pudimos analizar este PDF.");
       }
 
-      const capturePreview = payload.preview;
-      const provenance = payload.provenance ?? capturePreview.provenance;
-      const pdfReference = payload.pdfReference ?? { url: uploaded.url, fileName: file.name, expiresAt: 0 };
+      let capturePreview = payload.preview;
+      let provenance = payload.provenance ?? capturePreview.provenance;
+      if (retentionPromise) {
+        capturePreview = withStorageStatus(capturePreview, "pending", { retryable: true });
+        provenance = capturePreview.provenance;
+      } else if (uploaded) {
+        capturePreview = withStorageStatus(capturePreview, "retained", { attempts: uploaded.attempts, retryable: false });
+        provenance = capturePreview.provenance;
+      } else if (storageFallbackError) {
+        capturePreview = withStorageStatus(capturePreview, storageFallbackError.retryable ? "retryable" : "unavailable", {
+          errorCode: storageFallbackError.code,
+          attempts: storageFallbackError.attempts,
+          retryable: storageFallbackError.retryable,
+        });
+        capturePreview = {
+          ...capturePreview,
+          warnings: [
+            ...capturePreview.warnings,
+            "La IA fue solicitada, pero no se pudo conservar el PDF temporal; se muestra el resultado local.",
+          ].filter((warning, index, warnings) => warnings.indexOf(warning) === index),
+          provenance: {
+            ...capturePreview.provenance,
+            requestedMode: "ai",
+            extractionSource: "local",
+            reviewSource: "none",
+            aiAttempted: false,
+            aiFailureCode: "storage_unavailable",
+            trackingStatus: "unavailable",
+          },
+        };
+        provenance = capturePreview.provenance;
+      }
+      const pdfReference = payload.pdfReference ?? (uploaded ? makePdfReference(uploaded.url, file.name) : null);
       setLastPdfReference(pdfReference);
       const handoffId = savePolicyCapturePreview(capturePreview, pdfReference, makeId());
+      const messageId = makeId();
 
       setMessages((current) => [
         ...current,
         {
-          id: makeId(),
+          id: messageId,
           role: "assistant",
           text:
             provenance.extractionSource === "ai"
@@ -694,7 +879,26 @@ export function AssistantConsole({
         },
       ]);
 
-      // Conservar el PDF temporal y el File en memoria para permitir "Revisar con IA".
+      if (retentionPromise) {
+        void retentionPromise.then((retained) => {
+          const retainedPreview = withStorageStatus(capturePreview, "retained", { attempts: retained.attempts, retryable: false });
+          const retainedReference = makePdfReference(retained.url, file.name);
+          setLastPdfReference(retainedReference);
+          savePolicyCapturePreview(retainedPreview, retainedReference, handoffId);
+          updateCaptureMessage(messageId, retainedPreview, retainedReference);
+        }).catch((error) => {
+          const uploadError = error instanceof PdfCaptureUploadError ? error : null;
+          const failedPreview = withStorageStatus(capturePreview, uploadError?.retryable ? "retryable" : "unavailable", {
+            errorCode: uploadError?.code ?? "UPLOAD_UNKNOWN",
+            attempts: uploadError?.attempts,
+            retryable: uploadError?.retryable ?? false,
+          });
+          setLastPdfReference(null);
+          savePolicyCapturePreview(failedPreview, null, handoffId);
+          updateCaptureMessage(messageId, failedPreview, null);
+          toast.error(error instanceof Error ? error.message : "No se pudo conservar temporalmente el PDF.");
+        });
+      }
     } catch (error) {
       const messageText = error instanceof Error ? error.message : "No pudimos analizar este PDF.";
       toast.error(messageText);
@@ -767,30 +971,29 @@ export function AssistantConsole({
 
   const compact = variant === "panel";
 
-  function handleGlobalDragEnter(event: DragEvent<HTMLElement>) {
-    if (event.dataTransfer.types.includes("Files") && !(event.target as Element | null)?.closest("[data-policy-pdf-picker]")) {
+  function handleComposerDragEnter(event: DragEvent<HTMLElement>) {
+    if (event.dataTransfer.types.includes("Files") && !isSending) {
       event.preventDefault();
       setIsFileDragOver(true);
     }
   }
 
-  function handleGlobalDragOver(event: DragEvent<HTMLElement>) {
-    if (event.dataTransfer.types.includes("Files") && !(event.target as Element | null)?.closest("[data-policy-pdf-picker]")) {
+  function handleComposerDragOver(event: DragEvent<HTMLElement>) {
+    if (event.dataTransfer.types.includes("Files") && !isSending) {
       event.preventDefault();
       event.dataTransfer.dropEffect = "copy";
       setIsFileDragOver(true);
     }
   }
 
-  function handleGlobalDragLeave(event: DragEvent<HTMLElement>) {
+  function handleComposerDragLeave(event: DragEvent<HTMLElement>) {
     if (event.currentTarget === event.target || !(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node | null)) {
       setIsFileDragOver(false);
     }
   }
 
-  function handleGlobalDrop(event: DragEvent<HTMLElement>) {
+  function handleComposerDrop(event: DragEvent<HTMLElement>) {
     setIsFileDragOver(false);
-    if ((event.target as Element | null)?.closest("[data-policy-pdf-picker]")) return;
     if (!event.dataTransfer.files.length) return;
     event.preventDefault();
     if (isSending) return;
@@ -807,20 +1010,7 @@ export function AssistantConsole({
         ? "min-h-0 flex-1 rounded-[1.5rem] border border-border/70 shadow-sm"
         : "min-h-0 flex-1 rounded-none border-0 shadow-none",
     )}
-      onDragEnter={handleGlobalDragEnter}
-      onDragOver={handleGlobalDragOver}
-      onDragLeave={handleGlobalDragLeave}
-      onDrop={handleGlobalDrop}
     >
-      {isFileDragOver ? (
-        <div className="pointer-events-none absolute inset-3 z-20 grid place-items-center rounded-3xl border-2 border-dashed border-primary bg-background/90 text-center shadow-lg">
-          <div>
-            <UploadCloud className="mx-auto size-8 text-primary" />
-            <p className="mt-2 text-sm font-semibold">Suelta aquí tus PDFs</p>
-            <p className="mt-1 text-xs text-muted-foreground">Nora los agregará a la cola de captura.</p>
-          </div>
-        </div>
-      ) : null}
       <header className={cn("flex items-center justify-between border-b border-border/70", variant === "workspace" ? "px-5 py-4 sm:px-7" : "px-3 py-2")}>
         {variant === "workspace" ? (
         <div className="flex items-center gap-3">
@@ -998,7 +1188,15 @@ export function AssistantConsole({
                   provenance={message.capturePreview.provenance}
                   preview={message.capturePreview.preview}
                   onOpenCapture={goToPolicyCapture}
-                  onReanalyzeAi={attachedPdf ? () => { void analyzeAttachedPdf(attachedPdf, "Revisar esta captura con IA"); } : undefined}
+                  onReanalyzeAi={message.capturePreview.pdfReference && message.capturePreview.provenance.storageStatus !== "unavailable" && message.capturePreview.provenance.storageStatus !== "retryable"
+                    ? () => { void reanalyzeStoredPdf(message.capturePreview!.pdfReference!, message.id, message.capturePreview!.handoffId ?? makeId()); }
+                    : undefined}
+                  onRetryRetention={!message.capturePreview.pdfReference && message.capturePreview.handoffId && attachedPdfs.some((file) => file.name === message.capturePreview?.fileName)
+                    ? () => {
+                        const file = attachedPdfs.find((candidate) => candidate.name === message.capturePreview?.fileName);
+                        if (file) void retryPdfRetention(file, message.id, message.capturePreview!.handoffId!, message.capturePreview!.preview);
+                      }
+                    : undefined}
                   compact={compact}
                 />
               ) : null}
@@ -1041,15 +1239,41 @@ export function AssistantConsole({
       </Conversation>
 
       <footer className={cn("shrink-0 border-t border-border/70 bg-background/95 backdrop-blur", compact ? "p-3" : "p-4 sm:p-5")}>
-        {attachmentError ? (
-          <div className="mb-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
-            {attachmentError}
-          </div>
-        ) : null}
-        <div className="mb-2">
-          <PolicyPdfFilePicker files={attachedPdfs} onFilesChange={(files) => { if (files.length === 0) clearAttachment(); else onPdfSelected(files); }} disabled={isSending} />
+        <div
+          className={cn("relative border border-border bg-card shadow-sm focus-within:ring-2 focus-within:ring-ring/30", compact ? "rounded-2xl px-3 py-2.5" : "rounded-3xl px-4 py-3")}
+          onDragEnter={handleComposerDragEnter}
+          onDragOver={handleComposerDragOver}
+          onDragLeave={handleComposerDragLeave}
+          onDrop={handleComposerDrop}
+        >
+          {isFileDragOver ? (
+            <div className="pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-[1.25rem] border-2 border-dashed border-primary bg-background/95 text-center shadow-sm">
+              <div>
+                <UploadCloud className="mx-auto size-6 text-primary" />
+                <p className="mt-1 text-xs font-semibold">Suelta tus PDFs aquí</p>
+                <p className="text-[10px] text-muted-foreground">Se agregarán a la cola de captura.</p>
+              </div>
+            </div>
+          ) : null}
+          {attachmentError ? (
+            <div className="mb-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+              {attachmentError}
+            </div>
+          ) : null}
+          <PolicyPdfFilePicker
+            files={attachedPdfs}
+            presentation="inline"
+            inputRef={fileInputRef}
+            onFilesChange={(files) => { if (files.length === 0) clearAttachment(); else { setAttachedPdfs(files); setAttachmentError(null); setActiveCapture(null); } }}
+            disabled={isSending}
+            fileStatus={(file) => uploadStates[fileKey(file)] ?? null}
+            onRetryFile={(file) => {
+              const captureMessage = messages.find((message) => message.capturePreview?.fileName === file.name && !message.capturePreview.pdfReference && message.capturePreview.handoffId);
+              if (captureMessage?.capturePreview?.handoffId) void retryPdfRetention(file, captureMessage.id, captureMessage.capturePreview.handoffId, captureMessage.capturePreview.preview);
+            }}
+          />
           {attachedPdfs.length > 0 ? (
-            <div className="mt-1 space-y-1 text-[11px] text-muted-foreground">
+            <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
               <div className="flex flex-wrap gap-2" role="group" aria-label="Modo de documentos">
                 <Button type="button" size="sm" variant={documentMode === "independent" ? "default" : "outline"} className="h-7 rounded-full text-[11px]" onClick={() => setDocumentMode("independent")} disabled={isSending}>Pólizas independientes</Button>
                 <Button type="button" size="sm" variant={documentMode === "group" ? "default" : "outline"} className="h-7 rounded-full text-[11px]" onClick={() => setDocumentMode("group")} disabled={isSending}>Agrupar relacionados</Button>
@@ -1057,14 +1281,13 @@ export function AssistantConsole({
               <p>{documentMode === "group" ? "La carátula será principal y los recibos/endosos se tratarán como complementarios en una sola corrida local." : "Cada PDF genera su propia captura y corrida IA."}</p>
             </div>
           ) : null}
-        </div>
-        <div className={cn("flex min-w-0 items-end gap-2 border border-border bg-card shadow-sm focus-within:ring-2 focus-within:ring-ring/30", compact ? "rounded-2xl px-3 py-2.5" : "rounded-3xl px-4 py-3")}>
+          <div className="mt-2 flex min-w-0 items-end gap-2">
           <Button
             type="button"
             variant="ghost"
             size="icon"
             className="size-9 shrink-0 rounded-full"
-            onClick={() => document.querySelector<HTMLInputElement>('input[type="file"][accept="application/pdf,.pdf"]')?.click()}
+            onClick={() => fileInputRef.current?.click()}
             disabled={isSending}
             aria-label="Adjuntar PDF"
           >
@@ -1100,6 +1323,7 @@ export function AssistantConsole({
           >
             <ArrowUp className="size-4" />
           </Button>
+          </div>
         </div>
         <p className="mt-2 text-center text-[10px] leading-4 text-muted-foreground">
           {compact ? "Verifica la información importante antes de confirmar." : "Nora solo responde sobre PolicyDesk y únicamente usa información accesible para tu usuario."}
