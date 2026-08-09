@@ -66,6 +66,7 @@ export type PersistedNoraSession = {
 };
 
 export type PolicyCaptureHandoffPayload = {
+  handoffId?: string;
   draft: Record<string, unknown>;
   fieldConfidence?: Record<string, "high" | "medium" | "low">;
   selectedClientId?: string;
@@ -449,6 +450,9 @@ function sanitizeCapturePayload(value: unknown): PolicyCaptureHandoffPayload | n
     : undefined;
   return {
     draft: safeDraft,
+    ...(typeof candidate.handoffId === "string" && candidate.handoffId.trim()
+      ? { handoffId: cleanText(candidate.handoffId, 160) }
+      : {}),
     ...(safeConfidence ? { fieldConfidence: safeConfidence } : {}),
     ...Object.fromEntries(["selectedClientId", "selectedClientLabel", "selectedInsurerId", "selectedInsurerLabel", "selectedSourcePolicyId", "selectedSourcePolicyLabel"].flatMap((key) => typeof candidate[key as keyof PolicyCaptureHandoffPayload] === "string" ? [[key, cleanText(candidate[key as keyof PolicyCaptureHandoffPayload], 300)]] : [])),
     ...(typeof candidate.showInlineClient === "boolean" ? { showInlineClient: candidate.showInlineClient } : {}),
@@ -467,7 +471,10 @@ function sanitizeCapturePayload(value: unknown): PolicyCaptureHandoffPayload | n
 export function savePolicyCaptureHandoff(userId: string, payload: PolicyCaptureHandoffPayload, options: { storage?: StorageLike | null; now?: number } = {}) {
   if (!validOwnerId(userId)) return false;
   const storage = resolveStorage(options);
-  const safePayload = sanitizeCapturePayload(payload);
+  const safePayload = sanitizeCapturePayload({
+    ...payload,
+    handoffId: payload.handoffId || (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`),
+  });
   if (!safePayload) return false;
   const now = options.now ?? Date.now();
   const handoff: PersistedPolicyCaptureHandoff = { version: POLICY_CAPTURE_SESSION_VERSION, ownerId: userId, createdAt: now, expiresAt: now + POLICY_CAPTURE_TTL_MS, payload: safePayload };

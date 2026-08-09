@@ -642,6 +642,103 @@ describe("policy-pdf-capture", () => {
     expect(preview.confidence.sourcePolicy).toBe(false);
   });
 
+  it("matches the client without punctuation and prefers Banorte over Bupa for the same VIN", async () => {
+    const sourcePolicy = (id: string, insurerId: string, insurerName: string) => ({
+      id,
+      clientId: "client-1",
+      insurerId,
+      policyNumber: id === "source-banorte" ? "1009577" : "BUPA-1009577",
+      startDate: new Date("2025-08-01T00:00:00.000Z"),
+      endDate: new Date("2026-08-01T00:00:00.000Z"),
+      status: "RENEWED",
+      client: { id: "client-1", fullName: "MOTORES ANGELOPOLIS SA DE CV" },
+      insurer: { id: insurerId, name: insurerName },
+      insuredAssets: [{ serialNumber: "1G1F66S0XN4124102" }],
+    });
+    const db = {
+      client: {
+        findMany: async () => [{ id: "client-1", fullName: "MOTORES ANGELOPOLIS SA DE CV" }],
+      },
+      insurer: {
+        findMany: async () => [
+          { id: "insurer-banorte", name: "Seguros Banorte" },
+          { id: "insurer-bupa", name: "BUPA MÉXICO, COMPAÑÍA DE SEGUROS, S.A. DE C.V." },
+        ],
+      },
+      policy: {
+        findMany: async (args: { where?: { insuredAssets?: unknown; OR?: unknown } }) => {
+          if (args.where?.insuredAssets) {
+            return [
+              sourcePolicy("source-banorte", "insurer-banorte", "Seguros Banorte"),
+              sourcePolicy("source-bupa", "insurer-bupa", "BUPA MÉXICO, COMPAÑÍA DE SEGUROS, S.A. DE C.V."),
+            ];
+          }
+          return [];
+        },
+      },
+    } as never;
+
+    const preview = await buildPolicyPdfCapturePreviewFromDraft({
+      draft: {
+        policyNumber: "1009578",
+        clientName: "MOTORES ANGELOPOLIS, S.A. DE C.V.",
+        clientType: "COMPANY",
+        clientEmail: null,
+        clientPhone: null,
+        clientAddress: null,
+        clientRfc: null,
+        clientBirthDate: null,
+        insurerName: "Seguros Banorte, S.A. de C.V.",
+        policyType: "AUTO",
+        serialNumber: "1G1F66S0XN4124102",
+        startDate: "2026-08-01",
+        endDate: "2027-08-01",
+        issueDate: "2026-08-01",
+        paymentFrequency: "ANNUAL",
+        paymentPlan: null,
+        premiumAmount: 31920.29,
+        currency: "MXN",
+        requestNumber: null,
+        insuredObject: "CHEVROLET DEMO SEDAN",
+        beneficiaryInfo: null,
+        notes: null,
+        sourcePolicyNumber: null,
+      },
+      fieldConfidence: buildPolicyPdfCaptureFieldConfidence("MOTORES ANGELOPOLIS, S.A. DE C.V. 1G1F66S0XN4124102" as string, {
+        policyNumber: "1009578",
+        clientName: "MOTORES ANGELOPOLIS, S.A. DE C.V.",
+        clientType: "COMPANY",
+        clientEmail: null,
+        clientPhone: null,
+        clientAddress: null,
+        clientRfc: null,
+        clientBirthDate: null,
+        insurerName: "Seguros Banorte, S.A. de C.V.",
+        policyType: "AUTO",
+        serialNumber: "1G1F66S0XN4124102",
+        startDate: "2026-08-01",
+        endDate: "2027-08-01",
+        issueDate: "2026-08-01",
+        paymentFrequency: "ANNUAL",
+        paymentPlan: null,
+        premiumAmount: 31920.29,
+        currency: "MXN",
+        requestNumber: null,
+        insuredObject: "CHEVROLET DEMO SEDAN",
+        beneficiaryInfo: null,
+        notes: null,
+        sourcePolicyNumber: null,
+      } as never),
+      context: { user: null },
+    }, db);
+
+    expect(preview.suggestions.clientId).toBe("client-1");
+    expect(preview.suggestions.insurerId).toBe("insurer-banorte");
+    expect(preview.suggestions.sourcePolicyId).toBe("source-banorte");
+    expect(preview.sourcePolicyOptions[0]?.label).toContain("Seguros Banorte");
+    expect(preview.sourcePolicyOptions[0]?.label).toContain("MOTORES ANGELOPOLIS SA DE CV");
+  });
+
   it("marks low-confidence fields when text is sparse", () => {
     const confidence = buildPolicyPdfCaptureFieldConfidence("Póliza 123456789", extractPolicyPdfDraftFromText("Póliza 123456789"));
     expect(confidence.policyNumber).toBe("high");

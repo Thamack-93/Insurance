@@ -1,3 +1,5 @@
+import type { PolicyPdfCaptureCorrectionProposal } from "@/lib/policy-pdf-capture.shared";
+
 export type AssistantPrompt = {
   label: string;
   prompt: string;
@@ -333,4 +335,5 @@ export type AssistantConversationResponse = AssistantReply & {
   aiFallbackNotice?: string | null;
   aiDiagnostic?: AssistantAiDiagnostic | null;
   actionProposal?: AssistantActionProposal | null;
+  captureCorrection?: PolicyPdfCaptureCorrectionProposal | null;
 };

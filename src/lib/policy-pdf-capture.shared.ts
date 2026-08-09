@@ -109,6 +109,9 @@ export type PolicyCaptureSourceOption = PolicyCaptureOption & {
   endDate: string;
   status: string;
   serialNumber: string | null;
+  clientName?: string | null;
+  insurerName?: string | null;
+  matchReason?: string | null;
 };
 
 export type PolicyPdfCapturePreview = {
@@ -133,6 +136,21 @@ export type PolicyPdfCapturePreview = {
   provenance: PolicyPdfCaptureProvenance;
   relatedDocuments?: PolicyPdfCaptureRelatedDocument[];
   receiptEvidence?: PolicyPdfCaptureReceiptEvidence | null;
+};
+
+export type PolicyPdfCaptureCorrectionChange = {
+  field: "client" | "insurer" | "sourcePolicy";
+  label: string;
+  before: string | null;
+  after: string;
+  reason: string;
+};
+
+export type PolicyPdfCaptureCorrectionProposal = {
+  handoffId: string;
+  preview: PolicyPdfCapturePreview;
+  changes: PolicyPdfCaptureCorrectionChange[];
+  summary: string;
 };
 
 export type PolicyPdfCaptureReceiptPlanItem = {

@@ -4,9 +4,12 @@ import { useRef, useState } from "react";
 import { FileUp, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  mergePolicyPdfFiles,
+  POLICY_PDF_MAX_FILES,
+} from "@/lib/policy-pdf-file-picker.logic";
 
-export const POLICY_PDF_MAX_FILES = 8;
-export const POLICY_PDF_MAX_BATCH_BYTES = 30 * 1024 * 1024;
+export { mergePolicyPdfFiles, validatePolicyPdfFile, POLICY_PDF_MAX_FILES, POLICY_PDF_MAX_BATCH_BYTES } from "@/lib/policy-pdf-file-picker.logic";
 
 type Props = {
   files: File[];
@@ -16,13 +19,6 @@ type Props = {
   label?: string;
 };
 
-function validatePdf(file: File) {
-  if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf" && file.type !== "application/octet-stream") {
-    return "Solo se aceptan archivos PDF.";
-  }
-  if (file.size > 10 * 1024 * 1024) return "Supera el máximo individual de 10 MB.";
-  return null;
-}
 
 export function PolicyPdfFilePicker({ files, onFilesChange, disabled = false, className, label = "Arrastra PDFs aquí o selecciónalos" }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -30,39 +26,13 @@ export function PolicyPdfFilePicker({ files, onFilesChange, disabled = false, cl
   const [error, setError] = useState<string | null>(null);
 
   function addFiles(input: FileList | File[]) {
-    const incoming = Array.from(input);
-    const next = [...files];
-    const seen = new Set(next.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
-    for (const file of incoming) {
-      const validationError = validatePdf(file);
-      if (validationError) {
-        setError(`${file.name}: ${validationError}`);
-        continue;
-      }
-      const key = `${file.name}:${file.size}:${file.lastModified}`;
-      if (seen.has(key)) {
-        setError(`${file.name}: ya está en la cola.`);
-        continue;
-      }
-      if (next.length >= POLICY_PDF_MAX_FILES) {
-        setError(`Puedes analizar hasta ${POLICY_PDF_MAX_FILES} PDFs por lote.`);
-        break;
-      }
-      if (next.reduce((total, item) => total + item.size, 0) + file.size > POLICY_PDF_MAX_BATCH_BYTES) {
-        setError("El lote supera el máximo total de 30 MB.");
-        break;
-      }
-      seen.add(key);
-      next.push(file);
-    }
-    if (next.length !== files.length) {
-      setError(null);
-      onFilesChange(next);
-    }
+    const result = mergePolicyPdfFiles(files, Array.from(input));
+    setError(result.error);
+    if (result.files.length !== files.length) onFilesChange(result.files);
   }
 
   return (
-    <div className={cn("space-y-2", className)}>
+    <div data-policy-pdf-picker="true" className={cn("space-y-2", className)}>
       <div
         role="button"
         tabIndex={disabled ? -1 : 0}

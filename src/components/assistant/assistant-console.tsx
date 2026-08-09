@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, Bot, Check, Clipboard, FileUp, Loader2, RotateCcw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
+import { ArrowUp, Bot, Check, Clipboard, FileUp, Loader2, RotateCcw, UploadCloud } from "lucide-react";
 import { upload } from "@vercel/blob/client";
 import { toast } from "sonner";
 import type {
@@ -14,7 +14,7 @@ import type {
   AssistantSection,
   AssistantSnapshot,
 } from "@/lib/assistant-types";
-import type { PolicyPdfCapturePreview, PolicyPdfCaptureProvenance, PolicyPdfCaptureRelatedDocument } from "@/lib/policy-pdf-capture.shared";
+import type { PolicyPdfCaptureCorrectionProposal, PolicyPdfCapturePreview, PolicyPdfCaptureProvenance, PolicyPdfCaptureRelatedDocument } from "@/lib/policy-pdf-capture.shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,9 +31,10 @@ import {
 } from "@/lib/pdf-capture-client";
 import type { NoraContextRef } from "@/lib/nora-context";
 import { NoraExcelDownload } from "@/components/assistant/nora-excel-download";
-import { PolicyPdfFilePicker } from "@/components/policies/policy-pdf-file-picker";
+import { mergePolicyPdfFiles, PolicyPdfFilePicker } from "@/components/policies/policy-pdf-file-picker";
+import { PolicyCaptureCorrectionCard } from "@/components/assistant/policy-capture-correction-card";
 import { Conversation, ConversationContent, ConversationScrollButton } from "@/components/ai-elements/conversation";
-import { cleanupLegacyNoraState, getNoraStorageMode, loadNoraSession, NORA_SESSION_EVENT, saveNoraSession, savePolicyCaptureHandoff, type NoraStorageMode } from "@/lib/nora-browser-session";
+import { cleanupLegacyNoraState, clearPolicyCaptureHandoff, getNoraStorageMode, loadNoraSession, loadPolicyCaptureHandoff, NORA_SESSION_EVENT, saveNoraSession, savePolicyCaptureHandoff, type NoraStorageMode, type PolicyCaptureHandoffPayload } from "@/lib/nora-browser-session";
 
 type Message = {
   id: string;
@@ -55,12 +56,20 @@ type Message = {
   reportId?: string | null;
   capturePreview?: {
     fileName: string;
+    handoffId?: string;
     provenance: PolicyPdfCaptureProvenance;
     preview: PolicyPdfCapturePreview;
     pdfReference?: { url: string; fileName: string; expiresAt: number } | null;
   };
+  captureCorrection?: PolicyPdfCaptureCorrectionProposal | null;
   actionProposal?: AssistantConversationResponse["actionProposal"];
   todayMetrics?: AssistantConversationResponse["todayMetrics"];
+};
+
+type ActiveCapture = {
+  handoffId: string;
+  fileName: string;
+  payload: PolicyCaptureHandoffPayload;
 };
 
 function makeId() {
@@ -126,8 +135,9 @@ function formatUsageCost(usage: AssistantAiUsageSnapshot | null | undefined) {
   return `${formatCostUsd(value)}${suffix}`;
 }
 
-function buildCaptureSessionPayload(preview: PolicyPdfCapturePreview, pdfReference?: { url: string; fileName: string; expiresAt: number } | null) {
+function buildCaptureSessionPayload(preview: PolicyPdfCapturePreview, pdfReference?: { url: string; fileName: string; expiresAt: number } | null, handoffId = makeId()): PolicyCaptureHandoffPayload {
   return {
+    handoffId,
     draft: preview.draft,
     fieldConfidence: preview.fieldConfidence,
     selectedClientId: preview.suggestions.clientId ?? "",
@@ -164,6 +174,11 @@ function captureProvenanceSource(provenance: PolicyPdfCaptureProvenance): "local
 
 function wantsExplicitAi(prompt: string) {
   return /\b(?:con|usando|usa|utiliza|necesito)\s+ia\b|\bia\s+(?:real|directa)\b/i.test(prompt);
+}
+
+function wantsCaptureCorrection(prompt: string) {
+  return /\b(?:corrige|corregir|ajusta|ajustar|actualiza|cambia|busca|encuentra|revisa)\b/i.test(prompt) &&
+    /\b(?:cliente|aseguradora|origen|anterior|serie|p[oó]liza)\b/i.test(prompt);
 }
 
 function CapturePreviewCard({
@@ -274,6 +289,8 @@ export function AssistantConsole({
   const [attachedPdfs, setAttachedPdfs] = useState<File[]>([]);
   const [documentMode, setDocumentMode] = useState<"independent" | "group">("independent");
   const [lastPdfReference, setLastPdfReference] = useState<{ url: string; fileName: string; expiresAt: number } | null>(null);
+  const [activeCapture, setActiveCapture] = useState<ActiveCapture | null>(null);
+  const [isFileDragOver, setIsFileDragOver] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [lastPrompt, setLastPrompt] = useState<string | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
@@ -309,6 +326,15 @@ export function AssistantConsole({
           }
         } else if (initialPrompt) {
           setInput(initialPrompt);
+        }
+        const storedCapture = loadPolicyCaptureHandoff(userId);
+        if (storedCapture?.payload?.draft) {
+          setActiveCapture({
+            handoffId: storedCapture.payload.handoffId ?? makeId(),
+            fileName: storedCapture.payload.pdfReference?.fileName ?? "captura.pdf",
+            payload: storedCapture.payload,
+          });
+          if (storedCapture.payload.pdfReference) setLastPdfReference(storedCapture.payload.pdfReference);
         }
         if (variant === "workspace" && window.location.search.includes("source=panel")) {
           router.replace("/assistant", { scroll: false });
@@ -400,20 +426,114 @@ export function AssistantConsole({
     }
     setAttachedPdfs([]);
     setAttachmentError(null);
+    setActiveCapture(null);
+    clearPolicyCaptureHandoff(userId);
   }
 
   function onPdfSelected(files: File[] | FileList) {
-    setAttachedPdfs(Array.from(files));
-    setAttachmentError(null);
+    const result = mergePolicyPdfFiles([], Array.from(files));
+    setAttachedPdfs(result.files);
+    setAttachmentError(result.error);
+    setActiveCapture(null);
   }
 
-  function savePolicyCapturePreview(preview: PolicyPdfCapturePreview, pdfReference?: { url: string; fileName: string; expiresAt: number } | null) {
-    savePolicyCaptureHandoff(userId, buildCaptureSessionPayload(preview, pdfReference ?? lastPdfReference));
+  function savePolicyCapturePreview(preview: PolicyPdfCapturePreview, pdfReference?: { url: string; fileName: string; expiresAt: number } | null, handoffId = makeId()) {
+    const payload = buildCaptureSessionPayload(preview, pdfReference ?? lastPdfReference ?? activeCapture?.payload.pdfReference, handoffId);
+    savePolicyCaptureHandoff(userId, payload);
+    setActiveCapture({ handoffId, fileName: payload.pdfReference?.fileName ?? activeCapture?.fileName ?? "captura.pdf", payload });
+    return handoffId;
   }
 
   function goToPolicyCapture(preview: PolicyPdfCapturePreview) {
-    savePolicyCapturePreview(preview);
+    savePolicyCapturePreview(preview, undefined, activeCapture?.handoffId ?? makeId());
     router.push("/policies/capture");
+  }
+
+  async function requestCaptureCorrection(request: string) {
+    if (!activeCapture || isSending) return;
+    setLastPrompt(request);
+    setMessages((current) => [...current, { id: makeId(), role: "user", text: request }]);
+    setInput("");
+    setIsSending(true);
+    try {
+      const payload = activeCapture.payload;
+      const response = await fetch("/api/nora/policy-pdf/correct", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          handoffId: activeCapture.handoffId,
+          request,
+          capture: {
+            draft: payload.draft,
+            fieldConfidence: payload.fieldConfidence ?? {},
+            selectedClientId: payload.selectedClientId ?? null,
+            selectedClientLabel: payload.selectedClientLabel ?? null,
+            selectedInsurerId: payload.selectedInsurerId ?? null,
+            selectedInsurerLabel: payload.selectedInsurerLabel ?? null,
+            selectedSourcePolicyId: payload.selectedSourcePolicyId ?? null,
+            selectedSourcePolicyLabel: payload.selectedSourcePolicyLabel ?? null,
+            warnings: payload.warnings ?? [],
+            aiReview: payload.aiReview ?? null,
+            provenance: payload.provenance ?? {
+              requestedMode: "local",
+              extractionSource: "local",
+              reviewSource: "none",
+              aiRunIds: [],
+              trackingStatus: "recorded",
+              aiAttempted: false,
+            },
+            receiptEvidence: payload.receiptEvidence ?? null,
+            relatedDocuments: payload.relatedDocuments ?? [],
+          },
+        }),
+      });
+      const result = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        correction?: PolicyPdfCaptureCorrectionProposal;
+        error?: string;
+      } | null;
+      if (!response.ok || !result?.success || !result.correction) {
+        throw new Error(result?.error || "No se pudo revisar la corrección de la captura.");
+      }
+      const correction = result.correction;
+      setMessages((current) => [
+        ...current,
+        {
+          id: makeId(),
+          role: "assistant",
+          text: correction.summary,
+          source: "local",
+          captureCorrection: correction,
+        },
+      ]);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : "No se pudo revisar la corrección de la captura.";
+      toast.error(messageText);
+      setMessages((current) => [...current, { id: makeId(), role: "assistant", text: messageText, source: "local" }]);
+    } finally {
+      setIsSending(false);
+    }
+  }
+
+  function applyCaptureCorrection(messageId: string, proposal: PolicyPdfCaptureCorrectionProposal) {
+    const pdfReference = lastPdfReference ?? activeCapture?.payload.pdfReference ?? null;
+    const payload = buildCaptureSessionPayload(proposal.preview, pdfReference, proposal.handoffId);
+    savePolicyCaptureHandoff(userId, payload);
+    setActiveCapture({ handoffId: proposal.handoffId, fileName: pdfReference?.fileName ?? activeCapture?.fileName ?? "captura.pdf", payload });
+    setMessages((current) => current.map((message) => message.id === messageId
+      ? {
+          ...message,
+          text: "Apliqué la propuesta al borrador de captura. Todavía falta revisarlo y confirmarlo.",
+          captureCorrection: null,
+          capturePreview: {
+            fileName: pdfReference?.fileName ?? activeCapture?.fileName ?? "captura.pdf",
+            handoffId: proposal.handoffId,
+            provenance: proposal.preview.provenance,
+            preview: proposal.preview,
+            pdfReference,
+          },
+        }
+      : message));
   }
 
   async function sendMessage(value: string) {
@@ -536,7 +656,7 @@ export function AssistantConsole({
       const provenance = payload.provenance ?? capturePreview.provenance;
       const pdfReference = payload.pdfReference ?? { url: uploaded.url, fileName: file.name, expiresAt: 0 };
       setLastPdfReference(pdfReference);
-      savePolicyCapturePreview(capturePreview, pdfReference);
+      const handoffId = savePolicyCapturePreview(capturePreview, pdfReference, makeId());
 
       setMessages((current) => [
         ...current,
@@ -566,6 +686,7 @@ export function AssistantConsole({
           ],
           capturePreview: {
             fileName: file.name,
+            handoffId,
             provenance,
             preview: capturePreview,
             pdfReference,
@@ -618,6 +739,10 @@ export function AssistantConsole({
 
   function submitCurrentInput() {
     if (isSending) return;
+    if (activeCapture && wantsCaptureCorrection(input)) {
+      void requestCaptureCorrection(input.trim());
+      return;
+    }
     if (attachedPdfs.length > 0) {
       void analyzeAttachedPdfs(attachedPdfs, input);
       return;
@@ -642,13 +767,60 @@ export function AssistantConsole({
 
   const compact = variant === "panel";
 
+  function handleGlobalDragEnter(event: DragEvent<HTMLElement>) {
+    if (event.dataTransfer.types.includes("Files") && !(event.target as Element | null)?.closest("[data-policy-pdf-picker]")) {
+      event.preventDefault();
+      setIsFileDragOver(true);
+    }
+  }
+
+  function handleGlobalDragOver(event: DragEvent<HTMLElement>) {
+    if (event.dataTransfer.types.includes("Files") && !(event.target as Element | null)?.closest("[data-policy-pdf-picker]")) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      setIsFileDragOver(true);
+    }
+  }
+
+  function handleGlobalDragLeave(event: DragEvent<HTMLElement>) {
+    if (event.currentTarget === event.target || !(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node | null)) {
+      setIsFileDragOver(false);
+    }
+  }
+
+  function handleGlobalDrop(event: DragEvent<HTMLElement>) {
+    setIsFileDragOver(false);
+    if ((event.target as Element | null)?.closest("[data-policy-pdf-picker]")) return;
+    if (!event.dataTransfer.files.length) return;
+    event.preventDefault();
+    if (isSending) return;
+    const result = mergePolicyPdfFiles(attachedPdfs, Array.from(event.dataTransfer.files));
+    setAttachedPdfs(result.files);
+    setAttachmentError(result.error);
+    setActiveCapture(null);
+  }
+
   return (
     <section className={cn(
-      "mx-auto flex w-full max-w-none flex-col overflow-hidden bg-card/90",
+      "relative mx-auto flex w-full max-w-none flex-col overflow-hidden bg-card/90",
       variant === "workspace"
         ? "min-h-0 flex-1 rounded-[1.5rem] border border-border/70 shadow-sm"
         : "min-h-0 flex-1 rounded-none border-0 shadow-none",
-    )}>
+    )}
+      onDragEnter={handleGlobalDragEnter}
+      onDragOver={handleGlobalDragOver}
+      onDragLeave={handleGlobalDragLeave}
+      onDrop={handleGlobalDrop}
+    >
+      {isFileDragOver ? (
+        <div className="pointer-events-none absolute inset-3 z-20 grid place-items-center rounded-3xl border-2 border-dashed border-primary bg-background/90 text-center shadow-lg">
+          <div>
+            <UploadCloud className="mx-auto size-8 text-primary" />
+            <p className="mt-2 text-sm font-semibold">Suelta aquí tus PDFs</p>
+            <p className="mt-1 text-xs text-muted-foreground">Nora los agregará a la cola de captura.</p>
+          </div>
+        </div>
+      ) : null}
       <header className={cn("flex items-center justify-between border-b border-border/70", variant === "workspace" ? "px-5 py-4 sm:px-7" : "px-3 py-2")}>
         {variant === "workspace" ? (
         <div className="flex items-center gap-3">
@@ -828,6 +1000,13 @@ export function AssistantConsole({
                   onOpenCapture={goToPolicyCapture}
                   onReanalyzeAi={attachedPdf ? () => { void analyzeAttachedPdf(attachedPdf, "Revisar esta captura con IA"); } : undefined}
                   compact={compact}
+                />
+              ) : null}
+              {message.captureCorrection ? (
+                <PolicyCaptureCorrectionCard
+                  proposal={message.captureCorrection}
+                  onApply={() => applyCaptureCorrection(message.id, message.captureCorrection!)}
+                  onOpenCapture={() => goToPolicyCapture(message.captureCorrection!.preview)}
                 />
               ) : null}
               {message.actionProposal ? <AssistantActionProposalCard proposal={message.actionProposal} onConfirmed={onConfirmed} /> : null}

@@ -1,7 +1,7 @@
 import { getDb } from "@/lib/db";
 import { normalize } from "@/lib/search-utils";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
-import { normalizeCaptureIdentity } from "@/lib/policy-pdf-capture.shared";
+import { normalizeCaptureIdentity, scoreCaptureIdentity } from "@/lib/policy-pdf-capture.shared";
 
 export type PolicyCaptureSearchKind = "client" | "insurer" | "policy";
 
@@ -49,11 +49,14 @@ async function searchClients(query: string, portfolioOwnerId?: string | null) {
   const db = getDb();
   const needle = normalize(query);
   const databaseQuery = normalizeCaptureIdentity(query).split(" ").filter(Boolean).slice(0, 2).join(" ") || query;
-  const rows = await db.client.findMany({
+  const baseWhere = {
+    status: { not: "ARCHIVED" as const },
+    ...(portfolioOwnerId ? { portfolioOwnerId } : {}),
+  };
+  let rows = await db.client.findMany({
     where: needle
       ? {
-          status: { not: "ARCHIVED" },
-          ...(portfolioOwnerId ? { portfolioOwnerId } : {}),
+          ...baseWhere,
           OR: [
             { fullName: { contains: databaseQuery, mode: "insensitive" } },
             { email: { contains: query, mode: "insensitive" } },
@@ -65,8 +68,7 @@ async function searchClients(query: string, portfolioOwnerId?: string | null) {
           ],
         }
       : {
-          status: { not: "ARCHIVED" },
-          ...(portfolioOwnerId ? { portfolioOwnerId } : {}),
+          ...baseWhere,
         },
     select: {
       id: true,
@@ -81,6 +83,29 @@ async function searchClients(query: string, portfolioOwnerId?: string | null) {
     orderBy: needle ? [{ updatedAt: "desc" }] : [{ fullName: "asc" }],
     take: 12,
   });
+  if (needle && rows.length === 0) {
+    const broadRows = await db.client.findMany({
+      where: baseWhere,
+      select: {
+        id: true,
+        fullName: true,
+        type: true,
+        email: true,
+        phone: true,
+        rfc: true,
+        address: true,
+        updatedAt: true,
+      },
+      orderBy: { fullName: "asc" },
+      take: 500,
+    });
+    rows = broadRows
+      .map((client) => ({ client, score: scoreCaptureIdentity(query, client.fullName) }))
+      .filter((entry) => entry.score > 0)
+      .sort((left, right) => right.score - left.score || left.client.fullName.localeCompare(right.client.fullName))
+      .slice(0, 12)
+      .map((entry) => entry.client);
+  }
 
   return rows.map((client) => ({
     id: client.id,
@@ -107,10 +132,11 @@ async function searchInsurers(query: string) {
   const db = getDb();
   const needle = normalize(query);
   const databaseQuery = normalizeCaptureIdentity(query).split(" ").filter(Boolean).slice(0, 2).join(" ") || query;
-  const rows = await db.insurer.findMany({
+  const baseWhere = { status: { not: "ARCHIVED" as const } };
+  let rows = await db.insurer.findMany({
     where: needle
       ? {
-          status: { not: "ARCHIVED" },
+          ...baseWhere,
           OR: [
             { name: { contains: databaseQuery, mode: "insensitive" } },
             { contactName: { contains: query, mode: "insensitive" } },
@@ -119,7 +145,7 @@ async function searchInsurers(query: string) {
             { notes: { contains: query, mode: "insensitive" } },
           ],
         }
-      : { status: { not: "ARCHIVED" } },
+      : baseWhere,
     select: {
       id: true,
       name: true,
@@ -131,6 +157,27 @@ async function searchInsurers(query: string) {
     orderBy: needle ? [{ updatedAt: "desc" }] : [{ name: "asc" }],
     take: 12,
   });
+  if (needle && rows.length === 0) {
+    const broadRows = await db.insurer.findMany({
+      where: baseWhere,
+      select: {
+        id: true,
+        name: true,
+        contactName: true,
+        contactEmail: true,
+        contactPhone: true,
+        updatedAt: true,
+      },
+      orderBy: { name: "asc" },
+      take: 200,
+    });
+    rows = broadRows
+      .map((insurer) => ({ insurer, score: scoreCaptureIdentity(query, insurer.name) }))
+      .filter((entry) => entry.score > 0)
+      .sort((left, right) => right.score - left.score || left.insurer.name.localeCompare(right.insurer.name))
+      .slice(0, 12)
+      .map((entry) => entry.insurer);
+  }
 
   return rows.map((insurer) => ({
     id: insurer.id,
@@ -152,11 +199,13 @@ async function searchPolicies(
   const db = getDb();
   const needle = normalize(query);
   const policyNumberVariants = buildPolicyNumberSearchVariants(query);
+  const identifierQuery = /^[A-Z0-9/-]{7,}$/i.test(query.replace(/\s+/g, ""));
+  const clientFilter = filters?.clientId && !identifierQuery ? { clientId: filters.clientId } : {};
   const rows = await db.policy.findMany({
     where: needle
       ? {
           ...(filters?.portfolioOwnerId ? { client: { portfolioOwnerId: filters.portfolioOwnerId } } : {}),
-          ...(filters?.clientId ? { clientId: filters.clientId } : {}),
+          ...clientFilter,
           ...(filters?.insurerId ? { insurerId: filters.insurerId } : {}),
           OR: [
             { policyNumber: { contains: query, mode: "insensitive" } },
@@ -173,7 +222,7 @@ async function searchPolicies(
         }
       : {
           ...(filters?.portfolioOwnerId ? { client: { portfolioOwnerId: filters.portfolioOwnerId } } : {}),
-          ...(filters?.clientId ? { clientId: filters.clientId } : {}),
+          ...clientFilter,
           ...(filters?.insurerId ? { insurerId: filters.insurerId } : {}),
         },
     select: {
