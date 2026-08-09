@@ -94,16 +94,57 @@ export const workQueueSelect = {
 
 export type WorkQueueItem = Prisma.WorkItemGetPayload<{ select: typeof workQueueSelect }>;
 
-export function getRenewalPolicyId(item: Pick<WorkQueueItem, "sourceType" | "sourceId" | "entityType" | "entityId" | "policyId">) {
-  if (item.policyId || item.sourceType?.toLowerCase() !== "renewal") return null;
+type RenewalReferenceInput = Pick<
+  WorkQueueItem,
+  "sourceType" | "sourceId" | "taskType" | "title" | "description" | "entityType" | "entityId" | "policyId"
+>;
+
+function normalizeSearchText(value: string | null | undefined) {
+  return value?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase() ?? "";
+}
+
+function isRenewalWorkItem(item: RenewalReferenceInput) {
+  const sourceType = normalizeSearchText(item.sourceType);
+  const taskType = normalizeSearchText(item.taskType);
+  const text = normalizeSearchText(`${item.title ?? ""} ${item.description ?? ""}`);
+
+  return sourceType === "renewal" || taskType === "renewal" || /\brenovacion\b/.test(text);
+}
+
+export function getRenewalPolicyId(item: RenewalReferenceInput) {
+  if (item.policyId || !isRenewalWorkItem(item)) return null;
   if (item.entityType?.toLowerCase() === "policy" && item.entityId) return item.entityId;
 
   for (const reference of [item.entityId, item.sourceId]) {
-    const match = reference?.match(/^policy:([^:]+):renewal-workItem$/i);
-    if (match?.[1]) return match[1];
+    const canonicalMatch = reference?.match(/^policy:([^:]+):renewal-workItem$/i);
+    if (canonicalMatch?.[1]) return canonicalMatch[1];
+
+    const historicalMatch = reference?.match(/^([^:]+):\d{4}-\d{2}-\d{2}$/);
+    if (historicalMatch?.[1]) return historicalMatch[1];
   }
 
   return null;
+}
+
+function getRenewalPolicyNumbers(item: RenewalReferenceInput) {
+  if (!isRenewalWorkItem(item)) return [];
+
+  const text = `${item.title ?? ""}\n${item.description ?? ""}`;
+  const numbers = new Set<string>();
+  const patterns = [
+    /renovaci[oó]n(?:\s+de\s+p[oó]liza)?(?:\s+sin\s+avance)?\s*:\s*([A-Z0-9][A-Z0-9/_-]*)/giu,
+    /p[oó]liza\s*:?\s*([A-Z0-9][A-Z0-9/_-]*)/giu,
+    /n[uú]mero(?:\s+de\s+p[oó]liza)?\s*:\s*([A-Z0-9][A-Z0-9/_-]*)/giu,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const policyNumber = match[1]?.trim();
+      if (policyNumber) numbers.add(policyNumber);
+    }
+  }
+
+  return [...numbers];
 }
 
 export type WorkQueueFilters = {
@@ -140,36 +181,59 @@ export async function getWorkItems(filters: WorkQueueFilters = {}) {
 }
 
 /**
- * Renewal reminders can be found in two persisted shapes: historical rows
- * keep the policy id in entityId, while current rows use the canonical
- * policy:<id>:renewal-workItem source reference. Resolve either shape for
- * display and navigation without mutating the historical record.
+ * Renewal reminders can be found in several persisted shapes: historical rows
+ * keep the policy id in entityId or in a policy:<id>:date source reference,
+ * current rows use policy:<id>:renewal-workItem, and some task-backed rows
+ * only keep the policy number in their title or description. Resolve all of
+ * them for display and navigation without mutating the historical record.
  */
 async function resolveLegacyRenewalRelations(
   items: WorkQueueItem[],
   filters: WorkQueueFilters,
   db: WorkQueueDb,
 ) {
-  const renewalPolicyIdsByWorkItem = new Map(
-    items
-      .map((item) => [item.id, getRenewalPolicyId(item)] as const)
-      .filter((entry): entry is readonly [string, string] => Boolean(entry[1])),
+  const renewalReferencesByWorkItem = new Map(
+    items.map((item) => [
+      item.id,
+      {
+        policyId: getRenewalPolicyId(item),
+        policyNumbers: getRenewalPolicyNumbers(item),
+      },
+    ] as const),
   );
-  const renewalPolicyIds = [...new Set(renewalPolicyIdsByWorkItem.values())];
+  const renewalPolicyIds = [
+    ...new Set(
+      [...renewalReferencesByWorkItem.values()]
+        .map((reference) => reference.policyId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const renewalPolicyNumbers = [
+    ...new Set([...renewalReferencesByWorkItem.values()].flatMap((reference) => reference.policyNumbers)),
+  ];
 
-  if (!renewalPolicyIds.length) return items;
+  if (!renewalPolicyIds.length && !renewalPolicyNumbers.length) return items;
+
+  const policyOr: Prisma.PolicyWhereInput[] = [];
+  if (renewalPolicyIds.length) policyOr.push({ id: { in: renewalPolicyIds } });
+  if (renewalPolicyNumbers.length) policyOr.push({ policyNumber: { in: renewalPolicyNumbers } });
 
   const policies = await db.policy.findMany({
     where: {
-      id: { in: renewalPolicyIds },
+      OR: policyOr,
       ...(filters.portfolioOwnerId ? { client: { portfolioOwnerId: filters.portfolioOwnerId } } : {}),
     },
     select: policyQueueSelect,
   });
   const policyById = new Map(policies.map((policy) => [policy.id, policy]));
+  const policyByNumber = new Map(policies.map((policy) => [policy.policyNumber.toUpperCase(), policy]));
 
   return items.map((item) => {
-    const policy = item.policy ?? policyById.get(renewalPolicyIdsByWorkItem.get(item.id) ?? "");
+    const reference = renewalReferencesByWorkItem.get(item.id);
+    const policy =
+      item.policy ??
+      policyById.get(reference?.policyId ?? "") ??
+      reference?.policyNumbers.map((number) => policyByNumber.get(number.toUpperCase())).find(Boolean);
     if (!policy) return item;
 
     return {

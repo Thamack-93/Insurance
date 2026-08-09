@@ -7,7 +7,6 @@ import {
   FileDigit,
   History,
   ShieldAlert,
-  Sparkles,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -48,12 +47,6 @@ const operationalLinks = [
     description: "Consulta la actividad y los eventos relevantes del sistema.",
     href: "/activity",
     icon: History,
-  },
-  {
-    title: "Nora y reportes IA",
-    description: "Revisa incidentes, evidencia y configuración del uso de IA.",
-    href: "/settings/assistant",
-    icon: Sparkles,
   },
 ] as const;
 
