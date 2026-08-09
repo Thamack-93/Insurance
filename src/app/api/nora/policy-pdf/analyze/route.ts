@@ -30,14 +30,24 @@ const analyzeSchema = z.object({
   blobUrl: z.string().url().optional(),
   fileName: z.string().trim().max(255).optional().nullable(),
   prompt: z.string().trim().max(500).optional().nullable(),
+  mode: z.enum(["local", "ai"]).default("local"),
+  retainBlob: z.boolean().default(false),
+  relatedDocuments: z.array(z.object({
+    id: z.string().max(160),
+    fileName: z.string().max(255),
+    kind: z.enum(["policy", "receipt", "endorsement", "inciso", "unknown"]),
+    source: z.enum(["local", "ai"]),
+    policyNumber: z.string().nullable(),
+    warnings: z.array(z.string()).max(10),
+  })).max(20).optional(),
 });
 
-async function responseFromText(text: string, userId: string, role: "ADMIN" | "AGENT") {
+async function responseFromText(text: string, userId: string, role: "ADMIN" | "AGENT", options: { requestedMode?: "local" | "ai"; skipAiReview?: boolean; extraWarnings?: string[]; aiFailureCode?: string | null; relatedDocuments?: z.infer<typeof analyzeSchema>["relatedDocuments"] } = {}) {
   const preview = await withOperationTimeout(
     buildPolicyPdfCapturePreviewFromText(text, undefined, {
       portfolioOwnerId: role === "ADMIN" ? undefined : userId,
-      user: { id: userId, role },
-    }),
+    user: { id: userId, role },
+    }, options),
     PDF_ANALYSIS_SERVER_TIMEOUT_MS,
     "La revisión del PDF tardó demasiado al consultar la cartera o la IA.",
   );
@@ -111,9 +121,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Debes enviar texto extraído o una URL temporal del PDF." }, { status: 400 });
     }
 
-    if (payload.text) {
-      const result = await responseFromText(payload.text, user.id, user.role === "ADMIN" ? "ADMIN" : "AGENT");
-      return NextResponse.json({ success: true, ...result });
+    if (payload.mode === "ai" && !payload.blobUrl) {
+      return NextResponse.json({ error: "La extracción IA requiere conservar el PDF temporal para enviarlo al gateway." }, { status: 400 });
+    }
+
+    if (payload.text && payload.mode !== "ai") {
+      const result = await responseFromText(payload.text, user.id, user.role === "ADMIN" ? "ADMIN" : "AGENT", { requestedMode: "local", relatedDocuments: payload.relatedDocuments });
+      return NextResponse.json({ success: true, ...result, pdfReference: payload.retainBlob && payload.blobUrl ? { url: payload.blobUrl, fileName: payload.fileName ?? "policy.pdf", expiresAt: Date.now() + 30 * 60 * 1000 } : null });
     }
 
     const blobUrl = payload.blobUrl!;
@@ -149,11 +163,7 @@ export async function POST(request: NextRequest) {
         logError("api.nora.policyPdf.analyze.serverExtraction", error);
       }
 
-      if (extracted?.text.trim()) {
-        const result = await responseFromText(extracted.text, user.id, user.role === "ADMIN" ? "ADMIN" : "AGENT");
-        preview = result.preview;
-        analysisSource = result.provenance.extractionSource;
-      } else {
+      if (payload.mode === "ai") {
         const aiExtraction = await extractPolicyPdfDraftFromAiFile({
           user: { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" },
           fileName: payload.fileName ?? blob.blob.pathname.split("/").pop() ?? "policy.pdf",
@@ -162,44 +172,52 @@ export async function POST(request: NextRequest) {
         });
 
         if (!aiExtraction.value) {
-          return NextResponse.json(
-            {
-              error: aiExtraction.attempted
-                ? "La extracción IA no pudo completar este PDF después de que falló la extracción local. Revisa la configuración del gateway IA o prueba con una versión con mejor calidad."
-                : "La extracción local no encontró texto y la IA no está disponible. Configura AI_GATEWAY_API_KEY o prueba con una versión con mejor calidad.",
-            },
-            { status: 422 },
+          if (!extracted?.text.trim()) {
+            return NextResponse.json({ error: aiExtraction.attempted ? "La extracción IA no pudo completar este PDF después de recorrer los modelos configurados." : "La IA no está disponible. Configura AI_GATEWAY_API_KEY o prueba con una versión con mejor calidad." }, { status: 422 });
+          }
+          const fallback = await responseFromText(extracted.text, user.id, user.role === "ADMIN" ? "ADMIN" : "AGENT", {
+            requestedMode: "ai",
+            skipAiReview: true,
+            extraWarnings: ["La IA fue solicitada, pero no pudo completar la extracción; se muestra el resultado local para revisión."],
+            aiFailureCode: aiExtraction.failureCode ?? "gateway_error",
+            relatedDocuments: payload.relatedDocuments,
+          });
+          preview = fallback.preview;
+          analysisSource = "local";
+        } else {
+          preview = await withOperationTimeout(
+            buildPolicyPdfCapturePreviewFromDraft({
+              draft: aiExtraction.value.draft,
+              fieldConfidence: aiExtraction.value.fieldConfidence,
+              warnings: aiExtraction.value.warnings,
+              aiReview: aiExtraction.value.aiReview ?? null,
+              aiReviewTelemetry: aiExtraction,
+              extractionSource: "ai",
+              requestedMode: "ai",
+              aiRunIds: aiExtraction.runId ? [aiExtraction.runId] : [],
+              trackingStatus: aiExtraction.trackingStatus,
+              context: { portfolioOwnerId, user: { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" } },
+            }),
+            PDF_ANALYSIS_SERVER_TIMEOUT_MS,
+            "La revisión de la captura tardó demasiado al consultar la cartera.",
           );
+          analysisSource = "ai";
         }
-
-        preview = await withOperationTimeout(
-          buildPolicyPdfCapturePreviewFromDraft({
-            draft: aiExtraction.value.draft,
-            fieldConfidence: aiExtraction.value.fieldConfidence,
-            warnings: aiExtraction.value.warnings,
-            aiReview: aiExtraction.value?.aiReview ?? null,
-            aiReviewTelemetry: aiExtraction,
-            extractionSource: "ai",
-            aiRunIds: aiExtraction.runId ? [aiExtraction.runId] : [],
-            trackingStatus: aiExtraction.trackingStatus,
-            context: {
-              portfolioOwnerId,
-              user: { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" },
-            },
-          }),
-          PDF_ANALYSIS_SERVER_TIMEOUT_MS,
-          "La revisión de la captura tardó demasiado al consultar la cartera.",
-        );
-        analysisSource = "ai";
+      } else if (extracted?.text.trim()) {
+        const result = await responseFromText(extracted.text, user.id, user.role === "ADMIN" ? "ADMIN" : "AGENT", { requestedMode: "local", relatedDocuments: payload.relatedDocuments });
+        preview = result.preview;
+        analysisSource = result.provenance.extractionSource;
+      } else {
+        return NextResponse.json({ error: "No se pudo extraer texto del PDF en el servidor." }, { status: 422 });
       }
     } finally {
-      await del(blobUrl).catch(() => {});
+      if (!payload.retainBlob) await del(blobUrl).catch(() => {});
       await cleanupExpiredNoraPolicyPdfUploads(user.id).catch((error) => {
         logError("api.nora.policyPdf.analyze.cleanup", error);
       });
     }
 
-    return NextResponse.json({ success: true, analysisSource, provenance: preview?.provenance, preview });
+    return NextResponse.json({ success: true, analysisSource, provenance: preview?.provenance, preview, pdfReference: payload.retainBlob ? { url: blobUrl, fileName: payload.fileName ?? "policy.pdf", expiresAt: Date.now() + 30 * 60 * 1000 } : null });
   } catch (error) {
     if (error instanceof OperationTimeoutError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: 504 });

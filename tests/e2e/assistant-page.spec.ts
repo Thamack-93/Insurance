@@ -16,6 +16,17 @@ test.describe("Nora assistant", () => {
     await expect(page.getByText("Backlog de IA")).toHaveCount(0);
   });
 
+  test("accepts a PDF dropped over the conversation, not only over the picker", async ({ page }) => {
+    const workspace = page.getByRole("main").locator("section").first();
+    await workspace.evaluate((section) => {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(new File(["%PDF-1.7"], "arrastre.pdf", { type: "application/pdf" }));
+      section.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer }));
+    });
+
+    await expect(page.getByText("arrastre.pdf", { exact: false })).toBeVisible();
+  });
+
   test("uses the full workspace without nested scroll gaps and reports AI usage", async ({ page }) => {
     await page.route("**/api/assistant", async (route) => {
       if (route.request().method() !== "POST") return route.continue();

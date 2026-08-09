@@ -22,6 +22,7 @@ export const API_SECURITY_MANIFEST = {
   "/api/jobs/renewal-followups": "cron-secret",
   "/api/nora/policy-pdf/upload": "authenticated",
   "/api/nora/policy-pdf/analyze": "authenticated",
+  "/api/nora/policy-pdf/correct": "authenticated",
   "/api/payments/quick": "authenticated",
   "/api/policies/capture/clients": "authenticated",
   "/api/policies/capture/confirm": "authenticated",

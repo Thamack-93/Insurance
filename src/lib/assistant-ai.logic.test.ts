@@ -195,7 +195,7 @@ describe("assistant ai fallback", () => {
     expect(aiMocks.createAttempt).toHaveBeenCalledWith(expect.objectContaining({ runId, status: "STARTED" }));
     expect(aiMocks.finalizeAttempt).toHaveBeenCalledWith(attemptId, expect.objectContaining({ status: "SUCCEEDED", responsePreview: "Policy PDF review completed.", usage: expect.objectContaining({ generationId: "gen-review-1", inputTokens: 10, outputTokens: 20 }) }));
     expect(aiMocks.finalizeRun).toHaveBeenCalledWith(runId, expect.objectContaining({ status: "SUCCEEDED", responsePreview: "Policy PDF review completed.", finalModel: "openai/gpt-5.6-luna" }));
-    expect(aiMocks.generateText.mock.calls[0]?.[0].providerOptions.gateway.models).toEqual(["minimax/minimax-m3", "openai/gpt-5.4-nano"]);
+    expect(aiMocks.generateText.mock.calls.map((call) => call[0].providerOptions.gateway.models)).toEqual([[]]);
     expect(JSON.stringify(aiMocks.finalizeAttempt.mock.calls)).not.toContain("NOMBRE PRIVADO");
   });
 
@@ -239,7 +239,7 @@ describe("assistant ai fallback", () => {
       usage: expect.objectContaining({ generationId: "gen-extract-1", inputTokens: 12, outputTokens: 24 }),
     }));
     expect(aiMocks.finalizeRun).toHaveBeenCalledWith(runId, expect.objectContaining({ status: "SUCCEEDED", finalModel: "openai/gpt-5.6-luna" }));
-    expect(aiMocks.generateText.mock.calls[0]?.[0].providerOptions.gateway.models).toEqual(["minimax/minimax-m3", "openai/gpt-5.4-nano"]);
+    expect(aiMocks.generateText.mock.calls.map((call) => call[0].providerOptions.gateway.models)).toEqual([[]]);
     expect(JSON.stringify(aiMocks.finalizeAttempt.mock.calls)).not.toContain("No debe persistirse");
   });
 
@@ -293,7 +293,7 @@ describe("assistant ai fallback", () => {
     const attemptId = aiMocks.createAttempt.mock.calls[0]?.[0].id;
     expect(result).toMatchObject({ value: null, runId, trackingStatus: "recorded", attempted: true });
     expect(aiMocks.finalizeAttempt).toHaveBeenCalledWith(attemptId, expect.objectContaining({ status: "FAILED", responsePreview: null }));
-    expect(aiMocks.finalizeRun).toHaveBeenCalledWith(runId, expect.objectContaining({ status: "FAILED", attemptCount: 1 }));
+    expect(aiMocks.finalizeRun).toHaveBeenCalledWith(runId, expect.objectContaining({ status: "FAILED", attemptCount: 3, fallbackCount: 2, errorCode: "provider_unavailable" }));
   });
 
   it("does not block the gateway when creating the audit run times out", async () => {

@@ -105,18 +105,36 @@ describe("nora browser session", () => {
         corrections: [{ field: "endDate", proposedValue: "2027-08-01", reason: "Detectada en la carátula.", confidence: "high" }],
       },
       provenance: {
+        requestedMode: "ai",
         extractionSource: "local",
         reviewSource: "ai",
         aiRunIds: ["run-review-1", "run-review-2"],
         trackingStatus: "recorded",
         aiAttempted: true,
       },
+      pdfReference: { url: "https://blob.test/policydesk/nora-policy-pdf/user-a/p.pdf", fileName: "p.pdf", expiresAt: 1_800_100 },
+      receiptEvidence: {
+        policyNumber: "0940457241",
+        receiptControlNumber: "0307563244",
+        dueDate: "2026-08-30",
+        periodLabel: "01/01",
+        amountDue: 6359.33,
+        depositAmount: 6359,
+        currency: "MXN",
+        paymentMethod: "CONTADO",
+        paymentConfirmed: false,
+        warnings: ["Diferencia de centavos"],
+      },
+      relatedDocuments: [{ id: "doc-1", fileName: "recibo.pdf", kind: "receipt", source: "local", policyNumber: "0940457241", warnings: [] }],
     }, { storage: store, now: 100 });
 
     expect(loadPolicyCaptureHandoff("user-a", { storage: store, now: 100 } )?.payload).toMatchObject({
       warnings: ["No encontramos póliza origen"],
       aiReview: { summary: "La vigencia requiere confirmación.", corrections: [{ field: "endDate", proposedValue: "2027-08-01" }] },
-      provenance: { extractionSource: "local", reviewSource: "ai", aiRunIds: ["run-review-1", "run-review-2"], trackingStatus: "recorded", aiAttempted: true },
+      provenance: { requestedMode: "ai", extractionSource: "local", reviewSource: "ai", aiRunIds: ["run-review-1", "run-review-2"], trackingStatus: "recorded", aiAttempted: true },
+      pdfReference: { fileName: "p.pdf" },
+      receiptEvidence: { receiptControlNumber: "0307563244" },
+      relatedDocuments: [{ id: "doc-1", kind: "receipt" }],
     });
   });
 

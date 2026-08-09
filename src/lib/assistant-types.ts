@@ -1,3 +1,5 @@
+import type { PolicyPdfCaptureCorrectionProposal } from "@/lib/policy-pdf-capture.shared";
+
 export type AssistantPrompt = {
   label: string;
   prompt: string;
@@ -78,6 +80,7 @@ export type AssistantAiAttempt = {
   usage?: AssistantAiUsageSnapshot | null;
   totalUsage?: AssistantAiUsageSnapshot | null;
   providerMetadata?: unknown;
+  errorMessage?: string | null;
 };
 
 export type AssistantAiTraceEntry = {
@@ -91,6 +94,7 @@ export type AssistantAiTraceEntry = {
   durationMs: number | null;
   finishReason: string | null;
   statusCode: number | null;
+  errorMessage?: string | null;
   usage: AssistantAiUsageSnapshot | null;
   responsePreview: string | null;
 };
@@ -152,6 +156,7 @@ export type AssistantAiFailureCode =
   | "invalid_prompt"
   | "type_validation_error"
   | "empty_response"
+  | "gateway_error"
   | "unknown";
 
 export type AssistantAiDiagnostic = {
@@ -330,4 +335,5 @@ export type AssistantConversationResponse = AssistantReply & {
   aiFallbackNotice?: string | null;
   aiDiagnostic?: AssistantAiDiagnostic | null;
   actionProposal?: AssistantActionProposal | null;
+  captureCorrection?: PolicyPdfCaptureCorrectionProposal | null;
 };

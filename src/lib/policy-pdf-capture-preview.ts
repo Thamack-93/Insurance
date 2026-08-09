@@ -2,10 +2,10 @@ import "server-only";
 
 import { getDb } from "@/lib/db";
 import { parseDateInput } from "@/lib/form-utils";
-import { normalize } from "@/lib/search-utils";
 import { reviewPolicyPdfWithAi } from "@/lib/assistant-ai";
 import {
   extractPolicyPdfDraftFromText,
+  extractPolicyPdfReceiptEvidence,
   buildPolicyPdfCaptureFieldConfidence,
   buildPolicyPdfCaptureReceiptPlan,
   type PolicyCaptureSourceOption,
@@ -14,6 +14,7 @@ import {
   type PolicyPdfCaptureFieldConfidence,
   type PolicyPdfCapturePreview,
   type PolicyPdfCaptureProvenance,
+  scoreCaptureIdentity,
 } from "@/lib/policy-pdf-capture.shared";
 import type { AssistantUser } from "@/lib/assistant-types";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
@@ -28,19 +29,7 @@ type PolicyPdfCapturePreviewContext = {
 };
 
 function scoreTextMatch(needle: string, candidate: string) {
-  const normalizedNeedle = normalize(needle).trim();
-  const normalizedCandidate = normalize(candidate).trim();
-  if (!normalizedNeedle || !normalizedCandidate) return 0;
-  if (normalizedNeedle === normalizedCandidate) return 100;
-  if (normalizedCandidate.includes(normalizedNeedle) || normalizedNeedle.includes(normalizedCandidate)) return 80;
-
-  const needleTokens = normalizedNeedle.split(/\s+/).filter(Boolean);
-  const candidateTokens = normalizedCandidate.split(/\s+/).filter(Boolean);
-  const matches = needleTokens.filter((token) =>
-    candidateTokens.some((candidateToken) => candidateToken.includes(token) || token.includes(candidateToken)),
-  );
-
-  return matches.length * 10;
+  return scoreCaptureIdentity(needle, candidate);
 }
 
 async function buildSourcePolicyCandidates(
@@ -49,17 +38,79 @@ async function buildSourcePolicyCandidates(
   clientId: string | null,
   insurerId: string | null,
   portfolioOwnerId?: string,
-) {
-  const candidates: Array<PolicyCaptureSourceOption> = [];
+) : Promise<{ candidates: Array<PolicyCaptureSourceOption>; suggestedId: string | null }> {
+  type SourceRow = {
+    id: string;
+    clientId: string;
+    insurerId: string;
+    policyNumber: string;
+    startDate: Date;
+    endDate: Date;
+    status: string;
+    client?: { id: string; fullName: string } | null;
+    insurer?: { id: string; name: string } | null;
+    insuredAssets: Array<{ serialNumber: string | null }>;
+  };
+  const ranked = new Map<string, { option: PolicyCaptureSourceOption; rank: number; exactNumber: boolean }>();
   const exactNumberVariants = draft.sourcePolicyNumber ? buildPolicyNumberSearchVariants(draft.sourcePolicyNumber) : [];
+  const targetStartDate = draft.startDate ? parseDateInput(draft.startDate) : null;
+
+  function addRows(rows: SourceRow[], baseRank: number, exactNumber: boolean) {
+    for (const policy of rows) {
+      if (policy.policyNumber === draft.policyNumber) continue;
+      const clientName = policy.client?.fullName ?? null;
+      const insurerName = policy.insurer?.name ?? null;
+      const clientScore = policy.client?.id === clientId
+        ? 100
+        : clientName && draft.clientName
+          ? scoreTextMatch(draft.clientName, clientName)
+          : 0;
+      const insurerScore = policy.insurer?.id === insurerId
+        ? 100
+        : insurerName && draft.insurerName
+          ? scoreTextMatch(draft.insurerName, insurerName)
+          : 0;
+
+      // A source from another client is not a valid renewal candidate. If the
+      // relation is unavailable (legacy test/row), keep it visible but never
+      // let it win over an evidenced match.
+      if (clientName && draft.clientName && clientScore === 0) continue;
+
+      const matchReason = exactNumber
+        ? "Número de póliza origen"
+        : policy.insuredAssets[0]?.serialNumber === draft.serialNumber
+          ? "Serie y cliente"
+          : "Cliente y vigencia";
+      const option: PolicyCaptureSourceOption = {
+        id: policy.id,
+        value: policy.id,
+        label: [
+          policy.policyNumber,
+          policy.status,
+          policy.endDate.toISOString().slice(0, 10),
+          clientName,
+          insurerName,
+          policy.insuredAssets[0]?.serialNumber ? `Serie ${policy.insuredAssets[0].serialNumber}` : null,
+        ].filter(Boolean).join(" · "),
+        policyNumber: policy.policyNumber,
+        startDate: policy.startDate.toISOString().slice(0, 10),
+        endDate: policy.endDate.toISOString().slice(0, 10),
+        status: policy.status,
+        serialNumber: policy.insuredAssets[0]?.serialNumber ?? null,
+        clientName,
+        insurerName,
+        matchReason,
+      };
+      const rank = baseRank + clientScore * 100 + insurerScore * 10 + policy.endDate.getTime() / 1e12;
+      const current = ranked.get(policy.id);
+      if (!current || rank > current.rank) ranked.set(policy.id, { option, rank, exactNumber });
+    }
+  }
 
   if (draft.serialNumber && draft.policyType === "AUTO") {
-    const targetStartDate = draft.startDate ? parseDateInput(draft.startDate) : null;
     const serialPolicies = await db.policy.findMany({
       where: {
         ...policyOperationalWhere(portfolioOwnerId),
-        ...(clientId ? { clientId } : {}),
-        ...(insurerId ? { insurerId } : {}),
         policyType: "AUTO",
         status: { in: ["ACTIVE", "EXPIRED", "RENEWED"] },
         ...(targetStartDate ? { endDate: { lt: targetStartDate } } : {}),
@@ -76,6 +127,10 @@ async function buildSourcePolicyCandidates(
         startDate: true,
         endDate: true,
         status: true,
+        clientId: true,
+        insurerId: true,
+        client: { select: { id: true, fullName: true } },
+        insurer: { select: { id: true, name: true } },
         insuredAssets: {
           where: { serialNumber: draft.serialNumber },
           select: {
@@ -84,21 +139,9 @@ async function buildSourcePolicyCandidates(
           take: 1,
         },
       },
-      take: 5,
+      take: 25,
     });
-
-    candidates.push(
-      ...serialPolicies.map((policy) => ({
-        id: policy.id,
-        value: policy.id,
-        label: `${policy.policyNumber} · ${policy.status} · ${policy.endDate.toISOString().slice(0, 10)} · Serie ${policy.insuredAssets[0]?.serialNumber ?? draft.serialNumber}`,
-        policyNumber: policy.policyNumber,
-        startDate: policy.startDate.toISOString().slice(0, 10),
-        endDate: policy.endDate.toISOString().slice(0, 10),
-        status: policy.status,
-        serialNumber: policy.insuredAssets[0]?.serialNumber ?? null,
-      })),
-    );
+    addRows(serialPolicies as SourceRow[], 8_000, false);
   }
 
   if (exactNumberVariants.length > 0) {
@@ -106,8 +149,6 @@ async function buildSourcePolicyCandidates(
       where: {
         OR: exactNumberVariants.map((variant) => ({ policyNumber: variant })),
         ...policyOperationalWhere(portfolioOwnerId),
-        ...(clientId ? { clientId } : {}),
-        ...(insurerId ? { insurerId } : {}),
       },
       orderBy: [{ startDate: "desc" }, { updatedAt: "desc" }],
       select: {
@@ -116,6 +157,10 @@ async function buildSourcePolicyCandidates(
         startDate: true,
         endDate: true,
         status: true,
+        clientId: true,
+        insurerId: true,
+        client: { select: { id: true, fullName: true } },
+        insurer: { select: { id: true, name: true } },
         insuredAssets: {
           select: {
             serialNumber: true,
@@ -125,30 +170,17 @@ async function buildSourcePolicyCandidates(
       },
       take: 5,
     });
-
-    candidates.push(
-      ...exact.map((policy) => ({
-        id: policy.id,
-        value: policy.id,
-        label: `${policy.policyNumber} · ${policy.status} · ${policy.endDate.toISOString().slice(0, 10)}${policy.insuredAssets[0]?.serialNumber ? ` · Serie ${policy.insuredAssets[0].serialNumber}` : ""}`,
-        policyNumber: policy.policyNumber,
-        startDate: policy.startDate.toISOString().slice(0, 10),
-        endDate: policy.endDate.toISOString().slice(0, 10),
-        status: policy.status,
-        serialNumber: policy.insuredAssets[0]?.serialNumber ?? null,
-      })),
-    );
+    addRows(exact as SourceRow[], 10_000, true);
   }
 
-  if (candidates.length === 0 && clientId && insurerId) {
+  if (ranked.size === 0 && clientId) {
     const fallback = await db.policy.findMany({
       where: {
         ...policyOperationalWhere(portfolioOwnerId),
         clientId,
-        insurerId,
         policyType: draft.policyType,
         status: { in: ["ACTIVE", "EXPIRED", "RENEWED"] },
-        ...(exactNumberVariants.length > 0 ? { OR: exactNumberVariants.map((variant) => ({ policyNumber: variant })) } : {}),
+        ...(targetStartDate ? { endDate: { lt: targetStartDate } } : {}),
       },
       orderBy: [{ endDate: "desc" }, { startDate: "desc" }, { updatedAt: "desc" }],
       select: {
@@ -157,6 +189,10 @@ async function buildSourcePolicyCandidates(
         startDate: true,
         endDate: true,
         status: true,
+        clientId: true,
+        insurerId: true,
+        client: { select: { id: true, fullName: true } },
+        insurer: { select: { id: true, name: true } },
         insuredAssets: {
           select: {
             serialNumber: true,
@@ -166,22 +202,16 @@ async function buildSourcePolicyCandidates(
       },
       take: 5,
     });
-
-    candidates.push(
-      ...fallback.map((policy) => ({
-        id: policy.id,
-        value: policy.id,
-        label: `${policy.policyNumber} · ${policy.status} · ${policy.endDate.toISOString().slice(0, 10)}${policy.insuredAssets[0]?.serialNumber ? ` · Serie ${policy.insuredAssets[0].serialNumber}` : ""}`,
-        policyNumber: policy.policyNumber,
-        startDate: policy.startDate.toISOString().slice(0, 10),
-        endDate: policy.endDate.toISOString().slice(0, 10),
-        status: policy.status,
-        serialNumber: policy.insuredAssets[0]?.serialNumber ?? null,
-      })),
-    );
+    addRows(fallback as SourceRow[], 2_000, false);
   }
 
-  return candidates;
+  const ordered = [...ranked.values()].sort((left, right) => right.rank - left.rank);
+  const top = ordered[0];
+  const second = ordered[1];
+  const suggestedId = top && top.option.matchReason !== "Cliente y vigencia" && (top.exactNumber || !second || top.rank - second.rank > 500)
+    ? top.option.id
+    : null;
+  return { candidates: ordered.slice(0, 12).map((entry) => entry.option), suggestedId };
 }
 
 type PolicyPdfCapturePreviewInput = {
@@ -195,8 +225,14 @@ type PolicyPdfCapturePreviewInput = {
     attempted: boolean;
   } | null;
   extractionSource?: "local" | "ai";
+  requestedMode?: "local" | "ai";
   aiRunIds?: string[];
   trackingStatus?: "recorded" | "unavailable";
+  aiFailureCode?: string | null;
+  skipAiReview?: boolean;
+  extraWarnings?: string[];
+  receiptEvidence?: import("@/lib/policy-pdf-capture.shared").PolicyPdfCaptureReceiptEvidence | null;
+  relatedDocuments?: import("@/lib/policy-pdf-capture.shared").PolicyPdfCaptureRelatedDocument[];
   reviewText?: string | null;
   context?: PolicyPdfCapturePreviewContext;
 };
@@ -206,7 +242,7 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
   db: DbClient = getDb(),
 ): Promise<PolicyPdfCapturePreview> {
   const { portfolioOwnerId, user } = input.context ?? {};
-  const warnings = [...(input.warnings ?? [])];
+  const warnings = [...(input.warnings ?? []), ...(input.extraWarnings ?? [])];
   const policyNumberSuggestion = input.draft.sourcePolicyNumber;
   const policyNumberVariants = buildPolicyNumberSearchVariants(input.draft.policyNumber);
   const existingPolicyMatches = policyNumberVariants.length > 0
@@ -256,14 +292,17 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
   const suggestedClientId = clientCandidates[0]?.id ?? null;
   const suggestedInsurerId = insurerCandidates[0]?.id ?? null;
 
-  const sourcePolicyCandidates = await buildSourcePolicyCandidates(
+  const sourcePolicyResult = await buildSourcePolicyCandidates(
     db,
     input.draft,
     suggestedClientId,
     suggestedInsurerId,
     portfolioOwnerId,
   );
-  const suggestedSourcePolicyId = sourcePolicyCandidates.find((policy) => policy.policyNumber === policyNumberSuggestion)?.id ?? null;
+  const sourcePolicyCandidates = sourcePolicyResult.candidates;
+  const suggestedSourcePolicyId = policyNumberSuggestion
+    ? sourcePolicyCandidates.find((policy) => policy.policyNumber === policyNumberSuggestion)?.id ?? sourcePolicyResult.suggestedId
+    : sourcePolicyResult.suggestedId;
 
   if (!input.draft.policyNumber) warnings.push("No pudimos detectar el número de póliza.");
   if (existingPolicyMatches.length > 0) {
@@ -295,6 +334,7 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
   const shouldRequestAiReview = Boolean(
     user &&
       !input.aiReview &&
+      !input.skipAiReview &&
       (warnings.length > 0 ||
         hasLowConfidence ||
         clientCandidates.length === 0 ||
@@ -327,11 +367,13 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
     ? aiReviewResult.trackingStatus
     : input.trackingStatus ?? "recorded";
   const provenance: PolicyPdfCaptureProvenance = {
+    requestedMode: input.requestedMode ?? "local",
     extractionSource: input.extractionSource ?? "local",
     reviewSource: aiReview ? "ai" : "none",
     aiRunIds,
     trackingStatus,
     aiAttempted,
+    aiFailureCode: input.aiFailureCode ?? null,
   };
   if (aiAttempted && !aiReview) {
     warnings.push("No pudimos completar la revisión IA; revisa los campos marcados antes de confirmar.");
@@ -370,6 +412,8 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
     warnings,
     aiReview,
     provenance,
+    relatedDocuments: input.relatedDocuments,
+    receiptEvidence: input.receiptEvidence ?? null,
   } satisfies PolicyPdfCapturePreview;
 }
 
@@ -377,13 +421,17 @@ export async function buildPolicyPdfCapturePreviewFromText(
   text: string,
   db: DbClient = getDb(),
   context: PolicyPdfCapturePreviewContext = {},
+  options: Pick<PolicyPdfCapturePreviewInput, "requestedMode" | "skipAiReview" | "extraWarnings" | "aiFailureCode" | "relatedDocuments"> = {},
 ): Promise<PolicyPdfCapturePreview> {
   const draft = extractPolicyPdfDraftFromText(text);
   const fieldConfidence = buildPolicyPdfCaptureFieldConfidence(text, draft);
+  const receiptEvidence = extractPolicyPdfReceiptEvidence(text);
   return buildPolicyPdfCapturePreviewFromDraft({
     draft,
     fieldConfidence,
     reviewText: text,
+    ...options,
+    receiptEvidence,
     context,
   }, db);
 }

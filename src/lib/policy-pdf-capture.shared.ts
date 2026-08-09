@@ -63,13 +63,40 @@ export type PolicyPdfCaptureAiReview = {
 export type PolicyPdfCaptureSource = "local" | "ai";
 export type PolicyPdfCaptureReviewSource = "none" | "ai";
 export type PolicyPdfCaptureTrackingStatus = "recorded" | "unavailable";
+export type PolicyPdfCaptureRequestedMode = "local" | "ai";
 
 export type PolicyPdfCaptureProvenance = {
+  requestedMode?: PolicyPdfCaptureRequestedMode;
   extractionSource: PolicyPdfCaptureSource;
   reviewSource: PolicyPdfCaptureReviewSource;
   aiRunIds: string[];
   trackingStatus: PolicyPdfCaptureTrackingStatus;
   aiAttempted: boolean;
+  aiFailureCode?: string | null;
+};
+
+export type PolicyPdfCaptureDocumentKind = "policy" | "receipt" | "endorsement" | "inciso" | "unknown";
+
+export type PolicyPdfCaptureRelatedDocument = {
+  id: string;
+  fileName: string;
+  kind: PolicyPdfCaptureDocumentKind;
+  source: "local" | "ai";
+  policyNumber: string | null;
+  warnings: string[];
+};
+
+export type PolicyPdfCaptureReceiptEvidence = {
+  policyNumber: string | null;
+  receiptControlNumber: string | null;
+  dueDate: string | null;
+  periodLabel: string | null;
+  amountDue: number | null;
+  depositAmount: number | null;
+  currency: string;
+  paymentMethod: string | null;
+  paymentConfirmed: false;
+  warnings: string[];
 };
 
 export type PolicyCaptureOption = {
@@ -82,6 +109,9 @@ export type PolicyCaptureSourceOption = PolicyCaptureOption & {
   endDate: string;
   status: string;
   serialNumber: string | null;
+  clientName?: string | null;
+  insurerName?: string | null;
+  matchReason?: string | null;
 };
 
 export type PolicyPdfCapturePreview = {
@@ -104,6 +134,23 @@ export type PolicyPdfCapturePreview = {
   warnings: string[];
   aiReview: PolicyPdfCaptureAiReview | null;
   provenance: PolicyPdfCaptureProvenance;
+  relatedDocuments?: PolicyPdfCaptureRelatedDocument[];
+  receiptEvidence?: PolicyPdfCaptureReceiptEvidence | null;
+};
+
+export type PolicyPdfCaptureCorrectionChange = {
+  field: "client" | "insurer" | "sourcePolicy";
+  label: string;
+  before: string | null;
+  after: string;
+  reason: string;
+};
+
+export type PolicyPdfCaptureCorrectionProposal = {
+  handoffId: string;
+  preview: PolicyPdfCapturePreview;
+  changes: PolicyPdfCaptureCorrectionChange[];
+  summary: string;
 };
 
 export type PolicyPdfCaptureReceiptPlanItem = {
@@ -237,6 +284,34 @@ export function mergePolicyPdfCaptureReceiptPlan(
 
 function compact(value: string) {
   return value.replace(/\s+/g, " ").trim();
+}
+
+const CAPTURE_GENERIC_IDENTITY_TOKENS = new Set([
+  "a", "de", "del", "la", "las", "los", "s", "sa", "c", "cv", "sc", "rl",
+  "compania", "compañia", "seguros", "seguro", "aseguradora",
+]);
+
+export function normalizeCaptureIdentity(value: string) {
+  return normalizeText(value)
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function captureIdentityTokens(value: string) {
+  const normalized = normalizeCaptureIdentity(value);
+  const meaningful = normalized.split(" ").filter((token) => token.length > 1 && !CAPTURE_GENERIC_IDENTITY_TOKENS.has(token));
+  return meaningful.length > 0 ? meaningful : normalized.split(" ").filter(Boolean);
+}
+
+export function scoreCaptureIdentity(needle: string, candidate: string) {
+  const left = captureIdentityTokens(needle);
+  const right = captureIdentityTokens(candidate);
+  if (left.length === 0 || right.length === 0) return 0;
+  if (left.join(" ") === right.join(" ")) return 100;
+  const matches = left.filter((token) => right.some((candidateToken) => candidateToken === token));
+  const coverage = matches.length / Math.max(left.length, right.length);
+  return Math.round(coverage * 90);
 }
 
 const POLICY_TYPE_CODES = new Set([
@@ -664,6 +739,18 @@ function normalizePolicyType(value: string | null | undefined) {
 
 function parsePolicyNumber(lines: string[]) {
   const policyPattern = /\b(\d{5}U\d{2}|\d{5,12})\b/i;
+  const policyHeaderIndex = findLineIndexContaining(lines, [
+    "PÓLIZA ENDOSO INCISO",
+    "Poliza ENDOSO INCISO",
+  ]);
+  if (policyHeaderIndex >= 0) {
+    const headerWindow = lines.slice(policyHeaderIndex + 1, policyHeaderIndex + 4);
+    const explicitHeaderNumber = headerWindow
+      .map((line) => line.match(/^\s*(\d{5}U\d{2}|\d{8,12})\b/i)?.[1] ?? null)
+      .find((value) => Boolean(value));
+    if (explicitHeaderNumber) return explicitHeaderNumber;
+  }
+
   const explicitPolicyLine = lines.find((line) => /(?:no\.?\s*de\s*p[oó]liza|n[uú]mero\s+de\s+p[oó]liza)/i.test(line) && policyPattern.test(line) && !isLikelyPhoneNumber(line));
   if (explicitPolicyLine) {
     const match = explicitPolicyLine.match(policyPattern);
@@ -1059,6 +1146,48 @@ function parseSourcePolicyNumber(lines: string[], fullText: string, policyNumber
   if (explicit?.[1] && explicit[1] !== policyNumber) return explicit[1];
 
   return suggestPreviousPolicyNumber(policyNumber);
+}
+
+export function extractPolicyPdfReceiptEvidence(text: string): PolicyPdfCaptureReceiptEvidence | null {
+  const fullText = compact(text);
+  const normalized = normalizeText(fullText);
+  if (!normalized.includes("aviso de cobro") && !normalized.includes("ficha de deposito") && !normalized.includes("numero control")) {
+    return null;
+  }
+
+  const policyNumber = fullText.match(/p[oó]liza(?:\s+endoso)?\s*[:#]?\s*(\d{8,12})/i)?.[1]
+    ?? fullText.match(/PÓLIZA\s+ENDOSO[^\n]*?(\d{8,12})/i)?.[1]
+    ?? null;
+  const receiptControlNumber = fullText.match(/n[uú]mero\s+control\s+([0-9]{6,})/i)?.[1] ?? null;
+  const dueDate = normalizeDateString(
+    fullText.match(/fecha\s+de\s+vencimiento[^\d]*(\d{1,2}\/\d{1,2}\/\d{4})/i)?.[1] ?? null,
+  );
+  const periodLabel = fullText.match(/serie\s+\d{1,2}\s*\/\s*\d{1,2}/i)?.[0]?.replace(/serie\s+/i, "") ?? null;
+  const amountFromLabel = (label: RegExp) => {
+    const match = fullText.match(label);
+    return match?.[1] ? parseMoney(match[1]) : null;
+  };
+  const amountDue = amountFromLabel(/total\s+a\s+pagar\s*\$?\s*([\d.,]+)/i);
+  const depositAmount = amountFromLabel(/ficha\s+de\s+(?:pago|deposito)[^]*?total\s+a\s+pagar\s*\$?\s*([\d.,]+)/i);
+  const warnings: string[] = [];
+  if (amountDue !== null && depositAmount !== null && Math.abs(amountDue - depositAmount) > 0.009) {
+    warnings.push(`El aviso indica ${amountDue.toFixed(2)} y la ficha de depósito ${depositAmount.toFixed(2)}.`);
+  }
+  if (!policyNumber) warnings.push("No pudimos vincular el recibo con un número de póliza.");
+  if (!receiptControlNumber) warnings.push("No pudimos detectar el número de control del recibo.");
+
+  return {
+    policyNumber,
+    receiptControlNumber,
+    dueDate,
+    periodLabel,
+    amountDue,
+    depositAmount,
+    currency: normalized.includes("pesos") || normalized.includes("mxn") ? "MXN" : "MXN",
+    paymentMethod: fullText.match(/forma\s+de\s+pago\s+([A-ZÁÉÍÓÚÜÑ ]+)/i)?.[1]?.trim() ?? null,
+    paymentConfirmed: false,
+    warnings,
+  };
 }
 
 export function suggestPreviousPolicyNumber(policyNumber: string) {

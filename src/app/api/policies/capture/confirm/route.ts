@@ -9,7 +9,7 @@ import { rateLimitResponse, guardErrorResponse } from "@/lib/api-security";
 import { parseDateInput } from "@/lib/form-utils";
 import { businessToday } from "@/lib/business-dates";
 import { assertClientPortfolioAccess, assertPolicyPortfolioAccess } from "@/lib/portfolio-access";
-import { inferClientType, type PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
+import { inferClientType, type PolicyPdfCaptureDraft, type PolicyPdfCaptureReceiptEvidence } from "@/lib/policy-pdf-capture.shared";
 import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
 import { revalidatePaths } from "@/lib/mutation-utils";
 import { closeRenewalFollowUp } from "@/lib/renewal-followups";
@@ -58,6 +58,18 @@ const confirmSchema = z.object({
       }),
     )
     .optional(),
+  receiptEvidence: z.object({
+    policyNumber: z.string().nullable(),
+    receiptControlNumber: z.string().nullable(),
+    dueDate: z.string().nullable(),
+    periodLabel: z.string().nullable(),
+    amountDue: z.number().nullable(),
+    depositAmount: z.number().nullable(),
+    currency: z.string(),
+    paymentMethod: z.string().nullable(),
+    paymentConfirmed: z.literal(false),
+    warnings: z.array(z.string()).max(20),
+  }).nullable().optional(),
 });
 
 function normalizeDraft(draft: z.infer<typeof confirmSchema>["draft"]): PolicyPdfCaptureDraft {
@@ -215,9 +227,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (payload.clientId !== sourcePolicy.clientId || payload.insurerId !== sourcePolicy.insurerId) {
+    if (payload.clientId !== sourcePolicy.clientId) {
       return NextResponse.json(
-        { error: "La póliza nueva debe conservar el mismo cliente y aseguradora de la póliza renovada." },
+        { error: "La póliza nueva debe conservar el mismo cliente de la póliza origen." },
         { status: 400 },
       );
     }
@@ -340,6 +352,7 @@ export async function POST(request: NextRequest) {
         draft: captureDraft,
         userId: user.id,
         receiptPlan: payload.receiptPlan,
+        receiptEvidence: payload.receiptEvidence as PolicyPdfCaptureReceiptEvidence | null | undefined,
       });
 
       for (const autoReceiptResult of autoReceiptResults) {
