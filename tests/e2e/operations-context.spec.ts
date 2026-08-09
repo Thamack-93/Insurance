@@ -11,6 +11,11 @@ test.describe("operation queue context", () => {
     let workItemId: string | null = null;
 
     try {
+      await db.policy.update({
+        where: { id: fixture.policyId },
+        data: { endDate: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      });
+
       const workItem = await db.workItem.create({
         data: {
           sourceType: "Renewal",
@@ -34,12 +39,15 @@ test.describe("operation queue context", () => {
       await authenticatePageAsAdmin(page);
       await page.goto("/operations");
 
-      const renewalLink = page.getByRole("link", { name: new RegExp(`Renovación: ${policy!.policyNumber}`) }).first();
+      const renewalLink = page.getByRole("link", { name: new RegExp(`Renovación(?: vencida)? · ${policy!.policyNumber}`) }).first();
       await expect(renewalLink).toBeVisible();
       await expect(renewalLink).toContainText(fixture.clientName);
       await expect(renewalLink).toContainText(fixture.insurerName);
-      await expect(renewalLink).toContainText("Vigencia");
+      await expect(renewalLink).toContainText("Venció");
+      await expect(renewalLink).toContainText("Vencida");
+      await expect(renewalLink).toContainText("Abrir póliza");
       await expect(renewalLink).toHaveAttribute("href", `/policies/${policy!.id}`);
+      expect((await renewalLink.innerText()).split(policy!.policyNumber)).toHaveLength(2);
 
       await renewalLink.click();
       await expect(page).toHaveURL(new RegExp(`/policies/${policy!.id}$`));
@@ -81,11 +89,12 @@ test.describe("operation queue context", () => {
       await authenticatePageAsAdmin(page);
       await page.goto("/operations");
 
-      const renewalLink = page.getByRole("link", { name: new RegExp(`Renovación: ${policy!.policyNumber}`) }).first();
+      const renewalLink = page.getByRole("link", { name: new RegExp(`Renovación(?: vencida)? · ${policy!.policyNumber}`) }).first();
       await expect(renewalLink).toBeVisible();
       await expect(renewalLink).toContainText(fixture.clientName);
       await expect(renewalLink).toContainText(fixture.insurerName);
-      await expect(renewalLink).toContainText("Renovación");
+      await expect(renewalLink).toContainText("Renueva");
+      await expect(renewalLink).toContainText("Abrir póliza");
       await expect(renewalLink).toHaveAttribute("href", `/policies/${policy!.id}`);
     } finally {
       if (workItemId) await db.workItem.delete({ where: { id: workItemId } }).catch(() => undefined);
@@ -123,12 +132,14 @@ test.describe("operation queue context", () => {
       await authenticatePageAsAdmin(page);
       await page.goto("/operations");
 
-      const renewalLink = page.getByRole("link", { name: new RegExp(`Renovación: ${fixture.policyNumber}`) }).first();
+      const renewalLink = page.getByRole("link", { name: new RegExp(`Renovación(?: vencida)? · ${fixture.policyNumber}`) }).first();
       await expect(renewalLink).toBeVisible();
       await expect(renewalLink).toContainText(fixture.clientName);
       await expect(renewalLink).toContainText(fixture.insurerName);
-      await expect(renewalLink).toContainText("Vigencia");
+      await expect(renewalLink).toContainText("Renueva");
+      await expect(renewalLink).toContainText("Abrir póliza");
       await expect(renewalLink).toHaveAttribute("href", `/policies/${fixture.policyId}`);
+      expect((await renewalLink.innerText()).split(fixture.policyNumber)).toHaveLength(2);
     } finally {
       if (workItemId) await db.workItem.delete({ where: { id: workItemId } }).catch(() => undefined);
       await cleanupPolicyFixture(fixture);

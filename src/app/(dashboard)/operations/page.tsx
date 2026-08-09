@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, CalendarClock, CheckCircle2, ClipboardList, Plus, ShieldCheck } from "@/components/icons";
+import { AlertTriangle, ArrowRight, CalendarClock, CheckCircle2, ClipboardList, Plus, ShieldCheck } from "@/components/icons";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { PageHeader } from "@/components/layout/page-header";
 import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
@@ -14,12 +14,14 @@ import { policyTypeLabel } from "@/lib/status";
 import { claimOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 import { getWorkItems, OPEN_WORK_ITEM_STATUSES, type WorkQueueItem } from "@/lib/work-queue";
+import { buildOperationalWorkItemPresentation, type OperationalRenewalState } from "@/lib/operations-presentation";
 import { readTablePage } from "@/lib/table-query";
 import { cn } from "@/lib/utils";
 import { getWorkItemHref } from "@/lib/work-item-navigation";
 import { RenewalBoard } from "@/components/renewals/renewal-board";
 import { getRenewalBoardOwners, loadRenewalBoard } from "@/lib/renewal-board";
 import { readRenewalBoardFilters } from "@/lib/renewal-board.logic";
+import { Badge } from "@/components/ui/badge";
 
 type OperationsView = "all" | "pending" | "renewals" | "renewal-board" | "claims";
 
@@ -39,41 +41,89 @@ function readView(value?: string): OperationsView {
     : "all";
 }
 
+const operationalStateClasses: Record<OperationalRenewalState, string> = {
+  VENCIDA: "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300",
+  URGENTE: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200",
+  PROXIMA: "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300",
+  PENDIENTE: "border-border bg-muted text-muted-foreground",
+};
+
+const operationalStateLabels: Record<OperationalRenewalState, string> = {
+  VENCIDA: "Vencida",
+  URGENTE: "Urgente",
+  PROXIMA: "Próxima",
+  PENDIENTE: "Pendiente",
+};
+
 function WorkItemRow({ item }: { item: WorkQueueItem }) {
   const href = getWorkItemHref(item);
   const clientLabel = item.client?.fullName ?? "Sin cliente asociado";
-  const policyContext = item.policy
-    ? `${item.policy.policyNumber} · ${policyTypeLabel(item.policy.policyType)}`
-    : "Sin póliza asociada";
+  const policyType = item.policy ? policyTypeLabel(item.policy.policyType) : "Tipo no disponible";
   const insurerLabel = item.insurer?.name ?? "Sin aseguradora asociada";
-  const isRenewal = item.sourceType?.toLowerCase() === "renewal" || item.taskType?.toLowerCase() === "renewal";
-  const renewalDate = item.policy?.endDate ?? (isRenewal ? item.dueDate : null);
-  const dueDateLabel = item.dueDate
-    ? `Seguimiento ${formatDate(item.dueDate)} · ${formatBusinessDateRelative(item.dueDate)}`
-    : "Sin fecha de seguimiento";
+  const presentation = buildOperationalWorkItemPresentation({
+    sourceType: item.sourceType,
+    taskType: item.taskType,
+    title: item.title,
+    description: item.description,
+    dueDate: item.dueDate,
+    policy: item.policy,
+  });
+  const policyNumber = item.policy?.policyNumber;
+  const title = presentation.isRenewal
+    ? `${presentation.state === "VENCIDA" ? "Renovación vencida" : "Renovación"}${policyNumber ? ` · ${policyNumber}` : ""}`
+    : item.title;
+  const renewalDateLabel = presentation.renewalLabel && item.policy?.endDate
+    ? `${presentation.renewalLabel}: ${formatDate(item.policy.endDate)}`
+    : null;
+  const followUpLabel = presentation.followUpPending
+    ? "Seguimiento pendiente"
+    : item.dueDate
+    ? `${presentation.followUpOverdue ? "Seguimiento vencido" : "Seguimiento"}: ${formatDate(item.dueDate)} · ${formatBusinessDateRelative(item.dueDate)}`
+    : "Seguimiento pendiente";
+  const actionLabel = item.policy && presentation.isRenewal ? "Abrir póliza" : "Abrir pendiente";
+  const stateLabel = presentation.state ? operationalStateLabels[presentation.state] : null;
   return (
-    <li className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b px-4 py-3 last:border-b-0">
-      <Link href={href} className="min-w-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <p className="truncate text-sm font-medium">{item.title}</p>
-        <p className="mt-0.5 truncate text-xs text-muted-foreground">Cliente: {clientLabel} · Póliza: {policyContext} · Aseguradora: {insurerLabel}</p>
-        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-          {item.policy ? `Vigencia ${formatDate(item.policy.startDate)}–${formatDate(item.policy.endDate)} · ` : ""}
-          {renewalDate ? `Renovación ${formatDate(renewalDate)} · ` : isRenewal ? "Renovación sin fecha · " : ""}
-          {dueDateLabel}
-        </p>
+    <li className="border-b px-4 py-3 last:border-b-0">
+      <Link
+        href={href}
+        aria-label={`${actionLabel}: ${title}`}
+        className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <div className="min-w-0">
+          <p className="break-words text-sm font-medium">{title}</p>
+          <p className="mt-0.5 break-words text-xs text-muted-foreground">Cliente: {clientLabel} · {policyType} · Aseguradora: {insurerLabel}</p>
+          <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+            {renewalDateLabel ? `${renewalDateLabel} · ` : ""}
+            {followUpLabel}
+          </p>
+          <span className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary">
+            {actionLabel}
+            <ArrowRight className="size-3.5" aria-hidden />
+          </span>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          {stateLabel && presentation.state ? (
+            <Badge variant="outline" className={`rounded-full px-2 py-0.5 text-[11px] ${operationalStateClasses[presentation.state]}`}>
+              {stateLabel}
+            </Badge>
+          ) : null}
+          <PriorityBadge priority={item.priority} className="px-2 py-0.5 text-[11px]" />
+        </div>
       </Link>
-      <PriorityBadge priority={item.priority} className="px-2 py-0.5 text-[11px]" />
     </li>
   );
 }
 
-function WorkItemColumn({ title, count, items, tone }: { title: string; count: number; items: WorkQueueItem[]; tone: string }) {
+function WorkItemColumn({ title, count, items, tone, viewAllHref }: { title: string; count: number; items: WorkQueueItem[]; tone: string; viewAllHref?: string }) {
   return (
     <Card size="sm" className="gap-0 py-0">
       <CardHeader className="border-b py-3">
-        <CardTitle className="flex items-center justify-between gap-2">
+        <CardTitle className="flex items-center justify-between gap-3">
           <span className={tone}>{title}</span>
-          <span className="font-mono text-base">{count}</span>
+          <span className="flex flex-col items-end gap-1">
+            <span className="font-mono text-base">{count}</span>
+            {viewAllHref ? <Link href={viewAllHref} className="text-xs font-medium text-primary hover:underline">Ver las {count} pendientes</Link> : null}
+          </span>
         </CardTitle>
       </CardHeader>
       <CardContent className="px-0">
@@ -204,7 +254,7 @@ export default async function OperationsPage({
             ))}
           </section>
           <div className="grid gap-4 lg:grid-cols-2">
-            <WorkItemColumn title="Requieren atención" count={overdue.length + dueToday.length} items={[...overdue, ...dueToday].slice(0, 8)} tone="text-destructive" />
+            <WorkItemColumn title="Requieren atención" count={overdue.length + dueToday.length} items={[...overdue, ...dueToday].slice(0, 8)} tone="text-destructive" viewAllHref="/operations?view=pending" />
             <Card size="sm" className="gap-0 py-0">
               <CardHeader className="border-b py-3"><CardTitle>Renovaciones pendientes</CardTitle></CardHeader>
               <CardContent className="px-0">
