@@ -3,6 +3,7 @@ import { DEFAULT_TIMEZONE, daysUntil, formatDate } from "@/lib/dates";
 import { businessAddDays, businessEndOfDay, businessStartOfDay, parseBusinessDateInput } from "@/lib/business-dates";
 import { getOpenWorkItems } from "@/lib/list-queries";
 import { getDb } from "@/lib/db";
+import { assertDeploymentDatabaseSafety } from "@/lib/deployment-db-safety";
 import { logError } from "@/lib/logger";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { writeActivityLog } from "@/lib/activity-log";
@@ -406,6 +407,7 @@ function getTelegramLinkSecret() {
 }
 
 export async function syncTelegramWebhook(baseUrl?: string): Promise<TelegramWebhookSyncResult> {
+  await assertDeploymentDatabaseSafety();
   const token = getTelegramBotToken();
   const webhookUrl = getTelegramWebhookUrl(
     baseUrl ?? process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.APP_BASE_URL?.trim(),
@@ -955,6 +957,7 @@ function parseTelegramDraftState(payloadJson: string): TelegramDraftState | null
 }
 
 export async function sendTelegramMessage(chatId: string, text: string): Promise<TelegramSendResult> {
+  await assertDeploymentDatabaseSafety();
   const token = getTelegramBotToken();
   if (!token) {
     return { ok: false, error: "TELEGRAM_BOT_TOKEN no está configurado." };

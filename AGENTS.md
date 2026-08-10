@@ -13,6 +13,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - A restore drill must validate counts, public foreign keys, Payment `POSTED`/`REVERSED` lifecycle, Policy/Receipt cancellation and renewal invariants, Notification user references, WorkItem canonical and legacy references, sequences, application reads and Prisma drift before reporting `PASS`.
 - `session_replication_role = replica` is limited to the restore transaction; restore it to `origin` before validation and roll back on every validation failure.
 
+## Deployment database identity
+
+- `DeploymentIdentity` is environment-local and must never be exported from a business backup or overwritten by restore.
+- Runtime uses pooled `DATABASE_URL`; Prisma migrations and identity administration require direct `DATABASE_URL_UNPOOLED`.
+- Never infer expected identity from `NODE_ENV`. Require explicit environment plus the deterministic Neon project/branch/database fingerprint.
+- A cloned Neon branch inherits the source identity and must fail closed until an operator explicitly rebinds it through the guarded CLI.
+- Do not initialize or rebind identity from build, `postinstall`, application startup, proxy/middleware or generic Preview automation.
+- The deployment-safety Prisma extension is only a mutation guard. It must never be used to implement tenant organization assignment.
+
 ## Cycle 1 organization transition
 
 - The temporary singleton barrier lives only in `20260803000000_organization_transition` SQL: normal PostgreSQL triggers, never `ENABLE ALWAYS`, and never a Prisma extension.

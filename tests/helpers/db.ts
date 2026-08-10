@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHmac, randomBytes, scryptSync } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 import type { Page } from "@playwright/test";
+import { Pool } from "pg";
 import { PrismaClient } from "../../src/generated/prisma/client";
 
 const localEnvPath = path.join(process.cwd(), ".env.local");
@@ -118,6 +119,33 @@ export function getTestDb() {
   }
 
   return globalForTests.prisma;
+}
+
+export async function replaceTestDeploymentFingerprint(fingerprint: string) {
+  const connectionString = process.env.DATABASE_URL_UNPOOLED?.trim() || process.env.DATABASE_URL?.trim();
+  if (!connectionString) throw new Error("DATABASE_URL is required for deployment-safety tests.");
+  assertDisposableTestDatabase(connectionString);
+  const pool = new Pool({ connectionString, max: 1, application_name: "policydesk-deployment-safety-test" });
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL policydesk.deployment_identity_admin = '1'");
+    const result = await client.query<{ fingerprint: string }>(
+      `UPDATE "DeploymentIdentity"
+          SET "fingerprint" = $1, "updatedAt" = now()
+        WHERE "id" = 'policydesk_deployment_identity_v1'
+      RETURNING "fingerprint"`,
+      [fingerprint],
+    );
+    await client.query("COMMIT");
+    if (!result.rows[0]) throw new Error("DeploymentIdentity is not initialized.");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+    await pool.end();
+  }
 }
 
 export function getTestOrigin() {

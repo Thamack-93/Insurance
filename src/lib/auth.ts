@@ -2,6 +2,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { cache } from "react";
 import { getDb } from "@/lib/db";
+import { assertDeploymentDatabaseSafety, DeploymentDatabaseSafetyError } from "@/lib/deployment-db-safety";
 import {
   SESSION_COOKIE_NAME,
   SESSION_TTL,
@@ -17,9 +18,11 @@ export type UserRole = UserRoleSession;
 
 export class AuthError extends Error {
   status: number;
-  constructor(message: string, status = 401) {
+  code?: string;
+  constructor(message: string, status = 401, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -75,6 +78,7 @@ export const getSession = cache(async (): Promise<SessionPayload | null> => {
 export async function getCurrentUser() {
   const session = await getSession();
   if (!session) return null;
+  await assertDeploymentDatabaseSafety();
   const db = getDb();
   const user = await db.user.findUnique({ where: { id: session.userId } });
   return user;
@@ -105,6 +109,14 @@ export async function getCurrentUserIdOrSystem(): Promise<string> {
 export async function requireUser() {
   const session = await getSession();
   if (!session) throw new AuthError("Necesitas iniciar sesión.", 401);
+  try {
+    await assertDeploymentDatabaseSafety();
+  } catch (error) {
+    if (error instanceof DeploymentDatabaseSafetyError) {
+      throw new AuthError(error.message, error.status, error.code);
+    }
+    throw error;
+  }
   const db = getDb();
   const user = await db.user.findUnique({ where: { id: session.userId } });
   if (!user || !user.active || user.id === SYSTEM_USER_ID) {
@@ -138,7 +150,7 @@ export async function requireUserOrRedirect() {
   try {
     return await requireUser();
   } catch (error) {
-    if (error instanceof AuthError) {
+    if (error instanceof AuthError && error.status < 500) {
       try {
         await clearSessionCookie();
       } catch {

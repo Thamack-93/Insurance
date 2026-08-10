@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { AuthError } from "@/lib/auth";
 import { RequestGuardError, type RateLimitResult } from "@/lib/request-guards";
+import { DeploymentDatabaseSafetyError } from "@/lib/deployment-db-safety";
 
 export type ApiSecurityClass = "public-health" | "authenticated" | "admin" | "cron-secret" | "telegram-webhook";
 
@@ -32,8 +33,14 @@ export const API_SECURITY_MANIFEST = {
 } as const satisfies Record<string, ApiSecurityClass>;
 
 export function guardErrorResponse(error: unknown, fallback = "La petición no es válida.") {
+  if (error instanceof DeploymentDatabaseSafetyError) {
+    return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+  }
   if (error instanceof AuthError) {
-    return NextResponse.json({ error: error.message }, { status: error.status });
+    return NextResponse.json(
+      { error: error.message, ...(error.code ? { code: error.code } : {}) },
+      { status: error.status },
+    );
   }
   if (error instanceof RequestGuardError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
