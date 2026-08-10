@@ -14,6 +14,7 @@ import {
   type PolicyPdfCaptureFieldConfidence,
   type PolicyPdfCapturePreview,
   type PolicyPdfCaptureProvenance,
+  type PolicyPdfCaptureExistingPolicyMatch,
   scoreCaptureIdentity,
 } from "@/lib/policy-pdf-capture.shared";
 import type { AssistantUser } from "@/lib/assistant-types";
@@ -245,22 +246,63 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
   const warnings = [...(input.warnings ?? []), ...(input.extraWarnings ?? [])];
   const policyNumberSuggestion = input.draft.sourcePolicyNumber;
   const policyNumberVariants = buildPolicyNumberSearchVariants(input.draft.policyNumber);
-  const existingPolicyMatches = policyNumberVariants.length > 0
+  const existingPolicyRows = policyNumberVariants.length > 0 || Boolean(input.draft.serialNumber)
     ? await db.policy.findMany({
         where: {
-          ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
-          OR: policyNumberVariants.map((variant) => ({ policyNumber: variant })),
+          ...policyOperationalWhere(portfolioOwnerId),
+          OR: [
+            ...policyNumberVariants.map((variant) => ({ policyNumber: variant })),
+            ...(input.draft.serialNumber
+              ? [{ insuredAssets: { some: { serialNumber: input.draft.serialNumber } } }]
+              : []),
+          ],
         },
         select: {
           id: true,
           policyNumber: true,
+          policyType: true,
+          premiumAmount: true,
+          startDate: true,
+          endDate: true,
+          status: true,
+          client: { select: { fullName: true } },
+          insurer: { select: { name: true } },
+          insuredAssets: {
+            where: input.draft.serialNumber ? { serialNumber: input.draft.serialNumber } : undefined,
+            select: { serialNumber: true },
+            take: 1,
+          },
         },
         orderBy: [{ updatedAt: "desc" }],
-        take: 3,
+        take: 12,
       })
     : [];
+  const existingPolicyMatches: PolicyPdfCaptureExistingPolicyMatch[] = existingPolicyRows.flatMap((policy) => {
+    if (!policy.client || !policy.insurer || !(policy.startDate instanceof Date) || !(policy.endDate instanceof Date)) return [];
+    const differences: string[] = [];
+    if (policy.policyType !== input.draft.policyType) differences.push(`tipo: cartera ${policy.policyType}, PDF ${input.draft.policyType}`);
+    if (policy.startDate.toISOString().slice(0, 10) !== input.draft.startDate) differences.push(`inicio: cartera ${policy.startDate.toISOString().slice(0, 10)}, PDF ${input.draft.startDate || "sin dato"}`);
+    if (policy.endDate.toISOString().slice(0, 10) !== input.draft.endDate) differences.push(`fin: cartera ${policy.endDate.toISOString().slice(0, 10)}, PDF ${input.draft.endDate || "sin dato"}`);
+    if (Math.abs(Number(policy.premiumAmount) - input.draft.premiumAmount) > 0.01) differences.push(`prima: cartera ${Number(policy.premiumAmount).toFixed(2)}, PDF ${input.draft.premiumAmount.toFixed(2)}`);
+    if (input.draft.clientName && scoreCaptureIdentity(input.draft.clientName, policy.client.fullName) < 100) differences.push(`cliente: cartera ${policy.client.fullName}, PDF ${input.draft.clientName}`);
+    if (input.draft.insurerName && scoreCaptureIdentity(input.draft.insurerName, policy.insurer.name) < 100) differences.push(`aseguradora: cartera ${policy.insurer.name}, PDF ${input.draft.insurerName}`);
+    const existingSerial = policy.insuredAssets[0]?.serialNumber ?? null;
+    if (input.draft.serialNumber && existingSerial && existingSerial !== input.draft.serialNumber) differences.push(`serie: cartera ${existingSerial}, PDF ${input.draft.serialNumber}`);
+    return [{
+      id: policy.id,
+      policyNumber: policy.policyNumber,
+      clientName: policy.client.fullName,
+      insurerName: policy.insurer.name,
+      startDate: policy.startDate.toISOString().slice(0, 10),
+      endDate: policy.endDate.toISOString().slice(0, 10),
+      status: policy.status,
+      serialNumber: existingSerial,
+      matchReason: policyNumberVariants.includes(policy.policyNumber) ? "policyNumber" : "serialNumber",
+      differences,
+    } satisfies PolicyPdfCaptureExistingPolicyMatch];
+  });
 
-  const clientCandidates = input.draft.clientName
+  const clientMatches = input.draft.clientName
     ? (await db.client.findMany({
         where: {
           status: { not: "ARCHIVED" },
@@ -273,10 +315,10 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
         .filter((client) => client.score > 0)
         .sort((left, right) => right.score - left.score)
         .slice(0, 5)
-        .map(({ id, label }) => ({ id, value: id, label }))
+        .map(({ id, label, score }) => ({ id, value: id, label, score }))
     : [];
 
-  const insurerCandidates = input.draft.insurerName
+  const insurerMatches = input.draft.insurerName
     ? (await db.insurer.findMany({
         where: { status: { not: "ARCHIVED" } },
         select: { id: true, name: true },
@@ -286,11 +328,17 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
         .filter((insurer) => insurer.score > 0)
         .sort((left, right) => right.score - left.score)
         .slice(0, 5)
-        .map(({ id, label }) => ({ id, value: id, label }))
+        .map(({ id, label, score }) => ({ id, value: id, label, score }))
     : [];
 
-  const suggestedClientId = clientCandidates[0]?.id ?? null;
-  const suggestedInsurerId = insurerCandidates[0]?.id ?? null;
+  const clientCandidates = clientMatches.map(({ id, value, label }) => ({ id, value, label }));
+  const insurerCandidates = insurerMatches.map(({ id, value, label }) => ({ id, value, label }));
+  const suggestedClientId = clientMatches[0] && (!clientMatches[1] || clientMatches[0].score > clientMatches[1].score)
+    ? clientMatches[0].id
+    : null;
+  const suggestedInsurerId = insurerMatches[0] && (!insurerMatches[1] || insurerMatches[0].score > insurerMatches[1].score)
+    ? insurerMatches[0].id
+    : null;
 
   const sourcePolicyResult = await buildSourcePolicyCandidates(
     db,
@@ -306,7 +354,9 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
 
   if (!input.draft.policyNumber) warnings.push("No pudimos detectar el número de póliza.");
   if (existingPolicyMatches.length > 0) {
-    const matchLabel = existingPolicyMatches.map((policy) => policy.policyNumber).join(" | ");
+    const matchLabel = existingPolicyMatches
+      .map((policy) => `${policy.policyNumber} · ${policy.clientName} · ${policy.insurerName}`)
+      .join(" | ");
     warnings.push(
       existingPolicyMatches.length === 1
         ? `Ya existe una póliza equivalente: ${matchLabel}. Revisa si esta captura debe actualizar o enlazar el registro existente.`
@@ -414,6 +464,7 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
     provenance,
     relatedDocuments: input.relatedDocuments,
     receiptEvidence: input.receiptEvidence ?? null,
+    existingPolicyMatches,
   } satisfies PolicyPdfCapturePreview;
 }
 

@@ -13,6 +13,7 @@ import { inferClientType, type PolicyPdfCaptureDraft, type PolicyPdfCaptureRecei
 import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
 import { revalidatePaths } from "@/lib/mutation-utils";
 import { closeRenewalFollowUp } from "@/lib/renewal-followups";
+import { buildCaptureClientEnrichment } from "@/lib/policy-capture-client-merge";
 import {
   recordSecurityAccessDenied,
   recordSecurityRateLimit,
@@ -20,6 +21,11 @@ import {
 } from "@/lib/security-events";
 
 export const runtime = "nodejs";
+
+class PolicyCaptureConflictError extends Error {
+  status = 409;
+  code = "POLICY_ALREADY_CAPTURED";
+}
 
 const confirmSchema = z.object({
   draft: z.object({
@@ -49,7 +55,7 @@ const confirmSchema = z.object({
   }),
   clientId: z.string().min(1),
   insurerId: z.string().min(1),
-  sourcePolicyId: z.string().min(1),
+  sourcePolicyId: z.string().min(1).nullable().optional(),
   receiptPlan: z
     .array(
       z.object({
@@ -177,7 +183,7 @@ export async function POST(request: NextRequest) {
 
     try {
       await assertClientPortfolioAccess(payload.clientId, user.id);
-      await assertPolicyPortfolioAccess(payload.sourcePolicyId, user.id);
+      if (payload.sourcePolicyId) await assertPolicyPortfolioAccess(payload.sourcePolicyId, user.id);
     } catch (error) {
       if (error instanceof AuthError) {
         await recordSecurityAccessDenied({
@@ -186,7 +192,7 @@ export async function POST(request: NextRequest) {
           description: "Se intentó confirmar una captura de póliza fuera de la cartera permitida.",
           severity: "WARNING",
           entityType: "SecurityEvent",
-          entityId: `policy-capture-confirm:portfolio:${payload.sourcePolicyId}`,
+          entityId: `policy-capture-confirm:portfolio:${payload.sourcePolicyId ?? "none"}`,
           userId: user.id,
         });
         return NextResponse.json({ error: "No tienes acceso a esta póliza." }, { status: error.status });
@@ -203,7 +209,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "La aseguradora seleccionada ya no existe." }, { status: 404 });
     }
 
-    const sourcePolicy = await db.policy.findUnique({
+    const sourcePolicy = payload.sourcePolicyId
+      ? await db.policy.findUnique({
       where: { id: payload.sourcePolicyId },
       select: {
         id: true,
@@ -214,20 +221,21 @@ export async function POST(request: NextRequest) {
         insurerId: true,
         policyType: true,
       },
-    });
+    })
+      : null;
 
-    if (!sourcePolicy) {
+    if (payload.sourcePolicyId && !sourcePolicy) {
       return NextResponse.json({ error: "La póliza origen ya no existe." }, { status: 404 });
     }
 
-    if (draft.policyNumber === sourcePolicy.policyNumber) {
+    if (sourcePolicy && draft.policyNumber === sourcePolicy.policyNumber) {
       return NextResponse.json(
         { error: "La póliza nueva debe tener un número distinto a la póliza renovada." },
         { status: 400 },
       );
     }
 
-    if (payload.clientId !== sourcePolicy.clientId) {
+    if (sourcePolicy && payload.clientId !== sourcePolicy.clientId) {
       return NextResponse.json(
         { error: "La póliza nueva debe conservar el mismo cliente de la póliza origen." },
         { status: 400 },
@@ -249,41 +257,104 @@ export async function POST(request: NextRequest) {
         select: { id: true, notes: true },
       });
 
-      const familyRootId = sourcePolicy.familyRootId ?? sourcePolicy.id;
+      const existingSameNumber = await tx.policy.findMany({
+        where: { policyNumber: draft.policyNumber },
+        select: { id: true, clientId: true, insurerId: true, startDate: true, endDate: true },
+      });
+      const samePeriodDifferentRecord = existingSameNumber.find((policy) =>
+        policy.startDate.getTime() === targetStartDate.getTime() &&
+        policy.endDate.getTime() === targetEndDate.getTime() &&
+        policy.id !== existingTarget?.id,
+      );
+      if (samePeriodDifferentRecord) {
+        throw new PolicyCaptureConflictError("Ya existe una póliza con el mismo número y vigencia; no se creó un duplicado.");
+      }
+
+      if (draft.serialNumber) {
+        const sameVehiclePeriod = await tx.policy.findFirst({
+          where: {
+            id: existingTarget ? { not: existingTarget.id } : undefined,
+            clientId: payload.clientId,
+            insurerId: payload.insurerId,
+            startDate: targetStartDate,
+            endDate: targetEndDate,
+            insuredAssets: { some: { serialNumber: draft.serialNumber } },
+          },
+          select: { id: true, policyNumber: true },
+        });
+        if (sameVehiclePeriod) {
+          throw new PolicyCaptureConflictError(`La serie ya está capturada en la póliza ${sameVehiclePeriod.policyNumber} para esta misma vigencia.`);
+        }
+      }
+
+      const familyRootId = sourcePolicy ? (sourcePolicy.familyRootId ?? sourcePolicy.id) : null;
       const captureDraft = {
         ...draft,
-        sourcePolicyNumber: draft.sourcePolicyNumber ?? sourcePolicy.policyNumber,
+        sourcePolicyNumber: sourcePolicy ? (draft.sourcePolicyNumber ?? sourcePolicy.policyNumber) : null,
       } satisfies PolicyPdfCaptureDraft;
-      const notes = buildCaptureNotes(captureDraft, existingTarget?.notes ?? null);
+      const notes = [
+        !sourcePolicy ? "Capturada sin póliza origen." : null,
+        buildCaptureNotes(captureDraft, existingTarget?.notes ?? null),
+      ].filter(Boolean).join(" ") || null;
 
       const selectedClient = await tx.client.findUnique({
         where: { id: payload.clientId },
-        select: { id: true, type: true, birthDate: true },
+        select: { id: true, fullName: true, type: true, email: true, phone: true, rfc: true, address: true, birthDate: true },
       });
 
-      if (selectedClient?.type === "PERSON" && parsedBirthDate) {
-        if (!selectedClient.birthDate) {
+      if (selectedClient) {
+        const conflictingRfcClient = captureDraft.clientRfc
+          ? await tx.client.findFirst({
+              where: {
+                rfc: captureDraft.clientRfc,
+                id: { not: selectedClient.id },
+                status: { not: "ARCHIVED" },
+                portfolioOwnerId: user.id,
+              },
+              select: { id: true, fullName: true, rfc: true },
+            })
+          : null;
+        const enrichment = buildCaptureClientEnrichment(selectedClient, {
+          fullName: captureDraft.clientName,
+          // An RFC already owned by another client must be reviewed manually;
+          // never merge it into the selected client during confirmation.
+          rfc: conflictingRfcClient ? null : captureDraft.clientRfc,
+          email: captureDraft.clientEmail,
+          phone: captureDraft.clientPhone,
+          address: captureDraft.clientAddress,
+          birthDate: selectedClient.type === "PERSON" ? parsedBirthDate : null,
+        });
+        if (conflictingRfcClient && captureDraft.clientRfc) {
+          enrichment.conflicts.push({
+            field: "rfc",
+            existing: `Otro cliente: ${conflictingRfcClient.fullName}`,
+            incoming: captureDraft.clientRfc,
+          });
+        }
+        const enrichedFields = Object.keys(enrichment.updates);
+        if (enrichedFields.length > 0) {
           const updatedClient = await tx.client.update({
             where: { id: selectedClient.id },
-            data: { birthDate: parsedBirthDate, updatedById: user.id },
-            select: { id: true, birthDate: true },
+            data: { ...enrichment.updates, updatedById: user.id },
+            select: { id: true, fullName: true, email: true, phone: true, rfc: true, address: true, birthDate: true },
           });
           await writeActivityLog({
             entityType: "Client",
             entityId: selectedClient.id,
-            action: "CLIENT_BIRTHDATE_CONFIRMED_FROM_PDF",
-            oldValue: { birthDate: null },
-            newValue: { birthDate: updatedClient.birthDate, source: "PDF", policyId: sourcePolicy.id },
+            action: "CLIENT_ENRICH_FROM_CAPTURE_PDF",
+            oldValue: selectedClient,
+            newValue: { ...updatedClient, fields: enrichedFields, source: "PDF", policyId: sourcePolicy?.id ?? null },
             userId: user.id,
             db: tx,
           });
-        } else if (selectedClient.birthDate.getTime() !== parsedBirthDate.getTime()) {
+        }
+        if (enrichment.conflicts.length > 0) {
           await writeActivityLog({
             entityType: "Client",
             entityId: selectedClient.id,
-            action: "CLIENT_BIRTHDATE_CONFLICT_FROM_PDF",
-            oldValue: { birthDate: selectedClient.birthDate },
-            newValue: { birthDate: parsedBirthDate, source: "PDF", policyId: sourcePolicy.id },
+            action: "CLIENT_CAPTURE_DATA_CONFLICT",
+            oldValue: { fields: enrichment.conflicts.map((conflict) => ({ field: conflict.field, value: conflict.existing })) },
+            newValue: { fields: enrichment.conflicts.map((conflict) => ({ field: conflict.field, value: conflict.incoming })), source: "PDF", policyId: sourcePolicy?.id ?? null },
             userId: user.id,
             db: tx,
           });
@@ -306,7 +377,7 @@ export async function POST(request: NextRequest) {
         beneficiaryInfo: captureDraft.beneficiaryInfo,
         notes,
         familyRootId,
-        renewedFromPolicyId: sourcePolicy.id,
+        renewedFromPolicyId: sourcePolicy?.id ?? null,
         updatedById: user.id,
       };
 
@@ -366,15 +437,17 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      if (sourcePolicy.status !== "RENEWED") {
+      if (sourcePolicy && sourcePolicy.status !== "RENEWED") {
         await tx.policy.update({
           where: { id: sourcePolicy.id },
           data: { status: "RENEWED", updatedById: user.id },
         });
       }
 
-      // La renovación quedó cerrada: su recordatorio de "sin avance" sobra.
-      await closeRenewalFollowUp(sourcePolicy.id, user.id, tx);
+      if (sourcePolicy) {
+        // La renovación quedó cerrada: su recordatorio de "sin avance" sobra.
+        await closeRenewalFollowUp(sourcePolicy.id, user.id, tx);
+      }
 
       await writeActivityLog({
         entityType: "Policy",
@@ -383,8 +456,8 @@ export async function POST(request: NextRequest) {
         oldValue: existingTarget ?? undefined,
         newValue: {
           ...targetPolicy,
-          sourcePolicyId: sourcePolicy.id,
-          sourcePolicyNumber: sourcePolicy.policyNumber,
+          sourcePolicyId: sourcePolicy?.id ?? null,
+          sourcePolicyNumber: sourcePolicy?.policyNumber ?? null,
           serialNumber: captureDraft.serialNumber,
           capturedFromPdf: true,
         },
@@ -392,15 +465,17 @@ export async function POST(request: NextRequest) {
         db: tx,
       });
 
-      await writeActivityLog({
-        entityType: "Policy",
-        entityId: sourcePolicy.id,
-        action: "POLICY_MARK_RENEWED_FROM_PDF",
-        oldValue: { status: sourcePolicy.status },
-        newValue: { status: "RENEWED", renewedByPolicyId: targetPolicy.id },
-        userId: user.id,
-        db: tx,
-      });
+      if (sourcePolicy) {
+        await writeActivityLog({
+          entityType: "Policy",
+          entityId: sourcePolicy.id,
+          action: "POLICY_MARK_RENEWED_FROM_PDF",
+          oldValue: { status: sourcePolicy.status },
+          newValue: { status: "RENEWED", renewedByPolicyId: targetPolicy.id },
+          userId: user.id,
+          db: tx,
+        });
+      }
 
       return {
         targetPolicy,
@@ -429,9 +504,14 @@ export async function POST(request: NextRequest) {
       receiptId: result.receiptId,
       receiptIds: result.receiptIds,
       redirectTo: `/policies/${result.targetPolicy.id}`,
-      message: "Póliza capturada, recibos generados y renovación vinculada.",
+      message: sourcePolicy
+        ? "Póliza capturada, recibos generados y renovación vinculada."
+        : "Póliza capturada sin póliza origen; recibos generados para revisión.",
     });
   } catch (error) {
+    if (error instanceof PolicyCaptureConflictError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    }
     if (error instanceof Error && "status" in error) return guardErrorResponse(error);
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

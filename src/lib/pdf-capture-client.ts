@@ -25,6 +25,7 @@ export type PdfCaptureUploadErrorCode =
   | "UPLOAD_RATE_LIMITED"
   | "UPLOAD_REJECTED"
   | "UPLOAD_SERVER_ERROR"
+  | "UPLOAD_CANCELLED"
   | "UPLOAD_UNKNOWN";
 
 export class PdfCaptureUploadError extends Error {
@@ -53,6 +54,7 @@ type UploadPdfWithRetryOptions = {
   maxAttempts?: number;
   uploadFn?: UploadFunction;
   onProgress?: (progress: PdfCaptureUploadProgress) => void;
+  signal?: AbortSignal;
 };
 
 function getErrorStatus(error: unknown) {
@@ -114,9 +116,21 @@ async function uploadOnce(
     attempt: number;
     maxAttempts: number;
     onProgress?: (progress: PdfCaptureUploadProgress) => void;
+    signal?: AbortSignal;
   },
 ) {
   const controller = new AbortController();
+  if (options.signal?.aborted) {
+    throw new PdfCaptureUploadError("La subida temporal fue cancelada.", { code: "UPLOAD_CANCELLED", retryable: false, attempts: options.attempt });
+  }
+  const abortFromParent = () => controller.abort(options.signal?.reason);
+  options.signal?.addEventListener("abort", abortFromParent, { once: true });
+  let rejectCancellation: ((reason?: unknown) => void) | undefined;
+  const cancellation = options.signal
+    ? new Promise<never>((_, reject) => { rejectCancellation = reject; })
+    : null;
+  const rejectFromParent = () => rejectCancellation?.(new PdfCaptureUploadError("La subida temporal fue cancelada.", { code: "UPLOAD_CANCELLED", retryable: false, attempts: options.attempt }));
+  options.signal?.addEventListener("abort", rejectFromParent, { once: true });
   let timedOut = false;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -142,10 +156,14 @@ async function uploadOnce(
         onUploadProgress: (progress) => options.onProgress?.({ ...progress, attempt: options.attempt, maxAttempts: options.maxAttempts }),
       }),
       timeout,
+      ...(cancellation ? [cancellation] : []),
     ]);
     return result;
   } catch (error) {
     if (error instanceof PdfCaptureUploadError) throw error;
+    if (options.signal?.aborted) {
+      throw new PdfCaptureUploadError("La subida temporal fue cancelada.", { code: "UPLOAD_CANCELLED", retryable: false, attempts: options.attempt });
+    }
     const classified = classifyUploadError(error, timedOut);
     throw new PdfCaptureUploadError(classified.message, {
       code: classified.code,
@@ -154,6 +172,8 @@ async function uploadOnce(
     });
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
+    options.signal?.removeEventListener("abort", abortFromParent);
+    options.signal?.removeEventListener("abort", rejectFromParent);
     controller.abort();
   }
 }
@@ -170,6 +190,9 @@ export async function uploadPdfWithRetry(options: UploadPdfWithRetryOptions): Pr
   let lastError: PdfCaptureUploadError | null = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (options.signal?.aborted) {
+      throw new PdfCaptureUploadError("La subida temporal fue cancelada.", { code: "UPLOAD_CANCELLED", retryable: false, attempts: attempt - 1 });
+    }
     const remainingMs = totalTimeoutMs - (Date.now() - startedAt);
     if (remainingMs <= 0) break;
     const timeoutMs = Math.min(attemptTimeoutMs, remainingMs);
@@ -182,6 +205,7 @@ export async function uploadPdfWithRetry(options: UploadPdfWithRetryOptions): Pr
         attempt,
         maxAttempts,
         onProgress: options.onProgress,
+        signal: options.signal,
       });
       options.onProgress?.({ loaded: options.file.size, total: options.file.size, percentage: 100, attempt, maxAttempts });
       return { ...result, attempts: attempt };
@@ -189,11 +213,22 @@ export async function uploadPdfWithRetry(options: UploadPdfWithRetryOptions): Pr
       lastError = error instanceof PdfCaptureUploadError
         ? error
         : new PdfCaptureUploadError("No se pudo conservar temporalmente el PDF.", { code: "UPLOAD_UNKNOWN", retryable: false, attempts: attempt });
-      if (!lastError.retryable || attempt >= maxAttempts) break;
+      if (!lastError.retryable || lastError.code === "UPLOAD_CANCELLED" || attempt >= maxAttempts) break;
       const delayMs = Math.min(1_500, 500 * attempt);
       const remainingAfterFailure = totalTimeoutMs - (Date.now() - startedAt);
       if (remainingAfterFailure <= delayMs) break;
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await new Promise<void>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          options.signal?.removeEventListener("abort", onAbort);
+          resolve();
+        }, delayMs);
+        const onAbort = () => {
+          clearTimeout(timeoutId);
+          options.signal?.removeEventListener("abort", onAbort);
+          reject(new PdfCaptureUploadError("La subida temporal fue cancelada.", { code: "UPLOAD_CANCELLED", retryable: false, attempts: attempt }));
+        };
+        options.signal?.addEventListener("abort", onAbort, { once: true });
+      });
     }
   }
 
@@ -211,12 +246,17 @@ export async function fetchPdfCaptureWithTimeout(
   init: RequestInit,
   timeoutMs: number,
   timeoutMessage: string,
+  signal?: AbortSignal,
 ) {
   const controller = new AbortController();
+  let abortFromParent: (() => void) | undefined;
   let timedOut = false;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
   try {
+    if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
+    abortFromParent = () => controller.abort(signal?.reason);
+    signal?.addEventListener("abort", abortFromParent, { once: true });
     const request = fetch(input, { ...init, signal: controller.signal });
     const deadline = new Promise<Response>((_, reject) => {
       timeoutId = setTimeout(() => {
@@ -231,5 +271,7 @@ export async function fetchPdfCaptureWithTimeout(
     throw error;
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
+    if (abortFromParent) signal?.removeEventListener("abort", abortFromParent);
+    controller.abort();
   }
 }

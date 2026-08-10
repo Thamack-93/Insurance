@@ -9,6 +9,7 @@ import { writeActivityLog } from "@/lib/activity-log";
 import { inferClientType } from "@/lib/policy-pdf-capture.shared";
 import { parseDateInput } from "@/lib/form-utils";
 import { businessToday } from "@/lib/business-dates";
+import { chooseCaptureClient } from "@/lib/policy-capture-client-merge";
 
 export const runtime = "nodejs";
 
@@ -65,19 +66,10 @@ export async function POST(request: NextRequest) {
     const address = normalizeText(payload.address);
     const birthDate = inferredType === "PERSON" ? normalizeBirthDate(payload.birthDate) : null;
 
-    const existing = await db.client.findFirst({
+    const candidates = await db.client.findMany({
       where: {
         status: { not: "ARCHIVED" },
         portfolioOwnerId: user.id,
-        OR: [
-          ...(rfc ? [{ rfc }] : []),
-          {
-            fullName: {
-              equals: payload.fullName.trim(),
-              mode: "insensitive" as const,
-            },
-          },
-        ],
       },
       select: {
         id: true,
@@ -89,7 +81,11 @@ export async function POST(request: NextRequest) {
         address: true,
         birthDate: true,
       },
+      take: 500,
     });
+    const selection = chooseCaptureClient({ fullName: payload.fullName, rfc }, candidates);
+    if (selection.conflict) return NextResponse.json({ error: selection.conflict, code: "CLIENT_MATCH_CONFLICT" }, { status: 409 });
+    const existing = selection.candidate;
 
     if (existing) {
       return NextResponse.json({

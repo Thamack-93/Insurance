@@ -93,6 +93,34 @@ describe("nora browser session", () => {
     expect(loadPolicyCaptureHandoff("user-a", { storage: store, now: 100 + 15 * 60 * 1000 + 1 })).toBeNull();
   });
 
+  it("keeps independent capture handoffs and removes only the selected one", () => {
+    const store = storage();
+    savePolicyCaptureHandoff("user-a", { handoffId: "handoff-1", draft: { policyNumber: "P-1" } }, { storage: store, now: 100 });
+    savePolicyCaptureHandoff("user-a", { handoffId: "handoff-2", draft: { policyNumber: "P-2" } }, { storage: store, now: 100 });
+
+    expect(loadPolicyCaptureHandoff("user-a", "handoff-1", { storage: store, now: 100 })?.payload.draft.policyNumber).toBe("P-1");
+    expect(consumePolicyCaptureHandoff("user-a", "handoff-1", { storage: store, now: 100 })?.payload.draft.policyNumber).toBe("P-1");
+    expect(loadPolicyCaptureHandoff("user-a", "handoff-1", { storage: store, now: 100 })).toBeNull();
+    expect(loadPolicyCaptureHandoff("user-a", "handoff-2", { storage: store, now: 100 })?.payload.draft.policyNumber).toBe("P-2");
+  });
+
+  it("persists capture references in Nora messages without persisting the preview or PDF", () => {
+    const store = storage();
+    saveNoraSession("user-a", {
+      messages: [{
+        id: "capture-message",
+        role: "assistant",
+        text: "Captura lista",
+        capturePreview: { draft: { policyNumber: "P-1" } },
+        capture: { handoffId: "handoff-1", fileName: "poliza.pdf" },
+      }],
+    }, { storage: store, now: 100 });
+    const stored = JSON.parse(store.values.get(noraSessionKey("user-a")) ?? "{}");
+    expect(stored.messages[0].capture).toEqual({ handoffId: "handoff-1", fileName: "poliza.pdf" });
+    expect(stored.messages[0]).not.toHaveProperty("capturePreview");
+    expect(stored.messages[0]).not.toHaveProperty("pdfReference");
+  });
+
   it("persists AI review, warnings, provenance, and run folios through the capture handoff", () => {
     const store = storage();
     savePolicyCaptureHandoff("user-a", {
@@ -140,6 +168,8 @@ describe("nora browser session", () => {
       receiptEvidence: { receiptControlNumber: "0307563244" },
       relatedDocuments: [{ id: "doc-1", kind: "receipt" }],
     });
+    expect(JSON.parse(store.values.get(policyCaptureSessionKey("user-a")) ?? "[]")).toHaveLength(1);
+    expect([...store.values.values()].some((value) => value.includes("CLIENTE DEMO"))).toBe(false);
   });
 
   it("clears scoped and legacy keys on logout", () => {

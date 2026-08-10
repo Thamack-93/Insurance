@@ -7,10 +7,11 @@ import type {
   PolicyPdfCaptureReceiptEvidence,
   PolicyPdfCaptureRelatedDocument,
   PolicyPdfCaptureProvenance,
+  PolicyPdfCaptureExistingPolicyMatch,
 } from "@/lib/policy-pdf-capture.shared";
 
 export const NORA_BROWSER_SESSION_VERSION = 2 as const;
-export const POLICY_CAPTURE_SESSION_VERSION = 4 as const;
+export const POLICY_CAPTURE_SESSION_VERSION = 5 as const;
 export const NORA_SESSION_TTL_MS = 30 * 60 * 1000;
 export const POLICY_CAPTURE_TTL_MS = 15 * 60 * 1000;
 export const NORA_MAX_MESSAGES = 20;
@@ -19,7 +20,9 @@ export const NORA_MAX_SESSION_BYTES = 64 * 1024;
 export const NORA_SESSION_EVENT = "policydesk:nora-session-updated";
 
 const NORA_KEY_PREFIX = "policydesk.nora.session.v2:";
-const CAPTURE_KEY_PREFIX = "policydesk.policyCapture.v4:";
+const CAPTURE_INDEX_KEY_PREFIX = "policydesk.policyCapture.index.v5:";
+const CAPTURE_ITEM_KEY_PREFIX = "policydesk.policyCapture.v5:";
+const LEGACY_CAPTURE_KEY_PREFIX = "policydesk.policyCapture.v4:";
 const LEGACY_KEYS = [
   "policydesk.nora.conversation.v1",
   "policydesk.policyPdfCapture.v2",
@@ -29,7 +32,7 @@ const LEGACY_KEYS = [
 export type NoraStorageMode = "persistent" | "memory";
 
 const memoryNoraSessions = new Map<string, PersistedNoraSession>();
-const memoryPolicyCaptureHandoffs = new Map<string, PersistedPolicyCaptureHandoff>();
+const memoryPolicyCaptureHandoffs = new Map<string, Map<string, PersistedPolicyCaptureHandoff>>();
 let lastStorageMode: NoraStorageMode = "persistent";
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -52,6 +55,11 @@ export type PersistedNoraMessage = {
   role: "user" | "assistant";
   text: string;
   sections?: PersistedNoraSection[];
+  capture?: {
+    handoffId: string;
+    fileName: string;
+    fileKey?: string;
+  };
 };
 
 export type PersistedNoraSession = {
@@ -62,6 +70,7 @@ export type PersistedNoraSession = {
   expiresAt: number;
   input: string;
   context: NoraContextRef | null;
+  activeCaptureHandoffId?: string | null;
   messages: PersistedNoraMessage[];
 };
 
@@ -82,6 +91,7 @@ export type PolicyCaptureHandoffPayload = {
   provenance?: PolicyPdfCaptureProvenance;
   receiptEvidence?: PolicyPdfCaptureReceiptEvidence | null;
   relatedDocuments?: PolicyPdfCaptureRelatedDocument[];
+  existingPolicyMatches?: PolicyPdfCaptureExistingPolicyMatch[];
   pdfReference?: {
     url: string;
     fileName: string;
@@ -110,7 +120,15 @@ export function noraSessionKey(userId: string) {
 }
 
 export function policyCaptureSessionKey(userId: string) {
-  return scopedKey(CAPTURE_KEY_PREFIX, userId);
+  return scopedKey(CAPTURE_INDEX_KEY_PREFIX, userId);
+}
+
+export function policyCaptureHandoffKey(userId: string, handoffId: string) {
+  return `${scopedKey(CAPTURE_ITEM_KEY_PREFIX, userId)}:${encodeURIComponent(handoffId)}`;
+}
+
+function legacyPolicyCaptureSessionKey(userId: string) {
+  return scopedKey(LEGACY_CAPTURE_KEY_PREFIX, userId);
 }
 
 function browserStorage(): StorageLike | null {
@@ -195,17 +213,37 @@ function cleanSections(value: unknown): PersistedNoraSection[] | undefined {
   return sections.slice(0, 8);
 }
 
+function cleanCaptureReference(value: unknown) {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as { handoffId?: unknown; fileName?: unknown; fileKey?: unknown };
+  if (typeof candidate.handoffId !== "string" || typeof candidate.fileName !== "string") return undefined;
+  const handoffId = candidate.handoffId.trim();
+  const fileName = candidate.fileName.trim();
+  if (!handoffId || !fileName || handoffId.length > 160 || fileName.length > 255) return undefined;
+  return {
+    handoffId,
+    fileName,
+    ...(typeof candidate.fileKey === "string" && candidate.fileKey.trim() && candidate.fileKey.length <= 300
+      ? { fileKey: candidate.fileKey.trim() }
+      : {}),
+  };
+}
+
 function cleanMessage(value: unknown, index: number): PersistedNoraMessage | null {
   if (!value || typeof value !== "object") return null;
-  const candidate = value as { id?: unknown; role?: unknown; text?: unknown; sections?: unknown };
+  const candidate = value as { id?: unknown; role?: unknown; text?: unknown; sections?: unknown; capture?: unknown };
   if (candidate.role !== "user" && candidate.role !== "assistant") return null;
   const text = cleanText(candidate.text);
   if (!text) return null;
+  const capture = cleanCaptureReference(candidate.capture);
   return {
     id: cleanText(candidate.id, 120) || `message-${index}`,
     role: candidate.role,
     text,
-    ...(cleanSections(candidate.sections) ? { sections: cleanSections(candidate.sections) } : {}),
+    // Capture cards are rebuilt from the opaque handoff reference. Do not put
+    // policy/client labels or extracted data into browser session storage.
+    ...(!capture && cleanSections(candidate.sections) ? { sections: cleanSections(candidate.sections) } : {}),
+    ...(capture ? { capture } : {}),
   };
 }
 
@@ -264,13 +302,16 @@ export function loadNoraSession(userId: string, options: { storage?: StorageLike
     expiresAt,
     input: cleanText(candidate.input, NORA_MAX_MESSAGE_CHARS),
     context: cleanContext(candidate.context),
+    ...(typeof candidate.activeCaptureHandoffId === "string" && candidate.activeCaptureHandoffId.trim()
+      ? { activeCaptureHandoffId: cleanText(candidate.activeCaptureHandoffId, 160) }
+      : {}),
     messages,
   } satisfies PersistedNoraSession;
 }
 
 export function saveNoraSession(
   userId: string,
-  value: { messages: unknown; input?: unknown; context?: unknown; welcome?: PersistedNoraMessage },
+  value: { messages: unknown; input?: unknown; context?: unknown; activeCaptureHandoffId?: string | null; welcome?: PersistedNoraMessage },
   options: { storage?: StorageLike | null; now?: number; sourceId?: string } = {},
 ) {
   if (!validOwnerId(userId)) return false;
@@ -287,6 +328,7 @@ export function saveNoraSession(
     expiresAt: now + NORA_SESSION_TTL_MS,
     input: cleanText(value.input, NORA_MAX_MESSAGE_CHARS),
     context: cleanContext(value.context),
+    ...(value.activeCaptureHandoffId ? { activeCaptureHandoffId: cleanText(value.activeCaptureHandoffId, 160) } : {}),
     messages,
   };
   const welcomeIndex = session.messages[0]?.id === "welcome" ? 1 : 0;
@@ -456,6 +498,36 @@ function sanitizeCapturePayload(value: unknown): PolicyCaptureHandoffPayload | n
         } satisfies PolicyPdfCaptureRelatedDocument];
       }).slice(0, 20)
     : undefined;
+  const safeExistingPolicyMatches = Array.isArray(candidate.existingPolicyMatches)
+    ? candidate.existingPolicyMatches.flatMap((match) => {
+        if (!match || typeof match !== "object") return [];
+        const row = match as unknown as Record<string, unknown>;
+        if (
+          typeof row.id !== "string" ||
+          typeof row.policyNumber !== "string" ||
+          typeof row.clientName !== "string" ||
+          typeof row.insurerName !== "string" ||
+          typeof row.startDate !== "string" ||
+          typeof row.endDate !== "string" ||
+          typeof row.status !== "string" ||
+          !["policyNumber", "serialNumber"].includes(String(row.matchReason))
+        ) return [];
+        return [{
+          id: cleanText(row.id, 160),
+          policyNumber: cleanText(row.policyNumber, 80),
+          clientName: cleanText(row.clientName, 255),
+          insurerName: cleanText(row.insurerName, 255),
+          startDate: cleanText(row.startDate, 30),
+          endDate: cleanText(row.endDate, 30),
+          status: cleanText(row.status, 40),
+          serialNumber: typeof row.serialNumber === "string" ? cleanText(row.serialNumber, 40) : null,
+          matchReason: row.matchReason as PolicyPdfCaptureExistingPolicyMatch["matchReason"],
+          ...(Array.isArray(row.differences)
+            ? { differences: row.differences.flatMap((difference) => typeof difference === "string" && difference.trim() ? [cleanText(difference, 500)] : []).slice(0, 20) }
+            : {}),
+        } satisfies PolicyPdfCaptureExistingPolicyMatch];
+      }).slice(0, 20)
+    : undefined;
   return {
     draft: safeDraft,
     ...(typeof candidate.handoffId === "string" && candidate.handoffId.trim()
@@ -470,29 +542,82 @@ function sanitizeCapturePayload(value: unknown): PolicyCaptureHandoffPayload | n
     ...(safeProvenance ? { provenance: safeProvenance } : {}),
     ...(safeReceiptEvidence ? { receiptEvidence: safeReceiptEvidence } : candidate.receiptEvidence === null ? { receiptEvidence: null } : {}),
     ...(safeRelatedDocuments ? { relatedDocuments: safeRelatedDocuments } : {}),
+    ...(safeExistingPolicyMatches ? { existingPolicyMatches: safeExistingPolicyMatches } : {}),
     ...(candidate.pdfReference && typeof candidate.pdfReference === "object" && typeof candidate.pdfReference.url === "string" && typeof candidate.pdfReference.fileName === "string" && typeof candidate.pdfReference.expiresAt === "number"
       ? { pdfReference: { url: candidate.pdfReference.url.slice(0, 2_000), fileName: cleanText(candidate.pdfReference.fileName, 255), expiresAt: candidate.pdfReference.expiresAt } }
       : {}),
   };
 }
 
-export function savePolicyCaptureHandoff(userId: string, payload: PolicyCaptureHandoffPayload, options: { storage?: StorageLike | null; now?: number } = {}) {
+type CaptureStorageOptions = { storage?: StorageLike | null; now?: number };
+
+function createHandoffId() {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function memoryHandoffsFor(userId: string) {
+  let handoffs = memoryPolicyCaptureHandoffs.get(userId);
+  if (!handoffs) {
+    handoffs = new Map();
+    memoryPolicyCaptureHandoffs.set(userId, handoffs);
+  }
+  return handoffs;
+}
+
+function readHandoffIds(storage: StorageLike | null, userId: string) {
+  const stored = parseStored<unknown>(storage, policyCaptureSessionKey(userId));
+  if (!Array.isArray(stored)) return [];
+  return stored.flatMap((id) => typeof id === "string" && id.trim() ? [id.trim().slice(0, 160)] : []).slice(0, NORA_MAX_MESSAGES);
+}
+
+function writeHandoffIds(storage: StorageLike, userId: string, ids: string[]) {
+  storage.setItem(policyCaptureSessionKey(userId), JSON.stringify(Array.from(new Set(ids)).slice(0, NORA_MAX_MESSAGES)));
+}
+
+function normalizeHandoff(candidate: Partial<PersistedPolicyCaptureHandoff> | null, userId: string, now: number) {
+  if (!candidate || (candidate.version !== POLICY_CAPTURE_SESSION_VERSION && candidate.version !== 4) || candidate.ownerId !== userId || !isValidTimestamp(candidate.expiresAt) || candidate.expiresAt <= now) return null;
+  const payload = sanitizeCapturePayload(candidate.payload);
+  if (!payload) return null;
+  const handoffId = payload.handoffId ?? createHandoffId();
+  return {
+    version: POLICY_CAPTURE_SESSION_VERSION,
+    ownerId: userId,
+    createdAt: isValidTimestamp(candidate.createdAt) ? candidate.createdAt : now,
+    expiresAt: candidate.expiresAt,
+    payload: { ...payload, handoffId },
+  } satisfies PersistedPolicyCaptureHandoff;
+}
+
+function captureOptions(handoffIdOrOptions?: string | CaptureStorageOptions, options: CaptureStorageOptions = {}) {
+  return typeof handoffIdOrOptions === "string"
+    ? { handoffId: handoffIdOrOptions, options }
+    : { handoffId: undefined, options: handoffIdOrOptions ?? options };
+}
+
+export function savePolicyCaptureHandoff(userId: string, payload: PolicyCaptureHandoffPayload, options: CaptureStorageOptions = {}) {
   if (!validOwnerId(userId)) return false;
   const storage = resolveStorage(options);
-  const safePayload = sanitizeCapturePayload({
-    ...payload,
-    handoffId: payload.handoffId || (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`),
-  });
-  if (!safePayload) return false;
+  const safePayload = sanitizeCapturePayload({ ...payload, handoffId: payload.handoffId || createHandoffId() });
+  if (!safePayload?.handoffId) return false;
   const now = options.now ?? Date.now();
-  const handoff: PersistedPolicyCaptureHandoff = { version: POLICY_CAPTURE_SESSION_VERSION, ownerId: userId, createdAt: now, expiresAt: now + POLICY_CAPTURE_TTL_MS, payload: safePayload };
-  memoryPolicyCaptureHandoffs.set(userId, handoff);
+  const previous = memoryHandoffsFor(userId).get(safePayload.handoffId);
+  const handoff: PersistedPolicyCaptureHandoff = {
+    version: POLICY_CAPTURE_SESSION_VERSION,
+    ownerId: userId,
+    createdAt: previous?.createdAt ?? now,
+    expiresAt: now + POLICY_CAPTURE_TTL_MS,
+    payload: safePayload,
+  };
+  memoryHandoffsFor(userId).set(safePayload.handoffId, handoff);
   if (!storage) {
     lastStorageMode = "memory";
     return true;
   }
   try {
-    storage.setItem(policyCaptureSessionKey(userId), JSON.stringify(handoff));
+    const ids = readHandoffIds(storage, userId).filter((id) => id !== safePayload.handoffId);
+    writeHandoffIds(storage, userId, [safePayload.handoffId, ...ids]);
     lastStorageMode = "persistent";
     return true;
   } catch {
@@ -501,37 +626,72 @@ export function savePolicyCaptureHandoff(userId: string, payload: PolicyCaptureH
   }
 }
 
-export function loadPolicyCaptureHandoff(userId: string, options: { storage?: StorageLike | null; now?: number } = {}) {
-  if (!validOwnerId(userId)) return null;
+export function listPolicyCaptureHandoffs(userId: string, options: CaptureStorageOptions = {}) {
+  if (!validOwnerId(userId)) return [];
   const storage = resolveStorage(options);
-  const stored = parseStored<Partial<PersistedPolicyCaptureHandoff>>(storage, policyCaptureSessionKey(userId));
-  const memoryStored = memoryPolicyCaptureHandoffs.get(userId);
-  const candidate = stored ?? memoryStored;
   const now = options.now ?? Date.now();
-  const expiresAt = candidate?.expiresAt;
-  if (!candidate || candidate.version !== POLICY_CAPTURE_SESSION_VERSION || candidate.ownerId !== userId || !isValidTimestamp(expiresAt) || expiresAt <= now) {
-    if (candidate) clearPolicyCaptureHandoff(userId, { storage });
-    return null;
-  }
-  const payload = sanitizeCapturePayload(candidate.payload);
-  if (!payload) {
-    clearPolicyCaptureHandoff(userId, { storage });
-    return null;
-  }
-  return { ...candidate, expiresAt, payload } as PersistedPolicyCaptureHandoff;
+  const memory = memoryHandoffsFor(userId);
+  const ids = [...new Set([...readHandoffIds(storage, userId), ...memory.keys()])];
+  return ids.flatMap((id) => {
+    const stored = parseStored<Partial<PersistedPolicyCaptureHandoff>>(storage, policyCaptureHandoffKey(userId, id));
+    // The browser stores only the opaque ID. Full handoff contents live in memory
+    // during the current SPA session or in the private server-side temporary store.
+    const candidate = normalizeHandoff(memory.get(id) ?? stored ?? null, userId, now);
+    if (!candidate) {
+      clearPolicyCaptureHandoff(userId, id, { storage });
+      return [];
+    }
+    memory.set(id, candidate);
+    return [candidate];
+  });
 }
 
-export function consumePolicyCaptureHandoff(userId: string, options: { storage?: StorageLike | null; now?: number } = {}) {
-  const result = loadPolicyCaptureHandoff(userId, options);
-  clearPolicyCaptureHandoff(userId, options);
+export function loadPolicyCaptureHandoff(userId: string, handoffIdOrOptions?: string | CaptureStorageOptions, options: CaptureStorageOptions = {}) {
+  if (!validOwnerId(userId)) return null;
+  const parsed = captureOptions(handoffIdOrOptions, options);
+  const handoffs = listPolicyCaptureHandoffs(userId, parsed.options);
+  if (parsed.handoffId) return handoffs.find((handoff) => handoff.payload.handoffId === parsed.handoffId) ?? null;
+  if (handoffs.length > 0) return handoffs[0] ?? null;
+
+  // One-time compatibility for the previous single-handoff browser format.
+  const storage = resolveStorage(parsed.options);
+  const legacy = normalizeHandoff(parseStored<Partial<PersistedPolicyCaptureHandoff>>(storage, legacyPolicyCaptureSessionKey(userId)), userId, parsed.options.now ?? Date.now());
+  if (legacy && (!parsed.handoffId || legacy.payload.handoffId === parsed.handoffId)) {
+    memoryHandoffsFor(userId).set(legacy.payload.handoffId!, legacy);
+    return legacy;
+  }
+  return null;
+}
+
+export function consumePolicyCaptureHandoff(userId: string, handoffIdOrOptions?: string | CaptureStorageOptions, options: CaptureStorageOptions = {}) {
+  const parsed = captureOptions(handoffIdOrOptions, options);
+  const result = parsed.handoffId
+    ? loadPolicyCaptureHandoff(userId, parsed.handoffId, parsed.options)
+    : loadPolicyCaptureHandoff(userId, parsed.options);
+  if (result) clearPolicyCaptureHandoff(userId, result.payload.handoffId, parsed.options);
   return result;
 }
 
-export function clearPolicyCaptureHandoff(userId: string, options: { storage?: StorageLike | null } = {}) {
+export function clearPolicyCaptureHandoff(userId: string, handoffIdOrOptions?: string | CaptureStorageOptions, options: CaptureStorageOptions = {}) {
   if (!validOwnerId(userId)) return;
-  const storage = resolveStorage(options);
+  const parsed = captureOptions(handoffIdOrOptions, options);
+  const storage = resolveStorage(parsed.options);
+  const memory = memoryHandoffsFor(userId);
+  if (parsed.handoffId) {
+    memory.delete(parsed.handoffId);
+    try {
+      storage?.removeItem(policyCaptureHandoffKey(userId, parsed.handoffId));
+      const ids = readHandoffIds(storage, userId).filter((id) => id !== parsed.handoffId);
+      if (storage) writeHandoffIds(storage, userId, ids);
+    } catch { /* best effort cleanup */ }
+    return;
+  }
   memoryPolicyCaptureHandoffs.delete(userId);
-  try { storage?.removeItem(policyCaptureSessionKey(userId)); } catch { /* memory-only fallback */ }
+  try {
+    for (const id of readHandoffIds(storage, userId)) storage?.removeItem(policyCaptureHandoffKey(userId, id));
+    storage?.removeItem(policyCaptureSessionKey(userId));
+    storage?.removeItem(legacyPolicyCaptureSessionKey(userId));
+  } catch { /* memory-only fallback */ }
 }
 
 export function clearNoraBrowserSession(userId: string, options: { storage?: StorageLike | null } = {}) {
@@ -541,6 +701,48 @@ export function clearNoraBrowserSession(userId: string, options: { storage?: Sto
   if (!storage) return;
   for (const key of LEGACY_KEYS) {
     try { storage.removeItem(key); } catch { /* best effort */ }
+  }
+}
+
+export async function persistPolicyCaptureHandoff(userId: string, payload: PolicyCaptureHandoffPayload) {
+  const saved = savePolicyCaptureHandoff(userId, payload);
+  if (!saved || typeof fetch === "undefined") return saved;
+  const handoff = loadPolicyCaptureHandoff(userId, payload.handoffId);
+  const handoffId = handoff?.payload.handoffId ?? payload.handoffId;
+  if (!handoffId) return false;
+  try {
+    const response = await fetch("/api/nora/policy-pdf/handoff", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ handoffId, payload: { ...payload, handoffId } }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function restorePolicyCaptureHandoff(userId: string, handoffId: string) {
+  if (!validOwnerId(userId) || !handoffId || typeof fetch === "undefined") return null;
+  try {
+    const response = await fetch(`/api/nora/policy-pdf/handoff?handoffId=${encodeURIComponent(handoffId)}`, { cache: "no-store" });
+    if (!response.ok) return null;
+    const body = await response.json() as { handoff?: Partial<PersistedPolicyCaptureHandoff> };
+    const normalized = normalizeHandoff(body.handoff ?? null, userId, Date.now());
+    if (!normalized) return null;
+    memoryHandoffsFor(userId).set(handoffId, normalized);
+    return normalized;
+  } catch {
+    return null;
+  }
+}
+
+export async function deletePolicyCaptureHandoffRemote(handoffId: string) {
+  if (!handoffId || typeof fetch === "undefined") return;
+  try {
+    await fetch(`/api/nora/policy-pdf/handoff?handoffId=${encodeURIComponent(handoffId)}`, { method: "DELETE", keepalive: true });
+  } catch {
+    // TTL cleanup remains the server-side fallback.
   }
 }
 

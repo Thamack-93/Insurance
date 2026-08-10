@@ -119,6 +119,19 @@ export type PolicyCaptureSourceOption = PolicyCaptureOption & {
   matchReason?: string | null;
 };
 
+export type PolicyPdfCaptureExistingPolicyMatch = {
+  id: string;
+  policyNumber: string;
+  clientName: string;
+  insurerName: string;
+  startDate: string;
+  endDate: string;
+  status: string;
+  serialNumber: string | null;
+  matchReason: "policyNumber" | "serialNumber";
+  differences?: string[];
+};
+
 export type PolicyPdfCapturePreview = {
   draft: PolicyPdfCaptureDraft;
   suggestions: {
@@ -141,6 +154,7 @@ export type PolicyPdfCapturePreview = {
   provenance: PolicyPdfCaptureProvenance;
   relatedDocuments?: PolicyPdfCaptureRelatedDocument[];
   receiptEvidence?: PolicyPdfCaptureReceiptEvidence | null;
+  existingPolicyMatches?: PolicyPdfCaptureExistingPolicyMatch[];
 };
 
 export type PolicyPdfCaptureCorrectionChange = {
@@ -382,6 +396,11 @@ function monthTokenToNumber(token: string) {
 function normalizeText(value: string) {
   return value
     .toLowerCase()
+    // PDF text reconstruction can split accented glyphs into separate tokens
+    // (for example "INFORMACI Ó N" or "P Ó LIZA"). Rejoin those glyphs and
+    // isolated trailing letters before matching labels and values.
+    .replace(/\s+([áéíóúüñ])\s*/g, "$1")
+    .replace(/([áéíóúüñ])\s+([a-záéíóúüñ])(?=\s|$)/g, "$1$2")
     .replaceAll("á", "a")
     .replaceAll("é", "e")
     .replaceAll("í", "i")
@@ -532,7 +551,8 @@ function findLastLineIndexContaining(lines: string[], labels: string[]) {
 }
 
 function isInsuredHeading(line: string) {
-  return /^\s*(?:informaci[oó]n del asegurado|datos del asegurado(?:\s*\/|\s*$))/i.test(line);
+  const normalized = normalizeText(line);
+  return /^\s*(?:informacion del asegurado|datos del asegurado(?:\s*\/|\s*$))/i.test(normalized);
 }
 
 function findNextMeaningfulLine(lines: string[], startIndex: number, stopLabels: string[] = []) {
@@ -744,6 +764,7 @@ function normalizePolicyType(value: string | null | undefined) {
 
 function parsePolicyNumber(lines: string[]) {
   const policyPattern = /\b(\d{5}U\d{2}|\d{5,12})\b/i;
+  const normalizedLines = lines.map(normalizeText);
   const policyHeaderIndex = findLineIndexContaining(lines, [
     "PÓLIZA ENDOSO INCISO",
     "Poliza ENDOSO INCISO",
@@ -756,13 +777,15 @@ function parsePolicyNumber(lines: string[]) {
     if (explicitHeaderNumber) return explicitHeaderNumber;
   }
 
-  const explicitPolicyLine = lines.find((line) => /(?:no\.?\s*de\s*p[oó]liza|n[uú]mero\s+de\s+p[oó]liza)/i.test(line) && policyPattern.test(line) && !isLikelyPhoneNumber(line));
+  const explicitPolicyIndex = normalizedLines.findIndex((line) => /(?:no\.?\s*de\s*poliza|numero\s+de\s+poliza)/i.test(line) && policyPattern.test(line) && !isLikelyPhoneNumber(line));
+  const explicitPolicyLine = explicitPolicyIndex >= 0 ? lines[explicitPolicyIndex] : null;
   if (explicitPolicyLine) {
     const match = explicitPolicyLine.match(policyPattern);
     if (match?.[1]) return match[1];
   }
 
-  const labeledPolicyLine = lines.find((line) => /\bp[oó]liza\b/i.test(line) && policyPattern.test(line) && !/solicitud|folio|request/i.test(line) && !isLikelyPhoneNumber(line));
+  const labeledPolicyIndex = normalizedLines.findIndex((line) => /\bpoliza\b/i.test(line) && policyPattern.test(line) && !/solicitud|folio|request/i.test(line) && !isLikelyPhoneNumber(line));
+  const labeledPolicyLine = labeledPolicyIndex >= 0 ? lines[labeledPolicyIndex] : null;
   if (labeledPolicyLine) {
     const match = labeledPolicyLine.match(policyPattern);
     if (match?.[1]) return match[1];
@@ -1103,6 +1126,11 @@ function parseSerialNumber(lines: string[], fullText: string) {
 }
 
 function parseAutoInsuredObject(lines: string[]) {
+  const labeledDescription = lines
+    .map((line) => line.match(/^\s*descripci[oó]n\s*:\s*(.+)$/i)?.[1] ?? null)
+    .find((value) => Boolean(value));
+  if (labeledDescription) return compact(labeledDescription);
+
   const headingIndex = lines.findIndex((line) => normalizeText(line).includes("descripcion del vehiculo asegurado"));
   if (headingIndex >= 0) {
     const candidate = [lines[headingIndex + 1], lines[headingIndex + 2], lines[headingIndex + 3]]
@@ -1147,7 +1175,7 @@ function parseSourcePolicyNumber(lines: string[], fullText: string, policyNumber
     if (match?.[1] && match[1] !== policyNumber) return match[1];
   }
 
-  const explicit = fullText.match(/\bRENUEVA A:\s*(\d{8,12})\b/i);
+  const explicit = normalizeText(fullText).match(/\brenueva a:\s*(\d{8,12})\b/i);
   if (explicit?.[1] && explicit[1] !== policyNumber) return explicit[1];
 
   return suggestPreviousPolicyNumber(policyNumber);
@@ -1160,20 +1188,26 @@ export function extractPolicyPdfReceiptEvidence(text: string): PolicyPdfCaptureR
     return null;
   }
 
-  const policyNumber = fullText.match(/p[oó]liza(?:\s+endoso)?\s*[:#]?\s*(\d{8,12})/i)?.[1]
-    ?? fullText.match(/PÓLIZA\s+ENDOSO[^\n]*?(\d{8,12})/i)?.[1]
+  const explicitBanortePolicy = normalized.match(/(?:no\.?\s+de\s+poliza|numero\s+de\s+poliza)[^\d]{0,120}(\d{6,12})\s+0\s+\d{3}\b/i)?.[1] ?? null;
+  const policyNumber = explicitBanortePolicy
+    ?? normalized.match(/poliza(?:\s+endoso)?\s*[:#]?\s*(\d{8,12})/i)?.[1]
+    ?? normalized.match(/poliza\s+endoso[^\d]{0,80}(\d{8,12})/i)?.[1]
     ?? null;
-  const receiptControlNumber = fullText.match(/n[uú]mero\s+control\s+([0-9]{6,})/i)?.[1] ?? null;
+  const receiptControlNumber = normalized.match(/numero\s+control\s+([0-9]{6,})/i)?.[1] ?? null;
   const dueDate = normalizeDateString(
-    fullText.match(/fecha\s+de\s+vencimiento[^\d]*(\d{1,2}\/\d{1,2}\/\d{4})/i)?.[1] ?? null,
+    normalized.match(/fecha\s+de\s+vencimiento[^\d]*(\d{1,2}\/\d{1,2}\/\d{4})/i)?.[1] ?? null,
   );
-  const periodLabel = fullText.match(/serie\s+\d{1,2}\s*\/\s*\d{1,2}/i)?.[0]?.replace(/serie\s+/i, "") ?? null;
+  const periodLabel = normalized.match(/serie\s+\d{1,2}\s*\/\s*\d{1,2}/i)?.[0]?.replace(/serie\s+/i, "").replace(/\s*\/\s*/g, "/") ?? null;
   const amountFromLabel = (label: RegExp) => {
-    const match = fullText.match(label);
+    const match = normalized.match(label);
     return match?.[1] ? parseMoney(match[1]) : null;
   };
-  const amountDue = amountFromLabel(/total\s+a\s+pagar\s*\$?\s*([\d.,]+)/i);
-  const depositAmount = amountFromLabel(/ficha\s+de\s+(?:pago|deposito)[^]*?total\s+a\s+pagar\s*\$?\s*([\d.,]+)/i);
+  const amountDue = amountFromLabel(/total\s+a\s+pagar[^$]{0,80}\$\s*([\d.,]+)/i);
+  const depositSectionStart = normalized.indexOf("ficha de deposito") >= 0 ? normalized.indexOf("ficha de deposito") : normalized.indexOf("ficha de pago");
+  const depositSection = depositSectionStart >= 0 ? normalized.slice(depositSectionStart) : "";
+  const depositAmount = depositSection
+    ? parseMoney(depositSection.match(/total\s+a\s+pagar[^$]{0,260}\$\s*([\d.,]+)/i)?.[1] ?? null)
+    : null;
   const warnings: string[] = [];
   if (amountDue !== null && depositAmount !== null && Math.abs(amountDue - depositAmount) > 0.009) {
     warnings.push(`El aviso indica ${amountDue.toFixed(2)} y la ficha de depósito ${depositAmount.toFixed(2)}.`);
@@ -1189,10 +1223,24 @@ export function extractPolicyPdfReceiptEvidence(text: string): PolicyPdfCaptureR
     amountDue,
     depositAmount,
     currency: normalized.includes("pesos") || normalized.includes("mxn") ? "MXN" : "MXN",
-    paymentMethod: fullText.match(/forma\s+de\s+pago\s+([A-ZÁÉÍÓÚÜÑ ]+)/i)?.[1]?.trim() ?? null,
+    paymentMethod: normalized.match(/forma\s+de\s+pago\s+([a-záéíóúüñ ]+?)(?=\s+(?:moneda|recargo|plan|gastos|rfc|asegurado)\b)/i)?.[1]?.trim() ?? null,
     paymentConfirmed: false,
     warnings,
   };
+}
+
+export function isPolicyPdfReceiptOnlyText(text: string) {
+  const normalized = normalizeText(text);
+  if (!normalized.includes("aviso de cobro") && !normalized.includes("ficha de deposito") && !normalized.includes("numero control")) {
+    return false;
+  }
+
+  return ![
+    "poliza de seguro",
+    "poliza endoso inciso",
+    "datos de la poliza",
+    "datos del vehiculo",
+  ].some((marker) => normalized.includes(marker));
 }
 
 export function suggestPreviousPolicyNumber(policyNumber: string) {
@@ -1292,7 +1340,7 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
         (policyType === "AUTO" ? parseAutoInsuredObject(lines) : null);
   const beneficiaryCandidate = extractInlineValue(lines, ["Beneficiarios", "Beneficiario"]);
   const beneficiaryInfo =
-    beneficiaryCandidate && beneficiaryCandidate.length <= 180 && !/^(en nuestra|nuestra|coberturas|condiciones|pol[ií]za|seguros)/i.test(beneficiaryCandidate)
+    beneficiaryCandidate && beneficiaryCandidate.length <= 180 && !/^[\W_]+$/.test(beneficiaryCandidate) && !/^(en nuestra|nuestra|coberturas|condiciones|pol[ií]za|seguros)/i.test(beneficiaryCandidate)
       ? beneficiaryCandidate
       : null;
   const notes = [requestNumber ? `Solicitud ${requestNumber}` : null, issueDate ? `Emisión ${issueDate}` : null]

@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button";
 import { PolicyPdfCapturePanel } from "@/components/policies/policy-pdf-capture-panel";
 import { requireUserOrRedirect } from "@/lib/auth";
 
-export default async function PolicyPdfCapturePage() {
+export default async function PolicyPdfCapturePage({ searchParams }: { searchParams?: Promise<{ handoffId?: string }> }) {
   const user = await requireUserOrRedirect();
+  const params = (await searchParams) ?? {};
   return (
     <div className="flex flex-col gap-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
@@ -24,7 +25,7 @@ export default async function PolicyPdfCapturePage() {
           }
         />
 
-        <PolicyPdfCapturePanel userId={user.id} />
+        <PolicyPdfCapturePanel userId={user.id} handoffId={params.handoffId} />
       </div>
     </div>
   );
