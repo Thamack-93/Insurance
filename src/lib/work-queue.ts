@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import type { Priority, WorkItemStatus, WorkItemType } from "@/lib/domain-values";
 import { getDb } from "@/lib/db";
 import { businessEndOfDay, businessStartOfDay } from "@/lib/business-dates";
+import { shouldKeepRenewalWorkItemPolicy } from "@/lib/renewals.logic";
 
 export const OPEN_WORK_ITEM_STATUSES = [
   "OPEN",
@@ -173,11 +174,13 @@ export async function getWorkItems(filters: WorkQueueFilters = {}) {
     where,
     select: workQueueSelect,
     orderBy: buildOrderBy(filters),
-    skip: filters.skip,
-    take: filters.limit,
   });
 
-  return resolveLegacyRenewalRelations(items, filters, db);
+  const resolvedItems = await resolveLegacyRenewalRelations(items, filters, db);
+  const start = filters.skip ?? 0;
+  return filters.limit === undefined
+    ? resolvedItems.slice(start)
+    : resolvedItems.slice(start, start + filters.limit);
 }
 
 /**
@@ -223,17 +226,44 @@ async function resolveLegacyRenewalRelations(
       OR: policyOr,
       ...(filters.portfolioOwnerId ? { client: { portfolioOwnerId: filters.portfolioOwnerId } } : {}),
     },
-    select: policyQueueSelect,
+    select: {
+      ...policyQueueSelect,
+      renewalStage: true,
+      renewals: { select: { id: true }, take: 1 },
+      sourceRenewalSuggestions: {
+        where: { status: { in: ["ACCEPTED", "DECLINED"] } },
+        select: { id: true },
+        take: 1,
+      },
+      receipts: {
+        orderBy: [
+          { periodEndDate: "desc" },
+          { dueDate: "desc" },
+          { createdAt: "desc" },
+        ],
+        take: 1,
+        select: { status: true },
+      },
+    },
   });
   const policyById = new Map(policies.map((policy) => [policy.id, policy]));
-  const policyByNumber = new Map(policies.map((policy) => [policy.policyNumber.toUpperCase(), policy]));
+  const policiesByNumber = new Map<string, typeof policies>();
+  for (const policy of policies) {
+    const key = policy.policyNumber.toUpperCase();
+    const matches = policiesByNumber.get(key) ?? [];
+    matches.push(policy);
+    policiesByNumber.set(key, matches);
+  }
 
-  return items.map((item) => {
+  const resolvedItems = items.map((item) => {
     const reference = renewalReferencesByWorkItem.get(item.id);
+    const numberCandidates = reference?.policyNumbers.flatMap(
+      (number) => policiesByNumber.get(number.toUpperCase()) ?? [],
+    ) ?? [];
     const policy =
       item.policy ??
       policyById.get(reference?.policyId ?? "") ??
-      reference?.policyNumbers.map((number) => policyByNumber.get(number.toUpperCase())).find(Boolean);
+      (numberCandidates.length === 1 ? numberCandidates[0] : undefined);
     if (!policy) return item;
 
     return {
@@ -246,12 +276,32 @@ async function resolveLegacyRenewalRelations(
       policy,
     };
   });
+
+  return resolvedItems.filter((item) => {
+    if (!isRenewalWorkItem(item)) return true;
+
+    const reference = renewalReferencesByWorkItem.get(item.id);
+    const directPolicy = item.policy
+      ? policyById.get(item.policy.id)
+      : policyById.get(reference?.policyId ?? "");
+    const numberCandidates = reference?.policyNumbers.flatMap(
+      (number) => policiesByNumber.get(number.toUpperCase()) ?? [],
+    ) ?? [];
+    const candidates = directPolicy ? [directPolicy] : numberCandidates;
+    if (!candidates.length) return true;
+
+    return candidates.some((policy) => shouldKeepRenewalWorkItemPolicy({
+      status: policy.status,
+      renewalStage: policy.renewalStage,
+      hasSuccessor: (policy.renewals ?? []).length > 0,
+      hasDecision: (policy.sourceRenewalSuggestions ?? []).length > 0,
+      latestReceiptStatus: policy.receipts?.[0]?.status,
+    }));
+  });
 }
 
 export async function countWorkItems(filters: WorkQueueFilters = {}) {
-  const db = getDb();
-  const where = buildWhere(filters);
-  return db.workItem.count({ where });
+  return (await getWorkItems(filters)).length;
 }
 
 function buildWhere(filters: WorkQueueFilters): Prisma.WorkItemWhereInput {

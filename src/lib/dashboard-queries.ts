@@ -36,7 +36,6 @@ export async function getDashboardData() {
     },
     scope.portfolioOwnerId,
   );
-
   const [
     activePolicies,
     duePayments60,
@@ -415,6 +414,10 @@ export async function getTodayDashboardData() {
   const receiptWhere = receiptOperationalWhere(scope.portfolioOwnerId);
   const commissionWhere = commissionOperationalWhere(scope.portfolioOwnerId);
   const commissionMonthStatuses = { in: [...MONTHLY_COMMISSION_STATUSES] };
+  const overdueRenewalPoliciesPromise = loadEligibleRenewalPolicies(
+    { endDate: { lt: now } },
+    scope.portfolioOwnerId,
+  );
 
   const [
     activePolicies,
@@ -436,7 +439,7 @@ export async function getTodayDashboardData() {
     policyStatusRows,
     recentPolicies,
     overdueReceiptsCount,
-    expiredPoliciesCount,
+    overdueRenewalPolicies,
     openTasksCount,
   ] = await Promise.all([
     db.policy.count({ where: { ...policyWhere, status: "ACTIVE" } }),
@@ -499,7 +502,7 @@ export async function getTodayDashboardData() {
       take: 6,
     }),
     db.receipt.count({ where: { ...receiptWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } } }),
-    db.policy.count({ where: { ...policyWhere, status: "EXPIRED" } }),
+    overdueRenewalPoliciesPromise,
     countWorkItems({
       workItemTypes: ["TASK"],
       statuses: OPEN_WORK_ITEM_STATUSES,
@@ -577,7 +580,7 @@ export async function getTodayDashboardData() {
     alerts: [
       { id: "renewals", label: "Renovaciones próximas", detail: "Próximos 30 días", count: renewals30, tone: "warning" as const, href: "/operations?view=renewals" },
       { id: "overdue", label: "Cobros vencidos", detail: "Requieren atención", count: overdueReceiptsCount, tone: "critical" as const, href: "/receipts?tab=cobrar" },
-      { id: "expired", label: "Pólizas vencidas", detail: "En cartera", count: expiredPoliciesCount, tone: "critical" as const, href: "/policies" },
+      { id: "expired", label: "Renovaciones vencidas", detail: "Sin resolver", count: overdueRenewalPolicies.length, tone: "critical" as const, href: "/operations?view=renewals" },
       { id: "tasks", label: "Pendientes abiertos", detail: "Por resolver", count: openTasksCount, tone: "information" as const, href: "/operations?view=pending" },
     ],
     prevMonthLabel: prevMonthLabelFormatter.format(subMonths(now, 1)).replace(".", ""),
