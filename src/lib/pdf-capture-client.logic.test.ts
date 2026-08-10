@@ -88,4 +88,26 @@ describe("pdf capture client deadlines", () => {
     } satisfies Partial<PdfCaptureUploadError>);
     expect(uploadFn).toHaveBeenCalledTimes(1);
   });
+
+  it("aborts an in-flight upload when the operation is cancelled", async () => {
+    const controller = new AbortController();
+    let aborted = false;
+    const uploadFn = vi.fn(async (_pathname: string, _file: File, options: { abortSignal?: AbortSignal }) => {
+      options.abortSignal?.addEventListener("abort", () => { aborted = true; }, { once: true });
+      return await new Promise<never>(() => {});
+    });
+    const request = uploadPdfWithRetry({
+      pathname: "nora/policy.pdf",
+      file: new File(["pdf"], "policy.pdf", { type: "application/pdf" }),
+      handleUploadUrl: "/api/nora/policy-pdf/upload",
+      clientPayload: "{}",
+      maxAttempts: 2,
+      signal: controller.signal,
+      uploadFn: uploadFn as never,
+    });
+    controller.abort("removed");
+    await expect(request).rejects.toMatchObject({ code: "UPLOAD_CANCELLED", retryable: false });
+    expect(aborted).toBe(true);
+    expect(uploadFn).toHaveBeenCalledTimes(1);
+  });
 });

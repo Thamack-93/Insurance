@@ -21,10 +21,11 @@ type Props = {
   inputRef?: RefObject<HTMLInputElement | null>;
   fileStatus?: (file: File, index: number) => { label?: string; progress?: number; retryable?: boolean } | null;
   onRetryFile?: (file: File) => void;
+  allowRemoveWhenDisabled?: boolean;
 };
 
 
-export function PolicyPdfFilePicker({ files, onFilesChange, disabled = false, className, label = "Arrastra PDFs aquí o selecciónalos", presentation = "dropzone", inputRef: inputRefProp, fileStatus, onRetryFile }: Props) {
+export function PolicyPdfFilePicker({ files, onFilesChange, disabled = false, className, label = "Arrastra PDFs aquí o selecciónalos", presentation = "dropzone", inputRef: inputRefProp, fileStatus, onRetryFile, allowRemoveWhenDisabled = false }: Props) {
   const internalInputRef = useRef<HTMLInputElement>(null);
   const inputRef = inputRefProp ?? internalInputRef;
   const [dragging, setDragging] = useState(false);
@@ -60,13 +61,17 @@ export function PolicyPdfFilePicker({ files, onFilesChange, disabled = false, cl
       <input ref={inputRef} type="file" accept="application/pdf,.pdf" multiple className="hidden" disabled={disabled} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = ""; }} />
       {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
       {files.length > 0 ? (
-        <ul className="space-y-1">
+        <ul className={cn(presentation === "inline" ? "flex flex-wrap items-center gap-1.5" : "space-y-1")}>
           {files.map((file, index) => (
-            <li key={`${file.name}-${file.size}-${file.lastModified}`} className="flex items-center gap-2 rounded-xl border bg-card px-3 py-2 text-xs">
-              <span className="min-w-0 flex-1 truncate">{index + 1}. {file.name}</span>
-              <span className="text-muted-foreground">{(file.size / (1024 * 1024)).toFixed(1)} MB</span>
+            <li key={`${file.name}-${file.size}-${file.lastModified}`} className={cn(
+              presentation === "inline"
+                ? "inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border bg-card px-2 py-1 text-[11px] shadow-xs"
+                : "flex items-center gap-2 rounded-xl border bg-card px-3 py-2 text-xs",
+            )}>
+              <span className={cn("min-w-0 truncate", presentation === "inline" ? "max-w-[min(20rem,55vw)]" : "flex-1")}>{index + 1}. {file.name}</span>
+              <span className="shrink-0 text-muted-foreground">{(file.size / (1024 * 1024)).toFixed(1)} MB</span>
               {fileStatus?.(file, index) ? (
-                <span className="flex items-center gap-1 text-muted-foreground">
+                <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
                   {fileStatus(file, index)?.progress != null ? `${Math.round(fileStatus(file, index)?.progress ?? 0)}%` : null}
                   {fileStatus(file, index)?.label ?? ""}
                 </span>
@@ -76,7 +81,7 @@ export function PolicyPdfFilePicker({ files, onFilesChange, disabled = false, cl
                   <RefreshCw className="size-3.5" />
                 </Button>
               ) : null}
-              <Button type="button" variant="ghost" size="icon" className="size-6 rounded-full" disabled={disabled} onClick={() => onFilesChange(files.filter((_, fileIndex) => fileIndex !== index))} aria-label={`Eliminar ${file.name}`}>
+              <Button type="button" variant="ghost" size="icon" className="size-6 rounded-full" disabled={disabled && !allowRemoveWhenDisabled} onClick={() => onFilesChange(files.filter((_, fileIndex) => fileIndex !== index))} aria-label={`Eliminar ${file.name}`}>
                 <X className="size-3.5" />
               </Button>
             </li>

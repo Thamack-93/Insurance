@@ -5,6 +5,7 @@ import {
   inferClientType,
   normalizePdfPaymentFrequencyLabel,
   extractPolicyPdfReceiptEvidence,
+  isPolicyPdfReceiptOnlyText,
   scoreCaptureIdentity,
   suggestPreviousPolicyNumber,
 } from "@/lib/policy-pdf-capture.shared";
@@ -234,6 +235,113 @@ describe("policy-pdf-capture", () => {
     `);
     expect(receipt).toMatchObject({ policyNumber: "0940457241", receiptControlNumber: "0307563244", dueDate: "2026-08-30", periodLabel: "01/01", amountDue: 6359.33, depositAmount: 6359, paymentConfirmed: false });
     expect(receipt?.warnings.join(" ")).toContain("6359.33");
+  });
+
+  it("handles Quálitas PDFs whose reconstructed accents are separated", () => {
+    const draft = extractPolicyPdfDraftFromText(`
+      P Ó LIZA ENDOSO INCISO
+      P Ó LIZA DE SEGURO DE AUTOM Ó VILES
+      0940457790 000000 0001
+      INFORMACI Ó N DEL ASEGURADO
+      MARIA DEL CARMEN KOPPEL RIZO
+      DESCRIPCI Ó N DEL VEH Í CULO ASEGURADO
+      04893 MAZDA CX5 I GRAND TOURING 5P L4 SKYACTIV-G VP QC R. AUT.
+      Serie: JM3KFAD78J0419548
+      Vigencia Desde las 12:00 P.M. del 08/AGO/2026 Hasta las 12:00 P.M. del 08/AGO/2027
+      IMPORTE TOTAL. 8,658.52
+      RENUEVA A: 0940424801
+    `);
+
+    expect(draft).toMatchObject({
+      policyNumber: "0940457790",
+      clientName: "MARIA DEL CARMEN KOPPEL RIZO",
+      serialNumber: "JM3KFAD78J0419548",
+      startDate: "2026-08-08",
+      endDate: "2027-08-08",
+      premiumAmount: 8658.52,
+      sourcePolicyNumber: "0940424801",
+    });
+  });
+
+  it("classifies receipt-only documents and preserves both payment amounts", () => {
+    const text = `
+      AVISO DE COBRO DE PRIMAS DE AUTOMÓVILES
+      P Ó LIZA 0940457790 ENDOSO 000000 FECHA DE VENCIMIENTO 22/08/2026 N Ú MERO CONTROL 0307957697
+      TOTAL A PAGAR $ 8,658.52
+      FICHA DE DEP Ó SITO DE PRIMAS DE AUTOM Ó VILES
+      P Ó LIZA 0940457790 ENDOSO 000000 FECHA DE VENCIMIENTO 22/08/2026
+      TOTAL A PAGAR $ 8,658.00
+    `;
+    const receipt = extractPolicyPdfReceiptEvidence(text);
+
+    expect(isPolicyPdfReceiptOnlyText(text)).toBe(true);
+    expect(receipt).toMatchObject({
+      policyNumber: "0940457790",
+      receiptControlNumber: "0307957697",
+      dueDate: "2026-08-22",
+      amountDue: 8658.52,
+      depositAmount: 8658,
+    });
+    expect(receipt?.warnings.join(" ")).toContain("8658.52");
+  });
+
+  it("does not treat Banorte barcode padding as a different policy number", () => {
+    const receipt = extractPolicyPdfReceiptEvidence(`
+      AVISO DE COBRO
+      98607001009578008653
+      NÚMERO DE PÓLIZA 1009578 0 986 70 01 1
+      Póliza: 01009578
+      Fecha de vencimiento 31/08/2026
+      Importe a Pagar $31,920.29
+    `);
+
+    expect(receipt?.policyNumber).toBe("1009578");
+  });
+
+  it("reports an existing policy when the vehicle series is already captured", async () => {
+    const text = `
+      Póliza 1009578
+      Datos del asegurado
+      MOTORES ANGELOPOLIS SA DE CV
+      Descripción del vehículo asegurado
+      Serie: 1G1F66S0XN4124102
+      Vigencia 01/08/2026 al 01/08/2027
+      Prima Total $31,920.29
+    `;
+    const draft = extractPolicyPdfDraftFromText(text);
+    const db = {
+      policy: {
+        findMany: async (args: { where?: { OR?: unknown } }) => args.where?.OR
+          ? [{
+              id: "existing-policy",
+              policyNumber: "1009578",
+              startDate: new Date("2026-08-01T00:00:00.000Z"),
+              endDate: new Date("2027-08-01T00:00:00.000Z"),
+              status: "ACTIVE",
+              client: { fullName: "MOTORES ANGELOPOLIS SA DE CV" },
+              insurer: { name: "Seguros Banorte" },
+              insuredAssets: [{ serialNumber: "1G1F66S0XN4124102" }],
+            }]
+          : [],
+      },
+      client: { findMany: async () => [] },
+      insurer: { findMany: async () => [] },
+    } as never;
+
+    const preview = await buildPolicyPdfCapturePreviewFromDraft({
+      draft,
+      fieldConfidence: buildPolicyPdfCaptureFieldConfidence(text, draft),
+      context: { user: null },
+    }, db);
+
+    expect(preview.existingPolicyMatches).toEqual([
+      expect.objectContaining({
+        policyNumber: "1009578",
+        serialNumber: "1G1F66S0XN4124102",
+        matchReason: "policyNumber",
+      }),
+    ]);
+    expect(preview.warnings.join(" ")).toContain("MOTORES ANGELOPOLIS");
   });
 
   it("extracts the Banorte cover page without mistaking its phone or URL for policy data", () => {
