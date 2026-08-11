@@ -29,10 +29,10 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 ## Variables de entorno
 
 - `SESSION_SECRET`
-- `DATABASE_URL`
-- `DATABASE_URL_UNPOOLED` (endpoint directo; solo migraciones y comandos explícitos)
+- `DATABASE_URL` (endpoint pooled del rol restringido `policydesk_runtime`)
 - `EXPECTED_DATABASE_ENV`
 - `EXPECTED_DATABASE_FINGERPRINT`
+- `EXPECTED_DATABASE_ROLE=policydesk_runtime`
 - `ENABLE_DOCUMENT_FILES=false`
 - `CRON_SECRET`
 - `UPSTASH_REDIS_REST_URL` opcional para rate limiting distribuido
@@ -47,7 +47,11 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 - `BLOB_READ_WRITE_TOKEN`
 - `BACKUP_ENCRYPTION_KEY`
 - `BACKUP_ENCRYPTION_KEY_VERSION`
-- `RESTORE_DATABASE_URL`, `RESTORE_NEON_BRANCH`, `RESTORE_EXPECTED_DATABASE_ENV`, `RESTORE_EXPECTED_DATABASE_FINGERPRINT` y `ALLOW_TEMPORARY_NEON_RESTORE` solo para operaciones CLI autorizadas
+- `RESTORE_DATABASE_URL`, `RESTORE_NEON_BRANCH`, `RESTORE_EXPECTED_DATABASE_ENV`, `RESTORE_EXPECTED_DATABASE_FINGERPRINT` y `ALLOW_TEMPORARY_NEON_RESTORE` solo para operaciones CLI autorizadas fuera de Vercel
+
+`DATABASE_URL_UNPOOLED`, `DATABASE_RUNTIME_URL` y `NEON_API_KEY` pertenecen al
+GitHub Environment protegido o a la sesión explícita del operador. No deben
+existir en Production Runtime ni Preview de Vercel.
 
 ## Binding entre deployment y base
 
@@ -58,10 +62,13 @@ externos. Si falta o no coincide, login, dashboard, crons, Telegram y backups
 fallan cerradamente con estado no disponible; `/api/health` no expone el
 fingerprint ni la URL.
 
-El fingerprint se deriva de project ID, branch ID y database ID/nombre de Neon.
-Nunca se acepta una cadena manual como prueba de identidad. Después de aplicar
-la migración por el endpoint directo, un operador ejecuta primero el preview y
-luego el apply explícito:
+En destinos remotos, el CLI usa `NEON_API_KEY` para verificar project, branch,
+endpoint `read_write`, database y protección de Production. El fingerprint se
+deriva exclusivamente del project ID, branch ID y database ID devueltos por
+Neon; los flags son expectativas que deben coincidir. Si Neon no responde, el
+comando falla cerrado. Solo development/test sobre loopback admite identidad
+local. Después de aplicar la migración por el endpoint directo, un operador
+ejecuta primero el preview y luego el apply explícito:
 
 ```bash
 npm run init:deployment-db-identity -- \
@@ -83,6 +90,10 @@ npm run init:deployment-db-identity -- \
   --production-endpoint-id <production-endpoint-id> \
   --apply
 ```
+
+El apply usa una transacción con timeout, advisory lock, relectura bajo lock,
+GUC administrativo y verificación final. No imprime URLs, tokens ni respuestas
+del proveedor.
 
 Una rama clonada de Production hereda su fila y queda bloqueada hasta ejecutar
 el modo `--rebind-cloned-branch` con los IDs de Production y
@@ -123,26 +134,58 @@ npm run init:deployment-db-identity -- \
 Antes de desplegar o migrar, y de nuevo después, ejecutar:
 
 ```bash
-npm run check:deployment-db-safety
+npm run check:deployment-db-safety -- --runtime-only
+DATABASE_URL_UNPOOLED=<admin-direct> npm run check:deployment-db-safety -- --admin
 ```
 
 No se promueve un artifact de Preview a Production: Production se construye con
-su propia configuración e identidad. El build de Production conserva el
-`prisma migrate deploy` existente, pero ni el build, ni `postinstall`, ni el
-arranque inicializan o revinculan la identidad; Preview tampoco migra de forma
-automática.
+su propia configuración e identidad. `vercel-build` hace únicamente el audit
+runtime read-only y `next build`; no ejecuta migraciones. Ni build,
+`postinstall`, startup ni Preview automático migran o revinculan bases.
 
-En el primer rollout, aplicar esta migración administrativamente antes de
-desplegar el código que exige la identidad, inicializar Production y ejecutar el
-check. Así se evita una ventana de indisponibilidad entre `migrate deploy` y la
-inicialización explícita.
+## Rol PostgreSQL de runtime
+
+`npm run provision:database-runtime-role` muestra un preview y `--apply` crea el
+rol fijo `policydesk_runtime`. Requiere `DATABASE_URL_UNPOOLED` admin directa y
+`DATABASE_RUNTIME_URL` pooled del nuevo rol. El rol no puede crear schema/base,
+truncar tablas, leer `_prisma_migrations` ni mutar `DeploymentIdentity`; sí puede
+hacer CRUD sobre el inventario operativo y usar sus secuencias.
+
+No se usan default grants amplios: podrían exponer por accidente una futura
+tabla environment-local. Cada modelo se añade explícitamente a
+`src/lib/database-runtime-access.ts`; CI falla ante modelos no clasificados y el
+workflow vuelve a provisionar los grants después de migrar. Si un rol existente
+tiene autoridad incompatible, el CLI falla cerrado y exige revisión manual.
+
+## Releases protegidos
+
+`main` tiene auto-deploy Git desactivado en `vercel.json`; Preview continúa
+automático. Configurar el GitHub Environment `production` con al menos un
+required reviewer, deployment branch `main` y secretos administrativos de Neon,
+Vercel, fingerprint esperado y la cuenta de smoke. `RELEASE_GITHUB_TOKEN` debe
+tener solo lectura de checks y de la configuración del Environment para que el
+workflow compruebe físicamente reviewers y la política exacta de `main`.
+
+El workflow `production-runtime-role-cutover.yml` convierte el deployment base
+ya aprobado al rol restringido. `production-release.yml` exige SHA/checks
+exactos, verifica el baseline, crea una recovery branch protegida, migra por la
+conexión admin, inicializa/audita identidad, reaplica grants explícitos,
+construye con `vercel build`, crea un candidato con
+`vercel deploy --prebuilt --skip-domain` y ejecuta login, Today, Clients, logout
+y revisión de logs. El alias se promueve solo después del PASS; si falla, nunca
+abandona el deployment restringido anterior. Las migraciones deben haberse
+confirmado aditivas antes de iniciar.
+
+La recovery branch se conserva. `production-recovery-cleanup.yml` solo la
+elimina tras restore drill `PASS`, nueva aprobación del Environment y
+coincidencia exacta con el artifact inmutable del release run.
 
 ## Flujo de despliegue
 
 1. Crear la base de datos hosted.
 2. Crear una rama protegida para preview; no seedear ni resetear la base actual.
-3. Aplicar migraciones mediante `DATABASE_URL_UNPOOLED`, inicializar o revincular la identidad y ejecutar el check saneado.
-4. Configurar las variables por entorno y, para Preview, por rama Git en Vercel.
+3. Aplicar migraciones mediante una conexión admin directa fuera de Vercel, inicializar/revincular identidad, provisionar el rol runtime y ejecutar ambos audits.
+4. Configurar en Vercel solo las cuatro variables runtime y, para Preview, por rama Git.
 5. Conectar un Blob store privado.
 6. Mantener los cinco cron diarios en Vercel, todos protegidos por `CRON_SECRET`: `/api/jobs/backup` a las `05:00 UTC`, `/api/jobs/nonpayment-cancellation` a las `06:00 UTC`, `/api/jobs/renewal-followups` a las `13:30 UTC`, `/api/jobs/telegram-digest` a las `14:00 UTC` (08:00, hora de Ciudad de México) y `/api/jobs/telegram-birthdays` a las `15:00 UTC` (09:00, hora de Ciudad de México). El aviso de cumpleaños se deduplica por usuario y fecha local; el reenvío manual es independiente.
 7. Mantener el fallback local de rate limiting para el despliegue actual. Cuando aumente el tráfico, configurar Redis y cambiar `REQUIRE_DISTRIBUTED_RATE_LIMIT=1` para fallar cerrado si Redis no está disponible.

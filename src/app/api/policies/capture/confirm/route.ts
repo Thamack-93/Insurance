@@ -130,6 +130,7 @@ export async function POST(request: NextRequest) {
       user = await requireUser();
     } catch (error) {
       if (error instanceof AuthError) {
+        if (error.status >= 500) return guardErrorResponse(error);
         await recordSecurityAccessDenied({
           alertType: SECURITY_EVENT_TYPES.accessDenied,
           title: "Confirmación de captura sin sesión válida",
@@ -186,6 +187,7 @@ export async function POST(request: NextRequest) {
       if (payload.sourcePolicyId) await assertPolicyPortfolioAccess(payload.sourcePolicyId, user.id);
     } catch (error) {
       if (error instanceof AuthError) {
+        if (error.status >= 500) return guardErrorResponse(error);
         await recordSecurityAccessDenied({
           alertType: SECURITY_EVENT_TYPES.accessDenied,
           title: "Confirmación de captura sin acceso a cartera",
@@ -514,7 +516,7 @@ export async function POST(request: NextRequest) {
     }
     if (error instanceof Error && "status" in error) return guardErrorResponse(error);
     if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status });
     }
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.issues[0]?.message ?? "Datos inválidos." }, { status: 400 });

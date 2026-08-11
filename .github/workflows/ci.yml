@@ -49,6 +49,9 @@ jobs:
       - name: Check deployment database safety scope
         run: npm run check:deployment-db-safety-scope
 
+      - name: Check protected production release orchestration
+        run: npm run check:production-release-orchestration
+
       - name: Lint
         run: npm run lint
 
@@ -112,7 +115,14 @@ jobs:
         run: |
           FINGERPRINT=$(node -e "const {createHash}=require('node:crypto'); process.stdout.write(createHash('sha256').update(['policydesk-db:v1','ci-local','ci-application','postgres'].join('\\0')).digest('hex'))")
           echo "EXPECTED_DATABASE_FINGERPRINT=$FINGERPRINT" >> "$GITHUB_ENV"
-          npm run init:deployment-db-identity -- --environment test --project-id ci-local --branch-id ci-application --database postgres --endpoint-id 127 --apply --json
+          npm run --silent init:deployment-db-identity -- --environment test --project-id ci-local --branch-id ci-application --database postgres --endpoint-id 127 --apply --json > /tmp/identity-apply-a.json &
+          PID_A=$!
+          npm run --silent init:deployment-db-identity -- --environment test --project-id ci-local --branch-id ci-application --database postgres --endpoint-id 127 --apply --json > /tmp/identity-apply-b.json &
+          PID_B=$!
+          wait "$PID_A"
+          wait "$PID_B"
+          jq -e '.fingerprintMatches == true' /tmp/identity-apply-a.json >/dev/null
+          jq -e '.fingerprintMatches == true' /tmp/identity-apply-b.json >/dev/null
 
       - name: Check deployment database identity
         run: npm run check:deployment-db-safety
@@ -120,7 +130,7 @@ jobs:
       - name: Deployment database safety integration
         env:
           DEPLOYMENT_SAFETY_INTEGRATION: "1"
-        run: npm run test:unit -- src/lib/deployment-db-safety.integration.logic.test.ts
+        run: npm run test:unit -- src/lib/deployment-db-safety.integration.logic.test.ts src/lib/database-runtime-role.integration.logic.test.ts
 
       - name: Check migration drift
         run: npm run db:check-drift

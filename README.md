@@ -37,9 +37,12 @@ Copia `.env.example` a `.env.local` y ajusta los valores:
 |----------|-----------|-------------|
 | `SESSION_SECRET` | Producción | Secreto HMAC para cookies de sesión (mín. 32 caracteres) |
 | `DATABASE_URL` | Todos | Endpoint pooled usado exclusivamente por el runtime |
-| `DATABASE_URL_UNPOOLED` | Migración/operación | Endpoint directo de la misma rama Neon; no se usa como fallback del runtime |
+| `DATABASE_URL_UNPOOLED` | GitHub Environment/operación | Endpoint admin directo; nunca se configura en Vercel Runtime o Preview |
+| `DATABASE_RUNTIME_URL` | GitHub Environment/operación | URL pooled del rol `policydesk_runtime`, usada para provisionar y validar el cutover |
 | `EXPECTED_DATABASE_ENV` | Todos | Identidad explícita: `production`, `preview`, `development` o `test` |
-| `EXPECTED_DATABASE_FINGERPRINT` | Todos | SHA-256 derivado de project ID, branch ID y database ID/nombre saneados |
+| `EXPECTED_DATABASE_FINGERPRINT` | Todos | SHA-256 derivado del project ID, branch ID y database ID verificados por Neon |
+| `EXPECTED_DATABASE_ROLE` | Runtime remoto | Debe ser `policydesk_runtime` |
+| `NEON_API_KEY` | GitHub Environment/operación | Verificación de topología; nunca se configura en Vercel |
 | `CRON_SECRET` | Producción | Protege los cinco jobs internos de Vercel Cron |
 | `AI_GATEWAY_MODEL` | Opcional | Modelo `provider/model` usado por Nora |
 | `AI_GATEWAY_FALLBACK_MODELS` | Opcional | Modelos de respaldo para conversación |
@@ -121,9 +124,10 @@ La ruta recomendada para una demo pública o compartida es:
 
 1. Crear una base de datos hosted.
 2. Migrar el snapshot real actual a esa base hosted.
-3. Configurar `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `EXPECTED_DATABASE_ENV` y el fingerprint derivado en el scope exacto del entorno/rama de Vercel.
-4. Desplegar en [Vercel Hobby](https://vercel.com/pricing).
-5. Conectar un store privado de Blob para los backups cifrados.
+3. Provisionar el rol restringido e inicializar la identidad mediante una conexión admin directa.
+4. Configurar en Vercel únicamente `DATABASE_URL` runtime, `EXPECTED_DATABASE_ENV`, `EXPECTED_DATABASE_FINGERPRINT` y `EXPECTED_DATABASE_ROLE` en el scope exacto.
+5. Desplegar en [Vercel Hobby](https://vercel.com/pricing).
+6. Conectar un store privado de Blob para los backups cifrados.
 
 La demo queda enfocada en datos estructurados y no requiere PDFs ni almacenamiento de archivos en esta fase.
 

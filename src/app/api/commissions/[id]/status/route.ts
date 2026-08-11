@@ -32,6 +32,7 @@ export async function POST(
     }
   } catch (error) {
     if (error instanceof AuthError) {
+      if (error.status >= 500) return guardErrorResponse(error);
       await recordSecurityAccessDenied({
         alertType: SECURITY_EVENT_TYPES.accessDenied,
         title: "Actualización de comisión sin permisos",

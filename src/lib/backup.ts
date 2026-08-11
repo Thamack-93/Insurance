@@ -650,6 +650,7 @@ export async function rekeyStoredBackup(
   sourceFilename: string,
   now = new Date(),
 ): Promise<RekeyedBackup> {
+  await assertDeploymentDatabaseSafety();
   assertSafeBackupFilename(sourceFilename);
   const rekeyStatus = getBackupRekeyStatus();
   if (!rekeyStatus.ready || !rekeyStatus.targetKeyVersion) {

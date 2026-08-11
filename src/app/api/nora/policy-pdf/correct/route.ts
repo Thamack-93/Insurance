@@ -208,7 +208,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof AuthError) return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status });
     if (error instanceof z.ZodError) return NextResponse.json({ error: "La propuesta de corrección no es válida." }, { status: 400 });
     return NextResponse.json({ error: "No se pudo revisar la corrección de la captura." }, { status: 500 });
   }

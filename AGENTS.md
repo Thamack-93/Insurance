@@ -21,6 +21,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - A cloned Neon branch inherits the source identity and must fail closed until an operator explicitly rebinds it through the guarded CLI.
 - Do not initialize or rebind identity from build, `postinstall`, application startup, proxy/middleware or generic Preview automation.
 - The deployment-safety Prisma extension is only a mutation guard. It must never be used to implement tenant organization assignment.
+- Remote identity initialization must verify endpoint, project, branch, database ID, compute mode and branch protection through the Neon API. Operator flags are expectations, never identity evidence.
+- Vercel runtime receives only pooled `DATABASE_URL` for `policydesk_runtime`, `EXPECTED_DATABASE_ENV`, `EXPECTED_DATABASE_FINGERPRINT` and `EXPECTED_DATABASE_ROLE`. Keep direct/admin database credentials and `NEON_API_KEY` in the protected GitHub Environment only.
+- Production builds never own migrations. Releases use the protected workflow order: exact SHA/checks, recovery branch, migrate, identity, runtime grants/audit, prebuilt deploy and authenticated smoke.
+- Runtime table privileges are an explicit inventory in `src/lib/database-runtime-access.ts`; broad default table grants are forbidden. Add every new Prisma model to that inventory or the safety-scope check fails.
+- Raw Prisma SQL is permitted only through `src/lib/deployment-safe-raw-sql.ts`; the AST safety-scope check enforces this boundary.
 
 ## Cycle 1 organization transition
 

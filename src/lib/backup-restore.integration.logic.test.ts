@@ -217,6 +217,30 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
       await initializeDeploymentIdentity(targetUrl);
       await seedFixture(sourceUrl);
       const snapshot = await snapshotDatabase(sourceUrl);
+      snapshot.push({
+        type: "table",
+        schema: "public",
+        name: "DeploymentIdentity",
+        columns: [
+          { name: "id", postgresType: "text", nullable: false },
+          { name: "environment", postgresType: "DeploymentEnvironment", nullable: false },
+          { name: "fingerprint", postgresType: "text", nullable: false },
+          { name: "createdAt", postgresType: "timestamp", nullable: false },
+          { name: "updatedAt", postgresType: "timestamp", nullable: false },
+        ],
+        rows: [{
+          type: "row",
+          schema: "public",
+          table: "DeploymentIdentity",
+          data: {
+            id: "policydesk_deployment_identity_v1",
+            environment: "PRODUCTION",
+            fingerprint: "f".repeat(64),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        }],
+      });
       const valid = encodeSnapshot(snapshot);
       const restored = await restoreVerifiedBackup(restoreInput(targetUrl, valid));
       expect(restored.tableCounts.totalRows).toBeGreaterThan(0);

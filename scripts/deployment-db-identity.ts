@@ -1,16 +1,26 @@
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import { getFlag, hasFlag, parseCliArgs } from "./_shared.ts";
 import {
   DEPLOYMENT_IDENTITY_ID,
-  canonicalNeonEndpointId,
   deriveDeploymentFingerprint,
   type DeploymentEnvironment,
 } from "../src/lib/deployment-db-safety.ts";
+import { localDatabaseIdentity, verifyNeonTarget } from "./deployment-db-neon.ts";
 
 const args = parseCliArgs();
 const apply = hasFlag(args, "apply");
 const json = hasFlag(args, "json");
 const rebind = hasFlag(args, "rebind-cloned-branch");
+const LOCK_KEY = "policydesk-deployment-identity-v1";
+
+type StoredIdentity = { environment: string; fingerprint: string } | null;
+type TargetIdentity = {
+  projectId: string;
+  branchId: string;
+  endpointId: string;
+  databaseIdentity: string;
+  databaseName: string;
+};
 
 function required(name: string) {
   const value = getFlag(args, name)?.trim();
@@ -33,6 +43,78 @@ function print(value: Record<string, unknown>) {
   else Object.entries(value).forEach(([key, entry]) => console.log(`${key}: ${String(entry)}`));
 }
 
+async function readIdentity(client: PoolClient): Promise<StoredIdentity> {
+  const result = await client.query<{ environment: string; fingerprint: string }>(
+    `SELECT "environment"::text AS environment, "fingerprint" FROM "DeploymentIdentity" WHERE "id" = $1`,
+    [DEPLOYMENT_IDENTITY_ID],
+  );
+  return result.rows[0] ?? null;
+}
+
+function validateTransition(input: {
+  current: StoredIdentity;
+  environment: DeploymentEnvironment;
+  fingerprint: string;
+  expectedProductionFingerprint: string | null;
+}) {
+  const alreadyMatches = input.current?.environment === prismaEnvironment(input.environment)
+    && input.current.fingerprint === input.fingerprint;
+  if (input.current && !alreadyMatches) {
+    if (!rebind) throw new Error("La identidad existente es distinta; usa el flujo explícito de rebind.");
+    if (input.environment !== "preview" && input.environment !== "test") throw new Error("El rebind solo puede terminar en Preview o Test.");
+    if (!input.expectedProductionFingerprint) throw new Error("El rebind requiere la identidad verificada de Production.");
+    if (input.current.environment !== "PRODUCTION" || input.current.fingerprint !== input.expectedProductionFingerprint) {
+      throw new Error("La identidad heredada no coincide con la Production verificada.");
+    }
+    if (apply && process.env.ALLOW_DEPLOYMENT_IDENTITY_REBIND !== "1") {
+      throw new Error("El rebind requiere ALLOW_DEPLOYMENT_IDENTITY_REBIND=1.");
+    }
+  }
+  return {
+    alreadyMatches,
+    operation: input.current && !alreadyMatches ? "rebind-cloned-branch" : alreadyMatches ? "validate" : "initialize",
+  };
+}
+
+async function resolveTarget(input: {
+  connectionString: string;
+  environment: DeploymentEnvironment;
+  projectId: string;
+  branchId: string;
+  endpointId: string;
+  databaseName: string;
+  isLocal: boolean;
+}): Promise<TargetIdentity> {
+  if (input.isLocal) {
+    if (input.environment === "production" || input.environment === "preview") {
+      throw new Error("Production/Preview no pueden inicializarse sobre un host local.");
+    }
+    const local = localDatabaseIdentity(input.connectionString);
+    if (local.endpointId !== input.endpointId || local.databaseName !== input.databaseName) {
+      throw new Error("La identidad local no coincide con la conexión.");
+    }
+    return { ...input, databaseIdentity: local.databaseName };
+  }
+  const apiKey = process.env.NEON_API_KEY?.trim();
+  if (!apiKey) throw new Error("NEON_API_KEY es obligatoria para verificar un destino Neon remoto.");
+  const verified = await verifyNeonTarget({
+    apiKey,
+    connectionString: input.connectionString,
+    projectId: input.projectId,
+    branchId: input.branchId,
+    endpointId: input.endpointId,
+    databaseName: input.databaseName,
+    requireProtected: input.environment === "production",
+  });
+  return {
+    projectId: verified.projectId,
+    branchId: verified.branchId,
+    endpointId: verified.endpointId,
+    databaseIdentity: verified.databaseId,
+    databaseName: verified.databaseName,
+  };
+}
+
 async function main() {
   const connectionString = process.env.DATABASE_URL_UNPOOLED?.trim();
   if (!connectionString) throw new Error("DATABASE_URL_UNPOOLED es obligatoria.");
@@ -40,9 +122,8 @@ async function main() {
   const environment = parseEnvironment(required("environment"));
   const projectId = required("project-id");
   const branchId = required("branch-id");
-  const database = required("database");
   const endpointId = required("endpoint-id").toLowerCase();
-  const actualEndpointId = canonicalNeonEndpointId(connectionString);
+  const databaseName = required("database");
   const isLocal = ["127.0.0.1", "localhost", "::1"].includes(url.hostname.toLowerCase());
   const requiresProductionComparison = environment === "preview" || rebind;
   const productionBranchId = requiresProductionComparison ? required("production-branch-id") : null;
@@ -51,66 +132,132 @@ async function main() {
   if (url.hostname.toLowerCase().split(".")[0]?.endsWith("-pooler")) {
     throw new Error("La inicialización requiere el endpoint directo, no el pooler.");
   }
-  if (actualEndpointId !== endpointId) throw new Error("El endpoint saneado no coincide con --endpoint-id.");
-  if ((environment === "production" || environment === "preview") && isLocal) {
-    throw new Error("Production/Preview no pueden inicializarse sobre un host local.");
-  }
   if (productionBranchId && productionEndpointId && (branchId === productionBranchId || endpointId === productionEndpointId)) {
     throw new Error("El target coincide con la rama o endpoint de Production.");
   }
   if (environment === "production" && apply && process.env.ALLOW_PRODUCTION_DEPLOYMENT_IDENTITY_APPLY !== "1") {
     throw new Error("Production requiere ALLOW_PRODUCTION_DEPLOYMENT_IDENTITY_APPLY=1.");
   }
-  if ((environment === "development" || environment === "test") && !isLocal && apply && process.env.ALLOW_REMOTE_NONPRODUCTION_DEPLOYMENT_IDENTITY_APPLY !== "1") {
+  if ((environment === "development" || environment === "test") && !isLocal && apply
+    && process.env.ALLOW_REMOTE_NONPRODUCTION_DEPLOYMENT_IDENTITY_APPLY !== "1") {
     throw new Error("Development/Test remotos requieren ALLOW_REMOTE_NONPRODUCTION_DEPLOYMENT_IDENTITY_APPLY=1.");
   }
 
-  const fingerprint = deriveDeploymentFingerprint({ projectId, branchId, databaseIdOrName: database });
+  const target = await resolveTarget({ connectionString, environment, projectId, branchId, endpointId, databaseName, isLocal });
+  const fingerprint = deriveDeploymentFingerprint({ projectId: target.projectId, branchId: target.branchId, databaseIdOrName: target.databaseIdentity });
+  let expectedProductionFingerprint: string | null = null;
+  if (requiresProductionComparison) {
+    if (isLocal) {
+      expectedProductionFingerprint = deriveDeploymentFingerprint({ projectId, branchId: productionBranchId!, databaseIdOrName: databaseName });
+    } else {
+      const apiKey = process.env.NEON_API_KEY!.trim();
+      const productionConnectionString = process.env.PRODUCTION_DATABASE_URL_UNPOOLED?.trim();
+      if (!productionConnectionString) throw new Error("Preview/rebind remotos requieren PRODUCTION_DATABASE_URL_UNPOOLED para verificar Production.");
+      const production = await verifyNeonTarget({
+        apiKey,
+        connectionString: productionConnectionString,
+        projectId,
+        branchId: productionBranchId!,
+        endpointId: productionEndpointId!,
+        databaseName,
+        requireProtected: true,
+      });
+      expectedProductionFingerprint = deriveDeploymentFingerprint({
+        projectId: production.projectId,
+        branchId: production.branchId,
+        databaseIdOrName: production.databaseId,
+      });
+    }
+  }
+
   const pool = new Pool({ connectionString, max: 1, application_name: "policydesk-deployment-identity-admin" });
   const client = await pool.connect();
   try {
-    const currentResult = await client.query<{ environment: string; fingerprint: string }>(
-      `SELECT "environment"::text AS environment, "fingerprint" FROM "DeploymentIdentity" WHERE "id" = $1`,
-      [DEPLOYMENT_IDENTITY_ID],
-    );
-    const current = currentResult.rows[0] ?? null;
-    const alreadyMatches = current?.environment === prismaEnvironment(environment) && current.fingerprint === fingerprint;
-
-    if (current && !alreadyMatches) {
-      if (!rebind) throw new Error("La identidad existente es distinta; usa el flujo explícito de rebind.");
-      if (environment !== "preview" && environment !== "test") throw new Error("El rebind solo puede terminar en Preview o Test.");
-      if (!productionBranchId || !productionEndpointId) throw new Error("El rebind requiere la identidad saneada de Production.");
-      const expectedPrevious = deriveDeploymentFingerprint({ projectId, branchId: productionBranchId, databaseIdOrName: database });
-      if (current.environment !== "PRODUCTION" || current.fingerprint !== expectedPrevious) {
-        throw new Error("La identidad heredada no coincide con la Production declarada.");
+    if (!apply) {
+      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      try {
+        const current = await readIdentity(client);
+        const transition = validateTransition({ current, environment, fingerprint, expectedProductionFingerprint });
+        print({
+          mode: "preview",
+          operation: transition.operation,
+          targetEnvironment: environment,
+          targetEndpointMatches: true,
+          providerTopologyVerified: !isLocal,
+          currentIdentity: current ? current.environment.toLowerCase() : "missing",
+          derivedFingerprint: fingerprint,
+          fingerprintMatches: transition.alreadyMatches,
+          mutationRequired: !transition.alreadyMatches,
+        });
+      } finally {
+        await client.query("ROLLBACK");
       }
-      if (apply && process.env.ALLOW_DEPLOYMENT_IDENTITY_REBIND !== "1") {
-        throw new Error("El rebind requiere ALLOW_DEPLOYMENT_IDENTITY_REBIND=1.");
-      }
+      return;
     }
 
-    print({
-      mode: apply ? "apply" : "preview",
-      operation: current && !alreadyMatches ? "rebind-cloned-branch" : alreadyMatches ? "validate" : "initialize",
-      targetEnvironment: environment,
-      targetEndpointMatches: actualEndpointId === endpointId,
-      currentIdentity: current ? current.environment.toLowerCase() : "missing",
-      derivedFingerprint: fingerprint,
-      fingerprintMatches: alreadyMatches,
-      mutationRequired: !alreadyMatches,
-    });
-
-    if (!apply || alreadyMatches) return;
     await client.query("BEGIN");
     try {
-      await client.query(`SET LOCAL policydesk.deployment_identity_admin = '1'`);
-      await client.query(
-        `INSERT INTO "DeploymentIdentity" ("id", "environment", "fingerprint", "createdAt", "updatedAt")
-         VALUES ($1, $2::"DeploymentEnvironment", $3, now(), now())
-         ON CONFLICT ("id") DO UPDATE SET "environment" = EXCLUDED."environment", "fingerprint" = EXCLUDED."fingerprint", "updatedAt" = now()`,
-        [DEPLOYMENT_IDENTITY_ID, prismaEnvironment(environment), fingerprint],
-      );
+      await client.query(`SET LOCAL lock_timeout = '30s'`);
+      await client.query(`SET LOCAL statement_timeout = '5min'`);
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [LOCK_KEY]);
+      const lockedTarget = await resolveTarget({ connectionString, environment, projectId, branchId, endpointId, databaseName, isLocal });
+      const lockedFingerprint = deriveDeploymentFingerprint({
+        projectId: lockedTarget.projectId,
+        branchId: lockedTarget.branchId,
+        databaseIdOrName: lockedTarget.databaseIdentity,
+      });
+      if (lockedFingerprint !== fingerprint
+        || lockedTarget.endpointId !== target.endpointId
+        || lockedTarget.databaseName !== target.databaseName) {
+        throw new Error("La topología del destino cambió durante la operación.");
+      }
+      if (requiresProductionComparison && !isLocal) {
+        const lockedProduction = await verifyNeonTarget({
+          apiKey: process.env.NEON_API_KEY!.trim(),
+          connectionString: process.env.PRODUCTION_DATABASE_URL_UNPOOLED!.trim(),
+          projectId,
+          branchId: productionBranchId!,
+          endpointId: productionEndpointId!,
+          databaseName,
+          requireProtected: true,
+        });
+        const lockedProductionFingerprint = deriveDeploymentFingerprint({
+          projectId: lockedProduction.projectId,
+          branchId: lockedProduction.branchId,
+          databaseIdOrName: lockedProduction.databaseId,
+        });
+        if (lockedProductionFingerprint !== expectedProductionFingerprint) {
+          throw new Error("La topología de Production cambió durante la operación.");
+        }
+      }
+      const current = await readIdentity(client);
+      const transition = validateTransition({ current, environment, fingerprint, expectedProductionFingerprint });
+      if (!transition.alreadyMatches) {
+        await client.query(`SET LOCAL policydesk.deployment_identity_admin = '1'`);
+        await client.query(
+          `INSERT INTO "DeploymentIdentity" ("id", "environment", "fingerprint", "createdAt", "updatedAt")
+           VALUES ($1, $2::"DeploymentEnvironment", $3, now(), now())
+           ON CONFLICT ("id") DO UPDATE SET "environment" = EXCLUDED."environment", "fingerprint" = EXCLUDED."fingerprint", "updatedAt" = now()`,
+          [DEPLOYMENT_IDENTITY_ID, prismaEnvironment(environment), fingerprint],
+        );
+      }
+      const finalIdentity = await readIdentity(client);
+      if (finalIdentity?.environment !== prismaEnvironment(environment) || finalIdentity.fingerprint !== fingerprint) {
+        throw new Error("La identidad final no coincide con el destino verificado.");
+      }
       await client.query("COMMIT");
+      print({
+        mode: "apply",
+        operation: transition.operation,
+        targetEnvironment: environment,
+        targetEndpointMatches: true,
+        providerTopologyVerified: !isLocal,
+        currentIdentity: current ? current.environment.toLowerCase() : "missing",
+        derivedFingerprint: fingerprint,
+        fingerprintMatches: true,
+        mutationRequired: !transition.alreadyMatches,
+        mutationApplied: !transition.alreadyMatches,
+      });
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
       throw error;

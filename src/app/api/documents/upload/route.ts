@@ -7,7 +7,7 @@ import { assertSafeDocumentPath, documentsDir } from "@/lib/files";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, assertRequestBodySize, checkDistributedRateLimit, getRequestIp, RequestGuardError, securityFingerprint } from "@/lib/request-guards";
-import { rateLimitResponse } from "@/lib/api-security";
+import { guardErrorResponse, rateLimitResponse } from "@/lib/api-security";
 import {
   assertEndorsementPortfolioAccess,
   assertClientPortfolioAccess,
@@ -304,6 +304,7 @@ export async function POST(request: NextRequest) {
       await assertDocumentUploadOwnership(validatedData, userId, activeUser.role);
     } catch (error) {
       if (error instanceof AuthError) {
+        if (error.status >= 500) return guardErrorResponse(error);
         await recordSecurityAccessDenied({
           alertType: SECURITY_EVENT_TYPES.documentAccessDenied,
           title: "Subida de documento sin acceso",
@@ -370,6 +371,7 @@ export async function POST(request: NextRequest) {
     logError("api.documents.upload", error);
 
     if (error instanceof AuthError) {
+      if (error.status >= 500) return guardErrorResponse(error);
       await recordSecurityAccessDenied({
         alertType: SECURITY_EVENT_TYPES.documentAccessDenied,
         title: "Carga de documento sin sesión válida",

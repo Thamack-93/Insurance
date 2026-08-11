@@ -57,3 +57,15 @@ EXECUTE FUNCTION policydesk_guard_deployment_identity();
 
 COMMENT ON TRIGGER "DeploymentIdentity_truncate_guard" ON "DeploymentIdentity" IS
   'Prevents removal of the environment-local identity through TRUNCATE.';
+
+-- The restricted runtime role is provisioned administratively before the
+-- production cutover. Keep identity mutation unavailable in the same migration
+-- transaction when that role already exists. Local/CI databases may omit it.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'policydesk_runtime') THEN
+    REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE "DeploymentIdentity" FROM policydesk_runtime;
+    GRANT SELECT ON TABLE "DeploymentIdentity" TO policydesk_runtime;
+  END IF;
+END;
+$$;

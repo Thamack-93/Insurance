@@ -1,0 +1,63 @@
+name: Production recovery branch cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      recovery_branch_id:
+        description: Recovery branch ID recorded by the release
+        required: true
+        type: string
+      release_run_id:
+        description: Approved production release run ID
+        required: true
+        type: string
+      restore_drill_status:
+        description: Must be PASS
+        required: true
+        type: string
+      confirmation:
+        description: Type DELETE_APPROVED_RECOVERY_BRANCH
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: policydesk-production-recovery-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.ref == 'refs/heads/main' && inputs.restore_drill_status == 'PASS' && inputs.confirmation == 'DELETE_APPROVED_RECOVERY_BRANCH'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Download immutable release evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+        run: |
+          test "$(printf '%s' "$RELEASE_RUN_ID" | tr -cd '0-9')" = "$RELEASE_RUN_ID"
+          mkdir -p evidence
+          gh run download "$RELEASE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "production-release-$RELEASE_RUN_ID" --dir evidence
+
+      - name: Verify evidence and Neon parent before deleting exact branch
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+          NEON_PRODUCTION_BRANCH_ID: ${{ secrets.NEON_PRODUCTION_BRANCH_ID }}
+          RECOVERY_BRANCH_ID: ${{ inputs.recovery_branch_id }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+        run: |
+          test "$(printf '%s' "$RECOVERY_BRANCH_ID" | tr -cd 'A-Za-z0-9_-')" = "$RECOVERY_BRANCH_ID"
+          test "$(jq -r '.status' evidence/release.json)" = PASS
+          test "$(jq -r '.runId' evidence/release.json)" = "$RELEASE_RUN_ID"
+          test "$(jq -r '.recoveryBranchId' evidence/release.json)" = "$RECOVERY_BRANCH_ID"
+          BRANCH=$(curl --fail --silent --show-error --max-time 20 -H "Authorization: Bearer $NEON_API_KEY" "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches/$RECOVERY_BRANCH_ID")
+          test "$(printf '%s' "$BRANCH" | jq -r '.branch.parent_id // empty')" = "$NEON_PRODUCTION_BRANCH_ID"
+          test "$(printf '%s' "$BRANCH" | jq -r '.branch.name // empty')" = "recovery-release-$RELEASE_RUN_ID"
+          curl --fail --silent --show-error --max-time 20 -X DELETE -H "Authorization: Bearer $NEON_API_KEY" "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches/$RECOVERY_BRANCH_ID"
+          printf '{"status":"PASS","releaseRunId":"%s","deletedRecoveryBranchId":"%s"}\n' "$RELEASE_RUN_ID" "$RECOVERY_BRANCH_ID"
