@@ -70,13 +70,22 @@ comando falla cerrado. Solo development/test sobre loopback admite identidad
 local. Después de aplicar la migración por el endpoint directo, un operador
 ejecuta primero el preview y luego el apply explícito:
 
-En Neon Free, donde la consola no permite proteger Production, se admite una
-excepción reducida exclusivamente para preparar Preview. Requiere
+El cutover productivo inicial usa `--topology-only` antes de cualquier mutación.
+Ese modo verifica la topología mediante Neon API, deriva el fingerprint y no
+consulta ni escribe `DeploymentIdentity`. En Neon Free, el workflow exige la
+confirmación exacta `ACCEPT_UNPROTECTED_NEON_FREE_PRODUCTION` y limita
+`ALLOW_UNPROTECTED_PRODUCTION_ON_NEON_FREE=1` al runner protegido. Solo después
+crea una recovery branch no protegida, ejecuta `prisma migrate deploy`,
+inicializa la identidad y provisiona `policydesk_runtime`.
+
+En Neon Free, donde la consola no permite proteger Production, se admiten dos
+excepciones separadas. La preparación de Preview requiere
 `ALLOW_UNPROTECTED_PRODUCTION_REFERENCE_FOR_PREVIEW=1`, sigue verificando por
 API ambos endpoints, branch IDs y database IDs, y rechaza cualquier fingerprint
-igual a Production. La variable es operator-only: nunca se configura en Vercel
-ni autoriza una inicialización o release de Production. Production permanece
-bloqueada mientras Neon reporte `protected=false`.
+igual a Production. El release productivo exige adicionalmente aprobación del
+Environment, la frase exacta del workflow y
+`ALLOW_UNPROTECTED_PRODUCTION_ON_NEON_FREE=1` solo durante la verificación e
+inicialización. Ninguna variable se configura en Vercel Runtime.
 
 ```bash
 npm run init:deployment-db-identity -- \
@@ -122,6 +131,7 @@ el opt-in únicamente durante el apply:
 
 ```bash
 ALLOW_PRODUCTION_DEPLOYMENT_IDENTITY_APPLY=1 \
+ALLOW_UNPROTECTED_PRODUCTION_ON_NEON_FREE=1 \
 npm run init:deployment-db-identity -- \
   --environment production \
   --project-id <neon-project-id> \
@@ -183,14 +193,19 @@ tener solo lectura de checks y de la configuración del Environment para que el
 workflow compruebe físicamente reviewers y la política exacta de `main`.
 
 El workflow `production-runtime-role-cutover.yml` convierte el deployment base
-ya aprobado al rol restringido. `production-release.yml` exige SHA/checks
-exactos, verifica el baseline, crea una recovery branch protegida, migra por la
-conexión admin, inicializa/audita identidad, reaplica grants explícitos,
-construye con `vercel build`, crea un candidato con
-`vercel deploy --prebuilt --skip-domain` y ejecuta login, Today, Clients, logout
-y revisión de logs. El alias se promueve solo después del PASS; si falla, nunca
-abandona el deployment restringido anterior. Las migraciones deben haberse
-confirmado aditivas antes de iniciar.
+ya aprobado al rol restringido. Verifica primero la topología sin depender del
+schema, crea una recovery branch protegida, aplica la migración aditiva,
+inicializa la identidad, provisiona el rol y retira de Vercel las credenciales
+owner/directas heredadas. Después construye el SHA base como candidato separado
+y solo lo promueve tras smoke y logs en PASS.
+
+`production-release.yml` exige SHA/checks exactos, verifica el baseline, crea
+una recovery branch protegida, migra por la conexión admin, inicializa/audita
+identidad, reaplica grants explícitos, construye con `vercel build`, crea un
+candidato con `vercel deploy --prebuilt --skip-domain` y ejecuta login, Today,
+Clients, logout y revisión de logs. El alias se promueve solo después del PASS;
+si falla, nunca abandona el deployment restringido anterior. Las migraciones
+deben haberse confirmado aditivas antes de iniciar.
 
 La recovery branch se conserva. `production-recovery-cleanup.yml` solo la
 elimina tras restore drill `PASS`, nueva aprobación del Environment y

@@ -15,6 +15,7 @@ const args = parseCliArgs();
 const apply = hasFlag(args, "apply");
 const json = hasFlag(args, "json");
 const rebind = hasFlag(args, "rebind-cloned-branch");
+const topologyOnly = hasFlag(args, "topology-only");
 const LOCK_KEY = "policydesk-deployment-identity-v1";
 
 type StoredIdentity = { environment: string; fingerprint: string } | null;
@@ -24,6 +25,7 @@ type TargetIdentity = {
   endpointId: string;
   databaseIdentity: string;
   databaseName: string;
+  branchProtected: boolean;
 };
 
 function required(name: string) {
@@ -88,6 +90,7 @@ async function resolveTarget(input: {
   endpointId: string;
   databaseName: string;
   isLocal: boolean;
+  requireProtected: boolean;
 }): Promise<TargetIdentity> {
   if (input.isLocal) {
     if (input.environment === "production" || input.environment === "preview") {
@@ -97,7 +100,7 @@ async function resolveTarget(input: {
     if (local.endpointId !== input.endpointId || local.databaseName !== input.databaseName) {
       throw new Error("La identidad local no coincide con la conexión.");
     }
-    return { ...input, databaseIdentity: local.databaseName };
+    return { ...input, databaseIdentity: local.databaseName, branchProtected: false };
   }
   const apiKey = process.env.NEON_API_KEY?.trim();
   if (!apiKey) throw new Error("NEON_API_KEY es obligatoria para verificar un destino Neon remoto.");
@@ -108,7 +111,7 @@ async function resolveTarget(input: {
     branchId: input.branchId,
     endpointId: input.endpointId,
     databaseName: input.databaseName,
-    requireProtected: input.environment === "production",
+    requireProtected: input.requireProtected,
   });
   return {
     projectId: verified.projectId,
@@ -116,6 +119,7 @@ async function resolveTarget(input: {
     endpointId: verified.endpointId,
     databaseIdentity: verified.databaseId,
     databaseName: verified.databaseName,
+    branchProtected: verified.branchProtected,
   };
 }
 
@@ -129,12 +133,18 @@ async function main() {
   const endpointId = required("endpoint-id").toLowerCase();
   const databaseName = required("database");
   const isLocal = ["127.0.0.1", "localhost", "::1"].includes(url.hostname.toLowerCase());
+  if (topologyOnly && (apply || rebind)) {
+    throw new Error("--topology-only no puede combinarse con --apply o --rebind-cloned-branch.");
+  }
   const requiresProductionComparison = environment === "preview" || rebind;
   const allowUnprotectedProductionReference = process.env.ALLOW_UNPROTECTED_PRODUCTION_REFERENCE_FOR_PREVIEW === "1";
+  const allowUnprotectedProductionTarget = process.env.ALLOW_UNPROTECTED_PRODUCTION_ON_NEON_FREE === "1";
   const productionReferenceMustBeProtected = requireProtectedProductionReference({
     environment,
     allowUnprotectedPreviewReference: allowUnprotectedProductionReference,
+    allowUnprotectedProductionTarget,
   });
+  const targetMustBeProtected = environment === "production" && !allowUnprotectedProductionTarget;
   const productionBranchId = requiresProductionComparison ? required("production-branch-id") : null;
   const productionEndpointId = requiresProductionComparison ? required("production-endpoint-id").toLowerCase() : null;
 
@@ -152,10 +162,10 @@ async function main() {
     throw new Error("Development/Test remotos requieren ALLOW_REMOTE_NONPRODUCTION_DEPLOYMENT_IDENTITY_APPLY=1.");
   }
 
-  const target = await resolveTarget({ connectionString, environment, projectId, branchId, endpointId, databaseName, isLocal });
+  const target = await resolveTarget({ connectionString, environment, projectId, branchId, endpointId, databaseName, isLocal, requireProtected: targetMustBeProtected });
   const fingerprint = deriveDeploymentFingerprint({ projectId: target.projectId, branchId: target.branchId, databaseIdOrName: target.databaseIdentity });
   let expectedProductionFingerprint: string | null = null;
-  let productionBranchProtected: boolean | null = null;
+  let productionBranchProtected: boolean | null = environment === "production" ? target.branchProtected : null;
   if (requiresProductionComparison) {
     if (isLocal) {
       expectedProductionFingerprint = deriveDeploymentFingerprint({ projectId, branchId: productionBranchId!, databaseIdOrName: databaseName });
@@ -184,6 +194,21 @@ async function main() {
     throw new Error("El fingerprint de Preview coincide con Production.");
   }
 
+  if (topologyOnly) {
+    print({
+      mode: "topology-only",
+      targetEnvironment: environment,
+      targetEndpointMatches: true,
+      providerTopologyVerified: !isLocal,
+      productionBranchProtected,
+      unprotectedProductionReferenceAccepted: allowUnprotectedProductionReference && productionBranchProtected === false,
+      unprotectedProductionTargetAccepted: allowUnprotectedProductionTarget && productionBranchProtected === false,
+      derivedFingerprint: fingerprint,
+      databaseMutationAttempted: false,
+    });
+    return;
+  }
+
   const pool = new Pool({ connectionString, max: 1, application_name: "policydesk-deployment-identity-admin" });
   const client = await pool.connect();
   try {
@@ -200,6 +225,7 @@ async function main() {
           providerTopologyVerified: !isLocal,
           productionBranchProtected,
           unprotectedProductionReferenceAccepted: allowUnprotectedProductionReference && productionBranchProtected === false,
+          unprotectedProductionTargetAccepted: allowUnprotectedProductionTarget && productionBranchProtected === false,
           currentIdentity: current ? current.environment.toLowerCase() : "missing",
           derivedFingerprint: fingerprint,
           fingerprintMatches: transition.alreadyMatches,
@@ -216,7 +242,7 @@ async function main() {
       await client.query(`SET LOCAL lock_timeout = '30s'`);
       await client.query(`SET LOCAL statement_timeout = '5min'`);
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [LOCK_KEY]);
-      const lockedTarget = await resolveTarget({ connectionString, environment, projectId, branchId, endpointId, databaseName, isLocal });
+      const lockedTarget = await resolveTarget({ connectionString, environment, projectId, branchId, endpointId, databaseName, isLocal, requireProtected: targetMustBeProtected });
       const lockedFingerprint = deriveDeploymentFingerprint({
         projectId: lockedTarget.projectId,
         branchId: lockedTarget.branchId,
@@ -270,6 +296,7 @@ async function main() {
         providerTopologyVerified: !isLocal,
         productionBranchProtected,
         unprotectedProductionReferenceAccepted: allowUnprotectedProductionReference && productionBranchProtected === false,
+        unprotectedProductionTargetAccepted: allowUnprotectedProductionTarget && productionBranchProtected === false,
         currentIdentity: current ? current.environment.toLowerCase() : "missing",
         derivedFingerprint: fingerprint,
         fingerprintMatches: true,

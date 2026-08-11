@@ -25,6 +25,24 @@ describe("Neon deployment topology verification", () => {
     })).toBe(true);
   });
 
+  it("allows an unprotected Production target only with the Neon Free opt-in", () => {
+    expect(requireProtectedProductionReference({
+      environment: "production",
+      allowUnprotectedPreviewReference: false,
+      allowUnprotectedProductionTarget: true,
+    })).toBe(false);
+    expect(() => requireProtectedProductionReference({
+      environment: "preview",
+      allowUnprotectedPreviewReference: false,
+      allowUnprotectedProductionTarget: true,
+    })).toThrow(/solo puede usarse en Production/);
+    expect(() => requireProtectedProductionReference({
+      environment: "production",
+      allowUnprotectedPreviewReference: true,
+      allowUnprotectedProductionTarget: true,
+    })).toThrow(/no pueden combinarse/);
+  });
+
   it("derives the database identity only after endpoint, branch and database agree", async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
       const path = String(url);
