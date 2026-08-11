@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+const assertDeploymentDatabaseSafety = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock("@/lib/deployment-db-safety", () => ({ assertDeploymentDatabaseSafety }));
 
 import {
   buildTelegramHelpMessage,
@@ -151,6 +153,20 @@ describe("telegram.shared", () => {
       } else {
         process.env.TELEGRAM_WEBHOOK_SECRET = originalWebhookSecret;
       }
+    }
+  });
+
+  it("does not call Telegram when deployment database safety fails", async () => {
+    const originalFetch = global.fetch;
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock as typeof fetch;
+    assertDeploymentDatabaseSafety.mockRejectedValueOnce(new Error("blocked deployment identity"));
+
+    try {
+      await expect(syncTelegramWebhook("https://example.com")).rejects.toThrow("blocked deployment identity");
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      global.fetch = originalFetch;
     }
   });
 });

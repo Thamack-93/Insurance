@@ -5,6 +5,7 @@ import { normalize, unaccentSql } from "@/lib/search-utils";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { getInsurerHref } from "@/lib/insurer-navigation";
 import { Prisma } from "@/generated/prisma/client";
+import { deploymentSafeQueryRaw } from "@/lib/deployment-safe-raw-sql";
 
 export { normalize, unaccentSql };
 
@@ -210,7 +211,7 @@ async function rawSearch<T extends RowWithId>(
   const orderBySql = orderBy ?? Prisma.sql`ORDER BY ${Prisma.raw('"updatedAt"')} DESC`;
   const combinedWhere = scopeWhere ? Prisma.sql`(${searchWhere}) AND ${scopeWhere}` : searchWhere;
   const sql = Prisma.sql`SELECT ${cols}${extraSelect} FROM ${tableSql} WHERE ${combinedWhere} ${orderBySql} LIMIT ${limit}`;
-  return (await db.$queryRaw<T[]>(sql)) as T[];
+  return deploymentSafeQueryRaw<T[]>(db, sql);
 }
 
 export async function globalSearch(query: string, portfolioOwnerId?: string): Promise<GlobalSearchResult[]> {

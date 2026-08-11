@@ -46,6 +46,12 @@ jobs:
       - name: Check Cycle 1 tenant inventory
         run: node --import tsx scripts/check-tenant-inventory.ts
 
+      - name: Check deployment database safety scope
+        run: npm run check:deployment-db-safety-scope
+
+      - name: Check protected production release orchestration
+        run: npm run check:production-release-orchestration
+
       - name: Lint
         run: npm run lint
 
@@ -66,7 +72,9 @@ jobs:
       PLAYWRIGHT_BASE_URL: http://localhost:4173
       PORT: "4173"
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
+      DATABASE_URL_UNPOOLED: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
       SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
+      EXPECTED_DATABASE_ENV: test
       SESSION_SECRET: ci-session-secret-minimum-32-characters-long
       RESTORE_INTEGRATION: "1"
       RESTORE_INTEGRATION_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
@@ -102,6 +110,27 @@ jobs:
 
       - name: Apply Prisma migrations
         run: npx prisma migrate deploy
+
+      - name: Derive and initialize disposable database identity
+        run: |
+          FINGERPRINT=$(node -e "const {createHash}=require('node:crypto'); process.stdout.write(createHash('sha256').update(['policydesk-db:v1','ci-local','ci-application','postgres'].join('\\0')).digest('hex'))")
+          echo "EXPECTED_DATABASE_FINGERPRINT=$FINGERPRINT" >> "$GITHUB_ENV"
+          npm run --silent init:deployment-db-identity -- --environment test --project-id ci-local --branch-id ci-application --database postgres --endpoint-id 127 --apply --json > /tmp/identity-apply-a.json &
+          PID_A=$!
+          npm run --silent init:deployment-db-identity -- --environment test --project-id ci-local --branch-id ci-application --database postgres --endpoint-id 127 --apply --json > /tmp/identity-apply-b.json &
+          PID_B=$!
+          wait "$PID_A"
+          wait "$PID_B"
+          jq -e '.fingerprintMatches == true' /tmp/identity-apply-a.json >/dev/null
+          jq -e '.fingerprintMatches == true' /tmp/identity-apply-b.json >/dev/null
+
+      - name: Check deployment database identity
+        run: npm run check:deployment-db-safety
+
+      - name: Deployment database safety integration
+        env:
+          DEPLOYMENT_SAFETY_INTEGRATION: "1"
+        run: npm run test:unit -- src/lib/deployment-db-safety.integration.logic.test.ts src/lib/database-runtime-role.integration.logic.test.ts
 
       - name: Check migration drift
         run: npm run db:check-drift

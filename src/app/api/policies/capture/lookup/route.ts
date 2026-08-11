@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ items });
   } catch (error) {
     if (error instanceof AuthError) {
-      return NextResponse.json({ error: "No autorizado." }, { status: error.status });
+      return NextResponse.json({ error: error.status >= 500 ? error.message : "No autorizado.", ...(error.code ? { code: error.code } : {}) }, { status: error.status });
     }
     logError("api.policies.capture.lookup", error, { query });
     return NextResponse.json({ error: "No se pudo buscar en la base." }, { status: 500 });

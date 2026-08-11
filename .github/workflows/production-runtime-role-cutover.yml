@@ -1,0 +1,150 @@
+name: Production runtime-role cutover
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline_sha:
+        description: Exact SHA currently serving Production
+        required: true
+        type: string
+      confirmation:
+        description: Type CUTOVER_RESTRICTED_RUNTIME
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  checks: read
+  deployments: write
+
+concurrency:
+  group: policydesk-production-release
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'CUTOVER_RESTRICTED_RUNTIME'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    env:
+      VERCEL_CLI: vercel@48.11.0
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Verify approved baseline and Environment protection
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
+          EXPECTED_SHA: ${{ inputs.baseline_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          test "$(printf '%s' "$EXPECTED_SHA" | wc -c)" -eq 40
+          ENVIRONMENT=$(gh api "repos/$GITHUB_REPOSITORY/environments/production")
+          RULES=$(printf '%s' "$ENVIRONMENT" | jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers | length] | add // 0')
+          test "$RULES" -ge 1
+          printf '%s' "$ENVIRONMENT" | jq -e '.deployment_branch_policy.custom_branch_policies == true' >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/environments/production/deployment-branch-policies" --jq '[.branch_policies[] | select(.name == "main")] | length == 1' | grep -qx true
+
+      - name: Install release tooling
+        run: npm ci
+
+      - name: Verify Production Neon topology
+        env:
+          DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_ADMIN_URL_UNPOOLED }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: npm run init:deployment-db-identity -- --environment production --project-id "${{ secrets.NEON_PROJECT_ID }}" --branch-id "${{ secrets.NEON_PRODUCTION_BRANCH_ID }}" --database "${{ secrets.NEON_DATABASE_NAME }}" --endpoint-id "${{ secrets.NEON_PRODUCTION_ENDPOINT_ID }}" --json
+
+      - name: Verify current Production deployment SHA
+        env:
+          EXPECTED_SHA: ${{ inputs.baseline_sha }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          RESPONSE=$(curl --fail --silent --show-error --max-time 20 -H "Authorization: Bearer $VERCEL_TOKEN" "https://api.vercel.com/v6/deployments?projectId=$VERCEL_PROJECT_ID&target=production&state=READY&limit=1")
+          ACTIVE_SHA=$(printf '%s' "$RESPONSE" | jq -r '.deployments[0].meta.githubCommitSha // empty')
+          ACTIVE_ID=$(printf '%s' "$RESPONSE" | jq -r '.deployments[0].uid // empty')
+          test "$ACTIVE_SHA" = "$EXPECTED_SHA"
+          test -n "$ACTIVE_ID"
+          printf 'BASELINE_DEPLOYMENT_ID=%s\n' "$ACTIVE_ID" >> "$GITHUB_ENV"
+
+      - name: Provision and audit restricted runtime role
+        env:
+          NODE_ENV: production
+          DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_ADMIN_URL_UNPOOLED }}
+          DATABASE_RUNTIME_URL: ${{ secrets.DATABASE_RUNTIME_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_RUNTIME_URL }}
+          EXPECTED_DATABASE_ENV: production
+          EXPECTED_DATABASE_FINGERPRINT: ${{ secrets.EXPECTED_DATABASE_FINGERPRINT }}
+          EXPECTED_DATABASE_ROLE: policydesk_runtime
+        run: |
+          npm run provision:database-runtime-role
+          npm run provision:database-runtime-role -- --apply
+          npm run check:deployment-db-safety -- --admin
+
+      - name: Replace Vercel runtime database variables
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          DATABASE_RUNTIME_URL: ${{ secrets.DATABASE_RUNTIME_URL }}
+          EXPECTED_DATABASE_FINGERPRINT: ${{ secrets.EXPECTED_DATABASE_FINGERPRINT }}
+        run: |
+          printf '%s' "$DATABASE_RUNTIME_URL" | npx --yes "$VERCEL_CLI" env add DATABASE_URL production --force --token "$VERCEL_TOKEN"
+          printf '%s' production | npx --yes "$VERCEL_CLI" env add EXPECTED_DATABASE_ENV production --force --token "$VERCEL_TOKEN"
+          printf '%s' "$EXPECTED_DATABASE_FINGERPRINT" | npx --yes "$VERCEL_CLI" env add EXPECTED_DATABASE_FINGERPRINT production --force --token "$VERCEL_TOKEN"
+          printf '%s' policydesk_runtime | npx --yes "$VERCEL_CLI" env add EXPECTED_DATABASE_ROLE production --force --token "$VERCEL_TOKEN"
+          npx --yes "$VERCEL_CLI" env rm DATABASE_URL_UNPOOLED production --yes --token "$VERCEL_TOKEN" || true
+          npx --yes "$VERCEL_CLI" env rm NEON_API_KEY production --yes --token "$VERCEL_TOKEN" || true
+          ENVS=$(curl --fail --silent --show-error --max-time 20 -H "Authorization: Bearer $VERCEL_TOKEN" "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/env")
+          printf '%s' "$ENVS" | jq -e '[.envs[] | select((.target | index("production")) and (.key == "DATABASE_URL_UNPOOLED" or .key == "NEON_API_KEY"))] | length == 0' >/dev/null
+          printf '%s' "$ENVS" | jq -e '[.envs[] | select((.target | index("production")) and .key == "DATABASE_URL")] | length == 1' >/dev/null
+
+      - name: Build and deploy the approved baseline
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_ADMIN_URL_UNPOOLED }}
+        run: |
+          git checkout --detach "${{ inputs.baseline_sha }}"
+          npm ci
+          npx --yes "$VERCEL_CLI" pull --yes --environment=production --token "$VERCEL_TOKEN"
+          npx --yes "$VERCEL_CLI" build --prod --token "$VERCEL_TOKEN"
+          DEPLOYMENT_URL=$(npx --yes "$VERCEL_CLI" deploy --prebuilt --prod --skip-domain --token "$VERCEL_TOKEN")
+          printf 'CUTOVER_DEPLOYMENT_URL=%s\n' "$DEPLOYMENT_URL" >> "$GITHUB_ENV"
+
+      - name: Authenticated smoke on restricted baseline
+        env:
+          PRODUCTION_SMOKE_BASE_URL: ${{ env.CUTOVER_DEPLOYMENT_URL }}
+          PRODUCTION_SMOKE_EMAIL: ${{ secrets.PRODUCTION_SMOKE_EMAIL }}
+          PRODUCTION_SMOKE_PASSWORD: ${{ secrets.PRODUCTION_SMOKE_PASSWORD }}
+        run: |
+          git checkout --detach "${{ github.sha }}"
+          npm ci
+          npx playwright install --with-deps chromium
+          npm run smoke:production-release
+
+      - name: Promote restricted baseline only after smoke PASS
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx --yes "$VERCEL_CLI" promote "$CUTOVER_DEPLOYMENT_URL" --token "$VERCEL_TOKEN" --yes
+
+      - name: Write sanitized evidence
+        run: |
+          mkdir -p artifacts/production-release
+          jq -n --arg sha "${{ inputs.baseline_sha }}" --arg baseline "$BASELINE_DEPLOYMENT_ID" --arg deployment "$CUTOVER_DEPLOYMENT_URL" --arg run "$GITHUB_RUN_ID" '{status:"PASS",sha:$sha,previousDeploymentId:$baseline,restrictedDeployment:$deployment,runId:$run}' > artifacts/production-release/cutover.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-runtime-role-cutover-${{ github.run_id }}
+          path: artifacts/production-release
+          if-no-files-found: warn
+          retention-days: 90

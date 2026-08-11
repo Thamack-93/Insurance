@@ -32,7 +32,7 @@ export async function GET(
     return new NextResponse(result.stream, { status: 200, headers });
   } catch (error) {
     if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status });
     }
     if (error instanceof Error && error.message === "Invalid backup filename.") {
       return NextResponse.json({ error: "Nombre de respaldo no válido." }, { status: 400 });

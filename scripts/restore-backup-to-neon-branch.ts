@@ -7,6 +7,19 @@ import {
   RestoreStageError,
 } from "../src/lib/backup-restore.ts";
 import { assertTemporaryNeonRestoreTarget } from "../src/lib/backup-restore-guards.ts";
+import type { DeploymentEnvironment } from "../src/lib/deployment-db-safety.ts";
+
+function restoreIdentityAuthorization() {
+  const environment = process.env.RESTORE_EXPECTED_DATABASE_ENV?.trim().toLowerCase();
+  const fingerprint = process.env.RESTORE_EXPECTED_DATABASE_FINGERPRINT?.trim().toLowerCase();
+  if (!environment || !["preview", "development", "test"].includes(environment)) {
+    throw new Error("RESTORE_EXPECTED_DATABASE_ENV debe autorizar explícitamente preview, development o test.");
+  }
+  if (!fingerprint || !/^[a-f0-9]{64}$/.test(fingerprint)) {
+    throw new Error("RESTORE_EXPECTED_DATABASE_FINGERPRINT debe contener el fingerprint saneado del target.");
+  }
+  return { expectedDatabaseEnvironment: environment as DeploymentEnvironment, expectedDatabaseFingerprint: fingerprint };
+}
 
 async function readStream(stream: ReadableStream<Uint8Array>) {
   const chunks: Buffer[] = [];
@@ -77,6 +90,7 @@ async function main() {
     targetDatabaseUrl: target.target.toString(),
     plaintext,
     manifest: verification.manifest,
+    ...restoreIdentityAuthorization(),
   });
   console.log(`Restauración validada en ${target.branchName}: ${result.tableCounts.totalRows} filas restauradas.`);
 }

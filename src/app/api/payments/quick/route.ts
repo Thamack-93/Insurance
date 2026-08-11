@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
     await requireUser();
   } catch (error) {
     if (error instanceof AuthError) {
+      if (error.status >= 500) return guardErrorResponse(error);
       await recordSecurityAccessDenied({
         alertType: SECURITY_EVENT_TYPES.accessDenied,
         title: "Pago rápido sin sesión válida",

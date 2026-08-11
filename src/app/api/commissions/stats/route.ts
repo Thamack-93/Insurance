@@ -10,7 +10,7 @@ export async function GET() {
     return NextResponse.json(stats);
   } catch (error) {
     if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status });
     }
     logError("api.commissions.stats", error);
     return NextResponse.json(

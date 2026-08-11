@@ -80,7 +80,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return new NextResponse(`\uFEFF${toCsv(result.rows, result.columns)}`, { headers });
   } catch (error) {
     if (error instanceof AuthError) {
-      return NextResponse.json({ error: "No autorizado." }, { status: error.status });
+      return NextResponse.json({ error: error.status >= 500 ? error.message : "No autorizado.", ...(error.code ? { code: error.code } : {}) }, { status: error.status });
     }
 
     logError("export.route", error, { dataset, format });

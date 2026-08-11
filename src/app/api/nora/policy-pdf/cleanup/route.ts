@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     await cleanupExpiredNoraCaptureHandoffs(user.id).catch(() => undefined);
     return NextResponse.json({ success: true });
   } catch (error) {
-    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof AuthError) return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status });
     if (error instanceof z.ZodError) return NextResponse.json({ error: "La referencia temporal no es válida." }, { status: 400 });
     return NextResponse.json({ error: "No se pudo limpiar el PDF temporal." }, { status: 500 });
   }

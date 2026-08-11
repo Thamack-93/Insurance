@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(results);
   } catch (error) {
     if (error instanceof AuthError) {
-      return NextResponse.json({ error: "No autorizado." }, { status: error.status });
+      return NextResponse.json({ error: error.status >= 500 ? error.message : "No autorizado.", ...(error.code ? { code: error.code } : {}) }, { status: error.status });
     }
     logError("api.search", error, { query });
     return NextResponse.json({ error: "Search failed" }, { status: 500 });
