@@ -42,6 +42,18 @@ export class NeonTopologyVerificationError extends Error {
   }
 }
 
+export function requireProtectedProductionReference(input: {
+  environment: "production" | "preview" | "development" | "test";
+  allowUnprotectedPreviewReference: boolean;
+}) {
+  if (input.allowUnprotectedPreviewReference && input.environment !== "preview") {
+    throw new NeonTopologyVerificationError(
+      "La excepción de Production no protegida solo puede usarse para preparar Preview.",
+    );
+  }
+  return !input.allowUnprotectedPreviewReference;
+}
+
 function canonicalDatabaseName(connectionString: string) {
   const url = new URL(connectionString);
   const databaseName = decodeURIComponent(url.pathname.replace(/^\//, "")).trim();

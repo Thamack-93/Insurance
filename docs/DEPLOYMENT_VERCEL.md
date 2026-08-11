@@ -70,6 +70,14 @@ comando falla cerrado. Solo development/test sobre loopback admite identidad
 local. Después de aplicar la migración por el endpoint directo, un operador
 ejecuta primero el preview y luego el apply explícito:
 
+En Neon Free, donde la consola no permite proteger Production, se admite una
+excepción reducida exclusivamente para preparar Preview. Requiere
+`ALLOW_UNPROTECTED_PRODUCTION_REFERENCE_FOR_PREVIEW=1`, sigue verificando por
+API ambos endpoints, branch IDs y database IDs, y rechaza cualquier fingerprint
+igual a Production. La variable es operator-only: nunca se configura en Vercel
+ni autoriza una inicialización o release de Production. Production permanece
+bloqueada mientras Neon reporte `protected=false`.
+
 ```bash
 npm run init:deployment-db-identity -- \
   --environment preview \
@@ -89,6 +97,14 @@ npm run init:deployment-db-identity -- \
   --production-branch-id <production-branch-id> \
   --production-endpoint-id <production-endpoint-id> \
   --apply
+```
+
+Para aplicar la excepción Preview de Neon Free, anteponer únicamente a los dos
+comandos anteriores:
+
+```bash
+ALLOW_UNPROTECTED_PRODUCTION_REFERENCE_FOR_PREVIEW=1 \
+npm run init:deployment-db-identity -- <mismos-argumentos-preview>
 ```
 
 El apply usa una transacción con timeout, advisory lock, relectura bajo lock,

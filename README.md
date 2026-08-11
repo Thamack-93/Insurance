@@ -43,6 +43,7 @@ Copia `.env.example` a `.env.local` y ajusta los valores:
 | `EXPECTED_DATABASE_FINGERPRINT` | Todos | SHA-256 derivado del project ID, branch ID y database ID verificados por Neon |
 | `EXPECTED_DATABASE_ROLE` | Runtime remoto | Debe ser `policydesk_runtime` |
 | `NEON_API_KEY` | GitHub Environment/operación | Verificación de topología; nunca se configura en Vercel |
+| `ALLOW_UNPROTECTED_PRODUCTION_REFERENCE_FOR_PREVIEW` | Operación Preview excepcional | Opt-in temporal para verificar una Preview aislada cuando Neon Free no permite proteger Production; nunca autoriza Production ni se configura en Vercel |
 | `CRON_SECRET` | Producción | Protege los cinco jobs internos de Vercel Cron |
 | `AI_GATEWAY_MODEL` | Opcional | Modelo `provider/model` usado por Nora |
 | `AI_GATEWAY_FALLBACK_MODELS` | Opcional | Modelos de respaldo para conversación |

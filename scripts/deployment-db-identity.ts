@@ -5,7 +5,11 @@ import {
   deriveDeploymentFingerprint,
   type DeploymentEnvironment,
 } from "../src/lib/deployment-db-safety.ts";
-import { localDatabaseIdentity, verifyNeonTarget } from "./deployment-db-neon.ts";
+import {
+  localDatabaseIdentity,
+  requireProtectedProductionReference,
+  verifyNeonTarget,
+} from "./deployment-db-neon.ts";
 
 const args = parseCliArgs();
 const apply = hasFlag(args, "apply");
@@ -126,6 +130,11 @@ async function main() {
   const databaseName = required("database");
   const isLocal = ["127.0.0.1", "localhost", "::1"].includes(url.hostname.toLowerCase());
   const requiresProductionComparison = environment === "preview" || rebind;
+  const allowUnprotectedProductionReference = process.env.ALLOW_UNPROTECTED_PRODUCTION_REFERENCE_FOR_PREVIEW === "1";
+  const productionReferenceMustBeProtected = requireProtectedProductionReference({
+    environment,
+    allowUnprotectedPreviewReference: allowUnprotectedProductionReference,
+  });
   const productionBranchId = requiresProductionComparison ? required("production-branch-id") : null;
   const productionEndpointId = requiresProductionComparison ? required("production-endpoint-id").toLowerCase() : null;
 
@@ -146,6 +155,7 @@ async function main() {
   const target = await resolveTarget({ connectionString, environment, projectId, branchId, endpointId, databaseName, isLocal });
   const fingerprint = deriveDeploymentFingerprint({ projectId: target.projectId, branchId: target.branchId, databaseIdOrName: target.databaseIdentity });
   let expectedProductionFingerprint: string | null = null;
+  let productionBranchProtected: boolean | null = null;
   if (requiresProductionComparison) {
     if (isLocal) {
       expectedProductionFingerprint = deriveDeploymentFingerprint({ projectId, branchId: productionBranchId!, databaseIdOrName: databaseName });
@@ -160,14 +170,18 @@ async function main() {
         branchId: productionBranchId!,
         endpointId: productionEndpointId!,
         databaseName,
-        requireProtected: true,
+        requireProtected: productionReferenceMustBeProtected,
       });
+      productionBranchProtected = production.branchProtected;
       expectedProductionFingerprint = deriveDeploymentFingerprint({
         projectId: production.projectId,
         branchId: production.branchId,
         databaseIdOrName: production.databaseId,
       });
     }
+  }
+  if (expectedProductionFingerprint && fingerprint === expectedProductionFingerprint) {
+    throw new Error("El fingerprint de Preview coincide con Production.");
   }
 
   const pool = new Pool({ connectionString, max: 1, application_name: "policydesk-deployment-identity-admin" });
@@ -184,6 +198,8 @@ async function main() {
           targetEnvironment: environment,
           targetEndpointMatches: true,
           providerTopologyVerified: !isLocal,
+          productionBranchProtected,
+          unprotectedProductionReferenceAccepted: allowUnprotectedProductionReference && productionBranchProtected === false,
           currentIdentity: current ? current.environment.toLowerCase() : "missing",
           derivedFingerprint: fingerprint,
           fingerprintMatches: transition.alreadyMatches,
@@ -219,7 +235,7 @@ async function main() {
           branchId: productionBranchId!,
           endpointId: productionEndpointId!,
           databaseName,
-          requireProtected: true,
+          requireProtected: productionReferenceMustBeProtected,
         });
         const lockedProductionFingerprint = deriveDeploymentFingerprint({
           projectId: lockedProduction.projectId,
@@ -252,6 +268,8 @@ async function main() {
         targetEnvironment: environment,
         targetEndpointMatches: true,
         providerTopologyVerified: !isLocal,
+        productionBranchProtected,
+        unprotectedProductionReferenceAccepted: allowUnprotectedProductionReference && productionBranchProtected === false,
         currentIdentity: current ? current.environment.toLowerCase() : "missing",
         derivedFingerprint: fingerprint,
         fingerprintMatches: true,

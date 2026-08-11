@@ -1,11 +1,30 @@
 import { describe, expect, it, vi } from "vitest";
-import { NeonTopologyVerificationError, verifyNeonTarget } from "../../scripts/deployment-db-neon";
+import {
+  NeonTopologyVerificationError,
+  requireProtectedProductionReference,
+  verifyNeonTarget,
+} from "../../scripts/deployment-db-neon";
 
 function response(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 }
 
 describe("Neon deployment topology verification", () => {
+  it("allows an unprotected Production reference only for an explicitly opted-in Preview", () => {
+    expect(requireProtectedProductionReference({
+      environment: "preview",
+      allowUnprotectedPreviewReference: true,
+    })).toBe(false);
+    expect(() => requireProtectedProductionReference({
+      environment: "production",
+      allowUnprotectedPreviewReference: true,
+    })).toThrow(/solo puede usarse para preparar Preview/);
+    expect(requireProtectedProductionReference({
+      environment: "preview",
+      allowUnprotectedPreviewReference: false,
+    })).toBe(true);
+  });
+
   it("derives the database identity only after endpoint, branch and database agree", async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
       const path = String(url);
