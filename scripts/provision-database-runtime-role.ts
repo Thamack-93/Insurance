@@ -79,7 +79,13 @@ async function readRole(client: PoolClient, name: string): Promise<RoleState> {
        LEFT JOIN pg_auth_members membership ON membership.member = role_definition.oid
        LEFT JOIN pg_roles parent_role ON parent_role.oid = membership.roleid
       WHERE role_definition.rolname = $1
-      GROUP BY role_definition.oid`,
+      GROUP BY role_definition.oid,
+               role_definition.rolcanlogin,
+               role_definition.rolsuper,
+               role_definition.rolcreaterole,
+               role_definition.rolcreatedb,
+               role_definition.rolreplication,
+               role_definition.rolbypassrls`,
     [name],
   );
   const row = result.rows[0];
