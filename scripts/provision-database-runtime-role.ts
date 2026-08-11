@@ -74,7 +74,7 @@ async function readRole(client: PoolClient, name: string): Promise<RoleState> {
     `SELECT role_definition.rolcanlogin,
             (role_definition.rolsuper OR role_definition.rolcreaterole OR role_definition.rolcreatedb
              OR role_definition.rolreplication OR role_definition.rolbypassrls) AS elevated,
-            array_remove(array_agg(parent_role.rolname), NULL) AS memberships
+            array_remove(array_agg(parent_role.rolname::text), NULL)::text[] AS memberships
        FROM pg_roles role_definition
        LEFT JOIN pg_auth_members membership ON membership.member = role_definition.oid
        LEFT JOIN pg_roles parent_role ON parent_role.oid = membership.roleid
