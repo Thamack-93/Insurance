@@ -11,6 +11,10 @@ on:
         description: Type CUTOVER_RESTRICTED_RUNTIME
         required: true
         type: string
+      neon_free_confirmation:
+        description: Type ACCEPT_UNPROTECTED_NEON_FREE_PRODUCTION
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -23,7 +27,7 @@ concurrency:
 
 jobs:
   cutover:
-    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'CUTOVER_RESTRICTED_RUNTIME'
+    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'CUTOVER_RESTRICTED_RUNTIME' && inputs.neon_free_confirmation == 'ACCEPT_UNPROTECTED_NEON_FREE_PRODUCTION'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: production
@@ -60,9 +64,10 @@ jobs:
           DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_ADMIN_URL_UNPOOLED }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           EXPECTED_DATABASE_FINGERPRINT: ${{ secrets.EXPECTED_DATABASE_FINGERPRINT }}
+          ALLOW_UNPROTECTED_PRODUCTION_ON_NEON_FREE: "1"
         run: |
           TOPOLOGY=$(npm run --silent init:deployment-db-identity -- --environment production --project-id "${{ secrets.NEON_PROJECT_ID }}" --branch-id "${{ secrets.NEON_PRODUCTION_BRANCH_ID }}" --database "${{ secrets.NEON_DATABASE_NAME }}" --endpoint-id "${{ secrets.NEON_PRODUCTION_ENDPOINT_ID }}" --topology-only --json)
-          printf '%s' "$TOPOLOGY" | jq -e '.mode == "topology-only" and .providerTopologyVerified == true and .productionBranchProtected == true and .databaseMutationAttempted == false' >/dev/null
+          printf '%s' "$TOPOLOGY" | jq -e '.mode == "topology-only" and .providerTopologyVerified == true and .productionBranchProtected == false and .unprotectedProductionTargetAccepted == true and .databaseMutationAttempted == false' >/dev/null
           test "$(printf '%s' "$TOPOLOGY" | jq -r '.derivedFingerprint // empty')" = "$EXPECTED_DATABASE_FINGERPRINT"
 
       - name: Verify current Production deployment SHA
@@ -78,21 +83,21 @@ jobs:
           test -n "$ACTIVE_ID"
           printf 'BASELINE_DEPLOYMENT_ID=%s\n' "$ACTIVE_ID" >> "$GITHUB_ENV"
 
-      - name: Create protected recovery branch before migration
+      - name: Create Neon Free recovery branch before migration
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
           NEON_PRODUCTION_BRANCH_ID: ${{ secrets.NEON_PRODUCTION_BRANCH_ID }}
         run: |
           NAME="recovery-cutover-${GITHUB_RUN_ID}"
-          BODY=$(jq -n --arg parent "$NEON_PRODUCTION_BRANCH_ID" --arg name "$NAME" '{branch:{parent_id:$parent,name:$name,protected:true},endpoints:[{type:"read_write"}]}')
+          BODY=$(jq -n --arg parent "$NEON_PRODUCTION_BRANCH_ID" --arg name "$NAME" '{branch:{parent_id:$parent,name:$name,protected:false},endpoints:[{type:"read_write"}]}')
           RESPONSE=$(curl --fail --silent --show-error --max-time 30 -X POST -H "Authorization: Bearer $NEON_API_KEY" -H 'Content-Type: application/json' --data "$BODY" "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches")
           RECOVERY_ID=$(printf '%s' "$RESPONSE" | jq -r '.branch.id // empty')
           RECOVERY_PARENT=$(printf '%s' "$RESPONSE" | jq -r '.branch.parent_id // empty')
           RECOVERY_PROTECTED=$(printf '%s' "$RESPONSE" | jq -r '.branch.protected // false')
           test -n "$RECOVERY_ID"
           test "$RECOVERY_PARENT" = "$NEON_PRODUCTION_BRANCH_ID"
-          test "$RECOVERY_PROTECTED" = true
+          test "$RECOVERY_PROTECTED" = false
           printf 'RECOVERY_BRANCH_ID=%s\n' "$RECOVERY_ID" >> "$GITHUB_ENV"
 
       - name: Migrate, initialize identity, provision and audit runtime role
@@ -106,11 +111,12 @@ jobs:
           EXPECTED_DATABASE_FINGERPRINT: ${{ secrets.EXPECTED_DATABASE_FINGERPRINT }}
           EXPECTED_DATABASE_ROLE: policydesk_runtime
           ALLOW_PRODUCTION_DEPLOYMENT_IDENTITY_APPLY: "1"
+          ALLOW_UNPROTECTED_PRODUCTION_ON_NEON_FREE: "1"
         run: |
           DATABASE_URL="${{ secrets.DATABASE_ADMIN_URL_UNPOOLED }}" npx prisma migrate deploy
           IDENTITY=$(npm run --silent init:deployment-db-identity -- --environment production --project-id "${{ secrets.NEON_PROJECT_ID }}" --branch-id "${{ secrets.NEON_PRODUCTION_BRANCH_ID }}" --database "${{ secrets.NEON_DATABASE_NAME }}" --endpoint-id "${{ secrets.NEON_PRODUCTION_ENDPOINT_ID }}" --apply --json)
           test "$(printf '%s' "$IDENTITY" | jq -r '.derivedFingerprint // empty')" = "$EXPECTED_DATABASE_FINGERPRINT"
-          printf '%s' "$IDENTITY" | jq -e '.fingerprintMatches == true and .providerTopologyVerified == true and .productionBranchProtected == true' >/dev/null
+          printf '%s' "$IDENTITY" | jq -e '.fingerprintMatches == true and .providerTopologyVerified == true and .productionBranchProtected == false and .unprotectedProductionTargetAccepted == true' >/dev/null
           npm run provision:database-runtime-role
           npm run provision:database-runtime-role -- --apply
           npm run check:deployment-db-safety -- --admin

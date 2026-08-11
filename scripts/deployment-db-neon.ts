@@ -45,13 +45,22 @@ export class NeonTopologyVerificationError extends Error {
 export function requireProtectedProductionReference(input: {
   environment: "production" | "preview" | "development" | "test";
   allowUnprotectedPreviewReference: boolean;
+  allowUnprotectedProductionTarget?: boolean;
 }) {
+  if (input.allowUnprotectedPreviewReference && input.allowUnprotectedProductionTarget) {
+    throw new NeonTopologyVerificationError("Las excepciones Neon Free no pueden combinarse.");
+  }
   if (input.allowUnprotectedPreviewReference && input.environment !== "preview") {
     throw new NeonTopologyVerificationError(
       "La excepción de Production no protegida solo puede usarse para preparar Preview.",
     );
   }
-  return !input.allowUnprotectedPreviewReference;
+  if (input.allowUnprotectedProductionTarget && input.environment !== "production") {
+    throw new NeonTopologyVerificationError(
+      "La excepción de target Production no protegido solo puede usarse en Production.",
+    );
+  }
+  return !input.allowUnprotectedPreviewReference && !input.allowUnprotectedProductionTarget;
 }
 
 function canonicalDatabaseName(connectionString: string) {

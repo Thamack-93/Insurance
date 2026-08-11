@@ -90,6 +90,7 @@ async function resolveTarget(input: {
   endpointId: string;
   databaseName: string;
   isLocal: boolean;
+  requireProtected: boolean;
 }): Promise<TargetIdentity> {
   if (input.isLocal) {
     if (input.environment === "production" || input.environment === "preview") {
@@ -110,7 +111,7 @@ async function resolveTarget(input: {
     branchId: input.branchId,
     endpointId: input.endpointId,
     databaseName: input.databaseName,
-    requireProtected: input.environment === "production",
+    requireProtected: input.requireProtected,
   });
   return {
     projectId: verified.projectId,
@@ -137,10 +138,13 @@ async function main() {
   }
   const requiresProductionComparison = environment === "preview" || rebind;
   const allowUnprotectedProductionReference = process.env.ALLOW_UNPROTECTED_PRODUCTION_REFERENCE_FOR_PREVIEW === "1";
+  const allowUnprotectedProductionTarget = process.env.ALLOW_UNPROTECTED_PRODUCTION_ON_NEON_FREE === "1";
   const productionReferenceMustBeProtected = requireProtectedProductionReference({
     environment,
     allowUnprotectedPreviewReference: allowUnprotectedProductionReference,
+    allowUnprotectedProductionTarget,
   });
+  const targetMustBeProtected = environment === "production" && !allowUnprotectedProductionTarget;
   const productionBranchId = requiresProductionComparison ? required("production-branch-id") : null;
   const productionEndpointId = requiresProductionComparison ? required("production-endpoint-id").toLowerCase() : null;
 
@@ -158,7 +162,7 @@ async function main() {
     throw new Error("Development/Test remotos requieren ALLOW_REMOTE_NONPRODUCTION_DEPLOYMENT_IDENTITY_APPLY=1.");
   }
 
-  const target = await resolveTarget({ connectionString, environment, projectId, branchId, endpointId, databaseName, isLocal });
+  const target = await resolveTarget({ connectionString, environment, projectId, branchId, endpointId, databaseName, isLocal, requireProtected: targetMustBeProtected });
   const fingerprint = deriveDeploymentFingerprint({ projectId: target.projectId, branchId: target.branchId, databaseIdOrName: target.databaseIdentity });
   let expectedProductionFingerprint: string | null = null;
   let productionBranchProtected: boolean | null = environment === "production" ? target.branchProtected : null;
@@ -198,6 +202,7 @@ async function main() {
       providerTopologyVerified: !isLocal,
       productionBranchProtected,
       unprotectedProductionReferenceAccepted: allowUnprotectedProductionReference && productionBranchProtected === false,
+      unprotectedProductionTargetAccepted: allowUnprotectedProductionTarget && productionBranchProtected === false,
       derivedFingerprint: fingerprint,
       databaseMutationAttempted: false,
     });
@@ -220,6 +225,7 @@ async function main() {
           providerTopologyVerified: !isLocal,
           productionBranchProtected,
           unprotectedProductionReferenceAccepted: allowUnprotectedProductionReference && productionBranchProtected === false,
+          unprotectedProductionTargetAccepted: allowUnprotectedProductionTarget && productionBranchProtected === false,
           currentIdentity: current ? current.environment.toLowerCase() : "missing",
           derivedFingerprint: fingerprint,
           fingerprintMatches: transition.alreadyMatches,
@@ -236,7 +242,7 @@ async function main() {
       await client.query(`SET LOCAL lock_timeout = '30s'`);
       await client.query(`SET LOCAL statement_timeout = '5min'`);
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [LOCK_KEY]);
-      const lockedTarget = await resolveTarget({ connectionString, environment, projectId, branchId, endpointId, databaseName, isLocal });
+      const lockedTarget = await resolveTarget({ connectionString, environment, projectId, branchId, endpointId, databaseName, isLocal, requireProtected: targetMustBeProtected });
       const lockedFingerprint = deriveDeploymentFingerprint({
         projectId: lockedTarget.projectId,
         branchId: lockedTarget.branchId,
@@ -290,6 +296,7 @@ async function main() {
         providerTopologyVerified: !isLocal,
         productionBranchProtected,
         unprotectedProductionReferenceAccepted: allowUnprotectedProductionReference && productionBranchProtected === false,
+        unprotectedProductionTargetAccepted: allowUnprotectedProductionTarget && productionBranchProtected === false,
         currentIdentity: current ? current.environment.toLowerCase() : "missing",
         derivedFingerprint: fingerprint,
         fingerprintMatches: true,

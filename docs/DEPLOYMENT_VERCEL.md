@@ -71,18 +71,21 @@ local. Después de aplicar la migración por el endpoint directo, un operador
 ejecuta primero el preview y luego el apply explícito:
 
 El cutover productivo inicial usa `--topology-only` antes de cualquier mutación.
-Ese modo verifica la topología mediante Neon API, exige `protected=true`, deriva
-el fingerprint y no consulta ni escribe `DeploymentIdentity`. Solo después se
-crea una recovery branch protegida, se ejecuta `prisma migrate deploy`, se
-inicializa la identidad y se provisiona `policydesk_runtime`.
+Ese modo verifica la topología mediante Neon API, deriva el fingerprint y no
+consulta ni escribe `DeploymentIdentity`. En Neon Free, el workflow exige la
+confirmación exacta `ACCEPT_UNPROTECTED_NEON_FREE_PRODUCTION` y limita
+`ALLOW_UNPROTECTED_PRODUCTION_ON_NEON_FREE=1` al runner protegido. Solo después
+crea una recovery branch no protegida, ejecuta `prisma migrate deploy`,
+inicializa la identidad y provisiona `policydesk_runtime`.
 
-En Neon Free, donde la consola no permite proteger Production, se admite una
-excepción reducida exclusivamente para preparar Preview. Requiere
+En Neon Free, donde la consola no permite proteger Production, se admiten dos
+excepciones separadas. La preparación de Preview requiere
 `ALLOW_UNPROTECTED_PRODUCTION_REFERENCE_FOR_PREVIEW=1`, sigue verificando por
 API ambos endpoints, branch IDs y database IDs, y rechaza cualquier fingerprint
-igual a Production. La variable es operator-only: nunca se configura en Vercel
-ni autoriza una inicialización o release de Production. Production permanece
-bloqueada mientras Neon reporte `protected=false`.
+igual a Production. El release productivo exige adicionalmente aprobación del
+Environment, la frase exacta del workflow y
+`ALLOW_UNPROTECTED_PRODUCTION_ON_NEON_FREE=1` solo durante la verificación e
+inicialización. Ninguna variable se configura en Vercel Runtime.
 
 ```bash
 npm run init:deployment-db-identity -- \
@@ -128,6 +131,7 @@ el opt-in únicamente durante el apply:
 
 ```bash
 ALLOW_PRODUCTION_DEPLOYMENT_IDENTITY_APPLY=1 \
+ALLOW_UNPROTECTED_PRODUCTION_ON_NEON_FREE=1 \
 npm run init:deployment-db-identity -- \
   --environment production \
   --project-id <neon-project-id> \

@@ -39,7 +39,7 @@ requireOrder(release, [
   "Fail closed on SHA",
   "Verify restricted runtime baseline before any mutation",
   "Verify Production Neon topology before recovery mutation",
-  "create protected recovery branch",
+  "create Neon Free recovery branch",
   "npx prisma migrate deploy",
   "--apply --json",
   "provision:database-runtime-role -- --apply",
@@ -51,11 +51,15 @@ requireOrder(release, [
   "promote \"$NEW_DEPLOYMENT_URL\"",
 ], "release");
 requireText(release, "Verify restricted alias remained unchanged on failed smoke", "release");
+requireText(release, "ACCEPT_UNPROTECTED_NEON_FREE_PRODUCTION", "release");
+requireText(release, 'ALLOW_UNPROTECTED_PRODUCTION_ON_NEON_FREE: "1"', "release");
+requireText(release, "unprotectedProductionTargetAccepted == true", "release");
+requireText(release, "protected:false", "release");
 requireText(cutover, 'deploy --prebuilt --prod --skip-domain', "cutover");
 requireOrder(cutover, [
   "Verify Production Neon topology before recovery mutation",
   "--topology-only",
-  "Create protected recovery branch before migration",
+  "Create Neon Free recovery branch before migration",
   "npx prisma migrate deploy",
   "--apply --json",
   "provision:database-runtime-role -- --apply",
@@ -67,6 +71,10 @@ requireOrder(cutover, [
   'promote "$CUTOVER_DEPLOYMENT_URL"',
 ], "cutover");
 requireText(cutover, "Verify previous alias remained unchanged on failed cutover smoke", "cutover");
+requireText(cutover, "ACCEPT_UNPROTECTED_NEON_FREE_PRODUCTION", "cutover");
+requireText(cutover, 'ALLOW_UNPROTECTED_PRODUCTION_ON_NEON_FREE: "1"', "cutover");
+requireText(cutover, "unprotectedProductionTargetAccepted == true", "cutover");
+requireText(cutover, "protected:false", "cutover");
 requireText(cutover, "DATABASE_URL_UNPOOLED DATABASE_RUNTIME_URL PRODUCTION_DATABASE_URL_UNPOOLED NEON_API_KEY", "cutover");
 requireText(cutover, "production-release-${{ github.run_id }}", "cutover");
 requireText(cleanup, 'gh run download "$RELEASE_RUN_ID"', "cleanup");
