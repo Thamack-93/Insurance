@@ -70,6 +70,12 @@ comando falla cerrado. Solo development/test sobre loopback admite identidad
 local. Después de aplicar la migración por el endpoint directo, un operador
 ejecuta primero el preview y luego el apply explícito:
 
+El cutover productivo inicial usa `--topology-only` antes de cualquier mutación.
+Ese modo verifica la topología mediante Neon API, exige `protected=true`, deriva
+el fingerprint y no consulta ni escribe `DeploymentIdentity`. Solo después se
+crea una recovery branch protegida, se ejecuta `prisma migrate deploy`, se
+inicializa la identidad y se provisiona `policydesk_runtime`.
+
 En Neon Free, donde la consola no permite proteger Production, se admite una
 excepción reducida exclusivamente para preparar Preview. Requiere
 `ALLOW_UNPROTECTED_PRODUCTION_REFERENCE_FOR_PREVIEW=1`, sigue verificando por
@@ -183,14 +189,19 @@ tener solo lectura de checks y de la configuración del Environment para que el
 workflow compruebe físicamente reviewers y la política exacta de `main`.
 
 El workflow `production-runtime-role-cutover.yml` convierte el deployment base
-ya aprobado al rol restringido. `production-release.yml` exige SHA/checks
-exactos, verifica el baseline, crea una recovery branch protegida, migra por la
-conexión admin, inicializa/audita identidad, reaplica grants explícitos,
-construye con `vercel build`, crea un candidato con
-`vercel deploy --prebuilt --skip-domain` y ejecuta login, Today, Clients, logout
-y revisión de logs. El alias se promueve solo después del PASS; si falla, nunca
-abandona el deployment restringido anterior. Las migraciones deben haberse
-confirmado aditivas antes de iniciar.
+ya aprobado al rol restringido. Verifica primero la topología sin depender del
+schema, crea una recovery branch protegida, aplica la migración aditiva,
+inicializa la identidad, provisiona el rol y retira de Vercel las credenciales
+owner/directas heredadas. Después construye el SHA base como candidato separado
+y solo lo promueve tras smoke y logs en PASS.
+
+`production-release.yml` exige SHA/checks exactos, verifica el baseline, crea
+una recovery branch protegida, migra por la conexión admin, inicializa/audita
+identidad, reaplica grants explícitos, construye con `vercel build`, crea un
+candidato con `vercel deploy --prebuilt --skip-domain` y ejecuta login, Today,
+Clients, logout y revisión de logs. El alias se promueve solo después del PASS;
+si falla, nunca abandona el deployment restringido anterior. Las migraciones
+deben haberse confirmado aditivas antes de iniciar.
 
 La recovery branch se conserva. `production-recovery-cleanup.yml` solo la
 elimina tras restore drill `PASS`, nueva aprobación del Environment y

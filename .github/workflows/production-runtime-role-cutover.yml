@@ -55,11 +55,15 @@ jobs:
       - name: Install release tooling
         run: npm ci
 
-      - name: Verify Production Neon topology
+      - name: Verify Production Neon topology before recovery mutation
         env:
           DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_ADMIN_URL_UNPOOLED }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-        run: npm run init:deployment-db-identity -- --environment production --project-id "${{ secrets.NEON_PROJECT_ID }}" --branch-id "${{ secrets.NEON_PRODUCTION_BRANCH_ID }}" --database "${{ secrets.NEON_DATABASE_NAME }}" --endpoint-id "${{ secrets.NEON_PRODUCTION_ENDPOINT_ID }}" --json
+          EXPECTED_DATABASE_FINGERPRINT: ${{ secrets.EXPECTED_DATABASE_FINGERPRINT }}
+        run: |
+          TOPOLOGY=$(npm run --silent init:deployment-db-identity -- --environment production --project-id "${{ secrets.NEON_PROJECT_ID }}" --branch-id "${{ secrets.NEON_PRODUCTION_BRANCH_ID }}" --database "${{ secrets.NEON_DATABASE_NAME }}" --endpoint-id "${{ secrets.NEON_PRODUCTION_ENDPOINT_ID }}" --topology-only --json)
+          printf '%s' "$TOPOLOGY" | jq -e '.mode == "topology-only" and .providerTopologyVerified == true and .productionBranchProtected == true and .databaseMutationAttempted == false' >/dev/null
+          test "$(printf '%s' "$TOPOLOGY" | jq -r '.derivedFingerprint // empty')" = "$EXPECTED_DATABASE_FINGERPRINT"
 
       - name: Verify current Production deployment SHA
         env:
@@ -74,16 +78,39 @@ jobs:
           test -n "$ACTIVE_ID"
           printf 'BASELINE_DEPLOYMENT_ID=%s\n' "$ACTIVE_ID" >> "$GITHUB_ENV"
 
-      - name: Provision and audit restricted runtime role
+      - name: Create protected recovery branch before migration
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+          NEON_PRODUCTION_BRANCH_ID: ${{ secrets.NEON_PRODUCTION_BRANCH_ID }}
+        run: |
+          NAME="recovery-cutover-${GITHUB_RUN_ID}"
+          BODY=$(jq -n --arg parent "$NEON_PRODUCTION_BRANCH_ID" --arg name "$NAME" '{branch:{parent_id:$parent,name:$name,protected:true},endpoints:[{type:"read_write"}]}')
+          RESPONSE=$(curl --fail --silent --show-error --max-time 30 -X POST -H "Authorization: Bearer $NEON_API_KEY" -H 'Content-Type: application/json' --data "$BODY" "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches")
+          RECOVERY_ID=$(printf '%s' "$RESPONSE" | jq -r '.branch.id // empty')
+          RECOVERY_PARENT=$(printf '%s' "$RESPONSE" | jq -r '.branch.parent_id // empty')
+          RECOVERY_PROTECTED=$(printf '%s' "$RESPONSE" | jq -r '.branch.protected // false')
+          test -n "$RECOVERY_ID"
+          test "$RECOVERY_PARENT" = "$NEON_PRODUCTION_BRANCH_ID"
+          test "$RECOVERY_PROTECTED" = true
+          printf 'RECOVERY_BRANCH_ID=%s\n' "$RECOVERY_ID" >> "$GITHUB_ENV"
+
+      - name: Migrate, initialize identity, provision and audit runtime role
         env:
           NODE_ENV: production
           DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_ADMIN_URL_UNPOOLED }}
           DATABASE_RUNTIME_URL: ${{ secrets.DATABASE_RUNTIME_URL }}
           DATABASE_URL: ${{ secrets.DATABASE_RUNTIME_URL }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           EXPECTED_DATABASE_ENV: production
           EXPECTED_DATABASE_FINGERPRINT: ${{ secrets.EXPECTED_DATABASE_FINGERPRINT }}
           EXPECTED_DATABASE_ROLE: policydesk_runtime
+          ALLOW_PRODUCTION_DEPLOYMENT_IDENTITY_APPLY: "1"
         run: |
+          DATABASE_URL="${{ secrets.DATABASE_ADMIN_URL_UNPOOLED }}" npx prisma migrate deploy
+          IDENTITY=$(npm run --silent init:deployment-db-identity -- --environment production --project-id "${{ secrets.NEON_PROJECT_ID }}" --branch-id "${{ secrets.NEON_PRODUCTION_BRANCH_ID }}" --database "${{ secrets.NEON_DATABASE_NAME }}" --endpoint-id "${{ secrets.NEON_PRODUCTION_ENDPOINT_ID }}" --apply --json)
+          test "$(printf '%s' "$IDENTITY" | jq -r '.derivedFingerprint // empty')" = "$EXPECTED_DATABASE_FINGERPRINT"
+          printf '%s' "$IDENTITY" | jq -e '.fingerprintMatches == true and .providerTopologyVerified == true and .productionBranchProtected == true' >/dev/null
           npm run provision:database-runtime-role
           npm run provision:database-runtime-role -- --apply
           npm run check:deployment-db-safety -- --admin
@@ -100,10 +127,11 @@ jobs:
           printf '%s' production | npx --yes "$VERCEL_CLI" env add EXPECTED_DATABASE_ENV production --force --token "$VERCEL_TOKEN"
           printf '%s' "$EXPECTED_DATABASE_FINGERPRINT" | npx --yes "$VERCEL_CLI" env add EXPECTED_DATABASE_FINGERPRINT production --force --token "$VERCEL_TOKEN"
           printf '%s' policydesk_runtime | npx --yes "$VERCEL_CLI" env add EXPECTED_DATABASE_ROLE production --force --token "$VERCEL_TOKEN"
-          npx --yes "$VERCEL_CLI" env rm DATABASE_URL_UNPOOLED production --yes --token "$VERCEL_TOKEN" || true
-          npx --yes "$VERCEL_CLI" env rm NEON_API_KEY production --yes --token "$VERCEL_TOKEN" || true
+          for key in DATABASE_URL_UNPOOLED DATABASE_RUNTIME_URL PRODUCTION_DATABASE_URL_UNPOOLED NEON_API_KEY PGPASSWORD POSTGRES_PRISMA_URL POSTGRES_URL_NO_SSL POSTGRES_URL_NON_POOLING POSTGRES_URL POSTGRES_PASSWORD POSTGRES_HOST POSTGRES_USER POSTGRES_DATABASE PGHOST_UNPOOLED PGHOST PGUSER PGDATABASE NEON_PROJECT_ID; do
+            npx --yes "$VERCEL_CLI" env rm "$key" production --yes --token "$VERCEL_TOKEN" || true
+          done
           ENVS=$(curl --fail --silent --show-error --max-time 20 -H "Authorization: Bearer $VERCEL_TOKEN" "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/env")
-          printf '%s' "$ENVS" | jq -e '[.envs[] | select((.target | index("production")) and (.key == "DATABASE_URL_UNPOOLED" or .key == "NEON_API_KEY"))] | length == 0' >/dev/null
+          printf '%s' "$ENVS" | jq -e '[.envs[] | select((.target | index("production")) and (.key | IN("DATABASE_URL_UNPOOLED", "DATABASE_RUNTIME_URL", "PRODUCTION_DATABASE_URL_UNPOOLED", "NEON_API_KEY", "PGPASSWORD", "POSTGRES_PRISMA_URL", "POSTGRES_URL_NO_SSL", "POSTGRES_URL_NON_POOLING", "POSTGRES_URL", "POSTGRES_PASSWORD", "POSTGRES_HOST", "POSTGRES_USER", "POSTGRES_DATABASE", "PGHOST_UNPOOLED", "PGHOST", "PGUSER", "PGDATABASE", "NEON_PROJECT_ID")))] | length == 0' >/dev/null
           printf '%s' "$ENVS" | jq -e '[.envs[] | select((.target | index("production")) and .key == "DATABASE_URL")] | length == 1' >/dev/null
 
       - name: Build and deploy the approved baseline
@@ -120,7 +148,22 @@ jobs:
           DEPLOYMENT_URL=$(npx --yes "$VERCEL_CLI" deploy --prebuilt --prod --skip-domain --token "$VERCEL_TOKEN")
           printf 'CUTOVER_DEPLOYMENT_URL=%s\n' "$DEPLOYMENT_URL" >> "$GITHUB_ENV"
 
+      - name: Verify candidate SHA and READY state
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          EXPECTED_SHA: ${{ inputs.baseline_sha }}
+        run: |
+          HOST=${CUTOVER_DEPLOYMENT_URL#https://}
+          DETAIL=$(curl --fail --silent --show-error --max-time 20 -H "Authorization: Bearer $VERCEL_TOKEN" "https://api.vercel.com/v13/deployments/$HOST")
+          test "$(printf '%s' "$DETAIL" | jq -r '.readyState // empty')" = READY
+          test "$(printf '%s' "$DETAIL" | jq -r '.meta.githubCommitSha // empty')" = "$EXPECTED_SHA"
+          CUTOVER_ID=$(printf '%s' "$DETAIL" | jq -r '.id // .uid // empty')
+          test -n "$CUTOVER_ID"
+          printf 'CUTOVER_DEPLOYMENT_ID=%s\n' "$CUTOVER_ID" >> "$GITHUB_ENV"
+
       - name: Authenticated smoke on restricted baseline
+        id: smoke
+        continue-on-error: true
         env:
           PRODUCTION_SMOKE_BASE_URL: ${{ env.CUTOVER_DEPLOYMENT_URL }}
           PRODUCTION_SMOKE_EMAIL: ${{ secrets.PRODUCTION_SMOKE_EMAIL }}
@@ -131,7 +174,26 @@ jobs:
           npx playwright install --with-deps chromium
           npm run smoke:production-release
 
+      - name: Verify previous alias remained unchanged on failed cutover smoke
+        if: steps.smoke.outcome != 'success'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          ACTIVE=$(curl --fail --silent --show-error --max-time 20 -H "Authorization: Bearer $VERCEL_TOKEN" "https://api.vercel.com/v6/deployments?projectId=$VERCEL_PROJECT_ID&target=production&state=READY&limit=1")
+          test "$(printf '%s' "$ACTIVE" | jq -r '.deployments[0].uid // empty')" = "$BASELINE_DEPLOYMENT_ID"
+          exit 1
+
+      - name: Inspect cutover candidate runtime logs
+        if: steps.smoke.outcome == 'success'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          EVENTS=$(curl --fail --silent --show-error --max-time 20 -H "Authorization: Bearer $VERCEL_TOKEN" "https://api.vercel.com/v2/deployments/$CUTOVER_DEPLOYMENT_ID/events?limit=1000")
+          printf '%s' "$EVENTS" | jq -e '[.[]? | select(((.text // "") | test("P2022|User.platformRole|missing column|Prisma schema"; "i")))] | length == 0' >/dev/null
+
       - name: Promote restricted baseline only after smoke PASS
+        if: steps.smoke.outcome == 'success'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: npx --yes "$VERCEL_CLI" promote "$CUTOVER_DEPLOYMENT_URL" --token "$VERCEL_TOKEN" --yes
@@ -139,12 +201,12 @@ jobs:
       - name: Write sanitized evidence
         run: |
           mkdir -p artifacts/production-release
-          jq -n --arg sha "${{ inputs.baseline_sha }}" --arg baseline "$BASELINE_DEPLOYMENT_ID" --arg deployment "$CUTOVER_DEPLOYMENT_URL" --arg run "$GITHUB_RUN_ID" '{status:"PASS",sha:$sha,previousDeploymentId:$baseline,restrictedDeployment:$deployment,runId:$run}' > artifacts/production-release/cutover.json
+          jq -n --arg sha "${{ inputs.baseline_sha }}" --arg previous "$BASELINE_DEPLOYMENT_ID" --arg deployment "$CUTOVER_DEPLOYMENT_ID" --arg recovery "$RECOVERY_BRANCH_ID" --arg run "$GITHUB_RUN_ID" '{status:"PASS",sha:$sha,previousDeploymentId:$previous,deploymentId:$deployment,recoveryBranchId:$recovery,runId:$run,migrations:"applied",identityAudit:"PASS",runtimeRole:"policydesk_runtime",runtimeLogs:"PASS",smoke:"PASS",promotion:"PASS",releaseType:"initial-cutover"}' > artifacts/production-release/release.json
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: production-runtime-role-cutover-${{ github.run_id }}
+          name: production-release-${{ github.run_id }}
           path: artifacts/production-release
           if-no-files-found: warn
           retention-days: 90

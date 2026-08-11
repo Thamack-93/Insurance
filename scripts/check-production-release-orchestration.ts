@@ -52,7 +52,23 @@ requireOrder(release, [
 ], "release");
 requireText(release, "Verify restricted alias remained unchanged on failed smoke", "release");
 requireText(cutover, 'deploy --prebuilt --prod --skip-domain', "cutover");
-requireOrder(cutover, ["smoke:production-release", 'promote "$CUTOVER_DEPLOYMENT_URL"'], "cutover");
+requireOrder(cutover, [
+  "Verify Production Neon topology before recovery mutation",
+  "--topology-only",
+  "Create protected recovery branch before migration",
+  "npx prisma migrate deploy",
+  "--apply --json",
+  "provision:database-runtime-role -- --apply",
+  "Replace Vercel runtime database variables",
+  'deploy --prebuilt --prod --skip-domain',
+  "Verify candidate SHA and READY state",
+  "smoke:production-release",
+  "Inspect cutover candidate runtime logs",
+  'promote "$CUTOVER_DEPLOYMENT_URL"',
+], "cutover");
+requireText(cutover, "Verify previous alias remained unchanged on failed cutover smoke", "cutover");
+requireText(cutover, "DATABASE_URL_UNPOOLED DATABASE_RUNTIME_URL PRODUCTION_DATABASE_URL_UNPOOLED NEON_API_KEY", "cutover");
+requireText(cutover, "production-release-${{ github.run_id }}", "cutover");
 requireText(cleanup, 'gh run download "$RELEASE_RUN_ID"', "cleanup");
 requireOrder(cleanup, ["recoveryBranchId", ".branch.parent_id", "-X DELETE"], "cleanup");
 

@@ -15,6 +15,7 @@ const args = parseCliArgs();
 const apply = hasFlag(args, "apply");
 const json = hasFlag(args, "json");
 const rebind = hasFlag(args, "rebind-cloned-branch");
+const topologyOnly = hasFlag(args, "topology-only");
 const LOCK_KEY = "policydesk-deployment-identity-v1";
 
 type StoredIdentity = { environment: string; fingerprint: string } | null;
@@ -24,6 +25,7 @@ type TargetIdentity = {
   endpointId: string;
   databaseIdentity: string;
   databaseName: string;
+  branchProtected: boolean;
 };
 
 function required(name: string) {
@@ -97,7 +99,7 @@ async function resolveTarget(input: {
     if (local.endpointId !== input.endpointId || local.databaseName !== input.databaseName) {
       throw new Error("La identidad local no coincide con la conexión.");
     }
-    return { ...input, databaseIdentity: local.databaseName };
+    return { ...input, databaseIdentity: local.databaseName, branchProtected: false };
   }
   const apiKey = process.env.NEON_API_KEY?.trim();
   if (!apiKey) throw new Error("NEON_API_KEY es obligatoria para verificar un destino Neon remoto.");
@@ -116,6 +118,7 @@ async function resolveTarget(input: {
     endpointId: verified.endpointId,
     databaseIdentity: verified.databaseId,
     databaseName: verified.databaseName,
+    branchProtected: verified.branchProtected,
   };
 }
 
@@ -129,6 +132,9 @@ async function main() {
   const endpointId = required("endpoint-id").toLowerCase();
   const databaseName = required("database");
   const isLocal = ["127.0.0.1", "localhost", "::1"].includes(url.hostname.toLowerCase());
+  if (topologyOnly && (apply || rebind)) {
+    throw new Error("--topology-only no puede combinarse con --apply o --rebind-cloned-branch.");
+  }
   const requiresProductionComparison = environment === "preview" || rebind;
   const allowUnprotectedProductionReference = process.env.ALLOW_UNPROTECTED_PRODUCTION_REFERENCE_FOR_PREVIEW === "1";
   const productionReferenceMustBeProtected = requireProtectedProductionReference({
@@ -155,7 +161,7 @@ async function main() {
   const target = await resolveTarget({ connectionString, environment, projectId, branchId, endpointId, databaseName, isLocal });
   const fingerprint = deriveDeploymentFingerprint({ projectId: target.projectId, branchId: target.branchId, databaseIdOrName: target.databaseIdentity });
   let expectedProductionFingerprint: string | null = null;
-  let productionBranchProtected: boolean | null = null;
+  let productionBranchProtected: boolean | null = environment === "production" ? target.branchProtected : null;
   if (requiresProductionComparison) {
     if (isLocal) {
       expectedProductionFingerprint = deriveDeploymentFingerprint({ projectId, branchId: productionBranchId!, databaseIdOrName: databaseName });
@@ -182,6 +188,20 @@ async function main() {
   }
   if (expectedProductionFingerprint && fingerprint === expectedProductionFingerprint) {
     throw new Error("El fingerprint de Preview coincide con Production.");
+  }
+
+  if (topologyOnly) {
+    print({
+      mode: "topology-only",
+      targetEnvironment: environment,
+      targetEndpointMatches: true,
+      providerTopologyVerified: !isLocal,
+      productionBranchProtected,
+      unprotectedProductionReferenceAccepted: allowUnprotectedProductionReference && productionBranchProtected === false,
+      derivedFingerprint: fingerprint,
+      databaseMutationAttempted: false,
+    });
+    return;
   }
 
   const pool = new Pool({ connectionString, max: 1, application_name: "policydesk-deployment-identity-admin" });
