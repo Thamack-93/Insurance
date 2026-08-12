@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   cleanup:
-    if: github.ref == 'refs/heads/main' && inputs.restore_drill_status == 'PASS' && inputs.confirmation == 'DELETE_APPROVED_RECOVERY_BRANCH'
+    if: github.ref == 'refs/heads/main' && github.actor == github.repository_owner && inputs.restore_drill_status == 'PASS' && inputs.confirmation == 'DELETE_APPROVED_RECOVERY_BRANCH'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: production

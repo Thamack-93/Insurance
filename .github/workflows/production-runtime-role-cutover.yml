@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   cutover:
-    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'CUTOVER_RESTRICTED_RUNTIME' && inputs.neon_free_confirmation == 'ACCEPT_UNPROTECTED_NEON_FREE_PRODUCTION'
+    if: github.ref == 'refs/heads/main' && github.actor == github.repository_owner && inputs.confirmation == 'CUTOVER_RESTRICTED_RUNTIME' && inputs.neon_free_confirmation == 'ACCEPT_UNPROTECTED_NEON_FREE_PRODUCTION'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: production
@@ -43,16 +43,16 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - name: Verify approved baseline and Environment protection
+      - name: Verify approved baseline, owner and main-only Environment
         env:
           GH_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
           EXPECTED_SHA: ${{ inputs.baseline_sha }}
         run: |
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
           test "$(printf '%s' "$EXPECTED_SHA" | wc -c)" -eq 40
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER"
           ENVIRONMENT=$(gh api "repos/$GITHUB_REPOSITORY/environments/production")
-          RULES=$(printf '%s' "$ENVIRONMENT" | jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers | length] | add // 0')
-          test "$RULES" -ge 1
           printf '%s' "$ENVIRONMENT" | jq -e '.deployment_branch_policy.custom_branch_policies == true' >/dev/null
           gh api "repos/$GITHUB_REPOSITORY/environments/production/deployment-branch-policies" --jq '[.branch_policies[] | select(.name == "main")] | length == 1' | grep -qx true
 

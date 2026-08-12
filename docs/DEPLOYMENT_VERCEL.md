@@ -186,21 +186,23 @@ tiene autoridad incompatible, el CLI falla cerrado y exige revisión manual.
 ## Releases protegidos
 
 `main` tiene auto-deploy Git desactivado en `vercel.json`; Preview continúa
-automático. Configurar el GitHub Environment `production` con al menos un
-required reviewer, deployment branch `main` y secretos administrativos de Neon,
-Vercel, fingerprint esperado y la cuenta de smoke. `RELEASE_GITHUB_TOKEN` debe
-tener solo lectura de checks y de la configuración del Environment para que el
-workflow compruebe físicamente reviewers y la política exacta de `main`.
+automático. En GitHub Free, configurar el Environment `production` con una única
+regla de deployment branch `main` y los secretos administrativos de Neon,
+Vercel, fingerprint esperado y la cuenta de smoke. Los workflows exigen
+`github.actor == github.repository_owner` además de las confirmaciones exactas.
+`RELEASE_GITHUB_TOKEN` debe tener solo lectura de checks y de la configuración
+del Environment para comprobar físicamente la política exacta de `main`; no
+reemplaza la restricción aplicada por GitHub.
 
 El workflow `production-runtime-role-cutover.yml` convierte el deployment base
 ya aprobado al rol restringido. Verifica primero la topología sin depender del
-schema, crea una recovery branch protegida, aplica la migración aditiva,
+schema, crea una recovery branch no protegida compatible con Neon Free, aplica la migración aditiva,
 inicializa la identidad, provisiona el rol y retira de Vercel las credenciales
 owner/directas heredadas. Después construye el SHA base como candidato separado
 y solo lo promueve tras smoke y logs en PASS.
 
 `production-release.yml` exige SHA/checks exactos, verifica el baseline, crea
-una recovery branch protegida, migra por la conexión admin, inicializa/audita
+una recovery branch no protegida compatible con Neon Free, migra por la conexión admin, inicializa/audita
 identidad, reaplica grants explícitos, construye con `vercel build`, crea un
 candidato con `vercel deploy --prebuilt --skip-domain` y ejecuta login, Today,
 Clients, logout y revisión de logs. El alias se promueve solo después del PASS;

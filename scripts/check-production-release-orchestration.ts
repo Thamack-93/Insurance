@@ -32,9 +32,13 @@ for (const [label, workflow] of [["release", release], ["cutover", cutover], ["c
   requireText(workflow, "environment: production", label);
   requireText(workflow, "cancel-in-progress: false", label);
   requireText(workflow, "github.ref == 'refs/heads/main'", label);
+  requireText(workflow, "github.actor == github.repository_owner", label);
 }
 requireText(release, "deployment-branch-policies", "release");
 requireText(cutover, "deployment-branch-policies", "cutover");
+if (release.includes("required_reviewers") || cutover.includes("required_reviewers")) {
+  issues.push("release/cutover: GitHub Free usa owner gate, no required reviewers");
+}
 requireOrder(release, [
   "Fail closed on SHA",
   "Verify restricted runtime baseline before any mutation",
