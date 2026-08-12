@@ -6,7 +6,6 @@ import {
   getTestDb,
   getAdminSessionCookie,
   getTestOrigin,
-  replaceTestDeploymentFingerprint,
 } from "../helpers/db";
 
 test.describe("POST /api/payments/quick", () => {
@@ -163,48 +162,6 @@ test.describe("POST /api/payments/quick", () => {
         await cleanupSeededReceipt(seeded);
         await cleanupRecentRenewalWorkItems(seeded.policyId, start);
       }
-    }
-  });
-
-  test("fails closed on database identity mismatch and succeeds after identity is restored", async ({ request }) => {
-    const expectedFingerprint = process.env.EXPECTED_DATABASE_FINGERPRINT;
-    if (!expectedFingerprint) throw new Error("EXPECTED_DATABASE_FINGERPRINT is required for API safety coverage.");
-    const mismatchFingerprint = expectedFingerprint === "f".repeat(64) ? "e".repeat(64) : "f".repeat(64);
-    const start = Date.now();
-    const seeded = await seedPendingReceipt("DBSAFE");
-    const authCookie = await getAdminSessionCookie();
-
-    try {
-      await replaceTestDeploymentFingerprint(mismatchFingerprint);
-      const blocked = await request.post("/api/payments/quick", {
-        headers: { cookie: authCookie, origin: getTestOrigin() },
-        data: {
-          receiptId: seeded.id,
-          amount: 1234.56,
-          paidDate: new Date().toISOString().split("T")[0],
-          paymentMethod: "TRANSFER",
-        },
-      });
-      expect(blocked.status()).toBe(503);
-      expect(await blocked.json()).toMatchObject({ error: expect.stringMatching(/identidad|base de datos/i) });
-      expect((await getTestDb().receipt.findUnique({ where: { id: seeded.id } }))?.status).toBe("PENDING");
-
-      await replaceTestDeploymentFingerprint(expectedFingerprint);
-      const allowed = await request.post("/api/payments/quick", {
-        headers: { cookie: authCookie, origin: getTestOrigin() },
-        data: {
-          receiptId: seeded.id,
-          amount: 1234.56,
-          paidDate: new Date().toISOString().split("T")[0],
-          paymentMethod: "TRANSFER",
-        },
-      });
-      expect(allowed.status()).toBe(200);
-      expect((await getTestDb().receipt.findUnique({ where: { id: seeded.id } }))?.status).toBe("PAID");
-    } finally {
-      await replaceTestDeploymentFingerprint(expectedFingerprint).catch(() => undefined);
-      await cleanupSeededReceipt(seeded);
-      await cleanupRecentRenewalWorkItems(seeded.policyId, start);
     }
   });
 });

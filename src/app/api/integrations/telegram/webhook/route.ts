@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { logError } from "@/lib/logger";
 import { getDb } from "@/lib/db";
 import { checkDistributedRateLimit, getRequestIp, readJsonBody, securityFingerprint } from "@/lib/request-guards";
-import { guardErrorResponse, rateLimitResponse } from "@/lib/api-security";
-import { assertDeploymentDatabaseSafety, DeploymentDatabaseSafetyError } from "@/lib/deployment-db-safety";
+import { rateLimitResponse } from "@/lib/api-security";
 import { recordSecurityEvent, SECURITY_EVENT_TYPES } from "@/lib/security-events";
 import {
   isTelegramWebhookSecretValid,
@@ -32,13 +31,6 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    await assertDeploymentDatabaseSafety();
-  } catch (error) {
-    if (error instanceof DeploymentDatabaseSafetyError) return guardErrorResponse(error);
-    throw error;
-  }
-
   const ipFingerprint = securityFingerprint(`ip:${getRequestIp(request)}`);
   const rateLimit = await checkDistributedRateLimit(`telegram:webhook:${ipFingerprint}`, {
     limit: 60,

@@ -7,7 +7,6 @@ import { areDocumentFilesEnabled } from "@/lib/deployment";
 import { logError } from "@/lib/logger";
 import { AuthError, requireUser } from "@/lib/auth";
 import { recordSecurityAccessDenied, SECURITY_EVENT_TYPES } from "@/lib/security-events";
-import { guardErrorResponse } from "@/lib/api-security";
 
 type DownloadableDocument = {
   id: string;
@@ -46,7 +45,6 @@ export async function GET(
       user = await requireUser();
     } catch (authErr) {
       if (authErr instanceof AuthError) {
-        if (authErr.status >= 500) return guardErrorResponse(authErr);
         await recordSecurityAccessDenied({
           alertType: SECURITY_EVENT_TYPES.documentAccessDenied,
           title: "Descarga de documento sin sesión válida",

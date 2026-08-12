@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
     await cleanupExpired(user.id).catch((error) => logError("api.nora.policyPdf.handoff.cleanup", error));
     return NextResponse.json({ success: true, handoffId: parsed.handoffId, expiresAt: Date.now() + NORA_CAPTURE_HANDOFF_MAX_AGE_MS, url: blob.url });
   } catch (error) {
-    if (error instanceof AuthError) return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status });
+    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
     if (error instanceof z.ZodError) return NextResponse.json({ error: "La ficha temporal no es válida.", code: "HANDOFF_REJECTED" }, { status: 400 });
     const response = responseForError(error);
     logError("api.nora.policyPdf.handoff.save", error);
@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
     }
     return NextResponse.json({ success: true, handoff: { version: 5, ownerId: user.id, createdAt: blob.blob.uploadedAt.getTime(), expiresAt: parsed.expiresAt, payload: parsed.payload } });
   } catch (error) {
-    if (error instanceof AuthError) return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status });
+    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
     logError("api.nora.policyPdf.handoff.load", error);
     return NextResponse.json({ error: "No se pudo restaurar la ficha temporal.", code: "HANDOFF_SERVER_ERROR" }, { status: 500 });
   }
@@ -101,7 +101,7 @@ export async function DELETE(request: NextRequest) {
     if (process.env.BLOB_READ_WRITE_TOKEN?.trim()) await del(buildNoraCaptureHandoffPathname(user.id, handoffId)).catch(() => undefined);
     return NextResponse.json({ success: true });
   } catch (error) {
-    if (error instanceof AuthError) return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status });
+    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
     logError("api.nora.policyPdf.handoff.delete", error);
     return NextResponse.json({ error: "No se pudo eliminar la ficha temporal.", code: "HANDOFF_SERVER_ERROR" }, { status: 500 });
   }

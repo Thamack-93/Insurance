@@ -18,8 +18,6 @@ import {
   verifyBackupManifest,
   type BackupManifest,
 } from "@/lib/backup-logic";
-import { assertDeploymentDatabaseSafety } from "@/lib/deployment-db-safety";
-import { ENVIRONMENT_LOCAL_DATABASE_TABLES } from "@/lib/deployment-db-identity-constants";
 
 const BACKUP_PREFIX = "database-backups/";
 // Copies created during a key migration are deliberately outside BACKUP_PREFIX so
@@ -245,7 +243,6 @@ async function describeTables(client: PoolClient): Promise<TableDescription[]> {
 
   const descriptions: TableDescription[] = [];
   for (const table of tables.rows) {
-    if (ENVIRONMENT_LOCAL_DATABASE_TABLES.has(table.table_name)) continue;
     const [columns, primaryKey] = await Promise.all([
       client.query<{
         column_name: string;
@@ -457,7 +454,6 @@ export function listRekeyedBackups(): Promise<BackupEntry[]> {
 }
 
 export async function rotateBackups() {
-  await assertDeploymentDatabaseSafety();
   const entries = await listBackups();
   const selection = selectBackupRetention(
     entries.map((entry) => ({ ...entry, id: entry.pathname })),
@@ -470,7 +466,6 @@ export async function rotateBackups() {
 }
 
 export async function createDatabaseBackup(now = new Date()): Promise<CreatedBackup> {
-  await assertDeploymentDatabaseSafety();
   const preflight = getBackupPreflightStatus();
   if (!preflight.ready) {
     throw new Error(formatBackupPreflightError(preflight));
@@ -650,7 +645,6 @@ export async function rekeyStoredBackup(
   sourceFilename: string,
   now = new Date(),
 ): Promise<RekeyedBackup> {
-  await assertDeploymentDatabaseSafety();
   assertSafeBackupFilename(sourceFilename);
   const rekeyStatus = getBackupRekeyStatus();
   if (!rekeyStatus.ready || !rekeyStatus.targetKeyVersion) {

@@ -13,7 +13,6 @@ import { BOOTSTRAP_ORGANIZATION_ID, PROTECTED_TENANT_TABLES } from "@/lib/tenant
 const execFileAsync = promisify(execFile);
 const enabled = process.env.RESTORE_INTEGRATION === "1";
 const KEY = Buffer.from("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", "hex");
-const TEST_DEPLOYMENT_FINGERPRINT = createHash("sha256").update("policydesk-restore-integration-target").digest("hex");
 
 type SnapshotTable = { type: "table"; schema: string; name: string; columns: Array<{ name: string; postgresType: string; nullable: boolean }>; rows: Array<{ type: "row"; schema: string; table: string; data: Record<string, unknown> }> };
 
@@ -30,27 +29,6 @@ async function runMigrations(databaseUrl: string) {
     env: { PATH: process.env.PATH ?? "", DATABASE_URL: databaseUrl, DATABASE_URL_UNPOOLED: "", NODE_ENV: "test" },
     maxBuffer: 4 * 1024 * 1024,
   });
-}
-
-async function initializeDeploymentIdentity(databaseUrl: string) {
-  const pool = new Pool({ connectionString: databaseUrl, max: 1 });
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query("SET LOCAL policydesk.deployment_identity_admin = '1'");
-    await client.query(
-      `INSERT INTO "DeploymentIdentity" ("id", "environment", "fingerprint", "createdAt", "updatedAt")
-       VALUES ('policydesk_deployment_identity_v1', 'TEST', $1, now(), now())`,
-      [TEST_DEPLOYMENT_FINGERPRINT],
-    );
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-    await pool.end();
-  }
 }
 
 async function createDatabase(adminUrl: string, name: string) {
@@ -112,7 +90,6 @@ async function snapshotDatabase(databaseUrl: string): Promise<SnapshotTable[]> {
     const tables = await client.query<{ table_schema: string; table_name: string }>(`SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name`);
     const snapshot: SnapshotTable[] = [];
     for (const table of tables.rows) {
-      if (table.table_name === "DeploymentIdentity") continue;
       const columnsResult = await client.query<{ column_name: string; udt_name: string; is_nullable: "YES" | "NO" }>(`SELECT column_name, udt_name, is_nullable FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 ORDER BY ordinal_position`, [table.table_schema, table.table_name]);
       const rowsResult = await client.query<Record<string, unknown>>(`SELECT * FROM "${table.table_name.replaceAll('"', '""')}"`);
       snapshot.push({
@@ -189,16 +166,6 @@ function encodeSnapshot(snapshot: SnapshotTable[], mutate?: (snapshot: SnapshotT
   return { plaintext, manifest };
 }
 
-function restoreInput(targetDatabaseUrl: string, backup: ReturnType<typeof encodeSnapshot>) {
-  return {
-    targetDatabaseUrl,
-    plaintext: backup.plaintext,
-    manifest: backup.manifest,
-    expectedDatabaseEnvironment: "test" as const,
-    expectedDatabaseFingerprint: TEST_DEPLOYMENT_FINGERPRINT,
-  };
-}
-
 describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
   it("restores a full fixture and rolls back invalid variants", async () => {
     const adminUrl = process.env.RESTORE_INTEGRATION_ADMIN_URL ?? process.env.DATABASE_URL;
@@ -213,36 +180,10 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
       await createDatabase(adminUrl, targetName);
       await runMigrations(sourceUrl);
       await runMigrations(targetUrl);
-      await initializeDeploymentIdentity(sourceUrl);
-      await initializeDeploymentIdentity(targetUrl);
       await seedFixture(sourceUrl);
       const snapshot = await snapshotDatabase(sourceUrl);
-      snapshot.push({
-        type: "table",
-        schema: "public",
-        name: "DeploymentIdentity",
-        columns: [
-          { name: "id", postgresType: "text", nullable: false },
-          { name: "environment", postgresType: "DeploymentEnvironment", nullable: false },
-          { name: "fingerprint", postgresType: "text", nullable: false },
-          { name: "createdAt", postgresType: "timestamp", nullable: false },
-          { name: "updatedAt", postgresType: "timestamp", nullable: false },
-        ],
-        rows: [{
-          type: "row",
-          schema: "public",
-          table: "DeploymentIdentity",
-          data: {
-            id: "policydesk_deployment_identity_v1",
-            environment: "PRODUCTION",
-            fingerprint: "f".repeat(64),
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        }],
-      });
       const valid = encodeSnapshot(snapshot);
-      const restored = await restoreVerifiedBackup(restoreInput(targetUrl, valid));
+      const restored = await restoreVerifiedBackup({ targetDatabaseUrl: targetUrl, plaintext: valid.plaintext, manifest: valid.manifest });
       expect(restored.tableCounts.totalRows).toBeGreaterThan(0);
       const orchestrationReport = await runBackupRestoreDrill({
         backupFilename: valid.manifest.payload.filename,
@@ -263,14 +204,6 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
       const guardPool = new Pool({ connectionString: targetUrl, max: 1 });
       const guardClient = await guardPool.connect();
       try {
-        expect((await guardClient.query(`SELECT "fingerprint" FROM "DeploymentIdentity"`)).rows[0]?.fingerprint)
-          .toBe(TEST_DEPLOYMENT_FINGERPRINT);
-        await expect(guardClient.query(`UPDATE "DeploymentIdentity" SET "fingerprint" = $1`, ["f".repeat(64)]))
-          .rejects.toThrow(/POLICYDESK_DEPLOYMENT_IDENTITY_IMMUTABLE/);
-        await expect(guardClient.query(`DELETE FROM "DeploymentIdentity"`))
-          .rejects.toThrow(/POLICYDESK_DEPLOYMENT_IDENTITY_IMMUTABLE/);
-        await expect(guardClient.query(`TRUNCATE "DeploymentIdentity"`))
-          .rejects.toThrow(/POLICYDESK_DEPLOYMENT_IDENTITY_IMMUTABLE/);
         await expect(guardClient.query(`INSERT INTO "Organization" (id,name,slug,status,"timeZone","defaultCurrency","createdAt","updatedAt") VALUES ('org-second','Second','second','ACTIVE','Etc/GMT+6','MXN',now(),now())`)).rejects.toThrow();
         await expect(guardClient.query(`DELETE FROM "Organization" WHERE id = $1`, [BOOTSTRAP_ORGANIZATION_ID])).rejects.toThrow(/POLICYDESK_BOOTSTRAP_ORGANIZATION_IMMUTABLE/);
         await expect(guardClient.query(`TRUNCATE "Organization" CASCADE`)).rejects.toThrow(/POLICYDESK_BOOTSTRAP_ORGANIZATION_IMMUTABLE/);
@@ -325,7 +258,7 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
       const orphan = encodeSnapshot(snapshot, (copy) => {
         copy.find((table) => table.name === "Payment")!.rows[0].data.receiptId = "missing-receipt";
       });
-      await expect(restoreVerifiedBackup(restoreInput(targetUrl, orphan))).rejects.toThrow(/huérfanos|integridad/i);
+      await expect(restoreVerifiedBackup({ targetDatabaseUrl: targetUrl, plaintext: orphan.plaintext, manifest: orphan.manifest })).rejects.toThrow(/huérfanos|integridad/i);
       const targetCountAfterOrphan = await scalarCount(targetUrl, "Payment");
       expect(targetCountAfterOrphan).toBe(1);
 
@@ -334,20 +267,20 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
       const { manifestSha256: _manifestHash, ...mismatchUnsigned } = mismatch.manifest;
       void _manifestHash;
       mismatch.manifest = createBackupManifest(mismatchUnsigned);
-      await expect(restoreVerifiedBackup(restoreInput(targetUrl, mismatch))).rejects.toThrow(/conteo/i);
+      await expect(restoreVerifiedBackup({ targetDatabaseUrl: targetUrl, plaintext: mismatch.plaintext, manifest: mismatch.manifest })).rejects.toThrow(/conteo/i);
       expect(await scalarCount(targetUrl, "Payment")).toBe(1);
 
       const duplicate = encodeSnapshot(snapshot, (copy) => {
         const payment = copy.find((table) => table.name === "Payment")!;
         payment.rows.push({ ...payment.rows[0], data: { ...payment.rows[0].data, id: "drill-payment-duplicate" } });
       });
-      await expect(restoreVerifiedBackup(restoreInput(targetUrl, duplicate))).rejects.toThrow(/duplicate|posted_payment|recibo/i);
+      await expect(restoreVerifiedBackup({ targetDatabaseUrl: targetUrl, plaintext: duplicate.plaintext, manifest: duplicate.manifest })).rejects.toThrow(/duplicate|posted_payment|recibo/i);
       expect(await scalarCount(targetUrl, "Payment")).toBe(1);
 
       const inconsistentMembership = encodeSnapshot(snapshot, (copy) => {
         copy.find((table) => table.name === "OrganizationMembership")!.rows[0].data.active = false;
       });
-      await expect(restoreVerifiedBackup(restoreInput(targetUrl, inconsistentMembership))).rejects.toThrow(/Owner|membership|tenant/i);
+      await expect(restoreVerifiedBackup({ targetDatabaseUrl: targetUrl, plaintext: inconsistentMembership.plaintext, manifest: inconsistentMembership.manifest })).rejects.toThrow(/Owner|membership|tenant/i);
       expect(await scalarCount(targetUrl, "Payment")).toBe(1);
       expect(await tableCounts(sourceUrl)).toEqual(sourceCountsBefore);
       const sourceCountAfter = await scalarCount(sourceUrl, "Payment");

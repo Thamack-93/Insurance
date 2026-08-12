@@ -52,9 +52,6 @@ back all writes; new writes remain protected by the triggers.
 Restore uses `session_replication_role = replica` only inside its restore
 transaction. Normal triggers therefore do not generate memberships or rewrite
 backup rows; after returning to `origin`, the restore runs the tenant audit.
-`DeploymentIdentity` is a separate environment-local safety control. It is
-excluded from business backups, validated independently before restore writes,
-and never assigns or filters `organizationId`.
 Older backups without the organization tables/columns remain
 `BACKUP_SCHEMA_INCOMPATIBLE` and must be restored with their compatible schema,
 then migrated, backfilled, audited, re-backed-up, and drilled again.

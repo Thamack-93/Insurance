@@ -6,10 +6,8 @@ const del = vi.hoisted(() => vi.fn());
 const get = vi.hoisted(() => vi.fn());
 const list = vi.hoisted(() => vi.fn());
 const put = vi.hoisted(() => vi.fn());
-const assertDeploymentDatabaseSafety = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 
 vi.mock("@vercel/blob", () => ({ del, get, list, put }));
-vi.mock("@/lib/deployment-db-safety", () => ({ assertDeploymentDatabaseSafety }));
 
 import {
   createBackupManifest,
@@ -41,14 +39,6 @@ afterEach(() => {
 });
 
 describe("immutable backup rekey", () => {
-  it("does not touch Blob when deployment identity is unsafe", async () => {
-    assertDeploymentDatabaseSafety.mockRejectedValueOnce(new Error("blocked"));
-    await expect(rekeyStoredBackup(SOURCE_FILENAME)).rejects.toThrow("blocked");
-    expect(get).not.toHaveBeenCalled();
-    expect(put).not.toHaveBeenCalled();
-    expect(del).not.toHaveBeenCalled();
-  });
-
   it("creates and verifies a separate copy without deleting or overwriting the source", async () => {
     const plaintext = Buffer.from('{"type":"backup"}\n{"type":"end"}\n');
     const sourceIv = Buffer.from("101112131415161718191a1b", "hex");

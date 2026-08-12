@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { gateway, generateText } from "ai";
-import { AuthError, requireUser } from "@/lib/auth";
-import { guardErrorResponse } from "@/lib/api-security";
+import { requireUser } from "@/lib/auth";
 import { getAssistantAiConnectionStatus, getAssistantStructuredModel } from "@/lib/assistant-ai";
 import { logError } from "@/lib/logger";
 
@@ -38,7 +37,6 @@ export async function GET() {
       latencyMs: Date.now() - startedAt,
     });
   } catch (error) {
-    if (error instanceof AuthError && error.status >= 500) return guardErrorResponse(error);
     logError("api.admin.assistant.health", error);
     return NextResponse.json({ ok: false, error: "El gateway no respondió la prueba de conexión." }, { status: 502 });
   }

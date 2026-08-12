@@ -1,11 +1,5 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run vercel-build",
-  "git": {
-    "deploymentEnabled": {
-      "main": false
-    }
-  },
   "crons": [
     {
       "path": "/api/jobs/backup",

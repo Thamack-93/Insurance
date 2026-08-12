@@ -8,11 +8,6 @@ import { writeActivityLog } from "@/lib/activity-log";
 import { getRequestIp, checkDistributedRateLimit, securityFingerprint } from "@/lib/request-guards";
 import { recordSecurityEvent, SECURITY_EVENT_TYPES } from "@/lib/security-events";
 import { headers } from "next/headers";
-import {
-  DEPLOYMENT_DATABASE_ERROR_MESSAGE,
-  DeploymentDatabaseSafetyError,
-  assertDeploymentDatabaseSafety,
-} from "@/lib/deployment-db-safety";
 
 export type LoginResult = { ok: true } | { ok: false; error: string };
 
@@ -23,15 +18,6 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
 
   if (!email || !password) {
     return { ok: false, error: "Captura tu correo y contraseña." };
-  }
-
-  try {
-    await assertDeploymentDatabaseSafety();
-  } catch (error) {
-    if (error instanceof DeploymentDatabaseSafetyError) {
-      return { ok: false, error: DEPLOYMENT_DATABASE_ERROR_MESSAGE };
-    }
-    throw error;
   }
 
   const requestHeaders = await headers();

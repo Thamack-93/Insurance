@@ -1,9 +1,8 @@
 import type { PoolClient, QueryResultRow } from "pg";
 import type { RestoreFailureCode } from "@/lib/backup-restore-errors";
-import { ENVIRONMENT_LOCAL_DATABASE_TABLES } from "@/lib/deployment-db-identity-constants";
 import { auditTenantFoundation, OPTIONAL_ORGANIZATION_TABLES, PROTECTED_TENANT_TABLES } from "@/lib/tenant-organization-foundation";
 
-export const RESTORE_SKIPPED_TABLES = new Set(["_prisma_migrations", ...ENVIRONMENT_LOCAL_DATABASE_TABLES]);
+export const RESTORE_SKIPPED_TABLES = new Set(["_prisma_migrations"]);
 
 export type BackupColumn = {
   name: string;

@@ -2,8 +2,6 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { logError } from "@/lib/logger";
 import { runNonPaymentCancellationJob } from "@/lib/nonpayment-cancellation";
-import { guardErrorResponse } from "@/lib/api-security";
-import { assertDeploymentDatabaseSafety, DeploymentDatabaseSafetyError } from "@/lib/deployment-db-safety";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,13 +19,6 @@ function hasValidCronSecret(request: NextRequest) {
 export async function GET(request: NextRequest) {
   if (!hasValidCronSecret(request)) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
-
-  try {
-    await assertDeploymentDatabaseSafety();
-  } catch (error) {
-    if (error instanceof DeploymentDatabaseSafetyError) return guardErrorResponse(error);
-    throw error;
   }
 
   try {

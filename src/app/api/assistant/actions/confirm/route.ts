@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, result });
   } catch (error) {
     if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status });
+      return NextResponse.json({ error: error.message }, { status: error.status });
     }
     if (error instanceof Error && (error.message.includes("cuerpo") || error.message.includes("requiere un payload"))) {
       return guardErrorResponse(error);
