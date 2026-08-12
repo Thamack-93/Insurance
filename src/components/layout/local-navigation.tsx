@@ -24,6 +24,7 @@ export function LocalNavigation({
             <Link
               key={item.href}
               href={item.href}
+              prefetch={false}
               aria-current={active ? "page" : undefined}
               className={cn(
                 "relative inline-flex min-h-11 items-center whitespace-nowrap px-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",

@@ -106,7 +106,7 @@ export default async function PoliciesPage({
     portfolioAgg,
     filteredCount,
     pagedPolicies,
-    attentionPolicies,
+    pendingPolicies,
   ] = await Promise.all([
     db.policy.count({ where: { ...portfolioWhere, status: "ACTIVE" } }),
     db.policy.count({ where: { ...portfolioWhere, status: "PENDING" } }),
@@ -126,14 +126,17 @@ export default async function PoliciesPage({
       take: PAGE_SIZE,
     }),
     db.policy.findMany({
-      where: { ...portfolioWhere, status: { in: ["EXPIRED", "PENDING"] } },
+      where: { ...portfolioWhere, status: "PENDING" },
       include: { client: true, insurer: true },
-      orderBy: [{ status: "asc" }, { endDate: "asc" }],
+      orderBy: [{ endDate: "asc" }, { id: "asc" }],
       take: 10,
     }),
   ]);
 
   const renewalRiskCount = renewalRiskPolicies.length;
+  const attentionPolicies = [...renewalRiskPolicies, ...pendingPolicies]
+    .sort((left, right) => left.endDate.getTime() - right.endDate.getTime())
+    .slice(0, 10);
   const portfolioValue = toNumber(portfolioAgg._sum.premiumAmount ?? 0);
 
   return (
@@ -276,7 +279,9 @@ export default async function PoliciesPage({
                     <SortableTableHead sortKey="client">Cliente</SortableTableHead>
                     <SortableTableHead sortKey="insurer">Aseguradora</SortableTableHead>
                     <SortableTableHead sortKey="type">Tipo</SortableTableHead>
-                    <SortableTableHead sortKey="endDate">Renovación</SortableTableHead>
+                    <SortableTableHead sortKey="endDate">
+                      {statusFilter === "EXPIRED" ? "Fin de vigencia" : "Renovación"}
+                    </SortableTableHead>
                     <TableHead className="text-right">Prima</TableHead>
                     <TableHead>Estado</TableHead>
                   </TableRow>
@@ -306,7 +311,9 @@ export default async function PoliciesPage({
                       <TableCell>
                         {policy.endDate ? (
                           <span className="text-sm text-muted-foreground">
-                            {formatDate(policy.endDate)} · {daysUntil(policy.endDate)} días
+                            {statusFilter === "EXPIRED"
+                              ? `Terminó: ${formatDate(policy.endDate)}`
+                              : `${formatDate(policy.endDate)} · ${daysUntil(policy.endDate)} días`}
                           </span>
                         ) : (
                           <span className="text-sm text-muted-foreground">Sin fecha</span>
@@ -341,14 +348,14 @@ export default async function PoliciesPage({
 
         <SectionCard
           title="Atención inmediata"
-          description="Pólizas vencidas o pendientes que conviene mover esta semana."
+          description="Renovaciones sin resolver y pólizas pendientes que conviene mover esta semana."
         >
           {attentionPolicies.length === 0 ? (
             <div className="p-4">
               <EmptyState
                 icon={Shield}
                 title="Cartera al día"
-                description="No hay pólizas vencidas ni pendientes que reclamen atención inmediata."
+                description="No hay renovaciones vencidas sin resolver ni pólizas pendientes que reclamen atención inmediata."
               />
             </div>
           ) : (
