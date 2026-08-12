@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { authenticatePageAsAdmin } from "../helpers/db";
+import { authenticatePageAsAdmin, getTestDb } from "../helpers/db";
 
 test.describe("Nora assistant", () => {
   test.use({ navigationTimeout: 60_000 });
@@ -14,6 +14,102 @@ test.describe("Nora assistant", () => {
     await expect(page.getByPlaceholder(/pregunta por una póliza/i)).toBeVisible();
     await expect(page.getByText("Pistas rápidas")).toHaveCount(0);
     await expect(page.getByText("Backlog de IA")).toHaveCount(0);
+  });
+
+  test("accepts a PDF dropped over the chat composer", async ({ page }) => {
+    const input = page.getByPlaceholder(/pregunta por una póliza/i);
+    const composer = input.locator("xpath=../..");
+    await composer.evaluate((section) => {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(new File(["%PDF-1.7"], "arrastre.pdf", { type: "application/pdf" }));
+      section.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer }));
+    });
+
+    await expect(page.getByText("arrastre.pdf", { exact: false })).toBeVisible();
+    await expect(page.getByText("Arrastra PDFs aquí o selecciónalos", { exact: true })).toHaveCount(0);
+  });
+
+  test("keeps independent capture cards after opening one and returning to Nora", async ({ page }) => {
+    const db = getTestDb();
+    const user = await db.user.findUnique({ where: { email: "ci-admin@policydesk.local" }, select: { id: true } });
+    if (!user) throw new Error("Missing CI admin fixture.");
+    const now = Date.now();
+    const ids = ["handoff-e2e-1", "handoff-e2e-2"];
+    const buildDraft = (policyNumber: string, fileName: string) => ({
+      policyNumber,
+      clientName: "CLIENTE E2E",
+      clientType: "COMPANY",
+      clientEmail: null,
+      clientPhone: null,
+      clientAddress: null,
+      clientRfc: null,
+      clientBirthDate: null,
+      insurerName: "Seguros Banorte",
+      policyType: "AUTO",
+      serialNumber: null,
+      startDate: "2026-08-01",
+      endDate: "2027-08-01",
+      issueDate: "2026-08-01",
+      paymentFrequency: "ANNUAL",
+      paymentPlan: null,
+      premiumAmount: 1000,
+      currency: "MXN",
+      requestNumber: null,
+      insuredObject: fileName,
+      beneficiaryInfo: null,
+      notes: null,
+      sourcePolicyNumber: null,
+    });
+    const drafts = [buildDraft("POL-1", "uno.pdf"), buildDraft("POL-2", "dos.pdf")];
+    await page.addInitScript(({ userId, now, ids, drafts }) => {
+      const userKey = encodeURIComponent(userId);
+      const provenance = { requestedMode: "local", extractionSource: "local", reviewSource: "none", aiRunIds: [], trackingStatus: "recorded", aiAttempted: false };
+      const session = {
+        version: 2,
+        ownerId: userId,
+        createdAt: now,
+        updatedAt: now,
+        expiresAt: now + 1_800_000,
+        input: "",
+        context: null,
+        activeCaptureHandoffId: ids[0],
+        messages: [
+          { id: "welcome", role: "assistant", text: "Hola Nora" },
+          { id: "capture-1", role: "assistant", text: "Captura 1 lista", capture: { handoffId: ids[0], fileName: "uno.pdf", fileKey: "uno.pdf:1:1" } },
+          { id: "capture-2", role: "assistant", text: "Captura 2 lista", capture: { handoffId: ids[1], fileName: "dos.pdf", fileKey: "dos.pdf:1:1" } },
+        ],
+      };
+      sessionStorage.setItem(`policydesk.nora.session.v2:${userKey}`, JSON.stringify(session));
+      sessionStorage.setItem(`policydesk.policyCapture.index.v5:${userKey}`, JSON.stringify(ids));
+      ids.forEach((handoffId, index) => {
+        const payload = { handoffId, draft: drafts[index], warnings: [], aiReview: null, provenance };
+        sessionStorage.setItem(`policydesk.policyCapture.v5:${userKey}:${encodeURIComponent(handoffId)}`, JSON.stringify({ version: 5, ownerId: userId, createdAt: now, expiresAt: now + 900_000, payload }));
+      });
+    }, { userId: user.id, now, ids, drafts });
+    await page.reload();
+
+    await expect(page.getByText("uno.pdf", { exact: true })).toBeVisible();
+    await expect(page.getByText("dos.pdf", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Revisar captura" }).first().click();
+    await expect(page).toHaveURL(/\/policies\/capture\?handoffId=handoff-e2e-1/);
+    await page.goBack();
+    await expect(page.getByText("uno.pdf", { exact: true })).toBeVisible();
+    await expect(page.getByText("dos.pdf", { exact: true })).toBeVisible();
+  });
+
+  test("keeps inline PDF cards compact and side by side on a wide viewport", async ({ page }) => {
+    const input = page.getByPlaceholder(/pregunta por una póliza/i);
+    const composer = input.locator("xpath=../..");
+    await composer.evaluate((section) => {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(new File(["%PDF-1.7"], "uno.pdf", { type: "application/pdf" }));
+      dataTransfer.items.add(new File(["%PDF-1.7"], "dos.pdf", { type: "application/pdf" }));
+      section.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer }));
+    });
+    const files = page.locator('[data-policy-pdf-picker="true"] li');
+    await expect(files).toHaveCount(2);
+    const boxes = await files.evaluateAll((items) => items.map((item) => item.getBoundingClientRect()));
+    expect(boxes[0]?.top).toBe(boxes[1]?.top);
   });
 
   test("uses the full workspace without nested scroll gaps and reports AI usage", async ({ page }) => {

@@ -23,7 +23,7 @@ export function AppMobileSidebar({ isAdmin = false, isSuperAdmin = false }: { is
             variant="outline"
             size="icon"
             aria-label="Abrir menú de navegación"
-            className="rounded-lg bg-card lg:hidden"
+            className="rounded-md bg-card lg:hidden"
           />
         }
       >
@@ -31,26 +31,24 @@ export function AppMobileSidebar({ isAdmin = false, isSuperAdmin = false }: { is
       </SheetTrigger>
       <SheetContent
         side="left"
-        className="w-72 max-w-[88vw] border-white/10 bg-[#06283b] p-4 text-white"
+        className="w-72 max-w-[88vw] border-sidebar-border bg-sidebar p-4 text-sidebar-foreground"
       >
         <div className="flex h-full flex-col">
           <Link
             href="/today"
             onClick={() => setOpen(false)}
-            className="flex min-h-11 items-center gap-3 rounded-lg px-2 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+            className="flex min-h-11 items-center gap-3 rounded-md px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
           >
-            <div className="grid size-9 place-items-center rounded-lg bg-white text-[#06283b]">
-              <ShieldCheck className="size-5" />
-            </div>
+            <ShieldCheck className="size-6 shrink-0 text-sidebar-primary" aria-hidden />
             <div>
-              <p className="text-sm font-semibold tracking-tight">PolicyDesk</p>
-              <p className="text-xs text-slate-400">Operación de seguros</p>
+              <p className="font-display text-lg tracking-tight text-sidebar-accent-foreground">PolicyDesk</p>
+              <p className="text-xs text-sidebar-foreground/70">Operación de seguros</p>
             </div>
           </Link>
           <div className="mt-5 flex min-h-0 flex-1 flex-col">
             <SidebarNav onNavigate={() => setOpen(false)} />
           </div>
-          <div className="space-y-1 border-t border-white/10 pt-3">
+          <div className="space-y-1 border-t border-sidebar-border pt-3">
             {utilities.map((item) => {
               const Icon = item.icon;
               const active = isUtilityNavigationItemActive(item, pathname);
@@ -61,8 +59,8 @@ export function AppMobileSidebar({ isAdmin = false, isSuperAdmin = false }: { is
                   onClick={() => setOpen(false)}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium text-slate-300 hover:bg-white/8 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300",
-                    active && "bg-white/8 text-white",
+                    "flex min-h-11 items-center gap-3 rounded-md px-3 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                    active && "bg-sidebar-accent font-semibold text-sidebar-accent-foreground",
                   )}
                 >
                   <Icon className="size-[18px]" aria-hidden /> {item.label}

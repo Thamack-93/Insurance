@@ -11,6 +11,22 @@ import {
 
 export const runtime = "nodejs";
 
+function uploadErrorResponse(error: unknown) {
+  const status = error && typeof error === "object" && "statusCode" in error && typeof error.statusCode === "number"
+    ? error.statusCode
+    : 500;
+  if (status === 401 || status === 403) {
+    return { status, code: "UPLOAD_UNAUTHORIZED", error: "La sesión no está autorizada para conservar este PDF." };
+  }
+  if (status === 413) {
+    return { status, code: "UPLOAD_REJECTED", error: "El PDF supera el tamaño permitido." };
+  }
+  if (status === 429) {
+    return { status, code: "UPLOAD_RATE_LIMITED", error: "Se alcanzó el límite de subidas temporales." };
+  }
+  return { status: status >= 400 && status < 600 ? status : 500, code: "UPLOAD_SERVER_ERROR", error: "No se pudo preparar la subida temporal." };
+}
+
 export async function POST(request: NextRequest) {
   try {
     const user = await requireUser();
@@ -19,6 +35,13 @@ export async function POST(request: NextRequest) {
       assertSameOrigin(request, "nora policy pdf upload");
     } catch {
       return NextResponse.json({ error: "No autorizado." }, { status: 403 });
+    }
+
+    if (!process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
+      return NextResponse.json({
+        error: "El almacenamiento temporal de PDFs no está configurado en el servidor.",
+        code: "BLOB_NOT_CONFIGURED",
+      }, { status: 503 });
     }
 
     const rateLimit = await checkDistributedRateLimit(`nora-policy-pdf-upload:${getRequestIp(request)}:${user.id}`, {
@@ -59,6 +82,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     logError("api.nora.policyPdf.upload", error);
-    return NextResponse.json({ error: "No se pudo preparar la subida temporal." }, { status: 500 });
+    const response = uploadErrorResponse(error);
+    return NextResponse.json({ error: response.error, code: response.code }, { status: response.status });
   }
 }

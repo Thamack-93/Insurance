@@ -138,7 +138,7 @@ jobs:
       - name: Create protected two-organization fixture
         run: npm run test:tenant-fixture
       - name: Run tenant context and export tests
-        run: npm run test:unit -- src/lib/organization-context.logic.test.ts src/lib/export.logic.test.ts src/lib/tenant-isolation.integration.logic.test.ts
+        run: npm run test:unit -- src/lib/organization-context.logic.test.ts src/lib/organization-context-resolution.logic.test.ts src/lib/export.logic.test.ts src/lib/tenant-isolation.integration.logic.test.ts
       - name: Check tenant inventory
         run: node --import tsx scripts/check-tenant-inventory.ts
       - name: Build tenant-isolation application

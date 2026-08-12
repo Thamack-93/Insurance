@@ -3,6 +3,7 @@ export type WorkItemNavigationInput = {
   sourceType?: string | null;
   sourceId?: string | null;
   workItemType?: string | null;
+  taskType?: string | null;
   entityType?: string | null;
   entityId?: string | null;
   clientId?: string | null;
@@ -16,9 +17,10 @@ export type WorkItemNavigationInput = {
  */
 export function getWorkItemHref(item: WorkItemNavigationInput) {
   const sourceType = item.sourceType?.toLowerCase();
+  const taskType = item.taskType?.toLowerCase();
   const entityType = item.entityType?.toLowerCase();
 
-  if ((sourceType === "renewal" || entityType === "policy") && item.policyId) {
+  if ((sourceType === "renewal" || taskType === "renewal" || entityType === "policy") && item.policyId) {
     return `/policies/${item.policyId}`;
   }
   if (entityType === "claim" && item.entityId) return `/claims/${item.entityId}`;

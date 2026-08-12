@@ -34,4 +34,17 @@ describe("tenant organization transition foundation", () => {
     expect(migration).not.toContain('SecurityEventAggregate_transition_singleton_organization');
     expect(migration).not.toContain('TelegramWebhookUpdate_transition_singleton_organization');
   });
+
+  it("fails closed before enforcing one membership per user", () => {
+    const migration = fs.readFileSync(
+      path.join(process.cwd(), "prisma/migrations/20260812000000_single_organization_membership/migration.sql"),
+      "utf8",
+    );
+    expect(migration).toContain('GROUP BY "userId"');
+    expect(migration).toContain("HAVING count(*) > 1");
+    expect(migration).toContain("POLICYDESK_MULTIPLE_ORGANIZATION_MEMBERSHIPS");
+    expect(migration).toContain('CREATE UNIQUE INDEX "OrganizationMembership_userId_key"');
+    expect(migration).toContain('DROP INDEX IF EXISTS "OrganizationMembership_userId_idx"');
+    expect(migration).not.toContain('DROP INDEX IF EXISTS "OrganizationMembership_organizationId_userId_key"');
+  });
 });

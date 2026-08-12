@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { connection } from "next/server";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { PaymentForm } from "@/components/forms/payment-form";
@@ -32,7 +32,7 @@ export default async function NewPaymentPage() {
           title="Registrar pago"
           description="Selecciona un recibo pendiente y registra su pago."
           actions={
-            <Button asChild variant="outline" className="rounded-full bg-card/70">
+            <Button asChild variant="outline" className="bg-card/70">
               <Link href="/receipts">
                 <ArrowLeft className="mr-2 size-4" />
                 Volver a recibos

@@ -36,7 +36,7 @@ export function AppSidebar({ isAdmin, isSuperAdmin = false }: { isAdmin: boolean
     <TooltipProvider>
       <aside
         className={cn(
-          "sticky top-0 hidden h-screen shrink-0 border-r border-white/10 bg-[#06283b] text-white transition-[width] duration-200 lg:block",
+          "sticky top-0 hidden h-screen shrink-0 border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 lg:block",
           collapsed ? "w-[76px]" : "w-64",
         )}
       >
@@ -46,21 +46,19 @@ export function AppSidebar({ isAdmin, isSuperAdmin = false }: { isAdmin: boolean
               href="/today"
               aria-label="PolicyDesk, ir a Hoy"
               className={cn(
-                "flex min-h-11 items-center gap-3 rounded-lg px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300",
+                "flex min-h-11 items-center gap-3 rounded-md px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
                 collapsed && "justify-center px-0",
               )}
             >
-              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white text-[#06283b]">
-                <ShieldCheck className="size-5" aria-hidden />
-              </span>
-              {!collapsed ? <span className="text-[15px] font-semibold tracking-tight">PolicyDesk</span> : null}
+              <ShieldCheck className="size-6 shrink-0 text-sidebar-primary" aria-hidden />
+              {!collapsed ? <span className="font-display text-[19px] tracking-tight text-sidebar-accent-foreground">PolicyDesk</span> : null}
             </Link>
             {!collapsed ? (
               <button
                 type="button"
                 onClick={toggleCollapsed}
                 aria-label="Colapsar menú lateral"
-                className="grid size-9 place-items-center rounded-lg text-slate-300 hover:bg-white/8 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+                className="grid size-9 place-items-center rounded-md text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
               >
                 <ChevronLeft className="size-4" aria-hidden />
               </button>
@@ -75,7 +73,7 @@ export function AppSidebar({ isAdmin, isSuperAdmin = false }: { isAdmin: boolean
                     type="button"
                     onClick={toggleCollapsed}
                     aria-label="Expandir menú lateral"
-                    className="mt-2 grid min-h-10 w-full place-items-center rounded-lg text-slate-300 hover:bg-white/8 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+                    className="mt-2 grid min-h-10 w-full place-items-center rounded-md text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
                   />
                 }
               >
@@ -89,7 +87,7 @@ export function AppSidebar({ isAdmin, isSuperAdmin = false }: { isAdmin: boolean
             <SidebarNav collapsed={collapsed} />
           </div>
 
-          <div className="space-y-1 border-t border-white/10 pt-3">
+          <div className="space-y-1 border-t border-sidebar-border pt-3">
             {utilities.map((item) => (
               <SidebarUtilityLink
                 key={item.id}
@@ -125,8 +123,8 @@ function SidebarUtilityLink({
       href={href}
       aria-label={collapsed ? label : undefined}
       className={cn(
-        "flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium text-slate-300 hover:bg-white/8 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300",
-        active && "bg-white/8 text-white",
+        "flex min-h-11 items-center gap-3 rounded-md px-3 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+        active && "bg-sidebar-accent font-semibold text-sidebar-accent-foreground",
         collapsed && "justify-center px-0",
       )}
       aria-current={active ? "page" : undefined}

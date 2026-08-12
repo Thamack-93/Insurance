@@ -93,6 +93,85 @@ describe("nora browser session", () => {
     expect(loadPolicyCaptureHandoff("user-a", { storage: store, now: 100 + 15 * 60 * 1000 + 1 })).toBeNull();
   });
 
+  it("keeps independent capture handoffs and removes only the selected one", () => {
+    const store = storage();
+    savePolicyCaptureHandoff("user-a", { handoffId: "handoff-1", draft: { policyNumber: "P-1" } }, { storage: store, now: 100 });
+    savePolicyCaptureHandoff("user-a", { handoffId: "handoff-2", draft: { policyNumber: "P-2" } }, { storage: store, now: 100 });
+
+    expect(loadPolicyCaptureHandoff("user-a", "handoff-1", { storage: store, now: 100 })?.payload.draft.policyNumber).toBe("P-1");
+    expect(consumePolicyCaptureHandoff("user-a", "handoff-1", { storage: store, now: 100 })?.payload.draft.policyNumber).toBe("P-1");
+    expect(loadPolicyCaptureHandoff("user-a", "handoff-1", { storage: store, now: 100 })).toBeNull();
+    expect(loadPolicyCaptureHandoff("user-a", "handoff-2", { storage: store, now: 100 })?.payload.draft.policyNumber).toBe("P-2");
+  });
+
+  it("persists capture references in Nora messages without persisting the preview or PDF", () => {
+    const store = storage();
+    saveNoraSession("user-a", {
+      messages: [{
+        id: "capture-message",
+        role: "assistant",
+        text: "Captura lista",
+        capturePreview: { draft: { policyNumber: "P-1" } },
+        capture: { handoffId: "handoff-1", fileName: "poliza.pdf" },
+      }],
+    }, { storage: store, now: 100 });
+    const stored = JSON.parse(store.values.get(noraSessionKey("user-a")) ?? "{}");
+    expect(stored.messages[0].capture).toEqual({ handoffId: "handoff-1", fileName: "poliza.pdf" });
+    expect(stored.messages[0]).not.toHaveProperty("capturePreview");
+    expect(stored.messages[0]).not.toHaveProperty("pdfReference");
+  });
+
+  it("persists AI review, warnings, provenance, and run folios through the capture handoff", () => {
+    const store = storage();
+    savePolicyCaptureHandoff("user-a", {
+      draft: { policyNumber: "1009578", clientName: "CLIENTE DEMO" },
+      warnings: ["No encontramos póliza origen"],
+      aiReview: {
+        summary: "La vigencia requiere confirmación.",
+        warnings: ["Confirma la fecha final."],
+        suggestions: ["Revisa el origen."],
+        corrections: [{ field: "endDate", proposedValue: "2027-08-01", reason: "Detectada en la carátula.", confidence: "high" }],
+      },
+      provenance: {
+        requestedMode: "ai",
+        extractionSource: "local",
+        reviewSource: "ai",
+        aiRunIds: ["run-review-1", "run-review-2"],
+        trackingStatus: "recorded",
+        aiAttempted: true,
+        storageStatus: "retained",
+        storageErrorCode: null,
+        uploadAttemptCount: 1,
+        uploadRetryable: false,
+      },
+      pdfReference: { url: "https://blob.test/policydesk/nora-policy-pdf/user-a/p.pdf", fileName: "p.pdf", expiresAt: 1_800_100 },
+      receiptEvidence: {
+        policyNumber: "0940457241",
+        receiptControlNumber: "0307563244",
+        dueDate: "2026-08-30",
+        periodLabel: "01/01",
+        amountDue: 6359.33,
+        depositAmount: 6359,
+        currency: "MXN",
+        paymentMethod: "CONTADO",
+        paymentConfirmed: false,
+        warnings: ["Diferencia de centavos"],
+      },
+      relatedDocuments: [{ id: "doc-1", fileName: "recibo.pdf", kind: "receipt", source: "local", policyNumber: "0940457241", warnings: [] }],
+    }, { storage: store, now: 100 });
+
+    expect(loadPolicyCaptureHandoff("user-a", { storage: store, now: 100 } )?.payload).toMatchObject({
+      warnings: ["No encontramos póliza origen"],
+      aiReview: { summary: "La vigencia requiere confirmación.", corrections: [{ field: "endDate", proposedValue: "2027-08-01" }] },
+      provenance: { requestedMode: "ai", extractionSource: "local", reviewSource: "ai", aiRunIds: ["run-review-1", "run-review-2"], trackingStatus: "recorded", aiAttempted: true, storageStatus: "retained", uploadAttemptCount: 1, uploadRetryable: false },
+      pdfReference: { fileName: "p.pdf" },
+      receiptEvidence: { receiptControlNumber: "0307563244" },
+      relatedDocuments: [{ id: "doc-1", kind: "receipt" }],
+    });
+    expect(JSON.parse(store.values.get(policyCaptureSessionKey("user-a")) ?? "[]")).toHaveLength(1);
+    expect([...store.values.values()].some((value) => value.includes("CLIENTE DEMO"))).toBe(false);
+  });
+
   it("clears scoped and legacy keys on logout", () => {
     const store = storage();
     saveNoraSession("user-a", { messages: [{ id: "m", role: "user", text: "Hola" }] }, { storage: store, now: 100 });

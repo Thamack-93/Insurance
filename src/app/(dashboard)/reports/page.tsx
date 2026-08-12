@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { BarChart3, CalendarClock, CircleDollarSign, ClipboardList, Settings2, ShieldAlert } from "lucide-react";
+import { BarChart3, CalendarClock, CircleDollarSign, ClipboardList, Settings2, ShieldAlert } from "@/components/icons";
 import { LocalNavigation } from "@/components/layout/local-navigation";
+import { reportsNavigation } from "@/lib/navigation";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard } from "@/components/pages-secondary/panels";
 import { ReportDownloadCard, type ReportDownloadDefinition } from "@/components/reports/report-download-card";
@@ -18,13 +19,6 @@ import {
 
 type ReportView = "collections" | "renewals" | "portfolio" | "commissions" | "operations";
 
-const localItems = [
-  { label: "Cobranza", href: "/reports?view=collections" },
-  { label: "Renovaciones", href: "/reports?view=renewals" },
-  { label: "Cartera", href: "/reports?view=portfolio" },
-  { label: "Comisiones", href: "/reports?view=commissions" },
-  { label: "Operación", href: "/reports?view=operations" },
-];
 
 function readReportView(value?: string): ReportView {
   return value === "renewals" || value === "portfolio" || value === "commissions" || value === "operations"
@@ -144,7 +138,7 @@ export default async function ReportsPage({ searchParams }: { searchParams?: Pro
         actions={scope.role === "ADMIN" ? <Button asChild variant="outline"><Link href="/settings"><Settings2 className="size-4" />Ajustes</Link></Button> : undefined}
       />
 
-      <LocalNavigation items={localItems} label="Tipos de reporte" />
+      <LocalNavigation items={reportsNavigation} label="Secciones de reportes" />
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Resumen de reportes">
         <MetricCard title="Pólizas activas" value={activePolicies} description="Base productiva actual." icon={BarChart3} tone="blue" />

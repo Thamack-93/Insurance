@@ -1,6 +1,5 @@
-import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/layout/page-header";
-import { requireUser } from "@/lib/auth";
+import { requireOrganizationRole } from "@/lib/organization-context";
 import { listUsers } from "./actions";
 import { UsersAdminPanel } from "@/components/settings/users-admin-panel";
 
@@ -9,10 +8,7 @@ export const metadata = {
 };
 
 export default async function UsersAdminPage() {
-  const user = await requireUser();
-  if (user.role !== "ADMIN") {
-    redirect("/settings");
-  }
+  const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
 
   const users = await listUsers();
 
@@ -24,7 +20,7 @@ export default async function UsersAdminPage() {
           title="Usuarios"
           description="Invita compañeros, ajusta sus permisos y administra el acceso a la correduría."
         />
-        <UsersAdminPanel initialUsers={users} currentUserId={user.id} />
+        <UsersAdminPanel initialUsers={users} currentUserId={context.userId} />
       </div>
     </div>
   );

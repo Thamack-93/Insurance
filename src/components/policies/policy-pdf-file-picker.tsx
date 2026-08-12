@@ -1,0 +1,93 @@
+"use client";
+
+import { useRef, useState, type RefObject } from "react";
+import { FileUp, RefreshCw, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import {
+  mergePolicyPdfFiles,
+  POLICY_PDF_MAX_FILES,
+} from "@/lib/policy-pdf-file-picker.logic";
+
+export { mergePolicyPdfFiles, validatePolicyPdfFile, POLICY_PDF_MAX_FILES, POLICY_PDF_MAX_BATCH_BYTES } from "@/lib/policy-pdf-file-picker.logic";
+
+type Props = {
+  files: File[];
+  onFilesChange: (files: File[]) => void;
+  disabled?: boolean;
+  className?: string;
+  label?: string;
+  presentation?: "dropzone" | "inline";
+  inputRef?: RefObject<HTMLInputElement | null>;
+  fileStatus?: (file: File, index: number) => { label?: string; progress?: number; retryable?: boolean } | null;
+  onRetryFile?: (file: File) => void;
+  allowRemoveWhenDisabled?: boolean;
+};
+
+
+export function PolicyPdfFilePicker({ files, onFilesChange, disabled = false, className, label = "Arrastra PDFs aquí o selecciónalos", presentation = "dropzone", inputRef: inputRefProp, fileStatus, onRetryFile, allowRemoveWhenDisabled = false }: Props) {
+  const internalInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = inputRefProp ?? internalInputRef;
+  const [dragging, setDragging] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function addFiles(input: FileList | File[]) {
+    const result = mergePolicyPdfFiles(files, Array.from(input));
+    setError(result.error);
+    if (result.files.length !== files.length) onFilesChange(result.files);
+  }
+
+  return (
+    <div data-policy-pdf-picker="true" className={cn("space-y-2", className)}>
+      {presentation === "dropzone" ? (
+        <div
+          role="button"
+          tabIndex={disabled ? -1 : 0}
+          aria-label={label}
+          onClick={() => !disabled && inputRef.current?.click()}
+          onKeyDown={(event) => {
+            if (!disabled && (event.key === "Enter" || event.key === " ")) inputRef.current?.click();
+          }}
+          onDragOver={(event) => { event.preventDefault(); if (!disabled) setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(event) => { event.preventDefault(); setDragging(false); if (!disabled) addFiles(event.dataTransfer.files); }}
+          className={cn("cursor-pointer rounded-2xl border-2 border-dashed p-4 text-center transition-colors", dragging ? "border-primary bg-primary/5" : "border-border bg-muted/20 hover:border-primary/60", disabled && "cursor-not-allowed opacity-60")}
+        >
+          <FileUp className="mx-auto size-5 text-muted-foreground" />
+          <p className="mt-2 text-sm font-medium">{label}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Selector tradicional o arrastre · hasta {POLICY_PDF_MAX_FILES} archivos · 10 MB c/u</p>
+        </div>
+      ) : null}
+      <input ref={inputRef} type="file" accept="application/pdf,.pdf" multiple className="hidden" disabled={disabled} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = ""; }} />
+      {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
+      {files.length > 0 ? (
+        <ul className={cn(presentation === "inline" ? "flex flex-wrap items-center gap-1.5" : "space-y-1")}>
+          {files.map((file, index) => (
+            <li key={`${file.name}-${file.size}-${file.lastModified}`} className={cn(
+              presentation === "inline"
+                ? "inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border bg-card px-2 py-1 text-[11px] shadow-xs"
+                : "flex items-center gap-2 rounded-xl border bg-card px-3 py-2 text-xs",
+            )}>
+              <span className={cn("min-w-0 truncate", presentation === "inline" ? "max-w-[min(20rem,55vw)]" : "flex-1")}>{index + 1}. {file.name}</span>
+              <span className="shrink-0 text-muted-foreground">{(file.size / (1024 * 1024)).toFixed(1)} MB</span>
+              {fileStatus?.(file, index) ? (
+                <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+                  {fileStatus(file, index)?.progress != null ? `${Math.round(fileStatus(file, index)?.progress ?? 0)}%` : null}
+                  {fileStatus(file, index)?.label ?? ""}
+                </span>
+              ) : null}
+              {fileStatus?.(file, index)?.retryable && onRetryFile ? (
+                <Button type="button" variant="ghost" size="icon" className="size-6 rounded-full" disabled={disabled} onClick={() => onRetryFile(file)} aria-label={`Reintentar ${file.name}`}>
+                  <RefreshCw className="size-3.5" />
+                </Button>
+              ) : null}
+              <Button type="button" variant="ghost" size="icon" className="size-6 rounded-full" disabled={disabled && !allowRemoveWhenDisabled} onClick={() => onFilesChange(files.filter((_, fileIndex) => fileIndex !== index))} aria-label={`Eliminar ${file.name}`}>
+                <X className="size-3.5" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}

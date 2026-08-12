@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { parse as parseCsv } from "csv-parse/sync";
 import * as XLSX from "@e965/xlsx";
-import type { PrismaClient, Prisma } from "@/generated/prisma/client";
+import type { PrismaClient, Prisma, EndorsementStatus } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
 import { businessStartOfDay, parseBusinessDateInput } from "@/lib/business-dates";
 import { toNumber } from "@/lib/money";
@@ -246,7 +246,7 @@ function mapCurrency(value: string) {
   return normalizeName(value).includes("DOLAR") ? "USD" : "MXN";
 }
 
-function mapEndorsementStatus(value: string, endDate: Date, now: Date) {
+function mapEndorsementStatus(value: string, endDate: Date, now: Date): EndorsementStatus {
   const normalized = normalizeName(value);
   if (normalized === "CANCELADO") return "CANCELLED";
   if (normalized === "PENDIENTE") return "PENDING";

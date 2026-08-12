@@ -24,7 +24,7 @@ export function RefreshPageButton({ label = "Actualizar", className }: RefreshPa
     <Button
       type="button"
       variant="outline"
-      className={className ?? "rounded-full"}
+      className={className ?? ""}
       onClick={handleRefresh}
       disabled={isPending}
     >

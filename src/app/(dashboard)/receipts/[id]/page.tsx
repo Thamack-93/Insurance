@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CircleDollarSign, FileText, History, ReceiptText, CalendarClock } from "lucide-react";
+import { ArrowLeft, CircleDollarSign, FileText, History, ReceiptText, CalendarClock } from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
 import { NoraContextButton } from "@/components/assistant/nora-session-provider";
 import { AuditByline } from "@/components/audit/audit-byline";
@@ -77,7 +77,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
           actions={
             <>
               <NoraContextButton context={{ type: "receipt", id: receipt.id }} label="Registrar con Nora" />
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href={`/receipts/${receipt.id}/edit`}>Editar recibo</Link>
               </Button>
               {receipt.status !== "CANCELLED" && postedPayments.length === 0 ? (
@@ -92,7 +92,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                 />
               ) : null}
               {isAdmin ? <DeleteReceiptButton id={receipt.id} receiptNumber={receipt.receiptNumber} /> : null}
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/receipts">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
@@ -139,7 +139,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
           <SectionCard title="Ficha del recibo" description="Datos de periodo, vencimiento y contexto.">
             <div className="grid gap-4 p-4 text-sm">
               <div className="flex items-start justify-between gap-3">
-                <StatusBadge status={receipt.status} />
+                <StatusBadge status={receipt.status} entity="receipt" />
                 <div className="flex flex-wrap justify-end gap-2">
                   <Badge variant="outline" className="rounded-full">
                     {receipt.currency}
@@ -150,7 +150,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                 </div>
               </div>
 
-              <div className="rounded-2xl border bg-muted/40 p-4">
+              <div className="rounded-xl border bg-muted/40 p-4">
                 <p className="font-medium text-foreground">Cliente</p>
                 <Link href={`/clients/${receipt.clientId}`} className="mt-1 block text-foreground hover:text-primary">
                   {receipt.client.fullName}
@@ -200,7 +200,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
               </div>
 
               {receipt.notes ? (
-                <div className="rounded-2xl border bg-card/70 p-4 text-sm text-muted-foreground">
+                <div className="rounded-xl border bg-card/70 p-4 text-sm text-muted-foreground">
                   <p className="font-medium text-foreground">Notas</p>
                   <p className="mt-1">{receipt.notes}</p>
                 </div>
@@ -245,7 +245,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                           currency={payment.currency}
                           paymentMethod={payment.paymentMethod}
                           triggerLabel="Eliminar"
-                          triggerClassName="h-7 rounded-full bg-card/70 px-2.5 text-xs text-destructive hover:text-destructive"
+                          triggerClassName="h-7 bg-card/70 px-2.5 text-xs text-destructive hover:text-destructive"
                         />
                       </TableCell>
                     </TableRow>
@@ -286,7 +286,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                       <p className="font-medium text-foreground">
                         {formatCurrency(commission.expectedAmount)}
                       </p>
-                      <StatusBadge status={commission.status} />
+                      <StatusBadge status={commission.status} entity="commission" />
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {commission.insurer.name}
@@ -352,7 +352,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                     </TableCell>
                     <TableCell>{formatDate(related.dueDate)}</TableCell>
                     <TableCell>
-                      <StatusBadge status={related.status} />
+                      <StatusBadge status={related.status} entity="receipt" />
                     </TableCell>
                     <TableCell className="text-right font-medium">
                       {formatCurrency(related.amount, related.currency)}
@@ -378,7 +378,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
         >
           {activity.length === 0 ? (
             <div className="p-4">
-              <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
+              <div className="rounded-xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
                 <History className="mx-auto mb-2 size-5 text-muted-foreground" />
                 Sin actividad registrada para este recibo todavía.
               </div>

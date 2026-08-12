@@ -152,7 +152,7 @@ export function ReceiptForm({
               <FormField label="Estado" error={errors.status?.message}>
                 {isCancelled ? (
                   <div className="flex min-h-10 items-center gap-3 rounded-xl border border-border bg-muted/40 px-3 py-2.5">
-                    <StatusBadge status={defaultValues.status} />
+                    <StatusBadge status={defaultValues.status} entity="receipt" />
                     <span className="text-sm text-muted-foreground">Este recibo está cancelado y el estado no se edita desde aquí.</span>
                     <input type="hidden" {...register("status")} />
                   </div>

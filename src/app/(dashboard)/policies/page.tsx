@@ -60,7 +60,7 @@ export default async function PoliciesPage({
     ? {
         AND: [
           portfolioWhere,
-          ...(statusFilter ? [{ status: statusFilter }] : []),
+          ...(statusFilter ? [{ status: statusFilter as Prisma.PolicyWhereInput["status"] }] : []),
           ...(typeFilter ? [{ policyType: typeFilter }] : []),
           {
             OR: [
@@ -73,7 +73,7 @@ export default async function PoliciesPage({
       }
     : {
         ...portfolioWhere,
-        ...(statusFilter ? { status: statusFilter } : {}),
+        ...(statusFilter ? { status: statusFilter as Prisma.PolicyWhereInput["status"] } : {}),
         ...(typeFilter ? { policyType: typeFilter } : {}),
       };
 
@@ -230,8 +230,6 @@ export default async function PoliciesPage({
                   icon={FolderKanban}
                   title="Aún no hay pólizas"
                   description="Registra tu primera póliza para construir el inventario."
-                  action="Nueva póliza"
-                  actionHref="/policies/new"
                 />
               </div>
             )
@@ -241,12 +239,14 @@ export default async function PoliciesPage({
                   icon={FolderKanban}
                   title="Página fuera de rango"
                   description="No hay pólizas en esta página. Vuelve al inicio del listado."
-                  action="Volver al inicio"
-                  actionHref={buildTableHref("/policies", params, {
-                    q: query || null,
-                    status: statusFilter || null,
-                    type: typeFilter || null,
-                  })}
+                  action={{
+                    label: "Volver al inicio",
+                    href: buildTableHref("/policies", params, {
+                      q: query || null,
+                      status: statusFilter || null,
+                      type: typeFilter || null,
+                    }),
+                  }}
                 />
               </div>
           ) : (

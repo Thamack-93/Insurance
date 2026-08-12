@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, BadgeCheck, Calculator, CalendarClock, FileText, Pencil } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Calculator, CalendarClock, FileText, Pencil } from "@/components/icons";
 import { DeleteQuoteButton } from "@/components/quotes/delete-quote-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { AuditByline } from "@/components/audit/audit-byline";
@@ -52,14 +52,14 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           description={`${quote.policyType} · ${quote.client.fullName}`}
           actions={
             <div className="flex items-center gap-2">
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href={`/quotes/${quote.id}/edit`}>
                   <Pencil className="mr-2 size-4" />
                   Editar
                 </Link>
               </Button>
               <DeleteQuoteButton id={quote.id} label={quote.id.slice(0, 8)} />
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/quotes">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
@@ -106,11 +106,11 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           <SectionCard title="Ficha de cotización" description="Datos de la propuesta y vínculos operativos.">
             <div className="grid gap-4 p-4 text-sm">
               <div className="flex items-start justify-between gap-3">
-                <StatusBadge status={quote.status} />
+                <StatusBadge status={quote.status} entity="quote" />
                 <span className="text-xs text-muted-foreground">ID: {quote.id.slice(0, 8)}</span>
               </div>
 
-              <div className="rounded-2xl border bg-muted/40 p-4">
+              <div className="rounded-xl border bg-muted/40 p-4">
                 <p className="font-medium text-foreground">Tipo de póliza</p>
                 <p className="mt-1">{policyTypeLabel(quote.policyType)}</p>
                 {quote.notes && (
@@ -131,9 +131,13 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
                 {quote.insurer && (
                   <div>
                     <p className="text-muted-foreground">Aseguradora</p>
-                    <Link href={`/insurers/${quote.insurerId}`} className="font-medium text-foreground hover:text-primary">
-                      {quote.insurer.name}
-                    </Link>
+                    {scope.role === "ADMIN" ? (
+                      <Link href={`/insurers/${quote.insurerId}`} className="font-medium text-foreground hover:text-primary">
+                        {quote.insurer.name}
+                      </Link>
+                    ) : (
+                      <p className="font-medium">{quote.insurer.name}</p>
+                    )}
                   </div>
                 )}
               </div>
@@ -208,7 +212,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
                         {formatCurrency(related.quotedAmount)}
                       </span>
                     )}
-                    <StatusBadge status={related.status} />
+                    <StatusBadge status={related.status} entity="quote" />
                   </div>
                 </div>
               ))}

@@ -114,7 +114,7 @@ export function OnboardingChecklist({ status }: { status: OnboardingStatus }) {
               ) : (
                 <Link
                   href={step.href}
-                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "rounded-full")}
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
                 >
                   Empezar
                   <ArrowRight className="ml-1 size-3.5" />

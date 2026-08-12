@@ -96,9 +96,8 @@ async function main() {
     const users = [
       { id: "tenant-admin-a", email: "tenant-admin-a@policydesk.local", name: "Tenant Admin A", role: "ADMIN", org: orgA.id, membershipRole: "ADMIN" },
       { id: "tenant-agent-a", email: "tenant-agent-a@policydesk.local", name: "Tenant Agent A", role: "AGENT", org: orgA.id, membershipRole: "AGENT" },
-      { id: "tenant-admin-b", email: "tenant-admin-b@policydesk.local", name: "Tenant Admin B", role: "ADMIN", org: orgB.id, membershipRole: "ADMIN" },
+      { id: "tenant-admin-b", email: "tenant-admin-b@policydesk.local", name: "Tenant Admin B", role: "ADMIN", org: orgB.id, membershipRole: "OWNER" },
       { id: "tenant-agent-b", email: "tenant-agent-b@policydesk.local", name: "Tenant Agent B", role: "AGENT", org: orgB.id, membershipRole: "AGENT" },
-      { id: "tenant-dual-user", email: "tenant-dual@policydesk.local", name: "Tenant Dual User", role: "AGENT", org: orgA.id, membershipRole: "AGENT" },
       { id: "tenant-superadmin", email: "tenant-superadmin@policydesk.local", name: "Tenant Superadmin", role: "ADMIN", org: null, membershipRole: null },
     ] as const;
     for (const item of users) {
@@ -115,11 +114,6 @@ async function main() {
         });
       }
     }
-    await tx.organizationMembership.upsert({
-      where: { organizationId_userId: { organizationId: orgB.id, userId: "tenant-dual-user" } },
-      update: { role: "AGENT", active: true },
-      create: { organizationId: orgB.id, userId: "tenant-dual-user", role: "AGENT", active: true },
-    });
     await tx.organizationMembership.upsert({
       where: { organizationId_userId: { organizationId: orgA.id, userId: "tenant-admin-a" } },
       update: { role: "OWNER", active: true },

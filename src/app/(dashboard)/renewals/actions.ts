@@ -5,6 +5,9 @@ import { writeActivityLog } from "@/lib/activity-log";
 import { getCurrentUserId } from "@/lib/auth";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { assertPolicyPortfolioAccess } from "@/lib/portfolio-access";
+import { isRenewalStage, isTerminalRenewalStage, resolveRenewalStage } from "@/lib/renewal-board.logic";
+import { closeRenewalFollowUp } from "@/lib/renewal-followups";
+import { renewalStageLabel } from "@/lib/status";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 
 export async function markRenewalAsNotContinuing(policyId: string): Promise<MutationResult> {
@@ -94,6 +97,9 @@ export async function markRenewalAsNotContinuing(policyId: string): Promise<Muta
         });
       }
 
+      // El recordatorio de "sin avance" ya no aplica: la renovación se cerró.
+      await closeRenewalFollowUp(policy.id, userId, tx);
+
       await writeActivityLog({
         entityType: "Policy",
         entityId: policy.id,
@@ -115,6 +121,7 @@ export async function markRenewalAsNotContinuing(policyId: string): Promise<Muta
     });
 
     revalidatePaths([
+      "/operations",
       "/renewals",
       "/tasks",
       "/dashboard",
@@ -132,6 +139,122 @@ export async function markRenewalAsNotContinuing(policyId: string): Promise<Muta
     );
   } catch (error) {
     return errorResult(error instanceof Error ? error.message : "No se pudo cerrar la renovación.");
+  }
+}
+
+/**
+ * Mueve una renovación de columna en el tablero.
+ *
+ * Sólo se pueden mover a mano las etapas de gestión (por vencer, contactado,
+ * cotizado). Las dos columnas terminales no se escriben: "Renovado" lo produce
+ * el alta de la póliza de renovación y "Perdido" el flujo de "No renueva", que
+ * es a donde se delega. Si no fuera así el tablero podría afirmar que una
+ * póliza se renovó sin que exista la póliza nueva.
+ */
+export async function setRenewalStage(policyId: string, stage: string): Promise<MutationResult> {
+  try {
+    if (!isRenewalStage(stage)) {
+      return errorResult("La etapa de renovación no es válida.");
+    }
+
+    if (stage === "WON") {
+      return errorResult("Una renovación se marca como renovada al dar de alta la póliza nueva.");
+    }
+
+    if (stage === "LOST") {
+      // La pérdida es la misma decisión de siempre, con su sugerencia
+      // declinada y su pendiente cancelado.
+      return markRenewalAsNotContinuing(policyId);
+    }
+
+    const db = getDb();
+    const userId = await getCurrentUserId();
+    await assertPolicyPortfolioAccess(policyId, userId);
+
+    const policy = await db.policy.findUnique({
+      where: { id: policyId },
+      select: {
+        id: true,
+        policyNumber: true,
+        status: true,
+        renewalStage: true,
+        client: { select: { fullName: true } },
+        sourceRenewalSuggestions: { where: { status: "DECLINED" }, select: { id: true }, take: 1 },
+      },
+    });
+
+    if (!policy) {
+      return errorResult("La póliza ya no existe.");
+    }
+
+    const currentStage = resolveRenewalStage({
+      policyStatus: policy.status,
+      renewalStage: policy.renewalStage,
+      hasDeclinedSuggestion: policy.sourceRenewalSuggestions.length > 0,
+    });
+
+    if (isTerminalRenewalStage(currentStage)) {
+      return errorResult(
+        currentStage === "WON"
+          ? "Esta póliza ya se renovó; su etapa la define la póliza de renovación."
+          : "Esta renovación ya se cerró como no renovada.",
+      );
+    }
+
+    if (currentStage === stage) {
+      return successResult(policy.id, "/operations?view=renewal-board", "La renovación ya estaba en esa etapa.");
+    }
+
+    const now = new Date();
+
+    await db.$transaction(async (tx) => {
+      await tx.policy.update({
+        where: { id: policy.id },
+        data: {
+          renewalStage: stage,
+          renewalStageAt: now,
+          renewalStageById: userId,
+          updatedById: userId,
+        },
+      });
+
+      await writeActivityLog({
+        entityType: "Policy",
+        entityId: policy.id,
+        action: "RENEWAL_STAGE_CHANGE",
+        oldValue: { renewalStage: currentStage, label: renewalStageLabel(currentStage) },
+        newValue: {
+          renewalStage: stage,
+          label: renewalStageLabel(stage),
+          policyNumber: policy.policyNumber,
+          clientName: policy.client.fullName,
+        },
+        userId,
+        db: tx,
+      });
+
+      // La renovación acaba de avanzar: el recordatorio de "sin avance" que
+      // pudiera existir ya no aplica.
+      await closeRenewalFollowUp(policy.id, userId, tx);
+    });
+
+    revalidatePaths([
+      "/operations",
+      "/renewals",
+      "/tasks",
+      "/dashboard",
+      "/today",
+      "/portfolio",
+      `/policies/${policy.id}`,
+    ]);
+
+    return successResult(
+      policy.id,
+      "/operations?view=renewal-board",
+      `Renovación movida a ${renewalStageLabel(stage)}.`,
+    );
+  } catch (error) {
+    return errorResult(error instanceof Error ? error.message : "No se pudo mover la renovación.");
   }
 }
 
@@ -260,6 +383,9 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
         },
       });
 
+      // La renovación quedó cerrada: su recordatorio de "sin avance" sobra.
+      await closeRenewalFollowUp(sourcePolicy.id, userId, tx);
+
       await writeActivityLog({
         entityType: "Policy",
         entityId: sourcePolicy.id,
@@ -277,6 +403,7 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
     });
 
     revalidatePaths([
+      "/operations",
       "/renewals",
       "/tasks",
       "/dashboard",

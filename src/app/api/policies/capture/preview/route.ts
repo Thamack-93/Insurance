@@ -6,6 +6,7 @@ import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody
 import { rateLimitResponse } from "@/lib/api-security";
 import { buildPolicyPdfCapturePreviewFromText } from "@/lib/policy-pdf-capture-preview";
 import { requireOrganizationContext } from "@/lib/organization-context";
+import { OperationTimeoutError, withOperationTimeout } from "@/lib/operation-timeout";
 import {
   recordSecurityAccessDenied,
   recordSecurityRateLimit,
@@ -13,6 +14,8 @@ import {
 } from "@/lib/security-events";
 
 export const runtime = "nodejs";
+
+const PDF_ANALYSIS_SERVER_TIMEOUT_MS = 45_000;
 
 const previewRequestSchema = z.object({
   text: z.string().min(1),
@@ -23,10 +26,12 @@ export async function POST(request: NextRequest) {
   try {
     let user: Awaited<ReturnType<typeof requireUser>>;
     let portfolioOwnerId: string | undefined;
+    let organizationId: string;
     let assistantRole: "ADMIN" | "AGENT";
     try {
       user = await requireUser();
       const organization = await requireOrganizationContext();
+      organizationId = organization.organizationId;
       assistantRole = organization.membershipRole === "AGENT" ? "AGENT" : "ADMIN";
       portfolioOwnerId = assistantRole === "AGENT" ? organization.userId : undefined;
     } catch (error) {
@@ -100,12 +105,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const preview = await buildPolicyPdfCapturePreviewFromText(extractedText, undefined, {
-      portfolioOwnerId,
-      user: { id: user.id, role: assistantRole },
-    });
+    const preview = await withOperationTimeout(
+      buildPolicyPdfCapturePreviewFromText(extractedText, undefined, {
+        portfolioOwnerId,
+        organizationId,
+        user: { id: user.id, role: assistantRole },
+      }),
+      PDF_ANALYSIS_SERVER_TIMEOUT_MS,
+      "La revisión del PDF tardó demasiado al consultar la cartera o la IA.",
+    );
     return NextResponse.json({ success: true, preview });
   } catch (error) {
+    if (error instanceof OperationTimeoutError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 504 });
+    }
     logError("api.policies.capture.preview", error);
     return NextResponse.json(
       { error: "No se pudo analizar el PDF. Intenta con otra versión o revisa que el archivo sea legible." },

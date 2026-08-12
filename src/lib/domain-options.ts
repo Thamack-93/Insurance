@@ -1,7 +1,27 @@
+import {
+  CLAIM_STATUSES,
+  COMMISSION_STATUSES,
+  ENDORSEMENT_STATUSES,
+  ENTITY_STATUSES,
+  POLICY_STATUSES,
+  QUOTE_STATUSES,
+  RECEIPT_STATUSES,
+  TASK_STATUSES,
+} from "@/lib/domain-values";
+import { statusLabel, type StatusEntity } from "@/lib/status";
+
 export type SelectOption = {
   value: string;
   label: string;
 };
+
+/**
+ * Status dropdowns are derived from the same label source the badges use, so a
+ * status can never read one way in a filter and another way in a table.
+ */
+function statusOptions(values: readonly string[], entity: StatusEntity): SelectOption[] {
+  return values.map((value) => ({ value, label: statusLabel(value, entity) }));
+}
 
 export const digestHourOptions: SelectOption[] = Array.from({ length: 24 }, (_, hour) => {
   const value = String(hour);
@@ -14,11 +34,7 @@ export const clientTypeOptions: SelectOption[] = [
   { value: "COMPANY", label: "Empresa" },
 ];
 
-export const entityStatusOptions: SelectOption[] = [
-  { value: "ACTIVE", label: "Activo" },
-  { value: "INACTIVE", label: "Inactivo" },
-  { value: "ARCHIVED", label: "Archivado" },
-];
+export const entityStatusOptions: SelectOption[] = statusOptions(ENTITY_STATUSES, "client");
 
 export const policyTypeOptions: SelectOption[] = [
   { value: "AUTO", label: "Auto" },
@@ -33,20 +49,12 @@ export const policyTypeOptions: SelectOption[] = [
   { value: "OTRO", label: "Otro" },
 ];
 
-export const policyStatusOptions: SelectOption[] = [
-  { value: "ACTIVE", label: "Activa" },
-  { value: "PENDING", label: "Pendiente" },
-  { value: "RENEWED", label: "Renovada" },
-  { value: "EXPIRED", label: "Vencida" },
-  { value: "CANCELLED", label: "Cancelada" },
-];
+export const policyStatusOptions: SelectOption[] = statusOptions(POLICY_STATUSES, "policy");
 
-export const endorsementStatusOptions: SelectOption[] = [
-  { value: "ACTIVE", label: "Activo" },
-  { value: "PENDING", label: "Pendiente" },
-  { value: "EXPIRED", label: "Expirado" },
-  { value: "CANCELLED", label: "Cancelado" },
-];
+export const endorsementStatusOptions: SelectOption[] = statusOptions(
+  ENDORSEMENT_STATUSES,
+  "endorsement",
+);
 
 export const paymentFrequencyOptions: SelectOption[] = [
   { value: "MONTHLY", label: "Mensual" },
@@ -57,12 +65,12 @@ export const paymentFrequencyOptions: SelectOption[] = [
   { value: "OTHER", label: "Otra" },
 ];
 
-export const receiptStatusOptions: SelectOption[] = [
-  { value: "PENDING", label: "Pendiente" },
-  { value: "PAID", label: "Pagado" },
-  { value: "OVERDUE", label: "Vencido" },
-  { value: "CANCELLED", label: "Cancelado" },
-];
+export const receiptStatusOptions: SelectOption[] = statusOptions(RECEIPT_STATUSES, "receipt");
+
+export const commissionStatusOptions: SelectOption[] = statusOptions(
+  COMMISSION_STATUSES,
+  "commission",
+);
 
 export const workItemTypeOptions: SelectOption[] = [
   { value: "GENERAL", label: "General" },
@@ -75,17 +83,8 @@ export const workItemTypeOptions: SelectOption[] = [
   { value: "OTHER", label: "Otro" },
 ];
 
-export const workItemStatusOptions: SelectOption[] = [
-  { value: "OPEN", label: "Abierto" },
-  { value: "IN_PROGRESS", label: "En proceso" },
-  { value: "WAITING_CLIENT", label: "Esperando cliente" },
-  { value: "WAITING_INSURER", label: "Esperando aseguradora" },
-  { value: "WAITING_DOCUMENT", label: "Esperando documento" },
-  { value: "SENT", label: "Enviado" },
-  { value: "RESOLVED", label: "Resuelto" },
-  { value: "CANCELLED", label: "Cancelado" },
-  { value: "ARCHIVED", label: "Archivado" },
-];
+// DISMISSED is reachable only from the notification flow, never from the form.
+export const workItemStatusOptions: SelectOption[] = statusOptions(TASK_STATUSES, "workItem");
 
 export const priorityOptions: SelectOption[] = [
   { value: "LOW", label: "Baja" },
@@ -94,24 +93,9 @@ export const priorityOptions: SelectOption[] = [
   { value: "URGENT", label: "Urgente" },
 ];
 
-export const claimStatusOptions: SelectOption[] = [
-  { value: "OPEN", label: "Abierto" },
-  { value: "IN_PROGRESS", label: "En proceso" },
-  { value: "WAITING_CLIENT", label: "Esperando cliente" },
-  { value: "WAITING_INSURER", label: "Esperando aseguradora" },
-  { value: "RESOLVED", label: "Resuelto" },
-  { value: "CANCELLED", label: "Cancelado" },
-];
+export const claimStatusOptions: SelectOption[] = statusOptions(CLAIM_STATUSES, "claim");
 
-export const quoteStatusOptions: SelectOption[] = [
-  { value: "REQUESTED", label: "Solicitada" },
-  { value: "IN_PROGRESS", label: "En proceso" },
-  { value: "SENT", label: "Enviada" },
-  { value: "ACCEPTED", label: "Aceptada" },
-  { value: "REJECTED", label: "Rechazada" },
-  { value: "EXPIRED", label: "Expirada" },
-  { value: "CANCELLED", label: "Cancelada" },
-];
+export const quoteStatusOptions: SelectOption[] = statusOptions(QUOTE_STATUSES, "quote");
 
 export const documentTypeOptions: SelectOption[] = [
   { value: "POLICY", label: "Póliza" },

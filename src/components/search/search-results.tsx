@@ -65,7 +65,7 @@ export const SearchResults = memo(function SearchResults() {
   }
 
   return (
-    <div className="absolute left-0 right-0 top-full z-50 mt-2 max-h-[420px] overflow-y-auto rounded-lg border bg-popover shadow-lg">
+    <div className="absolute left-0 right-0 top-full z-50 mt-2 max-h-[420px] overflow-y-auto rounded-md border bg-popover shadow-lg">
       <div className="border-b p-3">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Search className="size-4" />

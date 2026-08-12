@@ -58,4 +58,25 @@ describeDisposable("tenant isolation disposable fixture", () => {
       await db.$disconnect();
     }
   });
+
+  it("physically rejects a second membership for the same user", async () => {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) throw new Error("DATABASE_URL is required");
+    const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+    try {
+      await expect(
+        db.organizationMembership.create({
+          data: {
+            organizationId: "org_test_b_0001",
+            userId: "tenant-agent-a",
+            role: "AGENT",
+            active: true,
+          },
+        }),
+      ).rejects.toMatchObject({ code: "P2002" });
+      expect(await db.organizationMembership.count({ where: { userId: "tenant-agent-a" } })).toBe(1);
+    } finally {
+      await db.$disconnect();
+    }
+  });
 });

@@ -8,16 +8,24 @@ revalidación de `OrganizationMembership` y `Organization` en PostgreSQL.
 ## Resolución
 
 Las rutas server-side deben usar `requireOrganizationContext()` o
-`requireOrganizationPortfolioReadScope()`. Una membership activa se selecciona
-automáticamente; con varias memberships se muestra `/organization/select`.
-Una organización inactiva o una selección obsoleta no cambia silenciosamente a
-otra: se requiere una nueva selección. Un `SUPERADMIN` sin membership solo puede
-usar `/platform` y no obtiene acceso operativo sin contexto explícito.
+`requireOrganizationPortfolioReadScope()`. Cada usuario puede tener como máximo
+una `OrganizationMembership`; la restricción existe físicamente en PostgreSQL y
+la auditoría falla si detecta duplicados heredados. La única membership activa se
+resuelve automáticamente. `/organization/select` queda únicamente como flujo
+explícito para renovar una cookie cuya selección contradice esa membership; no
+es un selector multi-organización.
+
+Una organización inactiva bloquea el acceso inmediatamente. Una selección
+obsoleta nunca cambia silenciosamente a otra. Un `SUPERADMIN` sin membership solo
+puede usar `/platform` y no obtiene acceso operativo por su rol global.
 
 ## Slice migrada
 
 - Today: métricas, recibos, renovaciones, tareas, actividad, alertas y riesgos.
 - Clients: listado, búsqueda, detalle, alta, edición y exportación Excel.
+- Users: Owner/Admin administran únicamente memberships y cuentas de su propia
+  organización. La autorización se revalida y bloquea dentro de la misma
+  transacción que escribe.
 - Policies: listado, detalle y relaciones defensivamente filtradas por
   organización. Las mutaciones de crear, editar, borrar y actualizar calidad
   están bloqueadas con `POLICY_TENANT_MUTATION_PENDING` hasta Cycle 2B.

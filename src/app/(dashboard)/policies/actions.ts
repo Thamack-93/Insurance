@@ -30,3 +30,9 @@ export async function deletePolicy(_id: string): Promise<MutationResult> {
   void _id;
   return blockedPolicyMutation();
 }
+
+export async function bulkUpdatePolicyStatus(_ids: string[], _status: string): Promise<MutationResult> {
+  void _ids;
+  void _status;
+  return blockedPolicyMutation();
+}

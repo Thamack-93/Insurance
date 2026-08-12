@@ -6,7 +6,6 @@ import { buildAssistantReply, getAssistantHomeSnapshot } from "@/lib/assistant";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody, RequestGuardError } from "@/lib/request-guards";
 import { noraContextRefSchema, resolveAuthorizedNoraContext } from "@/lib/nora-context";
-import { requirePortfolioReadScope } from "@/lib/portfolio-access";
 import { rateLimitResponse, guardErrorResponse } from "@/lib/api-security";
 
 export const runtime = "nodejs";
@@ -92,11 +91,10 @@ export async function POST(request: NextRequest) {
 
     let contextualMessage = payload.message;
     if (payload.context) {
-      const scope = await requirePortfolioReadScope();
       const context = await resolveAuthorizedNoraContext(payload.context, {
         organizationId: organization.organizationId,
         membershipRole: organization.membershipRole,
-        portfolioOwnerId: scope.portfolioOwnerId,
+        portfolioOwnerId: organization.membershipRole === "AGENT" ? organization.userId : undefined,
       });
       if (!context) {
         return NextResponse.json({ error: "El contexto de Nora no existe o no está autorizado." }, { status: 400 });

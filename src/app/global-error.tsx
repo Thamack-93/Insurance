@@ -23,8 +23,8 @@ export default function GlobalError({
           aria-live="assertive"
           className="grid min-h-screen place-items-center px-4 py-12"
         >
-          <div className="flex w-full max-w-md flex-col items-center gap-5 rounded-lg border bg-card p-6 text-center shadow-sm">
-            <div className="rounded-lg border bg-rose-50 p-3 text-rose-600 dark:bg-rose-950/40 dark:text-rose-300">
+          <div className="flex w-full max-w-md flex-col items-center gap-5 rounded-md border bg-card p-6 text-center shadow-sm">
+            <div className="rounded-md border bg-rose-50 p-3 text-rose-600 dark:bg-rose-950/40 dark:text-rose-300">
               <AlertTriangle className="size-6" aria-hidden />
             </div>
             <div className="space-y-2">
@@ -38,7 +38,7 @@ export default function GlobalError({
                 </p>
               ) : null}
             </div>
-            <Button type="button" onClick={reset} className="rounded-full">
+            <Button type="button" onClick={reset}>
               <RefreshCcw className="mr-2 size-4" aria-hidden />
               Reintentar
             </Button>

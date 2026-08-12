@@ -56,6 +56,9 @@ export function normalizeAssistantAiUsage(value: unknown): AssistantAiUsageSnaps
 }
 
 const DEFAULT_MODEL_COSTS: Record<string, { input: number; output: number }> = {
+  // Vercel AI Gateway OpenAI provider pricing after the configured 80% discount.
+  "openai/gpt-5.6-luna": { input: 0.20 / 1_000_000, output: 1.20 / 1_000_000 },
+  "openai/gpt-5.4-nano": { input: 0.20 / 1_000_000, output: 1.25 / 1_000_000 },
   "minimax/minimax-m3": { input: 0.30 / 1_000_000, output: 1.20 / 1_000_000 },
   "openai/gpt-5.4-mini": { input: 0.75 / 1_000_000, output: 4.50 / 1_000_000 },
 };
@@ -112,6 +115,7 @@ function toTraceEntry(attempt: {
   durationMs: number | null;
   finishReason: string | null;
   statusCode: number | null;
+  errorMessage?: string | null;
   responsePreview: string | null;
   usageJson: string | null;
   totalUsageJson: string | null;
@@ -133,6 +137,7 @@ function toTraceEntry(attempt: {
     durationMs: attempt.durationMs,
     finishReason: attempt.finishReason,
     statusCode: attempt.statusCode,
+    errorMessage: attempt.errorMessage ?? null,
     usage: effectiveUsage
       ? {
           ...effectiveUsage,

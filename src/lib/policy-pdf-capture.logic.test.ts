@@ -4,6 +4,9 @@ import {
   extractPolicyPdfDraftFromText,
   inferClientType,
   normalizePdfPaymentFrequencyLabel,
+  extractPolicyPdfReceiptEvidence,
+  isPolicyPdfReceiptOnlyText,
+  scoreCaptureIdentity,
   suggestPreviousPolicyNumber,
 } from "@/lib/policy-pdf-capture.shared";
 import { buildPolicyPdfCapturePreviewFromDraft, buildPolicyPdfCapturePreviewFromText } from "@/lib/policy-pdf-capture-preview";
@@ -14,6 +17,12 @@ describe("policy-pdf-capture", () => {
   it("suggests the prior renewal policy number", () => {
     expect(suggestPreviousPolicyNumber("19941U01")).toBe("19941U00");
     expect(suggestPreviousPolicyNumber("ABC123")).toBeNull();
+  });
+
+  it("matches legal suffixes, punctuation and accents without confusing insurers", () => {
+    expect(scoreCaptureIdentity("MOTORES ANGELOPOLIS, S.A. DE C.V.", "MOTORES ANGELOPOLIS SA DE CV")).toBe(100);
+    expect(scoreCaptureIdentity("Seguros Banorte, S.A. de C.V.", "Seguros Banorte")).toBe(100);
+    expect(scoreCaptureIdentity("Seguros Banorte, S.A. de C.V.", "BUPA MÉXICO, COMPAÑÍA DE SEGUROS")).toBe(0);
   });
 
   it("normalizes payment frequency labels to readable Spanish", () => {
@@ -191,6 +200,213 @@ describe("policy-pdf-capture", () => {
     expect(draft.premiumAmount).toBeCloseTo(14324.39);
     expect(draft.requestNumber).toBeNull();
     expect(draft.sourcePolicyNumber).toBeNull();
+  });
+
+  it("prioritizes the Quálitas policy block over the CONDUSEF registry and reads receipt evidence", () => {
+    const coverText = `
+      Quálitas Compañía de Seguros, S.A. de C.V.
+      RENUEVA A: 0940424458
+      PÓLIZA ENDOSO INCISO
+      PÓLIZA DE SEGURO DE AUTOMÓVILES
+      0940457241 000000 0001
+      CONDUSEF-002429-22
+      INFORMACIÓN DEL ASEGURADO
+      INES BARRADAS ALARCON
+      Serie: YJU787B3VVHP65N5NM156546
+      Vigencia Desde las 12:00 P.M. del: 16/AGO/2026 Hasta las 12:00 P.M. del: 16/AGO/2027
+      IMPORTE TOTAL 6,359.33
+    `;
+    const draft = extractPolicyPdfDraftFromText(coverText);
+    expect(draft.policyNumber).toBe("0940457241");
+    expect(draft.sourcePolicyNumber).toBe("0940424458");
+    expect(draft.clientName).toBe("INES BARRADAS ALARCON");
+    expect(draft.serialNumber).toBe("YJU787B3VVHP65N5NM156546");
+
+    const receipt = extractPolicyPdfReceiptEvidence(`
+      AVISO DE COBRO
+      Póliza 0940457241
+      Número control 0307563244
+      Fecha de vencimiento 30/08/2026
+      Serie 01/01
+      Total a pagar $6,359.33
+      FICHA DE DEPOSITO
+      Total a pagar $6,359.00
+      Forma de pago CONTADO
+    `);
+    expect(receipt).toMatchObject({ policyNumber: "0940457241", receiptControlNumber: "0307563244", dueDate: "2026-08-30", periodLabel: "01/01", amountDue: 6359.33, depositAmount: 6359, paymentConfirmed: false });
+    expect(receipt?.warnings.join(" ")).toContain("6359.33");
+  });
+
+  it("handles Quálitas PDFs whose reconstructed accents are separated", () => {
+    const draft = extractPolicyPdfDraftFromText(`
+      P Ó LIZA ENDOSO INCISO
+      P Ó LIZA DE SEGURO DE AUTOM Ó VILES
+      0940457790 000000 0001
+      INFORMACI Ó N DEL ASEGURADO
+      MARIA DEL CARMEN KOPPEL RIZO
+      DESCRIPCI Ó N DEL VEH Í CULO ASEGURADO
+      04893 MAZDA CX5 I GRAND TOURING 5P L4 SKYACTIV-G VP QC R. AUT.
+      Serie: JM3KFAD78J0419548
+      Vigencia Desde las 12:00 P.M. del 08/AGO/2026 Hasta las 12:00 P.M. del 08/AGO/2027
+      IMPORTE TOTAL. 8,658.52
+      RENUEVA A: 0940424801
+    `);
+
+    expect(draft).toMatchObject({
+      policyNumber: "0940457790",
+      clientName: "MARIA DEL CARMEN KOPPEL RIZO",
+      serialNumber: "JM3KFAD78J0419548",
+      startDate: "2026-08-08",
+      endDate: "2027-08-08",
+      premiumAmount: 8658.52,
+      sourcePolicyNumber: "0940424801",
+    });
+  });
+
+  it("classifies receipt-only documents and preserves both payment amounts", () => {
+    const text = `
+      AVISO DE COBRO DE PRIMAS DE AUTOMÓVILES
+      P Ó LIZA 0940457790 ENDOSO 000000 FECHA DE VENCIMIENTO 22/08/2026 N Ú MERO CONTROL 0307957697
+      TOTAL A PAGAR $ 8,658.52
+      FICHA DE DEP Ó SITO DE PRIMAS DE AUTOM Ó VILES
+      P Ó LIZA 0940457790 ENDOSO 000000 FECHA DE VENCIMIENTO 22/08/2026
+      TOTAL A PAGAR $ 8,658.00
+    `;
+    const receipt = extractPolicyPdfReceiptEvidence(text);
+
+    expect(isPolicyPdfReceiptOnlyText(text)).toBe(true);
+    expect(receipt).toMatchObject({
+      policyNumber: "0940457790",
+      receiptControlNumber: "0307957697",
+      dueDate: "2026-08-22",
+      amountDue: 8658.52,
+      depositAmount: 8658,
+    });
+    expect(receipt?.warnings.join(" ")).toContain("8658.52");
+  });
+
+  it("does not treat Banorte barcode padding as a different policy number", () => {
+    const receipt = extractPolicyPdfReceiptEvidence(`
+      AVISO DE COBRO
+      98607001009578008653
+      NÚMERO DE PÓLIZA 1009578 0 986 70 01 1
+      Póliza: 01009578
+      Fecha de vencimiento 31/08/2026
+      Importe a Pagar $31,920.29
+    `);
+
+    expect(receipt?.policyNumber).toBe("1009578");
+  });
+
+  it("reports an existing policy when the vehicle series is already captured", async () => {
+    const text = `
+      Póliza 1009578
+      Datos del asegurado
+      MOTORES ANGELOPOLIS SA DE CV
+      Descripción del vehículo asegurado
+      Serie: 1G1F66S0XN4124102
+      Vigencia 01/08/2026 al 01/08/2027
+      Prima Total $31,920.29
+    `;
+    const draft = extractPolicyPdfDraftFromText(text);
+    const db = {
+      policy: {
+        findMany: async (args: { where?: { OR?: unknown } }) => args.where?.OR
+          ? [{
+              id: "existing-policy",
+              policyNumber: "1009578",
+              startDate: new Date("2026-08-01T00:00:00.000Z"),
+              endDate: new Date("2027-08-01T00:00:00.000Z"),
+              status: "ACTIVE",
+              client: { fullName: "MOTORES ANGELOPOLIS SA DE CV" },
+              insurer: { name: "Seguros Banorte" },
+              insuredAssets: [{ serialNumber: "1G1F66S0XN4124102" }],
+            }]
+          : [],
+      },
+      client: { findMany: async () => [] },
+      insurer: { findMany: async () => [] },
+    } as never;
+
+    const preview = await buildPolicyPdfCapturePreviewFromDraft({
+      draft,
+      fieldConfidence: buildPolicyPdfCaptureFieldConfidence(text, draft),
+      context: { user: null },
+    }, db);
+
+    expect(preview.existingPolicyMatches).toEqual([
+      expect.objectContaining({
+        policyNumber: "1009578",
+        serialNumber: "1G1F66S0XN4124102",
+        matchReason: "policyNumber",
+      }),
+    ]);
+    expect(preview.warnings.join(" ")).toContain("MOTORES ANGELOPOLIS");
+  });
+
+  it("extracts the Banorte cover page without mistaking its phone or URL for policy data", () => {
+    const draft = extractPolicyPdfDraftFromText(`
+      8008371133
+      www.segurosbanorte.com.mx
+      SEGUROS BANORTE
+      DATOS DEL ASEGURADO
+      Nombre del Contratante: MOTORES ANGELOPOLIS, S.A. DE C.V. R.F.C.: MAGD900101AB1
+      Calle y No.: VIA ATLIXCAYOTL NO.3202 1
+      C.P.: 72840 Estado: PUEBLA Teléfono: (222)-4038925
+      DATOS DE LA PÓLIZA
+      No. de Póliza
+      1009578 0 986 70 01 1
+      Fecha de emisión: 01/AGO/2026
+      Inicio Vigencia:
+      12:00 hrs 01/AGO/2026
+      Fin Vigencia:
+      12:00 hrs 01/AGO/2027
+      Descripción del vehículo asegurado
+      CHEVROLET DEMO SEDAN AUT.
+      Serie: 1G1F66S0XN4124102
+      Prima Total: $31,920.29
+    `);
+
+    expect(draft.policyNumber).toBe("1009578");
+    expect(draft.clientName).toBe("MOTORES ANGELOPOLIS, S.A. DE C.V.");
+    expect(draft.clientType).toBe("COMPANY");
+    expect(draft.clientRfc).toBe("MAGD900101AB1");
+    expect(draft.clientAddress).toContain("VIA ATLIXCAYOTL NO.3202");
+    expect(draft.clientAddress).not.toContain("4038925");
+    expect(draft.clientPhone).toBe("(222)-4038925");
+    expect(draft.insurerName).toBe("Seguros Banorte, S.A. de C.V.");
+    expect(draft.policyType).toBe("AUTO");
+    expect(draft.startDate).toBe("2026-08-01");
+    expect(draft.endDate).toBe("2027-08-01");
+    expect(draft.issueDate).toBe("2026-08-01");
+    expect(draft.premiumAmount).toBeCloseTo(31920.29);
+    expect(draft.serialNumber).toBe("1G1F66S0XN4124102");
+  });
+
+  it("keeps request numbers, policy numbers, and insurer labels separate across a generic layout", () => {
+    const draft = extractPolicyPdfDraftFromText(`
+      Centro de atención: 800-555-0101
+      No. de Solicitud
+      40583993
+      Aseguradora
+      www.example-insurer.test
+      Compañía: Seguros Delta, S.A. de C.V.
+      Asegurado: CARLOS DEMO PEREZ
+      No. de Póliza: 1234567
+      Inicio de vigencia:
+      01/09/2026
+      Fin de vigencia:
+      01/09/2027
+      Prima total: $12,345.67
+    `);
+
+    expect(draft.requestNumber).toBe("40583993");
+    expect(draft.policyNumber).toBe("1234567");
+    expect(draft.clientName).toBe("CARLOS DEMO PEREZ");
+    expect(draft.insurerName).toBe("Seguros Delta, S.A. de C.V.");
+    expect(draft.startDate).toBe("2026-09-01");
+    expect(draft.endDate).toBe("2027-09-01");
+    expect(draft.premiumAmount).toBeCloseTo(12345.67);
   });
 
   it("extracts the real Buick renewal fields from the provided PDF layout", () => {
@@ -489,6 +705,7 @@ describe("policy-pdf-capture", () => {
 
     expect(preview.warnings).toContain("Advertencia local");
     expect(preview.warnings).toContain("Advertencia IA");
+    expect(preview.provenance).toMatchObject({ extractionSource: "local", reviewSource: "ai" });
   });
 
   it("does not auto-select a source policy when there is no exact match", async () => {
@@ -531,6 +748,103 @@ describe("policy-pdf-capture", () => {
 
     expect(preview.suggestions.sourcePolicyId).toBeNull();
     expect(preview.confidence.sourcePolicy).toBe(false);
+  });
+
+  it("matches the client without punctuation and prefers Banorte over Bupa for the same VIN", async () => {
+    const sourcePolicy = (id: string, insurerId: string, insurerName: string) => ({
+      id,
+      clientId: "client-1",
+      insurerId,
+      policyNumber: id === "source-banorte" ? "1009577" : "BUPA-1009577",
+      startDate: new Date("2025-08-01T00:00:00.000Z"),
+      endDate: new Date("2026-08-01T00:00:00.000Z"),
+      status: "RENEWED",
+      client: { id: "client-1", fullName: "MOTORES ANGELOPOLIS SA DE CV" },
+      insurer: { id: insurerId, name: insurerName },
+      insuredAssets: [{ serialNumber: "1G1F66S0XN4124102" }],
+    });
+    const db = {
+      client: {
+        findMany: async () => [{ id: "client-1", fullName: "MOTORES ANGELOPOLIS SA DE CV" }],
+      },
+      insurer: {
+        findMany: async () => [
+          { id: "insurer-banorte", name: "Seguros Banorte" },
+          { id: "insurer-bupa", name: "BUPA MÉXICO, COMPAÑÍA DE SEGUROS, S.A. DE C.V." },
+        ],
+      },
+      policy: {
+        findMany: async (args: { where?: { insuredAssets?: unknown; OR?: unknown } }) => {
+          if (args.where?.insuredAssets) {
+            return [
+              sourcePolicy("source-banorte", "insurer-banorte", "Seguros Banorte"),
+              sourcePolicy("source-bupa", "insurer-bupa", "BUPA MÉXICO, COMPAÑÍA DE SEGUROS, S.A. DE C.V."),
+            ];
+          }
+          return [];
+        },
+      },
+    } as never;
+
+    const preview = await buildPolicyPdfCapturePreviewFromDraft({
+      draft: {
+        policyNumber: "1009578",
+        clientName: "MOTORES ANGELOPOLIS, S.A. DE C.V.",
+        clientType: "COMPANY",
+        clientEmail: null,
+        clientPhone: null,
+        clientAddress: null,
+        clientRfc: null,
+        clientBirthDate: null,
+        insurerName: "Seguros Banorte, S.A. de C.V.",
+        policyType: "AUTO",
+        serialNumber: "1G1F66S0XN4124102",
+        startDate: "2026-08-01",
+        endDate: "2027-08-01",
+        issueDate: "2026-08-01",
+        paymentFrequency: "ANNUAL",
+        paymentPlan: null,
+        premiumAmount: 31920.29,
+        currency: "MXN",
+        requestNumber: null,
+        insuredObject: "CHEVROLET DEMO SEDAN",
+        beneficiaryInfo: null,
+        notes: null,
+        sourcePolicyNumber: null,
+      },
+      fieldConfidence: buildPolicyPdfCaptureFieldConfidence("MOTORES ANGELOPOLIS, S.A. DE C.V. 1G1F66S0XN4124102" as string, {
+        policyNumber: "1009578",
+        clientName: "MOTORES ANGELOPOLIS, S.A. DE C.V.",
+        clientType: "COMPANY",
+        clientEmail: null,
+        clientPhone: null,
+        clientAddress: null,
+        clientRfc: null,
+        clientBirthDate: null,
+        insurerName: "Seguros Banorte, S.A. de C.V.",
+        policyType: "AUTO",
+        serialNumber: "1G1F66S0XN4124102",
+        startDate: "2026-08-01",
+        endDate: "2027-08-01",
+        issueDate: "2026-08-01",
+        paymentFrequency: "ANNUAL",
+        paymentPlan: null,
+        premiumAmount: 31920.29,
+        currency: "MXN",
+        requestNumber: null,
+        insuredObject: "CHEVROLET DEMO SEDAN",
+        beneficiaryInfo: null,
+        notes: null,
+        sourcePolicyNumber: null,
+      } as never),
+      context: { user: null },
+    }, db);
+
+    expect(preview.suggestions.clientId).toBe("client-1");
+    expect(preview.suggestions.insurerId).toBe("insurer-banorte");
+    expect(preview.suggestions.sourcePolicyId).toBe("source-banorte");
+    expect(preview.sourcePolicyOptions[0]?.label).toContain("Seguros Banorte");
+    expect(preview.sourcePolicyOptions[0]?.label).toContain("MOTORES ANGELOPOLIS SA DE CV");
   });
 
   it("marks low-confidence fields when text is sparse", () => {

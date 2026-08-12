@@ -2,6 +2,7 @@ import { businessAddDays } from "../src/lib/business-dates.ts";
 import { daysUntil, today } from "../src/lib/dates.ts";
 import { LATEST_RENEWAL_RECEIPT_INCLUDE } from "../src/lib/renewal-receipt.ts";
 import { shouldIncludeInRenewals } from "../src/lib/renewals.logic.ts";
+import { ACTIVE_RENEWAL_POLICY_WHERE } from "../src/lib/renewal-decisions.ts";
 
 import {
   closeDb,
@@ -28,7 +29,7 @@ async function main() {
     db.policy.findMany({
       where: {
         endDate: { lt: now },
-        status: { notIn: ["RENEWED", "CANCELLED"] },
+        ...ACTIVE_RENEWAL_POLICY_WHERE,
       },
       include: { client: true, insurer: true, ...LATEST_RENEWAL_RECEIPT_INCLUDE },
       orderBy: { endDate: "asc" },
@@ -37,7 +38,7 @@ async function main() {
     db.policy.findMany({
       where: {
         endDate: { gte: now, lte: horizon },
-        status: "ACTIVE",
+        ...ACTIVE_RENEWAL_POLICY_WHERE,
       },
       include: { client: true, insurer: true, ...LATEST_RENEWAL_RECEIPT_INCLUDE },
       orderBy: { endDate: "asc" },

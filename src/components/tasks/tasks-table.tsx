@@ -137,7 +137,7 @@ function WorkItemsTableInner({ workItems }: { workItems: WorkItemRow[] }) {
   return (
     <div className="flex flex-col gap-3">
       {hasSelection ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/40 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/40 px-4 py-3">
           <div className="flex items-center gap-3">
             <Badge variant="secondary" className="rounded-full">
               {selectedCount} seleccionado{selectedCount !== 1 ? "s" : ""}
@@ -271,7 +271,7 @@ function WorkItemsTableInner({ workItems }: { workItems: WorkItemRow[] }) {
               <TableCell>
                 <div className="flex flex-wrap gap-2">
                   <PriorityBadge priority={workItem.priority} />
-                  <StatusBadge status={workItem.status} />
+                  <StatusBadge status={workItem.status} entity="workItem" />
                 </div>
               </TableCell>
               <TableCell className="text-right">
@@ -279,7 +279,7 @@ function WorkItemsTableInner({ workItems }: { workItems: WorkItemRow[] }) {
                   id={workItem.id}
                   folio={workItem.folio}
                   triggerLabel="Eliminar"
-                  triggerClassName="h-7 rounded-full bg-card/70 px-2.5 text-xs text-destructive hover:text-destructive"
+                  triggerClassName="h-7 bg-card/70 px-2.5 text-xs text-destructive hover:text-destructive"
                 />
               </TableCell>
             </SelectableRow>

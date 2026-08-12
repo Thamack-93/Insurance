@@ -8,7 +8,7 @@ import {
   FolderKanban,
   ShieldAlert,
   Users,
-} from "lucide-react";
+} from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { SeverityBadge } from "@/components/badges/status-badge";
@@ -26,7 +26,7 @@ import { formatCurrency } from "@/lib/money";
 import { ClientResolutionActions, PolicyResolutionActions, RenewalResolutionActions } from "@/components/risk-resolution/resolution-actions";
 import { PageRefreshTicker } from "@/components/risk-resolution/page-refresh-ticker";
 import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-button";
-import { requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { requireAdminOrRedirect } from "@/lib/auth";
 
 function riskHref(entityType: string, entityId: string) {
   if (entityType === "Client") return `/clients/${entityId}`;
@@ -109,6 +109,7 @@ export default async function RisksPage({
 }: {
   searchParams?: Promise<{ tab?: string; alertType?: string; issueCode?: string; q?: string }>;
 }) {
+  await requireAdminOrRedirect();
   const params = (await searchParams) ?? {};
   const initialTab = params.tab === "completitud" ? "completitud" : "hallazgos";
   const alertTypeFilter = params.alertType;
@@ -116,12 +117,11 @@ export default async function RisksPage({
   const query = (params.q ?? "").trim().toLowerCase();
 
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
   const [risks, openNotifications, clientScores, policyScores] = await Promise.all([
-    detectRisks(scope.portfolioOwnerId),
+    detectRisks(undefined),
     db.alert.findMany({ where: { status: "OPEN" } }),
-    getClientDataQualityScores(scope.portfolioOwnerId),
-    getPolicyDataQualityScores(scope.portfolioOwnerId),
+    getClientDataQualityScores(undefined),
+    getPolicyDataQualityScores(undefined),
   ]);
 
   const matchesQuery = (...values: Array<string | null | undefined>) =>
@@ -204,7 +204,7 @@ export default async function RisksPage({
         actions={
           <>
             <RefreshPageButton />
-            <Button asChild className="rounded-full">
+            <Button asChild>
               <Link href="/documents">
                 Documentos
                 <ArrowRight className="ml-2 size-4" />
@@ -248,11 +248,11 @@ export default async function RisksPage({
       </section>
 
       <UrlTabs defaultValue={initialTab}>
-        <TabsList className="rounded-full bg-card/70 p-1">
-          <TabsTrigger value="hallazgos" className="rounded-full px-4">
+        <TabsList className="bg-card/70 p-1">
+          <TabsTrigger value="hallazgos" className="px-4">
             Hallazgos
           </TabsTrigger>
-          <TabsTrigger value="completitud" className="rounded-full px-4">
+          <TabsTrigger value="completitud" className="px-4">
             Completitud
           </TabsTrigger>
         </TabsList>
@@ -349,7 +349,7 @@ export default async function RisksPage({
                               />
                             ) : null
                           ) : (
-                            <Button asChild variant="outline" size="sm" className="rounded-full">
+                            <Button asChild variant="outline" size="sm">
                               <Link href={riskHref(risk.entityType, risk.entityId)}>Abrir</Link>
                             </Button>
                           )}
@@ -385,10 +385,10 @@ export default async function RisksPage({
 
         <TabsContent value="completitud" className="space-y-6">
           {issueCodeFilter && (
-            <div className="flex items-center gap-2 rounded-2xl bg-muted/50 px-4 py-3">
+            <div className="flex items-center gap-2 rounded-xl bg-muted/50 px-4 py-3">
               <Badge variant="secondary">Filtrado: {getIssueCodeLabel(issueCodeFilter)}</Badge>
               <Link href="/risks?tab=completitud">
-                <Button variant="ghost" size="sm" className="h-6 rounded-full">Limpiar filtro</Button>
+                <Button variant="ghost" size="sm" className="h-6">Limpiar filtro</Button>
               </Link>
             </div>
           )}

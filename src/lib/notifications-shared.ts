@@ -9,7 +9,7 @@ export type NotificationSeverityLabel = "INFO" | "WARNING" | "CRITICAL";
  * Build an in-app link for a notification based on its entity type. Mirrors
  * the routing used in /risks so notifications navigate to the right place.
  */
-export function notificationLink(entityType: string, entityId: string): string {
+export function notificationLink(entityType: string, entityId: string, isAdmin = false): string {
   switch (entityType) {
     case "Client":
       return `/clients/${entityId}`;
@@ -31,7 +31,7 @@ export function notificationLink(entityType: string, entityId: string): string {
     case "SecurityEvent":
       return `/activity?view=security`;
     case "Insurer":
-      return `/insurers/${entityId}`;
+      return isAdmin ? `/insurers/${entityId}` : `/portfolio?insurerId=${encodeURIComponent(entityId)}`;
     default:
       return "/notifications";
   }

@@ -54,7 +54,22 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 4. Conectar un Blob store privado.
 5. Mantener los cuatro cron diarios en Vercel, todos protegidos por `CRON_SECRET`: `/api/jobs/backup` a las `05:00 UTC`, `/api/jobs/nonpayment-cancellation` a las `06:00 UTC`, `/api/jobs/telegram-digest` a las `14:00 UTC` (08:00, hora de Ciudad de México) y `/api/jobs/telegram-birthdays` a las `15:00 UTC` (09:00, hora de Ciudad de México). El aviso de cumpleaños se deduplica por usuario y fecha local; el reenvío manual es independiente.
 6. Mantener el fallback local de rate limiting para el despliegue actual. Cuando aumente el tráfico, configurar Redis y cambiar `REQUIRE_DISTRIBUTED_RATE_LIMIT=1` para fallar cerrado si Redis no está disponible.
-7. Desplegar preview, validar y luego promover la rama principal.
+7. Desplegar preview, validar y luego integrar la rama principal. Vercel despliega
+   `main` automáticamente.
+
+### Migraciones productivas
+
+El build de Vercel no ejecuta migraciones. Cuando un cambio incluya una migración:
+
+1. CI y Preview deben estar verdes sobre el SHA que se integrará.
+2. Crear y verificar un backup o una rama de recuperación cuando el cambio sea material.
+3. Ejecutar `prisma migrate deploy` explícitamente contra la conexión directa de la
+   rama productiva mediante una operación autorizada de Neon.
+4. Confirmar `prisma migrate status`, drift cero y los audits aplicables.
+5. Integrar a `main`; Vercel realizará el despliegue normal.
+
+No guardar una conexión administrativa en Vercel y no ejecutar migraciones desde
+`postinstall`, el build, el startup de la aplicación ni un Preview automático.
 
 ## Validaciones mínimas
 
