@@ -228,7 +228,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ error: "El reporte solicitado no está soportado." }, { status: 400 });
   } catch (error) {
-    if (error instanceof AuthError) return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status });
+    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
     return NextResponse.json({ error: "No se pudo generar el reporte." }, { status: 500 });
   }
 }

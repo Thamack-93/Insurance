@@ -2,8 +2,6 @@ import { redirect } from "next/navigation";
 import { ShieldCheck } from "@/components/icons";
 import { getCurrentUser } from "@/lib/auth";
 import { LoginForm } from "./login-form";
-import { DeploymentUnavailable } from "@/components/deployment/deployment-unavailable";
-import { getDeploymentDatabaseSafety } from "@/lib/deployment-db-safety";
 
 export const metadata = {
   title: "Iniciar sesión · PolicyDesk",
@@ -16,9 +14,6 @@ export default async function LoginPage({
 }) {
   const params = await searchParams;
   const redirectTo = params.redirect && params.redirect.startsWith("/") ? params.redirect : "/today";
-
-  const safety = await getDeploymentDatabaseSafety();
-  if (!safety.safe) return <DeploymentUnavailable />;
 
   const user = await getCurrentUser();
   if (user && user.active) {

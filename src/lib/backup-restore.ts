@@ -3,8 +3,6 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Pool, type PoolClient } from "pg";
 import type { BackupManifest } from "@/lib/backup-logic";
-import { DEPLOYMENT_IDENTITY_ID } from "@/lib/deployment-db-identity-constants";
-import { evaluateDeploymentDatabaseSafety, type DeploymentEnvironment } from "@/lib/deployment-db-safety";
 import type { RestoreFailureCode } from "@/lib/backup-restore-errors";
 import {
   parseBackupRecords,
@@ -41,8 +39,6 @@ export type RestoreInput = {
   targetDatabaseUrl: string;
   plaintext: Buffer;
   manifest: BackupManifest;
-  expectedDatabaseEnvironment: DeploymentEnvironment;
-  expectedDatabaseFingerprint: string;
   advisoryLockKey?: string;
 };
 
@@ -100,31 +96,6 @@ async function assertTargetIsPostgres(client: PoolClient) {
   const result = await client.query<{ version: string }>("SELECT version() AS version");
   const version = result.rows[0]?.version ?? "";
   if (!/^PostgreSQL\s/i.test(version)) throw new RestoreStageError("preflight", "El target no es PostgreSQL.", undefined, "TARGET_NOT_AUTHORIZED");
-}
-
-async function readAndAssertRestoreTargetIdentity(client: PoolClient, input: RestoreInput) {
-  const result = await client.query<{ environment: string; fingerprint: string }>(
-    `SELECT "environment"::text AS environment, "fingerprint"
-       FROM "DeploymentIdentity"
-      WHERE "id" = $1`,
-    [DEPLOYMENT_IDENTITY_ID],
-  );
-  const identity = result.rows[0];
-  const safety = evaluateDeploymentDatabaseSafety({
-    expectedEnvironment: input.expectedDatabaseEnvironment,
-    expectedFingerprint: input.expectedDatabaseFingerprint,
-    actualEnvironment: identity?.environment ?? null,
-    actualFingerprint: identity?.fingerprint ?? null,
-  });
-  if (!safety.safe) {
-    throw new RestoreStageError(
-      "preflight",
-      "La identidad local del target de restore no coincide con la autorización explícita.",
-      undefined,
-      "TARGET_NOT_AUTHORIZED",
-    );
-  }
-  return identity;
 }
 
 function migrationEnvironment(targetDatabaseUrl: string) {
@@ -208,7 +179,6 @@ export async function restoreVerifiedBackup(input: RestoreInput): Promise<Restor
   let transactionStarted = false;
   try {
     await assertTargetIsPostgres(client);
-    const targetIdentity = await readAndAssertRestoreTargetIdentity(client, input);
     await validateRestoreSchema(client, parsed);
     await client.query("BEGIN");
     transactionStarted = true;
@@ -235,18 +205,6 @@ export async function restoreVerifiedBackup(input: RestoreInput): Promise<Restor
     const foreignKeys = await validateForeignKeys(client);
     const domainChecks = await validateDomainInvariants(client);
     const sequences = await synchronizeSequences(client);
-    const identityAfterRestore = await readAndAssertRestoreTargetIdentity(client, input);
-    if (
-      identityAfterRestore.environment !== targetIdentity.environment ||
-      identityAfterRestore.fingerprint !== targetIdentity.fingerprint
-    ) {
-      throw new RestoreStageError(
-        "integrity",
-        "La identidad local del target cambió durante el restore.",
-        undefined,
-        "TARGET_NOT_AUTHORIZED",
-      );
-    }
     await client.query("COMMIT");
     transactionStarted = false;
     return {

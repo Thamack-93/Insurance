@@ -3,7 +3,7 @@ import { z } from "zod";
 import { AuthError, requireUser } from "@/lib/auth";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody } from "@/lib/request-guards";
-import { guardErrorResponse, rateLimitResponse } from "@/lib/api-security";
+import { rateLimitResponse } from "@/lib/api-security";
 import { buildPolicyPdfCapturePreviewFromText } from "@/lib/policy-pdf-capture-preview";
 import { OperationTimeoutError, withOperationTimeout } from "@/lib/operation-timeout";
 import { getPortfolioOwnerIdForRead } from "@/lib/portfolio-access";
@@ -31,7 +31,6 @@ export async function POST(request: NextRequest) {
       portfolioOwnerId = getPortfolioOwnerIdForRead(user);
     } catch (error) {
       if (error instanceof AuthError) {
-        if (error.status >= 500) return guardErrorResponse(error);
         await recordSecurityAccessDenied({
           alertType: SECURITY_EVENT_TYPES.accessDenied,
           title: "Vista previa de captura sin sesión válida",

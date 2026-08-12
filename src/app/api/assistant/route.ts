@@ -45,7 +45,7 @@ export async function GET() {
     return NextResponse.json({ success: true, snapshot });
   } catch (error) {
     if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status });
+      return NextResponse.json({ error: error.message }, { status: error.status });
     }
     logError("api.assistant.get", error);
     return NextResponse.json({ error: "No se pudo cargar el asistente." }, { status: 500 });
@@ -121,7 +121,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, response });
   } catch (error) {
     if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status });
+      return NextResponse.json({ error: error.message }, { status: error.status });
     }
     if (error instanceof RequestGuardError) return guardErrorResponse(error, "No se pudo procesar la consulta.");
     logError("api.assistant.post", error, { durationMs: Date.now() - startedAt });

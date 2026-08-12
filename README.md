@@ -36,15 +36,8 @@ Copia `.env.example` a `.env.local` y ajusta los valores:
 | Variable | Requerida | Descripción |
 |----------|-----------|-------------|
 | `SESSION_SECRET` | Producción | Secreto HMAC para cookies de sesión (mín. 32 caracteres) |
-| `DATABASE_URL` | Todos | Endpoint pooled usado exclusivamente por el runtime |
-| `DATABASE_URL_UNPOOLED` | GitHub Environment/operación | Endpoint admin directo; nunca se configura en Vercel Runtime o Preview |
-| `DATABASE_RUNTIME_URL` | GitHub Environment/operación | URL pooled del rol `policydesk_runtime`, usada para provisionar y validar el cutover |
-| `EXPECTED_DATABASE_ENV` | Todos | Identidad explícita: `production`, `preview`, `development` o `test` |
-| `EXPECTED_DATABASE_FINGERPRINT` | Todos | SHA-256 derivado del project ID, branch ID y database ID verificados por Neon |
-| `EXPECTED_DATABASE_ROLE` | Runtime remoto | Debe ser `policydesk_runtime` |
-| `NEON_API_KEY` | GitHub Environment/operación | Verificación de topología; nunca se configura en Vercel |
-| `ALLOW_UNPROTECTED_PRODUCTION_REFERENCE_FOR_PREVIEW` | Operación Preview excepcional | Opt-in temporal para verificar una Preview aislada cuando Neon Free no permite proteger Production; nunca autoriza Production ni se configura en Vercel |
-| `CRON_SECRET` | Producción | Protege los cinco jobs internos de Vercel Cron |
+| `DATABASE_URL` | Producción | URL de Postgres hosted para el despliegue en Vercel |
+| `CRON_SECRET` | Producción | Protege los cuatro jobs internos de Vercel Cron |
 | `AI_GATEWAY_MODEL` | Opcional | Modelo `provider/model` usado por Nora |
 | `AI_GATEWAY_FALLBACK_MODELS` | Opcional | Modelos de respaldo para conversación |
 | `AI_GATEWAY_STRUCTURED_MODEL` | Opcional | Modelo para acciones y salidas estructuradas |
@@ -83,7 +76,6 @@ La restauración nunca se ejecuta desde la UI. Para una rama temporal de Neon:
 
 ```bash
 RESTORE_DATABASE_URL=... RESTORE_NEON_BRANCH=restore-prueba \
-RESTORE_EXPECTED_DATABASE_ENV=test RESTORE_EXPECTED_DATABASE_FINGERPRINT=... \
 ALLOW_TEMPORARY_NEON_RESTORE=true \
 npm run restore:backup:temp-neon -- <archivo.ndjson.gz.enc>
 ```
@@ -93,7 +85,6 @@ lecturas y reporte JSON), el operador debe provisionar la rama temporal por sepa
 
 ```bash
 RESTORE_DATABASE_URL=... RESTORE_NEON_BRANCH=restore-2026-07-30 \
-RESTORE_EXPECTED_DATABASE_ENV=test RESTORE_EXPECTED_DATABASE_FINGERPRINT=... \
 ALLOW_TEMPORARY_NEON_RESTORE=true \
 npm run drill:backup:temp-neon -- <archivo.ndjson.gz.enc>
 ```
@@ -103,9 +94,6 @@ sola no demuestra recuperabilidad. Los reportes sanitizados se escriben en
 `artifacts/restore-drills/` y nunca contienen URLs, credenciales ni datos de clientes.
 Consulta el [runbook de disaster recovery](docs/internal/disaster-recovery-runbook.md)
 para el procedimiento completo.
-Antes del restore, aplica las migraciones e inicializa o revincula explícitamente
-`DeploymentIdentity` en la rama temporal. El restore valida esa identidad antes de
-escribir y no la copia desde el backup ni la modifica.
 
 ### Migrar una clave sin borrar backups
 
@@ -125,10 +113,9 @@ La ruta recomendada para una demo pública o compartida es:
 
 1. Crear una base de datos hosted.
 2. Migrar el snapshot real actual a esa base hosted.
-3. Provisionar el rol restringido e inicializar la identidad mediante una conexión admin directa.
-4. Configurar en Vercel únicamente `DATABASE_URL` runtime, `EXPECTED_DATABASE_ENV`, `EXPECTED_DATABASE_FINGERPRINT` y `EXPECTED_DATABASE_ROLE` en el scope exacto.
-5. Desplegar en [Vercel Hobby](https://vercel.com/pricing).
-6. Conectar un store privado de Blob para los backups cifrados.
+3. Configurar `DATABASE_URL` en el entorno de Vercel.
+4. Desplegar en [Vercel Hobby](https://vercel.com/pricing).
+5. Conectar un store privado de Blob para los backups cifrados.
 
 La demo queda enfocada en datos estructurados y no requiere PDFs ni almacenamiento de archivos en esta fase.
 

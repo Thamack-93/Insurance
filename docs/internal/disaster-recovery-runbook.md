@@ -21,8 +21,6 @@ schema o un incidente de integridad.
 - `DATABASE_URL` de la base fuente y `RESTORE_DATABASE_URL` del target temporal.
 - `RESTORE_NEON_BRANCH` con prefijo permitido `restore-`, `preview-` o `temp-`.
 - `ALLOW_TEMPORARY_NEON_RESTORE=true`.
-- `RESTORE_EXPECTED_DATABASE_ENV` y `RESTORE_EXPECTED_DATABASE_FINGERPRINT`
-  correspondientes a la identidad ya inicializada del target temporal.
 - La clave activa o la variable versionada correspondiente a la versión del
   backup (`BACKUP_ENCRYPTION_KEY`, `BACKUP_ENCRYPTION_KEY_V2`, etc.).
 - `BLOB_READ_WRITE_TOKEN` para leer el backup privado.
@@ -40,21 +38,17 @@ conteos, FK, invariantes de pagos/pólizas/WorkItem y lecturas de aplicación.
 ## Ejecución
 
 Provisiona la rama temporal y registra los fingerprints de origen y destino sin
-guardar URLs completas. Aplica primero las migraciones por conexión directa e
-inicializa o revincula `DeploymentIdentity` con el CLI administrativo. Ejecuta:
+guardar URLs completas. Ejecuta:
 
 ```bash
 RESTORE_DATABASE_URL=... \
 RESTORE_NEON_BRANCH=restore-2026-07-30 \
-RESTORE_EXPECTED_DATABASE_ENV=test \
-RESTORE_EXPECTED_DATABASE_FINGERPRINT=... \
 ALLOW_TEMPORARY_NEON_RESTORE=true \
 npm run drill:backup:temp-neon -- <backup-filename.ndjson.gz.enc>
 ```
 
-El drill vuelve a aplicar idempotentemente las migraciones actuales al target
-con un subprocess aislado, restaura todas las tablas exportadas excepto
-`_prisma_migrations` y `DeploymentIdentity`, vuelve
+El drill aplica las migraciones actuales al target con un subprocess aislado,
+restaura todas las tablas exportadas excepto `_prisma_migrations`, vuelve
 `session_replication_role` a `origin`, valida antes del commit y escribe un JSON
 en `artifacts/restore-drills/`. Un fallo revierte toda la transacción.
 
@@ -98,7 +92,6 @@ header/manifiesto y nunca imprime su valor.
 
 - [ ] Crear la rama Neon temporal fuera de la aplicación.
 - [ ] Confirmar fingerprints de fuente y destino distintos.
-- [ ] Migrar e inicializar/revincular la identidad local del target temporal.
 - [ ] Elegir un backup reciente y verificado.
 - [ ] Ejecutar el comando del drill.
 - [ ] Revisar el JSON y su estado final.

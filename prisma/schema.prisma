@@ -115,23 +115,6 @@ enum RenewalStage {
   LOST
 }
 
-enum DeploymentEnvironment {
-  PRODUCTION
-  PREVIEW
-  DEVELOPMENT
-  TEST
-}
-
-/// Environment-local deployment identity. This row is intentionally excluded
-/// from business backups and may only be changed by the guarded admin script.
-model DeploymentIdentity {
-  id          String                @id @db.VarChar(64)
-  environment DeploymentEnvironment
-  fingerprint String                @db.VarChar(64)
-  createdAt   DateTime              @default(now())
-  updatedAt   DateTime              @default(now()) @updatedAt
-}
-
 /// Cycle 1 transition singleton. The PostgreSQL migration owns the temporary
 /// trigger/index implementation; these models expose the additive data shape.
 model Organization {

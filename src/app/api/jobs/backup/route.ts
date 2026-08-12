@@ -3,8 +3,7 @@ import { NextResponse } from "next/server";
 import { runBackupJob } from "@/lib/backup-job";
 import { logError } from "@/lib/logger";
 import { acquireDistributedLock, checkDistributedRateLimit, securityFingerprint } from "@/lib/request-guards";
-import { guardErrorResponse, rateLimitResponse } from "@/lib/api-security";
-import { assertDeploymentDatabaseSafety, DeploymentDatabaseSafetyError } from "@/lib/deployment-db-safety";
+import { rateLimitResponse } from "@/lib/api-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,13 +21,6 @@ function hasValidCronSecret(request: Request) {
 async function handleBackupRequest(request: Request) {
   if (!hasValidCronSecret(request)) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
-
-  try {
-    await assertDeploymentDatabaseSafety();
-  } catch (error) {
-    if (error instanceof DeploymentDatabaseSafetyError) return guardErrorResponse(error);
-    throw error;
   }
 
   const caller = securityFingerprint(request.headers.get("user-agent") ?? "cron");

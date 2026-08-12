@@ -11,7 +11,6 @@ import type {
   AssistantReportStatus,
 } from "@/lib/assistant-types";
 import { Prisma, type PrismaClient } from "@/generated/prisma/client";
-import { deploymentSafeExecuteRaw } from "@/lib/deployment-safe-raw-sql";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -274,7 +273,7 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
 
   try {
     return await client.$transaction(async (tx) => {
-      await deploymentSafeExecuteRaw(tx, Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`${input.kind}:${themeKey}`}))`);
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`${input.kind}:${themeKey}`}))`);
       const reports = await tx.assistantReport.findMany({
         where: {
           kind: input.kind,

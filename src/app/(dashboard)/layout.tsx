@@ -15,8 +15,6 @@ import type { NotificationRecord } from "@/lib/notifications";
 import { requireUserOrRedirect } from "@/lib/auth";
 import { THEME_COOKIE } from "@/lib/settings-runtime";
 import { NoraSessionProvider } from "@/components/assistant/nora-session-provider";
-import { DeploymentUnavailable } from "@/components/deployment/deployment-unavailable";
-import { getDeploymentDatabaseSafety } from "@/lib/deployment-db-safety";
 
 const fallbackSettings: Settings = {
   firmName: "PG",
@@ -51,8 +49,6 @@ async function getSafeDashboardShellData() {
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
   await connection();
-  const safety = await getDeploymentDatabaseSafety();
-  if (!safety.safe) return <DeploymentUnavailable />;
   // Re-validate the user against the database on every dashboard request so
   // deactivations and role changes take effect immediately, rather than
   // waiting for the signed session token to expire.

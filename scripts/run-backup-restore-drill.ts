@@ -11,7 +11,6 @@ import {
   restoreVerifiedBackup,
   RestoreStageError,
 } from "../src/lib/backup-restore.ts";
-import type { DeploymentEnvironment } from "../src/lib/deployment-db-safety.ts";
 import {
   runBackupRestoreDrill,
   type FixtureLifecycleResult,
@@ -25,18 +24,6 @@ import {
 import { assertTemporaryNeonRestoreTarget } from "../src/lib/backup-restore-guards.ts";
 
 const execFileAsync = promisify(execFile);
-
-function restoreIdentityAuthorization() {
-  const environment = process.env.RESTORE_EXPECTED_DATABASE_ENV?.trim().toLowerCase();
-  const fingerprint = process.env.RESTORE_EXPECTED_DATABASE_FINGERPRINT?.trim().toLowerCase();
-  if (!environment || !["preview", "development", "test"].includes(environment)) {
-    throw new Error("RESTORE_EXPECTED_DATABASE_ENV debe autorizar explícitamente preview, development o test.");
-  }
-  if (!fingerprint || !/^[a-f0-9]{64}$/.test(fingerprint)) {
-    throw new Error("RESTORE_EXPECTED_DATABASE_FINGERPRINT debe contener el fingerprint saneado del target.");
-  }
-  return { expectedDatabaseEnvironment: environment as DeploymentEnvironment, expectedDatabaseFingerprint: fingerprint };
-}
 
 async function readStream(stream: ReadableStream<Uint8Array>) {
   const chunks: Buffer[] = [];
@@ -75,8 +62,6 @@ function childEnvironment(target: string, extra: Record<string, string> = {}) {
     PATH: process.env.PATH ?? "",
     DATABASE_URL: target,
     DATABASE_URL_UNPOOLED: "",
-    EXPECTED_DATABASE_ENV: process.env.RESTORE_EXPECTED_DATABASE_ENV ?? "",
-    EXPECTED_DATABASE_FINGERPRINT: process.env.RESTORE_EXPECTED_DATABASE_FINGERPRINT ?? "",
     NODE_ENV: process.env.NODE_ENV ?? "test",
     ...extra,
   };
@@ -306,12 +291,7 @@ async function main() {
       dependencies: {
         preflight: () => checkRestoreTargetConnection(targetUrl),
         applyMigrations: () => applyCurrentMigrations(targetUrl),
-        restore: () => restoreVerifiedBackup({
-          targetDatabaseUrl: targetUrl,
-          plaintext,
-          manifest: verifiedManifest,
-          ...restoreIdentityAuthorization(),
-        }),
+        restore: () => restoreVerifiedBackup({ targetDatabaseUrl: targetUrl, plaintext, manifest: verifiedManifest }),
         workItemAudit: () => runLegacyAudit(targetUrl),
         migrationDrift: () => checkTargetMigrationDrift(targetUrl),
         appSmoke: () => runAppSmoke(targetUrl),

@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof RequestGuardError) return guardErrorResponse(error);
     if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status });
+      return NextResponse.json({ error: error.message }, { status: error.status });
     }
     logError("api.nora.policyPdf.upload", error);
     const response = uploadErrorResponse(error);

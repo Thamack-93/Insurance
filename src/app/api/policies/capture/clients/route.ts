@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
       user = await requireUser();
     } catch (error) {
       if (error instanceof AuthError) {
-        return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status });
+        return NextResponse.json({ error: error.message }, { status: error.status });
       }
       throw error;
     }
@@ -155,7 +155,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof Error && "status" in error) return guardErrorResponse(error);
     if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status });
+      return NextResponse.json({ error: error.message }, { status: error.status });
     }
     logError("api.policies.capture.clients", error);
     return NextResponse.json({ error: "No se pudo crear el cliente." }, { status: 500 });
