@@ -14,16 +14,20 @@ import {
   TypeValidationError,
   generateText,
   gateway,
+  stepCountIs,
 } from "ai";
 import { z } from "zod";
 import {
   createAssistantAiAttempt,
   createAssistantAiRun,
   estimateAssistantAiCostUsd,
+  enrichAssistantAiUsageCost,
   finalizeAssistantAiAttempt,
   finalizeAssistantAiRun,
   normalizeAssistantAiUsage,
 } from "@/lib/assistant-ai-runs";
+import { createNoraAgentTools } from "@/lib/assistant-agent-tools";
+import { NORA_AGENT_PROMPT_VERSION, NORA_AGENT_SYSTEM_PROMPT } from "@/lib/nora-agent-prompt";
 import { redactAssistantReportText } from "@/lib/assistant-reports";
 import { withOperationTimeout } from "@/lib/operation-timeout";
 import type {
@@ -34,7 +38,10 @@ import type {
   AssistantAiStatus,
   AssistantAiTier,
   AssistantAiTraceEntry,
+  AssistantAiToolTraceEntry,
   AssistantAiUsageSnapshot,
+  AssistantActionProposal,
+  AssistantHistoryMessage,
   AssistantMutationPlan,
   AssistantPrompt,
   AssistantReply,
@@ -82,7 +89,7 @@ const assistantAiResponseSchema = z.object({
   quickPrompts: z.array(aiQuickPromptSchema).max(4),
   mutation: z
     .object({
-      entityType: z.enum(["client", "policy", "receipt", "payment", "workItem", "endorsement"]),
+      entityType: z.enum(["client", "policy", "receipt", "payment", "workItem", "endorsement", "claim", "claimChecklistItem"]),
       operation: z.enum(["create", "update"]),
       targetQuery: z.string().min(1).nullable(),
       title: z.string().min(1).max(200),
@@ -117,12 +124,24 @@ type AssistantAiAttemptResult<T> =
   | { ok: true; value: T; attempt: AssistantAiAttempt }
   | { ok: false; code: AssistantAiFailureCode; error: unknown; attempt: AssistantAiAttempt };
 
+type AssistantGenerateResult = {
+  usage: unknown;
+  totalUsage: unknown;
+  providerMetadata?: unknown;
+  finishReason?: string | null;
+  text: string;
+  output?: unknown;
+};
+
 type AssistantAiGeneratedValue = {
-  result: Awaited<ReturnType<typeof generateText>>;
+  result: AssistantGenerateResult;
   parsed?: z.infer<typeof assistantAiResponseSchema>;
   text?: string;
   usageOverride?: AssistantAiUsageSnapshot | null;
   totalUsageOverride?: AssistantAiUsageSnapshot | null;
+  actionProposal?: AssistantActionProposal | null;
+  toolTrace?: AssistantAiToolTraceEntry[];
+  promptVersion?: string | null;
 };
 
 type AssistantAiReplyValue = AssistantReply & {
@@ -137,6 +156,9 @@ type AssistantAiReplyValue = AssistantReply & {
   providerMetadata: unknown;
   durationMs: number;
   trace: AssistantAiTraceEntry[];
+  actionProposal: AssistantActionProposal | null;
+  toolTrace: AssistantAiToolTraceEntry[];
+  promptVersion: string | null;
 };
 
 function makeId(prefix: string) {
@@ -185,6 +207,7 @@ function safeAiErrorMessage(error: unknown) {
 export function getAssistantAiOperationLabel(operation: AssistantAiOperation) {
   switch (operation) {
     case "assistant-reply": return "la respuesta";
+    case "assistant-agent": return "la respuesta orquestada";
     case "assistant-report-classification": return "la clasificación";
     case "policy-pdf-extract": return "la extracción del PDF";
     case "policy-pdf-review": return "la revisión del PDF";
@@ -281,9 +304,10 @@ function toUsage(value: unknown, model: string, providerMetadata?: unknown): Ass
   const usage = normalizeAssistantAiUsage(value);
   if (!usage) return null;
   const generationId = usage.generationId ?? getGatewayGenerationId(providerMetadata);
-  const estimatedCostUsd = estimateAssistantAiCostUsd(model, usage);
+  const enriched = enrichAssistantAiUsageCost(model, usage) ?? usage;
+  const estimatedCostUsd = estimateAssistantAiCostUsd(model, enriched);
   return {
-    ...usage,
+    ...enriched,
     estimatedCostUsd,
     costSource: usage.billedCostUsd != null ? "gateway" : estimatedCostUsd != null ? "estimated" : "unknown",
     generationId,
@@ -295,21 +319,24 @@ function bestUsageCost(usage: AssistantAiUsageSnapshot | null | undefined) {
   return usage.billedCostUsd ?? usage.estimatedCostUsd ?? null;
 }
 
-function safeAiProviderMetadata(value: unknown) {
+function safeAiProviderMetadata(value: unknown, extra?: { promptVersion?: string | null; toolTrace?: AssistantAiToolTraceEntry[] }) {
   const metadata = getGatewayMetadata(value);
-  if (!metadata) return null;
   const gateway: Record<string, string> = {};
-  const generationId = metadata.generationId;
+  const generationId = metadata?.generationId;
   if (typeof generationId === "string" && generationId.trim()) gateway.generationId = generationId;
   const resolvedModel = getGatewayResolvedModel(value, "");
   if (resolvedModel) gateway.model = resolvedModel;
-  return Object.keys(gateway).length ? { gateway } : null;
+  const safeExtra = {
+    ...(extra?.promptVersion ? { promptVersion: extra.promptVersion } : {}),
+    ...(extra?.toolTrace?.length ? { toolTrace: extra.toolTrace.map((entry) => ({ tool: entry.tool, outcome: entry.outcome, durationMs: entry.durationMs })) } : {}),
+  };
+  return Object.keys(gateway).length || Object.keys(safeExtra).length ? { ...(Object.keys(gateway).length ? { gateway } : {}), ...safeExtra } : null;
 }
 
 function sumAttemptUsage(attempts: AssistantAiAttempt[]) {
   const usages = attempts.map((attempt) => attempt.totalUsage ?? attempt.usage).filter((usage): usage is AssistantAiUsageSnapshot => Boolean(usage));
   if (!usages.length) return null;
-  const sum = (key: "inputTokens" | "outputTokens" | "totalTokens" | "cachedInputTokens") => {
+  const sum = (key: "inputTokens" | "outputTokens" | "totalTokens" | "cachedInputTokens" | "nonCachedInputTokens" | "cacheReadTokens" | "cacheWriteTokens" | "nonCachedInputCostUsd" | "cacheReadCostUsd" | "cacheWriteCostUsd" | "outputCostUsd") => {
     const values = usages.map((usage) => usage[key]).filter((value): value is number => value != null && Number.isFinite(value));
     return values.length ? values.reduce((total, value) => total + value, 0) : null;
   };
@@ -324,6 +351,13 @@ function sumAttemptUsage(attempts: AssistantAiAttempt[]) {
     outputTokens: sum("outputTokens"),
     totalTokens: sum("totalTokens"),
     cachedInputTokens: sum("cachedInputTokens"),
+    nonCachedInputTokens: sum("nonCachedInputTokens"),
+    cacheReadTokens: sum("cacheReadTokens"),
+    cacheWriteTokens: sum("cacheWriteTokens"),
+    nonCachedInputCostUsd: sum("nonCachedInputCostUsd"),
+    cacheReadCostUsd: sum("cacheReadCostUsd"),
+    cacheWriteCostUsd: sum("cacheWriteCostUsd"),
+    outputCostUsd: sum("outputCostUsd"),
     estimatedCostUsd,
     billedCostUsd,
     costSource: billedCostUsd != null ? "gateway" as const : estimatedCostUsd != null ? "estimated" as const : "unknown" as const,
@@ -335,16 +369,18 @@ async function lookupGatewayUsage(usage: AssistantAiUsageSnapshot | null, model:
   if (!usage?.generationId) return usage;
   try {
     const generation = await gateway.getGenerationInfo({ id: usage.generationId });
-    return {
+    const updated = {
       ...usage,
       inputTokens: generation.promptTokens ?? usage.inputTokens,
       outputTokens: generation.completionTokens ?? usage.outputTokens,
       totalTokens: (generation.promptTokens ?? usage.inputTokens ?? 0) + (generation.completionTokens ?? usage.outputTokens ?? 0),
       cachedInputTokens: generation.cachedTokens ?? usage.cachedInputTokens,
+      cacheReadTokens: generation.cachedTokens ?? usage.cacheReadTokens ?? usage.cachedInputTokens,
       billedCostUsd: generation.totalCost,
-      estimatedCostUsd: estimateAssistantAiCostUsd(model, usage),
       costSource: "gateway" as const,
     } satisfies AssistantAiUsageSnapshot;
+    const enriched = enrichAssistantAiUsageCost(model, updated) ?? updated;
+    return { ...enriched, billedCostUsd: generation.totalCost, costSource: "gateway" as const } satisfies AssistantAiUsageSnapshot;
   } catch {
     return usage;
   }
@@ -637,9 +673,12 @@ async function runAssistantAttempt(input: {
   model: string;
   fallbackModels: string[];
   timeoutMs: number;
-  mode: "conversation" | "structured";
+  mode: "conversation" | "structured" | "agent";
+  history?: AssistantHistoryMessage[];
+  gmmMetadataOnly?: boolean;
 }) : Promise<AssistantAiAttemptResult<AssistantAiGeneratedValue>> {
   const startedAt = Date.now();
+  const agentRuntime = input.mode === "agent" ? createNoraAgentTools(input.user, { gmmMetadataOnly: input.gmmMetadataOnly }) : null;
   try {
     const generationInput = {
       model: gateway(input.model),
@@ -666,9 +705,29 @@ async function runAssistantAttempt(input: {
     };
     const result = input.mode === "structured"
       ? await generateText({ ...generationInput, output: Output.object({ schema: assistantAiResponseSchema }) })
-      : await generateText(generationInput);
+      : input.mode === "agent" && agentRuntime
+        ? await generateText({
+            model: gateway(input.model),
+            temperature: 0.2,
+            abortSignal: AbortSignal.timeout(input.timeoutMs),
+            system: NORA_AGENT_SYSTEM_PROMPT,
+            messages: [
+              ...(input.history ?? []).map((message) => ({ role: message.role, content: message.content } as const)),
+              { role: "user" as const, content: [input.contextText ? `Contexto explícito autorizado: ${input.contextText}` : null, input.message].filter(Boolean).join("\n\n") },
+            ],
+            tools: agentRuntime.tools,
+            stopWhen: stepCountIs(4),
+            providerOptions: {
+              gateway: {
+                user: input.user.id,
+                tags: ["feature:assistant", "mode:agent", `prompt:${NORA_AGENT_PROMPT_VERSION}`, `role:${input.user.role}`, "surface:web"],
+                models: input.fallbackModels,
+              },
+            },
+          })
+        : await generateText(generationInput);
 
-    if (input.mode === "conversation") {
+    if (input.mode === "conversation" || input.mode === "agent") {
       const resolvedModel = getGatewayResolvedModel(result.providerMetadata, input.model);
       const usage = await lookupGatewayUsage(toUsage(result.usage, resolvedModel, result.providerMetadata), resolvedModel);
       const totalUsage = await lookupGatewayUsage(toUsage(result.totalUsage, resolvedModel, result.providerMetadata), resolvedModel);
@@ -694,7 +753,17 @@ async function runAssistantAttempt(input: {
       }
       return {
         ok: true,
-        value: { result, text: result.text, usageOverride: usage, totalUsageOverride: totalUsage ?? usage },
+        value: {
+          result,
+          text: result.text,
+          usageOverride: usage,
+          totalUsageOverride: totalUsage ?? usage,
+          ...(agentRuntime ? {
+            actionProposal: agentRuntime.snapshot().actionProposal,
+            toolTrace: agentRuntime.snapshot().trace,
+            promptVersion: NORA_AGENT_PROMPT_VERSION,
+          } : {}),
+        },
         attempt: {
           model: resolvedModel,
           requestedModel: input.model,
@@ -706,6 +775,7 @@ async function runAssistantAttempt(input: {
           totalUsage: totalUsage ?? usage,
           providerMetadata: result.providerMetadata ?? null,
           responsePreview: result.text.slice(0, 500),
+          toolTrace: agentRuntime?.snapshot().trace ?? [],
         },
       };
     }
@@ -771,6 +841,7 @@ async function runAssistantAttempt(input: {
         usage: errorUsage,
         totalUsage: errorUsage,
         providerMetadata: errorProviderMetadata,
+        toolTrace: agentRuntime?.snapshot().trace ?? [],
       },
     };
   }
@@ -819,6 +890,9 @@ function valueFromAttempt(input: {
       usage: effectiveUsage,
       responsePreview: redactAssistantReportText(reply, 500),
     }],
+    actionProposal: input.generated.actionProposal ?? null,
+    toolTrace: input.generated.toolTrace ?? [],
+    promptVersion: input.generated.promptVersion ?? null,
   };
 }
 
@@ -838,7 +912,7 @@ async function recordAttempt(runId: string | null, attempt: AssistantAiAttempt, 
     durationMs: attempt.durationMs,
     usage: attempt.usage ?? undefined,
     totalUsage: attempt.totalUsage ?? undefined,
-    providerMetadata: safeAiProviderMetadata(attempt.providerMetadata) ?? undefined,
+    providerMetadata: safeAiProviderMetadata(attempt.providerMetadata, { toolTrace: attempt.toolTrace }) ?? undefined,
     estimatedCostUsd: (attempt.totalUsage ?? attempt.usage)?.billedCostUsd ?? (attempt.totalUsage ?? attempt.usage)?.estimatedCostUsd ?? null,
   }), null);
   return Boolean(finalized);
@@ -850,10 +924,18 @@ export async function buildAssistantAiReply(input: {
   localReply: AssistantReply;
   contextText?: string | null;
   themeHint?: string | null;
-  mode?: "conversation" | "structured";
+  mode?: "conversation" | "structured" | "agent";
+  history?: AssistantHistoryMessage[];
+  gmmMetadataOnly?: boolean;
 }): Promise<AssistantAiResult<AssistantAiReplyValue>> {
   const startedAt = Date.now();
-  const model = input.mode === "structured" ? getAssistantStructuredModel() : getAssistantAiModel();
+  const mode = input.mode ?? "conversation";
+  const operation: AssistantAiOperation = mode === "agent" ? "assistant-agent" : "assistant-reply";
+  const model = mode === "agent"
+    ? ASSISTANT_AI_PRIMARY_MODEL
+    : mode === "structured"
+      ? getAssistantStructuredModel()
+      : getAssistantAiModel();
   const fallbackModels = input.mode === "structured" ? getAssistantStructuredFallbackModels() : getAssistantGatewayFallbackModels();
   const runId = makeId("run");
   const tier: AssistantAiTier = input.mode === "structured" ? "critical" : "minimax";
@@ -864,7 +946,7 @@ export async function buildAssistantAiReply(input: {
         diagnosticId: makeId("diag"),
         runId,
         attemptNumber: null,
-        operation: "assistant-reply",
+        operation,
         tier,
         code: "unavailable",
         model,
@@ -877,9 +959,8 @@ export async function buildAssistantAiReply(input: {
       },
     };
   }
-  const mode = input.mode ?? "conversation";
   const persistedRunPromise = canPersistAiRuns()
-    ? tryAssistantAiTracking(() => createAssistantAiRun({ id: runId, user: input.user, operation: "assistant-reply", tier, requestedModel: model, fallbackReason: null }), null)
+    ? tryAssistantAiTracking(() => createAssistantAiRun({ id: runId, user: input.user, operation, tier, requestedModel: model, fallbackReason: null }), null)
     : Promise.resolve(null);
   let trackedRunId: string | null = null;
   let trackingStatus: "recorded" | "unavailable" = "unavailable";
@@ -903,7 +984,15 @@ export async function buildAssistantAiReply(input: {
   const candidateModels = [model, ...fallbackModels.filter((candidate) => candidate && candidate !== model)];
   for (let index = 0; index < candidateModels.length; index += 1) {
     const candidateModel = candidateModels[index]!;
-    const attemptResult = await runAssistantAttempt({ ...input, model: candidateModel, fallbackModels: [], timeoutMs: ASSISTANT_AI_ATTEMPT_TIMEOUT_MS, mode });
+    const remainingAgentTime = 25_000 - (Date.now() - startedAt);
+    if (mode === "agent" && remainingAgentTime <= 0) break;
+    const attemptResult = await runAssistantAttempt({
+      ...input,
+      model: candidateModel,
+      fallbackModels: [],
+      timeoutMs: mode === "agent" ? Math.max(250, remainingAgentTime) : ASSISTANT_AI_ATTEMPT_TIMEOUT_MS,
+      mode,
+    });
     attempts.push(attemptResult.attempt);
     await ensureTrackedRun();
     if (!(await recordAttempt(trackedRunId, attemptResult.attempt, index + 1, index === 0 ? tier : "critical"))) trackingStatus = "unavailable";
@@ -939,6 +1028,7 @@ export async function buildAssistantAiReply(input: {
         ...value.trace,
       ];
       value.totalUsage = sumAttemptUsage(attempts);
+      value.toolTrace = attempts.flatMap((attempt) => attempt.toolTrace ?? []);
       value.runId = trackedRunId;
       value.trackingStatus = trackingStatus;
       await finalizeRun({
@@ -947,7 +1037,7 @@ export async function buildAssistantAiReply(input: {
         finishReason: value.finishReason,
         usage: value.usage,
         totalUsage: value.totalUsage,
-        providerMetadata: safeAiProviderMetadata(value.providerMetadata) ?? undefined,
+        providerMetadata: safeAiProviderMetadata(value.providerMetadata, { promptVersion: value.promptVersion, toolTrace: value.toolTrace }) ?? undefined,
         durationMs: Date.now() - startedAt,
         attemptCount: attempts.length,
         fallbackCount: index,
@@ -961,7 +1051,7 @@ export async function buildAssistantAiReply(input: {
   }
 
   const lastAttempt = attempts[attempts.length - 1];
-  const diagnostic = buildDiagnostic({ operation: "assistant-reply", tier, model, fallbackModels, startedAt, runId, code: lastAttempt?.code ?? "gateway_error", attempts });
+  const diagnostic = buildDiagnostic({ operation, tier, model, fallbackModels, startedAt, runId, code: lastAttempt?.code ?? "gateway_error", attempts });
   await finalizeRun({ status: "FAILED", errorCode: diagnostic.code, errorMessage: diagnostic.summary, durationMs: diagnostic.durationMs, attemptCount: attempts.length, fallbackCount: Math.max(0, attempts.length - 1) });
   return { ok: false, diagnostic };
 }

@@ -62,10 +62,23 @@ export type AssistantAiUsageSnapshot = {
   outputTokens: number | null;
   totalTokens: number | null;
   cachedInputTokens: number | null;
+  nonCachedInputTokens?: number | null;
+  cacheReadTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  nonCachedInputCostUsd?: number | null;
+  cacheReadCostUsd?: number | null;
+  cacheWriteCostUsd?: number | null;
+  outputCostUsd?: number | null;
   estimatedCostUsd: number | null;
   billedCostUsd?: number | null;
   costSource?: "gateway" | "estimated" | "unknown";
   generationId?: string | null;
+};
+
+export type AssistantAiToolTraceEntry = {
+  tool: string;
+  outcome: "success" | "error";
+  durationMs: number;
 };
 
 export type AssistantAiAttempt = {
@@ -81,6 +94,7 @@ export type AssistantAiAttempt = {
   totalUsage?: AssistantAiUsageSnapshot | null;
   providerMetadata?: unknown;
   errorMessage?: string | null;
+  toolTrace?: AssistantAiToolTraceEntry[];
 };
 
 export type AssistantAiTraceEntry = {
@@ -138,6 +152,7 @@ export type AssistantAiRunSnapshot = {
 
 export type AssistantAiOperation =
   | "assistant-reply"
+  | "assistant-agent"
   | "assistant-report-classification"
   | "policy-pdf-extract"
   | "policy-pdf-review";
@@ -189,7 +204,7 @@ export type AssistantReply = {
   todayMetrics?: AssistantTodayBrief["metrics"];
 };
 
-export type AssistantMutationEntityType = "client" | "policy" | "receipt" | "payment" | "workItem" | "endorsement";
+export type AssistantMutationEntityType = "client" | "policy" | "receipt" | "payment" | "workItem" | "endorsement" | "claim" | "claimChecklistItem";
 export type AssistantMutationOperation = "create" | "update";
 
 export type AssistantMutationField = {
@@ -245,6 +260,11 @@ export type AssistantMessage = {
   source?: "local" | "ai";
   sections?: AssistantSection[];
   quickPrompts?: AssistantPrompt[];
+};
+
+export type AssistantHistoryMessage = {
+  role: "user" | "assistant";
+  content: string;
 };
 
 export type AssistantUser = {
@@ -332,6 +352,9 @@ export type AssistantConversationResponse = AssistantReply & {
   aiAttempts?: number;
   aiUsage?: AssistantAiUsageSnapshot | null;
   aiTrace?: AssistantAiTraceEntry[];
+  aiToolTrace?: AssistantAiToolTraceEntry[];
+  aiPromptVersion?: string | null;
+  aiBudgetWarning?: string | null;
   aiFallbackNotice?: string | null;
   aiDiagnostic?: AssistantAiDiagnostic | null;
   actionProposal?: AssistantActionProposal | null;

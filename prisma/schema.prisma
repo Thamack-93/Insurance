@@ -63,6 +63,13 @@ enum ClaimStatus {
   CANCELLED
 }
 
+enum ClaimChecklistStatus {
+  MISSING
+  REQUESTED
+  RECEIVED
+  WAIVED
+}
+
 enum QuoteStatus {
   REQUESTED
   IN_PROGRESS
@@ -138,6 +145,7 @@ model Organization {
   tasks Task[]
   workItems WorkItem[]
   claims Claim[]
+  claimChecklistItems ClaimChecklistItem[]
   quotes Quote[]
   documents Document[]
   activityLogs ActivityLog[]
@@ -705,6 +713,7 @@ model Claim {
   createdBy User?      @relation("ClaimCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   updatedBy User?      @relation("ClaimUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   documents Document[]
+  checklistItems ClaimChecklistItem[]
 
   @@index([folio])
   @@index([clientId])
@@ -713,6 +722,31 @@ model Claim {
   @@index([status])
   @@index([createdById])
   @@index([updatedById])
+  @@index([organizationId])
+}
+
+model ClaimChecklistItem {
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  id              String   @id @default(cuid())
+  claimId         String
+  documentId      String?
+  requirementCode String
+  label           String
+  status          ClaimChecklistStatus @default(MISSING)
+  requestedAt     DateTime?
+  receivedAt      DateTime?
+  waivedAt        DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  claim    Claim     @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  document Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@unique([claimId, requirementCode])
+  @@index([claimId])
+  @@index([documentId])
+  @@index([status])
   @@index([organizationId])
 }
 
@@ -783,6 +817,7 @@ model Document {
   primaryEndorsement PolicyEndorsement? @relation("PolicyEndorsementPrimaryDocument")
   createdBy      User?    @relation("DocumentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   updatedBy      User?    @relation("DocumentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  claimChecklistItems ClaimChecklistItem[]
 
   @@index([clientId])
   @@index([policyId])

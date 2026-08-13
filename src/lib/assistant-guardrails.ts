@@ -80,3 +80,38 @@ export function evaluateAssistantInput(message: string): AssistantGuardrailDecis
 export function buildAssistantBlockedReply() {
   return "Solo puedo ayudarte con información y flujos de PolicyDesk: clientes, pólizas, renovaciones, recibos, pagos, riesgos, reportes y captura de documentos.";
 }
+
+const GMM_SENSITIVE_PATTERNS = [
+  /\bdiagn[oó]stic/iu,
+  /\bpadec/iu,
+  /\bs[ií]ntoma/iu,
+  /\benfermedad/iu,
+  /\btratamiento/iu,
+  /\bmedicamento/iu,
+  /\bcirug[ií]a/iu,
+  /\bhospital/iu,
+  /\blaboratorio/iu,
+  /\bestudio/iu,
+  /\bresultado/iu,
+  /\bm[eé]dic[oa]/iu,
+  /\bfactura/iu,
+  /\bnota\s+cl[ií]nica/iu,
+  /\barchivo/iu,
+  /\b(?:dr|dra)\.?\s+[\p{L}]/iu,
+  /\b(?:c[aá]ncer|diabetes|hipertensi[oó]n|tumor|fractura|embarazo)\b/iu,
+  /\b[\w-]+\.(?:pdf|jpe?g|png|docx?)\b/iu,
+];
+
+const GMM_METADATA_ACTIONS = ["checklist", "requisito", "faltante", "pendiente", "recibido", "solicitado", "estado", "seguimiento", "marcar"];
+
+export function evaluateGmmPrivacy(message: string, gmmContext = false) {
+  const normalized = normalize(message);
+  const hasSensitiveNarrative = GMM_SENSITIVE_PATTERNS.some((pattern) => pattern.test(message));
+  const isMetadataAction = GMM_METADATA_ACTIONS.some((term) => normalized.includes(term));
+  const allowed = !hasSensitiveNarrative && (!gmmContext || isMetadataAction);
+  return { allowed, hasSensitiveNarrative, isMetadataAction };
+}
+
+export function buildGmmPrivacyReply() {
+  return "Para proteger datos médicos, Nora solo puede trabajar con metadatos del checklist de GMM: requisitos, estados, fechas y seguimientos. No escribas diagnósticos, estudios, médicos, tratamientos ni nombres de archivos; usa el área documental para esos contenidos.";
+}
