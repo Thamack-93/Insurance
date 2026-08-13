@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RecordPageView } from "@/components/recently-viewed/record-page-view";
-import { ArrowLeft, FileClock, History, Plus, ReceiptText, Repeat, Shield } from "lucide-react";
+import { ArrowLeft, FileClock, History, Pencil, Plus, ReceiptText, Repeat, Shield } from "lucide-react";
+import { DeletePolicyButton } from "@/components/policies/delete-policy-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { NoraContextButton } from "@/components/assistant/nora-session-provider";
 import { AuditByline } from "@/components/audit/audit-byline";
@@ -36,6 +37,7 @@ const frequencyLabels: Record<string, string> = {
 export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const scope = await requireOrganizationPortfolioReadScope();
+  const isAdmin = scope.membershipRole !== "AGENT";
   const db = getDb();
 
   const policy = await db.policy.findFirst({
@@ -211,6 +213,13 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           actions={
             <div className="flex items-center gap-2">
               <NoraContextButton context={{ type: "policy", id: policy.id }} />
+              <Button asChild variant="outline" className="rounded-full bg-card/70">
+                <Link href={`/policies/${id}/edit`}>
+                  <Pencil className="mr-2 size-4" />
+                  Editar
+                </Link>
+              </Button>
+              {isAdmin ? <DeletePolicyButton id={id} policyNumber={policy.policyNumber} /> : null}
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href="/policies">
                   <ArrowLeft className="mr-2 size-4" />
@@ -425,7 +434,15 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
 
           <SectionCard
             title="Endosos"
-            description="Ajustes ligados a esta póliza base, cada uno con sus propios recibos y documentos. Las mutaciones se habilitarán en Cycle 2B."
+            description="Ajustes ligados a esta póliza base, cada uno con sus propios recibos y documentos."
+            action={
+              <Button asChild size="sm" className="rounded-full">
+                <Link href={`/policies/${id}/endorsements/new`}>
+                  <Plus className="mr-2 size-4" />
+                  Nuevo endoso
+                </Link>
+              </Button>
+            }
           >
             {endorsements.length === 0 ? (
               <div className="p-4">
@@ -441,7 +458,12 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div className="space-y-2">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-lg font-semibold text-foreground">Endoso {endorsement.endorsementNumber}</span>
+                          <Link
+                            href={`/policies/${id}/endorsements/${endorsement.id}/edit`}
+                            className="text-lg font-semibold text-foreground hover:text-primary"
+                          >
+                            Endoso {endorsement.endorsementNumber}
+                          </Link>
                           <StatusBadge status={endorsement.status} />
                         </div>
                         <p className="text-sm text-muted-foreground">
@@ -457,6 +479,9 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
                         {endorsement.notes ? <p className="text-xs text-muted-foreground">{endorsement.notes}</p> : null}
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
+                        <Button asChild variant="outline" size="sm" className="rounded-full bg-card/70">
+                          <Link href={`/policies/${id}/endorsements/${endorsement.id}/edit`}>Editar</Link>
+                        </Button>
                         <Button asChild size="sm" className="rounded-full">
                           <Link href={`/receipts/new?policyId=${id}&endorsementId=${endorsement.id}`}>Nuevo recibo de endoso</Link>
                         </Button>

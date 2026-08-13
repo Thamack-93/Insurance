@@ -14,7 +14,7 @@ import {
   commissionOperationalWhere,
   policyOperationalWhere,
   receiptOperationalWhere,
-  requirePortfolioReadScope,
+  requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
 
 type ReportView = "collections" | "renewals" | "portfolio" | "commissions" | "operations";
@@ -115,17 +115,17 @@ function buildDefinitions(now: Date): Record<ReportView, ReportDownloadDefinitio
 export default async function ReportsPage({ searchParams }: { searchParams?: Promise<{ view?: string }> }) {
   const view = readReportView((await searchParams)?.view);
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const now = businessToday();
   const in60 = businessAddDays(now, 60);
 
   const [activePolicies, dueReceipts, renewalsSoonPolicies, openWorkItems, risks, paidCommissions] = await Promise.all([
-    db.policy.count({ where: { ...policyOperationalWhere(scope.portfolioOwnerId), status: "ACTIVE" } }),
-    db.receipt.count({ where: { ...receiptOperationalWhere(scope.portfolioOwnerId), dueDate: { gte: now, lte: in60 }, status: { notIn: ["PAID", "CANCELLED"] } } }),
+    db.policy.count({ where: { ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId), status: "ACTIVE" } }),
+    db.receipt.count({ where: { ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId), dueDate: { gte: now, lte: in60 }, status: { notIn: ["PAID", "CANCELLED"] } } }),
     loadEligibleRenewalPolicies({ endDate: { gte: now, lte: in60 } }, scope.portfolioOwnerId),
-    countWorkItems({ statuses: OPEN_WORK_ITEM_STATUSES, portfolioOwnerId: scope.portfolioOwnerId }),
+    countWorkItems({ organizationId: scope.organizationId, statuses: OPEN_WORK_ITEM_STATUSES, portfolioOwnerId: scope.portfolioOwnerId }),
     db.alert.count({ where: { status: "OPEN" } }),
-    db.commission.count({ where: { ...commissionOperationalWhere(scope.portfolioOwnerId), status: "PAID" } }),
+    db.commission.count({ where: { ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId), status: "PAID" } }),
   ]);
   const definition = buildDefinitions(now)[view];
 

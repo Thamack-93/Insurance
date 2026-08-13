@@ -28,7 +28,7 @@ export type RiskFinding = {
 
 const TAKE_LIMIT = 25;
 
-export async function detectRisks(portfolioOwnerId?: string, organizationId?: string): Promise<RiskFinding[]> {
+export async function detectRisks(portfolioOwnerId: string | undefined, organizationId: string): Promise<RiskFinding[]> {
   const db = getDb();
   const now = today();
   const in60 = businessAddDays(now, 60);

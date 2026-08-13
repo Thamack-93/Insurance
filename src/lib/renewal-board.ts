@@ -98,13 +98,15 @@ function ownerWhere(owner?: string): Prisma.PolicyWhereInput {
  */
 export function buildRenewalBoardWhere(
   filters: RenewalBoardFilters,
-  portfolioOwnerId?: string,
+  portfolioOwnerId: string | undefined,
+  organizationId: string,
   today: Date = businessToday(),
 ): Prisma.PolicyWhereInput {
   const range = renewalWindowRange(filters.window, today);
 
   return {
     AND: [
+      { organizationId },
       portfolioOwnerId ? { client: { portfolioOwnerId } } : {},
       ownerWhere(filters.owner),
       { endDate: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } },
@@ -175,14 +177,15 @@ function toRenewalBoardCard(policy: RenewalBoardPolicy, today: Date): RenewalBoa
 
 export async function loadRenewalBoard(
   filters: RenewalBoardFilters,
-  portfolioOwnerId?: string,
+  portfolioOwnerId: string | undefined,
+  organizationId: string,
 ): Promise<RenewalBoardData> {
   const today = businessToday();
 
   try {
     const db = getDb();
     const policies = await db.policy.findMany({
-      where: buildRenewalBoardWhere(filters, portfolioOwnerId, today),
+      where: buildRenewalBoardWhere(filters, portfolioOwnerId, organizationId, today),
       include: renewalBoardInclude,
       orderBy: [{ endDate: "asc" }, { id: "asc" }],
       take: RENEWAL_BOARD_LIMIT + 1,
@@ -287,14 +290,15 @@ export async function forEachRenewalCandidate(
  * Responsables que pueden aparecer en el filtro. Un agente sólo se ve a sí
  * mismo porque su alcance de cartera ya lo limita antes de llegar aquí.
  */
-export async function getRenewalBoardOwners(portfolioOwnerId?: string) {
+export async function getRenewalBoardOwners(portfolioOwnerId: string | undefined, organizationId: string) {
   try {
     const db = getDb();
     const users = await db.user.findMany({
       where: {
         active: true,
         ...(portfolioOwnerId ? { id: portfolioOwnerId } : {}),
-        portfolioClients: { some: {} },
+        organizationMemberships: { some: { organizationId, active: true } },
+        portfolioClients: { some: { organizationId } },
       },
       select: { id: true, name: true },
       orderBy: { name: "asc" },

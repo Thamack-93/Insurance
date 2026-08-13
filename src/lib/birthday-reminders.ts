@@ -94,6 +94,7 @@ export function buildBirthdayReminderMessage(items: BirthdayReminderItem[], now 
 }
 
 export async function getBirthdayRemindersForUser(input: {
+  organizationId: string;
   userId: string;
   now?: Date;
   timeZone?: string;
@@ -103,6 +104,7 @@ export async function getBirthdayRemindersForUser(input: {
   const timeZone = input.timeZone ?? DEFAULT_TIMEZONE;
   const rows = await input.client.client.findMany({
     where: {
+      organizationId: input.organizationId,
       portfolioOwnerId: input.userId,
       type: "PERSON",
       status: "ACTIVE",

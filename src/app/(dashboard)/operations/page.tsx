@@ -11,7 +11,7 @@ import { getDb } from "@/lib/db";
 import { businessAddDays, businessStartOfDay, businessToday, formatBusinessDateRelative } from "@/lib/business-dates";
 import { formatDate } from "@/lib/dates";
 import { policyTypeLabel } from "@/lib/status";
-import { claimOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { claimOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 import { getWorkItems, OPEN_WORK_ITEM_STATUSES, type WorkQueueItem } from "@/lib/work-queue";
 import { buildOperationalWorkItemPresentation, type OperationalRenewalState } from "@/lib/operations-presentation";
@@ -143,7 +143,7 @@ export default async function OperationsPage({
   const params = (await searchParams) ?? {};
   const view = readView(typeof params.view === "string" ? params.view : undefined);
   const page = readTablePage(params);
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const db = getDb();
   const today = businessToday();
   const nextSeven = businessAddDays(today, 7);
@@ -153,16 +153,16 @@ export default async function OperationsPage({
   const [board, boardOwners] =
     view === "renewal-board"
       ? await Promise.all([
-          loadRenewalBoard(boardFilters, scope.portfolioOwnerId),
-          getRenewalBoardOwners(scope.portfolioOwnerId),
+          loadRenewalBoard(boardFilters, scope.portfolioOwnerId, scope.organizationId),
+          getRenewalBoardOwners(scope.portfolioOwnerId, scope.organizationId),
         ])
       : [null, []];
 
   const [workItems, renewalPolicies, claims] = await Promise.all([
-    getWorkItems({ statuses: OPEN_WORK_ITEM_STATUSES, portfolioOwnerId: scope.portfolioOwnerId, limit: 100 }),
+    getWorkItems({ organizationId: scope.organizationId, statuses: OPEN_WORK_ITEM_STATUSES, portfolioOwnerId: scope.portfolioOwnerId, limit: 100 }),
     loadEligibleRenewalPolicies({ endDate: { lte: nextThirty } }, scope.portfolioOwnerId),
     db.claim.findMany({
-      where: { AND: [claimOperationalWhere(scope.portfolioOwnerId), { status: { notIn: ["RESOLVED", "CANCELLED"] } }] },
+      where: { AND: [claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId), { status: { notIn: ["RESOLVED", "CANCELLED"] } }] },
       select: { id: true, folio: true, claimType: true, status: true, incidentDate: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } },
       orderBy: [{ reportedDate: "desc" }, { id: "asc" }],
       take: 50,

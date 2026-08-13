@@ -23,7 +23,7 @@ import {
   paymentOperationalWhere,
   receiptOperationalWhere,
   receiptPortfolioWhere,
-  requirePortfolioReadScope,
+  requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
 import { buildTableHref } from "@/lib/table-query";
 import {
@@ -48,7 +48,7 @@ export default async function ReceiptsPage({
   const isFiltered = Boolean(query || statusFilter);
 
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const now = today();
   const monthStart = businessStartOfMonth(now);
   const clearFiltersHref = buildTableHref("/receipts", params, {
@@ -58,13 +58,13 @@ export default async function ReceiptsPage({
     tab: "cobrar",
   });
 
-  const baseWhere = buildOpenReceiptBaseWhere(scope.portfolioOwnerId);
-  const scopedReceiptWhere = receiptOperationalWhere(scope.portfolioOwnerId);
-  const scopedPaymentWhere = paymentOperationalWhere(scope.portfolioOwnerId);
+  const baseWhere = buildOpenReceiptBaseWhere(scope.portfolioOwnerId, scope.organizationId);
+  const scopedReceiptWhere = receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
+  const scopedPaymentWhere = paymentOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const scopedReceiptIssueWhere: Prisma.ReceiptReconciliationIssueWhereInput = scope.portfolioOwnerId
     ? { receipt: receiptPortfolioWhere(scope.portfolioOwnerId) }
     : {};
-  const where = buildReceiptListWhere(filters, scope.portfolioOwnerId);
+  const where = buildReceiptListWhere(filters, scope.portfolioOwnerId, scope.organizationId);
 
   const orderBy = buildReceiptListOrderBy(filters);
 

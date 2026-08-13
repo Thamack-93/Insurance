@@ -1,32 +1,19 @@
 import "server-only";
 
 import type { Prisma } from "@/generated/prisma/client";
-import { AuthError, requireUser } from "@/lib/auth";
+import { AuthError } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { requireOrganizationContext, type OrganizationContext } from "@/lib/organization-context";
 
-type PortfolioUser = {
+export type PortfolioReadScope = {
   id: string;
   role: string;
-};
-
-export type PortfolioReadScope = PortfolioUser & {
   portfolioOwnerId?: string;
-  organizationId?: string;
-  membershipRole?: string;
+  organizationId: string;
+  membershipRole: string;
 };
 
-export async function requirePortfolioUser(): Promise<PortfolioUser> {
-  const user = await requireUser();
-  return { id: user.id, role: user.role };
-}
-
-export async function requirePortfolioReadScope(): Promise<PortfolioReadScope> {
-  const user = await requirePortfolioUser();
-  return { ...user, portfolioOwnerId: getPortfolioOwnerIdForRead(user) };
-}
-
-export async function requireOrganizationPortfolioReadScope(): Promise<PortfolioReadScope & { organizationId: string; context: OrganizationContext }> {
+export async function requireOrganizationPortfolioReadScope(): Promise<PortfolioReadScope & { context: OrganizationContext }> {
   const context = await requireOrganizationContext();
   return {
     id: context.userId,
@@ -38,26 +25,22 @@ export async function requireOrganizationPortfolioReadScope(): Promise<Portfolio
   };
 }
 
-export function getPortfolioOwnerIdForRead(user: PortfolioUser): string | undefined {
-  return user.role === "ADMIN" ? undefined : user.id;
-}
-
 export function clientPortfolioWhere(userId: string): Prisma.ClientWhereInput {
   return { portfolioOwnerId: userId };
 }
 
-export function clientOperationalWhere(portfolioOwnerId?: string, organizationId?: string): Prisma.ClientWhereInput {
-  return { ...(organizationId ? { organizationId } : {}), ...(portfolioOwnerId ? clientPortfolioWhere(portfolioOwnerId) : {}) };
+export function clientOperationalWhere(portfolioOwnerId: string | undefined, organizationId: string): Prisma.ClientWhereInput {
+  return { organizationId, ...(portfolioOwnerId ? clientPortfolioWhere(portfolioOwnerId) : {}) };
 }
 
 export function policyPortfolioWhere(userId: string): Prisma.PolicyWhereInput {
   return { client: clientPortfolioWhere(userId) };
 }
 
-export function policyOperationalWhere(portfolioOwnerId?: string, organizationId?: string): Prisma.PolicyWhereInput {
+export function policyOperationalWhere(portfolioOwnerId: string | undefined, organizationId: string): Prisma.PolicyWhereInput {
   return {
-    ...(organizationId ? { organizationId, client: { organizationId, ...(portfolioOwnerId ? { portfolioOwnerId } : {}) } } : {}),
-    ...(portfolioOwnerId && !organizationId ? policyPortfolioWhere(portfolioOwnerId) : {}),
+    organizationId,
+    client: { organizationId, ...(portfolioOwnerId ? { portfolioOwnerId } : {}) },
   };
 }
 
@@ -65,10 +48,10 @@ export function endorsementPortfolioWhere(userId: string): Prisma.PolicyEndorsem
   return { policy: policyPortfolioWhere(userId) };
 }
 
-export function endorsementOperationalWhere(portfolioOwnerId?: string, organizationId?: string): Prisma.PolicyEndorsementWhereInput {
+export function endorsementOperationalWhere(portfolioOwnerId: string | undefined, organizationId: string): Prisma.PolicyEndorsementWhereInput {
   return {
-    ...(organizationId ? { organizationId, policy: { organizationId, client: { organizationId, ...(portfolioOwnerId ? { portfolioOwnerId } : {}) } } } : {}),
-    ...(portfolioOwnerId && !organizationId ? endorsementPortfolioWhere(portfolioOwnerId) : {}),
+    organizationId,
+    policy: { organizationId, client: { organizationId, ...(portfolioOwnerId ? { portfolioOwnerId } : {}) } },
   };
 }
 
@@ -76,10 +59,10 @@ export function receiptPortfolioWhere(userId: string): Prisma.ReceiptWhereInput 
   return { client: clientPortfolioWhere(userId) };
 }
 
-export function receiptOperationalWhere(portfolioOwnerId?: string, organizationId?: string): Prisma.ReceiptWhereInput {
+export function receiptOperationalWhere(portfolioOwnerId: string | undefined, organizationId: string): Prisma.ReceiptWhereInput {
   return {
-    ...(organizationId ? { organizationId, client: { organizationId, ...(portfolioOwnerId ? { portfolioOwnerId } : {}) } } : {}),
-    ...(portfolioOwnerId && !organizationId ? receiptPortfolioWhere(portfolioOwnerId) : {}),
+    organizationId,
+    client: { organizationId, ...(portfolioOwnerId ? { portfolioOwnerId } : {}) },
   };
 }
 
@@ -87,10 +70,10 @@ export function paymentPortfolioWhere(userId: string): Prisma.PaymentWhereInput 
   return { client: clientPortfolioWhere(userId) };
 }
 
-export function paymentOperationalWhere(portfolioOwnerId?: string, organizationId?: string): Prisma.PaymentWhereInput {
+export function paymentOperationalWhere(portfolioOwnerId: string | undefined, organizationId: string): Prisma.PaymentWhereInput {
   return {
-    ...(organizationId ? { organizationId, client: { organizationId, ...(portfolioOwnerId ? { portfolioOwnerId } : {}) } } : {}),
-    ...(portfolioOwnerId && !organizationId ? paymentPortfolioWhere(portfolioOwnerId) : {}),
+    organizationId,
+    client: { organizationId, ...(portfolioOwnerId ? { portfolioOwnerId } : {}) },
   };
 }
 
@@ -98,10 +81,10 @@ export function commissionPortfolioWhere(userId: string): Prisma.CommissionWhere
   return { client: clientPortfolioWhere(userId) };
 }
 
-export function commissionOperationalWhere(portfolioOwnerId?: string, organizationId?: string): Prisma.CommissionWhereInput {
+export function commissionOperationalWhere(portfolioOwnerId: string | undefined, organizationId: string): Prisma.CommissionWhereInput {
   return {
-    ...(organizationId ? { organizationId, client: { organizationId, ...(portfolioOwnerId ? { portfolioOwnerId } : {}) } } : {}),
-    ...(portfolioOwnerId && !organizationId ? commissionPortfolioWhere(portfolioOwnerId) : {}),
+    organizationId,
+    client: { organizationId, ...(portfolioOwnerId ? { portfolioOwnerId } : {}) },
   };
 }
 
@@ -109,10 +92,10 @@ export function claimPortfolioWhere(userId: string): Prisma.ClaimWhereInput {
   return { client: clientPortfolioWhere(userId) };
 }
 
-export function claimOperationalWhere(portfolioOwnerId?: string, organizationId?: string): Prisma.ClaimWhereInput {
+export function claimOperationalWhere(portfolioOwnerId: string | undefined, organizationId: string): Prisma.ClaimWhereInput {
   return {
-    ...(organizationId ? { organizationId, client: { organizationId, ...(portfolioOwnerId ? { portfolioOwnerId } : {}) } } : {}),
-    ...(portfolioOwnerId && !organizationId ? claimPortfolioWhere(portfolioOwnerId) : {}),
+    organizationId,
+    client: { organizationId, ...(portfolioOwnerId ? { portfolioOwnerId } : {}) },
   };
 }
 
@@ -120,10 +103,10 @@ export function quotePortfolioWhere(userId: string): Prisma.QuoteWhereInput {
   return { client: clientPortfolioWhere(userId) };
 }
 
-export function quoteOperationalWhere(portfolioOwnerId?: string, organizationId?: string): Prisma.QuoteWhereInput {
+export function quoteOperationalWhere(portfolioOwnerId: string | undefined, organizationId: string): Prisma.QuoteWhereInput {
   return {
-    ...(organizationId ? { organizationId, client: { organizationId, ...(portfolioOwnerId ? { portfolioOwnerId } : {}) } } : {}),
-    ...(portfolioOwnerId && !organizationId ? quotePortfolioWhere(portfolioOwnerId) : {}),
+    organizationId,
+    client: { organizationId, ...(portfolioOwnerId ? { portfolioOwnerId } : {}) },
   };
 }
 
@@ -154,9 +137,9 @@ export function documentPortfolioWhere(userId: string): Prisma.DocumentWhereInpu
   };
 }
 
-export function documentOperationalWhere(portfolioOwnerId?: string, organizationId?: string): Prisma.DocumentWhereInput {
+export function documentOperationalWhere(portfolioOwnerId: string | undefined, organizationId: string): Prisma.DocumentWhereInput {
   return {
-    ...(organizationId ? { organizationId } : {}),
+    organizationId,
     ...(portfolioOwnerId ? documentPortfolioWhere(portfolioOwnerId) : {}),
   };
 }
@@ -170,28 +153,11 @@ export function workItemPortfolioWhere(userId: string): Prisma.WorkItemWhereInpu
   };
 }
 
-export function workItemOperationalWhere(portfolioOwnerId?: string, organizationId?: string): Prisma.WorkItemWhereInput {
+export function workItemOperationalWhere(portfolioOwnerId: string | undefined, organizationId: string): Prisma.WorkItemWhereInput {
   return {
-    ...(organizationId ? { organizationId } : {}),
+    organizationId,
     ...(portfolioOwnerId ? workItemPortfolioWhere(portfolioOwnerId) : {}),
   };
-}
-
-export async function assertClientPortfolioAccess(clientId: string, userId: string) {
-  const db = getDb();
-  const user = await db.user.findUnique({
-    where: { id: userId },
-    select: { role: true },
-  });
-  if (user?.role === "ADMIN") return;
-  const client = await db.client.findFirst({
-    where: { id: clientId, ...clientPortfolioWhere(userId) },
-    select: { id: true },
-  });
-
-  if (!client) {
-    throw new AuthError("No tienes acceso a esta cartera.", 403);
-  }
 }
 
 export async function assertClientOrganizationAccess(clientId: string, context: OrganizationContext) {
@@ -207,23 +173,6 @@ export async function assertClientOrganizationAccess(clientId: string, context: 
   if (!client) throw new AuthError("No tienes acceso a este cliente.", 403);
 }
 
-export async function assertPolicyPortfolioAccess(policyId: string, userId: string) {
-  const db = getDb();
-  const user = await db.user.findUnique({
-    where: { id: userId },
-    select: { role: true },
-  });
-  if (user?.role === "ADMIN") return;
-  const policy = await db.policy.findFirst({
-    where: { id: policyId, ...policyPortfolioWhere(userId) },
-    select: { id: true },
-  });
-
-  if (!policy) {
-    throw new AuthError("No tienes acceso a esta póliza.", 403);
-  }
-}
-
 export async function assertPolicyOrganizationAccess(policyId: string, context: OrganizationContext) {
   const db = getDb();
   const policy = await db.policy.findFirst({
@@ -236,70 +185,15 @@ export async function assertPolicyOrganizationAccess(policyId: string, context: 
   if (!policy) throw new AuthError("No tienes acceso a esta póliza.", 403);
 }
 
-export async function assertEndorsementPortfolioAccess(endorsementId: string, userId: string) {
+export async function assertEndorsementOrganizationAccess(endorsementId: string, context: OrganizationContext) {
   const db = getDb();
-  const user = await db.user.findUnique({
-    where: { id: userId },
-    select: { role: true },
-  });
-  if (user?.role === "ADMIN") return;
   const endorsement = await db.policyEndorsement.findFirst({
-    where: { id: endorsementId, ...endorsementPortfolioWhere(userId) },
+    where: {
+      id: endorsementId,
+      organizationId: context.organizationId,
+      ...(context.membershipRole === "AGENT" ? { policy: { client: { portfolioOwnerId: context.userId } } } : {}),
+    },
     select: { id: true },
   });
-
-  if (!endorsement) {
-    throw new AuthError("No tienes acceso a este endoso.", 403);
-  }
-}
-
-export async function assertReceiptPortfolioAccess(receiptId: string, userId: string) {
-  const db = getDb();
-  const user = await db.user.findUnique({
-    where: { id: userId },
-    select: { role: true },
-  });
-  if (user?.role === "ADMIN") return;
-  const receipt = await db.receipt.findFirst({
-    where: { id: receiptId, ...receiptPortfolioWhere(userId) },
-    select: { id: true },
-  });
-
-  if (!receipt) {
-    throw new AuthError("No tienes acceso a este recibo.", 403);
-  }
-}
-
-export async function assertQuotePortfolioAccess(quoteId: string, userId: string) {
-  const db = getDb();
-  const user = await db.user.findUnique({
-    where: { id: userId },
-    select: { role: true },
-  });
-  if (user?.role === "ADMIN") return;
-  const quote = await db.quote.findFirst({
-    where: { id: quoteId, ...quotePortfolioWhere(userId) },
-    select: { id: true },
-  });
-
-  if (!quote) {
-    throw new AuthError("No tienes acceso a esta cotización.", 403);
-  }
-}
-
-export async function assertClaimPortfolioAccess(claimId: string, userId: string) {
-  const db = getDb();
-  const user = await db.user.findUnique({
-    where: { id: userId },
-    select: { role: true },
-  });
-  if (user?.role === "ADMIN") return;
-  const claim = await db.claim.findFirst({
-    where: { id: claimId, ...claimPortfolioWhere(userId) },
-    select: { id: true },
-  });
-
-  if (!claim) {
-    throw new AuthError("No tienes acceso a este siniestro.", 403);
-  }
+  if (!endorsement) throw new AuthError("No tienes acceso a este endoso.", 403);
 }

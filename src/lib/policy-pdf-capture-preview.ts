@@ -26,7 +26,7 @@ type DbClient = PrismaClient | Prisma.TransactionClient;
 
 type PolicyPdfCapturePreviewContext = {
   portfolioOwnerId?: string;
-  organizationId?: string;
+  organizationId: string;
   user?: AssistantUser | null;
 };
 
@@ -39,8 +39,8 @@ async function buildSourcePolicyCandidates(
   draft: PolicyPdfCaptureDraft,
   clientId: string | null,
   insurerId: string | null,
-  portfolioOwnerId?: string,
-  organizationId?: string,
+  portfolioOwnerId: string | undefined,
+  organizationId: string,
 ) : Promise<{ candidates: Array<PolicyCaptureSourceOption>; suggestedId: string | null }> {
   type SourceRow = {
     id: string;
@@ -237,14 +237,14 @@ type PolicyPdfCapturePreviewInput = {
   receiptEvidence?: import("@/lib/policy-pdf-capture.shared").PolicyPdfCaptureReceiptEvidence | null;
   relatedDocuments?: import("@/lib/policy-pdf-capture.shared").PolicyPdfCaptureRelatedDocument[];
   reviewText?: string | null;
-  context?: PolicyPdfCapturePreviewContext;
+  context: PolicyPdfCapturePreviewContext;
 };
 
 export async function buildPolicyPdfCapturePreviewFromDraft(
   input: PolicyPdfCapturePreviewInput,
   db: DbClient = getDb(),
 ): Promise<PolicyPdfCapturePreview> {
-  const { portfolioOwnerId, organizationId, user } = input.context ?? {};
+  const { portfolioOwnerId, organizationId, user } = input.context;
   const warnings = [...(input.warnings ?? []), ...(input.extraWarnings ?? [])];
   const policyNumberSuggestion = input.draft.sourcePolicyNumber;
   const policyNumberVariants = buildPolicyNumberSearchVariants(input.draft.policyNumber);
@@ -474,7 +474,7 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
 export async function buildPolicyPdfCapturePreviewFromText(
   text: string,
   db: DbClient = getDb(),
-  context: PolicyPdfCapturePreviewContext = {},
+  context: PolicyPdfCapturePreviewContext,
   options: Pick<PolicyPdfCapturePreviewInput, "requestedMode" | "skipAiReview" | "extraWarnings" | "aiFailureCode" | "relatedDocuments"> = {},
 ): Promise<PolicyPdfCapturePreview> {
   const draft = extractPolicyPdfDraftFromText(text);

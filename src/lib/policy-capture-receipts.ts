@@ -216,6 +216,7 @@ export function buildAutoCaptureReceiptPayloads(input: AutoCaptureReceiptInput):
 async function upsertAutoCaptureReceipt(db: DbClient, payload: AutoCaptureReceiptPayload) {
   const existingReceipt = await db.receipt.findFirst({
     where: {
+      organizationId: payload.organizationId,
       policyId: payload.policyId,
       receiptNumber: payload.receiptNumber,
     },

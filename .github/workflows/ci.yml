@@ -49,6 +49,9 @@ jobs:
       - name: Check tenant write scope
         run: npm run check:tenant-write-scope
 
+      - name: Check tenant read scope
+        run: npm run check:tenant-read-scope
+
       - name: Lint
         run: npm run lint
 

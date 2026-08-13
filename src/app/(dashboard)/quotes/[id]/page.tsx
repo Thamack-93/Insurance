@@ -12,12 +12,12 @@ import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
-import { quoteOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { quoteOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function QuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const scope = await requirePortfolioReadScope();
-  const quoteScope = quoteOperationalWhere(scope.portfolioOwnerId);
+  const scope = await requireOrganizationPortfolioReadScope();
+  const quoteScope = quoteOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const db = getDb();
 
   const quote = await db.quote.findFirst({

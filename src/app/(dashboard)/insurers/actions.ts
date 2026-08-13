@@ -54,7 +54,7 @@ export async function updateInsurer(id: string, values: InsurerFormValues): Prom
       await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
       const existing = await tx.insurer.findFirst({ where: { id, organizationId: context.organizationId } });
       if (!existing) throw new Error("INSURER_NOT_FOUND");
-      const updated = await tx.insurer.update({ where: { id }, data: normalizeInsurerInput(values) });
+      const updated = await tx.insurer.update({ where: { id, organizationId: context.organizationId }, data: normalizeInsurerInput(values) });
       await writeActivityLog({ organizationId: context.organizationId, action: "UPDATE_INSURER", entityType: "Insurer", entityId: updated.id, oldValue: { name: existing.name }, newValue: { name: updated.name }, userId: context.userId, db: tx });
       return updated;
     });
@@ -90,7 +90,7 @@ export async function deleteInsurer(id: string): Promise<MutationResult> {
       if (counts.quotes > 0) blockers.push(`${counts.quotes} cotización${counts.quotes !== 1 ? "es" : ""}`);
 
       if (blockers.length > 0) return { deleted: false as const, blockers };
-      await tx.insurer.delete({ where: { id } });
+      await tx.insurer.delete({ where: { id, organizationId: context.organizationId } });
       await writeActivityLog({ organizationId: context.organizationId, action: "DELETE_INSURER", entityType: "Insurer", entityId: id, oldValue: { name: existingInsurer.name }, userId: context.userId, db: tx });
       return { deleted: true as const, blockers: [] };
     });

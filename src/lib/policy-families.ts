@@ -20,6 +20,7 @@ type PolicyFamilyPolicy = {
 };
 
 export async function resolvePolicyFamilyRootId(input: {
+  organizationId: string;
   policyNumber: string;
   clientId: string;
   insurerId: string;
@@ -29,6 +30,7 @@ export async function resolvePolicyFamilyRootId(input: {
   const policyNumberVariants = buildPolicyNumberSearchVariants(input.policyNumber);
   const existing = await db.policy.findFirst({
     where: {
+      organizationId: input.organizationId,
       OR: policyNumberVariants.map((variant) => ({ policyNumber: variant })),
       clientId: input.clientId,
       insurerId: input.insurerId,

@@ -8,6 +8,8 @@ import {
   exportsDir,
   formatDateShort,
   formatMoney,
+  parseCliArgs,
+  requireOrganizationId,
   summarizeByCurrency,
   timestampForFile,
   toNumber,
@@ -16,11 +18,12 @@ import {
 } from "./_shared.ts";
 
 async function main() {
+  const organizationId = requireOrganizationId(parseCliArgs());
   const db = createDb();
   await ensureDataDirs();
 
   const commissions = await db.commission.findMany({
-    where: { status: { not: "CANCELLED" } },
+    where: { organizationId, status: { not: "CANCELLED" } },
     include: { client: true, insurer: true, policy: true, receipt: true },
     orderBy: [{ expectedDate: "asc" }, { createdAt: "asc" }],
   });

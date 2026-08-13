@@ -54,7 +54,7 @@ export async function createNotification(input: NotificationInput): Promise<Noti
         description: input.body ?? null,
         entityType,
         entityId,
-        ...(await resolveAlertEntityLink(db, entityType, entityId)),
+        ...(await resolveAlertEntityLink(db, input.organizationId, entityType, entityId)),
       },
     });
     await upsertWorkItemFromSource({

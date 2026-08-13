@@ -7,15 +7,18 @@ import {
   formatBusinessDateInput,
 } from "../src/lib/business-dates.ts";
 import { getDb } from "../src/lib/db";
+import { parseCliArgs, requireOrganizationId } from "./_shared.ts";
 
 async function main() {
   const db = getDb();
+  const organizationId = requireOrganizationId(parseCliArgs());
   const now = businessStartOfDay(new Date());
 
   console.log("Configurando pendientes de renovación...\n");
 
   const policies = await db.policy.findMany({
     where: {
+      organizationId,
       status: "ACTIVE",
       endDate: {
         gt: now,
@@ -60,8 +63,8 @@ async function main() {
         continue;
       }
 
-      const client = await db.client.findUnique({
-        where: { id: policy.clientId },
+      const client = await db.client.findFirst({
+        where: { id: policy.clientId, organizationId },
       });
 
       await db.workItem.create({

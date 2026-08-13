@@ -83,16 +83,18 @@ export type ActivityFilter = {
 };
 
 export async function getAllActivity({
+  organizationId,
   filter = {},
   page = 1,
   pageSize = 25,
 }: {
+  organizationId: string;
   filter?: ActivityFilter;
   page?: number;
   pageSize?: number;
 }): Promise<{ entries: ActivityEntry[]; total: number }> {
   const db = getDb();
-  const where: Prisma.ActivityLogWhereInput = {};
+  const where: Prisma.ActivityLogWhereInput = { organizationId };
   if (filter.entityType) where.entityType = filter.entityType;
   if (filter.entityId) where.entityId = filter.entityId;
   if (filter.actionStartsWith) {

@@ -316,9 +316,13 @@ function policyCaptureItemToSectionItem(item: Awaited<ReturnType<typeof searchPo
 }
 
 async function buildTargetedConsistencyAuditReply(user: AssistantUser, policyNumber: string): Promise<AssistantReply> {
+  if (!user.organizationId) throw new Error("ORGANIZATION_ACCESS_DENIED");
   const portfolioOwnerId = user.role === "ADMIN" ? undefined : user.id;
   const [policyMatches, relatedResults] = await Promise.all([
-    searchPolicyCaptureEntities("policy", policyNumber, { portfolioOwnerId }),
+    searchPolicyCaptureEntities("policy", policyNumber, {
+      organizationId: user.organizationId,
+      portfolioOwnerId,
+    }),
     searchUserPortfolio(user, policyNumber),
   ]);
 
@@ -629,6 +633,7 @@ async function buildPromptReply(user: AssistantUser, message: string): Promise<A
   }
 
   if (normalized.includes("riesg")) {
+    if (!user.organizationId) throw new Error("ORGANIZATION_ACCESS_DENIED");
     const findings = await detectRisks(user.role === "ADMIN" ? undefined : user.id, user.organizationId);
     const visible = findings.slice(0, 6);
     const detail = visible.length > 0

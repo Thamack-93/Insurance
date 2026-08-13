@@ -822,6 +822,7 @@ async function buildReceiptDraft(plan: AssistantMutationPlan, user: AssistantUse
 }
 
 async function buildPaymentDraft(plan: AssistantMutationPlan, user: AssistantUser) {
+  if (!user.organizationId) return null;
   const db = getDb();
   const fieldMap = new Map(plan.fields.map((field) => [field.field, field.value]));
   let selectedReceiptLabel: string | null = null;
@@ -857,7 +858,12 @@ async function buildPaymentDraft(plan: AssistantMutationPlan, user: AssistantUse
   }
 
   const receipt = await db.receipt.findFirst({
-    where: { AND: [{ id: String(next.receiptId) }, receiptOperationalWhere(getSearchScope(user))] },
+    where: {
+      AND: [
+        { id: String(next.receiptId) },
+        receiptOperationalWhere(getSearchScope(user), user.organizationId),
+      ],
+    },
     select: {
       id: true,
       receiptNumber: true,
@@ -918,6 +924,7 @@ async function buildPaymentDraft(plan: AssistantMutationPlan, user: AssistantUse
 
 async function buildEndorsementDraft(plan: AssistantMutationPlan, user: AssistantUser) {
   if (plan.operation !== "create") return null;
+  if (!user.organizationId) return null;
   const db = getDb();
   const fields = new Map(plan.fields.map((field) => [field.field, field.value]));
   const next: Record<string, unknown> = {
@@ -953,7 +960,12 @@ async function buildEndorsementDraft(plan: AssistantMutationPlan, user: Assistan
   }
 
   const policy = await db.policy.findFirst({
-    where: { AND: [{ id: String(next.policyId) }, policyOperationalWhere(getSearchScope(user))] },
+    where: {
+      AND: [
+        { id: String(next.policyId) },
+        policyOperationalWhere(getSearchScope(user), user.organizationId),
+      ],
+    },
     select: { id: true, policyNumber: true, currency: true, client: { select: { fullName: true } } },
   });
   if (!policy) return null;

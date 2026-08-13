@@ -186,7 +186,7 @@ export async function listAssistantReports(
   if (filter.status) where.status = filter.status;
 
   const reports = await client.assistantReport.findMany({
-    where,
+    where: { ...where, organizationId: filter.organizationId },
     include: {
       signals: {
         orderBy: { createdAt: "desc" },

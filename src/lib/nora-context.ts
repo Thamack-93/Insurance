@@ -20,14 +20,11 @@ export type NoraContextRef = z.infer<typeof noraContextRefSchema>;
 
 export async function resolveAuthorizedNoraContext(
   ref: NoraContextRef,
-  scope:
-    | (Pick<OrganizationContext, "organizationId" | "membershipRole"> & { portfolioOwnerId?: string })
-    | string
-    | undefined = undefined,
+  scope: Pick<OrganizationContext, "organizationId" | "membershipRole"> & { portfolioOwnerId?: string },
 ) {
   const db = getDb();
-  const portfolioOwnerId = typeof scope === "string" ? scope : scope?.membershipRole === "AGENT" ? scope.portfolioOwnerId : undefined;
-  const organizationId = typeof scope === "string" ? undefined : scope?.organizationId;
+  const portfolioOwnerId = scope.membershipRole === "AGENT" ? scope.portfolioOwnerId : undefined;
+  const organizationId = scope.organizationId;
 
   switch (ref.type) {
     case "client": {

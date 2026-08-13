@@ -14,6 +14,7 @@ type AlertLinkDb = PrismaClient | Prisma.TransactionClient;
  */
 export async function resolveAlertEntityLink(
   db: AlertLinkDb,
+  organizationId: string,
   entityType: string | null | undefined,
   entityId: string | null | undefined,
 ): Promise<{ clientId?: string; policyId?: string; receiptId?: string }> {
@@ -21,15 +22,15 @@ export async function resolveAlertEntityLink(
 
   switch (entityType.toUpperCase()) {
     case "CLIENT": {
-      const found = await db.client.findUnique({ where: { id: entityId }, select: { id: true } });
+      const found = await db.client.findFirst({ where: { id: entityId, organizationId }, select: { id: true } });
       return found ? { clientId: found.id } : {};
     }
     case "POLICY": {
-      const found = await db.policy.findUnique({ where: { id: entityId }, select: { id: true } });
+      const found = await db.policy.findFirst({ where: { id: entityId, organizationId }, select: { id: true } });
       return found ? { policyId: found.id } : {};
     }
     case "RECEIPT": {
-      const found = await db.receipt.findUnique({ where: { id: entityId }, select: { id: true } });
+      const found = await db.receipt.findFirst({ where: { id: entityId, organizationId }, select: { id: true } });
       return found ? { receiptId: found.id } : {};
     }
     default:

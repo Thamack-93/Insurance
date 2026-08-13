@@ -203,7 +203,7 @@ export async function getOnboardingStatus(): Promise<OnboardingStatus> {
     db.client.count({ where: clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId) }),
     db.policy.count({ where: policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) }),
     db.receipt.count({ where: receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) }),
-    db.systemSetting.findUnique({ where: { key: "onboardingDismissed" } }),
+    db.systemSetting.findUnique({ where: { key: `onboardingDismissed:${scope.organizationId}` } }),
   ]);
   return {
     insurers,

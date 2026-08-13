@@ -1037,8 +1037,10 @@ async function getTelegramReceipts(input: {
   client?: DbClient;
 }): Promise<TelegramListResult<TelegramReceiptItem>> {
   const db = input.client ?? getDb();
+  const organizationId = await requireActiveTelegramOrganization(input.userId, db);
 
   const where: Prisma.ReceiptWhereInput = {
+    organizationId,
     client: { portfolioOwnerId: input.userId },
     dueDate: {
       ...(input.from ? { gte: input.from } : {}),
@@ -1099,8 +1101,10 @@ async function getTelegramRenewals(input: {
   client?: DbClient;
 }): Promise<TelegramListResult<TelegramRenewalItem>> {
   const db = input.client ?? getDb();
+  const organizationId = await requireActiveTelegramOrganization(input.userId, db);
 
   const where: Prisma.PolicyWhereInput = {
+    organizationId,
     client: { portfolioOwnerId: input.userId },
     endDate: { gte: input.from, lte: input.to },
     ...ACTIVE_RENEWAL_POLICY_WHERE,
@@ -1547,7 +1551,8 @@ export async function buildTelegramUpcomingReceiptsReply(userId: string, days: n
 }
 
 export async function buildTelegramTasksReply(userId: string, days: number, page = 1, client?: DbClient) {
-  void client;
+  const db = client ?? getDb();
+  const organizationId = await requireActiveTelegramOrganization(userId, db);
   const dayStart = businessStartOfDay(new Date());
   const to = businessEndOfDay(businessAddDays(dayStart, days));
   const [total, tasks] = await Promise.all([
@@ -1557,6 +1562,7 @@ export async function buildTelegramTasksReply(userId: string, days: number, page
       from: dayStart,
       to,
       portfolioOwnerId: userId,
+      organizationId,
     }),
     getOpenWorkItems({
       from: dayStart,
@@ -1564,6 +1570,7 @@ export async function buildTelegramTasksReply(userId: string, days: number, page
       limit: TELEGRAM_QUERY_RESULT_LIMIT,
       skip: (page - 1) * TELEGRAM_QUERY_RESULT_LIMIT,
       portfolioOwnerId: userId,
+      organizationId,
     }),
   ]);
 
@@ -1628,6 +1635,7 @@ function startOfDayInTimeZone(date: Date, timeZone: string) {
 
 export async function buildTelegramDailyDigestMessagesByUser(userId: string, client?: DbClient, timeZone = DEFAULT_TIMEZONE) {
   const db = client ?? getDb();
+  const organizationId = await requireActiveTelegramOrganization(userId, db);
   const dayStart = startOfDayInTimeZone(new Date(), timeZone);
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
   const tomorrowStart = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
@@ -1661,9 +1669,10 @@ export async function buildTelegramDailyDigestMessagesByUser(userId: string, cli
       limit: TELEGRAM_DIGEST_SECTION_LIMIT,
       client,
     }),
-    getOpenWorkItems({ to: dayStart, limit: TELEGRAM_DIGEST_SECTION_LIMIT, portfolioOwnerId: userId }),
+    getOpenWorkItems({ organizationId, to: dayStart, limit: TELEGRAM_DIGEST_SECTION_LIMIT, portfolioOwnerId: userId }),
     db.commission.findMany({
       where: {
+        organizationId,
         client: { portfolioOwnerId: userId },
         expectedDate: { gte: dayStart, lte: new Date(dayStart.getTime() + 30 * 24 * 60 * 60 * 1000) },
         status: { in: ["EXPECTED", "PENDING", "OVERDUE"] },
@@ -1754,6 +1763,7 @@ export async function sendTelegramBirthdayReminderForUser(input: {
   const timeZone = input.timeZone ?? DEFAULT_TIMEZONE;
   const now = input.now ?? new Date();
   const birthdays = await getBirthdayRemindersForUser({
+    organizationId,
     userId: input.userId,
     client: db,
     timeZone,
@@ -2118,8 +2128,7 @@ async function createTelegramPolicyDraftFromPdf(input: {
     extractedText,
     db,
     {
-      // Telegram capture is outside the authenticated tenant slice. Keep its
-      // assistant scope fail-closed until the channel carries explicit org context.
+      organizationId,
       portfolioOwnerId: user?.id,
       user: user ? { id: user.id, role: "AGENT" } : null,
     },
@@ -2769,6 +2778,8 @@ export async function connectTelegramChannelFromCode(input: {
   chatType: string;
   client?: DbClient;
 }): Promise<TelegramActionResult> {
+  // TENANT_READ_SCOPE_GLOBAL_TOKEN: the random, hashed, single-use token is the
+  // authorization locator; its persisted organizationId scopes every follow-up.
   const db = input.client ?? getDb();
   const chatId = normalizeChatId(input.chatId);
   const normalizedCode = normalizeTelegramLinkCode(input.code);
@@ -2969,12 +2980,13 @@ export async function disconnectTelegramChannelForUser(input: {
 
 export async function deliverTelegramNotificationEvent(
   eventId: string,
+  organizationId: string,
   client?: DbClient,
 ): Promise<NotificationEventRecord | null> {
   const db = client ?? getDb();
 
   try {
-    const event = await db.notificationEvent.findUnique({ where: { id: eventId } });
+    const event = await db.notificationEvent.findFirst({ where: { id: eventId, organizationId } });
     if (!event) return null;
     if (event.status === "SENT" || event.status === "FAILED" || event.status === "SKIPPED") {
       return event as NotificationEventRecord;
@@ -3046,7 +3058,7 @@ export async function createAndDeliverTelegramNotificationEvent(input: {
     return event;
   }
 
-  return deliverTelegramNotificationEvent(event.id);
+  return deliverTelegramNotificationEvent(event.id, input.organizationId);
 }
 
 export async function processTelegramWebhookUpdate(

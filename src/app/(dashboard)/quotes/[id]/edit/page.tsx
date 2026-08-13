@@ -9,19 +9,19 @@ import type { QuoteFormValues } from "@/lib/validations";
 import {
   clientOperationalWhere,
   quoteOperationalWhere,
-  requirePortfolioReadScope,
+  requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
 
 export default async function EditQuotePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const db = getDb();
 
   const [quote, clients, insurers] = await Promise.all([
-    db.quote.findFirst({ where: { id, ...quoteOperationalWhere(scope.portfolioOwnerId) } }),
+    db.quote.findFirst({ where: { id, ...quoteOperationalWhere(scope.portfolioOwnerId, scope.organizationId) } }),
     db.client.findMany({
       where: {
-        ...clientOperationalWhere(scope.portfolioOwnerId),
+        ...clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
         status: { not: "ARCHIVED" },
       },
       orderBy: { fullName: "asc" },

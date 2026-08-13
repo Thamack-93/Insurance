@@ -6,16 +6,16 @@ import { getDb } from "@/lib/db";
 import {
   clientOperationalWhere,
   policyOperationalWhere,
-  requirePortfolioReadScope,
+  requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
 
 export default async function NewClaimPage() {
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const db = getDb();
   const [clients, policies, insurers] = await Promise.all([
     db.client.findMany({
       where: {
-        ...clientOperationalWhere(scope.portfolioOwnerId),
+        ...clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
         status: { not: "ARCHIVED" },
       },
       orderBy: { fullName: "asc" },
@@ -23,7 +23,7 @@ export default async function NewClaimPage() {
     }),
     db.policy.findMany({
       where: {
-        ...policyOperationalWhere(scope.portfolioOwnerId),
+        ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
         status: { not: "CANCELLED" },
       },
       orderBy: { policyNumber: "asc" },

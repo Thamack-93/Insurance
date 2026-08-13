@@ -1,16 +1,18 @@
-import { closeDb, createDb } from "./_shared";
+import { closeDb, createDb, parseCliArgs, requireOrganizationId } from "./_shared";
 
 const db = createDb();
 
 async function main() {
+  const organizationId = requireOrganizationId(parseCliArgs());
   try {
     const [totalClients, clientsWithBirthDate, personsWithBirthDate, eligiblePersons, eligiblePersonsWithBirthDate, eligibleWithoutBirthDate, eligibleWithoutOwner] =
       await Promise.all([
-      db.client.count(),
-      db.client.count({ where: { birthDate: { not: null } } }),
-      db.client.count({ where: { type: "PERSON", birthDate: { not: null } } }),
+      db.client.count({ where: { organizationId } }),
+      db.client.count({ where: { organizationId, birthDate: { not: null } } }),
+      db.client.count({ where: { organizationId, type: "PERSON", birthDate: { not: null } } }),
       db.client.count({
         where: {
+          organizationId,
           type: "PERSON",
           status: "ACTIVE",
           policies: { some: { status: "ACTIVE" } },
@@ -18,6 +20,7 @@ async function main() {
       }),
       db.client.count({
         where: {
+          organizationId,
           type: "PERSON",
           status: "ACTIVE",
           birthDate: { not: null },
@@ -26,6 +29,7 @@ async function main() {
       }),
       db.client.count({
         where: {
+          organizationId,
           type: "PERSON",
           status: "ACTIVE",
           birthDate: null,
@@ -34,6 +38,7 @@ async function main() {
       }),
       db.client.count({
         where: {
+          organizationId,
           type: "PERSON",
           status: "ACTIVE",
           portfolioOwnerId: null,

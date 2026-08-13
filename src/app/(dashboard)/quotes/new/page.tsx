@@ -3,15 +3,15 @@ import { QuoteForm } from "@/components/forms/quote-form";
 import { createQuoteDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
-import { clientOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { clientOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function NewQuotePage() {
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const db = getDb();
   const [clients, insurers] = await Promise.all([
     db.client.findMany({
       where: {
-        ...clientOperationalWhere(scope.portfolioOwnerId),
+        ...clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
         status: { not: "ARCHIVED" },
       },
       orderBy: { fullName: "asc" },

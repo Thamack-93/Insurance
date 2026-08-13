@@ -12,6 +12,7 @@ import {
   formatMoney,
   getFlag,
   parseCliArgs,
+  requireOrganizationId,
   formatCurrencyBreakdown,
   summarizeByCurrency,
   timestampForFile,
@@ -22,6 +23,7 @@ import {
 
 async function main() {
   const args = parseCliArgs();
+  const organizationId = requireOrganizationId(args);
   const horizonDays = Number(getFlag(args, "days", "60"));
   const db = createDb();
   const now = today();
@@ -30,6 +32,7 @@ async function main() {
 
   const receipts = await db.receipt.findMany({
     where: {
+      organizationId,
       dueDate: { gte: now, lte: horizon },
       status: { in: ["PENDING", "OVERDUE"] },
     },

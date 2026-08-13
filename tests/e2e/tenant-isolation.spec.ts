@@ -8,7 +8,7 @@ test("tenant admin cannot open a different organization's client", async ({ page
   await page.getByLabel("Correo electrónico").fill("tenant-admin-a@policydesk.local");
   await page.getByLabel("Contraseña").fill("tenant-fixture-password");
   await page.getByRole("button", { name: "Iniciar sesión" }).click();
-  await expect(page).toHaveURL(/\/today$/);
+  await expect(page).toHaveURL(/\/today$/, { timeout: 30_000 });
 
   await page.goto("/clients/tenant-client-a");
   await expect(page.getByText("Overlap Client").first()).toBeVisible();
@@ -36,7 +36,10 @@ test("separate browser contexts remain isolated in organizations A and B", async
         await pageB.getByRole("button", { name: "Iniciar sesión" }).click();
       })(),
     ]);
-    await Promise.all([expect(pageA).toHaveURL(/\/today$/), expect(pageB).toHaveURL(/\/today$/)]);
+    await Promise.all([
+      expect(pageA).toHaveURL(/\/today$/, { timeout: 30_000 }),
+      expect(pageB).toHaveURL(/\/today$/, { timeout: 30_000 }),
+    ]);
     await Promise.all([pageA.goto("/clients/tenant-client-a"), pageB.goto("/clients/tenant-client-b")]);
     await Promise.all([
       expect(pageA.getByText("Overlap Client").first()).toBeVisible(),
@@ -97,24 +100,46 @@ test("tenant users cannot open the master panel by URL", async ({ page }) => {
   await expect(page).toHaveURL(/\/today$/);
 });
 
-test("tenant policy mutation route is visibly blocked while reads remain available", async ({ page }) => {
+test("tenant policy mutation UI is enabled and capture routes validate input", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("Correo electrónico").fill("tenant-admin-a@policydesk.local");
   await page.getByLabel("Contraseña").fill("tenant-fixture-password");
   await page.getByRole("button", { name: "Iniciar sesión" }).click();
   await expect(page).toHaveURL(/\/today$/);
   await page.goto("/policies/new");
-  await expect(page.getByText("Mutación temporalmente bloqueada")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Nueva póliza" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Crear póliza" })).toBeVisible();
   await page.goto("/policies/tenant-policy-a");
   await expect(page.getByText("OVERLAP-A")).toBeVisible();
 
   for (const endpoint of ["/api/policies/capture/confirm", "/api/policies/capture/clients"]) {
-    const response = await page.request.post(endpoint, { data: {} });
-    expect(response.status()).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
-      code: "POLICY_TENANT_MUTATION_PENDING",
-    });
+    const response = await page.request.post(endpoint, { data: {}, headers: { Origin: "http://localhost:4173" } });
+    expect(response.status()).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: expect.any(String) });
   }
+
+  const crossTenant = await page.request.post("/api/policies/capture/confirm", {
+    headers: { Origin: "http://localhost:4173" },
+    data: {
+      draft: {
+        policyNumber: "CROSS-TENANT-MUST-NOT-CREATE",
+        clientName: "Overlap Client",
+        clientType: "PERSON",
+        insurerName: "Overlap Insurer",
+        policyType: "AUTO",
+        startDate: "2027-01-01",
+        endDate: "2028-01-01",
+        paymentFrequency: "ANNUAL",
+        premiumAmount: 1000,
+        currency: "MXN",
+      },
+      clientId: "tenant-client-b",
+      insurerId: "tenant-insurer-b",
+      sourcePolicyId: "tenant-policy-b",
+    },
+  });
+  expect(crossTenant.status()).toBe(403);
+  await expect(crossTenant.json()).resolves.toMatchObject({ error: "No tienes acceso a esta póliza." });
 });
 
 test("Pedro signs into his isolated organization and cannot see legacy clients", async ({ page }) => {

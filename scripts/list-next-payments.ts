@@ -10,12 +10,14 @@ import {
   formatMoney,
   getFlag,
   parseCliArgs,
+  requireOrganizationId,
   printTable,
   summarizeByCurrency,
 } from "./_shared.ts";
 
 async function main() {
   const args = parseCliArgs();
+  const organizationId = requireOrganizationId(args);
   const horizonDays = Number(getFlag(args, "days", "30"));
   const limit = Number(getFlag(args, "limit", "20"));
   const db = createDb();
@@ -24,13 +26,14 @@ async function main() {
 
   const [overdue, upcoming] = await Promise.all([
     db.receipt.findMany({
-      where: { dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { organizationId, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, insurer: true, policy: true },
       orderBy: { dueDate: "asc" },
       take: limit,
     }),
     db.receipt.findMany({
       where: {
+        organizationId,
         dueDate: { gte: now, lte: horizon },
         status: { in: ["PENDING", "OVERDUE"] },
       },

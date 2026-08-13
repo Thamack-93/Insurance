@@ -78,7 +78,7 @@ export default async function NotificationSettingsPage() {
               <CardDescription>Solo se administra tu canal de Telegram y el envío manual.</CardDescription>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
-              {user.role === "ADMIN"
+              {context.membershipRole !== "AGENT"
                 ? "Cuenta de administrador activa."
                 : "Cuenta de agente activa."}
             </CardContent>
@@ -128,7 +128,7 @@ export default async function NotificationSettingsPage() {
           </Card>
         </section>
 
-        {user.role === "ADMIN" ? (
+        {context.membershipRole !== "AGENT" ? (
           <Card className="border-border/60 bg-card/85 shadow-sm">
             <CardHeader className="border-b border-border/70">
               <CardTitle className="text-base">Webhook de Telegram</CardTitle>

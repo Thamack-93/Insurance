@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getBackupDownload } from "@/lib/backup";
-import { AuthError, requireAdmin } from "@/lib/auth";
+import { AuthError, requireSuperAdmin } from "@/lib/auth";
 import { logError } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -11,7 +11,7 @@ export async function GET(
   { params }: { params: Promise<{ filename: string }> },
 ) {
   try {
-    await requireAdmin();
+    await requireSuperAdmin();
     const { filename } = await params;
     const decoded = decodeURIComponent(filename);
     const result = await getBackupDownload(decoded);

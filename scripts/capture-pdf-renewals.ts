@@ -112,13 +112,14 @@ async function resolveActorId(db: ReturnType<typeof getDb>) {
 
 async function resolveSourcePolicy(
   db: ReturnType<typeof getDb>,
+  organizationId: string,
   draft: PolicyPdfCaptureDraft,
   targetStartDate: Date,
   exactPolicyNumber: string | null,
 ): Promise<SourcePolicy> {
   if (exactPolicyNumber) {
     const exact = await db.policy.findFirst({
-      where: { policyNumber: exactPolicyNumber },
+      where: { organizationId, policyNumber: exactPolicyNumber },
       select: {
         id: true,
         policyNumber: true,
@@ -140,6 +141,7 @@ async function resolveSourcePolicy(
   if (!draft.serialNumber) {
     const fallback = await db.policy.findFirst({
       where: {
+        organizationId,
         policyType: draft.policyType,
         client: { fullName: { contains: draft.clientName, mode: "insensitive" } },
         endDate: { lt: targetStartDate },
@@ -168,6 +170,7 @@ async function resolveSourcePolicy(
 
   const candidates = await db.policy.findMany({
     where: {
+      organizationId,
       policyType: "AUTO",
       insuredAssets: {
         some: { serialNumber: draft.serialNumber },
@@ -198,6 +201,7 @@ async function resolveSourcePolicy(
   if (!candidates.length) {
     const fallback = await db.policy.findFirst({
       where: {
+        organizationId,
         policyType: draft.policyType,
         client: { fullName: { contains: draft.clientName, mode: "insensitive" } },
         endDate: { lt: targetStartDate },
@@ -252,7 +256,7 @@ async function captureRenewalCase(
     captureCase.label === "19941U01"
       ? draft.sourcePolicyNumber ?? suggestPreviousPolicyNumber(draft.policyNumber)
       : draft.sourcePolicyNumber ?? null;
-  const sourcePolicy = await resolveSourcePolicy(db, draft, targetStartDate, sourcePolicyNumber);
+  const sourcePolicy = await resolveSourcePolicy(db, organizationId, draft, targetStartDate, sourcePolicyNumber);
   const familyRootId = sourcePolicy.familyRootId ?? sourcePolicy.id;
 
   const existingTarget = await db.policy.findFirst({

@@ -10,19 +10,19 @@ import {
   claimOperationalWhere,
   clientOperationalWhere,
   policyOperationalWhere,
-  requirePortfolioReadScope,
+  requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
 
 export default async function EditClaimPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const db = getDb();
 
   const [claim, clients, policies, insurers] = await Promise.all([
-    db.claim.findFirst({ where: { id, ...claimOperationalWhere(scope.portfolioOwnerId) } }),
+    db.claim.findFirst({ where: { id, ...claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId) } }),
     db.client.findMany({
       where: {
-        ...clientOperationalWhere(scope.portfolioOwnerId),
+        ...clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
         status: { not: "ARCHIVED" },
       },
       orderBy: { fullName: "asc" },
@@ -30,7 +30,7 @@ export default async function EditClaimPage({ params }: { params: Promise<{ id: 
     }),
     db.policy.findMany({
       where: {
-        ...policyOperationalWhere(scope.portfolioOwnerId),
+        ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
         status: { not: "CANCELLED" },
       },
       orderBy: { policyNumber: "asc" },

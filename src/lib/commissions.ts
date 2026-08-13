@@ -206,14 +206,14 @@ export async function updateCommissionStatus(
 }
 
 export async function getCommissionStats(
-  dateRange?: { start: Date; end: Date },
-  scope?: CommissionScope,
+  dateRange: { start: Date; end: Date } | undefined,
+  scope: CommissionScope,
 ) {
   const db = getDb();
   
   try {
     const whereClause: Prisma.CommissionWhereInput = {
-      ...commissionOperationalWhere(scope?.portfolioOwnerId, scope?.organizationId),
+      ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
       ...(dateRange
         ? {
           expectedDate: {
@@ -225,7 +225,7 @@ export async function getCommissionStats(
     };
 
     const stats = await db.commission.aggregate({
-      where: whereClause,
+      where: { ...whereClause, organizationId: scope.organizationId },
       _sum: {
         expectedAmount: true,
         actualAmount: true,
@@ -237,7 +237,7 @@ export async function getCommissionStats(
 
     const statusBreakdown = await db.commission.groupBy({
       by: ["status"],
-      where: whereClause,
+      where: { ...whereClause, organizationId: scope.organizationId },
       _sum: {
         expectedAmount: true,
         actualAmount: true,

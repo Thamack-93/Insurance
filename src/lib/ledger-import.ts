@@ -1442,9 +1442,12 @@ export async function applyLedgerImportBatch(input: {
 
     const endorsementNumber = cleanText(policyRow.endorsementNumber);
     const [policy, receipt, existingEndorsement] = await Promise.all([
-      db.policy.findUnique({ where: { id: row.policyId }, select: { id: true } }),
-      db.receipt.findUnique({
-        where: { id: row.receiptId },
+      db.policy.findFirst({
+        where: { id: row.policyId, organizationId: input.organizationId },
+        select: { id: true },
+      }),
+      db.receipt.findFirst({
+        where: { id: row.receiptId, organizationId: input.organizationId },
         select: {
           id: true,
           policyId: true,
@@ -1454,8 +1457,12 @@ export async function applyLedgerImportBatch(input: {
           endorsementId: true,
         },
       }),
-      db.policyEndorsement.findUnique({
-        where: { policyId_endorsementNumber: { policyId: row.policyId, endorsementNumber } },
+      db.policyEndorsement.findFirst({
+        where: {
+          organizationId: input.organizationId,
+          policyId: row.policyId,
+          endorsementNumber,
+        },
         select: { id: true },
       }),
     ]);

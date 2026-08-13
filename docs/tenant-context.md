@@ -26,11 +26,16 @@ puede usar `/platform` y no obtiene acceso operativo por su rol global.
 - Users: Owner/Admin administran únicamente memberships y cuentas de su propia
   organización. La autorización se revalida y bloquea dentro de la misma
   transacción que escribe.
-- Policies: listado, detalle y relaciones defensivamente filtradas por
-  organización. Las mutaciones de crear, editar, borrar y actualizar calidad
-  están bloqueadas con `POLICY_TENANT_MUTATION_PENDING` hasta Cycle 2B.
+- Policies y endosos: listado, detalle, alta, edición, calidad, eliminación y
+  captura PDF con relaciones validadas dentro de la organización y revalidación
+  transaccional del contexto.
 - Nora: búsquedas informativas y referencias autorizadas dentro de la
   organización seleccionada.
+
+Los gates `check:tenant-read-scope` y `check:tenant-write-scope` impiden
+introducir lecturas o writers de modelos protegidos sin `organizationId` o sin
+pasar por un helper tenant autorizado. Los scripts operativos también fallan
+cerradamente cuando no reciben una organización explícita.
 
 El Excel incluye organización y timestamp, usa filename saneado, no se cachea y
 escapa valores que podrían interpretarse como fórmulas.
@@ -44,13 +49,14 @@ sin renderizar `oldValue` ni `newValue`. No crea organizaciones, no modifica
 memberships y no concede acceso operativo: cualquier operación requiere una
 membership activa y selección tenant explícita.
 
-## Pendientes explícitos
+## Cobertura operativa ampliada
 
-Filtrado defensivo, pendiente de slice completa: receipts, payments, claims,
-quotes, insurers, documents, WorkItems/tasks y risks. Fuera de alcance de esta
-PR: mutaciones de esas áreas, reports, commissions, data-quality, Telegram,
-imports, maintenance y jobs. Ninguna de estas áreas permite asumir contexto
-tenant para escribir.
+Receipts, payments, claims, quotes, insurers, documents, WorkItems/tasks,
+risks, reports, commissions, data-quality, Telegram, imports, maintenance y
+jobs usan alcance organizacional explícito. Los jobs enumeran organizaciones
+activas y los scripts operativos requieren `--organization` o
+`POLICYDESK_ORGANIZATION_ID`. El cutover productivo, billing y las mutaciones
+del panel master permanecen como operaciones separadas y controladas.
 
 ## Retirada de singleton
 
