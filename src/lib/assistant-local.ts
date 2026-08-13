@@ -199,13 +199,14 @@ function buildConsistencySectionSubtitle(policy: {
 }
 
 async function buildConsistencyAuditReply(user: AssistantUser): Promise<AssistantReply> {
+  if (!user.organizationId) throw new Error("ORGANIZATION_ACCESS_DENIED");
   const portfolioOwnerId = user.role === "ADMIN" ? undefined : user.id;
   const [riskFindings, policyScores, receiptIssues, renewalSuggestions, latestRun] = await Promise.all([
     detectRisks(portfolioOwnerId, user.organizationId),
-    getPolicyDataQualityScores(),
-    getReceiptReviewIssues(),
-    getRenewalReviewSuggestions(),
-    getLatestMaintenanceRun("POLICY_VIGENCY_AUDIT"),
+    getPolicyDataQualityScores(user.organizationId, portfolioOwnerId),
+    getReceiptReviewIssues(user.organizationId, portfolioOwnerId),
+    getRenewalReviewSuggestions(user.organizationId, portfolioOwnerId),
+    getLatestMaintenanceRun("POLICY_VIGENCY_AUDIT", user.organizationId),
   ]);
 
   const policyScoresByNumber = new Map(policyScores.map((policy) => [policy.poliza, policy]));

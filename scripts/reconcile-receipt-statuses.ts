@@ -5,6 +5,7 @@ import { getDb } from "@/lib/db";
 import { SYSTEM_USER_ID } from "@/lib/auth";
 import { toNumber } from "@/lib/money";
 import { reconcileReceiptState, type ReceiptPaymentSnapshot, type ReceiptStatus } from "@/lib/receipt-reconciliation";
+import { parseCliArgs, requireOrganizationId } from "./_shared.ts";
 
 type ReceiptRow = {
   id: string;
@@ -97,10 +98,12 @@ function parseArgs(argv = process.argv.slice(2)) {
 
 async function main() {
   const args = parseArgs();
+  const organizationId = requireOrganizationId(parseCliArgs());
   const db = getDb();
   const startedAt = new Date();
 
   const receipts = await db.receipt.findMany({
+    where: { organizationId },
     include: {
       policy: {
         select: {
@@ -192,7 +195,7 @@ async function main() {
         for (const { receipt, reconciliation, shouldUpdate } of updates) {
           if (shouldUpdate) {
             const updated = await tx.receipt.update({
-              where: { id: receipt.id },
+              where: { id: receipt.id, organizationId },
               data: {
                 status: reconciliation.nextStatus,
                 paidDate: reconciliation.nextPaidDate,
@@ -203,6 +206,7 @@ async function main() {
 
             await tx.activityLog.create({
               data: {
+                organizationId,
                 entityType: "Receipt",
                 entityId: receipt.id,
                 action: "RECEIPT_RECONCILED",

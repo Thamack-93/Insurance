@@ -7,6 +7,7 @@ import { businessEndOfDay, businessStartOfDay, parseBusinessDateInput } from "@/
 import { writeActivityLog } from "@/lib/activity-log";
 import { reconcileReceiptState } from "@/lib/receipt-reconciliation";
 import { toNumber } from "@/lib/money";
+import { parseCliArgs, requireOrganizationId } from "./_shared.ts";
 
 type ReceiptRow = {
   organizationId: string;
@@ -159,15 +160,15 @@ function buildPlanRow(receipt: ReceiptRow): PlanRow {
   };
 }
 
-async function resolveOpenIssues(receiptId: string, db = getDb()) {
+async function resolveOpenIssues(organizationId: string, receiptId: string, db = getDb()) {
   const openIssues = await db.receiptReconciliationIssue.findMany({
-    where: { receiptId, status: "OPEN" },
+    where: { organizationId, receiptId, status: "OPEN" },
     select: { id: true },
   });
 
   for (const issue of openIssues) {
     await db.receiptReconciliationIssue.update({
-      where: { id: issue.id },
+      where: { id: issue.id, organizationId },
       data: {
         status: "RESOLVED",
         reviewedAt: new Date(),
@@ -178,9 +179,9 @@ async function resolveOpenIssues(receiptId: string, db = getDb()) {
   }
 }
 
-async function reconcileReceipt(receiptId: string, actorId: string, db = getDb()) {
-  const receipt = await db.receipt.findUnique({
-    where: { id: receiptId },
+async function reconcileReceipt(organizationId: string, receiptId: string, actorId: string, db = getDb()) {
+  const receipt = await db.receipt.findFirst({
+    where: { id: receiptId, organizationId },
     include: {
       payments: {
         orderBy: [{ paidDate: "desc" }, { createdAt: "desc" }],
@@ -218,7 +219,7 @@ async function reconcileReceipt(receiptId: string, actorId: string, db = getDb()
         : receipt.reconciliationNote;
 
   await db.receipt.update({
-    where: { id: receipt.id },
+    where: { id: receipt.id, organizationId },
     data: {
       status: snapshot.nextStatus,
       paidDate: snapshot.nextPaidDate,
@@ -232,14 +233,15 @@ async function reconcileReceipt(receiptId: string, actorId: string, db = getDb()
   if (snapshot.shouldReview) {
     const reason = snapshot.reasons.join(",") || "REVIEW_REQUIRED";
     const existingIssue = await db.receiptReconciliationIssue.findFirst({
-      where: { receiptId: receipt.id, reason, status: "OPEN" },
+      where: { organizationId, receiptId: receipt.id, reason, status: "OPEN" },
       select: { id: true },
     });
 
     if (existingIssue) {
       await db.receiptReconciliationIssue.update({
-        where: { id: existingIssue.id },
+        where: { id: existingIssue.id, organizationId },
         data: {
+          organizationId,
           detailsJson: JSON.stringify(snapshot),
           expectedAmount: receipt.amount,
           paidAmount: snapshot.paidAmount,
@@ -262,6 +264,7 @@ async function reconcileReceipt(receiptId: string, actorId: string, db = getDb()
 
   if (snapshot.nextStatus === "PAID" || snapshot.shouldReview) {
     await writeActivityLog({
+      organizationId,
       entityType: "Receipt",
       entityId: receipt.id,
       action: "RECEIPT_RECONCILED",
@@ -310,7 +313,7 @@ async function forceCloseReviewedReceipt(receipt: ReceiptRow, actorId: string, d
   }
 
   const updated = await db.receipt.update({
-    where: { id: receipt.id },
+    where: { id: receipt.id, organizationId: receipt.organizationId },
     data: {
       status: "PAID",
       paidDate: receipt.dueDate,
@@ -321,9 +324,10 @@ async function forceCloseReviewedReceipt(receipt: ReceiptRow, actorId: string, d
     },
   });
 
-  await resolveOpenIssues(receipt.id, db);
+  await resolveOpenIssues(receipt.organizationId, receipt.id, db);
 
   await writeActivityLog({
+    organizationId: receipt.organizationId,
     entityType: "Receipt",
     entityId: receipt.id,
     action: "HISTORICAL_RECEIPT_FORCE_APPLY",
@@ -350,6 +354,7 @@ async function forceCloseReviewedReceipt(receipt: ReceiptRow, actorId: string, d
 
 async function main() {
   const args = parseArgs();
+  const organizationId = requireOrganizationId(parseCliArgs());
   const db = getDb();
   const startedAt = new Date();
   const yearStart = businessStartOfDay(parseBusinessDateInput("2023-01-01"));
@@ -357,6 +362,7 @@ async function main() {
 
   const receipts = (await db.receipt.findMany({
     where: {
+      organizationId,
       dueDate: {
         gte: yearStart,
         lte: yearEnd,
@@ -462,15 +468,15 @@ async function main() {
         });
       }
 
-      await reconcileReceipt(receipt.id, SYSTEM_USER_ID, db);
-      await resolveOpenIssues(receipt.id, db);
+      await reconcileReceipt(organizationId, receipt.id, SYSTEM_USER_ID, db);
+      await resolveOpenIssues(organizationId, receipt.id, db);
       report.receiptsApplied += 1;
       report.applied.push(plan);
       continue;
     }
 
     const updated = await db.receipt.update({
-      where: { id: receipt.id },
+      where: { id: receipt.id, organizationId },
       data: {
         status: "PAID",
         paidDate: receipt.dueDate,
@@ -480,9 +486,10 @@ async function main() {
         updatedById: SYSTEM_USER_ID,
       },
     });
-    await resolveOpenIssues(receipt.id, db);
+    await resolveOpenIssues(organizationId, receipt.id, db);
 
     await writeActivityLog({
+      organizationId,
       entityType: "Receipt",
       entityId: updated.id,
       action: "HISTORICAL_RECEIPT_CLOSE",

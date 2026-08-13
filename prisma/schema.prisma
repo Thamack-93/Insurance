@@ -1251,7 +1251,7 @@ model PolicyRenewalSuggestion {
   mergedBy     User?           @relation("PolicyRenewalSuggestionMergedBy", fields: [mergedById], references: [id], onDelete: SetNull)
   reviewedBy     User?           @relation("PolicyRenewalSuggestionReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
 
-  @@unique([sourcePolicyId, targetPolicyId])
+  @@unique([organizationId, sourcePolicyId, targetPolicyId], map: "PolicyRenewalSuggestion_org_source_target_key")
   @@index([maintenanceRunId])
   @@index([sourcePolicyId])
   @@index([sourcePolicyId, status])
@@ -1287,7 +1287,7 @@ model DataQualitySuppressionRule {
   renewalSuggestions PolicyRenewalSuggestion[] @relation("RenewalSuggestionSuppressionRule")
   ledgerIssues LedgerImportIssue[] @relation("LedgerIssueSuppressionRule")
 
-  @@unique([category, issueCode, criteriaJson])
+  @@unique([organizationId, category, issueCode, criteriaJson], map: "DataQualitySuppressionRule_org_category_issue_criteria_key")
   @@index([category])
   @@index([issueCode])
   @@index([active])

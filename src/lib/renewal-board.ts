@@ -250,6 +250,7 @@ export const RENEWAL_SCAN_PAGE_SIZE = 200;
  * Se pagina con cursor para no cargar la cartera entera en memoria.
  */
 export async function forEachRenewalCandidate(
+  organizationId: string,
   handle: (card: RenewalBoardCard) => Promise<void>,
   today: Date = businessToday(),
 ): Promise<{ scanned: number }> {
@@ -259,7 +260,7 @@ export async function forEachRenewalCandidate(
 
   for (;;) {
     const policies = await db.policy.findMany({
-      where: ACTIVE_RENEWAL_POLICY_WHERE,
+      where: { ...ACTIVE_RENEWAL_POLICY_WHERE, organizationId },
       include: renewalBoardInclude,
       orderBy: [{ endDate: "asc" }, { id: "asc" }],
       take: RENEWAL_SCAN_PAGE_SIZE,

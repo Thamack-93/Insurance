@@ -26,7 +26,7 @@ import { formatCurrency } from "@/lib/money";
 import { ClientResolutionActions, PolicyResolutionActions, RenewalResolutionActions } from "@/components/risk-resolution/resolution-actions";
 import { PageRefreshTicker } from "@/components/risk-resolution/page-refresh-ticker";
 import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-button";
-import { requireAdminOrRedirect } from "@/lib/auth";
+import { requireOrganizationRole } from "@/lib/organization-context";
 
 function riskHref(entityType: string, entityId: string) {
   if (entityType === "Client") return `/clients/${entityId}`;
@@ -109,7 +109,7 @@ export default async function RisksPage({
 }: {
   searchParams?: Promise<{ tab?: string; alertType?: string; issueCode?: string; q?: string }>;
 }) {
-  await requireAdminOrRedirect();
+  const organizationContext = await requireOrganizationRole(["OWNER", "ADMIN"]);
   const params = (await searchParams) ?? {};
   const initialTab = params.tab === "completitud" ? "completitud" : "hallazgos";
   const alertTypeFilter = params.alertType;
@@ -118,10 +118,10 @@ export default async function RisksPage({
 
   const db = getDb();
   const [risks, openNotifications, clientScores, policyScores] = await Promise.all([
-    detectRisks(undefined),
-    db.alert.findMany({ where: { status: "OPEN" } }),
-    getClientDataQualityScores(undefined),
-    getPolicyDataQualityScores(undefined),
+    detectRisks(undefined, organizationContext.organizationId),
+    db.alert.findMany({ where: { organizationId: organizationContext.organizationId, status: "OPEN" } }),
+    getClientDataQualityScores(organizationContext.organizationId),
+    getPolicyDataQualityScores(organizationContext.organizationId),
   ]);
 
   const matchesQuery = (...values: Array<string | null | undefined>) =>

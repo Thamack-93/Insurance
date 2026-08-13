@@ -381,6 +381,8 @@ async function runTrackedStructuredOperation<T>(input: {
   }>;
   timeoutMs: number;
 }): Promise<AssistantAiTrackedOperationResult<T>> {
+  if (!input.user.organizationId) return { value: null, runId: null, trackingStatus: "unavailable", attempted: false, failureCode: "invalid_prompt" };
+  const organizationId = input.user.organizationId;
   const runId = makeId("run");
   const startedAt = Date.now();
   const fallbackModels = getAssistantStructuredFallbackModels();
@@ -420,6 +422,7 @@ async function runTrackedStructuredOperation<T>(input: {
       tier: "critical",
       requestedModel: attempt.requestedModel ?? attempt.model,
       status: "STARTED",
+      organizationId,
     }), null);
     if (!created) {
       trackingStatus = "unavailable";
@@ -429,6 +432,7 @@ async function runTrackedStructuredOperation<T>(input: {
     const usage = attempt.totalUsage ?? attempt.usage ?? null;
 
     const finalized = await tryAssistantAiTracking(() => finalizeAssistantAiAttempt(attemptId, {
+      organizationId,
       status: attempt.outcome === "success" ? "SUCCEEDED" : "FAILED",
       finalModel: attempt.outcome === "success" ? attempt.model : null,
       errorCode: attempt.code,
@@ -479,6 +483,7 @@ async function runTrackedStructuredOperation<T>(input: {
         await ensureTrackedRun();
         if (trackedRunId) {
           const finalized = await tryAssistantAiTracking(() => finalizeAssistantAiRun(trackedRunId!, {
+            organizationId,
             status: "SUCCEEDED",
             finalModel: resolvedModel,
             errorCode: null,
@@ -526,6 +531,7 @@ async function runTrackedStructuredOperation<T>(input: {
   await ensureTrackedRun();
   if (trackedRunId) {
     const finalized = await tryAssistantAiTracking(() => finalizeAssistantAiRun(trackedRunId!, {
+      organizationId,
       status: "FAILED",
       errorCode: diagnostic.code,
       errorMessage: diagnostic.details,
@@ -822,12 +828,13 @@ function valueFromAttempt(input: {
   };
 }
 
-async function recordAttempt(runId: string | null, attempt: AssistantAiAttempt, number: number, tier: AssistantAiTier) {
+async function recordAttempt(runId: string | null, organizationId: string, attempt: AssistantAiAttempt, number: number, tier: AssistantAiTier) {
   const attemptId = makeId("attempt");
   if (!canPersistAiRuns() || !runId) return false;
-  const created = await tryAssistantAiTracking(() => createAssistantAiAttempt({ id: attemptId, runId, attemptNumber: number, tier, requestedModel: attempt.requestedModel ?? attempt.model, status: "STARTED" }), null);
+  const created = await tryAssistantAiTracking(() => createAssistantAiAttempt({ id: attemptId, runId, organizationId, attemptNumber: number, tier, requestedModel: attempt.requestedModel ?? attempt.model, status: "STARTED" }), null);
   if (!created) return false;
   const finalized = await tryAssistantAiTracking(() => finalizeAssistantAiAttempt(attemptId, {
+    organizationId,
     status: attempt.outcome === "success" ? "SUCCEEDED" : "FAILED",
     finalModel: attempt.outcome === "success" ? attempt.model : null,
     errorCode: attempt.code,
@@ -852,6 +859,10 @@ export async function buildAssistantAiReply(input: {
   themeHint?: string | null;
   mode?: "conversation" | "structured";
 }): Promise<AssistantAiResult<AssistantAiReplyValue>> {
+  if (!input.user.organizationId) {
+    return { ok: false, diagnostic: buildDiagnostic({ operation: "assistant-reply", tier: "minimax", model: getAssistantAiModel(), fallbackModels: [], startedAt: Date.now(), runId: makeId("run"), code: "invalid_prompt", attempts: [] }) };
+  }
+  const organizationId = input.user.organizationId;
   const startedAt = Date.now();
   const model = input.mode === "structured" ? getAssistantStructuredModel() : getAssistantAiModel();
   const fallbackModels = input.mode === "structured" ? getAssistantStructuredFallbackModels() : getAssistantGatewayFallbackModels();
@@ -892,10 +903,10 @@ export async function buildAssistantAiReply(input: {
     }
     return trackedRunId;
   }
-  async function finalizeRun(payload: Parameters<typeof finalizeAssistantAiRun>[1]) {
+  async function finalizeRun(payload: Omit<Parameters<typeof finalizeAssistantAiRun>[1], "organizationId">) {
     await ensureTrackedRun();
     if (!trackedRunId) return;
-    const finalized = await tryAssistantAiTracking(() => finalizeAssistantAiRun(trackedRunId!, payload), null);
+    const finalized = await tryAssistantAiTracking(() => finalizeAssistantAiRun(trackedRunId!, { ...payload, organizationId }), null);
     if (!finalized) trackingStatus = "unavailable";
   }
 
@@ -906,7 +917,7 @@ export async function buildAssistantAiReply(input: {
     const attemptResult = await runAssistantAttempt({ ...input, model: candidateModel, fallbackModels: [], timeoutMs: ASSISTANT_AI_ATTEMPT_TIMEOUT_MS, mode });
     attempts.push(attemptResult.attempt);
     await ensureTrackedRun();
-    if (!(await recordAttempt(trackedRunId, attemptResult.attempt, index + 1, index === 0 ? tier : "critical"))) trackingStatus = "unavailable";
+    if (!(await recordAttempt(trackedRunId, organizationId, attemptResult.attempt, index + 1, index === 0 ? tier : "critical"))) trackingStatus = "unavailable";
 
     if (attemptResult.ok) {
       const value = valueFromAttempt({

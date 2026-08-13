@@ -690,9 +690,11 @@ async function getActiveTelegramDraftForChat(chatId: string, client?: DbClient) 
   if (!channel?.isEnabled) {
     return { channel: null, draft: null };
   }
+  const organizationId = await requireActiveTelegramOrganization(channel.userId, db);
 
   const draft = await db.telegramDraft.findFirst({
     where: {
+      organizationId,
       userId: channel.userId,
       channelId: channel.id,
       status: "COLLECTING",
@@ -875,8 +877,10 @@ async function getUserLinkedReceiptByPolicyAndNumber(
   client?: DbClient,
 ) {
   const db = client ?? getDb();
+  const organizationId = await requireActiveTelegramOrganization(userId, db);
   const exact = await db.receipt.findFirst({
     where: {
+      organizationId,
       receiptNumber,
       policy: {
         policyNumber,
@@ -895,6 +899,7 @@ async function getUserLinkedReceiptByPolicyAndNumber(
 
   const fuzzy = await db.receipt.findMany({
     where: {
+      organizationId,
       receiptNumber: { contains: receiptNumber },
       policy: {
         policyNumber,
@@ -914,13 +919,14 @@ async function getUserLinkedReceiptByPolicyAndNumber(
 }
 
 async function persistTelegramDraftState(input: {
+  organizationId: string;
   draftId: string;
   state: TelegramDraftState;
   client?: DbClient;
 }) {
   const db = input.client ?? getDb();
   return db.telegramDraft.update({
-    where: { id: input.draftId },
+    where: { id: input.draftId, organizationId: input.organizationId },
     data: {
       payloadJson: stringifyTelegramDraftState(input.state),
       updatedAt: new Date(),
@@ -1836,6 +1842,7 @@ async function createTelegramPaymentDraft(input: {
       replyText: buildTelegramLinkedChatRequiredMessage(),
     };
   }
+  const organizationId = await requireActiveTelegramOrganization(channel.userId, db);
 
   const parsed = parseTelegramPaymentArgument(input.argument);
 
@@ -1859,12 +1866,14 @@ async function createTelegramPaymentDraft(input: {
   const draft = await db.$transaction(async (tx) => {
     await tx.telegramDraft.updateMany({
       where: {
+        organizationId,
         userId: channel.userId,
         channelId: channel.id,
         type: "PAYMENT_CAPTURE",
         status: "COLLECTING",
       },
       data: {
+        organizationId,
         status: "CANCELLED",
         cancelledAt: new Date(),
       },
@@ -1890,6 +1899,7 @@ async function createTelegramPaymentDraft(input: {
 
     return tx.telegramDraft.create({
       data: {
+        organizationId,
         userId: channel.userId,
         channelId: channel.id,
         type: "PAYMENT_CAPTURE",
@@ -1932,6 +1942,7 @@ async function createTelegramPaymentDraft(input: {
     },
   };
   await persistTelegramDraftState({
+    organizationId,
     draftId: draft.id,
     state: payload,
     client: db,
@@ -1968,6 +1979,7 @@ async function createTelegramPolicyDraft(input: {
       replyText: buildTelegramLinkedChatRequiredMessage(),
     };
   }
+  const organizationId = await requireActiveTelegramOrganization(channel.userId, db);
 
   const parsed = parseTelegramPolicyArgument(input.argument);
   if (!parsed.ok) {
@@ -1980,12 +1992,14 @@ async function createTelegramPolicyDraft(input: {
   const draft = await db.$transaction(async (tx) => {
     await tx.telegramDraft.updateMany({
       where: {
+        organizationId,
         userId: channel.userId,
         channelId: channel.id,
         type: "POLICY_CAPTURE",
         status: "COLLECTING",
       },
       data: {
+        organizationId,
         status: "CANCELLED",
         cancelledAt: new Date(),
       },
@@ -1998,6 +2012,7 @@ async function createTelegramPolicyDraft(input: {
 
     return tx.telegramDraft.create({
       data: {
+        organizationId,
         userId: channel.userId,
         channelId: channel.id,
         type: "POLICY_CAPTURE",
@@ -2046,6 +2061,7 @@ async function createTelegramPolicyDraftFromPdf(input: {
       replyText: buildTelegramLinkedChatRequiredMessage(),
     };
   }
+  const organizationId = await requireActiveTelegramOrganization(channel.userId, db);
 
   if (!isTelegramPdfDocument(input.document)) {
     return {
@@ -2113,12 +2129,14 @@ async function createTelegramPolicyDraftFromPdf(input: {
   const draft = await db.$transaction(async (tx) => {
     await tx.telegramDraft.updateMany({
       where: {
+        organizationId,
         userId: channel.userId,
         channelId: channel.id,
         type: "POLICY_CAPTURE",
         status: "COLLECTING",
       },
       data: {
+        organizationId,
         status: "CANCELLED",
         cancelledAt: new Date(),
       },
@@ -2126,6 +2144,7 @@ async function createTelegramPolicyDraftFromPdf(input: {
 
     return tx.telegramDraft.create({
       data: {
+        organizationId,
         userId: channel.userId,
         channelId: channel.id,
         type: "POLICY_CAPTURE",
@@ -2250,7 +2269,7 @@ async function confirmTelegramDraft(input: {
       );
 
       await db.telegramDraft.update({
-        where: { id: draft.id },
+        where: { id: draft.id, organizationId: draft.organizationId! },
         data: {
           status: "CONFIRMED",
           confirmedAt: new Date(),
@@ -2258,6 +2277,7 @@ async function confirmTelegramDraft(input: {
       });
 
       await writeActivityLog({
+        organizationId: draft.organizationId!,
         entityType: "TelegramDraft",
         entityId: draft.id,
         action: "TELEGRAM_PAYMENT_DRAFT_CONFIRMED",
@@ -2293,7 +2313,7 @@ async function confirmTelegramDraft(input: {
   }
 
   await db.telegramDraft.update({
-    where: { id: draft.id },
+    where: { id: draft.id, organizationId: draft.organizationId! },
     data: {
       status: "CONFIRMED",
       confirmedAt: new Date(),
@@ -2301,6 +2321,7 @@ async function confirmTelegramDraft(input: {
   });
 
   await writeActivityLog({
+    organizationId: draft.organizationId!,
     entityType: "TelegramDraft",
     entityId: draft.id,
     action: "TELEGRAM_POLICY_DRAFT_CONFIRMED",
@@ -2342,7 +2363,7 @@ async function cancelTelegramDraft(input: {
   }
 
   await db.telegramDraft.update({
-    where: { id: draft.id },
+    where: { id: draft.id, organizationId: draft.organizationId! },
     data: {
       status: "CANCELLED",
       cancelledAt: new Date(),
@@ -2350,6 +2371,7 @@ async function cancelTelegramDraft(input: {
   });
 
   await writeActivityLog({
+    organizationId: draft.organizationId!,
     entityType: "TelegramDraft",
     entityId: draft.id,
     action: "TELEGRAM_DRAFT_CANCELLED",
@@ -2444,7 +2466,7 @@ async function continueTelegramDraftFromMessage(input: {
       type: "PAYMENT_CAPTURE",
       payment: state,
     };
-    await persistTelegramDraftState({ draftId: draft.id, state: nextPayload, client: db });
+    await persistTelegramDraftState({ organizationId: draft.organizationId!, draftId: draft.id, state: nextPayload, client: db });
 
     if (state.step === "ready") {
       const receipt =
@@ -2479,7 +2501,7 @@ async function continueTelegramDraftFromMessage(input: {
           reference: state.reference ?? null,
         },
       };
-      await persistTelegramDraftState({ draftId: draft.id, state: confirmedPayload, client: db });
+      await persistTelegramDraftState({ organizationId: draft.organizationId!, draftId: draft.id, state: confirmedPayload, client: db });
 
       return {
         handled: true as const,
@@ -2579,7 +2601,7 @@ async function continueTelegramDraftFromMessage(input: {
     type: "POLICY_CAPTURE",
     policy: state,
   };
-  await persistTelegramDraftState({ draftId: draft.id, state: nextPayload, client: db });
+  await persistTelegramDraftState({ organizationId: draft.organizationId!, draftId: draft.id, state: nextPayload, client: db });
 
   if (state.step === "ready") {
     const link = buildPolicyDeskUrl(`/policies/new?telegramDraft=${draft.id}`);
@@ -2681,6 +2703,7 @@ export async function createTelegramLinkCodeForUser(input: {
     const result = await db.$transaction(async (tx) => {
       await tx.telegramLinkToken.deleteMany({
         where: {
+          organizationId: input.organizationId,
           userId: input.userId,
           usedAt: null,
         },
@@ -2818,7 +2841,7 @@ export async function connectTelegramChannelFromCode(input: {
       });
 
       await tx.telegramLinkToken.update({
-        where: { id: token.id },
+        where: { id: token.id, organizationId: token.organizationId! },
         data: {
           usedAt: new Date(),
         },
@@ -2957,7 +2980,7 @@ export async function deliverTelegramNotificationEvent(
       return event as NotificationEventRecord;
     }
     if (event.channelType !== "TELEGRAM") {
-      return await markNotificationSkipped(event.id, "Canal no soportado.", db);
+      return await markNotificationSkipped(event.id, event.organizationId!, "Canal no soportado.", db);
     }
 
     const channel = await db.notificationChannel.findUnique({
@@ -2970,7 +2993,7 @@ export async function deliverTelegramNotificationEvent(
     });
 
     if (!channel || !channel.isEnabled || !channel.telegramChatId) {
-      return await markNotificationSkipped(event.id, "Telegram no está vinculado.", db);
+      return await markNotificationSkipped(event.id, event.organizationId!, "Telegram no está vinculado.", db);
     }
 
     const result = await sendTelegramMessage(
@@ -2979,10 +3002,10 @@ export async function deliverTelegramNotificationEvent(
     );
 
     if (!result.ok) {
-      return await markNotificationFailed(event.id, result.error, db);
+      return await markNotificationFailed(event.id, event.organizationId!, result.error, db);
     }
 
-    return await markNotificationSent(event.id, db);
+    return await markNotificationSent(event.id, event.organizationId!, db);
   } catch (error) {
     logError("telegram.deliverNotificationEvent", error, { eventId });
     return null;

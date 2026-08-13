@@ -356,8 +356,8 @@ export async function rehabilitateReceiptPayment(
 
     const adjustment = Math.round((Number(receipt.amount) - input.amount) * 100) / 100;
     const paymentDate = input.paidDate;
-    await tx.receipt.update({
-      where: { id: receipt.id },
+    await tx.receipt.updateMany({
+      where: { id: receipt.id, organizationId: input.organizationId },
       data: {
         status: "PAID",
         paidDate: paymentDate,
@@ -374,8 +374,8 @@ export async function rehabilitateReceiptPayment(
 
     for (const batchReceipt of batchReceipts) {
       if (batchReceipt.id === receipt.id) continue;
-      await tx.receipt.update({
-        where: { id: batchReceipt.id },
+      await tx.receipt.updateMany({
+        where: { id: batchReceipt.id, organizationId: input.organizationId },
         data: {
           status: isBusinessDateOverdue(batchReceipt.dueDate) ? "OVERDUE" : "PENDING",
           cancellationReason: null,
@@ -386,8 +386,8 @@ export async function rehabilitateReceiptPayment(
       });
     }
 
-    const updatedPolicy = await tx.policy.update({
-      where: { id: receipt.policyId },
+    await tx.policy.updateMany({
+      where: { id: receipt.policyId, organizationId: input.organizationId },
       data: {
         status: "ACTIVE",
         cancellationReason: null,
@@ -396,6 +396,7 @@ export async function rehabilitateReceiptPayment(
         updatedById: input.actorId,
       },
     });
+    const updatedPolicy = await tx.policy.findFirstOrThrow({ where: { id: receipt.policyId, organizationId: input.organizationId } });
 
     await tx.receiptReconciliationIssue.updateMany({
       where: { organizationId: input.organizationId, receiptId: { in: batchReceipts.map((item) => item.id) }, status: "OPEN" },

@@ -7,29 +7,31 @@ import { getDb } from "@/lib/db";
 import { formatDateInput } from "@/lib/form-utils";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
 import type { WorkItemFormValues } from "@/lib/validations";
+import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function EditWorkItemPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const db = getDb();
+  const scope = await requireOrganizationPortfolioReadScope();
   const [workItem, clients, policies, insurers, receipts] = await Promise.all([
-    findWorkItemByRouteId(id, db),
+    findWorkItemByRouteId(id, scope.organizationId, db, scope.portfolioOwnerId),
     db.client.findMany({
-      where: { status: { not: "ARCHIVED" } },
+      where: { organizationId: scope.organizationId, ...(scope.portfolioOwnerId ? { portfolioOwnerId: scope.portfolioOwnerId } : {}), status: { not: "ARCHIVED" } },
       orderBy: { fullName: "asc" },
       select: { id: true, fullName: true },
     }),
     db.policy.findMany({
-      where: { status: { not: "CANCELLED" } },
+      where: { organizationId: scope.organizationId, ...(scope.portfolioOwnerId ? { client: { portfolioOwnerId: scope.portfolioOwnerId } } : {}), status: { not: "CANCELLED" } },
       orderBy: { policyNumber: "asc" },
       select: { id: true, policyNumber: true },
     }),
     db.insurer.findMany({
-      where: { status: { not: "ARCHIVED" } },
+      where: { organizationId: scope.organizationId, status: { not: "ARCHIVED" } },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
     db.receipt.findMany({
-      where: { status: { not: "CANCELLED" } },
+      where: { organizationId: scope.organizationId, ...(scope.portfolioOwnerId ? { client: { portfolioOwnerId: scope.portfolioOwnerId } } : {}), status: { not: "CANCELLED" } },
       orderBy: { dueDate: "asc" },
       select: { id: true, receiptNumber: true },
     }),

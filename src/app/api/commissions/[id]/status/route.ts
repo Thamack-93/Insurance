@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { AuthError, requireAdmin } from "@/lib/auth";
+import { AuthError } from "@/lib/auth";
+import { requireOrganizationRole } from "@/lib/organization-context";
 import { updateCommissionStatus } from "@/lib/commissions";
 import { logError } from "@/lib/logger";
 import { COMMISSION_STATUSES, type CommissionStatus } from "@/lib/domain-values";
@@ -16,7 +17,7 @@ export async function POST(
   const params = await context.params;
 
   try {
-    await requireAdmin();
+    await requireOrganizationRole(["OWNER", "ADMIN"]);
     try {
       assertSameOrigin(request, "commission status update");
     } catch {

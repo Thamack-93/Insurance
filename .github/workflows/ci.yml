@@ -46,6 +46,9 @@ jobs:
       - name: Check Cycle 1 tenant inventory
         run: node --import tsx scripts/check-tenant-inventory.ts
 
+      - name: Check tenant write scope
+        run: npm run check:tenant-write-scope
+
       - name: Lint
         run: npm run lint
 

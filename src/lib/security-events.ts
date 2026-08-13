@@ -79,7 +79,7 @@ export async function recordSecurityEvent(input: SecurityEventInput) {
 
     if (aggregate.occurrenceCount > 1 || !input.organizationId) return null;
 
-    const alert = await db.alert.create({ data: alertData });
+    const alert = await db.alert.create({ data: { ...alertData, organizationId: input.organizationId } });
     await writeActivityLog({
       entityType: alertData.entityType,
       entityId: alertData.entityId,

@@ -83,7 +83,10 @@ function followUpPriority(card: RenewalBoardCard) {
   return card.priority;
 }
 
-export async function runRenewalFollowUpScan(now: Date = new Date()): Promise<RenewalFollowUpSummary> {
+export async function runRenewalFollowUpScan(
+  organizationId: string,
+  now: Date = new Date(),
+): Promise<RenewalFollowUpSummary> {
   const summary: RenewalFollowUpSummary = {
     scanned: 0,
     stalled: 0,
@@ -100,7 +103,7 @@ export async function runRenewalFollowUpScan(now: Date = new Date()): Promise<Re
     // toda la casa y cada aviso se dirige al responsable de la póliza.
     const stalledPolicyIds: string[] = [];
 
-    const { scanned } = await forEachRenewalCandidate(async (card) => {
+    const { scanned } = await forEachRenewalCandidate(organizationId, async (card) => {
       if (!card.stall.stalled) return;
       summary.stalled += 1;
       stalledPolicyIds.push(card.policyId);
@@ -196,6 +199,7 @@ export async function runRenewalFollowUpScan(now: Date = new Date()): Promise<Re
     // renovación tienen su propio ciclo de vida y no se tocan.
     const stale = await db.workItem.findMany({
       where: {
+        organizationId,
         sourceType: "Renewal",
         sourceId: { endsWith: RENEWAL_FOLLOWUP_SOURCE_SUFFIX },
         status: { in: [...OPEN_WORK_ITEM_STATUSES] },
@@ -206,7 +210,7 @@ export async function runRenewalFollowUpScan(now: Date = new Date()): Promise<Re
 
     if (stale.length > 0) {
       const closed = await db.workItem.updateMany({
-        where: { id: { in: stale.map((item) => item.id) } },
+        where: { organizationId, id: { in: stale.map((item) => item.id) } },
         data: { status: "RESOLVED", closedDate: now },
       });
       summary.workItemsClosed = closed.count;

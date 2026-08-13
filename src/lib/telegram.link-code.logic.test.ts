@@ -98,6 +98,7 @@ describe("telegram link code generation", () => {
 
     expect(telegramLinkTokenDeleteManyMock).toHaveBeenCalledWith({
       where: {
+        organizationId: "org-1",
         userId: "user-1",
         usedAt: null,
       },

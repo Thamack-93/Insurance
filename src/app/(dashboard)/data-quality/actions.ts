@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireAdmin } from "@/lib/auth";
+import { requireOrganizationRole } from "@/lib/organization-context";
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
@@ -18,6 +18,11 @@ const REVIEW_DENIED_NOTE = "Denegado desde Data Quality.";
 const REVIEW_SUPPRESSED_NOTE = "Suprimido por regla desde Data Quality.";
 const REVIEW_REOPENED_NOTE = "Reabierto desde Data Quality.";
 const REVIEW_CLOSED_NOTE = "Cerrado manualmente desde Riesgos y calidad.";
+
+async function requireAdmin() {
+  const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+  return { id: context.userId, organizationId: context.organizationId };
+}
 
 function buildLedgerTabHref(batchId?: string | null) {
   const params = new URLSearchParams({ tab: "ledger" });
@@ -81,10 +86,10 @@ function buildLedgerSuppressionCriteria(issue: {
   };
 }
 
-async function loadReceiptIssue(issueId: string) {
+async function loadReceiptIssue(issueId: string, organizationId: string) {
   const db = getDb();
-  return db.receiptReconciliationIssue.findUnique({
-    where: { id: issueId },
+  return db.receiptReconciliationIssue.findFirst({
+    where: { id: issueId, organizationId },
     include: {
       receipt: {
         select: {
@@ -104,10 +109,10 @@ async function loadReceiptIssue(issueId: string) {
   });
 }
 
-async function loadRenewalSuggestion(suggestionId: string) {
+async function loadRenewalSuggestion(suggestionId: string, organizationId: string) {
   const db = getDb();
-  return db.policyRenewalSuggestion.findUnique({
-    where: { id: suggestionId },
+  return db.policyRenewalSuggestion.findFirst({
+    where: { id: suggestionId, organizationId },
     include: {
       sourcePolicy: {
         select: {
@@ -154,6 +159,7 @@ async function closeRiskIssueSet(input: {
         },
         reason: closeNote,
         actorId: actor.id,
+        organizationId: actor.organizationId,
       },
       db,
     );
@@ -170,16 +176,17 @@ async function closeRiskIssueSet(input: {
       suppressionRuleIds: ruleIds,
     },
     userId: actor.id,
+    organizationId: actor.organizationId,
     db,
   });
 
   revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
 }
 
-async function loadLedgerIssue(issueId: string) {
+async function loadLedgerIssue(issueId: string, organizationId: string) {
   const db = getDb();
-  return db.ledgerImportIssue.findUnique({
-    where: { id: issueId },
+  return db.ledgerImportIssue.findFirst({
+    where: { id: issueId, organizationId },
     include: {
       row: {
         select: {
@@ -204,8 +211,8 @@ async function reviewReceiptIssue(issueId: string, decision: "APPROVE" | "DENY")
   try {
     const actor = await requireAdmin();
     const db = getDb();
-    const issue = await db.receiptReconciliationIssue.findUnique({
-      where: { id: issueId },
+    const issue = await db.receiptReconciliationIssue.findFirst({
+      where: { id: issueId, organizationId: actor.organizationId },
       include: {
         receipt: {
           select: {
@@ -235,8 +242,8 @@ async function reviewReceiptIssue(issueId: string, decision: "APPROVE" | "DENY")
     const nextStatus = decision === "APPROVE" ? "RESOLVED" : "DISMISSED";
     const reviewedAt = new Date();
 
-    await db.receiptReconciliationIssue.update({
-      where: { id: issue.id },
+    await db.receiptReconciliationIssue.updateMany({
+      where: { id: issue.id, organizationId: actor.organizationId },
       data: {
         status: nextStatus,
         reviewedAt,
@@ -252,6 +259,7 @@ async function reviewReceiptIssue(issueId: string, decision: "APPROVE" | "DENY")
       oldValue: issue,
       newValue: { ...issue, status: nextStatus, reviewedAt, reviewedById: actor.id },
       userId: actor.id,
+      organizationId: actor.organizationId,
     });
 
     revalidatePaths([
@@ -280,8 +288,8 @@ async function reviewRenewalSuggestion(
   try {
     const actor = await requireAdmin();
     const db = getDb();
-    const suggestion = await db.policyRenewalSuggestion.findUnique({
-      where: { id: suggestionId },
+    const suggestion = await db.policyRenewalSuggestion.findFirst({
+      where: { id: suggestionId, organizationId: actor.organizationId },
       include: {
         sourcePolicy: {
           select: {
@@ -317,8 +325,8 @@ async function reviewRenewalSuggestion(
     const nextStatus = "DECLINED";
     const reviewedAt = new Date();
 
-    await db.policyRenewalSuggestion.update({
-      where: { id: suggestion.id },
+    await db.policyRenewalSuggestion.updateMany({
+      where: { id: suggestion.id, organizationId: actor.organizationId },
       data: {
         status: nextStatus,
         reviewedAt,
@@ -334,6 +342,7 @@ async function reviewRenewalSuggestion(
       oldValue: suggestion,
       newValue: { ...suggestion, status: nextStatus, reviewedAt, reviewedById: actor.id },
       userId: actor.id,
+      organizationId: actor.organizationId,
     });
 
     revalidatePaths([
@@ -361,8 +370,8 @@ async function reviewLedgerIssue(issueId: string, decision: "APPROVE" | "DENY"):
   try {
     const actor = await requireAdmin();
     const db = getDb();
-    const issue = await db.ledgerImportIssue.findUnique({
-      where: { id: issueId },
+    const issue = await db.ledgerImportIssue.findFirst({
+      where: { id: issueId, organizationId: actor.organizationId },
       include: {
         batch: {
           select: {
@@ -385,8 +394,8 @@ async function reviewLedgerIssue(issueId: string, decision: "APPROVE" | "DENY"):
     const nextStatus = decision === "APPROVE" ? "RESOLVED" : "DISMISSED";
     const reviewedAt = new Date();
 
-    await db.ledgerImportIssue.update({
-      where: { id: issue.id },
+    await db.ledgerImportIssue.updateMany({
+      where: { id: issue.id, organizationId: actor.organizationId },
       data: {
         status: nextStatus,
         reviewedAt,
@@ -402,6 +411,7 @@ async function reviewLedgerIssue(issueId: string, decision: "APPROVE" | "DENY"):
       oldValue: issue,
       newValue: { ...issue, status: nextStatus, reviewedAt, reviewedById: actor.id },
       userId: actor.id,
+      organizationId: actor.organizationId,
     });
 
     revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
@@ -433,7 +443,8 @@ export async function linkRenewalSuggestionToPolicy(
   targetPolicyId: string,
 ): Promise<MutationResult> {
   try {
-    const suggestion = await loadRenewalSuggestion(suggestionId);
+    const actor = await requireAdmin();
+    const suggestion = await loadRenewalSuggestion(suggestionId, actor.organizationId);
     if (!suggestion) {
       return errorResult("La sugerencia de renovación ya no existe.");
     }
@@ -453,7 +464,8 @@ export async function linkRenewalSuggestionToPolicy(
 
 export async function markRenewalSuggestionAsNotContinuing(suggestionId: string): Promise<MutationResult> {
   try {
-    const suggestion = await loadRenewalSuggestion(suggestionId);
+    const actor = await requireAdmin();
+    const suggestion = await loadRenewalSuggestion(suggestionId, actor.organizationId);
     if (!suggestion) {
       return errorResult("La sugerencia de renovación ya no existe.");
     }
@@ -480,13 +492,13 @@ export async function reopenReceiptReviewIssue(issueId: string): Promise<Mutatio
   try {
     const actor = await requireAdmin();
     const db = getDb();
-    const issue = await loadReceiptIssue(issueId);
+    const issue = await loadReceiptIssue(issueId, actor.organizationId);
     if (!issue) {
       return errorResult("El issue de recibo ya no existe.");
     }
 
-    await db.receiptReconciliationIssue.update({
-      where: { id: issue.id },
+    await db.receiptReconciliationIssue.updateMany({
+      where: { id: issue.id, organizationId: actor.organizationId },
       data: {
         status: "OPEN",
         suppressedByRuleId: null,
@@ -506,6 +518,7 @@ export async function reopenReceiptReviewIssue(issueId: string): Promise<Mutatio
       oldValue: issue,
       newValue: { ...issue, status: "OPEN", reviewedAt: null, reviewedById: null },
       userId: actor.id,
+      organizationId: actor.organizationId,
     });
 
     revalidatePaths([
@@ -531,7 +544,7 @@ export async function suppressReceiptReviewIssue(issueId: string): Promise<Mutat
   try {
     const actor = await requireAdmin();
     const db = getDb();
-    const issue = await loadReceiptIssue(issueId);
+    const issue = await loadReceiptIssue(issueId, actor.organizationId);
     if (!issue || !issue.receipt || !issue.policy) {
       return errorResult("El issue de recibo ya no existe.");
     }
@@ -542,10 +555,11 @@ export async function suppressReceiptReviewIssue(issueId: string): Promise<Mutat
       criteria: buildReceiptSuppressionCriteria(issue),
       reason: `Suprimir ${issue.reason} para ${issue.policy.policyNumber}/${issue.receipt.receiptNumber}.`,
       actorId: actor.id,
+      organizationId: actor.organizationId,
     }, db);
 
-    await db.receiptReconciliationIssue.update({
-      where: { id: issue.id },
+    await db.receiptReconciliationIssue.updateMany({
+      where: { id: issue.id, organizationId: actor.organizationId },
       data: {
         status: "DISMISSED",
         suppressedByRuleId: suppressionRule.id,
@@ -565,6 +579,7 @@ export async function suppressReceiptReviewIssue(issueId: string): Promise<Mutat
       oldValue: issue,
       newValue: { ...issue, status: "DISMISSED", suppressedByRuleId: suppressionRule.id, reviewedAt: new Date(), reviewedById: actor.id },
       userId: actor.id,
+      organizationId: actor.organizationId,
     });
 
     revalidatePaths([
@@ -598,7 +613,7 @@ export async function bulkReceiptReviewIssuesAction(formData: FormData): Promise
     }
 
     const issues = await db.receiptReconciliationIssue.findMany({
-      where: { id: { in: issueIds } },
+      where: { organizationId: actor.organizationId, id: { in: issueIds } },
       include: {
         receipt: { select: { id: true, receiptNumber: true, policyId: true } },
         policy: { select: { id: true, policyNumber: true } },
@@ -616,8 +631,8 @@ export async function bulkReceiptReviewIssuesAction(formData: FormData): Promise
       }
       const [master, ...duplicates] = issues;
       for (const duplicate of duplicates) {
-        await db.receiptReconciliationIssue.update({
-          where: { id: duplicate.id },
+        await db.receiptReconciliationIssue.updateMany({
+          where: { id: duplicate.id, organizationId: actor.organizationId },
           data: {
             status: "DISMISSED",
             duplicateOfId: master.id,
@@ -639,6 +654,7 @@ export async function bulkReceiptReviewIssuesAction(formData: FormData): Promise
           duplicateIds: duplicates.map((duplicate) => duplicate.id),
         },
         userId: actor.id,
+        organizationId: actor.organizationId,
       });
       revalidatePaths(["/data-quality", "/receipts", "/due-payments", "/dashboard", "/today", "/portfolio", "/risks"]);
       return;
@@ -661,6 +677,7 @@ export async function bulkReceiptReviewIssuesAction(formData: FormData): Promise
           criteria: buildReceiptSuppressionCriteria(first),
           reason: `Suprimir ${first.reason} en recibos similares.`,
           actorId: actor.id,
+          organizationId: actor.organizationId,
         },
         db,
       );
@@ -668,8 +685,8 @@ export async function bulkReceiptReviewIssuesAction(formData: FormData): Promise
     }
 
     for (const issue of issues) {
-      await db.receiptReconciliationIssue.update({
-        where: { id: issue.id },
+      await db.receiptReconciliationIssue.updateMany({
+        where: { id: issue.id, organizationId: actor.organizationId },
         data: {
           status: resolvedStatus,
           suppressedByRuleId: operation === "SUPPRESS" ? suppressionRuleId : null,
@@ -699,6 +716,7 @@ export async function bulkReceiptReviewIssuesAction(formData: FormData): Promise
       oldValue: issues,
       newValue: { operation, issueIds },
       userId: actor.id,
+      organizationId: actor.organizationId,
     });
     revalidatePaths(["/data-quality", "/receipts", "/due-payments", "/dashboard", "/today", "/portfolio", "/risks"]);
     return;
@@ -720,13 +738,13 @@ export async function reopenRenewalSuggestionReview(suggestionId: string): Promi
   try {
     const actor = await requireAdmin();
     const db = getDb();
-    const suggestion = await loadRenewalSuggestion(suggestionId);
+    const suggestion = await loadRenewalSuggestion(suggestionId, actor.organizationId);
     if (!suggestion) {
       return errorResult("La sugerencia de renovación ya no existe.");
     }
 
-    await db.policyRenewalSuggestion.update({
-      where: { id: suggestion.id },
+    await db.policyRenewalSuggestion.updateMany({
+      where: { id: suggestion.id, organizationId: actor.organizationId },
       data: {
         status: "PENDING",
         suppressedByRuleId: null,
@@ -746,6 +764,7 @@ export async function reopenRenewalSuggestionReview(suggestionId: string): Promi
       oldValue: suggestion,
       newValue: { ...suggestion, status: "PENDING", reviewedAt: null, reviewedById: null },
       userId: actor.id,
+      organizationId: actor.organizationId,
     });
 
     revalidatePaths([
@@ -769,7 +788,7 @@ export async function suppressRenewalSuggestionReview(suggestionId: string): Pro
   try {
     const actor = await requireAdmin();
     const db = getDb();
-    const suggestion = await loadRenewalSuggestion(suggestionId);
+    const suggestion = await loadRenewalSuggestion(suggestionId, actor.organizationId);
     if (!suggestion) {
       return errorResult("La sugerencia de renovación ya no existe.");
     }
@@ -780,10 +799,11 @@ export async function suppressRenewalSuggestionReview(suggestionId: string): Pro
       criteria: buildRenewalSuppressionCriteria(suggestion),
       reason: `Suprimir renovación para ${suggestion.sourcePolicy.policyNumber}.`,
       actorId: actor.id,
+      organizationId: actor.organizationId,
     }, db);
 
-    await db.policyRenewalSuggestion.update({
-      where: { id: suggestion.id },
+    await db.policyRenewalSuggestion.updateMany({
+      where: { id: suggestion.id, organizationId: actor.organizationId },
       data: {
         status: "DECLINED",
         suppressedByRuleId: suppressionRule.id,
@@ -803,6 +823,7 @@ export async function suppressRenewalSuggestionReview(suggestionId: string): Pro
       oldValue: suggestion,
       newValue: { ...suggestion, status: "DECLINED", suppressedByRuleId: suppressionRule.id, reviewedAt: new Date(), reviewedById: actor.id },
       userId: actor.id,
+      organizationId: actor.organizationId,
     });
 
     revalidatePaths([
@@ -834,7 +855,7 @@ export async function bulkRenewalSuggestionReviewsAction(formData: FormData): Pr
     }
 
     const suggestions = await db.policyRenewalSuggestion.findMany({
-      where: { id: { in: suggestionIds } },
+      where: { organizationId: actor.organizationId, id: { in: suggestionIds } },
       include: {
         sourcePolicy: { select: { id: true, policyNumber: true } },
       },
@@ -868,6 +889,7 @@ export async function bulkRenewalSuggestionReviewsAction(formData: FormData): Pr
           targetPolicyIds: suggestions.map((suggestion) => suggestion.targetPolicyId),
         },
         userId: actor.id,
+        organizationId: actor.organizationId,
       });
       revalidatePaths(["/data-quality", "/renewals", "/dashboard", "/today", "/portfolio", "/risks"]);
       return;
@@ -879,8 +901,8 @@ export async function bulkRenewalSuggestionReviewsAction(formData: FormData): Pr
       }
       const [master, ...duplicates] = suggestions;
       for (const duplicate of duplicates) {
-        await db.policyRenewalSuggestion.update({
-          where: { id: duplicate.id },
+        await db.policyRenewalSuggestion.updateMany({
+          where: { id: duplicate.id, organizationId: actor.organizationId },
           data: {
             status: "DECLINED",
             duplicateOfId: master.id,
@@ -899,6 +921,7 @@ export async function bulkRenewalSuggestionReviewsAction(formData: FormData): Pr
         oldValue: suggestions,
         newValue: { masterId: master.id, duplicateIds: duplicates.map((duplicate) => duplicate.id) },
         userId: actor.id,
+        organizationId: actor.organizationId,
       });
       revalidatePaths(["/data-quality", "/renewals", "/dashboard", "/today", "/portfolio", "/risks"]);
       return;
@@ -921,6 +944,7 @@ export async function bulkRenewalSuggestionReviewsAction(formData: FormData): Pr
           criteria: buildRenewalSuppressionCriteria(first),
           reason: `Suprimir renovación para ${first.sourcePolicy.policyNumber}.`,
           actorId: actor.id,
+          organizationId: actor.organizationId,
         },
         db,
       );
@@ -928,8 +952,8 @@ export async function bulkRenewalSuggestionReviewsAction(formData: FormData): Pr
     }
 
     for (const suggestion of suggestions) {
-      await db.policyRenewalSuggestion.update({
-        where: { id: suggestion.id },
+      await db.policyRenewalSuggestion.updateMany({
+        where: { id: suggestion.id, organizationId: actor.organizationId },
         data: {
           status: resolvedStatus,
           suppressedByRuleId: operation === "SUPPRESS" ? suppressionRuleId : null,
@@ -957,6 +981,7 @@ export async function bulkRenewalSuggestionReviewsAction(formData: FormData): Pr
       oldValue: suggestions,
       newValue: { operation, suggestionIds },
       userId: actor.id,
+      organizationId: actor.organizationId,
     });
     revalidatePaths(["/data-quality", "/renewals", "/dashboard", "/today", "/portfolio", "/risks"]);
     return;
@@ -978,13 +1003,13 @@ export async function reopenLedgerIssue(issueId: string): Promise<MutationResult
   try {
     const actor = await requireAdmin();
     const db = getDb();
-    const issue = await loadLedgerIssue(issueId);
+    const issue = await loadLedgerIssue(issueId, actor.organizationId);
     if (!issue) {
       return errorResult("El issue de ledger ya no existe.");
     }
 
-    await db.ledgerImportIssue.update({
-      where: { id: issue.id },
+    await db.ledgerImportIssue.updateMany({
+      where: { id: issue.id, organizationId: actor.organizationId },
       data: {
         status: "OPEN",
         suppressedByRuleId: null,
@@ -1004,6 +1029,7 @@ export async function reopenLedgerIssue(issueId: string): Promise<MutationResult
       oldValue: issue,
       newValue: { ...issue, status: "OPEN", reviewedAt: null, reviewedById: null },
       userId: actor.id,
+      organizationId: actor.organizationId,
     });
 
     revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
@@ -1019,7 +1045,7 @@ export async function suppressLedgerIssue(issueId: string): Promise<MutationResu
   try {
     const actor = await requireAdmin();
     const db = getDb();
-    const issue = await loadLedgerIssue(issueId);
+    const issue = await loadLedgerIssue(issueId, actor.organizationId);
     if (!issue) {
       return errorResult("El issue de ledger ya no existe.");
     }
@@ -1030,10 +1056,11 @@ export async function suppressLedgerIssue(issueId: string): Promise<MutationResu
       criteria: buildLedgerSuppressionCriteria(issue),
       reason: `Suprimir issue ${issue.issueType} del batch ${issue.batch.sourceCsvName}.`,
       actorId: actor.id,
+      organizationId: actor.organizationId,
     }, db);
 
-    await db.ledgerImportIssue.update({
-      where: { id: issue.id },
+    await db.ledgerImportIssue.updateMany({
+      where: { id: issue.id, organizationId: actor.organizationId },
       data: {
         status: "DISMISSED",
         suppressedByRuleId: suppressionRule.id,
@@ -1053,6 +1080,7 @@ export async function suppressLedgerIssue(issueId: string): Promise<MutationResu
       oldValue: issue,
       newValue: { ...issue, status: "DISMISSED", suppressedByRuleId: suppressionRule.id, reviewedAt: new Date(), reviewedById: actor.id },
       userId: actor.id,
+      organizationId: actor.organizationId,
     });
 
     revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
@@ -1076,7 +1104,7 @@ export async function bulkLedgerIssuesAction(formData: FormData): Promise<void> 
     }
 
     const issues = await db.ledgerImportIssue.findMany({
-      where: { id: { in: issueIds } },
+      where: { organizationId: actor.organizationId, id: { in: issueIds } },
       include: {
         batch: { select: { id: true, sourceCsvName: true, sourcePaidName: true } },
         row: { select: { id: true, rowNumber: true, sourceType: true, sourceKey: true } },
@@ -1094,8 +1122,8 @@ export async function bulkLedgerIssuesAction(formData: FormData): Promise<void> 
       }
       const [master, ...duplicates] = issues;
       for (const duplicate of duplicates) {
-        await db.ledgerImportIssue.update({
-          where: { id: duplicate.id },
+        await db.ledgerImportIssue.updateMany({
+          where: { id: duplicate.id, organizationId: actor.organizationId },
           data: {
             status: "DISMISSED",
             duplicateOfId: master.id,
@@ -1114,6 +1142,7 @@ export async function bulkLedgerIssuesAction(formData: FormData): Promise<void> 
         oldValue: issues,
         newValue: { masterId: master.id, duplicateIds: duplicates.map((duplicate) => duplicate.id) },
         userId: actor.id,
+        organizationId: actor.organizationId,
       });
       revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
       return;
@@ -1136,6 +1165,7 @@ export async function bulkLedgerIssuesAction(formData: FormData): Promise<void> 
           criteria: buildLedgerSuppressionCriteria(first),
           reason: `Suprimir issue ${first.issueType} de ledger.`,
           actorId: actor.id,
+          organizationId: actor.organizationId,
         },
         db,
       );
@@ -1143,8 +1173,8 @@ export async function bulkLedgerIssuesAction(formData: FormData): Promise<void> 
     }
 
     for (const issue of issues) {
-      await db.ledgerImportIssue.update({
-        where: { id: issue.id },
+      await db.ledgerImportIssue.updateMany({
+        where: { id: issue.id, organizationId: actor.organizationId },
         data: {
           status: resolvedStatus,
           suppressedByRuleId: operation === "SUPPRESS" ? suppressionRuleId : null,
@@ -1174,6 +1204,7 @@ export async function bulkLedgerIssuesAction(formData: FormData): Promise<void> 
       oldValue: issues,
       newValue: { operation, issueIds },
       userId: actor.id,
+      organizationId: actor.organizationId,
     });
     revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
     return;
@@ -1186,7 +1217,7 @@ export async function bulkLedgerIssuesAction(formData: FormData): Promise<void> 
 export async function runVigencyAuditAction(): Promise<MutationResult> {
   try {
     const actor = await requireAdmin();
-    const { summary } = await runPolicyVigencyAudit({ actorId: actor.id });
+    const { summary } = await runPolicyVigencyAudit({ actorId: actor.id, organizationId: actor.organizationId });
 
     revalidatePath("/data-quality");
     revalidatePath("/receipts");
@@ -1209,7 +1240,7 @@ export async function runVigencyAuditAction(): Promise<MutationResult> {
 export async function runPaymentAuditAction(): Promise<MutationResult> {
   try {
     const actor = await requireAdmin();
-    const { summary } = await runPaymentReconciliationAudit({ actorId: actor.id });
+    const { summary } = await runPaymentReconciliationAudit({ actorId: actor.id, organizationId: actor.organizationId });
 
     revalidatePath("/data-quality");
     revalidatePath("/receipts");
@@ -1245,6 +1276,7 @@ export async function previewLedgerImportAction(formData: FormData): Promise<voi
 
     const result = await createLedgerImportPreview({
       actorId: actor.id,
+      organizationId: actor.organizationId,
       csvName: csvFile.name,
       csvBuffer,
       paidName: paidFile.name,
@@ -1258,6 +1290,7 @@ export async function previewLedgerImportAction(formData: FormData): Promise<voi
       action: "LEDGER_IMPORT_PREVIEW_CREATED",
       newValue: result.summary,
       userId: actor.id,
+      organizationId: actor.organizationId,
     });
 
     revalidatePath("/data-quality");
@@ -1285,6 +1318,7 @@ export async function applyLedgerImportBatchAction(formData: FormData): Promise<
 
     const result = await applyLedgerImportBatch({
       actorId: actor.id,
+      organizationId: actor.organizationId,
       batchId,
     });
 

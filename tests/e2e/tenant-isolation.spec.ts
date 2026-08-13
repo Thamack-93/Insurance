@@ -77,7 +77,7 @@ test("superadmin can inspect both organizations without operational bypass", asy
   await page.getByRole("link", { name: /Pedro Alfredo Gómez Lorenzo/ }).click();
   await expect(page).toHaveURL(/\/platform\/organizations\/org_pedro_gomez_0001$/);
   await expect(page.getByRole("heading", { name: "Pedro Alfredo Gómez Lorenzo" })).toBeVisible();
-  await expect(page.getByText("pedroagl93@gmail.com")).toBeVisible();
+  await expect(page.getByText("pedroagl93@gmail.com", { exact: true })).toBeVisible();
   await expect(page.getByText("Este detalle es de consulta.")).toBeVisible();
   await page.goto("/platform/organizations/does-not-exist");
   // Next.js may stream an HTTP 200 before notFound() resolves; the rendered

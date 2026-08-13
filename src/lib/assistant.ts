@@ -488,6 +488,7 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
       const aiStatus = getAssistantAiConnectionStatus();
       const signalKind = aiDiagnostic ? "AI_FAILURE" : source === "ai" ? "AI_RESPONSE" : "USER_MESSAGE";
       const report = await recordAssistantReportSignal({
+        organizationId: user.organizationId!,
         kind: reportTheme.kind,
         themeKey: reportTheme.themeKey,
         themeLabel: reportTheme.themeLabel,

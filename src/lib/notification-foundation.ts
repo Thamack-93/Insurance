@@ -372,10 +372,11 @@ export async function createNotificationEvent(
     });
     if (existing) {
       if (existing.status === "FAILED") {
-        const retried = await db.notificationEvent.update({
-          where: { id: existing.id },
+        await db.notificationEvent.updateMany({
+          where: { id: existing.id, organizationId: input.organizationId },
           data: { status: "PENDING", error: null },
         });
+        const retried = await db.notificationEvent.findFirstOrThrow({ where: { id: existing.id, organizationId: input.organizationId } });
         return toEventRecord(retried);
       }
       return toEventRecord(existing);
@@ -417,17 +418,18 @@ export async function createNotificationEvent(
   }
 }
 
-export async function markNotificationSent(id: string, client?: DbClient) {
+export async function markNotificationSent(id: string, organizationId: string, client?: DbClient) {
   const db = client ?? getDb();
   try {
-    const event = await db.notificationEvent.update({
-      where: { id },
+    await db.notificationEvent.updateMany({
+      where: { id, organizationId },
       data: {
         status: "SENT",
         sentAt: new Date(),
         error: null,
       },
     });
+    const event = await db.notificationEvent.findFirstOrThrow({ where: { id, organizationId } });
     return toEventRecord(event);
   } catch (error) {
     logError("notification-foundation.markNotificationSent", error, { id });
@@ -435,16 +437,17 @@ export async function markNotificationSent(id: string, client?: DbClient) {
   }
 }
 
-export async function markNotificationFailed(id: string, errorMessage: string, client?: DbClient) {
+export async function markNotificationFailed(id: string, organizationId: string, errorMessage: string, client?: DbClient) {
   const db = client ?? getDb();
   try {
-    const event = await db.notificationEvent.update({
-      where: { id },
+    await db.notificationEvent.updateMany({
+      where: { id, organizationId },
       data: {
         status: "FAILED",
         error: errorMessage,
       },
     });
+    const event = await db.notificationEvent.findFirstOrThrow({ where: { id, organizationId } });
     return toEventRecord(event);
   } catch (error) {
     logError("notification-foundation.markNotificationFailed", error, { id });
@@ -452,16 +455,17 @@ export async function markNotificationFailed(id: string, errorMessage: string, c
   }
 }
 
-export async function markNotificationSkipped(id: string, reason?: string, client?: DbClient) {
+export async function markNotificationSkipped(id: string, organizationId: string, reason?: string, client?: DbClient) {
   const db = client ?? getDb();
   try {
-    const event = await db.notificationEvent.update({
-      where: { id },
+    await db.notificationEvent.updateMany({
+      where: { id, organizationId },
       data: {
         status: "SKIPPED",
         error: reason ?? null,
       },
     });
+    const event = await db.notificationEvent.findFirstOrThrow({ where: { id, organizationId } });
     return toEventRecord(event);
   } catch (error) {
     logError("notification-foundation.markNotificationSkipped", error, { id });

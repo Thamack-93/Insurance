@@ -4,22 +4,18 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
-import { getCurrentUserId } from "@/lib/auth";
 import { createNotification } from "@/lib/notifications";
 import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
 import { mapTaskStatusToWorkItemStatus } from "@/lib/work-items";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
 import { workItemSchema, type WorkItemFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
-import { requireOrganizationContext, assertOrganizationContextInTransaction } from "@/lib/organization-context";
+import { requireOrganizationContext, assertOrganizationContextInTransaction, type OrganizationContext } from "@/lib/organization-context";
 import {
-  assertClientPortfolioAccess,
-  assertPolicyPortfolioAccess,
-  assertReceiptPortfolioAccess,
   workItemPortfolioWhere,
 } from "@/lib/portfolio-access";
 
-async function normalizeWorkItemRelations(values: WorkItemFormValues, userId: string) {
+async function normalizeWorkItemRelations(values: WorkItemFormValues, context: OrganizationContext) {
   const db = getDb();
   const receiptId = optionalRelationId(values.receiptId);
   const policyId = optionalRelationId(values.policyId);
@@ -27,9 +23,8 @@ async function normalizeWorkItemRelations(values: WorkItemFormValues, userId: st
   const insurerId = optionalRelationId(values.insurerId);
 
   if (receiptId) {
-    await assertReceiptPortfolioAccess(receiptId, userId);
-    const receipt = await db.receipt.findUnique({
-      where: { id: receiptId },
+    const receipt = await db.receipt.findFirst({
+      where: { id: receiptId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) },
       select: { id: true, policyId: true, clientId: true, insurerId: true },
     });
 
@@ -46,9 +41,8 @@ async function normalizeWorkItemRelations(values: WorkItemFormValues, userId: st
   }
 
   if (policyId) {
-    await assertPolicyPortfolioAccess(policyId, userId);
-    const policy = await db.policy.findUnique({
-      where: { id: policyId },
+    const policy = await db.policy.findFirst({
+      where: { id: policyId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) },
       select: { id: true, clientId: true, insurerId: true },
     });
 
@@ -65,7 +59,16 @@ async function normalizeWorkItemRelations(values: WorkItemFormValues, userId: st
   }
 
   if (clientId) {
-    await assertClientPortfolioAccess(clientId, userId);
+    const client = await db.client.findFirst({
+      where: { id: clientId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {}) },
+      select: { id: true },
+    });
+    if (!client) throw new Error("El cliente seleccionado ya no existe.");
+  }
+
+  if (insurerId) {
+    const insurer = await db.insurer.findFirst({ where: { id: insurerId, organizationId: context.organizationId }, select: { id: true } });
+    if (!insurer) throw new Error("La aseguradora seleccionada ya no existe.");
   }
 
   return {
@@ -76,8 +79,8 @@ async function normalizeWorkItemRelations(values: WorkItemFormValues, userId: st
   };
 }
 
-async function normalizeWorkItemInput(values: WorkItemFormValues, userId: string, existingFolio?: string) {
-  const relations = await normalizeWorkItemRelations(values, userId);
+async function normalizeWorkItemInput(values: WorkItemFormValues, context: OrganizationContext, existingFolio?: string) {
+  const relations = await normalizeWorkItemRelations(values, context);
 
   return {
     folio: existingFolio ?? `PD-${new Date().getUTCFullYear()}-${String(Date.now()).slice(-6)}`,
@@ -94,11 +97,12 @@ async function normalizeWorkItemInput(values: WorkItemFormValues, userId: string
   };
 }
 
-function buildWorkItemBulkWhere(userId: string, ids: string[]): Prisma.WorkItemWhereInput {
+function buildWorkItemBulkWhere(context: OrganizationContext, ids: string[]): Prisma.WorkItemWhereInput {
   return {
+    organizationId: context.organizationId,
     workItemType: "TASK",
     AND: [
-      workItemPortfolioWhere(userId),
+      ...(context.membershipRole === "AGENT" ? [workItemPortfolioWhere(context.userId)] : []),
       {
         OR: [{ sourceType: "Task", sourceId: { in: ids } }, { id: { in: ids } }],
       },
@@ -117,7 +121,7 @@ export async function createWorkItem(values: WorkItemFormValues): Promise<Mutati
     const db = getDb();
     const context = await requireOrganizationContext();
     const userId = context.userId;
-    const payload = await normalizeWorkItemInput(parsed.data, userId);
+    const payload = await normalizeWorkItemInput(parsed.data, context);
     const workItemId = randomUUID();
     const workItem = await db.$transaction(async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
@@ -203,16 +207,18 @@ export async function updateWorkItem(id: string, values: WorkItemFormValues): Pr
 
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
-    const previousWorkItem = await findWorkItemByRouteId(id, undefined, userId);
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
+    const previousWorkItem = await findWorkItemByRouteId(id, context.organizationId, undefined, context.membershipRole === "AGENT" ? userId : undefined);
 
     if (!previousWorkItem) {
       return errorResult("El pendiente ya no existe o no pertenece a tu cartera.");
     }
-    const payload = await normalizeWorkItemInput(parsed.data, userId, previousWorkItem.folio ?? undefined);
+    const payload = await normalizeWorkItemInput(parsed.data, context, previousWorkItem.folio ?? undefined);
     const workItem = await db.$transaction(async (tx) => {
-      const updatedWorkItem = await tx.workItem.update({
-        where: { id: previousWorkItem.id },
+      await assertOrganizationContextInTransaction(tx, context);
+      await tx.workItem.updateMany({
+        where: { id: previousWorkItem.id, organizationId: context.organizationId },
         data: {
           sourceType: previousWorkItem.sourceType === "Task" ? "WorkItem" : previousWorkItem.sourceType ?? "WorkItem",
           sourceId: previousWorkItem.sourceId ?? previousWorkItem.id,
@@ -236,9 +242,11 @@ export async function updateWorkItem(id: string, values: WorkItemFormValues): Pr
           updatedById: userId,
         },
       });
+      const updatedWorkItem = await tx.workItem.findFirstOrThrow({ where: { id: previousWorkItem.id, organizationId: context.organizationId } });
       const workItemRouteId = updatedWorkItem.sourceId ?? updatedWorkItem.id;
       await writeActivityLog({
         entityType: "WorkItem",
+        organizationId: context.organizationId,
         entityId: workItemRouteId,
         action: "TASK_UPDATE",
         oldValue: previousWorkItem,
@@ -297,10 +305,11 @@ export async function bulkUpdateWorkItemStatus(ids: string[], status: string): P
   }
   const db = getDb();
   try {
-    const userId = await getCurrentUserId();
+    const context = await requireOrganizationContext();
     await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
       await tx.workItem.updateMany({
-        where: buildWorkItemBulkWhere(userId, ids),
+        where: buildWorkItemBulkWhere(context, ids),
         data: {
           status: mapTaskStatusToWorkItemStatus(status),
           closedDate: status === "RESOLVED" ? new Date() : null,
@@ -321,10 +330,11 @@ export async function bulkUpdateWorkItemPriority(ids: string[], priority: string
   }
   const db = getDb();
   try {
-    const userId = await getCurrentUserId();
+    const context = await requireOrganizationContext();
     await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
       await tx.workItem.updateMany({
-        where: buildWorkItemBulkWhere(userId, ids),
+        where: buildWorkItemBulkWhere(context, ids),
         data: { priority },
       });
     });
@@ -339,9 +349,9 @@ export async function bulkDeleteWorkItems(ids: string[]): Promise<MutationResult
   if (!ids.length) return errorResult("No hay pendientes seleccionados.");
   const db = getDb();
   try {
-    const userId = await getCurrentUserId();
+    const context = await requireOrganizationContext();
     const workItems = await db.workItem.findMany({
-      where: buildWorkItemBulkWhere(userId, ids),
+      where: buildWorkItemBulkWhere(context, ids),
       select: { id: true, sourceId: true, folio: true, title: true, clientId: true, policyId: true },
     });
 
@@ -350,11 +360,13 @@ export async function bulkDeleteWorkItems(ids: string[]): Promise<MutationResult
     }
 
     await db.$transaction(async (tx) => {
-      await tx.workItem.deleteMany({ where: { id: { in: workItems.map((workItem) => workItem.id) } } });
+      await assertOrganizationContextInTransaction(tx, context);
+      await tx.workItem.deleteMany({ where: { organizationId: context.organizationId, id: { in: workItems.map((workItem) => workItem.id) } } });
       for (const workItem of workItems) {
         const workItemRouteId = workItem.sourceId ?? workItem.id;
         await writeActivityLog({
           entityType: "WorkItem",
+          organizationId: context.organizationId,
           entityId: workItemRouteId,
           action: "TASK_DELETE",
           oldValue: workItem,
@@ -376,18 +388,20 @@ export async function bulkDeleteWorkItems(ids: string[]): Promise<MutationResult
 export async function deleteWorkItem(id: string): Promise<MutationResult> {
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
-    const existingWorkItem = await findWorkItemByRouteId(id, undefined, userId);
+    const context = await requireOrganizationContext();
+    const existingWorkItem = await findWorkItemByRouteId(id, context.organizationId, undefined, context.membershipRole === "AGENT" ? context.userId : undefined);
 
     if (!existingWorkItem) {
       return errorResult("El pendiente ya no existe.");
     }
 
     await db.$transaction(async (tx) => {
-      await tx.workItem.delete({ where: { id: existingWorkItem.id } });
+      await assertOrganizationContextInTransaction(tx, context);
+      await tx.workItem.deleteMany({ where: { id: existingWorkItem.id, organizationId: context.organizationId } });
 
       await writeActivityLog({
         entityType: "WorkItem",
+        organizationId: context.organizationId,
         entityId: existingWorkItem.id,
         action: "TASK_DELETE",
         oldValue: existingWorkItem,

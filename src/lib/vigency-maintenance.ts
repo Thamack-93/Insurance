@@ -168,17 +168,19 @@ function normalizeNumber(value: unknown) {
 
 export async function getLatestMaintenanceRun(
   type: string,
+  organizationId: string,
   client?: DbClient,
 ): Promise<MaintenanceRunSnapshot | null> {
   const db = client ?? getDb();
   return db.maintenanceRun.findFirst({
-    where: { type },
+    where: { type, organizationId },
     orderBy: { startedAt: "desc" },
   });
 }
 
 export async function runPolicyVigencyAudit(input: {
   actorId: string;
+  organizationId: string;
   client?: DbClient;
   now?: Date;
 }): Promise<{ run: MaintenanceRunSnapshot; summary: VigencyAuditSummary }> {
@@ -186,6 +188,7 @@ export async function runPolicyVigencyAudit(input: {
   const now = input.now ?? new Date();
   const run = await db.maintenanceRun.create({
     data: {
+      organizationId: input.organizationId,
       type: "POLICY_VIGENCY_AUDIT",
       status: "RUNNING",
       createdById: input.actorId,
@@ -214,6 +217,7 @@ export async function runPolicyVigencyAudit(input: {
 
   try {
     const policies = (await db.policy.findMany({
+      where: { organizationId: input.organizationId },
       select: {
         id: true,
         policyNumber: true,
@@ -250,6 +254,7 @@ export async function runPolicyVigencyAudit(input: {
     }
 
     const allReceipts = (await db.receipt.findMany({
+      where: { organizationId: input.organizationId },
       select: {
         id: true,
         receiptNumber: true,
@@ -535,13 +540,15 @@ export async function runPolicyVigencyAudit(input: {
                 insurerId: sourcePolicy.insurerId,
               },
             },
+            input.organizationId,
             db,
           );
           const nextStatus = suppressionRule ? "DECLINED" : "PENDING";
 
           await db.policyRenewalSuggestion.upsert({
             where: {
-              sourcePolicyId_targetPolicyId: {
+              organizationId_sourcePolicyId_targetPolicyId: {
+                organizationId: input.organizationId,
                 sourcePolicyId: sourcePolicy.id,
                 targetPolicyId: targetPolicy.id,
               },
@@ -557,6 +564,7 @@ export async function runPolicyVigencyAudit(input: {
               resolutionNote: suppressionRule ? `Suprimida por regla: ${suppressionRule.reason ?? suppressionRule.issueCode}.` : undefined,
             },
             create: {
+              organizationId: input.organizationId,
               maintenanceRunId: run.id,
               sourcePolicyId: sourcePolicy.id,
               targetPolicyId: targetPolicy.id,
@@ -631,6 +639,7 @@ export async function runPolicyVigencyAudit(input: {
                 receiptNumber: receipt.receiptNumber,
               },
               userId: input.actorId,
+              organizationId: input.organizationId,
               db,
             });
           }
@@ -699,6 +708,7 @@ export async function runPolicyVigencyAudit(input: {
               familyKey: key,
             },
           },
+          input.organizationId,
           db,
         );
         const issueDetails = {
@@ -746,6 +756,7 @@ export async function runPolicyVigencyAudit(input: {
           } else {
             await db.receiptReconciliationIssue.create({
               data: {
+                organizationId: input.organizationId,
                 maintenanceRunId: run.id,
                 receiptId: receipt.id,
                 policyId: targetPolicy.id,
@@ -804,6 +815,7 @@ export async function runPolicyVigencyAudit(input: {
       action: "POLICY_VIGENCY_AUDIT_COMPLETED",
       newValue: summary,
       userId: input.actorId,
+      organizationId: input.organizationId,
       db,
     });
 

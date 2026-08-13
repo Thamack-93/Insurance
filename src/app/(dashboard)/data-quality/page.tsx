@@ -36,7 +36,7 @@ import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
 import { getLatestMaintenanceRun } from "@/lib/vigency-maintenance";
 import { getUpcomingRenewals } from "@/lib/renewals";
-import { requireAdminOrRedirect } from "@/lib/auth";
+import { requireOrganizationRole } from "@/lib/organization-context";
 import { RunVigencyAuditButton } from "@/components/data-quality/run-vigency-audit-button";
 import { RunPaymentAuditButton } from "@/components/data-quality/run-payment-audit-button";
 import { ReviewActionButtons } from "@/components/data-quality/review-action-buttons";
@@ -107,7 +107,7 @@ export default async function DataQualityPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireAdminOrRedirect();
+  const organizationContext = await requireOrganizationRole(["OWNER", "ADMIN"]);
   const params = (await searchParams) ?? {};
   const initialTab =
     params.tab === "salud" || params.tab === "vigencias" || params.tab === "pagos" || params.tab === "renovaciones" || params.tab === "ledger"
@@ -130,19 +130,19 @@ export default async function DataQualityPage({
     ledgerReviewIssues,
     renewalFollowUps,
   ] = await Promise.all([
-    getClientDataQualityScores(portfolioOwnerId),
-    getPolicyDataQualityScores(portfolioOwnerId),
-    getOperationalDataHealthSummary(portfolioOwnerId),
-    getLatestMaintenanceRun("POLICY_VIGENCY_AUDIT"),
-    getLatestMaintenanceRun("PAYMENT_RECONCILIATION_AUDIT"),
-    getReceiptReviewIssues(portfolioOwnerId),
-    getRenewalReviewSuggestions(portfolioOwnerId),
-    getLedgerReviewIssues(),
+    getClientDataQualityScores(organizationContext.organizationId, portfolioOwnerId),
+    getPolicyDataQualityScores(organizationContext.organizationId, portfolioOwnerId),
+    getOperationalDataHealthSummary(organizationContext.organizationId, portfolioOwnerId),
+    getLatestMaintenanceRun("POLICY_VIGENCY_AUDIT", organizationContext.organizationId),
+    getLatestMaintenanceRun("PAYMENT_RECONCILIATION_AUDIT", organizationContext.organizationId),
+    getReceiptReviewIssues(organizationContext.organizationId, portfolioOwnerId),
+    getRenewalReviewSuggestions(organizationContext.organizationId, portfolioOwnerId),
+    getLedgerReviewIssues(organizationContext.organizationId),
     getUpcomingRenewals(30, portfolioOwnerId),
   ]);
   const previewBatch = previewBatchId
-      ? await db.ledgerImportBatch.findUnique({
-        where: { id: previewBatchId },
+      ? await db.ledgerImportBatch.findFirst({
+        where: { id: previewBatchId, organizationId: organizationContext.organizationId },
         include: {
           rows: {
             orderBy: [{ rowNumber: "asc" }],

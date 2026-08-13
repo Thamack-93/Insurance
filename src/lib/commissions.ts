@@ -10,6 +10,15 @@ import { logError } from "@/lib/logger";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 import type { CommissionStatus } from "@/lib/domain-values";
 import { commissionOperationalWhere } from "@/lib/portfolio-access";
+import {
+  assertOrganizationContextInTransaction,
+  requireOrganizationContext,
+} from "@/lib/organization-context";
+
+type CommissionScope = {
+  organizationId: string;
+  portfolioOwnerId?: string;
+};
 
 export interface CommissionCalculation {
   policyId: string;
@@ -30,9 +39,20 @@ export async function calculateCommissionsForPolicy(
   const db = getDb();
 
   try {
+    const context = await requireOrganizationContext();
+    const portfolioOwnerId = context.membershipRole === "AGENT" ? context.userId : undefined;
+    return await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
     // Get policy details
-    const policy = await db.policy.findUnique({
-      where: { id: policyId },
+    const policy = await tx.policy.findFirst({
+      where: {
+        id: policyId,
+        organizationId: context.organizationId,
+        client: {
+          organizationId: context.organizationId,
+          ...(portfolioOwnerId ? { portfolioOwnerId } : {}),
+        },
+      },
       include: {
         client: true,
         insurer: true,
@@ -60,16 +80,18 @@ export async function calculateCommissionsForPolicy(
       const expectedDate = businessAddDays(receipt.dueDate, 30); // Commission expected 30 days after receipt due
 
       // Check if commission already exists
-      const existingCommission = await db.commission.findFirst({
+      const existingCommission = await tx.commission.findFirst({
         where: {
+          organizationId: context.organizationId,
           policyId,
           receiptId: receipt.id,
         },
       });
 
       if (!existingCommission) {
-        const commission = await db.commission.create({
+        const commission = await tx.commission.create({
           data: {
+            organizationId: context.organizationId,
             policyId,
             receiptId: receipt.id,
             clientId: policy.clientId,
@@ -88,6 +110,9 @@ export async function calculateCommissionsForPolicy(
           action: "CALCULATE_COMMISSION",
           entityType: "COMMISSION",
           entityId: commission.id,
+          organizationId: context.organizationId,
+          userId: context.userId,
+          db: tx,
           newValue: JSON.stringify({
             policyId,
             receiptId: receipt.id,
@@ -104,6 +129,7 @@ export async function calculateCommissionsForPolicy(
       `/policies/${policyId}`,
       `Se calcularon ${commissions.length} comisiones para la póliza.`,
     );
+    });
   } catch (error) {
     logError("commissions.calculateCommissionsForPolicy", error, { policyId, receiptId });
     return errorResult("No se pudieron calcular las comisiones. Intenta de nuevo.");
@@ -118,8 +144,12 @@ export async function updateCommissionStatus(
   const db = getDb();
 
   try {
-    const commission = await db.commission.findUnique({
-      where: { id: commissionId },
+    const context = await requireOrganizationContext();
+    const portfolioOwnerId = context.membershipRole === "AGENT" ? context.userId : undefined;
+    return await db.$transaction(async (tx) => {
+    await assertOrganizationContextInTransaction(tx, context);
+    const commission = await tx.commission.findFirst({
+      where: { id: commissionId, ...commissionOperationalWhere(portfolioOwnerId, context.organizationId) },
       include: {
         policy: true,
         client: true,
@@ -139,16 +169,20 @@ export async function updateCommissionStatus(
         : {}),
     };
 
-    const updatedCommission = await db.commission.update({
-      where: { id: commissionId },
+    const updated = await tx.commission.updateMany({
+      where: { id: commissionId, ...commissionOperationalWhere(portfolioOwnerId, context.organizationId) },
       data: updateData,
     });
+    if (updated.count !== 1) return errorResult("La comisión no existe o fue eliminada.");
 
     // Log activity
     await writeActivityLog({
       action: "UPDATE_COMMISSION_STATUS",
       entityType: "COMMISSION",
       entityId: commissionId,
+      organizationId: context.organizationId,
+      userId: context.userId,
+      db: tx,
       oldValue: JSON.stringify({
         status: commission.status,
         actualAmount: commission.actualAmount,
@@ -160,10 +194,11 @@ export async function updateCommissionStatus(
     });
 
     return successResult(
-      updatedCommission.id,
-      `/commissions/${updatedCommission.id}`,
+      commission.id,
+      `/commissions/${commission.id}`,
       "Estado de comisión actualizado.",
     );
+    });
   } catch (error) {
     logError("commissions.updateCommissionStatus", error, { commissionId, status });
     return errorResult("No se pudo actualizar el estado de la comisión. Intenta de nuevo.");
@@ -172,13 +207,13 @@ export async function updateCommissionStatus(
 
 export async function getCommissionStats(
   dateRange?: { start: Date; end: Date },
-  portfolioOwnerId?: string,
+  scope?: CommissionScope,
 ) {
   const db = getDb();
   
   try {
     const whereClause: Prisma.CommissionWhereInput = {
-      ...commissionOperationalWhere(portfolioOwnerId),
+      ...commissionOperationalWhere(scope?.portfolioOwnerId, scope?.organizationId),
       ...(dateRange
         ? {
           expectedDate: {
@@ -234,7 +269,7 @@ export async function getCommissionStats(
   }
 }
 
-export async function getOverdueCommissions(portfolioOwnerId?: string) {
+export async function getOverdueCommissions(scope: CommissionScope) {
   const db = getDb();
   
   try {
@@ -242,7 +277,7 @@ export async function getOverdueCommissions(portfolioOwnerId?: string) {
     
     const overdueCommissions = await db.commission.findMany({
       where: {
-        ...commissionOperationalWhere(portfolioOwnerId),
+        ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
         expectedDate: {
           lt: todayDate,
         },
@@ -292,17 +327,18 @@ export async function getOverdueCommissions(portfolioOwnerId?: string) {
   }
 }
 
-export async function autoUpdateCommissionStatuses(portfolioOwnerId?: string) {
+export async function autoUpdateCommissionStatuses(scope: CommissionScope) {
   const db = getDb();
 
   try {
     const todayDate = today();
-    const operationalWhere = commissionOperationalWhere(portfolioOwnerId);
+    const operationalWhere = commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
 
     // Sequential transitions: a commission may need EXPECTED→PENDING→OVERDUE
     // in the same run if its receipt was just paid AND it's already past due.
     const pendingResult = await db.commission.updateMany({
       where: {
+        organizationId: scope.organizationId,
         ...operationalWhere,
         status: "EXPECTED",
         receipt: { status: "PAID" },
@@ -311,6 +347,7 @@ export async function autoUpdateCommissionStatuses(portfolioOwnerId?: string) {
     });
     const overdueResult = await db.commission.updateMany({
       where: {
+        organizationId: scope.organizationId,
         ...operationalWhere,
         status: "PENDING",
         expectedDate: { lt: todayDate },

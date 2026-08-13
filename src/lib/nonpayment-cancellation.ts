@@ -103,8 +103,8 @@ export async function cancelPolicyForNonPayment(
     });
 
     const cancelledAt = now;
-    const policy = await tx.policy.update({
-      where: { id: sourceReceipt.policyId },
+    await tx.policy.updateMany({
+      where: { id: sourceReceipt.policyId, organizationId },
       data: {
         status: "CANCELLED",
         cancellationReason: "NON_PAYMENT",
@@ -113,10 +113,11 @@ export async function cancelPolicyForNonPayment(
         updatedById: actorId,
       },
     });
+    const policy = await tx.policy.findFirstOrThrow({ where: { id: sourceReceipt.policyId, organizationId } });
 
     for (const receipt of openReceipts) {
-      const updatedReceipt = await tx.receipt.update({
-        where: { id: receipt.id },
+      await tx.receipt.updateMany({
+        where: { id: receipt.id, organizationId },
         data: {
           status: "CANCELLED",
           paidDate: null,
@@ -127,6 +128,7 @@ export async function cancelPolicyForNonPayment(
           updatedById: actorId,
         },
       });
+      const updatedReceipt = await tx.receipt.findFirstOrThrow({ where: { id: receipt.id, organizationId } });
 
       await writeActivityLog({
         organizationId,

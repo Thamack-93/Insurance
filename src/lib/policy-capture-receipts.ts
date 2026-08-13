@@ -6,6 +6,7 @@ import type { PolicyPdfCaptureDraft, PolicyPdfCaptureReceiptEvidence } from "@/l
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export type AutoCaptureReceiptInput = {
+  organizationId: string;
   policyId: string;
   clientId: string;
   insurerId: string;
@@ -20,6 +21,7 @@ export type AutoCaptureReceiptInput = {
 };
 
 export type AutoCaptureReceiptPayload = {
+  organizationId: string;
   receiptNumber: string;
   policyId: string;
   endorsementId: null;
@@ -179,6 +181,7 @@ function buildAutoCaptureReceiptPayloadFromTerm(
   const notes = [buildAutoCaptureReceiptNotes(input.draft), buildReceiptEvidenceNote(input.receiptEvidence)].filter(Boolean).join(" · ") || null;
 
   return {
+    organizationId: input.organizationId,
     receiptNumber: term.receiptNumber,
     policyId: input.policyId,
     endorsementId: null,
@@ -242,7 +245,7 @@ async function upsertAutoCaptureReceipt(db: DbClient, payload: AutoCaptureReceip
     };
 
     const receipt = await db.receipt.update({
-      where: { id: existingReceipt.id },
+      where: { id: existingReceipt.id, organizationId: payload.organizationId },
       data,
     });
 
@@ -257,7 +260,7 @@ async function upsertAutoCaptureReceipt(db: DbClient, payload: AutoCaptureReceip
   }
 
   const receipt = await db.receipt.create({
-    data: payload,
+    data: { ...payload, organizationId: payload.organizationId },
   });
 
   return {
