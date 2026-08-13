@@ -13,7 +13,8 @@ import { createClientDefaults } from "@/lib/form-defaults";
 import { createPolicyDefaults } from "@/lib/form-defaults";
 import { createReceiptDefaults } from "@/lib/form-defaults";
 import { createWorkItemDefaults } from "@/lib/form-defaults";
-import { clientSchema, endorsementSchema, policySchema, receiptSchema, workItemSchema } from "@/lib/validations";
+import { createClaimDefaults } from "@/lib/form-defaults";
+import { claimSchema, clientSchema, endorsementSchema, policySchema, receiptSchema, workItemSchema } from "@/lib/validations";
 import { errorResult, type MutationResult } from "@/lib/mutation-utils";
 import { createClient, updateClient } from "@/app/(dashboard)/clients/actions";
 import { createPolicy, updatePolicy } from "@/app/(dashboard)/policies/actions";
@@ -21,9 +22,11 @@ import { createReceipt, updateReceipt } from "@/app/(dashboard)/receipts/actions
 import { createPayment } from "@/app/(dashboard)/payments/actions";
 import { createWorkItem, updateWorkItem } from "@/app/(dashboard)/tasks/actions";
 import { createEndorsement, updateEndorsement } from "@/app/(dashboard)/policies/endorsements/actions";
+import { createClaim, updateClaim } from "@/app/(dashboard)/claims/actions";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
-import { policyOperationalWhere, receiptOperationalWhere } from "@/lib/portfolio-access";
+import { claimOperationalWhere, policyOperationalWhere, receiptOperationalWhere } from "@/lib/portfolio-access";
 import { PAYMENT_CLOSE_TOLERANCE } from "@/lib/receipt-reconciliation";
+import { CLAIM_CHECKLIST_STATUSES, getClaimChecklistTemplate, updateClaimChecklistStatus } from "@/lib/claim-checklists";
 import type {
   AssistantActionProposal,
   AssistantMutationEntityType,
@@ -51,7 +54,7 @@ type AssistantActionDraftPayload = {
 
 const ACTION_DRAFT_TTL_MS = 30 * 60 * 1000;
 
-const ENTITY_TYPES: AssistantMutationEntityType[] = ["client", "policy", "receipt", "payment", "workItem", "endorsement"];
+const ENTITY_TYPES: AssistantMutationEntityType[] = ["client", "policy", "receipt", "payment", "workItem", "endorsement", "claim", "claimChecklistItem"];
 
 const RELATION_SEARCH_TYPE: Record<string, GlobalSearchResult["type"]> = {
   clientId: "client",
@@ -140,6 +143,25 @@ const FIELD_LABELS: Record<AssistantMutationEntityType, Record<string, string>> 
     reference: "Referencia",
     concept: "Concepto",
     notes: "Notas",
+  },
+  claim: {
+    folio: "Folio",
+    clientId: "Cliente",
+    policyId: "Póliza",
+    insurerId: "Aseguradora",
+    claimType: "Tipo de siniestro",
+    description: "Descripción",
+    status: "Estado",
+    incidentDate: "Fecha del incidente",
+    reportedDate: "Fecha de reporte",
+    closedDate: "Fecha de cierre",
+    amountClaimed: "Monto reclamado",
+    amountPaid: "Monto pagado",
+    notes: "Notas",
+  },
+  claimChecklistItem: {
+    requirementCode: "Requisito",
+    status: "Estado",
   },
 };
 
@@ -236,6 +258,8 @@ function buildActionTitle(entityType: AssistantMutationEntityType, operation: As
     payment: "pago",
     workItem: "pendiente",
     endorsement: "endoso",
+    claim: "siniestro",
+    claimChecklistItem: "requisito del siniestro",
   };
   return `${operation === "create" ? "Crear" : "Actualizar"} ${labels[entityType]}`;
 }
@@ -248,6 +272,8 @@ function buildActionSummary(entityType: AssistantMutationEntityType, operation: 
     payment: "pago",
     workItem: "pendiente",
     endorsement: "endoso",
+    claim: "siniestro",
+    claimChecklistItem: "requisito del siniestro",
   };
   const label = targetLabel ? ` sobre ${targetLabel}` : "";
   return `${operation === "create" ? "Alta" : "Edición"} de ${labels[entityType]}${label}`;
@@ -404,6 +430,38 @@ function toWorkItemFormValues(workItem: {
     startDate: formatDateInput(workItem.startDate),
     dueDate: workItem.dueDate ? formatDateInput(workItem.dueDate) : "",
     notes: workItem.notes ?? "",
+  };
+}
+
+function toClaimFormValues(claim: {
+  folio: string;
+  clientId: string;
+  policyId: string;
+  insurerId: string;
+  claimType: string;
+  description: string | null;
+  status: string;
+  incidentDate: Date;
+  reportedDate: Date;
+  closedDate: Date | null;
+  amountClaimed: Prisma.Decimal | number | null;
+  amountPaid: Prisma.Decimal | number | null;
+  notes: string | null;
+}) {
+  return {
+    folio: claim.folio,
+    clientId: claim.clientId,
+    policyId: claim.policyId,
+    insurerId: claim.insurerId,
+    claimType: claim.claimType,
+    description: claim.description ?? "",
+    status: claim.status,
+    incidentDate: formatDateInput(claim.incidentDate),
+    reportedDate: formatDateInput(claim.reportedDate),
+    closedDate: claim.closedDate ? formatDateInput(claim.closedDate) : "",
+    amountClaimed: claim.amountClaimed == null ? undefined : Number(claim.amountClaimed),
+    amountPaid: claim.amountPaid == null ? undefined : Number(claim.amountPaid),
+    notes: claim.notes ?? "",
   };
 }
 
@@ -1128,6 +1186,154 @@ async function buildWorkItemDraft(plan: AssistantMutationPlan, user: AssistantUs
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
 }
 
+async function buildClaimDraft(plan: AssistantMutationPlan, user: AssistantUser) {
+  const db = getDb();
+  const organizationId = user.organizationId!;
+  const values = createClaimDefaults();
+  const fieldMap = new Map(plan.fields.map((field) => [field.field, field.value]));
+  const portfolioOwnerId = getSearchScope(user);
+
+  if (plan.operation === "update") {
+    if (!plan.targetQuery) return null;
+    const candidates = (await globalSearch(plan.targetQuery, portfolioOwnerId)).filter((result) => result.type === "claim");
+    const chosen = exactMatch(candidates, plan.targetQuery, "claim") ?? (candidates.length === 1 ? candidates[0] : null);
+    if (!chosen) return null;
+    const current = await db.claim.findFirst({
+      where: { AND: [{ id: chosen.id }, claimOperationalWhere(portfolioOwnerId, organizationId)] },
+      select: {
+        id: true,
+        folio: true,
+        clientId: true,
+        policyId: true,
+        insurerId: true,
+        claimType: true,
+        description: true,
+        status: true,
+        incidentDate: true,
+        reportedDate: true,
+        closedDate: true,
+        amountClaimed: true,
+        amountPaid: true,
+        notes: true,
+        updatedAt: true,
+        client: { select: { fullName: true } },
+        policy: { select: { policyNumber: true, policyType: true } },
+        insurer: { select: { name: true } },
+      },
+    });
+    if (!current) return null;
+    if (current.policy.policyType === "GMM" && (fieldMap.has("description") || fieldMap.has("notes"))) return null;
+
+    const next: Record<string, unknown> = {
+      ...toClaimFormValues(current),
+      ...Object.fromEntries(fieldMap.entries()),
+    };
+    const beforeDisplay = {
+      clientId: current.client.fullName,
+      policyId: current.policy.policyNumber,
+      insurerId: current.insurer.name,
+    };
+    const afterDisplay = { ...beforeDisplay };
+    for (const relation of plan.relations) {
+      const resolved = await resolveRelation(user, relation);
+      if (!resolved || "error" in resolved) return null;
+      next[resolved.field] = resolved.id;
+      afterDisplay[resolved.field as keyof typeof afterDisplay] = resolved.label;
+    }
+    const parsed = claimSchema.safeParse(next);
+    if (!parsed.success) return null;
+    const payload: AssistantActionDraftPayload = {
+      title: plan.title || buildActionTitle("claim", "update"),
+      summary: plan.summary || buildActionSummary("claim", "update", current.folio),
+      reply: plan.reply,
+      entityType: "claim",
+      operation: "update",
+      targetId: current.id,
+      targetLabel: current.folio,
+      targetUpdatedAt: current.updatedAt.toISOString(),
+      formValues: parsed.data,
+      changes: buildChangeList("claim", toClaimFormValues(current), parsed.data, beforeDisplay, afterDisplay),
+    };
+    if (!payload.changes.length) return null;
+    const draft = await createDraftRecord(user.id, organizationId, payload, db);
+    await writeActivityLog({ entityType: "AssistantActionDraft", entityId: draft.id, action: "ASSISTANT_ACTION_DRAFT_CREATED", newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel }, userId: user.id, organizationId, db });
+    return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
+  }
+
+  const next = applyPlanFields(values, plan.fields);
+  const afterDisplay: Record<string, string> = {};
+  for (const relation of plan.relations) {
+    const resolved = await resolveRelation(user, relation);
+    if (!resolved || "error" in resolved) return null;
+    next[resolved.field] = resolved.id;
+    afterDisplay[resolved.field] = resolved.label;
+  }
+  const parsed = claimSchema.safeParse(next);
+  if (!parsed.success) return null;
+  const policy = await db.policy.findFirst({
+    where: { AND: [{ id: parsed.data.policyId }, policyOperationalWhere(portfolioOwnerId, organizationId)] },
+    select: { policyType: true },
+  });
+  if (!policy || (policy.policyType === "GMM" && (fieldMap.has("description") || fieldMap.has("notes")))) return null;
+  const payload: AssistantActionDraftPayload = {
+    title: plan.title || buildActionTitle("claim", "create"),
+    summary: plan.summary || buildActionSummary("claim", "create", null),
+    reply: plan.reply,
+    entityType: "claim",
+    operation: "create",
+    targetId: null,
+    targetLabel: null,
+    targetUpdatedAt: null,
+    formValues: parsed.data,
+    changes: buildChangeList("claim", null, parsed.data, {}, afterDisplay),
+  };
+  const draft = await createDraftRecord(user.id, organizationId, payload, db);
+  await writeActivityLog({ entityType: "AssistantActionDraft", entityId: draft.id, action: "ASSISTANT_ACTION_DRAFT_CREATED", newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel }, userId: user.id, organizationId, db });
+  return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
+}
+
+async function buildClaimChecklistDraft(plan: AssistantMutationPlan, user: AssistantUser) {
+  if (plan.operation !== "update" || !plan.targetQuery) return null;
+  const db = getDb();
+  const organizationId = user.organizationId!;
+  const portfolioOwnerId = getSearchScope(user);
+  const candidates = (await globalSearch(plan.targetQuery, portfolioOwnerId)).filter((result) => result.type === "claim");
+  const chosen = exactMatch(candidates, plan.targetQuery, "claim") ?? (candidates.length === 1 ? candidates[0] : null);
+  if (!chosen) return null;
+  const claim = await db.claim.findFirst({
+    where: { AND: [{ id: chosen.id }, claimOperationalWhere(portfolioOwnerId, organizationId)] },
+    select: {
+      id: true,
+      folio: true,
+      policy: { select: { policyType: true } },
+      checklistItems: { select: { requirementCode: true, status: true, updatedAt: true } },
+    },
+  });
+  if (!claim) return null;
+  const fields = new Map(plan.fields.map((field) => [field.field, field.value]));
+  const requirementCode = fields.get("requirementCode")?.trim() ?? "";
+  const status = fields.get("status")?.trim() ?? "";
+  const template = getClaimChecklistTemplate(claim.policy.policyType).find((item) => item.code === requirementCode);
+  if (!template || !CLAIM_CHECKLIST_STATUSES.includes(status as (typeof CLAIM_CHECKLIST_STATUSES)[number])) return null;
+  const current = claim.checklistItems.find((item) => item.requirementCode === requirementCode);
+  const payload: AssistantActionDraftPayload = {
+    title: plan.title || "Actualizar requisito del siniestro",
+    summary: plan.summary || `${template.label} · ${claim.folio}`,
+    reply: plan.reply,
+    entityType: "claimChecklistItem",
+    operation: "update",
+    targetId: `${claim.id}:${requirementCode}`,
+    targetLabel: `${claim.folio} · ${template.label}`,
+    targetUpdatedAt: current?.updatedAt.toISOString() ?? "MISSING",
+    formValues: { claimId: claim.id, requirementCode, status },
+    changes: [{ label: "Estado", before: current?.status ?? "MISSING", after: status }],
+  };
+  if (payload.changes[0]?.before === payload.changes[0]?.after) return null;
+  const draft = await createDraftRecord(user.id, organizationId, payload, db);
+  await writeActivityLog({ entityType: "AssistantActionDraft", entityId: draft.id, action: "ASSISTANT_ACTION_DRAFT_CREATED", newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel }, userId: user.id, organizationId, db });
+  return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
+}
+
 export async function buildAssistantActionProposalFromPlan(plan: AssistantMutationPlan, user: AssistantUser) {
   try {
     if (!user.organizationId) return null;
@@ -1159,6 +1365,10 @@ export async function buildAssistantActionProposalFromPlan(plan: AssistantMutati
         return buildWorkItemDraft(normalizedPlan, user);
       case "endorsement":
         return buildEndorsementDraft(normalizedPlan, user);
+      case "claim":
+        return buildClaimDraft(normalizedPlan, user);
+      case "claimChecklistItem":
+        return buildClaimChecklistDraft(normalizedPlan, user);
     }
     return null;
   } catch (error) {
@@ -1167,7 +1377,7 @@ export async function buildAssistantActionProposalFromPlan(plan: AssistantMutati
   }
 }
 
-async function executeDraftPayload(payload: AssistantActionDraftPayload): Promise<MutationResult> {
+async function executeDraftPayload(payload: AssistantActionDraftPayload, organizationId: string): Promise<MutationResult> {
   switch (payload.entityType) {
     case "client":
       return payload.operation === "create"
@@ -1191,6 +1401,26 @@ async function executeDraftPayload(payload: AssistantActionDraftPayload): Promis
       return payload.operation === "create"
         ? createEndorsement(payload.formValues as Parameters<typeof createEndorsement>[0])
         : updateEndorsement(payload.targetId ?? "", payload.formValues as Parameters<typeof updateEndorsement>[1]);
+    case "claim":
+      return payload.operation === "create"
+        ? createClaim(payload.formValues as Parameters<typeof createClaim>[0])
+        : updateClaim(payload.targetId ?? "", payload.formValues as Parameters<typeof updateClaim>[1]);
+    case "claimChecklistItem": {
+      const user = await getCurrentUser();
+      if (!user) return errorResult("No tienes permiso para actualizar este requisito.");
+      const values = payload.formValues as { claimId?: string; requirementCode?: string; status?: string };
+      if (!values.claimId || !values.requirementCode || !CLAIM_CHECKLIST_STATUSES.includes(values.status as (typeof CLAIM_CHECKLIST_STATUSES)[number])) {
+        return errorResult("El requisito del siniestro no es válido.");
+      }
+      const updated = await updateClaimChecklistStatus({
+        claimId: values.claimId,
+        requirementCode: values.requirementCode,
+        status: values.status as (typeof CLAIM_CHECKLIST_STATUSES)[number],
+      }, organizationId, user.role === "ADMIN" ? undefined : user.id);
+      return updated
+        ? { ok: true, id: updated.id, redirectTo: `/claims/${values.claimId}`, message: "Checklist del siniestro actualizado." }
+        : errorResult("No se pudo actualizar el requisito del siniestro.");
+    }
   }
   return errorResult("La acción solicitada no está soportada.");
 }
@@ -1277,7 +1507,18 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
       if (!current || current.updatedAt.toISOString() !== payload.targetUpdatedAt) {
         return markDraftFailed("La tarea cambió mientras revisabas la propuesta. Pide una nueva actualización.");
       }
-    } else if (payload.entityType === "client" || payload.entityType === "policy" || payload.entityType === "receipt") {
+    } else if (payload.entityType === "claimChecklistItem") {
+      const values = payload.formValues as { claimId?: string; requirementCode?: string };
+      if (!values.claimId || !values.requirementCode) return markDraftFailed("El requisito del siniestro no es válido.");
+      const current = await db.claimChecklistItem.findUnique({
+        where: { claimId_requirementCode: { claimId: values.claimId, requirementCode: values.requirementCode } },
+        select: { updatedAt: true },
+      });
+      const currentVersion = current?.updatedAt.toISOString() ?? "MISSING";
+      if (currentVersion !== payload.targetUpdatedAt) {
+        return markDraftFailed("El checklist cambió mientras revisabas la propuesta. Pide una nueva actualización.");
+      }
+    } else if (payload.entityType === "client" || payload.entityType === "policy" || payload.entityType === "receipt" || payload.entityType === "claim") {
       const entityDb = {
         client: db.client,
         policy: db.policy,
@@ -1299,13 +1540,18 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
         if (!current || current.updatedAt.toISOString() !== payload.targetUpdatedAt) {
           return markDraftFailed("El registro cambió mientras revisabas la propuesta. Pide una nueva actualización.");
         }
-      } else {
+      } else if (payload.entityType === "receipt") {
         const current = await entityDb.receipt.findFirst({
           where: { id: payload.targetId, organizationId: organizationContext.organizationId },
           select: { updatedAt: true },
         });
         if (!current || current.updatedAt.toISOString() !== payload.targetUpdatedAt) {
           return markDraftFailed("El registro cambió mientras revisabas la propuesta. Pide una nueva actualización.");
+        }
+      } else {
+        const current = await db.claim.findFirst({ where: { id: payload.targetId, organizationId: organizationContext.organizationId }, select: { updatedAt: true } });
+        if (!current || current.updatedAt.toISOString() !== payload.targetUpdatedAt) {
+          return markDraftFailed("El siniestro cambió mientras revisabas la propuesta. Pide una nueva actualización.");
         }
       }
     } else {
@@ -1315,7 +1561,7 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
 
   let result: MutationResult;
   try {
-    result = await executeDraftPayload(payload);
+    result = await executeDraftPayload(payload, organizationContext.organizationId);
   } catch (error) {
     logError("assistant.actions.executeDraft", error, { draftId: draft.id, entityType: payload.entityType, operation: payload.operation });
     result = errorResult(error instanceof Error ? error.message : "No se pudo ejecutar la propuesta.");

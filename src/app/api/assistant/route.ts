@@ -14,6 +14,10 @@ export const dynamic = "force-dynamic";
 const messageSchema = z.object({
   message: z.string().trim().min(1).max(2_000),
   context: noraContextRefSchema.nullish(),
+  history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().trim().min(1).max(2_000) })).max(6).optional(),
+}).superRefine((value, context) => {
+  const historyLength = (value.history ?? []).reduce((total, message) => total + message.content.length, 0);
+  if (historyLength > 6_000) context.addIssue({ code: "custom", path: ["history"], message: "El historial excede el límite permitido." });
 });
 
 export async function GET() {
@@ -89,7 +93,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "El mensaje no es válido." }, { status: 400 });
     }
 
-    let contextualMessage = payload.message;
+    let contextText: string | null = null;
+    let gmmMetadataOnly = false;
     if (payload.context) {
       const context = await resolveAuthorizedNoraContext(payload.context, {
         organizationId: organization.organizationId,
@@ -99,14 +104,15 @@ export async function POST(request: NextRequest) {
       if (!context) {
         return NextResponse.json({ error: "El contexto de Nora no existe o no está autorizado." }, { status: 400 });
       }
-      contextualMessage = `${payload.message}\n\nContexto explícitamente aceptado: ${context.type} ${context.label}.`;
+      contextText = `${context.type} ${context.label}`;
+      gmmMetadataOnly = "policyType" in context && context.policyType === "GMM";
     }
 
     const response = await buildAssistantReply({
       id: user.id,
       role: organization.membershipRole === "AGENT" ? "AGENT" : "ADMIN",
       organizationId: organization.organizationId,
-    }, contextualMessage);
+    }, payload.message, { history: payload.history, contextText, gmmMetadataOnly });
 
     console.log(
       JSON.stringify({

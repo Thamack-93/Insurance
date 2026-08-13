@@ -8,7 +8,8 @@ import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-but
 import { requireOrganizationRole } from "@/lib/organization-context";
 import { listAssistantReports } from "@/lib/assistant-reports";
 import { getAssistantAiConnectionStatus, getAssistantAiOperationLabel } from "@/lib/assistant-ai";
-import { listAssistantAiRuns } from "@/lib/assistant-ai-runs";
+import { getAssistantAiMonthlyUsageSummary, listAssistantAiRuns } from "@/lib/assistant-ai-runs";
+import { getNoraAgentMode, getNoraAiMonthlySoftLimitUsd } from "@/lib/assistant-agent-config";
 import { formatDate } from "@/lib/dates";
 import { AssistantReportActionButtons } from "@/components/assistant/report-action-buttons";
 import { Gauge, ShieldCheck } from "lucide-react";
@@ -172,7 +173,7 @@ function AiRunList({
                 <p className="mt-1 font-medium">{run.finalModel ?? "Sin dato"}</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Costo estimado</p>
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Costo Gateway / estimado</p>
                 <p className="mt-1 font-medium">{formatCostUsd(run.estimatedCostUsd)}</p>
               </div>
               <div>
@@ -215,9 +216,11 @@ function AiRunList({
                     {attempt.usage ? (
                       <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
                         <span>In: {formatTokenCount(attempt.usage.inputTokens)}</span>
+                        <span>Cache read: {formatTokenCount(attempt.usage.cacheReadTokens ?? attempt.usage.cachedInputTokens)}</span>
+                        <span>Cache write: {formatTokenCount(attempt.usage.cacheWriteTokens)}</span>
                         <span>Out: {formatTokenCount(attempt.usage.outputTokens)}</span>
                         <span>Total: {formatTokenCount(attempt.usage.totalTokens)}</span>
-                        <span>Costo: {formatCostUsd(attempt.usage.estimatedCostUsd)}</span>
+                        <span>Costo: {formatCostUsd(attempt.usage.billedCostUsd ?? attempt.usage.estimatedCostUsd)}</span>
                       </div>
                     ) : null}
                   </div>
@@ -234,9 +237,10 @@ function AiRunList({
 export default async function AssistantSettingsPage() {
   const organizationContext = await requireOrganizationRole(["OWNER", "ADMIN"]);
   const aiStatus = getAssistantAiConnectionStatus();
-  const [incidents, suggestions] = await Promise.all([
+  const [incidents, suggestions, monthlyUsage] = await Promise.all([
     listAssistantReports({ organizationId: organizationContext.organizationId, kind: "INCIDENT", limit: 100 }),
     listAssistantReports({ organizationId: organizationContext.organizationId, kind: "SUGGESTION", limit: 100 }),
+    getAssistantAiMonthlyUsageSummary(organizationContext.organizationId),
   ]);
   const aiRuns = await listAssistantAiRuns({ organizationId: organizationContext.organizationId, limit: 50 });
 
@@ -244,10 +248,11 @@ export default async function AssistantSettingsPage() {
   const openSuggestions = suggestions.filter((report) => report.status === "OPEN" || report.status === "COLLECTING").length;
   const succeededRuns = aiRuns.filter((run) => run.status === "SUCCEEDED").length;
   const failedRuns = aiRuns.filter((run) => run.status === "FAILED").length;
-  const fallbackRuns = aiRuns.filter((run) => run.fallbackCount > 0).length;
   const averageDurationMs = aiRuns.length
     ? Math.round(aiRuns.reduce((sum, run) => sum + (run.durationMs ?? 0), 0) / aiRuns.length)
     : 0;
+  const agentMode = getNoraAgentMode();
+  const softLimitUsd = getNoraAiMonthlySoftLimitUsd();
 
   return (
     <div className="flex flex-col gap-6">
@@ -323,9 +328,30 @@ export default async function AssistantSettingsPage() {
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="pb-3">
-            <CardDescription>Corridas registradas</CardDescription>
-            <CardTitle className="text-3xl">{aiRuns.length}</CardTitle>
+            <CardDescription>Llamadas este mes</CardDescription>
+            <CardTitle className="text-3xl">{monthlyUsage.runCount}</CardTitle>
           </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription>Costo del mes</CardDescription>
+            <CardTitle className="text-3xl">{formatCostUsd(monthlyUsage.costUsd)}</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 text-xs text-muted-foreground">Límite interno: {formatCostUsd(softLimitUsd)}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription>Entrada cacheada</CardDescription>
+            <CardTitle className="text-3xl">{Math.round(monthlyUsage.cacheReadRatio * 100)}%</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 text-xs text-muted-foreground">{formatTokenCount(monthlyUsage.cacheReadTokens)} leídos · {formatTokenCount(monthlyUsage.cacheWriteTokens)} escritos</CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription>Modo Nora</CardDescription>
+            <CardTitle className="text-3xl">{agentMode}</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 text-xs text-muted-foreground">Prompts: {monthlyUsage.promptVersions.join(", ") || "sin datos"}</CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-3">
@@ -335,8 +361,8 @@ export default async function AssistantSettingsPage() {
         </Card>
         <Card>
           <CardHeader className="pb-3">
-            <CardDescription>Corridas con fallback</CardDescription>
-            <CardTitle className="text-3xl">{fallbackRuns}</CardTitle>
+            <CardDescription>Fallbacks este mes</CardDescription>
+            <CardTitle className="text-3xl">{monthlyUsage.fallbackRuns}</CardTitle>
           </CardHeader>
         </Card>
         <Card>

@@ -32,8 +32,8 @@ export async function resolveAuthorizedNoraContext(
       return entity ? { ...ref, label: entity.fullName } : null;
     }
     case "policy": {
-      const entity = await db.policy.findFirst({ where: { AND: [{ id: ref.id }, policyOperationalWhere(portfolioOwnerId, organizationId)] }, select: { id: true, policyNumber: true } });
-      return entity ? { ...ref, label: entity.policyNumber } : null;
+      const entity = await db.policy.findFirst({ where: { AND: [{ id: ref.id }, policyOperationalWhere(portfolioOwnerId, organizationId)] }, select: { id: true, policyNumber: true, policyType: true } });
+      return entity ? { ...ref, label: entity.policyNumber, policyType: entity.policyType } : null;
     }
     case "receipt": {
       const entity = await db.receipt.findFirst({ where: { AND: [{ id: ref.id }, receiptOperationalWhere(portfolioOwnerId, organizationId)] }, select: { id: true, receiptNumber: true } });
@@ -44,8 +44,8 @@ export async function resolveAuthorizedNoraContext(
       return entity ? { ...ref, label: entity.title } : null;
     }
     case "claim": {
-      const entity = await db.claim.findFirst({ where: { AND: [{ id: ref.id }, claimOperationalWhere(portfolioOwnerId, organizationId)] }, select: { id: true, folio: true } });
-      return entity ? { ...ref, label: entity.folio } : null;
+      const entity = await db.claim.findFirst({ where: { AND: [{ id: ref.id }, claimOperationalWhere(portfolioOwnerId, organizationId)] }, select: { id: true, folio: true, policy: { select: { policyType: true } } } });
+      return entity ? { ...ref, label: entity.folio, policyType: entity.policy.policyType } : null;
     }
     case "endorsement": {
       const entity = await db.policyEndorsement.findFirst({ where: { AND: [{ id: ref.id }, endorsementOperationalWhere(portfolioOwnerId, organizationId)] }, select: { id: true, endorsementNumber: true } });

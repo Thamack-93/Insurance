@@ -51,6 +51,9 @@ type Message = {
   aiAttempts?: number;
   aiUsage?: AssistantAiUsageSnapshot | null;
   aiTrace?: AssistantAiTraceEntry[];
+  aiToolTrace?: AssistantConversationResponse["aiToolTrace"];
+  aiPromptVersion?: string | null;
+  aiBudgetWarning?: string | null;
   aiFallbackNotice?: string | null;
   aiDiagnostic?: AssistantConversationResponse["aiDiagnostic"];
   reportId?: string | null;
@@ -83,6 +86,19 @@ function makeId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function buildAssistantHistory(messages: Message[]) {
+  let remaining = 6_000;
+  const history: Array<{ role: "user" | "assistant"; content: string }> = [];
+  for (const message of messages.filter((entry) => entry.id !== "welcome").slice(-6).reverse()) {
+    if (remaining <= 0) break;
+    const content = message.text.trim().slice(0, Math.min(2_000, remaining));
+    if (!content) continue;
+    history.unshift({ role: message.role, content });
+    remaining -= content.length;
+  }
+  return history;
 }
 
 function initialMessage(snapshot: AssistantSnapshot): Message {
@@ -864,7 +880,7 @@ export function AssistantConsole({
       const response = await fetch("/api/assistant", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message, context: activeContext }),
+        body: JSON.stringify({ message, context: activeContext, history: buildAssistantHistory(messages) }),
       });
       const payload = (await response.json().catch(() => null)) as
         | { success?: boolean; response?: AssistantConversationResponse; error?: string }
@@ -894,6 +910,9 @@ export function AssistantConsole({
           aiAttempts: assistantResponse.aiAttempts,
           aiUsage: assistantResponse.aiUsage,
           aiTrace: assistantResponse.aiTrace,
+          aiToolTrace: assistantResponse.aiToolTrace,
+          aiPromptVersion: assistantResponse.aiPromptVersion,
+          aiBudgetWarning: assistantResponse.aiBudgetWarning,
           reportId: assistantResponse.reportId,
           actionProposal: assistantResponse.actionProposal,
           todayMetrics: assistantResponse.todayMetrics,
@@ -1260,6 +1279,11 @@ export function AssistantConsole({
               {message.aiFallbackNotice ? (
                 <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                   {message.aiFallbackNotice}
+                </div>
+              ) : null}
+              {message.aiBudgetWarning ? (
+                <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  {message.aiBudgetWarning}
                 </div>
               ) : null}
               {message.aiDiagnostic ? (

@@ -7,12 +7,21 @@ const aiMocks = vi.hoisted(() => ({
   createAttempt: vi.fn(),
   finalizeAttempt: vi.fn(),
   finalizeRun: vi.fn(),
+  stepCountIs: vi.fn(),
 }));
 
 vi.mock("ai", async () => {
   const actual = await vi.importActual<typeof import("ai")>("ai");
   const gateway = Object.assign((model: string) => model, { getGenerationInfo: aiMocks.getGenerationInfo });
-  return { ...actual, generateText: aiMocks.generateText, gateway };
+  return {
+    ...actual,
+    generateText: aiMocks.generateText,
+    gateway,
+    stepCountIs: (count: number) => {
+      aiMocks.stepCountIs(count);
+      return actual.stepCountIs(count);
+    },
+  };
 });
 
 vi.mock("@/lib/assistant-ai-runs", async () => {
@@ -103,6 +112,51 @@ describe("assistant ai fallback", () => {
 
     vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "openai/gpt-5.4-mini, deepseek/deepseek-v3");
     expect(getAssistantGatewayFallbackModels()).toEqual(["openai/gpt-5.4-mini", "deepseek/deepseek-v3"]);
+  });
+
+  it("configures the Luna agent with the stable prompt, safe tools and four-step limit", async () => {
+    vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
+    vi.stubEnv("AI_GATEWAY_MODEL", "minimax/minimax-m3");
+    vi.stubEnv("DATABASE_URL", "");
+    aiMocks.generateText.mockResolvedValue({
+      text: "Resumen generado por Nora.",
+      usage: { inputTokens: 1_500, outputTokens: 100 },
+      totalUsage: { inputTokens: 1_500, outputTokens: 100 },
+      providerMetadata: { gateway: { model: "openai/gpt-5.6-luna" } },
+      finishReason: "stop",
+    });
+
+    const result = await buildAssistantAiReply({
+      user: { id: "agent-1", role: "AGENT", organizationId: "org-test" },
+      message: "Lista los siniestros abiertos",
+      localReply: { reply: "", sections: [], quickPrompts: [] },
+      contextText: "claim SIN-001",
+      history: [{ role: "user", content: "Busca el siniestro SIN-001" }],
+      mode: "agent",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(aiMocks.stepCountIs).toHaveBeenCalledWith(4);
+    const options = aiMocks.generateText.mock.calls[0]?.[0];
+    expect(options.model).toBe("openai/gpt-5.6-luna");
+    expect(options.system.length).toBeGreaterThan(4_096);
+    expect(Object.keys(options.tools)).toEqual([
+      "searchPortfolio",
+      "getEntitySummary",
+      "getTodayBrief",
+      "listRenewals",
+      "listReceipts",
+      "listOpenWorkItems",
+      "listClaims",
+      "getClaimChecklist",
+      "auditConsistency",
+      "prepareActionDraft",
+    ]);
+    expect(options.messages).toEqual([
+      { role: "user", content: "Busca el siniestro SIN-001" },
+      { role: "user", content: "Contexto explícito autorizado: claim SIN-001\n\nLista los siniestros abiertos" },
+    ]);
+    expect(options.providerOptions.gateway.tags).toContain("prompt:nora-agent-v1");
   });
 
   it("treats a Vercel deployment as gateway-capable even without a local token", () => {

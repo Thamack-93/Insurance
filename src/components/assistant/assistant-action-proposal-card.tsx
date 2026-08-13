@@ -16,6 +16,8 @@ const ENTITY_LABELS: Record<AssistantActionProposal["entityType"], string> = {
   payment: "Pago",
   workItem: "Pendiente",
   endorsement: "Endoso",
+  claim: "Siniestro",
+  claimChecklistItem: "Checklist de siniestro",
 };
 
 export function AssistantActionProposalCard({ proposal, onConfirmed }: { proposal: AssistantActionProposal; onConfirmed?: () => void }) {

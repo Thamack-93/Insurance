@@ -36,8 +36,19 @@ export function normalizeAssistantAiUsage(value: unknown): AssistantAiUsageSnaps
   const inputTokens = toNumber(record.inputTokens ?? record.promptTokens ?? record.promptTokenCount ?? record.inputTokenCount);
   const outputTokens = toNumber(record.outputTokens ?? record.completionTokens ?? record.completionTokenCount ?? record.generatedTokens);
   const totalTokens = toNumber(record.totalTokens ?? record.totalTokenCount ?? record.totalUsage ?? record.tokenCount) ?? (inputTokens != null || outputTokens != null ? (inputTokens ?? 0) + (outputTokens ?? 0) : null);
-  const cachedInputTokens = toNumber(record.cachedInputTokens ?? record.cachedTokens ?? record.inputTokensCached ?? record.promptTokensCached);
+  const inputTokenDetails = record.inputTokenDetails && typeof record.inputTokenDetails === "object"
+    ? record.inputTokenDetails as Record<string, unknown>
+    : null;
+  const cacheReadTokens = toNumber(
+    inputTokenDetails?.cacheReadTokens ?? record.cacheReadTokens ?? record.cachedInputTokens ?? record.cachedTokens ?? record.inputTokensCached ?? record.promptTokensCached,
+  );
+  const cacheWriteTokens = toNumber(inputTokenDetails?.cacheWriteTokens ?? record.cacheWriteTokens ?? record.cacheCreationInputTokens);
+  const explicitNonCached = toNumber(inputTokenDetails?.noCacheTokens ?? record.nonCachedInputTokens ?? record.noCacheTokens);
+  const nonCachedInputTokens = explicitNonCached ?? (inputTokens != null
+    ? Math.max(0, inputTokens - (cacheReadTokens ?? 0) - (cacheWriteTokens ?? 0))
+    : null);
   const billedCostUsd = toNumber(record.billedCostUsd ?? record.totalCost ?? record.costUsd);
+  const estimatedCostUsd = toNumber(record.estimatedCostUsd);
   const costSource = record.costSource === "gateway" || record.costSource === "estimated" || record.costSource === "unknown"
     ? record.costSource
     : undefined;
@@ -47,17 +58,20 @@ export function normalizeAssistantAiUsage(value: unknown): AssistantAiUsageSnaps
     inputTokens,
     outputTokens,
     totalTokens,
-    cachedInputTokens,
-    estimatedCostUsd: null,
+    cachedInputTokens: cacheReadTokens,
+    nonCachedInputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    estimatedCostUsd,
     billedCostUsd,
     ...(costSource ? { costSource } : {}),
     generationId,
   };
 }
 
-const DEFAULT_MODEL_COSTS: Record<string, { input: number; output: number }> = {
+const DEFAULT_MODEL_COSTS: Record<string, { input: number; output: number; cacheRead?: number; cacheWrite?: number }> = {
   // Vercel AI Gateway OpenAI provider pricing after the configured 80% discount.
-  "openai/gpt-5.6-luna": { input: 0.20 / 1_000_000, output: 1.20 / 1_000_000 },
+  "openai/gpt-5.6-luna": { input: 0.20 / 1_000_000, output: 1.20 / 1_000_000, cacheRead: 0.02 / 1_000_000, cacheWrite: 0.25 / 1_000_000 },
   "openai/gpt-5.4-nano": { input: 0.20 / 1_000_000, output: 1.25 / 1_000_000 },
   "minimax/minimax-m3": { input: 0.30 / 1_000_000, output: 1.20 / 1_000_000 },
   "openai/gpt-5.4-mini": { input: 0.75 / 1_000_000, output: 4.50 / 1_000_000 },
@@ -68,18 +82,45 @@ export function estimateAssistantAiCostUsd(model: string, usage: AssistantAiUsag
   if (usage.inputTokens == null && usage.outputTokens == null) return null;
   const cost = DEFAULT_MODEL_COSTS[model];
   if (!cost) return null;
-  const inputCost = (usage.inputTokens ?? 0) * cost.input;
+  const cacheReadTokens = usage.cacheReadTokens ?? usage.cachedInputTokens ?? 0;
+  const cacheWriteTokens = usage.cacheWriteTokens ?? 0;
+  const nonCachedInputTokens = usage.nonCachedInputTokens ?? Math.max(0, (usage.inputTokens ?? 0) - cacheReadTokens - cacheWriteTokens);
+  const inputCost = nonCachedInputTokens * cost.input;
+  const cacheReadCost = cacheReadTokens * (cost.cacheRead ?? cost.input);
+  const cacheWriteCost = cacheWriteTokens * (cost.cacheWrite ?? cost.input);
   const outputCost = (usage.outputTokens ?? 0) * cost.output;
-  const estimated = inputCost + outputCost;
+  const estimated = inputCost + cacheReadCost + cacheWriteCost + outputCost;
   return Number.isFinite(estimated) ? Number(estimated.toFixed(9)) : null;
+}
+
+export function enrichAssistantAiUsageCost(model: string, usage: AssistantAiUsageSnapshot | null | undefined) {
+  if (!usage) return null;
+  const cost = DEFAULT_MODEL_COSTS[model];
+  const estimatedCostUsd = estimateAssistantAiCostUsd(model, usage);
+  if (!cost) return { ...usage, estimatedCostUsd };
+  const cacheReadTokens = usage.cacheReadTokens ?? usage.cachedInputTokens ?? 0;
+  const cacheWriteTokens = usage.cacheWriteTokens ?? 0;
+  const nonCachedInputTokens = usage.nonCachedInputTokens ?? Math.max(0, (usage.inputTokens ?? 0) - cacheReadTokens - cacheWriteTokens);
+  return {
+    ...usage,
+    nonCachedInputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    nonCachedInputCostUsd: Number((nonCachedInputTokens * cost.input).toFixed(9)),
+    cacheReadCostUsd: Number((cacheReadTokens * (cost.cacheRead ?? cost.input)).toFixed(9)),
+    cacheWriteCostUsd: Number((cacheWriteTokens * (cost.cacheWrite ?? cost.input)).toFixed(9)),
+    outputCostUsd: Number(((usage.outputTokens ?? 0) * cost.output).toFixed(9)),
+    estimatedCostUsd,
+  } satisfies AssistantAiUsageSnapshot;
 }
 
 function toSnapshotUsage(value: unknown, model: string) {
   const usage = normalizeAssistantAiUsage(value);
   if (!usage) return null;
-  const estimatedCostUsd = usage.estimatedCostUsd ?? estimateAssistantAiCostUsd(model, usage);
+  const enriched = enrichAssistantAiUsageCost(model, usage) ?? usage;
+  const estimatedCostUsd = enriched.estimatedCostUsd ?? estimateAssistantAiCostUsd(model, enriched);
   return {
-    ...usage,
+    ...enriched,
     estimatedCostUsd,
     costSource: usage.costSource ?? (usage.billedCostUsd != null ? "gateway" : estimatedCostUsd != null ? "estimated" : "unknown"),
   };
@@ -491,4 +532,62 @@ export async function listAssistantAiRuns(
   });
 
   return runs.map(toRunSnapshot);
+}
+
+export async function getAssistantAiMonthlySpend(
+  now = new Date(),
+  client: DbClient = getDb(),
+) {
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const aggregate = await client.assistantAiRun.aggregate({
+    where: { createdAt: { gte: monthStart } },
+    _sum: { estimatedCostUsd: true },
+    _count: { id: true },
+  });
+  return {
+    monthStart,
+    costUsd: toNumber(aggregate._sum.estimatedCostUsd) ?? 0,
+    runCount: aggregate._count.id,
+  };
+}
+
+export async function getAssistantAiMonthlyUsageSummary(organizationId: string, now = new Date(), client: DbClient = getDb()) {
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const runs = await client.assistantAiRun.findMany({
+    where: { organizationId, createdAt: { gte: monthStart } },
+    select: { totalUsageJson: true, usageJson: true, estimatedCostUsd: true, fallbackCount: true, providerMetadataJson: true },
+  });
+  let inputTokens = 0;
+  let cacheReadTokens = 0;
+  let cacheWriteTokens = 0;
+  let costUsd = 0;
+  let fallbackRuns = 0;
+  const promptVersions = new Set<string>();
+  for (const run of runs) {
+    const usage = normalizeAssistantAiUsage(JSON.parse(run.totalUsageJson ?? run.usageJson ?? "null"));
+    inputTokens += usage?.inputTokens ?? 0;
+    cacheReadTokens += usage?.cacheReadTokens ?? usage?.cachedInputTokens ?? 0;
+    cacheWriteTokens += usage?.cacheWriteTokens ?? 0;
+    costUsd += toNumber(run.estimatedCostUsd) ?? usage?.billedCostUsd ?? usage?.estimatedCostUsd ?? 0;
+    if (run.fallbackCount > 0) fallbackRuns += 1;
+    if (run.providerMetadataJson) {
+      try {
+        const metadata = JSON.parse(run.providerMetadataJson) as { promptVersion?: unknown };
+        if (typeof metadata.promptVersion === "string") promptVersions.add(metadata.promptVersion);
+      } catch {
+        // Ignore legacy or malformed metadata in the aggregate view.
+      }
+    }
+  }
+  return {
+    monthStart,
+    runCount: runs.length,
+    fallbackRuns,
+    inputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    cacheReadRatio: inputTokens > 0 ? cacheReadTokens / inputTokens : 0,
+    costUsd: Number(costUsd.toFixed(9)),
+    promptVersions: [...promptVersions].sort(),
+  };
 }
