@@ -27,7 +27,7 @@ export const EXPECTED_TENANT_TRIGGERS = Object.fromEntries(
   PROTECTED_TENANT_TABLES.map((table) => [table, `${table}_transition_singleton_organization`]),
 ) as Record<(typeof PROTECTED_TENANT_TABLES)[number], string>;
 
-const relationChecks: Array<[string, string, string]> = [
+export const TENANT_RELATION_CHECKS: ReadonlyArray<readonly [string, string, string]> = [
   ["Client", "referidorId", "Client"],
   ["Policy", "familyRootId", "Policy"], ["Policy", "renewedFromPolicyId", "Policy"],
   ["Policy", "clientId", "Client"], ["Policy", "insurerId", "Insurer"],
@@ -108,7 +108,7 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
     if (Number(dangling.rows[0]?.count ?? 0) > 0) issues.push(`${table} has dangling optional organization references`);
   }
 
-  for (const [child, column, parent] of relationChecks) {
+  for (const [child, column, parent] of TENANT_RELATION_CHECKS) {
     const result = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM ${identifier(child)} c JOIN ${identifier(parent)} p ON p."id" = c.${identifier(column)} WHERE c.${identifier(column)} IS NOT NULL AND c."organizationId" IS NOT NULL AND p."organizationId" IS NOT NULL AND c."organizationId" <> p."organizationId"`);
     if (Number(result.rows[0]?.count ?? 0) > 0) issues.push(`${child}.${column} crosses organizations`);
   }

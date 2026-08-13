@@ -90,18 +90,18 @@ async function main() {
     await removeSingletonGuards(tx);
     const orgA = await tx.organization.upsert({
       where: { id: LEGACY_ORGANIZATION_ID },
-      update: { name: "PolicyDesk Legacy Organization", slug: "legacy-organization", status: "ACTIVE" },
-      create: { id: LEGACY_ORGANIZATION_ID, name: "PolicyDesk Legacy Organization", slug: "legacy-organization", status: "ACTIVE", timeZone: "Etc/GMT+6", defaultCurrency: "MXN" },
+      update: { name: "PolicyDesk Legacy Organization", slug: "legacy-organization", kind: "LEGACY", status: "ACTIVE" },
+      create: { id: LEGACY_ORGANIZATION_ID, name: "PolicyDesk Legacy Organization", slug: "legacy-organization", kind: "LEGACY", status: "ACTIVE", timeZone: "Etc/GMT+6", defaultCurrency: "MXN" },
     });
     const orgB = await tx.organization.upsert({
       where: { id: PEDRO_ORGANIZATION_ID },
-      update: { name: "Pedro Alfredo Gómez Lorenzo", slug: "pedro-alfredo-gomez-lorenzo", status: "ACTIVE" },
-      create: { id: PEDRO_ORGANIZATION_ID, name: "Pedro Alfredo Gómez Lorenzo", slug: "pedro-alfredo-gomez-lorenzo", status: "ACTIVE", timeZone: "Etc/GMT+6", defaultCurrency: "MXN" },
+      update: { name: "Pedro Alfredo Gómez Lorenzo", slug: "pedro-alfredo-gomez-lorenzo", kind: "CUSTOMER", status: "ACTIVE" },
+      create: { id: PEDRO_ORGANIZATION_ID, name: "Pedro Alfredo Gómez Lorenzo", slug: "pedro-alfredo-gomez-lorenzo", kind: "CUSTOMER", status: "ACTIVE", timeZone: "Etc/GMT+6", defaultCurrency: "MXN" },
     });
     const orgDemo = await tx.organization.upsert({
       where: { id: DEMO_ORGANIZATION_ID },
-      update: { name: "PolicyDesk Demo Broker", slug: "demo-broker", status: "ACTIVE" },
-      create: { id: DEMO_ORGANIZATION_ID, name: "PolicyDesk Demo Broker", slug: "demo-broker", status: "ACTIVE", timeZone: "America/Mexico_City", defaultCurrency: "MXN" },
+      update: { name: "PolicyDesk Demo Broker", slug: "demo-broker", kind: "DEMO", status: "ACTIVE" },
+      create: { id: DEMO_ORGANIZATION_ID, name: "PolicyDesk Demo Broker", slug: "demo-broker", kind: "DEMO", status: "ACTIVE", timeZone: "America/Mexico_City", defaultCurrency: "MXN" },
     });
     const organizations = await tx.organization.findMany({ select: { id: true }, orderBy: { id: "asc" } });
     if (organizations.length !== 3 || organizations.some(({ id }) => ![LEGACY_ORGANIZATION_ID, PEDRO_ORGANIZATION_ID, DEMO_ORGANIZATION_ID].includes(id))) {

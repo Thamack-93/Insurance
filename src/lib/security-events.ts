@@ -77,7 +77,7 @@ export async function recordSecurityEvent(input: SecurityEventInput) {
       },
     });
 
-    if (aggregate.occurrenceCount > 1) return null;
+    if (aggregate.occurrenceCount > 1 || !input.organizationId) return null;
 
     const alert = await db.alert.create({ data: alertData });
     await writeActivityLog({

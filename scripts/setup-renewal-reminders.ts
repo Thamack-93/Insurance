@@ -27,6 +27,7 @@ async function main() {
 
   for (const policy of policies) {
     if (!policy.endDate) continue;
+    if (!policy.organizationId) throw new Error("POLICYDESK_RENEWAL_ORGANIZATION_REQUIRED");
 
     const endDate = businessStartOfDay(policy.endDate);
     const today = now;
@@ -47,7 +48,8 @@ async function main() {
       const sourceId = `${policy.id}:${formatBusinessDateInput(dueDate)}`;
       const existing = await db.workItem.findUnique({
         where: {
-          sourceType_sourceId: {
+          organizationId_sourceType_sourceId: {
+            organizationId: policy.organizationId,
             sourceType: "Renewal",
             sourceId,
           },
@@ -64,6 +66,7 @@ async function main() {
 
       await db.workItem.create({
         data: {
+          organizationId: policy.organizationId,
           sourceType: "Renewal",
           sourceId,
           workItemType: "TASK",

@@ -17,12 +17,14 @@ export type PlatformSummary = {
   activeUsers: number;
   activeMemberships: number;
   activeOwners: number;
+  activePlatformAdmins: number;
 };
 
 export type PlatformOrganizationRow = {
   id: string;
   name: string;
   slug: string;
+  kind: string;
   status: string;
   timeZone: string;
   defaultCurrency: string;
@@ -96,6 +98,7 @@ type OrganizationBase = {
   id: string;
   name: string;
   slug: string;
+  kind: string;
   status: string;
   timeZone: string;
   defaultCurrency: string;
@@ -147,6 +150,7 @@ function toOrganizationRow(organization: OrganizationBase, stats: MembershipStat
     id: organization.id,
     name: organization.name,
     slug: organization.slug,
+    kind: organization.kind,
     status: organization.status,
     timeZone: organization.timeZone,
     defaultCurrency: organization.defaultCurrency,
@@ -162,15 +166,16 @@ function toOrganizationRow(organization: OrganizationBase, stats: MembershipStat
 
 async function getPlatformSummary(): Promise<PlatformSummary> {
   const db = getDb();
-  const [organizations, activeOrganizations, suspendedOrganizations, activeMemberships, activeOwners, activeMemberIds] = await Promise.all([
+  const [organizations, activeOrganizations, suspendedOrganizations, activeMemberships, activeOwners, activePlatformAdmins, activeMemberIds] = await Promise.all([
     db.organization.count(),
     db.organization.count({ where: { status: "ACTIVE" } }),
     db.organization.count({ where: { status: "SUSPENDED" } }),
     db.organizationMembership.count({ where: { active: true } }),
     db.organizationMembership.count({ where: { active: true, role: "OWNER", user: { active: true } } }),
+    db.user.count({ where: { active: true, platformRole: "SUPERADMIN" } }),
     db.organizationMembership.findMany({ where: { active: true, user: { active: true } }, select: { userId: true } }),
   ]);
-  return { organizations, activeOrganizations, suspendedOrganizations, activeUsers: new Set(activeMemberIds.map(({ userId }) => userId)).size, activeMemberships, activeOwners };
+  return { organizations, activeOrganizations, suspendedOrganizations, activeUsers: new Set(activeMemberIds.map(({ userId }) => userId)).size, activeMemberships, activeOwners, activePlatformAdmins };
 }
 
 export async function getPlatformOverview({ query, status, page }: { query?: string; status?: string; page?: string }): Promise<PlatformOverview> {
@@ -191,6 +196,7 @@ export async function getPlatformOverview({ query, status, page }: { query?: str
         id: true,
         name: true,
         slug: true,
+        kind: true,
         status: true,
         timeZone: true,
         defaultCurrency: true,
@@ -213,6 +219,7 @@ export async function getPlatformOrganizationDetail(organizationId: string, { me
       id: true,
       name: true,
       slug: true,
+      kind: true,
       status: true,
       timeZone: true,
       defaultCurrency: true,

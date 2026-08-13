@@ -11,6 +11,7 @@ import { mapTaskStatusToWorkItemStatus } from "@/lib/work-items";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
 import { workItemSchema, type WorkItemFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
+import { requireOrganizationContext, assertOrganizationContextInTransaction } from "@/lib/organization-context";
 import {
   assertClientPortfolioAccess,
   assertPolicyPortfolioAccess,
@@ -114,12 +115,15 @@ export async function createWorkItem(values: WorkItemFormValues): Promise<Mutati
 
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
     const payload = await normalizeWorkItemInput(parsed.data, userId);
     const workItemId = randomUUID();
     const workItem = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
       const createdWorkItem = await tx.workItem.create({
         data: {
+          organizationId: context.organizationId,
           id: workItemId,
           sourceType: "WorkItem",
           sourceId: workItemId,
@@ -147,6 +151,7 @@ export async function createWorkItem(values: WorkItemFormValues): Promise<Mutati
       });
       const workItemRouteId = createdWorkItem.sourceId ?? createdWorkItem.id;
       await writeActivityLog({
+        organizationId: context.organizationId,
         entityType: "WorkItem",
         entityId: workItemRouteId,
         action: "TASK_CREATE",
@@ -161,6 +166,7 @@ export async function createWorkItem(values: WorkItemFormValues): Promise<Mutati
 
     if (workItem.priority === "HIGH" || workItem.priority === "URGENT") {
       await createNotification({
+        organizationId: context.organizationId,
         type: "TASK_HIGH_PRIORITY",
         severity: workItem.priority === "URGENT" ? "CRITICAL" : "WARNING",
         title: `Pendiente ${workItem.priority === "URGENT" ? "urgente" : "alta prioridad"}: ${workItem.title}`,

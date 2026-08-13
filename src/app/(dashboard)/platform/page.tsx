@@ -3,6 +3,7 @@ import { Building2, ChevronRight, ShieldCheck } from "lucide-react";
 import { Pagination } from "@/components/lists/pagination";
 import { requireSuperAdminOrRedirect } from "@/lib/auth";
 import { getPlatformOverview } from "@/lib/platform-dashboard";
+import { getOrganizationOptions } from "@/lib/organization-context";
 
 export const dynamic = "force-dynamic";
 
@@ -20,10 +21,16 @@ function statusLabel(value: string) {
   return value;
 }
 
+function kindLabel(value: string) {
+  if (value === "LEGACY") return "Legacy";
+  if (value === "DEMO") return "Demo";
+  return "Cliente";
+}
+
 export default async function PlatformPage({ searchParams }: { searchParams?: Promise<{ q?: string; status?: string; page?: string }> }) {
-  await requireSuperAdminOrRedirect();
+  const platformAdmin = await requireSuperAdminOrRedirect();
   const params = (await searchParams) ?? {};
-  const overview = await getPlatformOverview(params);
+  const [overview, organizationOptions] = await Promise.all([getPlatformOverview(params), getOrganizationOptions()]);
   const paginationParams = { q: params.q, status: params.status };
 
   return (
@@ -32,18 +39,19 @@ export default async function PlatformPage({ searchParams }: { searchParams?: Pr
         <div>
           <p className="text-sm font-semibold text-muted-foreground">Plataforma</p>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">Panel master</h1>
-          <p className="mt-2 max-w-3xl text-sm text-muted-foreground">Supervisión global de organizaciones, memberships y actividad. Las operaciones requieren una organización seleccionada y no se ejecutan desde este panel.</p>
+          <p className="mt-2 max-w-3xl text-sm text-muted-foreground">Supervisión global de organizaciones, memberships y actividad. Sesión de plataforma: {platformAdmin.email}. Las operaciones requieren una membership explícita y no se ejecutan desde este panel.</p>
         </div>
         <ShieldCheck className="size-7 text-primary" aria-hidden />
       </header>
 
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6" aria-label="Resumen de plataforma">
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Resumen de plataforma">
         <Metric label="Organizaciones" value={overview.summary.organizations} />
         <Metric label="Activas" value={overview.summary.activeOrganizations} />
         <Metric label="Suspendidas" value={overview.summary.suspendedOrganizations} />
         <Metric label="Usuarios activos" value={overview.summary.activeUsers} />
         <Metric label="Memberships" value={overview.summary.activeMemberships} />
         <Metric label="Owners activos" value={overview.summary.activeOwners} />
+        <Metric label="Admins master" value={overview.summary.activePlatformAdmins} />
       </section>
 
       <section className="rounded-xl border bg-card p-4" aria-label="Filtros de organizaciones">
@@ -72,7 +80,7 @@ export default async function PlatformPage({ searchParams }: { searchParams?: Pr
             {overview.organizations.map((organization) => (
               <Link prefetch={false} key={organization.id} href={`/platform/organizations/${encodeURIComponent(organization.id)}`} className="flex flex-col gap-3 p-4 transition hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex min-w-0 items-start gap-3"><Building2 className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden /><div className="min-w-0"><p className="truncate font-medium">{organization.name}</p><p className="truncate text-sm text-muted-foreground">{organization.slug} · {organization.timeZone} · {organization.defaultCurrency}</p></div></div>
-                <div className="flex flex-wrap items-center gap-3 text-sm"><span className="rounded-full border px-2 py-0.5 text-xs">{statusLabel(organization.status)}</span><span>{organization.activeMemberCount} miembros</span><span>{organization.clientCount} clientes</span><span>{organization.policyCount} pólizas</span><span className={organization.health.length > 0 ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}>{organization.health.length > 0 ? organization.health.map(healthLabel).join(" · ") : "Salud OK"}</span><ChevronRight className="size-4 text-muted-foreground" aria-hidden /></div>
+                <div className="flex flex-wrap items-center gap-3 text-sm"><span className="rounded-full border px-2 py-0.5 text-xs">{kindLabel(organization.kind)}</span><span className="rounded-full border px-2 py-0.5 text-xs">{statusLabel(organization.status)}</span><span>{organization.activeMemberCount} miembros</span><span>{organization.clientCount} clientes</span><span>{organization.policyCount} pólizas</span><span className={organization.health.length > 0 ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}>{organization.health.length > 0 ? organization.health.map(healthLabel).join(" · ") : "Salud OK"}</span><ChevronRight className="size-4 text-muted-foreground" aria-hidden /></div>
               </Link>
             ))}
           </div>
@@ -81,7 +89,7 @@ export default async function PlatformPage({ searchParams }: { searchParams?: Pr
       </section>
 
       <p className="text-sm text-muted-foreground">Este panel es de consulta. Para operar, selecciona una organización con membership activa.</p>
-      <Link href="/organization/select" className="text-sm font-medium text-primary underline">Seleccionar una organización operativa</Link>
+      {organizationOptions.length > 0 ? <Link href="/organization/select" className="text-sm font-medium text-primary underline">Entrar a mi organización operativa</Link> : <p className="text-sm text-muted-foreground">Esta cuenta master no tiene membership tenant y no puede abrir datos operativos.</p>}
     </div>
   );
 }

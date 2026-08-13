@@ -121,6 +121,7 @@ model Organization {
   id              String   @id
   name            String
   slug            String   @unique
+  kind            String   @default("CUSTOMER")
   status          String   @default("ACTIVE")
   timeZone        String   @default("Etc/GMT+6")
   defaultCurrency String   @default("MXN")
@@ -164,6 +165,7 @@ model Organization {
   securityEventAggregates SecurityEventAggregate[]
 
   @@index([status])
+  @@index([kind])
 }
 
 model OrganizationMembership {
@@ -659,7 +661,7 @@ model WorkItem {
   sourceAlert        Alert?              @relation("WorkItemSourceAlert", fields: [sourceAlertId], references: [id], onDelete: Cascade)
   notificationEvents NotificationEvent[]
 
-  @@unique([sourceType, sourceId])
+  @@unique([organizationId, sourceType, sourceId])
   @@index([sourceAlertId])
   @@index([folio])
   @@index([entityType, entityId])

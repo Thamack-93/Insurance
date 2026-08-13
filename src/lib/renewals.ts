@@ -13,6 +13,7 @@ import { LATEST_RENEWAL_RECEIPT_INCLUDE, getLatestReceiptStatus } from "@/lib/re
 import { shouldIncludeInRenewals } from "@/lib/renewals.logic";
 
 export interface RenewalOpportunity {
+  organizationId: string;
   policyId: string;
   clientId: string;
   insurerId: string;
@@ -29,6 +30,7 @@ export interface RenewalOpportunity {
 }
 
 type RenewalPolicyRecord = {
+  organizationId: string;
   id: string;
   clientId: string;
   insurerId: string;
@@ -57,6 +59,7 @@ function mapPolicyToRenewalOpportunity(policy: RenewalPolicyRecord): RenewalOppo
   }
 
   return {
+    organizationId: policy.organizationId,
     policyId: policy.id,
     clientId: policy.clientId,
     insurerId: policy.insurerId,
@@ -171,6 +174,7 @@ export async function createRenewalWorkItems() {
       const workItemSourceId = `policy:${renewal.policyId}:renewal-workItem`;
       if (renewal.daysUntilRenewal <= 30) {
         const workItem = await upsertWorkItemFromSource({
+          organizationId: renewal.organizationId,
           sourceType: "Renewal",
           sourceId: workItemSourceId,
           workItemType: "TASK",
@@ -194,6 +198,7 @@ export async function createRenewalWorkItems() {
           workItemsCreated++;
 
           await writeActivityLog({
+            organizationId: renewal.organizationId,
             action: "CREATE_RENEWAL_WORK_ITEM",
             entityType: "WorkItem",
             entityId: workItemSourceId,

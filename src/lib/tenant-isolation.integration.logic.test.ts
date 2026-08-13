@@ -15,13 +15,15 @@ describeDisposable("tenant isolation disposable fixture", () => {
     if (!connectionString) throw new Error("DATABASE_URL is required");
     const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
     try {
-      const organizations = await db.organization.findMany({ where: { id: { in: ["org_legacy_singleton_0001", "org_pedro_gomez_0001"] } } });
-      expect(organizations).toHaveLength(2);
+      const organizations = await db.organization.findMany({ where: { id: { in: ["org_legacy_singleton_0001", "org_pedro_gomez_0001", "org_demo_broker_0001"] } } });
+      expect(organizations).toHaveLength(3);
       expect(organizations.find((organization) => organization.id === "org_pedro_gomez_0001")).toMatchObject({
         name: "Pedro Alfredo Gómez Lorenzo",
         slug: "pedro-alfredo-gomez-lorenzo",
+        kind: "CUSTOMER",
         status: "ACTIVE",
       });
+      expect(organizations.find((organization) => organization.id === "org_demo_broker_0001")?.kind).toBe("DEMO");
       const pedro = await db.user.findUnique({ where: { id: "tenant-pedro-gomez" }, include: { organizationMemberships: true } });
       expect(pedro?.email).toBe("pedroagl93@gmail.com");
       expect(pedro?.organizationMemberships).toEqual([

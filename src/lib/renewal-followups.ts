@@ -121,6 +121,7 @@ export async function runRenewalFollowUpScan(now: Date = new Date()): Promise<Re
       const sourceId = renewalFollowUpWorkItemSourceId(card.policyId);
       const workItem = await upsertWorkItemFromSource(
         {
+          organizationId: card.organizationId,
           sourceType: "Renewal",
           sourceId,
           workItemType: "TASK",
@@ -166,6 +167,7 @@ export async function runRenewalFollowUpScan(now: Date = new Date()): Promise<Re
 
       summary.notificationsCreated += 1;
       await writeActivityLog({
+        organizationId: card.organizationId,
         entityType: "Policy",
         entityId: card.policyId,
         action: "RENEWAL_FOLLOWUP_REMINDER",

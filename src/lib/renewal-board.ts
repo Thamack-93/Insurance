@@ -29,6 +29,7 @@ export const RENEWAL_BOARD_LIMIT = 400;
 export const RENEWAL_BOARD_COLUMN_PREVIEW = 25;
 
 export type RenewalBoardCard = {
+  organizationId: string;
   policyId: string;
   policyNumber: string;
   policyType: string;
@@ -144,6 +145,7 @@ function toRenewalBoardCard(policy: RenewalBoardPolicy, today: Date): RenewalBoa
   const daysUntilRenewal = daysBetweenBusinessDates(policy.endDate, today);
 
   return {
+    organizationId: policy.organizationId!,
     policyId: policy.id,
     policyNumber: policy.policyNumber,
     policyType: policy.policyType,

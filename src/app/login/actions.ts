@@ -99,12 +99,17 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
     organizationId: initialOrganizationId,
   });
 
-  await writeActivityLog({
-    entityType: "User",
-    entityId: user.id,
-    action: "USER_LOGIN",
-    userId: user.id,
-  });
+  // ActivityLog is tenant-owned. Platform-only logins have no tenant and are
+  // intentionally represented by global security telemetry instead.
+  if (initialOrganizationId) {
+    await writeActivityLog({
+      entityType: "User",
+      entityId: user.id,
+      action: "USER_LOGIN",
+      userId: user.id,
+      organizationId: initialOrganizationId,
+    });
+  }
 
   const fallback = user.platformRole === "SUPERADMIN"
     ? "/platform"
