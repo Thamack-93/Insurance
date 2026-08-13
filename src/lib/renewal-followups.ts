@@ -53,6 +53,7 @@ export type RenewalFollowUpSummary = {
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export async function closeRenewalFollowUp(
+  organizationId: string,
   policyId: string,
   userId: string | null,
   client?: DbClient,
@@ -60,6 +61,7 @@ export async function closeRenewalFollowUp(
   const db = client ?? getDb();
   const item = await db.workItem.findFirst({
     where: {
+      organizationId,
       sourceType: "Renewal",
       sourceId: renewalFollowUpWorkItemSourceId(policyId),
       status: { in: [...OPEN_WORK_ITEM_STATUSES] },
