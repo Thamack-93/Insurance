@@ -27,6 +27,15 @@ usar `/platform` y no obtiene acceso operativo sin contexto explícito.
 El Excel incluye organización y timestamp, usa filename saneado, no se cachea y
 escapa valores que podrían interpretarse como fórmulas.
 
+## Panel master global
+
+`SUPERADMIN` puede consultar `/platform` y el detalle
+`/platform/organizations/[organizationId]`. El panel muestra agregados explícitos
+por organización, memberships, último login de un miembro y actividad reciente
+sin renderizar `oldValue` ni `newValue`. No crea organizaciones, no modifica
+memberships y no concede acceso operativo: cualquier operación requiere una
+membership activa y selección tenant explícita.
+
 ## Pendientes explícitos
 
 Filtrado defensivo, pendiente de slice completa: receipts, payments, claims,

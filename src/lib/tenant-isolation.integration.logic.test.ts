@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
+
+vi.mock("server-only", () => ({}));
+
+import { getPlatformOrganizationDetail, getPlatformOverview } from "@/lib/platform-dashboard";
 
 const enabled = process.env.TENANT_ISOLATION_TEST_DB === "1" && process.env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB === "1";
 const describeDisposable = enabled ? describe : describe.skip;
@@ -68,5 +72,18 @@ describeDisposable("tenant isolation disposable fixture", () => {
     } finally {
       await db.$disconnect();
     }
+  });
+
+  it("keeps the master panel aggregates and activity tenant-scoped", async () => {
+    const overview = await getPlatformOverview({});
+    expect(overview.summary.organizations).toBe(2);
+    expect(overview.summary.activeUsers).toBe(6);
+    expect(overview.organizations.map((organization) => organization.id)).toEqual(["org_legacy_singleton_0001", "org_pedro_gomez_0001"]);
+
+    const pedro = await getPlatformOrganizationDetail("org_pedro_gomez_0001");
+    expect(pedro?.organization.name).toBe("Pedro Alfredo Gómez Lorenzo");
+    expect(pedro?.memberships.some((membership) => membership.userEmail === "pedroagl93@gmail.com" && membership.role === "OWNER")).toBe(true);
+    expect(pedro?.activities.every((activity) => activity.entityId !== "legacy-secret" && !("oldValue" in activity) && !("newValue" in activity))).toBe(true);
+    expect(await getPlatformOrganizationDetail("does-not-exist")).toBeNull();
   });
 });
