@@ -115,13 +115,13 @@ async function main() {
       { id: PEDRO_USER_ID, email: "pedroagl93@gmail.com", name: "Pedro Alfredo Gómez Lorenzo", role: "ADMIN", org: orgB.id, membershipRole: "OWNER" },
       { id: "tenant-demo-owner", email: "demo-owner@policydesk.local", name: "Demo Owner", role: "ADMIN", org: orgDemo.id, membershipRole: "OWNER" },
       { id: "tenant-demo-agent", email: "demo-agent@policydesk.local", name: "Demo Agent", role: "AGENT", org: orgDemo.id, membershipRole: "AGENT" },
-      { id: "tenant-superadmin", email: "tenant-superadmin@policydesk.local", name: "Tenant Superadmin", role: "ADMIN", org: null, membershipRole: null },
+      { id: "platform_admin_demo_0001", email: "admin@policydesk.local", name: "Admin Demo", role: "ADMIN", org: null, membershipRole: null },
     ] as const;
     for (const item of users) {
       await tx.user.upsert({
         where: { id: item.id },
-        update: { email: item.email, name: item.name, role: item.role, platformRole: item.id === "tenant-superadmin" ? "SUPERADMIN" : "NONE", active: true },
-        create: { id: item.id, email: item.email, name: item.name, passwordHash: hash("tenant-fixture-password"), role: item.role, platformRole: item.id === "tenant-superadmin" ? "SUPERADMIN" : "NONE", active: true },
+        update: { email: item.email, name: item.name, role: item.role, platformRole: item.id === "platform_admin_demo_0001" ? "SUPERADMIN" : "NONE", active: true },
+        create: { id: item.id, email: item.email, name: item.name, passwordHash: hash("tenant-fixture-password"), role: item.role, platformRole: item.id === "platform_admin_demo_0001" ? "SUPERADMIN" : "NONE", active: true },
       });
       if (item.org && item.membershipRole) {
         await tx.organizationMembership.upsert({

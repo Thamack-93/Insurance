@@ -64,9 +64,19 @@ PostgreSQL desechable con `TENANT_ISOLATION_TEST_DB=1` y
 ## Fixture de separación de Pedro
 
 El job `tenant-isolation` crea únicamente en su base desechable las organizaciones
-`org_legacy_singleton_0001` y `org_pedro_gomez_0001`. La segunda usa el nombre
+`org_legacy_singleton_0001`, `org_pedro_gomez_0001` y
+`org_demo_broker_0001`. La organización de Pedro usa el nombre
 visible `Pedro Alfredo Gómez Lorenzo` y el slug
 `pedro-alfredo-gomez-lorenzo`; `pedroagl93@gmail.com` recibe `OWNER` únicamente
-en esa fixture. Esta identidad no se provisiona en Preview ni en producción
+en esa fixture. Demo contiene exclusivamente cuentas y registros sintéticos.
+Esta identidad no se provisiona en Preview ni en producción
 durante Cycle 2A. La creación productiva requiere completar los gates de
 aislamiento y restore con dos organizaciones.
+## Administrador global
+
+`admin@policydesk.local` se provisiona mediante `npm run provision:platform-admin`.
+El comando es preview por defecto; `--apply` requiere un target explícito y
+una conexión directa. Si la cuenta no existe, la contraseña procede únicamente
+de `PLATFORM_ADMIN_PASSWORD`. Un `SUPERADMIN` no tiene membership tenant,
+no hereda acceso operativo y no puede promoverse mientras sea Owner o conserve
+asignaciones operativas.

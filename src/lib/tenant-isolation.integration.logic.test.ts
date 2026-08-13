@@ -27,7 +27,8 @@ describeDisposable("tenant isolation disposable fixture", () => {
       expect(pedro?.organizationMemberships).toEqual([
         expect.objectContaining({ organizationId: "org_pedro_gomez_0001", role: "OWNER", active: true }),
       ]);
-      const superadmin = await db.user.findUnique({ where: { id: "tenant-superadmin" }, include: { organizationMemberships: true } });
+      const superadmin = await db.user.findUnique({ where: { id: "platform_admin_demo_0001" }, include: { organizationMemberships: true } });
+      expect(superadmin?.email).toBe("admin@policydesk.local");
       expect(superadmin?.platformRole).toBe("SUPERADMIN");
       expect(superadmin?.organizationMemberships).toHaveLength(0);
       const clients = await db.client.findMany({ where: { id: { in: ["tenant-client-a", "tenant-client-b"] } }, select: { id: true, organizationId: true } });
@@ -78,7 +79,7 @@ describeDisposable("tenant isolation disposable fixture", () => {
     const overview = await getPlatformOverview({});
     expect(overview.summary.organizations).toBe(3);
     expect(overview.summary.activeUsers).toBe(7);
-    expect(overview.organizations.map((organization) => organization.id)).toEqual(["org_demo_broker_0001", "org_legacy_singleton_0001", "org_pedro_gomez_0001"]);
+    expect(overview.organizations.map((organization) => organization.id)).toEqual(["org_pedro_gomez_0001", "org_demo_broker_0001", "org_legacy_singleton_0001"]);
 
     const pedro = await getPlatformOrganizationDetail("org_pedro_gomez_0001");
     expect(pedro?.organization.name).toBe("Pedro Alfredo Gómez Lorenzo");

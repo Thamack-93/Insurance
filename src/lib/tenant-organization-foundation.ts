@@ -77,13 +77,15 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
   const ownerLegacyRole = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE m."organizationId" = $1 AND m."role" = 'OWNER' AND (u."role" <> 'ADMIN' OR NOT u."active")`, [BOOTSTRAP_ORGANIZATION_ID]);
   if (Number(ownerLegacyRole.rows[0]?.count ?? 0) > 0) issues.push("active Owner is not backed by an active legacy ADMIN user");
 
-  const missingMemberships = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "User" u LEFT JOIN "OrganizationMembership" m ON m."userId" = u."id" AND m."organizationId" = $1 WHERE u."id" <> $2 AND m."id" IS NULL`, [BOOTSTRAP_ORGANIZATION_ID, SYSTEM_USER_ID]);
+  const missingMemberships = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "User" u LEFT JOIN "OrganizationMembership" m ON m."userId" = u."id" AND m."organizationId" = $1 WHERE u."id" <> $2 AND u."platformRole" <> 'SUPERADMIN' AND m."id" IS NULL`, [BOOTSTRAP_ORGANIZATION_ID, SYSTEM_USER_ID]);
   const missing = Number(missingMemberships.rows[0]?.count ?? 0);
   summary.usersMissingMembership = missing;
   if (missing > 0) issues.push(`${missing} non-technical users without membership`);
 
   const systemMemberships = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" WHERE "userId" = $1`, [SYSTEM_USER_ID]);
   if (Number(systemMemberships.rows[0]?.count ?? 0) > 0) issues.push("technical system user has a membership");
+  const platformMemberships = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE u."platformRole" = 'SUPERADMIN'`);
+  if (Number(platformMemberships.rows[0]?.count ?? 0) > 0) issues.push("SUPERADMIN user has a tenant membership");
   const membershipActiveMismatch = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE m."active" IS DISTINCT FROM u."active"`);
   if (Number(membershipActiveMismatch.rows[0]?.count ?? 0) > 0) issues.push("membership active state differs from User.active");
   const membershipRoleMismatch = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE (m."role" NOT IN ('OWNER','ADMIN','AGENT')) OR (m."role" <> 'OWNER' AND (u."role" NOT IN ('ADMIN','AGENT') OR m."role" <> u."role"))`);
@@ -150,6 +152,16 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
     if (!row) issues.push(`expected guard trigger ${trigger} is missing`);
     else if (row.tgenabled !== "O" || row.table_name !== table || row.function_name !== fn) issues.push(`guard trigger ${trigger} has an unexpected definition`);
   }
+  const membershipFunction = await client.query<{ definition: string }>(`
+    SELECT pg_get_functiondef(p.oid) AS definition
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = 'policydesk_sync_user_membership'
+  `);
+  const membershipFunctionDefinition = membershipFunction.rows[0]?.definition ?? "";
+  if (!membershipFunctionDefinition.includes('NEW."platformRole" = \'SUPERADMIN\'')) issues.push("User membership sync does not exclude SUPERADMIN");
+  const userMembershipTrigger = installed.get("User_transition_membership_sync")?.definition.replaceAll('"', '').replace(/\s+/g, " ") ?? "";
+  if (!/AFTER INSERT OR UPDATE OF role, active, platformRole ON/.test(userMembershipTrigger)) issues.push("User membership sync trigger does not track platformRole");
   const indexes = await client.query<{ indexname: string; table_name: string; indisunique: boolean; indexdef: string; predicate: string | null }>(`
     SELECT i.relname AS indexname, t.relname AS table_name, x.indisunique,
            pg_get_indexdef(x.indexrelid) AS indexdef, pg_get_expr(x.indpred, x.indrelid) AS predicate

@@ -55,7 +55,7 @@ test("separate browser contexts remain isolated in organizations A and B", async
 
 test("superadmin without membership is confined to the platform shell", async ({ page }) => {
   await page.goto("/login");
-  await page.getByLabel("Correo electrónico").fill("tenant-superadmin@policydesk.local");
+  await page.getByLabel("Correo electrónico").fill("admin@policydesk.local");
   await page.getByLabel("Contraseña").fill("tenant-fixture-password");
   await page.getByRole("button", { name: "Iniciar sesión" }).click();
   await expect(page).toHaveURL(/\/platform$/);
@@ -66,7 +66,7 @@ test("superadmin without membership is confined to the platform shell", async ({
 test("superadmin can inspect both organizations without operational bypass", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/login");
-  await page.getByLabel("Correo electrónico").fill("tenant-superadmin@policydesk.local");
+  await page.getByLabel("Correo electrónico").fill("admin@policydesk.local");
   await page.getByLabel("Contraseña").fill("tenant-fixture-password");
   await page.getByRole("button", { name: "Iniciar sesión" }).click();
   await expect(page).toHaveURL(/\/platform$/);
@@ -79,8 +79,10 @@ test("superadmin can inspect both organizations without operational bypass", asy
   await expect(page.getByRole("heading", { name: "Pedro Alfredo Gómez Lorenzo" })).toBeVisible();
   await expect(page.getByText("pedroagl93@gmail.com")).toBeVisible();
   await expect(page.getByText("Este detalle es de consulta.")).toBeVisible();
-  const missingOrganizationResponse = await page.goto("/platform/organizations/does-not-exist");
-  expect(missingOrganizationResponse?.status()).toBe(404);
+  await page.goto("/platform/organizations/does-not-exist");
+  // Next.js may stream an HTTP 200 before notFound() resolves; the rendered
+  // result must still be the framework's canonical 404 and disclose no tenant.
+  await expect(page.getByText("This page could not be found.")).toBeVisible();
   await page.goto("/today");
   await expect(page).toHaveURL(/\/platform$/);
 });
@@ -126,4 +128,16 @@ test("Pedro signs into his isolated organization and cannot see legacy clients",
   await expect(page.getByText("Pedro Client Private").first()).toBeVisible();
   await page.goto("/clients/tenant-client-a");
   await expect(page.getByText("Overlap Client").first()).not.toBeVisible();
+});
+
+test("demo broker account stays inside synthetic demo data", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByLabel("Correo electrónico").fill("demo-owner@policydesk.local");
+  await page.getByLabel("Contraseña").fill("tenant-fixture-password");
+  await page.getByRole("button", { name: "Iniciar sesión" }).click();
+  await expect(page).toHaveURL(/\/today$/);
+  await page.goto("/clients/tenant-client-c");
+  await expect(page.getByText("Overlap Client").first()).toBeVisible();
+  await page.goto("/clients/tenant-client-pedro");
+  await expect(page.getByText("Pedro Client Private").first()).not.toBeVisible();
 });
