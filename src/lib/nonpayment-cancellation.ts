@@ -30,6 +30,7 @@ export type NonPaymentCancellationResult = {
 };
 
 export async function cancelPolicyForNonPayment(
+  organizationId: string,
   receiptId: string,
   actorId: string,
   now = new Date(),
@@ -39,8 +40,8 @@ export async function cancelPolicyForNonPayment(
   const cutoff = cancellationCutoff(now);
 
   const cancel = async (tx: DbClient) => {
-    const sourceReceipt = await tx.receipt.findUnique({
-      where: { id: receiptId },
+    const sourceReceipt = await tx.receipt.findFirst({
+      where: { id: receiptId, organizationId },
       include: {
         policy: {
           select: {
@@ -58,7 +59,7 @@ export async function cancelPolicyForNonPayment(
     if (!sourceReceipt) throw new Error("El recibo no existe o fue eliminado.");
 
     const oldestUnpaid = await tx.receipt.findFirst({
-      where: { policyId: sourceReceipt.policyId, ...unpaidReceiptWhere },
+      where: { organizationId, policyId: sourceReceipt.policyId, ...unpaidReceiptWhere },
       orderBy: [{ dueDate: "asc" }, { createdAt: "asc" }],
       select: { id: true, dueDate: true },
     });
@@ -82,6 +83,7 @@ export async function cancelPolicyForNonPayment(
     const batchId = randomUUID();
     const openReceipts = await tx.receipt.findMany({
       where: {
+        organizationId,
         policyId: sourceReceipt.policyId,
         status: { notIn: ["PAID", "CANCELLED"] },
       },
@@ -127,6 +129,7 @@ export async function cancelPolicyForNonPayment(
       });
 
       await writeActivityLog({
+        organizationId,
         entityType: "Receipt",
         entityId: updatedReceipt.id,
         action: "RECEIPT_CANCEL_NON_PAYMENT",
@@ -139,7 +142,7 @@ export async function cancelPolicyForNonPayment(
 
     if (openReceipts.length > 0) {
       await tx.receiptReconciliationIssue.updateMany({
-        where: { receiptId: { in: openReceipts.map((receipt) => receipt.id) }, status: "OPEN" },
+        where: { organizationId, receiptId: { in: openReceipts.map((receipt) => receipt.id) }, status: "OPEN" },
         data: {
           status: "RESOLVED",
           reviewedAt: now,
@@ -150,6 +153,7 @@ export async function cancelPolicyForNonPayment(
     }
 
     await writeActivityLog({
+      organizationId,
       entityType: "Policy",
       entityId: policy.id,
       action: "POLICY_CANCEL_NON_PAYMENT",
@@ -179,38 +183,37 @@ export async function runNonPaymentCancellationJob(options: { now?: Date; actorI
   const actorId = options.actorId ?? SYSTEM_USER_ID;
   const cutoff = cancellationCutoff(now);
 
-  const candidates = await db.receipt.findMany({
-    where: {
-      ...unpaidReceiptWhere,
-      dueDate: { lt: cutoff },
-      policy: { status: { notIn: ["CANCELLED", "EXPIRED", "RENEWED"] } },
-    },
-    select: { id: true, policyId: true },
-    orderBy: { dueDate: "asc" },
-  });
-
-  const policyIds = [...new Set(candidates.map((candidate) => candidate.policyId))];
+  const organizations = await db.organization.findMany({ where: { status: "ACTIVE" }, select: { id: true }, orderBy: { id: "asc" } });
+  let evaluatedPolicies = 0;
   let cancelledPolicies = 0;
   let cancelledReceipts = 0;
 
-  for (const policyId of policyIds) {
-    const source = candidates.find((candidate) => candidate.policyId === policyId);
-    if (!source) continue;
-    try {
-      const result = await cancelPolicyForNonPayment(source.id, actorId, now);
-      if (result.cancelled) {
-        cancelledPolicies += 1;
-        cancelledReceipts += result.cancelledReceiptCount ?? 0;
+  for (const organization of organizations) {
+    const candidates = await db.receipt.findMany({
+      where: { organizationId: organization.id, ...unpaidReceiptWhere, dueDate: { lt: cutoff }, policy: { organizationId: organization.id, status: { notIn: ["CANCELLED", "EXPIRED", "RENEWED"] } } },
+      select: { id: true, policyId: true },
+      orderBy: { dueDate: "asc" },
+    });
+    const policyIds = [...new Set(candidates.map((candidate) => candidate.policyId))];
+    evaluatedPolicies += policyIds.length;
+    for (const policyId of policyIds) {
+      const source = candidates.find((candidate) => candidate.policyId === policyId);
+      if (!source) continue;
+      try {
+        const result = await cancelPolicyForNonPayment(organization.id, source.id, actorId, now);
+        if (result.cancelled) {
+          cancelledPolicies += 1;
+          cancelledReceipts += result.cancelledReceiptCount ?? 0;
+        }
+      } catch (error) {
+        logError("nonpayment-cancellation.policy", error, { organizationId: organization.id, policyId });
       }
-    } catch (error) {
-      // A concurrent payment or cancellation makes this candidate stale; the next run will re-evaluate it.
-      logError("nonpayment-cancellation.policy", error, { policyId });
     }
   }
 
   return {
     ok: true,
-    evaluatedPolicies: policyIds.length,
+    evaluatedPolicies,
     cancelledPolicies,
     cancelledReceipts,
     cutoff,

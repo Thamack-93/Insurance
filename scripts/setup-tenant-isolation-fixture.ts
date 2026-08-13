@@ -147,10 +147,30 @@ async function main() {
         update: { organizationId: orgId, fullName: "Overlap Client", portfolioOwnerId: ownerId, status: "ACTIVE" },
         create: { id: `tenant-client-${suffix.toLowerCase()}`, organizationId: orgId, fullName: "Overlap Client", type: "PERSON", status: "ACTIVE", portfolioOwnerId: ownerId, createdById: ownerId, updatedById: ownerId },
       });
-      await tx.policy.upsert({
+      const policy = await tx.policy.upsert({
         where: { id: `tenant-policy-${suffix.toLowerCase()}` },
         update: { organizationId: orgId, clientId: client.id, insurerId: insurer.id, policyNumber: `OVERLAP-${suffix}`, status: "ACTIVE" },
         create: { id: `tenant-policy-${suffix.toLowerCase()}`, organizationId: orgId, clientId: client.id, insurerId: insurer.id, policyNumber: `OVERLAP-${suffix}`, policyType: "AUTO", status: "ACTIVE", paymentFrequency: "ANNUAL", startDate: new Date("2026-01-01"), endDate: new Date("2026-12-31"), premiumAmount: 1000, currency: "MXN" },
+      });
+      await tx.receipt.upsert({
+        where: { id: `tenant-receipt-${suffix.toLowerCase()}` },
+        update: { organizationId: orgId, policyId: policy.id, clientId: client.id, insurerId: insurer.id, status: "PENDING", paidDate: null, paymentMethod: null },
+        create: {
+          id: `tenant-receipt-${suffix.toLowerCase()}`,
+          organizationId: orgId,
+          receiptNumber: "OVERLAP-RECEIPT",
+          policyId: policy.id,
+          clientId: client.id,
+          insurerId: insurer.id,
+          periodStartDate: new Date("2026-01-01"),
+          periodEndDate: new Date("2026-12-31"),
+          dueDate: new Date("2026-06-30"),
+          amount: 1000,
+          currency: "MXN",
+          status: "PENDING",
+          createdById: ownerId,
+          updatedById: ownerId,
+        },
       });
     }
     const pedroClient = await tx.client.upsert({

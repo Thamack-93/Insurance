@@ -1,14 +1,13 @@
 "use server";
 
 import { getDb } from "@/lib/db";
-import { AuthError, getCurrentUserId } from "@/lib/auth";
+import { AuthError } from "@/lib/auth";
 import { logError } from "@/lib/logger";
 import { parseDateInput } from "@/lib/form-utils";
 import { writeActivityLog } from "@/lib/activity-log";
 import { PaymentConflictError, recordPayment, rehabilitateReceiptPayment } from "@/lib/payment-service";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import {
-  assertReceiptPortfolioAccess,
   paymentPortfolioWhere,
   receiptPortfolioWhere,
 } from "@/lib/portfolio-access";
@@ -19,6 +18,7 @@ import {
   type MutationResult,
 } from "@/lib/mutation-utils";
 import { reconcileReceiptById } from "@/lib/payment-service";
+import { assertOrganizationContextInTransaction, requireOrganizationContext } from "@/lib/organization-context";
 
 export type CreatePaymentInput = {
   receiptId: string;
@@ -49,30 +49,13 @@ export async function createPayment(data: CreatePaymentInput): Promise<MutationR
   }
 
   try {
-    const userId = await getCurrentUserId();
-    await assertReceiptPortfolioAccess(data.receiptId, userId);
-    const receipt = await db.receipt.findUnique({
-      where: { id: data.receiptId },
-      include: {
-        client: true,
-        policy: true,
-        insurer: true,
-        endorsement: true,
-      },
-    });
-
-    if (!receipt) {
-      return errorResult("El recibo no existe o fue eliminado.");
-    }
-
-    const { payment } = await recordPayment({
-      receiptId: data.receiptId,
-      amount: data.amount,
-      paidDate: parseDateInput(data.paidDate),
-      paymentMethod: data.paymentMethod,
-      reference: data.reference,
-      notes: data.notes,
-      actorId: userId,
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
+    const { payment, receipt } = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const permitted = await tx.receipt.findFirst({ where: { id: data.receiptId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: userId } } : {}) }, select: { id: true } });
+      if (!permitted) throw new Error("El recibo no existe o fue eliminado.");
+      return recordPayment({ organizationId: context.organizationId, receiptId: data.receiptId, amount: data.amount, paidDate: parseDateInput(data.paidDate), paymentMethod: data.paymentMethod, reference: data.reference, notes: data.notes, actorId: userId }, tx);
     });
 
     revalidatePaths([
@@ -108,16 +91,13 @@ export async function rehabilitatePayment(data: CreatePaymentInput): Promise<Mut
   if (!data.paymentMethod) return errorResult("Selecciona un método de pago.");
 
   try {
-    const userId = await getCurrentUserId();
-    await assertReceiptPortfolioAccess(data.receiptId, userId);
-    const result = await rehabilitateReceiptPayment({
-      receiptId: data.receiptId,
-      amount: data.amount,
-      paidDate: parseDateInput(data.paidDate),
-      paymentMethod: data.paymentMethod,
-      reference: data.reference,
-      notes: data.notes,
-      actorId: userId,
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
+    const result = await getDb().$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const permitted = await tx.receipt.findFirst({ where: { id: data.receiptId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: userId } } : {}) }, select: { id: true } });
+      if (!permitted) throw new Error("El recibo no existe o fue eliminado.");
+      return rehabilitateReceiptPayment({ organizationId: context.organizationId, receiptId: data.receiptId, amount: data.amount, paidDate: parseDateInput(data.paidDate), paymentMethod: data.paymentMethod, reference: data.reference, notes: data.notes, actorId: userId }, tx);
     });
 
     revalidatePaths([
@@ -152,10 +132,11 @@ export async function rehabilitatePayment(data: CreatePaymentInput): Promise<Mut
 export async function deletePayment(id: string): Promise<MutationResult> {
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
 
     const payment = await db.payment.findFirst({
-      where: { id, ...paymentPortfolioWhere(userId) },
+      where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? paymentPortfolioWhere(userId) : {}) },
       include: {
         receipt: {
           select: {
@@ -189,6 +170,9 @@ export async function deletePayment(id: string): Promise<MutationResult> {
     }
 
     await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const stillPermitted = await tx.payment.findFirst({ where: { id: payment.id, organizationId: context.organizationId, status: "POSTED", ...(context.membershipRole === "AGENT" ? paymentPortfolioWhere(userId) : {}) }, select: { id: true } });
+      if (!stillPermitted) throw new Error("El pago no existe o no tienes acceso.");
       const reversedPayment = await tx.payment.update({
         where: { id: payment.id },
         data: {
@@ -201,6 +185,7 @@ export async function deletePayment(id: string): Promise<MutationResult> {
       });
 
       await writeActivityLog({
+        organizationId: context.organizationId,
         entityType: "Payment",
         entityId: reversedPayment.id,
         action: "PAYMENT_REVERSE",
@@ -229,7 +214,7 @@ export async function deletePayment(id: string): Promise<MutationResult> {
         db: tx,
       });
 
-      await reconcileReceiptById(payment.receiptId, userId, tx);
+      await reconcileReceiptById(context.organizationId, payment.receiptId, userId, tx);
     });
 
     revalidatePaths([
@@ -259,10 +244,12 @@ export async function getPendingReceipts() {
   const db = getDb();
 
   try {
-    const userId = await getCurrentUserId();
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
     const receipts = await db.receipt.findMany({
       where: {
-        ...receiptPortfolioWhere(userId),
+        organizationId: context.organizationId,
+        ...(context.membershipRole === "AGENT" ? receiptPortfolioWhere(userId) : {}),
         status: { in: ["PENDING", "OVERDUE"] },
       },
       include: {
@@ -314,9 +301,10 @@ export async function getPaymentHistory(limit?: number) {
   const db = getDb();
 
   try {
-    const userId = await getCurrentUserId();
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
     const payments = await db.payment.findMany({
-      where: { ...paymentPortfolioWhere(userId), status: "POSTED" },
+      where: { organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? paymentPortfolioWhere(userId) : {}), status: "POSTED" },
       take: limit || 50,
       include: {
         receipt: {
@@ -363,13 +351,15 @@ export async function getPaymentStats() {
   const db = getDb();
 
   try {
-    const userId = await getCurrentUserId();
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
     const currentMonth = new Date();
     currentMonth.setDate(1);
 
     const totalPaymentsThisMonth = await db.payment.aggregate({
       where: {
-        ...paymentPortfolioWhere(userId),
+        organizationId: context.organizationId,
+        ...(context.membershipRole === "AGENT" ? paymentPortfolioWhere(userId) : {}),
         paidDate: {
           gte: currentMonth,
         },
@@ -383,12 +373,13 @@ export async function getPaymentStats() {
     });
 
     const pendingCount = await db.receipt.count({
-      where: { ...receiptPortfolioWhere(userId), status: "PENDING" },
+      where: { organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? receiptPortfolioWhere(userId) : {}), status: "PENDING" },
     });
 
     const overdueCount = await db.receipt.count({
       where: {
-        ...receiptPortfolioWhere(userId),
+        organizationId: context.organizationId,
+        ...(context.membershipRole === "AGENT" ? receiptPortfolioWhere(userId) : {}),
         status: { in: ["PENDING", "OVERDUE"] },
         dueDate: {
           lt: new Date(),

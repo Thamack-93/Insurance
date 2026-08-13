@@ -5,6 +5,7 @@ import { PrismaClient } from "@/generated/prisma/client";
 vi.mock("server-only", () => ({}));
 
 import { getPlatformOrganizationDetail, getPlatformOverview } from "@/lib/platform-dashboard";
+import { recordPayment } from "@/lib/payment-service";
 
 const enabled = process.env.TENANT_ISOLATION_TEST_DB === "1" && process.env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB === "1";
 const describeDisposable = enabled ? describe : describe.skip;
@@ -106,6 +107,34 @@ describeDisposable("tenant isolation disposable fixture", () => {
         }),
       ).rejects.toMatchObject({ code: "P2002" });
       expect(await db.organizationMembership.count({ where: { userId: "tenant-agent-a" } })).toBe(1);
+    } finally {
+      await db.$disconnect();
+    }
+  });
+
+  it("scopes payment evidence idempotency to the organization", async () => {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) throw new Error("DATABASE_URL is required");
+    const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+    const ids = ["tenant-payment-evidence-a", "tenant-payment-evidence-b"];
+    try {
+      await db.payment.deleteMany({ where: { id: { in: ids } } });
+      await db.payment.create({ data: { id: ids[0], organizationId: "org_legacy_singleton_0001", receiptId: "tenant-receipt-a", policyId: "tenant-policy-a", clientId: "tenant-client-a", amount: 1000, currency: "MXN", paidDate: new Date("2026-06-30"), paymentMethod: "TEST", sourceEvidenceKey: "overlap-evidence" } });
+      await db.payment.create({ data: { id: ids[1], organizationId: "org_pedro_gomez_0001", receiptId: "tenant-receipt-b", policyId: "tenant-policy-b", clientId: "tenant-client-b", amount: 1000, currency: "MXN", paidDate: new Date("2026-06-30"), paymentMethod: "TEST", sourceEvidenceKey: "overlap-evidence" } });
+      await expect(db.payment.create({ data: { organizationId: "org_legacy_singleton_0001", receiptId: "tenant-receipt-a", policyId: "tenant-policy-a", clientId: "tenant-client-a", amount: 1000, currency: "MXN", paidDate: new Date("2026-07-01"), paymentMethod: "TEST", sourceEvidenceKey: "overlap-evidence" } })).rejects.toMatchObject({ code: "P2002" });
+    } finally {
+      await db.payment.deleteMany({ where: { id: { in: ids } } });
+      await db.$disconnect();
+    }
+  });
+
+  it("fails closed when a payment targets another organization's receipt", async () => {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) throw new Error("DATABASE_URL is required");
+    const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+    try {
+      await expect(recordPayment({ organizationId: "org_legacy_singleton_0001", receiptId: "tenant-receipt-b", amount: 1000, paidDate: new Date("2026-06-30"), paymentMethod: "TEST", sourceEvidenceKey: "cross-org-payment-must-fail", actorId: "tenant-admin-a" }, db)).rejects.toThrow("El recibo no existe o fue eliminado.");
+      expect(await db.payment.count({ where: { sourceEvidenceKey: "cross-org-payment-must-fail" } })).toBe(0);
     } finally {
       await db.$disconnect();
     }

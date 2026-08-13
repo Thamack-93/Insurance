@@ -2237,6 +2237,7 @@ async function confirmTelegramDraft(input: {
     try {
       const result = await recordPayment(
         {
+          organizationId: draft.organizationId!,
           receiptId: receipt.id,
           amount: Number(state.amount),
           paidDate: parseBusinessDateInput(state.paidDate ?? ""),

@@ -1361,6 +1361,7 @@ export async function applyLedgerImportBatch(input: {
   if (!batch) {
     throw new Error("El batch de importación no existe.");
   }
+  if (!batch.organizationId) throw new Error("ORGANIZATION_ACCESS_DENIED");
 
   if (!["PREVIEW_READY", "APPROVED", "PARTIAL_APPLIED"].includes(batch.status)) {
     throw new Error("Este batch no está listo para aplicarse.");
@@ -1564,6 +1565,7 @@ export async function applyLedgerImportBatch(input: {
 
     try {
       const result = await recordPayment({
+        organizationId: batch.organizationId,
         receiptId: row.receiptId,
         amount: paidRow.totalPaid,
         paidDate: paidRow.paidDate,
@@ -1606,7 +1608,7 @@ export async function applyLedgerImportBatch(input: {
     } catch (error) {
       if (error instanceof PaymentConflictError) {
         const existingPayment = await db.payment.findUnique({
-          where: { sourceEvidenceKey: evidenceKey },
+          where: { organizationId_sourceEvidenceKey: { organizationId: batch.organizationId, sourceEvidenceKey: evidenceKey } },
           select: { id: true, policyId: true, receiptId: true },
         });
 

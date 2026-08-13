@@ -521,7 +521,7 @@ model Payment {
   reversedById      String?
   reversedAt        DateTime?
   reversalReason    String?
-  sourceEvidenceKey String?  @unique
+  sourceEvidenceKey String?
 
   receipt   Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   policy    Policy  @relation(fields: [policyId], references: [id], onDelete: Cascade)
@@ -539,6 +539,7 @@ model Payment {
   @@index([createdById])
   @@index([updatedById])
   @@index([organizationId])
+  @@unique([organizationId, sourceEvidenceKey])
 }
 
 model Commission {

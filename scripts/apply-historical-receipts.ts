@@ -9,6 +9,7 @@ import { reconcileReceiptState } from "@/lib/receipt-reconciliation";
 import { toNumber } from "@/lib/money";
 
 type ReceiptRow = {
+  organizationId: string;
   id: string;
   receiptNumber: string;
   status: string;
@@ -286,13 +287,14 @@ async function forceCloseReviewedReceipt(receipt: ReceiptRow, actorId: string, d
   const sourceEvidenceKey = `historical-receipt-force:${receipt.id}:${dateKey(receipt.dueDate)}`;
 
   const existingPayment = await db.payment.findUnique({
-    where: { sourceEvidenceKey },
+    where: { organizationId_sourceEvidenceKey: { organizationId: receipt.organizationId, sourceEvidenceKey } },
     select: { id: true },
   });
 
   if (!existingPayment) {
     await db.payment.create({
       data: {
+        organizationId: receipt.organizationId,
         receiptId: receipt.id,
         policyId: receipt.policy.id,
         clientId: receipt.policy.clientId,
@@ -438,13 +440,14 @@ async function main() {
     if (plan.action === "PAY_OUTSTANDING") {
       const sourceEvidenceKey = `historical-receipt:${receipt.id}:${dateKey(receipt.dueDate)}`;
       const payment = await db.payment.findUnique({
-        where: { sourceEvidenceKey },
+        where: { organizationId_sourceEvidenceKey: { organizationId: receipt.organizationId, sourceEvidenceKey } },
         select: { id: true },
       });
 
       if (!payment) {
         await db.payment.create({
           data: {
+            organizationId: receipt.organizationId,
             receiptId: receipt.id,
             policyId: receipt.policy.id,
             clientId: receipt.policy.clientId,
