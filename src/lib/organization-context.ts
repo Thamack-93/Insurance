@@ -1,7 +1,7 @@
 import "server-only";
 
 import { getDb } from "@/lib/db";
-import { AuthError, getSession, requireUser, setSessionCookie } from "@/lib/auth";
+import { AuthError, clearSessionCookie, getSession, requireUser, setSessionCookie } from "@/lib/auth";
 import { writeActivityLog } from "@/lib/activity-log";
 import { Prisma } from "@/generated/prisma/client";
 
@@ -161,6 +161,23 @@ export async function requireOrganizationRole(allowedRoles: readonly Organizatio
     throw new AuthError("No tienes permisos en esta organización.", 403);
   }
   return context;
+}
+
+export async function requireOrganizationRoleOrRedirect(allowedRoles: readonly OrganizationRole[]): Promise<OrganizationContext> {
+  const { redirect } = await import("next/navigation");
+  try {
+    return await requireOrganizationRole(allowedRoles);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      if (error.status === 401) {
+        try { await clearSessionCookie(); } catch { /* best effort */ }
+        redirect("/login");
+      }
+      if (error.status === 409) redirect("/organization/select");
+      redirect("/today");
+    }
+    throw error;
+  }
 }
 
 /**

@@ -11,7 +11,7 @@ import {
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { requireOrganizationRole } from "@/lib/organization-context";
+import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 
 export const metadata = {
   title: "Centro Operativo · Administración",
@@ -51,7 +51,7 @@ const operationalLinks = [
 ] as const;
 
 export default async function OperationalCenterPage() {
-  await requireOrganizationRole(["OWNER", "ADMIN"]);
+  await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
 
   return (
     <div className="flex flex-col gap-6">

@@ -17,7 +17,7 @@ import { Pagination } from "@/components/lists/pagination";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { Button } from "@/components/ui/button";
 import { getAllActivity } from "@/lib/activity-log";
-import { requireOrganizationRole } from "@/lib/organization-context";
+import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import { getDb } from "@/lib/db";
 import { cn } from "@/lib/utils";
 import type { Prisma } from "@/generated/prisma/client";
@@ -139,7 +139,7 @@ export default async function ActivityPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+  const context = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
 
   const sp = await searchParams;
   const requestedView = typeof sp.view === "string" ? sp.view : "all";

@@ -26,7 +26,7 @@ import { formatCurrency } from "@/lib/money";
 import { ClientResolutionActions, PolicyResolutionActions, RenewalResolutionActions } from "@/components/risk-resolution/resolution-actions";
 import { PageRefreshTicker } from "@/components/risk-resolution/page-refresh-ticker";
 import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-button";
-import { requireOrganizationRole } from "@/lib/organization-context";
+import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 
 function riskHref(entityType: string, entityId: string) {
   if (entityType === "Client") return `/clients/${entityId}`;
@@ -109,7 +109,7 @@ export default async function RisksPage({
 }: {
   searchParams?: Promise<{ tab?: string; alertType?: string; issueCode?: string; q?: string }>;
 }) {
-  const organizationContext = await requireOrganizationRole(["OWNER", "ADMIN"]);
+  const organizationContext = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
   const params = (await searchParams) ?? {};
   const initialTab = params.tab === "completitud" ? "completitud" : "hallazgos";
   const alertTypeFilter = params.alertType;

@@ -452,7 +452,7 @@ export async function buildAssistantReply(
     ? !isLocalOnlyQuery(normalized)
     : shouldUseAssistantAi(normalized) || (!isDeterministicQuery(normalized) && message.length > 40) || message.length > 220);
   const budget = agentEnabled && shouldTryAi
-    ? await getNoraAiBudgetStatus().catch(() => ({ allowed: true, warning: null, spentUsd: 0, limitUsd: 4 }))
+    ? await getNoraAiBudgetStatus(user.organizationId).catch(() => ({ allowed: true, warning: null, spentUsd: 0, limitUsd: 4 }))
     : { allowed: true, warning: null, spentUsd: 0, limitUsd: 4 };
   if (!budget.allowed) shouldTryAi = false;
 

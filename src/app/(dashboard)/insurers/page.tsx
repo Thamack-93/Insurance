@@ -11,7 +11,7 @@ import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
 import { getDb } from "@/lib/db";
 import { formatCurrency, toNumber } from "@/lib/money";
-import { requireOrganizationRole } from "@/lib/organization-context";
+import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import { claimOperationalWhere, policyOperationalWhere } from "@/lib/portfolio-access";
 
 const PAGE_SIZE = 25;
@@ -21,7 +21,7 @@ export default async function InsurersPage({
 }: {
   searchParams?: Promise<{ q?: string; page?: string }>;
 }) {
-  const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+  const context = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
   const isAdmin = true;
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);

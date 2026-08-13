@@ -535,12 +535,13 @@ export async function listAssistantAiRuns(
 }
 
 export async function getAssistantAiMonthlySpend(
+  organizationId: string,
   now = new Date(),
   client: DbClient = getDb(),
 ) {
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const aggregate = await client.assistantAiRun.aggregate({
-    where: { createdAt: { gte: monthStart } },
+    where: { organizationId, createdAt: { gte: monthStart } },
     _sum: { estimatedCostUsd: true },
     _count: { id: true },
   });

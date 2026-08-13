@@ -1,5 +1,5 @@
 import { PageHeader } from "@/components/layout/page-header";
-import { requireOrganizationRole } from "@/lib/organization-context";
+import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import { listUsers } from "./actions";
 import { UsersAdminPanel } from "@/components/settings/users-admin-panel";
 
@@ -8,7 +8,7 @@ export const metadata = {
 };
 
 export default async function UsersAdminPage() {
-  const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+  const context = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
 
   const users = await listUsers();
 

@@ -2,10 +2,10 @@ import { createInsurer } from "@/app/(dashboard)/insurers/actions";
 import { InsurerForm } from "@/components/forms/insurer-form";
 import { createInsurerDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
-import { requireOrganizationRole } from "@/lib/organization-context";
+import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 
 export default async function NewInsurerPage() {
-  await requireOrganizationRole(["OWNER", "ADMIN"]);
+  await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
 
   return (
     <div className="flex flex-col gap-6">

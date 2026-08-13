@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UrlTabs } from "@/components/ui/url-tabs";
 import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-button";
-import { requireOrganizationRole } from "@/lib/organization-context";
+import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import { listAssistantReports } from "@/lib/assistant-reports";
 import { getAssistantAiConnectionStatus, getAssistantAiOperationLabel } from "@/lib/assistant-ai";
 import { getAssistantAiMonthlyUsageSummary, listAssistantAiRuns } from "@/lib/assistant-ai-runs";
@@ -235,7 +235,7 @@ function AiRunList({
 }
 
 export default async function AssistantSettingsPage() {
-  const organizationContext = await requireOrganizationRole(["OWNER", "ADMIN"]);
+  const organizationContext = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
   const aiStatus = getAssistantAiConnectionStatus();
   const [incidents, suggestions, monthlyUsage] = await Promise.all([
     listAssistantReports({ organizationId: organizationContext.organizationId, kind: "INCIDENT", limit: 100 }),

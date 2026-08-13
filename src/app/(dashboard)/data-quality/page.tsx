@@ -36,7 +36,7 @@ import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
 import { getLatestMaintenanceRun } from "@/lib/vigency-maintenance";
 import { getUpcomingRenewals } from "@/lib/renewals";
-import { requireOrganizationRole } from "@/lib/organization-context";
+import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import { RunVigencyAuditButton } from "@/components/data-quality/run-vigency-audit-button";
 import { RunPaymentAuditButton } from "@/components/data-quality/run-payment-audit-button";
 import { ReviewActionButtons } from "@/components/data-quality/review-action-buttons";
@@ -107,7 +107,7 @@ export default async function DataQualityPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const organizationContext = await requireOrganizationRole(["OWNER", "ADMIN"]);
+  const organizationContext = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
   const params = (await searchParams) ?? {};
   const initialTab =
     params.tab === "salud" || params.tab === "vigencias" || params.tab === "pagos" || params.tab === "renovaciones" || params.tab === "ledger"

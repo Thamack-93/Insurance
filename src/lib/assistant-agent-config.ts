@@ -20,10 +20,10 @@ export function getNoraAiMonthlySoftLimitUsd() {
   return Number.isFinite(configured) && configured > 0 ? configured : 4;
 }
 
-export async function getNoraAiBudgetStatus() {
+export async function getNoraAiBudgetStatus(organizationId?: string) {
   const limitUsd = getNoraAiMonthlySoftLimitUsd();
-  if (!process.env.DATABASE_URL?.trim()) return { allowed: true, warning: null, spentUsd: 0, limitUsd };
-  const monthly = await getAssistantAiMonthlySpend();
+  if (!process.env.DATABASE_URL?.trim() || !organizationId) return { allowed: true, warning: null, spentUsd: 0, limitUsd };
+  const monthly = await getAssistantAiMonthlySpend(organizationId);
   const ratio = limitUsd > 0 ? monthly.costUsd / limitUsd : 1;
   if (ratio >= 1) {
     return {

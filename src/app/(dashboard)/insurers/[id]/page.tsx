@@ -14,7 +14,7 @@ import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
 import { DeleteInsurerButton } from "@/components/insurers/delete-insurer-button";
-import { requireOrganizationRole } from "@/lib/organization-context";
+import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import {
   claimOperationalWhere,
   commissionOperationalWhere,
@@ -22,7 +22,7 @@ import {
 } from "@/lib/portfolio-access";
 
 export default async function InsurerDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+  const context = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
   const { id } = await params;
   const db = getDb();
 
