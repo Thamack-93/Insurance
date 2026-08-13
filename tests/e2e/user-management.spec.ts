@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
 import {
   authenticatePageAsAdmin,
+  hashTestPassword,
   cleanupPolicyFixture,
   getTestDb,
-  hashTestPassword,
   seedPolicyFixture,
 } from "../helpers/db";
 

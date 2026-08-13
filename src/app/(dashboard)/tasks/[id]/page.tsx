@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CalendarClock, CheckSquare, ClipboardList, FileText, MessageSquare } from "lucide-react";
+import { ArrowLeft, CalendarClock, CheckSquare, ClipboardList, FileText, MessageSquare } from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
 import { NoraContextButton } from "@/components/assistant/nora-session-provider";
 import { AuditByline } from "@/components/audit/audit-byline";
@@ -14,6 +14,7 @@ import { getDb } from "@/lib/db";
 import { daysSince, daysUntil, formatDate } from "@/lib/dates";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
+import { statusLabel } from "@/lib/status";
 
 const workItemTypeLabels: Record<string, string> = {
   GENERAL: "General",
@@ -24,19 +25,6 @@ const workItemTypeLabels: Record<string, string> = {
   DOCUMENT: "Documento",
   COMMISSION: "Comisión",
   OTHER: "Otro",
-};
-
-const workItemStatusLabels: Record<string, string> = {
-  OPEN: "Abierta",
-  IN_PROGRESS: "En progreso",
-  WAITING_CLIENT: "Esperando cliente",
-  WAITING_INSURER: "Esperando aseguradora",
-  WAITING_DOCUMENT: "Esperando documento",
-  SENT: "Enviada",
-  RESOLVED: "Resuelta",
-  CANCELLED: "Cancelada",
-  ARCHIVED: "Archivada",
-  DISMISSED: "Descartada",
 };
 
 export default async function WorkItemDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -80,11 +68,11 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
           actions={
             <>
               <NoraContextButton context={{ type: "workItem", id: workItem.id }} />
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href={`/tasks/${workItem.sourceId ?? workItem.id}/edit`}>Editar pendiente</Link>
               </Button>
               <DeleteWorkItemButton id={workItem.sourceId ?? workItem.id} folio={workItem.folio ?? workItem.sourceId ?? workItem.id} />
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/operations?view=pending">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
@@ -99,7 +87,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
             title="Estado"
-            value={workItemStatusLabels[workItem.status] ?? workItem.status}
+            value={statusLabel(workItem.status, "workItem")}
             description={isClosed ? "Pendiente cerrada" : isOverdue ? "Vencida" : "Activa"}
             icon={CheckSquare}
             tone={isClosed ? "blue" : isOverdue ? "rose" : "emerald"}
@@ -133,14 +121,14 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
               <div className="flex items-start justify-between gap-3">
                 <div className="flex gap-2">
                   <PriorityBadge priority={workItem.priority} />
-                  <StatusBadge status={workItem.status} />
+                  <StatusBadge status={workItem.status} entity="workItem" />
                 </div>
                 <Badge variant="outline" className="rounded-full">
                   {workItemTypeLabels[workItem.taskType ?? "GENERAL"] ?? workItem.taskType ?? "GENERAL"}
                 </Badge>
               </div>
 
-              <div className="rounded-2xl border bg-muted/40 p-4">
+              <div className="rounded-xl border bg-muted/40 p-4">
                 <p className="font-medium text-foreground">Título</p>
                 <p className="mt-1">{workItem.title}</p>
                 {workItem.description ? (
@@ -206,7 +194,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
               ) : null}
 
               {workItem.notes ? (
-                <div className="rounded-2xl border bg-card/70 p-4 text-sm text-muted-foreground">
+                <div className="rounded-xl border bg-card/70 p-4 text-sm text-muted-foreground">
                   <p className="font-medium text-foreground">Notas internas</p>
                   <p className="mt-1">{workItem.notes}</p>
                 </div>
@@ -265,7 +253,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
 
         <SectionCard title="Comunicación" description="Resumen de interacciones relacionadas.">
           <div className="grid gap-4 p-4 md:grid-cols-2">
-            <div className="rounded-2xl border bg-card/70 p-4">
+            <div className="rounded-xl border bg-card/70 p-4">
               <div className="flex items-center gap-3">
                 <MessageSquare className="size-4 text-muted-foreground" />
                 <p className="font-medium">Estado actual</p>
@@ -278,7 +266,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
                     : "Este pendiente está activo y en seguimiento normal."}
               </p>
             </div>
-            <div className="rounded-2xl border bg-card/70 p-4">
+            <div className="rounded-xl border bg-card/70 p-4">
               <div className="flex items-center gap-3">
                 <CalendarClock className="size-4 text-muted-foreground" />
                 <p className="font-medium">Próximos pasos</p>

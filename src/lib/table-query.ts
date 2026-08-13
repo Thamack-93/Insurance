@@ -12,13 +12,13 @@ export function readTableParam(params: TableSearchParams, key: string) {
   return typeof value === "string" ? value : undefined;
 }
 
-export function readAllowedTableParam(
+export function readAllowedTableParam<T extends string>(
   params: TableSearchParams,
   key: string,
-  allowed: readonly string[],
-) {
+  allowed: readonly T[],
+): T | undefined {
   const value = readTableParam(params, key);
-  return value && allowed.includes(value) ? value : undefined;
+  return value && (allowed as readonly string[]).includes(value) ? (value as T) : undefined;
 }
 
 export function readTablePage(params: TableSearchParams, fallback = 1) {

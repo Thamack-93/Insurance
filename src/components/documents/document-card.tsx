@@ -56,7 +56,7 @@ function DocumentCard({
         <CardContent className="space-y-2">
           <div className="grid gap-2 sm:grid-cols-2">
             {meta.map((item) => (
-              <div key={item.label} className="rounded-lg border bg-muted/30 p-2.5">
+              <div key={item.label} className="rounded-md border bg-muted/30 p-2.5">
                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{item.label}</div>
                 <div className="mt-1 text-sm text-foreground">{item.value}</div>
               </div>

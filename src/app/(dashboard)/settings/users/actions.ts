@@ -7,21 +7,26 @@ import { writeActivityLog } from "@/lib/activity-log";
 import {
   AuthError,
   hashPassword,
-  requireAdmin,
   requireUser,
   verifyPassword,
   SYSTEM_USER_ID,
   type UserRole,
 } from "@/lib/auth";
+import type { Prisma } from "@/generated/prisma/client";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { logError } from "@/lib/logger";
 import { DEFAULT_USER_TIME_ZONE } from "@/lib/time-zones";
+import {
+  assertOrganizationContextInTransaction,
+  requireOrganizationRole,
+  type OrganizationRole,
+} from "@/lib/organization-context";
 
 export type AdminUserRow = {
   id: string;
   email: string;
   name: string;
-  role: UserRole;
+  role: OrganizationRole;
   active: boolean;
   lastLoginAt: string | null;
   createdAt: string;
@@ -49,34 +54,47 @@ function generateTemporaryPassword(): string {
 }
 
 export async function listUsers(): Promise<AdminUserRow[]> {
-  await requireAdmin();
+  const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
   const db = getDb();
-  const users = await db.user.findMany({
-    where: { id: { not: SYSTEM_USER_ID } },
-    orderBy: [{ active: "desc" }, { name: "asc" }],
-    include: { _count: { select: { portfolioClients: true } } },
+  const memberships = await db.organizationMembership.findMany({
+    where: { organizationId: context.organizationId, userId: { not: SYSTEM_USER_ID } },
+    orderBy: [{ active: "desc" }, { user: { name: "asc" } }],
+    include: {
+      user: {
+        include: {
+          _count: {
+            select: { portfolioClients: { where: { organizationId: context.organizationId } } },
+          },
+        },
+      },
+    },
   });
-  return users.map((u) => ({
-    id: u.id,
-    email: u.email,
-    name: u.name,
-    role: u.role as UserRole,
-    active: u.active,
-    lastLoginAt: u.lastLoginAt ? u.lastLoginAt.toISOString() : null,
-    createdAt: u.createdAt.toISOString(),
-    portfolioClients: u._count.portfolioClients,
+  return memberships.map((membership) => ({
+    id: membership.user.id,
+    email: membership.user.email,
+    name: membership.user.name,
+    role: membership.role as OrganizationRole,
+    active: membership.active && membership.user.active,
+    lastLoginAt: membership.user.lastLoginAt ? membership.user.lastLoginAt.toISOString() : null,
+    createdAt: membership.user.createdAt.toISOString(),
+    portfolioClients: membership.user._count.portfolioClients,
   }));
 }
 
-async function ensureNotLastAdmin(db: ReturnType<typeof getDb>, excludeUserId?: string) {
-  const remaining = await db.user.count({
+async function countRemainingTenantAdmins(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  excludeUserId?: string,
+) {
+  return tx.organizationMembership.count({
     where: {
-      id: { notIn: [SYSTEM_USER_ID, ...(excludeUserId ? [excludeUserId] : [])] },
-      role: "ADMIN",
+      organizationId,
+      userId: excludeUserId ? { not: excludeUserId } : undefined,
+      role: { in: ["OWNER", "ADMIN"] },
       active: true,
+      user: { active: true },
     },
   });
-  return remaining;
 }
 
 export type InviteResult =
@@ -90,7 +108,7 @@ export async function inviteUser(input: {
   tempPassword?: string;
 }): Promise<InviteResult> {
   try {
-    const actor = await requireAdmin();
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
     const name = String(input.name ?? "").trim();
     const email = String(input.email ?? "").trim().toLowerCase();
     const role = input.role;
@@ -106,28 +124,38 @@ export async function inviteUser(input: {
     if (passwordError) return { ok: false, error: passwordError };
 
     const db = getDb();
-    const existing = await db.user.findUnique({ where: { email } });
-    if (existing) {
-      return { ok: false, error: "Ya existe un usuario con ese correo." };
-    }
+    const created = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
+      const existing = await tx.user.findUnique({ where: { email }, select: { id: true } });
+      if (existing) throw new AuthError("Ya existe un usuario con ese correo.", 409);
 
-    const created = await db.user.create({
-      data: {
-        name,
-        email,
-        role,
-        active: true,
-        timeZone: DEFAULT_USER_TIME_ZONE,
-        passwordHash: hashPassword(tempPassword),
-      },
-    });
-
-    await writeActivityLog({
-      entityType: "User",
-      entityId: created.id,
-      action: "USER_INVITE",
-      newValue: { email, name, role },
-      userId: actor.id,
+      const user = await tx.user.create({
+        data: {
+          name,
+          email,
+          role,
+          active: true,
+          timeZone: DEFAULT_USER_TIME_ZONE,
+          passwordHash: hashPassword(tempPassword),
+        },
+      });
+      // The Cycle 1 trigger may already have created this row. Upsert keeps the
+      // operation compatible both before and after that temporary trigger is removed.
+      await tx.organizationMembership.upsert({
+        where: { organizationId_userId: { organizationId: context.organizationId, userId: user.id } },
+        update: { role, active: true },
+        create: { organizationId: context.organizationId, userId: user.id, role, active: true },
+      });
+      await writeActivityLog({
+        entityType: "User",
+        entityId: user.id,
+        action: "USER_INVITE",
+        newValue: { email, name, role },
+        userId: context.userId,
+        organizationId: context.organizationId,
+        db: tx,
+      });
+      return user;
     });
 
     revalidatePath("/settings/users");
@@ -146,38 +174,47 @@ export async function inviteUser(input: {
 
 export async function changeUserRole(userId: string, role: UserRole): Promise<MutationResult> {
   try {
-    const actor = await requireAdmin();
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
     if (!isRole(role)) return errorResult("Rol no válido.");
     if (userId === SYSTEM_USER_ID) return errorResult("No puedes cambiar el rol del usuario del sistema.");
 
     const db = getDb();
-    const target = await db.user.findUnique({ where: { id: userId } });
-    if (!target) return errorResult("El usuario ya no existe.");
-    if (target.role === role) return successResult(userId, "/settings/users", "Sin cambios.");
-
-    if (target.role === "ADMIN" && role !== "ADMIN") {
-      const remaining = await ensureNotLastAdmin(db, target.id);
-      if (remaining === 0) {
-        return errorResult("Debe quedar al menos un Administrador activo.");
+    const outcome = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
+      const membership = await tx.organizationMembership.findFirst({
+        where: { organizationId: context.organizationId, userId },
+        include: { user: true },
+      });
+      if (!membership) return "missing" as const;
+      if (membership.role === "OWNER") return "owner" as const;
+      if (membership.role === role) return "unchanged" as const;
+      if (membership.role === "ADMIN" && role === "AGENT") {
+        const remaining = await countRemainingTenantAdmins(tx, context.organizationId, userId);
+        if (remaining === 0) return "last-admin" as const;
       }
-    }
 
-    if (actor.id === userId && role !== "ADMIN") {
-      const remaining = await ensureNotLastAdmin(db, actor.id);
-      if (remaining === 0) {
-        return errorResult("No puedes quitarte el rol si eres el único Administrador.");
-      }
-    }
-
-    await db.user.update({ where: { id: userId }, data: { role } });
-    await writeActivityLog({
-      entityType: "User",
-      entityId: userId,
-      action: "USER_ROLE_CHANGE",
-      oldValue: { role: target.role },
-      newValue: { role },
-      userId: actor.id,
+      await tx.user.update({ where: { id: userId }, data: { role } });
+      await tx.organizationMembership.update({
+        where: { organizationId_userId: { organizationId: context.organizationId, userId } },
+        data: { role },
+      });
+      await writeActivityLog({
+        entityType: "User",
+        entityId: userId,
+        action: "USER_ROLE_CHANGE",
+        oldValue: { role: membership.role },
+        newValue: { role },
+        userId: context.userId,
+        organizationId: context.organizationId,
+        db: tx,
+      });
+      return "updated" as const;
     });
+
+    if (outcome === "missing") return errorResult("El usuario no pertenece a esta organización.");
+    if (outcome === "owner") return errorResult("El Owner no puede degradarse desde este flujo.");
+    if (outcome === "last-admin") return errorResult("Debe quedar al menos un Owner o Administrador activo.");
+    if (outcome === "unchanged") return successResult(userId, "/settings/users", "Sin cambios.");
 
     revalidatePath("/settings/users");
     return successResult(userId, "/settings/users", "Rol actualizado.");
@@ -190,33 +227,49 @@ export async function changeUserRole(userId: string, role: UserRole): Promise<Mu
 
 export async function setUserActive(userId: string, active: boolean): Promise<MutationResult> {
   try {
-    const actor = await requireAdmin();
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
     if (userId === SYSTEM_USER_ID) return errorResult("No puedes modificar el usuario del sistema.");
-    if (actor.id === userId && !active) {
+    if (context.userId === userId && !active) {
       return errorResult("No puedes desactivar tu propia cuenta.");
     }
 
     const db = getDb();
-    const target = await db.user.findUnique({ where: { id: userId } });
-    if (!target) return errorResult("El usuario ya no existe.");
-    if (target.active === active) return successResult(userId, "/settings/users", "Sin cambios.");
-
-    if (!active && target.role === "ADMIN") {
-      const remaining = await ensureNotLastAdmin(db, target.id);
-      if (remaining === 0) {
-        return errorResult("Debe quedar al menos un Administrador activo.");
+    const outcome = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
+      const membership = await tx.organizationMembership.findFirst({
+        where: { organizationId: context.organizationId, userId },
+        include: { user: true },
+      });
+      if (!membership) return "missing" as const;
+      if (membership.role === "OWNER" && !active) return "owner" as const;
+      if (membership.active === active && membership.user.active === active) return "unchanged" as const;
+      if (!active && membership.role === "ADMIN") {
+        const remaining = await countRemainingTenantAdmins(tx, context.organizationId, userId);
+        if (remaining === 0) return "last-admin" as const;
       }
-    }
 
-    await db.user.update({ where: { id: userId }, data: { active } });
-    await writeActivityLog({
-      entityType: "User",
-      entityId: userId,
-      action: active ? "USER_ACTIVATE" : "USER_DEACTIVATE",
-      oldValue: { active: target.active },
-      newValue: { active },
-      userId: actor.id,
+      await tx.user.update({ where: { id: userId }, data: { active } });
+      await tx.organizationMembership.update({
+        where: { organizationId_userId: { organizationId: context.organizationId, userId } },
+        data: { active },
+      });
+      await writeActivityLog({
+        entityType: "User",
+        entityId: userId,
+        action: active ? "USER_ACTIVATE" : "USER_DEACTIVATE",
+        oldValue: { active: membership.active },
+        newValue: { active },
+        userId: context.userId,
+        organizationId: context.organizationId,
+        db: tx,
+      });
+      return "updated" as const;
     });
+
+    if (outcome === "missing") return errorResult("El usuario no pertenece a esta organización.");
+    if (outcome === "owner") return errorResult("El Owner activo no puede desactivarse desde este flujo.");
+    if (outcome === "last-admin") return errorResult("Debe quedar al menos un Owner o Administrador activo.");
+    if (outcome === "unchanged") return successResult(userId, "/settings/users", "Sin cambios.");
 
     revalidatePath("/settings/users");
     return successResult(userId, "/settings/users", active ? "Usuario activado." : "Usuario desactivado.");
@@ -229,54 +282,78 @@ export async function setUserActive(userId: string, active: boolean): Promise<Mu
 
 export async function deleteUser(userId: string, replacementUserId?: string): Promise<MutationResult> {
   try {
-    const actor = await requireAdmin();
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
     if (userId === SYSTEM_USER_ID) return errorResult("No puedes eliminar el usuario del sistema.");
-    if (actor.id === userId) return errorResult("No puedes eliminar tu propia cuenta.");
+    if (context.userId === userId) return errorResult("No puedes eliminar tu propia cuenta.");
 
     const db = getDb();
-    const target = await db.user.findUnique({ where: { id: userId } });
-    if (!target) return errorResult("El usuario ya no existe.");
-    if (target.active && target.role === "ADMIN") {
-      const remainingAdmins = await ensureNotLastAdmin(db, target.id);
-      if (remainingAdmins === 0) return errorResult("No puedes eliminar al último administrador activo.");
-    }
-    if (target.active) return errorResult("Desactiva el usuario antes de eliminarlo.");
-
-    const portfolioClients = await db.client.count({ where: { portfolioOwnerId: target.id } });
     const replacementId = replacementUserId?.trim() || null;
-    if (portfolioClients > 0 && !replacementId) {
-      return errorResult("Selecciona un usuario activo para reasignar la cartera.");
-    }
+    const outcome = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
+      const membership = await tx.organizationMembership.findFirst({
+        where: { organizationId: context.organizationId, userId },
+        include: { user: true },
+      });
+      if (!membership) return { status: "missing" as const };
+      if (membership.role === "OWNER") return { status: "owner" as const };
+      if (membership.user.active || membership.active) return { status: "active" as const };
 
-    let replacement: { id: string; active: boolean } | null = null;
-    if (replacementId) {
-      if (replacementId === target.id || replacementId === SYSTEM_USER_ID) {
-        return errorResult("El usuario de destino no es válido.");
+      const portfolioClients = await tx.client.count({
+        where: { organizationId: context.organizationId, portfolioOwnerId: userId },
+      });
+      if (portfolioClients > 0 && !replacementId) return { status: "replacement-required" as const };
+
+      let replacement: { id: string } | null = null;
+      if (replacementId) {
+        if (replacementId === userId || replacementId === SYSTEM_USER_ID) return { status: "invalid-replacement" as const };
+        const replacementMembership = await tx.organizationMembership.findFirst({
+          where: {
+            organizationId: context.organizationId,
+            userId: replacementId,
+            active: true,
+            user: { active: true },
+          },
+          select: { userId: true },
+        });
+        if (!replacementMembership) return { status: "invalid-replacement" as const };
+        replacement = { id: replacementMembership.userId };
       }
-      replacement = await db.user.findUnique({ where: { id: replacementId }, select: { id: true, active: true } });
-      if (!replacement || !replacement.active) return errorResult("El usuario de destino debe estar activo.");
-    }
 
-    await db.$transaction(async (tx) => {
       if (replacement) {
-        await tx.client.updateMany({ where: { portfolioOwnerId: target.id }, data: { portfolioOwnerId: replacement.id } });
+        await tx.client.updateMany({
+          where: { organizationId: context.organizationId, portfolioOwnerId: userId },
+          data: { portfolioOwnerId: replacement.id },
+        });
       }
-      await tx.activityLog.updateMany({ where: { userId: target.id }, data: { userId: SYSTEM_USER_ID } });
+      await tx.activityLog.updateMany({
+        where: { userId, organizationId: context.organizationId },
+        data: { userId: SYSTEM_USER_ID },
+      });
       await writeActivityLog({
         entityType: "User",
-        entityId: target.id,
+        entityId: userId,
         action: "USER_DELETE",
-        oldValue: { email: target.email, role: target.role, active: target.active, portfolioClients },
+        oldValue: { email: membership.user.email, role: membership.role, active: membership.active, portfolioClients },
         newValue: { replacementUserId: replacement?.id ?? null },
-        userId: actor.id,
+        userId: context.userId,
+        organizationId: context.organizationId,
         db: tx,
       });
       // Cycle 1 keeps a synchronized membership for every legacy user. Remove
       // the inactive membership explicitly so its transition guard runs before
       // the user delete instead of relying on FK cascade ordering.
-      await tx.organizationMembership.deleteMany({ where: { userId: target.id } });
-      await tx.user.delete({ where: { id: target.id } });
+      await tx.organizationMembership.delete({
+        where: { organizationId_userId: { organizationId: context.organizationId, userId } },
+      });
+      await tx.user.delete({ where: { id: userId } });
+      return { status: "deleted" as const };
     });
+
+    if (outcome.status === "missing") return errorResult("El usuario no pertenece a esta organización.");
+    if (outcome.status === "owner") return errorResult("El Owner no puede eliminarse desde este flujo.");
+    if (outcome.status === "active") return errorResult("Desactiva el usuario antes de eliminarlo.");
+    if (outcome.status === "replacement-required") return errorResult("Selecciona un usuario activo para reasignar la cartera.");
+    if (outcome.status === "invalid-replacement") return errorResult("El usuario de destino debe pertenecer y estar activo en esta organización.");
 
     revalidatePath("/settings/users");
     return successResult(userId, "/settings/users", "Usuario eliminado.");
@@ -293,25 +370,33 @@ export type ResetPasswordResult =
 
 export async function resetUserPassword(userId: string): Promise<ResetPasswordResult> {
   try {
-    const actor = await requireAdmin();
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
     if (userId === SYSTEM_USER_ID) return { ok: false, error: "No puedes resetear el usuario del sistema." };
 
     const db = getDb();
-    const target = await db.user.findUnique({ where: { id: userId } });
-    if (!target) return { ok: false, error: "El usuario ya no existe." };
-
     const tempPassword = generateTemporaryPassword();
-    await db.user.update({
-      where: { id: userId },
-      data: { passwordHash: hashPassword(tempPassword) },
+    const updated = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
+      const membership = await tx.organizationMembership.findFirst({
+        where: { organizationId: context.organizationId, userId },
+        select: { id: true },
+      });
+      if (!membership) return false;
+      await tx.user.update({
+        where: { id: userId },
+        data: { passwordHash: hashPassword(tempPassword) },
+      });
+      await writeActivityLog({
+        entityType: "User",
+        entityId: userId,
+        action: "USER_PASSWORD_RESET",
+        userId: context.userId,
+        organizationId: context.organizationId,
+        db: tx,
+      });
+      return true;
     });
-
-    await writeActivityLog({
-      entityType: "User",
-      entityId: userId,
-      action: "USER_PASSWORD_RESET",
-      userId: actor.id,
-    });
+    if (!updated) return { ok: false, error: "El usuario no pertenece a esta organización." };
 
     revalidatePath("/settings/users");
     return {

@@ -87,7 +87,7 @@ export function ReportDownloadCard({ definition }: { definition: ReportDownloadD
     <section className="overflow-hidden rounded-xl border bg-card" aria-labelledby="report-generator-title">
       <header className="border-b px-5 py-4">
         <div className="flex items-start gap-3">
-          <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><FileSpreadsheet className="size-5" aria-hidden /></span>
+          <span className="grid size-10 shrink-0 place-items-center rounded-md bg-primary/10 text-primary"><FileSpreadsheet className="size-5" aria-hidden /></span>
           <div>
             <h2 id="report-generator-title" className="font-semibold">{definition.title}</h2>
             <p className="mt-1 text-sm text-muted-foreground">{definition.description}</p>
@@ -107,7 +107,7 @@ export function ReportDownloadCard({ definition }: { definition: ReportDownloadD
           </label>
           <label className="grid gap-1.5 text-sm font-medium sm:col-span-2">
             {definition.filterLabel}
-            <select value={filter} onChange={(event) => { setFilter(event.target.value); setPreview(null); }} className="min-h-10 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <select value={filter} onChange={(event) => { setFilter(event.target.value); setPreview(null); }} className="min-h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
               {definition.filterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
@@ -122,7 +122,7 @@ export function ReportDownloadCard({ definition }: { definition: ReportDownloadD
           </div>
         </form>
 
-        <div className="min-w-0 rounded-lg border bg-muted/25 p-4" aria-live="polite">
+        <div className="min-w-0 rounded-md border bg-muted/25 p-4" aria-live="polite">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Contenido del documento</p>
           {preview ? (
             <>

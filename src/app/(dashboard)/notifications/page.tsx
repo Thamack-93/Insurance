@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Bell, CheckCheck } from "lucide-react";
+import { ArrowRight, Bell, CheckCheck } from "@/components/icons";
 import { PageHeader } from "@/components/layout/page-header";
 import { SectionCard } from "@/components/pages-secondary/panels";
 import { EmptyState } from "@/components/empty-states/empty-state";
@@ -15,6 +15,7 @@ import {
 } from "@/lib/notifications";
 import { MarkOneButton, MarkAllReadButton } from "@/components/notifications/notifications-page-actions";
 import { formatDate, formatRelativeDate } from "@/lib/dates";
+import { requireUser } from "@/lib/auth";
 
 const PAGE_SIZE = 25;
 
@@ -30,6 +31,7 @@ export default async function NotificationsPage({
   searchParams?: Promise<{ type?: string; read?: string; page?: string }>;
 }) {
   const params = (await searchParams) ?? {};
+  const user = await requireUser();
   const type = (params.type ?? "").trim() || undefined;
   const readParam = (params.read ?? "").trim();
   const read: NotificationFilter["read"] =
@@ -57,7 +59,7 @@ export default async function NotificationsPage({
         actions={
           <>
             <MarkAllReadButton />
-            <Button asChild variant="outline" className="rounded-full bg-card/70">
+            <Button asChild variant="outline" className="bg-card/70">
               <Link href="/risks">
                 Ver riesgos
                 <ArrowRight className="ml-2 size-4" />
@@ -101,7 +103,7 @@ export default async function NotificationsPage({
             </select>
           </div>
           <div className="flex items-end">
-            <Button type="submit" variant="outline" className="rounded-full bg-card/70">
+            <Button type="submit" variant="outline" className="bg-card/70">
               Aplicar
             </Button>
           </div>
@@ -120,7 +122,7 @@ export default async function NotificationsPage({
         ) : (
           <ul className="divide-y divide-border/70">
             {entries.map((notification) => {
-              const href = notificationLink(notification.entityType, notification.entityId);
+              const href = notificationLink(notification.entityType, notification.entityId, user.role === "ADMIN");
               const isRead = Boolean(notification.readAt);
               const relative = formatRelativeDate(notification.createdAt);
               return (
@@ -152,7 +154,7 @@ export default async function NotificationsPage({
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-2">
-                    <Button asChild variant="outline" size="sm" className="rounded-full">
+                    <Button asChild variant="outline" size="sm">
                       <Link href={href}>Abrir</Link>
                     </Button>
                     {!isRead ? (

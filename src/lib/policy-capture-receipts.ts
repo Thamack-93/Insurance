@@ -1,7 +1,7 @@
 import { addMonths } from "date-fns";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { parseDateInput } from "@/lib/form-utils";
-import type { PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
+import type { PolicyPdfCaptureDraft, PolicyPdfCaptureReceiptEvidence } from "@/lib/policy-pdf-capture.shared";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -16,6 +16,7 @@ export type AutoCaptureReceiptInput = {
     receiptNumber: string;
     amount: number;
   }>;
+  receiptEvidence?: PolicyPdfCaptureReceiptEvidence | null;
 };
 
 export type AutoCaptureReceiptPayload = {
@@ -63,6 +64,19 @@ function buildAutoCaptureReceiptNotes(draft: PolicyPdfCaptureDraft) {
     draft.issueDate ? `Emision ${draft.issueDate}` : null,
   ].filter(Boolean);
 
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function buildReceiptEvidenceNote(evidence: PolicyPdfCaptureReceiptEvidence | null | undefined) {
+  if (!evidence) return null;
+  const parts = [
+    evidence.receiptControlNumber ? `Control de recibo ${evidence.receiptControlNumber}` : null,
+    evidence.dueDate ? `Vencimiento ${evidence.dueDate}` : null,
+    evidence.periodLabel ? `Periodo ${evidence.periodLabel}` : null,
+    evidence.amountDue != null ? `Aviso ${evidence.amountDue.toFixed(2)} ${evidence.currency}` : null,
+    evidence.depositAmount != null ? `Ficha ${evidence.depositAmount.toFixed(2)} ${evidence.currency}` : null,
+    "Pago no confirmado",
+  ].filter(Boolean);
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
@@ -162,7 +176,7 @@ function buildAutoCaptureReceiptPayloadFromTerm(
   input: AutoCaptureReceiptInput,
   term: AutoCaptureReceiptTerm,
 ): AutoCaptureReceiptPayload {
-  const notes = buildAutoCaptureReceiptNotes(input.draft);
+  const notes = [buildAutoCaptureReceiptNotes(input.draft), buildReceiptEvidenceNote(input.receiptEvidence)].filter(Boolean).join(" · ") || null;
 
   return {
     receiptNumber: term.receiptNumber,

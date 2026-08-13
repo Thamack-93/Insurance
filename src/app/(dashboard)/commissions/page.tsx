@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { connection } from "next/server";
-import { ArrowRight, BadgeCheck, CircleAlert, HandCoins, TrendingUp } from "lucide-react";
+import { ArrowRight, BadgeCheck, CircleAlert, HandCoins, TrendingUp } from "@/components/icons";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
@@ -105,7 +105,7 @@ export default async function CommissionsPage({
           title="Comisiones y bonos"
           description="Seguimiento de comisiones esperadas, cobradas y vencidas. Los bonos se incorporarán cuando existan datos reales."
           actions={
-            <Button asChild className="rounded-full">
+            <Button asChild>
               <Link href="/reports">
                 Reportes
                 <ArrowRight className="ml-2 size-4" />
@@ -168,12 +168,7 @@ export default async function CommissionsPage({
                 icon={HandCoins}
                 title="Página fuera de rango"
                 description="Vuelve al inicio del listado."
-                action="Volver al inicio"
-                actionHref={buildTableHref("/commissions", params, {
-                  q: query || null,
-                  sort: sortKey ?? null,
-                  dir: direction ?? null,
-                })}
+                action={{ label: "Volver al inicio", href: buildTableHref("/commissions", params, { q: query || null, sort: sortKey ?? null, dir: direction ?? null, }) }}
               />
             </div>
           ) : (
@@ -204,7 +199,7 @@ export default async function CommissionsPage({
                       <TableCell>{formatDate(commission.expectedDate)}</TableCell>
                       <TableCell className="text-right font-medium">{formatCurrency(toNumber(commission.expectedAmount))}</TableCell>
                       <TableCell>
-                        <StatusBadge status={commission.status} />
+                        <StatusBadge status={commission.status} entity="commission" />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -247,7 +242,7 @@ export default async function CommissionsPage({
                   </div>
                   <div className="text-right">
                     <p className="font-medium">{formatCurrency(toNumber(commission.actualAmount ?? commission.expectedAmount))}</p>
-                    <StatusBadge status={commission.status} className="mt-1 w-fit" />
+                    <StatusBadge status={commission.status} entity="commission" className="mt-1 w-fit" />
                   </div>
                 </div>
               ))}

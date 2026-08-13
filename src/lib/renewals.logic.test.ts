@@ -6,7 +6,9 @@ import {
   createRenewalWorkItemDescription,
   createRenewalWorkItemTitle,
   filterRenewalsByTimeRange,
+  isUnresolvedOverdueRenewal,
   shouldIncludeInRenewals,
+  shouldKeepRenewalWorkItemPolicy,
   sortRenewalsByPriority,
   type RenewalInfo,
 } from "./renewals.logic";
@@ -38,6 +40,25 @@ describe("renewals.logic", () => {
     expect(shouldIncludeInRenewals("ACTIVE", new Date("2024-07-01"))).toBe(true);
     expect(shouldIncludeInRenewals("CANCELLED", new Date("2024-07-01"))).toBe(false);
     expect(shouldIncludeInRenewals("ACTIVE", new Date("2024-07-01"), "CANCELLED")).toBe(false);
+  });
+
+  it("identifies only active overdue policies without a renewal decision", () => {
+    const overdue = new Date("2024-06-10");
+    expect(isUnresolvedOverdueRenewal({ status: "ACTIVE", endDate: overdue, hasSuccessor: false, hasDecision: false }, today)).toBe(true);
+    expect(isUnresolvedOverdueRenewal({ status: "ACTIVE", endDate: overdue, hasSuccessor: true, hasDecision: false }, today)).toBe(false);
+    expect(isUnresolvedOverdueRenewal({ status: "ACTIVE", endDate: overdue, hasSuccessor: false, hasDecision: true }, today)).toBe(false);
+    expect(isUnresolvedOverdueRenewal({ status: "EXPIRED", endDate: overdue, hasSuccessor: false, hasDecision: false }, today)).toBe(false);
+    expect(isUnresolvedOverdueRenewal({ status: "ACTIVE", endDate: new Date("2024-06-20"), hasSuccessor: false, hasDecision: false }, today)).toBe(false);
+  });
+
+  it("keeps renewal work only while the policy is actionable", () => {
+    const actionable = { status: "ACTIVE", hasSuccessor: false, hasDecision: false };
+    expect(shouldKeepRenewalWorkItemPolicy(actionable)).toBe(true);
+    expect(shouldKeepRenewalWorkItemPolicy({ ...actionable, latestReceiptStatus: "CANCELLED" })).toBe(false);
+    expect(shouldKeepRenewalWorkItemPolicy({ ...actionable, hasSuccessor: true })).toBe(false);
+    expect(shouldKeepRenewalWorkItemPolicy({ ...actionable, hasDecision: true })).toBe(false);
+    expect(shouldKeepRenewalWorkItemPolicy({ ...actionable, renewalStage: "LOST" })).toBe(false);
+    expect(shouldKeepRenewalWorkItemPolicy({ ...actionable, status: "EXPIRED" })).toBe(false);
   });
 
   it("builds renewal work item title and description", () => {

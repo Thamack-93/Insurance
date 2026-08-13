@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, BadgeCheck, CalendarClock, FileText, History, Pencil, ShieldCheck } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CalendarClock, FileText, History, Pencil, ShieldCheck } from "@/components/icons";
 import { DeleteClaimButton } from "@/components/claims/delete-claim-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { NoraContextButton } from "@/components/assistant/nora-session-provider";
@@ -60,14 +60,14 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
           actions={
             <div className="flex items-center gap-2">
               <NoraContextButton context={{ type: "claim", id: claim.id }} />
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href={`/claims/${claim.id}/edit`}>
                   <Pencil className="mr-2 size-4" />
                   Editar
                 </Link>
               </Button>
               <DeleteClaimButton id={claim.id} folio={claim.folio} />
-              <Button asChild variant="outline" className="rounded-full bg-card/70">
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/operations?view=claims">
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
@@ -114,11 +114,11 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
           <SectionCard title="Ficha del siniestro" description="Datos del reclamo y vínculos operativos.">
             <div className="grid gap-4 p-4 text-sm">
               <div className="flex items-start justify-between gap-3">
-                <StatusBadge status={claim.status} />
+                <StatusBadge status={claim.status} entity="claim" />
                 <span className="text-xs text-muted-foreground">Folio: {claim.folio}</span>
               </div>
 
-              <div className="rounded-2xl border bg-muted/40 p-4">
+              <div className="rounded-xl border bg-muted/40 p-4">
                 <p className="font-medium text-foreground">Tipo de siniestro</p>
                 <p className="mt-1">{claim.claimType}</p>
                 {claim.description && (
@@ -145,9 +145,13 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
                 </div>
                 <div>
                   <p className="text-muted-foreground">Aseguradora</p>
-                  <Link href={`/insurers/${claim.insurerId}`} className="font-medium text-foreground hover:text-primary">
-                    {claim.insurer.name}
-                  </Link>
+                  {scope.role === "ADMIN" ? (
+                    <Link href={`/insurers/${claim.insurerId}`} className="font-medium text-foreground hover:text-primary">
+                      {claim.insurer.name}
+                    </Link>
+                  ) : (
+                    <p className="font-medium">{claim.insurer.name}</p>
+                  )}
                 </div>
               </div>
 
@@ -169,7 +173,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
               </div>
 
               {claim.notes && (
-                <div className="rounded-2xl border bg-card/70 p-4 text-sm text-muted-foreground">
+                <div className="rounded-xl border bg-card/70 p-4 text-sm text-muted-foreground">
                   <p className="font-medium text-foreground">Notas internas</p>
                   <p className="mt-1">{claim.notes}</p>
                 </div>
@@ -211,7 +215,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
                       {related.claimType} · {formatDate(related.incidentDate)}
                     </p>
                   </div>
-                  <StatusBadge status={related.status} />
+                  <StatusBadge status={related.status} entity="claim" />
                 </div>
               ))}
             </div>
@@ -232,7 +236,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
         >
           {activity.length === 0 ? (
             <div className="p-4">
-              <div className="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
+              <div className="rounded-xl border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-sm text-muted-foreground">
                 <History className="mx-auto mb-2 size-5 text-muted-foreground" />
                 Sin actividad registrada para este siniestro todavía.
               </div>

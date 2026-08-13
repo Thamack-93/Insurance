@@ -38,6 +38,12 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    // Turbopack rewrites this scratch directory while the dev server runs and
+    // intermittently emits syntactically invalid TypeScript (a dropped comment
+    // prefix on a "// Validate <path>" line), which breaks `npm run typecheck`
+    // for reasons unrelated to our source. Route/page signatures are still
+    // validated through ".next/types/**/*.ts", which `next build` generates.
+    ".next/dev/**"
   ]
 }

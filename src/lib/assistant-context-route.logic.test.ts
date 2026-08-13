@@ -59,7 +59,7 @@ describe("Nora explicit context API", () => {
     vi.clearAllMocks();
     requireUser.mockResolvedValue(user);
     requirePortfolioReadScope.mockResolvedValue(scope);
-    requireOrganizationContext.mockResolvedValue({ organizationId: "org-a", membershipRole: "AGENT" });
+    requireOrganizationContext.mockResolvedValue({ userId: "agent-1", organizationId: "org-a", membershipRole: "AGENT" });
     assertSameOrigin.mockReturnValue(undefined);
     checkDistributedRateLimit.mockResolvedValue({ allowed: true });
     getRequestIp.mockReturnValue("127.0.0.1");

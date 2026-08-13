@@ -48,6 +48,7 @@ describe("notification-foundation", () => {
         "TEST_MESSAGE",
         "DAILY_DIGEST",
         "BIRTHDAY_REMINDER",
+        "RENEWAL_FOLLOWUP",
       ]);
     expect(comparePriority("URGENT", "HIGH")).toBeGreaterThan(0);
   });

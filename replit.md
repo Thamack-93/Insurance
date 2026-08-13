@@ -59,6 +59,31 @@ Key scripts include backups, data validation, renewals, open work item listings,
 
 Playwright specs live in `tests/`. They cover API and end-to-end flows for the live app.
 
+## Running on Replit
+
+```bash
+npm install
+npm run db:generate   # regenerate Prisma client after schema changes
+npm run dev           # starts Next.js dev server on port 5000
+```
+
+The workflow **Start application** runs `npm run dev -- -p 5000` and serves the app in the preview pane.
+
+### Environment variables (set as Replit Secrets)
+
+| Secret | Notes |
+|---|---|
+| `DATABASE_URL_UNPOOLED` | External Postgres connection string. Replit injects its own `DATABASE_URL` so this project uses `DATABASE_URL_UNPOOLED` instead. |
+| `SESSION_SECRET` | Already configured. |
+
+All other variables (`CRON_SECRET`, `AI_GATEWAY_*`, `BLOB_READ_WRITE_TOKEN`, etc.) are optional for local dev.
+
+### Known setup notes
+
+- **Node.js 22** is required (`nodejs-22` module). Node 20 shipped a corrupted `@next/swc` binary that causes a Bus error on startup.
+- `lucide-react` icons must be imported via `@/components/icons` (a `"use client"` re-export wrapper) in Server Components to avoid a Turbopack SSR `createContext` error.
+- `allowedDevOrigins` in `next.config.ts` includes `*.picard.replit.dev` and `127.0.0.1` for the Replit preview proxy.
+
 ## Deployment posture
 
 PolicyDesk is deployed toward Vercel with hosted Postgres. The public/demo deployment uses the live database and stays focused on the hosted runtime.

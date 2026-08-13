@@ -45,7 +45,7 @@ function FilterChips({
               type="button"
               variant="ghost"
               size="icon-xs"
-              className="ml-1 -mr-1 size-5 rounded-full text-muted-foreground hover:text-foreground"
+              className="ml-1 -mr-1 size-5 text-muted-foreground hover:text-foreground"
               onClick={item.onRemove}
               aria-label={`Quitar filtro ${item.label}`}
             >

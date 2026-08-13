@@ -220,6 +220,26 @@ test.describe("Data quality renewals tab", () => {
   test("Aprobar selección links the renewal and resolves the open source follow-up", async ({ page }) => {
     const seeded = await seedRenewalCase({ withTargetPolicy: true });
 
+    // Recordatorio de "sin avance" del tablero: al vincular la renovación deja
+    // de tener sentido y debe cerrarse en la misma operación.
+    const db0 = getTestDb();
+    const followUp = await db0.workItem.create({
+      data: {
+        sourceType: "Renewal",
+        sourceId: `policy:${seeded.sourcePolicyId}:renewal-followup`,
+        workItemType: "TASK",
+        taskType: "RENEWAL",
+        status: "OPEN",
+        priority: "MEDIUM",
+        title: "Renovación sin avance",
+        entityType: "Policy",
+        entityId: seeded.sourcePolicyId,
+        policyId: seeded.sourcePolicyId,
+      },
+      select: { id: true },
+    });
+    workItemIds.add(followUp.id);
+
     await authenticatePageAsAdmin(page);
     await page.goto(`/data-quality?tab=renovaciones&q=${encodeURIComponent(seeded.sourcePolicyNumber)}`);
 
@@ -231,16 +251,20 @@ test.describe("Data quality renewals tab", () => {
     const db = getTestDb();
     await expect
       .poll(async () => {
-        const [sourcePolicy, targetPolicy, suggestion, workItem, receipt, paymentCount] = await Promise.all([
-          db.policy.findUnique({ where: { id: seeded.sourcePolicyId } }),
-          db.policy.findUnique({ where: { id: seeded.targetPolicyId! } }),
-          db.policyRenewalSuggestion.findUnique({ where: { id: seeded.suggestionId } }),
-          db.workItem.findUnique({ where: { id: seeded.workItemId } }),
-          db.receipt.findUnique({ where: { id: seeded.sourceReceiptId } }),
-          db.payment.count({ where: { receiptId: seeded.sourceReceiptId } }),
-        ]);
+        const [sourcePolicy, targetPolicy, suggestion, workItem, followUpItem, receipt, paymentCount] =
+          await Promise.all([
+            db.policy.findUnique({ where: { id: seeded.sourcePolicyId } }),
+            db.policy.findUnique({ where: { id: seeded.targetPolicyId! } }),
+            db.policyRenewalSuggestion.findUnique({ where: { id: seeded.suggestionId } }),
+            db.workItem.findUnique({ where: { id: seeded.workItemId } }),
+            db.workItem.findUnique({ where: { id: followUp.id } }),
+            db.receipt.findUnique({ where: { id: seeded.sourceReceiptId } }),
+            db.payment.count({ where: { receiptId: seeded.sourceReceiptId } }),
+          ]);
 
         return {
+          followUpStatus: followUpItem?.status,
+          followUpClosed: Boolean(followUpItem?.closedDate),
           sourceStatus: sourcePolicy?.status,
           targetRenewedFromPolicyId: targetPolicy?.renewedFromPolicyId,
           targetStatus: targetPolicy?.status,
@@ -253,6 +277,8 @@ test.describe("Data quality renewals tab", () => {
         };
       })
       .toMatchObject({
+        followUpStatus: "RESOLVED",
+        followUpClosed: true,
         sourceStatus: "RENEWED",
         targetRenewedFromPolicyId: seeded.sourcePolicyId,
         targetStatus: "ACTIVE",

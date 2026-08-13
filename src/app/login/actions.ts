@@ -77,11 +77,18 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
 
   await db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
-  const activeMemberships = await db.organizationMembership.findMany({
-    where: { userId: user.id, active: true, organization: { status: "ACTIVE" } },
-    select: { organizationId: true },
+  const memberships = await db.organizationMembership.findMany({
+    where: { userId: user.id },
+    select: { organizationId: true, active: true, organization: { select: { status: true } } },
+    orderBy: { id: "asc" },
+    take: 2,
   });
-  const initialOrganizationId = activeMemberships.length === 1 ? activeMemberships[0].organizationId : undefined;
+  const activeMemberships = memberships.filter(
+    (membership) => membership.active && membership.organization.status === "ACTIVE",
+  );
+  const initialOrganizationId = memberships.length === 1 && activeMemberships.length === 1
+    ? activeMemberships[0].organizationId
+    : undefined;
 
   await setSessionCookie({
     userId: user.id,
@@ -101,16 +108,16 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
 
   const fallback = user.platformRole === "SUPERADMIN"
     ? "/platform"
-    : activeMemberships.length === 0
-      ? "/organization/no-access"
-      : activeMemberships.length > 1
-        ? "/organization/select"
-        : "/today";
+      : memberships.length === 1 && activeMemberships.length === 1
+        ? "/today"
+        : memberships.length > 1
+          ? "/organization/no-access?reason=corrupt"
+          : "/organization/no-access";
   // A requested route is safe only after the login has established exactly one
-  // active tenant. Global users and users with multiple/no memberships must go
+  // active tenant. Global users and users with corrupt/no memberships must go
   // through their controlled landing page first; otherwise a stale `/today`
-  // redirect bypasses the selector or sends a SUPERADMIN into tenant routes.
-  const canHonorRedirect = user.platformRole !== "SUPERADMIN" && activeMemberships.length === 1;
+  // redirect can send a SUPERADMIN into tenant routes.
+  const canHonorRedirect = user.platformRole !== "SUPERADMIN" && memberships.length === 1 && activeMemberships.length === 1;
   const safeRedirect = canHonorRedirect && redirectTo.startsWith("/") && !redirectTo.startsWith("//")
     ? redirectTo
     : fallback;

@@ -4,7 +4,13 @@ import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { getCurrentUserId } from "@/lib/auth";
 import { logError } from "@/lib/logger";
-import { assertClientPortfolioAccess, assertQuotePortfolioAccess } from "@/lib/portfolio-access";
+import {
+  assertClientPortfolioAccess,
+  assertQuotePortfolioAccess,
+  quoteOperationalWhere,
+  requirePortfolioReadScope,
+} from "@/lib/portfolio-access";
+import { statusLabel } from "@/lib/status";
 import type { QuoteFormValues } from "@/lib/validations";
 import {
   errorResult,
@@ -142,5 +148,84 @@ export async function deleteQuote(id: string): Promise<MutationResult> {
   } catch (error) {
     logError("quotes.deleteQuote", error, { id });
     return errorResult("No se pudo eliminar la cotización. Intenta de nuevo.");
+  }
+}
+
+/** Statuses a bulk edit may assign; ACCEPTED stays manual because it emits a policy. */
+const BULK_QUOTE_STATUSES = ["SENT", "REJECTED", "EXPIRED", "CANCELLED"] as const;
+export type BulkQuoteStatus = (typeof BULK_QUOTE_STATUSES)[number];
+
+/**
+ * Applies a status to several quotes at once. Ids outside the caller's
+ * portfolio are dropped rather than failing the whole batch, and accepted
+ * quotes are left alone so a bulk edit can never undo a sold policy.
+ */
+export async function bulkUpdateQuoteStatus(
+  ids: string[],
+  status: string,
+): Promise<MutationResult> {
+  if (ids.length === 0) return errorResult("No hay cotizaciones seleccionadas.");
+  if (!BULK_QUOTE_STATUSES.includes(status as BulkQuoteStatus)) {
+    return errorResult("Ese estado no se puede aplicar en lote.");
+  }
+
+  try {
+    const scope = await requirePortfolioReadScope();
+    const db = getDb();
+
+    const permitted = await db.quote.findMany({
+      where: { id: { in: ids }, ...quoteOperationalWhere(scope.portfolioOwnerId) },
+      select: { id: true, status: true, clientId: true },
+    });
+
+    const outOfScope = ids.length - permitted.length;
+    const accepted = permitted.filter((quote) => quote.status === "ACCEPTED");
+    const target = permitted.filter((quote) => quote.status !== "ACCEPTED" && quote.status !== status);
+
+    if (target.length === 0) {
+      return errorResult(
+        outOfScope > 0
+          ? "Ninguna de las cotizaciones seleccionadas está en tu cartera."
+          : accepted.length > 0
+            ? "Las cotizaciones aceptadas no se pueden cambiar en lote."
+            : "Las cotizaciones seleccionadas ya tienen ese estado.",
+      );
+    }
+
+    const targetIds = target.map((quote) => quote.id);
+    const result = await db.quote.updateMany({
+      where: { id: { in: targetIds } },
+      data: { status: status as BulkQuoteStatus },
+    });
+
+    await writeActivityLog({
+      action: "BULK_UPDATE_STATUS",
+      entityType: "Quote",
+      entityId: targetIds.join(","),
+      newValue: { status, count: result.count },
+    });
+
+    revalidatePaths([
+      "/quotes",
+      "/dashboard",
+      "/today",
+      ...[...new Set(target.map((quote) => `/clients/${quote.clientId}`))],
+    ]);
+
+    const label = statusLabel(status, "quote");
+    const parts = [
+      `${result.count} cotización${result.count !== 1 ? "es" : ""} ${result.count !== 1 ? "quedaron" : "quedó"} como “${label}”.`,
+    ];
+    const unchanged = permitted.length - target.length - accepted.length;
+    if (unchanged > 0) parts.push(`${unchanged} ya ${unchanged !== 1 ? "tenían" : "tenía"} ese estado.`);
+    if (accepted.length > 0) {
+      parts.push(`${accepted.length} aceptada${accepted.length !== 1 ? "s" : ""} se ${accepted.length !== 1 ? "omitieron" : "omitió"}.`);
+    }
+    if (outOfScope > 0) parts.push(`${outOfScope} no ${outOfScope !== 1 ? "están" : "está"} en tu cartera.`);
+
+    return successResult("bulk", "", parts.join(" "));
+  } catch (error) {
+    logError("quotes.bulkUpdateQuoteStatus", error, { count: ids.length, status });
+    return errorResult("No se pudo actualizar el estado de las cotizaciones seleccionadas.");
   }
 }

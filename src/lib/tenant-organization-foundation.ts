@@ -88,6 +88,8 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
   if (Number(membershipActiveMismatch.rows[0]?.count ?? 0) > 0) issues.push("membership active state differs from User.active");
   const membershipRoleMismatch = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE (m."role" NOT IN ('OWNER','ADMIN','AGENT')) OR (m."role" <> 'OWNER' AND (u."role" NOT IN ('ADMIN','AGENT') OR m."role" <> u."role"))`);
   if (Number(membershipRoleMismatch.rows[0]?.count ?? 0) > 0) issues.push("membership role is invalid or differs from legacy User.role");
+  const usersWithMultipleMemberships = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM (SELECT "userId" FROM "OrganizationMembership" GROUP BY "userId" HAVING count(*) > 1) duplicate_memberships`);
+  if (Number(usersWithMultipleMemberships.rows[0]?.count ?? 0) > 0) issues.push("users with multiple organization memberships");
 
   for (const table of PROTECTED_TENANT_TABLES) {
     const nullResult = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM ${identifier(table)} WHERE "organizationId" IS NULL`);
@@ -156,13 +158,22 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
       JOIN pg_class t ON t.oid = x.indrelid
       JOIN pg_namespace n ON n.oid = t.relnamespace
      WHERE n.nspname = 'public' AND i.relname = ANY($1::text[])
-  `, [["Organization_transition_singleton_idx", "OrganizationMembership_transition_owner_idx"]]);
+  `, [["Organization_transition_singleton_idx", "OrganizationMembership_transition_owner_idx", "OrganizationMembership_userId_key"]]);
   const indexByName = new Map(indexes.rows.map((row) => [row.indexname, row]));
   const singleton = indexByName.get("Organization_transition_singleton_idx");
   if (!singleton || singleton.table_name !== "Organization" || !singleton.indisunique || !singleton.indexdef.replace(/\s+/g, "").includes("((1))")) issues.push("singleton expression index is not the required unique constant index");
   const ownerIndex = indexByName.get("OrganizationMembership_transition_owner_idx");
   const ownerPredicate = ownerIndex?.predicate?.replaceAll('"', '') ?? "";
   if (!ownerIndex || ownerIndex.table_name !== "OrganizationMembership" || !ownerIndex.indisunique || !ownerIndex.indexdef.replace(/\s+/g, "").includes("((1))") || !/role\s*=\s*'OWNER'/.test(ownerPredicate)) issues.push("Owner singleton index is not the required unique partial constant index");
+  const singleMembershipIndex = indexByName.get("OrganizationMembership_userId_key");
+  if (
+    !singleMembershipIndex ||
+    singleMembershipIndex.table_name !== "OrganizationMembership" ||
+    !singleMembershipIndex.indisunique ||
+    !/\("userId"\)/.test(singleMembershipIndex.indexdef)
+  ) {
+    issues.push("single organization membership unique index is missing or invalid");
+  }
 
   return { ok: issues.length === 0, issues, summary };
 }

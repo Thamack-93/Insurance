@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import type { Priority, WorkItemStatus, WorkItemType } from "@/lib/domain-values";
 import { getDb } from "@/lib/db";
 import { businessEndOfDay, businessStartOfDay } from "@/lib/business-dates";
+import { shouldKeepRenewalWorkItemPolicy } from "@/lib/renewals.logic";
 
 export const OPEN_WORK_ITEM_STATUSES = [
   "OPEN",
@@ -94,6 +95,59 @@ export const workQueueSelect = {
 
 export type WorkQueueItem = Prisma.WorkItemGetPayload<{ select: typeof workQueueSelect }>;
 
+type RenewalReferenceInput = Pick<
+  WorkQueueItem,
+  "sourceType" | "sourceId" | "taskType" | "title" | "description" | "entityType" | "entityId" | "policyId"
+>;
+
+function normalizeSearchText(value: string | null | undefined) {
+  return value?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase() ?? "";
+}
+
+function isRenewalWorkItem(item: RenewalReferenceInput) {
+  const sourceType = normalizeSearchText(item.sourceType);
+  const taskType = normalizeSearchText(item.taskType);
+  const text = normalizeSearchText(`${item.title ?? ""} ${item.description ?? ""}`);
+
+  return sourceType === "renewal" || taskType === "renewal" || /\brenovacion\b/.test(text);
+}
+
+export function getRenewalPolicyId(item: RenewalReferenceInput) {
+  if (item.policyId || !isRenewalWorkItem(item)) return null;
+  if (item.entityType?.toLowerCase() === "policy" && item.entityId) return item.entityId;
+
+  for (const reference of [item.entityId, item.sourceId]) {
+    const canonicalMatch = reference?.match(/^policy:([^:]+):renewal-workItem$/i);
+    if (canonicalMatch?.[1]) return canonicalMatch[1];
+
+    const historicalMatch = reference?.match(/^([^:]+):\d{4}-\d{2}-\d{2}$/);
+    if (historicalMatch?.[1]) return historicalMatch[1];
+  }
+
+  return null;
+}
+
+function getRenewalPolicyNumbers(item: RenewalReferenceInput) {
+  if (!isRenewalWorkItem(item)) return [];
+
+  const text = `${item.title ?? ""}\n${item.description ?? ""}`;
+  const numbers = new Set<string>();
+  const patterns = [
+    /renovaci[oó]n(?:\s+de\s+p[oó]liza)?(?:\s+sin\s+avance)?\s*:\s*([A-Z0-9][A-Z0-9/_-]*)/giu,
+    /p[oó]liza\s*:?\s*([A-Z0-9][A-Z0-9/_-]*)/giu,
+    /n[uú]mero(?:\s+de\s+p[oó]liza)?\s*:\s*([A-Z0-9][A-Z0-9/_-]*)/giu,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const policyNumber = match[1]?.trim();
+      if (policyNumber) numbers.add(policyNumber);
+    }
+  }
+
+  return [...numbers];
+}
+
 export type WorkQueueFilters = {
   query?: string;
   from?: Date;
@@ -121,42 +175,97 @@ export async function getWorkItems(filters: WorkQueueFilters = {}) {
     where,
     select: workQueueSelect,
     orderBy: buildOrderBy(filters),
-    skip: filters.skip,
-    take: filters.limit,
   });
 
-  return resolveLegacyRenewalRelations(items, filters, db);
+  const resolvedItems = await resolveLegacyRenewalRelations(items, filters, db);
+  const start = filters.skip ?? 0;
+  return filters.limit === undefined
+    ? resolvedItems.slice(start)
+    : resolvedItems.slice(start, start + filters.limit);
 }
 
 /**
- * Renewal reminders created before WorkItem kept their policy/client foreign
- * keys. They still carry the policy id in entityId, so resolve that relation
- * for display and navigation without mutating the historical record.
+ * Renewal reminders can be found in several persisted shapes: historical rows
+ * keep the policy id in entityId or in a policy:<id>:date source reference,
+ * current rows use policy:<id>:renewal-workItem, and some task-backed rows
+ * only keep the policy number in their title or description. Resolve all of
+ * them for display and navigation without mutating the historical record.
  */
 async function resolveLegacyRenewalRelations(
   items: WorkQueueItem[],
   filters: WorkQueueFilters,
   db: WorkQueueDb,
 ) {
-  const legacyPolicyIds = [...new Set(items
-    .filter((item) => item.sourceType?.toLowerCase() === "renewal" && item.entityType?.toLowerCase() === "policy" && !item.policyId && item.entityId)
-    .map((item) => item.entityId)
-    .filter((id): id is string => Boolean(id)))];
+  const renewalReferencesByWorkItem = new Map(
+    items.map((item) => [
+      item.id,
+      {
+        policyId: getRenewalPolicyId(item),
+        policyNumbers: getRenewalPolicyNumbers(item),
+      },
+    ] as const),
+  );
+  const renewalPolicyIds = [
+    ...new Set(
+      [...renewalReferencesByWorkItem.values()]
+        .map((reference) => reference.policyId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const renewalPolicyNumbers = [
+    ...new Set([...renewalReferencesByWorkItem.values()].flatMap((reference) => reference.policyNumbers)),
+  ];
 
-  if (!legacyPolicyIds.length) return items;
+  if (!renewalPolicyIds.length && !renewalPolicyNumbers.length) return items;
+
+  const policyOr: Prisma.PolicyWhereInput[] = [];
+  if (renewalPolicyIds.length) policyOr.push({ id: { in: renewalPolicyIds } });
+  if (renewalPolicyNumbers.length) policyOr.push({ policyNumber: { in: renewalPolicyNumbers } });
 
   const policies = await db.policy.findMany({
     where: {
-      id: { in: legacyPolicyIds },
+      OR: policyOr,
       ...(filters.portfolioOwnerId ? { client: { portfolioOwnerId: filters.portfolioOwnerId } } : {}),
       ...(filters.organizationId ? { organizationId: filters.organizationId } : {}),
     },
-    select: policyQueueSelect,
+    select: {
+      ...policyQueueSelect,
+      renewalStage: true,
+      renewals: { select: { id: true }, take: 1 },
+      sourceRenewalSuggestions: {
+        where: { status: { in: ["ACCEPTED", "DECLINED"] } },
+        select: { id: true },
+        take: 1,
+      },
+      receipts: {
+        orderBy: [
+          { periodEndDate: "desc" },
+          { dueDate: "desc" },
+          { createdAt: "desc" },
+        ],
+        take: 1,
+        select: { status: true },
+      },
+    },
   });
   const policyById = new Map(policies.map((policy) => [policy.id, policy]));
+  const policiesByNumber = new Map<string, typeof policies>();
+  for (const policy of policies) {
+    const key = policy.policyNumber.toUpperCase();
+    const matches = policiesByNumber.get(key) ?? [];
+    matches.push(policy);
+    policiesByNumber.set(key, matches);
+  }
 
-  return items.map((item) => {
-    const policy = item.policy ?? policyById.get(item.entityId);
+  const resolvedItems = items.map((item) => {
+    const reference = renewalReferencesByWorkItem.get(item.id);
+    const numberCandidates = reference?.policyNumbers.flatMap(
+      (number) => policiesByNumber.get(number.toUpperCase()) ?? [],
+    ) ?? [];
+    const policy =
+      item.policy ??
+      policyById.get(reference?.policyId ?? "") ??
+      (numberCandidates.length === 1 ? numberCandidates[0] : undefined);
     if (!policy) return item;
 
     return {
@@ -169,12 +278,32 @@ async function resolveLegacyRenewalRelations(
       policy,
     };
   });
+
+  return resolvedItems.filter((item) => {
+    if (!isRenewalWorkItem(item)) return true;
+
+    const reference = renewalReferencesByWorkItem.get(item.id);
+    const directPolicy = item.policy
+      ? policyById.get(item.policy.id)
+      : policyById.get(reference?.policyId ?? "");
+    const numberCandidates = reference?.policyNumbers.flatMap(
+      (number) => policiesByNumber.get(number.toUpperCase()) ?? [],
+    ) ?? [];
+    const candidates = directPolicy ? [directPolicy] : numberCandidates;
+    if (!candidates.length) return true;
+
+    return candidates.some((policy) => shouldKeepRenewalWorkItemPolicy({
+      status: policy.status,
+      renewalStage: policy.renewalStage,
+      hasSuccessor: (policy.renewals ?? []).length > 0,
+      hasDecision: (policy.sourceRenewalSuggestions ?? []).length > 0,
+      latestReceiptStatus: policy.receipts?.[0]?.status,
+    }));
+  });
 }
 
 export async function countWorkItems(filters: WorkQueueFilters = {}) {
-  const db = getDb();
-  const where = buildWhere(filters);
-  return db.workItem.count({ where });
+  return (await getWorkItems(filters)).length;
 }
 
 function buildWhere(filters: WorkQueueFilters): Prisma.WorkItemWhereInput {

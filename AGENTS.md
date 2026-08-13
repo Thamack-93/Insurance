@@ -24,7 +24,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
 ## Authenticated tenant context (Cycle 2A)
 
 - `pd_session.organizationId` is only a signed selection hint. Every protected request must revalidate the active user, membership and organization in PostgreSQL.
+- A user may have at most one `OrganizationMembership`; keep both the global `userId` unique constraint and the temporary Cycle 1 composite unique. Multiple rows are corruption and must fail closed, never open an organization selector.
+- Mutations in migrated slices must call `assertOrganizationContextInTransaction` so membership, user, and organization suspension are locked and revalidated in the writing transaction.
 - Use `resolveOrganizationContext`, `requireOrganizationContext` and `requireOrganizationPortfolioReadScope`; never use a global tenant query from an authenticated route.
-- A `SUPERADMIN` without membership may use `/platform` only. It must select an organization before accessing operational data.
+- A `SUPERADMIN` without membership may use `/platform` only. The platform role never bypasses tenant predicates or creates an automatic membership.
 - Tenant test fixtures must use a disposable local PostgreSQL database with `TENANT_ISOLATION_TEST_DB=1` and `PLAYWRIGHT_ENFORCE_DISPOSABLE_DB=1`; never production or Vercel Preview credentials.
 - PR #28 guarantees Today, Clients, read-only Policies, representative client create/edit, informational Nora searches and the Clients Excel export. Policy create/edit/delete/quality mutations are fail-closed with `POLICY_TENANT_MUTATION_PENDING` until Cycle 2B. Receipts, payments, claims, quotes, insurers, documents, WorkItems/tasks and risks are defensively filtered only; their mutations, reports, commissions, data-quality, Telegram, imports, maintenance and jobs remain explicitly pending.

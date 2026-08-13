@@ -1,5 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { AlertSeverity } from "@/lib/domain-values";
+import { resolveAlertEntityLink } from "@/lib/alert-links";
 import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { mapNotificationStatusToWorkItemStatus, upsertWorkItemFromSource } from "@/lib/work-items";
@@ -41,19 +42,23 @@ export type NotificationFilter = {
 export async function createNotification(input: NotificationInput): Promise<NotificationRecord | null> {
   const db = getDb();
   try {
+    const entityType = input.entityType ?? "System";
+    const entityId = input.entityId ?? "general";
     const alert = await db.alert.create({
       data: {
         alertType: input.type,
         severity: input.severity ?? "INFO",
         title: input.title,
         description: input.body ?? null,
-        entityType: input.entityType ?? "System",
-        entityId: input.entityId ?? "general",
+        entityType,
+        entityId,
+        ...(await resolveAlertEntityLink(db, entityType, entityId)),
       },
     });
     await upsertWorkItemFromSource({
       sourceType: "Notification",
       sourceId: alert.id,
+      sourceAlertId: alert.id,
       workItemType: "NOTIFICATION",
       status: mapNotificationStatusToWorkItemStatus(alert.status),
       severity: alert.severity,

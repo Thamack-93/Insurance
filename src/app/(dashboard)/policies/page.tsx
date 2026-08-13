@@ -55,12 +55,17 @@ export default async function PoliciesPage({
     scope.portfolioOwnerId,
     scope.organizationId,
   );
+  const renewalRiskPoliciesPromise = loadEligibleRenewalPolicies(
+    { endDate: { lt: now } },
+    scope.portfolioOwnerId,
+    scope.organizationId,
+  );
 
   const where: Prisma.PolicyWhereInput = query
     ? {
         AND: [
           portfolioWhere,
-          ...(statusFilter ? [{ status: statusFilter }] : []),
+          ...(statusFilter ? [{ status: statusFilter as Prisma.PolicyWhereInput["status"] }] : []),
           ...(typeFilter ? [{ policyType: typeFilter }] : []),
           {
             OR: [
@@ -73,7 +78,7 @@ export default async function PoliciesPage({
       }
     : {
         ...portfolioWhere,
-        ...(statusFilter ? { status: statusFilter } : {}),
+        ...(statusFilter ? { status: statusFilter as Prisma.PolicyWhereInput["status"] } : {}),
         ...(typeFilter ? { policyType: typeFilter } : {}),
       };
 
@@ -97,15 +102,17 @@ export default async function PoliciesPage({
     pendingCount,
     expiredCount,
     renewals60Policies,
+    renewalRiskPolicies,
     portfolioAgg,
     filteredCount,
     pagedPolicies,
-    attentionPolicies,
+    pendingPolicies,
   ] = await Promise.all([
     db.policy.count({ where: { ...portfolioWhere, status: "ACTIVE" } }),
     db.policy.count({ where: { ...portfolioWhere, status: "PENDING" } }),
     db.policy.count({ where: { ...portfolioWhere, status: "EXPIRED" } }),
     renewals60Promise,
+    renewalRiskPoliciesPromise,
     db.policy.aggregate({
       where: { ...portfolioWhere, status: "ACTIVE" },
       _sum: { premiumAmount: true },
@@ -119,13 +126,17 @@ export default async function PoliciesPage({
       take: PAGE_SIZE,
     }),
     db.policy.findMany({
-      where: { ...portfolioWhere, status: { in: ["EXPIRED", "PENDING"] } },
+      where: { ...portfolioWhere, status: "PENDING" },
       include: { client: true, insurer: true },
-      orderBy: [{ status: "asc" }, { endDate: "asc" }],
+      orderBy: [{ endDate: "asc" }, { id: "asc" }],
       take: 10,
     }),
   ]);
 
+  const renewalRiskCount = renewalRiskPolicies.length;
+  const attentionPolicies = [...renewalRiskPolicies, ...pendingPolicies]
+    .sort((left, right) => left.endDate.getTime() - right.endDate.getTime())
+    .slice(0, 10);
   const portfolioValue = toNumber(portfolioAgg._sum.premiumAmount ?? 0);
 
   return (
@@ -159,7 +170,7 @@ export default async function PoliciesPage({
             { label: "Activas", href: "/policies?status=ACTIVE" },
             { label: "Por vencer", href: "/operations?view=renewals" },
             { label: "Cotizaciones", href: "/quotes" },
-            { label: "Archivadas", href: "/policies?status=ARCHIVED" },
+            { label: "Vigencias terminadas", href: "/policies?status=EXPIRED" },
           ]}
         />
 
@@ -185,18 +196,28 @@ export default async function PoliciesPage({
             icon={BadgeDollarSign}
             tone="blue"
           />
-          <MetricCard
-            title="Vencidas"
-            value={expiredCount}
-            description="Pólizas que requieren atención inmediata."
-            icon={AlertCircle}
-            tone="rose"
-          />
+          <Link
+            href="/operations?view=renewals"
+            aria-label={`Renovaciones vencidas sin resolver: ${renewalRiskCount}`}
+            className="block rounded-xl transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transform-none"
+          >
+            <MetricCard
+              title="Renovaciones vencidas sin resolver"
+              value={renewalRiskCount}
+              description={`${expiredCount} vigencias terminadas; revisa únicamente las renovaciones sin decisión.`}
+              icon={AlertCircle}
+              tone="rose"
+            />
+          </Link>
         </section>
 
         <SectionCard
           title="Inventario"
-          description="Búsqueda y paginación sobre todas las pólizas."
+          description={
+            statusFilter === "EXPIRED"
+              ? "Vigencias terminadas para consulta histórica; esto no indica por sí solo que una renovación haya quedado sin resolver."
+              : "Búsqueda y paginación sobre todas las pólizas."
+          }
           action={
             <TableToolbar
               searchPlaceholder="Buscar por número, cliente o aseguradora..."
@@ -230,8 +251,6 @@ export default async function PoliciesPage({
                   icon={FolderKanban}
                   title="Aún no hay pólizas"
                   description="Registra tu primera póliza para construir el inventario."
-                  action="Nueva póliza"
-                  actionHref="/policies/new"
                 />
               </div>
             )
@@ -241,12 +260,14 @@ export default async function PoliciesPage({
                   icon={FolderKanban}
                   title="Página fuera de rango"
                   description="No hay pólizas en esta página. Vuelve al inicio del listado."
-                  action="Volver al inicio"
-                  actionHref={buildTableHref("/policies", params, {
-                    q: query || null,
-                    status: statusFilter || null,
-                    type: typeFilter || null,
-                  })}
+                  action={{
+                    label: "Volver al inicio",
+                    href: buildTableHref("/policies", params, {
+                      q: query || null,
+                      status: statusFilter || null,
+                      type: typeFilter || null,
+                    }),
+                  }}
                 />
               </div>
           ) : (
@@ -258,7 +279,9 @@ export default async function PoliciesPage({
                     <SortableTableHead sortKey="client">Cliente</SortableTableHead>
                     <SortableTableHead sortKey="insurer">Aseguradora</SortableTableHead>
                     <SortableTableHead sortKey="type">Tipo</SortableTableHead>
-                    <SortableTableHead sortKey="endDate">Renovación</SortableTableHead>
+                    <SortableTableHead sortKey="endDate">
+                      {statusFilter === "EXPIRED" ? "Fin de vigencia" : "Renovación"}
+                    </SortableTableHead>
                     <TableHead className="text-right">Prima</TableHead>
                     <TableHead>Estado</TableHead>
                   </TableRow>
@@ -288,7 +311,9 @@ export default async function PoliciesPage({
                       <TableCell>
                         {policy.endDate ? (
                           <span className="text-sm text-muted-foreground">
-                            {formatDate(policy.endDate)} · {daysUntil(policy.endDate)} días
+                            {statusFilter === "EXPIRED"
+                              ? `Terminó: ${formatDate(policy.endDate)}`
+                              : `${formatDate(policy.endDate)} · ${daysUntil(policy.endDate)} días`}
                           </span>
                         ) : (
                           <span className="text-sm text-muted-foreground">Sin fecha</span>
@@ -323,14 +348,14 @@ export default async function PoliciesPage({
 
         <SectionCard
           title="Atención inmediata"
-          description="Pólizas vencidas o pendientes que conviene mover esta semana."
+          description="Renovaciones sin resolver y pólizas pendientes que conviene mover esta semana."
         >
           {attentionPolicies.length === 0 ? (
             <div className="p-4">
               <EmptyState
                 icon={Shield}
                 title="Cartera al día"
-                description="No hay pólizas vencidas ni pendientes que reclamen atención inmediata."
+                description="No hay renovaciones vencidas sin resolver ni pólizas pendientes que reclamen atención inmediata."
               />
             </div>
           ) : (

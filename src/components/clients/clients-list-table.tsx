@@ -1,20 +1,19 @@
 "use client";
 
-import { useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
+
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Pagination } from "@/components/lists/pagination";
 import { SortableTableHead } from "@/components/tables/sortable-table-head";
+import { RecordCards, type RecordCardItem } from "@/components/tables/record-cards";
 import {
   BulkActionsProvider,
   useBulkActions,
 } from "@/components/bulk-actions/bulk-actions-provider";
+import { BulkActionsToolbar } from "@/components/bulk-actions/bulk-actions-toolbar";
 import { formatDate } from "@/lib/dates";
 import { bulkArchiveClients } from "@/app/(dashboard)/clients/actions";
 
@@ -36,31 +35,48 @@ type ClientsListTableProps = {
   total: number;
   query: string;
   searchParams?: Record<string, string | undefined>;
+  /** Archiving is admin-only; hide the affordance for everyone else. */
+  canBulkEdit?: boolean;
 };
 
-export function ClientsListTable({ clients, page, pageSize, total, query, searchParams = {} }: ClientsListTableProps) {
+function typeLabel(type: string) {
+  return type === "COMPANY" ? "Empresa" : "Persona";
+}
+
+export function ClientsListTable({
+  clients,
+  page,
+  pageSize,
+  total,
+  query,
+  searchParams = {},
+  canBulkEdit = false,
+}: ClientsListTableProps) {
   return (
     <BulkActionsProvider>
-      <ClientsBulkToolbar clients={clients} />
-      <Table>
-        <TableHeader>
-          <TableRow className="bg-muted/40">
-            <TableHead className="w-10" />
-            <SortableTableHead sortKey="fullName">Cliente</SortableTableHead>
-            <SortableTableHead sortKey="type">Tipo</SortableTableHead>
-            <TableHead className="text-right">Pólizas</TableHead>
-            <TableHead className="text-right">Recibos</TableHead>
-            <TableHead className="text-right">Tareas</TableHead>
-            <SortableTableHead sortKey="createdAt">Alta</SortableTableHead>
-            <SortableTableHead sortKey="status">Estado</SortableTableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {clients.map((client) => (
-            <ClientRow key={client.id} client={client} />
-          ))}
-        </TableBody>
-      </Table>
+      {canBulkEdit ? <ClientsBulkToolbar clients={clients} /> : null}
+      <ClientsCards clients={clients} selectable={canBulkEdit} />
+      <div className="hidden md:block">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-muted/40">
+              {canBulkEdit ? <TableHead className="w-10" /> : null}
+              <SortableTableHead sortKey="fullName">Cliente</SortableTableHead>
+              <SortableTableHead sortKey="type">Tipo</SortableTableHead>
+              <TableHead className="text-right">Pólizas</TableHead>
+              <TableHead className="text-right">Recibos</TableHead>
+              <TableHead className="text-right">Tareas</TableHead>
+              <SortableTableHead sortKey="createdAt">Alta</SortableTableHead>
+              <SortableTableHead sortKey="status">Estado</SortableTableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {clients.map((client) => (
+              <ClientRow key={client.id} client={client} selectable={canBulkEdit} />
+            ))}
+          </TableBody>
+        </Table>
+      </div>
       <Pagination
         page={page}
         pageSize={pageSize}
@@ -73,68 +89,39 @@ export function ClientsListTable({ clients, page, pageSize, total, query, search
 }
 
 function ClientsBulkToolbar({ clients }: { clients: ClientListRow[] }) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const { selectedItems, hasSelection, clearSelection, getSelectedIds, selectAll } = useBulkActions();
-  const allIds = clients.map((c) => c.id);
-
-  const handleArchive = () => {
-    const ids = getSelectedIds();
-    if (ids.length === 0) {
-      toast.error("Selecciona al menos un cliente.");
-      return;
-    }
-    startTransition(async () => {
-      const result = await bulkArchiveClients(ids);
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      toast.success(result.message);
-      clearSelection();
-      router.refresh();
-    });
-  };
-
-  if (clients.length === 0) return null;
-
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-4 py-2">
-      <Checkbox
-        checked={selectedItems.size === clients.length && clients.length > 0}
-        onCheckedChange={(checked) => (checked ? selectAll(allIds) : clearSelection())}
-        aria-label="Seleccionar todos los clientes de la página"
-      />
-      {hasSelection ? (
-        <>
-          <span className="text-sm text-muted-foreground">{selectedItems.size} seleccionados</span>
-          <Button size="sm" variant="outline" onClick={handleArchive} disabled={isPending}>
-            Archivar
-          </Button>
-          <Button size="sm" variant="ghost" onClick={clearSelection}>
-            Limpiar
-          </Button>
-        </>
-      ) : (
-        <span className="text-sm text-muted-foreground">Selecciona clientes para acciones en lote</span>
-      )}
-    </div>
+    <BulkActionsToolbar
+      allIds={clients.map((client) => client.id)}
+      noun={["cliente", "clientes"]}
+      actions={[
+        {
+          key: "archive",
+          label: "Archivar",
+          confirmTitle: (count) => `¿Archivar ${count} cliente${count !== 1 ? "s" : ""}?`,
+          confirmDescription: () =>
+            "Pasarán a estado “Inactivo” y dejarán de aparecer en las vistas activas. Sus pólizas, recibos y tareas se conservan.",
+          confirmLabel: "Archivar",
+          run: (ids) => bulkArchiveClients(ids),
+        },
+      ]}
+    />
   );
 }
 
-function ClientRow({ client }: { client: ClientListRow }) {
+function ClientRow({ client, selectable }: { client: ClientListRow; selectable: boolean }) {
   const { selectedItems, toggleItem } = useBulkActions();
-  const checked = selectedItems.has(client.id);
 
   return (
-    <TableRow>
-      <TableCell>
-        <Checkbox
-          checked={checked}
-          onCheckedChange={() => toggleItem(client.id)}
-          aria-label={`Seleccionar ${client.fullName}`}
-        />
-      </TableCell>
+    <TableRow data-state={selectedItems.has(client.id) ? "selected" : undefined}>
+      {selectable ? (
+        <TableCell>
+          <Checkbox
+            checked={selectedItems.has(client.id)}
+            onCheckedChange={() => toggleItem(client.id)}
+            aria-label={`Seleccionar ${client.fullName}`}
+          />
+        </TableCell>
+      ) : null}
       <TableCell>
         <Link href={`/clients/${client.id}`} className="font-medium text-foreground hover:text-primary">
           {client.fullName}
@@ -145,7 +132,7 @@ function ClientRow({ client }: { client: ClientListRow }) {
       </TableCell>
       <TableCell>
         <Badge variant="outline" className="rounded-full">
-          {client.type === "COMPANY" ? "Empresa" : "Persona"}
+          {typeLabel(client.type)}
         </Badge>
       </TableCell>
       <TableCell className="text-right">{client._count.policies}</TableCell>
@@ -153,8 +140,35 @@ function ClientRow({ client }: { client: ClientListRow }) {
       <TableCell className="text-right">{client._count.tasks}</TableCell>
       <TableCell className="text-sm text-muted-foreground">{formatDate(new Date(client.createdAt))}</TableCell>
       <TableCell>
-        <StatusBadge status={client.status} />
+        <StatusBadge status={client.status} entity="client" />
       </TableCell>
     </TableRow>
   );
+}
+
+function ClientsCards({ clients, selectable }: { clients: ClientListRow[]; selectable: boolean }) {
+  const { selectedItems, toggleItem } = useBulkActions();
+
+  const items: RecordCardItem[] = clients.map((client) => ({
+    id: client.id,
+    title: client.fullName,
+    href: `/clients/${client.id}`,
+    subtitle: `${typeLabel(client.type)} · ${client.email ?? client.phone ?? "Sin contacto"}`,
+    badge: <StatusBadge status={client.status} entity="client" />,
+    leading: selectable ? (
+      <Checkbox
+        checked={selectedItems.has(client.id)}
+        onCheckedChange={() => toggleItem(client.id)}
+        aria-label={`Seleccionar ${client.fullName}`}
+      />
+    ) : undefined,
+    fields: [
+      { label: "Pólizas", value: client._count.policies, emphasis: true },
+      { label: "Recibos", value: client._count.receipts },
+      { label: "Tareas", value: client._count.tasks },
+      { label: "Alta", value: formatDate(new Date(client.createdAt)) },
+    ],
+  }));
+
+  return <RecordCards items={items} label="Clientes" />;
 }

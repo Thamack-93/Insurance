@@ -21,7 +21,7 @@ export function CommandPaletteTrigger({
       aria-label="Abrir búsqueda global"
       onClick={handleClick}
       className={cn(
-        "w-full cursor-pointer rounded-2xl border bg-card/55 p-2 text-left text-sm text-muted-foreground transition-colors hover:bg-card/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "w-full cursor-pointer rounded-xl border bg-card/55 p-2 text-left text-sm text-muted-foreground transition-colors hover:bg-card/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
     >

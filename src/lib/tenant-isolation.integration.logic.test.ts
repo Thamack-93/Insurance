@@ -76,14 +76,35 @@ describeDisposable("tenant isolation disposable fixture", () => {
 
   it("keeps the master panel aggregates and activity tenant-scoped", async () => {
     const overview = await getPlatformOverview({});
-    expect(overview.summary.organizations).toBe(2);
-    expect(overview.summary.activeUsers).toBe(6);
-    expect(overview.organizations.map((organization) => organization.id)).toEqual(["org_legacy_singleton_0001", "org_pedro_gomez_0001"]);
+    expect(overview.summary.organizations).toBe(3);
+    expect(overview.summary.activeUsers).toBe(7);
+    expect(overview.organizations.map((organization) => organization.id)).toEqual(["org_demo_broker_0001", "org_legacy_singleton_0001", "org_pedro_gomez_0001"]);
 
     const pedro = await getPlatformOrganizationDetail("org_pedro_gomez_0001");
     expect(pedro?.organization.name).toBe("Pedro Alfredo Gómez Lorenzo");
     expect(pedro?.memberships.some((membership) => membership.userEmail === "pedroagl93@gmail.com" && membership.role === "OWNER")).toBe(true);
     expect(pedro?.activities.every((activity) => activity.entityId !== "legacy-secret" && !("oldValue" in activity) && !("newValue" in activity))).toBe(true);
     expect(await getPlatformOrganizationDetail("does-not-exist")).toBeNull();
+  });
+
+  it("physically rejects a second membership for the same user", async () => {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) throw new Error("DATABASE_URL is required");
+    const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+    try {
+      await expect(
+        db.organizationMembership.create({
+          data: {
+            organizationId: "org_pedro_gomez_0001",
+            userId: "tenant-agent-a",
+            role: "AGENT",
+            active: true,
+          },
+        }),
+      ).rejects.toMatchObject({ code: "P2002" });
+      expect(await db.organizationMembership.count({ where: { userId: "tenant-agent-a" } })).toBe(1);
+    } finally {
+      await db.$disconnect();
+    }
   });
 });

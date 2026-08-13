@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, FileDigit, FolderOpen, Link2, ShieldAlert, Download } from "lucide-react";
+import { ArrowRight, FileDigit, FolderOpen, Link2, ShieldAlert, Download } from "@/components/icons";
 import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
@@ -14,7 +14,8 @@ import { formatDate } from "@/lib/dates";
 import { UploadForm } from "@/components/documents/upload-form";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
-import { documentOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { requireAdminOrRedirect } from "@/lib/auth";
+import { documentOperationalWhere } from "@/lib/portfolio-access";
 
 function associationLabel(document: {
   policy?: { policyNumber: string } | null;
@@ -38,13 +39,13 @@ export default async function DocumentsPage({
 }: {
   searchParams?: Promise<{ q?: string; page?: string }>;
 }) {
+  await requireAdminOrRedirect();
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
   const documentsEnabled = areDocumentFilesEnabled();
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = Math.max(1, Number(params.page) || 1);
-  const scopedWhere = documentOperationalWhere(scope.portfolioOwnerId);
+  const scopedWhere = documentOperationalWhere();
 
   const where: Prisma.DocumentWhereInput = query
     ? {
@@ -106,7 +107,7 @@ export default async function DocumentsPage({
           title="Documentos"
           description="Control de documentos, asociaciones y huecos de expediente."
           actions={
-            <Button asChild className="rounded-full">
+            <Button asChild>
               <Link href="/risks">
                 Riesgos
                 <ArrowRight className="ml-2 size-4" />
@@ -169,8 +170,7 @@ export default async function DocumentsPage({
                 icon={FolderOpen}
                 title="Página fuera de rango"
                 description="Vuelve al inicio del listado."
-                action="Volver al inicio"
-                actionHref={query ? `/documents?q=${encodeURIComponent(query)}` : "/documents"}
+                action={{ label: "Volver al inicio", href: query ? `/documents?q=${encodeURIComponent(query)}` : "/documents" }}
               />
             </div>
           ) : (
@@ -285,7 +285,7 @@ export default async function DocumentsPage({
           {documentsEnabled ? (
             <UploadForm />
           ) : (
-            <div className="rounded-2xl border border-dashed bg-muted/30 p-6 text-sm text-muted-foreground">
+            <div className="rounded-xl border border-dashed bg-muted/30 p-6 text-sm text-muted-foreground">
               La carga de archivos está deshabilitada en la demo publicada. Esta sección queda como metadata del expediente.
             </div>
           )}

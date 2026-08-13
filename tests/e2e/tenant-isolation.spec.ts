@@ -16,14 +16,41 @@ test("tenant admin cannot open a different organization's client", async ({ page
   await expect(page.getByText("Overlap Client").first()).not.toBeVisible();
 });
 
-test("dual membership requires an explicit organization selection", async ({ page }) => {
-  await page.goto("/login");
-  await page.getByLabel("Correo electrónico").fill("tenant-dual@policydesk.local");
-  await page.getByLabel("Contraseña").fill("tenant-fixture-password");
-  await page.getByRole("button", { name: "Iniciar sesión" }).click();
-  await expect(page).toHaveURL(/\/organization\/select$/);
-  await expect(page.getByText("PolicyDesk Legacy Organization")).toBeVisible();
-  await expect(page.getByText("Pedro Alfredo Gómez Lorenzo")).toBeVisible();
+test("separate browser contexts remain isolated in organizations A and B", async ({ browser }) => {
+  const contextA = await browser.newContext();
+  const contextB = await browser.newContext();
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+  try {
+    await Promise.all([
+      (async () => {
+        await pageA.goto("/login");
+        await pageA.getByLabel("Correo electrónico").fill("tenant-admin-a@policydesk.local");
+        await pageA.getByLabel("Contraseña").fill("tenant-fixture-password");
+        await pageA.getByRole("button", { name: "Iniciar sesión" }).click();
+      })(),
+      (async () => {
+        await pageB.goto("/login");
+        await pageB.getByLabel("Correo electrónico").fill("tenant-admin-b@policydesk.local");
+        await pageB.getByLabel("Contraseña").fill("tenant-fixture-password");
+        await pageB.getByRole("button", { name: "Iniciar sesión" }).click();
+      })(),
+    ]);
+    await Promise.all([expect(pageA).toHaveURL(/\/today$/), expect(pageB).toHaveURL(/\/today$/)]);
+    await Promise.all([pageA.goto("/clients/tenant-client-a"), pageB.goto("/clients/tenant-client-b")]);
+    await Promise.all([
+      expect(pageA.getByText("Overlap Client").first()).toBeVisible(),
+      expect(pageB.getByText("Overlap Client").first()).toBeVisible(),
+    ]);
+    await Promise.all([pageA.goto("/clients/tenant-client-b"), pageB.goto("/clients/tenant-client-a")]);
+    await Promise.all([
+      expect(pageA.getByText("Overlap Client").first()).not.toBeVisible(),
+      expect(pageB.getByText("Overlap Client").first()).not.toBeVisible(),
+    ]);
+  } finally {
+    await contextA.close();
+    await contextB.close();
+  }
 });
 
 test("superadmin without membership is confined to the platform shell", async ({ page }) => {
@@ -46,6 +73,7 @@ test("superadmin can inspect both organizations without operational bypass", asy
   await expect(page.getByRole("heading", { name: "Panel master" })).toBeVisible();
   await expect(page.getByText("PolicyDesk Legacy Organization")).toBeVisible();
   await expect(page.getByText("Pedro Alfredo Gómez Lorenzo")).toBeVisible();
+  await expect(page.getByText("PolicyDesk Demo Broker")).toBeVisible();
   await page.getByRole("link", { name: /Pedro Alfredo Gómez Lorenzo/ }).click();
   await expect(page).toHaveURL(/\/platform\/organizations\/org_pedro_gomez_0001$/);
   await expect(page.getByRole("heading", { name: "Pedro Alfredo Gómez Lorenzo" })).toBeVisible();
@@ -77,6 +105,14 @@ test("tenant policy mutation route is visibly blocked while reads remain availab
   await expect(page.getByText("Mutación temporalmente bloqueada")).toBeVisible();
   await page.goto("/policies/tenant-policy-a");
   await expect(page.getByText("OVERLAP-A")).toBeVisible();
+
+  for (const endpoint of ["/api/policies/capture/confirm", "/api/policies/capture/clients"]) {
+    const response = await page.request.post(endpoint, { data: {} });
+    expect(response.status()).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "POLICY_TENANT_MUTATION_PENDING",
+    });
+  }
 });
 
 test("Pedro signs into his isolated organization and cannot see legacy clients", async ({ page }) => {

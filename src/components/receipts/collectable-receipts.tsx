@@ -42,7 +42,7 @@ export function CollectableReceipts({ receipts }: { receipts: CollectableReceipt
 
   return (
     <BulkActionsProvider>
-      <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
+      <div className="overflow-hidden rounded-md border border-border/70 bg-card">
         <BulkToolbar receipts={receipts} />
         <div className="divide-y divide-border/70">
           {receipts.map((receipt) => (
@@ -177,7 +177,7 @@ function ReceiptRow({ receipt }: { receipt: CollectableReceipt }) {
             <Badge variant={overdue ? "destructive" : "secondary"}>
               {overdue ? "Vencido" : "Pendiente"}
             </Badge>
-            <StatusBadge status={receipt.status} />
+            <StatusBadge status={receipt.status} entity="receipt" />
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             {receipt.client.fullName} · {receipt.policy.policyNumber} · {receipt.insurer.name}
@@ -214,7 +214,7 @@ function ReceiptRow({ receipt }: { receipt: CollectableReceipt }) {
             id={receipt.id}
             receiptNumber={receipt.receiptNumber}
             triggerLabel="Cancelar"
-            triggerClassName="h-8 rounded-full bg-card/70 px-3 text-xs"
+            triggerClassName="h-8 bg-card/70 px-3 text-xs"
           />
         ) : null}
       </div>

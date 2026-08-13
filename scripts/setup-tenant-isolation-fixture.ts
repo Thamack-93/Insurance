@@ -51,6 +51,7 @@ const hash = (password: string) => {
 
 const LEGACY_ORGANIZATION_ID = "org_legacy_singleton_0001";
 const PEDRO_ORGANIZATION_ID = "org_pedro_gomez_0001";
+const DEMO_ORGANIZATION_ID = "org_demo_broker_0001";
 const PEDRO_USER_ID = "tenant-pedro-gomez";
 
 async function validateMarker() {
@@ -97,8 +98,13 @@ async function main() {
       update: { name: "Pedro Alfredo Gómez Lorenzo", slug: "pedro-alfredo-gomez-lorenzo", status: "ACTIVE" },
       create: { id: PEDRO_ORGANIZATION_ID, name: "Pedro Alfredo Gómez Lorenzo", slug: "pedro-alfredo-gomez-lorenzo", status: "ACTIVE", timeZone: "Etc/GMT+6", defaultCurrency: "MXN" },
     });
+    const orgDemo = await tx.organization.upsert({
+      where: { id: DEMO_ORGANIZATION_ID },
+      update: { name: "PolicyDesk Demo Broker", slug: "demo-broker", status: "ACTIVE" },
+      create: { id: DEMO_ORGANIZATION_ID, name: "PolicyDesk Demo Broker", slug: "demo-broker", status: "ACTIVE", timeZone: "America/Mexico_City", defaultCurrency: "MXN" },
+    });
     const organizations = await tx.organization.findMany({ select: { id: true }, orderBy: { id: "asc" } });
-    if (organizations.length !== 2 || organizations.some(({ id }) => ![LEGACY_ORGANIZATION_ID, PEDRO_ORGANIZATION_ID].includes(id))) {
+    if (organizations.length !== 3 || organizations.some(({ id }) => ![LEGACY_ORGANIZATION_ID, PEDRO_ORGANIZATION_ID, DEMO_ORGANIZATION_ID].includes(id))) {
       throw new Error("Tenant isolation fixture refuses unexpected organizations in the disposable database.");
     }
     const users = [
@@ -107,7 +113,8 @@ async function main() {
       { id: "tenant-admin-b", email: "tenant-admin-b@policydesk.local", name: "Tenant Admin B", role: "ADMIN", org: orgB.id, membershipRole: "ADMIN" },
       { id: "tenant-agent-b", email: "tenant-agent-b@policydesk.local", name: "Tenant Agent B", role: "AGENT", org: orgB.id, membershipRole: "AGENT" },
       { id: PEDRO_USER_ID, email: "pedroagl93@gmail.com", name: "Pedro Alfredo Gómez Lorenzo", role: "ADMIN", org: orgB.id, membershipRole: "OWNER" },
-      { id: "tenant-dual-user", email: "tenant-dual@policydesk.local", name: "Tenant Dual User", role: "AGENT", org: orgA.id, membershipRole: "AGENT" },
+      { id: "tenant-demo-owner", email: "demo-owner@policydesk.local", name: "Demo Owner", role: "ADMIN", org: orgDemo.id, membershipRole: "OWNER" },
+      { id: "tenant-demo-agent", email: "demo-agent@policydesk.local", name: "Demo Agent", role: "AGENT", org: orgDemo.id, membershipRole: "AGENT" },
       { id: "tenant-superadmin", email: "tenant-superadmin@policydesk.local", name: "Tenant Superadmin", role: "ADMIN", org: null, membershipRole: null },
     ] as const;
     for (const item of users) {
@@ -125,16 +132,11 @@ async function main() {
       }
     }
     await tx.organizationMembership.upsert({
-      where: { organizationId_userId: { organizationId: orgB.id, userId: "tenant-dual-user" } },
-      update: { role: "AGENT", active: true },
-      create: { organizationId: orgB.id, userId: "tenant-dual-user", role: "AGENT", active: true },
-    });
-    await tx.organizationMembership.upsert({
       where: { organizationId_userId: { organizationId: orgA.id, userId: "tenant-admin-a" } },
       update: { role: "OWNER", active: true },
       create: { organizationId: orgA.id, userId: "tenant-admin-a", role: "OWNER", active: true },
     });
-    for (const [orgId, suffix, ownerId] of [[orgA.id, "A", "tenant-agent-a"], [orgB.id, "B", "tenant-agent-b"]] as const) {
+    for (const [orgId, suffix, ownerId] of [[orgA.id, "A", "tenant-agent-a"], [orgB.id, "B", "tenant-agent-b"], [orgDemo.id, "C", "tenant-demo-agent"]] as const) {
       const insurer = await tx.insurer.upsert({
         where: { id: `tenant-insurer-${suffix.toLowerCase()}` },
         update: { organizationId: orgId, name: `Fixture Insurer ${suffix}`, status: "ACTIVE" },
@@ -196,7 +198,7 @@ async function main() {
         currency: "MXN",
       },
     });
-    console.log(JSON.stringify({ ok: true, organizations: [orgA.id, orgB.id], users: users.map((user) => user.id) }));
+    console.log(JSON.stringify({ ok: true, organizations: [orgA.id, orgB.id, orgDemo.id], users: users.map((user) => user.id) }));
   });
 }
 

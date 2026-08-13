@@ -44,6 +44,38 @@ export function shouldIncludeInRenewals(
   return true;
 }
 
+export function shouldKeepRenewalWorkItemPolicy(input: {
+  status: string;
+  renewalStage?: string | null;
+  hasSuccessor: boolean;
+  hasDecision: boolean;
+  latestReceiptStatus?: string | null;
+}): boolean {
+  if (input.status !== "ACTIVE") return false;
+  if (input.renewalStage === "WON" || input.renewalStage === "LOST") return false;
+  if (input.hasSuccessor || input.hasDecision) return false;
+  if (input.latestReceiptStatus === "CANCELLED") return false;
+  return true;
+}
+
+export function isUnresolvedOverdueRenewal(
+  policy: {
+    status: string;
+    endDate: Date | null;
+    hasSuccessor: boolean;
+    hasDecision: boolean;
+  },
+  today: Date = businessToday(),
+): boolean {
+  return (
+    policy.status === "ACTIVE" &&
+    policy.endDate !== null &&
+    policy.endDate < today &&
+    !policy.hasSuccessor &&
+    !policy.hasDecision
+  );
+}
+
 export function createRenewalWorkItemTitle(
   priority: RenewalPriority,
   policyNumber: string

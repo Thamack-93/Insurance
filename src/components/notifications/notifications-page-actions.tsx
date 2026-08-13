@@ -17,7 +17,7 @@ export function MarkOneButton({ id }: { id: string }) {
       variant="ghost"
       size="sm"
       disabled={isPending}
-      className="h-7 rounded-full px-2 text-xs"
+      className="h-7 px-2 text-xs"
       onClick={() => {
         startTransition(async () => {
           const result = await markNotificationRead(id);
@@ -39,7 +39,7 @@ export function MarkAllReadButton() {
     <Button
       type="button"
       variant="outline"
-      className="rounded-full bg-card/70"
+      className="bg-card/70"
       disabled={isPending}
       onClick={() => {
         startTransition(async () => {

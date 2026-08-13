@@ -424,6 +424,7 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
   let aiFallbackNotice: string | null = null;
   let aiDiagnostic: AssistantAiDiagnostic | null = null;
   let aiRunId: string | null = null;
+  let aiTrackingStatus: "recorded" | "unavailable" | undefined;
   let aiTier: AssistantAiTier | null = null;
   let aiModel: string | null = null;
   let aiAttempts = 0;
@@ -448,6 +449,7 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
       };
       source = "ai";
       aiRunId = aiReply.value.runId ?? null;
+      aiTrackingStatus = aiReply.value.trackingStatus;
       aiTier = aiReply.value.tier;
       aiModel = aiReply.value.resolvedModel;
       aiAttempts = aiReply.value.trace.length;
@@ -536,6 +538,7 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
     reportThemeKey: reportTheme?.themeKey ?? null,
     reportThemeLabel: reportTheme?.themeLabel ?? null,
     aiRunId,
+    aiTrackingStatus,
     aiTier,
     aiModel,
     aiAttempts,

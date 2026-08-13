@@ -53,7 +53,7 @@ export function RenewalRowActions({
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
-      <Button asChild type="button" size="sm" className="rounded-full" disabled={isPending}>
+      <Button asChild type="button" size="sm" disabled={isPending}>
         <Link href={`/policies/new?renewalFrom=${encodeURIComponent(sourcePolicyId)}`}>
           Renovar
           <ArrowRight className="ml-2 size-4" />
@@ -64,7 +64,7 @@ export function RenewalRowActions({
         type="button"
         size="sm"
         variant="outline"
-        className="rounded-full"
+
         onClick={() => setSearchOpen(true)}
         disabled={isPending}
       >
@@ -75,7 +75,7 @@ export function RenewalRowActions({
       <NoRenewalButton
         policyId={sourcePolicyId}
         policyNumber={sourcePolicyNumber}
-        triggerClassName="h-8 rounded-full bg-card/70 px-3 text-xs"
+        triggerClassName="h-8 bg-card/70 px-3 text-xs"
         triggerLabel="No renueva"
       />
 

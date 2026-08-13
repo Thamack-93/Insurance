@@ -33,7 +33,7 @@ export function Highlight({ text, query, className }: HighlightProps) {
         p.match ? (
           <mark
             key={i}
-            className="rounded-[3px] bg-amber-200/70 px-0.5 text-foreground dark:bg-amber-400/30"
+            className="rounded-sm bg-amber-200/70 px-0.5 text-foreground dark:bg-amber-400/30"
           >
             {p.value}
           </mark>

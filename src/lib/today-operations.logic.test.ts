@@ -84,6 +84,10 @@ describe("today operations presentation logic", () => {
       "receipt-today-today",
       "work-item-task",
     ]);
+
+    const overdueReceipt = buildFocusItems(data).find((item) => item.id === "receipt-overdue-a");
+    expect(overdueReceipt?.dueText).toContain("Vencimiento: 09/07/2026");
+    expect(overdueReceipt?.dueText).toContain("Vencido hace");
   });
 
   it("derives a truthful empty summary from available data", () => {
