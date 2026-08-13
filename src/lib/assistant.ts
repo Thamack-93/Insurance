@@ -13,7 +13,8 @@ import {
 } from "@/lib/assistant-ai";
 import { buildAssistantActionProposalFromPlan } from "@/lib/assistant-actions";
 import { createAssistantThemeKey, recordAssistantReportSignal } from "@/lib/assistant-reports";
-import { buildAssistantBlockedReply, evaluateAssistantInput } from "@/lib/assistant-guardrails";
+import { buildAssistantBlockedReply, buildGmmPrivacyReply, evaluateAssistantInput, evaluateGmmPrivacy } from "@/lib/assistant-guardrails";
+import { getNoraAiBudgetStatus, isNoraAgentEnabledForUser } from "@/lib/assistant-agent-config";
 import type {
   AssistantAiDiagnostic,
   AssistantActionProposal,
@@ -24,6 +25,8 @@ import type {
   AssistantAiTier,
   AssistantAiTraceEntry,
   AssistantAiUsageSnapshot,
+  AssistantAiToolTraceEntry,
+  AssistantHistoryMessage,
   AssistantResponseSource,
   AssistantSnapshot,
   AssistantUser,
@@ -94,6 +97,10 @@ function isDeterministicQuery(normalized: string) {
     normalized.includes("cliente") ||
     normalized.includes("poliza")
   );
+}
+
+function isLocalOnlyQuery(normalized: string) {
+  return ["", "hola", "buenos dias", "buenas", "help", "ayuda", "menu", "que puedes hacer"].includes(normalized);
 }
 
 function shouldUseAssistantAi(normalized: string) {
@@ -391,7 +398,11 @@ export async function getAssistantHomeSnapshot(user: AssistantUser): Promise<Ass
   };
 }
 
-export async function buildAssistantReply(user: AssistantUser, message: string): Promise<AssistantConversationResponse> {
+export async function buildAssistantReply(
+  user: AssistantUser,
+  message: string,
+  options: { history?: AssistantHistoryMessage[]; contextText?: string | null; gmmMetadataOnly?: boolean } = {},
+): Promise<AssistantConversationResponse> {
   const guardrail = evaluateAssistantInput(message);
   const normalized = normalizeMessage(message);
   if (!guardrail.allowed) {
@@ -410,15 +421,50 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
     };
   }
 
-  const localReply = await buildLocalAssistantReply(user, message);
+  const gmmMode = Boolean(options.gmmMetadataOnly || /\bgmm\b|gastos medicos|gastos médicos/i.test(message));
+  if (gmmMode && !evaluateGmmPrivacy(message, Boolean(options.gmmMetadataOnly)).allowed) {
+    return {
+      reply: buildGmmPrivacyReply(),
+      sections: [],
+      quickPrompts: [
+        { label: "Ver checklist", prompt: "Ver checklist de requisitos GMM" },
+        { label: "Ver faltantes", prompt: "Mostrar requisitos faltantes de GMM" },
+      ],
+      source: "local",
+      reportId: null,
+      reportThemeKey: null,
+      reportThemeLabel: null,
+      aiPromptVersion: null,
+      aiToolTrace: [],
+    };
+  }
+
+  const localMessage = options.contextText ? `${message}\n\nContexto explícitamente aceptado: ${options.contextText}.` : message;
+  let localReply: AssistantReply | null = null;
+  async function getLocalReply() {
+    if (!localReply) localReply = await buildLocalAssistantReply(user, localMessage);
+    return localReply;
+  }
+
   const theme = detectTheme(normalized);
-  const shouldTryAi =
-    theme?.kind !== "INCIDENT" &&
-    (shouldUseAssistantAi(normalized) || (!isDeterministicQuery(normalized) && message.length > 40) || message.length > 220);
+  const agentEnabled = isNoraAgentEnabledForUser(user);
+  let shouldTryAi = theme?.kind !== "INCIDENT" && (agentEnabled
+    ? !isLocalOnlyQuery(normalized)
+    : shouldUseAssistantAi(normalized) || (!isDeterministicQuery(normalized) && message.length > 40) || message.length > 220);
+  const budget = agentEnabled && shouldTryAi
+    ? await getNoraAiBudgetStatus().catch(() => ({ allowed: true, warning: null, spentUsd: 0, limitUsd: 4 }))
+    : { allowed: true, warning: null, spentUsd: 0, limitUsd: 4 };
+  if (!budget.allowed) shouldTryAi = false;
 
-  const aiContext = shouldTryAi || theme ? await buildAssistantAiContext(user, message, localReply) : null;
+  const aiContext = shouldTryAi
+    ? agentEnabled
+      ? options.contextText ?? null
+      : await buildAssistantAiContext(user, message, await getLocalReply())
+    : theme
+      ? await buildAssistantAiContext(user, message, await getLocalReply())
+      : null;
 
-  let finalReply: AssistantReply = localReply;
+  let finalReply: AssistantReply = shouldTryAi ? { reply: "", sections: [], quickPrompts: [] } : await getLocalReply();
   let source: AssistantResponseSource = "local";
   let actionProposal: AssistantActionProposal | null = null;
   let aiFallbackNotice: string | null = null;
@@ -430,16 +476,23 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
   let aiAttempts = 0;
   let aiUsage: AssistantAiUsageSnapshot | null = null;
   let aiTrace: AssistantAiTraceEntry[] = [];
-  const aiMode = hasMutationIntent(normalized) ? "structured" as const : "conversation" as const;
+  let aiToolTrace: AssistantAiToolTraceEntry[] = [];
+  let aiPromptVersion: string | null = null;
+  const aiMode = agentEnabled ? "agent" as const : hasMutationIntent(normalized) ? "structured" as const : "conversation" as const;
 
   if (shouldTryAi) {
+    const safeHistory = (options.history ?? [])
+      .filter((entry) => !gmmMode || evaluateGmmPrivacy(entry.content, false).allowed)
+      .slice(-6);
     const aiReply = await buildAssistantAiReply({
       user,
       message,
-      localReply,
+      localReply: agentEnabled ? { reply: "", sections: [], quickPrompts: [] } : await getLocalReply(),
       contextText: aiContext,
       themeHint: null,
       mode: aiMode,
+      history: safeHistory,
+      gmmMetadataOnly: gmmMode,
     });
     if (aiReply.ok) {
       finalReply = {
@@ -462,10 +515,15 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
           ? { ...aiReply.value.usage, estimatedCostUsd: aiReply.value.usage.estimatedCostUsd ?? null }
           : null;
       aiTrace = aiReply.value.trace;
-      if (aiMode === "structured" && aiReply.value.mutation) {
+      aiToolTrace = aiReply.value.toolTrace;
+      aiPromptVersion = aiReply.value.promptVersion;
+      if (aiMode === "agent") {
+        actionProposal = aiReply.value.actionProposal;
+      } else if (aiMode === "structured" && aiReply.value.mutation) {
         actionProposal = await buildAssistantActionProposalFromPlan(aiReply.value.mutation, user);
       }
     } else {
+      finalReply = await getLocalReply();
       aiDiagnostic = aiReply.diagnostic;
       aiFallbackNotice = buildAssistantAiFallbackNotice(aiReply.diagnostic);
       aiRunId = aiReply.diagnostic.runId ?? null;
@@ -544,6 +602,9 @@ export async function buildAssistantReply(user: AssistantUser, message: string):
     aiAttempts,
     aiUsage,
     aiTrace,
+    aiToolTrace,
+    aiPromptVersion,
+    aiBudgetWarning: budget.warning,
     aiFallbackNotice,
     aiDiagnostic,
     actionProposal,

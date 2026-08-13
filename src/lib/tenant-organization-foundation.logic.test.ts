@@ -22,16 +22,21 @@ describe("tenant organization transition foundation", () => {
 
   it("ships normal, inspectable SQL guards", () => {
     const migration = fs.readFileSync(path.join(process.cwd(), "prisma/migrations/20260803000000_organization_transition/migration.sql"), "utf8");
+    const additiveMigration = fs.readFileSync(path.join(process.cwd(), "prisma/migrations/20260813000000_nora_hybrid_agent/migration.sql"), "utf8");
+    const allGuardSql = `${migration}\n${additiveMigration}`;
     expect(migration).toContain("org_legacy_singleton_0001");
     expect(migration).toContain("Organization_transition_singleton_idx");
     expect(migration).toContain("policydesk_assign_singleton_organization");
     expect(migration).not.toContain("session_replication_role");
-    expect(migration).not.toMatch(/(?:ALTER|CREATE)\s+TRIGGER[^;]*ENABLE ALWAYS/i);
+    expect(allGuardSql).not.toMatch(/(?:ALTER|CREATE)\s+TRIGGER[^;]*ENABLE ALWAYS/i);
     expect(migration).toContain("POLICYDESK_ORGANIZATION_IMMUTABLE");
     expect(migration).toContain("User_transition_membership_sync");
     expect(migration).toContain('CREATE INDEX "User_platformRole_idx"');
     expect(migration).not.toContain('NotificationChannel_transition_singleton_organization');
     expect(migration).not.toContain('SecurityEventAggregate_transition_singleton_organization');
     expect(migration).not.toContain('TelegramWebhookUpdate_transition_singleton_organization');
+    for (const trigger of Object.values(EXPECTED_TENANT_TRIGGERS)) {
+      expect(allGuardSql).toContain(`CREATE TRIGGER "${trigger}"`);
+    }
   });
 });

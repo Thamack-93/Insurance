@@ -16,7 +16,9 @@ const mocks = vi.hoisted(() => ({
   listAssistantReports: vi.fn(),
   recordAssistantReportSignal: vi.fn(),
   buildAssistantBlockedReply: vi.fn(),
+  buildGmmPrivacyReply: vi.fn(),
   evaluateAssistantInput: vi.fn(),
+  evaluateGmmPrivacy: vi.fn(),
 }));
 
 vi.mock("@/lib/assistant-local", () => ({
@@ -45,7 +47,9 @@ vi.mock("@/lib/assistant-reports", () => ({
 
 vi.mock("@/lib/assistant-guardrails", () => ({
   buildAssistantBlockedReply: mocks.buildAssistantBlockedReply,
+  buildGmmPrivacyReply: mocks.buildGmmPrivacyReply,
   evaluateAssistantInput: mocks.evaluateAssistantInput,
+  evaluateGmmPrivacy: mocks.evaluateGmmPrivacy,
 }));
 
 import { buildAssistantReply } from "@/lib/assistant";
@@ -387,5 +391,131 @@ describe("assistant router", () => {
     expect(response.actionProposal).toBeNull();
     expect(response.sections).toEqual([]);
     expect(mocks.buildAssistantActionProposalFromPlan).not.toHaveBeenCalled();
+  });
+
+  it("uses Luna as the agent orchestrator with recent history when enabled", async () => {
+    vi.stubEnv("NORA_AGENT_MODE", "all");
+    vi.stubEnv("DATABASE_URL", "");
+    mocks.evaluateAssistantInput.mockReturnValue({
+      allowed: true,
+      normalized: "lista los siniestros abiertos y sus pendientes",
+      reason: "system",
+    });
+    mocks.buildAssistantAiReply.mockResolvedValue({
+      ok: true,
+      value: {
+        runId: "run-agent",
+        tier: "minimax",
+        reply: "Encontré dos siniestros abiertos.",
+        sections: [],
+        quickPrompts: [],
+        mutation: null,
+        actionProposal: null,
+        toolTrace: [{ tool: "listClaims", outcome: "success", durationMs: 12 }],
+        promptVersion: "nora-agent-v1",
+        resolvedModel: "openai/gpt-5.6-luna",
+        usage: aiTrace[0].usage,
+        totalUsage: aiTrace[0].usage,
+        finishReason: "stop",
+        providerMetadata: {},
+        durationMs: 420,
+        trace: aiTrace,
+      },
+    });
+    const history = [
+      { role: "user" as const, content: "Busca mis siniestros" },
+      { role: "assistant" as const, content: "¿Abiertos o todos?" },
+    ];
+
+    const response = await buildAssistantReply(user, "Lista los siniestros abiertos y sus pendientes", { history });
+
+    expect(response.source).toBe("ai");
+    expect(response.aiPromptVersion).toBe("nora-agent-v1");
+    expect(response.aiToolTrace).toEqual([{ tool: "listClaims", outcome: "success", durationMs: 12 }]);
+    expect(mocks.buildAssistantAiReply).toHaveBeenCalledWith(expect.objectContaining({
+      mode: "agent",
+      history,
+      contextText: null,
+    }));
+    expect(mocks.buildLocalAssistantReply).not.toHaveBeenCalled();
+  });
+
+  it("keeps GMM medical narrative local and never sends it to Luna", async () => {
+    vi.stubEnv("NORA_AGENT_MODE", "all");
+    mocks.evaluateAssistantInput.mockReturnValue({
+      allowed: true,
+      normalized: "el diagnostico fue diabetes y lo atendio la dra perez",
+      reason: "system",
+    });
+    mocks.evaluateGmmPrivacy.mockReturnValue({ allowed: false, hasSensitiveNarrative: true, isMetadataAction: false });
+    mocks.buildGmmPrivacyReply.mockReturnValue("Usa únicamente metadatos del checklist de GMM.");
+
+    const response = await buildAssistantReply(
+      user,
+      "El diagnóstico fue diabetes y lo atendió la Dra. Pérez",
+      { gmmMetadataOnly: true },
+    );
+
+    expect(response.source).toBe("local");
+    expect(response.reply).toContain("metadatos");
+    expect(mocks.buildAssistantAiReply).not.toHaveBeenCalled();
+    expect(mocks.buildLocalAssistantReply).not.toHaveBeenCalled();
+  });
+
+  it("removes medical GMM history before calling Luna", async () => {
+    vi.stubEnv("NORA_AGENT_MODE", "all");
+    vi.stubEnv("DATABASE_URL", "");
+    mocks.evaluateAssistantInput.mockReturnValue({
+      allowed: true,
+      normalized: "ver requisitos faltantes del checklist",
+      reason: "system",
+    });
+    mocks.evaluateGmmPrivacy.mockImplementation((content: string) => {
+      const sensitive = /diagnóstico reservado|resonancia privada|doctor privado|archivo-clinico\.pdf/i.test(content);
+      return { allowed: !sensitive, hasSensitiveNarrative: sensitive, isMetadataAction: !sensitive };
+    });
+    mocks.buildAssistantAiReply.mockResolvedValue({
+      ok: true,
+      value: {
+        runId: "run-gmm-safe",
+        tier: "minimax",
+        reply: "Falta un requisito.",
+        quickPrompts: [],
+        mutation: null,
+        actionProposal: null,
+        toolTrace: [],
+        promptVersion: "nora-agent-v1",
+        resolvedModel: "openai/gpt-5.6-luna",
+        usage: null,
+        totalUsage: null,
+        finishReason: "stop",
+        providerMetadata: {},
+        durationMs: 100,
+        trace: [],
+      },
+    });
+    const history = [
+      { role: "user" as const, content: "Diagnóstico reservado" },
+      { role: "user" as const, content: "Resonancia privada" },
+      { role: "user" as const, content: "Doctor Privado" },
+      { role: "user" as const, content: "archivo-clinico.pdf" },
+      { role: "assistant" as const, content: "Usa el checklist de metadatos" },
+    ];
+
+    const response = await buildAssistantReply(user, "Ver requisitos faltantes del checklist", {
+      gmmMetadataOnly: true,
+      history,
+    });
+
+    expect(response.source).toBe("ai");
+    expect(mocks.buildAssistantAiReply).toHaveBeenCalledWith(expect.objectContaining({
+      history: [{ role: "assistant", content: "Usa el checklist de metadatos" }],
+      gmmMetadataOnly: true,
+    }));
+    const gatewayInput = JSON.stringify(mocks.buildAssistantAiReply.mock.calls[0]?.[0]);
+    expect(gatewayInput).not.toContain("Diagnóstico reservado");
+    expect(gatewayInput).not.toContain("Resonancia privada");
+    expect(gatewayInput).not.toContain("Doctor Privado");
+    expect(gatewayInput).not.toContain("archivo-clinico.pdf");
   });
 });

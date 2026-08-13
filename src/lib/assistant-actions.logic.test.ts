@@ -14,6 +14,9 @@ const updateReceipt = vi.hoisted(() => vi.fn());
 const createPayment = vi.hoisted(() => vi.fn());
 const createWorkItem = vi.hoisted(() => vi.fn());
 const updateWorkItem = vi.hoisted(() => vi.fn());
+const createClaim = vi.hoisted(() => vi.fn());
+const updateClaim = vi.hoisted(() => vi.fn());
+const updateClaimChecklistStatus = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", () => ({ getDb }));
 vi.mock("@/lib/auth", () => ({ getCurrentUser }));
@@ -23,6 +26,12 @@ vi.mock("@/app/(dashboard)/policies/actions", () => ({ createPolicy, updatePolic
 vi.mock("@/app/(dashboard)/receipts/actions", () => ({ createReceipt, updateReceipt }));
 vi.mock("@/app/(dashboard)/payments/actions", () => ({ createPayment }));
 vi.mock("@/app/(dashboard)/tasks/actions", () => ({ createWorkItem, updateWorkItem }));
+vi.mock("@/app/(dashboard)/claims/actions", () => ({ createClaim, updateClaim }));
+vi.mock("@/lib/claim-checklists", () => ({
+  CLAIM_CHECKLIST_STATUSES: ["MISSING", "REQUESTED", "RECEIVED", "WAIVED"],
+  getClaimChecklistTemplate: vi.fn(),
+  updateClaimChecklistStatus,
+}));
 vi.mock("@/lib/work-item-resolvers", () => ({ findWorkItemByRouteId: vi.fn() }));
 vi.mock("@/lib/logger", () => ({ logError: vi.fn() }));
 
@@ -103,6 +112,12 @@ describe("confirmAssistantActionDraft", () => {
       redirectTo: "/clients/client-1",
       message: "Cliente creado.",
     });
+    createClaim.mockResolvedValue({
+      ok: true,
+      id: "claim-1",
+      redirectTo: "/claims/claim-1",
+      message: "Siniestro creado.",
+    });
   });
 
   it("confirms a persisted pending draft exactly once", async () => {
@@ -137,6 +152,55 @@ describe("confirmAssistantActionDraft", () => {
       }),
     );
     expect(writeActivityLog).toHaveBeenCalled();
+  });
+
+  it("creates a claim only after claiming a pending confirmation draft", async () => {
+    const draft = makeDraft({
+      payloadJson: JSON.stringify({
+        title: "Crear siniestro",
+        summary: "Alta de siniestro",
+        reply: "Listo para confirmar.",
+        entityType: "claim",
+        operation: "create",
+        targetId: null,
+        targetLabel: null,
+        targetUpdatedAt: null,
+        formValues: {
+          folio: "SIN-001",
+          clientId: "client-1",
+          policyId: "policy-1",
+          insurerId: "insurer-1",
+          claimType: "COLLISION",
+          description: "",
+          status: "OPEN",
+          incidentDate: "2026-08-10",
+          reportedDate: "2026-08-11",
+          closedDate: "",
+          notes: "",
+        },
+        changes: [],
+      }),
+    });
+    const db = makeDb({
+      assistantActionDraft: {
+        findFirst: vi.fn().mockResolvedValue(draft),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        update: vi.fn().mockResolvedValue({ id: draft.id }),
+        create: vi.fn(),
+      },
+    });
+    getDb.mockReturnValue(db);
+
+    const result = await confirmAssistantActionDraft(draft.id, user.id);
+
+    expect(result.ok).toBe(true);
+    expect(db.assistantActionDraft.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: draft.id, userId: user.id, status: "PENDING" }),
+    }));
+    expect(createClaim).toHaveBeenCalledTimes(1);
+    expect(db.assistantActionDraft.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "CONFIRMED" }),
+    }));
   });
 
   it("blocks expired drafts before execution", async () => {

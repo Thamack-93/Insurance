@@ -42,6 +42,11 @@ export async function createClaim(values: ClaimFormValues): Promise<MutationResu
     const userId = await getCurrentUserId();
     await assertClientPortfolioAccess(values.clientId, userId);
     await assertPolicyPortfolioAccess(values.policyId, userId);
+    const relatedPolicy = await db.policy.findFirst({
+      where: { id: values.policyId, clientId: values.clientId, insurerId: values.insurerId },
+      select: { id: true },
+    });
+    if (!relatedPolicy) return errorResult("La póliza, el cliente y la aseguradora no corresponden al mismo registro.");
     const claim = await db.claim.create({
       data: { ...normalizeClaimInput(values), createdById: userId, updatedById: userId },
     });
@@ -76,6 +81,11 @@ export async function updateClaim(id: string, values: ClaimFormValues): Promise<
     await assertClaimPortfolioAccess(id, userId);
     await assertClientPortfolioAccess(values.clientId, userId);
     await assertPolicyPortfolioAccess(values.policyId, userId);
+    const relatedPolicy = await db.policy.findFirst({
+      where: { id: values.policyId, clientId: values.clientId, insurerId: values.insurerId },
+      select: { id: true },
+    });
+    if (!relatedPolicy) return errorResult("La póliza, el cliente y la aseguradora no corresponden al mismo registro.");
 
     const existingClaim = await db.claim.findUnique({
       where: { id },
