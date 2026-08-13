@@ -52,7 +52,6 @@ test.describe("role visibility smoke tests", () => {
     for (const path of [
       "/settings/centro-operativo",
       "/insurers",
-      "/documents",
       "/risks",
       "/data-quality",
       "/activity",
@@ -61,6 +60,11 @@ test.describe("role visibility smoke tests", () => {
       await page.goto(path);
       await expect(page).toHaveURL(/\/today$/);
     }
+
+    // Documents remain readable through the defensive tenant scope for agents;
+    // only their write/internal-control surfaces stay admin-only.
+    await page.goto("/documents");
+    await expect(page).toHaveURL(/\/documents$/);
   });
 
   test("agent insurer links open the filtered portfolio", async ({ page }) => {
