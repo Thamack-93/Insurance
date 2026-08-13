@@ -209,7 +209,7 @@ function toEventRecord(row: {
   return row as NotificationEventRecord;
 }
 
-export async function ensureNotificationDefaultsForUser(userId: string, client?: DbClient) {
+export async function ensureNotificationDefaultsForUser(organizationId: string, userId: string, client?: DbClient) {
   const db = client ?? getDb();
 
   await db.notificationChannel.upsert({
@@ -241,6 +241,7 @@ export async function ensureNotificationDefaultsForUser(userId: string, client?:
         },
         update: {},
         create: {
+          organizationId,
           userId,
           eventType: event.eventType,
           channelType: "TELEGRAM",
@@ -253,12 +254,13 @@ export async function ensureNotificationDefaultsForUser(userId: string, client?:
 }
 
 export async function getNotificationPreferencesForUser(
+  organizationId: string,
   userId: string,
   client?: DbClient,
 ): Promise<NotificationPreferencesSnapshot> {
   const db = client ?? getDb();
   try {
-    await ensureNotificationDefaultsForUser(userId, db);
+    await ensureNotificationDefaultsForUser(organizationId, userId, db);
 
     const [channel, preferences] = await Promise.all([
       db.notificationChannel.findUnique({
@@ -270,7 +272,7 @@ export async function getNotificationPreferencesForUser(
         },
       }),
       db.notificationPreference.findMany({
-        where: { userId, channelType: "TELEGRAM" },
+        where: { organizationId, userId, channelType: "TELEGRAM" },
         orderBy: [{ eventType: "asc" }],
       }),
     ]);
@@ -307,6 +309,7 @@ export async function getNotificationPreferencesForUser(
 }
 
 export async function shouldNotifyUser(input: {
+  organizationId: string;
   userId: string;
   eventType: string;
   priority: Priority;
@@ -314,7 +317,7 @@ export async function shouldNotifyUser(input: {
   client?: DbClient;
 }) {
   const channelType = input.channelType ?? "TELEGRAM";
-  const snapshot = await getNotificationPreferencesForUser(input.userId, input.client);
+  const snapshot = await getNotificationPreferencesForUser(input.organizationId, input.userId, input.client);
   const preference = snapshot.preferences.find(
     (row) => row.eventType === input.eventType && row.channelType === channelType,
   );
@@ -334,6 +337,7 @@ export async function shouldNotifyUser(input: {
 
 export async function createNotificationEvent(
   input: {
+    organizationId: string;
     type: string;
     title: string;
     body: string;
@@ -354,6 +358,7 @@ export async function createNotificationEvent(
   const shouldSend = input.force
     ? true
     : await shouldNotifyUser({
+        organizationId: input.organizationId,
         userId: input.userId,
         eventType: input.type,
         priority: input.priority,
@@ -362,7 +367,9 @@ export async function createNotificationEvent(
       });
 
   if (input.dedupeKey) {
-    const existing = await db.notificationEvent.findUnique({ where: { dedupeKey: input.dedupeKey } });
+    const existing = await db.notificationEvent.findUnique({
+      where: { organizationId_dedupeKey: { organizationId: input.organizationId, dedupeKey: input.dedupeKey } },
+    });
     if (existing) {
       if (existing.status === "FAILED") {
         const retried = await db.notificationEvent.update({
@@ -378,6 +385,7 @@ export async function createNotificationEvent(
   try {
     const event = await db.notificationEvent.create({
       data: {
+        organizationId: input.organizationId,
         type: input.type,
         title: input.title,
         body: input.body,
@@ -396,7 +404,9 @@ export async function createNotificationEvent(
     return toEventRecord(event);
   } catch (error) {
     if (input.dedupeKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      const existing = await db.notificationEvent.findUnique({ where: { dedupeKey: input.dedupeKey } });
+      const existing = await db.notificationEvent.findUnique({
+        where: { organizationId_dedupeKey: { organizationId: input.organizationId, dedupeKey: input.dedupeKey } },
+      });
       return existing ? toEventRecord(existing) : null;
     }
     logError("notification-foundation.createNotificationEvent", error, {
@@ -460,6 +470,7 @@ export async function markNotificationSkipped(id: string, reason?: string, clien
 }
 
 export async function updateNotificationPreferences(input: {
+  organizationId: string;
   userId: string;
   preferences: NotificationPreferenceInput[];
   actorId: string;
@@ -469,10 +480,11 @@ export async function updateNotificationPreferences(input: {
   const cleanPreferences = input.preferences.filter((item) => isNotificationEventType(item.eventType));
 
   try {
-    await ensureNotificationDefaultsForUser(input.userId, db);
+    await ensureNotificationDefaultsForUser(input.organizationId, input.userId, db);
 
     const existing = await db.notificationPreference.findMany({
       where: {
+        organizationId: input.organizationId,
         userId: input.userId,
         channelType: "TELEGRAM",
       },
@@ -501,6 +513,7 @@ export async function updateNotificationPreferences(input: {
             minPriority: preference.minPriority,
           },
           create: {
+            organizationId: input.organizationId,
             userId: input.userId,
             eventType: preference.eventType,
             channelType: "TELEGRAM",
@@ -519,6 +532,7 @@ export async function updateNotificationPreferences(input: {
         if (changed) {
           await writeActivityLog(
             {
+              organizationId: input.organizationId,
               entityType: "NotificationPreference",
               entityId: `${input.userId}:${preference.eventType}:TELEGRAM`,
               action: previous ? "NOTIFICATION_PREFERENCE_UPDATED" : "NOTIFICATION_PREFERENCE_CREATED",

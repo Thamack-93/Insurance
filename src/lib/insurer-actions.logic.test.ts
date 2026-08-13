@@ -2,15 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const requireAdmin = vi.hoisted(() => vi.fn());
+const requireOrganizationRole = vi.hoisted(() => vi.fn());
+const assertOrganizationContextInTransaction = vi.hoisted(() => vi.fn());
 const getDb = vi.hoisted(() => vi.fn());
 const writeActivityLog = vi.hoisted(() => vi.fn());
 const revalidatePath = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/auth", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/auth")>()),
-  requireAdmin,
-}));
+vi.mock("@/lib/organization-context", () => ({ requireOrganizationRole, assertOrganizationContextInTransaction }));
 vi.mock("@/lib/db", () => ({ getDb }));
 vi.mock("@/lib/activity-log", () => ({ writeActivityLog }));
 vi.mock("next/cache", () => ({ revalidatePath }));
@@ -42,21 +40,21 @@ function makeDb() {
 describe("insurer mutations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    requireAdmin.mockRejectedValue(new Error("Esta acción requiere permisos de administrador."));
+    requireOrganizationRole.mockRejectedValue(new Error("Esta acción requiere permisos de organización."));
   });
 
   it.each([
     ["create", () => createInsurer(insurerValues)],
     ["update", () => updateInsurer("insurer-1", insurerValues)],
     ["delete", () => deleteInsurer("insurer-1")],
-  ])("requires an administrator before %s", async (_operation, invoke) => {
+  ])("requires an organization administrator before %s", async (_operation, invoke) => {
     const db = makeDb();
     getDb.mockReturnValue(db);
 
     const result = await invoke();
 
     expect(result).toEqual(expect.objectContaining({ ok: false }));
-    expect(requireAdmin).toHaveBeenCalledTimes(1);
+    expect(requireOrganizationRole).toHaveBeenCalledWith(["OWNER", "ADMIN"]);
     expect(db.insurer.create).not.toHaveBeenCalled();
     expect(db.insurer.findUnique).not.toHaveBeenCalled();
     expect(db.insurer.update).not.toHaveBeenCalled();

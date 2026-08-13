@@ -2,13 +2,8 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
-import { getCurrentUserId } from "@/lib/auth";
 import { logError } from "@/lib/logger";
-import {
-  assertClaimPortfolioAccess,
-  assertClientPortfolioAccess,
-  assertPolicyPortfolioAccess,
-} from "@/lib/portfolio-access";
+import { assertOrganizationContextInTransaction, requireOrganizationContext } from "@/lib/organization-context";
 import type { ClaimFormValues } from "@/lib/validations";
 import {
   errorResult,
@@ -38,19 +33,36 @@ function normalizeClaimInput(values: ClaimFormValues) {
 export async function createClaim(values: ClaimFormValues): Promise<MutationResult> {
   try {
     const db = getDb();
-
-    const userId = await getCurrentUserId();
-    await assertClientPortfolioAccess(values.clientId, userId);
-    await assertPolicyPortfolioAccess(values.policyId, userId);
-    const claim = await db.claim.create({
-      data: { ...normalizeClaimInput(values), createdById: userId, updatedById: userId },
-    });
-
-    await writeActivityLog({
-      action: "CREATE_CLAIM",
-      entityType: "Claim",
-      entityId: claim.id,
-      newValue: { folio: claim.folio },
+    const context = await requireOrganizationContext();
+    const claim = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const client = await tx.client.findFirst({
+        where: {
+          id: values.clientId,
+          organizationId: context.organizationId,
+          ...(context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {}),
+        },
+        select: { id: true },
+      });
+      const policy = await tx.policy.findFirst({
+        where: { id: values.policyId, organizationId: context.organizationId, clientId: values.clientId, insurerId: values.insurerId },
+        select: { id: true },
+      });
+      const insurer = await tx.insurer.findFirst({ where: { id: values.insurerId, organizationId: context.organizationId }, select: { id: true } });
+      if (!client || !policy || !insurer) throw new Error("TENANT_RELATION_MISMATCH");
+      const created = await tx.claim.create({
+        data: { organizationId: context.organizationId, ...normalizeClaimInput(values), createdById: context.userId, updatedById: context.userId },
+      });
+      await writeActivityLog({
+        organizationId: context.organizationId,
+        action: "CREATE_CLAIM",
+        entityType: "Claim",
+        entityId: created.id,
+        newValue: { folio: created.folio },
+        userId: context.userId,
+        db: tx,
+      });
+      return created;
     });
 
     revalidatePaths([
@@ -72,30 +84,29 @@ export async function createClaim(values: ClaimFormValues): Promise<MutationResu
 export async function updateClaim(id: string, values: ClaimFormValues): Promise<MutationResult> {
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
-    await assertClaimPortfolioAccess(id, userId);
-    await assertClientPortfolioAccess(values.clientId, userId);
-    await assertPolicyPortfolioAccess(values.policyId, userId);
-
-    const existingClaim = await db.claim.findUnique({
-      where: { id },
-    });
-
-    if (!existingClaim) {
-      return errorResult("Siniestro no encontrado.");
-    }
-
-    const claim = await db.claim.update({
-      where: { id },
-      data: { ...normalizeClaimInput(values), updatedById: userId },
-    });
-
-    await writeActivityLog({
-      action: "UPDATE_CLAIM",
-      entityType: "Claim",
-      entityId: claim.id,
-      oldValue: { folio: existingClaim.folio },
-      newValue: { folio: claim.folio },
+    const context = await requireOrganizationContext();
+    const claim = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const existing = await tx.claim.findFirst({
+        where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) },
+      });
+      const client = await tx.client.findFirst({ where: { id: values.clientId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {}) }, select: { id: true } });
+      const policy = await tx.policy.findFirst({ where: { id: values.policyId, organizationId: context.organizationId, clientId: values.clientId, insurerId: values.insurerId }, select: { id: true } });
+      const insurer = await tx.insurer.findFirst({ where: { id: values.insurerId, organizationId: context.organizationId }, select: { id: true } });
+      if (!existing) throw new Error("CLAIM_NOT_FOUND");
+      if (!client || !policy || !insurer) throw new Error("TENANT_RELATION_MISMATCH");
+      const updated = await tx.claim.update({ where: { id }, data: { ...normalizeClaimInput(values), updatedById: context.userId } });
+      await writeActivityLog({
+        organizationId: context.organizationId,
+        action: "UPDATE_CLAIM",
+        entityType: "Claim",
+        entityId: updated.id,
+        oldValue: { folio: existing.folio },
+        newValue: { folio: updated.folio },
+        userId: context.userId,
+        db: tx,
+      });
+      return updated;
     });
 
     revalidatePaths([
@@ -117,35 +128,26 @@ export async function updateClaim(id: string, values: ClaimFormValues): Promise<
 export async function deleteClaim(id: string): Promise<MutationResult> {
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
-    await assertClaimPortfolioAccess(id, userId);
-
-    const existingClaim = await db.claim.findUnique({
-      where: { id },
-      include: { _count: { select: { documents: true } } },
-    });
-
-    if (!existingClaim) {
-      return errorResult("El siniestro ya no existe.");
-    }
-
-    if (existingClaim.status === "IN_PROGRESS" || existingClaim.status === "WAITING_INSURER") {
-      return errorResult(
-        "No se puede eliminar: el siniestro está en proceso. Ciérralo o cancélalo antes de eliminarlo.",
-      );
-    }
-
-    await db.claim.delete({ where: { id } });
-
-    await writeActivityLog({
-      action: "DELETE_CLAIM",
-      entityType: "Claim",
-      entityId: id,
-      oldValue: {
-        folio: existingClaim.folio,
-        clientId: existingClaim.clientId,
-        policyId: existingClaim.policyId,
-      },
+    const context = await requireOrganizationContext();
+    const existingClaim = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const existing = await tx.claim.findFirst({
+        where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) },
+        include: { _count: { select: { documents: true } } },
+      });
+      if (!existing) throw new Error("CLAIM_NOT_FOUND");
+      if (existing.status === "IN_PROGRESS" || existing.status === "WAITING_INSURER") throw new Error("CLAIM_IN_PROGRESS");
+      await tx.claim.delete({ where: { id } });
+      await writeActivityLog({
+        organizationId: context.organizationId,
+        action: "DELETE_CLAIM",
+        entityType: "Claim",
+        entityId: id,
+        oldValue: { folio: existing.folio, clientId: existing.clientId, policyId: existing.policyId },
+        userId: context.userId,
+        db: tx,
+      });
+      return existing;
     });
 
     revalidatePaths([

@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { requireUserOrRedirect } from "@/lib/auth";
+import { requireOrganizationContext } from "@/lib/organization-context";
 import { getTelegramChannelStateForUser } from "@/lib/telegram";
 import { getNotificationPreferencesForUser } from "@/lib/notification-foundation";
 import { DEFAULT_USER_TIME_ZONE } from "@/lib/time-zones";
@@ -26,9 +27,9 @@ async function syncWebhookFormAction(_formData: FormData) {
 }
 
 export default async function NotificationSettingsPage() {
-  const user = await requireUserOrRedirect();
-  const snapshot = await getNotificationPreferencesForUser(user.id);
-  const channel = snapshot.channel ?? (await getTelegramChannelStateForUser(user.id));
+  const [user, context] = await Promise.all([requireUserOrRedirect(), requireOrganizationContext()]);
+  const snapshot = await getNotificationPreferencesForUser(context.organizationId, user.id);
+  const channel = snapshot.channel ?? (await getTelegramChannelStateForUser(context.organizationId, user.id));
   const timeZone = user.timeZone || DEFAULT_USER_TIME_ZONE;
   const cronSecretConfigured = Boolean(process.env.CRON_SECRET?.trim());
   const telegramConnected = channel.isEnabled && Boolean(channel.telegramChatId);

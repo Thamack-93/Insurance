@@ -912,7 +912,7 @@ model NotificationEvent {
   clientId    String?
   policyId    String?
   receiptId   String?
-  dedupeKey   String?   @unique
+  dedupeKey   String?
   channelType String
   status      String    @default("PENDING")
   sentAt      DateTime?
@@ -933,6 +933,7 @@ model NotificationEvent {
   @@index([createdAt])
   @@index([workItemId])
   @@index([clientId])
+  @@unique([organizationId, dedupeKey])
   @@index([policyId])
   @@index([receiptId])
   @@index([organizationId])

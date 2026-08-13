@@ -56,6 +56,20 @@ import {
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
+
+async function requireActiveTelegramOrganization(userId: string, db: DbClient): Promise<string> {
+  const membership = await db.organizationMembership.findFirst({
+    where: {
+      userId,
+      active: true,
+      user: { active: true },
+      organization: { status: "ACTIVE" },
+    },
+    select: { organizationId: true },
+  });
+  if (!membership) throw new Error("ORGANIZATION_ACCESS_DENIED");
+  return membership.organizationId;
+}
 type TelegramReceiptItem = {
   id: string;
   receiptNumber: string;
@@ -1686,6 +1700,7 @@ export async function sendTelegramDigestMessagesForUser(input: {
   timeZone?: string;
 }) {
   const db = input.client ?? getDb();
+  const organizationId = await requireActiveTelegramOrganization(input.userId, db);
   const timeZone = input.timeZone ?? DEFAULT_TIMEZONE;
   const parts = await buildTelegramDailyDigestMessagesByUser(input.userId, db, timeZone);
   let sent = 0;
@@ -1693,6 +1708,7 @@ export async function sendTelegramDigestMessagesForUser(input: {
 
   for (const part of parts) {
     const event = await createAndDeliverTelegramNotificationEvent({
+      organizationId,
       type: "DAILY_DIGEST",
       title: part.title,
       body: part.body,
@@ -1728,6 +1744,7 @@ export async function sendTelegramBirthdayReminderForUser(input: {
   now?: Date;
 }): Promise<TelegramBirthdayReminderResult> {
   const db = input.client ?? getDb();
+  const organizationId = await requireActiveTelegramOrganization(input.userId, db);
   const timeZone = input.timeZone ?? DEFAULT_TIMEZONE;
   const now = input.now ?? new Date();
   const birthdays = await getBirthdayRemindersForUser({
@@ -1743,6 +1760,7 @@ export async function sendTelegramBirthdayReminderForUser(input: {
 
   const message = buildBirthdayReminderMessage(birthdays, now, timeZone);
   const event = await createAndDeliverTelegramNotificationEvent({
+    organizationId,
     type: "BIRTHDAY_REMINDER",
     title: message.title,
     body: message.body,
@@ -2651,6 +2669,7 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
 }
 
 export async function createTelegramLinkCodeForUser(input: {
+  organizationId: string;
   userId: string;
   actorId: string;
   client?: DbClient;
@@ -2672,6 +2691,7 @@ export async function createTelegramLinkCodeForUser(input: {
 
       const token = await tx.telegramLinkToken.create({
         data: {
+          organizationId: input.organizationId,
           userId: input.userId,
           tokenHash,
           expiresAt,
@@ -2687,6 +2707,7 @@ export async function createTelegramLinkCodeForUser(input: {
 
     try {
       await writeActivityLog({
+        organizationId: input.organizationId,
         entityType: "TelegramLinkToken",
         entityId: result.tokenId,
         action: "TELEGRAM_LINK_CODE_GENERATED",
@@ -2757,7 +2778,8 @@ export async function connectTelegramChannelFromCode(input: {
         };
       }
 
-      await ensureNotificationDefaultsForUser(token.userId, tx);
+      if (!token.organizationId) throw new Error("ORGANIZATION_ACCESS_DENIED");
+      await ensureNotificationDefaultsForUser(token.organizationId, token.userId, tx);
 
       const conflictingChannel = await tx.notificationChannel.findFirst({
         where: {
@@ -2804,6 +2826,7 @@ export async function connectTelegramChannelFromCode(input: {
       return {
         ok: true as const,
         userId: token.userId,
+        organizationId: token.organizationId,
         channelId: channel.id,
         previousChannel,
       };
@@ -2815,6 +2838,7 @@ export async function connectTelegramChannelFromCode(input: {
 
     try {
       await writeActivityLog({
+        organizationId: result.organizationId,
         entityType: "NotificationChannel",
         entityId: result.channelId,
         action: result.previousChannel?.telegramChatId ? "TELEGRAM_RELINKED" : "TELEGRAM_LINKED",
@@ -2849,6 +2873,7 @@ export async function connectTelegramChannelFromCode(input: {
 }
 
 export async function disconnectTelegramChannelForUser(input: {
+  organizationId: string;
   userId: string;
   actorId: string;
   client?: DbClient;
@@ -2857,7 +2882,7 @@ export async function disconnectTelegramChannelForUser(input: {
 
   try {
     const result = await db.$transaction(async (tx) => {
-      await ensureNotificationDefaultsForUser(input.userId, tx);
+      await ensureNotificationDefaultsForUser(input.organizationId, input.userId, tx);
       const current = await getTelegramChannelByUserId(input.userId, tx);
       if (!current || (!current.isEnabled && !current.telegramChatId)) {
         return {
@@ -2881,6 +2906,7 @@ export async function disconnectTelegramChannelForUser(input: {
 
       await writeActivityLog(
         {
+          organizationId: input.organizationId,
           entityType: "NotificationChannel",
           entityId: updated.id,
           action: "TELEGRAM_DISCONNECTED",
@@ -2963,6 +2989,7 @@ export async function deliverTelegramNotificationEvent(
 }
 
 export async function createAndDeliverTelegramNotificationEvent(input: {
+  organizationId: string;
   type: string;
   title: string;
   body: string;
@@ -2976,6 +3003,7 @@ export async function createAndDeliverTelegramNotificationEvent(input: {
   force?: boolean;
 }): Promise<NotificationEventRecord | null> {
   const event = await createNotificationEvent({
+    organizationId: input.organizationId,
     type: input.type,
     title: input.title,
     body: input.body,
@@ -3354,10 +3382,10 @@ export async function processTelegramWebhookUpdate(
   }
 }
 
-export async function getTelegramChannelStateForUser(userId: string, client?: DbClient) {
+export async function getTelegramChannelStateForUser(organizationId: string, userId: string, client?: DbClient) {
   const db = client ?? getDb();
   try {
-    await ensureNotificationDefaultsForUser(userId, db);
+    await ensureNotificationDefaultsForUser(organizationId, userId, db);
     return (await getTelegramChannelByUserId(userId, db)) ?? createFallbackTelegramChannelState(userId);
   } catch (error) {
     logError("telegram.getTelegramChannelStateForUser", error, { userId });

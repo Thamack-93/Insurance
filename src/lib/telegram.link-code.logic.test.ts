@@ -85,6 +85,7 @@ describe("telegram link code generation", () => {
 
     await expect(
       createTelegramLinkCodeForUser({
+        organizationId: "org-1",
         userId: "user-1",
         actorId: "user-1",
       }),

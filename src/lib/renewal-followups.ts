@@ -114,7 +114,7 @@ export async function runRenewalFollowUpScan(now: Date = new Date()): Promise<Re
 
       const dedupeKey = renewalFollowUpDedupeKey(card.policyId, card.stage, weekKey);
       const alreadyNotified = await db.notificationEvent.findUnique({
-        where: { dedupeKey },
+        where: { organizationId_dedupeKey: { organizationId: card.organizationId, dedupeKey } },
         select: { id: true },
       });
 
@@ -150,6 +150,7 @@ export async function runRenewalFollowUpScan(now: Date = new Date()): Promise<Re
 
       const event = await createNotificationEvent(
         {
+          organizationId: card.organizationId,
           type: "RENEWAL_FOLLOWUP",
           title: message.title,
           body: message.body,

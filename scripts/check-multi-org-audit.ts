@@ -94,6 +94,14 @@ export async function auditMultiOrganizationState(client: PoolClient): Promise<A
   const unsafeDemoMembers = await count(client, `SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "Organization" o ON o."id"=m."organizationId" JOIN "User" u ON u."id"=m."userId" WHERE o."kind"='DEMO' AND lower(u."email") NOT LIKE '%@policydesk.local'`);
   if (unsafeDemoMembers > 0) issues.push("DEMO_MEMBERSHIP_NOT_SYNTHETIC");
 
+  const tenantDedupeIndexes = await client.query<{ indexname: string; indexdef: string }>(`
+    SELECT indexname, indexdef FROM pg_indexes
+    WHERE schemaname='public' AND indexname = ANY($1::text[])
+  `, [["WorkItem_organizationId_sourceType_sourceId_key", "NotificationEvent_organizationId_dedupeKey_key"]]);
+  const definitions = new Map(tenantDedupeIndexes.rows.map(({ indexname, indexdef }) => [indexname, indexdef]));
+  if (!definitions.get("WorkItem_organizationId_sourceType_sourceId_key")?.includes('UNIQUE INDEX') || !definitions.get("WorkItem_organizationId_sourceType_sourceId_key")?.includes('"organizationId", "sourceType", "sourceId"')) issues.push("WORK_ITEM_TENANT_DEDUPE_INDEX_INVALID");
+  if (!definitions.get("NotificationEvent_organizationId_dedupeKey_key")?.includes('UNIQUE INDEX') || !definitions.get("NotificationEvent_organizationId_dedupeKey_key")?.includes('"organizationId", "dedupeKey"')) issues.push("NOTIFICATION_EVENT_TENANT_DEDUPE_INDEX_INVALID");
+
   return { ok: issues.length === 0, issues, summary };
 }
 
