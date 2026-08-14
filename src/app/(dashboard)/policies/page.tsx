@@ -14,7 +14,7 @@ import { daysUntil, formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
 import { policyStatusOptions, policyTypeOptions } from "@/lib/domain-options";
-import { policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { organizationOperationalWhere, policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 import { buildTableHref } from "@/lib/table-query";
 import {
@@ -46,7 +46,7 @@ export default async function PoliciesPage({
   const scope = await requirePortfolioReadScope();
   const now = today();
   const in60 = businessAddDays(now, 60);
-  const portfolioWhere = policyOperationalWhere(scope.portfolioOwnerId);
+  const portfolioWhere = { ...policyOperationalWhere(scope.portfolioOwnerId), ...organizationOperationalWhere(scope.organizationId) };
   const renewals60Promise = loadEligibleRenewalPolicies(
     {
       endDate: {
@@ -61,7 +61,7 @@ export default async function PoliciesPage({
     scope.portfolioOwnerId,
   );
 
-  const where = buildPolicyListWhere(filters, scope.portfolioOwnerId);
+  const where = buildPolicyListWhere(filters, scope.portfolioOwnerId, scope.organizationId);
   const orderBy = buildPolicyListOrderBy(filters);
   const clearFiltersHref = buildTableHref("/policies", params, {
     q: null,

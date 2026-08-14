@@ -14,6 +14,7 @@ import {
   policyOperationalWhere,
   receiptOperationalWhere,
   workItemOperationalWhere,
+  organizationOperationalWhere,
 } from "@/lib/portfolio-access";
 
 export type RiskFinding = {
@@ -28,14 +29,16 @@ export type RiskFinding = {
 
 const TAKE_LIMIT = 25;
 
-export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFinding[]> {
+export async function detectRisks(portfolioOwnerId?: string, organizationId?: string): Promise<RiskFinding[]> {
   const db = getDb();
   const now = today();
   const in60 = businessAddDays(now, 60);
   const olderThan15 = businessAddDays(now, -15);
-  const policyScope = policyOperationalWhere(portfolioOwnerId);
+  const organizationScope = organizationId ? organizationOperationalWhere(organizationId) : {};
+  const policyScope = { ...policyOperationalWhere(portfolioOwnerId), ...organizationScope };
   const activeClientScope = {
     ...clientOperationalWhere(portfolioOwnerId),
+    ...organizationScope,
     status: "ACTIVE",
   } satisfies Prisma.ClientWhereInput;
   const activeRenewalScope = {
@@ -53,10 +56,10 @@ export async function detectRisks(portfolioOwnerId?: string): Promise<RiskFindin
       },
     },
   };
-  const receiptScope = receiptOperationalWhere(portfolioOwnerId);
-  const commissionScope = commissionOperationalWhere(portfolioOwnerId);
-  const workItemScope = workItemOperationalWhere(portfolioOwnerId);
-  const documentScope = documentOperationalWhere(portfolioOwnerId);
+  const receiptScope = { ...receiptOperationalWhere(portfolioOwnerId), ...organizationScope };
+  const commissionScope = { ...commissionOperationalWhere(portfolioOwnerId), ...organizationScope };
+  const workItemScope = { ...workItemOperationalWhere(portfolioOwnerId), ...organizationScope };
+  const documentScope = { ...documentOperationalWhere(portfolioOwnerId), ...organizationScope };
 
   const [
     suppressionRules,

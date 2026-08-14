@@ -11,6 +11,8 @@ type PortfolioUser = {
 
 export type PortfolioReadScope = PortfolioUser & {
   portfolioOwnerId?: string;
+  /** Cycle 1 keeps one organization, but every scoped read carries it explicitly. */
+  organizationId: string;
 };
 
 export async function requirePortfolioUser(): Promise<PortfolioUser> {
@@ -20,7 +22,29 @@ export async function requirePortfolioUser(): Promise<PortfolioUser> {
 
 export async function requirePortfolioReadScope(): Promise<PortfolioReadScope> {
   const user = await requirePortfolioUser();
-  return { ...user, portfolioOwnerId: getPortfolioOwnerIdForRead(user) };
+  const organizationId = await getOrganizationIdForUser(user.id);
+  if (!organizationId) {
+    throw new AuthError("Tu cuenta no tiene una organización activa.", 403);
+  }
+  return { ...user, portfolioOwnerId: getPortfolioOwnerIdForRead(user), organizationId };
+}
+
+export async function getOrganizationIdForUser(userId: string): Promise<string | null> {
+  const db = getDb();
+  const membership = await db.organizationMembership.findFirst({
+    where: {
+      userId,
+      active: true,
+      organization: { status: { in: ["ACTIVE", "BOOTSTRAP"] } },
+    },
+    orderBy: [{ createdAt: "asc" }, { organizationId: "asc" }],
+    select: { organizationId: true },
+  });
+  return membership?.organizationId ?? null;
+}
+
+export function organizationOperationalWhere(organizationId: string) {
+  return { organizationId };
 }
 
 export function getPortfolioOwnerIdForRead(user: PortfolioUser): string | undefined {

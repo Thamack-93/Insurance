@@ -162,4 +162,16 @@ describe("work queue legacy renewal context", () => {
       }),
     }));
   });
+
+  it("sorts priorities semantically before applying the limit", async () => {
+    db.workItem.findMany.mockResolvedValue([
+      { ...legacyRenewal(), id: "low", priority: "LOW", client: { id: "c2", fullName: "Ángel" } },
+      { ...legacyRenewal(), id: "high", priority: "HIGH", client: { id: "c1", fullName: "Zoé" } },
+    ]);
+    db.policy.findMany.mockResolvedValue([]);
+
+    const items = await getWorkItems({ limit: 2 });
+
+    expect(items.map((item) => item.priority)).toEqual(["HIGH", "LOW"]);
+  });
 });

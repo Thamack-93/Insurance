@@ -92,8 +92,13 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     db.receipt.findMany({
       where: { policyId: id, endorsementId: null },
       include: { client: true, insurer: true, endorsement: true },
-      orderBy: { dueDate: "desc" },
-      take: 10,
+      orderBy: [
+        { periodStartDate: "asc" },
+        { periodEndDate: "asc" },
+        { receiptSequence: { sort: "asc", nulls: "last" } },
+        { receiptNumber: "asc" },
+        { id: "asc" },
+      ],
     }),
     db.receipt.count({
       where: {
@@ -140,13 +145,13 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     db.payment.findMany({
       where: { policyId: id, status: "POSTED" },
       include: { client: true },
-      orderBy: { paidDate: "desc" },
+      orderBy: [{ paidDate: "desc" }, { id: "desc" }],
       take: 10,
     }),
     db.commission.findMany({
       where: { policyId: id },
       include: { client: true, insurer: true, receipt: true },
-      orderBy: { expectedDate: "desc" },
+      orderBy: [{ expectedDate: "desc" }, { id: "desc" }],
       take: 10,
     }),
     getWorkItems({
@@ -157,7 +162,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     db.document.findMany({
       where: { policyId: id },
       include: { receipt: true, task: true, claim: true, quote: true, endorsement: true },
-      orderBy: { uploadedAt: "desc" },
+      orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
       take: 10,
     }),
     db.policyEndorsement.findMany({
@@ -165,7 +170,13 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       include: {
         receipts: {
           include: { client: true, insurer: true, endorsement: true },
-          orderBy: { dueDate: "asc" },
+          orderBy: [
+            { periodStartDate: "asc" },
+            { periodEndDate: "asc" },
+            { receiptSequence: { sort: "asc", nulls: "last" } },
+            { receiptNumber: "asc" },
+            { id: "asc" },
+          ],
         },
         documents: {
           include: {
@@ -174,7 +185,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
           },
         },
       },
-      orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
+      orderBy: [{ startDate: "desc" }, { createdAt: "desc" }, { id: "asc" }],
     }),
     getActivityForEntity("Policy", id, 20),
     getPolicyFamilyPolicies(id),

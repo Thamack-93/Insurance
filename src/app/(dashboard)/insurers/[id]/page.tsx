@@ -38,18 +38,18 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
     db.policy.findMany({
       where: { insurerId: id, ...policyOperationalWhere() },
       include: { client: true },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     }),
     db.claim.findMany({
       where: { insurerId: id, ...claimOperationalWhere() },
       include: { client: true },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 10,
     }),
     db.commission.findMany({
       where: { insurerId: id, ...commissionOperationalWhere() },
       include: { policy: true, client: true },
-      orderBy: { expectedDate: "desc" },
+      orderBy: [{ expectedDate: "desc" }, { id: "desc" }],
       take: 10,
     }),
     getActivityForEntity("Insurer", id, 20),

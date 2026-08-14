@@ -10,6 +10,7 @@ import { Client as PgClient } from "pg";
 import { businessStartOfDay, parseBusinessDateInput } from "../src/lib/business-dates.ts";
 import { createDatabaseBackup } from "../src/lib/backup.ts";
 import { reconcileReceiptState } from "@/lib/receipt-reconciliation";
+import { receiptSequenceForNumber } from "@/lib/sorting";
 
 type Mode = "dry-run" | "apply";
 
@@ -1389,10 +1390,11 @@ async function runImport(args: Args) {
 
         if (args.mode === "apply") {
           await db.query(
-          'insert into public."Receipt" (id, "receiptNumber", "policyId", "endorsementId", "clientId", "insurerId", "periodStartDate", "periodEndDate", "dueDate", amount, currency, status, "paidDate", "paymentMethod", "createdAt", "updatedAt", "createdById", "updatedById") values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now(),now(),$15,$15)',
+          'insert into public."Receipt" (id, "receiptNumber", "receiptSequence", "policyId", "endorsementId", "clientId", "insurerId", "periodStartDate", "periodEndDate", "dueDate", amount, currency, status, "paidDate", "paymentMethod", "createdAt", "updatedAt", "createdById", "updatedById") values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now(),now(),$16,$16)',
             [
               newReceipt.id,
               newReceipt.receiptNumber,
+              receiptSequenceForNumber(newReceipt.receiptNumber),
               newReceipt.policyId,
               newReceipt.endorsementId,
               newReceipt.clientId,

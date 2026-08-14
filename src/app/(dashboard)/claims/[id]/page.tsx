@@ -30,7 +30,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
       client: true,
       policy: { include: { insurer: true } },
       insurer: true,
-      documents: { orderBy: { uploadedAt: "desc" } },
+      documents: { orderBy: [{ uploadedAt: "desc" }, { id: "desc" }] },
     },
   });
 
@@ -41,7 +41,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
   const [relatedClaims, activity] = await Promise.all([
     db.claim.findMany({
       where: { ...claimScope, policyId: claim.policyId, id: { not: id } },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 5,
     }),
     getActivityForEntity("Claim", id, 20),

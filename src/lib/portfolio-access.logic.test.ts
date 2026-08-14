@@ -6,6 +6,7 @@ import {
   claimOperationalWhere,
   documentOperationalWhere,
   getPortfolioOwnerIdForRead,
+  organizationOperationalWhere,
   policyOperationalWhere,
   quoteOperationalWhere,
   receiptOperationalWhere,
@@ -59,5 +60,11 @@ describe("portfolio access helpers", () => {
     expect(quoteOperationalWhere()).toEqual({});
     expect(documentOperationalWhere()).toEqual({});
     expect(workItemOperationalWhere()).toEqual({});
+  });
+
+  it("keeps the active organization predicate explicit", () => {
+    expect(organizationOperationalWhere("org_legacy_singleton_0001")).toEqual({
+      organizationId: "org_legacy_singleton_0001",
+    });
   });
 });

@@ -21,6 +21,7 @@ import { formatCurrency, toNumber } from "@/lib/money";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import {
   paymentOperationalWhere,
+  organizationOperationalWhere,
   receiptOperationalWhere,
   receiptPortfolioWhere,
   requirePortfolioReadScope,
@@ -58,13 +59,14 @@ export default async function ReceiptsPage({
     tab: "cobrar",
   });
 
-  const baseWhere = buildOpenReceiptBaseWhere(scope.portfolioOwnerId);
-  const scopedReceiptWhere = receiptOperationalWhere(scope.portfolioOwnerId);
-  const scopedPaymentWhere = paymentOperationalWhere(scope.portfolioOwnerId);
+  const baseWhere = buildOpenReceiptBaseWhere(scope.portfolioOwnerId, scope.organizationId);
+  const organizationScope = organizationOperationalWhere(scope.organizationId);
+  const scopedReceiptWhere = { ...receiptOperationalWhere(scope.portfolioOwnerId), ...organizationScope };
+  const scopedPaymentWhere = { ...paymentOperationalWhere(scope.portfolioOwnerId), ...organizationScope };
   const scopedReceiptIssueWhere: Prisma.ReceiptReconciliationIssueWhereInput = scope.portfolioOwnerId
-    ? { receipt: receiptPortfolioWhere(scope.portfolioOwnerId) }
+    ? { receipt: { ...receiptPortfolioWhere(scope.portfolioOwnerId), ...organizationScope } }
     : {};
-  const where = buildReceiptListWhere(filters, scope.portfolioOwnerId);
+  const where = buildReceiptListWhere(filters, scope.portfolioOwnerId, scope.organizationId);
 
   const orderBy = buildReceiptListOrderBy(filters);
 
@@ -85,7 +87,7 @@ export default async function ReceiptsPage({
     db.receipt.findMany({
       where: { ...scopedReceiptWhere, status: "PAID", paidDate: { gte: monthStart } },
       include: { client: true, policy: true, insurer: true, endorsement: true },
-      orderBy: { paidDate: "desc" },
+      orderBy: [{ paidDate: "desc" }, { id: "desc" }],
     }),
     db.receipt.aggregate({ _sum: { amount: true }, where: baseWhere }),
     db.receipt.aggregate({
@@ -114,7 +116,7 @@ export default async function ReceiptsPage({
         client: { select: { id: true, fullName: true } },
         policy: { select: { id: true, policyNumber: true } },
       },
-      orderBy: { paidDate: "desc" },
+      orderBy: [{ paidDate: "desc" }, { id: "desc" }],
       take: 50,
     }),
     db.receiptReconciliationIssue.findMany({
@@ -126,7 +128,7 @@ export default async function ReceiptsPage({
         receipt: { include: { payments: { where: { status: "POSTED" } }, client: true } },
         policy: true,
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 100,
     }),
   ]);

@@ -12,26 +12,31 @@ import { Pagination } from "@/components/lists/pagination";
 import { getDb } from "@/lib/db";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { requireAdminOrRedirect } from "@/lib/auth";
-import { claimOperationalWhere, policyOperationalWhere } from "@/lib/portfolio-access";
+import { claimOperationalWhere, organizationOperationalWhere, policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 
 const PAGE_SIZE = 25;
 
 export default async function InsurersPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; page?: string }>;
+  searchParams?: Promise<{ q?: string; page?: string; status?: string }>;
 }) {
   const user = await requireAdminOrRedirect();
+  const scope = await requirePortfolioReadScope();
   const isAdmin = user.role === "ADMIN";
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
+  const status = params.status === "ARCHIVED" ? "ARCHIVED" : params.status === "ALL" ? undefined : "ACTIVE";
   const page = Math.max(1, Number(params.page) || 1);
-  const policyScope = policyOperationalWhere();
-  const claimScope = claimOperationalWhere();
+  const organizationScope = organizationOperationalWhere(scope.organizationId);
+  const policyScope = { ...policyOperationalWhere(scope.portfolioOwnerId), ...organizationScope };
+  const claimScope = { ...claimOperationalWhere(scope.portfolioOwnerId), ...organizationScope };
 
   const db = getDb();
 
-  const where: Prisma.InsurerWhereInput = query
+  const where: Prisma.InsurerWhereInput = {
+    ...(status ? { status } : {}),
+    ...(query
     ? {
         OR: [
           { name: { contains: query } },
@@ -39,7 +44,8 @@ export default async function InsurersPage({
           { contactName: { contains: query } },
         ],
       }
-    : {};
+      : {}),
+  };
 
   const [
     activeCount,
@@ -50,8 +56,8 @@ export default async function InsurersPage({
     filteredCount,
     pagedInsurers,
   ] = await Promise.all([
-    db.insurer.count({ where: { status: "ACTIVE" } }),
-    db.insurer.count({ where: { status: "ARCHIVED" } }),
+    db.insurer.count({ where: { ...organizationScope, status: "ACTIVE" } }),
+    db.insurer.count({ where: { ...organizationScope, status: "ARCHIVED" } }),
     db.policy.count({ where: policyScope }),
     db.claim.count({ where: claimScope }),
     db.policy.aggregate({
@@ -61,7 +67,7 @@ export default async function InsurersPage({
     db.insurer.count({ where }),
     db.insurer.findMany({
       where,
-      orderBy: { name: "asc" },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
       include: {
         _count: {
           select: {
@@ -139,10 +145,17 @@ export default async function InsurersPage({
           />
         </section>
 
-        <SectionCard
+          <SectionCard
           title="Directorio de aseguradoras"
           description="Listado completo con métricas de negocio."
-          action={<ListSearch placeholder="Buscar por nombre o contacto..." />}
+          action={
+            <div className="flex items-center gap-2">
+              <Link className={status === "ACTIVE" ? "font-semibold" : "text-muted-foreground"} href="/insurers">Activas</Link>
+              <Link className={status === undefined ? "font-semibold" : "text-muted-foreground"} href="/insurers?status=ALL">Todas</Link>
+              <Link className={status === "ARCHIVED" ? "font-semibold" : "text-muted-foreground"} href="/insurers?status=ARCHIVED">Archivadas</Link>
+              <ListSearch placeholder="Buscar por nombre o contacto..." />
+            </div>
+          }
         >
           {filteredCount === 0 ? (
             query ? (

@@ -61,7 +61,7 @@ const clientsDataset: ExportDataset = {
     const db = getDb();
 
     const records = await db.client.findMany({
-      where: buildClientListWhere(filters, scope.portfolioOwnerId),
+      where: buildClientListWhere(filters, scope.portfolioOwnerId, scope.organizationId),
       orderBy: buildClientListOrderBy(filters),
       include: { _count: { select: { policies: true, receipts: true, tasks: true } } },
       take: EXPORT_ROW_LIMIT + 1,
@@ -109,7 +109,7 @@ const policiesDataset: ExportDataset = {
     const db = getDb();
 
     const records = await db.policy.findMany({
-      where: buildPolicyListWhere(filters, scope.portfolioOwnerId),
+      where: buildPolicyListWhere(filters, scope.portfolioOwnerId, scope.organizationId),
       orderBy: buildPolicyListOrderBy(filters),
       include: { client: true, insurer: true },
       take: EXPORT_ROW_LIMIT + 1,
@@ -155,7 +155,7 @@ const receiptsDataset: ExportDataset = {
     const db = getDb();
 
     const records = await db.receipt.findMany({
-      where: buildReceiptListWhere(filters, scope.portfolioOwnerId),
+      where: buildReceiptListWhere(filters, scope.portfolioOwnerId, scope.organizationId),
       orderBy: buildReceiptListOrderBy(filters),
       include: { client: true, policy: true, insurer: true, endorsement: true },
       take: EXPORT_ROW_LIMIT + 1,
@@ -201,7 +201,7 @@ const quotesDataset: ExportDataset = {
     const db = getDb();
 
     const records = await db.quote.findMany({
-      where: buildQuoteListWhere(filters, scope.portfolioOwnerId),
+      where: buildQuoteListWhere(filters, scope.portfolioOwnerId, scope.organizationId),
       orderBy: buildQuoteListOrderBy(filters),
       include: { client: true, insurer: true },
       take: EXPORT_ROW_LIMIT + 1,

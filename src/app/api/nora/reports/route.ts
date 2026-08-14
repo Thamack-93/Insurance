@@ -3,7 +3,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { AuthError } from "@/lib/auth";
 import { businessAddDays, businessEndOfDay, businessToday, formatBusinessDateInput, parseBusinessDateInput } from "@/lib/business-dates";
 import { getDb } from "@/lib/db";
-import { commissionOperationalWhere, policyOperationalWhere, receiptOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { commissionOperationalWhere, organizationOperationalWhere, policyOperationalWhere, receiptOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 import { getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 
 export const runtime = "nodejs";
@@ -38,6 +38,7 @@ export async function GET(request: NextRequest) {
       const receipts = await db.receipt.findMany({
         where: {
           ...receiptOperationalWhere(scope.portfolioOwnerId),
+          ...organizationOperationalWhere(scope.organizationId),
           dueDate: filter === "overdue" || !filter ? { gte: from, lt: overdueEndExclusive } : { gte: from, lte: businessEndOfDay(to) },
           ...(receiptStatus ? { status: receiptStatus } : {}),
         },
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
           policy: { select: { policyNumber: true } },
           insurer: { select: { name: true } },
         },
-        orderBy: [{ dueDate: "asc" }, { receiptNumber: "asc" }],
+        orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }],
         take: 1000,
       });
       return NextResponse.json({

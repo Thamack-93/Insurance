@@ -414,6 +414,9 @@ model Receipt {
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                       String    @id @default(cuid())
   receiptNumber            String
+  /// Numeric suffix used only for stable human ordering; the displayed
+  /// receiptNumber remains the source value (for example, REC-001).
+  receiptSequence          Int?
   policyId                 String
   endorsementId            String?
   clientId                 String
@@ -455,6 +458,7 @@ model Receipt {
   alerts               Alert[]
 
   @@index([receiptNumber])
+  @@index([policyId, receiptSequence])
   @@index([policyId])
   @@index([endorsementId])
   @@index([clientId])

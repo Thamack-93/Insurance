@@ -9,6 +9,7 @@ import {
   clientOperationalWhere,
   policyOperationalWhere,
   receiptOperationalWhere,
+  organizationOperationalWhere,
 } from "@/lib/portfolio-access";
 
 export type DataQualityIssue = {
@@ -484,11 +485,11 @@ export async function getLedgerReviewIssues(): Promise<LedgerReviewIssue[]> {
     }));
 }
 
-export async function getClientDataQualityScores(portfolioOwnerId?: string) {
+export async function getClientDataQualityScores(portfolioOwnerId?: string, organizationId?: string) {
   const db = getDb();
   const suppressionRules = await loadRiskSuppressionRules();
   const clients = await db.client.findMany({
-    where: { ...clientOperationalWhere(portfolioOwnerId), status: "ACTIVE" },
+    where: { ...clientOperationalWhere(portfolioOwnerId), ...(organizationId ? organizationOperationalWhere(organizationId) : {}), status: "ACTIVE" },
     select: {
       id: true,
       fullName: true,
@@ -613,11 +614,11 @@ export async function getClientDataQualityScores(portfolioOwnerId?: string) {
     .sort((a, b) => a.score - b.score || a.cliente.localeCompare(b.cliente));
 }
 
-export async function getPolicyDataQualityScores(portfolioOwnerId?: string) {
+export async function getPolicyDataQualityScores(portfolioOwnerId?: string, organizationId?: string) {
   const db = getDb();
   const suppressionRules = await loadRiskSuppressionRules();
   const policies = await db.policy.findMany({
-    where: policyOperationalWhere(portfolioOwnerId),
+    where: { ...policyOperationalWhere(portfolioOwnerId), ...(organizationId ? organizationOperationalWhere(organizationId) : {}) },
     select: {
       id: true,
       policyNumber: true,

@@ -55,13 +55,18 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     db.policy.findMany({
       where: { clientId: id },
       include: { insurer: true },
-      orderBy: [{ status: "asc" }, { endDate: "asc" }],
+      orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }, { id: "asc" }],
       take: 10,
     }),
     db.receipt.findMany({
       where: { clientId: id },
       include: { policy: true, insurer: true },
-      orderBy: { dueDate: "desc" },
+      orderBy: [
+        { dueDate: "desc" },
+        { receiptSequence: { sort: "desc", nulls: "last" } },
+        { receiptNumber: "desc" },
+        { id: "desc" },
+      ],
       take: 10,
     }),
     getWorkItems({
@@ -72,19 +77,19 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     db.claim.findMany({
       where: { clientId: id },
       include: { policy: true, insurer: true },
-      orderBy: { reportedDate: "desc" },
+      orderBy: [{ reportedDate: "desc" }, { id: "desc" }],
       take: 5,
     }),
     db.quote.findMany({
       where: { clientId: id },
       include: { insurer: true },
-      orderBy: { requestedDate: "desc" },
+      orderBy: [{ requestedDate: "desc" }, { id: "desc" }],
       take: 5,
     }),
     db.document.findMany({
       where: { clientId: id },
       include: { policy: true, receipt: true, task: true, claim: true, quote: true },
-      orderBy: { uploadedAt: "desc" },
+      orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
       take: 20,
     }),
     db.client.findMany({

@@ -272,6 +272,9 @@ export async function fetchPdfCaptureWithTimeout(
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
     if (abortFromParent) signal?.removeEventListener("abort", abortFromParent);
-    controller.abort();
+    // Do not abort a successful fetch here: callers still need to consume
+    // response.json()/response.text() after this helper returns the Response.
+    // Abort only when the request was cancelled or timed out.
+    if (timedOut || signal?.aborted) controller.abort();
   }
 }

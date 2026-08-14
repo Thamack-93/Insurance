@@ -2,6 +2,7 @@ import { addMonths } from "date-fns";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { parseDateInput } from "@/lib/form-utils";
 import type { PolicyPdfCaptureDraft, PolicyPdfCaptureReceiptEvidence } from "@/lib/policy-pdf-capture.shared";
+import { receiptSequenceForNumber } from "@/lib/sorting";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -21,6 +22,7 @@ export type AutoCaptureReceiptInput = {
 
 export type AutoCaptureReceiptPayload = {
   receiptNumber: string;
+  receiptSequence: number | null;
   policyId: string;
   endorsementId: null;
   clientId: string;
@@ -180,6 +182,7 @@ function buildAutoCaptureReceiptPayloadFromTerm(
 
   return {
     receiptNumber: term.receiptNumber,
+    receiptSequence: receiptSequenceForNumber(term.receiptNumber),
     policyId: input.policyId,
     endorsementId: null,
     clientId: input.clientId,
@@ -215,6 +218,7 @@ async function upsertAutoCaptureReceipt(db: DbClient, payload: AutoCaptureReceip
     where: {
       policyId: payload.policyId,
       receiptNumber: payload.receiptNumber,
+      receiptSequence: payload.receiptSequence,
     },
     select: {
       id: true,

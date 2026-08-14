@@ -34,7 +34,6 @@ import { buildNoraPolicyPdfPathname } from "@/lib/nora-pdf-storage.shared";
 import {
   fetchPdfCaptureWithTimeout,
   PDF_CAPTURE_ANALYSIS_TIMEOUT_MS,
-  PdfCaptureUploadError,
   uploadPdfWithRetry,
 } from "@/lib/pdf-capture-client";
 import type { PolicyCaptureSearchItem, PolicyCaptureSearchKind } from "@/lib/policy-capture-search";
@@ -511,26 +510,16 @@ export function PolicyPdfCapturePanel({ userId, handoffId }: { userId: string; h
     const signal = controller.signal;
     const operationId = makeCaptureHandoffId();
     setCurrentHandoffId(operationId);
-    let retentionPending = false;
-
     try {
       const extractedText = options.combinedText ?? await extractPdfTextFromFile(targetFile, { timeoutMs: 12_000, signal }).catch(() => "");
       if (extractedText.trim() && isPolicyPdfReceiptOnlyText(extractedText)) {
         throw new Error("Este PDF parece ser un recibo o ficha de depósito. Agrúpalo con la carátula de la misma póliza antes de capturarlo.");
       }
-      const retentionPromise = extractedText.trim()
-        ? uploadPdfWithRetry({
-            pathname: buildNoraPolicyPdfPathname(userId, targetFile.name),
-            file: targetFile,
-            handleUploadUrl: "/api/nora/policy-pdf/upload",
-            clientPayload: JSON.stringify({ userId, purpose: "policy-capture", fileName: targetFile.name, operationId }),
-            signal,
-          })
-        : null;
-      retentionPending = Boolean(retentionPromise);
-      if (retentionPromise) void retentionPromise.catch(() => undefined);
+      // Local extraction is sufficient for the capture preview and confirmation.
+      // Do not start an optional Blob upload in parallel here: a cancelled or
+      // unavailable retention upload must not abort an otherwise valid capture.
       let uploaded: Awaited<ReturnType<typeof uploadPdfWithRetry>> | null = null;
-      if (!retentionPromise) {
+      if (!extractedText.trim()) {
         try {
           uploaded = await uploadPdfWithRetry({
             pathname: buildNoraPolicyPdfPathname(userId, targetFile.name),
@@ -570,8 +559,7 @@ export function PolicyPdfCapturePanel({ userId, handoffId }: { userId: string; h
       }
 
       let nextPreview = result.preview;
-      if (retentionPromise) nextPreview = withStorageStatus(nextPreview, "pending", { retryable: true });
-      else if (uploaded) nextPreview = withStorageStatus(nextPreview, "retained", { attempts: uploaded.attempts, retryable: false });
+      if (uploaded) nextPreview = withStorageStatus(nextPreview, "retained", { attempts: uploaded.attempts, retryable: false });
       setPreview(nextPreview);
       const reference = result.pdfReference ?? (uploaded ? { url: uploaded.url, fileName: targetFile.name, expiresAt: Date.now() + 30 * 60 * 1000 } : null);
       setPdfReference(reference);
@@ -590,23 +578,6 @@ export function PolicyPdfCapturePanel({ userId, handoffId }: { userId: string; h
       setSelectedSourcePolicyLabel(nextPreview.suggestions.sourcePolicyId ? nextPreview.draft.sourcePolicyNumber ?? "" : "");
       setShowInlineClient(!nextPreview.suggestions.clientId);
       toast.success("PDF analizado. Revisa la propuesta y confirma.");
-      if (retentionPromise) {
-        void retentionPromise.then((retained) => {
-          if (signal.aborted) return;
-          const retainedPreview = withStorageStatus(nextPreview, "retained", { attempts: retained.attempts, retryable: false });
-          setPreview(retainedPreview);
-          setPdfReference({ url: retained.url, fileName: targetFile.name, expiresAt: Date.now() + 30 * 60 * 1000 });
-        }).catch((error) => {
-          if (signal.aborted) return;
-          const uploadError = error instanceof PdfCaptureUploadError ? error : null;
-          const failedPreview = withStorageStatus(nextPreview, uploadError?.retryable ? "retryable" : "unavailable", { errorCode: uploadError?.code ?? "UPLOAD_UNKNOWN", attempts: uploadError?.attempts, retryable: uploadError?.retryable ?? false });
-          setPreview(failedPreview);
-          toast.error(error instanceof Error ? error.message : "No se pudo conservar temporalmente el PDF.");
-        }).finally(() => {
-          retentionPending = false;
-          if (operationControllerRef.current === controller) operationControllerRef.current = null;
-        });
-      }
     } catch (analysisError) {
       const message = analysisError instanceof Error ? analysisError.message : "No se pudo analizar el PDF.";
       if (!signal.aborted) {
@@ -614,7 +585,7 @@ export function PolicyPdfCapturePanel({ userId, handoffId }: { userId: string; h
         toast.error(message);
       }
     } finally {
-      if (!retentionPending && operationControllerRef.current === controller) operationControllerRef.current = null;
+      if (operationControllerRef.current === controller) operationControllerRef.current = null;
     }
   }
 

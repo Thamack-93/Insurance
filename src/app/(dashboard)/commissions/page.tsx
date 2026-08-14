@@ -16,8 +16,9 @@ import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getDb } from "@/lib/db";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
-import { commissionOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { commissionOperationalWhere, organizationOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
+import { compareCommissionStatusDesc, compareDateAsc } from "@/lib/sorting";
 
 export default async function CommissionsPage({
   searchParams,
@@ -36,6 +37,7 @@ export default async function CommissionsPage({
 
   const openWhere: Prisma.CommissionWhereInput = {
     ...commissionOperationalWhere(scope.portfolioOwnerId),
+    ...organizationOperationalWhere(scope.organizationId),
     status: { notIn: ["PAID", "CANCELLED"] },
     ...(query
       ? {
@@ -71,17 +73,29 @@ export default async function CommissionsPage({
     db.commission.findMany({
       where: openWhere,
       include: { client: true, insurer: true, policy: true, receipt: true },
-      orderBy,
-      skip: (page - 1) * DEFAULT_PAGE_SIZE,
-      take: DEFAULT_PAGE_SIZE,
+      orderBy: sortKey ? orderBy : [{ expectedDate: "asc" }, { id: "asc" }],
     }),
     db.commission.findMany({
-      where: { ...commissionOperationalWhere(scope.portfolioOwnerId), status: "PAID" },
+      where: { ...commissionOperationalWhere(scope.portfolioOwnerId), ...organizationOperationalWhere(scope.organizationId), status: "PAID" },
       include: { client: true, insurer: true, policy: true, receipt: true },
       orderBy: [{ paidDate: "desc" }, { expectedDate: "desc" }],
       take: 10,
     }),
   ]);
+
+  const orderedOpenCommissions = [...openCommissions].sort((left, right) => {
+    if (sortKey && sortKey !== "status") return 0;
+    return (
+      compareCommissionStatusDesc(left.status, right.status) ||
+      compareDateAsc(left.expectedDate, right.expectedDate) ||
+      right.createdAt.getTime() - left.createdAt.getTime() ||
+      left.id.localeCompare(right.id)
+    );
+  });
+  const pagedOpenCommissions = (sortKey && sortKey !== "status"
+    ? openCommissions
+    : orderedOpenCommissions
+  ).slice((page - 1) * DEFAULT_PAGE_SIZE, page * DEFAULT_PAGE_SIZE);
 
   const ratio = stats.totalExpected ? Math.round((stats.totalActual / stats.totalExpected) * 100) : 0;
   type CommissionRow = (typeof openCommissions)[number];
@@ -93,7 +107,7 @@ export default async function CommissionsPage({
   };
   const hasRelations = (commission: CommissionRow): commission is CommissionWithRelations =>
     Boolean(commission.policy && commission.client && commission.insurer && commission.receipt);
-  const safeOpenCommissions = openCommissions.filter(hasRelations);
+  const safeOpenCommissions = pagedOpenCommissions.filter(hasRelations);
   const safePaidCommissions = paidCommissions.filter(hasRelations);
   const paidCount = stats.statusBreakdown.find(({ status }) => status === "PAID")?.count ?? 0;
 

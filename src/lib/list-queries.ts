@@ -133,7 +133,12 @@ export async function getDuePayments(options: DuePaymentsOptions = {}) {
       policy: { select: { id: true, policyNumber: true, policyType: true } },
       insurer: { select: { id: true, name: true } },
     },
-    orderBy: [{ dueDate: "asc" }, { receiptNumber: "asc" }],
+    orderBy: [
+      { dueDate: "asc" },
+      { receiptSequence: { sort: "asc", nulls: "last" } },
+      { receiptNumber: "asc" },
+      { id: "asc" },
+    ],
     take: options.limit,
     skip: options.skip,
   });
@@ -166,7 +171,7 @@ export async function getRenewals(options: RenewalOptions = {}) {
       client: { select: { id: true, fullName: true } },
       insurer: { select: { id: true, name: true } },
     },
-    orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }],
+    orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }, { id: "asc" }],
     take: options.limit,
     skip: options.skip,
   });

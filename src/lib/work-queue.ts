@@ -3,6 +3,7 @@ import type { Priority, WorkItemStatus, WorkItemType } from "@/lib/domain-values
 import { getDb } from "@/lib/db";
 import { businessEndOfDay, businessStartOfDay } from "@/lib/business-dates";
 import { shouldKeepRenewalWorkItemPolicy } from "@/lib/renewals.logic";
+import { compareDateAsc, compareNaturalText, comparePriorityDesc } from "@/lib/sorting";
 
 export const OPEN_WORK_ITEM_STATUSES = [
   "OPEN",
@@ -164,6 +165,7 @@ export type WorkQueueFilters = {
   receiptId?: string;
   entityType?: string;
   portfolioOwnerId?: string;
+  organizationId?: string;
 };
 
 export async function getWorkItems(filters: WorkQueueFilters = {}) {
@@ -177,6 +179,7 @@ export async function getWorkItems(filters: WorkQueueFilters = {}) {
   });
 
   const resolvedItems = await resolveLegacyRenewalRelations(items, filters, db);
+  resolvedItems.sort(compareWorkQueueItems);
   const start = filters.skip ?? 0;
   return filters.limit === undefined
     ? resolvedItems.slice(start)
@@ -225,6 +228,7 @@ async function resolveLegacyRenewalRelations(
     where: {
       OR: policyOr,
       ...(filters.portfolioOwnerId ? { client: { portfolioOwnerId: filters.portfolioOwnerId } } : {}),
+      ...(filters.organizationId ? { organizationId: filters.organizationId } : {}),
     },
     select: {
       ...policyQueueSelect,
@@ -369,6 +373,10 @@ function buildWhere(filters: WorkQueueFilters): Prisma.WorkItemWhereInput {
     where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), portfolioWhere];
   }
 
+  if (filters.organizationId) {
+    where.organizationId = filters.organizationId;
+  }
+
   if (filters.from || filters.to) {
     where.dueDate = {
       ...(filters.from ? { gte: businessStartOfDay(filters.from) } : {}),
@@ -380,9 +388,20 @@ function buildWhere(filters: WorkQueueFilters): Prisma.WorkItemWhereInput {
 }
 
 function buildOrderBy(filters: WorkQueueFilters): Prisma.WorkItemOrderByWithRelationInput[] {
-  if (filters.query) {
-    return [{ priority: "desc" }, { dueDate: "asc" }, { createdAt: "desc" }];
-  }
+  // Priority is persisted as text, so ordering it in PostgreSQL would make
+  // LOW sort ahead of HIGH. The semantic rank is applied after legacy
+  // renewal relations are resolved; these fields keep the database read
+  // bounded and deterministic before that final comparison.
+  void filters;
+  return [{ dueDate: "asc" }, { createdAt: "desc" }, { id: "asc" }];
+}
 
-  return [{ priority: "desc" }, { dueDate: "asc" }, { createdAt: "desc" }];
+function compareWorkQueueItems(left: WorkQueueItem, right: WorkQueueItem) {
+  return (
+    comparePriorityDesc(left.priority, right.priority) ||
+    compareDateAsc(left.dueDate, right.dueDate) ||
+    right.createdAt.getTime() - left.createdAt.getTime() ||
+    compareNaturalText(left.client?.fullName ?? left.folio ?? left.id, right.client?.fullName ?? right.folio ?? right.id) ||
+    left.id.localeCompare(right.id)
+  );
 }

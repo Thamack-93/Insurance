@@ -9,6 +9,7 @@ import { errorResult, revalidatePaths, successResult, type MutationResult } from
 import { recordPayment } from "@/lib/payment-service";
 import { cancelPolicyForNonPayment } from "@/lib/nonpayment-cancellation";
 import { NON_PAYMENT_CANCELLATION_DAYS } from "@/lib/nonpayment-cancellation.logic";
+import { receiptSequenceForNumber } from "@/lib/sorting";
 import {
   assertEndorsementPortfolioAccess,
   assertPolicyPortfolioAccess,
@@ -53,6 +54,7 @@ async function normalizeReceiptInput(values: ReceiptFormValues, userId: string) 
 
   return {
     receiptNumber: values.receiptNumber.trim(),
+    receiptSequence: receiptSequenceForNumber(values.receiptNumber),
     policyId: policy.id,
     endorsementId,
     clientId: policy.clientId,

@@ -20,7 +20,7 @@ import {
   readClientListFilters,
 } from "@/lib/list-filters";
 import { LocalNavigation } from "@/components/layout/local-navigation";
-import { clientOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { clientOperationalWhere, organizationOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
 
 const PAGE_SIZE = 25;
 
@@ -34,11 +34,11 @@ export default async function ClientsPage({
   const { query, page, sortKey, direction } = filters;
   const statusFilter = filters.status;
   const typeFilter = filters.type;
-  const isFiltered = Boolean(query || statusFilter || typeFilter);
+  const isFiltered = Boolean(query || typeFilter || (params.status && params.status !== "ACTIVE"));
 
   const db = getDb();
   const scope = await requirePortfolioReadScope();
-  const portfolioWhere = clientOperationalWhere(scope.portfolioOwnerId);
+  const portfolioWhere = { ...clientOperationalWhere(scope.portfolioOwnerId), ...organizationOperationalWhere(scope.organizationId) };
   const clearFiltersHref = buildTableHref("/clients", params, {
     q: null,
     status: null,
@@ -46,7 +46,7 @@ export default async function ClientsPage({
     page: null,
   });
 
-  const where = buildClientListWhere(filters, scope.portfolioOwnerId);
+  const where = buildClientListWhere(filters, scope.portfolioOwnerId, scope.organizationId);
   const orderBy = buildClientListOrderBy(filters);
 
   const [
@@ -77,6 +77,7 @@ export default async function ClientsPage({
       include: {
         policies: { where: { status: "ACTIVE" }, select: { premiumAmount: true } },
       },
+      orderBy: [{ fullName: "asc" }, { id: "asc" }],
       take: 50,
     }),
   ]);
@@ -121,7 +122,9 @@ export default async function ClientsPage({
         <LocalNavigation
           label="Tipos de cliente"
           items={[
-            { label: "Todos", href: "/clients", excludeQueryKeys: ["type"] },
+            { label: "Activos", href: "/clients", excludeQueryKeys: ["type", "status"] },
+            { label: "Todos", href: "/clients?status=ALL", excludeQueryKeys: ["type"] },
+            { label: "Archivados", href: "/clients?status=ARCHIVED", excludeQueryKeys: ["type"] },
             { label: "Personas", href: "/clients?type=PERSON" },
             { label: "Empresas", href: "/clients?type=COMPANY" },
           ]}
@@ -180,7 +183,7 @@ export default async function ClientsPage({
                 {
                   key: "status",
                   label: "Estado",
-                  options: entityStatusOptions,
+                  options: [{ value: "ALL", label: "Todos" }, ...entityStatusOptions],
                 },
               ]}
             />

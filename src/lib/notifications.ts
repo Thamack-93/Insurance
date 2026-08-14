@@ -3,6 +3,8 @@ import type { AlertSeverity } from "@/lib/domain-values";
 import { resolveAlertEntityLink } from "@/lib/alert-links";
 import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
+import { getOrganizationIdForUser } from "@/lib/portfolio-access";
+import { getCurrentUserId } from "@/lib/auth";
 import { mapNotificationStatusToWorkItemStatus, upsertWorkItemFromSource } from "@/lib/work-items";
 
 export { notificationLink } from "@/lib/notifications-shared";
@@ -80,8 +82,9 @@ export async function createNotification(input: NotificationInput): Promise<Noti
 export async function getUnreadNotificationCount(): Promise<number> {
   const db = getDb();
   try {
+    const organizationId = await getOrganizationIdForCurrentUser();
     return await db.alert.count({
-      where: { readAt: null, status: { not: "RESOLVED" } },
+      where: { readAt: null, status: { not: "RESOLVED" }, ...(organizationId ? { organizationId } : {}) },
     });
   } catch (error) {
     logError("notifications.getUnreadNotificationCount", error);
@@ -92,9 +95,10 @@ export async function getUnreadNotificationCount(): Promise<number> {
 export async function getUnreadNotifications(limit = 10): Promise<NotificationRecord[]> {
   const db = getDb();
   try {
+    const organizationId = await getOrganizationIdForCurrentUser();
     const rows = await db.alert.findMany({
-      where: { readAt: null, status: { not: "RESOLVED" } },
-      orderBy: [{ createdAt: "desc" }],
+      where: { readAt: null, status: { not: "RESOLVED" }, ...(organizationId ? { organizationId } : {}) },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: limit,
     });
     return rows as NotificationRecord[];
@@ -111,9 +115,10 @@ export async function getUnreadNotifications(limit = 10): Promise<NotificationRe
 export async function getRecentNotifications(limit = 10): Promise<NotificationRecord[]> {
   const db = getDb();
   try {
+    const organizationId = await getOrganizationIdForCurrentUser();
     const rows = await db.alert.findMany({
-      where: { status: { not: "RESOLVED" } },
-      orderBy: [{ createdAt: "desc" }],
+      where: { status: { not: "RESOLVED" }, ...(organizationId ? { organizationId } : {}) },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: limit,
     });
     return rows as NotificationRecord[];
@@ -142,10 +147,12 @@ export async function getAllNotifications({
   const skip = (safePage - 1) * pageSize;
 
   try {
+    const organizationId = await getOrganizationIdForCurrentUser();
+    if (organizationId) where.organizationId = organizationId;
     const [entries, total] = await Promise.all([
       db.alert.findMany({
         where,
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         skip,
         take: pageSize,
       }),
@@ -161,7 +168,9 @@ export async function getAllNotifications({
 export async function getNotificationTypes(): Promise<string[]> {
   const db = getDb();
   try {
+    const organizationId = await getOrganizationIdForCurrentUser();
     const rows = await db.alert.findMany({
+      where: organizationId ? { organizationId } : undefined,
       distinct: ["alertType"],
       select: { alertType: true },
       orderBy: { alertType: "asc" },
@@ -170,5 +179,13 @@ export async function getNotificationTypes(): Promise<string[]> {
   } catch (error) {
     logError("notifications.getNotificationTypes", error);
     return [];
+  }
+}
+
+async function getOrganizationIdForCurrentUser(): Promise<string | null> {
+  try {
+    return await getOrganizationIdForUser(await getCurrentUserId());
+  } catch {
+    return null;
   }
 }

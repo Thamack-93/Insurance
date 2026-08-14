@@ -166,7 +166,7 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
         const start = today();
         const tomorrow = businessAddDays(start, 1);
         const dueDate = state === "overdue" ? { lt: start } : state === "today" ? { gte: start, lt: tomorrow } : { gte: tomorrow, lte: businessAddDays(start, days) };
-        const rows = await db.receipt.findMany({ where: { ...receiptOperationalWhere(scope.portfolioOwnerId), dueDate, status: { notIn: ["PAID", "CANCELLED"] } }, select: { id: true, receiptNumber: true, dueDate: true, amount: true, currency: true, status: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } }, orderBy: { dueDate: "asc" }, take: 25 });
+        const rows = await db.receipt.findMany({ where: { ...receiptOperationalWhere(scope.portfolioOwnerId), organizationId: scope.organizationId, dueDate, status: { notIn: ["PAID", "CANCELLED"] } }, select: { id: true, receiptNumber: true, receiptSequence: true, dueDate: true, amount: true, currency: true, status: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } }, orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }], take: 25 });
         return rows.map((item) => ({ ...item, amount: Number(item.amount), dueDate: iso(item.dueDate) }));
       }),
     }),

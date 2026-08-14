@@ -1018,8 +1018,10 @@ async function getTelegramReceipts(input: {
 }): Promise<TelegramListResult<TelegramReceiptItem>> {
   const db = input.client ?? getDb();
 
+  const organizationId = await getOrganizationIdForUser(input.userId);
   const where: Prisma.ReceiptWhereInput = {
     client: { portfolioOwnerId: input.userId },
+    ...(organizationId ? { organizationId } : {}),
     dueDate: {
       ...(input.from ? { gte: input.from } : {}),
       lte: input.to,
@@ -1039,7 +1041,7 @@ async function getTelegramReceipts(input: {
       endorsement: { select: { endorsementNumber: true } },
       payments: { where: { status: "POSTED" }, select: { amount: true } },
     },
-    orderBy: [{ dueDate: "asc" }, { receiptNumber: "asc" }],
+    orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }],
   });
 
   const eligibleRows = rows.filter((row) => {
