@@ -15,12 +15,21 @@ import { requireOrganizationContext } from "@/lib/organization-context";
 import { SettingsForm } from "@/components/forms/settings-form";
 import { BackupsPanel } from "@/components/settings/backups-panel";
 import { OnboardingPanel } from "@/components/settings/onboarding-panel";
+import { getOrganizationBackupStatus } from "@/lib/organization-backup-status";
 import {
   createBackup,
   listBackupsAction,
 } from "./backups-actions";
 
 export const maxDuration = 300;
+
+function formatDateTime(value: string) {
+  try {
+    return new Intl.DateTimeFormat("es-MX", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
 
 export default async function SettingsPage() {
   const now = today();
@@ -30,10 +39,11 @@ export default async function SettingsPage() {
   const isPlatformAdmin = !!liveUser && liveUser.active && liveUser.platformRole === "SUPERADMIN";
   const aiStatus = getAssistantAiConnectionStatus();
   const backupStatus = getBackupPreflightStatus();
-  const [settings, initialBackups, onboarding] = await Promise.all([
+  const [settings, initialBackups, onboarding, ownerBackupStatus] = await Promise.all([
     getSettings(),
     isPlatformAdmin ? listBackupsAction().catch(() => []) : Promise.resolve([]),
     getOnboardingStatus(),
+    organization.membershipRole === "OWNER" ? getOrganizationBackupStatus() : Promise.resolve(null),
   ]);
 
   return (
@@ -188,6 +198,26 @@ export default async function SettingsPage() {
         ) : null}
 
         <OnboardingPanel initialDismissed={onboarding.dismissed} />
+
+        {ownerBackupStatus ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Database className="size-4" /> Respaldo de mi organización
+              </CardTitle>
+              <CardDescription>
+                Estado del servicio de respaldo global. Los archivos físicos contienen datos de toda la plataforma y no se descargan desde una cuenta tenant.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              {ownerBackupStatus.status === "AVAILABLE" && ownerBackupStatus.latestCreatedAt
+                ? `Último respaldo disponible: ${formatDateTime(ownerBackupStatus.latestCreatedAt)}`
+                : ownerBackupStatus.status === "NOT_CONFIGURED"
+                  ? "Todavía no hay un respaldo global disponible."
+                  : "El estado del respaldo no está disponible temporalmente."}
+            </CardContent>
+          </Card>
+        ) : null}
 
         {isPlatformAdmin ? (
           <BackupsPanel
