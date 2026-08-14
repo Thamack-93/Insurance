@@ -3,8 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
-  requirePortfolioReadScope: vi.fn(),
-  membershipFindFirst: vi.fn(),
+  requireOrganizationContext: vi.fn(),
   searchUserPortfolio: vi.fn(),
   getClaimChecklistSummary: vi.fn(),
 }));
@@ -16,11 +15,9 @@ vi.mock("@/lib/auth", () => ({
     }
   },
 }));
-vi.mock("@/lib/db", () => ({
-  getDb: () => ({ organizationMembership: { findFirst: mocks.membershipFindFirst } }),
-}));
+vi.mock("@/lib/db", () => ({ getDb: vi.fn() }));
+vi.mock("@/lib/organization-context", () => ({ requireOrganizationContext: mocks.requireOrganizationContext }));
 vi.mock("@/lib/portfolio-access", () => ({
-  requirePortfolioReadScope: mocks.requirePortfolioReadScope,
   claimOperationalWhere: vi.fn(),
   clientOperationalWhere: vi.fn(),
   endorsementOperationalWhere: vi.fn(),
@@ -45,31 +42,26 @@ type DirectTool = {
 describe("Nora agent tool authorization", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requirePortfolioReadScope.mockResolvedValue({ id: "agent-1", role: "AGENT", portfolioOwnerId: "agent-1" });
-    mocks.membershipFindFirst.mockResolvedValue({ organizationId: "org-default", role: "AGENT" });
+    mocks.requireOrganizationContext.mockResolvedValue({ userId: "agent-1", organizationId: "org-default", membershipRole: "AGENT" });
     mocks.searchUserPortfolio.mockResolvedValue([]);
   });
 
   it("revalidates the live session and active organization membership", async () => {
-    mocks.membershipFindFirst.mockResolvedValue(null);
+    mocks.requireOrganizationContext.mockRejectedValue(new Error("No tienes una membresía activa para usar Nora."));
     const runtime = createNoraAgentTools({ id: "agent-1", role: "AGENT" });
     const search = runtime.tools.searchPortfolio as DirectTool;
 
     await expect(search.execute?.({ query: "POL-001" }, {})).rejects.toThrow("membresía activa");
-    expect(mocks.membershipFindFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ userId: "agent-1", active: true }),
-    }));
     expect(mocks.searchUserPortfolio).not.toHaveBeenCalled();
     expect(runtime.snapshot().trace).toEqual([expect.objectContaining({ tool: "searchPortfolio", outcome: "error" })]);
   });
 
   it("fails closed when the authenticated user changes between steps", async () => {
-    mocks.requirePortfolioReadScope.mockResolvedValue({ id: "other-user", role: "ADMIN", portfolioOwnerId: "other-user" });
+    mocks.requireOrganizationContext.mockResolvedValue({ userId: "other-user", organizationId: "org-default", membershipRole: "ADMIN" });
     const runtime = createNoraAgentTools({ id: "agent-1", role: "AGENT" });
     const search = runtime.tools.searchPortfolio as DirectTool;
 
     await expect(search.execute?.({ query: "POL-001" }, {})).rejects.toThrow("sesión de Nora cambió");
-    expect(mocks.membershipFindFirst).not.toHaveBeenCalled();
     expect(mocks.searchUserPortfolio).not.toHaveBeenCalled();
   });
 
@@ -81,7 +73,7 @@ describe("Nora agent tool authorization", () => {
     await expect(search.execute?.({ query: "POL-001" }, {})).resolves.toEqual([
       expect.objectContaining({ id: "policy-1", title: "POL-001" }),
     ]);
-    expect(mocks.searchUserPortfolio).toHaveBeenCalledWith({ id: "agent-1", role: "AGENT" }, "POL-001");
+    expect(mocks.searchUserPortfolio).toHaveBeenCalledWith({ id: "agent-1", role: "AGENT", organizationId: "org-default" }, "POL-001");
     expect(runtime.snapshot().trace).toEqual([expect.objectContaining({ tool: "searchPortfolio", outcome: "success" })]);
   });
 
@@ -121,7 +113,7 @@ describe("Nora agent tool authorization", () => {
     });
     expect(JSON.stringify(result)).not.toContain("médico");
     expect(JSON.stringify(result)).not.toContain("documentLinked");
-    expect(mocks.getClaimChecklistSummary).toHaveBeenCalledWith("claim-1", "agent-1");
+    expect(mocks.getClaimChecklistSummary).toHaveBeenCalledWith("claim-1", "org-default", "agent-1");
   });
 
   it("removes subtitles, parent labels and links from searches in GMM mode", async () => {

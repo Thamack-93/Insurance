@@ -16,7 +16,7 @@ import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getDb } from "@/lib/db";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
-import { commissionOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { commissionOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
 
 export default async function CommissionsPage({
@@ -25,9 +25,9 @@ export default async function CommissionsPage({
   searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string }>;
 }) {
   await connection();
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   // Run side-effect first; downstream reads must see the new statuses.
-  await autoUpdateCommissionStatuses(scope.portfolioOwnerId);
+  await autoUpdateCommissionStatuses(scope);
 
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
@@ -35,7 +35,7 @@ export default async function CommissionsPage({
   const { sortKey, direction } = readTableSort(params);
 
   const openWhere: Prisma.CommissionWhereInput = {
-    ...commissionOperationalWhere(scope.portfolioOwnerId),
+    ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
     status: { notIn: ["PAID", "CANCELLED"] },
     ...(query
       ? {
@@ -65,8 +65,8 @@ export default async function CommissionsPage({
 
   const db = getDb();
   const [stats, overdueCommissions, openCount, openCommissions, paidCommissions] = await Promise.all([
-    getCommissionStats(undefined, scope.portfolioOwnerId),
-    getOverdueCommissions(scope.portfolioOwnerId),
+    getCommissionStats(undefined, scope),
+    getOverdueCommissions(scope),
     db.commission.count({ where: openWhere }),
     db.commission.findMany({
       where: openWhere,
@@ -76,7 +76,7 @@ export default async function CommissionsPage({
       take: DEFAULT_PAGE_SIZE,
     }),
     db.commission.findMany({
-      where: { ...commissionOperationalWhere(scope.portfolioOwnerId), status: "PAID" },
+      where: { ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId), status: "PAID" },
       include: { client: true, insurer: true, policy: true, receipt: true },
       orderBy: [{ paidDate: "desc" }, { expectedDate: "desc" }],
       take: 10,

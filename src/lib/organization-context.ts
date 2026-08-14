@@ -1,0 +1,288 @@
+import "server-only";
+
+import { getDb } from "@/lib/db";
+import { AuthError, clearSessionCookie, getSession, requireUser, setSessionCookie } from "@/lib/auth";
+import { writeActivityLog } from "@/lib/activity-log";
+import { Prisma } from "@/generated/prisma/client";
+
+export const ORGANIZATION_ROLES = ["OWNER", "ADMIN", "AGENT"] as const;
+export type OrganizationRole = (typeof ORGANIZATION_ROLES)[number];
+
+export type OrganizationContext = {
+  userId: string;
+  userEmail: string;
+  userName: string;
+  userRole: string;
+  platformRole: string;
+  organizationId: string;
+  organizationName: string;
+  organizationSlug: string;
+  organizationStatus: string;
+  membershipId: string;
+  membershipRole: OrganizationRole;
+};
+
+export type OrganizationOption = {
+  id: string;
+  name: string;
+  slug: string;
+  role: OrganizationRole;
+};
+
+export type OrganizationContextResolution =
+  | { status: "unauthenticated" }
+  | { status: "ready"; context: OrganizationContext }
+  | { status: "no-membership"; options: [] }
+  | { status: "corrupt-memberships"; options: OrganizationOption[] }
+  | { status: "stale-selection"; options: OrganizationOption[] };
+
+function isOrganizationRole(value: string): value is OrganizationRole {
+  return (ORGANIZATION_ROLES as readonly string[]).includes(value);
+}
+
+async function membershipState(userId: string) {
+  const db = getDb();
+  const memberships = await db.organizationMembership.findMany({
+    where: { userId },
+    select: {
+      id: true,
+      role: true,
+      active: true,
+      organization: { select: { id: true, name: true, slug: true, status: true } },
+    },
+    orderBy: { id: "asc" },
+    take: 2,
+  });
+
+  const options = memberships
+    .filter((membership): membership is typeof membership & { role: OrganizationRole } =>
+      membership.active && membership.organization.status === "ACTIVE" && isOrganizationRole(membership.role),
+    )
+    .map((membership) => ({
+      id: membership.organization.id,
+      name: membership.organization.name,
+      slug: membership.organization.slug,
+      role: membership.role,
+    }));
+
+  return { memberships, options };
+}
+
+export async function getOrganizationOptions(): Promise<OrganizationOption[]> {
+  const user = await requireUser();
+  const state = await membershipState(user.id);
+  if (state.memberships.length > 1) return [];
+  return state.options;
+}
+
+export async function resolveOrganizationContext(): Promise<OrganizationContextResolution> {
+  const session = await getSession();
+  if (!session) return { status: "unauthenticated" };
+
+  let user;
+  try {
+    user = await requireUser();
+  } catch (error) {
+    if (error instanceof AuthError && error.status === 401) return { status: "unauthenticated" };
+    throw error;
+  }
+
+  const { memberships, options } = await membershipState(user.id);
+  if (memberships.length > 1) return { status: "corrupt-memberships", options };
+  if (options.length === 0) return { status: "no-membership", options: [] };
+
+  if (!session.organizationId) {
+    return buildContext(user, options[0].id);
+  }
+
+  const selected = options.find((option) => option.id === session.organizationId);
+  if (!selected) return { status: "stale-selection", options };
+  return buildContext(user, selected.id);
+}
+
+async function buildContext(user: Awaited<ReturnType<typeof requireUser>>, organizationId: string): Promise<OrganizationContextResolution> {
+  const db = getDb();
+  const membership = await db.organizationMembership.findFirst({
+    where: {
+      organizationId,
+      userId: user.id,
+      active: true,
+      organization: { status: "ACTIVE" },
+    },
+    select: {
+      id: true,
+      role: true,
+      organization: {
+        select: { id: true, name: true, slug: true, status: true },
+      },
+    },
+  });
+
+  if (!membership || !isOrganizationRole(membership.role)) {
+    const { memberships, options } = await membershipState(user.id);
+    if (memberships.length > 1) return { status: "corrupt-memberships", options };
+    return { status: "stale-selection", options };
+  }
+
+  return {
+    status: "ready",
+    context: {
+      userId: user.id,
+      userEmail: user.email,
+      userName: user.name,
+      userRole: user.role,
+      platformRole: user.platformRole,
+      organizationId: membership.organization.id,
+      organizationName: membership.organization.name,
+      organizationSlug: membership.organization.slug,
+      organizationStatus: membership.organization.status,
+      membershipId: membership.id,
+      membershipRole: membership.role,
+    },
+  };
+}
+
+export async function requireOrganizationContext(): Promise<OrganizationContext> {
+  const resolution = await resolveOrganizationContext();
+  if (resolution.status === "ready") return resolution.context;
+  if (resolution.status === "unauthenticated") throw new AuthError("Necesitas iniciar sesión.", 401);
+  if (resolution.status === "stale-selection") {
+    throw new AuthError("ORGANIZATION_CONTEXT_STALE", 409);
+  }
+  if (resolution.status === "corrupt-memberships") {
+    throw new AuthError("POLICYDESK_MULTIPLE_ORGANIZATION_MEMBERSHIPS", 409);
+  }
+  throw new AuthError("No tienes una organización activa.", 403);
+}
+
+export async function requireOrganizationRole(allowedRoles: readonly OrganizationRole[]): Promise<OrganizationContext> {
+  const context = await requireOrganizationContext();
+  if (!allowedRoles.includes(context.membershipRole)) {
+    throw new AuthError("No tienes permisos en esta organización.", 403);
+  }
+  return context;
+}
+
+export async function requireOrganizationRoleOrRedirect(allowedRoles: readonly OrganizationRole[]): Promise<OrganizationContext> {
+  const { redirect } = await import("next/navigation");
+  try {
+    return await requireOrganizationRole(allowedRoles);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      if (error.status === 401) {
+        try { await clearSessionCookie(); } catch { /* best effort */ }
+        redirect("/login");
+      }
+      if (error.status === 409) redirect("/organization/select");
+      redirect("/today");
+    }
+    throw error;
+  }
+}
+
+/**
+ * Revalidates the live tenant boundary on the same transaction that performs a
+ * mutation, closing the race between an authorization read and a concurrent
+ * user, membership, or organization suspension.
+ */
+export async function assertOrganizationContextInTransaction(
+  tx: Prisma.TransactionClient,
+  context: OrganizationContext,
+  allowedRoles: readonly OrganizationRole[] = ORGANIZATION_ROLES,
+): Promise<void> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT m."id"
+      FROM "OrganizationMembership" m
+      JOIN "User" u ON u."id" = m."userId"
+      JOIN "Organization" o ON o."id" = m."organizationId"
+     WHERE m."id" = ${context.membershipId}
+       AND m."userId" = ${context.userId}
+       AND m."organizationId" = ${context.organizationId}
+       AND m."role" IN (${Prisma.join([...allowedRoles])})
+       AND m."active"
+       AND u."active"
+       AND o."status" = 'ACTIVE'
+     FOR UPDATE OF m, u, o
+  `);
+  if (!rows[0]) throw new AuthError("ORGANIZATION_ACCESS_DENIED", 403);
+}
+
+export async function selectOrganization(organizationId: string) {
+  const user = await requireUser();
+  const db = getDb();
+  const memberships = await db.organizationMembership.findMany({
+    where: {
+      userId: user.id,
+    },
+    select: {
+      id: true,
+      organizationId: true,
+      role: true,
+      active: true,
+      organization: { select: { status: true } },
+    },
+    orderBy: { id: "asc" },
+    take: 2,
+  });
+
+  if (memberships.length > 1) throw new AuthError("POLICYDESK_MULTIPLE_ORGANIZATION_MEMBERSHIPS", 409);
+  const membership = memberships[0];
+  if (
+    !membership ||
+    membership.organizationId !== organizationId ||
+    !membership.active ||
+    membership.organization.status !== "ACTIVE" ||
+    !isOrganizationRole(membership.role)
+  ) {
+    throw new AuthError("ORGANIZATION_CONTEXT_STALE", 409);
+  }
+
+  await setSessionCookie({
+    userId: user.id,
+    email: user.email,
+    name: user.name,
+    role: membership.role === "AGENT" ? "AGENT" : "ADMIN",
+    platformRole: user.platformRole === "SUPERADMIN" ? "SUPERADMIN" : "NONE",
+    organizationId: membership.organizationId,
+  });
+
+  await writeActivityLog({
+    entityType: "OrganizationMembership",
+    entityId: membership.id,
+    action: "ORGANIZATION_SELECTED",
+    userId: user.id,
+    organizationId: membership.organizationId,
+    newValue: { organizationId: membership.organizationId },
+  });
+}
+
+export async function clearSelectedOrganization() {
+  const user = await requireUser();
+  await setSessionCookie({
+    userId: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role === "ADMIN" ? "ADMIN" : "AGENT",
+    platformRole: user.platformRole === "SUPERADMIN" ? "SUPERADMIN" : "NONE",
+  });
+}
+
+export function organizationClientWhere(context: OrganizationContext) {
+  return { organizationId: context.organizationId } as const;
+}
+
+export function organizationPolicyWhere(context: OrganizationContext) {
+  return {
+    organizationId: context.organizationId,
+    client: { organizationId: context.organizationId },
+    insurer: { organizationId: context.organizationId },
+  } as const;
+}
+
+export function portfolioOwnerIdForContext(context: OrganizationContext) {
+  return context.membershipRole === "AGENT" ? context.userId : undefined;
+}
+
+export function assertSameOrganization(left: string | null | undefined, context: OrganizationContext): void {
+  if (left !== context.organizationId) throw new AuthError("La relación no pertenece a esta organización.", 403);
+}

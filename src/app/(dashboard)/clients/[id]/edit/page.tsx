@@ -7,14 +7,16 @@ import { createClientDefaults } from "@/lib/form-defaults";
 import { formatDateInput } from "@/lib/form-utils";
 import type { SelectOption } from "@/lib/domain-options";
 import type { ClientFormValues } from "@/lib/validations";
+import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function EditClientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const scope = await requireOrganizationPortfolioReadScope();
   const db = getDb();
   const [client, referidorClients] = await Promise.all([
-    db.client.findUnique({ where: { id } }),
+    db.client.findFirst({ where: { id, organizationId: scope.organizationId } }),
     db.client.findMany({
-      where: { id: { not: id } },
+      where: { id: { not: id }, organizationId: scope.organizationId },
       select: { id: true, fullName: true, type: true },
       orderBy: [{ fullName: "asc" }],
     }),

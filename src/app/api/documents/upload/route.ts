@@ -1,19 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { writeFile, unlink } from "node:fs/promises";
+import { mkdir, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { getDb } from "@/lib/db";
-import { AuthError, requireUser } from "@/lib/auth";
+import { AuthError } from "@/lib/auth";
+import { requireOrganizationContext, type OrganizationContext } from "@/lib/organization-context";
 import { assertSafeDocumentPath, documentsDir } from "@/lib/files";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, assertRequestBodySize, checkDistributedRateLimit, getRequestIp, RequestGuardError, securityFingerprint } from "@/lib/request-guards";
 import { rateLimitResponse } from "@/lib/api-security";
-import {
-  assertEndorsementPortfolioAccess,
-  assertClientPortfolioAccess,
-  assertPolicyPortfolioAccess,
-  assertReceiptPortfolioAccess,
-} from "@/lib/portfolio-access";
 import {
   recordSecurityAccessDenied,
   recordSecurityRateLimit,
@@ -68,7 +63,7 @@ type UploadResult = {
 async function processFile(
   file: File,
   metadata: z.infer<typeof uploadSchema>,
-  userId: string,
+  context: OrganizationContext,
 ): Promise<UploadResult> {
   if (file.type && file.type !== "application/octet-stream" && file.type !== "application/zip" && !ALLOWED_TYPES.includes(file.type)) {
     return { ok: false, fileName: file.name, error: "Tipo de archivo no permitido (PDF, JPG, PNG, WebP o Word)." };
@@ -91,7 +86,10 @@ async function processFile(
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
     const fileName = `${timestamp}-${sanitizedFileName}`;
-    const filePath = path.join(documentsDir, fileName);
+    const organizationNamespace = context.organizationId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const organizationDirectory = path.join(documentsDir, organizationNamespace);
+    await mkdir(organizationDirectory, { recursive: true });
+    const filePath = path.join(organizationDirectory, fileName);
     const safePath = assertSafeDocumentPath(filePath);
 
     await writeFile(safePath, Buffer.from(bytes));
@@ -99,13 +97,14 @@ async function processFile(
     const db = getDb();
     const document = await db.document.create({
       data: {
+        organizationId: context.organizationId,
         ...metadata,
         fileName: file.name,
-        filePath: `data/documents/${fileName}`,
+        filePath: `data/documents/${organizationNamespace}/${fileName}`,
         mimeType: detectedType,
         uploadedAt: new Date(),
-        createdById: userId,
-        updatedById: userId,
+        createdById: context.userId,
+        updatedById: context.userId,
       },
     });
 
@@ -166,63 +165,19 @@ function startsWith(bytes: Uint8Array, signature: number[], offset = 0) {
 
 async function assertDocumentUploadOwnership(
   metadata: z.infer<typeof uploadSchema>,
-  userId: string,
-  role: string,
+  context: OrganizationContext,
 ) {
-  if (role === "ADMIN") return;
-
-  if (metadata.clientId) {
-    await assertClientPortfolioAccess(metadata.clientId, userId);
-  }
-  if (metadata.policyId) {
-    await assertPolicyPortfolioAccess(metadata.policyId, userId);
-  }
-  if (metadata.endorsementId) {
-    const db = getDb();
-    const endorsement = await db.policyEndorsement.findFirst({
-      where: {
-        id: metadata.endorsementId,
-        policy: { client: { portfolioOwnerId: userId } },
-      },
-      select: { id: true, policyId: true },
-    });
-    if (!endorsement) {
-      throw new AuthError("No tienes acceso a este endoso.", 403);
-    }
-    if (metadata.policyId && metadata.policyId !== endorsement.policyId) {
-      throw new AuthError("El endoso no pertenece a la póliza seleccionada.", 403);
-    }
-    await assertEndorsementPortfolioAccess(metadata.endorsementId, userId);
-  }
-  if (metadata.receiptId) {
-    await assertReceiptPortfolioAccess(metadata.receiptId, userId);
-  }
-  if (metadata.claimId) {
-    const db = getDb();
-    const claim = await db.claim.findFirst({
-      where: {
-        id: metadata.claimId,
-        client: { portfolioOwnerId: userId },
-      },
-      select: { id: true },
-    });
-    if (!claim) {
-      throw new AuthError("No tienes acceso a esta reclamación.", 403);
-    }
-  }
-  if (metadata.quoteId) {
-    const db = getDb();
-    const quote = await db.quote.findFirst({
-      where: {
-        id: metadata.quoteId,
-        client: { portfolioOwnerId: userId },
-      },
-      select: { id: true },
-    });
-    if (!quote) {
-      throw new AuthError("No tienes acceso a esta cotización.", 403);
-    }
-  }
+  const db = getDb();
+  const agentClient = context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {};
+  const checks = await Promise.all([
+    metadata.clientId ? db.client.count({ where: { id: metadata.clientId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {}) } }) : 1,
+    metadata.policyId ? db.policy.count({ where: { id: metadata.policyId, organizationId: context.organizationId, ...agentClient } }) : 1,
+    metadata.endorsementId ? db.policyEndorsement.count({ where: { id: metadata.endorsementId, organizationId: context.organizationId, ...(metadata.policyId ? { policyId: metadata.policyId } : {}), ...(context.membershipRole === "AGENT" ? { policy: { client: { portfolioOwnerId: context.userId } } } : {}) } }) : 1,
+    metadata.receiptId ? db.receipt.count({ where: { id: metadata.receiptId, organizationId: context.organizationId, ...agentClient } }) : 1,
+    metadata.claimId ? db.claim.count({ where: { id: metadata.claimId, organizationId: context.organizationId, ...agentClient } }) : 1,
+    metadata.quoteId ? db.quote.count({ where: { id: metadata.quoteId, organizationId: context.organizationId, ...agentClient } }) : 1,
+  ]);
+  if (checks.some((value) => value !== 1)) throw new AuthError("TENANT_RELATION_MISMATCH", 404);
 }
 
 export async function POST(request: NextRequest) {
@@ -298,10 +253,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Selecciona al menos un archivo para subir." }, { status: 400 });
     }
 
-    const activeUser = await requireUser();
-    const userId = activeUser.id;
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
     try {
-      await assertDocumentUploadOwnership(validatedData, userId, activeUser.role);
+      await assertDocumentUploadOwnership(validatedData, context);
     } catch (error) {
       if (error instanceof AuthError) {
         await recordSecurityAccessDenied({
@@ -312,12 +267,13 @@ export async function POST(request: NextRequest) {
           entityType: "SecurityEvent",
           entityId: `document-upload:denied:${validatedData.documentType}`,
           userId,
+          organizationId: context.organizationId,
         });
       }
       throw error;
     }
     const rollback = formData.get("rollback") === "1" || files.length > 1;
-    const results = await Promise.all(files.map((f) => processFile(f, validatedData, userId)));
+    const results = await Promise.all(files.map((f) => processFile(f, validatedData, context)));
 
     const okCount = results.filter((r) => r.ok).length;
     const failCount = results.length - okCount;
@@ -331,7 +287,7 @@ export async function POST(request: NextRequest) {
           .map(async (r, idx) => {
             if (!r.ok || !r.document) return;
             try {
-              await db.document.delete({ where: { id: r.document.id } });
+              await db.document.deleteMany({ where: { id: r.document.id, organizationId: context.organizationId } });
               if (r.savedPath) {
                 await unlink(r.savedPath).catch(() => {});
               }

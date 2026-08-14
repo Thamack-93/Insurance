@@ -31,7 +31,10 @@ describe("resolveAuthorizedNoraContext", () => {
     findFirst.mockResolvedValue({ id: "receipt-1", receiptNumber: "REC-001" });
 
     await expect(
-      resolveAuthorizedNoraContext({ type: "receipt", id: "receipt-1" }, "agent-1"),
+      resolveAuthorizedNoraContext(
+        { type: "receipt", id: "receipt-1" },
+        { organizationId: "org-a", membershipRole: "AGENT", portfolioOwnerId: "agent-1" },
+      ),
     ).resolves.toEqual({ type: "receipt", id: "receipt-1", label: "REC-001" });
 
     expect(findFirst).toHaveBeenCalledWith(
@@ -39,7 +42,7 @@ describe("resolveAuthorizedNoraContext", () => {
         where: {
           AND: [
             { id: "receipt-1" },
-            { client: { portfolioOwnerId: "agent-1" } },
+            { organizationId: "org-a", client: { organizationId: "org-a", portfolioOwnerId: "agent-1" } },
           ],
         },
       }),
@@ -50,10 +53,16 @@ describe("resolveAuthorizedNoraContext", () => {
     findFirst.mockResolvedValue(null);
 
     await expect(
-      resolveAuthorizedNoraContext({ type: "policy", id: "foreign-policy" }, "agent-1"),
+      resolveAuthorizedNoraContext(
+        { type: "policy", id: "foreign-policy" },
+        { organizationId: "org-a", membershipRole: "AGENT", portfolioOwnerId: "agent-1" },
+      ),
     ).resolves.toBeNull();
     await expect(
-      resolveAuthorizedNoraContext({ type: "policy", id: "missing-policy" }, "agent-1"),
+      resolveAuthorizedNoraContext(
+        { type: "policy", id: "missing-policy" },
+        { organizationId: "org-a", membershipRole: "AGENT", portfolioOwnerId: "agent-1" },
+      ),
     ).resolves.toBeNull();
 
     expect(findFirst).toHaveBeenNthCalledWith(
@@ -62,7 +71,7 @@ describe("resolveAuthorizedNoraContext", () => {
         where: {
           AND: [
             { id: "foreign-policy" },
-            { client: { portfolioOwnerId: "agent-1" } },
+            { organizationId: "org-a", client: { organizationId: "org-a", portfolioOwnerId: "agent-1" } },
           ],
         },
       }),
@@ -72,7 +81,10 @@ describe("resolveAuthorizedNoraContext", () => {
   it("allows an administrator scope to resolve a valid context without a portfolio filter", async () => {
     findFirst.mockResolvedValue({ id: "client-1", fullName: "Cliente Admin" });
 
-    await expect(resolveAuthorizedNoraContext({ type: "client", id: "client-1" })).resolves.toEqual({
+    await expect(resolveAuthorizedNoraContext(
+      { type: "client", id: "client-1" },
+      { organizationId: "org-a", membershipRole: "ADMIN" },
+    )).resolves.toEqual({
       type: "client",
       id: "client-1",
       label: "Cliente Admin",
@@ -80,7 +92,7 @@ describe("resolveAuthorizedNoraContext", () => {
 
     expect(findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { AND: [{ id: "client-1" }, {}] },
+        where: { AND: [{ id: "client-1" }, { organizationId: "org-a" }] },
       }),
     );
   });

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { getDb, resetDb } from "@/lib/db";
-import { assertProductionMutationAllowed } from "./_shared.ts";
+import { assertProductionMutationAllowed, parseCliArgs, requireOrganizationId } from "./_shared.ts";
 import {
   isInsuredClientName,
   mergeTextField,
@@ -138,6 +138,7 @@ async function writeReportFile(rows: ReportRow[], summary: Record<string, unknow
 
 async function main() {
   const apply = process.argv.includes("--apply");
+  const organizationId = requireOrganizationId(parseCliArgs());
   if (apply) {
     assertProductionMutationAllowed({
       actionLabel: "La reconciliación de clientes asegurados",
@@ -148,6 +149,7 @@ async function main() {
 
   const [allClients, candidateClients, policies] = await Promise.all([
     db.client.findMany({
+      where: { organizationId },
       select: {
         id: true,
         fullName: true,
@@ -182,6 +184,7 @@ async function main() {
     }),
     db.client.findMany({
       where: {
+        organizationId,
         status: "ACTIVE",
         fullName: { contains: "ASEGURADO:" },
       },
@@ -218,6 +221,7 @@ async function main() {
       orderBy: { fullName: "asc" },
     }),
     db.policy.findMany({
+      where: { organizationId },
       select: {
         id: true,
         policyNumber: true,
@@ -315,8 +319,8 @@ async function main() {
 
     try {
       await db.$transaction(async (tx) => {
-        const currentCanonical = await tx.client.findUnique({
-          where: { id: canonical.id },
+        const currentCanonical = await tx.client.findFirst({
+          where: { id: canonical.id, organizationId },
           select: {
             id: true,
             fullName: true,
@@ -360,7 +364,7 @@ async function main() {
         );
 
         await tx.client.update({
-          where: { id: currentCanonical.id },
+          where: { id: currentCanonical.id, organizationId },
           data: {
             ...mergedMetadata,
             notes: mergedNote,
@@ -369,20 +373,20 @@ async function main() {
           },
         });
 
-        await tx.policy.updateMany({ where: { clientId: candidate.id }, data: { clientId: currentCanonical.id } });
-        await tx.receipt.updateMany({ where: { clientId: candidate.id }, data: { clientId: currentCanonical.id } });
-        await tx.payment.updateMany({ where: { clientId: candidate.id }, data: { clientId: currentCanonical.id } });
-        await tx.commission.updateMany({ where: { clientId: candidate.id }, data: { clientId: currentCanonical.id } });
-        await tx.claim.updateMany({ where: { clientId: candidate.id }, data: { clientId: currentCanonical.id } });
-        await tx.quote.updateMany({ where: { clientId: candidate.id }, data: { clientId: currentCanonical.id } });
-        await tx.document.updateMany({ where: { clientId: candidate.id }, data: { clientId: currentCanonical.id } });
-        await tx.task.updateMany({ where: { clientId: candidate.id }, data: { clientId: currentCanonical.id } });
-        await tx.workItem.updateMany({ where: { clientId: candidate.id }, data: { clientId: currentCanonical.id } });
-        await tx.notificationEvent.updateMany({ where: { clientId: candidate.id }, data: { clientId: currentCanonical.id } });
-        await tx.client.updateMany({ where: { referidorId: candidate.id }, data: { referidorId: currentCanonical.id } });
+        await tx.policy.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });
+        await tx.receipt.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });
+        await tx.payment.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });
+        await tx.commission.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });
+        await tx.claim.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });
+        await tx.quote.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });
+        await tx.document.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });
+        await tx.task.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });
+        await tx.workItem.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });
+        await tx.notificationEvent.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });
+        await tx.client.updateMany({ where: { organizationId, referidorId: candidate.id }, data: { referidorId: currentCanonical.id } });
 
         await tx.client.update({
-          where: { id: candidate.id },
+          where: { id: candidate.id, organizationId },
           data: {
             status: "ARCHIVED",
             notes: appendConsolidationNote(candidate.notes, `fusionado con ${currentCanonical.fullName}`),

@@ -36,7 +36,7 @@ describe("claim checklist metadata", () => {
       claimChecklistItem: { upsert: vi.fn() },
     };
 
-    const result = await getClaimChecklistSummary("claim-1", "agent-1", client as never);
+    const result = await getClaimChecklistSummary("claim-1", "org-a", "agent-1", client as never);
 
     expect(client.claim.findFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: { AND: [{ id: "claim-1" }, { ownerId: "agent-1" }] },
@@ -60,7 +60,7 @@ describe("claim checklist metadata", () => {
       claimId: "claim-1",
       requirementCode: "invented_by_model",
       status: "RECEIVED",
-    }, "agent-1", client as never);
+    }, "org-a", "agent-1", client as never);
 
     expect(result).toBeNull();
     expect(client.claimChecklistItem.upsert).not.toHaveBeenCalled();
@@ -76,7 +76,7 @@ describe("claim checklist metadata", () => {
       claimId: "claim-1",
       requirementCode: "adjuster_evidence",
       status: "REQUESTED",
-    }, "agent-1", client as never);
+    }, "org-a", "agent-1", client as never);
 
     expect(client.claimChecklistItem.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({

@@ -8,7 +8,7 @@ import * as XLSX from "@e965/xlsx";
 import * as shared from "./_shared.ts";
 import { SYSTEM_USER_ID } from "../src/lib/auth.ts";
 
-const { closeDb, createDb, assertProductionMutationAllowed } = shared;
+const { closeDb, createDb, assertProductionMutationAllowed, parseCliArgs, requireOrganizationId } = shared;
 
 const EXPECTED_APPROVED_COUNT = 38;
 const REVIEW_FILE = "/Users/pedrogomez/Desktop/Polizas Pedro/Revision_fechas_nacimiento.xlsx";
@@ -111,6 +111,7 @@ function readReviewRows(filePath: string): ReviewRow[] {
 
 async function main() {
   const args = parseArgs();
+  const organizationId = requireOrganizationId(parseCliArgs());
   const rows = readReviewRows(args.file);
   const decisions = rows.map((row) => ({
     ...row,
@@ -129,7 +130,7 @@ async function main() {
   const db = createDb();
   try {
     const clients = await db.client.findMany({
-      where: { id: { in: importRows.map((row) => row.clientId) } },
+      where: { organizationId, id: { in: importRows.map((row) => row.clientId) } },
       select: { id: true, fullName: true, type: true, status: true, birthDate: true },
     });
     const byId = new Map(clients.map((client) => [client.id, client]));
@@ -175,7 +176,7 @@ async function main() {
     await db.$transaction(async (tx) => {
       for (const row of importRows) {
         const targetDate = (row.decision === "CORREGIR" ? row.correctedDate : row.proposedDate)!;
-        const current = await tx.client.findUnique({ where: { id: row.clientId }, select: { id: true, fullName: true, type: true, birthDate: true } });
+        const current = await tx.client.findFirst({ where: { id: row.clientId, organizationId }, select: { id: true, fullName: true, type: true, birthDate: true } });
         if (!current) throw new Error(`Cliente desapareció durante la transacción: ${row.clientId}`);
         const currentDate = current.birthDate?.toISOString().slice(0, 10) ?? null;
         if (currentDate === targetDate) continue;
@@ -183,12 +184,13 @@ async function main() {
           throw new Error(`${current.fullName} ya tiene birthDate=${currentDate}; solo CORREGIR con --allow-overwrite puede reemplazarlo.`);
         }
         const updated = await tx.client.update({
-          where: { id: current.id },
+          where: { id: current.id, organizationId },
           data: { birthDate: new Date(`${targetDate}T00:00:00.000Z`), updatedById: SYSTEM_USER_ID },
           select: { id: true, birthDate: true },
         });
         await tx.activityLog.create({
           data: {
+            organizationId,
             entityType: "Client",
             entityId: current.id,
             action: "CLIENT_BIRTHDATE_IMPORTED_FROM_REVIEW",

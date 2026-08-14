@@ -6,11 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { requireUserOrRedirect } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { buildRenewalPolicyDefaults, type PolicyRenewalSource } from "@/lib/policy-renewal";
-import {
-  assertPolicyPortfolioAccess,
-  clientOperationalWhere,
-  policyOperationalWhere,
-} from "@/lib/portfolio-access";
+import { clientOperationalWhere, policyOperationalWhere } from "@/lib/portfolio-access";
+import { requireOrganizationContext } from "@/lib/organization-context";
 import type { PolicyFormValues } from "@/lib/validations";
 
 type TelegramDraftAiReview = {
@@ -81,23 +78,24 @@ export default async function NewPolicyPage({
   searchParams?: Promise<{ telegramDraft?: string; renewalFrom?: string }>;
 }) {
   const user = await requireUserOrRedirect();
+  const context = await requireOrganizationContext();
   const params = (await searchParams) ?? {};
   const db = getDb();
-  const portfolioOwnerId = user.role === "ADMIN" ? undefined : user.id;
+  const portfolioOwnerId = context.membershipRole === "ADMIN" || context.membershipRole === "OWNER" ? undefined : context.userId;
   const [clients, insurers, mostUsedInsurer] = await Promise.all([
     db.client.findMany({
-      where: { status: { not: "ARCHIVED" }, ...clientOperationalWhere(portfolioOwnerId) },
+      where: { status: { not: "ARCHIVED" }, ...clientOperationalWhere(portfolioOwnerId, context.organizationId) },
       orderBy: { fullName: "asc" },
       select: { id: true, fullName: true },
     }),
     db.insurer.findMany({
-      where: { status: { not: "ARCHIVED" } },
+      where: { status: { not: "ARCHIVED" }, organizationId: context.organizationId },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
     db.policy.groupBy({
       by: ["insurerId"],
-      where: { status: "ACTIVE", ...policyOperationalWhere(portfolioOwnerId) },
+      where: { status: "ACTIVE", ...policyOperationalWhere(portfolioOwnerId, context.organizationId) },
       _count: { insurerId: true },
       orderBy: { _count: { insurerId: "desc" } },
       take: 1,
@@ -110,6 +108,7 @@ export default async function NewPolicyPage({
     const draft = await db.telegramDraft.findFirst({
       where: {
         id: params.telegramDraft,
+        organizationId: context.organizationId,
         userId: user.id,
         type: "POLICY_CAPTURE",
       },
@@ -125,7 +124,7 @@ export default async function NewPolicyPage({
   let renewalSource: PolicyRenewalSource | null = null;
   if (params.renewalFrom) {
     const source = await db.policy.findFirst({
-      where: { id: params.renewalFrom, ...policyOperationalWhere(portfolioOwnerId) },
+      where: { id: params.renewalFrom, ...policyOperationalWhere(portfolioOwnerId, context.organizationId) },
       include: {
         client: { select: { id: true, fullName: true } },
         insurer: { select: { id: true, name: true } },
@@ -134,9 +133,6 @@ export default async function NewPolicyPage({
 
     if (source) {
       try {
-        if (user.role !== "ADMIN") {
-          await assertPolicyPortfolioAccess(source.id, user.id);
-        }
         renewalSource = {
           id: source.id,
           policyNumber: source.policyNumber,

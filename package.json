@@ -13,8 +13,13 @@
     "db:migrate": "prisma migrate dev",
     "db:check-drift": "prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code",
     "backfill:organizations": "node --import tsx scripts/backfill-organizations.ts",
+    "configure:pedro-organization": "node --import tsx scripts/configure-pedro-organization.ts",
     "check:tenant-backfill": "node --import tsx scripts/check-tenant-backfill.ts",
     "check:tenant-guards": "node --import tsx scripts/check-tenant-inventory.ts && node --import tsx scripts/check-tenant-backfill.ts --guards-only",
+    "check:multi-org-audit": "node --import tsx scripts/check-multi-org-audit.ts",
+    "check:tenant-write-scope": "node --import tsx scripts/check-tenant-write-scope.ts",
+    "check:tenant-read-scope": "node --import tsx scripts/check-tenant-read-scope.ts",
+    "provision:platform-admin": "node --import tsx scripts/provision-platform-admin.ts",
     "db:sync-work-items": "tsx scripts/backfill-work-items.ts",
     "clean:cache": "node --import tsx scripts/clean-cache.ts cache",
     "clean:artifacts": "node --import tsx scripts/clean-cache.ts artifacts",
@@ -46,6 +51,7 @@
     "test:unit:watch": "vitest",
     "test:e2e": "playwright test tests/e2e",
     "test:api": "playwright test tests/api"
+    ,"test:tenant-fixture": "node --import tsx scripts/setup-tenant-isolation-fixture.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

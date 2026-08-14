@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { AuthError, requireUser } from "@/lib/auth";
+import { AuthError } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody, securityFingerprint } from "@/lib/request-guards";
@@ -9,7 +9,7 @@ import { writeActivityLog } from "@/lib/activity-log";
 import { inferClientType } from "@/lib/policy-pdf-capture.shared";
 import { parseDateInput } from "@/lib/form-utils";
 import { businessToday } from "@/lib/business-dates";
-import { chooseCaptureClient } from "@/lib/policy-capture-client-merge";
+import { assertOrganizationContextInTransaction, requireOrganizationContext } from "@/lib/organization-context";
 
 export const runtime = "nodejs";
 
@@ -39,9 +39,9 @@ function normalizeBirthDate(value: string | null | undefined) {
 
 export async function POST(request: NextRequest) {
   try {
-    let user: Awaited<ReturnType<typeof requireUser>>;
+    let context: Awaited<ReturnType<typeof requireOrganizationContext>>;
     try {
-      user = await requireUser();
+      context = await requireOrganizationContext();
     } catch (error) {
       if (error instanceof AuthError) {
         return NextResponse.json({ error: error.message }, { status: error.status });
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
     }
 
     assertSameOrigin(request, "policy capture client create");
-    const rateLimit = await checkDistributedRateLimit(`policy-capture-client-create:${securityFingerprint(`ip:${getRequestIp(request)}`)}:${user.id}`, {
+    const rateLimit = await checkDistributedRateLimit(`policy-capture-client-create:${securityFingerprint(`ip:${getRequestIp(request)}`)}:${context.userId}`, {
       limit: 20,
       windowMs: 60 * 1000,
       requireDistributed: true,
@@ -66,10 +66,20 @@ export async function POST(request: NextRequest) {
     const address = normalizeText(payload.address);
     const birthDate = inferredType === "PERSON" ? normalizeBirthDate(payload.birthDate) : null;
 
-    const candidates = await db.client.findMany({
+    const existing = await db.client.findFirst({
       where: {
+        organizationId: context.organizationId,
         status: { not: "ARCHIVED" },
-        portfolioOwnerId: user.id,
+        portfolioOwnerId: context.userId,
+        OR: [
+          ...(rfc ? [{ rfc }] : []),
+          {
+            fullName: {
+              equals: payload.fullName.trim(),
+              mode: "insensitive" as const,
+            },
+          },
+        ],
       },
       select: {
         id: true,
@@ -81,11 +91,7 @@ export async function POST(request: NextRequest) {
         address: true,
         birthDate: true,
       },
-      take: 500,
     });
-    const selection = chooseCaptureClient({ fullName: payload.fullName, rfc }, candidates);
-    if (selection.conflict) return NextResponse.json({ error: selection.conflict, code: "CLIENT_MATCH_CONFLICT" }, { status: 409 });
-    const existing = selection.candidate;
 
     if (existing) {
       return NextResponse.json({
@@ -104,8 +110,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const client = await db.client.create({
-      data: {
+    const client = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const created = await tx.client.create({ data: {
+        organizationId: context.organizationId,
         fullName: payload.fullName.trim(),
         type: inferredType,
         email,
@@ -114,9 +122,9 @@ export async function POST(request: NextRequest) {
         rfc,
         birthDate,
         status: "ACTIVE",
-        portfolioOwnerId: user.id,
-        createdById: user.id,
-        updatedById: user.id,
+        portfolioOwnerId: context.userId,
+        createdById: context.userId,
+        updatedById: context.userId,
       },
       select: {
         id: true,
@@ -127,15 +135,9 @@ export async function POST(request: NextRequest) {
         rfc: true,
         address: true,
         birthDate: true,
-      },
-    });
-
-    await writeActivityLog({
-      entityType: "Client",
-      entityId: client.id,
-      action: "CLIENT_CREATE",
-      newValue: client,
-      userId: user.id,
+      } });
+      await writeActivityLog({ organizationId: context.organizationId, entityType: "Client", entityId: created.id, action: "CLIENT_CREATE", newValue: created, userId: context.userId, db: tx });
+      return created;
     });
 
     return NextResponse.json({
@@ -153,6 +155,9 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ error: error.issues[0]?.message ?? "Datos inválidos." }, { status: 400 });
+    }
     if (error instanceof Error && "status" in error) return guardErrorResponse(error);
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

@@ -1,11 +1,13 @@
 import { getDb } from "@/lib/db";
 import { SYSTEM_USER_ID } from "@/lib/auth";
+import { parseCliArgs, requireOrganizationId } from "./_shared.ts";
 
 const PEDRO_EMAIL = "pedroagl93@gmail.com";
 const BROKER_DEMO_EMAIL = "broker@policydesk.local";
 
 async function main() {
   const db = getDb();
+  const organizationId = requireOrganizationId(parseCliArgs());
   const pedro = await db.user.findUnique({
     where: { email: PEDRO_EMAIL },
     select: { id: true, name: true },
@@ -17,11 +19,11 @@ async function main() {
 
   const result = await db.$transaction(async (tx) => {
     const clients = await tx.client.updateMany({
-      where: { portfolioOwnerId: null },
+      where: { organizationId, portfolioOwnerId: null },
       data: { portfolioOwnerId: pedro.id },
     });
     const workItems = await tx.workItem.updateMany({
-      where: { assignedToId: null, client: { portfolioOwnerId: pedro.id } },
+      where: { organizationId, assignedToId: null, client: { organizationId, portfolioOwnerId: pedro.id } },
       data: { assignedToId: pedro.id },
     });
 
@@ -79,6 +81,7 @@ async function main() {
 
     await tx.activityLog.create({
       data: {
+        organizationId,
         entityType: "Portfolio",
         entityId: pedro.id,
         action: "ASSIGN_EXISTING_PORTFOLIO",

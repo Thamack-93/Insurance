@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UrlTabs } from "@/components/ui/url-tabs";
 import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-button";
-import { requireAdminOrRedirect } from "@/lib/auth";
+import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import { listAssistantReports } from "@/lib/assistant-reports";
 import { getAssistantAiConnectionStatus, getAssistantAiOperationLabel } from "@/lib/assistant-ai";
 import { getAssistantAiMonthlyUsageSummary, listAssistantAiRuns } from "@/lib/assistant-ai-runs";
@@ -235,14 +235,14 @@ function AiRunList({
 }
 
 export default async function AssistantSettingsPage() {
-  await requireAdminOrRedirect();
+  const organizationContext = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
   const aiStatus = getAssistantAiConnectionStatus();
   const [incidents, suggestions, monthlyUsage] = await Promise.all([
-    listAssistantReports({ kind: "INCIDENT", limit: 100 }),
-    listAssistantReports({ kind: "SUGGESTION", limit: 100 }),
-    getAssistantAiMonthlyUsageSummary(),
+    listAssistantReports({ organizationId: organizationContext.organizationId, kind: "INCIDENT", limit: 100 }),
+    listAssistantReports({ organizationId: organizationContext.organizationId, kind: "SUGGESTION", limit: 100 }),
+    getAssistantAiMonthlyUsageSummary(organizationContext.organizationId),
   ]);
-  const aiRuns = await listAssistantAiRuns({ limit: 50 });
+  const aiRuns = await listAssistantAiRuns({ organizationId: organizationContext.organizationId, limit: 50 });
 
   const openIncidents = incidents.filter((report) => report.status === "OPEN" || report.status === "COLLECTING").length;
   const openSuggestions = suggestions.filter((report) => report.status === "OPEN" || report.status === "COLLECTING").length;

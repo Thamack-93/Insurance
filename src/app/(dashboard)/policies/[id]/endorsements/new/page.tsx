@@ -7,15 +7,15 @@ import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { formatDateInput } from "@/lib/form-utils";
-import { policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { policyOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function NewEndorsementPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const db = getDb();
 
   const policy = await db.policy.findFirst({
-    where: { id, ...policyOperationalWhere(scope.portfolioOwnerId) },
+    where: { id, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
     include: { client: true, insurer: true },
   });
 

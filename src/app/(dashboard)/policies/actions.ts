@@ -2,23 +2,16 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
-import { AuthError, getCurrentUser, getCurrentUserId, requireAdmin } from "@/lib/auth";
+import { AuthError } from "@/lib/auth";
 import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
 import { resolvePolicyFamilyRootId } from "@/lib/policy-families";
 import type { Prisma } from "@/generated/prisma/client";
 import { policySchema, type PolicyFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
-import {
-  assertClientPortfolioAccess,
-  assertPolicyPortfolioAccess,
-  policyOperationalWhere,
-  requirePortfolioReadScope,
-} from "@/lib/portfolio-access";
+import { assertClientOrganizationAccess, assertPolicyOrganizationAccess } from "@/lib/portfolio-access";
+import { assertOrganizationContextInTransaction, requireOrganizationContext, type OrganizationContext } from "@/lib/organization-context";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { buildPolicyDeleteBlockedMessage } from "@/lib/policy-delete";
-import { logError } from "@/lib/logger";
-import { statusLabel } from "@/lib/status";
-import { closeRenewalFollowUp } from "@/lib/renewal-followups";
 
 function normalizePolicyInput(values: PolicyFormValues) {
   return {
@@ -49,9 +42,23 @@ type RenewalPolicyRecord = {
   status: string;
 };
 
-async function clearPreviousRenewalSource(tx: Prisma.TransactionClient, sourcePolicyId: string, currentPolicyId: string, userId: string) {
+async function assertPolicyRelationsInTransaction(
+  tx: Prisma.TransactionClient,
+  context: OrganizationContext,
+  clientId: string,
+  insurerId: string,
+) {
+  const [client, insurer] = await Promise.all([
+    tx.client.findFirst({ where: { id: clientId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {}) }, select: { id: true } }),
+    tx.insurer.findFirst({ where: { id: insurerId, organizationId: context.organizationId }, select: { id: true } }),
+  ]);
+  if (!client || !insurer) throw new AuthError("TENANT_RELATION_MISMATCH", 409);
+}
+
+async function clearPreviousRenewalSource(tx: Prisma.TransactionClient, organizationId: string, sourcePolicyId: string, currentPolicyId: string, userId: string) {
   const remainingChildren = await tx.policy.count({
     where: {
+      organizationId,
       renewedFromPolicyId: sourcePolicyId,
       id: { not: currentPolicyId },
     },
@@ -59,7 +66,7 @@ async function clearPreviousRenewalSource(tx: Prisma.TransactionClient, sourcePo
 
   if (remainingChildren === 0) {
     await tx.policy.update({
-      where: { id: sourcePolicyId },
+      where: { id: sourcePolicyId, organizationId },
       data: {
         status: "ACTIVE",
         updatedById: userId,
@@ -77,13 +84,14 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
 
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
-    await assertClientPortfolioAccess(parsed.data.clientId, userId);
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
+    await assertClientOrganizationAccess(parsed.data.clientId, context);
     const normalized = normalizePolicyInput(parsed.data);
     const renewalSourceId = normalized.renewedFromPolicyId;
     const renewalSource = renewalSourceId
-      ? await db.policy.findUnique({
-          where: { id: renewalSourceId },
+      ? await db.policy.findFirst({
+          where: { id: renewalSourceId, organizationId: context.organizationId },
           select: {
             id: true,
             policyNumber: true,
@@ -102,6 +110,7 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
     }
 
     const familyRootId = await resolvePolicyFamilyRootId({
+      organizationId: context.organizationId,
       policyNumber: parsed.data.policyNumber.trim(),
       clientId: parsed.data.clientId,
       insurerId: parsed.data.insurerId,
@@ -112,6 +121,7 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
         OR: policyNumberVariants.map((variant) => ({ policyNumber: variant })),
         clientId: normalized.clientId,
         insurerId: normalized.insurerId,
+        organizationId: context.organizationId,
         startDate: { lte: normalized.endDate },
         endDate: { gte: normalized.startDate },
         ...(renewalSourceId ? { id: { not: renewalSourceId } } : {}),
@@ -123,10 +133,13 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
     }
 
     const policy = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      await assertPolicyRelationsInTransaction(tx, context, normalized.clientId, normalized.insurerId);
       const effectiveFamilyRootId = renewalSource ? renewalSource.familyRootId ?? renewalSource.id : familyRootId;
       const createdPolicy = await tx.policy.create({
         data: {
           ...normalized,
+          organizationId: context.organizationId,
           familyRootId: effectiveFamilyRootId,
           renewedFromPolicyId: renewalSource?.id ?? null,
           status: renewalSource ? "ACTIVE" : normalized.status,
@@ -137,16 +150,12 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
 
       if (renewalSource) {
         await tx.policy.update({
-          where: { id: renewalSource.id },
+          where: { id: renewalSource.id, organizationId: context.organizationId },
           data: {
             status: "RENEWED",
             updatedById: userId,
           },
         });
-
-        // La renovación quedó cerrada: su recordatorio de "sin avance" ya no
-        // tiene a quién reclamarle.
-        await closeRenewalFollowUp(renewalSource.id, userId, tx);
       }
 
       await writeActivityLog({
@@ -158,6 +167,7 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
           renewedFromPolicyId: renewalSource?.id ?? null,
           familyRootId: effectiveFamilyRootId,
         },
+        organizationId: context.organizationId,
         db: tx,
       });
 
@@ -170,7 +180,6 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
       `/clients/${policy.clientId}`,
       "/dashboard",
       "/today",
-      "/operations",
       "/portfolio",
       "/renewals",
       "/risks",
@@ -192,11 +201,11 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
 
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
-    const currentUser = await getCurrentUser();
-    await assertPolicyPortfolioAccess(id, userId);
-    await assertClientPortfolioAccess(parsed.data.clientId, userId);
-    const previousPolicy = await db.policy.findUnique({ where: { id } });
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
+    await assertPolicyOrganizationAccess(id, context);
+    await assertClientOrganizationAccess(parsed.data.clientId, context);
+    const previousPolicy = await db.policy.findFirst({ where: { id, organizationId: context.organizationId } });
 
     if (!previousPolicy) {
       return errorResult("La poliza ya no existe.");
@@ -207,7 +216,7 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
     const previousRenewedFromPolicyId = previousPolicy.renewedFromPolicyId ?? null;
     const renewalChanged = previousRenewedFromPolicyId !== nextRenewedFromPolicyId;
 
-    if (renewalChanged && currentUser?.role !== "ADMIN") {
+    if (renewalChanged && context.membershipRole === "AGENT") {
       return errorResult("Solo un administrador puede cambiar el vínculo de renovación.");
     }
 
@@ -217,9 +226,9 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
         return errorResult("La póliza origen y la destino no pueden ser la misma.");
       }
 
-      await assertPolicyPortfolioAccess(nextRenewedFromPolicyId, userId);
-      nextRenewalSource = await db.policy.findUnique({
-        where: { id: nextRenewedFromPolicyId },
+      await assertPolicyOrganizationAccess(nextRenewedFromPolicyId, context);
+      nextRenewalSource = await db.policy.findFirst({
+        where: { id: nextRenewedFromPolicyId, organizationId: context.organizationId },
         select: {
           id: true,
           policyNumber: true,
@@ -239,8 +248,10 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
     }
 
     const policy = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      await assertPolicyRelationsInTransaction(tx, context, normalized.clientId, normalized.insurerId);
       await tx.policy.update({
-        where: { id },
+        where: { id, organizationId: context.organizationId },
         data: {
           ...normalized,
           status: (normalized.renewedFromPolicyId || renewalChanged) ? "ACTIVE" : normalized.status,
@@ -250,13 +261,13 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
 
       if (renewalChanged) {
         if (previousRenewedFromPolicyId) {
-          await clearPreviousRenewalSource(tx, previousRenewedFromPolicyId, id, userId);
+          await clearPreviousRenewalSource(tx, context.organizationId, previousRenewedFromPolicyId, id, userId);
         }
 
         if (nextRenewalSource) {
           const effectiveFamilyRootId = nextRenewalSource.familyRootId ?? nextRenewalSource.id;
           await tx.policy.update({
-            where: { id },
+            where: { id, organizationId: context.organizationId },
             data: {
               renewedFromPolicyId: nextRenewalSource.id,
               familyRootId: effectiveFamilyRootId,
@@ -266,17 +277,15 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
           });
 
           await tx.policy.update({
-            where: { id: nextRenewalSource.id },
+            where: { id: nextRenewalSource.id, organizationId: context.organizationId },
             data: {
               status: "RENEWED",
               updatedById: userId,
             },
           });
-
-          await closeRenewalFollowUp(nextRenewalSource.id, userId, tx);
         } else {
           await tx.policy.update({
-            where: { id },
+            where: { id, organizationId: context.organizationId },
             data: {
               renewedFromPolicyId: null,
               status: "ACTIVE",
@@ -286,8 +295,8 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
         }
       }
 
-      const finalPolicy = await tx.policy.findUnique({
-        where: { id },
+      const finalPolicy = await tx.policy.findFirst({
+        where: { id, organizationId: context.organizationId },
         include: {
           client: true,
           insurer: true,
@@ -304,6 +313,7 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
         action: renewalChanged ? "POLICY_UPDATE_RENEWAL" : "POLICY_UPDATE",
         oldValue: previousPolicy,
         newValue: finalPolicy,
+        organizationId: context.organizationId,
         db: tx,
       });
 
@@ -316,7 +326,6 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
       `/clients/${policy.clientId}`,
       "/dashboard",
       "/today",
-      "/operations",
       "/portfolio",
       "/renewals",
       "/risks",
@@ -341,10 +350,11 @@ export async function updatePolicyQualityFields(
 ): Promise<MutationResult> {
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
-    await assertPolicyPortfolioAccess(id, userId);
-    const previousPolicy = await db.policy.findUnique({
-      where: { id },
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
+    await assertPolicyOrganizationAccess(id, context);
+    const previousPolicy = await db.policy.findFirst({
+      where: { id, organizationId: context.organizationId },
       select: {
         id: true,
         policyNumber: true,
@@ -391,18 +401,14 @@ export async function updatePolicyQualityFields(
       updateData.premiumAmount = premium;
     }
 
-    const policy = await db.policy.update({
-      where: { id },
-      data: updateData,
-    });
-
-    await writeActivityLog({
-      entityType: "Policy",
-      entityId: policy.id,
-      action: "POLICY_QUALITY_UPDATE",
-      oldValue: previousPolicy,
-      newValue: policy,
-      userId,
+    const policy = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const updated = await tx.policy.update({
+        where: { id, organizationId: context.organizationId },
+        data: updateData,
+      });
+      await writeActivityLog({ entityType: "Policy", entityId: updated.id, action: "POLICY_QUALITY_UPDATE", oldValue: previousPolicy, newValue: updated, userId, organizationId: context.organizationId, db: tx });
+      return updated;
     });
 
     revalidatePaths([
@@ -411,7 +417,6 @@ export async function updatePolicyQualityFields(
       `/clients/${policy.clientId}`,
       "/dashboard",
       "/today",
-      "/operations",
       "/portfolio",
       "/renewals",
       "/risks",
@@ -426,11 +431,13 @@ export async function updatePolicyQualityFields(
 }
 export async function deletePolicy(id: string): Promise<MutationResult> {
   try {
-    await requireAdmin();
+    const context = await requireOrganizationContext();
+    if (context.membershipRole === "AGENT") return errorResult("Esta acción requiere permisos de administrador.");
+    await assertPolicyOrganizationAccess(id, context);
     const db = getDb();
 
-    const existingPolicy = await db.policy.findUnique({
-      where: { id },
+    const existingPolicy = await db.policy.findFirst({
+      where: { id, organizationId: context.organizationId },
       select: {
         id: true,
         policyNumber: true,
@@ -444,7 +451,7 @@ export async function deletePolicy(id: string): Promise<MutationResult> {
 
     const paidReceiptCount = await db.receipt.count({
       where: {
-        policyId: id,
+        policyId: id, organizationId: context.organizationId,
         status: "PAID",
       },
     });
@@ -453,13 +460,13 @@ export async function deletePolicy(id: string): Promise<MutationResult> {
       return errorResult(blockerMessage);
     }
 
-    await db.policy.delete({ where: { id } });
-
-    await writeActivityLog({
-      entityType: "Policy",
-      entityId: id,
-      action: "POLICY_DELETE",
-      oldValue: { policyNumber: existingPolicy.policyNumber, clientId: existingPolicy.clientId },
+    await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
+      const currentPaidReceiptCount = await tx.receipt.count({ where: { policyId: id, organizationId: context.organizationId, status: "PAID" } });
+      const currentBlocker = buildPolicyDeleteBlockedMessage(currentPaidReceiptCount);
+      if (currentBlocker) throw new Error(currentBlocker);
+      await tx.policy.delete({ where: { id, organizationId: context.organizationId } });
+      await writeActivityLog({ entityType: "Policy", entityId: id, action: "POLICY_DELETE", oldValue: { policyNumber: existingPolicy.policyNumber, clientId: existingPolicy.clientId }, organizationId: context.organizationId, db: tx });
     });
 
     revalidatePaths([
@@ -479,79 +486,23 @@ export async function deletePolicy(id: string): Promise<MutationResult> {
   }
 }
 
-/** Statuses a bulk edit may assign; the rest need the full policy form. */
-const BULK_POLICY_STATUSES = ["ACTIVE", "EXPIRED", "CANCELLED"] as const;
-export type BulkPolicyStatus = (typeof BULK_POLICY_STATUSES)[number];
-
-/**
- * Applies a status to several policies at once. Ids outside the caller's
- * portfolio are dropped rather than failing the whole batch, and the result
- * message reports exactly what happened to the selection.
- */
-export async function bulkUpdatePolicyStatus(
-  ids: string[],
-  status: string,
-): Promise<MutationResult> {
-  if (ids.length === 0) return errorResult("No hay pólizas seleccionadas.");
-  if (!BULK_POLICY_STATUSES.includes(status as BulkPolicyStatus)) {
-    return errorResult("Ese estado no se puede aplicar en lote.");
-  }
-
+export async function bulkUpdatePolicyStatus(ids: string[], status: "EXPIRED" | "CANCELLED"): Promise<MutationResult> {
   try {
-    const scope = await requirePortfolioReadScope();
+    const context = await requireOrganizationContext();
+    if (context.membershipRole === "AGENT") return errorResult("Esta acción requiere permisos de administrador.");
+    const uniqueIds = [...new Set(ids.filter(Boolean))];
+    if (!uniqueIds.length || !["EXPIRED", "CANCELLED"].includes(status)) return errorResult("Selección o estado no válido.");
     const db = getDb();
-
-    const permitted = await db.policy.findMany({
-      where: { id: { in: ids }, ...policyOperationalWhere(scope.portfolioOwnerId) },
-      select: { id: true, status: true, clientId: true },
+    const count = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
+      const result = await tx.policy.updateMany({ where: { id: { in: uniqueIds }, organizationId: context.organizationId }, data: { status, updatedById: context.userId } });
+      if (result.count !== uniqueIds.length) throw new AuthError("Una o más pólizas no pertenecen a tu organización.", 403);
+      await writeActivityLog({ organizationId: context.organizationId, entityType: "Policy", entityId: "bulk", action: "POLICY_BULK_STATUS_UPDATE", newValue: { ids: uniqueIds, status }, userId: context.userId, db: tx });
+      return result.count;
     });
-
-    const outOfScope = ids.length - permitted.length;
-    const target = permitted.filter((policy) => policy.status !== status);
-
-    if (target.length === 0) {
-      return errorResult(
-        outOfScope > 0
-          ? "Ninguna de las pólizas seleccionadas está en tu cartera."
-          : "Las pólizas seleccionadas ya tienen ese estado.",
-      );
-    }
-
-    const targetIds = target.map((policy) => policy.id);
-    const result = await db.policy.updateMany({
-      where: { id: { in: targetIds } },
-      data: { status: status as BulkPolicyStatus },
-    });
-
-    await writeActivityLog({
-      action: "BULK_UPDATE_STATUS",
-      entityType: "Policy",
-      entityId: targetIds.join(","),
-      newValue: { status, count: result.count },
-    });
-
-    revalidatePaths([
-      "/policies",
-      "/dashboard",
-      "/today",
-      "/portfolio",
-      "/renewals",
-      "/risks",
-      ...[...new Set(target.map((policy) => `/clients/${policy.clientId}`))],
-    ]);
-
-    const label = statusLabel(status, "policy");
-    const parts = [
-      `${result.count} póliza${result.count !== 1 ? "s" : ""} ${result.count !== 1 ? "quedaron" : "quedó"} como “${label}”.`,
-    ];
-    const unchanged = permitted.length - target.length;
-    if (unchanged > 0) parts.push(`${unchanged} ya ${unchanged !== 1 ? "tenían" : "tenía"} ese estado.`);
-    if (outOfScope > 0) parts.push(`${outOfScope} no ${outOfScope !== 1 ? "están" : "está"} en tu cartera.`);
-
-    return successResult("bulk", "", parts.join(" "));
+    revalidatePaths(["/policies", "/today", "/portfolio", "/renewals", "/risks", "/data-quality"]);
+    return successResult(String(count), "/policies", `${count} pólizas actualizadas.`);
   } catch (error) {
-    if (error instanceof AuthError) return errorResult(error.message);
-    logError("policies.bulkUpdatePolicyStatus", error, { count: ids.length, status });
-    return errorResult("No se pudo actualizar el estado de las pólizas seleccionadas.");
+    return errorResult(error instanceof Error ? error.message : "No se pudieron actualizar las pólizas.");
   }
 }

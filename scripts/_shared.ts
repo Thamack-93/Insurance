@@ -172,6 +172,14 @@ export function hasFlag(args: CliArgs, name: string) {
   return args.flags[name] === true || args.flags[name] === "true";
 }
 
+export function requireOrganizationId(args: CliArgs = parseCliArgs()) {
+  const organizationId = getFlag(args, "organization")?.trim() || process.env.POLICYDESK_ORGANIZATION_ID?.trim();
+  if (!organizationId) {
+    throw new Error("Se requiere --organization <id> o POLICYDESK_ORGANIZATION_ID; los scripts operativos nunca usan alcance global.");
+  }
+  return organizationId;
+}
+
 export function normalizeKey(value: string) {
   return value
     .toLowerCase()

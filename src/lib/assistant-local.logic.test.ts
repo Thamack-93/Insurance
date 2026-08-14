@@ -294,7 +294,7 @@ describe("assistant local replies", () => {
 
   it("returns a targeted consistency audit for vigencia and receipts", async () => {
     const reply = await buildAssistantReply(
-      { id: "user-1", role: "ADMIN" },
+      { id: "user-1", role: "ADMIN", organizationId: "org-test" },
       "necesito que me digas que polizas no coinciden sus fechas de vencimiento, renovacion, inicio de vigencia y sus recibos",
     );
 

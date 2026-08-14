@@ -3,22 +3,20 @@ import { updatePolicy } from "@/app/(dashboard)/policies/actions";
 import { PolicyForm } from "@/components/forms/policy-form";
 import { createPolicyDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
-import { getCurrentUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { formatDateInput } from "@/lib/form-utils";
 import type { PolicyRenewalSource } from "@/lib/policy-renewal";
 import type { PolicyFormValues } from "@/lib/validations";
-import { clientOperationalWhere, policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { clientOperationalWhere, policyOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function EditPolicyPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const scope = await requirePortfolioReadScope();
-  const liveUser = await getCurrentUser();
-  const isAdmin = !!liveUser && liveUser.active && liveUser.role === "ADMIN";
+  const scope = await requireOrganizationPortfolioReadScope();
+  const isAdmin = scope.membershipRole !== "AGENT";
   const db = getDb();
   const [policy, clients, insurers] = await Promise.all([
     db.policy.findFirst({
-      where: { id, ...policyOperationalWhere(scope.portfolioOwnerId) },
+      where: { id, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: {
         renewedFrom: {
           select: {
@@ -43,12 +41,12 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
       },
     }),
     db.client.findMany({
-      where: { status: { not: "ARCHIVED" }, ...clientOperationalWhere(scope.portfolioOwnerId) },
+      where: { status: { not: "ARCHIVED" }, ...clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       orderBy: { fullName: "asc" },
       select: { id: true, fullName: true },
     }),
     db.insurer.findMany({
-      where: { status: { not: "ARCHIVED" } },
+      where: { status: { not: "ARCHIVED" }, organizationId: scope.organizationId },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),

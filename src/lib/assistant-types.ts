@@ -270,6 +270,8 @@ export type AssistantHistoryMessage = {
 export type AssistantUser = {
   id: string;
   role: "ADMIN" | "AGENT";
+  /** Present for authenticated tenant-aware assistant requests. */
+  organizationId?: string;
 };
 
 export type AssistantResponseSource = "local" | "ai";

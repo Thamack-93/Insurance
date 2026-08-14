@@ -20,7 +20,7 @@ import {
   readClientListFilters,
 } from "@/lib/list-filters";
 import { LocalNavigation } from "@/components/layout/local-navigation";
-import { clientOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { clientOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 const PAGE_SIZE = 25;
 
@@ -37,8 +37,8 @@ export default async function ClientsPage({
   const isFiltered = Boolean(query || statusFilter || typeFilter);
 
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
-  const portfolioWhere = clientOperationalWhere(scope.portfolioOwnerId);
+  const scope = await requireOrganizationPortfolioReadScope();
+  const portfolioWhere = clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const clearFiltersHref = buildTableHref("/clients", params, {
     q: null,
     status: null,
@@ -46,7 +46,7 @@ export default async function ClientsPage({
     page: null,
   });
 
-  const where = buildClientListWhere(filters, scope.portfolioOwnerId);
+  const where = buildClientListWhere(filters, scope.portfolioOwnerId, scope.organizationId);
   const orderBy = buildClientListOrderBy(filters);
 
   const [
@@ -107,6 +107,9 @@ export default async function ClientsPage({
             <>
               <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/clients/new">Nuevo cliente</Link>
+              </Button>
+              <Button asChild variant="outline" className="bg-card/70">
+                <a href="/api/exports/clients">Exportar Excel</a>
               </Button>
               <Button asChild>
                 <Link href="/policies">

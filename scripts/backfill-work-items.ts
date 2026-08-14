@@ -22,6 +22,7 @@ async function main() {
   const tasks = await db.task.findMany({
     select: {
       id: true,
+      organizationId: true,
       folio: true,
       clientId: true,
       policyId: true,
@@ -42,9 +43,11 @@ async function main() {
   });
 
   for (const task of tasks) {
+    if (!task.organizationId) throw new Error("POLICYDESK_WORK_ITEM_SOURCE_ORGANIZATION_REQUIRED");
     const existing = await db.workItem.findUnique({
       where: {
-        sourceType_sourceId: {
+        organizationId_sourceType_sourceId: {
+          organizationId: task.organizationId,
           sourceType: "Task",
           sourceId: task.id,
         },
@@ -53,6 +56,7 @@ async function main() {
     });
 
     await upsertWorkItemFromSource({
+      organizationId: task.organizationId!,
       sourceType: "Task",
       sourceId: task.id,
       workItemType: "TASK",
@@ -83,6 +87,7 @@ async function main() {
   const alerts = await db.alert.findMany({
     select: {
       id: true,
+      organizationId: true,
       severity: true,
       title: true,
       description: true,
@@ -94,9 +99,11 @@ async function main() {
   });
 
   for (const alert of alerts) {
+    if (!alert.organizationId) throw new Error("POLICYDESK_WORK_ITEM_SOURCE_ORGANIZATION_REQUIRED");
     const existing = await db.workItem.findUnique({
       where: {
-        sourceType_sourceId: {
+        organizationId_sourceType_sourceId: {
+          organizationId: alert.organizationId,
           sourceType: "Notification",
           sourceId: alert.id,
         },
@@ -105,6 +112,7 @@ async function main() {
     });
 
     await upsertWorkItemFromSource({
+      organizationId: alert.organizationId!,
       sourceType: "Notification",
       sourceId: alert.id,
       workItemType: "NOTIFICATION",

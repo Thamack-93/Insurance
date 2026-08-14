@@ -13,6 +13,7 @@ import { LATEST_RENEWAL_RECEIPT_INCLUDE, getLatestReceiptStatus } from "@/lib/re
 import { shouldIncludeInRenewals } from "@/lib/renewals.logic";
 
 export interface RenewalOpportunity {
+  organizationId: string;
   policyId: string;
   clientId: string;
   insurerId: string;
@@ -29,6 +30,7 @@ export interface RenewalOpportunity {
 }
 
 type RenewalPolicyRecord = {
+  organizationId: string;
   id: string;
   clientId: string;
   insurerId: string;
@@ -57,6 +59,7 @@ function mapPolicyToRenewalOpportunity(policy: RenewalPolicyRecord): RenewalOppo
   }
 
   return {
+    organizationId: policy.organizationId,
     policyId: policy.id,
     clientId: policy.clientId,
     insurerId: policy.insurerId,
@@ -73,9 +76,10 @@ function mapPolicyToRenewalOpportunity(policy: RenewalPolicyRecord): RenewalOppo
   };
 }
 
-function buildRenewalWhere(portfolioOwnerId?: string, additionalWhere: Prisma.PolicyWhereInput = {}): Prisma.PolicyWhereInput {
+function buildRenewalWhere(portfolioOwnerId?: string, organizationId?: string, additionalWhere: Prisma.PolicyWhereInput = {}): Prisma.PolicyWhereInput {
   return {
-    ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
+    ...(organizationId ? { organizationId, client: { organizationId, ...(portfolioOwnerId ? { portfolioOwnerId } : {}) } } : {}),
+    ...(portfolioOwnerId && !organizationId ? { client: { portfolioOwnerId } } : {}),
     ...ACTIVE_RENEWAL_POLICY_WHERE,
     ...additionalWhere,
   };
@@ -84,12 +88,13 @@ function buildRenewalWhere(portfolioOwnerId?: string, additionalWhere: Prisma.Po
 export async function loadEligibleRenewalPolicies(
   additionalWhere: Prisma.PolicyWhereInput,
   portfolioOwnerId?: string,
+  organizationId?: string,
 ): Promise<RenewalPolicyRecord[]> {
   await connection();
   const db = getDb();
 
   const policies = await db.policy.findMany({
-    where: buildRenewalWhere(portfolioOwnerId, additionalWhere),
+    where: buildRenewalWhere(portfolioOwnerId, organizationId, additionalWhere),
     include: {
       client: {
         select: {
@@ -169,6 +174,7 @@ export async function createRenewalWorkItems() {
       const workItemSourceId = `policy:${renewal.policyId}:renewal-workItem`;
       if (renewal.daysUntilRenewal <= 30) {
         const workItem = await upsertWorkItemFromSource({
+          organizationId: renewal.organizationId,
           sourceType: "Renewal",
           sourceId: workItemSourceId,
           workItemType: "TASK",
@@ -192,6 +198,7 @@ export async function createRenewalWorkItems() {
           workItemsCreated++;
 
           await writeActivityLog({
+            organizationId: renewal.organizationId,
             action: "CREATE_RENEWAL_WORK_ITEM",
             entityType: "WorkItem",
             entityId: workItemSourceId,

@@ -1,6 +1,6 @@
 "use server";
 
-import { requireAdmin } from "@/lib/auth";
+import { requireOrganizationRole } from "@/lib/organization-context";
 import {
   archiveAssistantReport,
   closeAssistantReport,
@@ -12,8 +12,8 @@ import { logError } from "@/lib/logger";
 
 export async function closeAssistantReportAction(reportId: string): Promise<MutationResult> {
   try {
-    const actor = await requireAdmin();
-    await closeAssistantReport(reportId, actor.id);
+    const actor = await requireOrganizationRole(["OWNER", "ADMIN"]);
+    await closeAssistantReport(reportId, actor.organizationId, actor.userId);
     revalidatePaths(["/settings", "/settings/assistant", "/assistant"]);
     return successResult(reportId, "/settings/assistant", "Reporte cerrado.");
   } catch (error) {
@@ -24,8 +24,8 @@ export async function closeAssistantReportAction(reportId: string): Promise<Muta
 
 export async function archiveAssistantReportAction(reportId: string): Promise<MutationResult> {
   try {
-    const actor = await requireAdmin();
-    await archiveAssistantReport(reportId, actor.id);
+    const actor = await requireOrganizationRole(["OWNER", "ADMIN"]);
+    await archiveAssistantReport(reportId, actor.organizationId, actor.userId);
     revalidatePaths(["/settings", "/settings/assistant", "/assistant"]);
     return successResult(reportId, "/settings/assistant", "Reporte archivado.");
   } catch (error) {
@@ -36,8 +36,8 @@ export async function archiveAssistantReportAction(reportId: string): Promise<Mu
 
 export async function reopenAssistantReportAction(reportId: string): Promise<MutationResult> {
   try {
-    const actor = await requireAdmin();
-    await reopenAssistantReport(reportId, actor.id);
+    const actor = await requireOrganizationRole(["OWNER", "ADMIN"]);
+    await reopenAssistantReport(reportId, actor.organizationId, actor.userId);
     revalidatePaths(["/settings", "/settings/assistant", "/assistant"]);
     return successResult(reportId, "/settings/assistant", "Reporte reabierto.");
   } catch (error) {
@@ -48,8 +48,8 @@ export async function reopenAssistantReportAction(reportId: string): Promise<Mut
 
 export async function deleteAssistantReportAction(reportId: string): Promise<MutationResult> {
   try {
-    const actor = await requireAdmin();
-    await deleteAssistantReport(reportId, actor.id);
+    const actor = await requireOrganizationRole(["OWNER", "ADMIN"]);
+    await deleteAssistantReport(reportId, actor.organizationId, actor.userId);
     revalidatePaths(["/settings", "/settings/assistant", "/assistant"]);
     return successResult(reportId, "/settings/assistant", "Reporte eliminado.");
   } catch (error) {

@@ -13,12 +13,16 @@ import { getBreadcrumbSegments } from "@/lib/navigation";
 export function AppTopbar({
   userMenu,
   isAdmin = false,
+  isSuperAdmin = false,
+  hasOrganizationContext = false,
   unreadNotificationCount,
   notifications,
   initialTheme,
 }: {
   userMenu?: ReactNode;
   isAdmin?: boolean;
+  isSuperAdmin?: boolean;
+  hasOrganizationContext?: boolean;
   unreadNotificationCount: number;
   notifications: BellNotification[];
   initialTheme: ThemeMode;
@@ -31,7 +35,7 @@ export function AppTopbar({
   return (
     <header className="sticky top-0 z-30 border-b border-border/70 bg-background/80 backdrop-blur-xl">
       <div className="flex h-16 items-center gap-3 px-3 sm:px-5 lg:gap-4 lg:px-8">
-        <AppMobileSidebar isAdmin={isAdmin} />
+        <AppMobileSidebar isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} />
         <nav aria-label="Breadcrumb" className="hidden shrink-0 items-center gap-2 text-sm text-muted-foreground md:flex">
           <span className="font-display text-[15px] text-foreground">PolicyDesk</span>
           {segments.map(({ segment, label }, index) => (
@@ -43,29 +47,31 @@ export function AppTopbar({
         </nav>
 
         <div className="mx-auto flex w-full max-w-2xl items-center gap-2 rounded-md border bg-card px-3 py-1.5 shadow-[0_1px_2px_rgb(0_0_0/0.04)]">
-          <SearchInput />
-          <button
+          {hasOrganizationContext ? <SearchInput /> : <span className="px-2 text-sm text-muted-foreground">Selecciona una organización para operar</span>}
+          {hasOrganizationContext ? <button
             type="button"
             aria-label="Abrir paleta de comandos"
             onClick={() => window.dispatchEvent(new CustomEvent("pg:open-command-palette"))}
             className="hidden shrink-0 cursor-pointer items-center gap-1 rounded-md border bg-muted px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex"
           >
             <Command className="size-3" /> K
-          </button>
+          </button> : null}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
           <ThemeToggle initialTheme={initialTheme} />
-          <button
-            type="button"
-            onClick={() => openNora()}
-            aria-label="Abrir Nora"
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ai transition-colors hover:bg-ai/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Sparkles className="size-4" aria-hidden />
-            <span className="hidden sm:inline">Nora</span>
-          </button>
-          <NotificationsBell isAdmin={isAdmin} unreadCount={unreadNotificationCount} notifications={notifications} />
+          {hasOrganizationContext ? (
+            <button
+              type="button"
+              onClick={() => openNora()}
+              aria-label="Abrir Nora"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ai transition-colors hover:bg-ai/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Sparkles className="size-4" aria-hidden />
+              <span className="hidden sm:inline">Nora</span>
+            </button>
+          ) : null}
+          {hasOrganizationContext ? <NotificationsBell isAdmin={isAdmin} unreadCount={unreadNotificationCount} notifications={notifications} /> : null}
           {userMenu}
         </div>
       </div>

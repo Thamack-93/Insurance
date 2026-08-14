@@ -1,7 +1,7 @@
 import "server-only";
 
 import { getDb } from "@/lib/db";
-import { requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { formatDate } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
 import { policyTypeLabel, statusLabel } from "@/lib/status";
@@ -56,12 +56,12 @@ function columns<T extends Record<string, unknown>>(
 const clientsDataset: ExportDataset = {
   label: "Clientes",
   async load(params) {
-    const scope = await requirePortfolioReadScope();
+    const scope = await requireOrganizationPortfolioReadScope();
     const filters = readClientListFilters(params);
     const db = getDb();
 
     const records = await db.client.findMany({
-      where: buildClientListWhere(filters, scope.portfolioOwnerId),
+      where: buildClientListWhere(filters, scope.portfolioOwnerId, scope.organizationId),
       orderBy: buildClientListOrderBy(filters),
       include: { _count: { select: { policies: true, receipts: true, tasks: true } } },
       take: EXPORT_ROW_LIMIT + 1,
@@ -104,12 +104,12 @@ const clientsDataset: ExportDataset = {
 const policiesDataset: ExportDataset = {
   label: "Pólizas",
   async load(params) {
-    const scope = await requirePortfolioReadScope();
+    const scope = await requireOrganizationPortfolioReadScope();
     const filters = readPolicyListFilters(params);
     const db = getDb();
 
     const records = await db.policy.findMany({
-      where: buildPolicyListWhere(filters, scope.portfolioOwnerId),
+      where: buildPolicyListWhere(filters, scope.portfolioOwnerId, scope.organizationId),
       orderBy: buildPolicyListOrderBy(filters),
       include: { client: true, insurer: true },
       take: EXPORT_ROW_LIMIT + 1,
@@ -150,12 +150,12 @@ const policiesDataset: ExportDataset = {
 const receiptsDataset: ExportDataset = {
   label: "Recibos",
   async load(params) {
-    const scope = await requirePortfolioReadScope();
+    const scope = await requireOrganizationPortfolioReadScope();
     const filters = readReceiptListFilters(params);
     const db = getDb();
 
     const records = await db.receipt.findMany({
-      where: buildReceiptListWhere(filters, scope.portfolioOwnerId),
+      where: buildReceiptListWhere(filters, scope.portfolioOwnerId, scope.organizationId),
       orderBy: buildReceiptListOrderBy(filters),
       include: { client: true, policy: true, insurer: true, endorsement: true },
       take: EXPORT_ROW_LIMIT + 1,
@@ -196,12 +196,12 @@ const receiptsDataset: ExportDataset = {
 const quotesDataset: ExportDataset = {
   label: "Cotizaciones",
   async load(params) {
-    const scope = await requirePortfolioReadScope();
+    const scope = await requireOrganizationPortfolioReadScope();
     const filters = readQuoteListFilters(params);
     const db = getDb();
 
     const records = await db.quote.findMany({
-      where: buildQuoteListWhere(filters, scope.portfolioOwnerId),
+      where: buildQuoteListWhere(filters, scope.portfolioOwnerId, scope.organizationId),
       orderBy: buildQuoteListOrderBy(filters),
       include: { client: true, insurer: true },
       take: EXPORT_ROW_LIMIT + 1,

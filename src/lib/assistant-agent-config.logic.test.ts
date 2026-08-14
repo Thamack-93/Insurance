@@ -43,7 +43,7 @@ describe("Nora agent rollout configuration", () => {
     vi.stubEnv("DATABASE_URL", "postgres://configured");
     vi.stubEnv("NORA_AI_MONTHLY_SOFT_LIMIT_USD", "4");
     getAssistantAiMonthlySpend.mockResolvedValueOnce({ costUsd: 3.2, runCount: 10 });
-    const warningStatus = await getNoraAiBudgetStatus();
+    const warningStatus = await getNoraAiBudgetStatus("org-test");
     expect(warningStatus).toMatchObject({
       allowed: true,
       warning: expect.stringContaining("80%"),
@@ -52,7 +52,7 @@ describe("Nora agent rollout configuration", () => {
     });
 
     getAssistantAiMonthlySpend.mockResolvedValueOnce({ costUsd: 4, runCount: 12 });
-    await expect(getNoraAiBudgetStatus()).resolves.toMatchObject({
+    await expect(getNoraAiBudgetStatus("org-test")).resolves.toMatchObject({
       allowed: false,
       warning: expect.stringContaining("alcanzó el límite"),
       spentUsd: 4,

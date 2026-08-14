@@ -3,27 +3,29 @@ import { WorkItemForm } from "@/components/forms/task-form";
 import { createWorkItemDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
+import { clientOperationalWhere, policyOperationalWhere, receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function NewWorkItemPage() {
+  const scope = await requireOrganizationPortfolioReadScope();
   const db = getDb();
   const [clients, policies, insurers, receipts] = await Promise.all([
     db.client.findMany({
-      where: { status: { not: "ARCHIVED" } },
+      where: { status: { not: "ARCHIVED" }, ...clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       orderBy: { fullName: "asc" },
       select: { id: true, fullName: true },
     }),
     db.policy.findMany({
-      where: { status: { not: "CANCELLED" } },
+      where: { status: { not: "CANCELLED" }, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       orderBy: { policyNumber: "asc" },
       select: { id: true, policyNumber: true },
     }),
     db.insurer.findMany({
-      where: { status: { not: "ARCHIVED" } },
+      where: { status: { not: "ARCHIVED" }, organizationId: scope.organizationId },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
     db.receipt.findMany({
-      where: { status: { not: "CANCELLED" } },
+      where: { status: { not: "CANCELLED" }, ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       orderBy: { dueDate: "asc" },
       select: { id: true, receiptNumber: true },
     }),

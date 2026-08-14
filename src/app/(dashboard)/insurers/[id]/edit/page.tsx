@@ -5,15 +5,15 @@ import { createInsurerDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { getDb } from "@/lib/db";
 import type { InsurerFormValues } from "@/lib/validations";
-import { requireAdminOrRedirect } from "@/lib/auth";
+import { requireOrganizationRole } from "@/lib/organization-context";
 
 export default async function EditInsurerPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireAdminOrRedirect();
+  const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
   const { id } = await params;
   const db = getDb();
 
-  const insurer = await db.insurer.findUnique({
-    where: { id },
+  const insurer = await db.insurer.findFirst({
+    where: { id, organizationId: context.organizationId },
   });
 
   if (!insurer) {

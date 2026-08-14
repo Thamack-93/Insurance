@@ -13,14 +13,13 @@ import { detectRisks } from "@/lib/risk-engine";
 import { buildAssistantActionProposalFromPlan } from "@/lib/assistant-actions";
 import { getClaimChecklistSummary } from "@/lib/claim-checklists";
 import { searchUserPortfolio } from "@/lib/assistant-local";
-import { BOOTSTRAP_ORGANIZATION_ID } from "@/lib/tenant-organization-foundation";
+import { requireOrganizationContext } from "@/lib/organization-context";
 import {
   claimOperationalWhere,
   clientOperationalWhere,
   endorsementOperationalWhere,
   policyOperationalWhere,
   receiptOperationalWhere,
-  requirePortfolioReadScope,
   workItemOperationalWhere,
 } from "@/lib/portfolio-access";
 import type {
@@ -61,20 +60,14 @@ const draftOutputSchema = z.union([
 ]);
 
 async function requireNoraToolScope(expectedUserId: string) {
-  const scope = await requirePortfolioReadScope();
-  if (scope.id !== expectedUserId) throw new AuthError("La sesión de Nora cambió. Vuelve a intentarlo.", 403);
-  const db = getDb();
-  const membership = await db.organizationMembership.findFirst({
-    where: {
-      userId: scope.id,
-      organizationId: BOOTSTRAP_ORGANIZATION_ID,
-      active: true,
-      organization: { status: "ACTIVE" },
-    },
-    select: { organizationId: true, role: true },
-  });
-  if (!membership) throw new AuthError("No tienes una membresía activa para usar Nora.", 403);
-  return { ...scope, organizationId: membership.organizationId };
+  const context = await requireOrganizationContext();
+  if (context.userId !== expectedUserId) throw new AuthError("La sesión de Nora cambió. Vuelve a intentarlo.", 403);
+  return {
+    id: context.userId,
+    role: context.membershipRole === "AGENT" ? "AGENT" as const : "ADMIN" as const,
+    portfolioOwnerId: context.membershipRole === "AGENT" ? context.userId : undefined,
+    organizationId: context.organizationId,
+  };
 }
 
 function iso(value: Date | null | undefined) {
@@ -103,7 +96,7 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
       inputSchema: z.object({ query: z.string().trim().min(2).max(250) }),
       execute: ({ query }) => traced("searchPortfolio", searchOutputSchema, async () => {
         const scope = await requireNoraToolScope(user.id);
-        const freshUser: AssistantUser = { id: scope.id, role: scope.role === "ADMIN" ? "ADMIN" : "AGENT" };
+        const freshUser: AssistantUser = { id: scope.id, role: scope.role, organizationId: scope.organizationId };
         const results = await searchUserPortfolio(freshUser, query);
         return results.map((result) => options.gmmMetadataOnly
           ? { id: result.id, type: result.type, title: result.title }
@@ -118,13 +111,13 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
         if (options.gmmMetadataOnly && type !== "claim") return { restricted: true, reason: "El contexto GMM solo permite metadatos del siniestro y su checklist." };
         const db = getDb();
         switch (type) {
-          case "client": return db.client.findFirst({ where: { AND: [{ id }, clientOperationalWhere(scope.portfolioOwnerId)] }, select: { id: true, fullName: true, type: true, status: true, email: true, phone: true } });
-          case "policy": return db.policy.findFirst({ where: { AND: [{ id }, policyOperationalWhere(scope.portfolioOwnerId)] }, select: { id: true, policyNumber: true, policyType: true, status: true, startDate: true, endDate: true, premiumAmount: true, currency: true, client: { select: { fullName: true } }, insurer: { select: { name: true } } } });
-          case "receipt": return db.receipt.findFirst({ where: { AND: [{ id }, receiptOperationalWhere(scope.portfolioOwnerId)] }, select: { id: true, receiptNumber: true, status: true, dueDate: true, amount: true, currency: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } } });
-          case "workItem": return db.workItem.findFirst({ where: { AND: [{ id }, workItemOperationalWhere(scope.portfolioOwnerId)] }, select: { id: true, title: true, status: true, priority: true, dueDate: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } } });
-          case "endorsement": return db.policyEndorsement.findFirst({ where: { AND: [{ id }, endorsementOperationalWhere(scope.portfolioOwnerId)] }, select: { id: true, endorsementNumber: true, status: true, startDate: true, endDate: true, concept: true, policy: { select: { policyNumber: true } } } });
+          case "client": return db.client.findFirst({ where: { AND: [{ id }, clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId)] }, select: { id: true, fullName: true, type: true, status: true, email: true, phone: true } });
+          case "policy": return db.policy.findFirst({ where: { AND: [{ id }, policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId)] }, select: { id: true, policyNumber: true, policyType: true, status: true, startDate: true, endDate: true, premiumAmount: true, currency: true, client: { select: { fullName: true } }, insurer: { select: { name: true } } } });
+          case "receipt": return db.receipt.findFirst({ where: { AND: [{ id }, receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId)] }, select: { id: true, receiptNumber: true, status: true, dueDate: true, amount: true, currency: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } } });
+          case "workItem": return db.workItem.findFirst({ where: { AND: [{ id }, workItemOperationalWhere(scope.portfolioOwnerId, scope.organizationId)] }, select: { id: true, title: true, status: true, priority: true, dueDate: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } } });
+          case "endorsement": return db.policyEndorsement.findFirst({ where: { AND: [{ id }, endorsementOperationalWhere(scope.portfolioOwnerId, scope.organizationId)] }, select: { id: true, endorsementNumber: true, status: true, startDate: true, endDate: true, concept: true, policy: { select: { policyNumber: true } } } });
           case "claim": {
-            const claim = await db.claim.findFirst({ where: { AND: [{ id }, claimOperationalWhere(scope.portfolioOwnerId)] }, select: { id: true, folio: true, status: true, claimType: true, incidentDate: true, reportedDate: true, amountClaimed: true, amountPaid: true, description: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true, policyType: true } }, insurer: { select: { name: true } } } });
+            const claim = await db.claim.findFirst({ where: { AND: [{ id }, claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId)] }, select: { id: true, folio: true, status: true, claimType: true, incidentDate: true, reportedDate: true, amountClaimed: true, amountPaid: true, description: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true, policyType: true } }, insurer: { select: { name: true } } } });
             if (!claim) return null;
             if (claim.policy.policyType === "GMM") return { id: claim.id, folio: claim.folio, status: claim.status, policyType: "GMM", policyNumber: claim.policy.policyNumber, incidentDate: iso(claim.incidentDate), reportedDate: iso(claim.reportedDate), metadataOnly: true };
             if (options.gmmMetadataOnly) return { restricted: true, reason: "El siniestro no corresponde al contexto GMM autorizado." };
@@ -153,7 +146,7 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
       execute: ({ days }) => traced("listRenewals", recordListOutputSchema, async () => {
         const scope = await requireNoraToolScope(user.id);
         const start = today();
-        const policies = await loadEligibleRenewalPolicies({ endDate: { gte: start, lte: businessAddDays(start, days) } }, scope.portfolioOwnerId);
+        const policies = await loadEligibleRenewalPolicies({ endDate: { gte: start, lte: businessAddDays(start, days) } }, scope.portfolioOwnerId, scope.organizationId);
         return policies.slice(0, 25).map((item) => ({ id: item.id, policyNumber: item.policyNumber, endDate: iso(item.endDate), client: item.client.fullName, insurer: item.insurer.name, premiumAmount: Number(item.premiumAmount), currency: item.currency }));
       }),
     }),
@@ -166,7 +159,7 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
         const start = today();
         const tomorrow = businessAddDays(start, 1);
         const dueDate = state === "overdue" ? { lt: start } : state === "today" ? { gte: start, lt: tomorrow } : { gte: tomorrow, lte: businessAddDays(start, days) };
-        const rows = await db.receipt.findMany({ where: { ...receiptOperationalWhere(scope.portfolioOwnerId), dueDate, status: { notIn: ["PAID", "CANCELLED"] } }, select: { id: true, receiptNumber: true, dueDate: true, amount: true, currency: true, status: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } }, orderBy: { dueDate: "asc" }, take: 25 });
+        const rows = await db.receipt.findMany({ where: { ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId), dueDate, status: { notIn: ["PAID", "CANCELLED"] } }, select: { id: true, receiptNumber: true, dueDate: true, amount: true, currency: true, status: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } }, orderBy: { dueDate: "asc" }, take: 25 });
         return rows.map((item) => ({ ...item, amount: Number(item.amount), dueDate: iso(item.dueDate) }));
       }),
     }),
@@ -175,7 +168,7 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
       inputSchema: z.object({ limit: z.number().int().min(1).max(25).default(15) }),
       execute: ({ limit }) => traced("listOpenWorkItems", recordListOutputSchema, async () => {
         const scope = await requireNoraToolScope(user.id);
-        const rows = await getWorkItems({ workItemTypes: ["TASK"], statuses: OPEN_WORK_ITEM_STATUSES, limit, portfolioOwnerId: scope.portfolioOwnerId });
+        const rows = await getWorkItems({ workItemTypes: ["TASK"], statuses: OPEN_WORK_ITEM_STATUSES, limit, portfolioOwnerId: scope.portfolioOwnerId, organizationId: scope.organizationId });
         return rows.map((item) => ({ id: item.id, title: item.title, status: item.status, priority: item.priority, dueDate: iso(item.dueDate), client: item.client?.fullName ?? null, policyNumber: item.policy?.policyNumber ?? null }));
       }),
     }),
@@ -185,7 +178,7 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
       execute: ({ status, limit }) => traced("listClaims", recordListOutputSchema, async () => {
         const scope = await requireNoraToolScope(user.id);
         const db = getDb();
-        const rows = await db.claim.findMany({ where: { ...claimOperationalWhere(scope.portfolioOwnerId), ...(status ? { status } : { status: { notIn: ["RESOLVED", "CANCELLED"] } }) }, select: { id: true, folio: true, claimType: true, status: true, incidentDate: true, reportedDate: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true, policyType: true } }, insurer: { select: { name: true } } }, orderBy: { reportedDate: "desc" }, take: limit });
+        const rows = await db.claim.findMany({ where: { ...claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId), ...(status ? { status } : { status: { notIn: ["RESOLVED", "CANCELLED"] } }) }, select: { id: true, folio: true, claimType: true, status: true, incidentDate: true, reportedDate: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true, policyType: true } }, insurer: { select: { name: true } } }, orderBy: { reportedDate: "desc" }, take: limit });
         return rows.map((item) => item.policy.policyType === "GMM" ? { id: item.id, folio: item.folio, status: item.status, policyType: "GMM", policyNumber: item.policy.policyNumber, reportedDate: iso(item.reportedDate), metadataOnly: true } : { ...item, incidentDate: iso(item.incidentDate), reportedDate: iso(item.reportedDate) });
       }),
     }),
@@ -194,7 +187,7 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
       inputSchema: z.object({ claimId: z.string().min(1).max(100) }),
       execute: ({ claimId }) => traced("getClaimChecklist", nullableRecordOutputSchema, async () => {
         const scope = await requireNoraToolScope(user.id);
-        const summary = await getClaimChecklistSummary(claimId, scope.portfolioOwnerId);
+        const summary = await getClaimChecklistSummary(claimId, scope.organizationId, scope.portfolioOwnerId);
         if (!summary || summary.policyType !== "GMM") return summary;
         return {
           counts: summary.counts,
@@ -213,7 +206,7 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
       inputSchema: z.object({}),
       execute: () => traced("auditConsistency", toolRecordSchema, async () => {
         const scope = await requireNoraToolScope(user.id);
-        const findings = await detectRisks(scope.portfolioOwnerId);
+        const findings = await detectRisks(scope.portfolioOwnerId, scope.organizationId);
         return { count: findings.length, findings: findings.slice(0, 25) };
       }),
     }),
@@ -222,7 +215,7 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
       inputSchema: mutationPlanSchema,
       execute: (plan) => traced("prepareActionDraft", draftOutputSchema, async () => {
         const scope = await requireNoraToolScope(user.id);
-        const freshUser: AssistantUser = { id: scope.id, role: scope.role === "ADMIN" ? "ADMIN" : "AGENT" };
+        const freshUser: AssistantUser = { id: scope.id, role: scope.role, organizationId: scope.organizationId };
         actionProposal = await buildAssistantActionProposalFromPlan(plan as AssistantMutationPlan, freshUser);
         return actionProposal ? { prepared: true, proposal: actionProposal } : { prepared: false, reason: "La propuesta es incompleta, ambigua o no pasó las validaciones locales." };
       }),

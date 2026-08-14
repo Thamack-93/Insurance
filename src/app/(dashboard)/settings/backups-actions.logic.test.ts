@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const requireAdmin = vi.hoisted(() => vi.fn());
+const requireSuperAdmin = vi.hoisted(() => vi.fn());
 const createDatabaseBackup = vi.hoisted(() => vi.fn());
 const listBackups = vi.hoisted(() => vi.fn());
 const listRekeyedBackups = vi.hoisted(() => vi.fn());
@@ -13,7 +13,7 @@ const rekeyStoredBackup = vi.hoisted(() => vi.fn());
 const revalidatePath = vi.hoisted(() => vi.fn());
 
 vi.mock("next/cache", () => ({ revalidatePath }));
-vi.mock("@/lib/auth", () => ({ requireAdmin, AuthError: class AuthError extends Error {} }));
+vi.mock("@/lib/auth", () => ({ requireSuperAdmin, AuthError: class AuthError extends Error {} }));
 vi.mock("@/lib/backup", () => ({
   createDatabaseBackup,
   formatBackupPreflightError,
@@ -30,7 +30,7 @@ import { createBackup, listBackupsAction, rekeyBackupAction, verifyBackupAction 
 describe("backups actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    requireAdmin.mockResolvedValue({ id: "admin-1" });
+    requireSuperAdmin.mockResolvedValue({ id: "admin-1" });
     getBackupPreflightStatus.mockReturnValue({ ready: true, checks: [] });
     formatBackupPreflightError.mockReturnValue("Configuración incompleta");
     listBackups.mockResolvedValue([
@@ -62,10 +62,10 @@ describe("backups actions", () => {
     });
   });
 
-  it("requires admin access before listing backups", async () => {
+  it("requires platform admin access before listing backups", async () => {
     const result = await listBackupsAction();
 
-    expect(requireAdmin).toHaveBeenCalledTimes(1);
+    expect(requireSuperAdmin).toHaveBeenCalledTimes(1);
     expect(listBackups).toHaveBeenCalledTimes(1);
     expect(result).toEqual([
       {
@@ -81,7 +81,7 @@ describe("backups actions", () => {
   it("requires admin access before creating a backup", async () => {
     const result = await createBackup();
 
-    expect(requireAdmin).toHaveBeenCalledTimes(1);
+    expect(requireSuperAdmin).toHaveBeenCalledTimes(1);
     expect(createDatabaseBackup).toHaveBeenCalledTimes(1);
     expect(revalidatePath).toHaveBeenCalledWith("/settings");
     expect(result).toMatchObject({
@@ -94,7 +94,7 @@ describe("backups actions", () => {
   it("requires admin access before verifying a backup", async () => {
     const result = await verifyBackupAction("backup-1");
 
-    expect(requireAdmin).toHaveBeenCalledTimes(1);
+    expect(requireSuperAdmin).toHaveBeenCalledTimes(1);
     expect(verifyStoredBackup).toHaveBeenCalledWith("backup-1");
     expect(result).toMatchObject({
       ok: true,
@@ -106,7 +106,7 @@ describe("backups actions", () => {
   it("requires admin access before creating an immutable re-encrypted copy", async () => {
     const result = await rekeyBackupAction("backup-1");
 
-    expect(requireAdmin).toHaveBeenCalledTimes(1);
+    expect(requireSuperAdmin).toHaveBeenCalledTimes(1);
     expect(rekeyStoredBackup).toHaveBeenCalledWith("backup-1");
     expect(revalidatePath).toHaveBeenCalledWith("/settings");
     expect(result).toMatchObject({ ok: true, id: "backup-2", redirectTo: "/settings" });

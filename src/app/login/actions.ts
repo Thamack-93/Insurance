@@ -77,20 +77,54 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
 
   await db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
+  const memberships = await db.organizationMembership.findMany({
+    where: { userId: user.id },
+    select: { organizationId: true, active: true, organization: { select: { status: true } } },
+    orderBy: { id: "asc" },
+    take: 2,
+  });
+  const activeMemberships = memberships.filter(
+    (membership) => membership.active && membership.organization.status === "ACTIVE",
+  );
+  const initialOrganizationId = memberships.length === 1 && activeMemberships.length === 1
+    ? activeMemberships[0].organizationId
+    : undefined;
+
   await setSessionCookie({
     userId: user.id,
     email: user.email,
     name: user.name,
     role: user.role as UserRoleSession,
+    platformRole: user.platformRole === "SUPERADMIN" ? "SUPERADMIN" : "NONE",
+    organizationId: initialOrganizationId,
   });
 
-  await writeActivityLog({
-    entityType: "User",
-    entityId: user.id,
-    action: "USER_LOGIN",
-    userId: user.id,
-  });
+  // ActivityLog is tenant-owned. Platform-only logins have no tenant and are
+  // intentionally represented by global security telemetry instead.
+  if (initialOrganizationId) {
+    await writeActivityLog({
+      entityType: "User",
+      entityId: user.id,
+      action: "USER_LOGIN",
+      userId: user.id,
+      organizationId: initialOrganizationId,
+    });
+  }
 
-  const safeRedirect = redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/today";
+  const fallback = user.platformRole === "SUPERADMIN"
+    ? "/platform"
+      : memberships.length === 1 && activeMemberships.length === 1
+        ? "/today"
+        : memberships.length > 1
+          ? "/organization/no-access?reason=corrupt"
+          : "/organization/no-access";
+  // A requested route is safe only after the login has established exactly one
+  // active tenant. Global users and users with corrupt/no memberships must go
+  // through their controlled landing page first; otherwise a stale `/today`
+  // redirect can send a SUPERADMIN into tenant routes.
+  const canHonorRedirect = user.platformRole !== "SUPERADMIN" && memberships.length === 1 && activeMemberships.length === 1;
+  const safeRedirect = canHonorRedirect && redirectTo.startsWith("/") && !redirectTo.startsWith("//")
+    ? redirectTo
+    : fallback;
   redirect(safeRedirect);
 }

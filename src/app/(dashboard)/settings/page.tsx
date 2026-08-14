@@ -11,6 +11,7 @@ import { getSettings, updateSettings } from "@/lib/settings";
 import { getOnboardingStatus } from "@/lib/dashboard-queries";
 import { getBackupPreflightStatus } from "@/lib/backup";
 import { getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
+import { requireOrganizationContext } from "@/lib/organization-context";
 import { SettingsForm } from "@/components/forms/settings-form";
 import { BackupsPanel } from "@/components/settings/backups-panel";
 import { OnboardingPanel } from "@/components/settings/onboarding-panel";
@@ -24,12 +25,14 @@ export const maxDuration = 300;
 export default async function SettingsPage() {
   const now = today();
   const liveUser = await getCurrentUser();
-  const isAdmin = !!liveUser && liveUser.active && liveUser.role === "ADMIN";
+  const organization = await requireOrganizationContext();
+  const isTenantAdmin = organization.membershipRole === "OWNER" || organization.membershipRole === "ADMIN";
+  const isPlatformAdmin = !!liveUser && liveUser.active && liveUser.platformRole === "SUPERADMIN";
   const aiStatus = getAssistantAiConnectionStatus();
   const backupStatus = getBackupPreflightStatus();
   const [settings, initialBackups, onboarding] = await Promise.all([
     getSettings(),
-    isAdmin ? listBackupsAction().catch(() => []) : Promise.resolve([]),
+    isPlatformAdmin ? listBackupsAction().catch(() => []) : Promise.resolve([]),
     getOnboardingStatus(),
   ]);
 
@@ -50,7 +53,7 @@ export default async function SettingsPage() {
           }
         />
 
-        {isAdmin ? (
+        {isPlatformAdmin ? (
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard 
             title="Firma" 
@@ -116,7 +119,7 @@ export default async function SettingsPage() {
               </Button>
             </CardContent>
           </Card>
-          {isAdmin ? (
+          {isTenantAdmin ? (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
@@ -134,7 +137,7 @@ export default async function SettingsPage() {
               </CardContent>
             </Card>
           ) : null}
-          {isAdmin ? (
+          {isTenantAdmin ? (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
@@ -157,7 +160,7 @@ export default async function SettingsPage() {
               </CardContent>
             </Card>
           ) : null}
-          {isAdmin ? (
+          {isTenantAdmin ? (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
@@ -177,7 +180,7 @@ export default async function SettingsPage() {
           ) : null}
         </section>
 
-        {isAdmin ? (
+        {isPlatformAdmin ? (
           <SettingsForm
             initialSettings={settings}
             updateSettings={updateSettings}
@@ -186,7 +189,7 @@ export default async function SettingsPage() {
 
         <OnboardingPanel initialDismissed={onboarding.dismissed} />
 
-        {isAdmin ? (
+        {isPlatformAdmin ? (
           <BackupsPanel
             initialBackups={initialBackups}
             backupStatus={backupStatus}

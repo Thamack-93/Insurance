@@ -7,15 +7,18 @@ import {
   formatBusinessDateInput,
 } from "../src/lib/business-dates.ts";
 import { getDb } from "../src/lib/db";
+import { parseCliArgs, requireOrganizationId } from "./_shared.ts";
 
 async function main() {
   const db = getDb();
+  const organizationId = requireOrganizationId(parseCliArgs());
   const now = businessStartOfDay(new Date());
 
   console.log("Configurando pendientes de renovación...\n");
 
   const policies = await db.policy.findMany({
     where: {
+      organizationId,
       status: "ACTIVE",
       endDate: {
         gt: now,
@@ -27,6 +30,7 @@ async function main() {
 
   for (const policy of policies) {
     if (!policy.endDate) continue;
+    if (!policy.organizationId) throw new Error("POLICYDESK_RENEWAL_ORGANIZATION_REQUIRED");
 
     const endDate = businessStartOfDay(policy.endDate);
     const today = now;
@@ -47,7 +51,8 @@ async function main() {
       const sourceId = `${policy.id}:${formatBusinessDateInput(dueDate)}`;
       const existing = await db.workItem.findUnique({
         where: {
-          sourceType_sourceId: {
+          organizationId_sourceType_sourceId: {
+            organizationId: policy.organizationId,
             sourceType: "Renewal",
             sourceId,
           },
@@ -58,12 +63,13 @@ async function main() {
         continue;
       }
 
-      const client = await db.client.findUnique({
-        where: { id: policy.clientId },
+      const client = await db.client.findFirst({
+        where: { id: policy.clientId, organizationId },
       });
 
       await db.workItem.create({
         data: {
+          organizationId: policy.organizationId,
           sourceType: "Renewal",
           sourceId,
           workItemType: "TASK",

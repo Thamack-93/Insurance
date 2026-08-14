@@ -199,13 +199,14 @@ function buildConsistencySectionSubtitle(policy: {
 }
 
 async function buildConsistencyAuditReply(user: AssistantUser): Promise<AssistantReply> {
+  if (!user.organizationId) throw new Error("ORGANIZATION_ACCESS_DENIED");
   const portfolioOwnerId = user.role === "ADMIN" ? undefined : user.id;
   const [riskFindings, policyScores, receiptIssues, renewalSuggestions, latestRun] = await Promise.all([
-    detectRisks(portfolioOwnerId),
-    getPolicyDataQualityScores(),
-    getReceiptReviewIssues(),
-    getRenewalReviewSuggestions(),
-    getLatestMaintenanceRun("POLICY_VIGENCY_AUDIT"),
+    detectRisks(portfolioOwnerId, user.organizationId),
+    getPolicyDataQualityScores(user.organizationId, portfolioOwnerId),
+    getReceiptReviewIssues(user.organizationId, portfolioOwnerId),
+    getRenewalReviewSuggestions(user.organizationId, portfolioOwnerId),
+    getLatestMaintenanceRun("POLICY_VIGENCY_AUDIT", user.organizationId),
   ]);
 
   const policyScoresByNumber = new Map(policyScores.map((policy) => [policy.poliza, policy]));
@@ -315,9 +316,13 @@ function policyCaptureItemToSectionItem(item: Awaited<ReturnType<typeof searchPo
 }
 
 async function buildTargetedConsistencyAuditReply(user: AssistantUser, policyNumber: string): Promise<AssistantReply> {
+  if (!user.organizationId) throw new Error("ORGANIZATION_ACCESS_DENIED");
   const portfolioOwnerId = user.role === "ADMIN" ? undefined : user.id;
   const [policyMatches, relatedResults] = await Promise.all([
-    searchPolicyCaptureEntities("policy", policyNumber, { portfolioOwnerId }),
+    searchPolicyCaptureEntities("policy", policyNumber, {
+      organizationId: user.organizationId,
+      portfolioOwnerId,
+    }),
     searchUserPortfolio(user, policyNumber),
   ]);
 
@@ -573,7 +578,7 @@ function formatRiskText(finding: {
 
 export async function searchUserPortfolio(user: AssistantUser, message: string) {
   const terms = buildSearchTerms(message);
-  const resultGroups = await Promise.all(terms.map((term) => globalSearch(term, user.role === "ADMIN" ? undefined : user.id)));
+  const resultGroups = await Promise.all(terms.map((term) => globalSearch(term, user.role === "ADMIN" ? undefined : user.id, user.organizationId)));
   const unique = new Map<string, GlobalSearchResult>();
   for (const result of resultGroups.flat()) unique.set(`${result.type}:${result.id}`, result);
   return [...unique.values()].slice(0, 8);
@@ -628,7 +633,8 @@ async function buildPromptReply(user: AssistantUser, message: string): Promise<A
   }
 
   if (normalized.includes("riesg")) {
-    const findings = await detectRisks(user.role === "ADMIN" ? undefined : user.id);
+    if (!user.organizationId) throw new Error("ORGANIZATION_ACCESS_DENIED");
+    const findings = await detectRisks(user.role === "ADMIN" ? undefined : user.id, user.organizationId);
     const visible = findings.slice(0, 6);
     const detail = visible.length > 0
       ? `\n\n${visible.map(formatRiskText).join("\n")}${formatMoreCount(findings.length, visible.length, 25)}`

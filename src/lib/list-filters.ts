@@ -71,7 +71,8 @@ export function readClientListFilters(params: TableSearchParams): ClientListFilt
 
 export function buildClientListWhere(
   filters: ClientListFilters,
-  portfolioOwnerId?: string,
+  portfolioOwnerId: string | undefined,
+  organizationId: string,
 ): Prisma.ClientWhereInput {
   const { parsedQuery } = filters;
   const or: Prisma.ClientWhereInput[] = [];
@@ -90,7 +91,7 @@ export function buildClientListWhere(
   }
 
   return {
-    ...clientOperationalWhere(portfolioOwnerId),
+    ...clientOperationalWhere(portfolioOwnerId, organizationId),
     ...(filters.status ? { status: filters.status } : {}),
     ...(filters.type ? { type: filters.type } : {}),
     ...(or.length ? { OR: or } : {}),
@@ -129,11 +130,12 @@ export function readPolicyListFilters(params: TableSearchParams): PolicyListFilt
 
 export function buildPolicyListWhere(
   filters: PolicyListFilters,
-  portfolioOwnerId?: string,
+  portfolioOwnerId: string | undefined,
+  organizationId: string,
 ): Prisma.PolicyWhereInput {
   const { parsedQuery } = filters;
   const base: Prisma.PolicyWhereInput = {
-    ...policyOperationalWhere(portfolioOwnerId),
+    ...policyOperationalWhere(portfolioOwnerId, organizationId),
     ...(filters.status ? { status: filters.status } : {}),
     ...(filters.type ? { policyType: filters.type } : {}),
   };
@@ -194,11 +196,12 @@ export function readQuoteListFilters(params: TableSearchParams): QuoteListFilter
 
 export function buildQuoteListWhere(
   filters: QuoteListFilters,
-  portfolioOwnerId?: string,
+  portfolioOwnerId: string | undefined,
+  organizationId: string,
 ): Prisma.QuoteWhereInput {
   const { parsedQuery } = filters;
   const base: Prisma.QuoteWhereInput = {
-    ...quoteOperationalWhere(portfolioOwnerId),
+    ...quoteOperationalWhere(portfolioOwnerId, organizationId),
     ...(filters.status ? { status: filters.status } : {}),
   };
 
@@ -271,16 +274,20 @@ function receiptDueDateWhere(status?: ReceiptDueFilter): Prisma.ReceiptWhereInpu
 }
 
 /** Open receipts only: the "Por cobrar" tab never shows paid or cancelled ones. */
-export function buildOpenReceiptBaseWhere(portfolioOwnerId?: string): Prisma.ReceiptWhereInput {
+export function buildOpenReceiptBaseWhere(
+  portfolioOwnerId: string | undefined,
+  organizationId: string,
+): Prisma.ReceiptWhereInput {
   return {
-    ...receiptOperationalWhere(portfolioOwnerId),
+    ...receiptOperationalWhere(portfolioOwnerId, organizationId),
     status: { notIn: ["PAID", "CANCELLED"] },
   };
 }
 
 export function buildReceiptListWhere(
   filters: ReceiptListFilters,
-  portfolioOwnerId?: string,
+  portfolioOwnerId: string | undefined,
+  organizationId: string,
 ): Prisma.ReceiptWhereInput {
   const { parsedQuery } = filters;
   const or: Prisma.ReceiptWhereInput[] = [];
@@ -304,7 +311,7 @@ export function buildReceiptListWhere(
 
   return {
     AND: [
-      buildOpenReceiptBaseWhere(portfolioOwnerId),
+      buildOpenReceiptBaseWhere(portfolioOwnerId, organizationId),
       receiptDueDateWhere(filters.status),
       ...(or.length ? [{ OR: or }] : []),
     ],

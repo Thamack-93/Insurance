@@ -52,7 +52,7 @@ describe("telegram channel state", () => {
     notificationChannelUpsert.mockResolvedValue(channel);
     notificationChannelFindUnique.mockResolvedValue(channel);
 
-    await expect(getTelegramChannelStateForUser("user-1")).resolves.toMatchObject({
+    await expect(getTelegramChannelStateForUser("org-1", "user-1")).resolves.toMatchObject({
       id: "channel-1",
       telegramChatId: "123456789",
       isEnabled: true,
@@ -63,7 +63,7 @@ describe("telegram channel state", () => {
   it("falls back to a disconnected state when loading Telegram state fails", async () => {
     notificationChannelUpsert.mockRejectedValue(new Error("database unavailable"));
 
-    await expect(getTelegramChannelStateForUser("user-1")).resolves.toMatchObject({
+    await expect(getTelegramChannelStateForUser("org-1", "user-1")).resolves.toMatchObject({
       userId: "user-1",
       type: "TELEGRAM",
       telegramChatId: null,

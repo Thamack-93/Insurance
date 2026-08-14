@@ -27,7 +27,7 @@ export const EXPECTED_TENANT_TRIGGERS = Object.fromEntries(
   PROTECTED_TENANT_TABLES.map((table) => [table, `${table}_transition_singleton_organization`]),
 ) as Record<(typeof PROTECTED_TENANT_TABLES)[number], string>;
 
-const relationChecks: Array<[string, string, string]> = [
+export const TENANT_RELATION_CHECKS: ReadonlyArray<readonly [string, string, string]> = [
   ["Client", "referidorId", "Client"],
   ["Policy", "familyRootId", "Policy"], ["Policy", "renewedFromPolicyId", "Policy"],
   ["Policy", "clientId", "Client"], ["Policy", "insurerId", "Insurer"],
@@ -78,17 +78,21 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
   const ownerLegacyRole = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE m."organizationId" = $1 AND m."role" = 'OWNER' AND (u."role" <> 'ADMIN' OR NOT u."active")`, [BOOTSTRAP_ORGANIZATION_ID]);
   if (Number(ownerLegacyRole.rows[0]?.count ?? 0) > 0) issues.push("active Owner is not backed by an active legacy ADMIN user");
 
-  const missingMemberships = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "User" u LEFT JOIN "OrganizationMembership" m ON m."userId" = u."id" AND m."organizationId" = $1 WHERE u."id" <> $2 AND m."id" IS NULL`, [BOOTSTRAP_ORGANIZATION_ID, SYSTEM_USER_ID]);
+  const missingMemberships = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "User" u LEFT JOIN "OrganizationMembership" m ON m."userId" = u."id" AND m."organizationId" = $1 WHERE u."id" <> $2 AND u."platformRole" <> 'SUPERADMIN' AND m."id" IS NULL`, [BOOTSTRAP_ORGANIZATION_ID, SYSTEM_USER_ID]);
   const missing = Number(missingMemberships.rows[0]?.count ?? 0);
   summary.usersMissingMembership = missing;
   if (missing > 0) issues.push(`${missing} non-technical users without membership`);
 
   const systemMemberships = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" WHERE "userId" = $1`, [SYSTEM_USER_ID]);
   if (Number(systemMemberships.rows[0]?.count ?? 0) > 0) issues.push("technical system user has a membership");
+  const platformMemberships = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE u."platformRole" = 'SUPERADMIN'`);
+  if (Number(platformMemberships.rows[0]?.count ?? 0) > 0) issues.push("SUPERADMIN user has a tenant membership");
   const membershipActiveMismatch = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE m."active" IS DISTINCT FROM u."active"`);
   if (Number(membershipActiveMismatch.rows[0]?.count ?? 0) > 0) issues.push("membership active state differs from User.active");
   const membershipRoleMismatch = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" WHERE (m."role" NOT IN ('OWNER','ADMIN','AGENT')) OR (m."role" <> 'OWNER' AND (u."role" NOT IN ('ADMIN','AGENT') OR m."role" <> u."role"))`);
   if (Number(membershipRoleMismatch.rows[0]?.count ?? 0) > 0) issues.push("membership role is invalid or differs from legacy User.role");
+  const usersWithMultipleMemberships = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM (SELECT "userId" FROM "OrganizationMembership" GROUP BY "userId" HAVING count(*) > 1) duplicate_memberships`);
+  if (Number(usersWithMultipleMemberships.rows[0]?.count ?? 0) > 0) issues.push("users with multiple organization memberships");
 
   for (const table of PROTECTED_TENANT_TABLES) {
     const nullResult = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM ${identifier(table)} WHERE "organizationId" IS NULL`);
@@ -105,7 +109,7 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
     if (Number(dangling.rows[0]?.count ?? 0) > 0) issues.push(`${table} has dangling optional organization references`);
   }
 
-  for (const [child, column, parent] of relationChecks) {
+  for (const [child, column, parent] of TENANT_RELATION_CHECKS) {
     const result = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM ${identifier(child)} c JOIN ${identifier(parent)} p ON p."id" = c.${identifier(column)} WHERE c.${identifier(column)} IS NOT NULL AND c."organizationId" IS NOT NULL AND p."organizationId" IS NOT NULL AND c."organizationId" <> p."organizationId"`);
     if (Number(result.rows[0]?.count ?? 0) > 0) issues.push(`${child}.${column} crosses organizations`);
   }
@@ -149,6 +153,16 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
     if (!row) issues.push(`expected guard trigger ${trigger} is missing`);
     else if (row.tgenabled !== "O" || row.table_name !== table || row.function_name !== fn) issues.push(`guard trigger ${trigger} has an unexpected definition`);
   }
+  const membershipFunction = await client.query<{ definition: string }>(`
+    SELECT pg_get_functiondef(p.oid) AS definition
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = 'policydesk_sync_user_membership'
+  `);
+  const membershipFunctionDefinition = membershipFunction.rows[0]?.definition ?? "";
+  if (!membershipFunctionDefinition.includes('NEW."platformRole" = \'SUPERADMIN\'')) issues.push("User membership sync does not exclude SUPERADMIN");
+  const userMembershipTrigger = installed.get("User_transition_membership_sync")?.definition.replaceAll('"', '').replace(/\s+/g, " ") ?? "";
+  if (!/AFTER INSERT OR UPDATE OF role, active, platformRole ON/.test(userMembershipTrigger)) issues.push("User membership sync trigger does not track platformRole");
   const indexes = await client.query<{ indexname: string; table_name: string; indisunique: boolean; indexdef: string; predicate: string | null }>(`
     SELECT i.relname AS indexname, t.relname AS table_name, x.indisunique,
            pg_get_indexdef(x.indexrelid) AS indexdef, pg_get_expr(x.indpred, x.indrelid) AS predicate
@@ -157,13 +171,22 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
       JOIN pg_class t ON t.oid = x.indrelid
       JOIN pg_namespace n ON n.oid = t.relnamespace
      WHERE n.nspname = 'public' AND i.relname = ANY($1::text[])
-  `, [["Organization_transition_singleton_idx", "OrganizationMembership_transition_owner_idx"]]);
+  `, [["Organization_transition_singleton_idx", "OrganizationMembership_transition_owner_idx", "OrganizationMembership_userId_key"]]);
   const indexByName = new Map(indexes.rows.map((row) => [row.indexname, row]));
   const singleton = indexByName.get("Organization_transition_singleton_idx");
   if (!singleton || singleton.table_name !== "Organization" || !singleton.indisunique || !singleton.indexdef.replace(/\s+/g, "").includes("((1))")) issues.push("singleton expression index is not the required unique constant index");
   const ownerIndex = indexByName.get("OrganizationMembership_transition_owner_idx");
   const ownerPredicate = ownerIndex?.predicate?.replaceAll('"', '') ?? "";
   if (!ownerIndex || ownerIndex.table_name !== "OrganizationMembership" || !ownerIndex.indisunique || !ownerIndex.indexdef.replace(/\s+/g, "").includes("((1))") || !/role\s*=\s*'OWNER'/.test(ownerPredicate)) issues.push("Owner singleton index is not the required unique partial constant index");
+  const singleMembershipIndex = indexByName.get("OrganizationMembership_userId_key");
+  if (
+    !singleMembershipIndex ||
+    singleMembershipIndex.table_name !== "OrganizationMembership" ||
+    !singleMembershipIndex.indisunique ||
+    !/\("userId"\)/.test(singleMembershipIndex.indexdef)
+  ) {
+    issues.push("single organization membership unique index is missing or invalid");
+  }
 
   return { ok: issues.length === 0, issues, summary };
 }

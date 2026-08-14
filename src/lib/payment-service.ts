@@ -14,6 +14,7 @@ type DbClient = PrismaClient | Prisma.TransactionClient;
 const CLOSE_TOLERANCE = PAYMENT_CLOSE_TOLERANCE;
 
 export type RecordPaymentInput = {
+  organizationId: string;
   receiptId: string;
   amount: number;
   paidDate: Date;
@@ -35,13 +36,14 @@ function dateKey(value: Date) {
 }
 
 export async function reconcileReceiptById(
+  organizationId: string,
   receiptId: string,
   actorId: string,
   client?: DbClient,
 ) {
   const db = client ?? getDb();
-  const receipt = await db.receipt.findUnique({
-    where: { id: receiptId },
+  const receipt = await db.receipt.findFirst({
+    where: { id: receiptId, organizationId },
     include: {
       payments: {
         where: { status: "POSTED" },
@@ -101,13 +103,14 @@ export async function reconcileReceiptById(
   if (snapshot.shouldReview) {
     const reason = snapshot.reasons.join(",") || "REVIEW_REQUIRED";
     const existingIssue = await db.receiptReconciliationIssue.findFirst({
-      where: { receiptId: receipt.id, reason, status: "OPEN" },
+      where: { organizationId, receiptId: receipt.id, reason, status: "OPEN" },
       select: { id: true },
     });
     if (existingIssue) {
       await db.receiptReconciliationIssue.update({
         where: { id: existingIssue.id },
         data: {
+          organizationId,
           detailsJson: JSON.stringify(snapshot),
           expectedAmount: receipt.amount,
           paidAmount: snapshot.paidAmount,
@@ -116,6 +119,7 @@ export async function reconcileReceiptById(
     } else {
       await db.receiptReconciliationIssue.create({
         data: {
+          organizationId,
           receiptId: receipt.id,
           policyId: receipt.policyId,
           reason,
@@ -130,6 +134,7 @@ export async function reconcileReceiptById(
 
   if (changed || snapshot.shouldReview) {
     await writeActivityLog({
+      organizationId,
       entityType: "Receipt",
       entityId: receipt.id,
       action: "RECEIPT_RECONCILED",
@@ -161,8 +166,8 @@ export async function recordPayment(input: RecordPaymentInput, client?: DbClient
   }
 
   const applyPayment = async (tx: DbClient) => {
-    const receipt = await tx.receipt.findUnique({
-      where: { id: input.receiptId },
+    const receipt = await tx.receipt.findFirst({
+      where: { id: input.receiptId, organizationId: input.organizationId },
       include: {
         client: true,
         policy: true,
@@ -192,7 +197,7 @@ export async function recordPayment(input: RecordPaymentInput, client?: DbClient
 
     if (input.sourceEvidenceKey) {
       const evidenceMatch = await tx.payment.findUnique({
-        where: { sourceEvidenceKey: input.sourceEvidenceKey },
+        where: { organizationId_sourceEvidenceKey: { organizationId: input.organizationId, sourceEvidenceKey: input.sourceEvidenceKey } },
         select: { id: true },
       });
       if (evidenceMatch) {
@@ -202,6 +207,7 @@ export async function recordPayment(input: RecordPaymentInput, client?: DbClient
 
     const exactDuplicate = await tx.payment.findFirst({
       where: {
+        organizationId: input.organizationId,
         receiptId: input.receiptId,
         amount: input.amount,
         paidDate: input.paidDate,
@@ -215,6 +221,7 @@ export async function recordPayment(input: RecordPaymentInput, client?: DbClient
 
     const payment = await tx.payment.create({
       data: {
+        organizationId: input.organizationId,
         receiptId: receipt.id,
         policyId: receipt.policyId,
         clientId: receipt.clientId,
@@ -231,6 +238,7 @@ export async function recordPayment(input: RecordPaymentInput, client?: DbClient
     });
 
     await writeActivityLog({
+      organizationId: input.organizationId,
       entityType: "Payment",
       entityId: payment.id,
       action: "PAYMENT_CREATE",
@@ -250,7 +258,7 @@ export async function recordPayment(input: RecordPaymentInput, client?: DbClient
       db: tx,
     });
 
-    const reconciliation = await reconcileReceiptById(receipt.id, input.actorId, tx);
+    const reconciliation = await reconcileReceiptById(input.organizationId, receipt.id, input.actorId, tx);
     return { payment, receipt, reconciliation };
   };
 
@@ -277,8 +285,8 @@ export async function rehabilitateReceiptPayment(
   }
 
   const applyRehabilitation = async (tx: DbClient) => {
-    const receipt = await tx.receipt.findUnique({
-      where: { id: input.receiptId },
+    const receipt = await tx.receipt.findFirst({
+      where: { id: input.receiptId, organizationId: input.organizationId },
       include: {
         client: true,
         policy: true,
@@ -304,7 +312,7 @@ export async function rehabilitateReceiptPayment(
 
     if (input.sourceEvidenceKey) {
       const evidenceMatch = await tx.payment.findUnique({
-        where: { sourceEvidenceKey: input.sourceEvidenceKey },
+        where: { organizationId_sourceEvidenceKey: { organizationId: input.organizationId, sourceEvidenceKey: input.sourceEvidenceKey } },
         select: { id: true },
       });
       if (evidenceMatch) throw new PaymentConflictError("Este comprobante ya fue aplicado anteriormente.");
@@ -312,6 +320,7 @@ export async function rehabilitateReceiptPayment(
 
     const batchReceipts = await tx.receipt.findMany({
       where: {
+        organizationId: input.organizationId,
         policyId: receipt.policyId,
         status: "CANCELLED",
         cancellationReason: "NON_PAYMENT",
@@ -329,6 +338,7 @@ export async function rehabilitateReceiptPayment(
 
     const payment = await tx.payment.create({
       data: {
+        organizationId: input.organizationId,
         receiptId: receipt.id,
         policyId: receipt.policyId,
         clientId: receipt.clientId,
@@ -346,8 +356,8 @@ export async function rehabilitateReceiptPayment(
 
     const adjustment = Math.round((Number(receipt.amount) - input.amount) * 100) / 100;
     const paymentDate = input.paidDate;
-    await tx.receipt.update({
-      where: { id: receipt.id },
+    await tx.receipt.updateMany({
+      where: { id: receipt.id, organizationId: input.organizationId },
       data: {
         status: "PAID",
         paidDate: paymentDate,
@@ -364,8 +374,8 @@ export async function rehabilitateReceiptPayment(
 
     for (const batchReceipt of batchReceipts) {
       if (batchReceipt.id === receipt.id) continue;
-      await tx.receipt.update({
-        where: { id: batchReceipt.id },
+      await tx.receipt.updateMany({
+        where: { id: batchReceipt.id, organizationId: input.organizationId },
         data: {
           status: isBusinessDateOverdue(batchReceipt.dueDate) ? "OVERDUE" : "PENDING",
           cancellationReason: null,
@@ -376,8 +386,8 @@ export async function rehabilitateReceiptPayment(
       });
     }
 
-    const updatedPolicy = await tx.policy.update({
-      where: { id: receipt.policyId },
+    await tx.policy.updateMany({
+      where: { id: receipt.policyId, organizationId: input.organizationId },
       data: {
         status: "ACTIVE",
         cancellationReason: null,
@@ -386,9 +396,10 @@ export async function rehabilitateReceiptPayment(
         updatedById: input.actorId,
       },
     });
+    const updatedPolicy = await tx.policy.findFirstOrThrow({ where: { id: receipt.policyId, organizationId: input.organizationId } });
 
     await tx.receiptReconciliationIssue.updateMany({
-      where: { receiptId: { in: batchReceipts.map((item) => item.id) }, status: "OPEN" },
+      where: { organizationId: input.organizationId, receiptId: { in: batchReceipts.map((item) => item.id) }, status: "OPEN" },
       data: {
         status: "RESOLVED",
         reviewedAt: new Date(),
@@ -398,6 +409,7 @@ export async function rehabilitateReceiptPayment(
     });
 
     await writeActivityLog({
+      organizationId: input.organizationId,
       entityType: "Payment",
       entityId: payment.id,
       action: "PAYMENT_REHABILITATION_CREATE",
@@ -417,6 +429,7 @@ export async function rehabilitateReceiptPayment(
     });
 
     await writeActivityLog({
+      organizationId: input.organizationId,
       entityType: "Policy",
       entityId: updatedPolicy.id,
       action: "POLICY_REHABILITATED",

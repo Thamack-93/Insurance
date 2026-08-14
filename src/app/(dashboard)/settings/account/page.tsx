@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth";
+import { requireOrganizationContext } from "@/lib/organization-context";
 import { ChangePasswordForm } from "@/components/settings/change-password-form";
 
 export const metadata = {
@@ -14,6 +15,7 @@ const ROLE_LABELS: Record<string, string> = {
 
 export default async function MyAccountPage() {
   const user = await requireUser();
+  const organization = await requireOrganizationContext();
 
   return (
     <div className="flex flex-col gap-6">
@@ -27,7 +29,7 @@ export default async function MyAccountPage() {
           <CardHeader>
             <CardTitle>Datos de la cuenta</CardTitle>
             <CardDescription>
-              {user.name} · {user.email} · {ROLE_LABELS[user.role] ?? user.role}
+              {user.name} · {user.email} · {ROLE_LABELS[organization.membershipRole] ?? organization.membershipRole}
             </CardDescription>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">

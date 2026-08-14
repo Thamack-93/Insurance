@@ -11,7 +11,7 @@ import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
 import { getDb } from "@/lib/db";
 import { formatCurrency, toNumber } from "@/lib/money";
-import { requireAdminOrRedirect } from "@/lib/auth";
+import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import { claimOperationalWhere, policyOperationalWhere } from "@/lib/portfolio-access";
 
 const PAGE_SIZE = 25;
@@ -21,25 +21,25 @@ export default async function InsurersPage({
 }: {
   searchParams?: Promise<{ q?: string; page?: string }>;
 }) {
-  const user = await requireAdminOrRedirect();
-  const isAdmin = user.role === "ADMIN";
+  const context = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
+  const isAdmin = true;
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = Math.max(1, Number(params.page) || 1);
-  const policyScope = policyOperationalWhere();
-  const claimScope = claimOperationalWhere();
+  const policyScope = policyOperationalWhere(undefined, context.organizationId);
+  const claimScope = claimOperationalWhere(undefined, context.organizationId);
 
   const db = getDb();
 
   const where: Prisma.InsurerWhereInput = query
-    ? {
+    ? { organizationId: context.organizationId,
         OR: [
           { name: { contains: query } },
           { contactEmail: { contains: query } },
           { contactName: { contains: query } },
         ],
       }
-    : {};
+    : { organizationId: context.organizationId };
 
   const [
     activeCount,
@@ -50,8 +50,8 @@ export default async function InsurersPage({
     filteredCount,
     pagedInsurers,
   ] = await Promise.all([
-    db.insurer.count({ where: { status: "ACTIVE" } }),
-    db.insurer.count({ where: { status: "ARCHIVED" } }),
+    db.insurer.count({ where: { organizationId: context.organizationId, status: "ACTIVE" } }),
+    db.insurer.count({ where: { organizationId: context.organizationId, status: "ARCHIVED" } }),
     db.policy.count({ where: policyScope }),
     db.claim.count({ where: claimScope }),
     db.policy.aggregate({

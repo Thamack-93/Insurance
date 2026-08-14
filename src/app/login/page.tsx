@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { ShieldCheck } from "@/components/icons";
 import { getCurrentUser } from "@/lib/auth";
+import { getDb } from "@/lib/db";
 import { LoginForm } from "./login-form";
 
 export const metadata = {
@@ -17,7 +18,15 @@ export default async function LoginPage({
 
   const user = await getCurrentUser();
   if (user && user.active) {
-    redirect(redirectTo);
+    if (user.platformRole === "SUPERADMIN") redirect("/platform");
+    const memberships = await getDb().organizationMembership.findMany({
+      where: { userId: user.id },
+      select: { active: true, organization: { select: { status: true } } },
+      orderBy: { id: "asc" },
+      take: 2,
+    });
+    const hasOneActiveMembership = memberships.length === 1 && memberships[0].active && memberships[0].organization.status === "ACTIVE";
+    redirect(hasOneActiveMembership ? redirectTo : memberships.length > 1 ? "/organization/no-access?reason=corrupt" : "/organization/no-access");
   }
 
   return (

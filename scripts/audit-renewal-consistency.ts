@@ -9,6 +9,7 @@ import {
   hasFlag,
   parseCliArgs,
   printTable,
+  requireOrganizationId,
 } from "./_shared.ts";
 
 type RenewalAudit = {
@@ -29,7 +30,7 @@ type RenewalAudit = {
   }>;
 };
 
-async function collectAudit(): Promise<RenewalAudit> {
+async function collectAudit(organizationId: string): Promise<RenewalAudit> {
   const db = createDb();
   const now = today();
 
@@ -41,19 +42,20 @@ async function collectAudit(): Promise<RenewalAudit> {
     };
 
     const [totalPolicies, expiredPolicies, activeOverduePolicies, activeOverdueWithSuccessor, activeOverdueWithDecision, statusRows, unresolvedRows] = await Promise.all([
-      db.policy.count(),
-      db.policy.count({ where: { status: "EXPIRED" } }),
-      db.policy.count({ where: overdueActiveWhere }),
-      db.policy.count({ where: { ...overdueActiveWhere, renewals: { some: {} } } }),
+      db.policy.count({ where: { organizationId } }),
+      db.policy.count({ where: { organizationId, status: "EXPIRED" } }),
+      db.policy.count({ where: { organizationId, ...overdueActiveWhere } }),
+      db.policy.count({ where: { organizationId, ...overdueActiveWhere, renewals: { some: {} } } }),
       db.policy.count({
         where: {
+          organizationId,
           ...overdueActiveWhere,
           sourceRenewalSuggestions: { some: { status: { in: ["ACCEPTED", "DECLINED"] } } },
         },
       }),
-      db.policy.groupBy({ by: ["status"], _count: { _all: true }, orderBy: { status: "asc" } }),
+      db.policy.groupBy({ by: ["status"], where: { organizationId }, _count: { _all: true }, orderBy: { status: "asc" } }),
       db.policy.findMany({
-        where: unresolvedOverdueWhere,
+        where: { organizationId, ...unresolvedOverdueWhere },
         include: {
           client: { select: { fullName: true } },
           ...LATEST_RENEWAL_RECEIPT_INCLUDE,
@@ -90,9 +92,10 @@ async function collectAudit(): Promise<RenewalAudit> {
 }
 
 async function main() {
-  const audit = await collectAudit();
+  const args = parseCliArgs();
+  const audit = await collectAudit(requireOrganizationId(args));
 
-  if (hasFlag(parseCliArgs(), "json")) {
+  if (hasFlag(args, "json")) {
     console.log(JSON.stringify(audit, null, 2));
     return;
   }

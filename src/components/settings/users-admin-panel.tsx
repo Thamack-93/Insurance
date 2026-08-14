@@ -211,12 +211,13 @@ export function UsersAdminPanel({
                         <Select
                           value={user.role}
                           onValueChange={(v) => handleRoleChange(user.id, v as UserRole)}
-                          disabled={pending}
+                          disabled={pending || user.role === "OWNER"}
                         >
                           <SelectTrigger className="w-[160px]">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
+                            {user.role === "OWNER" ? <SelectItem value="OWNER">Owner</SelectItem> : null}
                             <SelectItem value="ADMIN">Administrador</SelectItem>
                             <SelectItem value="AGENT">Agente</SelectItem>
                           </SelectContent>

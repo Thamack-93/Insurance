@@ -164,14 +164,15 @@ export type WorkQueueFilters = {
   receiptId?: string;
   entityType?: string;
   portfolioOwnerId?: string;
+  organizationId: string;
 };
 
-export async function getWorkItems(filters: WorkQueueFilters = {}) {
+export async function getWorkItems(filters: WorkQueueFilters) {
   const db = getDb();
   const where = buildWhere(filters);
 
   const items = await db.workItem.findMany({
-    where,
+    where: { ...where, organizationId: filters.organizationId },
     select: workQueueSelect,
     orderBy: buildOrderBy(filters),
   });
@@ -225,6 +226,7 @@ async function resolveLegacyRenewalRelations(
     where: {
       OR: policyOr,
       ...(filters.portfolioOwnerId ? { client: { portfolioOwnerId: filters.portfolioOwnerId } } : {}),
+      ...(filters.organizationId ? { organizationId: filters.organizationId } : {}),
     },
     select: {
       ...policyQueueSelect,
@@ -300,12 +302,14 @@ async function resolveLegacyRenewalRelations(
   });
 }
 
-export async function countWorkItems(filters: WorkQueueFilters = {}) {
+export async function countWorkItems(filters: WorkQueueFilters) {
   return (await getWorkItems(filters)).length;
 }
 
 function buildWhere(filters: WorkQueueFilters): Prisma.WorkItemWhereInput {
   const where: Prisma.WorkItemWhereInput = {};
+
+  if (filters.organizationId) where.organizationId = filters.organizationId;
 
   if (filters.query) {
     const query = filters.query.trim();

@@ -8,6 +8,7 @@ import { normalize } from "@/lib/search-utils";
 import { globalSearch, type GlobalSearchResult } from "@/lib/search";
 import { formatDateInput } from "@/lib/form-utils";
 import { getCurrentUser } from "@/lib/auth";
+import { requireOrganizationContext } from "@/lib/organization-context";
 import { createClientDefaults } from "@/lib/form-defaults";
 import { createPolicyDefaults } from "@/lib/form-defaults";
 import { createReceiptDefaults } from "@/lib/form-defaults";
@@ -294,7 +295,7 @@ async function resolveRelation(
     return { field: relation.field, error: `La relación ${relation.field} no está soportada todavía.` };
   }
 
-  const results = (await globalSearch(relation.query, getSearchScope(user))).filter((result) => result.type === searchType);
+  const results = (await globalSearch(relation.query, getSearchScope(user), user.organizationId)).filter((result) => result.type === searchType);
   if (results.length === 0) {
     return { field: relation.field, error: `No encontré un ${relation.label.toLowerCase()} para "${relation.query}".` };
   }
@@ -484,11 +485,13 @@ function buildProposalSnapshot(input: {
 
 async function createDraftRecord(
   userId: string,
+  organizationId: string,
   payload: AssistantActionDraftPayload,
   client: DbClient = getDb(),
 ) {
   return client.assistantActionDraft.create({
     data: {
+      organizationId,
       userId,
       title: payload.title,
       summary: payload.summary,
@@ -502,9 +505,9 @@ async function createDraftRecord(
   });
 }
 
-async function findOwnedDraft(draftId: string, userId: string, client: DbClient = getDb()) {
+async function findOwnedDraft(draftId: string, userId: string, organizationId: string, client: DbClient = getDb()) {
   return client.assistantActionDraft.findFirst({
-    where: { id: draftId, userId },
+    where: { id: draftId, userId, organizationId },
   });
 }
 
@@ -515,12 +518,12 @@ async function buildClientDraft(plan: AssistantMutationPlan, user: AssistantUser
 
   if (plan.operation === "update") {
     if (!plan.targetQuery) return null;
-    const candidates = (await globalSearch(plan.targetQuery, getSearchScope(user))).filter((result) => result.type === "client");
+    const candidates = (await globalSearch(plan.targetQuery, getSearchScope(user), user.organizationId)).filter((result) => result.type === "client");
     const chosen = exactMatch(candidates, plan.targetQuery, "client") ?? (candidates.length === 1 ? candidates[0] : null);
     if (!chosen) return null;
 
-    const current = await db.client.findUnique({
-      where: { id: chosen.id },
+    const current = await db.client.findFirst({
+      where: { id: chosen.id, organizationId: user.organizationId },
       select: {
         id: true,
         fullName: true,
@@ -574,13 +577,14 @@ async function buildClientDraft(plan: AssistantMutationPlan, user: AssistantUser
       changes: buildChangeList("client", toClientFormValues(current), parsed.data, beforeDisplay, afterDisplay),
     };
     if (!payload.changes.length) return null;
-    const draft = await createDraftRecord(user.id, payload, db);
+    const draft = await createDraftRecord(user.id, user.organizationId!, payload, db);
     await writeActivityLog({
       entityType: "AssistantActionDraft",
       entityId: draft.id,
       action: "ASSISTANT_ACTION_DRAFT_CREATED",
       newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel },
       userId: user.id,
+      organizationId: user.organizationId!,
       db,
     });
     return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
@@ -611,13 +615,14 @@ async function buildClientDraft(plan: AssistantMutationPlan, user: AssistantUser
     formValues: parsed.data,
     changes: buildChangeList("client", null, parsed.data, {}, afterDisplay),
   };
-  const draft = await createDraftRecord(user.id, payload, db);
+  const draft = await createDraftRecord(user.id, user.organizationId!, payload, db);
   await writeActivityLog({
     entityType: "AssistantActionDraft",
     entityId: draft.id,
     action: "ASSISTANT_ACTION_DRAFT_CREATED",
     newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel },
     userId: user.id,
+    organizationId: user.organizationId!,
     db,
   });
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
@@ -630,12 +635,12 @@ async function buildPolicyDraft(plan: AssistantMutationPlan, user: AssistantUser
 
   if (plan.operation === "update") {
     if (!plan.targetQuery) return null;
-    const candidates = (await globalSearch(plan.targetQuery, getSearchScope(user))).filter((result) => result.type === "policy");
+    const candidates = (await globalSearch(plan.targetQuery, getSearchScope(user), user.organizationId)).filter((result) => result.type === "policy");
     const chosen = exactMatch(candidates, plan.targetQuery, "policy") ?? (candidates.length === 1 ? candidates[0] : null);
     if (!chosen) return null;
 
-    const current = await db.policy.findUnique({
-      where: { id: chosen.id },
+    const current = await db.policy.findFirst({
+      where: { id: chosen.id, organizationId: user.organizationId },
       select: {
         id: true,
         policyNumber: true,
@@ -700,13 +705,14 @@ async function buildPolicyDraft(plan: AssistantMutationPlan, user: AssistantUser
       changes: buildChangeList("policy", toPolicyFormValues(current), parsed.data, beforeDisplay, afterDisplay),
     };
     if (!payload.changes.length) return null;
-    const draft = await createDraftRecord(user.id, payload, db);
+    const draft = await createDraftRecord(user.id, user.organizationId!, payload, db);
     await writeActivityLog({
       entityType: "AssistantActionDraft",
       entityId: draft.id,
       action: "ASSISTANT_ACTION_DRAFT_CREATED",
       newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel },
       userId: user.id,
+      organizationId: user.organizationId!,
       db,
     });
     return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
@@ -737,13 +743,14 @@ async function buildPolicyDraft(plan: AssistantMutationPlan, user: AssistantUser
     formValues: parsed.data,
     changes: buildChangeList("policy", null, parsed.data, {}, afterDisplay),
   };
-  const draft = await createDraftRecord(user.id, payload, db);
+  const draft = await createDraftRecord(user.id, user.organizationId!, payload, db);
   await writeActivityLog({
     entityType: "AssistantActionDraft",
     entityId: draft.id,
     action: "ASSISTANT_ACTION_DRAFT_CREATED",
     newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel },
     userId: user.id,
+    organizationId: user.organizationId!,
     db,
   });
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
@@ -756,12 +763,12 @@ async function buildReceiptDraft(plan: AssistantMutationPlan, user: AssistantUse
 
   if (plan.operation === "update") {
     if (!plan.targetQuery) return null;
-    const candidates = (await globalSearch(plan.targetQuery, getSearchScope(user))).filter((result) => result.type === "receipt");
+    const candidates = (await globalSearch(plan.targetQuery, getSearchScope(user), user.organizationId)).filter((result) => result.type === "receipt");
     const chosen = exactMatch(candidates, plan.targetQuery, "receipt") ?? (candidates.length === 1 ? candidates[0] : null);
     if (!chosen) return null;
 
-    const current = await db.receipt.findUnique({
-      where: { id: chosen.id },
+    const current = await db.receipt.findFirst({
+      where: { id: chosen.id, organizationId: user.organizationId },
       select: {
         id: true,
         receiptNumber: true,
@@ -821,13 +828,14 @@ async function buildReceiptDraft(plan: AssistantMutationPlan, user: AssistantUse
       changes: buildChangeList("receipt", toReceiptFormValues(current), parsed.data, beforeDisplay, afterDisplay),
     };
     if (!payload.changes.length) return null;
-    const draft = await createDraftRecord(user.id, payload, db);
+    const draft = await createDraftRecord(user.id, user.organizationId!, payload, db);
     await writeActivityLog({
       entityType: "AssistantActionDraft",
       entityId: draft.id,
       action: "ASSISTANT_ACTION_DRAFT_CREATED",
       newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel },
       userId: user.id,
+      organizationId: user.organizationId!,
       db,
     });
     return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
@@ -858,19 +866,21 @@ async function buildReceiptDraft(plan: AssistantMutationPlan, user: AssistantUse
     formValues: parsed.data,
     changes: buildChangeList("receipt", null, parsed.data, {}, afterDisplay),
   };
-  const draft = await createDraftRecord(user.id, payload, db);
+  const draft = await createDraftRecord(user.id, user.organizationId!, payload, db);
   await writeActivityLog({
     entityType: "AssistantActionDraft",
     entityId: draft.id,
     action: "ASSISTANT_ACTION_DRAFT_CREATED",
     newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel },
     userId: user.id,
+    organizationId: user.organizationId!,
     db,
   });
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
 }
 
 async function buildPaymentDraft(plan: AssistantMutationPlan, user: AssistantUser) {
+  if (!user.organizationId) return null;
   const db = getDb();
   const fieldMap = new Map(plan.fields.map((field) => [field.field, field.value]));
   let selectedReceiptLabel: string | null = null;
@@ -894,7 +904,7 @@ async function buildPaymentDraft(plan: AssistantMutationPlan, user: AssistantUse
   if (!next.receiptId) {
     const targetQuery = plan.targetQuery ?? fieldMap.get("receiptId")?.toString() ?? "";
     if (targetQuery) {
-      const candidates = (await globalSearch(targetQuery, getSearchScope(user))).filter((result) => result.type === "receipt");
+      const candidates = (await globalSearch(targetQuery, getSearchScope(user), user.organizationId)).filter((result) => result.type === "receipt");
       const chosen = exactMatch(candidates, targetQuery, "receipt") ?? (candidates.length === 1 ? candidates[0] : null);
       if (!chosen) return null;
       next.receiptId = chosen.id;
@@ -906,7 +916,12 @@ async function buildPaymentDraft(plan: AssistantMutationPlan, user: AssistantUse
   }
 
   const receipt = await db.receipt.findFirst({
-    where: { AND: [{ id: String(next.receiptId) }, receiptOperationalWhere(getSearchScope(user))] },
+    where: {
+      AND: [
+        { id: String(next.receiptId) },
+        receiptOperationalWhere(getSearchScope(user), user.organizationId),
+      ],
+    },
     select: {
       id: true,
       receiptNumber: true,
@@ -952,13 +967,14 @@ async function buildPaymentDraft(plan: AssistantMutationPlan, user: AssistantUse
       { label: "Método de pago", before: null, after: String(next.paymentMethod) },
     ],
   };
-  const draft = await createDraftRecord(user.id, payload, db);
+  const draft = await createDraftRecord(user.id, user.organizationId!, payload, db);
   await writeActivityLog({
     entityType: "AssistantActionDraft",
     entityId: draft.id,
     action: "ASSISTANT_ACTION_DRAFT_CREATED",
     newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel },
     userId: user.id,
+    organizationId: user.organizationId!,
     db,
   });
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
@@ -966,6 +982,7 @@ async function buildPaymentDraft(plan: AssistantMutationPlan, user: AssistantUse
 
 async function buildEndorsementDraft(plan: AssistantMutationPlan, user: AssistantUser) {
   if (plan.operation !== "create") return null;
+  if (!user.organizationId) return null;
   const db = getDb();
   const fields = new Map(plan.fields.map((field) => [field.field, field.value]));
   const next: Record<string, unknown> = {
@@ -993,7 +1010,7 @@ async function buildEndorsementDraft(plan: AssistantMutationPlan, user: Assistan
   if (!next.policyId) {
     const targetQuery = plan.targetQuery ?? fields.get("policyId") ?? "";
     if (!targetQuery) return null;
-    const candidates = (await globalSearch(targetQuery, getSearchScope(user))).filter((result) => result.type === "policy");
+    const candidates = (await globalSearch(targetQuery, getSearchScope(user), user.organizationId)).filter((result) => result.type === "policy");
     const chosen = exactMatch(candidates, targetQuery, "policy") ?? (candidates.length === 1 ? candidates[0] : null);
     if (!chosen) return null;
     next.policyId = chosen.id;
@@ -1001,7 +1018,12 @@ async function buildEndorsementDraft(plan: AssistantMutationPlan, user: Assistan
   }
 
   const policy = await db.policy.findFirst({
-    where: { AND: [{ id: String(next.policyId) }, policyOperationalWhere(getSearchScope(user))] },
+    where: {
+      AND: [
+        { id: String(next.policyId) },
+        policyOperationalWhere(getSearchScope(user), user.organizationId),
+      ],
+    },
     select: { id: true, policyNumber: true, currency: true, client: { select: { fullName: true } } },
   });
   if (!policy) return null;
@@ -1022,13 +1044,14 @@ async function buildEndorsementDraft(plan: AssistantMutationPlan, user: Assistan
     formValues: parsed.data,
     changes: buildChangeList("endorsement", null, parsed.data, {}, { policyId: policyLabel }),
   };
-  const draft = await createDraftRecord(user.id, payload, db);
+  const draft = await createDraftRecord(user.id, user.organizationId!, payload, db);
   await writeActivityLog({
     entityType: "AssistantActionDraft",
     entityId: draft.id,
     action: "ASSISTANT_ACTION_DRAFT_CREATED",
     newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel },
     userId: user.id,
+    organizationId: user.organizationId!,
     db,
   });
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
@@ -1041,11 +1064,12 @@ async function buildWorkItemDraft(plan: AssistantMutationPlan, user: AssistantUs
 
   if (plan.operation === "update") {
     if (!plan.targetQuery) return null;
-    const candidates = (await globalSearch(plan.targetQuery, getSearchScope(user))).filter((result) => result.type === "workItem");
+    const candidates = (await globalSearch(plan.targetQuery, getSearchScope(user), user.organizationId)).filter((result) => result.type === "workItem");
     const chosen = exactMatch(candidates, plan.targetQuery, "workItem") ?? (candidates.length === 1 ? candidates[0] : null);
     if (!chosen) return null;
 
-    const current = await findWorkItemByRouteId(chosen.id, db, user.role === "ADMIN" ? undefined : user.id);
+    if (!user.organizationId) return null;
+    const current = await findWorkItemByRouteId(chosen.id, user.organizationId, db, user.role === "ADMIN" ? undefined : user.id);
     if (!current) return null;
 
     const next: Record<string, unknown> = {
@@ -1111,13 +1135,14 @@ async function buildWorkItemDraft(plan: AssistantMutationPlan, user: AssistantUs
       }), parsed.data, beforeDisplay, afterDisplay),
     };
     if (!payload.changes.length) return null;
-    const draft = await createDraftRecord(user.id, payload, db);
+    const draft = await createDraftRecord(user.id, user.organizationId!, payload, db);
     await writeActivityLog({
       entityType: "AssistantActionDraft",
       entityId: draft.id,
       action: "ASSISTANT_ACTION_DRAFT_CREATED",
       newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel },
       userId: user.id,
+      organizationId: user.organizationId!,
       db,
     });
     return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
@@ -1148,13 +1173,14 @@ async function buildWorkItemDraft(plan: AssistantMutationPlan, user: AssistantUs
     formValues: parsed.data,
     changes: buildChangeList("workItem", null, parsed.data, {}, afterDisplay),
   };
-  const draft = await createDraftRecord(user.id, payload, db);
+  const draft = await createDraftRecord(user.id, user.organizationId!, payload, db);
   await writeActivityLog({
     entityType: "AssistantActionDraft",
     entityId: draft.id,
     action: "ASSISTANT_ACTION_DRAFT_CREATED",
     newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel },
     userId: user.id,
+    organizationId: user.organizationId!,
     db,
   });
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
@@ -1162,6 +1188,7 @@ async function buildWorkItemDraft(plan: AssistantMutationPlan, user: AssistantUs
 
 async function buildClaimDraft(plan: AssistantMutationPlan, user: AssistantUser) {
   const db = getDb();
+  const organizationId = user.organizationId!;
   const values = createClaimDefaults();
   const fieldMap = new Map(plan.fields.map((field) => [field.field, field.value]));
   const portfolioOwnerId = getSearchScope(user);
@@ -1172,7 +1199,7 @@ async function buildClaimDraft(plan: AssistantMutationPlan, user: AssistantUser)
     const chosen = exactMatch(candidates, plan.targetQuery, "claim") ?? (candidates.length === 1 ? candidates[0] : null);
     if (!chosen) return null;
     const current = await db.claim.findFirst({
-      where: { AND: [{ id: chosen.id }, claimOperationalWhere(portfolioOwnerId)] },
+      where: { AND: [{ id: chosen.id }, claimOperationalWhere(portfolioOwnerId, organizationId)] },
       select: {
         id: true,
         folio: true,
@@ -1228,8 +1255,8 @@ async function buildClaimDraft(plan: AssistantMutationPlan, user: AssistantUser)
       changes: buildChangeList("claim", toClaimFormValues(current), parsed.data, beforeDisplay, afterDisplay),
     };
     if (!payload.changes.length) return null;
-    const draft = await createDraftRecord(user.id, payload, db);
-    await writeActivityLog({ entityType: "AssistantActionDraft", entityId: draft.id, action: "ASSISTANT_ACTION_DRAFT_CREATED", newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel }, userId: user.id, db });
+    const draft = await createDraftRecord(user.id, organizationId, payload, db);
+    await writeActivityLog({ entityType: "AssistantActionDraft", entityId: draft.id, action: "ASSISTANT_ACTION_DRAFT_CREATED", newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel }, userId: user.id, organizationId, db });
     return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
   }
 
@@ -1244,7 +1271,7 @@ async function buildClaimDraft(plan: AssistantMutationPlan, user: AssistantUser)
   const parsed = claimSchema.safeParse(next);
   if (!parsed.success) return null;
   const policy = await db.policy.findFirst({
-    where: { AND: [{ id: parsed.data.policyId }, policyOperationalWhere(portfolioOwnerId)] },
+    where: { AND: [{ id: parsed.data.policyId }, policyOperationalWhere(portfolioOwnerId, organizationId)] },
     select: { policyType: true },
   });
   if (!policy || (policy.policyType === "GMM" && (fieldMap.has("description") || fieldMap.has("notes")))) return null;
@@ -1260,20 +1287,21 @@ async function buildClaimDraft(plan: AssistantMutationPlan, user: AssistantUser)
     formValues: parsed.data,
     changes: buildChangeList("claim", null, parsed.data, {}, afterDisplay),
   };
-  const draft = await createDraftRecord(user.id, payload, db);
-  await writeActivityLog({ entityType: "AssistantActionDraft", entityId: draft.id, action: "ASSISTANT_ACTION_DRAFT_CREATED", newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel }, userId: user.id, db });
+  const draft = await createDraftRecord(user.id, organizationId, payload, db);
+  await writeActivityLog({ entityType: "AssistantActionDraft", entityId: draft.id, action: "ASSISTANT_ACTION_DRAFT_CREATED", newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel }, userId: user.id, organizationId, db });
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
 }
 
 async function buildClaimChecklistDraft(plan: AssistantMutationPlan, user: AssistantUser) {
   if (plan.operation !== "update" || !plan.targetQuery) return null;
   const db = getDb();
+  const organizationId = user.organizationId!;
   const portfolioOwnerId = getSearchScope(user);
   const candidates = (await globalSearch(plan.targetQuery, portfolioOwnerId)).filter((result) => result.type === "claim");
   const chosen = exactMatch(candidates, plan.targetQuery, "claim") ?? (candidates.length === 1 ? candidates[0] : null);
   if (!chosen) return null;
   const claim = await db.claim.findFirst({
-    where: { AND: [{ id: chosen.id }, claimOperationalWhere(portfolioOwnerId)] },
+    where: { AND: [{ id: chosen.id }, claimOperationalWhere(portfolioOwnerId, organizationId)] },
     select: {
       id: true,
       folio: true,
@@ -1301,13 +1329,14 @@ async function buildClaimChecklistDraft(plan: AssistantMutationPlan, user: Assis
     changes: [{ label: "Estado", before: current?.status ?? "MISSING", after: status }],
   };
   if (payload.changes[0]?.before === payload.changes[0]?.after) return null;
-  const draft = await createDraftRecord(user.id, payload, db);
-  await writeActivityLog({ entityType: "AssistantActionDraft", entityId: draft.id, action: "ASSISTANT_ACTION_DRAFT_CREATED", newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel }, userId: user.id, db });
+  const draft = await createDraftRecord(user.id, organizationId, payload, db);
+  await writeActivityLog({ entityType: "AssistantActionDraft", entityId: draft.id, action: "ASSISTANT_ACTION_DRAFT_CREATED", newValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel }, userId: user.id, organizationId, db });
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
 }
 
 export async function buildAssistantActionProposalFromPlan(plan: AssistantMutationPlan, user: AssistantUser) {
   try {
+    if (!user.organizationId) return null;
     const normalizedEntityType = normalizeEntityType(plan.entityType);
     const normalizedOperation = normalizeOperation(plan.operation);
     if (!normalizedEntityType || !normalizedOperation) {
@@ -1348,7 +1377,7 @@ export async function buildAssistantActionProposalFromPlan(plan: AssistantMutati
   }
 }
 
-async function executeDraftPayload(payload: AssistantActionDraftPayload): Promise<MutationResult> {
+async function executeDraftPayload(payload: AssistantActionDraftPayload, organizationId: string): Promise<MutationResult> {
   switch (payload.entityType) {
     case "client":
       return payload.operation === "create"
@@ -1387,7 +1416,7 @@ async function executeDraftPayload(payload: AssistantActionDraftPayload): Promis
         claimId: values.claimId,
         requirementCode: values.requirementCode,
         status: values.status as (typeof CLAIM_CHECKLIST_STATUSES)[number],
-      }, user.role === "ADMIN" ? undefined : user.id);
+      }, organizationId, user.role === "ADMIN" ? undefined : user.id);
       return updated
         ? { ok: true, id: updated.id, redirectTo: `/claims/${values.claimId}`, message: "Checklist del siniestro actualizado." }
         : errorResult("No se pudo actualizar el requisito del siniestro.");
@@ -1402,15 +1431,16 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
   if (!user || user.id !== userId) {
     return errorResult("No tienes permiso para confirmar esta propuesta.");
   }
+  const organizationContext = await requireOrganizationContext();
 
-  const draft = await findOwnedDraft(draftId, userId, db);
+  const draft = await findOwnedDraft(draftId, userId, organizationContext.organizationId, db);
   if (!draft) {
     return errorResult("La propuesta ya no existe o no está disponible.");
   }
   const ownedDraft = draft;
   async function markDraftFailed(message: string) {
-    await db.assistantActionDraft.update({
-      where: { id: ownedDraft.id },
+    await db.assistantActionDraft.updateMany({
+      where: { id: ownedDraft.id, userId, organizationId: organizationContext.organizationId },
       data: { status: "FAILED" },
     });
     return errorResult(message);
@@ -1422,8 +1452,8 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
 
   const now = new Date();
   if (draft.expiresAt.getTime() <= now.getTime()) {
-    await db.assistantActionDraft.update({
-      where: { id: draft.id },
+    await db.assistantActionDraft.updateMany({
+      where: { id: draft.id, userId, organizationId: organizationContext.organizationId },
       data: { status: "EXPIRED" },
     });
     return errorResult("La propuesta expiró. Pide a Nora que la regenere.");
@@ -1433,6 +1463,7 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
     where: {
       id: draft.id,
       userId,
+      organizationId: organizationContext.organizationId,
       status: "PENDING",
       expiresAt: { gt: now },
     },
@@ -1444,16 +1475,16 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
 
   const payload = parsePayload(draft.payloadJson);
   if (!payload) {
-    await db.assistantActionDraft.update({
-      where: { id: draft.id },
+    await db.assistantActionDraft.updateMany({
+      where: { id: draft.id, userId, organizationId: organizationContext.organizationId },
       data: { status: "FAILED" },
     });
     return errorResult("La propuesta está corrupta.");
   }
 
   if ((payload as { entityType?: string }).entityType === "task") {
-    await db.assistantActionDraft.update({
-      where: { id: draft.id },
+    await db.assistantActionDraft.updateMany({
+      where: { id: draft.id, userId, organizationId: organizationContext.organizationId },
       data: {
         status: "FAILED",
         resultJson: JSON.stringify({ ok: false, error: "Las propuestas antiguas de tareas deben recrearse como pendientes." }),
@@ -1463,8 +1494,8 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
   }
 
   if (payload.operation === "update" && (!payload.targetId || !payload.targetUpdatedAt)) {
-    await db.assistantActionDraft.update({
-      where: { id: draft.id },
+    await db.assistantActionDraft.updateMany({
+      where: { id: draft.id, userId, organizationId: organizationContext.organizationId },
       data: { status: "FAILED" },
     });
     return errorResult("La propuesta de edición no tiene un objetivo válido.");
@@ -1472,7 +1503,7 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
 
   if (payload.operation === "update" && payload.targetId && payload.targetUpdatedAt) {
     if (payload.entityType === "workItem") {
-      const current = await findWorkItemByRouteId(payload.targetId, db, user.role === "ADMIN" ? undefined : user.id);
+      const current = await findWorkItemByRouteId(payload.targetId, organizationContext.organizationId, db, organizationContext.membershipRole === "AGENT" ? user.id : undefined);
       if (!current || current.updatedAt.toISOString() !== payload.targetUpdatedAt) {
         return markDraftFailed("La tarea cambió mientras revisabas la propuesta. Pide una nueva actualización.");
       }
@@ -1494,31 +1525,31 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
         receipt: db.receipt,
       } as const;
       if (payload.entityType === "client") {
-        const current = await entityDb.client.findUnique({
-          where: { id: payload.targetId },
+        const current = await entityDb.client.findFirst({
+          where: { id: payload.targetId, organizationId: organizationContext.organizationId },
           select: { updatedAt: true },
         });
         if (!current || current.updatedAt.toISOString() !== payload.targetUpdatedAt) {
           return markDraftFailed("El registro cambió mientras revisabas la propuesta. Pide una nueva actualización.");
         }
       } else if (payload.entityType === "policy") {
-        const current = await entityDb.policy.findUnique({
-          where: { id: payload.targetId },
+        const current = await entityDb.policy.findFirst({
+          where: { id: payload.targetId, organizationId: organizationContext.organizationId },
           select: { updatedAt: true },
         });
         if (!current || current.updatedAt.toISOString() !== payload.targetUpdatedAt) {
           return markDraftFailed("El registro cambió mientras revisabas la propuesta. Pide una nueva actualización.");
         }
       } else if (payload.entityType === "receipt") {
-        const current = await entityDb.receipt.findUnique({
-          where: { id: payload.targetId },
+        const current = await entityDb.receipt.findFirst({
+          where: { id: payload.targetId, organizationId: organizationContext.organizationId },
           select: { updatedAt: true },
         });
         if (!current || current.updatedAt.toISOString() !== payload.targetUpdatedAt) {
           return markDraftFailed("El registro cambió mientras revisabas la propuesta. Pide una nueva actualización.");
         }
       } else {
-        const current = await db.claim.findUnique({ where: { id: payload.targetId }, select: { updatedAt: true } });
+        const current = await db.claim.findFirst({ where: { id: payload.targetId, organizationId: organizationContext.organizationId }, select: { updatedAt: true } });
         if (!current || current.updatedAt.toISOString() !== payload.targetUpdatedAt) {
           return markDraftFailed("El siniestro cambió mientras revisabas la propuesta. Pide una nueva actualización.");
         }
@@ -1530,13 +1561,13 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
 
   let result: MutationResult;
   try {
-    result = await executeDraftPayload(payload);
+    result = await executeDraftPayload(payload, organizationContext.organizationId);
   } catch (error) {
     logError("assistant.actions.executeDraft", error, { draftId: draft.id, entityType: payload.entityType, operation: payload.operation });
     result = errorResult(error instanceof Error ? error.message : "No se pudo ejecutar la propuesta.");
   }
-  await db.assistantActionDraft.update({
-    where: { id: draft.id },
+  await db.assistantActionDraft.updateMany({
+    where: { id: draft.id, userId, organizationId: organizationContext.organizationId },
     data: {
       status: result.ok ? "CONFIRMED" : "FAILED",
       confirmedAt: result.ok ? new Date() : null,
@@ -1552,6 +1583,7 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
     oldValue: { entityType: payload.entityType, operation: payload.operation, targetLabel: payload.targetLabel },
     newValue: result,
     userId,
+    organizationId: organizationContext.organizationId,
     db,
   });
 
@@ -1560,8 +1592,9 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
 
 export async function getAssistantActionDraftProposal(draftId: string, userId: string) {
   const db = getDb();
+  const context = await requireOrganizationContext();
   const draft = await db.assistantActionDraft.findFirst({
-    where: { id: draftId, userId },
+    where: { id: draftId, userId, organizationId: context.organizationId },
   });
   if (!draft) return null;
   const payload = parsePayload(draft.payloadJson);
@@ -1571,10 +1604,12 @@ export async function getAssistantActionDraftProposal(draftId: string, userId: s
 
 export async function pruneExpiredAssistantActionDrafts(userId: string) {
   const db = getDb();
+  const context = await requireOrganizationContext();
   const now = new Date();
   await db.assistantActionDraft.updateMany({
     where: {
       userId,
+      organizationId: context.organizationId,
       status: "PENDING",
       expiresAt: { lte: now },
     },
