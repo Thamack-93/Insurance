@@ -41,21 +41,21 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
   const [payments, commissions, documents, relatedReceipts, activity] = await Promise.all([
     db.payment.findMany({
       where: { receiptId: id, organizationId: scope.organizationId },
-      orderBy: { paidDate: "desc" },
+      orderBy: [{ paidDate: "desc" }, { id: "desc" }],
     }),
     db.commission.findMany({
       where: { receiptId: id, organizationId: scope.organizationId },
       include: { insurer: true },
-      orderBy: { expectedDate: "desc" },
+      orderBy: [{ expectedDate: "desc" }, { id: "desc" }],
     }),
     db.document.findMany({
       where: { receiptId: id, organizationId: scope.organizationId },
-      orderBy: { uploadedAt: "desc" },
+      orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
     }),
     db.receipt.findMany({
       where: { policyId: receipt.policyId, organizationId: scope.organizationId, id: { not: id } },
       include: { endorsement: true },
-      orderBy: { dueDate: "desc" },
+      orderBy: [{ dueDate: "desc" }, { receiptSequence: { sort: "desc", nulls: "last" } }, { receiptNumber: "desc" }, { id: "desc" }],
       take: 5,
     }),
     getActivityForEntity("Receipt", id, 20),

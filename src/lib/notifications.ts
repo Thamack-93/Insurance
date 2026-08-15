@@ -97,7 +97,7 @@ export async function getUnreadNotifications(organizationId: string, limit = 10)
   try {
     const rows = await db.alert.findMany({
       where: { organizationId, readAt: null, status: { not: "RESOLVED" } },
-      orderBy: [{ createdAt: "desc" }],
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: limit,
     });
     return rows as NotificationRecord[];
@@ -116,7 +116,7 @@ export async function getRecentNotifications(limit: number, organizationId: stri
   try {
     const rows = await db.alert.findMany({
       where: { organizationId, status: { not: "RESOLVED" } },
-      orderBy: [{ createdAt: "desc" }],
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: limit,
     });
     return rows as NotificationRecord[];
@@ -150,7 +150,7 @@ export async function getAllNotifications({
     const [entries, total] = await Promise.all([
       db.alert.findMany({
         where,
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         skip,
         take: pageSize,
       }),

@@ -114,9 +114,7 @@ export async function loadEligibleRenewalPolicies(
       },
       ...LATEST_RENEWAL_RECEIPT_INCLUDE,
     },
-    orderBy: {
-      endDate: "asc",
-    },
+    orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }, { id: "asc" }],
   });
 
   return policies.filter((policy) =>

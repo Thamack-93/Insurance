@@ -12,6 +12,7 @@ import { cancelPolicyForNonPayment } from "@/lib/nonpayment-cancellation";
 import { NON_PAYMENT_CANCELLATION_DAYS } from "@/lib/nonpayment-cancellation.logic";
 import { receiptPortfolioWhere } from "@/lib/portfolio-access";
 import { assertOrganizationContextInTransaction, requireOrganizationContext, requireOrganizationRole, type OrganizationContext } from "@/lib/organization-context";
+import { receiptSequenceForNumber } from "@/lib/sorting";
 
 const ALLOWED_PAYMENT_METHODS = ["TRANSFER", "CASH", "CARD", "CHECK", "OTHER"] as const;
 type AllowedPaymentMethod = (typeof ALLOWED_PAYMENT_METHODS)[number];
@@ -48,6 +49,7 @@ async function normalizeReceiptInput(values: ReceiptFormValues, context: Organiz
 
   return {
     receiptNumber: values.receiptNumber.trim(),
+    receiptSequence: receiptSequenceForNumber(values.receiptNumber),
     policyId: policy.id,
     endorsementId,
     clientId: policy.clientId,

@@ -44,7 +44,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
       // WorkItem keeps sourceId stable when a legacy Task is normalized, so
       // this remains a narrow compatibility lookup without loading all docs.
       where: { organizationId: scope.organizationId, taskId: workItem.sourceId ?? workItem.id },
-      orderBy: { uploadedAt: "desc" },
+      orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
     }),
     db.activityLog.findMany({
       where: {
@@ -52,7 +52,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
         entityType: "WorkItem",
         organizationId: scope.organizationId,
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 10,
     }),
   ]);

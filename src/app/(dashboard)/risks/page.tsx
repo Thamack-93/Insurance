@@ -119,7 +119,7 @@ export default async function RisksPage({
   const db = getDb();
   const [risks, openNotifications, clientScores, policyScores] = await Promise.all([
     detectRisks(undefined, organizationContext.organizationId),
-    db.alert.findMany({ where: { organizationId: organizationContext.organizationId, status: "OPEN" } }),
+    db.alert.findMany({ where: { organizationId: organizationContext.organizationId, status: "OPEN" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] }),
     getClientDataQualityScores(organizationContext.organizationId),
     getPolicyDataQualityScores(organizationContext.organizationId),
   ]);
