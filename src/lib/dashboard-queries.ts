@@ -37,6 +37,7 @@ export async function getDashboardData() {
       },
     },
     scope.portfolioOwnerId,
+    scope.organizationId,
   );
   const [
     activePolicies,
@@ -238,6 +239,7 @@ export async function getTodayData() {
       },
     },
     scope.portfolioOwnerId,
+    scope.organizationId,
   );
 
   const [
@@ -446,6 +448,7 @@ export async function getTodayDashboardData() {
   const overdueRenewalPoliciesPromise = loadEligibleRenewalPolicies(
     { endDate: { lt: now } },
     scope.portfolioOwnerId,
+    scope.organizationId,
   );
 
   const [

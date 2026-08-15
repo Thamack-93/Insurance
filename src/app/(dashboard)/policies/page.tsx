@@ -55,10 +55,12 @@ export default async function PoliciesPage({
       },
     },
     scope.portfolioOwnerId,
+    scope.organizationId,
   );
   const renewalRiskPoliciesPromise = loadEligibleRenewalPolicies(
     { endDate: { lt: now } },
     scope.portfolioOwnerId,
+    scope.organizationId,
   );
 
   const where = buildPolicyListWhere(filters, scope.portfolioOwnerId, scope.organizationId);
