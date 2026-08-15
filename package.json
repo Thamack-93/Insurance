@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "db:generate": "node -e \"require('node:fs').rmSync('src/generated/prisma',{recursive:true,force:true})\" && prisma generate",
+    "db:generate": "node -e \"require('node:fs').rmSync('src/generated/prisma',{recursive:true,force:true})\" && prisma generate && node scripts/ensure-prisma-generated-package.mjs",
     "db:migrate": "prisma migrate dev",
     "db:check-drift": "prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code",
     "backfill:organizations": "node --import tsx scripts/backfill-organizations.ts",

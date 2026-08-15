@@ -3,7 +3,7 @@ import path from "node:path";
 import { createHmac, randomBytes, scryptSync } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 import type { Page } from "@playwright/test";
-import { PrismaClient } from "../../src/generated/prisma/client";
+import { PrismaClient } from "../../src/generated/prisma/client.ts";
 
 const localEnvPath = path.join(process.cwd(), ".env.local");
 const SESSION_COOKIE_NAME = "pd_session";
