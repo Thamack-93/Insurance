@@ -19,27 +19,32 @@ const PAGE_SIZE = 25;
 export default async function InsurersPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; page?: string }>;
+  searchParams?: Promise<{ q?: string; page?: string; status?: string }>;
 }) {
   const context = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
   const isAdmin = true;
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
+  const status = params.status === "ARCHIVED" ? "ARCHIVED" : params.status === "ALL" ? undefined : "ACTIVE";
   const page = Math.max(1, Number(params.page) || 1);
   const policyScope = policyOperationalWhere(undefined, context.organizationId);
   const claimScope = claimOperationalWhere(undefined, context.organizationId);
 
   const db = getDb();
 
-  const where: Prisma.InsurerWhereInput = query
-    ? { organizationId: context.organizationId,
+  const where: Prisma.InsurerWhereInput = {
+    organizationId: context.organizationId,
+    ...(status ? { status } : {}),
+    ...(query
+    ? {
         OR: [
           { name: { contains: query } },
           { contactEmail: { contains: query } },
           { contactName: { contains: query } },
         ],
       }
-    : { organizationId: context.organizationId };
+      : {}),
+  };
 
   const [
     activeCount,
@@ -61,7 +66,7 @@ export default async function InsurersPage({
     db.insurer.count({ where }),
     db.insurer.findMany({
       where,
-      orderBy: { name: "asc" },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
       include: {
         _count: {
           select: {
@@ -142,7 +147,14 @@ export default async function InsurersPage({
         <SectionCard
           title="Directorio de aseguradoras"
           description="Listado completo con métricas de negocio."
-          action={<ListSearch placeholder="Buscar por nombre o contacto..." />}
+          action={
+            <div className="flex items-center gap-2">
+              <Link className={status === "ACTIVE" ? "font-semibold" : "text-muted-foreground"} href="/insurers">Activas</Link>
+              <Link className={status === undefined ? "font-semibold" : "text-muted-foreground"} href="/insurers?status=ALL">Todas</Link>
+              <Link className={status === "ARCHIVED" ? "font-semibold" : "text-muted-foreground"} href="/insurers?status=ARCHIVED">Archivadas</Link>
+              <ListSearch placeholder="Buscar por nombre o contacto..." />
+            </div>
+          }
         >
           {filteredCount === 0 ? (
             query ? (

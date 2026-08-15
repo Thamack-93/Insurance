@@ -34,7 +34,7 @@ export default async function ClientsPage({
   const { query, page, sortKey, direction } = filters;
   const statusFilter = filters.status;
   const typeFilter = filters.type;
-  const isFiltered = Boolean(query || statusFilter || typeFilter);
+  const isFiltered = Boolean(query || typeFilter || (params.status && params.status !== "ACTIVE"));
 
   const db = getDb();
   const scope = await requireOrganizationPortfolioReadScope();
@@ -124,7 +124,9 @@ export default async function ClientsPage({
         <LocalNavigation
           label="Tipos de cliente"
           items={[
-            { label: "Todos", href: "/clients", excludeQueryKeys: ["type"] },
+            { label: "Activos", href: "/clients", excludeQueryKeys: ["type", "status"] },
+            { label: "Todos", href: "/clients?status=ALL", excludeQueryKeys: ["type"] },
+            { label: "Archivados", href: "/clients?status=ARCHIVED", excludeQueryKeys: ["type"] },
             { label: "Personas", href: "/clients?type=PERSON" },
             { label: "Empresas", href: "/clients?type=COMPANY" },
           ]}
@@ -183,7 +185,7 @@ export default async function ClientsPage({
                 {
                   key: "status",
                   label: "Estado",
-                  options: entityStatusOptions,
+                    options: [{ value: "ALL", label: "Todos" }, ...entityStatusOptions],
                 },
               ]}
             />

@@ -93,15 +93,15 @@ export async function getDashboardData() {
     db.receipt.findMany({
       where: { ...receiptWhere, dueDate: { lte: in60 }, status: { notIn: ["CANCELLED"] } },
       include: { client: true, insurer: true, policy: true },
-      orderBy: { dueDate: "asc" },
+      orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }],
       take: DASHBOARD_LIST_LIMIT,
     }),
     // Lightweight chart query — only the field we need, capped separately so the
     // urgent list size doesn't silently undercount the weekly chart.
     db.receipt.findMany({
       where: { ...receiptWhere, dueDate: { lte: in60 }, status: { notIn: ["CANCELLED"] } },
-      select: { dueDate: true },
-      orderBy: { dueDate: "asc" },
+      select: { dueDate: true, id: true },
+      orderBy: [{ dueDate: "asc" }, { id: "asc" }],
       take: 500,
     }),
     db.policy.groupBy({
@@ -116,11 +116,12 @@ export async function getDashboardData() {
     }),
     db.commission.findMany({
       where: { ...commissionWhere, status: { in: ["EXPECTED", "PENDING", "OVERDUE"] } },
-      select: { expectedDate: true, expectedAmount: true, actualAmount: true },
+      select: { id: true, expectedDate: true, expectedAmount: true, actualAmount: true },
+      orderBy: [{ expectedDate: "asc" }, { id: "asc" }],
       take: 200,
     }),
-    db.activityLog.findMany({ where: { organizationId: scope.organizationId }, orderBy: { createdAt: "desc" }, take: 8 }),
-    db.alert.findMany({ where: { organizationId: scope.organizationId, status: "OPEN" }, orderBy: { createdAt: "desc" }, take: 8 }),
+    db.activityLog.findMany({ where: { organizationId: scope.organizationId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 }),
+    db.alert.findMany({ where: { organizationId: scope.organizationId, status: "OPEN" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 }),
     db.alert.count({ where: { organizationId: scope.organizationId, status: "OPEN", alertType: { startsWith: "SECURITY_" } } }),
     detectRisks(scope.portfolioOwnerId, scope.organizationId),
     getWorkItems({
@@ -249,17 +250,18 @@ export async function getTodayData() {
     db.receipt.findMany({
       where: { ...receiptWhere, dueDate: { gte: now, lt: tomorrow }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
+      orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }],
     }),
     db.receipt.findMany({
       where: { ...receiptWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
-      orderBy: { dueDate: "asc" },
+      orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }],
       take: 8,
     }),
     db.receipt.findMany({
       where: { ...receiptWhere, dueDate: { gte: tomorrow, lte: in7 }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
-      orderBy: { dueDate: "asc" },
+      orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }],
       take: 8,
     }),
     urgentRenewalsPromise,
@@ -278,6 +280,7 @@ export async function getTodayData() {
           some: { workItemType: "TASK", status: { in: ["OPEN", "WAITING_CLIENT"] } },
         },
       },
+      orderBy: [{ fullName: "asc" }, { id: "asc" }],
       take: 6,
     }),
     db.commission.findMany({
@@ -287,10 +290,10 @@ export async function getTodayData() {
         status: { in: ["EXPECTED", "PENDING", "OVERDUE"] },
       },
       include: { client: true, policy: true, insurer: true },
-      orderBy: { expectedDate: "asc" },
+      orderBy: [{ expectedDate: "asc" }, { id: "asc" }],
       take: 8,
     }),
-    db.activityLog.findMany({ where: { organizationId: scope.organizationId }, orderBy: { createdAt: "desc" }, take: 8 }),
+    db.activityLog.findMany({ where: { organizationId: scope.organizationId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 }),
     detectRisks(scope.portfolioOwnerId, scope.organizationId),
   ]);
 
@@ -484,28 +487,32 @@ export async function getTodayDashboardData() {
     db.policy.findMany({
       where: { ...policyWhere, startDate: { gte: trendStart } },
       select: { startDate: true },
+      orderBy: [{ startDate: "asc" }, { id: "asc" }],
       take: 5000,
     }),
     db.policy.findMany({
       where: { ...policyWhere, status: "ACTIVE", endDate: { gte: trendStart } },
       select: { endDate: true },
+      orderBy: [{ endDate: "asc" }, { id: "asc" }],
       take: 5000,
     }),
     db.receipt.findMany({
       where: { ...receiptWhere, createdAt: { gte: trendStart }, status: { notIn: ["CANCELLED"] } },
       select: { createdAt: true, amount: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       take: 5000,
     }),
     db.commission.findMany({
       where: { ...commissionWhere, expectedDate: { gte: trendStart }, status: commissionMonthStatuses },
       select: { expectedDate: true, expectedAmount: true, actualAmount: true },
+      orderBy: [{ expectedDate: "asc" }, { id: "asc" }],
       take: 2000,
     }),
     db.policy.groupBy({ by: ["status"], where: policyWhere, _count: { status: true } }),
     db.policy.findMany({
       where: policyWhere,
       include: { client: { select: { fullName: true } }, insurer: { select: { name: true } } },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 6,
     }),
     db.receipt.count({ where: { ...receiptWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } } }),

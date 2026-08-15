@@ -18,6 +18,7 @@ import { getDb } from "@/lib/db";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { commissionOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
+import { compareCommissionStatusDesc, compareDateAsc } from "@/lib/sorting";
 
 export default async function CommissionsPage({
   searchParams,
@@ -50,18 +51,18 @@ export default async function CommissionsPage({
 
   const orderBy =
     sortKey === "policy"
-      ? [{ policy: { policyNumber: direction ?? "asc" } }, { expectedDate: "asc" as const }]
+      ? [{ policy: { policyNumber: direction ?? "asc" } }, { expectedDate: "asc" as const }, { id: "asc" as const }]
       : sortKey === "client"
-        ? [{ client: { fullName: direction ?? "asc" } }, { expectedDate: "asc" as const }]
+        ? [{ client: { fullName: direction ?? "asc" } }, { expectedDate: "asc" as const }, { id: "asc" as const }]
         : sortKey === "insurer"
-          ? [{ insurer: { name: direction ?? "asc" } }, { expectedDate: "asc" as const }]
+          ? [{ insurer: { name: direction ?? "asc" } }, { expectedDate: "asc" as const }, { id: "asc" as const }]
           : sortKey === "expectedDate"
-            ? [{ expectedDate: direction ?? "asc" }, { policy: { policyNumber: "asc" as const } }]
+            ? [{ expectedDate: direction ?? "asc" }, { policy: { policyNumber: "asc" as const } }, { id: "asc" as const }]
             : sortKey === "amount"
-              ? [{ expectedAmount: direction ?? "desc" }, { expectedDate: "asc" as const }]
+              ? [{ expectedAmount: direction ?? "desc" }, { expectedDate: "asc" as const }, { id: "asc" as const }]
               : sortKey === "status"
-                ? [{ status: direction ?? "asc" }, { expectedDate: "asc" as const }]
-                : [{ status: "asc" as const }, { expectedDate: "asc" as const }];
+                ? [{ status: direction ?? "asc" }, { expectedDate: "asc" as const }, { id: "asc" as const }]
+                : [{ expectedDate: "asc" as const }, { id: "asc" as const }];
 
   const db = getDb();
   const [stats, overdueCommissions, openCount, openCommissions, paidCommissions] = await Promise.all([
@@ -71,9 +72,7 @@ export default async function CommissionsPage({
     db.commission.findMany({
       where: openWhere,
       include: { client: true, insurer: true, policy: true, receipt: true },
-      orderBy,
-      skip: (page - 1) * DEFAULT_PAGE_SIZE,
-      take: DEFAULT_PAGE_SIZE,
+      orderBy: sortKey ? orderBy : [{ expectedDate: "asc" }, { id: "asc" }],
     }),
     db.commission.findMany({
       where: { ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId), status: "PAID" },
@@ -82,6 +81,16 @@ export default async function CommissionsPage({
       take: 10,
     }),
   ]);
+
+  const orderedOpenCommissions = [...openCommissions].sort((left, right) => (
+    compareCommissionStatusDesc(left.status, right.status) ||
+    compareDateAsc(left.expectedDate, right.expectedDate) ||
+    right.createdAt.getTime() - left.createdAt.getTime() ||
+    left.id.localeCompare(right.id)
+  ));
+  const pagedOpenCommissions = sortKey && sortKey !== "status"
+    ? openCommissions.slice((page - 1) * DEFAULT_PAGE_SIZE, page * DEFAULT_PAGE_SIZE)
+    : orderedOpenCommissions.slice((page - 1) * DEFAULT_PAGE_SIZE, page * DEFAULT_PAGE_SIZE);
 
   const ratio = stats.totalExpected ? Math.round((stats.totalActual / stats.totalExpected) * 100) : 0;
   type CommissionRow = (typeof openCommissions)[number];
@@ -93,7 +102,7 @@ export default async function CommissionsPage({
   };
   const hasRelations = (commission: CommissionRow): commission is CommissionWithRelations =>
     Boolean(commission.policy && commission.client && commission.insurer && commission.receipt);
-  const safeOpenCommissions = openCommissions.filter(hasRelations);
+  const safeOpenCommissions = pagedOpenCommissions.filter(hasRelations);
   const safePaidCommissions = paidCommissions.filter(hasRelations);
   const paidCount = stats.statusBreakdown.find(({ status }) => status === "PAID")?.count ?? 0;
 
