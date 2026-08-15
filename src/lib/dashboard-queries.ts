@@ -125,9 +125,9 @@ export async function getDashboardData() {
       orderBy: [{ expectedDate: "asc" }, { id: "asc" }],
       take: 200,
     }),
-    db.activityLog.findMany({ orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 }),
-    db.alert.findMany({ where: { status: "OPEN" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 }),
-    db.alert.count({ where: { status: "OPEN", alertType: { startsWith: "SECURITY_" } } }),
+    db.activityLog.findMany({ where: organizationWhere, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 }),
+    db.alert.findMany({ where: { status: "OPEN", ...organizationWhere }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 }),
+    db.alert.count({ where: { status: "OPEN", alertType: { startsWith: "SECURITY_" }, ...organizationWhere } }),
     detectRisks(scope.portfolioOwnerId, scope.organizationId),
     getWorkItems({
       workItemTypes: ["TASK"],
@@ -204,11 +204,12 @@ export type OnboardingStatus = {
 export async function getOnboardingStatus(): Promise<OnboardingStatus> {
   const db = getDb();
   const scope = await requirePortfolioReadScope();
+  const organizationWhere = organizationOperationalWhere(scope.organizationId);
   const [insurers, clients, policies, receipts, dismissedRow] = await Promise.all([
-    db.insurer.count(),
-    db.client.count({ where: clientOperationalWhere(scope.portfolioOwnerId) }),
-    db.policy.count({ where: policyOperationalWhere(scope.portfolioOwnerId) }),
-    db.receipt.count({ where: receiptOperationalWhere(scope.portfolioOwnerId) }),
+    db.insurer.count({ where: organizationWhere }),
+    db.client.count({ where: { ...clientOperationalWhere(scope.portfolioOwnerId), ...organizationWhere } }),
+    db.policy.count({ where: { ...policyOperationalWhere(scope.portfolioOwnerId), ...organizationWhere } }),
+    db.receipt.count({ where: { ...receiptOperationalWhere(scope.portfolioOwnerId), ...organizationWhere } }),
     db.systemSetting.findUnique({ where: { key: "onboardingDismissed" } }),
   ]);
   return {
@@ -315,7 +316,7 @@ export async function getTodayData() {
       orderBy: [{ expectedDate: "asc" }, { id: "asc" }],
       take: 8,
     }),
-    db.activityLog.findMany({ orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 }),
+    db.activityLog.findMany({ where: organizationWhere, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 }),
     detectRisks(scope.portfolioOwnerId, scope.organizationId),
   ]);
 
@@ -441,9 +442,10 @@ export async function getTodayDashboardData() {
   const prevMonthStart = businessStartOfMonth(subMonths(now, 1));
   const prevMonthEnd = businessEndOfMonth(subMonths(now, 1));
   const trendStart = businessStartOfMonth(subMonths(now, 5));
-  const policyWhere = policyOperationalWhere(scope.portfolioOwnerId);
-  const receiptWhere = receiptOperationalWhere(scope.portfolioOwnerId);
-  const commissionWhere = commissionOperationalWhere(scope.portfolioOwnerId);
+  const organizationWhere = organizationOperationalWhere(scope.organizationId);
+  const policyWhere = { ...policyOperationalWhere(scope.portfolioOwnerId), ...organizationWhere };
+  const receiptWhere = { ...receiptOperationalWhere(scope.portfolioOwnerId), ...organizationWhere };
+  const commissionWhere = { ...commissionOperationalWhere(scope.portfolioOwnerId), ...organizationWhere };
   const commissionMonthStatuses = { in: [...MONTHLY_COMMISSION_STATUSES] };
   const overdueRenewalPoliciesPromise = loadEligibleRenewalPolicies(
     { endDate: { lt: now } },
@@ -509,28 +511,32 @@ export async function getTodayDashboardData() {
     db.policy.findMany({
       where: { ...policyWhere, startDate: { gte: trendStart } },
       select: { startDate: true },
+      orderBy: [{ startDate: "asc" }, { id: "asc" }],
       take: 5000,
     }),
     db.policy.findMany({
       where: { ...policyWhere, status: "ACTIVE", endDate: { gte: trendStart } },
       select: { endDate: true },
+      orderBy: [{ endDate: "asc" }, { id: "asc" }],
       take: 5000,
     }),
     db.receipt.findMany({
       where: { ...receiptWhere, createdAt: { gte: trendStart }, status: { notIn: ["CANCELLED"] } },
       select: { createdAt: true, amount: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       take: 5000,
     }),
     db.commission.findMany({
       where: { ...commissionWhere, expectedDate: { gte: trendStart }, status: commissionMonthStatuses },
       select: { expectedDate: true, expectedAmount: true, actualAmount: true },
+      orderBy: [{ expectedDate: "asc" }, { id: "asc" }],
       take: 2000,
     }),
     db.policy.groupBy({ by: ["status"], where: policyWhere, _count: { status: true } }),
     db.policy.findMany({
       where: policyWhere,
       include: { client: { select: { fullName: true } }, insurer: { select: { name: true } } },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 6,
     }),
     db.receipt.count({ where: { ...receiptWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } } }),
