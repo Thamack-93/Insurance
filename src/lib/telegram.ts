@@ -48,6 +48,7 @@ import { ACTIVE_RENEWAL_POLICY_WHERE } from "@/lib/renewal-decisions";
 import { shouldIncludeInRenewals } from "@/lib/renewals.logic";
 import { checkDistributedRateLimit, securityFingerprint } from "@/lib/request-guards";
 import { OPEN_WORK_ITEM_STATUSES, countWorkItems } from "@/lib/work-queue";
+import { getOrganizationIdForUser } from "@/lib/portfolio-access";
 import {
   birthdayAutomaticDedupeKey,
   buildBirthdayReminderMessage,
