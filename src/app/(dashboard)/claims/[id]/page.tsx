@@ -16,12 +16,12 @@ import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
-import { claimOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { claimOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function ClaimDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const scope = await requirePortfolioReadScope();
-  const claimScope = claimOperationalWhere(scope.portfolioOwnerId);
+  const scope = await requireOrganizationPortfolioReadScope();
+  const claimScope = claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const db = getDb();
 
   const claim = await db.claim.findFirst({

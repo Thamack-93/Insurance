@@ -7,7 +7,7 @@ import {
   clientOperationalWhere,
   commissionOperationalWhere,
   policyOperationalWhere,
-  requirePortfolioReadScope,
+  requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
 
 type CommissionStatus = "EXPECTED" | "PENDING" | "PAID" | "OVERDUE" | "CANCELLED";
@@ -85,13 +85,13 @@ export type CommissionSummary = {
 
 export async function getPortfolioMetrics() {
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const fechaCorte = today();
-  const policyWhere = policyOperationalWhere(scope.portfolioOwnerId);
+  const policyWhere = policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
 
   const [clients, policies] = await Promise.all([
     db.client.findMany({
-      where: clientOperationalWhere(scope.portfolioOwnerId),
+      where: clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
       select: {
         id: true,
         fullName: true,
@@ -231,12 +231,12 @@ export async function getPortfolioMetrics() {
 
 export async function getCommissionSummary(options: CommissionSummaryOptions = {}) {
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const rango = resolveRange(options.from, options.to, 60);
 
   const commissions = await db.commission.findMany({
     where: {
-      ...commissionOperationalWhere(scope.portfolioOwnerId),
+      ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
       expectedDate: { gte: rango.from, lte: rango.to },
       status: { not: "CANCELLED" },
     },

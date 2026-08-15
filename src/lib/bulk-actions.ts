@@ -4,6 +4,7 @@ import { getDb } from "./db";
 import { writeActivityLog } from "./activity-log";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "./mutation-utils";
 import { logError } from "./logger";
+import { assertOrganizationContextInTransaction, requireOrganizationRole } from "./organization-context";
 type AnyDb = ReturnType<typeof getDb>;
 
 type EntityType = "client" | "policy" | "receipt" | "task" | "claim" | "quote" | "insurer";
@@ -28,9 +29,9 @@ const modelMap: Record<EntityType, DelegateName> = {
 };
 
 type BulkDelegate = {
-  deleteMany: (args: { where: { id: { in: string[] } } }) => Promise<{ count: number }>;
+  deleteMany: (args: { where: { id: { in: string[] }; organizationId: string } }) => Promise<{ count: number }>;
   updateMany: (args: {
-    where: { id: { in: string[] } };
+    where: { id: { in: string[] }; organizationId: string };
     data: { status: string };
   }) => Promise<{ count: number }>;
 };
@@ -48,16 +49,20 @@ export async function bulkDelete(
     return errorResult("Selecciona al menos un elemento para eliminar.");
   }
 
-  const db = getDb();
-  const delegate = getDelegate(db, entityType);
-
   try {
-    const result = await delegate.deleteMany({ where: { id: { in: ids } } });
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+    const db = getDb();
+    const result = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
+      return getDelegate(tx as AnyDb, entityType).deleteMany({ where: { id: { in: ids }, organizationId: context.organizationId } });
+    });
 
     await writeActivityLog({
       action: "BULK_DELETE",
       entityType: entityType.toUpperCase(),
       entityId: ids.join(","),
+      organizationId: context.organizationId,
+      userId: context.userId,
       newValue: { count: result.count },
     });
 
@@ -81,19 +86,23 @@ export async function bulkUpdateStatus(
     return errorResult("Selecciona al menos un elemento para actualizar.");
   }
 
-  const db = getDb();
-  const delegate = getDelegate(db, entityType);
-
   try {
-    const result = await delegate.updateMany({
-      where: { id: { in: ids } },
-      data: { status },
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+    const db = getDb();
+    const result = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
+      return getDelegate(tx as AnyDb, entityType).updateMany({
+        where: { id: { in: ids }, organizationId: context.organizationId },
+        data: { status },
+      });
     });
 
     await writeActivityLog({
       action: "BULK_UPDATE_STATUS",
       entityType: entityType.toUpperCase(),
       entityId: ids.join(","),
+      organizationId: context.organizationId,
+      userId: context.userId,
       newValue: { status, count: result.count },
     });
 

@@ -2,14 +2,8 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
-import { getCurrentUserId } from "@/lib/auth";
 import { logError } from "@/lib/logger";
-import {
-  assertClientPortfolioAccess,
-  assertQuotePortfolioAccess,
-  quoteOperationalWhere,
-  requirePortfolioReadScope,
-} from "@/lib/portfolio-access";
+import { assertOrganizationContextInTransaction, requireOrganizationContext } from "@/lib/organization-context";
 import { statusLabel } from "@/lib/status";
 import type { QuoteFormValues } from "@/lib/validations";
 import {
@@ -36,18 +30,15 @@ function normalizeQuoteInput(values: QuoteFormValues) {
 export async function createQuote(values: QuoteFormValues): Promise<MutationResult> {
   try {
     const db = getDb();
-
-    const userId = await getCurrentUserId();
-    await assertClientPortfolioAccess(values.clientId, userId);
-    const quote = await db.quote.create({
-      data: { ...normalizeQuoteInput(values), createdById: userId, updatedById: userId },
-    });
-
-    await writeActivityLog({
-      action: "CREATE_QUOTE",
-      entityType: "Quote",
-      entityId: quote.id,
-      newValue: { id: quote.id.slice(0, 8) },
+    const context = await requireOrganizationContext();
+    const quote = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const client = await tx.client.findFirst({ where: { id: values.clientId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {}) }, select: { id: true } });
+      const insurer = values.insurerId ? await tx.insurer.findFirst({ where: { id: values.insurerId, organizationId: context.organizationId }, select: { id: true } }) : true;
+      if (!client || !insurer) throw new Error("TENANT_RELATION_MISMATCH");
+      const created = await tx.quote.create({ data: { organizationId: context.organizationId, ...normalizeQuoteInput(values), createdById: context.userId, updatedById: context.userId } });
+      await writeActivityLog({ organizationId: context.organizationId, action: "CREATE_QUOTE", entityType: "Quote", entityId: created.id, newValue: { id: created.id.slice(0, 8) }, userId: context.userId, db: tx });
+      return created;
     });
 
     revalidatePaths([
@@ -68,29 +59,17 @@ export async function createQuote(values: QuoteFormValues): Promise<MutationResu
 export async function updateQuote(id: string, values: QuoteFormValues): Promise<MutationResult> {
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
-    await assertQuotePortfolioAccess(id, userId);
-    await assertClientPortfolioAccess(values.clientId, userId);
-
-    const existingQuote = await db.quote.findUnique({
-      where: { id },
-    });
-
-    if (!existingQuote) {
-      return errorResult("Cotización no encontrada.");
-    }
-
-    const quote = await db.quote.update({
-      where: { id },
-      data: { ...normalizeQuoteInput(values), updatedById: userId },
-    });
-
-    await writeActivityLog({
-      action: "UPDATE_QUOTE",
-      entityType: "Quote",
-      entityId: quote.id,
-      oldValue: { id: existingQuote.id.slice(0, 8) },
-      newValue: { id: quote.id.slice(0, 8) },
+    const context = await requireOrganizationContext();
+    const quote = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const existing = await tx.quote.findFirst({ where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) } });
+      const client = await tx.client.findFirst({ where: { id: values.clientId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {}) }, select: { id: true } });
+      const insurer = values.insurerId ? await tx.insurer.findFirst({ where: { id: values.insurerId, organizationId: context.organizationId }, select: { id: true } }) : true;
+      if (!existing) throw new Error("QUOTE_NOT_FOUND");
+      if (!client || !insurer) throw new Error("TENANT_RELATION_MISMATCH");
+      const updated = await tx.quote.update({ where: { id }, data: { ...normalizeQuoteInput(values), updatedById: context.userId } });
+      await writeActivityLog({ organizationId: context.organizationId, action: "UPDATE_QUOTE", entityType: "Quote", entityId: updated.id, oldValue: { id: existing.id.slice(0, 8) }, newValue: { id: updated.id.slice(0, 8) }, userId: context.userId, db: tx });
+      return updated;
     });
 
     revalidatePaths([
@@ -111,30 +90,15 @@ export async function updateQuote(id: string, values: QuoteFormValues): Promise<
 export async function deleteQuote(id: string): Promise<MutationResult> {
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
-    await assertQuotePortfolioAccess(id, userId);
-
-    const existingQuote = await db.quote.findUnique({
-      where: { id },
-    });
-
-    if (!existingQuote) {
-      return errorResult("La cotización ya no existe.");
-    }
-
-    if (existingQuote.status === "ACCEPTED") {
-      return errorResult(
-        "No se puede eliminar: la cotización está aceptada. Cámbiala de estado antes de eliminarla.",
-      );
-    }
-
-    await db.quote.delete({ where: { id } });
-
-    await writeActivityLog({
-      action: "DELETE_QUOTE",
-      entityType: "Quote",
-      entityId: id,
-      oldValue: { id: existingQuote.id.slice(0, 8), clientId: existingQuote.clientId },
+    const context = await requireOrganizationContext();
+    const existingQuote = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const existing = await tx.quote.findFirst({ where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) } });
+      if (!existing) throw new Error("QUOTE_NOT_FOUND");
+      if (existing.status === "ACCEPTED") throw new Error("QUOTE_ACCEPTED");
+      await tx.quote.delete({ where: { id } });
+      await writeActivityLog({ organizationId: context.organizationId, action: "DELETE_QUOTE", entityType: "Quote", entityId: id, oldValue: { id: existing.id.slice(0, 8), clientId: existing.clientId }, userId: context.userId, db: tx });
+      return existing;
     });
 
     revalidatePaths([
@@ -170,40 +134,31 @@ export async function bulkUpdateQuoteStatus(
   }
 
   try {
-    const scope = await requirePortfolioReadScope();
+    const context = await requireOrganizationContext();
     const db = getDb();
-
-    const permitted = await db.quote.findMany({
-      where: { id: { in: ids }, ...quoteOperationalWhere(scope.portfolioOwnerId) },
-      select: { id: true, status: true, clientId: true },
-    });
+    const outcome = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const permitted = await tx.quote.findMany({
+        where: { id: { in: ids }, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) },
+        select: { id: true, status: true, clientId: true },
+      });
 
     const outOfScope = ids.length - permitted.length;
     const accepted = permitted.filter((quote) => quote.status === "ACCEPTED");
     const target = permitted.filter((quote) => quote.status !== "ACCEPTED" && quote.status !== status);
 
-    if (target.length === 0) {
-      return errorResult(
-        outOfScope > 0
-          ? "Ninguna de las cotizaciones seleccionadas está en tu cartera."
-          : accepted.length > 0
-            ? "Las cotizaciones aceptadas no se pueden cambiar en lote."
-            : "Las cotizaciones seleccionadas ya tienen ese estado.",
-      );
-    }
+      if (target.length === 0) return { changed: 0, permitted, target, accepted, outOfScope };
 
     const targetIds = target.map((quote) => quote.id);
-    const result = await db.quote.updateMany({
-      where: { id: { in: targetIds } },
+      const result = await tx.quote.updateMany({
+      where: { id: { in: targetIds }, organizationId: context.organizationId },
       data: { status: status as BulkQuoteStatus },
     });
-
-    await writeActivityLog({
-      action: "BULK_UPDATE_STATUS",
-      entityType: "Quote",
-      entityId: targetIds.join(","),
-      newValue: { status, count: result.count },
+      await writeActivityLog({ organizationId: context.organizationId, action: "BULK_UPDATE_STATUS", entityType: "Quote", entityId: targetIds.join(","), newValue: { status, count: result.count }, userId: context.userId, db: tx });
+      return { changed: result.count, permitted, target, accepted, outOfScope };
     });
+    const { changed, permitted, target, accepted, outOfScope } = outcome;
+    if (changed === 0) return errorResult(outOfScope > 0 ? "Ninguna de las cotizaciones seleccionadas está en tu cartera." : accepted.length > 0 ? "Las cotizaciones aceptadas no se pueden cambiar en lote." : "Las cotizaciones seleccionadas ya tienen ese estado.");
 
     revalidatePaths([
       "/quotes",
@@ -214,7 +169,7 @@ export async function bulkUpdateQuoteStatus(
 
     const label = statusLabel(status, "quote");
     const parts = [
-      `${result.count} cotización${result.count !== 1 ? "es" : ""} ${result.count !== 1 ? "quedaron" : "quedó"} como “${label}”.`,
+      `${changed} cotización${changed !== 1 ? "es" : ""} ${changed !== 1 ? "quedaron" : "quedó"} como “${label}”.`,
     ];
     const unchanged = permitted.length - target.length - accepted.length;
     if (unchanged > 0) parts.push(`${unchanged} ya ${unchanged !== 1 ? "tenían" : "tenía"} ese estado.`);

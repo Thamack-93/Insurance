@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 
 const requireUser = vi.hoisted(() => vi.fn());
 const requirePortfolioReadScope = vi.hoisted(() => vi.fn());
+const requireOrganizationContext = vi.hoisted(() => vi.fn());
 const resolveAuthorizedNoraContext = vi.hoisted(() => vi.fn());
 const buildAssistantReply = vi.hoisted(() => vi.fn());
 const assertSameOrigin = vi.hoisted(() => vi.fn());
@@ -17,6 +18,7 @@ vi.mock("@/lib/auth", () => ({
   requireUser,
 }));
 vi.mock("@/lib/portfolio-access", () => ({ requirePortfolioReadScope }));
+vi.mock("@/lib/organization-context", () => ({ requireOrganizationContext }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/nora-context", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/nora-context")>()),
@@ -57,6 +59,7 @@ describe("Nora explicit context API", () => {
     vi.clearAllMocks();
     requireUser.mockResolvedValue(user);
     requirePortfolioReadScope.mockResolvedValue(scope);
+    requireOrganizationContext.mockResolvedValue({ userId: "agent-1", organizationId: "org-a", membershipRole: "AGENT" });
     assertSameOrigin.mockReturnValue(undefined);
     checkDistributedRateLimit.mockResolvedValue({ allowed: true });
     getRequestIp.mockReturnValue("127.0.0.1");
@@ -73,7 +76,7 @@ describe("Nora explicit context API", () => {
     await expect(response.json()).resolves.toEqual({ error: "El contexto de Nora no existe o no está autorizado." });
     expect(resolveAuthorizedNoraContext).toHaveBeenCalledWith(
       { type: "receipt", id: "foreign-or-missing" },
-      "agent-1",
+      { organizationId: "org-a", membershipRole: "AGENT", portfolioOwnerId: "agent-1" },
     );
     expect(buildAssistantReply).not.toHaveBeenCalled();
   });
@@ -85,7 +88,7 @@ describe("Nora explicit context API", () => {
 
     expect(response.status).toBe(200);
     expect(buildAssistantReply).toHaveBeenCalledWith(
-      { id: "agent-1", role: "AGENT" },
+      { id: "agent-1", role: "AGENT", organizationId: "org-a" },
       "Revisa este contexto",
       { contextText: "policy POL-001", gmmMetadataOnly: false, history: undefined },
     );
@@ -102,7 +105,7 @@ describe("Nora explicit context API", () => {
 
     expect(response.status).toBe(200);
     expect(buildAssistantReply).toHaveBeenCalledWith(
-      { id: "agent-1", role: "AGENT" },
+      { id: "agent-1", role: "AGENT", organizationId: "org-a" },
       "Revisa este contexto",
       { contextText: null, gmmMetadataOnly: false, history },
     );
@@ -127,7 +130,7 @@ describe("Nora explicit context API", () => {
 
     expect(response.status).toBe(200);
     expect(buildAssistantReply).toHaveBeenCalledWith(
-      { id: "agent-1", role: "AGENT" },
+      { id: "agent-1", role: "AGENT", organizationId: "org-a" },
       "Revisa este contexto",
       { contextText: "claim SIN-001", gmmMetadataOnly: true, history: undefined },
     );

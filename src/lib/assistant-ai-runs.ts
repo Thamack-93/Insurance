@@ -304,8 +304,10 @@ export async function createAssistantAiRun(
   client: DbClient = getDb(),
 ): Promise<AssistantAiRunSnapshot | null> {
   try {
+    if (!input.user.organizationId) return null;
     const run = await client.assistantAiRun.create({
       data: {
+        organizationId: input.user.organizationId,
         id: input.id,
         userId: input.user.id,
         userRole: input.user.role,
@@ -338,12 +340,14 @@ export async function createAssistantAiAttempt(
     status: AssistantAiAttemptStatus;
     fallbackReason?: string | null;
     provider?: string | null;
+    organizationId: string;
   },
   client: DbClient = getDb(),
 ) {
   try {
     const attempt = await client.assistantAiAttempt.create({
       data: {
+        organizationId: input.organizationId,
         id: input.id,
         runId: input.runId,
         attemptNumber: input.attemptNumber,
@@ -384,6 +388,7 @@ export async function createAssistantAiAttempt(
 export async function finalizeAssistantAiAttempt(
   attemptId: string,
   input: {
+    organizationId: string;
     status: AssistantAiAttemptStatus;
     finalModel?: string | null;
     errorCode?: string | null;
@@ -400,8 +405,10 @@ export async function finalizeAssistantAiAttempt(
   client: DbClient = getDb(),
 ) {
   try {
+    const current = await client.assistantAiAttempt.findFirst({ where: { id: attemptId, organizationId: input.organizationId }, select: { id: true } });
+    if (!current) return null;
     const attempt = await client.assistantAiAttempt.update({
-      where: { id: attemptId },
+      where: { id: current.id },
       data: {
         status: input.status,
         finalModel: input.finalModel ?? undefined,
@@ -428,6 +435,7 @@ export async function finalizeAssistantAiAttempt(
 export async function finalizeAssistantAiRun(
   runId: string,
   input: {
+    organizationId: string;
     status: AssistantAiRunStatus;
     finalModel?: string | null;
     errorCode?: string | null;
@@ -446,8 +454,10 @@ export async function finalizeAssistantAiRun(
   client: DbClient = getDb(),
 ) {
   try {
+    const current = await client.assistantAiRun.findFirst({ where: { id: runId, organizationId: input.organizationId }, select: { id: true } });
+    if (!current) return null;
     const run = await client.assistantAiRun.update({
-      where: { id: runId },
+      where: { id: current.id },
       data: {
         status: input.status,
         finalModel: input.finalModel ?? undefined,
@@ -476,10 +486,10 @@ export async function finalizeAssistantAiRun(
   }
 }
 
-export async function linkAssistantAiRunToReport(runId: string, reportId: string, client: DbClient = getDb()) {
+export async function linkAssistantAiRunToReport(runId: string, reportId: string, organizationId: string, client: DbClient = getDb()) {
   try {
-    await client.assistantAiRun.update({
-      where: { id: runId },
+    await client.assistantAiRun.updateMany({
+      where: { id: runId, organizationId },
       data: { reportId },
     });
   } catch (error) {
@@ -487,9 +497,9 @@ export async function linkAssistantAiRunToReport(runId: string, reportId: string
   }
 }
 
-export async function getAssistantAiRun(runId: string, client: DbClient = getDb()) {
-  const run = await client.assistantAiRun.findUnique({
-    where: { id: runId },
+export async function getAssistantAiRun(runId: string, organizationId: string, client: DbClient = getDb()) {
+  const run = await client.assistantAiRun.findFirst({
+    where: { id: runId, organizationId },
     include: {
       attempts: { orderBy: { attemptNumber: "asc" } },
     },
@@ -499,15 +509,17 @@ export async function getAssistantAiRun(runId: string, client: DbClient = getDb(
 
 export async function listAssistantAiRuns(
   filter: {
+    organizationId: string;
     limit?: number;
     userId?: string;
     operation?: AssistantAiOperation;
     status?: AssistantAiRunStatus;
-  } = {},
+  },
   client: DbClient = getDb(),
 ): Promise<AssistantAiRunSnapshot[]> {
   const runs = await client.assistantAiRun.findMany({
     where: {
+      organizationId: filter.organizationId,
       ...(filter.userId ? { userId: filter.userId } : {}),
       ...(filter.operation ? { operation: filter.operation } : {}),
       ...(filter.status ? { status: filter.status } : {}),
@@ -523,12 +535,13 @@ export async function listAssistantAiRuns(
 }
 
 export async function getAssistantAiMonthlySpend(
+  organizationId: string,
   now = new Date(),
   client: DbClient = getDb(),
 ) {
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const aggregate = await client.assistantAiRun.aggregate({
-    where: { createdAt: { gte: monthStart } },
+    where: { organizationId, createdAt: { gte: monthStart } },
     _sum: { estimatedCostUsd: true },
     _count: { id: true },
   });
@@ -539,10 +552,10 @@ export async function getAssistantAiMonthlySpend(
   };
 }
 
-export async function getAssistantAiMonthlyUsageSummary(now = new Date(), client: DbClient = getDb()) {
+export async function getAssistantAiMonthlyUsageSummary(organizationId: string, now = new Date(), client: DbClient = getDb()) {
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const runs = await client.assistantAiRun.findMany({
-    where: { createdAt: { gte: monthStart } },
+    where: { organizationId, createdAt: { gte: monthStart } },
     select: { totalUsageJson: true, usageJson: true, estimatedCostUsd: true, fallbackCount: true, providerMetadataJson: true },
   });
   let inputTokens = 0;

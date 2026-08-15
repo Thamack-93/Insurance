@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { AuthError, requireUser } from "@/lib/auth";
+import { AuthError } from "@/lib/auth";
+import { requireOrganizationContext } from "@/lib/organization-context";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody } from "@/lib/request-guards";
 import { rateLimitResponse } from "@/lib/api-security";
 import { buildPolicyPdfCapturePreviewFromDraft } from "@/lib/policy-pdf-capture-preview";
@@ -108,14 +109,14 @@ const correctionSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    const user = await requireUser();
+    const context = await requireOrganizationContext();
     try {
       assertSameOrigin(request, "policy capture correction");
     } catch {
       return NextResponse.json({ error: "No autorizado." }, { status: 403 });
     }
 
-    const rateLimit = await checkDistributedRateLimit(`policy-capture-correction:${getRequestIp(request)}:${user.id}`, {
+    const rateLimit = await checkDistributedRateLimit(`policy-capture-correction:${getRequestIp(request)}:${context.userId}`, {
       limit: 30,
       windowMs: 60 * 1000,
       requireDistributed: true,
@@ -148,8 +149,9 @@ export async function POST(request: NextRequest) {
       receiptEvidence: (capture.receiptEvidence ?? null) as PolicyPdfCaptureReceiptEvidence | null,
       relatedDocuments: capture.relatedDocuments as PolicyPdfCaptureRelatedDocument[] | undefined,
       context: {
-        portfolioOwnerId: user.role === "ADMIN" ? undefined : user.id,
-        user: { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" },
+        organizationId: context.organizationId,
+        portfolioOwnerId: context.membershipRole === "AGENT" ? context.userId : undefined,
+        user: { id: context.userId, role: context.membershipRole === "AGENT" ? "AGENT" : "ADMIN" },
       },
     });
 

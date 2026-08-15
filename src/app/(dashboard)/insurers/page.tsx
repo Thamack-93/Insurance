@@ -11,41 +11,35 @@ import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
 import { getDb } from "@/lib/db";
 import { formatCurrency, toNumber } from "@/lib/money";
-import { requireAdminOrRedirect } from "@/lib/auth";
-import { claimOperationalWhere, organizationOperationalWhere, policyOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
+import { claimOperationalWhere, policyOperationalWhere } from "@/lib/portfolio-access";
 
 const PAGE_SIZE = 25;
 
 export default async function InsurersPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; page?: string; status?: string }>;
+  searchParams?: Promise<{ q?: string; page?: string }>;
 }) {
-  const user = await requireAdminOrRedirect();
-  const scope = await requirePortfolioReadScope();
-  const isAdmin = user.role === "ADMIN";
+  const context = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
+  const isAdmin = true;
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
-  const status = params.status === "ARCHIVED" ? "ARCHIVED" : params.status === "ALL" ? undefined : "ACTIVE";
   const page = Math.max(1, Number(params.page) || 1);
-  const organizationScope = organizationOperationalWhere(scope.organizationId);
-  const policyScope = { ...policyOperationalWhere(scope.portfolioOwnerId), ...organizationScope };
-  const claimScope = { ...claimOperationalWhere(scope.portfolioOwnerId), ...organizationScope };
+  const policyScope = policyOperationalWhere(undefined, context.organizationId);
+  const claimScope = claimOperationalWhere(undefined, context.organizationId);
 
   const db = getDb();
 
-  const where: Prisma.InsurerWhereInput = {
-    ...(status ? { status } : {}),
-    ...(query
-    ? {
+  const where: Prisma.InsurerWhereInput = query
+    ? { organizationId: context.organizationId,
         OR: [
           { name: { contains: query } },
           { contactEmail: { contains: query } },
           { contactName: { contains: query } },
         ],
       }
-      : {}),
-  };
+    : { organizationId: context.organizationId };
 
   const [
     activeCount,
@@ -56,8 +50,8 @@ export default async function InsurersPage({
     filteredCount,
     pagedInsurers,
   ] = await Promise.all([
-    db.insurer.count({ where: { ...organizationScope, status: "ACTIVE" } }),
-    db.insurer.count({ where: { ...organizationScope, status: "ARCHIVED" } }),
+    db.insurer.count({ where: { organizationId: context.organizationId, status: "ACTIVE" } }),
+    db.insurer.count({ where: { organizationId: context.organizationId, status: "ARCHIVED" } }),
     db.policy.count({ where: policyScope }),
     db.claim.count({ where: claimScope }),
     db.policy.aggregate({
@@ -67,7 +61,7 @@ export default async function InsurersPage({
     db.insurer.count({ where }),
     db.insurer.findMany({
       where,
-      orderBy: [{ name: "asc" }, { id: "asc" }],
+      orderBy: { name: "asc" },
       include: {
         _count: {
           select: {
@@ -145,17 +139,10 @@ export default async function InsurersPage({
           />
         </section>
 
-          <SectionCard
+        <SectionCard
           title="Directorio de aseguradoras"
           description="Listado completo con métricas de negocio."
-          action={
-            <div className="flex items-center gap-2">
-              <Link className={status === "ACTIVE" ? "font-semibold" : "text-muted-foreground"} href="/insurers">Activas</Link>
-              <Link className={status === undefined ? "font-semibold" : "text-muted-foreground"} href="/insurers?status=ALL">Todas</Link>
-              <Link className={status === "ARCHIVED" ? "font-semibold" : "text-muted-foreground"} href="/insurers?status=ARCHIVED">Archivadas</Link>
-              <ListSearch placeholder="Buscar por nombre o contacto..." />
-            </div>
-          }
+          action={<ListSearch placeholder="Buscar por nombre o contacto..." />}
         >
           {filteredCount === 0 ? (
             query ? (

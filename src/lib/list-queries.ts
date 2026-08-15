@@ -23,6 +23,7 @@ export type DateRange = {
 };
 
 export type DuePaymentsOptions = {
+  organizationId: string;
   from?: Date;
   to?: Date;
   limit?: number;
@@ -31,6 +32,7 @@ export type DuePaymentsOptions = {
 };
 
 export type RenewalOptions = {
+  organizationId: string;
   from?: Date;
   to?: Date;
   limit?: number;
@@ -39,6 +41,7 @@ export type RenewalOptions = {
 };
 
 export type OpenWorkItemsOptions = {
+  organizationId: string;
   from?: Date;
   to?: Date;
   limit?: number;
@@ -118,13 +121,14 @@ export type OpenWorkItemItem = {
   } | null;
 };
 
-export async function getDuePayments(options: DuePaymentsOptions = {}) {
+export async function getDuePayments(options: DuePaymentsOptions) {
   const db = getDb();
   const range = resolveRange(options.from, options.to, 60);
   const statuses = options.statuses ?? ["PENDING", "OVERDUE"];
 
   const rows = await db.receipt.findMany({
     where: {
+      organizationId: options.organizationId,
       dueDate: { gte: range.from, lte: range.to },
       status: { in: statuses },
     },
@@ -157,13 +161,14 @@ export async function getDuePayments(options: DuePaymentsOptions = {}) {
   }));
 }
 
-export async function getRenewals(options: RenewalOptions = {}) {
+export async function getRenewals(options: RenewalOptions) {
   const db = getDb();
   const range = resolveRange(options.from, options.to, 60);
   const statuses = options.statuses ?? ["ACTIVE"];
 
   const rows = await db.policy.findMany({
     where: {
+      organizationId: options.organizationId,
       endDate: { gte: range.from, lte: range.to },
       status: { in: statuses },
     },
@@ -190,7 +195,7 @@ export async function getRenewals(options: RenewalOptions = {}) {
   }));
 }
 
-export async function getOpenWorkItems(options: OpenWorkItemsOptions = {}) {
+export async function getOpenWorkItems(options: OpenWorkItemsOptions) {
   const range = options.from || options.to ? resolveRange(options.from, options.to, 0) : null;
   const statuses = options.statuses ?? OPEN_WORK_ITEM_STATUSES;
 
@@ -202,6 +207,7 @@ export async function getOpenWorkItems(options: OpenWorkItemsOptions = {}) {
     limit: options.limit,
     skip: options.skip,
     portfolioOwnerId: options.portfolioOwnerId,
+    organizationId: options.organizationId,
   });
 
   return rows.map<OpenWorkItemItem>((row) => ({

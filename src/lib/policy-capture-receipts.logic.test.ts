@@ -9,6 +9,7 @@ import {
 describe("policy-capture-receipts", () => {
   it("builds a pending receipt from the capture draft", () => {
     const payload = buildAutoCaptureReceiptPayload({
+      organizationId: "org-test",
       policyId: "policy-1",
       clientId: "client-1",
       insurerId: "insurer-1",
@@ -58,6 +59,7 @@ describe("policy-capture-receipts", () => {
 
   it("splits semianual captures into two receipts", () => {
     const payloads = buildAutoCaptureReceiptPayloads({
+      organizationId: "org-test",
       policyId: "policy-1",
       clientId: "client-1",
       insurerId: "insurer-1",
@@ -101,6 +103,7 @@ describe("policy-capture-receipts", () => {
 
   it("honors custom amounts provided per receipt", () => {
     const payloads = buildAutoCaptureReceiptPayloads({
+      organizationId: "org-test",
       policyId: "policy-1",
       clientId: "client-1",
       insurerId: "insurer-1",
@@ -165,6 +168,7 @@ describe("policy-capture-receipts", () => {
     } as never;
 
     const input = {
+      organizationId: "org-test",
       policyId: "policy-1",
       clientId: "client-1",
       insurerId: "insurer-1",
@@ -225,6 +229,7 @@ describe("policy-capture-receipts", () => {
     } as never;
 
     await syncAutoCaptureReceipts(db, {
+      organizationId: "org-test",
       policyId: "policy-1",
       clientId: "client-1",
       insurerId: "insurer-1",

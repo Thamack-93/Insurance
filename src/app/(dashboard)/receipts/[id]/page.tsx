@@ -16,7 +16,7 @@ import { CancelReceiptButton } from "@/components/receipts/cancel-receipt-button
 import { RehabilitateReceiptButton } from "@/components/receipts/rehabilitate-receipt-button";
 import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
 import { getDb } from "@/lib/db";
-import { getCurrentUser } from "@/lib/auth";
+import { receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
@@ -25,12 +25,12 @@ import { isPaidWithinTolerance } from "@/lib/receipt-reconciliation";
 
 export default async function ReceiptDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const liveUser = await getCurrentUser();
-  const isAdmin = !!liveUser && liveUser.active && liveUser.role === "ADMIN";
+  const scope = await requireOrganizationPortfolioReadScope();
+  const isAdmin = scope.membershipRole !== "AGENT";
   const db = getDb();
 
-  const receipt = await db.receipt.findUnique({
-    where: { id },
+  const receipt = await db.receipt.findFirst({
+    where: { id, ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
     include: { client: true, policy: true, insurer: true, document: true, endorsement: true },
   });
 
@@ -40,27 +40,22 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
 
   const [payments, commissions, documents, relatedReceipts, activity] = await Promise.all([
     db.payment.findMany({
-      where: { receiptId: id },
-      orderBy: [{ paidDate: "desc" }, { id: "desc" }],
+      where: { receiptId: id, organizationId: scope.organizationId },
+      orderBy: { paidDate: "desc" },
     }),
     db.commission.findMany({
-      where: { receiptId: id },
+      where: { receiptId: id, organizationId: scope.organizationId },
       include: { insurer: true },
-      orderBy: [{ expectedDate: "desc" }, { id: "desc" }],
+      orderBy: { expectedDate: "desc" },
     }),
     db.document.findMany({
-      where: { receiptId: id },
-      orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
+      where: { receiptId: id, organizationId: scope.organizationId },
+      orderBy: { uploadedAt: "desc" },
     }),
     db.receipt.findMany({
-      where: { policyId: receipt.policyId, id: { not: id } },
+      where: { policyId: receipt.policyId, organizationId: scope.organizationId, id: { not: id } },
       include: { endorsement: true },
-      orderBy: [
-        { dueDate: "desc" },
-        { receiptSequence: { sort: "desc", nulls: "last" } },
-        { receiptNumber: "desc" },
-        { id: "desc" },
-      ],
+      orderBy: { dueDate: "desc" },
       take: 5,
     }),
     getActivityForEntity("Receipt", id, 20),

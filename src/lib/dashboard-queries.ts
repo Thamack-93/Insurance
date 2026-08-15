@@ -12,23 +12,21 @@ import {
   clientOperationalWhere,
   policyOperationalWhere,
   receiptOperationalWhere,
-  organizationOperationalWhere,
-  requirePortfolioReadScope,
+  requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 
 export async function getDashboardData() {
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const now = today();
   const in7 = businessAddDays(now, 7);
   const in60 = businessAddDays(now, 60);
   const monthStart = businessStartOfMonth(now);
   const monthEnd = businessEndOfMonth(now);
-  const organizationWhere = organizationOperationalWhere(scope.organizationId);
-  const policyWhere = { ...policyOperationalWhere(scope.portfolioOwnerId), ...organizationWhere };
-  const receiptWhere = { ...receiptOperationalWhere(scope.portfolioOwnerId), ...organizationWhere };
-  const commissionWhere = { ...commissionOperationalWhere(scope.portfolioOwnerId), ...organizationWhere };
+  const policyWhere = policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
+  const receiptWhere = receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
+  const commissionWhere = commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const upcomingRenewalPoliciesPromise = loadEligibleRenewalPolicies(
     {
       endDate: {
@@ -70,12 +68,14 @@ export async function getDashboardData() {
       workItemTypes: ["TASK"],
       statuses: OPEN_WORK_ITEM_STATUSES,
       portfolioOwnerId: scope.portfolioOwnerId,
+      organizationId: scope.organizationId,
     }),
     countWorkItems({
       workItemTypes: ["TASK"],
       statuses: OPEN_WORK_ITEM_STATUSES,
       priorities: ["URGENT"],
       portfolioOwnerId: scope.portfolioOwnerId,
+      organizationId: scope.organizationId,
     }),
     // Per-row fallback: actualAmount when set, otherwise expectedAmount.
     // We split into two aggregates to reproduce SUM(COALESCE(actualAmount, expectedAmount))
@@ -93,20 +93,15 @@ export async function getDashboardData() {
     db.receipt.findMany({
       where: { ...receiptWhere, dueDate: { lte: in60 }, status: { notIn: ["CANCELLED"] } },
       include: { client: true, insurer: true, policy: true },
-      orderBy: [
-        { dueDate: "asc" },
-        { receiptSequence: { sort: "asc", nulls: "last" } },
-        { receiptNumber: "asc" },
-        { id: "asc" },
-      ],
+      orderBy: { dueDate: "asc" },
       take: DASHBOARD_LIST_LIMIT,
     }),
     // Lightweight chart query — only the field we need, capped separately so the
     // urgent list size doesn't silently undercount the weekly chart.
     db.receipt.findMany({
       where: { ...receiptWhere, dueDate: { lte: in60 }, status: { notIn: ["CANCELLED"] } },
-      select: { dueDate: true, id: true },
-      orderBy: [{ dueDate: "asc" }, { id: "asc" }],
+      select: { dueDate: true },
+      orderBy: { dueDate: "asc" },
       take: 500,
     }),
     db.policy.groupBy({
@@ -121,13 +116,12 @@ export async function getDashboardData() {
     }),
     db.commission.findMany({
       where: { ...commissionWhere, status: { in: ["EXPECTED", "PENDING", "OVERDUE"] } },
-      select: { id: true, expectedDate: true, expectedAmount: true, actualAmount: true },
-      orderBy: [{ expectedDate: "asc" }, { id: "asc" }],
+      select: { expectedDate: true, expectedAmount: true, actualAmount: true },
       take: 200,
     }),
-    db.activityLog.findMany({ where: organizationWhere, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 }),
-    db.alert.findMany({ where: { status: "OPEN", ...organizationWhere }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 }),
-    db.alert.count({ where: { status: "OPEN", alertType: { startsWith: "SECURITY_" }, ...organizationWhere } }),
+    db.activityLog.findMany({ where: { organizationId: scope.organizationId }, orderBy: { createdAt: "desc" }, take: 8 }),
+    db.alert.findMany({ where: { organizationId: scope.organizationId, status: "OPEN" }, orderBy: { createdAt: "desc" }, take: 8 }),
+    db.alert.count({ where: { organizationId: scope.organizationId, status: "OPEN", alertType: { startsWith: "SECURITY_" } } }),
     detectRisks(scope.portfolioOwnerId, scope.organizationId),
     getWorkItems({
       workItemTypes: ["TASK"],
@@ -203,14 +197,13 @@ export type OnboardingStatus = {
 
 export async function getOnboardingStatus(): Promise<OnboardingStatus> {
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
-  const organizationWhere = organizationOperationalWhere(scope.organizationId);
+  const scope = await requireOrganizationPortfolioReadScope();
   const [insurers, clients, policies, receipts, dismissedRow] = await Promise.all([
-    db.insurer.count({ where: organizationWhere }),
-    db.client.count({ where: { ...clientOperationalWhere(scope.portfolioOwnerId), ...organizationWhere } }),
-    db.policy.count({ where: { ...policyOperationalWhere(scope.portfolioOwnerId), ...organizationWhere } }),
-    db.receipt.count({ where: { ...receiptOperationalWhere(scope.portfolioOwnerId), ...organizationWhere } }),
-    db.systemSetting.findUnique({ where: { key: "onboardingDismissed" } }),
+    db.insurer.count({ where: { organizationId: scope.organizationId } }),
+    db.client.count({ where: clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId) }),
+    db.policy.count({ where: policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) }),
+    db.receipt.count({ where: receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) }),
+    db.systemSetting.findUnique({ where: { key: `onboardingDismissed:${scope.organizationId}` } }),
   ]);
   return {
     insurers,
@@ -224,14 +217,13 @@ export async function getOnboardingStatus(): Promise<OnboardingStatus> {
 
 export async function getTodayData() {
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const now = today();
   const tomorrow = businessAddDays(now, 1);
   const in7 = businessAddDays(now, 7);
   const in30 = businessAddDays(now, 30);
-  const organizationWhere = organizationOperationalWhere(scope.organizationId);
-  const receiptWhere = { ...receiptOperationalWhere(scope.portfolioOwnerId), ...organizationWhere };
-  const commissionWhere = { ...commissionOperationalWhere(scope.portfolioOwnerId), ...organizationWhere };
+  const receiptWhere = receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
+  const commissionWhere = commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const urgentRenewalsPromise = loadEligibleRenewalPolicies(
     {
       endDate: {
@@ -257,33 +249,17 @@ export async function getTodayData() {
     db.receipt.findMany({
       where: { ...receiptWhere, dueDate: { gte: now, lt: tomorrow }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
-      orderBy: [
-        { dueDate: "asc" },
-        { receiptSequence: { sort: "asc", nulls: "last" } },
-        { receiptNumber: "asc" },
-        { id: "asc" },
-      ],
     }),
     db.receipt.findMany({
       where: { ...receiptWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
-      orderBy: [
-        { dueDate: "asc" },
-        { receiptSequence: { sort: "asc", nulls: "last" } },
-        { receiptNumber: "asc" },
-        { id: "asc" },
-      ],
+      orderBy: { dueDate: "asc" },
       take: 8,
     }),
     db.receipt.findMany({
       where: { ...receiptWhere, dueDate: { gte: tomorrow, lte: in7 }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
-      orderBy: [
-        { dueDate: "asc" },
-        { receiptSequence: { sort: "asc", nulls: "last" } },
-        { receiptNumber: "asc" },
-        { id: "asc" },
-      ],
+      orderBy: { dueDate: "asc" },
       take: 8,
     }),
     urgentRenewalsPromise,
@@ -297,13 +273,11 @@ export async function getTodayData() {
     }),
     db.client.findMany({
       where: {
-        ...clientOperationalWhere(scope.portfolioOwnerId),
-        ...organizationWhere,
+        ...clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
         workItems: {
           some: { workItemType: "TASK", status: { in: ["OPEN", "WAITING_CLIENT"] } },
         },
       },
-      orderBy: [{ fullName: "asc" }, { id: "asc" }],
       take: 6,
     }),
     db.commission.findMany({
@@ -313,10 +287,10 @@ export async function getTodayData() {
         status: { in: ["EXPECTED", "PENDING", "OVERDUE"] },
       },
       include: { client: true, policy: true, insurer: true },
-      orderBy: [{ expectedDate: "asc" }, { id: "asc" }],
+      orderBy: { expectedDate: "asc" },
       take: 8,
     }),
-    db.activityLog.findMany({ where: organizationWhere, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 }),
+    db.activityLog.findMany({ where: { organizationId: scope.organizationId }, orderBy: { createdAt: "desc" }, take: 8 }),
     detectRisks(scope.portfolioOwnerId, scope.organizationId),
   ]);
 
@@ -434,7 +408,7 @@ export type TodayDashboardData = Awaited<ReturnType<typeof getTodayDashboardData
 
 export async function getTodayDashboardData() {
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const now = today();
   const in30 = businessAddDays(now, 30);
   const monthStart = businessStartOfMonth(now);
@@ -442,10 +416,9 @@ export async function getTodayDashboardData() {
   const prevMonthStart = businessStartOfMonth(subMonths(now, 1));
   const prevMonthEnd = businessEndOfMonth(subMonths(now, 1));
   const trendStart = businessStartOfMonth(subMonths(now, 5));
-  const organizationWhere = organizationOperationalWhere(scope.organizationId);
-  const policyWhere = { ...policyOperationalWhere(scope.portfolioOwnerId), ...organizationWhere };
-  const receiptWhere = { ...receiptOperationalWhere(scope.portfolioOwnerId), ...organizationWhere };
-  const commissionWhere = { ...commissionOperationalWhere(scope.portfolioOwnerId), ...organizationWhere };
+  const policyWhere = policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
+  const receiptWhere = receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
+  const commissionWhere = commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const commissionMonthStatuses = { in: [...MONTHLY_COMMISSION_STATUSES] };
   const overdueRenewalPoliciesPromise = loadEligibleRenewalPolicies(
     { endDate: { lt: now } },
@@ -511,32 +484,28 @@ export async function getTodayDashboardData() {
     db.policy.findMany({
       where: { ...policyWhere, startDate: { gte: trendStart } },
       select: { startDate: true },
-      orderBy: [{ startDate: "asc" }, { id: "asc" }],
       take: 5000,
     }),
     db.policy.findMany({
       where: { ...policyWhere, status: "ACTIVE", endDate: { gte: trendStart } },
       select: { endDate: true },
-      orderBy: [{ endDate: "asc" }, { id: "asc" }],
       take: 5000,
     }),
     db.receipt.findMany({
       where: { ...receiptWhere, createdAt: { gte: trendStart }, status: { notIn: ["CANCELLED"] } },
       select: { createdAt: true, amount: true },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       take: 5000,
     }),
     db.commission.findMany({
       where: { ...commissionWhere, expectedDate: { gte: trendStart }, status: commissionMonthStatuses },
       select: { expectedDate: true, expectedAmount: true, actualAmount: true },
-      orderBy: [{ expectedDate: "asc" }, { id: "asc" }],
       take: 2000,
     }),
     db.policy.groupBy({ by: ["status"], where: policyWhere, _count: { status: true } }),
     db.policy.findMany({
       where: policyWhere,
       include: { client: { select: { fullName: true } }, insurer: { select: { name: true } } },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      orderBy: { createdAt: "desc" },
       take: 6,
     }),
     db.receipt.count({ where: { ...receiptWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } } }),
@@ -545,6 +514,7 @@ export async function getTodayDashboardData() {
       workItemTypes: ["TASK"],
       statuses: OPEN_WORK_ITEM_STATUSES,
       portfolioOwnerId: scope.portfolioOwnerId,
+      organizationId: scope.organizationId,
     }),
   ]);
 

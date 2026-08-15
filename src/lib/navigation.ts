@@ -32,11 +32,12 @@ export type GlobalNavigationItem = {
 };
 
 export type UtilityNavigationItem = {
-  id: "administration" | "profile";
+  id: "administration" | "platform" | "profile";
   label: string;
   href: string;
   icon: LucideIcon;
   requiresAdmin?: boolean;
+  requiresSuperAdmin?: boolean;
 };
 
 export const globalNavigation: GlobalNavigationItem[] = [
@@ -64,6 +65,7 @@ export const globalNavigation: GlobalNavigationItem[] = [
 
 export const utilityNavigation: UtilityNavigationItem[] = [
   { id: "administration", label: "Administración", href: "/settings", icon: Settings, requiresAdmin: true },
+  { id: "platform", label: "Plataforma", href: "/platform", icon: ShieldCheck, requiresSuperAdmin: true },
   { id: "profile", label: "Perfil", href: "/settings/account", icon: UserRound },
 ];
 
@@ -131,8 +133,8 @@ export function getPrimaryNavigationId(pathname: string): GlobalNavigationId | u
   return getPrimaryNavigationItem(pathname)?.id;
 }
 
-export function getUtilityNavigation(isAdmin: boolean) {
-  return utilityNavigation.filter((item) => !item.requiresAdmin || isAdmin);
+export function getUtilityNavigation(isAdmin: boolean, isSuperAdmin = false) {
+  return utilityNavigation.filter((item) => (!item.requiresAdmin || isAdmin) && (!item.requiresSuperAdmin || isSuperAdmin));
 }
 
 export function getActiveUtilityNavigationItem(pathname: string) {

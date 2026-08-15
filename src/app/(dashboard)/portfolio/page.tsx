@@ -24,7 +24,7 @@ import {
   clientOperationalWhere,
   policyOperationalWhere,
   receiptOperationalWhere,
-  requirePortfolioReadScope,
+  requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
 import { getInsurerHref } from "@/lib/insurer-navigation";
 import { buildTableHref, readAllowedTableParam, readTablePage, readTableParam, readTableSort } from "@/lib/table-query";
@@ -34,10 +34,10 @@ export default async function PortfolioPage({
 }: {
   searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string; type?: string; insurerId?: string }>;
 }) {
-  const scope = await requirePortfolioReadScope();
-  const policyScope = policyOperationalWhere(scope.portfolioOwnerId);
-  const clientScope = clientOperationalWhere(scope.portfolioOwnerId);
-  const receiptScope = receiptOperationalWhere(scope.portfolioOwnerId);
+  const scope = await requireOrganizationPortfolioReadScope();
+  const policyScope = policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
+  const clientScope = clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
+  const receiptScope = receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const db = getDb();
   const now = today();
   const in60 = new Date(now);

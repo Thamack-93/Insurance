@@ -8,7 +8,7 @@ import { formatDateInput } from "@/lib/form-utils";
 import {
   endorsementOperationalWhere,
   policyOperationalWhere,
-  requirePortfolioReadScope,
+  requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
 
 export default async function NewReceiptPage({
@@ -17,26 +17,26 @@ export default async function NewReceiptPage({
   searchParams?: Promise<{ policyId?: string; endorsementId?: string }>;
 }) {
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const params = (await searchParams) ?? {};
   const policyId = params.policyId?.trim() || "";
   const endorsementId = params.endorsementId?.trim() || "";
 
   const [policies, selectedPolicy, selectedEndorsement] = await Promise.all([
     db.policy.findMany({
-      where: { status: { not: "CANCELLED" }, ...policyOperationalWhere(scope.portfolioOwnerId) },
+      where: { status: { not: "CANCELLED" }, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: { client: true },
       orderBy: { policyNumber: "asc" },
     }),
     policyId
       ? db.policy.findFirst({
-          where: { id: policyId, ...policyOperationalWhere(scope.portfolioOwnerId) },
+          where: { id: policyId, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
           include: { client: true },
         })
       : Promise.resolve(null),
     endorsementId
       ? db.policyEndorsement.findFirst({
-          where: { id: endorsementId, ...endorsementOperationalWhere(scope.portfolioOwnerId) },
+          where: { id: endorsementId, ...endorsementOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
           include: {
             policy: {
               include: { client: true },

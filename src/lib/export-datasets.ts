@@ -1,7 +1,7 @@
 import "server-only";
 
 import { getDb } from "@/lib/db";
-import { requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { formatDate } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
 import { policyTypeLabel, statusLabel } from "@/lib/status";
@@ -56,7 +56,7 @@ function columns<T extends Record<string, unknown>>(
 const clientsDataset: ExportDataset = {
   label: "Clientes",
   async load(params) {
-    const scope = await requirePortfolioReadScope();
+    const scope = await requireOrganizationPortfolioReadScope();
     const filters = readClientListFilters(params);
     const db = getDb();
 
@@ -104,7 +104,7 @@ const clientsDataset: ExportDataset = {
 const policiesDataset: ExportDataset = {
   label: "Pólizas",
   async load(params) {
-    const scope = await requirePortfolioReadScope();
+    const scope = await requireOrganizationPortfolioReadScope();
     const filters = readPolicyListFilters(params);
     const db = getDb();
 
@@ -150,7 +150,7 @@ const policiesDataset: ExportDataset = {
 const receiptsDataset: ExportDataset = {
   label: "Recibos",
   async load(params) {
-    const scope = await requirePortfolioReadScope();
+    const scope = await requireOrganizationPortfolioReadScope();
     const filters = readReceiptListFilters(params);
     const db = getDb();
 
@@ -196,7 +196,7 @@ const receiptsDataset: ExportDataset = {
 const quotesDataset: ExportDataset = {
   label: "Cotizaciones",
   async load(params) {
-    const scope = await requirePortfolioReadScope();
+    const scope = await requireOrganizationPortfolioReadScope();
     const filters = readQuoteListFilters(params);
     const db = getDb();
 

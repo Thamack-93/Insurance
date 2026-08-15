@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import type { LucideIcon } from "@/components/icons";
 import {
   Activity,
@@ -18,7 +17,7 @@ import { Pagination } from "@/components/lists/pagination";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { Button } from "@/components/ui/button";
 import { getAllActivity } from "@/lib/activity-log";
-import { AuthError, requireUser } from "@/lib/auth";
+import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import { getDb } from "@/lib/db";
 import { cn } from "@/lib/utils";
 import type { Prisma } from "@/generated/prisma/client";
@@ -140,18 +139,7 @@ export default async function ActivityPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  let user: Awaited<ReturnType<typeof requireUser>>;
-  try {
-    user = await requireUser();
-  } catch (error) {
-    if (error instanceof AuthError) {
-      redirect("/today");
-    }
-    throw error;
-  }
-  if (user.role !== "ADMIN") {
-    redirect("/today");
-  }
+  const context = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
 
   const sp = await searchParams;
   const requestedView = typeof sp.view === "string" ? sp.view : "all";
@@ -166,7 +154,7 @@ export default async function ActivityPage({
 
   const from = parseDate(fromRaw);
   const to = parseDate(toRaw, true);
-  const baseWhere = buildBaseWhere({ entityType, entityId, from, to });
+  const baseWhere = { organizationId: context.organizationId, ...buildBaseWhere({ entityType, entityId, from, to }) };
   const db = getDb();
 
   const filter = {
@@ -179,7 +167,7 @@ export default async function ActivityPage({
   };
 
   const [activity, total, summary] = await Promise.all([
-    getAllActivity({ filter, page, pageSize: PAGE_SIZE }),
+    getAllActivity({ organizationId: context.organizationId, filter, page, pageSize: PAGE_SIZE }),
     db.activityLog.count({ where: baseWhere }),
     Promise.all(
       ACTIVITY_VIEWS.map(async (view) => ({

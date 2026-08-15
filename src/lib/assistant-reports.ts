@@ -20,6 +20,7 @@ const DEFAULT_SUGGESTION_THRESHOLD = 5;
 const MAX_EVIDENCE_JSON_LENGTH = 5_000;
 
 export type AssistantReportSignalInput = {
+  organizationId: string;
   kind: AssistantReportKind;
   themeKey: string;
   themeLabel: string;
@@ -42,6 +43,7 @@ export type AssistantReportSignalInput = {
 };
 
 export type AssistantReportListFilter = {
+  organizationId: string;
   kind?: AssistantReportKind;
   status?: AssistantReportStatus;
   limit?: number;
@@ -176,15 +178,15 @@ export function createAssistantThemeKey(parts: Array<string | null | undefined>)
 }
 
 export async function listAssistantReports(
-  filter: AssistantReportListFilter = {},
+  filter: AssistantReportListFilter,
   client: DbClient = getDb(),
 ): Promise<AssistantReportSnapshot[]> {
-  const where: Prisma.AssistantReportWhereInput = {};
+  const where: Prisma.AssistantReportWhereInput = { organizationId: filter.organizationId };
   if (filter.kind) where.kind = filter.kind;
   if (filter.status) where.status = filter.status;
 
   const reports = await client.assistantReport.findMany({
-    where,
+    where: { ...where, organizationId: filter.organizationId },
     include: {
       signals: {
         orderBy: { createdAt: "desc" },
@@ -198,9 +200,9 @@ export async function listAssistantReports(
   return reports.map(buildSnapshot);
 }
 
-export async function getAssistantReport(reportId: string, client: DbClient = getDb()) {
-  const report = await client.assistantReport.findUnique({
-    where: { id: reportId },
+export async function getAssistantReport(reportId: string, organizationId: string, client: DbClient = getDb()) {
+  const report = await client.assistantReport.findFirst({
+    where: { id: reportId, organizationId },
     include: {
       signals: { orderBy: { createdAt: "desc" }, take: 25 },
     },
@@ -273,9 +275,10 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
 
   try {
     return await client.$transaction(async (tx) => {
-      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`${input.kind}:${themeKey}`}))`);
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`${input.organizationId}:${input.kind}:${themeKey}`}))`);
       const reports = await tx.assistantReport.findMany({
         where: {
+          organizationId: input.organizationId,
           kind: input.kind,
           themeKey,
         },
@@ -299,8 +302,8 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
           input.kind === "INCIDENT" ? "OPEN" : nextSignalCount >= threshold ? "OPEN" : (activeReport.status as AssistantReportStatus);
         const openedAt = activeReport.openedAt ?? (nextStatus === "OPEN" ? now : null);
 
-        const updated = await tx.assistantReport.update({
-          where: { id: activeReport.id },
+        await tx.assistantReport.updateMany({
+          where: { id: activeReport.id, organizationId: input.organizationId },
           data: {
             themeLabel,
             title,
@@ -322,9 +325,11 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
             }),
           },
         });
+        const updated = await tx.assistantReport.findFirstOrThrow({ where: { id: activeReport.id, organizationId: input.organizationId } });
 
         await tx.assistantReportSignal.create({
           data: {
+            organizationId: input.organizationId,
             reportId: updated.id,
             signalKind: input.signalKind,
             source: input.source,
@@ -356,6 +361,7 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
               signalCount: nextSignalCount,
             },
             userId: input.actorId,
+            organizationId: input.organizationId,
             db: tx,
           });
         }
@@ -366,6 +372,7 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
       const nextVersion = (latestReport?.version ?? 0) + 1;
       const created = await tx.assistantReport.create({
         data: {
+          organizationId: input.organizationId,
           kind: input.kind,
           themeKey,
           themeLabel,
@@ -394,6 +401,7 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
 
       await tx.assistantReportSignal.create({
         data: {
+          organizationId: input.organizationId,
           reportId: created.id,
           signalKind: input.signalKind,
           source: input.source,
@@ -425,6 +433,7 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
             signalCount: 1,
           },
           userId: input.actorId,
+          organizationId: input.organizationId,
           db: tx,
         });
       }
@@ -437,10 +446,11 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
   }
 }
 
-async function setReportStatus(reportId: string, status: AssistantReportStatus, actorId: string, client: DbClient = getDb()) {
+async function setReportStatus(reportId: string, organizationId: string, status: AssistantReportStatus, actorId: string, client: DbClient = getDb()) {
   const now = new Date();
-  const report = await client.assistantReport.update({
-    where: { id: reportId },
+  const existing = await client.assistantReport.findFirstOrThrow({ where: { id: reportId, organizationId } });
+  await client.assistantReport.updateMany({
+    where: { id: reportId, organizationId },
     data: {
       status,
       archivedAt: status === "ARCHIVED" ? now : null,
@@ -449,6 +459,7 @@ async function setReportStatus(reportId: string, status: AssistantReportStatus, 
       openedAt: status === "OPEN" ? now : undefined,
     },
   });
+  const report = { ...existing, status, archivedAt: status === "ARCHIVED" ? now : null, resolvedAt: status === "RESOLVED" ? now : null, deletedAt: status === "DELETED" ? now : null, openedAt: status === "OPEN" ? now : existing.openedAt };
 
   await writeActivityLog({
     entityType: "AssistantReport",
@@ -456,26 +467,28 @@ async function setReportStatus(reportId: string, status: AssistantReportStatus, 
     action: `ASSISTANT_REPORT_${status}`,
     newValue: { status },
     userId: actorId,
+    organizationId,
     db: client,
   });
 
   return buildSnapshot(report);
 }
 
-export async function closeAssistantReport(reportId: string, actorId: string, client: DbClient = getDb()) {
-  return setReportStatus(reportId, "RESOLVED", actorId, client);
+export async function closeAssistantReport(reportId: string, organizationId: string, actorId: string, client: DbClient = getDb()) {
+  return setReportStatus(reportId, organizationId, "RESOLVED", actorId, client);
 }
 
-export async function archiveAssistantReport(reportId: string, actorId: string, client: DbClient = getDb()) {
-  return setReportStatus(reportId, "ARCHIVED", actorId, client);
+export async function archiveAssistantReport(reportId: string, organizationId: string, actorId: string, client: DbClient = getDb()) {
+  return setReportStatus(reportId, organizationId, "ARCHIVED", actorId, client);
 }
 
-export async function reopenAssistantReport(reportId: string, actorId: string, client: DbClient = getDb()) {
-  const report = await client.assistantReport.findUnique({ where: { id: reportId } });
+export async function reopenAssistantReport(reportId: string, organizationId: string, actorId: string, client: DbClient = getDb()) {
+  const report = await client.assistantReport.findFirst({ where: { id: reportId, organizationId } });
   if (!report) throw new Error("El reporte ya no existe.");
   const active = await client.assistantReport.findFirst({
     where: {
       id: { not: reportId },
+      organizationId,
       kind: report.kind,
       themeKey: report.themeKey,
       status: { in: ["OPEN", "COLLECTING"] },
@@ -483,11 +496,12 @@ export async function reopenAssistantReport(reportId: string, actorId: string, c
     select: { id: true },
   });
   if (active) throw new Error("Ya existe una versión activa de este tema.");
-  return setReportStatus(reportId, "OPEN", actorId, client);
+  return setReportStatus(reportId, organizationId, "OPEN", actorId, client);
 }
 
-export async function deleteAssistantReport(reportId: string, actorId: string, client: DbClient = getDb()) {
-  const report = await client.assistantReport.delete({ where: { id: reportId } });
+export async function deleteAssistantReport(reportId: string, organizationId: string, actorId: string, client: DbClient = getDb()) {
+  const report = await client.assistantReport.findFirstOrThrow({ where: { id: reportId, organizationId } });
+  await client.assistantReport.deleteMany({ where: { id: reportId, organizationId } });
 
   await writeActivityLog({
     entityType: "AssistantReport",
@@ -495,6 +509,7 @@ export async function deleteAssistantReport(reportId: string, actorId: string, c
     action: "ASSISTANT_REPORT_DELETED",
     newValue: { id: report.id, kind: report.kind, themeKey: report.themeKey },
     userId: actorId,
+    organizationId,
     db: client,
   });
 

@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 type TelegramLinkTokenRow = {
   id: string;
+  organizationId: string;
   userId: string;
   tokenHash: string;
   expiresAt: Date;
@@ -102,6 +103,7 @@ describe("telegram connect flow", () => {
   it("keeps linking successful even when audit logging fails", async () => {
     const token: TelegramLinkTokenRow = {
       id: "token-1",
+      organizationId: "org-1",
       userId: "user-1",
       tokenHash: "token-hash",
       expiresAt: new Date("2026-01-01T00:15:00.000Z"),

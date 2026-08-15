@@ -16,9 +16,8 @@ import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getDb } from "@/lib/db";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
-import { commissionOperationalWhere, organizationOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { commissionOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
-import { compareCommissionStatusDesc, compareDateAsc } from "@/lib/sorting";
 
 export default async function CommissionsPage({
   searchParams,
@@ -26,9 +25,9 @@ export default async function CommissionsPage({
   searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string }>;
 }) {
   await connection();
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   // Run side-effect first; downstream reads must see the new statuses.
-  await autoUpdateCommissionStatuses(scope.portfolioOwnerId);
+  await autoUpdateCommissionStatuses(scope);
 
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
@@ -36,8 +35,7 @@ export default async function CommissionsPage({
   const { sortKey, direction } = readTableSort(params);
 
   const openWhere: Prisma.CommissionWhereInput = {
-    ...commissionOperationalWhere(scope.portfolioOwnerId),
-    ...organizationOperationalWhere(scope.organizationId),
+    ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
     status: { notIn: ["PAID", "CANCELLED"] },
     ...(query
       ? {
@@ -67,35 +65,23 @@ export default async function CommissionsPage({
 
   const db = getDb();
   const [stats, overdueCommissions, openCount, openCommissions, paidCommissions] = await Promise.all([
-    getCommissionStats(undefined, scope.portfolioOwnerId),
-    getOverdueCommissions(scope.portfolioOwnerId),
+    getCommissionStats(undefined, scope),
+    getOverdueCommissions(scope),
     db.commission.count({ where: openWhere }),
     db.commission.findMany({
       where: openWhere,
       include: { client: true, insurer: true, policy: true, receipt: true },
-      orderBy: sortKey ? orderBy : [{ expectedDate: "asc" }, { id: "asc" }],
+      orderBy,
+      skip: (page - 1) * DEFAULT_PAGE_SIZE,
+      take: DEFAULT_PAGE_SIZE,
     }),
     db.commission.findMany({
-      where: { ...commissionOperationalWhere(scope.portfolioOwnerId), ...organizationOperationalWhere(scope.organizationId), status: "PAID" },
+      where: { ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId), status: "PAID" },
       include: { client: true, insurer: true, policy: true, receipt: true },
       orderBy: [{ paidDate: "desc" }, { expectedDate: "desc" }],
       take: 10,
     }),
   ]);
-
-  const orderedOpenCommissions = [...openCommissions].sort((left, right) => {
-    if (sortKey && sortKey !== "status") return 0;
-    return (
-      compareCommissionStatusDesc(left.status, right.status) ||
-      compareDateAsc(left.expectedDate, right.expectedDate) ||
-      right.createdAt.getTime() - left.createdAt.getTime() ||
-      left.id.localeCompare(right.id)
-    );
-  });
-  const pagedOpenCommissions = (sortKey && sortKey !== "status"
-    ? openCommissions
-    : orderedOpenCommissions
-  ).slice((page - 1) * DEFAULT_PAGE_SIZE, page * DEFAULT_PAGE_SIZE);
 
   const ratio = stats.totalExpected ? Math.round((stats.totalActual / stats.totalExpected) * 100) : 0;
   type CommissionRow = (typeof openCommissions)[number];
@@ -107,7 +93,7 @@ export default async function CommissionsPage({
   };
   const hasRelations = (commission: CommissionRow): commission is CommissionWithRelations =>
     Boolean(commission.policy && commission.client && commission.insurer && commission.receipt);
-  const safeOpenCommissions = pagedOpenCommissions.filter(hasRelations);
+  const safeOpenCommissions = openCommissions.filter(hasRelations);
   const safePaidCommissions = paidCommissions.filter(hasRelations);
   const paidCount = stats.statusBreakdown.find(({ status }) => status === "PAID")?.count ?? 0;
 

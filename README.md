@@ -52,6 +52,8 @@ Copia `.env.example` a `.env.local` y ajusta los valores:
 | `ENABLE_DOCUMENT_FILES` | Opcional | `false` para la demo publicada sin archivos |
 | `AUTH_SECRET` | Dev | Alias de `SESSION_SECRET` en desarrollo |
 | `RESTORE_DRILL_APP_SMOKE` | Opcional | `1` habilita el smoke E2E opt-in contra el target temporal |
+| `TENANT_ISOLATION_TEST_DB` | Solo tests | Debe ser `1` para habilitar fixtures de aislamiento desechables |
+| `PLAYWRIGHT_ENFORCE_DISPOSABLE_DB` | Solo tests | Rechaza bases que no sean locales/desechables |
 
 ## Comandos
 
@@ -136,3 +138,4 @@ npm run db:check-drift
 ## Documentación
 
 - `docs/DEPLOYMENT_VERCEL.md`
+- `docs/tenant-context.md`

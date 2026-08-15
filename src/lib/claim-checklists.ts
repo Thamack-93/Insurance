@@ -64,11 +64,12 @@ export function isMedicalChecklistCode(code: string) {
 
 export async function getClaimChecklistSummary(
   claimId: string,
+  organizationId: string,
   portfolioOwnerId?: string,
   client: DbClient = getDb(),
 ) {
   const claim = await client.claim.findFirst({
-    where: { AND: [{ id: claimId }, claimOperationalWhere(portfolioOwnerId)] },
+    where: { AND: [{ id: claimId }, claimOperationalWhere(portfolioOwnerId, organizationId)] },
     select: {
       id: true,
       folio: true,
@@ -121,11 +122,12 @@ export async function updateClaimChecklistStatus(
     requirementCode: string;
     status: ClaimChecklistStatusValue;
   },
+  organizationId: string,
   portfolioOwnerId?: string,
   client: DbClient = getDb(),
 ) {
   const claim = await client.claim.findFirst({
-    where: { AND: [{ id: input.claimId }, claimOperationalWhere(portfolioOwnerId)] },
+    where: { AND: [{ id: input.claimId }, claimOperationalWhere(portfolioOwnerId, organizationId)] },
     select: { id: true, policy: { select: { policyType: true } } },
   });
   if (!claim) return null;

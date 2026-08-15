@@ -41,7 +41,7 @@ describe("data-quality client scoring", () => {
       },
     ]);
 
-    const [score] = await getClientDataQualityScores();
+    const [score] = await getClientDataQualityScores("org-test");
 
     expect(score).toMatchObject({
       clienteId: "client-critical",
@@ -75,7 +75,7 @@ describe("data-quality client scoring", () => {
       },
     ]);
 
-    const [score] = await getClientDataQualityScores();
+    const [score] = await getClientDataQualityScores("org-test");
 
     expect(score).toMatchObject({
       clienteId: "client-attention",
@@ -99,10 +99,10 @@ describe("data-quality client scoring", () => {
       },
     ]);
 
-    await getClientDataQualityScores("agent-1");
+    await getClientDataQualityScores("org-test", "agent-1");
 
     expect(clientFindMany).toHaveBeenCalledWith({
-      where: { portfolioOwnerId: "agent-1", status: "ACTIVE" },
+      where: { organizationId: "org-test", portfolioOwnerId: "agent-1", status: "ACTIVE" },
       select: expect.any(Object),
     });
   });

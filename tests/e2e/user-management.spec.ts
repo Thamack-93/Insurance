@@ -35,7 +35,9 @@ test.describe("administración de usuarios", () => {
       await page.getByRole("button", { name: "Eliminar usuario", exact: true }).click();
       await expect(row).toHaveCount(0);
 
-      await expect.poll(() => db.user.findUnique({ where: { id: target.id } }), { timeout: 5_000 }).toBeNull();
+      await expect
+        .poll(() => db.user.findUnique({ where: { id: target.id } }), { timeout: 5_000 })
+        .toBeNull();
       expect((await db.client.findUnique({ where: { id: fixture.clientId } }))?.portfolioOwnerId).toBe(replacement.id);
       expect(await db.policy.findUnique({ where: { id: fixture.policyId } })).not.toBeNull();
     } finally {

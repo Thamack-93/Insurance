@@ -11,7 +11,7 @@ import {
   verifyStoredBackup,
   type BackupEntry,
 } from "@/lib/backup";
-import { AuthError, requireAdmin } from "@/lib/auth";
+import { AuthError, requireSuperAdmin } from "@/lib/auth";
 import { logError } from "@/lib/logger";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 
@@ -34,7 +34,7 @@ function toItem(entry: BackupEntry, storage: BackupListItem["storage"]): BackupL
 }
 
 export async function listBackupsAction(): Promise<BackupListItem[]> {
-  await requireAdmin();
+  await requireSuperAdmin();
   const [originals, rekeyed] = await Promise.all([listBackups(), listRekeyedBackups()]);
   return [
     ...originals.map((entry) => toItem(entry, "original")),
@@ -44,7 +44,7 @@ export async function listBackupsAction(): Promise<BackupListItem[]> {
 
 export async function createBackup(): Promise<MutationResult> {
   try {
-    await requireAdmin();
+    await requireSuperAdmin();
     const preflight = getBackupPreflightStatus();
     if (!preflight.ready) {
       return errorResult(formatBackupPreflightError(preflight));
@@ -66,7 +66,7 @@ export async function createBackup(): Promise<MutationResult> {
 
 export async function verifyBackupAction(filename: string): Promise<MutationResult> {
   try {
-    await requireAdmin();
+    await requireSuperAdmin();
     const verification = await verifyStoredBackup(filename);
     if (!verification.valid) return errorResult(verification.reason);
     return successResult(
@@ -83,7 +83,7 @@ export async function verifyBackupAction(filename: string): Promise<MutationResu
 
 export async function rekeyBackupAction(filename: string): Promise<MutationResult> {
   try {
-    await requireAdmin();
+    await requireSuperAdmin();
     const copy = await rekeyStoredBackup(filename);
     revalidatePath("/settings");
     return successResult(

@@ -11,7 +11,7 @@ import type { EndorsementFormValues } from "@/lib/validations";
 import {
   endorsementOperationalWhere,
   policyOperationalWhere,
-  requirePortfolioReadScope,
+  requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
 
 export default async function EditEndorsementPage({
@@ -20,16 +20,16 @@ export default async function EditEndorsementPage({
   params: Promise<{ id: string; endorsementId: string }>;
 }) {
   const { id, endorsementId } = await params;
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const db = getDb();
 
   const [policy, endorsement] = await Promise.all([
     db.policy.findFirst({
-      where: { id, ...policyOperationalWhere(scope.portfolioOwnerId) },
+      where: { id, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: { client: true, insurer: true },
     }),
     db.policyEndorsement.findFirst({
-      where: { id: endorsementId, ...endorsementOperationalWhere(scope.portfolioOwnerId) },
+      where: { id: endorsementId, ...endorsementOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: { policy: { include: { client: true, insurer: true } } },
     }),
   ]);

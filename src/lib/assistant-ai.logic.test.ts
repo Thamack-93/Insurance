@@ -71,7 +71,7 @@ describe("assistant ai fallback", () => {
     vi.stubEnv("VERCEL_OIDC_TOKEN", "");
     vi.stubEnv("AI_GATEWAY_API_KEY", "");
 
-    const user: AssistantUser = { id: "agent-1", role: "AGENT" };
+    const user: AssistantUser = { id: "agent-1", role: "AGENT", organizationId: "org-test" };
     const reply = await buildAssistantAiReply({
       user,
       message: "hola",
@@ -127,7 +127,7 @@ describe("assistant ai fallback", () => {
     });
 
     const result = await buildAssistantAiReply({
-      user: { id: "agent-1", role: "AGENT" },
+      user: { id: "agent-1", role: "AGENT", organizationId: "org-test" },
       message: "Lista los siniestros abiertos",
       localReply: { reply: "", sections: [], quickPrompts: [] },
       contextText: "claim SIN-001",
@@ -181,7 +181,7 @@ describe("assistant ai fallback", () => {
     vi.stubEnv("VERCEL", "");
 
     const result = await reviewPolicyPdfWithAi({
-      user: { id: "agent-1", role: "AGENT" },
+      user: { id: "agent-1", role: "AGENT", organizationId: "org-test" },
       draft: {
         policyNumber: "1009578",
         clientName: "CLIENTE DEMO",
@@ -230,7 +230,7 @@ describe("assistant ai fallback", () => {
     });
 
     const result = await reviewPolicyPdfWithAi({
-      user: { id: "agent-1", role: "AGENT" },
+      user: { id: "agent-1", role: "AGENT", organizationId: "org-test" },
       text: "NOMBRE PRIVADO Y DATOS DEL PDF",
       draft: {
         policyNumber: "1009578", clientName: "CLIENTE DEMO", clientType: "PERSON", clientEmail: null, clientPhone: null,
@@ -279,7 +279,7 @@ describe("assistant ai fallback", () => {
     });
 
     const result = await extractPolicyPdfDraftFromAiFile({
-      user: { id: "agent-1", role: "AGENT" },
+      user: { id: "agent-1", role: "AGENT", organizationId: "org-test" },
       fileName: "poliza.pdf",
       fileData: new Uint8Array([37, 80, 68, 70]),
     });
@@ -312,7 +312,7 @@ describe("assistant ai fallback", () => {
     });
 
     const result = await reviewPolicyPdfWithAi({
-      user: { id: "agent-1", role: "AGENT" },
+      user: { id: "agent-1", role: "AGENT", organizationId: "org-test" },
       draft: trackedDraft,
       warnings: [],
     });
@@ -332,7 +332,7 @@ describe("assistant ai fallback", () => {
     aiMocks.generateText.mockRejectedValue(new Error("gateway failed with private context"));
 
     const result = await reviewPolicyPdfWithAi({
-      user: { id: "agent-1", role: "AGENT" },
+      user: { id: "agent-1", role: "AGENT", organizationId: "org-test" },
       draft: {
         policyNumber: "1009578", clientName: "CLIENTE DEMO", clientType: "PERSON", clientEmail: null, clientPhone: null,
         clientAddress: null, clientRfc: null, clientBirthDate: null, insurerName: "Seguros Banorte, S.A. de C.V.",
@@ -365,7 +365,7 @@ describe("assistant ai fallback", () => {
     });
 
     const resultPromise = reviewPolicyPdfWithAi({
-      user: { id: "agent-1", role: "AGENT" },
+      user: { id: "agent-1", role: "AGENT", organizationId: "org-test" },
       draft: trackedDraft,
       warnings: ["Revisar"],
     });
@@ -392,7 +392,7 @@ describe("assistant ai fallback", () => {
       text: "",
     });
 
-    const resultPromise = reviewPolicyPdfWithAi({ user: { id: "agent-1", role: "AGENT" }, draft: trackedDraft, warnings: [] });
+    const resultPromise = reviewPolicyPdfWithAi({ user: { id: "agent-1", role: "AGENT", organizationId: "org-test" }, draft: trackedDraft, warnings: [] });
     await vi.advanceTimersByTimeAsync(2_000);
     const result = await resultPromise;
 
@@ -417,7 +417,7 @@ describe("assistant ai fallback", () => {
       text: "",
     });
 
-    const resultPromise = reviewPolicyPdfWithAi({ user: { id: "agent-1", role: "AGENT" }, draft: trackedDraft, warnings: [] });
+    const resultPromise = reviewPolicyPdfWithAi({ user: { id: "agent-1", role: "AGENT", organizationId: "org-test" }, draft: trackedDraft, warnings: [] });
     await vi.advanceTimersByTimeAsync(2_000);
     const result = await resultPromise;
 
@@ -440,7 +440,7 @@ describe("assistant ai fallback", () => {
       text: "",
     });
 
-    const input = { user: { id: "agent-1", role: "AGENT" as const }, draft: trackedDraft, warnings: ["Revisar"] };
+    const input = { user: { id: "agent-1", role: "AGENT" as const, organizationId: "org-test" }, draft: trackedDraft, warnings: ["Revisar"] };
     const first = await reviewPolicyPdfWithAi(input);
     const second = await reviewPolicyPdfWithAi(input);
     const runIds = aiMocks.createRun.mock.calls.map((call) => call[0].id);
@@ -461,7 +461,7 @@ describe("assistant ai fallback", () => {
       .mockResolvedValueOnce({ text: "Respuesta de Nano", usage: null, totalUsage: null, providerMetadata: null, finishReason: "stop" });
 
     const result = await buildAssistantAiReply({
-      user: { id: "agent-1", role: "AGENT" },
+      user: { id: "agent-1", role: "AGENT", organizationId: "org-test" },
       message: "Dame una respuesta amplia sobre la cartera y sus riesgos.",
       localReply: { reply: "Resumen local", sections: [], quickPrompts: [] },
     });

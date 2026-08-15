@@ -75,7 +75,7 @@ describe("work queue legacy renewal context", () => {
       insurer: { id: "insurer-1", name: "Seguros Atlas" },
     }]);
 
-    const [item] = await getWorkItems({ portfolioOwnerId: "owner-1" });
+    const [item] = await getWorkItems({ organizationId: "org-a", portfolioOwnerId: "owner-1" });
 
     expect(item.client).toEqual({ id: "client-1", fullName: "María García" });
     expect(item.policyId).toBe("policy-1");
@@ -94,7 +94,7 @@ describe("work queue legacy renewal context", () => {
     db.workItem.findMany.mockResolvedValue([legacyRenewal()]);
     db.policy.findMany.mockResolvedValue([]);
 
-    const [item] = await getWorkItems({ portfolioOwnerId: "owner-1" });
+    const [item] = await getWorkItems({ organizationId: "org-a", portfolioOwnerId: "owner-1" });
 
     expect(item.client).toBeNull();
     expect(item.policy).toBeNull();
@@ -114,7 +114,7 @@ describe("work queue legacy renewal context", () => {
       insurer: { id: "insurer-1", name: "Seguros Atlas" },
     }]);
 
-    const [item] = await getWorkItems({ portfolioOwnerId: "owner-1" });
+    const [item] = await getWorkItems({ organizationId: "org-a", portfolioOwnerId: "owner-1" });
 
     expect(item.client?.fullName).toBe("María García");
     expect(item.policyId).toBe("policy-1");
@@ -150,7 +150,7 @@ describe("work queue legacy renewal context", () => {
       insurer: { id: "insurer-1", name: "Seguros Atlas" },
     }]);
 
-    const [item] = await getWorkItems({ portfolioOwnerId: "owner-1" });
+    const [item] = await getWorkItems({ organizationId: "org-a", portfolioOwnerId: "owner-1" });
 
     expect(item.client?.fullName).toBe("María García");
     expect(item.policy?.policyNumber).toBe("POL-001");
@@ -170,7 +170,7 @@ describe("work queue legacy renewal context", () => {
     ]);
     db.policy.findMany.mockResolvedValue([]);
 
-    const items = await getWorkItems({ limit: 2 });
+    const items = await getWorkItems({ limit: 2, organizationId: "org-a" });
 
     expect(items.map((item) => item.priority)).toEqual(["HIGH", "LOW"]);
   });

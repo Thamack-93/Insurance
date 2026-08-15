@@ -26,6 +26,7 @@ type DbClient = PrismaClient | Prisma.TransactionClient;
 
 type PolicyPdfCapturePreviewContext = {
   portfolioOwnerId?: string;
+  organizationId: string;
   user?: AssistantUser | null;
 };
 
@@ -38,7 +39,8 @@ async function buildSourcePolicyCandidates(
   draft: PolicyPdfCaptureDraft,
   clientId: string | null,
   insurerId: string | null,
-  portfolioOwnerId?: string,
+  portfolioOwnerId: string | undefined,
+  organizationId: string,
 ) : Promise<{ candidates: Array<PolicyCaptureSourceOption>; suggestedId: string | null }> {
   type SourceRow = {
     id: string;
@@ -111,7 +113,7 @@ async function buildSourcePolicyCandidates(
   if (draft.serialNumber && draft.policyType === "AUTO") {
     const serialPolicies = await db.policy.findMany({
       where: {
-        ...policyOperationalWhere(portfolioOwnerId),
+        ...policyOperationalWhere(portfolioOwnerId, organizationId),
         policyType: "AUTO",
         status: { in: ["ACTIVE", "EXPIRED", "RENEWED"] },
         ...(targetStartDate ? { endDate: { lt: targetStartDate } } : {}),
@@ -149,7 +151,7 @@ async function buildSourcePolicyCandidates(
     const exact = await db.policy.findMany({
       where: {
         OR: exactNumberVariants.map((variant) => ({ policyNumber: variant })),
-        ...policyOperationalWhere(portfolioOwnerId),
+        ...policyOperationalWhere(portfolioOwnerId, organizationId),
       },
       orderBy: [{ startDate: "desc" }, { updatedAt: "desc" }],
       select: {
@@ -177,7 +179,7 @@ async function buildSourcePolicyCandidates(
   if (ranked.size === 0 && clientId) {
     const fallback = await db.policy.findMany({
       where: {
-        ...policyOperationalWhere(portfolioOwnerId),
+        ...policyOperationalWhere(portfolioOwnerId, organizationId),
         clientId,
         policyType: draft.policyType,
         status: { in: ["ACTIVE", "EXPIRED", "RENEWED"] },
@@ -235,21 +237,21 @@ type PolicyPdfCapturePreviewInput = {
   receiptEvidence?: import("@/lib/policy-pdf-capture.shared").PolicyPdfCaptureReceiptEvidence | null;
   relatedDocuments?: import("@/lib/policy-pdf-capture.shared").PolicyPdfCaptureRelatedDocument[];
   reviewText?: string | null;
-  context?: PolicyPdfCapturePreviewContext;
+  context: PolicyPdfCapturePreviewContext;
 };
 
 export async function buildPolicyPdfCapturePreviewFromDraft(
   input: PolicyPdfCapturePreviewInput,
   db: DbClient = getDb(),
 ): Promise<PolicyPdfCapturePreview> {
-  const { portfolioOwnerId, user } = input.context ?? {};
+  const { portfolioOwnerId, organizationId, user } = input.context;
   const warnings = [...(input.warnings ?? []), ...(input.extraWarnings ?? [])];
   const policyNumberSuggestion = input.draft.sourcePolicyNumber;
   const policyNumberVariants = buildPolicyNumberSearchVariants(input.draft.policyNumber);
   const existingPolicyRows = policyNumberVariants.length > 0 || Boolean(input.draft.serialNumber)
     ? await db.policy.findMany({
         where: {
-          ...policyOperationalWhere(portfolioOwnerId),
+          ...policyOperationalWhere(portfolioOwnerId, organizationId),
           OR: [
             ...policyNumberVariants.map((variant) => ({ policyNumber: variant })),
             ...(input.draft.serialNumber
@@ -306,7 +308,7 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
     ? (await db.client.findMany({
         where: {
           status: { not: "ARCHIVED" },
-          ...clientOperationalWhere(portfolioOwnerId),
+          ...clientOperationalWhere(portfolioOwnerId, organizationId),
         },
         select: { id: true, fullName: true },
         orderBy: { fullName: "asc" },
@@ -320,7 +322,7 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
 
   const insurerMatches = input.draft.insurerName
     ? (await db.insurer.findMany({
-        where: { status: { not: "ARCHIVED" } },
+        where: { status: { not: "ARCHIVED" }, ...(organizationId ? { organizationId } : {}) },
         select: { id: true, name: true },
         orderBy: { name: "asc" },
       }))
@@ -346,6 +348,7 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
     suggestedClientId,
     suggestedInsurerId,
     portfolioOwnerId,
+    organizationId,
   );
   const sourcePolicyCandidates = sourcePolicyResult.candidates;
   const suggestedSourcePolicyId = policyNumberSuggestion
@@ -471,7 +474,7 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
 export async function buildPolicyPdfCapturePreviewFromText(
   text: string,
   db: DbClient = getDb(),
-  context: PolicyPdfCapturePreviewContext = {},
+  context: PolicyPdfCapturePreviewContext,
   options: Pick<PolicyPdfCapturePreviewInput, "requestedMode" | "skipAiReview" | "extraWarnings" | "aiFailureCode" | "relatedDocuments"> = {},
 ): Promise<PolicyPdfCapturePreview> {
   const draft = extractPolicyPdfDraftFromText(text);

@@ -20,7 +20,7 @@ import {
   readClientListFilters,
 } from "@/lib/list-filters";
 import { LocalNavigation } from "@/components/layout/local-navigation";
-import { clientOperationalWhere, organizationOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { clientOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 const PAGE_SIZE = 25;
 
@@ -34,11 +34,11 @@ export default async function ClientsPage({
   const { query, page, sortKey, direction } = filters;
   const statusFilter = filters.status;
   const typeFilter = filters.type;
-  const isFiltered = Boolean(query || typeFilter || (params.status && params.status !== "ACTIVE"));
+  const isFiltered = Boolean(query || statusFilter || typeFilter);
 
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
-  const portfolioWhere = { ...clientOperationalWhere(scope.portfolioOwnerId), ...organizationOperationalWhere(scope.organizationId) };
+  const scope = await requireOrganizationPortfolioReadScope();
+  const portfolioWhere = clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const clearFiltersHref = buildTableHref("/clients", params, {
     q: null,
     status: null,
@@ -77,7 +77,6 @@ export default async function ClientsPage({
       include: {
         policies: { where: { status: "ACTIVE" }, select: { premiumAmount: true } },
       },
-      orderBy: [{ fullName: "asc" }, { id: "asc" }],
       take: 50,
     }),
   ]);
@@ -109,6 +108,9 @@ export default async function ClientsPage({
               <Button asChild variant="outline" className="bg-card/70">
                 <Link href="/clients/new">Nuevo cliente</Link>
               </Button>
+              <Button asChild variant="outline" className="bg-card/70">
+                <a href="/api/exports/clients">Exportar Excel</a>
+              </Button>
               <Button asChild>
                 <Link href="/policies">
                   Ver pólizas
@@ -122,9 +124,7 @@ export default async function ClientsPage({
         <LocalNavigation
           label="Tipos de cliente"
           items={[
-            { label: "Activos", href: "/clients", excludeQueryKeys: ["type", "status"] },
-            { label: "Todos", href: "/clients?status=ALL", excludeQueryKeys: ["type"] },
-            { label: "Archivados", href: "/clients?status=ARCHIVED", excludeQueryKeys: ["type"] },
+            { label: "Todos", href: "/clients", excludeQueryKeys: ["type"] },
             { label: "Personas", href: "/clients?type=PERSON" },
             { label: "Empresas", href: "/clients?type=COMPANY" },
           ]}
@@ -183,7 +183,7 @@ export default async function ClientsPage({
                 {
                   key: "status",
                   label: "Estado",
-                  options: [{ value: "ALL", label: "Todos" }, ...entityStatusOptions],
+                  options: entityStatusOptions,
                 },
               ]}
             />

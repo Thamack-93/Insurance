@@ -21,10 +21,9 @@ import { formatCurrency, toNumber } from "@/lib/money";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import {
   paymentOperationalWhere,
-  organizationOperationalWhere,
   receiptOperationalWhere,
   receiptPortfolioWhere,
-  requirePortfolioReadScope,
+  requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
 import { buildTableHref } from "@/lib/table-query";
 import {
@@ -49,7 +48,7 @@ export default async function ReceiptsPage({
   const isFiltered = Boolean(query || statusFilter);
 
   const db = getDb();
-  const scope = await requirePortfolioReadScope();
+  const scope = await requireOrganizationPortfolioReadScope();
   const now = today();
   const monthStart = businessStartOfMonth(now);
   const clearFiltersHref = buildTableHref("/receipts", params, {
@@ -60,11 +59,10 @@ export default async function ReceiptsPage({
   });
 
   const baseWhere = buildOpenReceiptBaseWhere(scope.portfolioOwnerId, scope.organizationId);
-  const organizationScope = organizationOperationalWhere(scope.organizationId);
-  const scopedReceiptWhere = { ...receiptOperationalWhere(scope.portfolioOwnerId), ...organizationScope };
-  const scopedPaymentWhere = { ...paymentOperationalWhere(scope.portfolioOwnerId), ...organizationScope };
+  const scopedReceiptWhere = receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
+  const scopedPaymentWhere = paymentOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const scopedReceiptIssueWhere: Prisma.ReceiptReconciliationIssueWhereInput = scope.portfolioOwnerId
-    ? { receipt: { ...receiptPortfolioWhere(scope.portfolioOwnerId), ...organizationScope } }
+    ? { receipt: receiptPortfolioWhere(scope.portfolioOwnerId) }
     : {};
   const where = buildReceiptListWhere(filters, scope.portfolioOwnerId, scope.organizationId);
 
@@ -87,7 +85,7 @@ export default async function ReceiptsPage({
     db.receipt.findMany({
       where: { ...scopedReceiptWhere, status: "PAID", paidDate: { gte: monthStart } },
       include: { client: true, policy: true, insurer: true, endorsement: true },
-      orderBy: [{ paidDate: "desc" }, { id: "desc" }],
+      orderBy: { paidDate: "desc" },
     }),
     db.receipt.aggregate({ _sum: { amount: true }, where: baseWhere }),
     db.receipt.aggregate({
@@ -116,7 +114,7 @@ export default async function ReceiptsPage({
         client: { select: { id: true, fullName: true } },
         policy: { select: { id: true, policyNumber: true } },
       },
-      orderBy: [{ paidDate: "desc" }, { id: "desc" }],
+      orderBy: { paidDate: "desc" },
       take: 50,
     }),
     db.receiptReconciliationIssue.findMany({
@@ -128,7 +126,7 @@ export default async function ReceiptsPage({
         receipt: { include: { payments: { where: { status: "POSTED" } }, client: true } },
         policy: true,
       },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      orderBy: { createdAt: "desc" },
       take: 100,
     }),
   ]);

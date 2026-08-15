@@ -6,7 +6,6 @@ import {
   policyOperationalWhere,
   quoteOperationalWhere,
   receiptOperationalWhere,
-  organizationOperationalWhere,
 } from "@/lib/portfolio-access";
 import { businessAddDays } from "@/lib/business-dates";
 import { today } from "@/lib/dates";
@@ -63,20 +62,17 @@ export type ClientListFilters = ListFilters & {
 };
 
 export function readClientListFilters(params: TableSearchParams): ClientListFilters {
-  const rawStatus = readTableParam(params, "status");
   return {
     ...readBaseFilters(params),
-    // The directory is operational by default. `status=ALL` is an explicit
-    // opt-in to the historical/inactive records.
-    status: rawStatus === "ALL" ? undefined : readAllowedTableParam(params, "status", ENTITY_STATUSES) ?? "ACTIVE",
+    status: readAllowedTableParam(params, "status", ENTITY_STATUSES),
     type: readAllowedTableParam(params, "type", ["PERSON", "COMPANY"] as const),
   };
 }
 
 export function buildClientListWhere(
   filters: ClientListFilters,
-  portfolioOwnerId?: string,
-  organizationId?: string,
+  portfolioOwnerId: string | undefined,
+  organizationId: string,
 ): Prisma.ClientWhereInput {
   const { parsedQuery } = filters;
   const or: Prisma.ClientWhereInput[] = [];
@@ -95,26 +91,25 @@ export function buildClientListWhere(
   }
 
   return {
-    ...clientOperationalWhere(portfolioOwnerId),
-    ...(organizationId ? organizationOperationalWhere(organizationId) : {}),
+    ...clientOperationalWhere(portfolioOwnerId, organizationId),
     ...(filters.status ? { status: filters.status } : {}),
     ...(filters.type ? { type: filters.type } : {}),
     ...(or.length ? { OR: or } : {}),
   };
 }
 
-export function buildClientListOrderBy({ sortKey, direction }: ClientListFilters): Prisma.ClientOrderByWithRelationInput[] {
+export function buildClientListOrderBy({ sortKey, direction }: ClientListFilters) {
   switch (sortKey) {
     case "fullName":
-      return [{ fullName: direction ?? "asc" }, { id: "asc" as const }];
+      return [{ fullName: direction ?? "asc" }, { createdAt: "desc" as const }];
     case "type":
-      return [{ type: direction ?? "asc" }, { fullName: "asc" as const }, { id: "asc" as const }];
+      return [{ type: direction ?? "asc" }, { createdAt: "desc" as const }];
     case "status":
-      return [{ status: direction ?? "asc" }, { fullName: "asc" as const }, { id: "asc" as const }];
+      return [{ status: direction ?? "asc" }, { createdAt: "desc" as const }];
     case "createdAt":
-      return [{ createdAt: direction ?? "desc" }, { id: "desc" as const }];
+      return [{ createdAt: direction ?? "desc" }];
     default:
-      return [{ fullName: "asc" as const }, { id: "asc" as const }];
+      return [{ createdAt: "desc" as const }];
   }
 }
 
@@ -135,13 +130,12 @@ export function readPolicyListFilters(params: TableSearchParams): PolicyListFilt
 
 export function buildPolicyListWhere(
   filters: PolicyListFilters,
-  portfolioOwnerId?: string,
-  organizationId?: string,
+  portfolioOwnerId: string | undefined,
+  organizationId: string,
 ): Prisma.PolicyWhereInput {
   const { parsedQuery } = filters;
   const base: Prisma.PolicyWhereInput = {
-    ...policyOperationalWhere(portfolioOwnerId),
-    ...(organizationId ? organizationOperationalWhere(organizationId) : {}),
+    ...policyOperationalWhere(portfolioOwnerId, organizationId),
     ...(filters.status ? { status: filters.status } : {}),
     ...(filters.type ? { policyType: filters.type } : {}),
   };
@@ -166,8 +160,8 @@ export function buildPolicyListWhere(
   return { AND: [base, { OR: or }] };
 }
 
-export function buildPolicyListOrderBy({ sortKey, direction }: PolicyListFilters): Prisma.PolicyOrderByWithRelationInput[] {
-  const tail = [{ endDate: "asc" as const }, { updatedAt: "desc" as const }, { id: "asc" as const }];
+export function buildPolicyListOrderBy({ sortKey, direction }: PolicyListFilters) {
+  const tail = [{ endDate: "desc" as const }, { updatedAt: "desc" as const }];
 
   switch (sortKey) {
     case "policyNumber":
@@ -179,11 +173,11 @@ export function buildPolicyListOrderBy({ sortKey, direction }: PolicyListFilters
     case "type":
       return [{ policyType: direction ?? "asc" }, ...tail];
     case "endDate":
-      return [{ endDate: direction ?? "asc" }, { updatedAt: "desc" as const }, { id: "asc" as const }];
+      return [{ endDate: direction ?? "desc" }, { updatedAt: "desc" as const }];
     case "premiumAmount":
-      return [{ premiumAmount: direction ?? "desc" }, { endDate: "asc" as const }, { id: "asc" as const }];
+      return [{ premiumAmount: direction ?? "desc" }, { endDate: "desc" as const }];
     default:
-      return [{ endDate: "asc" as const }, { startDate: "asc" as const }, { updatedAt: "desc" as const }, { id: "asc" as const }];
+      return [{ endDate: "desc" as const }, { startDate: "desc" as const }, { updatedAt: "desc" as const }];
   }
 }
 
@@ -202,13 +196,12 @@ export function readQuoteListFilters(params: TableSearchParams): QuoteListFilter
 
 export function buildQuoteListWhere(
   filters: QuoteListFilters,
-  portfolioOwnerId?: string,
-  organizationId?: string,
+  portfolioOwnerId: string | undefined,
+  organizationId: string,
 ): Prisma.QuoteWhereInput {
   const { parsedQuery } = filters;
   const base: Prisma.QuoteWhereInput = {
-    ...quoteOperationalWhere(portfolioOwnerId),
-    ...(organizationId ? organizationOperationalWhere(organizationId) : {}),
+    ...quoteOperationalWhere(portfolioOwnerId, organizationId),
     ...(filters.status ? { status: filters.status } : {}),
   };
 
@@ -232,10 +225,10 @@ export function buildQuoteListWhere(
   return { AND: [base, { OR: or }] };
 }
 
-export function buildQuoteListOrderBy({ sortKey, direction }: QuoteListFilters): Prisma.QuoteOrderByWithRelationInput[] {
+export function buildQuoteListOrderBy({ sortKey, direction }: QuoteListFilters) {
   switch (sortKey) {
     case "folio":
-      return [{ id: direction ?? "asc" }, { createdAt: "desc" as const }];
+      return [{ id: direction ?? "asc" }];
     case "client":
       return [{ client: { fullName: direction ?? "asc" } }, { createdAt: "desc" as const }];
     case "type":
@@ -245,11 +238,11 @@ export function buildQuoteListOrderBy({ sortKey, direction }: QuoteListFilters):
     case "status":
       return [{ status: direction ?? "asc" }, { createdAt: "desc" as const }];
     case "createdAt":
-      return [{ createdAt: direction ?? "desc" }, { id: "desc" as const }];
+      return [{ createdAt: direction ?? "desc" }];
     case "value":
       return [{ quotedAmount: direction ?? "desc" }, { createdAt: "desc" as const }];
     default:
-      return [{ createdAt: "desc" as const }, { id: "desc" as const }];
+      return [{ createdAt: "desc" as const }];
   }
 }
 
@@ -281,18 +274,20 @@ function receiptDueDateWhere(status?: ReceiptDueFilter): Prisma.ReceiptWhereInpu
 }
 
 /** Open receipts only: the "Por cobrar" tab never shows paid or cancelled ones. */
-export function buildOpenReceiptBaseWhere(portfolioOwnerId?: string, organizationId?: string): Prisma.ReceiptWhereInput {
+export function buildOpenReceiptBaseWhere(
+  portfolioOwnerId: string | undefined,
+  organizationId: string,
+): Prisma.ReceiptWhereInput {
   return {
-    ...receiptOperationalWhere(portfolioOwnerId),
-    ...(organizationId ? organizationOperationalWhere(organizationId) : {}),
+    ...receiptOperationalWhere(portfolioOwnerId, organizationId),
     status: { notIn: ["PAID", "CANCELLED"] },
   };
 }
 
 export function buildReceiptListWhere(
   filters: ReceiptListFilters,
-  portfolioOwnerId?: string,
-  organizationId?: string,
+  portfolioOwnerId: string | undefined,
+  organizationId: string,
 ): Prisma.ReceiptWhereInput {
   const { parsedQuery } = filters;
   const or: Prisma.ReceiptWhereInput[] = [];
@@ -323,26 +318,21 @@ export function buildReceiptListWhere(
   };
 }
 
-export function buildReceiptListOrderBy({ sortKey, direction }: ReceiptListFilters): Prisma.ReceiptOrderByWithRelationInput[] {
+export function buildReceiptListOrderBy({ sortKey, direction }: ReceiptListFilters) {
   switch (sortKey) {
     case "receiptNumber":
-      return [
-        { receiptSequence: { sort: direction ?? "asc", nulls: "last" as const } },
-        { receiptNumber: direction ?? "asc" },
-        { dueDate: "asc" as const },
-        { id: "asc" as const },
-      ];
+      return [{ receiptNumber: direction ?? "asc" }, { dueDate: "asc" as const }];
     case "client":
-      return [{ client: { fullName: direction ?? "asc" } }, { dueDate: "asc" as const }, { id: "asc" as const }];
+      return [{ client: { fullName: direction ?? "asc" } }, { dueDate: "asc" as const }];
     case "policy":
-      return [{ policy: { policyNumber: direction ?? "asc" } }, { dueDate: "asc" as const }, { id: "asc" as const }];
+      return [{ policy: { policyNumber: direction ?? "asc" } }, { dueDate: "asc" as const }];
     case "insurer":
-      return [{ insurer: { name: direction ?? "asc" } }, { dueDate: "asc" as const }, { id: "asc" as const }];
+      return [{ insurer: { name: direction ?? "asc" } }, { dueDate: "asc" as const }];
     case "dueDate":
-      return [{ dueDate: direction ?? "asc" }, { receiptSequence: { sort: "asc", nulls: "last" as const } }, { receiptNumber: "asc" as const }, { id: "asc" as const }];
+      return [{ dueDate: direction ?? "asc" }, { receiptNumber: "asc" as const }];
     case "amount":
-      return [{ amount: direction ?? "desc" }, { dueDate: "asc" as const }, { id: "asc" as const }];
+      return [{ amount: direction ?? "desc" }, { dueDate: "asc" as const }];
     default:
-      return [{ dueDate: "asc" as const }, { receiptSequence: { sort: "asc", nulls: "last" as const } }, { receiptNumber: "asc" as const }, { id: "asc" as const }];
+      return [{ dueDate: "asc" as const }];
   }
 }

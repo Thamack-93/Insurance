@@ -3,7 +3,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { AuthError } from "@/lib/auth";
 import { businessAddDays, businessEndOfDay, businessToday, formatBusinessDateInput, parseBusinessDateInput } from "@/lib/business-dates";
 import { getDb } from "@/lib/db";
-import { commissionOperationalWhere, organizationOperationalWhere, policyOperationalWhere, receiptOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { commissionOperationalWhere, policyOperationalWhere, receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 
 export const runtime = "nodejs";
@@ -20,7 +20,7 @@ function readDate(value: string | null, fallback: Date) {
 
 export async function GET(request: NextRequest) {
   try {
-    const scope = await requirePortfolioReadScope();
+    const scope = await requireOrganizationPortfolioReadScope();
     const db = getDb();
     const type = request.nextUrl.searchParams.get("type");
     const today = businessToday();
@@ -37,8 +37,7 @@ export async function GET(request: NextRequest) {
         filter === "all" ? undefined : { notIn: ["PAID", "CANCELLED"] };
       const receipts = await db.receipt.findMany({
         where: {
-          ...receiptOperationalWhere(scope.portfolioOwnerId),
-          ...organizationOperationalWhere(scope.organizationId),
+          ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
           dueDate: filter === "overdue" || !filter ? { gte: from, lt: overdueEndExclusive } : { gte: from, lte: businessEndOfDay(to) },
           ...(receiptStatus ? { status: receiptStatus } : {}),
         },
@@ -52,7 +51,7 @@ export async function GET(request: NextRequest) {
           policy: { select: { policyNumber: true } },
           insurer: { select: { name: true } },
         },
-        orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }],
+        orderBy: [{ dueDate: "asc" }, { receiptNumber: "asc" }],
         take: 1000,
       });
       return NextResponse.json({
@@ -82,7 +81,7 @@ export async function GET(request: NextRequest) {
       const requestedTo = request.nextUrl.searchParams.has("to") ? to : businessAddDays(today, days);
       const policies = await db.policy.findMany({
         where: {
-          ...policyOperationalWhere(scope.portfolioOwnerId),
+          ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
           ...(filter === "all" ? {} : { status: "ACTIVE" }),
           endDate: { gte: requestedFrom, lte: businessEndOfDay(requestedTo) },
         },
@@ -121,7 +120,7 @@ export async function GET(request: NextRequest) {
       const status = filter === "all" ? undefined : filter === "expired" ? "EXPIRED" : "ACTIVE";
       const policies = await db.policy.findMany({
         where: {
-          ...policyOperationalWhere(scope.portfolioOwnerId),
+          ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
           ...(status ? { status } : {}),
           startDate: { lte: businessEndOfDay(to) },
           endDate: { gte: from },
@@ -164,7 +163,7 @@ export async function GET(request: NextRequest) {
         filter === "paid" ? { equals: "PAID" } : filter === "all" ? undefined : { in: ["EXPECTED", "PENDING", "OVERDUE"] };
       const commissions = await db.commission.findMany({
         where: {
-          ...commissionOperationalWhere(scope.portfolioOwnerId),
+          ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
           expectedDate: { gte: from, lte: businessEndOfDay(to) },
           ...(status ? { status } : {}),
         },
@@ -203,6 +202,7 @@ export async function GET(request: NextRequest) {
 
     if (type === "operations") {
       const workItems = await getWorkItems({
+        organizationId: scope.organizationId,
         portfolioOwnerId: scope.portfolioOwnerId,
         from,
         to,

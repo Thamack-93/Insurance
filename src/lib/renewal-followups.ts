@@ -53,6 +53,7 @@ export type RenewalFollowUpSummary = {
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export async function closeRenewalFollowUp(
+  organizationId: string,
   policyId: string,
   userId: string | null,
   client?: DbClient,
@@ -60,6 +61,7 @@ export async function closeRenewalFollowUp(
   const db = client ?? getDb();
   const item = await db.workItem.findFirst({
     where: {
+      organizationId,
       sourceType: "Renewal",
       sourceId: renewalFollowUpWorkItemSourceId(policyId),
       status: { in: [...OPEN_WORK_ITEM_STATUSES] },
@@ -81,7 +83,10 @@ function followUpPriority(card: RenewalBoardCard) {
   return card.priority;
 }
 
-export async function runRenewalFollowUpScan(now: Date = new Date()): Promise<RenewalFollowUpSummary> {
+export async function runRenewalFollowUpScan(
+  organizationId: string,
+  now: Date = new Date(),
+): Promise<RenewalFollowUpSummary> {
   const summary: RenewalFollowUpSummary = {
     scanned: 0,
     stalled: 0,
@@ -98,7 +103,7 @@ export async function runRenewalFollowUpScan(now: Date = new Date()): Promise<Re
     // toda la casa y cada aviso se dirige al responsable de la póliza.
     const stalledPolicyIds: string[] = [];
 
-    const { scanned } = await forEachRenewalCandidate(async (card) => {
+    const { scanned } = await forEachRenewalCandidate(organizationId, async (card) => {
       if (!card.stall.stalled) return;
       summary.stalled += 1;
       stalledPolicyIds.push(card.policyId);
@@ -114,13 +119,14 @@ export async function runRenewalFollowUpScan(now: Date = new Date()): Promise<Re
 
       const dedupeKey = renewalFollowUpDedupeKey(card.policyId, card.stage, weekKey);
       const alreadyNotified = await db.notificationEvent.findUnique({
-        where: { dedupeKey },
+        where: { organizationId_dedupeKey: { organizationId: card.organizationId, dedupeKey } },
         select: { id: true },
       });
 
       const sourceId = renewalFollowUpWorkItemSourceId(card.policyId);
       const workItem = await upsertWorkItemFromSource(
         {
+          organizationId: card.organizationId,
           sourceType: "Renewal",
           sourceId,
           workItemType: "TASK",
@@ -149,6 +155,7 @@ export async function runRenewalFollowUpScan(now: Date = new Date()): Promise<Re
 
       const event = await createNotificationEvent(
         {
+          organizationId: card.organizationId,
           type: "RENEWAL_FOLLOWUP",
           title: message.title,
           body: message.body,
@@ -166,6 +173,7 @@ export async function runRenewalFollowUpScan(now: Date = new Date()): Promise<Re
 
       summary.notificationsCreated += 1;
       await writeActivityLog({
+        organizationId: card.organizationId,
         entityType: "Policy",
         entityId: card.policyId,
         action: "RENEWAL_FOLLOWUP_REMINDER",
@@ -191,6 +199,7 @@ export async function runRenewalFollowUpScan(now: Date = new Date()): Promise<Re
     // renovación tienen su propio ciclo de vida y no se tocan.
     const stale = await db.workItem.findMany({
       where: {
+        organizationId,
         sourceType: "Renewal",
         sourceId: { endsWith: RENEWAL_FOLLOWUP_SOURCE_SUFFIX },
         status: { in: [...OPEN_WORK_ITEM_STATUSES] },
@@ -201,7 +210,7 @@ export async function runRenewalFollowUpScan(now: Date = new Date()): Promise<Re
 
     if (stale.length > 0) {
       const closed = await db.workItem.updateMany({
-        where: { id: { in: stale.map((item) => item.id) } },
+        where: { organizationId, id: { in: stale.map((item) => item.id) } },
         data: { status: "RESOLVED", closedDate: now },
       });
       summary.workItemsClosed = closed.count;

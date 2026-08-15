@@ -17,6 +17,7 @@ export type WorkItemResolverRecord = Prisma.WorkItemGetPayload<{
 
 export async function findWorkItemByRouteId(
   id: string,
+  organizationId: string,
   client?: WorkItemResolverDb,
   portfolioOwnerId?: string,
 ): Promise<WorkItemResolverRecord | null> {
@@ -24,6 +25,7 @@ export async function findWorkItemByRouteId(
 
   return db.workItem.findFirst({
     where: {
+      organizationId,
       workItemType: "TASK",
       OR: [
         {

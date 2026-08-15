@@ -5,7 +5,8 @@ import { getDb } from "@/lib/db";
 import { assertSafeDocumentPath } from "@/lib/files";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
 import { logError } from "@/lib/logger";
-import { AuthError, requireUser } from "@/lib/auth";
+import { AuthError } from "@/lib/auth";
+import { requireOrganizationContext } from "@/lib/organization-context";
 import { recordSecurityAccessDenied, SECURITY_EVENT_TYPES } from "@/lib/security-events";
 
 type DownloadableDocument = {
@@ -26,8 +27,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  type ActiveUser = Awaited<ReturnType<typeof requireUser>>;
-  let user: ActiveUser;
+  let context: Awaited<ReturnType<typeof requireOrganizationContext>>;
   let documentId = "";
   const { id } = await params;
   documentId = id;
@@ -42,7 +42,7 @@ export async function GET(
 
     // Reject deactivated/unauthenticated users immediately.
     try {
-      user = await requireUser();
+      context = await requireOrganizationContext();
     } catch (authErr) {
       if (authErr instanceof AuthError) {
         await recordSecurityAccessDenied({
@@ -60,8 +60,17 @@ export async function GET(
 
     // Get document metadata from database
     const db = getDb();
-    const document = (await db.document.findUnique({
-      where: { id },
+    const document = (await db.document.findFirst({
+      where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { OR: [
+        { client: { portfolioOwnerId: context.userId } },
+        { policy: { client: { portfolioOwnerId: context.userId } } },
+        { receipt: { client: { portfolioOwnerId: context.userId } } },
+        { claim: { client: { portfolioOwnerId: context.userId } } },
+        { quote: { client: { portfolioOwnerId: context.userId } } },
+        { task: { client: { portfolioOwnerId: context.userId } } },
+        { task: { clientId: null, createdById: context.userId } },
+        { clientId: null, policyId: null, receiptId: null, claimId: null, quoteId: null, taskId: null, createdById: context.userId },
+      ] } : {}) },
       include: {
         client: { select: { portfolioOwnerId: true } },
         policy: { select: { client: { select: { portfolioOwnerId: true } } } },
@@ -77,40 +86,6 @@ export async function GET(
         { error: "El documento no existe o fue eliminado." },
         { status: 404 }
       );
-    }
-
-    if (user.role !== "ADMIN") {
-      const hasScopedRelation =
-        document.client?.portfolioOwnerId === user.id ||
-        document.policy?.client?.portfolioOwnerId === user.id ||
-        document.receipt?.client?.portfolioOwnerId === user.id ||
-        document.claim?.client?.portfolioOwnerId === user.id ||
-        document.quote?.client?.portfolioOwnerId === user.id ||
-        document.task?.client?.portfolioOwnerId === user.id ||
-        (document.task?.client == null && document.task?.createdById === user.id);
-      const hasStandaloneOwnership =
-        document.createdById === user.id &&
-        !document.client &&
-        !document.policy &&
-        !document.receipt &&
-        !document.claim &&
-        !document.quote &&
-        !document.task;
-      const isAllowed =
-        hasScopedRelation || hasStandaloneOwnership;
-
-      if (!isAllowed) {
-        await recordSecurityAccessDenied({
-          alertType: SECURITY_EVENT_TYPES.documentAccessDenied,
-          title: "Acceso denegado a documento",
-          description: `Se bloqueó la descarga del documento ${id} para el usuario ${user.id}.`,
-          severity: "WARNING",
-          entityType: "SecurityEvent",
-          entityId: `document-download:denied:${documentId}`,
-          userId: user.id,
-        });
-        return NextResponse.json({ error: "No tienes acceso a este documento." }, { status: 403 });
-      }
     }
 
     // Validate file path security

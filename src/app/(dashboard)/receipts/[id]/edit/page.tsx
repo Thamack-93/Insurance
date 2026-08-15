@@ -7,12 +7,14 @@ import { CancelReceiptOnlyButton } from "@/components/receipts/cancel-receipt-bu
 import { getDb } from "@/lib/db";
 import { formatDateInput } from "@/lib/form-utils";
 import type { ReceiptFormValues } from "@/lib/validations";
+import { policyOperationalWhere, receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function EditReceiptPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const scope = await requireOrganizationPortfolioReadScope();
   const db = getDb();
-  const receipt = await db.receipt.findUnique({
-    where: { id },
+  const receipt = await db.receipt.findFirst({
+    where: { id, ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
     include: {
       client: true,
       policy: true,
@@ -43,7 +45,7 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
         },
       ]
     : await db.policy.findMany({
-        where: { status: { not: "CANCELLED" } },
+        where: { status: { not: "CANCELLED" }, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
         include: { client: true },
         orderBy: { policyNumber: "asc" },
       });

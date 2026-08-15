@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { logError } from "@/lib/logger";
 import { runRenewalFollowUpScan } from "@/lib/renewal-followups";
+import { getDb } from "@/lib/db";
 import { checkDistributedRateLimit, securityFingerprint } from "@/lib/request-guards";
 import { rateLimitResponse } from "@/lib/api-security";
 
@@ -35,8 +36,24 @@ export async function GET(request: NextRequest) {
   if (!rateLimit.allowed) return rateLimitResponse(rateLimit, "Este job ya fue ejecutado recientemente.");
 
   try {
-    const summary = await runRenewalFollowUpScan();
-    return NextResponse.json({ ok: true, ...summary }, { status: 200 });
+    const organizations = await getDb().organization.findMany({
+      where: { status: "ACTIVE" },
+      select: { id: true },
+    });
+    const summaries = await Promise.all(
+      organizations.map(({ id }) => runRenewalFollowUpScan(id)),
+    );
+    const summary = summaries.reduce(
+      (total, item) => ({
+        scanned: total.scanned + item.scanned,
+        stalled: total.stalled + item.stalled,
+        workItemsUpserted: total.workItemsUpserted + item.workItemsUpserted,
+        workItemsClosed: total.workItemsClosed + item.workItemsClosed,
+        notificationsCreated: total.notificationsCreated + item.notificationsCreated,
+      }),
+      { scanned: 0, stalled: 0, workItemsUpserted: 0, workItemsClosed: 0, notificationsCreated: 0 },
+    );
+    return NextResponse.json({ ok: true, organizations: organizations.length, ...summary }, { status: 200 });
   } catch (error) {
     logError("api.jobs.renewal-followups", error);
     return NextResponse.json({ ok: false }, { status: 500 });

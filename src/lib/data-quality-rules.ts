@@ -47,9 +47,10 @@ export function matchesSuppressionCriteria(criteriaJson: string, fields: Record<
   return Object.entries(criteria).every(([key, expected]) => String(fields[key] ?? "") === expected);
 }
 
-export async function getActiveSuppressionRules(client: DbClient = getDb()): Promise<SuppressionRuleSnapshot[]> {
+export async function getActiveSuppressionRules(organizationId: string, client: DbClient = getDb()): Promise<SuppressionRuleSnapshot[]> {
   const rules = await client.dataQualitySuppressionRule.findMany({
     where: {
+      organizationId,
       active: true,
       OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
     },
@@ -75,10 +76,12 @@ export async function findMatchingSuppressionRule(
     issueCode: string;
     fields: Record<string, unknown>;
   },
+  organizationId: string,
   client: DbClient = getDb(),
 ): Promise<SuppressionRuleSnapshot | null> {
   const rules = await client.dataQualitySuppressionRule.findMany({
     where: {
+      organizationId,
       category: input.category,
       issueCode: input.issueCode,
       active: true,
@@ -111,13 +114,15 @@ export async function upsertSuppressionRule(
     reason?: string | null;
     expiresAt?: Date | null;
     actorId: string;
+    organizationId: string;
   },
   client: DbClient = getDb(),
 ): Promise<SuppressionRuleSnapshot> {
   const criteriaJson = stringifySuppressionCriteria(input.criteria);
   const rule = await client.dataQualitySuppressionRule.upsert({
     where: {
-      category_issueCode_criteriaJson: {
+      organizationId_category_issueCode_criteriaJson: {
+        organizationId: input.organizationId,
         category: input.category,
         issueCode: input.issueCode,
         criteriaJson,
@@ -131,6 +136,7 @@ export async function upsertSuppressionRule(
       reviewedById: input.actorId,
     },
     create: {
+      organizationId: input.organizationId,
       category: input.category,
       issueCode: input.issueCode,
       criteriaJson,
@@ -156,9 +162,12 @@ export async function upsertSuppressionRule(
   };
 }
 
-export async function deactivateSuppressionRule(ruleId: string, actorId: string, client: DbClient = getDb()) {
-  const rule = await client.dataQualitySuppressionRule.update({
-    where: { id: ruleId },
+export async function deactivateSuppressionRule(ruleId: string, organizationId: string, actorId: string, client: DbClient = getDb()) {
+  const rule = await client.dataQualitySuppressionRule.findFirstOrThrow({
+    where: { id: ruleId, organizationId },
+  });
+  await client.dataQualitySuppressionRule.updateMany({
+    where: { id: ruleId, organizationId },
     data: {
       active: false,
       reviewedAt: new Date(),
@@ -171,7 +180,7 @@ export async function deactivateSuppressionRule(ruleId: string, actorId: string,
     category: rule.category,
     issueCode: rule.issueCode,
     criteriaJson: rule.criteriaJson,
-    active: rule.active,
+    active: false,
     reason: rule.reason,
     expiresAt: rule.expiresAt,
     createdAt: rule.createdAt,

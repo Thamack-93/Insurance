@@ -2,6 +2,7 @@ import { addYears } from "date-fns";
 
 import { getDb } from "@/lib/db";
 import { toNumber } from "@/lib/money";
+import { parseCliArgs, requireOrganizationId } from "./_shared.ts";
 
 type Args = {
   policyId?: string;
@@ -100,12 +101,13 @@ function findTermIndex(startDate: Date, familyStart: Date, termCount: number) {
 
 async function main() {
   const args = parseArgs();
+  const organizationId = requireOrganizationId(parseCliArgs());
   const db = getDb();
 
   const initialPolicy = args.policyId
-    ? await db.policy.findUnique({ where: { id: args.policyId } })
+    ? await db.policy.findFirst({ where: { id: args.policyId, organizationId } })
     : await db.policy.findFirst({
-        where: { policyNumber: args.policyNumber ?? "157476" },
+        where: { organizationId, policyNumber: args.policyNumber ?? "157476" },
         orderBy: [{ startDate: "asc" }, { createdAt: "asc" }],
       });
 
@@ -115,6 +117,7 @@ async function main() {
 
   const familyPolicies = await db.policy.findMany({
     where: {
+      organizationId,
       policyNumber: initialPolicy.policyNumber,
       clientId: initialPolicy.clientId,
       insurerId: initialPolicy.insurerId,
@@ -180,8 +183,9 @@ async function main() {
 
       if (existingPolicy) {
         const updated = await tx.policy.update({
-          where: { id: existingPolicy.id },
+          where: { id: existingPolicy.id, organizationId },
           data: {
+            organizationId,
             policyNumber: rootPolicy.policyNumber,
             familyRootId: index === 0 ? null : rootPolicy.id,
             clientId: rootPolicy.clientId,
@@ -204,6 +208,7 @@ async function main() {
       } else {
         const created = await tx.policy.create({
           data: {
+            organizationId,
             policyNumber: rootPolicy.policyNumber,
             familyRootId: index === 0 ? null : rootPolicy.id,
             clientId: rootPolicy.clientId,
@@ -245,7 +250,7 @@ async function main() {
         if (!target) continue;
 
         await tx.receipt.update({
-          where: { id: receipt.id },
+          where: { id: receipt.id, organizationId },
           data: {
             policyId: target.policyId,
             clientId: target.clientId,
@@ -256,7 +261,7 @@ async function main() {
 
         for (const payment of receipt.payments) {
           await tx.payment.update({
-            where: { id: payment.id },
+            where: { id: payment.id, organizationId },
             data: {
               policyId: target.policyId,
               clientId: target.clientId,
@@ -285,7 +290,7 @@ async function main() {
       if (!targetPolicy) continue;
 
       await tx.commission.update({
-        where: { id: commission.id },
+        where: { id: commission.id, organizationId },
         data: {
           policyId: targetPolicy.id,
           clientId: targetPolicy.clientId,
@@ -297,6 +302,7 @@ async function main() {
 
     await tx.activityLog.create({
       data: {
+        organizationId,
         entityType: "Policy",
         entityId: rootPolicy.id,
         action: "SPLIT_POLICY_VIGENCIES",

@@ -331,7 +331,7 @@ describe("policy-pdf-capture", () => {
     const preview = await buildPolicyPdfCapturePreviewFromDraft({
       draft,
       fieldConfidence: buildPolicyPdfCaptureFieldConfidence(text, draft),
-      context: { user: null },
+      context: { organizationId: "org-a", user: null },
     }, db);
 
     expect(preview.existingPolicyMatches).toEqual([
@@ -613,6 +613,7 @@ describe("policy-pdf-capture", () => {
         Prima total $1,234.56
       `,
       db,
+      { organizationId: "org-a" },
     );
 
     expect(preview.draft.policyNumber).toBe("50702000466");
@@ -697,6 +698,7 @@ describe("policy-pdf-capture", () => {
           corrections: [],
         },
         context: {
+          organizationId: "org-a",
           user: { id: "agent-1", role: "AGENT" },
         },
       },
@@ -744,6 +746,7 @@ describe("policy-pdf-capture", () => {
         Prima total $1,234.56
       `,
       db,
+      { organizationId: "org-a" },
     );
 
     expect(preview.suggestions.sourcePolicyId).toBeNull();
@@ -837,7 +840,7 @@ describe("policy-pdf-capture", () => {
         notes: null,
         sourcePolicyNumber: null,
       } as never),
-      context: { user: null },
+      context: { organizationId: "org-a", user: null },
     }, db);
 
     expect(preview.suggestions.clientId).toBe("client-1");

@@ -11,10 +11,10 @@ import { getUtilityNavigation, isUtilityNavigationItemActive } from "@/lib/navig
 
 const SIDEBAR_STORAGE_KEY = "policydesk.sidebar.collapsed";
 
-export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
+export function AppSidebar({ isAdmin, isSuperAdmin = false }: { isAdmin: boolean; isSuperAdmin?: boolean }) {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
-  const utilities = getUtilityNavigation(isAdmin);
+  const utilities = getUtilityNavigation(isAdmin, isSuperAdmin);
 
   useEffect(() => {
     queueMicrotask(() => {

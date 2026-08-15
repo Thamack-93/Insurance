@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { getDb } from "@/lib/db";
-import { requireUser } from "@/lib/auth";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
@@ -18,10 +17,12 @@ import {
 } from "@/lib/telegram";
 import { updateNotificationPreferences } from "@/lib/notification-foundation";
 import type { NotificationPreferenceInput } from "@/lib/notification-foundation-shared";
+import { requireOrganizationContext } from "@/lib/organization-context";
 
 export async function setTelegramMutationsEnabled(enabled: boolean): Promise<MutationResult> {
   try {
-    const user = await requireUser();
+    const context = await requireOrganizationContext();
+    const user = { id: context.userId };
     const db = getDb();
     const current = await db.notificationChannel.findUnique({
       where: {
@@ -50,6 +51,7 @@ export async function setTelegramMutationsEnabled(enabled: boolean): Promise<Mut
     });
 
     await writeActivityLog({
+      organizationId: context.organizationId,
       entityType: "NotificationChannel",
       entityId: channel.id,
       action: enabled ? "TELEGRAM_MUTATIONS_ENABLED" : "TELEGRAM_MUTATIONS_DISABLED",
@@ -73,8 +75,10 @@ export async function setTelegramMutationsEnabled(enabled: boolean): Promise<Mut
 
 export async function generateTelegramLinkCode(): Promise<TelegramLinkCodeResult> {
   try {
-    const user = await requireUser();
+    const context = await requireOrganizationContext();
+    const user = { id: context.userId };
     const result = await createTelegramLinkCodeForUser({
+      organizationId: context.organizationId,
       userId: user.id,
       actorId: user.id,
     });
@@ -93,8 +97,10 @@ export async function generateTelegramLinkCode(): Promise<TelegramLinkCodeResult
 
 export async function disconnectTelegram(): Promise<MutationResult> {
   try {
-    const user = await requireUser();
+    const context = await requireOrganizationContext();
+    const user = { id: context.userId };
     const result = await disconnectTelegramChannelForUser({
+      organizationId: context.organizationId,
       userId: user.id,
       actorId: user.id,
     });
@@ -114,8 +120,10 @@ export async function disconnectTelegram(): Promise<MutationResult> {
 
 export async function sendTelegramTestMessage(): Promise<MutationResult> {
   try {
-    const user = await requireUser();
+    const context = await requireOrganizationContext();
+    const user = { id: context.userId };
     const event = await createAndDeliverTelegramNotificationEvent({
+      organizationId: context.organizationId,
       type: "TEST_MESSAGE",
       title: "Mensaje de prueba",
       body: "PolicyDesk confirmó que Telegram está listo para recibir notificaciones.",
@@ -129,6 +137,7 @@ export async function sendTelegramTestMessage(): Promise<MutationResult> {
     }
 
     await writeActivityLog({
+      organizationId: context.organizationId,
       entityType: "NotificationEvent",
       entityId: event.id,
       action: `TELEGRAM_TEST_MESSAGE_${event.status}`,
@@ -157,7 +166,8 @@ export async function sendTelegramTestMessage(): Promise<MutationResult> {
 
 export async function sendTelegramDigestNow(): Promise<MutationResult> {
   try {
-    const user = await requireUser();
+    const context = await requireOrganizationContext();
+    const user = { id: context.userId };
     const channel = await getDb().notificationChannel.findUnique({
       where: {
         userId_type: {
@@ -181,6 +191,7 @@ export async function sendTelegramDigestNow(): Promise<MutationResult> {
     });
 
     await writeActivityLog({
+      organizationId: context.organizationId,
       entityType: "NotificationEvent",
       entityId: `telegram-digest-now:${user.id}`,
       action: result.failed === 0 ? "TELEGRAM_DIGEST_NOW_SENT" : "TELEGRAM_DIGEST_NOW_PARTIAL",
@@ -208,7 +219,8 @@ export async function sendTelegramDigestNow(): Promise<MutationResult> {
 
 export async function sendTelegramBirthdaysNow(): Promise<MutationResult> {
   try {
-    const user = await requireUser();
+    const context = await requireOrganizationContext();
+    const user = { id: context.userId };
     const channel = await getDb().notificationChannel.findUnique({
       where: {
         userId_type: {
@@ -229,6 +241,7 @@ export async function sendTelegramBirthdaysNow(): Promise<MutationResult> {
     });
 
     await writeActivityLog({
+      organizationId: context.organizationId,
       entityType: "NotificationEvent",
       entityId: `telegram-birthdays-now:${user.id}:${Date.now()}`,
       action: result.failed === 0 ? "TELEGRAM_BIRTHDAYS_NOW_SENT" : "TELEGRAM_BIRTHDAYS_NOW_PARTIAL",
@@ -258,8 +271,9 @@ export async function sendTelegramBirthdaysNow(): Promise<MutationResult> {
 
 export async function updateTelegramPreferences(preferences: NotificationPreferenceInput[]): Promise<MutationResult> {
   try {
-    const user = await requireUser();
-    const updated = await updateNotificationPreferences({ userId: user.id, actorId: user.id, preferences });
+    const context = await requireOrganizationContext();
+    const user = { id: context.userId };
+    const updated = await updateNotificationPreferences({ organizationId: context.organizationId, userId: user.id, actorId: user.id, preferences });
     if (!updated) return errorResult("No se pudieron actualizar las preferencias.");
     revalidatePath("/settings/notifications");
     return successResult(user.id, "/settings/notifications", "Preferencias de Telegram actualizadas.");
@@ -271,7 +285,8 @@ export async function updateTelegramPreferences(preferences: NotificationPrefere
 
 export async function setTelegramDigestHour(hour: number): Promise<MutationResult> {
   try {
-    const user = await requireUser();
+    const context = await requireOrganizationContext();
+    const user = { id: context.userId };
     if (!Number.isInteger(hour) || hour < 0 || hour > 23) return errorResult("La hora debe estar entre 00 y 23.");
     await getDb().user.update({ where: { id: user.id }, data: { telegramDigestHour: hour } });
     revalidatePath("/settings/notifications");
@@ -285,8 +300,9 @@ export async function setTelegramDigestHour(hour: number): Promise<MutationResul
 export async function syncTelegramWebhookAction(_formData?: FormData): Promise<MutationResult> {
   void _formData;
   try {
-    const user = await requireUser();
-    if (user.role !== "ADMIN") return errorResult("Solo un administrador puede sincronizar el webhook.");
+    const context = await requireOrganizationContext();
+    const user = { id: context.userId };
+    if (context.membershipRole === "AGENT") return errorResult("Solo un administrador puede sincronizar el webhook.");
     const requestHeaders = await headers();
     const proto = requestHeaders.get("x-forwarded-proto") ?? "https";
     const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");

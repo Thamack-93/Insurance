@@ -39,6 +39,7 @@ const LEGACY_READ_FILES = new Set([
   "src/app/(dashboard)/tasks/actions.ts",
   "src/app/(dashboard)/documents/page.tsx",
   "src/app/(dashboard)/risks/page.tsx",
+  "src/app/api/documents/[id]/download/route.ts",
 ]);
 
 // Read-only tenant relation inventory. Keep this exact allow-list narrow so

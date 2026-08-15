@@ -14,12 +14,14 @@ const updateReceipt = vi.hoisted(() => vi.fn());
 const createPayment = vi.hoisted(() => vi.fn());
 const createWorkItem = vi.hoisted(() => vi.fn());
 const updateWorkItem = vi.hoisted(() => vi.fn());
+const requireOrganizationContext = vi.hoisted(() => vi.fn());
 const createClaim = vi.hoisted(() => vi.fn());
 const updateClaim = vi.hoisted(() => vi.fn());
 const updateClaimChecklistStatus = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", () => ({ getDb }));
 vi.mock("@/lib/auth", () => ({ getCurrentUser }));
+vi.mock("@/lib/organization-context", () => ({ requireOrganizationContext }));
 vi.mock("@/lib/activity-log", () => ({ writeActivityLog }));
 vi.mock("@/app/(dashboard)/clients/actions", () => ({ createClient, updateClient }));
 vi.mock("@/app/(dashboard)/policies/actions", () => ({ createPolicy, updatePolicy }));
@@ -106,6 +108,7 @@ describe("confirmAssistantActionDraft", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getCurrentUser.mockResolvedValue(user);
+    requireOrganizationContext.mockResolvedValue({ organizationId: "org-test", membershipRole: "AGENT" });
     createClient.mockResolvedValue({
       ok: true,
       id: "client-1",
@@ -145,9 +148,9 @@ describe("confirmAssistantActionDraft", () => {
       }),
     );
     expect(createClient).toHaveBeenCalledTimes(1);
-    expect(db.assistantActionDraft.update).toHaveBeenCalledWith(
+    expect(db.assistantActionDraft.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: draft.id },
+        where: expect.objectContaining({ id: draft.id, organizationId: "org-test", userId: user.id }),
         data: expect.objectContaining({ status: "CONFIRMED" }),
       }),
     );
@@ -198,7 +201,7 @@ describe("confirmAssistantActionDraft", () => {
       where: expect.objectContaining({ id: draft.id, userId: user.id, status: "PENDING" }),
     }));
     expect(createClaim).toHaveBeenCalledTimes(1);
-    expect(db.assistantActionDraft.update).toHaveBeenCalledWith(expect.objectContaining({
+    expect(db.assistantActionDraft.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: "CONFIRMED" }),
     }));
   });
@@ -224,11 +227,11 @@ describe("confirmAssistantActionDraft", () => {
     if ("error" in result) {
       expect(result.error).toContain("expiró");
     }
-    expect(db.assistantActionDraft.updateMany).not.toHaveBeenCalled();
+    expect(db.assistantActionDraft.updateMany).toHaveBeenCalledTimes(1);
     expect(createClient).not.toHaveBeenCalled();
-    expect(db.assistantActionDraft.update).toHaveBeenCalledWith(
+    expect(db.assistantActionDraft.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: draft.id },
+        where: { id: draft.id, organizationId: "org-test", userId: user.id },
         data: expect.objectContaining({ status: "EXPIRED" }),
       }),
     );
@@ -274,7 +277,7 @@ describe("confirmAssistantActionDraft", () => {
 
     expect(result).toEqual(expect.objectContaining({ ok: false }));
     expect(db.assistantActionDraft.findFirst).toHaveBeenCalledWith({
-      where: { id: "someone-elses-draft", userId: user.id },
+      where: { id: "someone-elses-draft", organizationId: "org-test", userId: user.id },
     });
     expect(db.assistantActionDraft.updateMany).not.toHaveBeenCalled();
     expect(createClient).not.toHaveBeenCalled();

@@ -36,6 +36,13 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  if (session.platformRole === "SUPERADMIN" && !session.organizationId && pathname !== "/platform" && !pathname.startsWith("/platform/")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/platform";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
   return NextResponse.next();
 }
 

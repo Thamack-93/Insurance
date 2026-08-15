@@ -165,15 +165,15 @@ export type WorkQueueFilters = {
   receiptId?: string;
   entityType?: string;
   portfolioOwnerId?: string;
-  organizationId?: string;
+  organizationId: string;
 };
 
-export async function getWorkItems(filters: WorkQueueFilters = {}) {
+export async function getWorkItems(filters: WorkQueueFilters) {
   const db = getDb();
   const where = buildWhere(filters);
 
   const items = await db.workItem.findMany({
-    where,
+    where: { ...where, organizationId: filters.organizationId },
     select: workQueueSelect,
     orderBy: buildOrderBy(filters),
   });
@@ -304,12 +304,14 @@ async function resolveLegacyRenewalRelations(
   });
 }
 
-export async function countWorkItems(filters: WorkQueueFilters = {}) {
+export async function countWorkItems(filters: WorkQueueFilters) {
   return (await getWorkItems(filters)).length;
 }
 
 function buildWhere(filters: WorkQueueFilters): Prisma.WorkItemWhereInput {
   const where: Prisma.WorkItemWhereInput = {};
+
+  if (filters.organizationId) where.organizationId = filters.organizationId;
 
   if (filters.query) {
     const query = filters.query.trim();
@@ -373,10 +375,6 @@ function buildWhere(filters: WorkQueueFilters): Prisma.WorkItemWhereInput {
     where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), portfolioWhere];
   }
 
-  if (filters.organizationId) {
-    where.organizationId = filters.organizationId;
-  }
-
   if (filters.from || filters.to) {
     where.dueDate = {
       ...(filters.from ? { gte: businessStartOfDay(filters.from) } : {}),
@@ -388,10 +386,8 @@ function buildWhere(filters: WorkQueueFilters): Prisma.WorkItemWhereInput {
 }
 
 function buildOrderBy(filters: WorkQueueFilters): Prisma.WorkItemOrderByWithRelationInput[] {
-  // Priority is persisted as text, so ordering it in PostgreSQL would make
-  // LOW sort ahead of HIGH. The semantic rank is applied after legacy
-  // renewal relations are resolved; these fields keep the database read
-  // bounded and deterministic before that final comparison.
+  // Priority is persisted as text, so PostgreSQL would sort LOW before HIGH.
+  // Apply the semantic rank after legacy renewal relations are resolved.
   void filters;
   return [{ dueDate: "asc" }, { createdAt: "desc" }, { id: "asc" }];
 }

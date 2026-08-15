@@ -7,7 +7,7 @@ import { writeActivityLog } from "@/lib/activity-log";
 import { getDb } from "@/lib/db";
 import { parseDateInput } from "@/lib/form-utils";
 import { extractPolicyPdfDraftFromText, suggestPreviousPolicyNumber, type PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
-import { assertProductionMutationAllowed } from "./_shared.ts";
+import { assertProductionMutationAllowed, parseCliArgs, requireOrganizationId } from "./_shared.ts";
 
 type CliArgs = {
   apply: boolean;
@@ -112,13 +112,14 @@ async function resolveActorId(db: ReturnType<typeof getDb>) {
 
 async function resolveSourcePolicy(
   db: ReturnType<typeof getDb>,
+  organizationId: string,
   draft: PolicyPdfCaptureDraft,
   targetStartDate: Date,
   exactPolicyNumber: string | null,
 ): Promise<SourcePolicy> {
   if (exactPolicyNumber) {
     const exact = await db.policy.findFirst({
-      where: { policyNumber: exactPolicyNumber },
+      where: { organizationId, policyNumber: exactPolicyNumber },
       select: {
         id: true,
         policyNumber: true,
@@ -140,6 +141,7 @@ async function resolveSourcePolicy(
   if (!draft.serialNumber) {
     const fallback = await db.policy.findFirst({
       where: {
+        organizationId,
         policyType: draft.policyType,
         client: { fullName: { contains: draft.clientName, mode: "insensitive" } },
         endDate: { lt: targetStartDate },
@@ -168,6 +170,7 @@ async function resolveSourcePolicy(
 
   const candidates = await db.policy.findMany({
     where: {
+      organizationId,
       policyType: "AUTO",
       insuredAssets: {
         some: { serialNumber: draft.serialNumber },
@@ -198,6 +201,7 @@ async function resolveSourcePolicy(
   if (!candidates.length) {
     const fallback = await db.policy.findFirst({
       where: {
+        organizationId,
         policyType: draft.policyType,
         client: { fullName: { contains: draft.clientName, mode: "insensitive" } },
         endDate: { lt: targetStartDate },
@@ -240,6 +244,7 @@ async function resolveSourcePolicy(
 
 async function captureRenewalCase(
   db: ReturnType<typeof getDb>,
+  organizationId: string,
   actorId: string,
   captureCase: CaptureCase,
   apply: boolean,
@@ -251,11 +256,12 @@ async function captureRenewalCase(
     captureCase.label === "19941U01"
       ? draft.sourcePolicyNumber ?? suggestPreviousPolicyNumber(draft.policyNumber)
       : draft.sourcePolicyNumber ?? null;
-  const sourcePolicy = await resolveSourcePolicy(db, draft, targetStartDate, sourcePolicyNumber);
+  const sourcePolicy = await resolveSourcePolicy(db, organizationId, draft, targetStartDate, sourcePolicyNumber);
   const familyRootId = sourcePolicy.familyRootId ?? sourcePolicy.id;
 
   const existingTarget = await db.policy.findFirst({
     where: {
+      organizationId,
       policyNumber: draft.policyNumber,
       clientId: sourcePolicy.clientId,
       insurerId: sourcePolicy.insurerId,
@@ -309,7 +315,7 @@ async function captureRenewalCase(
   const targetPolicy = await db.$transaction(async (tx) => {
     const target = existingTarget
       ? await tx.policy.update({
-          where: { id: existingTarget.id },
+          where: { id: existingTarget.id, organizationId },
           data: {
             ...policyData,
             updatedById: actorId,
@@ -317,16 +323,18 @@ async function captureRenewalCase(
         })
       : await tx.policy.create({
           data: {
+            organizationId,
             ...policyData,
             createdById: actorId,
           },
         });
 
-    await tx.policyInsuredParty.deleteMany({ where: { policyId: target.id } });
-    await tx.policyInsuredAsset.deleteMany({ where: { policyId: target.id } });
+    await tx.policyInsuredParty.deleteMany({ where: { organizationId, policyId: target.id } });
+    await tx.policyInsuredAsset.deleteMany({ where: { organizationId, policyId: target.id } });
 
     await tx.policyInsuredParty.create({
       data: {
+        organizationId,
         policyId: target.id,
         fullName: draft.clientName,
         isPrimary: true,
@@ -337,6 +345,7 @@ async function captureRenewalCase(
     if (draft.policyType === "AUTO" && draft.serialNumber) {
       await tx.policyInsuredAsset.create({
         data: {
+          organizationId,
           policyId: target.id,
           assetType: draft.policyType,
           description: draft.insuredObject ?? draft.clientName,
@@ -348,12 +357,13 @@ async function captureRenewalCase(
 
     if (sourcePolicy.status !== "RENEWED") {
       await tx.policy.update({
-        where: { id: sourcePolicy.id },
+        where: { id: sourcePolicy.id, organizationId },
         data: { status: "RENEWED", updatedById: actorId },
       });
     }
 
     await writeActivityLog({
+      organizationId,
       entityType: "Policy",
       entityId: target.id,
       action: existingTarget ? "POLICY_CAPTURE_PDF_UPDATE" : "POLICY_CAPTURE_PDF_CREATE",
@@ -394,6 +404,7 @@ async function captureRenewalCase(
 
 async function main() {
   const args = parseArgs();
+  const organizationId = requireOrganizationId(parseCliArgs());
   if (args.apply) {
     assertProductionMutationAllowed({
       actionLabel: "La captura asistida de renovaciones",
@@ -405,7 +416,7 @@ async function main() {
 
   try {
     for (const renewalCase of CASES) {
-      await captureRenewalCase(db, actorId, renewalCase, args.apply);
+      await captureRenewalCase(db, organizationId, actorId, renewalCase, args.apply);
     }
   } finally {
     await db.$disconnect();

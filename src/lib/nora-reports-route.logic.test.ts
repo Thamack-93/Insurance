@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const getDb = vi.hoisted(() => vi.fn());
-const requirePortfolioReadScope = vi.hoisted(() => vi.fn());
+const requireOrganizationPortfolioReadScope = vi.hoisted(() => vi.fn());
 const receiptOperationalWhere = vi.hoisted(() => vi.fn());
 const policyOperationalWhere = vi.hoisted(() => vi.fn());
 const commissionOperationalWhere = vi.hoisted(() => vi.fn());
@@ -15,7 +15,7 @@ vi.mock("@/lib/auth", () => ({
   },
 }));
 vi.mock("@/lib/portfolio-access", () => ({
-  requirePortfolioReadScope,
+  requireOrganizationPortfolioReadScope,
   receiptOperationalWhere,
   policyOperationalWhere,
   commissionOperationalWhere,
@@ -34,7 +34,7 @@ vi.mock("@/lib/work-queue", () => ({
 
 import { GET } from "@/app/api/nora/reports/route";
 
-const scope = { id: "agent-1", role: "AGENT", portfolioOwnerId: "agent-1" };
+const scope = { id: "agent-1", role: "AGENT", portfolioOwnerId: "agent-1", organizationId: "org-a" };
 const db = {
   receipt: { findMany: vi.fn() },
   policy: { findMany: vi.fn() },
@@ -49,7 +49,7 @@ describe("Nora report authorization scope", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getDb.mockReturnValue(db);
-    requirePortfolioReadScope.mockResolvedValue(scope);
+    requireOrganizationPortfolioReadScope.mockResolvedValue(scope);
     receiptOperationalWhere.mockImplementation((ownerId?: string) => ({ receiptScope: ownerId ?? "admin" }));
     policyOperationalWhere.mockImplementation((ownerId?: string) => ({ policyScope: ownerId ?? "admin" }));
     commissionOperationalWhere.mockImplementation((ownerId?: string) => ({ commissionScope: ownerId ?? "admin" }));

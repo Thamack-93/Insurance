@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { logError } from "@/lib/logger";
 import { setRuntimeSettings, THEME_COOKIE } from "@/lib/settings-runtime";
-import { AuthError, requireAdmin, requireUser } from "@/lib/auth";
+import { AuthError, requireSuperAdmin, requireUser } from "@/lib/auth";
 
 export type Settings = {
   firmName: string;
@@ -109,7 +109,7 @@ export async function updateSettings(settings: Partial<Settings>): Promise<Mutat
   const db = getDb();
 
   try {
-    await requireAdmin();
+    await requireSuperAdmin();
     const entries = Object.entries(settings);
     await Promise.all(
       entries.map(([key, value]) => {

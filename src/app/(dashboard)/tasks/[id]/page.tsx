@@ -15,6 +15,7 @@ import { daysSince, daysUntil, formatDate } from "@/lib/dates";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
 import { statusLabel } from "@/lib/status";
+import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 const workItemTypeLabels: Record<string, string> = {
   GENERAL: "General",
@@ -30,8 +31,9 @@ const workItemTypeLabels: Record<string, string> = {
 export default async function WorkItemDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const db = getDb();
+  const scope = await requireOrganizationPortfolioReadScope();
 
-  const workItem = await findWorkItemByRouteId(id, db);
+  const workItem = await findWorkItemByRouteId(id, scope.organizationId, db, scope.portfolioOwnerId);
 
   if (!workItem) {
     notFound();
@@ -41,15 +43,16 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
     db.document.findMany({
       // WorkItem keeps sourceId stable when a legacy Task is normalized, so
       // this remains a narrow compatibility lookup without loading all docs.
-      where: { taskId: workItem.sourceId ?? workItem.id },
-      orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
+      where: { organizationId: scope.organizationId, taskId: workItem.sourceId ?? workItem.id },
+      orderBy: { uploadedAt: "desc" },
     }),
     db.activityLog.findMany({
       where: {
         entityId: { in: [id, workItem.id] },
         entityType: "WorkItem",
+        organizationId: scope.organizationId,
       },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      orderBy: { createdAt: "desc" },
       take: 10,
     }),
   ]);

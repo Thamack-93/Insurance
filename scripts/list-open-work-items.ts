@@ -8,6 +8,7 @@ import {
   getFlag,
   parseCliArgs,
   printTable,
+  requireOrganizationId,
 } from "./_shared.ts";
 
 const priorityRank: Record<string, number> = {
@@ -21,12 +22,13 @@ const OPEN_STATUSES = ["OPEN", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_INSURER
 
 async function main() {
   const args = parseCliArgs();
+  const organizationId = requireOrganizationId(args);
   const limit = Number(getFlag(args, "limit", "30"));
   const db = createDb();
   const now = today();
 
   const tasks = await db.workItem.findMany({
-    where: { workItemType: "TASK", status: { in: [...OPEN_STATUSES] } },
+    where: { organizationId, workItemType: "TASK", status: { in: [...OPEN_STATUSES] } },
     include: { client: true, insurer: true, policy: true, receipt: true },
   });
 

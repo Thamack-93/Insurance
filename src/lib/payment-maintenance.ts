@@ -97,17 +97,19 @@ function paymentSnapshots(payments: ReceiptRow["payments"]) {
 
 export async function getLatestPaymentMaintenanceRun(
   type: string,
+  organizationId: string,
   client?: DbClient,
 ): Promise<MaintenanceRunSnapshot | null> {
   const db = client ?? getDb();
   return db.maintenanceRun.findFirst({
-    where: { type },
+    where: { type, organizationId },
     orderBy: { startedAt: "desc" },
   });
 }
 
 export async function runPaymentReconciliationAudit(input: {
   actorId: string;
+  organizationId: string;
   client?: DbClient;
   now?: Date;
 }): Promise<{ run: MaintenanceRunSnapshot; summary: PaymentAuditSummary }> {
@@ -116,6 +118,7 @@ export async function runPaymentReconciliationAudit(input: {
 
   const run = await db.maintenanceRun.create({
     data: {
+      organizationId: input.organizationId,
       type: "PAYMENT_RECONCILIATION_AUDIT",
       status: "RUNNING",
       createdById: input.actorId,
@@ -136,6 +139,7 @@ export async function runPaymentReconciliationAudit(input: {
 
   try {
     const receipts = (await db.receipt.findMany({
+      where: { organizationId: input.organizationId },
       select: {
         id: true,
         receiptNumber: true,
@@ -162,7 +166,7 @@ export async function runPaymentReconciliationAudit(input: {
         client: { select: { fullName: true } },
         insurer: { select: { name: true } },
         payments: {
-          where: { status: "POSTED" },
+          where: { status: "POSTED", organizationId: input.organizationId },
           select: {
             id: true,
             amount: true,
@@ -260,6 +264,7 @@ export async function runPaymentReconciliationAudit(input: {
               reasons: reconciliation.reasons,
             },
             userId: input.actorId,
+            organizationId: input.organizationId,
             db,
           });
         }
@@ -285,7 +290,7 @@ export async function runPaymentReconciliationAudit(input: {
         };
 
         const openIssues = await db.receiptReconciliationIssue.findMany({
-          where: { receiptId: receipt.id, status: "OPEN" },
+          where: { organizationId: input.organizationId, receiptId: receipt.id, status: "OPEN" },
           orderBy: { createdAt: "desc" },
           select: { id: true },
         });
@@ -301,6 +306,7 @@ export async function runPaymentReconciliationAudit(input: {
               familyKey: key,
             },
           },
+          input.organizationId,
           db,
         );
 
@@ -354,6 +360,7 @@ export async function runPaymentReconciliationAudit(input: {
             } else {
               await db.receiptReconciliationIssue.create({
                 data: {
+                  organizationId: input.organizationId,
                   maintenanceRunId: run.id,
                   receiptId: receipt.id,
                   policyId: receipt.policyId,
@@ -404,6 +411,7 @@ export async function runPaymentReconciliationAudit(input: {
           } else {
             await db.receiptReconciliationIssue.create({
               data: {
+                organizationId: input.organizationId,
                 maintenanceRunId: run.id,
                 receiptId: receipt.id,
                 policyId: receipt.policyId,
@@ -448,6 +456,7 @@ export async function runPaymentReconciliationAudit(input: {
       action: "PAYMENT_RECONCILIATION_AUDIT_COMPLETED",
       newValue: summary,
       userId: input.actorId,
+      organizationId: input.organizationId,
       db,
     });
 

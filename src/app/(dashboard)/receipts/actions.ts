@@ -1,21 +1,17 @@
 "use server";
 
 import { getDb } from "@/lib/db";
+import type { Prisma } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
-import { AuthError, getCurrentUserId, requireAdmin } from "@/lib/auth";
+import { AuthError } from "@/lib/auth";
 import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
 import { receiptSchema, type ReceiptFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { recordPayment } from "@/lib/payment-service";
 import { cancelPolicyForNonPayment } from "@/lib/nonpayment-cancellation";
 import { NON_PAYMENT_CANCELLATION_DAYS } from "@/lib/nonpayment-cancellation.logic";
-import { receiptSequenceForNumber } from "@/lib/sorting";
-import {
-  assertEndorsementPortfolioAccess,
-  assertPolicyPortfolioAccess,
-  assertReceiptPortfolioAccess,
-  receiptPortfolioWhere,
-} from "@/lib/portfolio-access";
+import { receiptPortfolioWhere } from "@/lib/portfolio-access";
+import { assertOrganizationContextInTransaction, requireOrganizationContext, requireOrganizationRole, type OrganizationContext } from "@/lib/organization-context";
 
 const ALLOWED_PAYMENT_METHODS = ["TRANSFER", "CASH", "CARD", "CHECK", "OTHER"] as const;
 type AllowedPaymentMethod = (typeof ALLOWED_PAYMENT_METHODS)[number];
@@ -24,11 +20,9 @@ function isAllowedPaymentMethod(value: string): value is AllowedPaymentMethod {
   return (ALLOWED_PAYMENT_METHODS as readonly string[]).includes(value);
 }
 
-async function normalizeReceiptInput(values: ReceiptFormValues, userId: string) {
-  const db = getDb();
-  await assertPolicyPortfolioAccess(values.policyId, userId);
-  const policy = await db.policy.findUnique({
-    where: { id: values.policyId },
+async function normalizeReceiptInput(values: ReceiptFormValues, context: OrganizationContext, db: Prisma.TransactionClient) {
+  const policy = await db.policy.findFirst({
+    where: { id: values.policyId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) },
     select: { id: true, clientId: true, insurerId: true, currency: true },
   });
 
@@ -38,10 +32,10 @@ async function normalizeReceiptInput(values: ReceiptFormValues, userId: string) 
 
   const endorsementId = optionalRelationId(values.endorsementId);
   if (endorsementId) {
-    await assertEndorsementPortfolioAccess(endorsementId, userId);
     const endorsement = await db.policyEndorsement.findFirst({
       where: {
         id: endorsementId,
+        organizationId: context.organizationId,
         policyId: policy.id,
       },
       select: { id: true },
@@ -54,7 +48,6 @@ async function normalizeReceiptInput(values: ReceiptFormValues, userId: string) 
 
   return {
     receiptNumber: values.receiptNumber.trim(),
-    receiptSequence: receiptSequenceForNumber(values.receiptNumber),
     policyId: policy.id,
     endorsementId,
     clientId: policy.clientId,
@@ -80,15 +73,13 @@ export async function createReceipt(values: ReceiptFormValues): Promise<Mutation
 
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
-    const payload = await normalizeReceiptInput(parsed.data, userId);
-    const receipt = await db.receipt.create({ data: { ...payload, createdById: userId, updatedById: userId } });
-
-    await writeActivityLog({
-      entityType: "Receipt",
-      entityId: receipt.id,
-      action: "RECEIPT_CREATE",
-      newValue: receipt,
+    const context = await requireOrganizationContext();
+    const receipt = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const payload = await normalizeReceiptInput(parsed.data, context, tx);
+      const created = await tx.receipt.create({ data: { organizationId: context.organizationId, ...payload, createdById: context.userId, updatedById: context.userId } });
+      await writeActivityLog({ organizationId: context.organizationId, entityType: "Receipt", entityId: created.id, action: "RECEIPT_CREATE", newValue: created, userId: context.userId, db: tx });
+      return created;
     });
 
     revalidatePaths([
@@ -117,26 +108,15 @@ export async function updateReceipt(id: string, values: ReceiptFormValues): Prom
 
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
-    await assertReceiptPortfolioAccess(id, userId);
-    const previousReceipt = await db.receipt.findUnique({ where: { id } });
-
-    if (!previousReceipt) {
-      return errorResult("El recibo ya no existe.");
-    }
-
-    const payload = await normalizeReceiptInput(parsed.data, userId);
-    const receipt = await db.receipt.update({
-      where: { id },
-      data: { ...payload, updatedById: userId },
-    });
-
-    await writeActivityLog({
-      entityType: "Receipt",
-      entityId: receipt.id,
-      action: "RECEIPT_UPDATE",
-      oldValue: previousReceipt,
-      newValue: receipt,
+    const context = await requireOrganizationContext();
+    const receipt = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const previous = await tx.receipt.findFirst({ where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) } });
+      if (!previous) throw new Error("El recibo ya no existe.");
+      const payload = await normalizeReceiptInput(parsed.data, context, tx);
+      const updated = await tx.receipt.update({ where: { id }, data: { ...payload, updatedById: context.userId } });
+      await writeActivityLog({ organizationId: context.organizationId, entityType: "Receipt", entityId: updated.id, action: "RECEIPT_UPDATE", oldValue: previous, newValue: updated, userId: context.userId, db: tx });
+      return updated;
     });
 
     revalidatePaths([
@@ -158,9 +138,14 @@ export async function updateReceipt(id: string, values: ReceiptFormValues): Prom
 
 export async function cancelReceiptAndPolicy(id: string): Promise<MutationResult> {
   try {
-    const userId = await getCurrentUserId();
-    await assertReceiptPortfolioAccess(id, userId);
-    const result = await cancelPolicyForNonPayment(id, userId, new Date(), { enforceCutoff: false });
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
+    const result = await getDb().$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const permitted = await tx.receipt.findFirst({ where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: userId } } : {}) }, select: { id: true } });
+      if (!permitted) throw new Error("El recibo no existe o fue eliminado.");
+      return cancelPolicyForNonPayment(context.organizationId, id, userId, new Date(), { client: tx, enforceCutoff: false });
+    });
 
     revalidatePaths([
       "/receipts",
@@ -190,11 +175,11 @@ export async function cancelReceiptAndPolicy(id: string): Promise<MutationResult
 export async function cancelReceipt(id: string): Promise<MutationResult> {
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
-    await assertReceiptPortfolioAccess(id, userId);
-
-    const existingReceipt = await db.receipt.findUnique({
-      where: { id },
+    const context = await requireOrganizationContext();
+    const result = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const existingReceipt = await tx.receipt.findFirst({
+      where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) },
       include: {
         policy: {
           select: {
@@ -210,19 +195,10 @@ export async function cancelReceipt(id: string): Promise<MutationResult> {
       },
     });
 
-    if (!existingReceipt) {
-      return errorResult("El recibo ya no existe.");
-    }
-
-    if (existingReceipt.status === "CANCELLED") {
-      return successResult(existingReceipt.id, `/receipts/${existingReceipt.id}`, "El recibo ya estaba cancelado.");
-    }
-
-    if (existingReceipt.payments.length > 0) {
-      return errorResult("No se puede cancelar: elimina primero los pagos registrados desde el detalle del recibo.");
-    }
-
-    const updatedReceipt = await db.receipt.update({
+      if (!existingReceipt) throw new Error("El recibo ya no existe.");
+      if (existingReceipt.status === "CANCELLED") return { existingReceipt, updatedReceipt: existingReceipt, alreadyCancelled: true };
+      if (existingReceipt.payments.length > 0) throw new Error("No se puede cancelar: elimina primero los pagos registrados desde el detalle del recibo.");
+      const updatedReceipt = await tx.receipt.update({
       where: { id },
       data: {
         status: "CANCELLED",
@@ -231,17 +207,15 @@ export async function cancelReceipt(id: string): Promise<MutationResult> {
         cancellationReason: "MANUAL",
         cancellationBatchId: null,
         cancelledAt: new Date(),
-        updatedById: userId,
+        updatedById: context.userId,
       },
     });
 
-    await writeActivityLog({
-      entityType: "Receipt",
-      entityId: updatedReceipt.id,
-      action: "RECEIPT_CANCEL",
-      oldValue: existingReceipt,
-      newValue: updatedReceipt,
+      await writeActivityLog({ organizationId: context.organizationId, entityType: "Receipt", entityId: updatedReceipt.id, action: "RECEIPT_CANCEL", oldValue: existingReceipt, newValue: updatedReceipt, userId: context.userId, db: tx });
+      return { existingReceipt, updatedReceipt, alreadyCancelled: false };
     });
+    const { existingReceipt, updatedReceipt } = result;
+    if (result.alreadyCancelled) return successResult(existingReceipt.id, `/receipts/${existingReceipt.id}`, "El recibo ya estaba cancelado.");
 
     revalidatePaths([
       "/receipts",
@@ -274,12 +248,13 @@ export async function bulkMarkReceiptsPaid(
   }
 
   const db = getDb();
-  const userId = await getCurrentUserId();
+  const context = await requireOrganizationContext();
+  const userId = context.userId;
   const now = new Date();
 
   try {
     const receipts = await db.receipt.findMany({
-      where: { id: { in: ids }, ...receiptPortfolioWhere(userId) },
+      where: { id: { in: ids }, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? receiptPortfolioWhere(userId) : {}) },
       select: {
         id: true,
         receiptNumber: true,
@@ -302,13 +277,9 @@ export async function bulkMarkReceiptsPaid(
 
     for (const receipt of eligible) {
       try {
-        await recordPayment({
-          receiptId: receipt.id,
-          amount: Number(receipt.amount),
-          paidDate: now,
-          paymentMethod,
-          sourceEvidenceKey: `bulk:${receipt.id}:${now.toISOString()}`,
-          actorId: userId,
+        await db.$transaction(async (tx) => {
+          await assertOrganizationContextInTransaction(tx, context);
+          return recordPayment({ organizationId: context.organizationId, receiptId: receipt.id, amount: Number(receipt.amount), paidDate: now, paymentMethod, sourceEvidenceKey: `bulk:${receipt.id}:${now.toISOString()}`, actorId: userId }, tx);
         });
 
         okCount += 1;
@@ -342,48 +313,36 @@ export async function bulkMarkReceiptsPaid(
 }
 export async function deleteReceipt(id: string): Promise<MutationResult> {
   try {
-    await requireAdmin();
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
     const db = getDb();
-
-    const existingReceipt = await db.receipt.findUnique({
-      where: { id },
-      include: {
-        _count: {
-          select: {
-            payments: true,
-            commissions: true,
+    const result = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
+      const existingReceipt = await tx.receipt.findFirst({
+        where: { id, organizationId: context.organizationId },
+        include: {
+          _count: {
+            select: {
+              payments: true,
+              commissions: true,
+            },
           },
         },
-      },
+      });
+
+      if (!existingReceipt) throw new Error("El recibo ya no existe.");
+
+      const counts = existingReceipt._count;
+      const blockers: string[] = [];
+      if (counts.payments > 0) blockers.push(`${counts.payments} pago${counts.payments !== 1 ? "s" : ""}`);
+      if (counts.commissions > 0) blockers.push(`${counts.commissions} comisión${counts.commissions !== 1 ? "es" : ""}`);
+
+      if (blockers.length > 0) return { deleted: false as const, existingReceipt, blockers };
+      await tx.receipt.delete({ where: { id } });
+      await writeActivityLog({ organizationId: context.organizationId, entityType: "Receipt", entityId: id, action: "RECEIPT_DELETE", oldValue: { receiptNumber: existingReceipt.receiptNumber, policyId: existingReceipt.policyId, clientId: existingReceipt.clientId }, userId: context.userId, db: tx });
+      return { deleted: true as const, existingReceipt, blockers: [] };
     });
-
-    if (!existingReceipt) {
-      return errorResult("El recibo ya no existe.");
-    }
-
-    const counts = existingReceipt._count;
-    const blockers: string[] = [];
-    if (counts.payments > 0) blockers.push(`${counts.payments} pago${counts.payments !== 1 ? "s" : ""}`);
-    if (counts.commissions > 0) blockers.push(`${counts.commissions} comisión${counts.commissions !== 1 ? "es" : ""}`);
-
-    if (blockers.length > 0) {
-      return errorResult(
-        `No se puede eliminar: el recibo tiene ${blockers.join(", ")} asociado${blockers.length > 1 ? "s" : ""}. Cancela o elimina primero esos registros.`,
-      );
-    }
-
-    await db.receipt.delete({ where: { id } });
-
-    await writeActivityLog({
-      entityType: "Receipt",
-      entityId: id,
-      action: "RECEIPT_DELETE",
-      oldValue: {
-        receiptNumber: existingReceipt.receiptNumber,
-        policyId: existingReceipt.policyId,
-        clientId: existingReceipt.clientId,
-      },
-    });
+    if (!result.deleted) return errorResult(`No se puede eliminar: el recibo tiene ${result.blockers.join(", ")} asociado${result.blockers.length > 1 ? "s" : ""}. Cancela o elimina primero esos registros.`);
+    const { existingReceipt } = result;
 
     revalidatePaths([
       "/receipts",

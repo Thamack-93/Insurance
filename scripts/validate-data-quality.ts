@@ -5,14 +5,16 @@ import { detectRisks } from "../src/lib/risk-engine";
 async function main() {
   const args = parseCliArgs();
   const strict = hasFlag(args, "strict");
+  const organizationId = String(args.flags.organization ?? process.env.POLICYDESK_ORGANIZATION_ID ?? "").trim();
+  if (!organizationId) throw new Error("POLICYDESK_ORGANIZATION_REQUIRED");
   await ensureDataDirs();
   const db = createDb();
 
   try {
     const [clientScores, policyScores, risks] = await Promise.all([
-      getClientDataQualityScores(),
-      getPolicyDataQualityScores(),
-      detectRisks(),
+      getClientDataQualityScores(organizationId),
+      getPolicyDataQualityScores(organizationId),
+      detectRisks(undefined, organizationId),
     ]);
 
     const criticalClients = clientScores.filter((item) => item.nivel === "Crítico");

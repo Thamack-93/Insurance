@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { AuthError, requireUser } from "@/lib/auth";
+import { AuthError } from "@/lib/auth";
 import { logError } from "@/lib/logger";
 import { checkDistributedRateLimit, getRequestIp, securityFingerprint } from "@/lib/request-guards";
 import { rateLimitResponse } from "@/lib/api-security";
-import { getPortfolioOwnerIdForRead } from "@/lib/portfolio-access";
+import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { searchPolicyCaptureEntities } from "@/lib/policy-capture-search";
 
 export const runtime = "nodejs";
@@ -19,7 +19,7 @@ const lookupSchema = z.object({
 export async function GET(request: NextRequest) {
   let query = "";
   try {
-    const user = await requireUser();
+    const scope = await requireOrganizationPortfolioReadScope();
     const { searchParams } = new URL(request.url);
     const payload = lookupSchema.parse({
       q: searchParams.get("q") ?? "",
@@ -28,9 +28,7 @@ export async function GET(request: NextRequest) {
       insurerId: searchParams.get("insurerId"),
     });
     query = payload.q;
-    const portfolioOwnerId = getPortfolioOwnerIdForRead(user);
-
-    const rateLimit = await checkDistributedRateLimit(`policy-capture-lookup:${securityFingerprint(`ip:${getRequestIp(request)}`)}:${user.id}`, {
+    const rateLimit = await checkDistributedRateLimit(`policy-capture-lookup:${securityFingerprint(`ip:${getRequestIp(request)}`)}:${scope.id}`, {
       limit: 60,
       windowMs: 60 * 1000,
       requireDistributed: true,
@@ -40,7 +38,8 @@ export async function GET(request: NextRequest) {
     const items = await searchPolicyCaptureEntities(payload.kind, payload.q, {
       clientId: payload.clientId,
       insurerId: payload.insurerId,
-      portfolioOwnerId,
+      portfolioOwnerId: scope.portfolioOwnerId,
+      organizationId: scope.organizationId,
     });
     return NextResponse.json({ items });
   } catch (error) {

@@ -20,3 +20,14 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - `NotificationChannel` and `TelegramWebhookUpdate` are platform-global. `SecurityEventAggregate.organizationId` is optional attribution and must not be auto-assigned or backfilled.
 - The bootstrap organization is intentionally singleton. Do not remove the singleton index, deletion guard, assignment triggers, or legacy User-to-membership synchronization until the explicit tenant-context rollout and two-organization validation criteria are complete.
 - Restore runs with `session_replication_role = replica`, so normal transition triggers preserve backup values. After returning to `origin`, `check:tenant-backfill` must pass, including trigger/index and membership-consistency audit.
+
+## Authenticated tenant context (Cycle 2A)
+
+- `pd_session.organizationId` is only a signed selection hint. Every protected request must revalidate the active user, membership and organization in PostgreSQL.
+- `check:tenant-read-scope` and `check:tenant-write-scope` are mandatory CI gates; protected helpers and operational scripts require an explicit `organizationId` and may not fall back to a global predicate.
+- A user may have at most one `OrganizationMembership`; keep both the global `userId` unique constraint and the temporary Cycle 1 composite unique. Multiple rows are corruption and must fail closed, never open an organization selector.
+- Mutations in migrated slices must call `assertOrganizationContextInTransaction` so membership, user, and organization suspension are locked and revalidated in the writing transaction.
+- Use `resolveOrganizationContext`, `requireOrganizationContext` and `requireOrganizationPortfolioReadScope`; never use a global tenant query from an authenticated route.
+- A `SUPERADMIN` without membership may use `/platform` only. The platform role never bypasses tenant predicates or creates an automatic membership.
+- Tenant test fixtures must use a disposable local PostgreSQL database with `TENANT_ISOLATION_TEST_DB=1` and `PLAYWRIGHT_ENFORCE_DISPOSABLE_DB=1`; never production or Vercel Preview credentials.
+- The multi-org operational coverage branch extends Cycle 2A through tenant-aware Policy/Endorsement CRUD, receipts/payments, claims, documents, WorkItems/tasks, commissions, data-quality, Nora persistence, Telegram drafts, imports, maintenance and per-organization jobs. Protected writers must pass `check:tenant-write-scope`; every runtime mutation must still revalidate context in its transaction. The production singleton barrier remains until cutover evidence passes.

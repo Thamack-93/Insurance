@@ -173,6 +173,12 @@ function quotedColumn(column: string) {
   return `"${column.replaceAll('"', '""')}"`;
 }
 
+function withOrganizationScope(table: SearchTable, scopeWhere: Prisma.Sql | undefined, organizationId?: string) {
+  if (!organizationId) return scopeWhere;
+  const organizationWhere = Prisma.sql`${Prisma.raw(`"${table}"`)}."organizationId" = ${organizationId}`;
+  return scopeWhere ? Prisma.sql`${organizationWhere} AND (${scopeWhere})` : organizationWhere;
+}
+
 /**
  * Expresión de búsqueda para una columna. El `::text` es obligatorio desde que
  * los estatus del dominio son enums: LOWER/REPLACE sólo operan sobre texto.
@@ -213,7 +219,7 @@ async function rawSearch<T extends RowWithId>(
   return (await db.$queryRaw<T[]>(sql)) as T[];
 }
 
-export async function globalSearch(query: string, portfolioOwnerId?: string): Promise<GlobalSearchResult[]> {
+export async function globalSearch(query: string, portfolioOwnerId?: string, organizationId?: string): Promise<GlobalSearchResult[]> {
   const q = query.trim();
   if (!q) return [];
   const needle = normalize(q);
@@ -326,7 +332,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       undefined,
       Prisma.empty,
       undefined,
-      scopedClientWhere,
+      withOrganizationScope("Client", scopedClientWhere, organizationId),
     ),
     (async () => {
       const policyNeedles = buildPolicyNumberSearchVariants(q);
@@ -376,7 +382,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
                   OR ${Prisma.raw(unaccentSql('"PolicyInsuredAsset"."serialNumber"'))} LIKE ${`%${needle}%`}
                 )
             )`,
-            scopedPolicyWhere,
+            withOrganizationScope("Policy", scopedPolicyWhere, organizationId),
           ),
         ),
       );
@@ -395,7 +401,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       undefined,
       Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Receipt"."clientId") AS "clientName"`,
       undefined,
-      scopedReceiptWhere,
+      withOrganizationScope("Receipt", scopedReceiptWhere, organizationId),
     ),
     rawSearch<WorkItemRow>(
       "WorkItem",
@@ -406,7 +412,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       undefined,
       Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "WorkItem"."clientId") AS "clientName"`,
       undefined,
-      scopedWorkItemWhere,
+      withOrganizationScope("WorkItem", scopedWorkItemWhere, organizationId),
     ),
     rawSearch<ClaimRow>(
       "Claim",
@@ -417,7 +423,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       undefined,
       Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Claim"."clientId") AS "clientName"`,
       undefined,
-      scopedClaimWhere,
+      withOrganizationScope("Claim", scopedClaimWhere, organizationId),
     ),
     rawSearch<QuoteRow>(
       "Quote",
@@ -428,7 +434,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       undefined,
       Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Quote"."clientId") AS "clientName"`,
       undefined,
-      scopedQuoteWhere,
+      withOrganizationScope("Quote", scopedQuoteWhere, organizationId),
     ),
     rawSearch<InsurerRow>(
       "Insurer",
@@ -439,7 +445,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
       undefined,
       Prisma.empty,
       undefined,
-      scopedInsurerWhere,
+      withOrganizationScope("Insurer", scopedInsurerWhere, organizationId),
     ),
     rawSearch<DocumentRow>(
       "Document",
@@ -455,7 +461,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string): Pr
           (SELECT "receiptNumber" FROM "Receipt" WHERE "Receipt"."id" = "Document"."receiptId")
         ) AS "parentLabel"`,
       undefined,
-      scopedDocumentWhere,
+      withOrganizationScope("Document", scopedDocumentWhere, organizationId),
     ),
   ]);
 

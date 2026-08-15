@@ -9,6 +9,7 @@ import type { WorkItemStatus } from "@/lib/domain-values";
 export type WorkItemSourceType = "Task" | "WorkItem" | "Renewal" | "Notification";
 
 export type WorkItemSyncInput = {
+  organizationId: string;
   sourceType: WorkItemSourceType;
   sourceId: string;
   /**
@@ -62,6 +63,7 @@ export async function upsertWorkItemFromSource(input: WorkItemSyncInput, client?
   const db = client ?? getDb();
 
   const createData: Prisma.WorkItemUncheckedCreateInput = {
+    organizationId: input.organizationId,
     sourceType: input.sourceType,
     sourceId: input.sourceId,
     sourceAlertId: normalizeNullableText(input.sourceAlertId),
@@ -89,6 +91,7 @@ export async function upsertWorkItemFromSource(input: WorkItemSyncInput, client?
   };
 
   const updateData: Prisma.WorkItemUncheckedUpdateInput = {
+    organizationId: input.organizationId,
     ...(input.sourceAlertId === undefined
       ? {}
       : { sourceAlertId: normalizeNullableText(input.sourceAlertId) }),
@@ -117,7 +120,8 @@ export async function upsertWorkItemFromSource(input: WorkItemSyncInput, client?
   try {
     return await db.workItem.upsert({
       where: {
-        sourceType_sourceId: {
+        organizationId_sourceType_sourceId: {
+          organizationId: input.organizationId,
           sourceType: input.sourceType,
           sourceId: input.sourceId,
         },
@@ -135,13 +139,14 @@ export async function upsertWorkItemFromSource(input: WorkItemSyncInput, client?
   }
 }
 
-export async function deleteWorkItemBySource(sourceType: WorkItemSourceType, sourceId: string, client?: WorkItemDb) {
+export async function deleteWorkItemBySource(organizationId: string, sourceType: WorkItemSourceType, sourceId: string, client?: WorkItemDb) {
   const db = client ?? getDb();
 
   try {
     await db.workItem.delete({
       where: {
-        sourceType_sourceId: {
+        organizationId_sourceType_sourceId: {
+          organizationId,
           sourceType,
           sourceId,
         },

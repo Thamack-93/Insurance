@@ -5,7 +5,7 @@ import { AuthError, requireUser } from "@/lib/auth";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody } from "@/lib/request-guards";
 import { rateLimitResponse } from "@/lib/api-security";
-import { getPortfolioOwnerIdForRead } from "@/lib/portfolio-access";
+import { requireOrganizationContext } from "@/lib/organization-context";
 import { extractPdfTextFromBytes } from "@/lib/pdf-text-extraction";
 import { buildPolicyPdfCapturePreviewFromText, buildPolicyPdfCapturePreviewFromDraft } from "@/lib/policy-pdf-capture-preview";
 import { extractPolicyPdfDraftFromAiFile } from "@/lib/assistant-ai";
@@ -42,11 +42,12 @@ const analyzeSchema = z.object({
   })).max(20).optional(),
 });
 
-async function responseFromText(text: string, userId: string, role: "ADMIN" | "AGENT", options: { requestedMode?: "local" | "ai"; skipAiReview?: boolean; extraWarnings?: string[]; aiFailureCode?: string | null; relatedDocuments?: z.infer<typeof analyzeSchema>["relatedDocuments"] } = {}) {
+async function responseFromText(text: string, userId: string, organizationId: string, role: "ADMIN" | "AGENT", options: { requestedMode?: "local" | "ai"; skipAiReview?: boolean; extraWarnings?: string[]; aiFailureCode?: string | null; relatedDocuments?: z.infer<typeof analyzeSchema>["relatedDocuments"] } = {}) {
   const preview = await withOperationTimeout(
     buildPolicyPdfCapturePreviewFromText(text, undefined, {
       portfolioOwnerId: role === "ADMIN" ? undefined : userId,
-    user: { id: userId, role },
+      organizationId,
+      user: { id: userId, role },
     }, options),
     PDF_ANALYSIS_SERVER_TIMEOUT_MS,
     "La revisión del PDF tardó demasiado al consultar la cartera o la IA.",
@@ -61,9 +62,14 @@ export async function POST(request: NextRequest) {
   try {
     let user: Awaited<ReturnType<typeof requireUser>>;
     let portfolioOwnerId: string | undefined;
+    let organizationId: string;
+    let assistantRole: "ADMIN" | "AGENT";
     try {
       user = await requireUser();
-      portfolioOwnerId = getPortfolioOwnerIdForRead(user);
+      const organization = await requireOrganizationContext();
+      organizationId = organization.organizationId;
+      assistantRole = organization.membershipRole === "AGENT" ? "AGENT" : "ADMIN";
+      portfolioOwnerId = assistantRole === "AGENT" ? organization.userId : undefined;
     } catch (error) {
       if (error instanceof AuthError) {
         await recordSecurityAccessDenied({
@@ -126,7 +132,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (payload.text && payload.mode !== "ai") {
-      const result = await responseFromText(payload.text, user.id, user.role === "ADMIN" ? "ADMIN" : "AGENT", { requestedMode: "local", relatedDocuments: payload.relatedDocuments });
+      const result = await responseFromText(payload.text, user.id, organizationId, assistantRole, { requestedMode: "local", relatedDocuments: payload.relatedDocuments });
       return NextResponse.json({ success: true, ...result, pdfReference: payload.retainBlob && payload.blobUrl ? { url: payload.blobUrl, fileName: payload.fileName ?? "policy.pdf", expiresAt: Date.now() + 30 * 60 * 1000 } : null });
     }
 
@@ -165,7 +171,7 @@ export async function POST(request: NextRequest) {
 
       if (payload.mode === "ai") {
         const aiExtraction = await extractPolicyPdfDraftFromAiFile({
-          user: { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" },
+          user: { id: user.id, role: assistantRole },
           fileName: payload.fileName ?? blob.blob.pathname.split("/").pop() ?? "policy.pdf",
           fileData: bytes,
           instruction: payload.prompt ?? null,
@@ -175,7 +181,7 @@ export async function POST(request: NextRequest) {
           if (!extracted?.text.trim()) {
             return NextResponse.json({ error: aiExtraction.attempted ? "La extracción IA no pudo completar este PDF después de recorrer los modelos configurados." : "La IA no está disponible. Configura AI_GATEWAY_API_KEY o prueba con una versión con mejor calidad." }, { status: 422 });
           }
-          const fallback = await responseFromText(extracted.text, user.id, user.role === "ADMIN" ? "ADMIN" : "AGENT", {
+          const fallback = await responseFromText(extracted.text, user.id, organizationId, assistantRole, {
             requestedMode: "ai",
             skipAiReview: true,
             extraWarnings: ["La IA fue solicitada, pero no pudo completar la extracción; se muestra el resultado local para revisión."],
@@ -196,7 +202,7 @@ export async function POST(request: NextRequest) {
               requestedMode: "ai",
               aiRunIds: aiExtraction.runId ? [aiExtraction.runId] : [],
               trackingStatus: aiExtraction.trackingStatus,
-              context: { portfolioOwnerId, user: { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" } },
+              context: { portfolioOwnerId, organizationId, user: { id: user.id, role: assistantRole } },
             }),
             PDF_ANALYSIS_SERVER_TIMEOUT_MS,
             "La revisión de la captura tardó demasiado al consultar la cartera.",
@@ -204,7 +210,7 @@ export async function POST(request: NextRequest) {
           analysisSource = "ai";
         }
       } else if (extracted?.text.trim()) {
-        const result = await responseFromText(extracted.text, user.id, user.role === "ADMIN" ? "ADMIN" : "AGENT", { requestedMode: "local", relatedDocuments: payload.relatedDocuments });
+        const result = await responseFromText(extracted.text, user.id, organizationId, assistantRole, { requestedMode: "local", relatedDocuments: payload.relatedDocuments });
         preview = result.preview;
         analysisSource = result.provenance.extractionSource;
       } else {

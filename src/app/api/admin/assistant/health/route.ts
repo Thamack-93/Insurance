@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { gateway, generateText } from "ai";
-import { requireUser } from "@/lib/auth";
+import { requireOrganizationRole } from "@/lib/organization-context";
 import { getAssistantAiConnectionStatus, getAssistantStructuredModel } from "@/lib/assistant-ai";
 import { logError } from "@/lib/logger";
 
@@ -9,10 +9,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const user = await requireUser();
-    if (user.role !== "ADMIN") {
-      return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
-    }
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
 
     const configured = getAssistantAiConnectionStatus();
     if (!configured.available) {
@@ -26,7 +23,7 @@ export async function GET() {
       temperature: 0,
       maxOutputTokens: 8,
       abortSignal: AbortSignal.timeout(8_000),
-      providerOptions: { gateway: { user: user.id, tags: ["feature:assistant-health", "surface:admin"] } },
+      providerOptions: { gateway: { user: context.userId, tags: ["feature:assistant-health", "surface:admin", `organization:${context.organizationId}`] } },
     });
 
     return NextResponse.json({

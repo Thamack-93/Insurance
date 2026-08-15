@@ -128,6 +128,7 @@ model Organization {
   id              String   @id
   name            String
   slug            String   @unique
+  kind            String   @default("CUSTOMER")
   status          String   @default("ACTIVE")
   timeZone        String   @default("Etc/GMT+6")
   defaultCurrency String   @default("MXN")
@@ -172,6 +173,7 @@ model Organization {
   securityEventAggregates SecurityEventAggregate[]
 
   @@index([status])
+  @@index([kind])
 }
 
 model OrganizationMembership {
@@ -187,8 +189,8 @@ model OrganizationMembership {
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, userId])
+  @@unique([userId])
   @@index([organizationId])
-  @@index([userId])
   @@index([role])
   @@index([active])
 }
@@ -531,7 +533,7 @@ model Payment {
   reversedById      String?
   reversedAt        DateTime?
   reversalReason    String?
-  sourceEvidenceKey String?  @unique
+  sourceEvidenceKey String?
 
   receipt   Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   policy    Policy  @relation(fields: [policyId], references: [id], onDelete: Cascade)
@@ -549,6 +551,7 @@ model Payment {
   @@index([createdById])
   @@index([updatedById])
   @@index([organizationId])
+  @@unique([organizationId, sourceEvidenceKey])
 }
 
 model Commission {
@@ -671,7 +674,7 @@ model WorkItem {
   sourceAlert        Alert?              @relation("WorkItemSourceAlert", fields: [sourceAlertId], references: [id], onDelete: Cascade)
   notificationEvents NotificationEvent[]
 
-  @@unique([sourceType, sourceId])
+  @@unique([organizationId, sourceType, sourceId])
   @@index([sourceAlertId])
   @@index([folio])
   @@index([entityType, entityId])
@@ -949,7 +952,7 @@ model NotificationEvent {
   clientId    String?
   policyId    String?
   receiptId   String?
-  dedupeKey   String?   @unique
+  dedupeKey   String?
   channelType String
   status      String    @default("PENDING")
   sentAt      DateTime?
@@ -970,6 +973,7 @@ model NotificationEvent {
   @@index([createdAt])
   @@index([workItemId])
   @@index([clientId])
+  @@unique([organizationId, dedupeKey])
   @@index([policyId])
   @@index([receiptId])
   @@index([organizationId])
@@ -1286,7 +1290,7 @@ model PolicyRenewalSuggestion {
   mergedBy     User?           @relation("PolicyRenewalSuggestionMergedBy", fields: [mergedById], references: [id], onDelete: SetNull)
   reviewedBy     User?           @relation("PolicyRenewalSuggestionReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
 
-  @@unique([sourcePolicyId, targetPolicyId])
+  @@unique([organizationId, sourcePolicyId, targetPolicyId], map: "PolicyRenewalSuggestion_org_source_target_key")
   @@index([maintenanceRunId])
   @@index([sourcePolicyId])
   @@index([sourcePolicyId, status])
@@ -1322,7 +1326,7 @@ model DataQualitySuppressionRule {
   renewalSuggestions PolicyRenewalSuggestion[] @relation("RenewalSuggestionSuppressionRule")
   ledgerIssues LedgerImportIssue[] @relation("LedgerIssueSuppressionRule")
 
-  @@unique([category, issueCode, criteriaJson])
+  @@unique([organizationId, category, issueCode, criteriaJson], map: "DataQualitySuppressionRule_org_category_issue_criteria_key")
   @@index([category])
   @@index([issueCode])
   @@index([active])

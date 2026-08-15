@@ -2,9 +2,8 @@
 
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
-import { getCurrentUserId } from "@/lib/auth";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
-import { assertPolicyPortfolioAccess } from "@/lib/portfolio-access";
+import { assertOrganizationContextInTransaction, requireOrganizationContext } from "@/lib/organization-context";
 import { isRenewalStage, isTerminalRenewalStage, resolveRenewalStage } from "@/lib/renewal-board.logic";
 import { closeRenewalFollowUp } from "@/lib/renewal-followups";
 import { renewalStageLabel } from "@/lib/status";
@@ -13,11 +12,11 @@ import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 export async function markRenewalAsNotContinuing(policyId: string): Promise<MutationResult> {
   try {
     const db = getDb();
-    const userId = await getCurrentUserId();
-    await assertPolicyPortfolioAccess(policyId, userId);
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
 
-    const policy = await db.policy.findUnique({
-      where: { id: policyId },
+    const policy = await db.policy.findFirst({
+      where: { id: policyId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: userId } } : {}) },
       include: {
         client: { select: { fullName: true } },
       },
@@ -29,8 +28,10 @@ export async function markRenewalAsNotContinuing(policyId: string): Promise<Muta
 
     const now = new Date();
     const { workItemCancelled, suggestionCreated } = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
       const workItem = await tx.workItem.findFirst({
         where: {
+          organizationId: context.organizationId,
           workItemType: "TASK",
           taskType: "RENEWAL",
           policyId,
@@ -56,6 +57,7 @@ export async function markRenewalAsNotContinuing(policyId: string): Promise<Muta
         cancelledWorkItemId = updatedWorkItem.id;
 
         await writeActivityLog({
+          organizationId: context.organizationId,
           entityType: "WorkItem",
           entityId: updatedWorkItem.sourceId ?? updatedWorkItem.id,
           action: "TASK_CANCEL_RENEWAL",
@@ -67,7 +69,7 @@ export async function markRenewalAsNotContinuing(policyId: string): Promise<Muta
       }
 
       const existingSuggestion = await tx.policyRenewalSuggestion.findFirst({
-        where: { sourcePolicyId: policy.id },
+        where: { organizationId: context.organizationId, sourcePolicyId: policy.id },
         orderBy: { updatedAt: "desc" },
       });
 
@@ -75,6 +77,7 @@ export async function markRenewalAsNotContinuing(policyId: string): Promise<Muta
         await tx.policyRenewalSuggestion.update({
           where: { id: existingSuggestion.id },
           data: {
+            organizationId: context.organizationId,
             targetPolicyId: null,
             status: "DECLINED",
             reason: "No se va a renovar.",
@@ -98,9 +101,10 @@ export async function markRenewalAsNotContinuing(policyId: string): Promise<Muta
       }
 
       // El recordatorio de "sin avance" ya no aplica: la renovación se cerró.
-      await closeRenewalFollowUp(policy.id, userId, tx);
+      await closeRenewalFollowUp(context.organizationId, policy.id, userId, tx);
 
       await writeActivityLog({
+        organizationId: context.organizationId,
         entityType: "Policy",
         entityId: policy.id,
         action: "RENEWAL_DECLINED",
@@ -168,11 +172,11 @@ export async function setRenewalStage(policyId: string, stage: string): Promise<
     }
 
     const db = getDb();
-    const userId = await getCurrentUserId();
-    await assertPolicyPortfolioAccess(policyId, userId);
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
 
-    const policy = await db.policy.findUnique({
-      where: { id: policyId },
+    const policy = await db.policy.findFirst({
+      where: { id: policyId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: userId } } : {}) },
       select: {
         id: true,
         policyNumber: true,
@@ -208,6 +212,7 @@ export async function setRenewalStage(policyId: string, stage: string): Promise<
     const now = new Date();
 
     await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
       await tx.policy.update({
         where: { id: policy.id },
         data: {
@@ -219,6 +224,7 @@ export async function setRenewalStage(policyId: string, stage: string): Promise<
       });
 
       await writeActivityLog({
+        organizationId: context.organizationId,
         entityType: "Policy",
         entityId: policy.id,
         action: "RENEWAL_STAGE_CHANGE",
@@ -235,7 +241,7 @@ export async function setRenewalStage(policyId: string, stage: string): Promise<
 
       // La renovación acaba de avanzar: el recordatorio de "sin avance" que
       // pudiera existir ya no aplica.
-      await closeRenewalFollowUp(policy.id, userId, tx);
+      await closeRenewalFollowUp(context.organizationId, policy.id, userId, tx);
     });
 
     revalidatePaths([
@@ -265,13 +271,12 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
     }
 
     const db = getDb();
-    const userId = await getCurrentUserId();
-    await assertPolicyPortfolioAccess(sourcePolicyId, userId);
-    await assertPolicyPortfolioAccess(targetPolicyId, userId);
+    const context = await requireOrganizationContext();
+    const userId = context.userId;
 
     const [sourcePolicy, targetPolicy] = await Promise.all([
-      db.policy.findUnique({
-        where: { id: sourcePolicyId },
+      db.policy.findFirst({
+        where: { id: sourcePolicyId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: userId } } : {}) },
         select: {
           id: true,
           policyNumber: true,
@@ -281,8 +286,8 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
           status: true,
         },
       }),
-      db.policy.findUnique({
-        where: { id: targetPolicyId },
+      db.policy.findFirst({
+        where: { id: targetPolicyId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: userId } } : {}) },
         select: {
           id: true,
           policyNumber: true,
@@ -309,8 +314,10 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
     let workItemClosed = false;
 
     await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
       const workItem = await tx.workItem.findFirst({
         where: {
+          organizationId: context.organizationId,
           workItemType: "TASK",
           taskType: "RENEWAL",
           policyId: sourcePolicy.id,
@@ -335,7 +342,7 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
       }
 
       const existingSuggestion = await tx.policyRenewalSuggestion.findFirst({
-        where: { sourcePolicyId: sourcePolicy.id },
+        where: { organizationId: context.organizationId, sourcePolicyId: sourcePolicy.id },
         orderBy: { updatedAt: "desc" },
       });
 
@@ -343,6 +350,7 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
         await tx.policyRenewalSuggestion.update({
           where: { id: existingSuggestion.id },
           data: {
+            organizationId: context.organizationId,
             targetPolicyId: targetPolicy.id,
             status: "ACCEPTED",
             reason: "Vinculada manualmente desde Riesgos y calidad.",
@@ -384,9 +392,10 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
       });
 
       // La renovación quedó cerrada: su recordatorio de "sin avance" sobra.
-      await closeRenewalFollowUp(sourcePolicy.id, userId, tx);
+      await closeRenewalFollowUp(context.organizationId, sourcePolicy.id, userId, tx);
 
       await writeActivityLog({
+        organizationId: context.organizationId,
         entityType: "Policy",
         entityId: sourcePolicy.id,
         action: "RENEWAL_LINKED",

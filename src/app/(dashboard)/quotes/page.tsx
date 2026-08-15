@@ -14,7 +14,7 @@ import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { quoteStatusOptions } from "@/lib/domain-options";
-import { organizationOperationalWhere, quoteOperationalWhere, requirePortfolioReadScope } from "@/lib/portfolio-access";
+import { quoteOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { buildTableHref } from "@/lib/table-query";
 import {
   buildQuoteListOrderBy,
@@ -34,8 +34,8 @@ export default async function QuotesPage({
   const { query, page, sortKey, direction } = filters;
   const statusFilter = filters.status;
   const isFiltered = Boolean(query || statusFilter);
-  const scope = await requirePortfolioReadScope();
-  const quoteScope = { ...quoteOperationalWhere(scope.portfolioOwnerId), ...organizationOperationalWhere(scope.organizationId) };
+  const scope = await requireOrganizationPortfolioReadScope();
+  const quoteScope = quoteOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const clearFiltersHref = buildTableHref("/quotes", params, {
     q: null,
     status: null,

@@ -14,11 +14,13 @@ import {
   getFlag,
   parseCliArgs,
   printTable,
+  requireOrganizationId,
   summarizeByCurrency,
 } from "./_shared.ts";
 
 async function main() {
   const args = parseCliArgs();
+  const organizationId = requireOrganizationId(args);
   const horizonDays = Number(getFlag(args, "days", "60"));
   const limit = Number(getFlag(args, "limit", "20"));
   const db = createDb();
@@ -28,6 +30,7 @@ async function main() {
   const [overdue, upcoming] = await Promise.all([
     db.policy.findMany({
       where: {
+        organizationId,
         endDate: { lt: now },
         ...ACTIVE_RENEWAL_POLICY_WHERE,
       },
@@ -37,6 +40,7 @@ async function main() {
     }),
     db.policy.findMany({
       where: {
+        organizationId,
         endDate: { gte: now, lte: horizon },
         ...ACTIVE_RENEWAL_POLICY_WHERE,
       },

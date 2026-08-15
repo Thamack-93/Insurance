@@ -1,4 +1,4 @@
-import { assertProductionMutationAllowed, createDb, closeDb, parseCliArgs } from "./_shared.ts";
+import { assertProductionMutationAllowed, createDb, closeDb, parseCliArgs, requireOrganizationId } from "./_shared.ts";
 import { businessStartOfDay } from "../src/lib/business-dates.ts";
 
 type ChangeRecord = {
@@ -62,6 +62,7 @@ async function normalizeRows<T extends { id: string } & Record<string, unknown>>
 async function main() {
   const args = parseCliArgs();
   const apply = args.flags.apply === true || args.flags.apply === "true";
+  const organizationId = requireOrganizationId(args);
   if (apply) {
     assertProductionMutationAllowed({
       actionLabel: "El backfill de fechas de negocio",
@@ -75,6 +76,7 @@ async function main() {
 
   try {
     const receipts = await db.receipt.findMany({
+      where: { organizationId },
       select: { id: true, periodStartDate: true, periodEndDate: true, dueDate: true, paidDate: true },
     });
     const receiptResult = await normalizeRows(
@@ -83,7 +85,7 @@ async function main() {
       ["periodStartDate", "periodEndDate", "dueDate", "paidDate"],
       async (row, updates) => {
         if (apply) {
-          await db.receipt.update({ where: { id: row.id }, data: updates });
+          await db.receipt.update({ where: { id: row.id, organizationId }, data: updates });
         }
       },
     );
@@ -91,6 +93,7 @@ async function main() {
     changes.push(...receiptResult.changes);
 
     const policies = await db.policy.findMany({
+      where: { organizationId },
       select: { id: true, startDate: true, endDate: true },
     });
     const policyResult = await normalizeRows(
@@ -99,7 +102,7 @@ async function main() {
       ["startDate", "endDate"],
       async (row, updates) => {
         if (apply) {
-          await db.policy.update({ where: { id: row.id }, data: updates });
+          await db.policy.update({ where: { id: row.id, organizationId }, data: updates });
         }
       },
     );
@@ -107,6 +110,7 @@ async function main() {
     changes.push(...policyResult.changes);
 
     const endorsements = await db.policyEndorsement.findMany({
+      where: { organizationId },
       select: { id: true, startDate: true, endDate: true },
     });
     const endorsementResult = await normalizeRows(
@@ -115,7 +119,7 @@ async function main() {
       ["startDate", "endDate"],
       async (row, updates) => {
         if (apply) {
-          await db.policyEndorsement.update({ where: { id: row.id }, data: updates });
+          await db.policyEndorsement.update({ where: { id: row.id, organizationId }, data: updates });
         }
       },
     );
@@ -123,17 +127,19 @@ async function main() {
     changes.push(...endorsementResult.changes);
 
     const payments = await db.payment.findMany({
+      where: { organizationId },
       select: { id: true, paidDate: true },
     });
     const paymentResult = await normalizeRows("Payment", payments, ["paidDate"], async (row, updates) => {
       if (apply) {
-        await db.payment.update({ where: { id: row.id }, data: updates });
+        await db.payment.update({ where: { id: row.id, organizationId }, data: updates });
       }
     });
     summaries.push({ table: "Payment", scanned: payments.length, updated: paymentResult.updated });
     changes.push(...paymentResult.changes);
 
     const commissions = await db.commission.findMany({
+      where: { organizationId },
       select: { id: true, expectedDate: true, paidDate: true },
     });
     const commissionResult = await normalizeRows(
@@ -142,7 +148,7 @@ async function main() {
       ["expectedDate", "paidDate"],
       async (row, updates) => {
         if (apply) {
-          await db.commission.update({ where: { id: row.id }, data: updates });
+          await db.commission.update({ where: { id: row.id, organizationId }, data: updates });
         }
       },
     );
@@ -150,17 +156,19 @@ async function main() {
     changes.push(...commissionResult.changes);
 
     const tasks = await db.task.findMany({
+      where: { organizationId },
       select: { id: true, startDate: true, dueDate: true, closedDate: true },
     });
     const taskResult = await normalizeRows("Task", tasks, ["startDate", "dueDate", "closedDate"], async (row, updates) => {
       if (apply) {
-        await db.task.update({ where: { id: row.id }, data: updates });
+        await db.task.update({ where: { id: row.id, organizationId }, data: updates });
       }
     });
     summaries.push({ table: "Task", scanned: tasks.length, updated: taskResult.updated });
     changes.push(...taskResult.changes);
 
     const workItems = await db.workItem.findMany({
+      where: { organizationId },
       select: { id: true, startDate: true, dueDate: true, closedDate: true, readAt: true },
     });
     const workItemResult = await normalizeRows(
@@ -169,7 +177,7 @@ async function main() {
       ["startDate", "dueDate", "closedDate", "readAt"],
       async (row, updates) => {
         if (apply) {
-          await db.workItem.update({ where: { id: row.id }, data: updates });
+          await db.workItem.update({ where: { id: row.id, organizationId }, data: updates });
         }
       },
     );
@@ -177,6 +185,7 @@ async function main() {
     changes.push(...workItemResult.changes);
 
     const quotes = await db.quote.findMany({
+      where: { organizationId },
       select: { id: true, requestedDate: true, sentDate: true, validUntil: true },
     });
     const quoteResult = await normalizeRows(
@@ -185,7 +194,7 @@ async function main() {
       ["requestedDate", "sentDate", "validUntil"],
       async (row, updates) => {
         if (apply) {
-          await db.quote.update({ where: { id: row.id }, data: updates });
+          await db.quote.update({ where: { id: row.id, organizationId }, data: updates });
         }
       },
     );

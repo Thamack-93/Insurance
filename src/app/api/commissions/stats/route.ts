@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { AuthError, requireAdmin } from "@/lib/auth";
+import { AuthError } from "@/lib/auth";
+import { requireOrganizationRole } from "@/lib/organization-context";
 import { getCommissionStats } from "@/lib/commissions";
 import { logError } from "@/lib/logger";
 
 export async function GET() {
   try {
-    await requireAdmin();
-    const stats = await getCommissionStats();
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+    const stats = await getCommissionStats(undefined, context);
     return NextResponse.json(stats);
   } catch (error) {
     if (error instanceof AuthError) {

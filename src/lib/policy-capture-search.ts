@@ -45,11 +45,12 @@ function includesNormalized(haystack: string | null | undefined, needle: string)
   return normalize(haystack).includes(needle);
 }
 
-async function searchClients(query: string, portfolioOwnerId?: string | null) {
+async function searchClients(query: string, organizationId: string, portfolioOwnerId?: string | null) {
   const db = getDb();
   const needle = normalize(query);
   const databaseQuery = normalizeCaptureIdentity(query).split(" ").filter(Boolean).slice(0, 2).join(" ") || query;
   const baseWhere = {
+    organizationId,
     status: { not: "ARCHIVED" as const },
     ...(portfolioOwnerId ? { portfolioOwnerId } : {}),
   };
@@ -128,11 +129,11 @@ async function searchClients(query: string, portfolioOwnerId?: string | null) {
   }));
 }
 
-async function searchInsurers(query: string) {
+async function searchInsurers(query: string, organizationId: string) {
   const db = getDb();
   const needle = normalize(query);
   const databaseQuery = normalizeCaptureIdentity(query).split(" ").filter(Boolean).slice(0, 2).join(" ") || query;
-  const baseWhere = { status: { not: "ARCHIVED" as const } };
+  const baseWhere = { organizationId, status: { not: "ARCHIVED" as const } };
   let rows = await db.insurer.findMany({
     where: needle
       ? {
@@ -194,7 +195,12 @@ async function searchInsurers(query: string) {
 
 async function searchPolicies(
   query: string,
-  filters?: { clientId?: string | null; insurerId?: string | null; portfolioOwnerId?: string | null },
+  filters: {
+    organizationId: string;
+    clientId?: string | null;
+    insurerId?: string | null;
+    portfolioOwnerId?: string | null;
+  },
 ) {
   const db = getDb();
   const needle = normalize(query);
@@ -204,6 +210,7 @@ async function searchPolicies(
   const rows = await db.policy.findMany({
     where: needle
       ? {
+          organizationId: filters.organizationId,
           ...(filters?.portfolioOwnerId ? { client: { portfolioOwnerId: filters.portfolioOwnerId } } : {}),
           ...clientFilter,
           ...(filters?.insurerId ? { insurerId: filters.insurerId } : {}),
@@ -221,6 +228,7 @@ async function searchPolicies(
           ],
         }
       : {
+          organizationId: filters.organizationId,
           ...(filters?.portfolioOwnerId ? { client: { portfolioOwnerId: filters.portfolioOwnerId } } : {}),
           ...clientFilter,
           ...(filters?.insurerId ? { insurerId: filters.insurerId } : {}),
@@ -294,11 +302,16 @@ async function searchPolicies(
 export async function searchPolicyCaptureEntities(
   kind: PolicyCaptureSearchKind,
   query: string,
-  filters?: { clientId?: string | null; insurerId?: string | null; portfolioOwnerId?: string | null },
+  filters: {
+    organizationId: string;
+    clientId?: string | null;
+    insurerId?: string | null;
+    portfolioOwnerId?: string | null;
+  },
 ): Promise<PolicyCaptureSearchItem[]> {
   const normalizedQuery = query.trim();
-  if (kind === "client") return searchClients(normalizedQuery, filters?.portfolioOwnerId);
-  if (kind === "insurer") return searchInsurers(normalizedQuery);
+  if (kind === "client") return searchClients(normalizedQuery, filters.organizationId, filters.portfolioOwnerId);
+  if (kind === "insurer") return searchInsurers(normalizedQuery, filters.organizationId);
   if (kind === "policy") return searchPolicies(normalizedQuery, filters);
   return [];
 }

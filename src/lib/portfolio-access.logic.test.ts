@@ -5,8 +5,6 @@ import {
   clientOperationalWhere,
   claimOperationalWhere,
   documentOperationalWhere,
-  getPortfolioOwnerIdForRead,
-  organizationOperationalWhere,
   policyOperationalWhere,
   quoteOperationalWhere,
   receiptOperationalWhere,
@@ -14,21 +12,22 @@ import {
 } from "@/lib/portfolio-access";
 
 describe("portfolio access helpers", () => {
-  it("maps non-admin users to their own portfolio and leaves admin global", () => {
-    expect(getPortfolioOwnerIdForRead({ id: "agent-1", role: "AGENT" })).toBe("agent-1");
-    expect(getPortfolioOwnerIdForRead({ id: "admin-1", role: "ADMIN" })).toBeUndefined();
-  });
-
   it("builds tenant-scoped predicates for the common entity types", () => {
-    expect(clientOperationalWhere("agent-1")).toEqual({ portfolioOwnerId: "agent-1" });
-    expect(policyOperationalWhere("agent-1")).toEqual({ client: { portfolioOwnerId: "agent-1" } });
-    expect(receiptOperationalWhere("agent-1")).toEqual({ client: { portfolioOwnerId: "agent-1" } });
-    expect(claimOperationalWhere("agent-1")).toEqual({ client: { portfolioOwnerId: "agent-1" } });
-    expect(quoteOperationalWhere("agent-1")).toEqual({ client: { portfolioOwnerId: "agent-1" } });
-    expect(workItemOperationalWhere("agent-1")).toEqual({
+    expect(clientOperationalWhere("agent-1", "org-a")).toEqual({ organizationId: "org-a", portfolioOwnerId: "agent-1" });
+    const relatedScope = {
+      organizationId: "org-a",
+      client: { organizationId: "org-a", portfolioOwnerId: "agent-1" },
+    };
+    expect(policyOperationalWhere("agent-1", "org-a")).toEqual(relatedScope);
+    expect(receiptOperationalWhere("agent-1", "org-a")).toEqual(relatedScope);
+    expect(claimOperationalWhere("agent-1", "org-a")).toEqual(relatedScope);
+    expect(quoteOperationalWhere("agent-1", "org-a")).toEqual(relatedScope);
+    expect(workItemOperationalWhere("agent-1", "org-a")).toEqual({
+      organizationId: "org-a",
       OR: [{ client: { portfolioOwnerId: "agent-1" } }, { clientId: null, assignedToId: "agent-1" }],
     });
-    expect(documentOperationalWhere("agent-1")).toEqual({
+    expect(documentOperationalWhere("agent-1", "org-a")).toEqual({
+      organizationId: "org-a",
       OR: [
         { client: { portfolioOwnerId: "agent-1" } },
         { policy: { client: { portfolioOwnerId: "agent-1" } } },
@@ -52,19 +51,14 @@ describe("portfolio access helpers", () => {
     });
   });
 
-  it("returns an empty predicate for admins", () => {
-    expect(clientOperationalWhere()).toEqual({});
-    expect(policyOperationalWhere()).toEqual({});
-    expect(receiptOperationalWhere()).toEqual({});
-    expect(claimOperationalWhere()).toEqual({});
-    expect(quoteOperationalWhere()).toEqual({});
-    expect(documentOperationalWhere()).toEqual({});
-    expect(workItemOperationalWhere()).toEqual({});
-  });
-
-  it("keeps the active organization predicate explicit", () => {
-    expect(organizationOperationalWhere("org_legacy_singleton_0001")).toEqual({
-      organizationId: "org_legacy_singleton_0001",
-    });
+  it("keeps administrators scoped to their organization", () => {
+    expect(clientOperationalWhere(undefined, "org-a")).toEqual({ organizationId: "org-a" });
+    const relatedScope = { organizationId: "org-a", client: { organizationId: "org-a" } };
+    expect(policyOperationalWhere(undefined, "org-a")).toEqual(relatedScope);
+    expect(receiptOperationalWhere(undefined, "org-a")).toEqual(relatedScope);
+    expect(claimOperationalWhere(undefined, "org-a")).toEqual(relatedScope);
+    expect(quoteOperationalWhere(undefined, "org-a")).toEqual(relatedScope);
+    expect(documentOperationalWhere(undefined, "org-a")).toEqual({ organizationId: "org-a" });
+    expect(workItemOperationalWhere(undefined, "org-a")).toEqual({ organizationId: "org-a" });
   });
 });

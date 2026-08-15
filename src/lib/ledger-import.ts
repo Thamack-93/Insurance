@@ -726,6 +726,7 @@ function strictReceiptMatch(receipt: {
 async function storePreviewBatch(input: {
   db: DbClient;
   actorId: string;
+  organizationId: string;
   sourceCsvName: string;
   sourceCsvHash: string;
   sourcePaidName: string;
@@ -738,6 +739,7 @@ async function storePreviewBatch(input: {
 }) {
   const batch = await input.db.ledgerImportBatch.create({
     data: {
+      organizationId: input.organizationId,
       sourceCsvName: input.sourceCsvName,
       sourceCsvHash: input.sourceCsvHash,
       sourcePaidName: input.sourcePaidName,
@@ -752,6 +754,7 @@ async function storePreviewBatch(input: {
       ...input.policyRows.map((row) => {
         const decision = input.endorsementDecisions.get(row.rowNumber);
         return {
+          organizationId: input.organizationId,
           batchId: batch.id,
           sourceType: "POLICY_CSV",
           rowNumber: row.rowNumber,
@@ -779,6 +782,7 @@ async function storePreviewBatch(input: {
       ...input.paidRows.map((row) => {
         const decision = input.paidDecisions.get(row.rowNumber);
         return {
+        organizationId: input.organizationId,
         batchId: batch.id,
         sourceType: "PAID_XLS",
         rowNumber: row.rowNumber,
@@ -814,6 +818,7 @@ async function storePreviewBatch(input: {
 
 export async function createLedgerImportPreview(input: {
   actorId: string;
+  organizationId: string;
   csvName: string;
   csvBuffer: Buffer;
   paidName: string;
@@ -829,6 +834,7 @@ export async function createLedgerImportPreview(input: {
 
   const [policies, receipts, existingPayments, existingEndorsements] = await Promise.all([
     db.policy.findMany({
+      where: { organizationId: input.organizationId },
       select: {
         id: true,
         policyNumber: true,
@@ -843,6 +849,7 @@ export async function createLedgerImportPreview(input: {
       },
     }),
     db.receipt.findMany({
+      where: { organizationId: input.organizationId },
       select: {
         id: true,
         receiptNumber: true,
@@ -862,10 +869,11 @@ export async function createLedgerImportPreview(input: {
       },
     }),
     db.payment.findMany({
-      where: { sourceEvidenceKey: { not: null } },
+      where: { organizationId: input.organizationId, sourceEvidenceKey: { not: null } },
       select: { id: true, sourceEvidenceKey: true },
     }),
     db.policyEndorsement.findMany({
+      where: { organizationId: input.organizationId },
       select: {
         id: true,
         policyId: true,
@@ -1174,6 +1182,7 @@ export async function createLedgerImportPreview(input: {
   const batch = await storePreviewBatch({
     db,
     actorId: input.actorId,
+    organizationId: input.organizationId,
     sourceCsvName: input.csvName,
     sourceCsvHash: csvHash,
     sourcePaidName: input.paidName,
@@ -1186,7 +1195,7 @@ export async function createLedgerImportPreview(input: {
   });
 
   const batchRows = await db.ledgerImportRow.findMany({
-    where: { batchId: batch.id },
+    where: { organizationId: input.organizationId, batchId: batch.id },
     select: { id: true, sourceType: true, rowNumber: true, sourceKey: true },
   });
   const rowBySource = new Map(
@@ -1209,10 +1218,12 @@ export async function createLedgerImportPreview(input: {
             issueType: issue.type,
           },
         },
+        input.organizationId,
         db,
       );
 
       return {
+        organizationId: input.organizationId,
         batchId: batch.id,
         rowId,
         issueType: issue.type,
@@ -1292,6 +1303,7 @@ async function markEndorsementApplyReview(input: {
   db: DbClient;
   batchId: string;
   actorId: string;
+  organizationId: string;
   row: { id: string; rowNumber: number; sourceType: string; sourceKey: string };
   issueType: string;
   message: string;
@@ -1309,6 +1321,7 @@ async function markEndorsementApplyReview(input: {
         sourceKey: input.row.sourceKey,
       },
     },
+    input.organizationId,
     input.db,
   );
   await input.db.ledgerImportRow.update({
@@ -1317,6 +1330,7 @@ async function markEndorsementApplyReview(input: {
   });
   await input.db.ledgerImportIssue.create({
     data: {
+      organizationId: input.organizationId,
       batchId: input.batchId,
       rowId: input.row.id,
       issueType: input.issueType,
@@ -1334,16 +1348,18 @@ async function markEndorsementApplyReview(input: {
 
 export async function applyLedgerImportBatch(input: {
   actorId: string;
+  organizationId: string;
   batchId: string;
   db?: DbClient;
 }): Promise<LedgerImportApplyResult> {
   const db = input.db ?? getDb();
   const now = new Date();
-  const batch = await db.ledgerImportBatch.findUnique({
-    where: { id: input.batchId },
+  const batch = await db.ledgerImportBatch.findFirst({
+    where: { id: input.batchId, organizationId: input.organizationId },
     include: {
       rows: {
         where: {
+          organizationId: input.organizationId,
           OR: [
             { sourceType: "PAID_XLS", action: "CREATE_PAYMENT", status: "READY" },
             {
@@ -1361,6 +1377,8 @@ export async function applyLedgerImportBatch(input: {
   if (!batch) {
     throw new Error("El batch de importación no existe.");
   }
+  if (!batch.organizationId) throw new Error("ORGANIZATION_ACCESS_DENIED");
+  if (batch.organizationId !== input.organizationId) throw new Error("ORGANIZATION_ACCESS_DENIED");
 
   if (!["PREVIEW_READY", "APPROVED", "PARTIAL_APPLIED"].includes(batch.status)) {
     throw new Error("Este batch no está listo para aplicarse.");
@@ -1377,6 +1395,7 @@ export async function applyLedgerImportBatch(input: {
 
   await db.ledgerImportAction.create({
     data: {
+      organizationId: input.organizationId,
       batchId: batch.id,
       actionType: "LEDGER_IMPORT_BLOCK_APPROVED",
       performedById: input.actorId,
@@ -1412,6 +1431,7 @@ export async function applyLedgerImportBatch(input: {
         db,
         batchId: batch.id,
         actorId: input.actorId,
+        organizationId: input.organizationId,
         row,
         issueType: "ENDORSEMENT_NOT_APPLICABLE",
         message: "La fila ya no contiene los datos necesarios para aplicar el endoso.",
@@ -1422,9 +1442,12 @@ export async function applyLedgerImportBatch(input: {
 
     const endorsementNumber = cleanText(policyRow.endorsementNumber);
     const [policy, receipt, existingEndorsement] = await Promise.all([
-      db.policy.findUnique({ where: { id: row.policyId }, select: { id: true } }),
-      db.receipt.findUnique({
-        where: { id: row.receiptId },
+      db.policy.findFirst({
+        where: { id: row.policyId, organizationId: input.organizationId },
+        select: { id: true },
+      }),
+      db.receipt.findFirst({
+        where: { id: row.receiptId, organizationId: input.organizationId },
         select: {
           id: true,
           policyId: true,
@@ -1434,8 +1457,12 @@ export async function applyLedgerImportBatch(input: {
           endorsementId: true,
         },
       }),
-      db.policyEndorsement.findUnique({
-        where: { policyId_endorsementNumber: { policyId: row.policyId, endorsementNumber } },
+      db.policyEndorsement.findFirst({
+        where: {
+          organizationId: input.organizationId,
+          policyId: row.policyId,
+          endorsementNumber,
+        },
         select: { id: true },
       }),
     ]);
@@ -1452,6 +1479,7 @@ export async function applyLedgerImportBatch(input: {
         db,
         batchId: batch.id,
         actorId: input.actorId,
+        organizationId: input.organizationId,
         row,
         issueType: receiptHasConflict ? "ENDORSEMENT_RECEIPT_CONFLICT" : "ENDORSEMENT_TARGET_CHANGED",
         message: receiptHasConflict
@@ -1512,6 +1540,7 @@ export async function applyLedgerImportBatch(input: {
         db,
         batchId: batch.id,
         actorId: input.actorId,
+        organizationId: input.organizationId,
         row,
         issueType: "ENDORSEMENT_APPLY_FAILED",
         message: error instanceof Error ? error.message : "No se pudo aplicar este endoso.",
@@ -1538,6 +1567,7 @@ export async function applyLedgerImportBatch(input: {
             sourceKey: row.sourceKey,
           },
         },
+        input.organizationId,
         db,
       );
       await db.ledgerImportRow.update({
@@ -1564,6 +1594,7 @@ export async function applyLedgerImportBatch(input: {
 
     try {
       const result = await recordPayment({
+        organizationId: batch.organizationId,
         receiptId: row.receiptId,
         amount: paidRow.totalPaid,
         paidDate: paidRow.paidDate,
@@ -1606,7 +1637,7 @@ export async function applyLedgerImportBatch(input: {
     } catch (error) {
       if (error instanceof PaymentConflictError) {
         const existingPayment = await db.payment.findUnique({
-          where: { sourceEvidenceKey: evidenceKey },
+          where: { organizationId_sourceEvidenceKey: { organizationId: batch.organizationId, sourceEvidenceKey: evidenceKey } },
           select: { id: true, policyId: true, receiptId: true },
         });
 
@@ -1639,6 +1670,7 @@ export async function applyLedgerImportBatch(input: {
             sourceKey: row.sourceKey,
           },
         },
+        input.organizationId,
         db,
       );
       await db.ledgerImportRow.update({

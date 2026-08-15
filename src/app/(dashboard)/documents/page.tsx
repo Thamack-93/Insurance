@@ -14,8 +14,7 @@ import { formatDate } from "@/lib/dates";
 import { UploadForm } from "@/components/documents/upload-form";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
-import { requireAdminOrRedirect } from "@/lib/auth";
-import { documentOperationalWhere } from "@/lib/portfolio-access";
+import { documentOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 function associationLabel(document: {
   policy?: { policyNumber: string } | null;
@@ -39,13 +38,13 @@ export default async function DocumentsPage({
 }: {
   searchParams?: Promise<{ q?: string; page?: string }>;
 }) {
-  await requireAdminOrRedirect();
+  const scope = await requireOrganizationPortfolioReadScope();
   const db = getDb();
   const documentsEnabled = areDocumentFilesEnabled();
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = Math.max(1, Number(params.page) || 1);
-  const scopedWhere = documentOperationalWhere();
+  const scopedWhere = documentOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
 
   const where: Prisma.DocumentWhereInput = query
     ? {

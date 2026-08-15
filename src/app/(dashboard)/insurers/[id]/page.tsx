@@ -14,7 +14,7 @@ import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
 import { DeleteInsurerButton } from "@/components/insurers/delete-insurer-button";
-import { requireAdminOrRedirect } from "@/lib/auth";
+import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import {
   claimOperationalWhere,
   commissionOperationalWhere,
@@ -22,12 +22,12 @@ import {
 } from "@/lib/portfolio-access";
 
 export default async function InsurerDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireAdminOrRedirect();
+  const context = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
   const { id } = await params;
   const db = getDb();
 
-  const insurer = await db.insurer.findUnique({
-    where: { id },
+  const insurer = await db.insurer.findFirst({
+    where: { id, organizationId: context.organizationId },
   });
 
   if (!insurer) {
@@ -36,23 +36,23 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
 
   const [policies, claims, commissions, activity] = await Promise.all([
     db.policy.findMany({
-      where: { insurerId: id, ...policyOperationalWhere() },
+      where: { insurerId: id, ...policyOperationalWhere(undefined, context.organizationId) },
       include: { client: true },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     }),
     db.claim.findMany({
-      where: { insurerId: id, ...claimOperationalWhere() },
+      where: { insurerId: id, ...claimOperationalWhere(undefined, context.organizationId) },
       include: { client: true },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 10,
     }),
     db.commission.findMany({
-      where: { insurerId: id, ...commissionOperationalWhere() },
+      where: { insurerId: id, ...commissionOperationalWhere(undefined, context.organizationId) },
       include: { policy: true, client: true },
       orderBy: [{ expectedDate: "desc" }, { id: "desc" }],
       take: 10,
     }),
-    getActivityForEntity("Insurer", id, 20),
+    getActivityForEntity("Insurer", id, 20, context.organizationId),
   ]);
 
   const activePolicies = policies.filter((p) => p.status === "ACTIVE");

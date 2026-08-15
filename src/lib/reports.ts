@@ -56,7 +56,8 @@ export interface ClientReport {
 export async function generateFinancialReport(
   startDate: Date,
   endDate: Date,
-  period: string
+  period: string,
+  organizationId: string,
 ): Promise<ReportData> {
   const db = getDb();
   
@@ -64,6 +65,7 @@ export async function generateFinancialReport(
     // Get policies in the period
     const policies = await db.policy.findMany({
       where: {
+        organizationId,
         startDate: {
           gte: startDate,
           lte: endDate,
@@ -88,6 +90,7 @@ export async function generateFinancialReport(
     // Get new clients in period
     const newClients = await db.client.count({
       where: {
+        organizationId,
         createdAt: {
           gte: startDate,
           lte: endDate,
@@ -98,6 +101,7 @@ export async function generateFinancialReport(
     // Calculate renewal rate
     const renewedPolicies = await db.policy.count({
       where: {
+        organizationId,
         endDate: {
           gte: startDate,
           lte: endDate,
@@ -136,13 +140,15 @@ export async function generateFinancialReport(
 export async function generatePolicyTypeReport(
   startDate: Date,
   endDate: Date,
-  period: string
+  period: string,
+  organizationId: string,
 ): Promise<ReportData> {
   const db = getDb();
   
   try {
     const policies = await db.policy.findMany({
       where: {
+        organizationId,
         startDate: {
           gte: startDate,
           lte: endDate,
@@ -209,12 +215,14 @@ export async function generatePolicyTypeReport(
 export async function generateClientPerformanceReport(
   startDate: Date,
   endDate: Date,
-  period: string
+  period: string,
+  organizationId: string,
 ): Promise<ReportData> {
   const db = getDb();
   
   try {
     const clients = await db.client.findMany({
+      where: { organizationId },
       include: {
         policies: {
           where: {
@@ -271,7 +279,7 @@ export async function generateClientPerformanceReport(
   }
 }
 
-export async function generateMonthlyTrendsReport(year: number): Promise<ReportData> {
+export async function generateMonthlyTrendsReport(year: number, organizationId: string): Promise<ReportData> {
   const db = getDb();
   
   try {
@@ -283,6 +291,7 @@ export async function generateMonthlyTrendsReport(year: number): Promise<ReportD
       
       const policies = await db.policy.findMany({
         where: {
+          organizationId,
           startDate: {
             gte: startDate,
             lte: endDate,
@@ -306,6 +315,7 @@ export async function generateMonthlyTrendsReport(year: number): Promise<ReportD
           sum + policy.commissions.reduce((commSum, comm) => commSum + toNumber(comm.expectedAmount), 0), 0),
         newClients: await db.client.count({
           where: {
+            organizationId,
             createdAt: {
               gte: startDate,
               lte: endDate,
@@ -332,12 +342,14 @@ export async function generateMonthlyTrendsReport(year: number): Promise<ReportD
 export async function generateInsurerPerformanceReport(
   startDate: Date,
   endDate: Date,
-  period: string
+  period: string,
+  organizationId: string,
 ): Promise<ReportData> {
   const db = getDb();
   
   try {
     const insurers = await db.insurer.findMany({
+      where: { organizationId },
       include: {
         policies: {
           where: {
@@ -391,16 +403,18 @@ export async function generateInsurerPerformanceReport(
   }
 }
 
-export async function getAvailableReportPeriods() {
+export async function getAvailableReportPeriods(organizationId: string) {
   const db = getDb();
   
   try {
     const oldestPolicy = await db.policy.findFirst({
+      where: { organizationId },
       orderBy: { startDate: "asc" },
       select: { startDate: true },
     });
 
     const newestPolicy = await db.policy.findFirst({
+      where: { organizationId },
       orderBy: { startDate: "desc" },
       select: { startDate: true },
     });

@@ -5,8 +5,8 @@ import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody } from "@/lib/request-guards";
 import { rateLimitResponse } from "@/lib/api-security";
 import { buildPolicyPdfCapturePreviewFromText } from "@/lib/policy-pdf-capture-preview";
+import { requireOrganizationContext } from "@/lib/organization-context";
 import { OperationTimeoutError, withOperationTimeout } from "@/lib/operation-timeout";
-import { getPortfolioOwnerIdForRead } from "@/lib/portfolio-access";
 import {
   recordSecurityAccessDenied,
   recordSecurityRateLimit,
@@ -26,9 +26,14 @@ export async function POST(request: NextRequest) {
   try {
     let user: Awaited<ReturnType<typeof requireUser>>;
     let portfolioOwnerId: string | undefined;
+    let organizationId: string;
+    let assistantRole: "ADMIN" | "AGENT";
     try {
       user = await requireUser();
-      portfolioOwnerId = getPortfolioOwnerIdForRead(user);
+      const organization = await requireOrganizationContext();
+      organizationId = organization.organizationId;
+      assistantRole = organization.membershipRole === "AGENT" ? "AGENT" : "ADMIN";
+      portfolioOwnerId = assistantRole === "AGENT" ? organization.userId : undefined;
     } catch (error) {
       if (error instanceof AuthError) {
         await recordSecurityAccessDenied({
@@ -103,7 +108,8 @@ export async function POST(request: NextRequest) {
     const preview = await withOperationTimeout(
       buildPolicyPdfCapturePreviewFromText(extractedText, undefined, {
         portfolioOwnerId,
-        user: { id: user.id, role: user.role === "ADMIN" ? "ADMIN" : "AGENT" },
+        organizationId,
+        user: { id: user.id, role: assistantRole },
       }),
       PDF_ANALYSIS_SERVER_TIMEOUT_MS,
       "La revisión del PDF tardó demasiado al consultar la cartera o la IA.",
