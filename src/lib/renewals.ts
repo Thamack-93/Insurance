@@ -73,9 +73,14 @@ function mapPolicyToRenewalOpportunity(policy: RenewalPolicyRecord): RenewalOppo
   };
 }
 
-function buildRenewalWhere(portfolioOwnerId?: string, additionalWhere: Prisma.PolicyWhereInput = {}): Prisma.PolicyWhereInput {
+function buildRenewalWhere(
+  portfolioOwnerId?: string,
+  additionalWhere: Prisma.PolicyWhereInput = {},
+  organizationId?: string,
+): Prisma.PolicyWhereInput {
   return {
     ...(portfolioOwnerId ? { client: { portfolioOwnerId } } : {}),
+    ...(organizationId ? { organizationId } : {}),
     ...ACTIVE_RENEWAL_POLICY_WHERE,
     ...additionalWhere,
   };
@@ -84,12 +89,13 @@ function buildRenewalWhere(portfolioOwnerId?: string, additionalWhere: Prisma.Po
 export async function loadEligibleRenewalPolicies(
   additionalWhere: Prisma.PolicyWhereInput,
   portfolioOwnerId?: string,
+  organizationId?: string,
 ): Promise<RenewalPolicyRecord[]> {
   await connection();
   const db = getDb();
 
   const policies = await db.policy.findMany({
-    where: buildRenewalWhere(portfolioOwnerId, additionalWhere),
+    where: buildRenewalWhere(portfolioOwnerId, additionalWhere, organizationId),
     include: {
       client: {
         select: {

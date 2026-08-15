@@ -97,7 +97,7 @@ export function buildClientListWhere(
   return {
     ...clientOperationalWhere(portfolioOwnerId),
     ...(organizationId ? organizationOperationalWhere(organizationId) : {}),
-    status: filters.status ?? "ACTIVE",
+    ...(filters.status ? { status: filters.status } : {}),
     ...(filters.type ? { type: filters.type } : {}),
     ...(or.length ? { OR: or } : {}),
   };
