@@ -85,7 +85,7 @@ export default async function ReceiptsPage({
     db.receipt.findMany({
       where: { ...scopedReceiptWhere, status: "PAID", paidDate: { gte: monthStart } },
       include: { client: true, policy: true, insurer: true, endorsement: true },
-      orderBy: { paidDate: "desc" },
+      orderBy: [{ paidDate: "desc" }, { id: "desc" }],
     }),
     db.receipt.aggregate({ _sum: { amount: true }, where: baseWhere }),
     db.receipt.aggregate({
@@ -114,7 +114,7 @@ export default async function ReceiptsPage({
         client: { select: { id: true, fullName: true } },
         policy: { select: { id: true, policyNumber: true } },
       },
-      orderBy: { paidDate: "desc" },
+      orderBy: [{ paidDate: "desc" }, { id: "desc" }],
       take: 50,
     }),
     db.receiptReconciliationIssue.findMany({
@@ -126,7 +126,7 @@ export default async function ReceiptsPage({
         receipt: { include: { payments: { where: { status: "POSTED" } }, client: true } },
         policy: true,
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 100,
     }),
   ]);

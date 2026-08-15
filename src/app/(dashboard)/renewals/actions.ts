@@ -37,7 +37,7 @@ export async function markRenewalAsNotContinuing(policyId: string): Promise<Muta
           policyId,
           status: { in: [...OPEN_WORK_ITEM_STATUSES] },
         },
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       });
 
       let cancelledWorkItemId: string | null = null;
@@ -323,7 +323,7 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
           policyId: sourcePolicy.id,
           status: { in: [...OPEN_WORK_ITEM_STATUSES] },
         },
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       });
 
       if (workItem) {

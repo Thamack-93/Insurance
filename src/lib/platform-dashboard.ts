@@ -246,7 +246,7 @@ export async function getPlatformOrganizationDetail(organizationId: string, { me
     db.activityLog.findMany({
       where: { organizationId },
       select: { id: true, entityType: true, entityId: true, action: true, userId: true, createdAt: true },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: PLATFORM_ACTIVITY_LIMIT,
     }),
   ]);

@@ -310,9 +310,7 @@ export async function getOverdueCommissions(scope: CommissionScope) {
           },
         },
       },
-      orderBy: {
-        expectedDate: "asc",
-      },
+      orderBy: [{ expectedDate: "asc" }, { id: "asc" }],
     });
 
     return overdueCommissions.map(commission => ({

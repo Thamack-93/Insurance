@@ -281,7 +281,7 @@ export async function getPendingReceipts() {
           },
         },
       },
-      orderBy: { dueDate: "asc" },
+      orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }],
     });
 
     return receipts
@@ -332,7 +332,7 @@ export async function getPaymentHistory(limit?: number) {
           },
         },
       },
-      orderBy: { paidDate: "desc" },
+      orderBy: [{ paidDate: "desc" }, { id: "desc" }],
     });
 
     return payments

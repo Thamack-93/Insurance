@@ -36,7 +36,7 @@ export default async function InsurersPage({
     organizationId: context.organizationId,
     ...(status ? { status } : {}),
     ...(query
-    ? {
+      ? {
         OR: [
           { name: { contains: query } },
           { contactEmail: { contains: query } },

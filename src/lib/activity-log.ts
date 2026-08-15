@@ -68,7 +68,7 @@ export async function getActivityForEntity(
   const db = getDb();
   return db.activityLog.findMany({
     where: { entityType, entityId, ...(organizationId ? { organizationId } : {}) },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit,
   });
 }
@@ -115,7 +115,7 @@ export async function getAllActivity({
   const [entries, total] = await Promise.all([
     db.activityLog.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: pageSize,
       skip,
     }),

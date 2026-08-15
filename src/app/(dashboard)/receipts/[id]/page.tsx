@@ -58,7 +58,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
       orderBy: [{ dueDate: "desc" }, { receiptSequence: { sort: "desc", nulls: "last" } }, { receiptNumber: "desc" }, { id: "desc" }],
       take: 5,
     }),
-    getActivityForEntity("Receipt", id, 20),
+    getActivityForEntity("Receipt", id, 20, scope.organizationId),
   ]);
 
   const postedPayments = payments.filter((payment) => payment.status === "POSTED");

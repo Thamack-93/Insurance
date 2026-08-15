@@ -1678,7 +1678,7 @@ export async function buildTelegramDailyDigestMessagesByUser(userId: string, cli
         status: { in: ["EXPECTED", "PENDING", "OVERDUE"] },
       },
       include: { client: { select: { fullName: true } }, policy: { select: { policyNumber: true } }, insurer: { select: { name: true } } },
-      orderBy: { expectedDate: "asc" },
+      orderBy: [{ expectedDate: "asc" }, { id: "asc" }],
       take: TELEGRAM_DIGEST_SECTION_LIMIT,
     }),
   ]);

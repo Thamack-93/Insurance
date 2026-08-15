@@ -41,7 +41,12 @@ export default async function PlatformPage({ searchParams }: { searchParams?: Pr
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">Panel master</h1>
           <p className="mt-2 max-w-3xl text-sm text-muted-foreground">Supervisión global de organizaciones, memberships y actividad. Sesión de plataforma: {platformAdmin.email}. Las operaciones requieren una membership explícita y no se ejecutan desde este panel.</p>
         </div>
-        <ShieldCheck className="size-7 text-primary" aria-hidden />
+        <div className="flex items-center gap-3">
+          <Link href="/platform/backups" className="hidden items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium text-primary hover:bg-muted/30 sm:inline-flex">
+            Respaldos globales
+          </Link>
+          <ShieldCheck className="size-7 text-primary" aria-hidden />
+        </div>
       </header>
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Resumen de plataforma">

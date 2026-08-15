@@ -243,7 +243,7 @@ export async function getCommissionSummary(options: CommissionSummaryOptions = {
     include: {
       insurer: { select: { id: true, name: true } },
     },
-    orderBy: [{ expectedDate: "asc" }, { createdAt: "asc" }],
+    orderBy: [{ expectedDate: "asc" }, { createdAt: "asc" }, { id: "asc" }],
   });
 
   const porEstado = new Map<string, CommissionStateSummary>();

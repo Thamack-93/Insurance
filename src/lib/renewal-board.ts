@@ -76,7 +76,7 @@ const renewalBoardInclude = {
     select: { id: true, fullName: true, portfolioOwnerId: true, portfolioOwner: { select: { name: true } } },
   },
   insurer: { select: { name: true } },
-  renewals: { select: { id: true }, orderBy: { createdAt: "desc" as const }, take: 1 },
+  renewals: { select: { id: true }, orderBy: [{ createdAt: "desc" as const }, { id: "desc" as const }], take: 1 },
   sourceRenewalSuggestions: { where: { status: "DECLINED" }, select: { id: true }, take: 1 },
   ...LATEST_RENEWAL_RECEIPT_INCLUDE,
 } satisfies Prisma.PolicyInclude;

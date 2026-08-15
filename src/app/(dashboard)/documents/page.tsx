@@ -69,7 +69,7 @@ export default async function DocumentsPage({
       db.document.findMany({
         where,
         include: { client: true, policy: true, receipt: true, task: true, claim: true, quote: true },
-        orderBy: { uploadedAt: "desc" },
+        orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
         skip: (page - 1) * DEFAULT_PAGE_SIZE,
         take: DEFAULT_PAGE_SIZE,
       }),
@@ -91,7 +91,7 @@ export default async function DocumentsPage({
       db.document.findMany({
         where: { ...scopedWhere, policyId: { not: null } },
         include: { policy: true },
-        orderBy: { uploadedAt: "desc" },
+        orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
         take: 10,
       }),
     ]);

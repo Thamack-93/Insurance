@@ -44,7 +44,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 5,
     }),
-    getActivityForEntity("Claim", id, 20),
+    getActivityForEntity("Claim", id, 20, scope.organizationId),
   ]);
 
   const isClosed = claim.status === "RESOLVED" || claim.status === "CANCELLED";
