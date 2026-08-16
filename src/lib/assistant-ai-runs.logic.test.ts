@@ -26,6 +26,13 @@ describe("assistant AI cost accounting", () => {
     expect(estimateAssistantAiCostUsd("openai/gpt-5.4-nano", usage)).toBe(1.45);
   });
 
+  it("estimates the economical Gemini and DeepSeek fallback prices", () => {
+    const usage = normalizeAssistantAiUsage({ inputTokens: 1_000_000, outputTokens: 1_000_000 });
+
+    expect(estimateAssistantAiCostUsd("google/gemini-3-flash", usage)).toBe(3.5);
+    expect(estimateAssistantAiCostUsd("deepseek/deepseek-v3.1", usage)).toBe(1.2);
+  });
+
   it("preserves Gateway billed cost and generation id", () => {
     const usage = normalizeAssistantAiUsage({
       inputTokens: 10,

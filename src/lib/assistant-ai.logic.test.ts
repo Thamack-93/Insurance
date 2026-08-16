@@ -89,12 +89,12 @@ describe("assistant ai fallback", () => {
     }
   });
 
-  it("uses a configurable model with the Luna primary default", () => {
+  it("uses a configurable model with the Gemini Flash primary default", () => {
     vi.stubEnv("AI_GATEWAY_MODEL", "minimax/minimax-m3");
     expect(getAssistantAiModel()).toBe("minimax/minimax-m3");
 
     vi.stubEnv("AI_GATEWAY_MODEL", "invalid-model");
-    expect(getAssistantAiModel()).toBe("openai/gpt-5.6-luna");
+    expect(getAssistantAiModel()).toBe("google/gemini-3-flash");
   });
 
   it("prefers API key when both supported credentials exist", () => {
@@ -106,15 +106,15 @@ describe("assistant ai fallback", () => {
     expect(getAssistantGatewayAuthMode()).toBe("api-key");
   });
 
-  it("defaults to the ordered Luna fallback chain", () => {
+  it("defaults to the ordered Gemini fallback chain", () => {
     vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "");
-    expect(getAssistantGatewayFallbackModels()).toEqual(["minimax/minimax-m3", "openai/gpt-5.4-nano"]);
+    expect(getAssistantGatewayFallbackModels()).toEqual(["minimax/minimax-m3", "deepseek/deepseek-v3.1"]);
 
     vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "openai/gpt-5.4-mini, deepseek/deepseek-v3");
     expect(getAssistantGatewayFallbackModels()).toEqual(["openai/gpt-5.4-mini", "deepseek/deepseek-v3"]);
   });
 
-  it("configures the Luna agent with the stable prompt, safe tools and four-step limit", async () => {
+  it("configures the agent from the selected model with the stable prompt, safe tools and four-step limit", async () => {
     vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
     vi.stubEnv("AI_GATEWAY_MODEL", "minimax/minimax-m3");
     vi.stubEnv("DATABASE_URL", "");
@@ -122,7 +122,7 @@ describe("assistant ai fallback", () => {
       text: "Resumen generado por Nora.",
       usage: { inputTokens: 1_500, outputTokens: 100 },
       totalUsage: { inputTokens: 1_500, outputTokens: 100 },
-      providerMetadata: { gateway: { model: "openai/gpt-5.6-luna" } },
+      providerMetadata: { gateway: { model: "minimax/minimax-m3" } },
       finishReason: "stop",
     });
 
@@ -138,7 +138,7 @@ describe("assistant ai fallback", () => {
     expect(result.ok).toBe(true);
     expect(aiMocks.stepCountIs).toHaveBeenCalledWith(4);
     const options = aiMocks.generateText.mock.calls[0]?.[0];
-    expect(options.model).toBe("openai/gpt-5.6-luna");
+    expect(options.model).toBe("minimax/minimax-m3");
     expect(options.system.length).toBeGreaterThan(4_096);
     expect(Object.keys(options.tools)).toEqual([
       "searchPortfolio",
@@ -169,8 +169,8 @@ describe("assistant ai fallback", () => {
       available: true,
       authMode: "deployment",
       connectionState: "configured",
-      model: "openai/gpt-5.6-luna",
-      fallbackModels: ["minimax/minimax-m3", "openai/gpt-5.4-nano"],
+      model: "google/gemini-3-flash",
+      fallbackModels: ["minimax/minimax-m3", "deepseek/deepseek-v3.1"],
     });
   });
 
@@ -248,7 +248,7 @@ describe("assistant ai fallback", () => {
     expect(aiMocks.createRun).toHaveBeenCalledWith(expect.objectContaining({ id: runId, operation: "policy-pdf-review" }));
     expect(aiMocks.createAttempt).toHaveBeenCalledWith(expect.objectContaining({ runId, status: "STARTED" }));
     expect(aiMocks.finalizeAttempt).toHaveBeenCalledWith(attemptId, expect.objectContaining({ status: "SUCCEEDED", responsePreview: "Policy PDF review completed.", usage: expect.objectContaining({ generationId: "gen-review-1", inputTokens: 10, outputTokens: 20 }) }));
-    expect(aiMocks.finalizeRun).toHaveBeenCalledWith(runId, expect.objectContaining({ status: "SUCCEEDED", responsePreview: "Policy PDF review completed.", finalModel: "openai/gpt-5.6-luna" }));
+    expect(aiMocks.finalizeRun).toHaveBeenCalledWith(runId, expect.objectContaining({ status: "SUCCEEDED", responsePreview: "Policy PDF review completed.", finalModel: "google/gemini-3-flash" }));
     expect(aiMocks.generateText.mock.calls.map((call) => call[0].providerOptions.gateway.models)).toEqual([[]]);
     expect(JSON.stringify(aiMocks.finalizeAttempt.mock.calls)).not.toContain("NOMBRE PRIVADO");
   });
@@ -292,7 +292,7 @@ describe("assistant ai fallback", () => {
       status: "SUCCEEDED",
       usage: expect.objectContaining({ generationId: "gen-extract-1", inputTokens: 12, outputTokens: 24 }),
     }));
-    expect(aiMocks.finalizeRun).toHaveBeenCalledWith(runId, expect.objectContaining({ status: "SUCCEEDED", finalModel: "openai/gpt-5.6-luna" }));
+    expect(aiMocks.finalizeRun).toHaveBeenCalledWith(runId, expect.objectContaining({ status: "SUCCEEDED", finalModel: "google/gemini-3-flash" }));
     expect(aiMocks.generateText.mock.calls.map((call) => call[0].providerOptions.gateway.models)).toEqual([[]]);
     expect(JSON.stringify(aiMocks.finalizeAttempt.mock.calls)).not.toContain("No debe persistirse");
   });

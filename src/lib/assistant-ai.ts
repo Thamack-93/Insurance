@@ -54,9 +54,10 @@ import type {
   PolicyPdfCaptureFieldKey,
 } from "@/lib/policy-pdf-capture.shared";
 
-const ASSISTANT_AI_PRIMARY_MODEL = "openai/gpt-5.6-luna";
-const ASSISTANT_AI_FALLBACK_MODELS = ["minimax/minimax-m3", "openai/gpt-5.4-nano"];
-const ASSISTANT_AI_ATTEMPT_TIMEOUT_MS = 15_000;
+const ASSISTANT_AI_PRIMARY_MODEL = "google/gemini-3-flash";
+const ASSISTANT_AI_FALLBACK_MODELS = ["minimax/minimax-m3", "deepseek/deepseek-v3.1"];
+const ASSISTANT_AI_AGENT_TOTAL_TIMEOUT_MS = 20_000;
+const ASSISTANT_AI_ATTEMPT_TIMEOUT_MS = 10_000;
 const ASSISTANT_AI_TRACKING_TIMEOUT_MS = 2_000;
 
 const aiQuickPromptSchema = z.object({
@@ -216,8 +217,10 @@ export function getAssistantAiOperationLabel(operation: AssistantAiOperation) {
 }
 
 export function getAssistantAiModelLabel(model: string) {
-  if (model === ASSISTANT_AI_PRIMARY_MODEL) return "GPT-5.6 Luna";
+  if (model === ASSISTANT_AI_PRIMARY_MODEL) return "Gemini 3 Flash";
+  if (model === "openai/gpt-5.6-luna") return "GPT-5.6 Luna";
   if (model === "minimax/minimax-m3") return "MiniMax M3";
+  if (model === "deepseek/deepseek-v3.1") return "DeepSeek V3.1";
   if (model === "openai/gpt-5.4-nano") return "GPT-5.4 nano";
   if (model === "openai/gpt-5.4-mini") return "GPT-5.4 mini";
   return model;
@@ -943,7 +946,7 @@ export async function buildAssistantAiReply(input: {
   const mode = input.mode ?? "conversation";
   const operation: AssistantAiOperation = mode === "agent" ? "assistant-agent" : "assistant-reply";
   const model = mode === "agent"
-    ? ASSISTANT_AI_PRIMARY_MODEL
+    ? getAssistantAiModel()
     : mode === "structured"
       ? getAssistantStructuredModel()
       : getAssistantAiModel();
@@ -995,7 +998,7 @@ export async function buildAssistantAiReply(input: {
   const candidateModels = [model, ...fallbackModels.filter((candidate) => candidate && candidate !== model)];
   for (let index = 0; index < candidateModels.length; index += 1) {
     const candidateModel = candidateModels[index]!;
-    const remainingAgentTime = 25_000 - (Date.now() - startedAt);
+    const remainingAgentTime = ASSISTANT_AI_AGENT_TOTAL_TIMEOUT_MS - (Date.now() - startedAt);
     if (mode === "agent" && remainingAgentTime <= 0) break;
     const attemptResult = await runAssistantAttempt({
       ...input,

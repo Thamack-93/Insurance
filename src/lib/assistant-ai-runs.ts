@@ -70,10 +70,13 @@ export function normalizeAssistantAiUsage(value: unknown): AssistantAiUsageSnaps
 }
 
 const DEFAULT_MODEL_COSTS: Record<string, { input: number; output: number; cacheRead?: number; cacheWrite?: number }> = {
-  // Vercel AI Gateway OpenAI provider pricing after the configured 80% discount.
+  // Vercel AI Gateway catalog pricing used only as a fallback estimate when
+  // Gateway does not return the billed amount.
   "openai/gpt-5.6-luna": { input: 0.20 / 1_000_000, output: 1.20 / 1_000_000, cacheRead: 0.02 / 1_000_000, cacheWrite: 0.25 / 1_000_000 },
+  "google/gemini-3-flash": { input: 0.50 / 1_000_000, output: 3.00 / 1_000_000, cacheRead: 0.05 / 1_000_000 },
   "openai/gpt-5.4-nano": { input: 0.20 / 1_000_000, output: 1.25 / 1_000_000 },
   "minimax/minimax-m3": { input: 0.30 / 1_000_000, output: 1.20 / 1_000_000 },
+  "deepseek/deepseek-v3.1": { input: 0.25 / 1_000_000, output: 0.95 / 1_000_000, cacheRead: 0.13 / 1_000_000 },
   "openai/gpt-5.4-mini": { input: 0.75 / 1_000_000, output: 4.50 / 1_000_000 },
 };
 
