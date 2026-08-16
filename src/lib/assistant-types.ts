@@ -60,6 +60,8 @@ export type AssistantAiAttemptStatus = "STARTED" | "SUCCEEDED" | "FAILED" | "SKI
 export type AssistantAiUsageSnapshot = {
   inputTokens: number | null;
   outputTokens: number | null;
+  textTokens?: number | null;
+  reasoningTokens?: number | null;
   totalTokens: number | null;
   cachedInputTokens: number | null;
   nonCachedInputTokens?: number | null;

@@ -181,6 +181,9 @@ function AiRunList({
                 <p className="mt-1 font-medium">
                   {formatTokenCount(run.totalUsage?.totalTokens ?? run.usage?.totalTokens)}
                 </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Texto {formatTokenCount(run.totalUsage?.textTokens ?? run.usage?.textTokens)} · Razonamiento {formatTokenCount(run.totalUsage?.reasoningTokens ?? run.usage?.reasoningTokens)}
+                </p>
               </div>
               <div>
                 <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Reporte</p>
@@ -218,6 +221,8 @@ function AiRunList({
                         <span>In: {formatTokenCount(attempt.usage.inputTokens)}</span>
                         <span>Cache read: {formatTokenCount(attempt.usage.cacheReadTokens ?? attempt.usage.cachedInputTokens)}</span>
                         <span>Cache write: {formatTokenCount(attempt.usage.cacheWriteTokens)}</span>
+                        <span>Texto: {formatTokenCount(attempt.usage.textTokens)}</span>
+                        <span>Razonamiento: {formatTokenCount(attempt.usage.reasoningTokens)}</span>
                         <span>Out: {formatTokenCount(attempt.usage.outputTokens)}</span>
                         <span>Total: {formatTokenCount(attempt.usage.totalTokens)}</span>
                         <span>Costo: {formatCostUsd(attempt.usage.billedCostUsd ?? attempt.usage.estimatedCostUsd)}</span>
@@ -345,6 +350,15 @@ export default async function AssistantSettingsPage() {
             <CardTitle className="text-3xl">{Math.round(monthlyUsage.cacheReadRatio * 100)}%</CardTitle>
           </CardHeader>
           <CardContent className="pt-0 text-xs text-muted-foreground">{formatTokenCount(monthlyUsage.cacheReadTokens)} leídos · {formatTokenCount(monthlyUsage.cacheWriteTokens)} escritos</CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription>Salida IA</CardDescription>
+            <CardTitle className="text-3xl">{formatTokenCount(monthlyUsage.outputTokens)}</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 text-xs text-muted-foreground">
+            {formatTokenCount(monthlyUsage.textTokens)} texto · {formatTokenCount(monthlyUsage.reasoningTokens)} razonamiento
+          </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-3">

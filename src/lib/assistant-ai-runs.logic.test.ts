@@ -33,6 +33,13 @@ describe("assistant AI cost accounting", () => {
     expect(estimateAssistantAiCostUsd("deepseek/deepseek-v3.1", usage)).toBe(1.2);
   });
 
+  it("estimates Qwen 3.7 and DeepSeek V4 Flash catalog prices", () => {
+    const usage = normalizeAssistantAiUsage({ inputTokens: 1_000_000, outputTokens: 1_000_000 });
+
+    expect(estimateAssistantAiCostUsd("alibaba/qwen3.7-flash", usage)).toBe(0.16);
+    expect(estimateAssistantAiCostUsd("deepseek/deepseek-v4-flash", usage)).toBe(0.27);
+  });
+
   it("preserves Gateway billed cost and generation id", () => {
     const usage = normalizeAssistantAiUsage({
       inputTokens: 10,
@@ -43,6 +50,20 @@ describe("assistant AI cost accounting", () => {
     });
 
     expect(usage).toMatchObject({ billedCostUsd: 0.000012, costSource: "gateway", generationId: "gen_test" });
+  });
+
+  it("preserves text and reasoning token details from the AI SDK", () => {
+    const usage = normalizeAssistantAiUsage({
+      inputTokens: 100,
+      outputTokenDetails: { textTokens: 240, reasoningTokens: 760 },
+    });
+
+    expect(usage).toMatchObject({
+      outputTokens: 1_000,
+      textTokens: 240,
+      reasoningTokens: 760,
+      totalTokens: 1_100,
+    });
   });
 
   it("separates Luna normal input, cache reads, cache writes and output", () => {

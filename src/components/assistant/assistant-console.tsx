@@ -1349,6 +1349,14 @@ export function AssistantConsole({
                           <p className="mt-1 font-medium text-foreground">{formatTokenCount(message.aiUsage.outputTokens)}</p>
                         </div>
                         <div>
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Texto</p>
+                          <p className="mt-1 font-medium text-foreground">{formatTokenCount(message.aiUsage.textTokens)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Razonamiento</p>
+                          <p className="mt-1 font-medium text-foreground">{formatTokenCount(message.aiUsage.reasoningTokens)}</p>
+                        </div>
+                        <div>
                           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Total</p>
                           <p className="mt-1 font-medium text-foreground">{formatTokenCount(message.aiUsage.totalTokens)}</p>
                         </div>
@@ -1382,6 +1390,8 @@ export function AssistantConsole({
                             <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
                               <span>In: {formatTokenCount(entry.usage.inputTokens)}</span>
                               <span>Out: {formatTokenCount(entry.usage.outputTokens)}</span>
+                              <span>Texto: {formatTokenCount(entry.usage.textTokens)}</span>
+                              <span>Razonamiento: {formatTokenCount(entry.usage.reasoningTokens)}</span>
                               <span>Total: {formatTokenCount(entry.usage.totalTokens)}</span>
                               <span>Costo: {formatUsageCost(entry.usage)}</span>
                             </div>

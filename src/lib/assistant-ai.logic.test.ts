@@ -44,6 +44,7 @@ import {
   getAssistantAiModel,
   getAssistantGatewayAuthMode,
   getAssistantGatewayFallbackModels,
+  assistantAgentOutputBudgetReached,
 } from "@/lib/assistant-ai";
 import type { AssistantUser } from "@/lib/assistant-types";
 
@@ -89,12 +90,12 @@ describe("assistant ai fallback", () => {
     }
   });
 
-  it("uses a configurable model with the Gemini Flash primary default", () => {
+  it("uses a configurable model with the Qwen 3.7 Flash primary default", () => {
     vi.stubEnv("AI_GATEWAY_MODEL", "minimax/minimax-m3");
     expect(getAssistantAiModel()).toBe("minimax/minimax-m3");
 
     vi.stubEnv("AI_GATEWAY_MODEL", "invalid-model");
-    expect(getAssistantAiModel()).toBe("google/gemini-3-flash");
+    expect(getAssistantAiModel()).toBe("alibaba/qwen3.7-flash");
   });
 
   it("prefers API key when both supported credentials exist", () => {
@@ -106,9 +107,12 @@ describe("assistant ai fallback", () => {
     expect(getAssistantGatewayAuthMode()).toBe("api-key");
   });
 
-  it("defaults to the ordered Gemini fallback chain", () => {
+  it("defaults to the Qwen fallback chain and supports disabling paid fallbacks", () => {
     vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "");
-    expect(getAssistantGatewayFallbackModels()).toEqual(["minimax/minimax-m3", "deepseek/deepseek-v3.1"]);
+    expect(getAssistantGatewayFallbackModels()).toEqual(["deepseek/deepseek-v4-flash"]);
+
+    vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "none");
+    expect(getAssistantGatewayFallbackModels()).toEqual([]);
 
     vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "openai/gpt-5.4-mini, deepseek/deepseek-v3");
     expect(getAssistantGatewayFallbackModels()).toEqual(["openai/gpt-5.4-mini", "deepseek/deepseek-v3"]);
@@ -139,6 +143,9 @@ describe("assistant ai fallback", () => {
     expect(aiMocks.stepCountIs).toHaveBeenCalledWith(4);
     const options = aiMocks.generateText.mock.calls[0]?.[0];
     expect(options.model).toBe("minimax/minimax-m3");
+    expect(options.maxRetries).toBe(0);
+    expect(options.maxOutputTokens).toBe(12_288);
+    expect(options.stopWhen).toHaveLength(2);
     expect(options.system.length).toBeGreaterThan(4_096);
     expect(Object.keys(options.tools)).toEqual([
       "searchPortfolio",
@@ -159,6 +166,45 @@ describe("assistant ai fallback", () => {
     expect(options.providerOptions.gateway.tags).toContain("prompt:nora-agent-v1");
   });
 
+  it("passes bounded Qwen thinking options only to the Alibaba model", async () => {
+    vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
+    vi.stubEnv("AI_GATEWAY_MODEL", "alibaba/qwen3.7-flash");
+    vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "none");
+    vi.stubEnv("DATABASE_URL", "");
+    aiMocks.generateText.mockResolvedValue({
+      text: "Resumen generado por Nora.",
+      usage: { inputTokens: 100, outputTokens: 20 },
+      totalUsage: { inputTokens: 100, outputTokens: 20 },
+      providerMetadata: { gateway: { model: "alibaba/qwen3.7-flash" } },
+      finishReason: "stop",
+    });
+
+    const result = await buildAssistantAiReply({
+      user: { id: "agent-1", role: "AGENT", organizationId: "org-test" },
+      message: "Dame el resumen de hoy",
+      localReply: { reply: "", sections: [], quickPrompts: [] },
+      mode: "agent",
+    });
+
+    expect(result.ok).toBe(true);
+    const options = aiMocks.generateText.mock.calls[0]?.[0];
+    expect(options.providerOptions.alibaba).toEqual({ enableThinking: true, thinkingBudget: 8_192 });
+    expect(options.providerOptions.gateway.models).toEqual([]);
+    expect(options.maxRetries).toBe(0);
+  });
+
+  it("stops the agent before starting another step after the aggregate output budget", () => {
+    expect(assistantAgentOutputBudgetReached({
+      steps: [
+        { usage: { outputTokens: 16_000 } } as never,
+        { usage: { outputTokens: 16_768 } } as never,
+      ] as never,
+    })).toBe(true);
+    expect(assistantAgentOutputBudgetReached({
+      steps: [{ usage: { outputTokenDetails: { textTokens: 2_000, reasoningTokens: 4_000 } } } as never] as never,
+    })).toBe(false);
+  });
+
   it("treats a Vercel deployment as gateway-capable even without a local token", () => {
     vi.stubEnv("AI_GATEWAY_API_KEY", "");
     vi.stubEnv("VERCEL_OIDC_TOKEN", "");
@@ -169,8 +215,8 @@ describe("assistant ai fallback", () => {
       available: true,
       authMode: "deployment",
       connectionState: "configured",
-      model: "google/gemini-3-flash",
-      fallbackModels: ["minimax/minimax-m3", "deepseek/deepseek-v3.1"],
+      model: "alibaba/qwen3.7-flash",
+      fallbackModels: ["deepseek/deepseek-v4-flash"],
     });
   });
 
@@ -248,7 +294,7 @@ describe("assistant ai fallback", () => {
     expect(aiMocks.createRun).toHaveBeenCalledWith(expect.objectContaining({ id: runId, operation: "policy-pdf-review" }));
     expect(aiMocks.createAttempt).toHaveBeenCalledWith(expect.objectContaining({ runId, status: "STARTED" }));
     expect(aiMocks.finalizeAttempt).toHaveBeenCalledWith(attemptId, expect.objectContaining({ status: "SUCCEEDED", responsePreview: "Policy PDF review completed.", usage: expect.objectContaining({ generationId: "gen-review-1", inputTokens: 10, outputTokens: 20 }) }));
-    expect(aiMocks.finalizeRun).toHaveBeenCalledWith(runId, expect.objectContaining({ status: "SUCCEEDED", responsePreview: "Policy PDF review completed.", finalModel: "google/gemini-3-flash" }));
+    expect(aiMocks.finalizeRun).toHaveBeenCalledWith(runId, expect.objectContaining({ status: "SUCCEEDED", responsePreview: "Policy PDF review completed.", finalModel: "alibaba/qwen3.7-flash" }));
     expect(aiMocks.generateText.mock.calls.map((call) => call[0].providerOptions.gateway.models)).toEqual([[]]);
     expect(JSON.stringify(aiMocks.finalizeAttempt.mock.calls)).not.toContain("NOMBRE PRIVADO");
   });
@@ -292,7 +338,7 @@ describe("assistant ai fallback", () => {
       status: "SUCCEEDED",
       usage: expect.objectContaining({ generationId: "gen-extract-1", inputTokens: 12, outputTokens: 24 }),
     }));
-    expect(aiMocks.finalizeRun).toHaveBeenCalledWith(runId, expect.objectContaining({ status: "SUCCEEDED", finalModel: "google/gemini-3-flash" }));
+    expect(aiMocks.finalizeRun).toHaveBeenCalledWith(runId, expect.objectContaining({ status: "SUCCEEDED", finalModel: "alibaba/qwen3.7-flash" }));
     expect(aiMocks.generateText.mock.calls.map((call) => call[0].providerOptions.gateway.models)).toEqual([[]]);
     expect(JSON.stringify(aiMocks.finalizeAttempt.mock.calls)).not.toContain("No debe persistirse");
   });
@@ -347,7 +393,7 @@ describe("assistant ai fallback", () => {
     const attemptId = aiMocks.createAttempt.mock.calls[0]?.[0].id;
     expect(result).toMatchObject({ value: null, runId, trackingStatus: "recorded", attempted: true });
     expect(aiMocks.finalizeAttempt).toHaveBeenCalledWith(attemptId, expect.objectContaining({ status: "FAILED", responsePreview: null }));
-    expect(aiMocks.finalizeRun).toHaveBeenCalledWith(runId, expect.objectContaining({ status: "FAILED", attemptCount: 3, fallbackCount: 2, errorCode: "provider_unavailable" }));
+    expect(aiMocks.finalizeRun).toHaveBeenCalledWith(runId, expect.objectContaining({ status: "FAILED", attemptCount: 2, fallbackCount: 1, errorCode: "provider_unavailable" }));
   });
 
   it("does not block the gateway when creating the audit run times out", async () => {

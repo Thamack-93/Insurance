@@ -15,6 +15,8 @@ import {
   generateText,
   gateway,
   stepCountIs,
+  type StopCondition,
+  type ToolSet,
 } from "ai";
 import { z } from "zod";
 import {
@@ -54,11 +56,42 @@ import type {
   PolicyPdfCaptureFieldKey,
 } from "@/lib/policy-pdf-capture.shared";
 
-const ASSISTANT_AI_PRIMARY_MODEL = "google/gemini-3-flash";
-const ASSISTANT_AI_FALLBACK_MODELS = ["minimax/minimax-m3", "deepseek/deepseek-v3.1"];
-const ASSISTANT_AI_AGENT_TOTAL_TIMEOUT_MS = 20_000;
+const ASSISTANT_AI_PRIMARY_MODEL = "alibaba/qwen3.7-flash";
+const ASSISTANT_AI_FALLBACK_MODELS = ["deepseek/deepseek-v4-flash"];
+const ASSISTANT_AI_AGENT_TOTAL_TIMEOUT_MS = 25_000;
 const ASSISTANT_AI_ATTEMPT_TIMEOUT_MS = 10_000;
 const ASSISTANT_AI_TRACKING_TIMEOUT_MS = 2_000;
+const ASSISTANT_AI_AGENT_MAX_OUTPUT_TOKENS = 12_288;
+const ASSISTANT_AI_AGENT_THINKING_BUDGET = 8_192;
+const ASSISTANT_AI_AGENT_MAX_TOTAL_OUTPUT_TOKENS = 32_768;
+
+function toFiniteTokenCount(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  }
+  return null;
+}
+
+function getAssistantStepOutputTokens(value: unknown) {
+  if (!value || typeof value !== "object") return 0;
+  const usage = value as {
+    outputTokens?: unknown;
+    outputTokenDetails?: { textTokens?: unknown; reasoningTokens?: unknown };
+  };
+  const direct = toFiniteTokenCount(usage.outputTokens);
+  if (direct != null) return direct;
+  return (toFiniteTokenCount(usage.outputTokenDetails?.textTokens) ?? 0)
+    + (toFiniteTokenCount(usage.outputTokenDetails?.reasoningTokens) ?? 0);
+}
+
+export function assistantAgentOutputBudgetReached<TOOLS extends ToolSet>({
+  steps,
+}: Parameters<StopCondition<TOOLS>>[0]) {
+  const totalOutputTokens = steps.reduce((total, step) => total + getAssistantStepOutputTokens(step.usage), 0);
+  return totalOutputTokens >= ASSISTANT_AI_AGENT_MAX_TOTAL_OUTPUT_TOKENS;
+}
 
 const aiQuickPromptSchema = z.object({
   label: z.string().min(1),
@@ -217,7 +250,9 @@ export function getAssistantAiOperationLabel(operation: AssistantAiOperation) {
 }
 
 export function getAssistantAiModelLabel(model: string) {
-  if (model === ASSISTANT_AI_PRIMARY_MODEL) return "Gemini 3 Flash";
+  if (model === ASSISTANT_AI_PRIMARY_MODEL) return "Qwen 3.7 Flash";
+  if (model === "google/gemini-3-flash") return "Gemini 3 Flash";
+  if (model === "deepseek/deepseek-v4-flash") return "DeepSeek V4 Flash";
   if (model === "openai/gpt-5.6-luna") return "GPT-5.6 Luna";
   if (model === "minimax/minimax-m3") return "MiniMax M3";
   if (model === "deepseek/deepseek-v3.1") return "DeepSeek V3.1";
@@ -251,8 +286,8 @@ export function getAssistantGatewayAuthMode(): "oidc" | "api-key" | "unavailable
 }
 
 export function getAssistantGatewayFallbackModels() {
-  const configured = process.env.AI_GATEWAY_FALLBACK_MODELS?.split(",").map((value) => value.trim()).filter(Boolean);
-  return configured?.length ? configured : ASSISTANT_AI_FALLBACK_MODELS;
+  const configured = parseConfiguredFallbackModels(process.env.AI_GATEWAY_FALLBACK_MODELS);
+  return configured ?? ASSISTANT_AI_FALLBACK_MODELS;
 }
 
 export function getAssistantStructuredModel() {
@@ -261,8 +296,39 @@ export function getAssistantStructuredModel() {
 }
 
 export function getAssistantStructuredFallbackModels() {
-  const configured = process.env.AI_GATEWAY_STRUCTURED_FALLBACK_MODELS?.split(",").map((value) => value.trim()).filter(Boolean);
-  return configured?.length ? configured : ASSISTANT_AI_FALLBACK_MODELS;
+  const configured = parseConfiguredFallbackModels(process.env.AI_GATEWAY_STRUCTURED_FALLBACK_MODELS);
+  return configured ?? ASSISTANT_AI_FALLBACK_MODELS;
+}
+
+function parseConfiguredFallbackModels(value: string | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  if (normalized.toLowerCase() === "none") return [];
+  return normalized.split(",").map((candidate) => candidate.trim()).filter(Boolean);
+}
+
+function getAssistantProviderOptions(input: {
+  userId: string;
+  model: string;
+  mode: "conversation" | "structured" | "agent";
+  tags: string[];
+  fallbackModels: string[];
+}) {
+  return {
+    gateway: {
+      user: input.userId,
+      tags: input.tags,
+      models: input.fallbackModels,
+    },
+    ...(input.model.startsWith("alibaba/")
+      ? {
+          alibaba: {
+            enableThinking: input.mode === "agent",
+            ...(input.mode === "agent" ? { thinkingBudget: ASSISTANT_AI_AGENT_THINKING_BUDGET } : {}),
+          },
+        }
+      : {}),
+  };
 }
 
 export function getAssistantAiConnectionStatus(): AssistantAiStatus {
@@ -339,7 +405,7 @@ function safeAiProviderMetadata(value: unknown, extra?: { promptVersion?: string
 function sumAttemptUsage(attempts: AssistantAiAttempt[]) {
   const usages = attempts.map((attempt) => attempt.totalUsage ?? attempt.usage).filter((usage): usage is AssistantAiUsageSnapshot => Boolean(usage));
   if (!usages.length) return null;
-  const sum = (key: "inputTokens" | "outputTokens" | "totalTokens" | "cachedInputTokens" | "nonCachedInputTokens" | "cacheReadTokens" | "cacheWriteTokens" | "nonCachedInputCostUsd" | "cacheReadCostUsd" | "cacheWriteCostUsd" | "outputCostUsd") => {
+  const sum = (key: "inputTokens" | "outputTokens" | "textTokens" | "reasoningTokens" | "totalTokens" | "cachedInputTokens" | "nonCachedInputTokens" | "cacheReadTokens" | "cacheWriteTokens" | "nonCachedInputCostUsd" | "cacheReadCostUsd" | "cacheWriteCostUsd" | "outputCostUsd") => {
     const values = usages.map((usage) => usage[key]).filter((value): value is number => value != null && Number.isFinite(value));
     return values.length ? values.reduce((total, value) => total + value, 0) : null;
   };
@@ -352,6 +418,8 @@ function sumAttemptUsage(attempts: AssistantAiAttempt[]) {
   return {
     inputTokens: sum("inputTokens"),
     outputTokens: sum("outputTokens"),
+    textTokens: sum("textTokens"),
+    reasoningTokens: sum("reasoningTokens"),
     totalTokens: sum("totalTokens"),
     cachedInputTokens: sum("cachedInputTokens"),
     nonCachedInputTokens: sum("nonCachedInputTokens"),
@@ -692,6 +760,8 @@ async function runAssistantAttempt(input: {
     const generationInput = {
       model: gateway(input.model),
       temperature: input.mode === "structured" ? 0.1 : 0.2,
+      maxOutputTokens: input.mode === "agent" ? ASSISTANT_AI_AGENT_MAX_OUTPUT_TOKENS : 1_000,
+      maxRetries: 0,
       abortSignal: AbortSignal.timeout(input.timeoutMs),
       system: input.mode === "structured"
         ? `${assistantSystemPrompt}\nDevuelve un plan de cambio estricto. Todas las propiedades deben existir; usa null para targetQuery y [] para listas vacías.`
@@ -704,13 +774,13 @@ async function runAssistantAttempt(input: {
         input.contextText ? `Contexto ampliado:\n${input.contextText}` : "Sin contexto ampliado.",
         input.themeHint ? `Tema sugerido: ${input.themeHint}` : null,
       ].filter(Boolean).join("\n\n"),
-      providerOptions: {
-        gateway: {
-          user: input.user.id,
-          tags: ["feature:assistant", input.mode === "structured" ? "mode:structured" : "mode:conversation", `role:${input.user.role}`, "surface:web"],
-          models: input.fallbackModels,
-        },
-      },
+      providerOptions: getAssistantProviderOptions({
+        userId: input.user.id,
+        model: input.model,
+        mode: input.mode,
+        tags: ["feature:assistant", input.mode === "structured" ? "mode:structured" : "mode:conversation", `role:${input.user.role}`, "surface:web"],
+        fallbackModels: input.fallbackModels,
+      }),
     };
     const result = input.mode === "structured"
       ? await generateText({ ...generationInput, output: Output.object({ schema: assistantAiResponseSchema }) })
@@ -718,6 +788,8 @@ async function runAssistantAttempt(input: {
         ? await generateText({
             model: gateway(input.model),
             temperature: 0.2,
+            maxOutputTokens: ASSISTANT_AI_AGENT_MAX_OUTPUT_TOKENS,
+            maxRetries: 0,
             abortSignal: AbortSignal.timeout(input.timeoutMs),
             system: NORA_AGENT_SYSTEM_PROMPT,
             messages: [
@@ -725,14 +797,14 @@ async function runAssistantAttempt(input: {
               { role: "user" as const, content: [input.contextText ? `Contexto explícito autorizado: ${input.contextText}` : null, input.message].filter(Boolean).join("\n\n") },
             ],
             tools: agentRuntime.tools,
-            stopWhen: stepCountIs(4),
-            providerOptions: {
-              gateway: {
-                user: input.user.id,
-                tags: ["feature:assistant", "mode:agent", `prompt:${NORA_AGENT_PROMPT_VERSION}`, `role:${input.user.role}`, "surface:web"],
-                models: input.fallbackModels,
-              },
-            },
+            stopWhen: [stepCountIs(4), assistantAgentOutputBudgetReached],
+            providerOptions: getAssistantProviderOptions({
+              userId: input.user.id,
+              model: input.model,
+              mode: "agent",
+              tags: ["feature:assistant", "mode:agent", `prompt:${NORA_AGENT_PROMPT_VERSION}`, `role:${input.user.role}`, "surface:web"],
+              fallbackModels: input.fallbackModels,
+            }),
           })
         : await generateText(generationInput);
 
@@ -1107,11 +1179,11 @@ export async function extractPolicyPdfDraftFromAiFile(input: { user: AssistantUs
     timeoutMs: 12_000,
     execute: async (candidateModel) => {
       const result = await generateText({
-        model: gateway(candidateModel), temperature: 0.1, abortSignal: AbortSignal.timeout(12_000),
+        model: gateway(candidateModel), temperature: 0.1, maxOutputTokens: 1_500, maxRetries: 0, abortSignal: AbortSignal.timeout(12_000),
         system: "Extrae únicamente la carátula del PDF. Todas las propiedades del esquema son obligatorias; usa null para datos ausentes y [] para listas vacías. No inventes valores.",
         messages: [{ role: "user", content: [{ type: "text", text: input.instruction?.trim() ?? "Extrae un borrador revisable." }, { type: "file", data: input.fileData, filename: input.fileName, mediaType: "application/pdf" }] }],
         output: Output.object({ schema: pdfFileExtractionSchema }),
-        providerOptions: { gateway: { user: input.user.id, tags: ["feature:assistant", "feature:pdf-extract", "surface:web", `role:${input.user.role}`], models: [] } },
+        providerOptions: getAssistantProviderOptions({ userId: input.user.id, model: candidateModel, mode: "structured", tags: ["feature:assistant", "feature:pdf-extract", "surface:web", `role:${input.user.role}`], fallbackModels: [] }),
       });
       const parsed = pdfFileExtractionSchema.safeParse(result.output);
       if (!parsed.success) return { result, value: null };
@@ -1140,7 +1212,8 @@ function parseJsonResponse<T>(text: string, schema: z.ZodType<T>): T | null {
 export async function classifyAssistantReportSignalWithAi(input: { user: AssistantUser; message: string; localReplyText?: string; contextText?: string | null; existingThemes: Array<{ themeKey: string; themeLabel: string; kind: "INCIDENT" | "SUGGESTION" }>; fallback?: Omit<AssistantAiReportSignal, "shouldReport"> | null }): Promise<AssistantAiReportSignal | null> {
   if (!hasGatewayAuth()) return null;
   try {
-    const result = await generateText({ model: gateway(getAssistantCriticalModel()), temperature: 0.1, abortSignal: AbortSignal.timeout(4_000), system: "Clasifica señales de producto de PolicyDesk y devuelve solo JSON válido según el esquema.", prompt: [`Mensaje: ${input.message.slice(0, 2_000)}`, input.localReplyText ? `Respuesta local:\n${input.localReplyText.slice(0, 3_000)}` : "Sin respuesta local.", input.contextText ? `Contexto:\n${input.contextText.slice(0, 4_000)}` : "Sin contexto.", `Temas abiertos: ${JSON.stringify(input.existingThemes.slice(0, 50))}`, input.fallback ? `Sugerencia determinística: ${JSON.stringify(input.fallback)}` : null].filter(Boolean).join("\n\n"), providerOptions: { gateway: { user: input.user.id, tags: ["feature:assistant", "feature:improvement-report", `role:${input.user.role}`], models: getAssistantStructuredFallbackModels() } } });
+    const model = getAssistantCriticalModel();
+    const result = await generateText({ model: gateway(model), temperature: 0.1, maxOutputTokens: 700, maxRetries: 0, abortSignal: AbortSignal.timeout(4_000), system: "Clasifica señales de producto de PolicyDesk y devuelve solo JSON válido según el esquema.", prompt: [`Mensaje: ${input.message.slice(0, 2_000)}`, input.localReplyText ? `Respuesta local:\n${input.localReplyText.slice(0, 3_000)}` : "Sin respuesta local.", input.contextText ? `Contexto:\n${input.contextText.slice(0, 4_000)}` : "Sin contexto.", `Temas abiertos: ${JSON.stringify(input.existingThemes.slice(0, 50))}`, input.fallback ? `Sugerencia determinística: ${JSON.stringify(input.fallback)}` : null].filter(Boolean).join("\n\n"), providerOptions: getAssistantProviderOptions({ userId: input.user.id, model, mode: "structured", tags: ["feature:assistant", "feature:improvement-report", `role:${input.user.role}`], fallbackModels: getAssistantStructuredFallbackModels() }) });
     return parseJsonResponse(result.text, reportSignalSchema);
   } catch { return null; }
 }
@@ -1157,11 +1230,11 @@ export async function reviewPolicyPdfWithAi(input: { user: AssistantUser; text?:
     timeoutMs: 8_000,
     execute: async (candidateModel) => {
       const result = await generateText({
-        model: gateway(candidateModel), temperature: 0.1, abortSignal: AbortSignal.timeout(8_000),
+        model: gateway(candidateModel), temperature: 0.1, maxOutputTokens: 900, maxRetries: 0, abortSignal: AbortSignal.timeout(8_000),
         system: "Revisa una carátula de seguro. No guardes ni confirmes cambios. Devuelve solo JSON válido según el esquema; usa [] cuando no existan advertencias, sugerencias o correcciones.",
         prompt: [`Tipo de usuario: ${input.user.role}`, `Tema: ${input.themeHint ?? "policy-pdf-review"}`, `Borrador: ${JSON.stringify(input.draft)}`, `Advertencias locales: ${JSON.stringify(input.warnings)}`, input.text ? `Texto extraído:\n${input.text.slice(0, 12_000)}` : "Sin texto completo."].join("\n\n"),
         output: Output.object({ schema: pdfAiReviewSchema }),
-        providerOptions: { gateway: { user: input.user.id, tags: ["feature:assistant", "feature:pdf-review", `role:${input.user.role}`], models: [] } },
+        providerOptions: getAssistantProviderOptions({ userId: input.user.id, model: candidateModel, mode: "structured", tags: ["feature:assistant", "feature:pdf-review", `role:${input.user.role}`], fallbackModels: [] }),
       });
       const parsed = pdfAiReviewSchema.safeParse(result.output);
       if (!parsed.success) return { result, value: null };

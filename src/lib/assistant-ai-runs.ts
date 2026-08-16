@@ -34,7 +34,15 @@ export function normalizeAssistantAiUsage(value: unknown): AssistantAiUsageSnaps
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   const inputTokens = toNumber(record.inputTokens ?? record.promptTokens ?? record.promptTokenCount ?? record.inputTokenCount);
-  const outputTokens = toNumber(record.outputTokens ?? record.completionTokens ?? record.completionTokenCount ?? record.generatedTokens);
+  const outputTokenDetails = record.outputTokenDetails && typeof record.outputTokenDetails === "object"
+    ? record.outputTokenDetails as Record<string, unknown>
+    : null;
+  const textTokens = toNumber(outputTokenDetails?.textTokens ?? record.textTokens ?? record.outputTextTokens);
+  const reasoningTokens = toNumber(outputTokenDetails?.reasoningTokens ?? record.reasoningTokens ?? record.outputReasoningTokens);
+  const explicitOutputTokens = toNumber(record.outputTokens ?? record.completionTokens ?? record.completionTokenCount ?? record.generatedTokens);
+  const outputTokens = explicitOutputTokens ?? (textTokens != null || reasoningTokens != null
+    ? (textTokens ?? 0) + (reasoningTokens ?? 0)
+    : null);
   const totalTokens = toNumber(record.totalTokens ?? record.totalTokenCount ?? record.totalUsage ?? record.tokenCount) ?? (inputTokens != null || outputTokens != null ? (inputTokens ?? 0) + (outputTokens ?? 0) : null);
   const inputTokenDetails = record.inputTokenDetails && typeof record.inputTokenDetails === "object"
     ? record.inputTokenDetails as Record<string, unknown>
@@ -57,6 +65,8 @@ export function normalizeAssistantAiUsage(value: unknown): AssistantAiUsageSnaps
   return {
     inputTokens,
     outputTokens,
+    textTokens,
+    reasoningTokens,
     totalTokens,
     cachedInputTokens: cacheReadTokens,
     nonCachedInputTokens,
@@ -73,10 +83,12 @@ const DEFAULT_MODEL_COSTS: Record<string, { input: number; output: number; cache
   // Vercel AI Gateway catalog pricing used only as a fallback estimate when
   // Gateway does not return the billed amount.
   "openai/gpt-5.6-luna": { input: 0.20 / 1_000_000, output: 1.20 / 1_000_000, cacheRead: 0.02 / 1_000_000, cacheWrite: 0.25 / 1_000_000 },
+  "alibaba/qwen3.7-flash": { input: 0.03 / 1_000_000, output: 0.13 / 1_000_000, cacheRead: 0.01 / 1_000_000, cacheWrite: 0.04 / 1_000_000 },
   "google/gemini-3-flash": { input: 0.50 / 1_000_000, output: 3.00 / 1_000_000, cacheRead: 0.05 / 1_000_000 },
   "openai/gpt-5.4-nano": { input: 0.20 / 1_000_000, output: 1.25 / 1_000_000 },
   "minimax/minimax-m3": { input: 0.30 / 1_000_000, output: 1.20 / 1_000_000 },
   "deepseek/deepseek-v3.1": { input: 0.25 / 1_000_000, output: 0.95 / 1_000_000, cacheRead: 0.13 / 1_000_000 },
+  "deepseek/deepseek-v4-flash": { input: 0.09 / 1_000_000, output: 0.18 / 1_000_000, cacheRead: 0.02 / 1_000_000 },
   "openai/gpt-5.4-mini": { input: 0.75 / 1_000_000, output: 4.50 / 1_000_000 },
 };
 
@@ -562,6 +574,9 @@ export async function getAssistantAiMonthlyUsageSummary(organizationId: string, 
     select: { totalUsageJson: true, usageJson: true, estimatedCostUsd: true, fallbackCount: true, providerMetadataJson: true },
   });
   let inputTokens = 0;
+  let outputTokens = 0;
+  let textTokens = 0;
+  let reasoningTokens = 0;
   let cacheReadTokens = 0;
   let cacheWriteTokens = 0;
   let costUsd = 0;
@@ -570,6 +585,9 @@ export async function getAssistantAiMonthlyUsageSummary(organizationId: string, 
   for (const run of runs) {
     const usage = normalizeAssistantAiUsage(JSON.parse(run.totalUsageJson ?? run.usageJson ?? "null"));
     inputTokens += usage?.inputTokens ?? 0;
+    outputTokens += usage?.outputTokens ?? 0;
+    textTokens += usage?.textTokens ?? 0;
+    reasoningTokens += usage?.reasoningTokens ?? 0;
     cacheReadTokens += usage?.cacheReadTokens ?? usage?.cachedInputTokens ?? 0;
     cacheWriteTokens += usage?.cacheWriteTokens ?? 0;
     costUsd += toNumber(run.estimatedCostUsd) ?? usage?.billedCostUsd ?? usage?.estimatedCostUsd ?? 0;
@@ -588,6 +606,9 @@ export async function getAssistantAiMonthlyUsageSummary(organizationId: string, 
     runCount: runs.length,
     fallbackRuns,
     inputTokens,
+    outputTokens,
+    textTokens,
+    reasoningTokens,
     cacheReadTokens,
     cacheWriteTokens,
     cacheReadRatio: inputTokens > 0 ? cacheReadTokens / inputTokens : 0,
