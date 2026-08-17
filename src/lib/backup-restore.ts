@@ -370,7 +370,9 @@ export async function restoreVerifiedBackup(input: RestoreInput): Promise<Restor
       : [];
 
     const restorableTables = [...parsed.tables.values()].filter((table) => !RESTORE_SKIPPED_TABLES.has(table.name));
-    const orderedTables = await orderTablesForRestore(client, restorableTables);
+    const orderedTables = triggerMode === "neon_user_trigger_fallback"
+      ? await orderTablesForRestore(client, restorableTables)
+      : restorableTables;
     if (restorableTables.length > 0) {
       await client.query(
         `TRUNCATE ${restorableTables.map((table) => tableReference(table.schema, table.name)).join(", ")} RESTART IDENTITY CASCADE`,
