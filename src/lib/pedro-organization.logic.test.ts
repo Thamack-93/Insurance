@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PEDRO_ORGANIZATION_ID,
+  getPedroOrganizationMetadataChanges,
   planPedroConfiguration,
   validatePedroOrganizationInputs,
   type PedroOrganizationSnapshot,
@@ -10,6 +11,10 @@ function snapshot(overrides: Partial<PedroOrganizationSnapshot> = {}): PedroOrga
   return {
     organizationStatus: "ACTIVE",
     organizationId: PEDRO_ORGANIZATION_ID,
+    organizationName: "Pedro Alfredo Gómez Lorenzo",
+    organizationSlug: "pedro-alfredo-gomez-lorenzo",
+    organizationTimeZone: "Etc/GMT+6",
+    organizationCurrency: "MXN",
     nonTechnicalUsers: 1,
     nonTechnicalUserIds: ["pedro"],
     ownerUserId: "pedro",
@@ -62,6 +67,14 @@ describe("Pedro organization configuration", () => {
     });
   });
 
+  it("requires the existing Pedro membership before metadata changes", () => {
+    expect(planPedroConfiguration(snapshot({ ownerUserId: null, ownerCount: 0, pedroMembershipRole: null, pedroMembershipActive: null }))).toEqual({
+      status: "BLOCKED",
+      action: "STOP",
+      reason: "POLICYDESK_PEDRO_OWNER_MEMBERSHIP_REQUIRED",
+    });
+  });
+
   it("blocks null tenant rows or an audit failure", () => {
     expect(planPedroConfiguration(snapshot({ tenantNullCount: 1 }))).toEqual({
       status: "STOP_NO_MUTATION",
@@ -75,6 +88,24 @@ describe("Pedro organization configuration", () => {
       status: "STOP_NO_MUTATION",
       action: "STOP",
       reason: "POLICYDESK_PEDRO_ORGANIZATION_NOT_ACTIVE",
+    });
+  });
+
+  it("reports only changed organization metadata", () => {
+    expect(getPedroOrganizationMetadataChanges({
+      name: snapshot().organizationName,
+      slug: snapshot().organizationSlug,
+      timeZone: snapshot().organizationTimeZone,
+      currency: snapshot().organizationCurrency,
+    }, {
+      name: "Pedro Gómez",
+      slug: "pedro-gomez",
+      timeZone: "Etc/GMT+6",
+      currency: "USD",
+    })).toEqual({
+      name: { from: "Pedro Alfredo Gómez Lorenzo", to: "Pedro Gómez" },
+      slug: { from: "pedro-alfredo-gomez-lorenzo", to: "pedro-gomez" },
+      currency: { from: "MXN", to: "USD" },
     });
   });
 });
