@@ -185,6 +185,7 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
       const valid = encodeSnapshot(snapshot);
       const restored = await restoreVerifiedBackup({ targetDatabaseUrl: targetUrl, plaintext: valid.plaintext, manifest: valid.manifest });
       expect(restored.tableCounts.totalRows).toBeGreaterThan(0);
+      expect(restored.triggerMode).toBe("session_replication_role");
       const orchestrationReport = await runBackupRestoreDrill({
         backupFilename: valid.manifest.payload.filename,
         targetDatabaseUrl: targetUrl,

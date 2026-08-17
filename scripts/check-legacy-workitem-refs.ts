@@ -57,6 +57,8 @@ const MIGRATION_FILES = new Set([
 function classify(file: string, snippet: string): Classification {
   if (MIGRATION_FILES.has(file)) return "migration-only";
   if (file === "scripts/check-legacy-workitem-refs.ts") return "migration-only";
+  // Restore compatibility inventory is declarative FK metadata, not a Task writer.
+  if (file === "src/lib/backup-restore.ts" && snippet.includes("Document_taskId_fkey")) return "migration-only";
   if (AUDIT_COMPAT_FILES.has(file)) return "legacy-read-compat";
   if (file === "src/app/api/documents/upload/route.ts" && snippet.includes("formData.get(\"taskId\")")) {
     return "legacy-read-compat";

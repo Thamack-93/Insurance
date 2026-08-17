@@ -21,6 +21,12 @@ schema o un incidente de integridad.
 - `DATABASE_URL` de la base fuente y `RESTORE_DATABASE_URL` del target temporal.
 - `RESTORE_NEON_BRANCH` con prefijo permitido `restore-`, `preview-` o `temp-`.
 - `ALLOW_TEMPORARY_NEON_RESTORE=true`.
+- Si el rol administrado de Neon no permite `session_replication_role`, añade
+  `ALLOW_NEON_USER_TRIGGER_FALLBACK=1` únicamente para este drill CLI. El fallback
+  solo se activa en endpoints `*.neon.tech`, exige que todos los triggers de usuario
+  estén en estado normal, deshabilita temporalmente los triggers dentro de la misma
+  transacción, restaura las FKs cíclicas inventariadas y las vuelve a habilitar antes
+  de validar. Nunca se configura en Vercel Runtime ni en la aplicación.
 - La clave activa o la variable versionada correspondiente a la versión del
   backup (`BACKUP_ENCRYPTION_KEY`, `BACKUP_ENCRYPTION_KEY_V2`, etc.).
 - `BLOB_READ_WRITE_TOKEN` para leer el backup privado.
@@ -49,8 +55,10 @@ npm run drill:backup:temp-neon -- <backup-filename.ndjson.gz.enc>
 
 El drill aplica las migraciones actuales al target con un subprocess aislado,
 restaura todas las tablas exportadas excepto `_prisma_migrations`, vuelve
-`session_replication_role` a `origin`, valida antes del commit y escribe un JSON
-en `artifacts/restore-drills/`. Un fallo revierte toda la transacción.
+`session_replication_role` a `origin` (o reestablece los triggers normales si se
+usó el fallback), valida antes del commit y escribe un JSON en
+`artifacts/restore-drills/`. El reporte incluye `triggerMode`. Un fallo revierte
+toda la transacción.
 
 Después del commit el propio drill reconecta al target, ejecuta las lecturas
 mínimas, `check:legacy-workitem-refs -- --read-only` y `db:check-drift`. No

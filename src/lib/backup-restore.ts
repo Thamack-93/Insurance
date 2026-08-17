@@ -44,6 +44,7 @@ export type RestoreInput = {
 
 export type RestoreResult = {
   targetFingerprint: string;
+  triggerMode: "session_replication_role" | "neon_user_trigger_fallback";
   tableCounts: Awaited<ReturnType<typeof validateTableCounts>>;
   foreignKeys: Awaited<ReturnType<typeof validateForeignKeys>>;
   domainChecks: Awaited<ReturnType<typeof validateDomainInvariants>>;
@@ -96,6 +97,183 @@ async function assertTargetIsPostgres(client: PoolClient) {
   const result = await client.query<{ version: string }>("SELECT version() AS version");
   const version = result.rows[0]?.version ?? "";
   if (!/^PostgreSQL\s/i.test(version)) throw new RestoreStageError("preflight", "El target no es PostgreSQL.", undefined, "TARGET_NOT_AUTHORIZED");
+}
+
+function isNeonTarget(targetDatabaseUrl: string) {
+  try {
+    return new URL(targetDatabaseUrl).hostname.endsWith(".neon.tech");
+  } catch {
+    return false;
+  }
+}
+
+async function disableUserTriggersForRestore(client: PoolClient, tables: BackupTableRecord[]) {
+  const tableRefs = tables
+    .filter((table) => !RESTORE_SKIPPED_TABLES.has(table.name))
+    .map((table) => tableReference(table.schema, table.name));
+  if (tableRefs.length === 0) return;
+
+  const nonNormal = await client.query<{ table_name: string; trigger_name: string; tgenabled: string }>(
+    `SELECT c.relname AS table_name, t.tgname AS trigger_name, t.tgenabled
+       FROM pg_trigger t
+       JOIN pg_class c ON c.oid = t.tgrelid
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND NOT t.tgisinternal AND t.tgenabled <> 'O'
+      ORDER BY c.relname, t.tgname`,
+  );
+  if ((nonNormal.rowCount ?? 0) > 0) {
+    throw new RestoreStageError(
+      "preflight",
+      "El target tiene triggers de usuario fuera del estado normal.",
+      undefined,
+      "TARGET_NOT_AUTHORIZED",
+    );
+  }
+
+  for (const tableRef of tableRefs) await client.query(`ALTER TABLE ${tableRef} DISABLE TRIGGER USER`);
+  // The backup contains exact trigger-managed values. Deferring constraints, where
+  // supported, keeps the insert order independent without weakening non-deferrable FKs.
+  await client.query("SET CONSTRAINTS ALL DEFERRED");
+}
+
+async function restoreUserTriggersAfterRestore(client: PoolClient, tables: BackupTableRecord[]) {
+  const tableRefs = tables
+    .filter((table) => !RESTORE_SKIPPED_TABLES.has(table.name))
+    .map((table) => tableReference(table.schema, table.name));
+  for (const tableRef of tableRefs) await client.query(`ALTER TABLE ${tableRef} ENABLE TRIGGER USER`);
+}
+
+const NEON_FALLBACK_CYCLIC_FKS = [
+  { table: "Document", constraint: "Document_endorsementId_fkey", column: '"endorsementId"', parent: '"PolicyEndorsement"' },
+  { table: "Document", constraint: "Document_receiptId_fkey", column: '"receiptId"', parent: '"Receipt"' },
+  { table: "Document", constraint: "Document_taskId_fkey", column: '"taskId"', parent: '"Task"' },
+  { table: "AssistantReport", constraint: "AssistantReport_parentReportId_fkey", column: '"parentReportId"', parent: '"AssistantReport"' },
+  { table: "Client", constraint: "Client_referidorId_fkey", column: '"referidorId"', parent: '"Client"' },
+  { table: "LedgerImportIssue", constraint: "LedgerImportIssue_duplicateOfId_fkey", column: '"duplicateOfId"', parent: '"LedgerImportIssue"' },
+  { table: "Policy", constraint: "Policy_renewedFromPolicyId_fkey", column: '"renewedFromPolicyId"', parent: '"Policy"' },
+  { table: "Policy", constraint: "Policy_familyRootId_fkey", column: '"familyRootId"', parent: '"Policy"' },
+  { table: "PolicyRenewalSuggestion", constraint: "PolicyRenewalSuggestion_duplicateOfId_fkey", column: '"duplicateOfId"', parent: '"PolicyRenewalSuggestion"' },
+  { table: "ReceiptReconciliationIssue", constraint: "ReceiptReconciliationIssue_duplicateOfId_fkey", column: '"duplicateOfId"', parent: '"ReceiptReconciliationIssue"' },
+] as const;
+
+async function dropNeonFallbackCyclicForeignKey(client: PoolClient, tables: BackupTableRecord[]) {
+  if (!tables.some((table) => table.schema === "public" && table.name === "Document")) return [];
+  const dropped: Array<{ table: string; constraint: string; definition: string }> = [];
+  for (const expected of NEON_FALLBACK_CYCLIC_FKS) {
+    const result = await client.query<{ definition: string }>(
+      `SELECT pg_get_constraintdef(con.oid) AS definition
+         FROM pg_constraint con
+         JOIN pg_class c ON c.oid = conrelid
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE conname = $1 AND n.nspname = 'public' AND c.relname = $2 AND contype = 'f'`,
+      [expected.constraint, expected.table],
+    );
+    const definition = result.rows[0]?.definition;
+    if (!definition || !definition.includes(expected.column) || !definition.includes(expected.parent)) {
+      throw new RestoreStageError(
+        "preflight",
+        "Las FKs cíclicas esperadas del target no coinciden con el inventario de restore.",
+        undefined,
+        "TARGET_NOT_AUTHORIZED",
+      );
+    }
+    await client.query(
+      `ALTER TABLE ${tableReference("public", expected.table)} DROP CONSTRAINT ${quoteIdentifier(expected.constraint)}`,
+    );
+    dropped.push({ table: expected.table, constraint: expected.constraint, definition });
+  }
+  return dropped;
+}
+
+async function restoreNeonFallbackCyclicForeignKey(client: PoolClient, definitions: Array<{ table: string; constraint: string; definition: string }>) {
+  for (const item of definitions) {
+    await client.query(
+      `ALTER TABLE ${tableReference("public", item.table)} ADD CONSTRAINT ${quoteIdentifier(item.constraint)} ${item.definition}`,
+    );
+  }
+}
+
+async function orderTablesForRestore(client: PoolClient, tables: BackupTableRecord[]) {
+  const keys = new Set(tables.map((table) => `${table.schema}.${table.name}`));
+  const byKey = new Map(tables.map((table) => [`${table.schema}.${table.name}`, table]));
+  const originalIndex = new Map(tables.map((table, index) => [`${table.schema}.${table.name}`, index]));
+  const dependencies = new Map<string, Set<string>>();
+  const dependents = new Map<string, Set<string>>();
+  for (const key of keys) {
+    dependencies.set(key, new Set());
+    dependents.set(key, new Set());
+  }
+  const foreignKeys = await client.query<{ child_schema: string; child_table: string; parent_schema: string; parent_table: string }>(
+    `SELECT child_ns.nspname AS child_schema, child.relname AS child_table,
+            parent_ns.nspname AS parent_schema, parent.relname AS parent_table
+       FROM pg_constraint con
+       JOIN pg_class child ON child.oid = con.conrelid
+       JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace
+       JOIN pg_class parent ON parent.oid = con.confrelid
+       JOIN pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace
+      WHERE con.contype = 'f' AND child_ns.nspname = 'public' AND parent_ns.nspname = 'public'`,
+  );
+  for (const fk of foreignKeys.rows) {
+    const child = `${fk.child_schema}.${fk.child_table}`;
+    const parent = `${fk.parent_schema}.${fk.parent_table}`;
+    if (!keys.has(child) || !keys.has(parent) || child === parent) continue;
+    dependencies.get(child)?.add(parent);
+    dependents.get(parent)?.add(child);
+  }
+  const available = [...keys].filter((key) => dependencies.get(key)?.size === 0)
+    .sort((left, right) => (originalIndex.get(left) ?? 0) - (originalIndex.get(right) ?? 0));
+  const orderedKeys: string[] = [];
+  while (available.length > 0) {
+    const key = available.shift()!;
+    orderedKeys.push(key);
+    for (const dependent of dependents.get(key) ?? []) {
+      const remaining = dependencies.get(dependent);
+      remaining?.delete(key);
+      if (remaining?.size === 0) {
+        available.push(dependent);
+        available.sort((left, right) => (originalIndex.get(left) ?? 0) - (originalIndex.get(right) ?? 0));
+      }
+    }
+  }
+  if (orderedKeys.length !== keys.size) {
+    throw new RestoreStageError(
+      "insertion",
+      "El grafo de relaciones del target contiene un ciclo no restaurable sin triggers de replicación.",
+      undefined,
+      "INSERTION_FAILED",
+    );
+  }
+  return orderedKeys.map((key) => byKey.get(key)!);
+}
+
+async function beginRestoreTransaction(
+  client: PoolClient,
+  parsed: { tables: Map<string, BackupTableRecord> },
+  targetDatabaseUrl: string,
+  advisoryLockKey: string,
+) {
+  await client.query("BEGIN");
+  try {
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [advisoryLockKey]);
+    await client.query("SET LOCAL session_replication_role = replica");
+    return "session_replication_role" as const;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    const enabled = process.env.ALLOW_NEON_USER_TRIGGER_FALLBACK === "1";
+    const isReplicationPermissionFailure = error instanceof Error
+      && (error as { code?: string }).code === "42501"
+      && error.message.includes("session_replication_role");
+    if (!enabled || !isNeonTarget(targetDatabaseUrl) || !isReplicationPermissionFailure) throw error;
+    await client.query("BEGIN");
+    try {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [advisoryLockKey]);
+      await disableUserTriggersForRestore(client, [...parsed.tables.values()]);
+      return "neon_user_trigger_fallback" as const;
+    } catch (fallbackError) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw fallbackError;
+    }
+  }
 }
 
 function migrationEnvironment(targetDatabaseUrl: string) {
@@ -180,21 +358,33 @@ export async function restoreVerifiedBackup(input: RestoreInput): Promise<Restor
   try {
     await assertTargetIsPostgres(client);
     await validateRestoreSchema(client, parsed);
-    await client.query("BEGIN");
+    const triggerMode = await beginRestoreTransaction(
+      client,
+      parsed,
+      input.targetDatabaseUrl,
+      input.advisoryLockKey ?? "policydesk-backup-restore",
+    );
     transactionStarted = true;
-    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [input.advisoryLockKey ?? "policydesk-backup-restore"]);
-    await client.query("SET LOCAL session_replication_role = replica");
+    const droppedCyclicForeignKeys = triggerMode === "neon_user_trigger_fallback"
+      ? await dropNeonFallbackCyclicForeignKey(client, [...parsed.tables.values()])
+      : [];
 
     const restorableTables = [...parsed.tables.values()].filter((table) => !RESTORE_SKIPPED_TABLES.has(table.name));
+    const orderedTables = await orderTablesForRestore(client, restorableTables);
     if (restorableTables.length > 0) {
       await client.query(
         `TRUNCATE ${restorableTables.map((table) => tableReference(table.schema, table.name)).join(", ")} RESTART IDENTITY CASCADE`,
       );
     }
-    for (const table of parsed.tables.values()) {
+    for (const table of orderedTables) {
       await restoreTable(client, table, parsed.rows.get(`${table.schema}.${table.name}`) ?? []);
     }
-    await client.query("SET LOCAL session_replication_role = origin");
+    if (triggerMode === "neon_user_trigger_fallback") {
+      await restoreNeonFallbackCyclicForeignKey(client, droppedCyclicForeignKeys);
+      await restoreUserTriggersAfterRestore(client, [...parsed.tables.values()]);
+    } else {
+      await client.query("SET LOCAL session_replication_role = origin");
+    }
 
     const tableCounts = await validateTableCounts(
       client,
@@ -209,6 +399,7 @@ export async function restoreVerifiedBackup(input: RestoreInput): Promise<Restor
     transactionStarted = false;
     return {
       targetFingerprint: getSafeTargetFingerprint(input.targetDatabaseUrl),
+      triggerMode,
       tableCounts,
       foreignKeys,
       domainChecks,
