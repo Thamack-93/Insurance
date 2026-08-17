@@ -54,6 +54,8 @@ export type AssistantAiStatus = {
 };
 
 export type AssistantAiTier = "deterministic" | "minimax" | "critical";
+export type AssistantAiExecutionProfile = "simple-read" | "complex-read" | "draft";
+export type AssistantAiTerminationReason = "complete" | "step-limit" | "output-budget" | "timeout" | "length" | "error";
 export type AssistantAiRunStatus = "RUNNING" | "SUCCEEDED" | "FAILED" | "ABORTED";
 export type AssistantAiAttemptStatus = "STARTED" | "SUCCEEDED" | "FAILED" | "SKIPPED";
 
@@ -170,6 +172,7 @@ export type AssistantAiFailureCode =
   | "no_object_generated"
   | "no_output_generated"
   | "invalid_output"
+  | "incomplete_output"
   | "invalid_prompt"
   | "type_validation_error"
   | "empty_response"
@@ -358,6 +361,9 @@ export type AssistantConversationResponse = AssistantReply & {
   aiTrace?: AssistantAiTraceEntry[];
   aiToolTrace?: AssistantAiToolTraceEntry[];
   aiPromptVersion?: string | null;
+  aiExecutionProfile?: AssistantAiExecutionProfile | null;
+  aiStepCount?: number | null;
+  aiTerminationReason?: AssistantAiTerminationReason | null;
   aiBudgetWarning?: string | null;
   aiFallbackNotice?: string | null;
   aiDiagnostic?: AssistantAiDiagnostic | null;

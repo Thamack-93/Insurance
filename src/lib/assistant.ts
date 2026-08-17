@@ -17,12 +17,14 @@ import { buildAssistantBlockedReply, buildGmmPrivacyReply, evaluateAssistantInpu
 import { getNoraAiBudgetStatus, isNoraAgentEnabledForUser } from "@/lib/assistant-agent-config";
 import type {
   AssistantAiDiagnostic,
+  AssistantAiExecutionProfile,
   AssistantActionProposal,
   AssistantConversationResponse,
   AssistantReportKind,
   AssistantReportSeverity,
   AssistantReply,
   AssistantAiTier,
+  AssistantAiTerminationReason,
   AssistantAiTraceEntry,
   AssistantAiUsageSnapshot,
   AssistantAiToolTraceEntry,
@@ -126,6 +128,7 @@ function shouldUseAssistantAi(normalized: string) {
 }
 
 function hasMutationIntent(normalized: string) {
+  const asksForDraft = ["borrador", "prepara", "propuesta"].some((phrase) => normalized.includes(phrase));
   const explicitReadOnly = [
     "no modifi",
     "sin modifi",
@@ -134,11 +137,8 @@ function hasMutationIntent(normalized: string) {
     "consulta informativa",
     "solo analiza",
     "solo revisa",
-    "no ejecutes",
-    "no guardes",
-    "no registres",
   ].some((phrase) => normalized.includes(phrase));
-  if (explicitReadOnly) return false;
+  if (explicitReadOnly && !asksForDraft) return false;
 
   return (
     normalized.includes("actualiz") ||
@@ -158,6 +158,32 @@ function hasMutationIntent(normalized: string) {
     normalized.includes("nuevo recibo") ||
     normalized.includes("nueva tarea")
   );
+}
+
+function resolveAgentExecutionPlan(normalized: string): {
+  profile: AssistantAiExecutionProfile;
+  activeTools?: string[];
+  requiredTool?: string | null;
+} {
+  if (normalized.includes("hoy") || normalized.includes("today") || normalized.includes("agenda") || normalized.includes("resumen")) {
+    return { profile: "simple-read", activeTools: ["getTodayBrief"], requiredTool: "getTodayBrief" };
+  }
+  if (normalized.includes("renov")) {
+    return { profile: "simple-read", activeTools: ["listRenewals"], requiredTool: "listRenewals" };
+  }
+  if (normalized.includes("recibo") || normalized.includes("cobro")) {
+    return { profile: "simple-read", activeTools: ["listReceipts"], requiredTool: "listReceipts" };
+  }
+  if (normalized.includes("buscar") || normalized.includes("cliente") || normalized.includes("poliza")) {
+    return { profile: "simple-read", activeTools: ["searchPortfolio", "getEntitySummary"], requiredTool: "searchPortfolio" };
+  }
+  if (normalized.includes("pendient") || normalized.includes("tarea") || normalized.includes("task")) {
+    return { profile: "simple-read", activeTools: ["listOpenWorkItems"], requiredTool: "listOpenWorkItems" };
+  }
+  if (normalized.includes("siniestro") || normalized.includes("claim") || normalized.includes("checklist")) {
+    return { profile: "simple-read", activeTools: ["listClaims", "getClaimChecklist"], requiredTool: "listClaims" };
+  }
+  return { profile: "complex-read" };
 }
 
 function detectTheme(normalized: string): AssistantReportTheme | null {
@@ -478,7 +504,16 @@ export async function buildAssistantReply(
   let aiTrace: AssistantAiTraceEntry[] = [];
   let aiToolTrace: AssistantAiToolTraceEntry[] = [];
   let aiPromptVersion: string | null = null;
-  const aiMode = agentEnabled ? "agent" as const : hasMutationIntent(normalized) ? "structured" as const : "conversation" as const;
+  let aiExecutionProfile: AssistantAiExecutionProfile | null = null;
+  let aiStepCount: number | null = null;
+  let aiTerminationReason: AssistantAiTerminationReason | null = null;
+  const mutationIntent = hasMutationIntent(normalized);
+  const agentExecutionPlan = agentEnabled && !mutationIntent ? resolveAgentExecutionPlan(normalized) : null;
+  const aiMode = mutationIntent
+    ? "structured" as const
+    : agentEnabled
+      ? "agent" as const
+      : "conversation" as const;
 
   if (shouldTryAi) {
     const safeHistory = (options.history ?? [])
@@ -493,6 +528,9 @@ export async function buildAssistantReply(
       mode: aiMode,
       history: safeHistory,
       gmmMetadataOnly: gmmMode,
+      executionProfile: mutationIntent ? "draft" : agentExecutionPlan?.profile,
+      activeTools: agentExecutionPlan?.activeTools,
+      requiredTool: agentExecutionPlan?.requiredTool,
     });
     if (aiReply.ok) {
       finalReply = {
@@ -517,6 +555,9 @@ export async function buildAssistantReply(
       aiTrace = aiReply.value.trace;
       aiToolTrace = aiReply.value.toolTrace;
       aiPromptVersion = aiReply.value.promptVersion;
+      aiExecutionProfile = aiReply.value.executionProfile;
+      aiStepCount = aiReply.value.stepCount;
+      aiTerminationReason = aiReply.value.terminationReason;
       if (aiMode === "agent") {
         actionProposal = aiReply.value.actionProposal;
       } else if (aiMode === "structured" && aiReply.value.mutation) {
@@ -532,6 +573,8 @@ export async function buildAssistantReply(
       aiAttempts = aiReply.diagnostic.trace?.length ?? 0;
       aiUsage = aiReply.diagnostic.usage ?? null;
       aiTrace = aiReply.diagnostic.trace ?? [];
+      aiExecutionProfile = mutationIntent ? "draft" : agentExecutionPlan?.profile ?? null;
+      aiTerminationReason = aiReply.diagnostic.code === "timeout" ? "timeout" : aiReply.diagnostic.code === "incomplete_output" ? "length" : "error";
     }
   }
 
@@ -605,6 +648,9 @@ export async function buildAssistantReply(
     aiTrace,
     aiToolTrace,
     aiPromptVersion,
+    aiExecutionProfile,
+    aiStepCount,
+    aiTerminationReason,
     aiBudgetWarning: budget.warning,
     aiFallbackNotice,
     aiDiagnostic,

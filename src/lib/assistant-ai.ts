@@ -11,12 +11,11 @@ import {
   NoOutputGeneratedError,
   NoSuchModelError,
   Output,
+  ToolLoopAgent,
   TypeValidationError,
   generateText,
   gateway,
   stepCountIs,
-  type StopCondition,
-  type ToolSet,
 } from "ai";
 import { z } from "zod";
 import {
@@ -35,12 +34,14 @@ import { withOperationTimeout } from "@/lib/operation-timeout";
 import type {
   AssistantAiAttempt,
   AssistantAiDiagnostic,
+  AssistantAiExecutionProfile,
   AssistantAiFailureCode,
   AssistantAiOperation,
   AssistantAiStatus,
   AssistantAiTier,
   AssistantAiTraceEntry,
   AssistantAiToolTraceEntry,
+  AssistantAiTerminationReason,
   AssistantAiUsageSnapshot,
   AssistantActionProposal,
   AssistantHistoryMessage,
@@ -61,9 +62,37 @@ const ASSISTANT_AI_FALLBACK_MODELS = ["deepseek/deepseek-v4-flash"];
 const ASSISTANT_AI_AGENT_TOTAL_TIMEOUT_MS = 25_000;
 const ASSISTANT_AI_ATTEMPT_TIMEOUT_MS = 10_000;
 const ASSISTANT_AI_TRACKING_TIMEOUT_MS = 2_000;
-const ASSISTANT_AI_AGENT_MAX_OUTPUT_TOKENS = 12_288;
-const ASSISTANT_AI_AGENT_THINKING_BUDGET = 8_192;
-const ASSISTANT_AI_AGENT_MAX_TOTAL_OUTPUT_TOKENS = 32_768;
+const ASSISTANT_AI_DRAFT_MAX_OUTPUT_TOKENS = 2_048;
+
+export const ASSISTANT_AI_EXECUTION_PROFILES: Record<AssistantAiExecutionProfile, {
+  maxOutputTokens: number;
+  thinkingBudget: number | null;
+  maxSteps: number;
+  maxTotalOutputTokens: number;
+  attemptTimeoutMs: number;
+}> = {
+  "simple-read": {
+    maxOutputTokens: 4_096,
+    thinkingBudget: 2_048,
+    maxSteps: 2,
+    maxTotalOutputTokens: 8_192,
+    attemptTimeoutMs: 14_000,
+  },
+  "complex-read": {
+    maxOutputTokens: 12_288,
+    thinkingBudget: 8_192,
+    maxSteps: 4,
+    maxTotalOutputTokens: 32_768,
+    attemptTimeoutMs: 18_000,
+  },
+  draft: {
+    maxOutputTokens: ASSISTANT_AI_DRAFT_MAX_OUTPUT_TOKENS,
+    thinkingBudget: null,
+    maxSteps: 1,
+    maxTotalOutputTokens: ASSISTANT_AI_DRAFT_MAX_OUTPUT_TOKENS,
+    attemptTimeoutMs: 10_000,
+  },
+};
 
 function toFiniteTokenCount(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
@@ -86,11 +115,12 @@ function getAssistantStepOutputTokens(value: unknown) {
     + (toFiniteTokenCount(usage.outputTokenDetails?.reasoningTokens) ?? 0);
 }
 
-export function assistantAgentOutputBudgetReached<TOOLS extends ToolSet>({
-  steps,
-}: Parameters<StopCondition<TOOLS>>[0]) {
+export function assistantAgentOutputBudgetReached(
+  { steps }: { steps: Array<{ usage?: unknown }> },
+  maxTotalOutputTokens = ASSISTANT_AI_EXECUTION_PROFILES["complex-read"].maxTotalOutputTokens,
+) {
   const totalOutputTokens = steps.reduce((total, step) => total + getAssistantStepOutputTokens(step.usage), 0);
-  return totalOutputTokens >= ASSISTANT_AI_AGENT_MAX_TOTAL_OUTPUT_TOKENS;
+  return totalOutputTokens >= maxTotalOutputTokens;
 }
 
 const aiQuickPromptSchema = z.object({
@@ -131,7 +161,7 @@ const assistantAiResponseSchema = z.object({
       reply: z.string().min(1),
       fields: z.array(mutationFieldSchema).max(20),
       relations: z.array(mutationRelationSchema).max(10),
-      missingFields: z.array(mutationMissingFieldSchema).max(10),
+      missingFields: z.array(mutationMissingFieldSchema).max(1),
     })
     .nullable(),
 });
@@ -165,6 +195,7 @@ type AssistantGenerateResult = {
   finishReason?: string | null;
   text: string;
   output?: unknown;
+  steps?: Array<{ usage?: unknown }>;
 };
 
 type AssistantAiGeneratedValue = {
@@ -176,6 +207,9 @@ type AssistantAiGeneratedValue = {
   actionProposal?: AssistantActionProposal | null;
   toolTrace?: AssistantAiToolTraceEntry[];
   promptVersion?: string | null;
+  executionProfile?: AssistantAiExecutionProfile | null;
+  stepCount?: number | null;
+  terminationReason?: AssistantAiTerminationReason | null;
 };
 
 type AssistantAiReplyValue = AssistantReply & {
@@ -193,6 +227,9 @@ type AssistantAiReplyValue = AssistantReply & {
   actionProposal: AssistantActionProposal | null;
   toolTrace: AssistantAiToolTraceEntry[];
   promptVersion: string | null;
+  executionProfile: AssistantAiExecutionProfile | null;
+  stepCount: number | null;
+  terminationReason: AssistantAiTerminationReason | null;
 };
 
 function makeId(prefix: string) {
@@ -311,6 +348,7 @@ function getAssistantProviderOptions(input: {
   userId: string;
   model: string;
   mode: "conversation" | "structured" | "agent";
+  thinkingBudget?: number | null;
   tags: string[];
   fallbackModels: string[];
 }) {
@@ -323,8 +361,8 @@ function getAssistantProviderOptions(input: {
     ...(input.model.startsWith("alibaba/")
       ? {
           alibaba: {
-            enableThinking: input.mode === "agent",
-            ...(input.mode === "agent" ? { thinkingBudget: ASSISTANT_AI_AGENT_THINKING_BUDGET } : {}),
+            enableThinking: input.mode === "agent" && input.thinkingBudget != null,
+            ...(input.mode === "agent" && input.thinkingBudget != null ? { thinkingBudget: input.thinkingBudget } : {}),
           },
         }
       : {}),
@@ -388,7 +426,13 @@ function bestUsageCost(usage: AssistantAiUsageSnapshot | null | undefined) {
   return usage.billedCostUsd ?? usage.estimatedCostUsd ?? null;
 }
 
-function safeAiProviderMetadata(value: unknown, extra?: { promptVersion?: string | null; toolTrace?: AssistantAiToolTraceEntry[] }) {
+function safeAiProviderMetadata(value: unknown, extra?: {
+  promptVersion?: string | null;
+  toolTrace?: AssistantAiToolTraceEntry[];
+  executionProfile?: AssistantAiExecutionProfile | null;
+  stepCount?: number | null;
+  terminationReason?: AssistantAiTerminationReason | null;
+}) {
   const metadata = getGatewayMetadata(value);
   const gateway: Record<string, string> = {};
   const generationId = metadata?.generationId;
@@ -398,6 +442,9 @@ function safeAiProviderMetadata(value: unknown, extra?: { promptVersion?: string
   const safeExtra = {
     ...(extra?.promptVersion ? { promptVersion: extra.promptVersion } : {}),
     ...(extra?.toolTrace?.length ? { toolTrace: extra.toolTrace.map((entry) => ({ tool: entry.tool, outcome: entry.outcome, durationMs: entry.durationMs })) } : {}),
+    ...(extra?.executionProfile ? { executionProfile: extra.executionProfile } : {}),
+    ...(extra?.stepCount != null ? { stepCount: extra.stepCount } : {}),
+    ...(extra?.terminationReason ? { terminationReason: extra.terminationReason } : {}),
   };
   return Object.keys(gateway).length || Object.keys(safeExtra).length ? { ...(Object.keys(gateway).length ? { gateway } : {}), ...safeExtra } : null;
 }
@@ -455,6 +502,18 @@ async function lookupGatewayUsage(usage: AssistantAiUsageSnapshot | null, model:
   } catch {
     return usage;
   }
+}
+
+async function resolveAssistantUsages(result: AssistantGenerateResult, model: string) {
+  const usage = toUsage(result.usage, model, result.providerMetadata);
+  const totalUsage = toUsage(result.totalUsage, model, result.providerMetadata);
+  const sameGeneration = Boolean(
+    usage?.generationId && totalUsage?.generationId && usage.generationId === totalUsage.generationId,
+  );
+  const resolvedUsage = await lookupGatewayUsage(usage, model);
+  if (sameGeneration) return { usage: resolvedUsage, totalUsage: resolvedUsage };
+  const resolvedTotalUsage = await lookupGatewayUsage(totalUsage, model);
+  return { usage: resolvedUsage, totalUsage: resolvedTotalUsage ?? resolvedUsage };
 }
 
 export type AssistantAiTrackedOperationResult<T> = {
@@ -753,18 +812,23 @@ async function runAssistantAttempt(input: {
   mode: "conversation" | "structured" | "agent";
   history?: AssistantHistoryMessage[];
   gmmMetadataOnly?: boolean;
+  executionProfile?: AssistantAiExecutionProfile;
+  activeTools?: string[];
+  requiredTool?: string | null;
 }) : Promise<AssistantAiAttemptResult<AssistantAiGeneratedValue>> {
   const startedAt = Date.now();
   const agentRuntime = input.mode === "agent" ? createNoraAgentTools(input.user, { gmmMetadataOnly: input.gmmMetadataOnly }) : null;
+  const executionProfile = input.executionProfile ?? "complex-read";
+  const profile = ASSISTANT_AI_EXECUTION_PROFILES[executionProfile];
   try {
     const generationInput = {
       model: gateway(input.model),
       temperature: input.mode === "structured" ? 0.1 : 0.2,
-      maxOutputTokens: input.mode === "agent" ? ASSISTANT_AI_AGENT_MAX_OUTPUT_TOKENS : 1_000,
+      maxOutputTokens: input.mode === "agent" ? profile.maxOutputTokens : input.mode === "structured" ? ASSISTANT_AI_DRAFT_MAX_OUTPUT_TOKENS : 1_000,
       maxRetries: 0,
       abortSignal: AbortSignal.timeout(input.timeoutMs),
       system: input.mode === "structured"
-        ? `${assistantSystemPrompt}\nDevuelve un plan de cambio estricto. Todas las propiedades deben existir; usa null para targetQuery y [] para listas vacías.`
+        ? `${assistantSystemPrompt}\nDevuelve un plan de cambio estricto. Todas las propiedades deben existir; usa null para targetQuery y [] para listas vacías. Si falta información, devuelve como máximo un missingField y formula una sola pregunta concreta; nunca prepares un borrador incompleto.`
         : `${assistantSystemPrompt}\nResponde únicamente con texto claro y conciso en español. No devuelvas JSON, tarjetas ni acciones para una consulta informativa. Usa únicamente la evidencia local proporcionada.`,
       prompt: [
         `Rol: ${input.user.role}`,
@@ -778,40 +842,95 @@ async function runAssistantAttempt(input: {
         userId: input.user.id,
         model: input.model,
         mode: input.mode,
+        thinkingBudget: input.mode === "agent" ? profile.thinkingBudget : null,
         tags: ["feature:assistant", input.mode === "structured" ? "mode:structured" : "mode:conversation", `role:${input.user.role}`, "surface:web"],
         fallbackModels: input.fallbackModels,
       }),
     };
     const result = input.mode === "structured"
       ? await generateText({ ...generationInput, output: Output.object({ schema: assistantAiResponseSchema }) })
-      : input.mode === "agent" && agentRuntime
-        ? await generateText({
+        : input.mode === "agent" && agentRuntime
+        ? await new ToolLoopAgent({
             model: gateway(input.model),
             temperature: 0.2,
-            maxOutputTokens: ASSISTANT_AI_AGENT_MAX_OUTPUT_TOKENS,
+            maxOutputTokens: profile.maxOutputTokens,
             maxRetries: 0,
-            abortSignal: AbortSignal.timeout(input.timeoutMs),
-            system: NORA_AGENT_SYSTEM_PROMPT,
-            messages: [
-              ...(input.history ?? []).map((message) => ({ role: message.role, content: message.content } as const)),
-              { role: "user" as const, content: [input.contextText ? `Contexto explícito autorizado: ${input.contextText}` : null, input.message].filter(Boolean).join("\n\n") },
-            ],
+            instructions: NORA_AGENT_SYSTEM_PROMPT,
             tools: agentRuntime.tools,
-            stopWhen: [stepCountIs(4), assistantAgentOutputBudgetReached],
+            stopWhen: [
+              stepCountIs(profile.maxSteps),
+              (step) => assistantAgentOutputBudgetReached(step, profile.maxTotalOutputTokens),
+            ],
             providerOptions: getAssistantProviderOptions({
               userId: input.user.id,
               model: input.model,
               mode: "agent",
-              tags: ["feature:assistant", "mode:agent", `prompt:${NORA_AGENT_PROMPT_VERSION}`, `role:${input.user.role}`, "surface:web"],
+              thinkingBudget: profile.thinkingBudget,
+              tags: ["feature:assistant", "mode:agent", `profile:${executionProfile}`, `prompt:${NORA_AGENT_PROMPT_VERSION}`, `role:${input.user.role}`, "surface:web"],
               fallbackModels: input.fallbackModels,
             }),
+            prepareStep: ({ stepNumber }) => {
+              const activeTools = input.activeTools?.length
+                ? input.activeTools as Array<keyof typeof agentRuntime.tools>
+                : undefined;
+              return {
+                ...(activeTools ? { activeTools } : {}),
+                ...(stepNumber === 0 && input.requiredTool && activeTools?.includes(input.requiredTool as keyof typeof agentRuntime.tools)
+                  ? { toolChoice: { type: "tool", toolName: input.requiredTool as keyof typeof agentRuntime.tools } }
+                  : {}),
+                providerOptions: getAssistantProviderOptions({
+                  userId: input.user.id,
+                  model: input.model,
+                  mode: "agent",
+                  thinkingBudget: profile.thinkingBudget,
+                  tags: ["feature:assistant", "mode:agent", `profile:${executionProfile}`, `prompt:${NORA_AGENT_PROMPT_VERSION}`, `role:${input.user.role}`, "surface:web"],
+                  fallbackModels: input.fallbackModels,
+                }),
+              };
+            },
+          }).generate({
+            abortSignal: AbortSignal.timeout(input.timeoutMs),
+            messages: [
+              ...(input.history ?? []).map((message) => ({ role: message.role, content: message.content } as const)),
+              { role: "user" as const, content: [input.contextText ? `Contexto explícito autorizado: ${input.contextText}` : null, input.message].filter(Boolean).join("\n\n") },
+            ],
           })
         : await generateText(generationInput);
 
     if (input.mode === "conversation" || input.mode === "agent") {
       const resolvedModel = getGatewayResolvedModel(result.providerMetadata, input.model);
-      const usage = await lookupGatewayUsage(toUsage(result.usage, resolvedModel, result.providerMetadata), resolvedModel);
-      const totalUsage = await lookupGatewayUsage(toUsage(result.totalUsage, resolvedModel, result.providerMetadata), resolvedModel);
+      const { usage, totalUsage } = await resolveAssistantUsages(result, resolvedModel);
+      const stepCount = input.mode === "agent" ? result.steps?.length ?? null : null;
+      const terminationReason = input.mode === "agent"
+        ? result.finishReason === "length"
+          ? "length" as const
+          : stepCount != null && stepCount >= profile.maxSteps
+            ? "step-limit" as const
+            : result.steps && assistantAgentOutputBudgetReached({ steps: result.steps }, profile.maxTotalOutputTokens)
+              ? "output-budget" as const
+              : "complete" as const
+        : "complete" as const;
+      if (result.finishReason === "length") {
+        return {
+          ok: false,
+          code: "incomplete_output",
+          error: new Error("AI response ended at the output limit"),
+          attempt: {
+            model: resolvedModel,
+            requestedModel: input.model,
+            code: "incomplete_output",
+            outcome: "error",
+            durationMs: Date.now() - startedAt,
+            finishReason: result.finishReason,
+            responsePreview: null,
+            errorMessage: "La respuesta terminó por límite de salida y no se mostró parcialmente.",
+            usage,
+            totalUsage: totalUsage ?? usage,
+            providerMetadata: result.providerMetadata ?? null,
+            toolTrace: agentRuntime?.snapshot().trace ?? [],
+          },
+        };
+      }
       if (!result.text?.trim()) {
         return {
           ok: false,
@@ -829,6 +948,7 @@ async function runAssistantAttempt(input: {
             usage,
             totalUsage: totalUsage ?? usage,
             providerMetadata: result.providerMetadata ?? null,
+            toolTrace: agentRuntime?.snapshot().trace ?? [],
           },
         };
       }
@@ -843,6 +963,9 @@ async function runAssistantAttempt(input: {
             actionProposal: agentRuntime.snapshot().actionProposal,
             toolTrace: agentRuntime.snapshot().trace,
             promptVersion: NORA_AGENT_PROMPT_VERSION,
+            executionProfile,
+            stepCount,
+            terminationReason,
           } : {}),
         },
         attempt: {
@@ -862,8 +985,27 @@ async function runAssistantAttempt(input: {
     }
 
     const resolvedModel = getGatewayResolvedModel(result.providerMetadata, input.model);
-    const usage = await lookupGatewayUsage(toUsage(result.usage, resolvedModel, result.providerMetadata), resolvedModel);
-    const totalUsage = await lookupGatewayUsage(toUsage(result.totalUsage, resolvedModel, result.providerMetadata), resolvedModel);
+    const { usage, totalUsage } = await resolveAssistantUsages(result, resolvedModel);
+    if (result.finishReason === "length") {
+      return {
+        ok: false,
+        code: "incomplete_output",
+        error: new Error("AI structured response ended at the output limit"),
+        attempt: {
+          model: resolvedModel,
+          requestedModel: input.model,
+          code: "incomplete_output",
+          outcome: "error",
+          durationMs: Date.now() - startedAt,
+          finishReason: result.finishReason,
+          responsePreview: null,
+          errorMessage: "El plan terminó por límite de salida y no se creó ningún borrador.",
+          usage,
+          totalUsage: totalUsage ?? usage,
+          providerMetadata: result.providerMetadata ?? null,
+        },
+      };
+    }
     const parsed = result.output as z.infer<typeof assistantAiResponseSchema> | undefined;
     if (!parsed) {
       return {
@@ -886,7 +1028,15 @@ async function runAssistantAttempt(input: {
     }
     return {
       ok: true,
-      value: { parsed, result, usageOverride: usage, totalUsageOverride: totalUsage ?? usage },
+      value: {
+        parsed,
+        result,
+        usageOverride: usage,
+        totalUsageOverride: totalUsage ?? usage,
+        executionProfile: "draft",
+        stepCount: 1,
+        terminationReason: "complete",
+      },
       attempt: {
         model: resolvedModel,
         requestedModel: input.model,
@@ -974,6 +1124,9 @@ function valueFromAttempt(input: {
     actionProposal: input.generated.actionProposal ?? null,
     toolTrace: input.generated.toolTrace ?? [],
     promptVersion: input.generated.promptVersion ?? null,
+    executionProfile: input.generated.executionProfile ?? null,
+    stepCount: input.generated.stepCount ?? null,
+    terminationReason: input.generated.terminationReason ?? null,
   };
 }
 
@@ -1009,6 +1162,9 @@ export async function buildAssistantAiReply(input: {
   mode?: "conversation" | "structured" | "agent";
   history?: AssistantHistoryMessage[];
   gmmMetadataOnly?: boolean;
+  executionProfile?: AssistantAiExecutionProfile;
+  activeTools?: string[];
+  requiredTool?: string | null;
 }): Promise<AssistantAiResult<AssistantAiReplyValue>> {
   if (!input.user.organizationId) {
     return { ok: false, diagnostic: buildDiagnostic({ operation: "assistant-reply", tier: "minimax", model: getAssistantAiModel(), fallbackModels: [], startedAt: Date.now(), runId: makeId("run"), code: "invalid_prompt", attempts: [] }) };
@@ -1016,6 +1172,8 @@ export async function buildAssistantAiReply(input: {
   const organizationId = input.user.organizationId;
   const startedAt = Date.now();
   const mode = input.mode ?? "conversation";
+  const executionProfile = input.executionProfile ?? (mode === "structured" ? "draft" : "complex-read");
+  const profile = ASSISTANT_AI_EXECUTION_PROFILES[executionProfile];
   const operation: AssistantAiOperation = mode === "agent" ? "assistant-agent" : "assistant-reply";
   const model = mode === "agent"
     ? getAssistantAiModel()
@@ -1068,16 +1226,20 @@ export async function buildAssistantAiReply(input: {
 
   const attempts: AssistantAiAttempt[] = [];
   const candidateModels = [model, ...fallbackModels.filter((candidate) => candidate && candidate !== model)];
+  const totalTimeoutMs = mode === "agent" ? ASSISTANT_AI_AGENT_TOTAL_TIMEOUT_MS : executionProfile === "draft" ? 15_000 : ASSISTANT_AI_ATTEMPT_TIMEOUT_MS;
   for (let index = 0; index < candidateModels.length; index += 1) {
     const candidateModel = candidateModels[index]!;
-    const remainingAgentTime = ASSISTANT_AI_AGENT_TOTAL_TIMEOUT_MS - (Date.now() - startedAt);
-    if (mode === "agent" && remainingAgentTime <= 0) break;
+    const remainingTime = totalTimeoutMs - (Date.now() - startedAt);
+    if (remainingTime <= 0) break;
     const attemptResult = await runAssistantAttempt({
       ...input,
       model: candidateModel,
       fallbackModels: [],
-      timeoutMs: mode === "agent" ? Math.max(250, remainingAgentTime) : ASSISTANT_AI_ATTEMPT_TIMEOUT_MS,
+      timeoutMs: Math.max(250, Math.min(profile.attemptTimeoutMs, remainingTime)),
       mode,
+      executionProfile,
+      activeTools: input.activeTools,
+      requiredTool: input.requiredTool,
     });
     attempts.push(attemptResult.attempt);
     await ensureTrackedRun();
@@ -1123,7 +1285,13 @@ export async function buildAssistantAiReply(input: {
         finishReason: value.finishReason,
         usage: value.usage,
         totalUsage: value.totalUsage,
-        providerMetadata: safeAiProviderMetadata(value.providerMetadata, { promptVersion: value.promptVersion, toolTrace: value.toolTrace }) ?? undefined,
+        providerMetadata: safeAiProviderMetadata(value.providerMetadata, {
+          promptVersion: value.promptVersion,
+          toolTrace: value.toolTrace,
+          executionProfile: value.executionProfile,
+          stepCount: value.stepCount,
+          terminationReason: value.terminationReason,
+        }) ?? undefined,
         durationMs: Date.now() - startedAt,
         attemptCount: attempts.length,
         fallbackCount: index,

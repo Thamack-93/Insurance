@@ -45,6 +45,13 @@ function formatDurationMs(value: number | null | undefined) {
   return `${(value / 1000).toFixed(1)} s`;
 }
 
+function getAiRunMetadata(run: Awaited<ReturnType<typeof listAssistantAiRuns>>[number], key: "executionProfile" | "stepCount" | "terminationReason") {
+  const metadata = run.providerMetadata;
+  if (!metadata || typeof metadata !== "object") return null;
+  const value = (metadata as Record<string, unknown>)[key];
+  return typeof value === "string" || typeof value === "number" ? String(value) : null;
+}
+
 function ReportList({
   reports,
 }: {
@@ -193,6 +200,9 @@ function AiRunList({
             <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
               <span>Intento final: {run.finishReason ?? "sin dato"}</span>
               <span>Fallo: {run.errorCode ?? "ninguno"}</span>
+              <span>Perfil: {getAiRunMetadata(run, "executionProfile") ?? "sin dato"}</span>
+              <span>Pasos: {getAiRunMetadata(run, "stepCount") ?? "sin dato"}</span>
+              <span>Terminación: {getAiRunMetadata(run, "terminationReason") ?? "sin dato"}</span>
               <span>Folio corrida: {run.id}</span>
             </div>
             <details className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3">

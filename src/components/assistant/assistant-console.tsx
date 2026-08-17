@@ -53,6 +53,9 @@ type Message = {
   aiTrace?: AssistantAiTraceEntry[];
   aiToolTrace?: AssistantConversationResponse["aiToolTrace"];
   aiPromptVersion?: string | null;
+  aiExecutionProfile?: AssistantConversationResponse["aiExecutionProfile"];
+  aiStepCount?: AssistantConversationResponse["aiStepCount"];
+  aiTerminationReason?: AssistantConversationResponse["aiTerminationReason"];
   aiBudgetWarning?: string | null;
   aiFallbackNotice?: string | null;
   aiDiagnostic?: AssistantConversationResponse["aiDiagnostic"];
@@ -1336,6 +1339,14 @@ export function AssistantConsole({
                       <div>
                         <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Intentos</p>
                         <p className="mt-1 font-medium text-foreground">{message.aiAttempts ?? message.aiTrace.length}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Perfil</p>
+                        <p className="mt-1 font-medium text-foreground">{message.aiExecutionProfile ?? "Sin dato"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Terminación</p>
+                        <p className="mt-1 font-medium text-foreground">{message.aiTerminationReason ?? "Sin dato"}{message.aiStepCount != null ? ` · ${message.aiStepCount} pasos` : ""}</p>
                       </div>
                     </div>
                     {message.aiUsage ? (

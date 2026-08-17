@@ -10,12 +10,38 @@ const aiMocks = vi.hoisted(() => ({
   stepCountIs: vi.fn(),
 }));
 
+const MockToolLoopAgent = vi.hoisted(() => class {
+  private readonly settings: Record<string, unknown>;
+
+  constructor(settings: Record<string, unknown>) {
+    this.settings = settings;
+  }
+
+  generate(options: Record<string, unknown>) {
+    const prepareStep = this.settings.prepareStep as ((input: Record<string, unknown>) => unknown) | undefined;
+    const prepared = prepareStep?.({
+      stepNumber: 0,
+      steps: [],
+      model: this.settings.model,
+      messages: options.messages ?? [],
+      experimental_context: undefined,
+    });
+    return Promise.resolve(prepared).then((step) => aiMocks.generateText({
+      ...this.settings,
+      ...(step && typeof step === "object" ? step : {}),
+      system: this.settings.instructions,
+      ...options,
+    }));
+  }
+});
+
 vi.mock("ai", async () => {
   const actual = await vi.importActual<typeof import("ai")>("ai");
   const gateway = Object.assign((model: string) => model, { getGenerationInfo: aiMocks.getGenerationInfo });
   return {
     ...actual,
     generateText: aiMocks.generateText,
+    ToolLoopAgent: MockToolLoopAgent,
     gateway,
     stepCountIs: (count: number) => {
       aiMocks.stepCountIs(count);
@@ -191,6 +217,88 @@ describe("assistant ai fallback", () => {
     expect(options.providerOptions.alibaba).toEqual({ enableThinking: true, thinkingBudget: 8_192 });
     expect(options.providerOptions.gateway.models).toEqual([]);
     expect(options.maxRetries).toBe(0);
+  });
+
+  it("uses a smaller simple-read profile and forces the requested first tool", async () => {
+    vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
+    vi.stubEnv("AI_GATEWAY_MODEL", "alibaba/qwen3.7-flash");
+    vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "none");
+    vi.stubEnv("DATABASE_URL", "");
+    aiMocks.generateText.mockResolvedValue({
+      text: "Resumen generado por Nora.",
+      usage: { inputTokens: 100, outputTokens: 20 },
+      totalUsage: { inputTokens: 100, outputTokens: 20 },
+      providerMetadata: { gateway: { model: "alibaba/qwen3.7-flash" } },
+      finishReason: "stop",
+    });
+
+    const result = await buildAssistantAiReply({
+      user: { id: "agent-1", role: "AGENT", organizationId: "org-test" },
+      message: "Dame el resumen de hoy",
+      localReply: { reply: "", sections: [], quickPrompts: [] },
+      mode: "agent",
+      executionProfile: "simple-read",
+      activeTools: ["getTodayBrief"],
+      requiredTool: "getTodayBrief",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(aiMocks.stepCountIs).toHaveBeenCalledWith(2);
+    const options = aiMocks.generateText.mock.calls[0]?.[0];
+    expect(options.maxOutputTokens).toBe(4_096);
+    expect(options.providerOptions.alibaba).toEqual({ enableThinking: true, thinkingBudget: 2_048 });
+    expect(options.activeTools).toEqual(["getTodayBrief"]);
+    expect(options.toolChoice).toEqual({ type: "tool", toolName: "getTodayBrief" });
+  });
+
+  it("rejects truncated responses without presenting partial text", async () => {
+    vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
+    vi.stubEnv("AI_GATEWAY_MODEL", "alibaba/qwen3.7-flash");
+    vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "none");
+    vi.stubEnv("DATABASE_URL", "");
+    aiMocks.generateText.mockResolvedValue({
+      text: "Respuesta incompleta",
+      usage: { inputTokens: 100, outputTokens: 4_096 },
+      totalUsage: { inputTokens: 100, outputTokens: 4_096 },
+      providerMetadata: { gateway: { model: "alibaba/qwen3.7-flash" } },
+      finishReason: "length",
+    });
+
+    const result = await buildAssistantAiReply({
+      user: { id: "agent-1", role: "AGENT", organizationId: "org-test" },
+      message: "Dame el resumen de hoy",
+      localReply: { reply: "", sections: [], quickPrompts: [] },
+      mode: "agent",
+      executionProfile: "simple-read",
+    });
+
+    expect(result).toMatchObject({ ok: false, diagnostic: { code: "incomplete_output" } });
+  });
+
+  it("looks up Gateway usage once when usage and totalUsage share a generation", async () => {
+    vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
+    vi.stubEnv("AI_GATEWAY_MODEL", "alibaba/qwen3.7-flash");
+    vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "none");
+    vi.stubEnv("DATABASE_URL", "");
+    aiMocks.getGenerationInfo.mockResolvedValue({ promptTokens: 100, completionTokens: 20, totalCost: 0.00001 });
+    aiMocks.generateText.mockResolvedValue({
+      text: "Respuesta completa",
+      usage: { inputTokens: 100, outputTokens: 20 },
+      totalUsage: { inputTokens: 100, outputTokens: 20 },
+      providerMetadata: { gateway: { model: "alibaba/qwen3.7-flash", generationId: "gen-1" } },
+      finishReason: "stop",
+    });
+
+    const result = await buildAssistantAiReply({
+      user: { id: "agent-1", role: "AGENT", organizationId: "org-test" },
+      message: "Dame el resumen de hoy",
+      localReply: { reply: "", sections: [], quickPrompts: [] },
+      mode: "agent",
+      executionProfile: "simple-read",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(aiMocks.getGenerationInfo).toHaveBeenCalledTimes(1);
   });
 
   it("stops the agent before starting another step after the aggregate output budget", () => {

@@ -440,6 +440,61 @@ describe("assistant router", () => {
     expect(mocks.buildLocalAssistantReply).not.toHaveBeenCalled();
   });
 
+  it("routes an explicit draft request through structured Luna even when the agent is enabled", async () => {
+    vi.stubEnv("NORA_AGENT_MODE", "all");
+    vi.stubEnv("DATABASE_URL", "");
+    mocks.evaluateAssistantInput.mockReturnValue({
+      allowed: true,
+      normalized: "actualiza el telefono de alejandro ramos a 5550101234 solo prepara el borrador no ejecutes nada",
+      reason: "system",
+    });
+    mocks.buildAssistantAiReply.mockResolvedValue({
+      ok: true,
+      value: {
+        runId: "run-draft",
+        tier: "critical",
+        reply: "Preparé un borrador para actualizar el teléfono.",
+        sections: [],
+        quickPrompts: [],
+        mutation: {
+          entityType: "client",
+          operation: "update",
+          targetQuery: "Alejandro Ramos",
+          title: "Actualizar teléfono",
+          summary: "Cambiar teléfono del cliente.",
+          reply: "El borrador requiere confirmación.",
+          fields: [{ field: "phone", label: "Teléfono", value: "5550101234" }],
+          relations: [],
+          missingFields: [],
+        },
+        actionProposal: null,
+        toolTrace: [],
+        promptVersion: null,
+        executionProfile: "draft",
+        stepCount: 1,
+        terminationReason: "complete",
+        resolvedModel: "alibaba/qwen3.7-flash",
+        usage: aiTrace[0].usage,
+        totalUsage: aiTrace[0].usage,
+        finishReason: "stop",
+        providerMetadata: {},
+        durationMs: 420,
+        trace: aiTrace,
+      },
+    });
+    mocks.buildAssistantActionProposalFromPlan.mockResolvedValue({ draftId: "draft-1" });
+
+    const response = await buildAssistantReply(user, "Actualiza el teléfono de Alejandro Ramos a 5550101234. Solo prepara el borrador, no ejecutes nada.");
+
+    expect(response.actionProposal).toEqual({ draftId: "draft-1" });
+    expect(response.aiExecutionProfile).toBe("draft");
+    expect(mocks.buildAssistantAiReply).toHaveBeenCalledWith(expect.objectContaining({
+      mode: "structured",
+      executionProfile: "draft",
+    }));
+    expect(mocks.buildAssistantActionProposalFromPlan).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps GMM medical narrative local and never sends it to Luna", async () => {
     vi.stubEnv("NORA_AGENT_MODE", "all");
     mocks.evaluateAssistantInput.mockReturnValue({
