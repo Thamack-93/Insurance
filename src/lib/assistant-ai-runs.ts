@@ -88,7 +88,8 @@ const DEFAULT_MODEL_COSTS: Record<string, { input: number; output: number; cache
   "openai/gpt-5.4-nano": { input: 0.20 / 1_000_000, output: 1.25 / 1_000_000 },
   "minimax/minimax-m3": { input: 0.30 / 1_000_000, output: 1.20 / 1_000_000 },
   "deepseek/deepseek-v3.1": { input: 0.25 / 1_000_000, output: 0.95 / 1_000_000, cacheRead: 0.13 / 1_000_000 },
-  "deepseek/deepseek-v4-flash": { input: 0.09 / 1_000_000, output: 0.18 / 1_000_000, cacheRead: 0.02 / 1_000_000 },
+  "deepseek/deepseek-v4-flash": { input: 0.13 / 1_000_000, output: 0.26 / 1_000_000, cacheRead: 0.028 / 1_000_000 },
+  "deepseek/deepseek-v4-flash-0731": { input: 0.13 / 1_000_000, output: 0.26 / 1_000_000, cacheRead: 0.028 / 1_000_000 },
   "openai/gpt-5.4-mini": { input: 0.75 / 1_000_000, output: 4.50 / 1_000_000 },
 };
 

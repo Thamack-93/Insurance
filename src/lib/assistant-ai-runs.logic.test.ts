@@ -37,7 +37,8 @@ describe("assistant AI cost accounting", () => {
     const usage = normalizeAssistantAiUsage({ inputTokens: 1_000_000, outputTokens: 1_000_000 });
 
     expect(estimateAssistantAiCostUsd("alibaba/qwen3.7-flash", usage)).toBe(0.16);
-    expect(estimateAssistantAiCostUsd("deepseek/deepseek-v4-flash", usage)).toBe(0.27);
+    expect(estimateAssistantAiCostUsd("deepseek/deepseek-v4-flash", usage)).toBe(0.39);
+    expect(estimateAssistantAiCostUsd("deepseek/deepseek-v4-flash-0731", usage)).toBe(0.39);
   });
 
   it("preserves Gateway billed cost and generation id", () => {

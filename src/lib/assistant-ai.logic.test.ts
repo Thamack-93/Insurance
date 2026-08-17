@@ -118,7 +118,7 @@ describe("assistant ai fallback", () => {
 
   it("uses a configurable model with the Qwen 3.7 Flash primary default", () => {
     vi.stubEnv("AI_GATEWAY_MODEL", "minimax/minimax-m3");
-    expect(getAssistantAiModel()).toBe("minimax/minimax-m3");
+    expect(getAssistantAiModel()).toBe("alibaba/qwen3.7-flash");
 
     vi.stubEnv("AI_GATEWAY_MODEL", "invalid-model");
     expect(getAssistantAiModel()).toBe("alibaba/qwen3.7-flash");
@@ -135,24 +135,27 @@ describe("assistant ai fallback", () => {
 
   it("defaults to the Qwen fallback chain and supports disabling paid fallbacks", () => {
     vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "");
-    expect(getAssistantGatewayFallbackModels()).toEqual(["deepseek/deepseek-v4-flash"]);
+    expect(getAssistantGatewayFallbackModels()).toEqual(["deepseek/deepseek-v4-flash-0731", "openai/gpt-5.4-nano"]);
 
     vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "none");
     expect(getAssistantGatewayFallbackModels()).toEqual([]);
 
     vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "openai/gpt-5.4-mini, deepseek/deepseek-v3");
     expect(getAssistantGatewayFallbackModels()).toEqual(["openai/gpt-5.4-mini", "deepseek/deepseek-v3"]);
+
+    vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "minimax/minimax-m3, deepseek/deepseek-v4-flash-0731, openai/gpt-5.4-nano");
+    expect(getAssistantGatewayFallbackModels()).toEqual(["deepseek/deepseek-v4-flash-0731", "openai/gpt-5.4-nano"]);
   });
 
   it("configures the agent from the selected model with the stable prompt, safe tools and four-step limit", async () => {
     vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
-    vi.stubEnv("AI_GATEWAY_MODEL", "minimax/minimax-m3");
+    vi.stubEnv("AI_GATEWAY_MODEL", "alibaba/qwen3.7-flash");
     vi.stubEnv("DATABASE_URL", "");
     aiMocks.generateText.mockResolvedValue({
       text: "Resumen generado por Nora.",
       usage: { inputTokens: 1_500, outputTokens: 100 },
       totalUsage: { inputTokens: 1_500, outputTokens: 100 },
-      providerMetadata: { gateway: { model: "minimax/minimax-m3" } },
+      providerMetadata: { gateway: { model: "alibaba/qwen3.7-flash" } },
       finishReason: "stop",
     });
 
@@ -168,7 +171,7 @@ describe("assistant ai fallback", () => {
     expect(result.ok).toBe(true);
     expect(aiMocks.stepCountIs).toHaveBeenCalledWith(4);
     const options = aiMocks.generateText.mock.calls[0]?.[0];
-    expect(options.model).toBe("minimax/minimax-m3");
+    expect(options.model).toBe("alibaba/qwen3.7-flash");
     expect(options.maxRetries).toBe(0);
     expect(options.maxOutputTokens).toBe(12_288);
     expect(options.stopWhen).toHaveLength(2);
@@ -246,9 +249,10 @@ describe("assistant ai fallback", () => {
     expect(aiMocks.stepCountIs).toHaveBeenCalledWith(2);
     const options = aiMocks.generateText.mock.calls[0]?.[0];
     expect(options.maxOutputTokens).toBe(4_096);
-    expect(options.providerOptions.alibaba).toEqual({ enableThinking: true, thinkingBudget: 2_048 });
+    expect(options.providerOptions.alibaba).toEqual({ enableThinking: false });
     expect(options.activeTools).toEqual(["getTodayBrief"]);
     expect(options.toolChoice).toEqual({ type: "tool", toolName: "getTodayBrief" });
+    expect(options.providerOptions.alibaba.enableThinking).toBe(false);
   });
 
   it("rejects truncated responses without presenting partial text", async () => {
@@ -273,6 +277,60 @@ describe("assistant ai fallback", () => {
     });
 
     expect(result).toMatchObject({ ok: false, diagnostic: { code: "incomplete_output" } });
+  });
+
+  it("passes disabled reasoning options to DeepSeek and GPT Nano fallbacks", async () => {
+    vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
+    vi.stubEnv("AI_GATEWAY_MODEL", "alibaba/qwen3.7-flash");
+    vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "deepseek/deepseek-v4-flash-0731,openai/gpt-5.4-nano");
+    vi.stubEnv("DATABASE_URL", "");
+    aiMocks.generateText
+      .mockRejectedValueOnce(new Error("Qwen unavailable"))
+      .mockRejectedValueOnce(new Error("DeepSeek unavailable"))
+      .mockResolvedValueOnce({
+        text: "Respuesta de Nano",
+        usage: { inputTokens: 10, outputTokens: 5 },
+        totalUsage: { inputTokens: 10, outputTokens: 5 },
+        providerMetadata: { gateway: { model: "openai/gpt-5.4-nano" } },
+        finishReason: "stop",
+      });
+
+    const result = await buildAssistantAiReply({
+      user: { id: "agent-1", role: "AGENT", organizationId: "org-test" },
+      message: "Dame el resumen autorizado.",
+      localReply: { reply: "Resumen local", sections: [], quickPrompts: [] },
+      mode: "conversation",
+      executionProfile: "simple-read",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(aiMocks.generateText.mock.calls[1]?.[0].providerOptions.deepseek).toEqual({ thinking: { type: "disabled" } });
+    expect(aiMocks.generateText.mock.calls[2]?.[0].providerOptions.openai).toEqual({ reasoningEffort: "none" });
+  });
+
+  it("does not start a third model for a complex agent after Qwen and DeepSeek fail", async () => {
+    vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
+    vi.stubEnv("AI_GATEWAY_MODEL", "alibaba/qwen3.7-flash");
+    vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "deepseek/deepseek-v4-flash-0731,openai/gpt-5.4-nano");
+    vi.stubEnv("DATABASE_URL", "");
+    aiMocks.generateText
+      .mockRejectedValueOnce(new Error("Qwen unavailable"))
+      .mockRejectedValueOnce(new Error("DeepSeek unavailable"));
+
+    const result = await buildAssistantAiReply({
+      user: { id: "agent-1", role: "AGENT", organizationId: "org-test" },
+      message: "Analiza inconsistencias complejas de mi cartera.",
+      localReply: { reply: "Resumen local", sections: [], quickPrompts: [] },
+      mode: "agent",
+      executionProfile: "complex-read",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(aiMocks.generateText).toHaveBeenCalledTimes(2);
+    expect(aiMocks.generateText.mock.calls.map((call) => call[0].model)).toEqual([
+      "alibaba/qwen3.7-flash",
+      "deepseek/deepseek-v4-flash-0731",
+    ]);
   });
 
   it("looks up Gateway usage once when usage and totalUsage share a generation", async () => {
@@ -324,7 +382,7 @@ describe("assistant ai fallback", () => {
       authMode: "deployment",
       connectionState: "configured",
       model: "alibaba/qwen3.7-flash",
-      fallbackModels: ["deepseek/deepseek-v4-flash"],
+      fallbackModels: ["deepseek/deepseek-v4-flash-0731", "openai/gpt-5.4-nano"],
     });
   });
 
@@ -501,7 +559,7 @@ describe("assistant ai fallback", () => {
     const attemptId = aiMocks.createAttempt.mock.calls[0]?.[0].id;
     expect(result).toMatchObject({ value: null, runId, trackingStatus: "recorded", attempted: true });
     expect(aiMocks.finalizeAttempt).toHaveBeenCalledWith(attemptId, expect.objectContaining({ status: "FAILED", responsePreview: null }));
-    expect(aiMocks.finalizeRun).toHaveBeenCalledWith(runId, expect.objectContaining({ status: "FAILED", attemptCount: 2, fallbackCount: 1, errorCode: "provider_unavailable" }));
+    expect(aiMocks.finalizeRun).toHaveBeenCalledWith(runId, expect.objectContaining({ status: "FAILED", attemptCount: 3, fallbackCount: 2, errorCode: "provider_unavailable" }));
   });
 
   it("does not block the gateway when creating the audit run times out", async () => {
@@ -605,13 +663,13 @@ describe("assistant ai fallback", () => {
     expect(new Set(runIds).size).toBe(2);
   });
 
-  it("tries conversation models in Luna, MiniMax, Nano order", async () => {
+  it("tries conversation models in Luna, DeepSeek 0731, Nano order", async () => {
     vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
     vi.stubEnv("AI_GATEWAY_MODEL", "openai/gpt-5.6-luna");
-    vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "minimax/minimax-m3,openai/gpt-5.4-nano");
+    vi.stubEnv("AI_GATEWAY_FALLBACK_MODELS", "deepseek/deepseek-v4-flash-0731,openai/gpt-5.4-nano");
     aiMocks.generateText
       .mockRejectedValueOnce(new Error("Luna unavailable"))
-      .mockRejectedValueOnce(new Error("MiniMax unavailable"))
+      .mockRejectedValueOnce(new Error("DeepSeek unavailable"))
       .mockResolvedValueOnce({ text: "Respuesta de Nano", usage: null, totalUsage: null, providerMetadata: null, finishReason: "stop" });
 
     const result = await buildAssistantAiReply({
@@ -625,13 +683,13 @@ describe("assistant ai fallback", () => {
       expect(result.value.resolvedModel).toBe("openai/gpt-5.4-nano");
       expect(result.value.trace.map((entry) => entry.requestedModel)).toEqual([
         "openai/gpt-5.6-luna",
-        "minimax/minimax-m3",
+        "deepseek/deepseek-v4-flash-0731",
         "openai/gpt-5.4-nano",
       ]);
     }
     expect(aiMocks.generateText.mock.calls.map((call) => call[0].model)).toEqual([
       "openai/gpt-5.6-luna",
-      "minimax/minimax-m3",
+      "deepseek/deepseek-v4-flash-0731",
       "openai/gpt-5.4-nano",
     ]);
   });
