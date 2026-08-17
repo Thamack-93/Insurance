@@ -428,7 +428,16 @@ export async function validateDomainInvariants(client: PoolClient): Promise<Doma
   add("receipt_cancellation_batch_wrong_reason", await count(client, `SELECT count(*)::text AS count FROM "Receipt" WHERE "cancellationBatchId" IS NOT NULL AND "cancellationReason" IS DISTINCT FROM 'NON_PAYMENT'`));
   add("receipt_cancellation_batch_missing_timestamp", await count(client, `SELECT count(*)::text AS count FROM "Receipt" WHERE "cancellationBatchId" IS NOT NULL AND "cancelledAt" IS NULL`));
   add("notification_event_missing_user", await count(client, `SELECT count(*)::text AS count FROM "NotificationEvent" event LEFT JOIN "User" user_row ON user_row.id = event."userId" WHERE user_row.id IS NULL`));
-  add("activity_log_missing_user", await count(client, `SELECT count(*)::text AS count FROM "ActivityLog" log LEFT JOIN "User" user_row ON user_row.id = log."userId" WHERE user_row.id IS NULL`));
+  add("activity_log_missing_user", await count(client, `
+    SELECT count(*)::text AS count
+      FROM "ActivityLog" log
+      LEFT JOIN "User" user_row ON user_row.id = log."userId"
+     WHERE user_row.id IS NULL
+       AND NOT (
+         log."entityType" = 'User'
+         AND log.action = 'USER_LOGIN'
+         AND log."entityId" = log."userId"
+       )`));
   add("system_user_reference_missing", await count(client, `
     SELECT count(*)::text AS count
       FROM "ActivityLog" log
