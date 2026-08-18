@@ -38,8 +38,20 @@ const CONTRACTUAL_TERMS = [
   "contrato", "poliza", "póliza", "procedencia",
 ];
 
+const GENERAL_DEFINITION_PATTERNS = [
+  /^(?:¿\s*)?que\s+(?:es|son|significa)\b/u,
+  /^(?:¿\s*)?(?:define|explica)\b/u,
+];
+
+const CONCRETE_POLICY_CONTEXT = [
+  " mi ", " mis ", " esta ", " este ", " tu ", " tus ", " la poliza ", " la póliza ", " el contrato ",
+];
+
 export function requiresInternalKnowledgeEvidence(question: string) {
   const normalized = question.toLocaleLowerCase("es-MX").normalize("NFD").replace(/\p{Diacritic}/gu, "");
+  const isGeneralDefinition = GENERAL_DEFINITION_PATTERNS.some((pattern) => pattern.test(normalized));
+  const refersToConcretePolicy = CONCRETE_POLICY_CONTEXT.some((term) => normalized.includes(term.normalize("NFD").replace(/\p{Diacritic}/gu, "")));
+  if (isGeneralDefinition && !refersToConcretePolicy) return false;
   return CONTRACTUAL_TERMS.some((term) => normalized.includes(term.normalize("NFD").replace(/\p{Diacritic}/gu, "")));
 }
 
