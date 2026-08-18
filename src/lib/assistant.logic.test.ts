@@ -468,6 +468,7 @@ describe("assistant router", () => {
     mocks.executeNoraSimpleRead.mockResolvedValue({
       value: [{ title: "Resumen de hoy" }],
       toolTrace: [{ tool: "getTodayBrief", outcome: "success", durationMs: 10 }],
+      knowledgeCitations: [],
     });
     mocks.buildAssistantAiReply.mockResolvedValue({
       ok: true,
