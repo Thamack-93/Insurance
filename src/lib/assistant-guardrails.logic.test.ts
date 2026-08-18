@@ -6,6 +6,8 @@ describe("assistant guardrails", () => {
     expect(evaluateAssistantInput("Busca la póliza 12345").allowed).toBe(true);
     expect(evaluateAssistantInput("Necesito un reporte de renovaciones").allowed).toBe(true);
     expect(evaluateAssistantInput("La captura de PDF no funciona").allowed).toBe(true);
+    expect(evaluateAssistantInput("¿Qué es un deducible en seguros?").allowed).toBe(true);
+    expect(evaluateAssistantInput("¿Qué significa coaseguro?").allowed).toBe(true);
     expect(evaluateAssistantInput("hoy").allowed).toBe(true);
     expect(evaluateAssistantInput("Resumen de hoy").allowed).toBe(true);
   });
