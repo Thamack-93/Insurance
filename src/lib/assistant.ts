@@ -29,6 +29,7 @@ import type {
   AssistantAiTraceEntry,
   AssistantAiUsageSnapshot,
   AssistantAiToolTraceEntry,
+  AssistantKnowledgeCitation,
   AssistantHistoryMessage,
   AssistantResponseSource,
   AssistantSnapshot,
@@ -496,7 +497,7 @@ export async function buildAssistantReply(
     : { allowed: true, warning: null, spentUsd: 0, limitUsd: 4 };
   if (!budget.allowed) shouldTryAi = false;
 
-  let precomputedSimpleRead: { contextText: string; toolTrace: AssistantAiToolTraceEntry[] } | null = null;
+  let precomputedSimpleRead: { contextText: string; toolTrace: AssistantAiToolTraceEntry[]; knowledgeCitations: AssistantKnowledgeCitation[] } | null = null;
   if (shouldTryAi && agentEnabled && !mutationIntent && agentExecutionPlan?.profile === "simple-read" && agentExecutionPlan.requiredTool) {
     try {
       const localRead = await executeNoraSimpleRead(user, {
@@ -507,6 +508,7 @@ export async function buildAssistantReply(
       precomputedSimpleRead = {
         contextText: `Resultado autorizado de ${agentExecutionPlan.requiredTool}: ${JSON.stringify(localRead.value)}`,
         toolTrace: localRead.toolTrace,
+        knowledgeCitations: localRead.knowledgeCitations,
       };
     } catch {
       shouldTryAi = false;
@@ -565,6 +567,7 @@ export async function buildAssistantReply(
       activeTools: precomputedSimpleRead ? undefined : agentExecutionPlan?.activeTools,
       requiredTool: precomputedSimpleRead ? null : agentExecutionPlan?.requiredTool,
       precomputedToolTrace: precomputedSimpleRead?.toolTrace,
+      precomputedKnowledgeCitations: precomputedSimpleRead?.knowledgeCitations,
       abortSignal: options.abortSignal,
     });
     if (aiReply.ok) {

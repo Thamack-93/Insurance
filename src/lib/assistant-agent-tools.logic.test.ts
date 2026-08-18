@@ -35,7 +35,7 @@ vi.mock("@/lib/assistant-actions", () => ({ buildAssistantActionProposalFromPlan
 vi.mock("@/lib/claim-checklists", () => ({ getClaimChecklistSummary: mocks.getClaimChecklistSummary }));
 vi.mock("@/lib/knowledge-base", () => ({ searchKnowledgeBase: mocks.searchKnowledgeBase }));
 
-import { createNoraAgentTools } from "@/lib/assistant-agent-tools";
+import { createNoraAgentTools, executeNoraSimpleRead } from "@/lib/assistant-agent-tools";
 
 type DirectTool = {
   execute?: (input: Record<string, unknown>, options: Record<string, unknown>) => Promise<unknown>;
@@ -74,6 +74,28 @@ describe("Nora agent tool authorization", () => {
     expect(mocks.searchKnowledgeBase).toHaveBeenCalledWith(expect.objectContaining({ organizationId: "org-default", question: "¿Cuál es el deducible?" }));
     expect(runtime.snapshot().knowledgeCitations).toEqual([expect.objectContaining({ sourceId: "source-1", sourceType: "INTERNAL", page: 4 })]);
     expect(JSON.stringify(runtime.snapshot().trace)).not.toContain("¿Cuál es el deducible?");
+  });
+
+  it("executes a simple knowledge read with the user question as the search input", async () => {
+    mocks.searchKnowledgeBase.mockResolvedValue({
+      results: [{ sourceId: "general-1", sourceType: "GENERAL", title: "Fundamentos del seguro", version: "2026-08-17", sourceUrl: "https://example.com/insurance", authority: "Demo", reviewedAt: "2026-08-17T00:00:00.000Z", page: null, section: "Deducible", match: 0.9, excerpt: "El deducible es la parte a cargo del asegurado." }],
+      requiresInternalEvidence: false,
+      abstained: false,
+    });
+
+    const result = await executeNoraSimpleRead(
+      { id: "agent-1", role: "ADMIN" },
+      { capability: "searchKnowledgeBase", message: "¿Qué es un deducible en seguros?", normalizedMessage: "que es un deducible en seguros" },
+    );
+
+    expect(result.value).toMatchObject({ abstained: false, results: [expect.objectContaining({ sourceType: "GENERAL" })] });
+    expect(result.knowledgeCitations).toEqual([expect.objectContaining({ sourceId: "general-1", sourceType: "GENERAL" })]);
+    expect(mocks.searchKnowledgeBase).toHaveBeenCalledWith({
+      organizationId: "org-default",
+      question: "¿Qué es un deducible en seguros?",
+      sourceType: "BOTH",
+      limit: 5,
+    });
   });
 
   it("fails closed when the authenticated user changes between steps", async () => {

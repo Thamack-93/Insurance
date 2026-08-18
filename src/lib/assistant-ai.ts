@@ -1201,6 +1201,7 @@ function valueFromAttempt(input: {
   generated: AssistantAiGeneratedValue;
   trackingStatus: "recorded" | "unavailable";
   precomputedToolTrace?: AssistantAiToolTraceEntry[];
+  precomputedKnowledgeCitations?: AssistantKnowledgeCitation[];
 }): AssistantAiReplyValue {
   const usage = input.generated.usageOverride ?? toUsage(input.generated.result.usage, input.model, input.generated.result.providerMetadata);
   const totalUsage = input.generated.totalUsageOverride ?? toUsage(input.generated.result.totalUsage, input.model, input.generated.result.providerMetadata);
@@ -1241,7 +1242,10 @@ function valueFromAttempt(input: {
     executionProfile: input.generated.executionProfile ?? null,
     stepCount: input.generated.stepCount ?? null,
     terminationReason: input.generated.terminationReason ?? null,
-    knowledgeCitations: input.generated.knowledgeCitations ?? [],
+    knowledgeCitations: [
+      ...(input.precomputedKnowledgeCitations ?? []),
+      ...(input.generated.knowledgeCitations ?? []),
+    ],
   };
 }
 
@@ -1282,6 +1286,7 @@ export async function buildAssistantAiReply(input: {
   requiredTool?: string | null;
   abortSignal?: AbortSignal;
   precomputedToolTrace?: AssistantAiToolTraceEntry[];
+  precomputedKnowledgeCitations?: AssistantKnowledgeCitation[];
 }): Promise<AssistantAiResult<AssistantAiReplyValue>> {
   if (!input.user.organizationId) {
     return { ok: false, diagnostic: buildDiagnostic({ operation: "assistant-reply", tier: "minimax", model: getAssistantAiModel(), fallbackModels: [], startedAt: Date.now(), runId: makeId("run"), code: "invalid_prompt", attempts: [] }) };
@@ -1378,6 +1383,7 @@ export async function buildAssistantAiReply(input: {
         generated: attemptResult.value,
         trackingStatus,
         precomputedToolTrace: input.precomputedToolTrace,
+        precomputedKnowledgeCitations: input.precomputedKnowledgeCitations,
       });
       value.trace[0]!.durationMs = attemptResult.attempt.durationMs;
       value.durationMs = attemptResult.attempt.durationMs;
@@ -1399,7 +1405,10 @@ export async function buildAssistantAiReply(input: {
         ...value.trace,
       ];
       value.totalUsage = sumAttemptUsage(attempts);
-      value.toolTrace = attempts.flatMap((attempt) => attempt.toolTrace ?? []);
+      value.toolTrace = [
+        ...(input.precomputedToolTrace ?? []),
+        ...attempts.flatMap((attempt) => attempt.toolTrace ?? []),
+      ];
       value.runId = trackedRunId;
       value.trackingStatus = trackingStatus;
       await finalizeRun({
