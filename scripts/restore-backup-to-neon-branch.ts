@@ -78,7 +78,7 @@ async function main() {
     plaintext,
     manifest: verification.manifest,
   });
-  console.log(`Restauración validada en ${target.branchName}: ${result.tableCounts.totalRows} filas restauradas.`);
+  console.log(`Restauración validada en ${target.branchName}: ${result.tableCounts.totalRows} filas restauradas; modo de triggers=${result.triggerMode}.`);
 }
 
 main().catch((error) => {

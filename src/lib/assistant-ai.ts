@@ -59,7 +59,7 @@ import type {
 } from "@/lib/policy-pdf-capture.shared";
 
 const ASSISTANT_AI_PRIMARY_MODEL = "alibaba/qwen3.7-flash";
-const ASSISTANT_AI_FALLBACK_MODELS = ["deepseek/deepseek-v4-flash"];
+const ASSISTANT_AI_FALLBACK_MODELS = ["deepseek/deepseek-v4-flash-0731", "openai/gpt-5.4-nano"];
 const ASSISTANT_AI_REQUEST_EMERGENCY_TIMEOUT_MS = 240_000;
 const ASSISTANT_AI_NON_STREAMING_ATTEMPT_TIMEOUT_MS = 120_000;
 const ASSISTANT_AI_IDLE_TIMEOUT_MS = 120_000;
@@ -319,7 +319,7 @@ export function getAssistantAiOperationLabel(operation: AssistantAiOperation) {
 export function getAssistantAiModelLabel(model: string) {
   if (model === ASSISTANT_AI_PRIMARY_MODEL) return "Qwen 3.7 Flash";
   if (model === "google/gemini-3-flash") return "Gemini 3 Flash";
-  if (model === "deepseek/deepseek-v4-flash") return "DeepSeek V4 Flash";
+  if (model === "deepseek/deepseek-v4-flash" || model === "deepseek/deepseek-v4-flash-0731") return "DeepSeek V4 Flash";
   if (model === "openai/gpt-5.6-luna") return "GPT-5.6 Luna";
   if (model === "minimax/minimax-m3") return "MiniMax M3";
   if (model === "deepseek/deepseek-v3.1") return "DeepSeek V3.1";
@@ -395,6 +395,18 @@ function getAssistantProviderOptions(input: {
             ...(input.mode === "agent" && input.thinkingBudget != null ? { thinkingBudget: input.thinkingBudget } : {}),
           },
         }
+      : {}),
+    ...(input.model.startsWith("deepseek/")
+      ? {
+          deepseek: {
+            thinking: {
+              type: input.mode === "agent" && input.thinkingBudget != null ? "enabled" : "disabled",
+            },
+          },
+        }
+      : {}),
+    ...(input.model.startsWith("openai/")
+      ? { openai: { reasoningEffort: input.mode === "agent" && input.thinkingBudget != null ? "medium" : "none" } }
       : {}),
   };
 }
@@ -583,7 +595,9 @@ async function runTrackedStructuredOperation<T>(input: {
   const runId = makeId("run");
   const startedAt = Date.now();
   const fallbackModels = getAssistantStructuredFallbackModels();
-  const candidateModels = [input.model, ...fallbackModels.filter((candidate) => candidate && candidate !== input.model)];
+  const candidateModels = [input.model, ...fallbackModels.filter((candidate) => candidate && candidate !== input.model)].slice(0, 3);
+  const structuredAttemptTimeouts = [5_000, 5_000, 4_000];
+  const structuredTotalTimeout = 14_000;
   const persistedRunPromise = canPersistAiRuns()
     ? tryAssistantAiTracking(() => createAssistantAiRun({
         id: runId,
@@ -652,9 +666,11 @@ async function runTrackedStructuredOperation<T>(input: {
     const candidateModel = candidateModels[index]!;
     const attemptStartedAt = Date.now();
     try {
+      const remainingTime = structuredTotalTimeout - (Date.now() - startedAt);
+      if (remainingTime <= 0) break;
       const generated = await withOperationTimeout(
         input.execute(candidateModel),
-        input.timeoutMs,
+        Math.min(structuredAttemptTimeouts[index] ?? input.timeoutMs, remainingTime),
         `El modelo ${candidateModel} tardó demasiado en completar la operación IA.`,
       );
       const resolvedModel = getGatewayResolvedModel(generated.result.providerMetadata, candidateModel);
@@ -904,7 +920,13 @@ async function runAssistantAttempt(input: {
     const generationInput = {
       model: gateway(input.model),
       temperature: input.mode === "structured" ? 0.1 : 0.2,
-      maxOutputTokens: input.mode === "agent" ? profile.maxOutputTokens : input.mode === "structured" ? ASSISTANT_AI_DRAFT_MAX_OUTPUT_TOKENS : 1_000,
+      maxOutputTokens: input.mode === "agent"
+        ? profile.maxOutputTokens
+        : input.mode === "structured"
+          ? ASSISTANT_AI_DRAFT_MAX_OUTPUT_TOKENS
+          : input.executionProfile === "simple-read"
+            ? profile.maxOutputTokens
+            : 1_000,
       maxRetries: 0,
       abortSignal: input.abortSignal,
       timeout: { totalMs: input.emergencyTimeoutMs },
@@ -962,7 +984,7 @@ async function runAssistantAttempt(input: {
                 : undefined;
               return {
                 ...(activeTools ? { activeTools } : {}),
-                ...(stepNumber === 0 && input.requiredTool && activeTools?.includes(input.requiredTool as keyof typeof agentRuntime.tools)
+                ...(stepNumber === 0 && profile.thinkingBudget == null && input.requiredTool && activeTools?.includes(input.requiredTool as keyof typeof agentRuntime.tools)
                   ? { toolChoice: { type: "tool", toolName: input.requiredTool as keyof typeof agentRuntime.tools } }
                   : {}),
                 providerOptions: getAssistantProviderOptions({
@@ -1178,6 +1200,7 @@ function valueFromAttempt(input: {
   localReply: AssistantReply;
   generated: AssistantAiGeneratedValue;
   trackingStatus: "recorded" | "unavailable";
+  precomputedToolTrace?: AssistantAiToolTraceEntry[];
 }): AssistantAiReplyValue {
   const usage = input.generated.usageOverride ?? toUsage(input.generated.result.usage, input.model, input.generated.result.providerMetadata);
   const totalUsage = input.generated.totalUsageOverride ?? toUsage(input.generated.result.totalUsage, input.model, input.generated.result.providerMetadata);
@@ -1213,7 +1236,7 @@ function valueFromAttempt(input: {
       responsePreview: redactAssistantReportText(reply, 500),
     }],
     actionProposal: input.generated.actionProposal ?? null,
-    toolTrace: input.generated.toolTrace ?? [],
+    toolTrace: [...(input.precomputedToolTrace ?? []), ...(input.generated.toolTrace ?? [])],
     promptVersion: input.generated.promptVersion ?? null,
     executionProfile: input.generated.executionProfile ?? null,
     stepCount: input.generated.stepCount ?? null,
@@ -1258,6 +1281,7 @@ export async function buildAssistantAiReply(input: {
   activeTools?: string[];
   requiredTool?: string | null;
   abortSignal?: AbortSignal;
+  precomputedToolTrace?: AssistantAiToolTraceEntry[];
 }): Promise<AssistantAiResult<AssistantAiReplyValue>> {
   if (!input.user.organizationId) {
     return { ok: false, diagnostic: buildDiagnostic({ operation: "assistant-reply", tier: "minimax", model: getAssistantAiModel(), fallbackModels: [], startedAt: Date.now(), runId: makeId("run"), code: "invalid_prompt", attempts: [] }) };
@@ -1317,7 +1341,8 @@ export async function buildAssistantAiReply(input: {
   }
 
   const attempts: AssistantAiAttempt[] = [];
-  const candidateModels = [model, ...fallbackModels.filter((candidate) => candidate && candidate !== model)];
+  const candidateModels = [model, ...fallbackModels.filter((candidate) => candidate && candidate !== model)]
+    .slice(0, mode === "agent" ? 2 : 3);
   const runtimeLimits = getAssistantAiRuntimeLimits();
   const totalTimeoutMs = runtimeLimits.emergencyTimeoutMs;
   for (let index = 0; index < candidateModels.length; index += 1) {
@@ -1352,6 +1377,7 @@ export async function buildAssistantAiReply(input: {
         localReply: input.localReply,
         generated: attemptResult.value,
         trackingStatus,
+        precomputedToolTrace: input.precomputedToolTrace,
       });
       value.trace[0]!.durationMs = attemptResult.attempt.durationMs;
       value.durationMs = attemptResult.attempt.durationMs;

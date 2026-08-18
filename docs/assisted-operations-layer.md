@@ -76,7 +76,10 @@ It expires automatically and is removed on logout; it is never written to the da
 
 ### Nora AI
 
-- Normal replies use the configured MiniMax model with gateway fallback.
+- Normal replies use Qwen 3.7 Flash with ordered DeepSeek V4 Flash 0731 and GPT-5.4 Nano fallbacks.
+- Simple reads execute one tenant-authorized local capability before the model writes the response;
+  complex agent reads retain the bounded tool loop and never start a third model after the two
+  agent attempts are exhausted.
 - Action proposals use `AI_GATEWAY_STRUCTURED_MODEL` and strict schemas where every property is
   required; nullable values are `null` and empty collections are `[]`.
 - Gateway failures are mapped to actionable codes such as `rate_limited`, `budget_exceeded`,

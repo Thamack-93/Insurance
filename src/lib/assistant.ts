@@ -11,6 +11,7 @@ import {
   getAssistantAiModelLabel,
   getAssistantAiOperationLabel,
 } from "@/lib/assistant-ai";
+import { executeNoraSimpleRead, type NoraSimpleReadCapability } from "@/lib/assistant-agent-tools";
 import { buildAssistantActionProposalFromPlan } from "@/lib/assistant-actions";
 import { createAssistantThemeKey, recordAssistantReportSignal } from "@/lib/assistant-reports";
 import { buildAssistantBlockedReply, buildGmmPrivacyReply, evaluateAssistantInput, evaluateGmmPrivacy } from "@/lib/assistant-guardrails";
@@ -495,9 +496,28 @@ export async function buildAssistantReply(
     : { allowed: true, warning: null, spentUsd: 0, limitUsd: 4 };
   if (!budget.allowed) shouldTryAi = false;
 
+  let precomputedSimpleRead: { contextText: string; toolTrace: AssistantAiToolTraceEntry[] } | null = null;
+  if (shouldTryAi && agentEnabled && !mutationIntent && agentExecutionPlan?.profile === "simple-read" && agentExecutionPlan.requiredTool) {
+    try {
+      const localRead = await executeNoraSimpleRead(user, {
+        capability: agentExecutionPlan.requiredTool as NoraSimpleReadCapability,
+        message,
+        normalizedMessage: normalized,
+      }, { gmmMetadataOnly: gmmMode });
+      precomputedSimpleRead = {
+        contextText: `Resultado autorizado de ${agentExecutionPlan.requiredTool}: ${JSON.stringify(localRead.value)}`,
+        toolTrace: localRead.toolTrace,
+      };
+    } catch {
+      shouldTryAi = false;
+    }
+  }
+
   const aiContext = shouldTryAi
-    ? agentEnabled
-      ? options.contextText ?? null
+    ? precomputedSimpleRead
+      ? [precomputedSimpleRead.contextText, options.contextText].filter(Boolean).join("\n\n")
+      : agentEnabled
+        ? options.contextText ?? null
       : await buildAssistantAiContext(user, message, await getLocalReply())
     : theme
       ? await buildAssistantAiContext(user, message, await getLocalReply())
@@ -522,7 +542,9 @@ export async function buildAssistantReply(
   let aiTerminationReason: AssistantAiTerminationReason | null = null;
   const aiMode = mutationIntent
     ? "structured" as const
-    : agentEnabled
+    : precomputedSimpleRead
+      ? "conversation" as const
+      : agentEnabled
       ? "agent" as const
       : "conversation" as const;
 
@@ -540,8 +562,9 @@ export async function buildAssistantReply(
       history: safeHistory,
       gmmMetadataOnly: gmmMode,
       executionProfile: mutationIntent ? "draft" : agentExecutionPlan?.profile,
-      activeTools: agentExecutionPlan?.activeTools,
-      requiredTool: agentExecutionPlan?.requiredTool,
+      activeTools: precomputedSimpleRead ? undefined : agentExecutionPlan?.activeTools,
+      requiredTool: precomputedSimpleRead ? null : agentExecutionPlan?.requiredTool,
+      precomputedToolTrace: precomputedSimpleRead?.toolTrace,
       abortSignal: options.abortSignal,
     });
     if (aiReply.ok) {

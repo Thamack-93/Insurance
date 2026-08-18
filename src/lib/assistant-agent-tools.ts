@@ -272,3 +272,51 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
     snapshot: () => ({ trace: [...trace], actionProposal, knowledgeCitations: [...knowledgeCitations.values()] }),
   };
 }
+
+export type NoraSimpleReadCapability =
+  | "getTodayBrief"
+  | "listRenewals"
+  | "listReceipts"
+  | "searchPortfolio"
+  | "listOpenWorkItems"
+  | "listClaims";
+
+export type NoraSimpleReadRequest = {
+  capability: NoraSimpleReadCapability;
+  message: string;
+  normalizedMessage: string;
+};
+
+type DirectToolExecutor = {
+  execute?: (input: unknown, options: unknown) => Promise<unknown>;
+};
+
+function getReceiptReadState(normalizedMessage: string): "overdue" | "today" | "upcoming" {
+  if (normalizedMessage.includes("vencid") || normalizedMessage.includes("atrasad")) return "overdue";
+  if (normalizedMessage.includes("hoy")) return "today";
+  return "upcoming";
+}
+
+function getRenewalReadDays(message: string) {
+  const match = message.match(/\b(?:en|proximas?\s+de|proximos?\s+)?(\d{1,2})\s+d[ií]as?\b/i);
+  const days = match ? Number(match[1]) : 30;
+  return Math.min(90, Math.max(1, Number.isFinite(days) ? days : 30));
+}
+
+export async function executeNoraSimpleRead(user: AssistantUser, request: NoraSimpleReadRequest, options: { gmmMetadataOnly?: boolean } = {}) {
+  const runtime = createNoraAgentTools(user, options);
+  const tool = runtime.tools[request.capability] as DirectToolExecutor;
+  if (!tool.execute) throw new Error(`La capacidad local ${request.capability} no tiene ejecutor.`);
+
+  const input = request.capability === "getTodayBrief" || request.capability === "listClaims"
+    ? request.capability === "getTodayBrief" ? {} : { limit: 15 }
+    : request.capability === "listRenewals"
+      ? { days: getRenewalReadDays(request.message) }
+      : request.capability === "listReceipts"
+        ? { state: getReceiptReadState(request.normalizedMessage), days: 7 }
+        : request.capability === "searchPortfolio"
+          ? { query: request.message.trim().slice(0, 250) }
+          : { limit: 15 };
+  const value = await tool.execute(input, {});
+  return { value, toolTrace: runtime.snapshot().trace };
+}

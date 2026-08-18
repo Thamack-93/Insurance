@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getLocalAssistantHomeSnapshot: vi.fn(),
   searchUserPortfolio: vi.fn(),
   buildAssistantAiReply: vi.fn(),
+  executeNoraSimpleRead: vi.fn(),
   classifyAssistantReportSignalWithAi: vi.fn(),
   getAssistantAiConnectionStatus: vi.fn(),
   getAssistantAiModelLabel: vi.fn(),
@@ -33,6 +34,10 @@ vi.mock("@/lib/assistant-ai", () => ({
   getAssistantAiConnectionStatus: mocks.getAssistantAiConnectionStatus,
   getAssistantAiModelLabel: mocks.getAssistantAiModelLabel,
   getAssistantAiOperationLabel: mocks.getAssistantAiOperationLabel,
+}));
+
+vi.mock("@/lib/assistant-agent-tools", () => ({
+  executeNoraSimpleRead: mocks.executeNoraSimpleRead,
 }));
 
 vi.mock("@/lib/assistant-actions", () => ({
@@ -133,6 +138,10 @@ function makeDiagnostic(overrides: Partial<AssistantAiDiagnostic> = {}): Assista
 }
 
 describe("assistant router", () => {
+  beforeEach(() => {
+    mocks.executeNoraSimpleRead.mockResolvedValue({ value: [], toolTrace: [] });
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
@@ -422,6 +431,10 @@ describe("assistant router", () => {
         trace: aiTrace,
       },
     });
+    mocks.executeNoraSimpleRead.mockResolvedValue({
+      value: [{ id: "claim-1", folio: "SIN-001", status: "OPEN", metadataOnly: true }],
+      toolTrace: [{ tool: "listClaims", outcome: "success", durationMs: 12 }],
+    });
     const history = [
       { role: "user" as const, content: "Busca mis siniestros" },
       { role: "assistant" as const, content: "¿Abiertos o todos?" },
@@ -433,10 +446,14 @@ describe("assistant router", () => {
     expect(response.aiPromptVersion).toBe("nora-agent-v1");
     expect(response.aiToolTrace).toEqual([{ tool: "listClaims", outcome: "success", durationMs: 12 }]);
     expect(mocks.buildAssistantAiReply).toHaveBeenCalledWith(expect.objectContaining({
-      mode: "agent",
+      mode: "conversation",
       history,
-      contextText: null,
+      contextText: expect.stringContaining('"folio":"SIN-001"'),
+      precomputedToolTrace: [{ tool: "listClaims", outcome: "success", durationMs: 12 }],
     }));
+    expect(mocks.executeNoraSimpleRead).toHaveBeenCalledTimes(1);
+    expect(mocks.buildAssistantAiReply.mock.calls[0]?.[0].activeTools).toBeUndefined();
+    expect(mocks.buildAssistantAiReply.mock.calls[0]?.[0].requiredTool).toBeNull();
     expect(mocks.buildLocalAssistantReply).not.toHaveBeenCalled();
   });
 
@@ -447,6 +464,10 @@ describe("assistant router", () => {
       allowed: true,
       normalized: "dame el resumen de hoy",
       reason: "system",
+    });
+    mocks.executeNoraSimpleRead.mockResolvedValue({
+      value: [{ title: "Resumen de hoy" }],
+      toolTrace: [{ tool: "getTodayBrief", outcome: "success", durationMs: 10 }],
     });
     mocks.buildAssistantAiReply.mockResolvedValue({
       ok: true,
@@ -477,11 +498,14 @@ describe("assistant router", () => {
 
     expect(response.source).toBe("ai");
     expect(mocks.buildAssistantAiReply).toHaveBeenCalledWith(expect.objectContaining({
-      mode: "agent",
+      mode: "conversation",
       executionProfile: "simple-read",
-      activeTools: ["getTodayBrief"],
-      requiredTool: "getTodayBrief",
+      contextText: expect.stringContaining('Resultado autorizado de getTodayBrief'),
+      activeTools: undefined,
+      requiredTool: null,
+      precomputedToolTrace: [{ tool: "getTodayBrief", outcome: "success", durationMs: 10 }],
     }));
+    expect(mocks.executeNoraSimpleRead).toHaveBeenCalledTimes(1);
   });
 
   it("routes an explicit draft request through structured Luna even when the agent is enabled", async () => {

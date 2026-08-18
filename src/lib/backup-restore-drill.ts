@@ -76,6 +76,7 @@ export async function runBackupRestoreDrill(input: RestoreDrillExecutionInput) {
     report.restoreIntegrity = {
       ok: true,
       targetFingerprint: restored.targetFingerprint,
+      triggerMode: restored.triggerMode,
       tableCounts: restored.tableCounts,
       foreignKeys: restored.foreignKeys,
       domainChecks: restored.domainChecks,
