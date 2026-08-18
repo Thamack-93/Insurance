@@ -52,6 +52,9 @@ jobs:
       - name: Check tenant read scope
         run: npm run check:tenant-read-scope
 
+      - name: Check organization metadata hardcodes
+        run: npm run check:organization-metadata-hardcodes
+
       - name: Lint
         run: npm run lint
 
