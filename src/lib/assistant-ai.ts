@@ -45,6 +45,7 @@ import type {
   AssistantAiUsageSnapshot,
   AssistantActionProposal,
   AssistantHistoryMessage,
+  AssistantKnowledgeCitation,
   AssistantMutationPlan,
   AssistantPrompt,
   AssistantReply,
@@ -59,8 +60,9 @@ import type {
 
 const ASSISTANT_AI_PRIMARY_MODEL = "alibaba/qwen3.7-flash";
 const ASSISTANT_AI_FALLBACK_MODELS = ["deepseek/deepseek-v4-flash"];
-const ASSISTANT_AI_AGENT_TOTAL_TIMEOUT_MS = 25_000;
-const ASSISTANT_AI_ATTEMPT_TIMEOUT_MS = 10_000;
+const ASSISTANT_AI_REQUEST_EMERGENCY_TIMEOUT_MS = 240_000;
+const ASSISTANT_AI_NON_STREAMING_ATTEMPT_TIMEOUT_MS = 120_000;
+const ASSISTANT_AI_IDLE_TIMEOUT_MS = 120_000;
 const ASSISTANT_AI_TRACKING_TIMEOUT_MS = 2_000;
 const ASSISTANT_AI_DRAFT_MAX_OUTPUT_TOKENS = 2_048;
 
@@ -69,30 +71,56 @@ export const ASSISTANT_AI_EXECUTION_PROFILES: Record<AssistantAiExecutionProfile
   thinkingBudget: number | null;
   maxSteps: number;
   maxTotalOutputTokens: number;
-  attemptTimeoutMs: number;
 }> = {
   "simple-read": {
     maxOutputTokens: 4_096,
-    thinkingBudget: 2_048,
+    thinkingBudget: null,
     maxSteps: 2,
     maxTotalOutputTokens: 8_192,
-    attemptTimeoutMs: 14_000,
   },
   "complex-read": {
     maxOutputTokens: 12_288,
     thinkingBudget: 8_192,
     maxSteps: 4,
     maxTotalOutputTokens: 32_768,
-    attemptTimeoutMs: 18_000,
   },
   draft: {
     maxOutputTokens: ASSISTANT_AI_DRAFT_MAX_OUTPUT_TOKENS,
     thinkingBudget: null,
     maxSteps: 1,
     maxTotalOutputTokens: ASSISTANT_AI_DRAFT_MAX_OUTPUT_TOKENS,
-    attemptTimeoutMs: 10_000,
   },
 };
+
+function readAssistantTimeoutMs(name: string, fallback: number, minimum: number, maximum: number) {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const configured = Number(raw);
+  if (!Number.isFinite(configured)) return fallback;
+  return Math.min(maximum, Math.max(minimum, Math.round(configured)));
+}
+
+export function getAssistantAiRuntimeLimits() {
+  const emergencyTimeoutMs = readAssistantTimeoutMs(
+    "NORA_AI_EMERGENCY_TIMEOUT_MS",
+    ASSISTANT_AI_REQUEST_EMERGENCY_TIMEOUT_MS,
+    60_000,
+    280_000,
+  );
+  return {
+    emergencyTimeoutMs,
+    idleTimeoutMs: readAssistantTimeoutMs(
+      "NORA_AI_IDLE_TIMEOUT_MS",
+      ASSISTANT_AI_IDLE_TIMEOUT_MS,
+      30_000,
+      Math.min(180_000, emergencyTimeoutMs),
+    ),
+    nonStreamingAttemptTimeoutMs: Math.min(
+      ASSISTANT_AI_NON_STREAMING_ATTEMPT_TIMEOUT_MS,
+      emergencyTimeoutMs,
+    ),
+  };
+}
 
 function toFiniteTokenCount(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
@@ -210,6 +238,7 @@ type AssistantAiGeneratedValue = {
   executionProfile?: AssistantAiExecutionProfile | null;
   stepCount?: number | null;
   terminationReason?: AssistantAiTerminationReason | null;
+  knowledgeCitations?: AssistantKnowledgeCitation[];
 };
 
 type AssistantAiReplyValue = AssistantReply & {
@@ -230,6 +259,7 @@ type AssistantAiReplyValue = AssistantReply & {
   executionProfile: AssistantAiExecutionProfile | null;
   stepCount: number | null;
   terminationReason: AssistantAiTerminationReason | null;
+  knowledgeCitations: AssistantKnowledgeCitation[];
 };
 
 function makeId(prefix: string) {
@@ -313,7 +343,7 @@ function canPersistAiRuns() {
 
 export function getAssistantAiModel() {
   const configured = process.env.AI_GATEWAY_MODEL?.trim();
-  return configured?.includes("/") ? configured : ASSISTANT_AI_PRIMARY_MODEL;
+  return configured?.includes("/") && !configured.toLowerCase().startsWith("minimax/") ? configured : ASSISTANT_AI_PRIMARY_MODEL;
 }
 
 export function getAssistantGatewayAuthMode(): "oidc" | "api-key" | "unavailable" {
@@ -329,7 +359,7 @@ export function getAssistantGatewayFallbackModels() {
 
 export function getAssistantStructuredModel() {
   const configured = process.env.AI_GATEWAY_STRUCTURED_MODEL?.trim();
-  return configured?.includes("/") ? configured : ASSISTANT_AI_PRIMARY_MODEL;
+  return configured?.includes("/") && !configured.toLowerCase().startsWith("minimax/") ? configured : ASSISTANT_AI_PRIMARY_MODEL;
 }
 
 export function getAssistantStructuredFallbackModels() {
@@ -341,7 +371,7 @@ function parseConfiguredFallbackModels(value: string | undefined) {
   const normalized = value?.trim();
   if (!normalized) return null;
   if (normalized.toLowerCase() === "none") return [];
-  return normalized.split(",").map((candidate) => candidate.trim()).filter(Boolean);
+  return normalized.split(",").map((candidate) => candidate.trim()).filter((candidate) => Boolean(candidate) && !candidate.toLowerCase().startsWith("minimax/"));
 }
 
 function getAssistantProviderOptions(input: {
@@ -494,6 +524,7 @@ async function lookupGatewayUsage(usage: AssistantAiUsageSnapshot | null, model:
       totalTokens: (generation.promptTokens ?? usage.inputTokens ?? 0) + (generation.completionTokens ?? usage.outputTokens ?? 0),
       cachedInputTokens: generation.cachedTokens ?? usage.cachedInputTokens,
       cacheReadTokens: generation.cachedTokens ?? usage.cacheReadTokens ?? usage.cachedInputTokens,
+      cacheWriteTokens: generation.cacheCreationTokens ?? usage.cacheWriteTokens,
       billedCostUsd: generation.totalCost,
       costSource: "gateway" as const,
     } satisfies AssistantAiUsageSnapshot;
@@ -800,6 +831,53 @@ const assistantSystemPrompt = [
   "Para endosos usa entityType endorsement y exige una póliza inequívoca antes de proponer el alta.",
 ].join("\n");
 
+async function collectAgentStreamResult(input: {
+  stream: {
+    fullStream: AsyncIterable<unknown>;
+    text: PromiseLike<string>;
+    usage: PromiseLike<unknown>;
+    totalUsage: PromiseLike<unknown>;
+    providerMetadata: PromiseLike<unknown>;
+    finishReason: PromiseLike<string>;
+    steps: PromiseLike<Array<{ usage?: unknown }>>;
+  };
+  idleController: AbortController;
+  idleTimeoutMs: number;
+}) : Promise<AssistantGenerateResult> {
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  const resetIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      input.idleController.abort(new DOMException(
+        "El proveedor de IA no emitió progreso durante el periodo de inactividad permitido.",
+        "TimeoutError",
+      ));
+    }, input.idleTimeoutMs);
+  };
+
+  resetIdleTimer();
+  try {
+    for await (const chunk of input.stream.fullStream) {
+      void chunk;
+      resetIdleTimer();
+    }
+    const [text, usage, totalUsage, providerMetadata, finishReason, steps] = await Promise.all([
+      input.stream.text,
+      input.stream.usage,
+      input.stream.totalUsage,
+      input.stream.providerMetadata,
+      input.stream.finishReason,
+      input.stream.steps,
+    ]);
+    return { text, usage, totalUsage, providerMetadata, finishReason, steps };
+  } catch (error) {
+    if (input.idleController.signal.aborted) throw input.idleController.signal.reason;
+    throw error;
+  } finally {
+    if (idleTimer) clearTimeout(idleTimer);
+  }
+}
+
 async function runAssistantAttempt(input: {
   user: AssistantUser;
   message: string;
@@ -808,7 +886,9 @@ async function runAssistantAttempt(input: {
   themeHint?: string | null;
   model: string;
   fallbackModels: string[];
-  timeoutMs: number;
+  emergencyTimeoutMs: number;
+  idleTimeoutMs: number;
+  abortSignal?: AbortSignal;
   mode: "conversation" | "structured" | "agent";
   history?: AssistantHistoryMessage[];
   gmmMetadataOnly?: boolean;
@@ -826,7 +906,8 @@ async function runAssistantAttempt(input: {
       temperature: input.mode === "structured" ? 0.1 : 0.2,
       maxOutputTokens: input.mode === "agent" ? profile.maxOutputTokens : input.mode === "structured" ? ASSISTANT_AI_DRAFT_MAX_OUTPUT_TOKENS : 1_000,
       maxRetries: 0,
-      abortSignal: AbortSignal.timeout(input.timeoutMs),
+      abortSignal: input.abortSignal,
+      timeout: { totalMs: input.emergencyTimeoutMs },
       system: input.mode === "structured"
         ? `${assistantSystemPrompt}\nDevuelve un plan de cambio estricto. Todas las propiedades deben existir; usa null para targetQuery y [] para listas vacías. Si falta información, devuelve como máximo un missingField y formula una sola pregunta concreta; nunca prepares un borrador incompleto.`
         : `${assistantSystemPrompt}\nResponde únicamente con texto claro y conciso en español. No devuelvas JSON, tarjetas ni acciones para una consulta informativa. Usa únicamente la evidencia local proporcionada.`,
@@ -847,10 +928,16 @@ async function runAssistantAttempt(input: {
         fallbackModels: input.fallbackModels,
       }),
     };
-    const result = input.mode === "structured"
-      ? await generateText({ ...generationInput, output: Output.object({ schema: assistantAiResponseSchema }) })
-        : input.mode === "agent" && agentRuntime
-        ? await new ToolLoopAgent({
+    let result: AssistantGenerateResult;
+    if (input.mode === "structured") {
+      result = await generateText({ ...generationInput, output: Output.object({ schema: assistantAiResponseSchema }) });
+    } else if (input.mode === "agent" && agentRuntime) {
+      const idleController = new AbortController();
+      const emergencySignal = AbortSignal.timeout(input.emergencyTimeoutMs);
+      const abortSignal = input.abortSignal
+        ? AbortSignal.any([input.abortSignal, emergencySignal, idleController.signal])
+        : AbortSignal.any([emergencySignal, idleController.signal]);
+      const stream = await new ToolLoopAgent({
             model: gateway(input.model),
             temperature: 0.2,
             maxOutputTokens: profile.maxOutputTokens,
@@ -888,14 +975,17 @@ async function runAssistantAttempt(input: {
                 }),
               };
             },
-          }).generate({
-            abortSignal: AbortSignal.timeout(input.timeoutMs),
+          }).stream({
+            abortSignal,
             messages: [
               ...(input.history ?? []).map((message) => ({ role: message.role, content: message.content } as const)),
               { role: "user" as const, content: [input.contextText ? `Contexto explícito autorizado: ${input.contextText}` : null, input.message].filter(Boolean).join("\n\n") },
             ],
-          })
-        : await generateText(generationInput);
+          });
+      result = await collectAgentStreamResult({ stream, idleController, idleTimeoutMs: input.idleTimeoutMs });
+    } else {
+      result = await generateText(generationInput);
+    }
 
     if (input.mode === "conversation" || input.mode === "agent") {
       const resolvedModel = getGatewayResolvedModel(result.providerMetadata, input.model);
@@ -962,6 +1052,7 @@ async function runAssistantAttempt(input: {
           ...(agentRuntime ? {
             actionProposal: agentRuntime.snapshot().actionProposal,
             toolTrace: agentRuntime.snapshot().trace,
+            knowledgeCitations: agentRuntime.snapshot().knowledgeCitations,
             promptVersion: NORA_AGENT_PROMPT_VERSION,
             executionProfile,
             stepCount,
@@ -1127,6 +1218,7 @@ function valueFromAttempt(input: {
     executionProfile: input.generated.executionProfile ?? null,
     stepCount: input.generated.stepCount ?? null,
     terminationReason: input.generated.terminationReason ?? null,
+    knowledgeCitations: input.generated.knowledgeCitations ?? [],
   };
 }
 
@@ -1165,6 +1257,7 @@ export async function buildAssistantAiReply(input: {
   executionProfile?: AssistantAiExecutionProfile;
   activeTools?: string[];
   requiredTool?: string | null;
+  abortSignal?: AbortSignal;
 }): Promise<AssistantAiResult<AssistantAiReplyValue>> {
   if (!input.user.organizationId) {
     return { ok: false, diagnostic: buildDiagnostic({ operation: "assistant-reply", tier: "minimax", model: getAssistantAiModel(), fallbackModels: [], startedAt: Date.now(), runId: makeId("run"), code: "invalid_prompt", attempts: [] }) };
@@ -1173,7 +1266,6 @@ export async function buildAssistantAiReply(input: {
   const startedAt = Date.now();
   const mode = input.mode ?? "conversation";
   const executionProfile = input.executionProfile ?? (mode === "structured" ? "draft" : "complex-read");
-  const profile = ASSISTANT_AI_EXECUTION_PROFILES[executionProfile];
   const operation: AssistantAiOperation = mode === "agent" ? "assistant-agent" : "assistant-reply";
   const model = mode === "agent"
     ? getAssistantAiModel()
@@ -1226,16 +1318,21 @@ export async function buildAssistantAiReply(input: {
 
   const attempts: AssistantAiAttempt[] = [];
   const candidateModels = [model, ...fallbackModels.filter((candidate) => candidate && candidate !== model)];
-  const totalTimeoutMs = mode === "agent" ? ASSISTANT_AI_AGENT_TOTAL_TIMEOUT_MS : executionProfile === "draft" ? 15_000 : ASSISTANT_AI_ATTEMPT_TIMEOUT_MS;
+  const runtimeLimits = getAssistantAiRuntimeLimits();
+  const totalTimeoutMs = runtimeLimits.emergencyTimeoutMs;
   for (let index = 0; index < candidateModels.length; index += 1) {
     const candidateModel = candidateModels[index]!;
     const remainingTime = totalTimeoutMs - (Date.now() - startedAt);
-    if (remainingTime <= 0) break;
+    if (remainingTime < 1_000) break;
     const attemptResult = await runAssistantAttempt({
       ...input,
       model: candidateModel,
       fallbackModels: [],
-      timeoutMs: Math.max(250, Math.min(profile.attemptTimeoutMs, remainingTime)),
+      emergencyTimeoutMs: Math.min(
+        mode === "agent" ? remainingTime : runtimeLimits.nonStreamingAttemptTimeoutMs,
+        remainingTime,
+      ),
+      idleTimeoutMs: Math.min(runtimeLimits.idleTimeoutMs, remainingTime),
       mode,
       executionProfile,
       activeTools: input.activeTools,

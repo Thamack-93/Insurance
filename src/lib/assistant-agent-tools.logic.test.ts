@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   requireOrganizationContext: vi.fn(),
   searchUserPortfolio: vi.fn(),
   getClaimChecklistSummary: vi.fn(),
+  searchKnowledgeBase: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -32,6 +33,7 @@ vi.mock("@/lib/work-queue", () => ({ getWorkItems: vi.fn(), OPEN_WORK_ITEM_STATU
 vi.mock("@/lib/risk-engine", () => ({ detectRisks: vi.fn() }));
 vi.mock("@/lib/assistant-actions", () => ({ buildAssistantActionProposalFromPlan: vi.fn() }));
 vi.mock("@/lib/claim-checklists", () => ({ getClaimChecklistSummary: mocks.getClaimChecklistSummary }));
+vi.mock("@/lib/knowledge-base", () => ({ searchKnowledgeBase: mocks.searchKnowledgeBase }));
 
 import { createNoraAgentTools } from "@/lib/assistant-agent-tools";
 
@@ -44,6 +46,7 @@ describe("Nora agent tool authorization", () => {
     vi.clearAllMocks();
     mocks.requireOrganizationContext.mockResolvedValue({ userId: "agent-1", organizationId: "org-default", membershipRole: "AGENT" });
     mocks.searchUserPortfolio.mockResolvedValue([]);
+    mocks.searchKnowledgeBase.mockResolvedValue({ results: [], requiresInternalEvidence: false, abstained: true });
   });
 
   it("revalidates the live session and active organization membership", async () => {
@@ -54,6 +57,23 @@ describe("Nora agent tool authorization", () => {
     await expect(search.execute?.({ query: "POL-001" }, {})).rejects.toThrow("membresía activa");
     expect(mocks.searchUserPortfolio).not.toHaveBeenCalled();
     expect(runtime.snapshot().trace).toEqual([expect.objectContaining({ tool: "searchPortfolio", outcome: "error" })]);
+  });
+
+  it("searches knowledge only with the server organization and records safe citations", async () => {
+    mocks.searchKnowledgeBase.mockResolvedValue({
+      results: [{ sourceId: "source-1", sourceType: "INTERNAL", title: "Condiciones demo", version: "1.0", page: 4, section: "Deducible", match: 0.8, excerpt: "El deducible se valida en la póliza." }],
+      requiresInternalEvidence: true,
+      abstained: false,
+    });
+    const runtime = createNoraAgentTools({ id: "agent-1", role: "ADMIN" });
+    const search = runtime.tools.searchKnowledgeBase as DirectTool;
+
+    const result = await search.execute?.({ question: "¿Cuál es el deducible?", sourceType: "BOTH", limit: 5 }, {});
+
+    expect(result).toMatchObject({ requiresInternalEvidence: true, abstained: false });
+    expect(mocks.searchKnowledgeBase).toHaveBeenCalledWith(expect.objectContaining({ organizationId: "org-default", question: "¿Cuál es el deducible?" }));
+    expect(runtime.snapshot().knowledgeCitations).toEqual([expect.objectContaining({ sourceId: "source-1", sourceType: "INTERNAL", page: 4 })]);
+    expect(JSON.stringify(runtime.snapshot().trace)).not.toContain("¿Cuál es el deducible?");
   });
 
   it("fails closed when the authenticated user changes between steps", async () => {

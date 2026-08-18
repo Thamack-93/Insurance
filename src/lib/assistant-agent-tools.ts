@@ -14,6 +14,7 @@ import { buildAssistantActionProposalFromPlan } from "@/lib/assistant-actions";
 import { getClaimChecklistSummary } from "@/lib/claim-checklists";
 import { searchUserPortfolio } from "@/lib/assistant-local";
 import { requireOrganizationContext } from "@/lib/organization-context";
+import { searchKnowledgeBase } from "@/lib/knowledge-base";
 import {
   claimOperationalWhere,
   clientOperationalWhere,
@@ -27,6 +28,7 @@ import type {
   AssistantAiToolTraceEntry,
   AssistantMutationPlan,
   AssistantUser,
+  AssistantKnowledgeCitation,
 } from "@/lib/assistant-types";
 
 const mutationFieldSchema = z.object({ field: z.string().min(1).max(64), label: z.string().min(1).max(80), value: z.string().max(500) });
@@ -58,6 +60,22 @@ const draftOutputSchema = z.union([
   z.object({ prepared: z.literal(true), proposal: toolRecordSchema }),
   z.object({ prepared: z.literal(false), reason: z.string() }),
 ]);
+const knowledgeOutputSchema = z.object({
+  results: z.array(z.object({
+    sourceId: z.string(),
+    sourceType: z.enum(["INTERNAL", "GENERAL"]),
+    title: z.string(),
+    version: z.string(),
+    page: z.number().nullable(),
+    section: z.string().nullable(),
+    match: z.number(),
+    excerpt: z.string(),
+    insurerName: z.string().nullable().optional(),
+    product: z.string().nullable().optional(),
+  })),
+  requiresInternalEvidence: z.boolean(),
+  abstained: z.boolean(),
+});
 
 async function requireNoraToolScope(expectedUserId: string) {
   const context = await requireOrganizationContext();
@@ -76,6 +94,7 @@ function iso(value: Date | null | undefined) {
 
 export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadataOnly?: boolean } = {}) {
   const trace: AssistantAiToolTraceEntry[] = [];
+  const knowledgeCitations = new Map<string, AssistantKnowledgeCitation>();
   let actionProposal: AssistantActionProposal | null = null;
 
   async function traced<T>(name: string, outputSchema: z.ZodType<T>, operation: () => Promise<unknown>): Promise<T> {
@@ -101,6 +120,32 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
         return results.map((result) => options.gmmMetadataOnly
           ? { id: result.id, type: result.type, title: result.title }
           : { id: result.id, type: result.type, title: result.title, subtitle: result.subtitle, parentLabel: result.parentLabel, href: result.href });
+      }),
+    }),
+    searchKnowledgeBase: tool({
+      description: "Busca evidencia breve en la base de conocimiento autorizada. Para preguntas contractuales solo acepta fuentes internas activas y devuelve citas; nunca devuelve archivos completos.",
+      inputSchema: z.object({
+        question: z.string().trim().min(2).max(500),
+        sourceType: z.enum(["INTERNAL", "GENERAL", "BOTH"]).default("BOTH"),
+        insurerName: z.string().trim().max(160).nullish(),
+        product: z.string().trim().max(120).nullish(),
+        limit: z.number().int().min(1).max(5).default(5),
+      }),
+      execute: ({ question, sourceType, insurerName, product, limit }) => traced("searchKnowledgeBase", knowledgeOutputSchema, async () => {
+        const scope = await requireNoraToolScope(user.id);
+        if (options.gmmMetadataOnly) return { results: [], requiresInternalEvidence: false, abstained: true };
+        const result = await searchKnowledgeBase({ organizationId: scope.organizationId, question, sourceType, insurerName, product, limit });
+        for (const citation of result.results) {
+          knowledgeCitations.set(`${citation.sourceType}:${citation.sourceId}:${citation.page ?? ""}:${citation.section ?? ""}`, {
+            sourceId: citation.sourceId,
+            sourceType: citation.sourceType,
+            title: citation.title,
+            version: citation.version,
+            page: citation.page,
+            section: citation.section,
+          });
+        }
+        return result;
       }),
     }),
     getEntitySummary: tool({
@@ -224,6 +269,6 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
 
   return {
     tools,
-    snapshot: () => ({ trace: [...trace], actionProposal }),
+    snapshot: () => ({ trace: [...trace], actionProposal, knowledgeCitations: [...knowledgeCitations.values()] }),
   };
 }

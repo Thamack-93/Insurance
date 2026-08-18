@@ -83,12 +83,12 @@ const DEFAULT_MODEL_COSTS: Record<string, { input: number; output: number; cache
   // Vercel AI Gateway catalog pricing used only as a fallback estimate when
   // Gateway does not return the billed amount.
   "openai/gpt-5.6-luna": { input: 0.20 / 1_000_000, output: 1.20 / 1_000_000, cacheRead: 0.02 / 1_000_000, cacheWrite: 0.25 / 1_000_000 },
-  "alibaba/qwen3.7-flash": { input: 0.03 / 1_000_000, output: 0.13 / 1_000_000, cacheRead: 0.01 / 1_000_000, cacheWrite: 0.04 / 1_000_000 },
+  "alibaba/qwen3.7-flash": { input: 0.03 / 1_000_000, output: 0.13 / 1_000_000, cacheRead: 0.006 / 1_000_000, cacheWrite: 0.038 / 1_000_000 },
   "google/gemini-3-flash": { input: 0.50 / 1_000_000, output: 3.00 / 1_000_000, cacheRead: 0.05 / 1_000_000 },
   "openai/gpt-5.4-nano": { input: 0.20 / 1_000_000, output: 1.25 / 1_000_000 },
   "minimax/minimax-m3": { input: 0.30 / 1_000_000, output: 1.20 / 1_000_000 },
   "deepseek/deepseek-v3.1": { input: 0.25 / 1_000_000, output: 0.95 / 1_000_000, cacheRead: 0.13 / 1_000_000 },
-  "deepseek/deepseek-v4-flash": { input: 0.09 / 1_000_000, output: 0.18 / 1_000_000, cacheRead: 0.02 / 1_000_000 },
+  "deepseek/deepseek-v4-flash": { input: 0.13 / 1_000_000, output: 0.26 / 1_000_000, cacheRead: 0.028 / 1_000_000 },
   "openai/gpt-5.4-mini": { input: 0.75 / 1_000_000, output: 4.50 / 1_000_000 },
 };
 
@@ -579,6 +579,8 @@ export async function getAssistantAiMonthlyUsageSummary(organizationId: string, 
   let reasoningTokens = 0;
   let cacheReadTokens = 0;
   let cacheWriteTokens = 0;
+  let cacheReadRuns = 0;
+  let cacheWriteRuns = 0;
   let costUsd = 0;
   let fallbackRuns = 0;
   const promptVersions = new Set<string>();
@@ -588,8 +590,12 @@ export async function getAssistantAiMonthlyUsageSummary(organizationId: string, 
     outputTokens += usage?.outputTokens ?? 0;
     textTokens += usage?.textTokens ?? 0;
     reasoningTokens += usage?.reasoningTokens ?? 0;
-    cacheReadTokens += usage?.cacheReadTokens ?? usage?.cachedInputTokens ?? 0;
-    cacheWriteTokens += usage?.cacheWriteTokens ?? 0;
+    const runCacheReadTokens = usage?.cacheReadTokens ?? usage?.cachedInputTokens ?? 0;
+    const runCacheWriteTokens = usage?.cacheWriteTokens ?? 0;
+    cacheReadTokens += runCacheReadTokens;
+    cacheWriteTokens += runCacheWriteTokens;
+    if (runCacheReadTokens > 0) cacheReadRuns += 1;
+    if (runCacheWriteTokens > 0) cacheWriteRuns += 1;
     costUsd += toNumber(run.estimatedCostUsd) ?? usage?.billedCostUsd ?? usage?.estimatedCostUsd ?? 0;
     if (run.fallbackCount > 0) fallbackRuns += 1;
     if (run.providerMetadataJson) {
@@ -611,6 +617,8 @@ export async function getAssistantAiMonthlyUsageSummary(organizationId: string, 
     reasoningTokens,
     cacheReadTokens,
     cacheWriteTokens,
+    cacheReadRuns,
+    cacheWriteRuns,
     cacheReadRatio: inputTokens > 0 ? cacheReadTokens / inputTokens : 0,
     costUsd: Number(costUsd.toFixed(9)),
     promptVersions: [...promptVersions].sort(),

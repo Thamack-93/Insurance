@@ -9,6 +9,7 @@ import type {
   AssistantAiTraceEntry,
   AssistantAiUsageSnapshot,
   AssistantConversationResponse,
+  AssistantKnowledgeCitation,
   AssistantPrompt,
   AssistantSection,
   AssistantSnapshot,
@@ -77,6 +78,7 @@ type Message = {
   captureCorrection?: PolicyPdfCaptureCorrectionProposal | null;
   actionProposal?: AssistantConversationResponse["actionProposal"];
   todayMetrics?: AssistantConversationResponse["todayMetrics"];
+  knowledgeCitations?: AssistantKnowledgeCitation[];
 };
 
 type ActiveCapture = {
@@ -919,6 +921,7 @@ export function AssistantConsole({
           reportId: assistantResponse.reportId,
           actionProposal: assistantResponse.actionProposal,
           todayMetrics: assistantResponse.todayMetrics,
+          knowledgeCitations: assistantResponse.knowledgeCitations,
         },
       ]);
     } catch (error) {
@@ -1275,7 +1278,7 @@ export function AssistantConsole({
               {message.role === "assistant" ? (
                 <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground">Nora</span>
-                  {message.source ? <span>{message.source === "ai" ? "IA" : "Local"}</span> : null}
+                  {message.source ? <span>{message.id === "welcome" ? "Operativa" : message.source === "ai" ? "IA" : "Local"}</span> : null}
                   {message.reportThemeLabel ? <Badge variant="outline" className="rounded-full text-[10px]">Señal registrada</Badge> : null}
                 </div>
               ) : null}
@@ -1368,6 +1371,14 @@ export function AssistantConsole({
                           <p className="mt-1 font-medium text-foreground">{formatTokenCount(message.aiUsage.reasoningTokens)}</p>
                         </div>
                         <div>
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Caché leído</p>
+                          <p className="mt-1 font-medium text-foreground">{formatTokenCount(message.aiUsage.cacheReadTokens ?? message.aiUsage.cachedInputTokens)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Caché escrito</p>
+                          <p className="mt-1 font-medium text-foreground">{formatTokenCount(message.aiUsage.cacheWriteTokens)}</p>
+                        </div>
+                        <div>
                           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Total</p>
                           <p className="mt-1 font-medium text-foreground">{formatTokenCount(message.aiUsage.totalTokens)}</p>
                         </div>
@@ -1414,6 +1425,18 @@ export function AssistantConsole({
                 </details>
               ) : null}
               {message.role === "assistant" ? <MessageResponse className="text-sm leading-6" isAnimating={false}>{message.text}</MessageResponse> : <p className="whitespace-pre-wrap text-sm leading-6">{message.text}</p>}
+              {message.knowledgeCitations?.length ? (
+                <div className="mt-3 rounded-2xl border border-border/70 bg-muted/20 px-3 py-2 text-xs">
+                  <p className="font-medium text-foreground">Fuentes consultadas</p>
+                  <ul className="mt-1 space-y-1 text-muted-foreground">
+                    {message.knowledgeCitations.map((citation) => (
+                      <li key={`${message.id}-${citation.sourceType}-${citation.sourceId}-${citation.page ?? ""}-${citation.section ?? ""}`}>
+                        {citation.title} · v{citation.version} · {citation.page != null ? `p. ${citation.page}` : citation.section ?? "sección no indicada"} · {citation.sourceType === "GENERAL" ? "orientativa" : "interna"}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               {message.role === "assistant" && message.text ? (
                 <div className="mt-2 flex items-center gap-1">
                   <Button type="button" size="icon-sm" variant="ghost" className="rounded-full text-muted-foreground" onClick={() => copyResponse(message.text)} aria-label="Copiar respuesta" title="Copiar respuesta"><Clipboard className="size-3.5" /></Button>

@@ -9,6 +9,7 @@ import {
 } from "@/lib/assistant-reports";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { logError } from "@/lib/logger";
+import { archiveInternalKnowledgeSource, activateInternalKnowledgeSource, createInternalKnowledgeSource } from "@/lib/knowledge-base";
 
 export async function closeAssistantReportAction(reportId: string): Promise<MutationResult> {
   try {
@@ -55,5 +56,46 @@ export async function deleteAssistantReportAction(reportId: string): Promise<Mut
   } catch (error) {
     logError("settings.assistant.deleteReport", error);
     return errorResult(error instanceof Error ? error.message : "No se pudo eliminar el reporte.");
+  }
+}
+
+export async function createKnowledgeSourceAction(formData: FormData): Promise<void> {
+  try {
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+    await createInternalKnowledgeSource({
+      context,
+      title: String(formData.get("title") ?? ""),
+      insurerName: String(formData.get("insurerName") ?? "").trim() || null,
+      product: String(formData.get("product") ?? "").trim() || null,
+      version: String(formData.get("version") ?? ""),
+      content: String(formData.get("content") ?? ""),
+      status: "DRAFT",
+    });
+    revalidatePaths(["/settings/assistant"]);
+  } catch (error) {
+    logError("settings.assistant.createKnowledgeSource", error);
+    throw error;
+  }
+}
+
+export async function activateKnowledgeSourceAction(sourceId: string): Promise<void> {
+  try {
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+    await activateInternalKnowledgeSource(context, sourceId);
+    revalidatePaths(["/settings/assistant"]);
+  } catch (error) {
+    logError("settings.assistant.activateKnowledgeSource", error);
+    throw error;
+  }
+}
+
+export async function archiveKnowledgeSourceAction(sourceId: string): Promise<void> {
+  try {
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+    await archiveInternalKnowledgeSource(context, sourceId);
+    revalidatePaths(["/settings/assistant"]);
+  } catch (error) {
+    logError("settings.assistant.archiveKnowledgeSource", error);
+    throw error;
   }
 }

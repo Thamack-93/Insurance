@@ -90,7 +90,7 @@ describe("Nora explicit context API", () => {
     expect(buildAssistantReply).toHaveBeenCalledWith(
       { id: "agent-1", role: "AGENT", organizationId: "org-a" },
       "Revisa este contexto",
-      { contextText: "policy POL-001", gmmMetadataOnly: false, history: undefined },
+      expect.objectContaining({ contextText: "policy POL-001", gmmMetadataOnly: false, history: undefined, abortSignal: expect.any(AbortSignal) }),
     );
   });
 
@@ -107,7 +107,7 @@ describe("Nora explicit context API", () => {
     expect(buildAssistantReply).toHaveBeenCalledWith(
       { id: "agent-1", role: "AGENT", organizationId: "org-a" },
       "Revisa este contexto",
-      { contextText: null, gmmMetadataOnly: false, history },
+      expect.objectContaining({ contextText: null, gmmMetadataOnly: false, history, abortSignal: expect.any(AbortSignal) }),
     );
   });
 
@@ -132,7 +132,7 @@ describe("Nora explicit context API", () => {
     expect(buildAssistantReply).toHaveBeenCalledWith(
       { id: "agent-1", role: "AGENT", organizationId: "org-a" },
       "Revisa este contexto",
-      { contextText: "claim SIN-001", gmmMetadataOnly: true, history: undefined },
+      expect.objectContaining({ contextText: "claim SIN-001", gmmMetadataOnly: true, history: undefined, abortSignal: expect.any(AbortSignal) }),
     );
   });
 });

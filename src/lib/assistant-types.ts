@@ -85,6 +85,15 @@ export type AssistantAiToolTraceEntry = {
   durationMs: number;
 };
 
+export type AssistantKnowledgeCitation = {
+  sourceId: string;
+  sourceType: "INTERNAL" | "GENERAL";
+  title: string;
+  version: string;
+  page: number | null;
+  section: string | null;
+};
+
 export type AssistantAiAttempt = {
   model: string;
   requestedModel?: string;
@@ -207,6 +216,7 @@ export type AssistantReply = {
   sections: AssistantSection[];
   quickPrompts: AssistantPrompt[];
   todayMetrics?: AssistantTodayBrief["metrics"];
+  knowledgeCitations?: AssistantKnowledgeCitation[];
 };
 
 export type AssistantMutationEntityType = "client" | "policy" | "receipt" | "payment" | "workItem" | "endorsement" | "claim" | "claimChecklistItem";

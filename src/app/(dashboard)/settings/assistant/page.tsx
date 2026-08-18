@@ -2,14 +2,17 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UrlTabs } from "@/components/ui/url-tabs";
 import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-button";
 import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import { listAssistantReports } from "@/lib/assistant-reports";
-import { getAssistantAiConnectionStatus, getAssistantAiOperationLabel } from "@/lib/assistant-ai";
+import { getAssistantAiConnectionStatus, getAssistantAiOperationLabel, getAssistantAiRuntimeLimits } from "@/lib/assistant-ai";
 import { getAssistantAiMonthlyUsageSummary, listAssistantAiRuns } from "@/lib/assistant-ai-runs";
 import { getNoraAgentMode, getNoraAiMonthlySoftLimitUsd } from "@/lib/assistant-agent-config";
+import { listInternalKnowledgeSources } from "@/lib/knowledge-base";
 import { formatDate } from "@/lib/dates";
 import { AssistantReportActionButtons } from "@/components/assistant/report-action-buttons";
 import { Gauge, ShieldCheck } from "lucide-react";
@@ -18,6 +21,9 @@ import {
   closeAssistantReportAction,
   deleteAssistantReportAction,
   reopenAssistantReportAction,
+  activateKnowledgeSourceAction,
+  archiveKnowledgeSourceAction,
+  createKnowledgeSourceAction,
 } from "./actions";
 
 function statusTone(status: string): "secondary" | "outline" | "destructive" {
@@ -52,10 +58,23 @@ function getAiRunMetadata(run: Awaited<ReturnType<typeof listAssistantAiRuns>>[n
   return typeof value === "string" || typeof value === "number" ? String(value) : null;
 }
 
+function isHistoricalAssistantIncident(
+  report: Awaited<ReturnType<typeof listAssistantReports>>[number],
+  activeModels: string[],
+) {
+  if (report.kind !== "INCIDENT") return false;
+  const diagnosticModels = report.evidence
+    .map((entry) => entry.diagnostic?.model)
+    .filter((model): model is string => Boolean(model));
+  return diagnosticModels.length > 0 && diagnosticModels.every((model) => !activeModels.includes(model));
+}
+
 function ReportList({
   reports,
+  activeModels,
 }: {
   reports: Awaited<ReturnType<typeof listAssistantReports>>;
+  activeModels: string[];
 }) {
   return (
     <div className="space-y-4">
@@ -77,6 +96,9 @@ function ReportList({
                   <Badge variant="outline" className="rounded-full">
                     v{report.version}
                   </Badge>
+                  {isHistoricalAssistantIncident(report, activeModels) ? (
+                    <Badge variant="outline" className="rounded-full">Histórico · configuración anterior</Badge>
+                  ) : null}
                 </CardTitle>
                 <CardDescription className="mt-1">
                   {report.themeLabel} · {report.kind} · {report.signalCount} señales
@@ -93,6 +115,11 @@ function ReportList({
           </CardHeader>
           <CardContent className="space-y-3 p-5 text-sm">
             <p>{report.summary}</p>
+            {isHistoricalAssistantIncident(report, activeModels) ? (
+              <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                Este incidente se conserva como auditoría, pero corresponde a un modelo que ya no está en la cadena activa de Nora.
+              </p>
+            ) : null}
             <p className="text-muted-foreground">Recomendación: {report.recommendation}</p>
             <p className="text-muted-foreground">Plan: {report.plan}</p>
             <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
@@ -168,13 +195,13 @@ function AiRunList({
                 </CardDescription>
               </div>
               <div className="text-right text-xs text-muted-foreground">
-                <p>{formatDurationMs(run.durationMs ?? 0)}</p>
+                <p>Total: {formatDurationMs(run.durationMs ?? 0)}</p>
                 <p>{formatDate(new Date(run.createdAt))}</p>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4 p-5 text-sm">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
               <div>
                 <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Modelo final</p>
                 <p className="mt-1 font-medium">{run.finalModel ?? "Sin dato"}</p>
@@ -190,6 +217,15 @@ function AiRunList({
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Texto {formatTokenCount(run.totalUsage?.textTokens ?? run.usage?.textTokens)} · Razonamiento {formatTokenCount(run.totalUsage?.reasoningTokens ?? run.usage?.reasoningTokens)}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Caché</p>
+                <p className="mt-1 font-medium">
+                  {formatTokenCount(run.totalUsage?.cacheReadTokens ?? run.usage?.cacheReadTokens ?? run.totalUsage?.cachedInputTokens ?? run.usage?.cachedInputTokens)} leídos
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {formatTokenCount(run.totalUsage?.cacheWriteTokens ?? run.usage?.cacheWriteTokens)} escritos
                 </p>
               </div>
               <div>
@@ -252,14 +288,19 @@ function AiRunList({
 export default async function AssistantSettingsPage() {
   const organizationContext = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
   const aiStatus = getAssistantAiConnectionStatus();
-  const [incidents, suggestions, monthlyUsage] = await Promise.all([
+  const runtimeLimits = getAssistantAiRuntimeLimits();
+  const [incidents, suggestions, monthlyUsage, knowledgeSources] = await Promise.all([
     listAssistantReports({ organizationId: organizationContext.organizationId, kind: "INCIDENT", limit: 100 }),
     listAssistantReports({ organizationId: organizationContext.organizationId, kind: "SUGGESTION", limit: 100 }),
     getAssistantAiMonthlyUsageSummary(organizationContext.organizationId),
+    listInternalKnowledgeSources(organizationContext.organizationId),
   ]);
   const aiRuns = await listAssistantAiRuns({ organizationId: organizationContext.organizationId, limit: 50 });
 
-  const openIncidents = incidents.filter((report) => report.status === "OPEN" || report.status === "COLLECTING").length;
+  const activeModels = [aiStatus.model, ...aiStatus.fallbackModels];
+  const openIncidents = incidents.filter((report) =>
+    (report.status === "OPEN" || report.status === "COLLECTING") && !isHistoricalAssistantIncident(report, activeModels),
+  ).length;
   const openSuggestions = suggestions.filter((report) => report.status === "OPEN" || report.status === "COLLECTING").length;
   const succeededRuns = aiRuns.filter((run) => run.status === "SUCCEEDED").length;
   const failedRuns = aiRuns.filter((run) => run.status === "FAILED").length;
@@ -359,7 +400,9 @@ export default async function AssistantSettingsPage() {
             <CardDescription>Entrada cacheada</CardDescription>
             <CardTitle className="text-3xl">{Math.round(monthlyUsage.cacheReadRatio * 100)}%</CardTitle>
           </CardHeader>
-          <CardContent className="pt-0 text-xs text-muted-foreground">{formatTokenCount(monthlyUsage.cacheReadTokens)} leídos · {formatTokenCount(monthlyUsage.cacheWriteTokens)} escritos</CardContent>
+          <CardContent className="pt-0 text-xs text-muted-foreground">
+            {formatTokenCount(monthlyUsage.cacheReadTokens)} leídos · {formatTokenCount(monthlyUsage.cacheWriteTokens)} escritos · {monthlyUsage.cacheReadRuns} corridas con lectura · {monthlyUsage.cacheWriteRuns} con escritura
+          </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-3">
@@ -409,7 +452,54 @@ export default async function AssistantSettingsPage() {
           <CardDescription>
             Nora bloquea temas ajenos a PolicyDesk, limita el contexto a la cartera autorizada y nunca aplica cambios de PDF sin confirmación humana.
           </CardDescription>
+          <p className="text-xs text-muted-foreground">
+            Las lecturas continúan mientras el proveedor emita progreso. Watchdog de inactividad: {formatDurationMs(runtimeLimits.idleTimeoutMs)} · límite de emergencia: {formatDurationMs(runtimeLimits.emergencyTimeoutMs)}.
+          </p>
         </CardHeader>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Knowledge base de seguros</CardTitle>
+          <CardDescription>
+            Registra aquí fuentes internas como borradores. Solo las fuentes activas se recuperan; las preguntas contractuales nunca se responden con la guía general.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+          <form action={createKnowledgeSourceAction} className="space-y-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
+            <p className="text-sm font-medium">Registrar fuente interna</p>
+            <Input name="title" placeholder="Título del documento" required maxLength={200} />
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Input name="insurerName" placeholder="Aseguradora" maxLength={160} />
+              <Input name="product" placeholder="Producto" maxLength={120} />
+              <Input name="version" placeholder="Versión" required maxLength={80} />
+            </div>
+            <Textarea name="content" placeholder="Pega únicamente texto operativo autorizado; no subas expedientes clínicos ni narrativa médica." required maxLength={100_000} className="min-h-40" />
+            <Button type="submit" className="rounded-full">Guardar borrador</Button>
+          </form>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-medium">Fuentes internas de esta organización</p>
+              <Badge variant="outline" className="rounded-full">GENERAL: solo lectura global</Badge>
+            </div>
+            {knowledgeSources.length === 0 ? <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">Todavía no hay fuentes internas.</p> : null}
+            {knowledgeSources.map((source) => (
+              <div key={source.id} className="rounded-2xl border border-border/70 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium">{source.title}</p>
+                    <p className="text-xs text-muted-foreground">v{source.version} · {source.insurerName ?? "Aseguradora no indicada"} · {source.product ?? "Producto no indicado"} · {source._count.chunks} fragmentos</p>
+                  </div>
+                  <Badge variant={source.status === "ACTIVE" ? "default" : source.status === "ARCHIVED" ? "outline" : "secondary"} className="rounded-full">{source.status}</Badge>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {source.status !== "ACTIVE" && source.status !== "ARCHIVED" ? <form action={activateKnowledgeSourceAction.bind(null, source.id)}><Button type="submit" size="sm" className="rounded-full">Activar</Button></form> : null}
+                  {source.status !== "ARCHIVED" ? <form action={archiveKnowledgeSourceAction.bind(null, source.id)}><Button type="submit" size="sm" variant="outline" className="rounded-full">Archivar</Button></form> : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
       </Card>
 
       <UrlTabs defaultValue="incidentes" className="space-y-4">
@@ -419,10 +509,10 @@ export default async function AssistantSettingsPage() {
           <TabsTrigger value="uso-ia">Uso IA</TabsTrigger>
         </TabsList>
         <TabsContent value="incidentes" className="space-y-4">
-          <ReportList reports={incidents} />
+          <ReportList reports={incidents} activeModels={activeModels} />
         </TabsContent>
         <TabsContent value="sugerencias" className="space-y-4">
-          <ReportList reports={suggestions} />
+          <ReportList reports={suggestions} activeModels={activeModels} />
         </TabsContent>
         <TabsContent value="uso-ia" className="space-y-4">
           <AiRunList runs={aiRuns} />

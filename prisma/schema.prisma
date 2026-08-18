@@ -70,6 +70,12 @@ enum ClaimChecklistStatus {
   WAIVED
 }
 
+enum KnowledgeSourceStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
 enum QuoteStatus {
   REQUESTED
   IN_PROGRESS
@@ -169,6 +175,8 @@ model Organization {
   assistantReportSignals AssistantReportSignal[]
   assistantAiRuns AssistantAiRun[]
   assistantAiAttempts AssistantAiAttempt[]
+  knowledgeSources KnowledgeSource[]
+  knowledgeChunks KnowledgeChunk[]
   alerts Alert[]
   securityEventAggregates SecurityEventAggregate[]
 
@@ -254,6 +262,7 @@ model User {
   reviewedDataQualitySuppressionRules DataQualitySuppressionRule[] @relation("DataQualitySuppressionRuleReviewedBy")
   createdAssistantActionDrafts AssistantActionDraft[]     @relation("AssistantActionDraftUser")
   createdAssistantAiRuns      AssistantAiRun[]            @relation("AssistantAiRunUser")
+  createdKnowledgeSources     KnowledgeSource[]           @relation("KnowledgeSourceCreatedBy")
   organizationMemberships     OrganizationMembership[]
 
   @@index([email])
@@ -838,6 +847,87 @@ model Document {
   @@index([createdById])
   @@index([updatedById])
   @@index([organizationId])
+}
+
+/// Tenant-owned insurance knowledge. Content is chunked before it can be
+/// retrieved by Nora; the source file itself remains outside the model.
+model KnowledgeSource {
+  organizationId String
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  id            String   @id @default(cuid())
+  title         String
+  insurerName   String?
+  product       String?
+  version       String
+  status        KnowledgeSourceStatus @default(DRAFT)
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  contentHash   String
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  createdBy User? @relation("KnowledgeSourceCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  chunks KnowledgeChunk[]
+
+  @@unique([organizationId, contentHash])
+  @@index([organizationId, status])
+  @@index([organizationId, insurerName, product])
+  @@index([createdById])
+}
+
+model KnowledgeChunk {
+  organizationId String
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  id           String   @id @default(cuid())
+  sourceId     String
+  ordinal      Int
+  content      String
+  section      String?
+  page         Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  source KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, ordinal])
+  @@index([organizationId, sourceId])
+}
+
+/// Platform-curated general insurance guidance. It intentionally has no
+/// organizationId and is never writable through a tenant route.
+model GeneralKnowledgeSource {
+  id            String   @id @default(cuid())
+  title         String
+  product       String?
+  version       String
+  status        KnowledgeSourceStatus @default(DRAFT)
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  contentHash   String   @unique
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  chunks GeneralKnowledgeChunk[]
+
+  @@index([status])
+  @@index([product])
+}
+
+model GeneralKnowledgeChunk {
+  id        String   @id @default(cuid())
+  sourceId  String
+  ordinal   Int
+  content   String
+  section   String?
+  page      Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  source GeneralKnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, ordinal])
+  @@index([sourceId])
 }
 
 model SystemSetting {

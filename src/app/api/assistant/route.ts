@@ -10,6 +10,7 @@ import { rateLimitResponse, guardErrorResponse } from "@/lib/api-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 const messageSchema = z.object({
   message: z.string().trim().min(1).max(2_000),
@@ -112,7 +113,7 @@ export async function POST(request: NextRequest) {
       id: user.id,
       role: organization.membershipRole === "AGENT" ? "AGENT" : "ADMIN",
       organizationId: organization.organizationId,
-    }, payload.message, { history: payload.history, contextText, gmmMetadataOnly });
+    }, payload.message, { history: payload.history, contextText, gmmMetadataOnly, abortSignal: request.signal });
 
     console.log(
       JSON.stringify({

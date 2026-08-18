@@ -14,14 +14,14 @@ export const BACKFILL_LOCK_KEY = "policydesk-organization-backfill";
  * trigger; global tables are deliberately outside the singleton boundary.
  */
 export const PROTECTED_TENANT_TABLES = [
-  "Client", "Insurer", "Policy", "Receipt", "PolicyEndorsement", "Payment", "Commission", "Task", "WorkItem", "Claim", "ClaimChecklistItem", "Quote", "Document", "ActivityLog", "AssistantActionDraft", "NotificationPreference", "NotificationEvent", "PolicyInsuredParty", "PolicyInsuredAsset", "TelegramLinkToken", "LedgerImportBatch", "LedgerImportRow", "LedgerImportAction", "LedgerImportIssue", "TelegramDraft", "MaintenanceRun", "ReceiptReconciliationIssue", "PolicyRenewalSuggestion", "DataQualitySuppressionRule", "AssistantReport", "AssistantReportSignal", "AssistantAiRun", "AssistantAiAttempt", "Alert",
+  "Client", "Insurer", "Policy", "Receipt", "PolicyEndorsement", "Payment", "Commission", "Task", "WorkItem", "Claim", "ClaimChecklistItem", "Quote", "Document", "ActivityLog", "AssistantActionDraft", "NotificationPreference", "NotificationEvent", "PolicyInsuredParty", "PolicyInsuredAsset", "TelegramLinkToken", "LedgerImportBatch", "LedgerImportRow", "LedgerImportAction", "LedgerImportIssue", "TelegramDraft", "MaintenanceRun", "ReceiptReconciliationIssue", "PolicyRenewalSuggestion", "DataQualitySuppressionRule", "AssistantReport", "AssistantReportSignal", "AssistantAiRun", "AssistantAiAttempt", "KnowledgeSource", "KnowledgeChunk", "Alert",
 ] as const;
 
 /** Global security telemetry may be attributed later, but is never auto-tagged in Cycle 1. */
 export const OPTIONAL_ORGANIZATION_TABLES = ["SecurityEventAggregate"] as const;
 
 /** These rows are platform-scoped and must not acquire a Cycle 1 organization column. */
-export const PLATFORM_GLOBAL_TABLES = ["User", "Organization", "OrganizationMembership", "SystemSetting", "NotificationChannel", "TelegramWebhookUpdate"] as const;
+export const PLATFORM_GLOBAL_TABLES = ["User", "Organization", "OrganizationMembership", "SystemSetting", "NotificationChannel", "TelegramWebhookUpdate", "GeneralKnowledgeSource", "GeneralKnowledgeChunk"] as const;
 
 export const EXPECTED_TENANT_TRIGGERS = Object.fromEntries(
   PROTECTED_TENANT_TABLES.map((table) => [table, `${table}_transition_singleton_organization`]),
@@ -38,6 +38,7 @@ export const TENANT_RELATION_CHECKS: ReadonlyArray<readonly [string, string, str
   ["WorkItem", "clientId", "Client"], ["WorkItem", "policyId", "Policy"], ["WorkItem", "insurerId", "Insurer"], ["WorkItem", "receiptId", "Receipt"],
   ["Claim", "clientId", "Client"], ["Claim", "policyId", "Policy"], ["Claim", "insurerId", "Insurer"],
   ["ClaimChecklistItem", "claimId", "Claim"], ["ClaimChecklistItem", "documentId", "Document"],
+  ["KnowledgeChunk", "sourceId", "KnowledgeSource"],
   ["Quote", "clientId", "Client"], ["Quote", "insurerId", "Insurer"],
   ["Document", "clientId", "Client"], ["Document", "policyId", "Policy"], ["Document", "endorsementId", "PolicyEndorsement"], ["Document", "receiptId", "Receipt"], ["Document", "taskId", "Task"], ["Document", "claimId", "Claim"], ["Document", "quoteId", "Quote"],
   ["PolicyInsuredParty", "policyId", "Policy"], ["PolicyInsuredAsset", "policyId", "Policy"],

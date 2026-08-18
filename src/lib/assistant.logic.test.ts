@@ -440,6 +440,50 @@ describe("assistant router", () => {
     expect(mocks.buildLocalAssistantReply).not.toHaveBeenCalled();
   });
 
+  it("routes a natural-language today summary to the same safe read capability as the quick action", async () => {
+    vi.stubEnv("NORA_AGENT_MODE", "admin");
+    vi.stubEnv("DATABASE_URL", "");
+    mocks.evaluateAssistantInput.mockReturnValue({
+      allowed: true,
+      normalized: "dame el resumen de hoy",
+      reason: "system",
+    });
+    mocks.buildAssistantAiReply.mockResolvedValue({
+      ok: true,
+      value: {
+        runId: "run-today",
+        tier: "minimax",
+        reply: "Resumen autorizado de hoy.",
+        sections: [],
+        quickPrompts: [],
+        mutation: null,
+        actionProposal: null,
+        toolTrace: [{ tool: "getTodayBrief", outcome: "success", durationMs: 10 }],
+        promptVersion: "nora-agent-v1",
+        executionProfile: "simple-read",
+        stepCount: 1,
+        terminationReason: "complete",
+        resolvedModel: "alibaba/qwen3.7-flash",
+        usage: null,
+        totalUsage: null,
+        finishReason: "stop",
+        providerMetadata: {},
+        durationMs: 100,
+        trace: [],
+      },
+    });
+
+    const response = await buildAssistantReply(user, "Dame el resumen de hoy.");
+
+    expect(response.source).toBe("ai");
+    expect(mocks.buildAssistantAiReply).toHaveBeenCalledWith(expect.objectContaining({
+      mode: "agent",
+      executionProfile: "simple-read",
+      activeTools: ["getTodayBrief"],
+      requiredTool: "getTodayBrief",
+    }));
+  });
+
   it("routes an explicit draft request through structured Luna even when the agent is enabled", async () => {
     vi.stubEnv("NORA_AGENT_MODE", "all");
     vi.stubEnv("DATABASE_URL", "");

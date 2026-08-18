@@ -37,7 +37,7 @@ describe("assistant AI cost accounting", () => {
     const usage = normalizeAssistantAiUsage({ inputTokens: 1_000_000, outputTokens: 1_000_000 });
 
     expect(estimateAssistantAiCostUsd("alibaba/qwen3.7-flash", usage)).toBe(0.16);
-    expect(estimateAssistantAiCostUsd("deepseek/deepseek-v4-flash", usage)).toBe(0.27);
+    expect(estimateAssistantAiCostUsd("deepseek/deepseek-v4-flash", usage)).toBe(0.39);
   });
 
   it("preserves Gateway billed cost and generation id", () => {
@@ -87,6 +87,20 @@ describe("assistant AI cost accounting", () => {
       cacheWriteCostUsd: 0.025,
       outputCostUsd: 1.2,
       estimatedCostUsd: 1.369,
+    });
+  });
+
+  it("normalizes Gateway cache creation tokens as cache writes", () => {
+    const usage = normalizeAssistantAiUsage({
+      inputTokens: 1_000,
+      outputTokens: 100,
+      inputTokenDetails: { noCacheTokens: 700, cacheReadTokens: 200, cacheWriteTokens: 100 },
+    });
+
+    expect(usage).toMatchObject({
+      nonCachedInputTokens: 700,
+      cacheReadTokens: 200,
+      cacheWriteTokens: 100,
     });
   });
 });

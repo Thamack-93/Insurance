@@ -165,7 +165,17 @@ function resolveAgentExecutionPlan(normalized: string): {
   activeTools?: string[];
   requiredTool?: string | null;
 } {
-  if (normalized.includes("hoy") || normalized.includes("today") || normalized.includes("agenda") || normalized.includes("resumen")) {
+  if (["cobertura", "condiciones", "exclusion", "exclusión", "deducible", "ampara", "poliza", "póliza", "aseguradora", "seguro", "significa"].some((term) => normalized.includes(term)) && !hasMutationIntent(normalized)) {
+    return { profile: "simple-read", activeTools: ["searchKnowledgeBase"], requiredTool: "searchKnowledgeBase" };
+  }
+  if (
+    normalized.includes("hoy") ||
+    normalized.includes("today") ||
+    normalized.includes("agenda") ||
+    normalized.includes("resumen") ||
+    normalized.includes("brief") ||
+    normalized.includes("dia")
+  ) {
     return { profile: "simple-read", activeTools: ["getTodayBrief"], requiredTool: "getTodayBrief" };
   }
   if (normalized.includes("renov")) {
@@ -427,7 +437,7 @@ export async function getAssistantHomeSnapshot(user: AssistantUser): Promise<Ass
 export async function buildAssistantReply(
   user: AssistantUser,
   message: string,
-  options: { history?: AssistantHistoryMessage[]; contextText?: string | null; gmmMetadataOnly?: boolean } = {},
+  options: { history?: AssistantHistoryMessage[]; contextText?: string | null; gmmMetadataOnly?: boolean; abortSignal?: AbortSignal } = {},
 ): Promise<AssistantConversationResponse> {
   const guardrail = evaluateAssistantInput(message);
   const normalized = normalizeMessage(message);
@@ -474,8 +484,11 @@ export async function buildAssistantReply(
 
   const theme = detectTheme(normalized);
   const agentEnabled = isNoraAgentEnabledForUser(user);
+  const mutationIntent = hasMutationIntent(normalized);
+  const agentExecutionPlan = agentEnabled && !mutationIntent ? resolveAgentExecutionPlan(normalized) : null;
+  const isKnownAgentRead = agentExecutionPlan?.profile === "simple-read";
   let shouldTryAi = theme?.kind !== "INCIDENT" && (agentEnabled
-    ? !isLocalOnlyQuery(normalized)
+    ? isKnownAgentRead || !isLocalOnlyQuery(normalized)
     : shouldUseAssistantAi(normalized) || (!isDeterministicQuery(normalized) && message.length > 40) || message.length > 220);
   const budget = agentEnabled && shouldTryAi
     ? await getNoraAiBudgetStatus(user.organizationId).catch(() => ({ allowed: true, warning: null, spentUsd: 0, limitUsd: 4 }))
@@ -507,8 +520,6 @@ export async function buildAssistantReply(
   let aiExecutionProfile: AssistantAiExecutionProfile | null = null;
   let aiStepCount: number | null = null;
   let aiTerminationReason: AssistantAiTerminationReason | null = null;
-  const mutationIntent = hasMutationIntent(normalized);
-  const agentExecutionPlan = agentEnabled && !mutationIntent ? resolveAgentExecutionPlan(normalized) : null;
   const aiMode = mutationIntent
     ? "structured" as const
     : agentEnabled
@@ -531,12 +542,14 @@ export async function buildAssistantReply(
       executionProfile: mutationIntent ? "draft" : agentExecutionPlan?.profile,
       activeTools: agentExecutionPlan?.activeTools,
       requiredTool: agentExecutionPlan?.requiredTool,
+      abortSignal: options.abortSignal,
     });
     if (aiReply.ok) {
       finalReply = {
         reply: aiReply.value.reply,
         sections: [],
         quickPrompts: aiReply.value.quickPrompts,
+        knowledgeCitations: aiReply.value.knowledgeCitations,
       };
       source = "ai";
       aiRunId = aiReply.value.runId ?? null;
