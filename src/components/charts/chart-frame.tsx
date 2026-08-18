@@ -21,7 +21,7 @@ export function ChartFrame({
 }) {
   return (
     <div className={cn("relative h-[clamp(11rem,26vh,18rem)] w-full min-h-44 flex-1", className)}>
-      <ResponsiveContainer width="100%" height="100%" debounce={1}>
+      <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }} debounce={1}>
         {children}
       </ResponsiveContainer>
     </div>
