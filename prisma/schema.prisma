@@ -871,6 +871,7 @@ model KnowledgeSource {
   chunks KnowledgeChunk[]
 
   @@unique([organizationId, contentHash])
+  @@index([organizationId])
   @@index([organizationId, status])
   @@index([organizationId, insurerName, product])
   @@index([createdById])
@@ -891,6 +892,7 @@ model KnowledgeChunk {
   source KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
 
   @@unique([sourceId, ordinal])
+  @@index([organizationId])
   @@index([organizationId, sourceId])
 }
 

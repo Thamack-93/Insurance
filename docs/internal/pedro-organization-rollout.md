@@ -29,12 +29,18 @@ está `ACTIVE`; no se debe desactivar el trigger para forzarlo.
 
 ```bash
 DATABASE_URL_UNPOOLED='...' \
+PEDRO_ORGANIZATION_NAME='...' \
+PEDRO_ORGANIZATION_SLUG='...' \
+PEDRO_ORGANIZATION_TIME_ZONE='...' \
+PEDRO_ORGANIZATION_CURRENCY='...' \
 PEDRO_OWNER_EMAIL='pedroagl93@gmail.com' \
 npm run configure:pedro-organization -- --json
 ```
 
-El preview es `REPEATABLE READ READ ONLY`; no adquiere locks de escritura ni
-registra ActivityLog.
+Todos los valores de metadata son obligatorios; el script no tiene defaults
+visibles de runtime. El preview es `REPEATABLE READ READ ONLY`, no adquiere
+locks de escritura, no registra ActivityLog y devuelve metadata actual,
+propuesta, cambios y `NOOP`/`READY`.
 
 ## Apply autorizado
 
@@ -48,9 +54,23 @@ DATABASE_URL_UNPOOLED='...' \
 npm run configure:pedro-organization -- --apply --json
 ```
 
+El actor debe estar activo y tener `platformRole=SUPERADMIN`; una membership
+`OWNER` o `ADMIN` no puede cambiar metadata global. El apply valida la auditoría
+tenant y los guards antes de escribir.
+
 El apply usa `SERIALIZABLE`, `lock_timeout=30s`, `statement_timeout=5min` y
 advisory lock. Actualiza únicamente metadata de la organización y registra un
-`ActivityLog` sin contraseñas, URLs ni datos de cartera.
+`ActivityLog` con los campos modificados y valores saneados, sin contraseñas,
+URLs, correos del actor ni datos de cartera. Los cambios de metadata no
+invalidan sesiones; la autorización se revalida en cada request.
+
+## Guard contra regresiones
+
+Ejecutar `npm run check:organization-metadata-hardcodes`. Permite referencias
+técnicas en migraciones históricas, inventarios y fixtures, pero falla si un
+nombre o slug visible de una organización aparece en runtime, UI, auth o
+scripts operativos. También verifica que Platform, Settings y Today consumen
+la organización desde la capa de consultas PostgreSQL.
 
 ## Resultados y reparación
 
