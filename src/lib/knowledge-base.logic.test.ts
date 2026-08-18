@@ -9,6 +9,8 @@ describe("insurance knowledge base rules", () => {
   it("requires internal evidence for contractual questions", () => {
     expect(requiresInternalKnowledgeEvidence("¿Qué exclusiones tiene esta póliza?")).toBe(true);
     expect(requiresInternalKnowledgeEvidence("¿Qué significa prima?")).toBe(false);
+    expect(requiresInternalKnowledgeEvidence("¿Qué es un deducible en seguros?")).toBe(false);
+    expect(requiresInternalKnowledgeEvidence("¿Qué deducible aplica a mi póliza?")).toBe(true);
   });
 
   it("splits content into bounded chunks without empty fragments", () => {
