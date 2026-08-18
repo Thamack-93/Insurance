@@ -891,6 +891,7 @@ model KnowledgeChunk {
   source KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
 
   @@unique([sourceId, ordinal])
+  @@index([organizationId])
   @@index([organizationId, sourceId])
 }
 
