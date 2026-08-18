@@ -154,7 +154,7 @@ jobs:
         run: npm run build
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
@@ -246,7 +246,7 @@ jobs:
 
       - name: Upload Playwright artifacts
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: playwright-artifacts-${{ github.run_attempt }}
           path: |
@@ -257,7 +257,7 @@ jobs:
 
       - name: Upload sanitized restore drill reports
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: restore-drill-reports-${{ github.run_attempt }}
           path: artifacts/restore-drills
