@@ -52,7 +52,7 @@ function Sparkline({ data }: { data: number[] }) {
   const points = data.map((value, index) => ({ index, value }));
   return (
     <div className="h-9 w-24" aria-hidden>
-      <ResponsiveContainer width="100%" height="100%" debounce={1}>
+      <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }} debounce={1}>
         <AreaChart accessibilityLayer={false} data={points} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
           <defs>
             <linearGradient id="sparkGradient" x1="0" x2="0" y1="0" y2="1">

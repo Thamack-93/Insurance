@@ -152,8 +152,16 @@ jobs:
         run: node --import tsx scripts/check-tenant-inventory.ts
       - name: Build tenant-isolation application
         run: npm run build
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright browser
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 8
+        run: npx playwright install chromium
       - name: Tenant isolation Chromium E2E
         run: npx playwright test tests/e2e/tenant-isolation.spec.ts
 
@@ -227,8 +235,16 @@ jobs:
       - name: Build production application
         run: npm run build
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+      - name: Cache Playwright browsers
+        id: application-playwright-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright browser
+        if: steps.application-playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 8
+        run: npx playwright install chromium
 
       - name: API tests against production server
         run: npm run test:api
@@ -238,7 +254,7 @@ jobs:
 
       - name: Upload Playwright artifacts
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: playwright-artifacts-${{ github.run_attempt }}
           path: |
@@ -249,7 +265,7 @@ jobs:
 
       - name: Upload sanitized restore drill reports
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: restore-drill-reports-${{ github.run_attempt }}
           path: artifacts/restore-drills
