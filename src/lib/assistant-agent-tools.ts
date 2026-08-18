@@ -327,5 +327,9 @@ export async function executeNoraSimpleRead(user: AssistantUser, request: NoraSi
             ? { question: request.message.trim().slice(0, 500), sourceType: "BOTH", limit: 5 }
           : { limit: 15 };
   const value = await tool.execute(input, {});
-  return { value, toolTrace: runtime.snapshot().trace };
+  return {
+    value,
+    toolTrace: runtime.snapshot().trace,
+    knowledgeCitations: runtime.snapshot().knowledgeCitations,
+  };
 }

@@ -89,6 +89,7 @@ describe("Nora agent tool authorization", () => {
     );
 
     expect(result.value).toMatchObject({ abstained: false, results: [expect.objectContaining({ sourceType: "GENERAL" })] });
+    expect(result.knowledgeCitations).toEqual([expect.objectContaining({ sourceId: "general-1", sourceType: "GENERAL" })]);
     expect(mocks.searchKnowledgeBase).toHaveBeenCalledWith({
       organizationId: "org-default",
       question: "¿Qué es un deducible en seguros?",
