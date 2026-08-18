@@ -2,10 +2,6 @@ import type { PoolClient } from "pg";
 
 export const SYSTEM_USER_ID = "system-user-0000";
 export const BOOTSTRAP_ORGANIZATION_ID = "org_legacy_singleton_0001";
-export const BOOTSTRAP_ORGANIZATION_NAME = "PolicyDesk Legacy Organization";
-export const BOOTSTRAP_ORGANIZATION_SLUG = "legacy-singleton";
-export const BOOTSTRAP_TIME_ZONE = "Etc/GMT+6";
-export const BOOTSTRAP_CURRENCY = "MXN";
 export const BACKFILL_LOCK_KEY = "policydesk-organization-backfill";
 
 /**
