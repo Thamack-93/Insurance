@@ -4,6 +4,8 @@ const DOMAIN_TERMS = [
   "consolid", "vincul", "policydesk", "nora", "telegram", "dashboard",
   "captura", "pdf", "documento", "caratula", "seguro", "deducible", "coaseguro", "cobertura", "exclusion",
   "exclusión", "ampara", "suma asegurada", "beneficiario", "contratante", "ajustador", "tabulador", "asistencia",
+  "reembolso", "pago directo", "hospitalizacion", "hospitalización", "hospitalizado", "cirugia", "cirugía", "programacion",
+  "programación", "ingreso hospitalario", "alta hospitalaria", "autorizacion", "autorización", "preautorizacion", "preautorización",
 ];
 
 const OFF_TOPIC_TERMS = [
@@ -31,8 +33,14 @@ function looksLikeEntityLookup(value: string) {
 }
 
 function hasDomainTerm(value: string) {
+  const normalized = normalize(value);
   const tokens = value.split(/[^a-z0-9]+/).filter(Boolean);
-  return DOMAIN_TERMS.some((term) => tokens.some((token) => token.startsWith(term)));
+  return DOMAIN_TERMS.some((term) => {
+    const normalizedTerm = normalize(term);
+    return normalizedTerm.includes(" ")
+      ? normalized.includes(normalizedTerm)
+      : tokens.some((token) => token.startsWith(normalizedTerm));
+  });
 }
 
 export type AssistantGuardrailDecision = {
@@ -90,20 +98,23 @@ const GMM_SENSITIVE_PATTERNS = [
   /\btratamiento/iu,
   /\bmedicamento/iu,
   /\bcirug[ií]a/iu,
-  /\bhospital/iu,
   /\blaboratorio/iu,
   /\bestudio/iu,
   /\bresultado/iu,
   /\bm[eé]dic[oa]/iu,
-  /\bfactura/iu,
   /\bnota\s+cl[ií]nica/iu,
-  /\barchivo/iu,
   /\b(?:dr|dra)\.?\s+[\p{L}]/iu,
   /\b(?:c[aá]ncer|diabetes|hipertensi[oó]n|tumor|fractura|embarazo)\b/iu,
+  /\b(?:factura|comprobante)\s+(?:m[eé]dic|detallad)/iu,
+  /\b(?:hospital|cl[ií]nica)\s+[A-ZÁÉÍÓÚÑ][\p{L}'-]+/u,
   /\b[\w-]+\.(?:pdf|jpe?g|png|docx?)\b/iu,
 ];
 
-const GMM_METADATA_ACTIONS = ["checklist", "requisito", "faltante", "pendiente", "recibido", "solicitado", "estado", "seguimiento", "marcar"];
+const GMM_METADATA_ACTIONS = [
+  "checklist", "requisito", "faltante", "pendiente", "recibido", "solicitado", "estado", "seguimiento", "marcar",
+  "reembolso", "pago directo", "hospitalizacion", "hospitalización", "hospitalizado", "cirugia", "cirugía", "programacion",
+  "programación", "ingreso hospitalario", "alta hospitalaria", "autorizacion", "autorización", "preautorizacion", "preautorización",
+];
 
 export function evaluateGmmPrivacy(message: string, gmmContext = false) {
   const normalized = normalize(message);

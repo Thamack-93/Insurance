@@ -94,13 +94,13 @@ Registrar comunicaciones, folios, próximos pasos y escalamiento. Nora puede res
 Antes de cerrar un pendiente se debe conservar la evidencia y la confirmación humana correspondiente. Los borradores de seguimiento nunca se envían automáticamente.`,
   },
   {
-    title: "Seguro de automóvil: coberturas y flujo operativo",
+    title: "Seguro de Auto y automóvil: coberturas y flujo operativo",
     product: "AUTO",
     version,
     authority: "CONDUSEF",
     sourceUrl: "https://webappsos.condusef.gob.mx/SimuladorSeguroAutomovil/coberturas.jsp",
     reviewedAt,
-    content: `# Seguro de automóvil
+    content: `# Seguro de Auto y automóvil
 
 Esta información es orientativa. La cobertura concreta depende de la póliza, el paquete contratado, sus límites, deducibles, exclusiones y endosos vigentes.
 
@@ -114,7 +114,7 @@ La valuación puede usar valor comercial, factura o valor convenido. Debe verifi
 
 ## Flujo operativo
 
-Reportar el evento por el canal de la aseguradora, conservar el folio, esperar instrucciones del ajustador y registrar el taller o proveedor autorizado. No se deben prometer pagos ni cerrar acuerdos en nombre de la aseguradora. Nora solo organiza información y prepara próximos pasos.`,
+Después de reportar un siniestro de Auto, conservar el folio, registrar fecha y canal, esperar instrucciones del ajustador, documentar el estatus y registrar el taller o proveedor autorizado. Estos son pasos operativos orientativos; no se deben prometer pagos ni cerrar acuerdos en nombre de la aseguradora. Nora solo organiza información y prepara próximos pasos.`,
   },
   {
     title: "GMM: conceptos y checklist administrativo",
@@ -125,15 +125,31 @@ Reportar el evento por el canal de la aseguradora, conservar el folio, esperar i
     reviewedAt,
     content: `# GMM: conceptos y checklist administrativo
 
-Esta guía es operativa y no médica. Nora trabaja con códigos, estados, fechas y conteos del checklist; no recibe ni interpreta narrativa clínica.
+Esta guía es operativa y no médica. Nora trabaja con códigos, estados, fechas y conteos del checklist; no recibe ni interpreta narrativa clínica. Las rutas finales dependen de la aseguradora, la póliza y la autorización correspondiente.
 
 ## Conceptos administrativos
 
 El deducible y el coaseguro pueden influir en la participación económica del asegurado según la póliza. El tabulador y la red hospitalaria son referencias del producto. El pago directo y el reembolso son rutas administrativas distintas. Los periodos de espera, continuidad y antigüedad deben verificarse en la documentación vigente.
 
+## Ruta administrativa de reembolso
+
+Para preparar un reembolso, identificar la póliza, el folio del siniestro, el asegurado, la fecha de atención y la aseguradora; solicitar el checklist vigente por el canal autorizado; registrar cada requisito con código, estado, fecha de solicitud y fecha de recepción; y confirmar que los datos bancarios se capturen únicamente en el flujo protegido de PolicyDesk. Los comprobantes se registran como recibidos o faltantes, sin copiar facturas, diagnósticos, estudios, notas ni montos clínicos en Nora. Si falta un requisito, preparar un seguimiento para revisión humana. La recepción de documentos no confirma cobertura ni pago.
+
+## Ruta administrativa de pago directo
+
+Ante una atención que pueda requerir pago directo, registrar la póliza y el folio, contactar a la aseguradora o central indicada, solicitar la autorización y confirmar el estado de la solicitud. Guardar solamente código de requisito, fechas, folio y estado en el checklist. No prometer autorización, pago, red o procedencia; si la aseguradora pide información adicional, crear un pendiente para que una persona lo gestione por el canal correspondiente.
+
+## Ruta administrativa de cirugía programada
+
+Para una cirugía programada, solicitar con anticipación el proceso de preautorización de la aseguradora, registrar fecha de solicitud, folio, estado y requisitos pendientes, y confirmar por el canal autorizado si la solicitud fue recibida. Nora puede generar un checklist y un borrador de seguimiento, pero no puede aprobar la cirugía, confirmar cobertura, interpretar indicaciones clínicas ni establecer plazos jurídicos.
+
+## Qué hacer ante una hospitalización
+
+Si un asegurado es hospitalizado, priorizar el aviso a la aseguradora o central de asistencia indicada en la póliza, obtener el folio de atención, preguntar si corresponde la ruta de pago directo y registrar el estado de autorización. Si esa ruta no está disponible, solicitar el checklist administrativo de reembolso y conservar los documentos en el área documental protegida. Nora solo puede organizar pasos, estados, fechas y faltantes; no ofrece consejo médico ni recibe nombres de hospitales, diagnósticos o narrativas clínicas.
+
 ## Checklist permitido
 
-Los estados permitidos son MISSING, REQUESTED, RECEIVED y WAIVED. Cada requisito puede tener fecha de solicitud, fecha de recepción, responsable y vínculo seguro. Nora puede listar faltantes, resumir estados y preparar un mensaje de seguimiento.
+Los estados permitidos son MISSING, REQUESTED, RECEIVED y WAIVED. Los códigos administrativos pueden incluir claim_notice, identity_evidence, policy_evidence, payment_evidence e insurer_additional; los códigos de documentos médicos o comprobantes solo se manejan como metadatos recibidos o faltantes. Cada requisito puede tener fecha de solicitud, fecha de recepción, responsable y vínculo seguro. Nora puede listar faltantes, resumir estados y preparar un mensaje de seguimiento.
 
 ## Restricción de privacidad
 

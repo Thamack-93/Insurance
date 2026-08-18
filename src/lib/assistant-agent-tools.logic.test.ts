@@ -98,6 +98,26 @@ describe("Nora agent tool authorization", () => {
     });
   });
 
+  it("allows only the curated GMM operational source in metadata-only mode", async () => {
+    mocks.searchKnowledgeBase.mockResolvedValue({
+      results: [{ sourceId: "gmm-general-1", sourceType: "GENERAL", title: "GMM administrativo", version: "2026-08-17", sourceUrl: "https://example.com/gmm", authority: "Demo", reviewedAt: "2026-08-17T00:00:00.000Z", page: null, section: "Reembolso", match: 0.9, excerpt: "Ruta administrativa de reembolso." }],
+      requiresInternalEvidence: false,
+      abstained: false,
+    });
+    const runtime = createNoraAgentTools({ id: "agent-1", role: "ADMIN" }, { gmmMetadataOnly: true });
+    const search = runtime.tools.searchKnowledgeBase as DirectTool;
+
+    await expect(search.execute?.({ question: "¿Qué necesito para un reembolso de GMM?", sourceType: "BOTH", limit: 5 }, {})).resolves.toMatchObject({ abstained: false });
+    expect(mocks.searchKnowledgeBase).toHaveBeenCalledWith({
+      organizationId: "org-default",
+      question: "¿Qué necesito para un reembolso de GMM?",
+      sourceType: "GENERAL",
+      insurerName: null,
+      product: "GMM",
+      limit: 5,
+    });
+  });
+
   it("fails closed when the authenticated user changes between steps", async () => {
     mocks.requireOrganizationContext.mockResolvedValue({ userId: "other-user", organizationId: "org-default", membershipRole: "ADMIN" });
     const runtime = createNoraAgentTools({ id: "agent-1", role: "AGENT" });
