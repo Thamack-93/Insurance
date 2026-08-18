@@ -871,6 +871,7 @@ model KnowledgeSource {
   chunks KnowledgeChunk[]
 
   @@unique([organizationId, contentHash])
+  @@index([organizationId])
   @@index([organizationId, status])
   @@index([organizationId, insurerName, product])
   @@index([createdById])
