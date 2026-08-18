@@ -16,6 +16,7 @@ import { listInternalKnowledgeSources } from "@/lib/knowledge-base";
 import { formatDate } from "@/lib/dates";
 import { AssistantReportActionButtons } from "@/components/assistant/report-action-buttons";
 import { Gauge, ShieldCheck } from "lucide-react";
+import { KnowledgeBaseTester } from "@/components/settings/knowledge-base-tester";
 import {
   archiveAssistantReportAction,
   closeAssistantReportAction,
@@ -474,6 +475,15 @@ export default async function AssistantSettingsPage() {
               <Input name="product" placeholder="Producto" maxLength={120} />
               <Input name="version" placeholder="Versión" required maxLength={80} />
             </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input name="authority" placeholder="Autoridad o fuente" maxLength={120} />
+              <Input name="sourceUrl" type="url" placeholder="URL de origen (https://…)" maxLength={500} />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <label className="space-y-1 text-xs text-muted-foreground">Revisada<input name="reviewedAt" type="date" className="mt-1 block h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground" /></label>
+              <label className="space-y-1 text-xs text-muted-foreground">Vigente desde<input name="effectiveFrom" type="date" className="mt-1 block h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground" /></label>
+              <label className="space-y-1 text-xs text-muted-foreground">Vigente hasta<input name="effectiveTo" type="date" className="mt-1 block h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground" /></label>
+            </div>
             <Textarea name="content" placeholder="Pega únicamente texto operativo autorizado; no subas expedientes clínicos ni narrativa médica." required maxLength={100_000} className="min-h-40" />
             <Button type="submit" className="rounded-full">Guardar borrador</Button>
           </form>
@@ -489,6 +499,7 @@ export default async function AssistantSettingsPage() {
                   <div>
                     <p className="font-medium">{source.title}</p>
                     <p className="text-xs text-muted-foreground">v{source.version} · {source.insurerName ?? "Aseguradora no indicada"} · {source.product ?? "Producto no indicado"} · {source._count.chunks} fragmentos</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{source.authority ?? "Fuente no indicada"}{source.reviewedAt ? ` · revisada ${formatDate(source.reviewedAt)}` : ""}{source.sourceUrl ? <a className="ml-1 underline" href={source.sourceUrl} target="_blank" rel="noreferrer">origen</a> : null}</p>
                   </div>
                   <Badge variant={source.status === "ACTIVE" ? "default" : source.status === "ARCHIVED" ? "outline" : "secondary"} className="rounded-full">{source.status}</Badge>
                 </div>
@@ -499,6 +510,9 @@ export default async function AssistantSettingsPage() {
               </div>
             ))}
           </div>
+        </CardContent>
+        <CardContent className="pt-0">
+          <KnowledgeBaseTester sources={knowledgeSources.map((source) => ({ id: source.id, title: source.title, status: source.status, version: source.version }))} />
         </CardContent>
       </Card>
 

@@ -90,6 +90,9 @@ export type AssistantKnowledgeCitation = {
   sourceType: "INTERNAL" | "GENERAL";
   title: string;
   version: string;
+  sourceUrl?: string | null;
+  authority?: string | null;
+  reviewedAt?: string | null;
   page: number | null;
   section: string | null;
 };

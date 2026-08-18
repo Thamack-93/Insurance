@@ -1431,7 +1431,7 @@ export function AssistantConsole({
                   <ul className="mt-1 space-y-1 text-muted-foreground">
                     {message.knowledgeCitations.map((citation) => (
                       <li key={`${message.id}-${citation.sourceType}-${citation.sourceId}-${citation.page ?? ""}-${citation.section ?? ""}`}>
-                        {citation.title} · v{citation.version} · {citation.page != null ? `p. ${citation.page}` : citation.section ?? "sección no indicada"} · {citation.sourceType === "GENERAL" ? "orientativa" : "interna"}
+                        {citation.title} · v{citation.version} · {citation.page != null ? `p. ${citation.page}` : citation.section ?? "sección no indicada"} · {citation.sourceType === "GENERAL" ? "orientativa" : "interna"}{citation.authority ? ` · ${citation.authority}` : ""}{citation.sourceUrl ? <a className="ml-1 underline" href={citation.sourceUrl} target="_blank" rel="noreferrer">fuente</a> : null}
                       </li>
                     ))}
                   </ul>

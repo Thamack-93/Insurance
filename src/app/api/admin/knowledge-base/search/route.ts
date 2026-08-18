@@ -17,6 +17,8 @@ export async function GET(request: Request) {
       sourceType: url.searchParams.get("sourceType") === "INTERNAL" ? "INTERNAL" : url.searchParams.get("sourceType") === "GENERAL" ? "GENERAL" : "BOTH",
       insurerName: url.searchParams.get("insurerName"),
       product: url.searchParams.get("product"),
+      sourceId: url.searchParams.get("sourceId"),
+      includeDraft: url.searchParams.get("includeDraft") === "1",
       limit: Number.isFinite(parsedLimit) ? parsedLimit : 5,
     });
     return NextResponse.json(result);

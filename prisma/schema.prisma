@@ -860,6 +860,9 @@ model KnowledgeSource {
   product       String?
   version       String
   status        KnowledgeSourceStatus @default(DRAFT)
+  sourceUrl     String?
+  authority     String?
+  reviewedAt    DateTime?
   effectiveFrom DateTime?
   effectiveTo   DateTime?
   contentHash   String
@@ -902,6 +905,9 @@ model GeneralKnowledgeSource {
   product       String?
   version       String
   status        KnowledgeSourceStatus @default(DRAFT)
+  sourceUrl     String?
+  authority     String?
+  reviewedAt    DateTime?
   effectiveFrom DateTime?
   effectiveTo   DateTime?
   contentHash   String   @unique

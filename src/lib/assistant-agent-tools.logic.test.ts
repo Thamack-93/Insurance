@@ -61,7 +61,7 @@ describe("Nora agent tool authorization", () => {
 
   it("searches knowledge only with the server organization and records safe citations", async () => {
     mocks.searchKnowledgeBase.mockResolvedValue({
-      results: [{ sourceId: "source-1", sourceType: "INTERNAL", title: "Condiciones demo", version: "1.0", page: 4, section: "Deducible", match: 0.8, excerpt: "El deducible se valida en la póliza." }],
+      results: [{ sourceId: "source-1", sourceType: "INTERNAL", title: "Condiciones demo", version: "1.0", sourceUrl: "https://example.com/conditions", authority: "Demo", reviewedAt: "2026-08-17T00:00:00.000Z", page: 4, section: "Deducible", match: 0.8, excerpt: "El deducible se valida en la póliza." }],
       requiresInternalEvidence: true,
       abstained: false,
     });

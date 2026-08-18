@@ -11,6 +11,14 @@ import { errorResult, revalidatePaths, successResult, type MutationResult } from
 import { logError } from "@/lib/logger";
 import { archiveInternalKnowledgeSource, activateInternalKnowledgeSource, createInternalKnowledgeSource } from "@/lib/knowledge-base";
 
+function parseDateInput(value: FormDataEntryValue | null, endOfDay = false) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const date = new Date(`${raw}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
+  if (Number.isNaN(date.getTime())) throw new Error("La fecha de la fuente no es válida.");
+  return date;
+}
+
 export async function closeAssistantReportAction(reportId: string): Promise<MutationResult> {
   try {
     const actor = await requireOrganizationRole(["OWNER", "ADMIN"]);
@@ -69,6 +77,11 @@ export async function createKnowledgeSourceAction(formData: FormData): Promise<v
       product: String(formData.get("product") ?? "").trim() || null,
       version: String(formData.get("version") ?? ""),
       content: String(formData.get("content") ?? ""),
+      sourceUrl: String(formData.get("sourceUrl") ?? "").trim() || null,
+      authority: String(formData.get("authority") ?? "").trim() || null,
+      reviewedAt: parseDateInput(formData.get("reviewedAt")),
+      effectiveFrom: parseDateInput(formData.get("effectiveFrom")),
+      effectiveTo: parseDateInput(formData.get("effectiveTo"), true),
       status: "DRAFT",
     });
     revalidatePaths(["/settings/assistant"]);
