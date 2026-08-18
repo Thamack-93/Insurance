@@ -47,12 +47,28 @@ const CONCRETE_POLICY_CONTEXT = [
   " mi ", " mis ", " esta ", " este ", " tu ", " tus ", " la poliza ", " la póliza ", " el contrato ",
 ];
 
+const KNOWLEDGE_QUERY_STOPWORDS = new Set([
+  "a", "al", "como", "cómo", "con", "cual", "cuál", "de", "del", "el", "en", "es", "la", "las", "lo", "los",
+  "para", "por", "que", "qué", "se", "sobre", "son", "su", "sus", "un", "una", "unas", "uno", "unos",
+  "define", "defineme", "defíname", "explica", "significa", "seguro", "seguros", "mi", "mis", "esta", "este", "tu", "tus",
+]);
+
 export function requiresInternalKnowledgeEvidence(question: string) {
   const normalized = question.toLocaleLowerCase("es-MX").normalize("NFD").replace(/\p{Diacritic}/gu, "");
   const isGeneralDefinition = GENERAL_DEFINITION_PATTERNS.some((pattern) => pattern.test(normalized));
   const refersToConcretePolicy = CONCRETE_POLICY_CONTEXT.some((term) => normalized.includes(term.normalize("NFD").replace(/\p{Diacritic}/gu, "")));
   if (isGeneralDefinition && !refersToConcretePolicy) return false;
   return CONTRACTUAL_TERMS.some((term) => normalized.includes(term.normalize("NFD").replace(/\p{Diacritic}/gu, "")));
+}
+
+export function buildKnowledgeSearchQuery(question: string) {
+  const normalized = question
+    .toLocaleLowerCase("es-MX")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ");
+  const terms = normalized.split(/\s+/).filter((term) => term.length > 2 && !KNOWLEDGE_QUERY_STOPWORDS.has(term));
+  return terms.join(" ") || normalized.trim();
 }
 
 export function isKnowledgeContentSafe(content: string) {
@@ -294,16 +310,17 @@ function sourceVisibilityPredicate(includeDraft: boolean) {
 
 async function searchInternal(input: { organizationId: string; question: string; insurerName?: string | null; product?: string | null; sourceId?: string | null; limit: number; includeDraft?: boolean }) {
   const db = getDb();
+  const searchQuery = buildKnowledgeSearchQuery(input.question);
   return db.$queryRaw<SearchRow[]>(Prisma.sql`
     SELECT c."id" AS "chunkId", s."id" AS "sourceId", s."title", s."version", s."sourceUrl", s."authority", s."reviewedAt", s."insurerName", s."product", c."page", c."section", c."content",
-      ts_rank(to_tsvector('simple', c."content"), websearch_to_tsquery('simple', ${input.question})) AS "rank"
+      ts_rank(to_tsvector('simple', c."content"), websearch_to_tsquery('simple', ${searchQuery})) AS "rank"
     FROM "KnowledgeChunk" c JOIN "KnowledgeSource" s ON s."id" = c."sourceId"
     WHERE c."organizationId" = ${input.organizationId} AND s."organizationId" = ${input.organizationId}
       AND ${sourceVisibilityPredicate(input.includeDraft === true)}
       AND (${input.insurerName ?? null}::text IS NULL OR lower(s."insurerName") = lower(${input.insurerName ?? null}))
       AND (${input.product ?? null}::text IS NULL OR lower(s."product") = lower(${input.product ?? null}))
       AND (${input.sourceId ?? null}::text IS NULL OR s."id" = ${input.sourceId ?? null})
-      AND to_tsvector('simple', c."content") @@ websearch_to_tsquery('simple', ${input.question})
+      AND to_tsvector('simple', c."content") @@ websearch_to_tsquery('simple', ${searchQuery})
     ORDER BY "rank" DESC, c."ordinal" ASC
     LIMIT ${input.limit}
   `);
@@ -311,13 +328,14 @@ async function searchInternal(input: { organizationId: string; question: string;
 
 async function searchGeneral(input: { question: string; product?: string | null; limit: number }) {
   const db = getDb();
+  const searchQuery = buildKnowledgeSearchQuery(input.question);
   return db.$queryRaw<SearchRow[]>(Prisma.sql`
     SELECT c."id" AS "chunkId", s."id" AS "sourceId", s."title", s."version", s."sourceUrl", s."authority", s."reviewedAt", NULL::text AS "insurerName", s."product", c."page", c."section", c."content",
-      ts_rank(to_tsvector('simple', c."content"), websearch_to_tsquery('simple', ${input.question})) AS "rank"
+      ts_rank(to_tsvector('simple', c."content"), websearch_to_tsquery('simple', ${searchQuery})) AS "rank"
     FROM "GeneralKnowledgeChunk" c JOIN "GeneralKnowledgeSource" s ON s."id" = c."sourceId"
     WHERE ${sourceVisibilityPredicate(false)}
       AND (${input.product ?? null}::text IS NULL OR lower(s."product") = lower(${input.product ?? null}))
-      AND to_tsvector('simple', c."content") @@ websearch_to_tsquery('simple', ${input.question})
+      AND to_tsvector('simple', c."content") @@ websearch_to_tsquery('simple', ${searchQuery})
     ORDER BY "rank" DESC, c."ordinal" ASC
     LIMIT ${input.limit}
   `);

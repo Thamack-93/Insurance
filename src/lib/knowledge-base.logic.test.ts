@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { GENERAL_INSURANCE_SOURCES } from "@/lib/knowledge-base-general";
-import { isKnowledgeContentSafe, requiresInternalKnowledgeEvidence, splitKnowledgeChunks, splitKnowledgeContent } from "@/lib/knowledge-base";
+import { buildKnowledgeSearchQuery, isKnowledgeContentSafe, requiresInternalKnowledgeEvidence, splitKnowledgeChunks, splitKnowledgeContent } from "@/lib/knowledge-base";
 
 describe("insurance knowledge base rules", () => {
   it("requires internal evidence for contractual questions", () => {
@@ -11,6 +11,12 @@ describe("insurance knowledge base rules", () => {
     expect(requiresInternalKnowledgeEvidence("¿Qué significa prima?")).toBe(false);
     expect(requiresInternalKnowledgeEvidence("¿Qué es un deducible en seguros?")).toBe(false);
     expect(requiresInternalKnowledgeEvidence("¿Qué deducible aplica a mi póliza?")).toBe(true);
+  });
+
+  it("removes question framing before full-text retrieval", () => {
+    expect(buildKnowledgeSearchQuery("¿Qué significa prima?")).toBe("prima");
+    expect(buildKnowledgeSearchQuery("¿Qué es un deducible en seguros?")).toBe("deducible");
+    expect(buildKnowledgeSearchQuery("¿Qué deducible aplica a mi póliza?")).toBe("deducible aplica poliza");
   });
 
   it("splits content into bounded chunks without empty fragments", () => {
