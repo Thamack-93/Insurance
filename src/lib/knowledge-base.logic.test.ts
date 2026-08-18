@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { GENERAL_INSURANCE_SOURCES } from "@/lib/knowledge-base-general";
-import { buildKnowledgeSearchQuery, isKnowledgeContentSafe, requiresInternalKnowledgeEvidence, splitKnowledgeChunks, splitKnowledgeContent } from "@/lib/knowledge-base";
+import { buildKnowledgeFallbackQuery, buildKnowledgeSearchQuery, isKnowledgeContentSafe, requiresInternalKnowledgeEvidence, splitKnowledgeChunks, splitKnowledgeContent } from "@/lib/knowledge-base";
 
 describe("insurance knowledge base rules", () => {
   it("requires internal evidence for contractual questions", () => {
@@ -17,6 +17,13 @@ describe("insurance knowledge base rules", () => {
     expect(buildKnowledgeSearchQuery("¿Qué significa prima?")).toBe("prima");
     expect(buildKnowledgeSearchQuery("¿Qué es un deducible en seguros?")).toBe("deducible");
     expect(buildKnowledgeSearchQuery("¿Qué deducible aplica a mi póliza?")).toBe("deducible aplica poliza");
+    expect(buildKnowledgeSearchQuery("¿Qué suele cubrir un seguro de Auto?")).toBe("cobertura auto");
+    expect(buildKnowledgeSearchQuery("¿Qué pasos operativos siguen después de reportar un siniestro?")).toBe("paso operativo reporte siniestro");
+  });
+
+  it("builds an OR fallback for natural-language variants", () => {
+    expect(buildKnowledgeFallbackQuery("¿Qué suele cubrir un seguro de Auto?").split(" | ")).toEqual(expect.arrayContaining(["cobertura:*", "coberturas:*", "auto:*", "automóvil:*"]));
+    expect(buildKnowledgeFallbackQuery("¿Qué necesito para un reembolso de GMM?").split(" | ")).toEqual(expect.arrayContaining(["reembolso:*", "reembolsos:*", "gmm:*"]));
   });
 
   it("splits content into bounded chunks without empty fragments", () => {
@@ -44,5 +51,10 @@ describe("insurance knowledge base rules", () => {
       expect(source.sourceUrl.startsWith("https://")).toBe(true);
       expect(source.content).not.toMatch(/\b(?:ley|reglamento|artículo|plazo legal|derechos legales)\b/i);
     }
+    const gmm = GENERAL_INSURANCE_SOURCES.find((source) => source.product === "GMM");
+    expect(gmm?.content).toMatch(/Ruta administrativa de reembolso/i);
+    expect(gmm?.content).toMatch(/Ruta administrativa de pago directo/i);
+    expect(gmm?.content).toMatch(/Ruta administrativa de cirugía programada/i);
+    expect(gmm?.content).toMatch(/Qué hacer ante una hospitalización/i);
   });
 });

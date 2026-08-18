@@ -8,6 +8,9 @@ describe("assistant guardrails", () => {
     expect(evaluateAssistantInput("La captura de PDF no funciona").allowed).toBe(true);
     expect(evaluateAssistantInput("¿Qué es un deducible en seguros?").allowed).toBe(true);
     expect(evaluateAssistantInput("¿Qué significa coaseguro?").allowed).toBe(true);
+    expect(evaluateAssistantInput("¿Qué necesito para un reembolso de GMM?").allowed).toBe(true);
+    expect(evaluateAssistantInput("¿Qué hacer si un asegurado es hospitalizado?").allowed).toBe(true);
+    expect(evaluateAssistantInput("¿Cómo solicito un pago directo o programo una cirugía?").allowed).toBe(true);
     expect(evaluateAssistantInput("hoy").allowed).toBe(true);
     expect(evaluateAssistantInput("Resumen de hoy").allowed).toBe(true);
   });
@@ -43,6 +46,20 @@ describe("assistant guardrails", () => {
       allowed: true,
       hasSensitiveNarrative: false,
       isMetadataAction: true,
+    });
+    expect(evaluateGmmPrivacy("¿Qué necesito para un reembolso de GMM?", true)).toMatchObject({
+      allowed: true,
+      hasSensitiveNarrative: false,
+      isMetadataAction: true,
+    });
+    expect(evaluateGmmPrivacy("¿Qué hacer si un asegurado es hospitalizado?", true)).toMatchObject({
+      allowed: true,
+      hasSensitiveNarrative: false,
+      isMetadataAction: true,
+    });
+    expect(evaluateGmmPrivacy("El asegurado fue hospitalizado por diabetes", true)).toMatchObject({
+      allowed: false,
+      hasSensitiveNarrative: true,
     });
   });
 });

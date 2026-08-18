@@ -167,7 +167,10 @@ function resolveAgentExecutionPlan(normalized: string): {
   activeTools?: string[];
   requiredTool?: string | null;
 } {
-  if (["cobertura", "condiciones", "exclusion", "exclusión", "deducible", "ampara", "poliza", "póliza", "aseguradora", "seguro", "significa"].some((term) => normalized.includes(term)) && !hasMutationIntent(normalized)) {
+  if ([
+    "cobertura", "condiciones", "exclusion", "exclusión", "deducible", "ampara", "poliza", "póliza", "aseguradora", "seguro", "significa",
+    "reembolso", "pago directo", "hospitaliz", "cirugi", "programacion", "preautoriz",
+  ].some((term) => normalized.includes(term)) && !hasMutationIntent(normalized)) {
     return { profile: "simple-read", activeTools: ["searchKnowledgeBase"], requiredTool: "searchKnowledgeBase" };
   }
   if (
@@ -489,6 +492,7 @@ export async function buildAssistantReply(
   const mutationIntent = hasMutationIntent(normalized);
   const agentExecutionPlan = agentEnabled && !mutationIntent ? resolveAgentExecutionPlan(normalized) : null;
   const isKnownAgentRead = agentExecutionPlan?.profile === "simple-read";
+  const isKnowledgeRead = agentExecutionPlan?.requiredTool === "searchKnowledgeBase";
   let shouldTryAi = theme?.kind !== "INCIDENT" && (agentEnabled
     ? isKnownAgentRead || !isLocalOnlyQuery(normalized)
     : shouldUseAssistantAi(normalized) || (!isDeterministicQuery(normalized) && message.length > 40) || message.length > 220);
@@ -498,7 +502,7 @@ export async function buildAssistantReply(
   if (!budget.allowed) shouldTryAi = false;
 
   let precomputedSimpleRead: { contextText: string; toolTrace: AssistantAiToolTraceEntry[]; knowledgeCitations: AssistantKnowledgeCitation[] } | null = null;
-  if (shouldTryAi && agentEnabled && !mutationIntent && agentExecutionPlan?.profile === "simple-read" && agentExecutionPlan.requiredTool) {
+  if (shouldTryAi && agentEnabled && !mutationIntent && !isKnowledgeRead && agentExecutionPlan?.profile === "simple-read" && agentExecutionPlan.requiredTool) {
     try {
       const localRead = await executeNoraSimpleRead(user, {
         capability: agentExecutionPlan.requiredTool as NoraSimpleReadCapability,
@@ -547,8 +551,8 @@ export async function buildAssistantReply(
     : precomputedSimpleRead
       ? "conversation" as const
       : agentEnabled
-      ? "agent" as const
-      : "conversation" as const;
+        ? "agent" as const
+        : "conversation" as const;
 
   if (shouldTryAi) {
     const safeHistory = (options.history ?? [])

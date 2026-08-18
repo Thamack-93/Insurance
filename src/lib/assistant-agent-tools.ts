@@ -136,8 +136,14 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
       }),
       execute: ({ question, sourceType, insurerName, product, limit }) => traced("searchKnowledgeBase", knowledgeOutputSchema, async () => {
         const scope = await requireNoraToolScope(user.id);
-        if (options.gmmMetadataOnly) return { results: [], requiresInternalEvidence: false, abstained: true };
-        const result = await searchKnowledgeBase({ organizationId: scope.organizationId, question, sourceType, insurerName, product, limit });
+        const result = await searchKnowledgeBase({
+          organizationId: scope.organizationId,
+          question,
+          sourceType: options.gmmMetadataOnly ? "GENERAL" : sourceType,
+          insurerName: options.gmmMetadataOnly ? null : insurerName,
+          product: options.gmmMetadataOnly ? "GMM" : product,
+          limit,
+        });
         for (const citation of result.results) {
           knowledgeCitations.set(`${citation.sourceType}:${citation.sourceId}:${citation.page ?? ""}:${citation.section ?? ""}`, {
             sourceId: citation.sourceId,

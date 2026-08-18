@@ -51,6 +51,43 @@ const KNOWLEDGE_QUERY_STOPWORDS = new Set([
   "a", "al", "como", "cómo", "con", "cual", "cuál", "de", "del", "el", "en", "es", "la", "las", "lo", "los",
   "para", "por", "que", "qué", "se", "sobre", "son", "su", "sus", "un", "una", "unas", "uno", "unos",
   "define", "defineme", "defíname", "explica", "significa", "seguro", "seguros", "mi", "mis", "esta", "este", "tu", "tus",
+  "suele", "suelen", "usual", "usuales", "frecuente", "frecuentes", "despues", "después", "siguiente", "siguientes", "siguen",
+  "hacer", "necesito", "necesitas", "generar", "solicitar", "solicita", "programar", "programacion", "programación",
+]);
+
+const KNOWLEDGE_TERM_ALIASES = new Map([
+  ["auto", "auto"],
+  ["automovil", "auto"],
+  ["automoviles", "auto"],
+  ["cubrir", "cobertura"],
+  ["cubre", "cobertura"],
+  ["coberturas", "cobertura"],
+  ["operativos", "operativo"],
+  ["operativas", "operativo"],
+  ["pasos", "paso"],
+  ["reportar", "reporte"],
+  ["reportado", "reporte"],
+  ["reportada", "reporte"],
+  ["hospitalizado", "hospitalizacion"],
+  ["hospitalizados", "hospitalizacion"],
+  ["hospitalizacion", "hospitalizacion"],
+  ["hospitalizaciones", "hospitalizacion"],
+  ["cirugias", "cirugia"],
+  ["reembolsos", "reembolso"],
+  ["requisitos", "requisito"],
+  ["faltantes", "faltante"],
+]);
+
+const KNOWLEDGE_TERM_VARIANTS = new Map([
+  ["cobertura", ["cobertura", "coberturas"]],
+  ["operativo", ["operativo", "operativa", "operativos", "operativas"]],
+  ["paso", ["paso", "pasos"]],
+  ["reporte", ["reporte", "reportar", "reportado", "reportada"]],
+  ["hospitalizacion", ["hospitalizacion", "hospitalización"]],
+  ["cirugia", ["cirugia", "cirugía"]],
+  ["reembolso", ["reembolso", "reembolsos"]],
+  ["auto", ["auto", "automovil", "automóvil"]],
+  ["poliza", ["poliza", "póliza", "polizas", "pólizas"]],
 ]);
 
 export function requiresInternalKnowledgeEvidence(question: string) {
@@ -67,8 +104,20 @@ export function buildKnowledgeSearchQuery(question: string) {
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
     .replace(/[^\p{L}\p{N}]+/gu, " ");
-  const terms = normalized.split(/\s+/).filter((term) => term.length > 2 && !KNOWLEDGE_QUERY_STOPWORDS.has(term));
+  const terms = normalized
+    .split(/\s+/)
+    .filter((term) => term.length > 2 && !KNOWLEDGE_QUERY_STOPWORDS.has(term))
+    .map((term) => KNOWLEDGE_TERM_ALIASES.get(term) ?? term);
   return terms.join(" ") || normalized.trim();
+}
+
+export function buildKnowledgeFallbackQuery(question: string) {
+  const terms = [...new Set(buildKnowledgeSearchQuery(question).split(/\s+/).filter(Boolean))];
+  return terms
+    .flatMap((term) => KNOWLEDGE_TERM_VARIANTS.get(term) ?? [term])
+    .filter((term, index, all) => all.indexOf(term) === index)
+    .map((term) => `${term}:*`)
+    .join(" | ");
 }
 
 export function isKnowledgeContentSafe(content: string) {
@@ -311,7 +360,7 @@ function sourceVisibilityPredicate(includeDraft: boolean) {
 async function searchInternal(input: { organizationId: string; question: string; insurerName?: string | null; product?: string | null; sourceId?: string | null; limit: number; includeDraft?: boolean }) {
   const db = getDb();
   const searchQuery = buildKnowledgeSearchQuery(input.question);
-  return db.$queryRaw<SearchRow[]>(Prisma.sql`
+  const exactRows = await db.$queryRaw<SearchRow[]>(Prisma.sql`
     SELECT c."id" AS "chunkId", s."id" AS "sourceId", s."title", s."version", s."sourceUrl", s."authority", s."reviewedAt", s."insurerName", s."product", c."page", c."section", c."content",
       ts_rank(to_tsvector('simple', c."content"), websearch_to_tsquery('simple', ${searchQuery})) AS "rank"
     FROM "KnowledgeChunk" c JOIN "KnowledgeSource" s ON s."id" = c."sourceId"
@@ -324,18 +373,49 @@ async function searchInternal(input: { organizationId: string; question: string;
     ORDER BY "rank" DESC, c."ordinal" ASC
     LIMIT ${input.limit}
   `);
+  if (exactRows.length) return exactRows;
+
+  const fallbackQuery = buildKnowledgeFallbackQuery(input.question);
+  if (!fallbackQuery) return exactRows;
+  return db.$queryRaw<SearchRow[]>(Prisma.sql`
+    SELECT c."id" AS "chunkId", s."id" AS "sourceId", s."title", s."version", s."sourceUrl", s."authority", s."reviewedAt", s."insurerName", s."product", c."page", c."section", c."content",
+      ts_rank(to_tsvector('simple', c."content"), to_tsquery('simple', ${fallbackQuery})) AS "rank"
+    FROM "KnowledgeChunk" c JOIN "KnowledgeSource" s ON s."id" = c."sourceId"
+    WHERE c."organizationId" = ${input.organizationId} AND s."organizationId" = ${input.organizationId}
+      AND ${sourceVisibilityPredicate(input.includeDraft === true)}
+      AND (${input.insurerName ?? null}::text IS NULL OR lower(s."insurerName") = lower(${input.insurerName ?? null}))
+      AND (${input.product ?? null}::text IS NULL OR lower(s."product") = lower(${input.product ?? null}))
+      AND (${input.sourceId ?? null}::text IS NULL OR s."id" = ${input.sourceId ?? null})
+      AND to_tsvector('simple', c."content") @@ to_tsquery('simple', ${fallbackQuery})
+    ORDER BY "rank" DESC, c."ordinal" ASC
+    LIMIT ${input.limit}
+  `);
 }
 
 async function searchGeneral(input: { question: string; product?: string | null; limit: number }) {
   const db = getDb();
   const searchQuery = buildKnowledgeSearchQuery(input.question);
-  return db.$queryRaw<SearchRow[]>(Prisma.sql`
+  const exactRows = await db.$queryRaw<SearchRow[]>(Prisma.sql`
     SELECT c."id" AS "chunkId", s."id" AS "sourceId", s."title", s."version", s."sourceUrl", s."authority", s."reviewedAt", NULL::text AS "insurerName", s."product", c."page", c."section", c."content",
       ts_rank(to_tsvector('simple', c."content"), websearch_to_tsquery('simple', ${searchQuery})) AS "rank"
     FROM "GeneralKnowledgeChunk" c JOIN "GeneralKnowledgeSource" s ON s."id" = c."sourceId"
     WHERE ${sourceVisibilityPredicate(false)}
       AND (${input.product ?? null}::text IS NULL OR lower(s."product") = lower(${input.product ?? null}))
       AND to_tsvector('simple', c."content") @@ websearch_to_tsquery('simple', ${searchQuery})
+    ORDER BY "rank" DESC, c."ordinal" ASC
+    LIMIT ${input.limit}
+  `);
+  if (exactRows.length) return exactRows;
+
+  const fallbackQuery = buildKnowledgeFallbackQuery(input.question);
+  if (!fallbackQuery) return exactRows;
+  return db.$queryRaw<SearchRow[]>(Prisma.sql`
+    SELECT c."id" AS "chunkId", s."id" AS "sourceId", s."title", s."version", s."sourceUrl", s."authority", s."reviewedAt", NULL::text AS "insurerName", s."product", c."page", c."section", c."content",
+      ts_rank(to_tsvector('simple', c."content"), to_tsquery('simple', ${fallbackQuery})) AS "rank"
+    FROM "GeneralKnowledgeChunk" c JOIN "GeneralKnowledgeSource" s ON s."id" = c."sourceId"
+    WHERE ${sourceVisibilityPredicate(false)}
+      AND (${input.product ?? null}::text IS NULL OR lower(s."product") = lower(${input.product ?? null}))
+      AND to_tsvector('simple', c."content") @@ to_tsquery('simple', ${fallbackQuery})
     ORDER BY "rank" DESC, c."ordinal" ASC
     LIMIT ${input.limit}
   `);

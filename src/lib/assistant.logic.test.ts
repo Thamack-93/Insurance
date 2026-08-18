@@ -509,6 +509,52 @@ describe("assistant router", () => {
     expect(mocks.executeNoraSimpleRead).toHaveBeenCalledTimes(1);
   });
 
+  it("lets the agent reformulate a knowledge question instead of precomputing one exact local search", async () => {
+    vi.stubEnv("NORA_AGENT_MODE", "admin");
+    vi.stubEnv("DATABASE_URL", "");
+    mocks.evaluateAssistantInput.mockReturnValue({
+      allowed: true,
+      normalized: "que suele cubrir un seguro de auto",
+      reason: "system",
+    });
+    mocks.buildAssistantAiReply.mockResolvedValue({
+      ok: true,
+      value: {
+        runId: "run-knowledge-agent",
+        tier: "minimax",
+        reply: "La cobertura depende del paquete contratado; revisa la póliza vigente.",
+        sections: [],
+        quickPrompts: [],
+        mutation: null,
+        actionProposal: null,
+        toolTrace: [{ tool: "searchKnowledgeBase", outcome: "success", durationMs: 18 }],
+        knowledgeCitations: [{ sourceId: "auto-general-1", sourceType: "GENERAL", title: "Seguro de Auto", version: "2026-08-17", sourceUrl: null, authority: "Demo", reviewedAt: null, page: null, section: "Flujo operativo" }],
+        promptVersion: "nora-agent-v4",
+        executionProfile: "simple-read",
+        stepCount: 2,
+        terminationReason: "complete",
+        resolvedModel: "alibaba/qwen3.7-flash",
+        usage: null,
+        totalUsage: null,
+        finishReason: "stop",
+        providerMetadata: {},
+        durationMs: 420,
+        trace: [],
+      },
+    });
+
+    const response = await buildAssistantReply(user, "¿Qué suele cubrir un seguro de Auto?");
+
+    expect(response.source).toBe("ai");
+    expect(mocks.executeNoraSimpleRead).not.toHaveBeenCalled();
+    expect(mocks.buildAssistantAiReply).toHaveBeenCalledWith(expect.objectContaining({
+      mode: "agent",
+      executionProfile: "simple-read",
+      activeTools: ["searchKnowledgeBase"],
+      requiredTool: "searchKnowledgeBase",
+    }));
+  });
+
   it("routes an explicit draft request through structured Luna even when the agent is enabled", async () => {
     vi.stubEnv("NORA_AGENT_MODE", "all");
     vi.stubEnv("DATABASE_URL", "");
