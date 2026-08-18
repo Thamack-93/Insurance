@@ -1,11 +1,6 @@
 import { BOOTSTRAP_ORGANIZATION_ID } from "./tenant-organization-foundation";
 
 export const PEDRO_ORGANIZATION_ID = BOOTSTRAP_ORGANIZATION_ID;
-export const PEDRO_OWNER_EMAIL = "pedroagl93@gmail.com";
-export const PEDRO_ORGANIZATION_NAME = "Pedro Alfredo Gómez Lorenzo";
-export const PEDRO_ORGANIZATION_SLUG = "pedro-alfredo-gomez-lorenzo";
-export const PEDRO_ORGANIZATION_TIME_ZONE = "Etc/GMT+6";
-export const PEDRO_ORGANIZATION_CURRENCY = "MXN";
 export const PEDRO_CONFIGURATION_LOCK_KEY = "policydesk-pedro-organization-configuration";
 
 export type PedroOrganizationInputs = {
@@ -16,9 +11,15 @@ export type PedroOrganizationInputs = {
   ownerEmail: string;
 };
 
+export type PedroOrganizationMetadata = Pick<PedroOrganizationInputs, "name" | "slug" | "timeZone" | "currency">;
+
 export type PedroOrganizationSnapshot = {
   organizationStatus: string | null;
   organizationId: string | null;
+  organizationName: string | null;
+  organizationSlug: string | null;
+  organizationTimeZone: string | null;
+  organizationCurrency: string | null;
   nonTechnicalUsers: number;
   nonTechnicalUserIds: string[];
   ownerUserId: string | null;
@@ -30,6 +31,18 @@ export type PedroOrganizationSnapshot = {
   pedroMembershipActive: boolean | null;
   tenantNullCount: number;
   tenantAuditOk: boolean;
+};
+
+export type PedroOrganizationMetadataChanges = Partial<Record<keyof PedroOrganizationMetadata, {
+  from: string | null;
+  to: string;
+}>>;
+
+export type PedroOrganizationCurrentMetadata = {
+  name: string | null;
+  slug: string | null;
+  timeZone: string | null;
+  currency: string | null;
 };
 
 export type PedroConfigurationPlan =
@@ -58,6 +71,23 @@ export function validatePedroOrganizationInputs(input: PedroOrganizationInputs):
   return normalized;
 }
 
+export function getPedroOrganizationMetadataChanges(
+  current: PedroOrganizationCurrentMetadata,
+  proposed: PedroOrganizationMetadata,
+): PedroOrganizationMetadataChanges {
+  const fields: Array<[keyof PedroOrganizationMetadata, string | null, string]> = [
+    ["name", current.name, proposed.name],
+    ["slug", current.slug, proposed.slug],
+    ["timeZone", current.timeZone, proposed.timeZone],
+    ["currency", current.currency, proposed.currency],
+  ];
+  return Object.fromEntries(
+    fields
+      .filter(([, from, to]) => from !== to)
+      .map(([field, from, to]) => [field, { from, to }]),
+  ) as PedroOrganizationMetadataChanges;
+}
+
 export function planPedroConfiguration(snapshot: PedroOrganizationSnapshot): PedroConfigurationPlan {
   if (snapshot.organizationId !== PEDRO_ORGANIZATION_ID) {
     return { status: "STOP_NO_MUTATION", action: "STOP", reason: "POLICYDESK_PEDRO_BOOTSTRAP_ORGANIZATION_MISSING" };
@@ -77,11 +107,11 @@ export function planPedroConfiguration(snapshot: PedroOrganizationSnapshot): Ped
   if (snapshot.ownerCount > 1 || (snapshot.ownerUserId && snapshot.ownerUserId !== snapshot.pedroUserId)) {
     return { status: "BLOCKED", action: "STOP", reason: "POLICYDESK_PEDRO_OWNER_REASSIGNMENT_REQUIRES_CUTOVER" };
   }
+  if (snapshot.ownerCount !== 1 || snapshot.ownerUserId !== snapshot.pedroUserId || snapshot.pedroMembershipRole !== "OWNER" || snapshot.pedroMembershipActive !== true) {
+    return { status: "BLOCKED", action: "STOP", reason: "POLICYDESK_PEDRO_OWNER_MEMBERSHIP_REQUIRED" };
+  }
   if (snapshot.tenantNullCount > 0 || !snapshot.tenantAuditOk) {
     return { status: "STOP_NO_MUTATION", action: "STOP", reason: "POLICYDESK_PEDRO_TENANT_AUDIT_REQUIRED" };
   }
-  const alreadyConfigured = snapshot.ownerUserId === snapshot.pedroUserId
-    && snapshot.pedroMembershipRole === "OWNER"
-    && snapshot.pedroMembershipActive === true;
-  return { status: "READY", action: alreadyConfigured ? "NOOP" : "CONFIGURE", reason: null };
+  return { status: "READY", action: "NOOP", reason: null };
 }

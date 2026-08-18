@@ -5,12 +5,8 @@ import { Pool, type PoolClient } from "pg";
 import { auditTenantFoundation, PROTECTED_TENANT_TABLES, SYSTEM_USER_ID } from "../src/lib/tenant-organization-foundation.ts";
 import {
   PEDRO_CONFIGURATION_LOCK_KEY,
-  PEDRO_ORGANIZATION_CURRENCY,
   PEDRO_ORGANIZATION_ID,
-  PEDRO_ORGANIZATION_NAME,
-  PEDRO_ORGANIZATION_SLUG,
-  PEDRO_ORGANIZATION_TIME_ZONE,
-  PEDRO_OWNER_EMAIL,
+  getPedroOrganizationMetadataChanges,
   planPedroConfiguration,
   validatePedroOrganizationInputs,
   type PedroOrganizationInputs,
@@ -30,11 +26,11 @@ function required(name: string, code: string) {
 
 function inputs(): PedroOrganizationInputs {
   return validatePedroOrganizationInputs({
-    name: process.env.PEDRO_ORGANIZATION_NAME ?? PEDRO_ORGANIZATION_NAME,
-    slug: process.env.PEDRO_ORGANIZATION_SLUG ?? PEDRO_ORGANIZATION_SLUG,
-    timeZone: process.env.PEDRO_ORGANIZATION_TIME_ZONE ?? PEDRO_ORGANIZATION_TIME_ZONE,
-    currency: process.env.PEDRO_ORGANIZATION_CURRENCY ?? PEDRO_ORGANIZATION_CURRENCY,
-    ownerEmail: process.env.PEDRO_OWNER_EMAIL ?? PEDRO_OWNER_EMAIL,
+    name: required("PEDRO_ORGANIZATION_NAME", "POLICYDESK_PEDRO_ORGANIZATION_NAME_REQUIRED"),
+    slug: required("PEDRO_ORGANIZATION_SLUG", "POLICYDESK_PEDRO_ORGANIZATION_SLUG_REQUIRED"),
+    timeZone: required("PEDRO_ORGANIZATION_TIME_ZONE", "POLICYDESK_PEDRO_ORGANIZATION_TIME_ZONE_REQUIRED"),
+    currency: required("PEDRO_ORGANIZATION_CURRENCY", "POLICYDESK_PEDRO_ORGANIZATION_CURRENCY_REQUIRED"),
+    ownerEmail: required("PEDRO_OWNER_EMAIL", "POLICYDESK_PEDRO_OWNER_EMAIL_REQUIRED"),
   });
 }
 
@@ -58,6 +54,10 @@ function guardApplyTarget(value: string) {
   if (!/preview|staging|temporary|temp|test|development|dev/i.test(labels)) throw new Error("POLICYDESK_PEDRO_TARGET_NOT_EXPLICIT");
 }
 
+function auditReason(value: string | null) {
+  return (value ?? "").replace(/https?:\/\/\S+/gi, "[redacted-url]").replace(/[\r\n]+/g, " ").slice(0, 500);
+}
+
 async function tenantNullCount(client: PoolClient) {
   let total = 0;
   for (const table of PROTECTED_TENANT_TABLES) {
@@ -68,7 +68,14 @@ async function tenantNullCount(client: PoolClient) {
 }
 
 async function readSnapshot(client: PoolClient, ownerEmail: string): Promise<PedroOrganizationSnapshot> {
-  const organizations = await client.query<{ id: string; status: string }>(`SELECT "id","status" FROM "Organization" ORDER BY "id"`);
+  const organizations = await client.query<{
+    id: string;
+    status: string;
+    name: string;
+    slug: string;
+    timeZone: string;
+    defaultCurrency: string;
+  }>(`SELECT "id","status","name","slug","timeZone","defaultCurrency" FROM "Organization" ORDER BY "id"`);
   const organization = organizations.rows.length === 1 ? organizations.rows[0] : null;
   const users = await client.query<{ id: string; email: string; active: boolean; role: string; platformRole: string }>(
     `SELECT "id","email","active","role","platformRole" FROM "User" WHERE "id" <> $1 AND "platformRole" <> 'SUPERADMIN' ORDER BY "id"`,
@@ -84,6 +91,10 @@ async function readSnapshot(client: PoolClient, ownerEmail: string): Promise<Ped
   return {
     organizationStatus: organization?.status ?? null,
     organizationId: organization?.id ?? null,
+    organizationName: organization?.name ?? null,
+    organizationSlug: organization?.slug ?? null,
+    organizationTimeZone: organization?.timeZone ?? null,
+    organizationCurrency: organization?.defaultCurrency ?? null,
     nonTechnicalUsers: users.rows.length,
     nonTechnicalUserIds: users.rows.map((row) => row.id),
     ownerUserId: owners[0]?.userId ?? null,
@@ -138,40 +149,85 @@ async function main() {
     const plan = planPedroConfiguration(snapshot);
     if (plan.status !== "READY") throw new Error(plan.reason);
     if (snapshot.organizationStatus !== "ACTIVE") throw new Error("POLICYDESK_PEDRO_ORGANIZATION_NOT_ACTIVE");
-    if (plan.action === "NOOP") {
+    const currentMetadata = {
+      name: snapshot.organizationName,
+      slug: snapshot.organizationSlug,
+      timeZone: snapshot.organizationTimeZone,
+      currency: snapshot.organizationCurrency,
+    };
+    const proposedMetadata = {
+      name: input.name,
+      slug: input.slug,
+      timeZone: input.timeZone,
+      currency: input.currency,
+    };
+    const metadataChanges = getPedroOrganizationMetadataChanges(currentMetadata, proposedMetadata);
+    if (apply) {
+      const actor = await client.query<{ id: string; active: boolean; platformRole: string }>(`SELECT "id","active","platformRole" FROM "User" WHERE "id" = $1 FOR UPDATE`, [actorId]);
+      if (actor.rowCount !== 1 || !actor.rows[0].active) throw new Error("POLICYDESK_PEDRO_CUTOVER_ACTOR_INVALID");
+      if (actor.rows[0].platformRole !== "SUPERADMIN") throw new Error("POLICYDESK_PEDRO_CUTOVER_ACTOR_NOT_SUPERADMIN");
+    }
+    if (plan.action === "NOOP" && Object.keys(metadataChanges).length === 0) {
       await client.query("COMMIT");
-      output(json, { ok: true, mode: apply ? "apply" : "preview", status: "NOOP", organizationId: PEDRO_ORGANIZATION_ID, ownerMembership: true });
+      output(json, {
+        ok: true,
+        mode: apply ? "apply" : "preview",
+        status: "NOOP",
+        organizationId: PEDRO_ORGANIZATION_ID,
+        current: currentMetadata,
+        proposed: proposedMetadata,
+        changes: {},
+        ownerMembership: true,
+      });
       return;
     }
     if (!apply) {
       await client.query("COMMIT");
-      output(json, { ok: true, mode: "preview", status: "READY", action: "CONFIGURE", organizationId: PEDRO_ORGANIZATION_ID, ownerMembership: true });
+      output(json, {
+        ok: true,
+        mode: "preview",
+        status: "READY",
+        action: "CONFIGURE",
+        organizationId: PEDRO_ORGANIZATION_ID,
+        current: currentMetadata,
+        proposed: proposedMetadata,
+        changes: metadataChanges,
+        ownerMembership: true,
+      });
       return;
     }
 
-    const actor = await client.query<{ id: string; active: boolean }>(`SELECT "id","active" FROM "User" WHERE "id" = $1 FOR UPDATE`, [actorId]);
-    if (actor.rowCount !== 1 || !actor.rows[0].active) throw new Error("POLICYDESK_PEDRO_CUTOVER_ACTOR_INVALID");
     const existingSlug = await client.query<{ id: string }>(`SELECT "id" FROM "Organization" WHERE "slug" = $1 AND "id" <> $2`, [input.slug, PEDRO_ORGANIZATION_ID]);
     if (existingSlug.rowCount) throw new Error("POLICYDESK_PEDRO_ORGANIZATION_SLUG_CONFLICT");
 
-    await client.query(
-      `UPDATE "Organization" SET "name"=$2,"slug"=$3,"kind"='CUSTOMER',"timeZone"=$4,"defaultCurrency"=$5,"updatedAt"=CURRENT_TIMESTAMP WHERE "id"=$1`,
-      [PEDRO_ORGANIZATION_ID, input.name, input.slug, input.timeZone, input.currency],
-    );
+    if (Object.keys(metadataChanges).length > 0) {
+      await client.query(
+        `UPDATE "Organization" SET "name"=$2,"slug"=$3,"kind"='CUSTOMER',"timeZone"=$4,"defaultCurrency"=$5,"updatedAt"=CURRENT_TIMESTAMP WHERE "id"=$1`,
+        [PEDRO_ORGANIZATION_ID, input.name, input.slug, input.timeZone, input.currency],
+      );
+    }
     await client.query(
       `INSERT INTO "ActivityLog" ("id","organizationId","entityType","entityId","action","oldValue","newValue","userId")
        VALUES ($1, $2, 'Organization', $2, 'ORGANIZATION_CONFIGURED_FOR_PEDRO', $3, $4, $5)`,
       [
         `pedro-org-config-${randomUUID().replaceAll("-", "")}`,
         PEDRO_ORGANIZATION_ID,
-        JSON.stringify({ id: PEDRO_ORGANIZATION_ID, scope: "organization-metadata" }),
-        JSON.stringify({ name: input.name, slug: input.slug, timeZone: input.timeZone, defaultCurrency: input.currency, owner: "single-owner" }),
+        JSON.stringify({ scope: "organization-metadata", changedFields: Object.keys(metadataChanges), previous: currentMetadata }),
+        JSON.stringify({ scope: "organization-metadata", changedFields: Object.keys(metadataChanges), next: proposedMetadata, reason: auditReason(reason) }),
         actorId,
       ],
     );
     const finalSnapshot = await readSnapshot(client, input.ownerEmail);
     const finalPlan = planPedroConfiguration(finalSnapshot);
-    if (finalPlan.status !== "READY" || finalPlan.action !== "NOOP") throw new Error("POLICYDESK_PEDRO_FINAL_STATE_INVALID");
+    const finalMetadata = {
+      name: finalSnapshot.organizationName,
+      slug: finalSnapshot.organizationSlug,
+      timeZone: finalSnapshot.organizationTimeZone,
+      currency: finalSnapshot.organizationCurrency,
+    };
+    if (finalPlan.status !== "READY" || finalPlan.action !== "NOOP" || Object.keys(getPedroOrganizationMetadataChanges(finalMetadata, proposedMetadata)).length > 0) {
+      throw new Error("POLICYDESK_PEDRO_FINAL_STATE_INVALID");
+    }
     await client.query("COMMIT");
     output(json, { ok: true, mode: "apply", status: "APPLIED", organizationId: PEDRO_ORGANIZATION_ID, ownerMembership: true, sessionPolicy: "revalidate-on-request" });
   } catch (error) {

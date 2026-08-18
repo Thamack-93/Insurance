@@ -19,6 +19,7 @@
     "check:multi-org-audit": "node --import tsx scripts/check-multi-org-audit.ts",
     "check:tenant-write-scope": "node --import tsx scripts/check-tenant-write-scope.ts",
     "check:tenant-read-scope": "node --import tsx scripts/check-tenant-read-scope.ts",
+    "check:organization-metadata-hardcodes": "node --import tsx scripts/check-organization-metadata-hardcodes.ts",
     "provision:platform-admin": "node --import tsx scripts/provision-platform-admin.ts",
     "db:sync-work-items": "tsx scripts/backfill-work-items.ts",
     "clean:cache": "node --import tsx scripts/clean-cache.ts cache",
