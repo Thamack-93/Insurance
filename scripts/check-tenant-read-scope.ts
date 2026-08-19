@@ -27,6 +27,8 @@ const EXEMPT_FILES = new Set([
   "scripts/check-legacy-workitem-refs.ts",
   "scripts/run-backup-restore-drill.ts",
   "scripts/setup-tenant-isolation-fixture.ts",
+  // Explicitly authorized CLI maintenance; never imported by a tenant route.
+  "scripts/backfill-knowledge-integrity.ts",
   "src/lib/backup-restore.ts",
   "src/lib/backup.ts",
   "src/lib/platform-dashboard.ts",

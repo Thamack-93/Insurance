@@ -12,11 +12,12 @@ import { listAssistantReports } from "@/lib/assistant-reports";
 import { getAssistantAiConnectionStatus, getAssistantAiOperationLabel, getAssistantAiRuntimeLimits } from "@/lib/assistant-ai";
 import { getAssistantAiMonthlyUsageSummary, listAssistantAiRuns } from "@/lib/assistant-ai-runs";
 import { getNoraAgentMode, getNoraAiMonthlySoftLimitUsd } from "@/lib/assistant-agent-config";
-import { listInternalKnowledgeSources } from "@/lib/knowledge-base";
+import { listGeneralKnowledgeSources, listInternalKnowledgeSources } from "@/lib/knowledge-base";
 import { formatDate } from "@/lib/dates";
 import { AssistantReportActionButtons } from "@/components/assistant/report-action-buttons";
 import { Gauge, ShieldCheck } from "lucide-react";
 import { KnowledgeBaseTester } from "@/components/settings/knowledge-base-tester";
+import { KnowledgeSourceActivationButton } from "@/components/settings/knowledge-source-actions";
 import {
   archiveAssistantReportAction,
   closeAssistantReportAction,
@@ -50,6 +51,18 @@ function formatDurationMs(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return "—";
   if (value < 1000) return `${Math.max(0, Math.round(value))} ms`;
   return `${(value / 1000).toFixed(1)} s`;
+}
+
+function validityLabel(source: { effectiveFrom: Date | null; effectiveTo: Date | null }) {
+  const today = new Date();
+  if (source.effectiveFrom && today < source.effectiveFrom) return "FUERA DE VIGENCIA";
+  if (source.effectiveTo && today > source.effectiveTo) return "FUERA DE VIGENCIA";
+  return null;
+}
+
+function integrityLabel(source: { manifestHash: string | null; integrityVersion: string | null; integrityVerifiedAt: Date | null }) {
+  if (source.integrityVerifiedAt && (source.integrityVersion !== "CHUNK_MANIFEST_V1" || !/^[0-9a-f]{64}$/u.test(source.manifestHash ?? ""))) return "INTEGRIDAD INVÁLIDA";
+  return null;
 }
 
 function getAiRunMetadata(run: Awaited<ReturnType<typeof listAssistantAiRuns>>[number], key: "executionProfile" | "stepCount" | "terminationReason") {
@@ -290,11 +303,12 @@ export default async function AssistantSettingsPage() {
   const organizationContext = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
   const aiStatus = getAssistantAiConnectionStatus();
   const runtimeLimits = getAssistantAiRuntimeLimits();
-  const [incidents, suggestions, monthlyUsage, knowledgeSources] = await Promise.all([
+  const [incidents, suggestions, monthlyUsage, knowledgeSources, generalKnowledgeSources] = await Promise.all([
     listAssistantReports({ organizationId: organizationContext.organizationId, kind: "INCIDENT", limit: 100 }),
     listAssistantReports({ organizationId: organizationContext.organizationId, kind: "SUGGESTION", limit: 100 }),
     getAssistantAiMonthlyUsageSummary(organizationContext.organizationId),
     listInternalKnowledgeSources(organizationContext.organizationId),
+    listGeneralKnowledgeSources(),
   ]);
   const aiRuns = await listAssistantAiRuns({ organizationId: organizationContext.organizationId, limit: 50 });
 
@@ -499,16 +513,37 @@ export default async function AssistantSettingsPage() {
                   <div>
                     <p className="font-medium">{source.title}</p>
                     <p className="text-xs text-muted-foreground">v{source.version} · {source.insurerName ?? "Aseguradora no indicada"} · {source.product ?? "Producto no indicado"} · {source._count.chunks} fragmentos</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{source.authority ?? "Fuente no indicada"}{source.reviewedAt ? ` · revisada ${formatDate(source.reviewedAt)}` : ""}{source.sourceUrl ? <a className="ml-1 underline" href={source.sourceUrl} target="_blank" rel="noreferrer">origen</a> : null}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{source.authority ?? "Fuente no indicada"}{source.reviewedAt ? ` · revisada ${formatDate(source.reviewedAt)}` : ""} · vigencia {source.effectiveFrom ? formatDate(source.effectiveFrom, "yyyy-MM-dd") : "sin inicio"}–{source.effectiveTo ? formatDate(source.effectiveTo, "yyyy-MM-dd") : "sin fin"}{source.sourceUrl ? <a className="ml-1 underline" href={source.sourceUrl} target="_blank" rel="noreferrer">origen</a> : null}</p>
                   </div>
-                  <Badge variant={source.status === "ACTIVE" ? "default" : source.status === "ARCHIVED" ? "outline" : "secondary"} className="rounded-full">{source.status}</Badge>
+                  <Badge variant={source.status === "ACTIVE" && source.integrityVerifiedAt ? "default" : source.status === "ARCHIVED" ? "outline" : "secondary"} className="rounded-full">{integrityLabel(source) ?? validityLabel(source) ?? (source.integrityVerifiedAt ? source.status : `${source.status} · integridad pendiente`)}</Badge>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {source.status !== "ACTIVE" && source.status !== "ARCHIVED" ? <form action={activateKnowledgeSourceAction.bind(null, source.id)}><Button type="submit" size="sm" className="rounded-full">Activar</Button></form> : null}
+                  {source.status !== "ACTIVE" && source.status !== "ARCHIVED" ? <KnowledgeSourceActivationButton action={activateKnowledgeSourceAction.bind(null, source.id)} title={source.title} version={source.version} chunkCount={source._count.chunks} effectiveFrom={source.effectiveFrom ? formatDate(source.effectiveFrom, "yyyy-MM-dd") : ""} effectiveTo={source.effectiveTo ? formatDate(source.effectiveTo, "yyyy-MM-dd") : ""} /> : null}
                   {source.status !== "ARCHIVED" ? <form action={archiveKnowledgeSourceAction.bind(null, source.id)}><Button type="submit" size="sm" variant="outline" className="rounded-full">Archivar</Button></form> : null}
                 </div>
               </div>
             ))}
+            <div className="mt-5 border-t border-border/70 pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm font-medium">Fuentes generales de plataforma</p>
+                <Badge variant="outline" className="rounded-full">Solo lectura</Badge>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">Estas guías son orientativas, globales y no pueden modificarse desde una organización.</p>
+              <div className="mt-3 space-y-2">
+                {generalKnowledgeSources.map((source) => (
+                  <div key={source.id} className="rounded-xl border border-border/70 bg-muted/10 p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium">{source.title}</p>
+                        <p className="text-xs text-muted-foreground">v{source.version} · {source.product ?? "General"} · {source._count.chunks} fragmentos</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{source.authority ?? "Fuente no indicada"}{source.reviewedAt ? ` · revisada ${formatDate(source.reviewedAt)}` : ""} · vigencia {source.effectiveFrom ? formatDate(source.effectiveFrom, "yyyy-MM-dd") : "sin inicio"}–{source.effectiveTo ? formatDate(source.effectiveTo, "yyyy-MM-dd") : "sin fin"}{source.sourceUrl ? <a className="ml-1 underline" href={source.sourceUrl} target="_blank" rel="noreferrer">origen</a> : null}</p>
+                      </div>
+                      <Badge variant={source.status === "ACTIVE" && source.integrityVerifiedAt ? "default" : source.status === "ARCHIVED" ? "outline" : "secondary"} className="rounded-full">{integrityLabel(source) ?? validityLabel(source) ?? (source.integrityVerifiedAt ? source.status : `${source.status} · integridad pendiente`)}</Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </CardContent>
         <CardContent className="pt-0">

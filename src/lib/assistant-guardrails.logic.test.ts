@@ -61,5 +61,7 @@ describe("assistant guardrails", () => {
       allowed: false,
       hasSensitiveNarrative: true,
     });
+    expect(evaluateGmmPrivacy("¿Cuál es la ruta administrativa para cirugía programada y hospitalización?", true).allowed).toBe(true);
+    expect(evaluateGmmPrivacy("Necesito el nombre del doctor Pérez para mi trámite GMM.", true).allowed).toBe(false);
   });
 });

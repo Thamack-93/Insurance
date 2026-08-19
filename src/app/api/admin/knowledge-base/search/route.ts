@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireOrganizationRole } from "@/lib/organization-context";
 import { buildGmmPrivacyReply, evaluateGmmPrivacy } from "@/lib/assistant-guardrails";
-import { searchKnowledgeBase } from "@/lib/knowledge-base";
+import { previewInternalKnowledgeSource } from "@/lib/knowledge-base";
 
 export async function GET(request: Request) {
   try {
@@ -11,14 +11,10 @@ export async function GET(request: Request) {
     if (!question) return NextResponse.json({ error: "q es obligatorio." }, { status: 400 });
     if (!evaluateGmmPrivacy(question, false).allowed) return NextResponse.json({ error: buildGmmPrivacyReply(), blocked: true }, { status: 422 });
     const parsedLimit = Number(url.searchParams.get("limit") ?? 5);
-    const result = await searchKnowledgeBase({
+    const result = await previewInternalKnowledgeSource({
       organizationId: context.organizationId,
       question,
-      sourceType: url.searchParams.get("sourceType") === "INTERNAL" ? "INTERNAL" : url.searchParams.get("sourceType") === "GENERAL" ? "GENERAL" : "BOTH",
-      insurerName: url.searchParams.get("insurerName"),
-      product: url.searchParams.get("product"),
       sourceId: url.searchParams.get("sourceId"),
-      includeDraft: url.searchParams.get("includeDraft") === "1",
       limit: Number.isFinite(parsedLimit) ? parsedLimit : 5,
     });
     return NextResponse.json(result);

@@ -483,7 +483,7 @@ function safeAiProviderMetadata(value: unknown, extra?: {
   if (resolvedModel) gateway.model = resolvedModel;
   const safeExtra = {
     ...(extra?.promptVersion ? { promptVersion: extra.promptVersion } : {}),
-    ...(extra?.toolTrace?.length ? { toolTrace: extra.toolTrace.map((entry) => ({ tool: entry.tool, outcome: entry.outcome, durationMs: entry.durationMs })) } : {}),
+    ...(extra?.toolTrace?.length ? { toolTrace: extra.toolTrace.map((entry) => ({ tool: entry.tool, outcome: entry.outcome, durationMs: entry.durationMs, ...(entry.metadata ? { metadata: { ...entry.metadata, selectedSourceIds: entry.metadata.selectedSourceIds?.slice(0, 20) } } : {}) })) } : {}),
     ...(extra?.executionProfile ? { executionProfile: extra.executionProfile } : {}),
     ...(extra?.stepCount != null ? { stepCount: extra.stepCount } : {}),
     ...(extra?.terminationReason ? { terminationReason: extra.terminationReason } : {}),
@@ -1249,7 +1249,7 @@ function valueFromAttempt(input: {
   };
 }
 
-async function recordAttempt(runId: string | null, organizationId: string, attempt: AssistantAiAttempt, number: number, tier: AssistantAiTier) {
+async function recordAttempt(runId: string | null, organizationId: string, attempt: AssistantAiAttempt, number: number, tier: AssistantAiTier, knowledgeBacked = false) {
   const attemptId = makeId("attempt");
   if (!canPersistAiRuns() || !runId) return false;
   const created = await tryAssistantAiTracking(() => createAssistantAiAttempt({ id: attemptId, runId, organizationId, attemptNumber: number, tier, requestedModel: attempt.requestedModel ?? attempt.model, status: "STARTED" }), null);
@@ -1262,7 +1262,7 @@ async function recordAttempt(runId: string | null, organizationId: string, attem
     errorMessage: attempt.errorMessage ?? (attempt.outcome === "error" ? attempt.code : null),
     statusCode: attempt.statusCode ?? null,
     finishReason: attempt.finishReason ?? null,
-    responsePreview: attempt.outcome === "success" ? redactAssistantReportText(attempt.responsePreview ?? "", 500) : null,
+    responsePreview: attempt.outcome === "success" && !knowledgeBacked ? redactAssistantReportText(attempt.responsePreview ?? "", 500) : null,
     durationMs: attempt.durationMs,
     usage: attempt.usage ?? undefined,
     totalUsage: attempt.totalUsage ?? undefined,
@@ -1370,7 +1370,8 @@ export async function buildAssistantAiReply(input: {
     });
     attempts.push(attemptResult.attempt);
     await ensureTrackedRun();
-    if (!(await recordAttempt(trackedRunId, organizationId, attemptResult.attempt, index + 1, index === 0 ? tier : "critical"))) trackingStatus = "unavailable";
+    const metadataOnlyRun = Boolean(input.gmmMetadataOnly || input.requiredTool === "searchKnowledgeBase");
+    if (!(await recordAttempt(trackedRunId, organizationId, attemptResult.attempt, index + 1, index === 0 ? tier : "critical", metadataOnlyRun))) trackingStatus = "unavailable";
 
     if (attemptResult.ok) {
       const value = valueFromAttempt({
@@ -1400,10 +1401,13 @@ export async function buildAssistantAiReply(input: {
           finishReason: attempt.finishReason ?? null,
           statusCode: attempt.statusCode ?? null,
           usage: attempt.totalUsage ?? attempt.usage ?? null,
-          responsePreview: attempt.responsePreview ?? null,
+          responsePreview: metadataOnlyRun ? null : attempt.responsePreview ?? null,
         })),
         ...value.trace,
       ];
+      if (metadataOnlyRun) {
+        value.trace = value.trace.map((entry) => ({ ...entry, responsePreview: null }));
+      }
       value.totalUsage = sumAttemptUsage(attempts);
       value.toolTrace = [
         ...(input.precomputedToolTrace ?? []),

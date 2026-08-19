@@ -14,7 +14,8 @@ import { buildAssistantActionProposalFromPlan } from "@/lib/assistant-actions";
 import { getClaimChecklistSummary } from "@/lib/claim-checklists";
 import { searchUserPortfolio } from "@/lib/assistant-local";
 import { requireOrganizationContext } from "@/lib/organization-context";
-import { searchKnowledgeBase } from "@/lib/knowledge-base";
+import { searchActiveKnowledgeBase } from "@/lib/knowledge-base";
+import { evaluateGmmPrivacy } from "@/lib/assistant-guardrails";
 import {
   claimOperationalWhere,
   clientOperationalWhere,
@@ -63,6 +64,8 @@ const draftOutputSchema = z.union([
 const knowledgeOutputSchema = z.object({
   results: z.array(z.object({
     sourceId: z.string(),
+    chunkId: z.string(),
+    chunkOrdinal: z.number().int(),
     sourceType: z.enum(["INTERNAL", "GENERAL"]),
     title: z.string(),
     version: z.string(),
@@ -78,6 +81,11 @@ const knowledgeOutputSchema = z.object({
   })),
   requiresInternalEvidence: z.boolean(),
   abstained: z.boolean(),
+  abstentionReason: z.string().optional(),
+  executedQuery: z.string(),
+  selectedSourceIds: z.array(z.string()),
+  citationCount: z.number().int(),
+  durationMs: z.number().int(),
 });
 
 async function requireNoraToolScope(expectedUserId: string) {
@@ -136,7 +144,10 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
       }),
       execute: ({ question, sourceType, insurerName, product, limit }) => traced("searchKnowledgeBase", knowledgeOutputSchema, async () => {
         const scope = await requireNoraToolScope(user.id);
-        const result = await searchKnowledgeBase({
+        if (options.gmmMetadataOnly && !evaluateGmmPrivacy(question, true).allowed) {
+          throw new Error("La consulta GMM contiene narrativa sensible y no puede buscarse en Nora.");
+        }
+        const result = await searchActiveKnowledgeBase({
           organizationId: scope.organizationId,
           question,
           sourceType: options.gmmMetadataOnly ? "GENERAL" : sourceType,
@@ -144,9 +155,21 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
           product: options.gmmMetadataOnly ? "GMM" : product,
           limit,
         });
+        const latestTrace = trace[trace.length - 1];
+        if (latestTrace) {
+          latestTrace.metadata = {
+            executedQuery: result.executedQuery,
+            selectedSourceIds: result.selectedSourceIds,
+            citationCount: result.citationCount,
+            ...(result.abstentionReason ? { abstentionReason: result.abstentionReason } : {}),
+            durationMs: result.durationMs,
+          };
+        }
         for (const citation of result.results) {
-          knowledgeCitations.set(`${citation.sourceType}:${citation.sourceId}:${citation.page ?? ""}:${citation.section ?? ""}`, {
+          knowledgeCitations.set(`${citation.sourceType}:${citation.chunkId}`, {
             sourceId: citation.sourceId,
+            chunkId: citation.chunkId,
+            chunkOrdinal: citation.chunkOrdinal,
             sourceType: citation.sourceType,
             title: citation.title,
             version: citation.version,
@@ -290,7 +313,6 @@ export type NoraSimpleReadCapability =
   | "listRenewals"
   | "listReceipts"
   | "searchPortfolio"
-  | "searchKnowledgeBase"
   | "listOpenWorkItems"
   | "listClaims";
 
@@ -327,10 +349,8 @@ export async function executeNoraSimpleRead(user: AssistantUser, request: NoraSi
       ? { days: getRenewalReadDays(request.message) }
       : request.capability === "listReceipts"
         ? { state: getReceiptReadState(request.normalizedMessage), days: 7 }
-        : request.capability === "searchPortfolio"
+      : request.capability === "searchPortfolio"
           ? { query: request.message.trim().slice(0, 250) }
-          : request.capability === "searchKnowledgeBase"
-            ? { question: request.message.trim().slice(0, 500), sourceType: "BOTH", limit: 5 }
           : { limit: 15 };
   const value = await tool.execute(input, {});
   return {

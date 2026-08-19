@@ -10,6 +10,8 @@ const EXEMPT_FILES = new Set([
   "scripts/backfill-organizations.ts",
   "scripts/setup-tenant-isolation-fixture.ts",
   "scripts/run-backup-restore-drill.ts",
+  // Explicitly authorized CLI maintenance; guarded by ALLOW_KNOWLEDGE_INTEGRITY_BACKFILL.
+  "scripts/backfill-knowledge-integrity.ts",
   "src/lib/backup-restore.ts",
   "src/lib/backup.ts",
 ]);

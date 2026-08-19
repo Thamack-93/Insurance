@@ -863,9 +863,12 @@ model KnowledgeSource {
   sourceUrl     String?
   authority     String?
   reviewedAt    DateTime?
-  effectiveFrom DateTime?
-  effectiveTo   DateTime?
+  effectiveFrom DateTime? @db.Date
+  effectiveTo   DateTime? @db.Date
   contentHash   String
+  manifestHash  String?
+  integrityVersion String? @default("CHUNK_MANIFEST_V1")
+  integrityVerifiedAt DateTime?
   createdById   String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -910,9 +913,12 @@ model GeneralKnowledgeSource {
   sourceUrl     String?
   authority     String?
   reviewedAt    DateTime?
-  effectiveFrom DateTime?
-  effectiveTo   DateTime?
+  effectiveFrom DateTime? @db.Date
+  effectiveTo   DateTime? @db.Date
   contentHash   String   @unique
+  manifestHash  String?
+  integrityVersion String? @default("CHUNK_MANIFEST_V1")
+  integrityVerifiedAt DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

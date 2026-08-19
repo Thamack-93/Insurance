@@ -16,6 +16,7 @@ import { buildAssistantActionProposalFromPlan } from "@/lib/assistant-actions";
 import { createAssistantThemeKey, recordAssistantReportSignal } from "@/lib/assistant-reports";
 import { buildAssistantBlockedReply, buildGmmPrivacyReply, evaluateAssistantInput, evaluateGmmPrivacy } from "@/lib/assistant-guardrails";
 import { getNoraAiBudgetStatus, isNoraAgentEnabledForUser } from "@/lib/assistant-agent-config";
+import { requiresInternalKnowledgeEvidence } from "@/lib/knowledge-base";
 import type {
   AssistantAiDiagnostic,
   AssistantAiExecutionProfile,
@@ -77,6 +78,18 @@ function normalizeMessage(value: string) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "");
+}
+
+function buildKnowledgeAbstentionReply() : AssistantReply {
+  return {
+    reply: "No encontré información verificada suficiente en la base de conocimiento para responder con seguridad.",
+    sections: [],
+    quickPrompts: [
+      { label: "Buscar una póliza", prompt: "Buscar póliza" },
+      { label: "Ver documentos", prompt: "¿Qué documento necesito revisar?" },
+    ],
+    knowledgeCitations: [],
+  };
 }
 
 function isDeterministicQuery(normalized: string) {
@@ -162,16 +175,32 @@ function hasMutationIntent(normalized: string) {
   );
 }
 
+const KNOWLEDGE_INTENT_TERMS = [
+  "cobertura", "cubre", "ampara", "condicion", "exclusion", "deducible", "coaseguro", "prima", "suma asegurada",
+  "vigencia", "poliza", "aseguradora", "seguro", "significa", "que es", "define", "reembolso", "pago directo",
+  "hospitaliz", "cirugi", "programacion", "preautoriz", "procedencia", "terminologia",
+];
+const OPERATIONAL_LOOKUP_TERMS = ["busca", "buscar", "muestra", "mostrar", "lista", "listar", "localiza", "abre", "consulta mi", "mis renovaciones", "mis recibos"];
+
+function isOperationalLookup(normalized: string) {
+  if (OPERATIONAL_LOOKUP_TERMS.some((term) => normalized.includes(term))) return true;
+  if (["no coinciden", "inconsist", "descuadr", "solap", "fechas de vencimiento", "renovacion", "renovación", "audita", "concili"].some((term) => normalized.includes(term))) return true;
+  return /\b(?:p[oó]liza|cliente|recibo|siniestro|endoso)\b.*\b\d{3,}\b/u.test(normalized);
+}
+
+function isKnowledgeIntent(normalized: string) {
+  if (isOperationalLookup(normalized)) return false;
+  return KNOWLEDGE_INTENT_TERMS.some((term) => normalized.includes(term));
+}
+
 function resolveAgentExecutionPlan(normalized: string): {
   profile: AssistantAiExecutionProfile;
   activeTools?: string[];
   requiredTool?: string | null;
+  knowledgeRequired?: boolean;
 } {
-  if ([
-    "cobertura", "condiciones", "exclusion", "exclusión", "deducible", "ampara", "poliza", "póliza", "aseguradora", "seguro", "significa",
-    "reembolso", "pago directo", "hospitaliz", "cirugi", "programacion", "preautoriz",
-  ].some((term) => normalized.includes(term)) && !hasMutationIntent(normalized)) {
-    return { profile: "simple-read", activeTools: ["searchKnowledgeBase"], requiredTool: "searchKnowledgeBase" };
+  if (isKnowledgeIntent(normalized) && !hasMutationIntent(normalized)) {
+    return { profile: "simple-read", activeTools: ["searchKnowledgeBase"], requiredTool: "searchKnowledgeBase", knowledgeRequired: true };
   }
   if (
     normalized.includes("hoy") ||
@@ -189,7 +218,7 @@ function resolveAgentExecutionPlan(normalized: string): {
   if (normalized.includes("recibo") || normalized.includes("cobro")) {
     return { profile: "simple-read", activeTools: ["listReceipts"], requiredTool: "listReceipts" };
   }
-  if (normalized.includes("buscar") || normalized.includes("cliente") || normalized.includes("poliza")) {
+  if (isOperationalLookup(normalized) || normalized.includes("cliente")) {
     return { profile: "simple-read", activeTools: ["searchPortfolio", "getEntitySummary"], requiredTool: "searchPortfolio" };
   }
   if (normalized.includes("pendient") || normalized.includes("tarea") || normalized.includes("task")) {
@@ -492,7 +521,8 @@ export async function buildAssistantReply(
   const mutationIntent = hasMutationIntent(normalized);
   const agentExecutionPlan = agentEnabled && !mutationIntent ? resolveAgentExecutionPlan(normalized) : null;
   const isKnownAgentRead = agentExecutionPlan?.profile === "simple-read";
-  const isKnowledgeRead = agentExecutionPlan?.requiredTool === "searchKnowledgeBase";
+  const knowledgeRequired = Boolean(agentExecutionPlan?.knowledgeRequired || (!mutationIntent && isKnowledgeIntent(normalized)));
+  const isKnowledgeRead = knowledgeRequired;
   let shouldTryAi = theme?.kind !== "INCIDENT" && (agentEnabled
     ? isKnownAgentRead || !isLocalOnlyQuery(normalized)
     : shouldUseAssistantAi(normalized) || (!isDeterministicQuery(normalized) && message.length > 40) || message.length > 220);
@@ -500,6 +530,7 @@ export async function buildAssistantReply(
     ? await getNoraAiBudgetStatus(user.organizationId).catch(() => ({ allowed: true, warning: null, spentUsd: 0, limitUsd: 4 }))
     : { allowed: true, warning: null, spentUsd: 0, limitUsd: 4 };
   if (!budget.allowed) shouldTryAi = false;
+  if (knowledgeRequired && !agentEnabled) shouldTryAi = false;
 
   let precomputedSimpleRead: { contextText: string; toolTrace: AssistantAiToolTraceEntry[]; knowledgeCitations: AssistantKnowledgeCitation[] } | null = null;
   if (shouldTryAi && agentEnabled && !mutationIntent && !isKnowledgeRead && agentExecutionPlan?.profile === "simple-read" && agentExecutionPlan.requiredTool) {
@@ -529,7 +560,7 @@ export async function buildAssistantReply(
       ? await buildAssistantAiContext(user, message, await getLocalReply())
       : null;
 
-  let finalReply: AssistantReply = shouldTryAi ? { reply: "", sections: [], quickPrompts: [] } : await getLocalReply();
+  let finalReply: AssistantReply = shouldTryAi ? { reply: "", sections: [], quickPrompts: [] } : knowledgeRequired ? buildKnowledgeAbstentionReply() : await getLocalReply();
   let source: AssistantResponseSource = "local";
   let actionProposal: AssistantActionProposal | null = null;
   let aiFallbackNotice: string | null = null;
@@ -575,6 +606,17 @@ export async function buildAssistantReply(
       abortSignal: options.abortSignal,
     });
     if (aiReply.ok) {
+      const citations = aiReply.value.knowledgeCitations ?? [];
+      const internalEvidenceRequired = requiresInternalKnowledgeEvidence(message);
+      const hasRequiredInternalEvidence = !internalEvidenceRequired || (citations.length > 0 && citations.some((citation) => citation.sourceType === "INTERNAL"));
+      const generatedGmmReplyIsSafe = !gmmMode || evaluateGmmPrivacy(aiReply.value.reply, Boolean(options.gmmMetadataOnly)).allowed;
+      if (gmmMode && !generatedGmmReplyIsSafe) {
+        finalReply = { reply: buildGmmPrivacyReply(), sections: [], quickPrompts: [] };
+        source = "local";
+      } else if (knowledgeRequired && (!citations.length || !hasRequiredInternalEvidence)) {
+        finalReply = buildKnowledgeAbstentionReply();
+        source = "local";
+      } else {
       finalReply = {
         reply: aiReply.value.reply,
         sections: [],
@@ -606,8 +648,9 @@ export async function buildAssistantReply(
       } else if (aiMode === "structured" && aiReply.value.mutation) {
         actionProposal = await buildAssistantActionProposalFromPlan(aiReply.value.mutation, user);
       }
+      }
     } else {
-      finalReply = await getLocalReply();
+      finalReply = knowledgeRequired ? buildKnowledgeAbstentionReply() : await getLocalReply();
       aiDiagnostic = aiReply.diagnostic;
       aiFallbackNotice = buildAssistantAiFallbackNotice(aiReply.diagnostic);
       aiRunId = aiReply.diagnostic.runId ?? null;

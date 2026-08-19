@@ -210,7 +210,7 @@ describe("assistant ai fallback", () => {
       { role: "user", content: "Busca el siniestro SIN-001" },
       { role: "user", content: "Contexto explícito autorizado: claim SIN-001\n\nLista los siniestros abiertos" },
     ]);
-    expect(options.providerOptions.gateway.tags).toContain("prompt:nora-agent-v4");
+    expect(options.providerOptions.gateway.tags).toContain("prompt:nora-agent-v5");
   });
 
   it("passes bounded Qwen thinking options only to the Alibaba model", async () => {
