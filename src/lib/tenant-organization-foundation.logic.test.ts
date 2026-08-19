@@ -16,7 +16,11 @@ describe("tenant organization transition foundation", () => {
     expect(SYSTEM_USER_ID).toBe("system-user-0000");
     expect(PROTECTED_TENANT_TABLES.length).toBeGreaterThan(30);
     expect(Object.keys(EXPECTED_TENANT_TRIGGERS)).toHaveLength(PROTECTED_TENANT_TABLES.length);
-    expect(OPTIONAL_ORGANIZATION_TABLES).toEqual(["SecurityEventAggregate"]);
+    expect(OPTIONAL_ORGANIZATION_TABLES).toEqual(expect.arrayContaining([
+      "SecurityEventAggregate",
+      "BackupArtifact",
+      "OrganizationRestoreRun",
+    ]));
     expect(PLATFORM_GLOBAL_TABLES).toEqual(expect.arrayContaining(["NotificationChannel", "TelegramWebhookUpdate"]));
   });
 

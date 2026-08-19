@@ -4,6 +4,8 @@ vi.mock("server-only", () => ({}));
 
 import { GENERAL_INSURANCE_SOURCES } from "@/lib/knowledge-base-general";
 import { buildKnowledgeFallbackQuery, buildKnowledgeSearchQuery, isKnowledgeContentSafe, requiresInternalKnowledgeEvidence, splitKnowledgeChunks, splitKnowledgeContent } from "@/lib/knowledge-base";
+import { buildKnowledgeManifest, hashKnowledgeManifest, KNOWLEDGE_INTEGRITY_VERSION } from "@/lib/knowledge-integrity";
+import { calibrateKnowledgeThreshold, KNOWLEDGE_EVALUATION_FIXTURE } from "@/lib/knowledge-evaluation";
 
 describe("insurance knowledge base rules", () => {
   it("requires internal evidence for contractual questions", () => {
@@ -56,5 +58,26 @@ describe("insurance knowledge base rules", () => {
     expect(gmm?.content).toMatch(/Ruta administrativa de pago directo/i);
     expect(gmm?.content).toMatch(/Ruta administrativa de cirugía programada/i);
     expect(gmm?.content).toMatch(/Qué hacer ante una hospitalización/i);
+  });
+
+  it("builds a canonical manifest independent of chunk input order", () => {
+    const chunks = [
+      { ordinal: 1, page: 2, section: "Deducible", content: "10%" },
+      { ordinal: 0, page: 1, section: "Cobertura", content: "Daños" },
+    ];
+    expect(buildKnowledgeManifest("Auto", "2026", chunks)).toContain(`"integrityVersion":"${KNOWLEDGE_INTEGRITY_VERSION}"`);
+    expect(hashKnowledgeManifest("Auto", "2026", chunks)).toBe(hashKnowledgeManifest("Auto", "2026", [...chunks].reverse()));
+  });
+
+  it("keeps a reproducible 32-case evaluation fixture and deterministic calibration", () => {
+    expect(KNOWLEDGE_EVALUATION_FIXTURE).toHaveLength(32);
+    const candidates = KNOWLEDGE_EVALUATION_FIXTURE.map((entry, index) => ({
+      caseId: entry.id,
+      score: 0.4 + (index % 3) * 0.1,
+      sourceType: entry.expectedSourceType ?? "GENERAL" as const,
+      sourceId: `fixture-${entry.id}`,
+    }));
+    const calibration = calibrateKnowledgeThreshold(KNOWLEDGE_EVALUATION_FIXTURE, candidates);
+    expect(calibration).toBeNull();
   });
 });

@@ -83,10 +83,19 @@ export type AssistantAiToolTraceEntry = {
   tool: string;
   outcome: "success" | "error";
   durationMs: number;
+  metadata?: {
+    executedQuery?: string;
+    selectedSourceIds?: string[];
+    citationCount?: number;
+    abstentionReason?: string;
+    durationMs?: number;
+  };
 };
 
 export type AssistantKnowledgeCitation = {
   sourceId: string;
+  chunkId: string;
+  chunkOrdinal: number;
   sourceType: "INTERNAL" | "GENERAL";
   title: string;
   version: string;

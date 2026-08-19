@@ -31,6 +31,8 @@
     "check:legacy-workitem-refs": "node --import tsx scripts/check-legacy-workitem-refs.ts",
     "check:qualification-scope": "node scripts/check-qualification-scope.mjs",
     "knowledge:seed-general": "node --import tsx scripts/seed-general-knowledge.ts",
+    "check:knowledge-integrity": "node --import tsx scripts/check-knowledge-integrity.ts",
+    "backfill:knowledge-integrity": "node --import tsx scripts/backfill-knowledge-integrity.ts",
     "check:navigation": "node scripts/check-navigation-reachability.mjs",
     "list:payments": "tsx scripts/list-next-payments.ts",
     "list:renewals": "tsx scripts/list-renewals.ts",

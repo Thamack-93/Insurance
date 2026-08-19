@@ -27,7 +27,7 @@ PolicyDesk es un CRM operativo para cartera de seguros, construido con Next.js A
 - Recibos, pagos y comisiones
 - WorkItems para seguimiento operativo
 - Riesgos, auditoría y reportes
-- Documentos como metadatos en esta etapa
+- Documentos y PDFs en almacenamiento privado de Vercel Blob, con metadatos y referencias protegidas
 
 ## Variables de entorno
 
@@ -119,7 +119,20 @@ La ruta recomendada para una demo pública o compartida es:
 4. Desplegar en [Vercel Hobby](https://vercel.com/pricing).
 5. Conectar un store privado de Blob para los backups cifrados.
 
-La demo queda enfocada en datos estructurados y no requiere PDFs ni almacenamiento de archivos en esta fase.
+La demo usa almacenamiento privado para PDFs/documentos; las rutas entregan referencias temporales autorizadas y nunca exponen el contenedor directamente.
+
+## Nora Knowledge Reliability
+
+La base de conocimiento de Nora separa fuentes `INTERNAL` por organización de fuentes `GENERAL` de plataforma. Las fuentes tenant se crean como `DRAFT`, se prueban únicamente desde el panel administrativo y solo una fuente `ACTIVE` por organización, aseguradora y producto puede participar en la recuperación. Activar una versión calcula un manifiesto SHA-256 ordenado de título, versión y chunks; cualquier cambio posterior invalida la integridad y devuelve la fuente a borrador.
+
+Nora solo usa `searchActiveKnowledgeBase`, con vigencia por fecha calendario y zona horaria de la organización. Las preguntas contractuales exigen evidencia `INTERNAL`; si no existe evidencia íntegra y una cita derivada de aplicación, Nora se abstiene. `previewInternalKnowledgeSource` está reservado a `OWNER`/`ADMIN`. El seed de fuentes `GENERAL` es CLI-only (`npm run knowledge:seed-general`), y la auditoría/backfill son explícitos y de solo base desechable:
+
+```bash
+npm run check:knowledge-integrity
+ALLOW_KNOWLEDGE_INTEGRITY_BACKFILL=1 npm run backfill:knowledge-integrity
+```
+
+La arquitectura, el ciclo de vida, las garantías de tenant, las citas, GMM, inyección y los límites operativos están documentados en [`docs/internal/nora-knowledge-reliability.md`](docs/internal/nora-knowledge-reliability.md).
 
 ## Cambios de schema (Prisma)
 

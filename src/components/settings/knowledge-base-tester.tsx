@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 type SourceOption = { id: string; title: string; status: string; version: string };
 type SearchResult = {
   sourceId: string;
+  chunkId: string;
+  chunkOrdinal: number;
   sourceType: "INTERNAL" | "GENERAL";
   title: string;
   version: string;
@@ -32,7 +34,7 @@ export function KnowledgeBaseTester({ sources }: { sources: SourceOption[] }) {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ q: question, sourceType: "INTERNAL", includeDraft: "1", limit: "5" });
+      const params = new URLSearchParams({ q: question, sourceType: "INTERNAL", limit: "5" });
       if (sourceId) params.set("sourceId", sourceId);
       const response = await fetch(`/api/admin/knowledge-base/search?${params.toString()}`, { cache: "no-store" });
       const payload = await response.json() as { results?: SearchResult[]; abstained?: boolean; error?: string };
@@ -68,7 +70,7 @@ export function KnowledgeBaseTester({ sources }: { sources: SourceOption[] }) {
       {results.length ? (
         <div className="space-y-2">
           {results.map((result) => (
-            <div key={`${result.sourceId}-${result.section ?? ""}-${result.page ?? ""}`} className="rounded-xl border border-border/70 bg-background p-3 text-xs">
+            <div key={`${result.sourceId}-${result.chunkId}`} className="rounded-xl border border-border/70 bg-background p-3 text-xs">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className="rounded-full">{result.title}</Badge>
                 <span>v{result.version}</span>

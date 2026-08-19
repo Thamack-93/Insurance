@@ -33,9 +33,9 @@ vi.mock("@/lib/work-queue", () => ({ getWorkItems: vi.fn(), OPEN_WORK_ITEM_STATU
 vi.mock("@/lib/risk-engine", () => ({ detectRisks: vi.fn() }));
 vi.mock("@/lib/assistant-actions", () => ({ buildAssistantActionProposalFromPlan: vi.fn() }));
 vi.mock("@/lib/claim-checklists", () => ({ getClaimChecklistSummary: mocks.getClaimChecklistSummary }));
-vi.mock("@/lib/knowledge-base", () => ({ searchKnowledgeBase: mocks.searchKnowledgeBase }));
+vi.mock("@/lib/knowledge-base", () => ({ searchActiveKnowledgeBase: mocks.searchKnowledgeBase }));
 
-import { createNoraAgentTools, executeNoraSimpleRead } from "@/lib/assistant-agent-tools";
+import { createNoraAgentTools } from "@/lib/assistant-agent-tools";
 
 type DirectTool = {
   execute?: (input: Record<string, unknown>, options: Record<string, unknown>) => Promise<unknown>;
@@ -46,7 +46,7 @@ describe("Nora agent tool authorization", () => {
     vi.clearAllMocks();
     mocks.requireOrganizationContext.mockResolvedValue({ userId: "agent-1", organizationId: "org-default", membershipRole: "AGENT" });
     mocks.searchUserPortfolio.mockResolvedValue([]);
-    mocks.searchKnowledgeBase.mockResolvedValue({ results: [], requiresInternalEvidence: false, abstained: true });
+    mocks.searchKnowledgeBase.mockResolvedValue({ results: [], requiresInternalEvidence: false, abstained: true, executedQuery: "", selectedSourceIds: [], citationCount: 0, durationMs: 1 });
   });
 
   it("revalidates the live session and active organization membership", async () => {
@@ -61,9 +61,13 @@ describe("Nora agent tool authorization", () => {
 
   it("searches knowledge only with the server organization and records safe citations", async () => {
     mocks.searchKnowledgeBase.mockResolvedValue({
-      results: [{ sourceId: "source-1", sourceType: "INTERNAL", title: "Condiciones demo", version: "1.0", sourceUrl: "https://example.com/conditions", authority: "Demo", reviewedAt: "2026-08-17T00:00:00.000Z", page: 4, section: "Deducible", match: 0.8, excerpt: "El deducible se valida en la póliza." }],
+      results: [{ sourceId: "source-1", chunkId: "chunk-1", chunkOrdinal: 0, sourceType: "INTERNAL", title: "Condiciones demo", version: "1.0", sourceUrl: "https://example.com/conditions", authority: "Demo", reviewedAt: "2026-08-17T00:00:00.000Z", page: 4, section: "Deducible", match: 0.8, excerpt: "El deducible se valida en la póliza." }],
       requiresInternalEvidence: true,
       abstained: false,
+      executedQuery: "deducible",
+      selectedSourceIds: ["source-1"],
+      citationCount: 1,
+      durationMs: 3,
     });
     const runtime = createNoraAgentTools({ id: "agent-1", role: "ADMIN" });
     const search = runtime.tools.searchKnowledgeBase as DirectTool;
@@ -76,33 +80,15 @@ describe("Nora agent tool authorization", () => {
     expect(JSON.stringify(runtime.snapshot().trace)).not.toContain("¿Cuál es el deducible?");
   });
 
-  it("executes a simple knowledge read with the user question as the search input", async () => {
-    mocks.searchKnowledgeBase.mockResolvedValue({
-      results: [{ sourceId: "general-1", sourceType: "GENERAL", title: "Fundamentos del seguro", version: "2026-08-17", sourceUrl: "https://example.com/insurance", authority: "Demo", reviewedAt: "2026-08-17T00:00:00.000Z", page: null, section: "Deducible", match: 0.9, excerpt: "El deducible es la parte a cargo del asegurado." }],
-      requiresInternalEvidence: false,
-      abstained: false,
-    });
-
-    const result = await executeNoraSimpleRead(
-      { id: "agent-1", role: "ADMIN" },
-      { capability: "searchKnowledgeBase", message: "¿Qué es un deducible en seguros?", normalizedMessage: "que es un deducible en seguros" },
-    );
-
-    expect(result.value).toMatchObject({ abstained: false, results: [expect.objectContaining({ sourceType: "GENERAL" })] });
-    expect(result.knowledgeCitations).toEqual([expect.objectContaining({ sourceId: "general-1", sourceType: "GENERAL" })]);
-    expect(mocks.searchKnowledgeBase).toHaveBeenCalledWith({
-      organizationId: "org-default",
-      question: "¿Qué es un deducible en seguros?",
-      sourceType: "BOTH",
-      limit: 5,
-    });
-  });
-
   it("allows only the curated GMM operational source in metadata-only mode", async () => {
     mocks.searchKnowledgeBase.mockResolvedValue({
-      results: [{ sourceId: "gmm-general-1", sourceType: "GENERAL", title: "GMM administrativo", version: "2026-08-17", sourceUrl: "https://example.com/gmm", authority: "Demo", reviewedAt: "2026-08-17T00:00:00.000Z", page: null, section: "Reembolso", match: 0.9, excerpt: "Ruta administrativa de reembolso." }],
+      results: [{ sourceId: "gmm-general-1", chunkId: "gmm-chunk-1", chunkOrdinal: 0, sourceType: "GENERAL", title: "GMM administrativo", version: "2026-08-17", sourceUrl: "https://example.com/gmm", authority: "Demo", reviewedAt: "2026-08-17T00:00:00.000Z", page: null, section: "Reembolso", match: 0.9, excerpt: "Ruta administrativa de reembolso." }],
       requiresInternalEvidence: false,
       abstained: false,
+      executedQuery: "reembolso GMM",
+      selectedSourceIds: ["gmm-general-1"],
+      citationCount: 1,
+      durationMs: 3,
     });
     const runtime = createNoraAgentTools({ id: "agent-1", role: "ADMIN" }, { gmmMetadataOnly: true });
     const search = runtime.tools.searchKnowledgeBase as DirectTool;

@@ -529,7 +529,7 @@ describe("assistant router", () => {
         actionProposal: null,
         toolTrace: [{ tool: "searchKnowledgeBase", outcome: "success", durationMs: 18 }],
         knowledgeCitations: [{ sourceId: "auto-general-1", sourceType: "GENERAL", title: "Seguro de Auto", version: "2026-08-17", sourceUrl: null, authority: "Demo", reviewedAt: null, page: null, section: "Flujo operativo" }],
-        promptVersion: "nora-agent-v4",
+        promptVersion: "nora-agent-v5",
         executionProfile: "simple-read",
         stepCount: 2,
         terminationReason: "complete",
