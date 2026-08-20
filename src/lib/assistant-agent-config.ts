@@ -7,7 +7,10 @@ export type NoraAgentMode = "off" | "admin" | "all";
 
 export function getNoraAgentMode(): NoraAgentMode {
   const configured = process.env.NORA_AGENT_MODE?.trim().toLowerCase();
-  return configured === "admin" || configured === "all" ? configured : "off";
+  if (configured === "admin" || configured === "all") return configured;
+  // Production is explicitly an administrator pilot; keep it deterministic even
+  // when a deployment misses the project-level environment variable.
+  return process.env.VERCEL_ENV === "production" ? "admin" : "off";
 }
 
 export function isNoraAgentEnabledForUser(user: AssistantUser) {
