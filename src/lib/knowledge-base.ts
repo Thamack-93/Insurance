@@ -79,7 +79,7 @@ const CONCRETE_POLICY_CONTEXT = [
   " mi ", " mis ", " esta ", " este ", " tu ", " tus ", " la poliza ", " la póliza ", " el contrato ",
 ];
 
-const POLICY_IDENTIFIER_PATTERN = /\b(?:p[oó]liza\s*(?:n[uú]mero|no\.?|#)?\s*)?(?:#?\s*[A-Z0-9]*\d[A-Z0-9/-]{2,})\b/iu;
+const POLICY_IDENTIFIER_PATTERN = /\b(?:p[oó]liza|policy)\s*(?:n[uú]mero|no\.?|#)?\s*#?\s*[A-Z0-9]*\d[A-Z0-9/-]{2,}\b/iu;
 
 const KNOWLEDGE_QUERY_STOPWORDS = new Set([
   "a", "al", "como", "cómo", "con", "cual", "cuál", "de", "del", "el", "en", "es", "la", "las", "lo", "los",
@@ -148,6 +148,10 @@ export function requiresPolicyIdentifier(question: string) {
   });
   const asksForApplication = /\baplic(?:a|ar|an|able)\b/u.test(normalized);
   return requiresInternalKnowledgeEvidence(question) && (hasConcreteContext || asksForApplication) && !POLICY_IDENTIFIER_PATTERN.test(question);
+}
+
+export function hasExplicitPolicyIdentifier(question: string) {
+  return POLICY_IDENTIFIER_PATTERN.test(question);
 }
 
 export function buildKnowledgeSearchQuery(question: string) {

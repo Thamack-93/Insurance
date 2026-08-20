@@ -570,6 +570,16 @@ describe("assistant router", () => {
     expect(mocks.executeNoraSimpleRead).not.toHaveBeenCalled();
   });
 
+  it("does not treat a client context as a policy context", async () => {
+    mocks.evaluateAssistantInput.mockReturnValue({ allowed: true, normalized: "que deducible aplica a mi poliza", reason: "system" });
+
+    const response = await buildAssistantReply(user, "¿Qué deducible aplica a mi póliza?", { contextText: "client Juan Pérez" });
+
+    expect(response.source).toBe("local");
+    expect(response.reply).toContain("número de póliza");
+    expect(mocks.buildAssistantAiReply).not.toHaveBeenCalled();
+  });
+
   it("routes a bare policy number after clarification to portfolio search", async () => {
     vi.stubEnv("NORA_AGENT_MODE", "admin");
     mocks.evaluateAssistantInput.mockReturnValue({ allowed: true, normalized: "940454625", reason: "system" });
@@ -588,7 +598,7 @@ describe("assistant router", () => {
         quickPrompts: [],
         mutation: null,
         actionProposal: null,
-        knowledgeCitations: [],
+        knowledgeCitations: [{ sourceId: "internal-1", chunkId: "chunk-1", chunkOrdinal: 0, sourceType: "INTERNAL", title: "Condiciones de la póliza", version: "1.0", sourceUrl: null, authority: "Aseguradora", reviewedAt: null, page: 1, section: "Deducible" }],
         toolTrace: [{ tool: "searchPortfolio", outcome: "success", durationMs: 12 }],
         promptVersion: "nora-agent-v5",
         executionProfile: "simple-read",
@@ -604,10 +614,16 @@ describe("assistant router", () => {
       },
     });
 
-    const response = await buildAssistantReply(user, "940454625");
+    const response = await buildAssistantReply(user, "940454625", {
+      history: [{ role: "user", content: "¿Qué deducible aplica a mi póliza?" }],
+    });
 
     expect(response.source).toBe("ai");
-    expect(mocks.executeNoraSimpleRead).toHaveBeenCalledWith(user, expect.objectContaining({ capability: "searchPortfolio" }), expect.anything());
+    expect(mocks.executeNoraSimpleRead).not.toHaveBeenCalled();
+    expect(mocks.buildAssistantAiReply).toHaveBeenCalledWith(expect.objectContaining({
+      activeTools: ["searchPortfolio", "getEntitySummary", "searchKnowledgeBase"],
+      requiredTool: "searchPortfolio",
+    }));
   });
 
   it("routes an explicit draft request through structured Luna even when the agent is enabled", async () => {

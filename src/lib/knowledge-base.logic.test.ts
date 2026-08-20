@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { GENERAL_INSURANCE_SOURCES } from "@/lib/knowledge-base-general";
-import { buildKnowledgeFallbackQuery, buildKnowledgeSearchQuery, isKnowledgeContentSafe, requiresInternalKnowledgeEvidence, requiresPolicyIdentifier, splitKnowledgeChunks, splitKnowledgeContent } from "@/lib/knowledge-base";
+import { buildKnowledgeFallbackQuery, buildKnowledgeSearchQuery, hasExplicitPolicyIdentifier, isKnowledgeContentSafe, requiresInternalKnowledgeEvidence, requiresPolicyIdentifier, splitKnowledgeChunks, splitKnowledgeContent } from "@/lib/knowledge-base";
 import { buildKnowledgeManifest, hashKnowledgeManifest, KNOWLEDGE_INTEGRITY_VERSION } from "@/lib/knowledge-integrity";
 import { calibrateKnowledgeThreshold, KNOWLEDGE_EVALUATION_FIXTURE } from "@/lib/knowledge-evaluation";
 
@@ -19,7 +19,10 @@ describe("insurance knowledge base rules", () => {
     expect(requiresPolicyIdentifier("¿Qué deducible aplica a mi póliza?")).toBe(true);
     expect(requiresPolicyIdentifier("¿Qué exclusiones tiene esta póliza?")).toBe(true);
     expect(requiresPolicyIdentifier("¿Qué deducible aplica a la póliza 940454625?")).toBe(false);
+    expect(requiresPolicyIdentifier("¿Qué deducible aplica a mi póliza de auto modelo 2024?")).toBe(true);
     expect(requiresPolicyIdentifier("¿Qué significa prima?")).toBe(false);
+    expect(hasExplicitPolicyIdentifier("¿Qué deducible aplica a mi póliza 940454625?")).toBe(true);
+    expect(hasExplicitPolicyIdentifier("¿Qué deducible aplica a mi póliza de auto modelo 2024?")).toBe(false);
   });
 
   it("removes question framing before full-text retrieval", () => {
