@@ -7,6 +7,7 @@ import {
   BACKUP_AUTH_TAG_BYTES,
   BACKUP_FORMAT,
   BACKUP_FORMAT_VERSION,
+  TENANT_BACKUP_FORMAT_VERSION,
   assertValidKeyVersion,
   canonicalJson,
   createBackupContainerHeader,
@@ -15,11 +16,15 @@ import {
   encryptBackupPayload,
   parseBackupEncryptionKey,
   selectBackupRetention,
+  sha256Hex,
   verifyBackupManifest,
   type BackupManifest,
 } from "@/lib/backup-logic";
+import { PROTECTED_TENANT_TABLES } from "@/lib/tenant-organization-foundation";
 
 const BACKUP_PREFIX = "database-backups/";
+const TENANT_BACKUP_PREFIX = "organization-backups/";
+export const EMERGENCY_BACKUP_PREFIX = "emergency-backups/";
 // Copies created during a key migration are deliberately outside BACKUP_PREFIX so
 // regular retention can never prune either the source or the migration copy.
 const BACKUP_REKEY_PREFIX = "database-backup-rekeys/";
@@ -28,7 +33,7 @@ const MANIFEST_SUFFIX = ".manifest.json";
 const EXPORT_BATCH_SIZE = 500;
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const BACKUP_FILENAME_PATTERN =
-  /^policydesk-\d{8}T\d{9}Z-[a-f0-9]{12}-kv-[A-Za-z0-9][A-Za-z0-9._-]{0,63}\.ndjson\.gz\.enc$/;
+  /^(?:policydesk|policydesk-emergency|policydesk-org-[A-Za-z0-9._-]{1,128})-\d{8}T\d{9}Z-[a-f0-9]{12}-kv-[A-Za-z0-9][A-Za-z0-9._-]{0,63}\.ndjson\.gz\.enc$/;
 
 type TableDescription = {
   schema: string;
@@ -53,6 +58,9 @@ export type BackupEntry = {
   size: number;
   createdAt: Date;
   manifestAvailable: boolean;
+  scope?: "PLATFORM" | "ORGANIZATION";
+  organizationId?: string;
+  storage?: "original" | "rekeyed";
 };
 
 export type CreatedBackup = BackupEntry & {
@@ -287,7 +295,13 @@ async function describeTables(client: PoolClient): Promise<TableDescription[]> {
   return descriptions;
 }
 
-async function* exportPostgresSnapshot(createdAt: Date, stats: ExportStats) {
+type SnapshotScope = {
+  organizationId?: string;
+  tableNames?: ReadonlySet<string>;
+  manifestVersion?: number;
+};
+
+async function* exportPostgresSnapshot(createdAt: Date, stats: ExportStats, scope: SnapshotScope = {}) {
   const connectionString = requireEnvironment("DATABASE_URL");
   if (!/^postgres(ql)?:\/\//i.test(connectionString)) {
     throw new Error("DATABASE_URL must point to Postgres for database backups.");
@@ -305,13 +319,18 @@ async function* exportPostgresSnapshot(createdAt: Date, stats: ExportStats) {
     await client.query("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
     transactionStarted = true;
     const versionResult = await client.query<{ server_version: string }>("SHOW server_version");
-    const tables = await describeTables(client);
+    const allTables = await describeTables(client);
+    const tables = scope.tableNames
+      ? allTables.filter((table) => scope.tableNames?.has(table.name))
+      : allTables;
 
     yield jsonLine({
       type: "backup",
       format: BACKUP_FORMAT,
-      version: BACKUP_FORMAT_VERSION,
+      version: scope.manifestVersion ?? BACKUP_FORMAT_VERSION,
       createdAt: createdAt.toISOString(),
+      scope: scope.organizationId ? "ORGANIZATION" : "PLATFORM",
+      ...(scope.organizationId ? { organizationId: scope.organizationId } : {}),
       database: {
         engine: "postgresql",
         serverVersion: versionResult.rows[0]?.server_version ?? "unknown",
@@ -324,8 +343,9 @@ async function* exportPostgresSnapshot(createdAt: Date, stats: ExportStats) {
       const orderBy = table.primaryKey.length
         ? table.primaryKey.map(quoteIdentifier).join(", ")
         : "ctid";
+      const where = scope.organizationId ? organizationSnapshotWhere(table, scope.organizationId) : "";
       await client.query(
-        `DECLARE backup_rows NO SCROLL CURSOR FOR SELECT * FROM ${tableReference(table)} ORDER BY ${orderBy}`,
+        `DECLARE backup_rows NO SCROLL CURSOR FOR SELECT * FROM ${tableReference(table)}${where} ORDER BY ${orderBy}`,
       );
       let rowCount = 0;
       try {
@@ -369,6 +389,18 @@ async function* exportPostgresSnapshot(createdAt: Date, stats: ExportStats) {
   }
 }
 
+function organizationSnapshotWhere(table: Pick<TableDescription, "name">, organizationId: string) {
+  // Tenant v2 exports only tables with organizationId. Future envelope tables
+  // must add an explicit predicate here rather than broadening the scope.
+  const escaped = organizationId.replaceAll("'", "''");
+  if (table.name === "Organization") return ` WHERE "id" = '${escaped}'`;
+  if (table.name === "OrganizationMembership") return ` WHERE "organizationId" = '${escaped}'`;
+  if (table.name === "User") {
+    return ` WHERE "id" IN (SELECT "userId" FROM "OrganizationMembership" WHERE "organizationId" = '${escaped}') AND "platformRole" = 'NONE'`;
+  }
+  return ` WHERE "organizationId" = '${escaped}'`;
+}
+
 function compactTimestamp(date: Date) {
   return date.toISOString().replaceAll("-", "").replaceAll(":", "").replace(".", "");
 }
@@ -385,6 +417,7 @@ async function* encryptedBackupStream(
   iv: Buffer,
   stats: ExportStats,
   onChunk: (chunk: Buffer) => void,
+  scope: SnapshotScope = {},
 ) {
   const { prefix, authenticatedData } = createBackupContainerHeader(keyVersion, iv);
   onChunk(prefix);
@@ -394,7 +427,7 @@ async function* encryptedBackupStream(
     authTagLength: BACKUP_AUTH_TAG_BYTES,
   });
   cipher.setAAD(authenticatedData);
-  const compressed = Readable.from(exportPostgresSnapshot(createdAt, stats)).pipe(
+  const compressed = Readable.from(exportPostgresSnapshot(createdAt, stats, scope)).pipe(
     createGzip({ level: 9 }),
   );
   for await (const value of compressed) {
@@ -439,9 +472,10 @@ async function listBackupsInPrefix(prefix: string): Promise<BackupEntry[]> {
         size: blob.size,
         createdAt: blob.uploadedAt,
         manifestAvailable: pathnames.has(`${blob.pathname}${MANIFEST_SUFFIX}`),
+        storage: prefix === BACKUP_REKEY_PREFIX ? "rekeyed" : "original",
       } satisfies BackupEntry;
     })
-    .filter((entry): entry is BackupEntry => entry !== null)
+    .filter((entry): entry is Exclude<typeof entry, null> => entry !== null)
     .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
 }
 
@@ -451,6 +485,42 @@ export function listBackups(): Promise<BackupEntry[]> {
 
 export function listRekeyedBackups(): Promise<BackupEntry[]> {
   return listBackupsInPrefix(BACKUP_REKEY_PREFIX);
+}
+
+function assertSafeOrganizationId(organizationId: string) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(organizationId)) {
+    throw new Error("Invalid organization id for backup storage.");
+  }
+  return organizationId;
+}
+
+async function listTenantBackupsInPrefix(prefix: string, organizationId: string): Promise<BackupEntry[]> {
+  const safeOrganizationId = assertSafeOrganizationId(organizationId);
+  const tenantPrefix = `${prefix}${safeOrganizationId}/`;
+  const blobs = await listAllBackupBlobs(tenantPrefix);
+  const pathnames = new Set(blobs.map((blob) => blob.pathname));
+  return blobs
+    .filter((blob) => blob.pathname.endsWith(BACKUP_EXTENSION))
+    .map((blob) => {
+      const filename = blob.pathname.slice(tenantPrefix.length);
+      if (!BACKUP_FILENAME_PATTERN.test(filename)) return null;
+      return {
+        filename,
+        pathname: blob.pathname,
+        size: blob.size,
+        createdAt: blob.uploadedAt,
+        manifestAvailable: pathnames.has(`${blob.pathname}${MANIFEST_SUFFIX}`),
+        scope: "ORGANIZATION",
+        organizationId: safeOrganizationId,
+        storage: prefix === BACKUP_REKEY_PREFIX ? "rekeyed" : "original",
+      } satisfies BackupEntry;
+    })
+    .filter((entry): entry is Exclude<typeof entry, null> => entry !== null)
+    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
+}
+
+export function listOrganizationBackups(organizationId: string): Promise<BackupEntry[]> {
+  return listTenantBackupsInPrefix(TENANT_BACKUP_PREFIX, organizationId);
 }
 
 export async function rotateBackups() {
@@ -465,7 +535,7 @@ export async function rotateBackups() {
   return selection.remove.map((entry) => entry.filename);
 }
 
-export async function createDatabaseBackup(now = new Date()): Promise<CreatedBackup> {
+export async function createDatabaseBackup(now = new Date(), options: { emergency?: boolean } = {}): Promise<CreatedBackup> {
   const preflight = getBackupPreflightStatus();
   if (!preflight.ready) {
     throw new Error(formatBackupPreflightError(preflight));
@@ -473,9 +543,9 @@ export async function createDatabaseBackup(now = new Date()): Promise<CreatedBac
   const { key, keyVersion } = getEncryptionConfiguration();
   const iv = randomBytes(12);
   const nonce = randomBytes(6).toString("hex");
-  const filename = `policydesk-${compactTimestamp(now)}-${nonce}-kv-${keyVersion}${BACKUP_EXTENSION}`;
+  const filename = `${options.emergency ? "policydesk-emergency" : "policydesk"}-${compactTimestamp(now)}-${nonce}-kv-${keyVersion}${BACKUP_EXTENSION}`;
   assertSafeBackupFilename(filename);
-  const pathname = `${BACKUP_PREFIX}${filename}`;
+  const pathname = `${options.emergency ? EMERGENCY_BACKUP_PREFIX : BACKUP_PREFIX}${filename}`;
   const stats: ExportStats = { tables: [], totalRows: 0 };
   const hash = createHash("sha256");
   let encryptedSize = 0;
@@ -529,7 +599,7 @@ export async function createDatabaseBackup(now = new Date()): Promise<CreatedBac
     throw error;
   }
 
-  const pruned = await rotateBackups();
+  const pruned = options.emergency ? [] : await rotateBackups();
   return {
     filename,
     pathname: uploaded.pathname,
@@ -542,6 +612,143 @@ export async function createDatabaseBackup(now = new Date()): Promise<CreatedBac
 }
 
 export const backupDatabase = createDatabaseBackup;
+
+const TENANT_EXPORT_TABLES = new Set<string>([
+  "Organization",
+  "User",
+  "OrganizationMembership",
+  ...PROTECTED_TENANT_TABLES,
+  "SecurityEventAggregate",
+]);
+
+async function getOrganizationBackupMetadata(organizationId: string) {
+  const connectionString = requireEnvironment("DATABASE_URL");
+  const pool = new Pool({ connectionString, max: 1, application_name: "policydesk-organization-backup-metadata" });
+  try {
+    const result = await pool.query<{
+      id: string;
+      name: string;
+      slug: string;
+      status: string;
+    }>(`SELECT "id", "name", "slug", "status" FROM "Organization" WHERE "id" = $1`, [organizationId]);
+    const organization = result.rows[0];
+    if (!organization) throw new Error("La organización no existe.");
+    if (organization.status === "RESTORING") throw new Error("La organización está en RESTORING y no puede respaldarse.");
+    const memberships = await pool.query<{ userId: string }>(
+      `SELECT "userId" FROM "OrganizationMembership" WHERE "organizationId" = $1 ORDER BY "userId"`,
+      [organizationId],
+    );
+    return { organization, userIds: memberships.rows.map((row) => row.userId) };
+  } finally {
+    await pool.end().catch(() => undefined);
+  }
+}
+
+async function rotateOrganizationBackups(organizationId: string) {
+  const entries = await listOrganizationBackups(organizationId);
+  const selection = selectBackupRetention(entries.map((entry) => ({ ...entry, id: entry.pathname })));
+  if (selection.remove.length === 0) return [];
+  await del(selection.remove.flatMap((entry) => [entry.pathname, `${entry.pathname}${MANIFEST_SUFFIX}`]));
+  return selection.remove.map((entry) => entry.filename);
+}
+
+export async function createOrganizationDatabaseBackup(
+  organizationId: string,
+  now = new Date(),
+): Promise<CreatedBackup> {
+  const preflight = getBackupPreflightStatus();
+  if (!preflight.ready) throw new Error(formatBackupPreflightError(preflight));
+  const safeOrganizationId = assertSafeOrganizationId(organizationId);
+  const metadata = await getOrganizationBackupMetadata(safeOrganizationId);
+  const { key, keyVersion } = getEncryptionConfiguration();
+  const iv = randomBytes(12);
+  const nonce = randomBytes(6).toString("hex");
+  const filename = `policydesk-org-${safeOrganizationId}-${compactTimestamp(now)}-${nonce}-kv-${keyVersion}${BACKUP_EXTENSION}`;
+  assertSafeBackupFilename(filename);
+  const pathname = `${TENANT_BACKUP_PREFIX}${safeOrganizationId}/${filename}`;
+  const stats: ExportStats = { tables: [], totalRows: 0 };
+  const hash = createHash("sha256");
+  let encryptedSize = 0;
+  const onChunk = (chunk: Buffer) => {
+    hash.update(chunk);
+    encryptedSize += chunk.length;
+  };
+  const source = Readable.from(encryptedBackupStream(
+    now,
+    key,
+    keyVersion,
+    iv,
+    stats,
+    onChunk,
+    { organizationId: safeOrganizationId, tableNames: TENANT_EXPORT_TABLES, manifestVersion: TENANT_BACKUP_FORMAT_VERSION },
+  ));
+  const body = Readable.toWeb(source) as ReadableStream<Uint8Array>;
+  const uploaded = await put(pathname, body, {
+    access: "private",
+    addRandomSuffix: false,
+    allowOverwrite: false,
+    cacheControlMaxAge: 60,
+    contentType: "application/octet-stream",
+    multipart: true,
+  });
+  const capability = (stats.tables.find((table) => table.name === "Document")?.rowCount ?? 0) === 0
+    ? "COMPLETE"
+    : "DATABASE_ONLY";
+  const manifest = createBackupManifest({
+    format: BACKUP_FORMAT,
+    version: TENANT_BACKUP_FORMAT_VERSION,
+    scope: "ORGANIZATION",
+    organization: {
+      id: safeOrganizationId,
+      name: metadata.organization.name,
+      slug: metadata.organization.slug,
+    },
+    capability,
+    dependencies: { userIds: metadata.userIds },
+    schemaFingerprint: sha256Hex(canonicalJson(stats.tables.map((table) => ({ schema: table.schema, name: table.name, rowCount: table.rowCount })))),
+    createdAt: now.toISOString(),
+    completedAt: new Date().toISOString(),
+    payload: {
+      filename,
+      pathname: uploaded.pathname,
+      size: encryptedSize,
+      sha256: hash.digest("hex"),
+    },
+    encryption: {
+      algorithm: "AES-256-GCM",
+      keyVersion,
+      iv: iv.toString("base64"),
+      authTagBytes: BACKUP_AUTH_TAG_BYTES,
+    },
+    compression: "gzip",
+    tables: stats.tables,
+    totals: { tables: stats.tables.length, rows: stats.totalRows },
+  });
+  try {
+    await put(`${pathname}${MANIFEST_SUFFIX}`, canonicalJson(manifest), {
+      access: "private",
+      addRandomSuffix: false,
+      allowOverwrite: false,
+      cacheControlMaxAge: 60,
+      contentType: "application/json",
+    });
+  } catch (error) {
+    await del(uploaded.pathname).catch(() => undefined);
+    throw error;
+  }
+  const pruned = await rotateOrganizationBackups(safeOrganizationId);
+  return {
+    filename,
+    pathname: uploaded.pathname,
+    size: encryptedSize,
+    createdAt: now,
+    manifestAvailable: true,
+    scope: "ORGANIZATION",
+    organizationId: safeOrganizationId,
+    manifest,
+    pruned,
+  };
+}
 
 async function readStream(stream: ReadableStream<Uint8Array>, maximumBytes?: number) {
   const reader = stream.getReader();
@@ -564,9 +771,14 @@ async function readStream(stream: ReadableStream<Uint8Array>, maximumBytes?: num
   return Buffer.concat(chunks, size);
 }
 
-async function findBackupManifest(filename: string) {
-  for (const prefix of [BACKUP_PREFIX, BACKUP_REKEY_PREFIX]) {
-    const pathname = `${prefix}${filename}`;
+async function findBackupManifest(filename: string, pathnameHint?: string) {
+  const pathnames = pathnameHint
+    ? [pathnameHint]
+    : [
+        `${BACKUP_PREFIX}${filename}`,
+        `${BACKUP_REKEY_PREFIX}${filename}`,
+      ];
+  for (const pathname of pathnames) {
     const manifestResult = await get(`${pathname}${MANIFEST_SUFFIX}`, { access: "private" });
     if (manifestResult?.statusCode === 200 && manifestResult.stream) {
       return { pathname, manifestResult };
@@ -575,9 +787,9 @@ async function findBackupManifest(filename: string) {
   return null;
 }
 
-export async function verifyStoredBackup(filename: string): Promise<BackupVerification> {
+export async function verifyStoredBackup(filename: string, pathnameHint?: string): Promise<BackupVerification> {
   assertSafeBackupFilename(filename);
-  const stored = await findBackupManifest(filename);
+  const stored = await findBackupManifest(filename, pathnameHint);
   if (!stored) {
     return { valid: false, filename, reason: "No se encontró el manifiesto privado." };
   }
@@ -622,8 +834,9 @@ export async function verifyStoredBackup(filename: string): Promise<BackupVerifi
   return { valid: true, filename, size, sha256, manifest };
 }
 
-export async function getBackupDownload(filename: string) {
+export async function getBackupDownload(filename: string, pathnameHint?: string) {
   assertSafeBackupFilename(filename);
+  if (pathnameHint) return get(pathnameHint, { access: "private" });
   const primary = await get(`${BACKUP_PREFIX}${filename}`, { access: "private" });
   if (primary?.statusCode === 200 && primary.stream) return primary;
   return get(`${BACKUP_REKEY_PREFIX}${filename}`, { access: "private" });

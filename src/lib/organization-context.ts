@@ -207,6 +207,23 @@ export async function assertOrganizationContextInTransaction(
   if (!rows[0]) throw new AuthError("ORGANIZATION_ACCESS_DENIED", 403);
 }
 
+/**
+ * Runs tenant work on one transaction-bound connection and establishes the
+ * PostgreSQL RLS context before any application query executes. Direct
+ * organization predicates remain required; this is the database second lock.
+ */
+export async function withOrganizationTransaction<T>(
+  context: OrganizationContext,
+  callback: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  const db = getDb();
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw(Prisma.sql`SELECT set_config('app.organization_id', ${context.organizationId}, true)`);
+    await assertOrganizationContextInTransaction(tx, context);
+    return callback(tx);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+}
+
 export async function selectOrganization(organizationId: string) {
   const user = await requireUser();
   const db = getDb();
@@ -244,6 +261,8 @@ export async function selectOrganization(organizationId: string) {
     role: membership.role === "AGENT" ? "AGENT" : "ADMIN",
     platformRole: user.platformRole === "SUPERADMIN" ? "SUPERADMIN" : "NONE",
     organizationId: membership.organizationId,
+    sessionVersion: user.sessionVersion,
+    mustChangePassword: user.mustChangePassword,
   });
 
   await writeActivityLog({
@@ -264,6 +283,8 @@ export async function clearSelectedOrganization() {
     name: user.name,
     role: user.role === "ADMIN" ? "ADMIN" : "AGENT",
     platformRole: user.platformRole === "SUPERADMIN" ? "SUPERADMIN" : "NONE",
+    sessionVersion: user.sessionVersion,
+    mustChangePassword: user.mustChangePassword,
   });
 }
 

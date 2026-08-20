@@ -36,6 +36,17 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  if (session.mustChangePassword) {
+    const allowed = (pathname === "/settings/account" && session.platformRole !== "SUPERADMIN") || (session.platformRole === "SUPERADMIN" && pathname === "/platform");
+    if (!allowed) {
+      const url = request.nextUrl.clone();
+      url.pathname = session.platformRole === "SUPERADMIN" ? "/platform" : "/settings/account";
+      url.search = "";
+      url.searchParams.set("forcePassword", "1");
+      return NextResponse.redirect(url);
+    }
+  }
+
   if (session.platformRole === "SUPERADMIN" && !session.organizationId && pathname !== "/platform" && !pathname.startsWith("/platform/")) {
     const url = request.nextUrl.clone();
     url.pathname = "/platform";

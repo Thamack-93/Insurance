@@ -1,13 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { randomBytes } from "node:crypto";
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import {
   AuthError,
+  getSession,
   hashPassword,
   requireUser,
+  setSessionCookie,
   verifyPassword,
   SYSTEM_USER_ID,
   type UserRole,
@@ -18,9 +19,11 @@ import { logError } from "@/lib/logger";
 import { DEFAULT_USER_TIME_ZONE } from "@/lib/time-zones";
 import {
   assertOrganizationContextInTransaction,
+  requireOrganizationContext,
   requireOrganizationRole,
   type OrganizationRole,
 } from "@/lib/organization-context";
+import { generateTemporaryPassword, temporaryPasswordExpiresAt, validatePasswordStrength } from "@/lib/password-policy";
 
 export type AdminUserRow = {
   id: string;
@@ -35,22 +38,6 @@ export type AdminUserRow = {
 
 function isRole(value: unknown): value is UserRole {
   return value === "ADMIN" || value === "AGENT";
-}
-
-function validatePasswordStrength(password: string): string | null {
-  if (typeof password !== "string") return "La contraseña no es válida.";
-  if (password.length < 8) return "La contraseña debe tener al menos 8 caracteres.";
-  const hasLetter = /[a-zA-Z]/.test(password);
-  const hasNumber = /\d/.test(password);
-  if (!hasLetter || !hasNumber) {
-    return "La contraseña debe combinar letras y números.";
-  }
-  return null;
-}
-
-function generateTemporaryPassword(): string {
-  // 10-char alphanumeric — readable enough to share over chat.
-  return randomBytes(8).toString("base64").replace(/[^a-zA-Z0-9]/g, "").slice(0, 10) + "1";
 }
 
 export async function listUsers(): Promise<AdminUserRow[]> {
@@ -137,6 +124,9 @@ export async function inviteUser(input: {
           active: true,
           timeZone: DEFAULT_USER_TIME_ZONE,
           passwordHash: hashPassword(tempPassword),
+          mustChangePassword: true,
+          temporaryPasswordExpiresAt: temporaryPasswordExpiresAt(),
+          sessionVersion: 0,
         },
       });
       // The Cycle 1 trigger may already have created this row. Upsert keeps the
@@ -370,21 +360,26 @@ export type ResetPasswordResult =
 
 export async function resetUserPassword(userId: string): Promise<ResetPasswordResult> {
   try {
-    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
-    if (userId === SYSTEM_USER_ID) return { ok: false, error: "No puedes resetear el usuario del sistema." };
+    const context = await requireOrganizationRole(["OWNER"]);
+    if (userId === SYSTEM_USER_ID || userId === context.userId) return { ok: false, error: "No puedes resetear esa cuenta desde este flujo." };
 
     const db = getDb();
     const tempPassword = generateTemporaryPassword();
     const updated = await db.$transaction(async (tx) => {
-      await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
+      await assertOrganizationContextInTransaction(tx, context, ["OWNER"]);
       const membership = await tx.organizationMembership.findFirst({
         where: { organizationId: context.organizationId, userId },
-        select: { id: true },
+        include: { user: { select: { platformRole: true } } },
       });
-      if (!membership) return false;
+      if (!membership || membership.user.platformRole === "SUPERADMIN" || membership.role === "OWNER") return false;
       await tx.user.update({
         where: { id: userId },
-        data: { passwordHash: hashPassword(tempPassword) },
+        data: {
+          passwordHash: hashPassword(tempPassword),
+          mustChangePassword: true,
+          temporaryPasswordExpiresAt: temporaryPasswordExpiresAt(),
+          sessionVersion: { increment: 1 },
+        },
       });
       await writeActivityLog({
         entityType: "User",
@@ -396,7 +391,7 @@ export async function resetUserPassword(userId: string): Promise<ResetPasswordRe
       });
       return true;
     });
-    if (!updated) return { ok: false, error: "El usuario no pertenece a esta organización." };
+    if (!updated) return { ok: false, error: "El usuario no puede resetearse desde esta organización." };
 
     revalidatePath("/settings/users");
     return {
@@ -420,6 +415,10 @@ export async function changeMyPassword(input: {
     const current = String(input.currentPassword ?? "");
     const next = String(input.newPassword ?? "");
 
+    if (user.mustChangePassword && user.temporaryPasswordExpiresAt && user.temporaryPasswordExpiresAt.getTime() <= Date.now()) {
+      return errorResult("La contraseña temporal expiró. Solicita un nuevo reset al Owner o superadmin.");
+    }
+
     if (!verifyPassword(current, user.passwordHash)) {
       return errorResult("La contraseña actual no es correcta.");
     }
@@ -427,18 +426,53 @@ export async function changeMyPassword(input: {
     if (passwordError) return errorResult(passwordError);
     if (current === next) return errorResult("La nueva contraseña debe ser distinta.");
 
+    const context = user.platformRole === "SUPERADMIN" ? null : await requireOrganizationContext();
     const db = getDb();
-    await db.user.update({
-      where: { id: user.id },
-      data: { passwordHash: hashPassword(next) },
+    const nextVersion = user.sessionVersion + 1;
+    await db.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: user.id },
+        data: {
+          passwordHash: hashPassword(next),
+          mustChangePassword: false,
+          temporaryPasswordExpiresAt: null,
+          sessionVersion: { increment: 1 },
+        },
+      });
+
+      if (context) {
+        await writeActivityLog({
+          entityType: "User",
+          entityId: user.id,
+          action: "USER_SELF_PASSWORD_CHANGE",
+          userId: user.id,
+          organizationId: context.organizationId,
+          db: tx,
+        });
+      } else {
+        await tx.platformAuditLog.create({
+          data: {
+            actorUserId: user.id,
+            targetUserId: user.id,
+            action: "SUPERADMIN_SELF_PASSWORD_CHANGE",
+          },
+        });
+      }
     });
 
-    await writeActivityLog({
-      entityType: "User",
-      entityId: user.id,
-      action: "USER_SELF_PASSWORD_CHANGE",
-      userId: user.id,
-    });
+    const session = await getSession();
+    if (session) {
+      await setSessionCookie({
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role as "ADMIN" | "AGENT",
+        platformRole: user.platformRole === "SUPERADMIN" ? "SUPERADMIN" : "NONE",
+        organizationId: session.organizationId,
+        sessionVersion: nextVersion,
+        mustChangePassword: false,
+      });
+    }
 
     return successResult(user.id, "/settings/account", "Contraseña actualizada.");
   } catch (error) {

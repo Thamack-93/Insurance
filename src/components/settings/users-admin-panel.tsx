@@ -66,9 +66,11 @@ function fmtDate(iso: string | null) {
 export function UsersAdminPanel({
   initialUsers,
   currentUserId,
+  canResetPasswords,
 }: {
   initialUsers: AdminUserRow[];
   currentUserId: string;
+  canResetPasswords: boolean;
 }) {
   const router = useRouter();
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -238,15 +240,15 @@ export function UsersAdminPanel({
                         {fmtDate(user.lastLoginAt)}
                       </TableCell>
                       <TableCell className="space-x-1 text-right">
-                        <Button
+                        {canResetPasswords ? <Button
                           variant="outline"
                           size="sm"
-                          disabled={pending}
+                          disabled={pending || isMe || user.role === "OWNER"}
                           onClick={() => handleReset(user)}
-                          title="Resetear contraseña"
+                          title={isMe || user.role === "OWNER" ? "El Owner no puede resetearse a sí mismo" : "Resetear contraseña"}
                         >
                           <KeyRound className="size-4" />
-                        </Button>
+                        </Button> : null}
                         <Button
                           variant="outline"
                           size="sm"

@@ -4,6 +4,7 @@ import { Pagination } from "@/components/lists/pagination";
 import { requireSuperAdminOrRedirect } from "@/lib/auth";
 import { getPlatformOverview } from "@/lib/platform-dashboard";
 import { getOrganizationOptions } from "@/lib/organization-context";
+import { ChangePasswordForm } from "@/components/settings/change-password-form";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,7 @@ function statusLabel(value: string) {
   if (value === "ACTIVE") return "Activa";
   if (value === "SUSPENDED") return "Suspendida";
   if (value === "BOOTSTRAP") return "Bootstrap";
+  if (value === "RESTORING") return "Restaurando";
   return value;
 }
 
@@ -27,11 +29,12 @@ function kindLabel(value: string) {
   return "Cliente";
 }
 
-export default async function PlatformPage({ searchParams }: { searchParams?: Promise<{ q?: string; status?: string; page?: string }> }) {
+export default async function PlatformPage({ searchParams }: { searchParams?: Promise<{ q?: string; status?: string; page?: string; forcePassword?: string }> }) {
   const platformAdmin = await requireSuperAdminOrRedirect();
   const params = (await searchParams) ?? {};
   const [overview, organizationOptions] = await Promise.all([getPlatformOverview(params), getOrganizationOptions()]);
   const paginationParams = { q: params.q, status: params.status };
+  const forcePassword = platformAdmin.mustChangePassword || params.forcePassword === "1";
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
@@ -42,12 +45,14 @@ export default async function PlatformPage({ searchParams }: { searchParams?: Pr
           <p className="mt-2 max-w-3xl text-sm text-muted-foreground">Supervisión global de organizaciones, memberships y actividad. Sesión de plataforma: {platformAdmin.email}. Las operaciones requieren una membership explícita y no se ejecutan desde este panel.</p>
         </div>
         <div className="flex items-center gap-3">
-          <Link href="/platform/backups" className="hidden items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium text-primary hover:bg-muted/30 sm:inline-flex">
-            Respaldos globales
+          <Link href="/platform/organizations/new" className="hidden items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 sm:inline-flex">
+            Nueva organización
           </Link>
           <ShieldCheck className="size-7 text-primary" aria-hidden />
         </div>
       </header>
+
+      {forcePassword ? <section className="rounded-xl border border-amber-300 bg-amber-50 p-5 text-amber-950 dark:bg-amber-950/20 dark:text-amber-100" aria-labelledby="forced-password-change"><h2 id="forced-password-change" className="text-lg font-semibold">Actualiza tu contraseña para continuar</h2><p className="mt-1 text-sm">La contraseña temporal es de un solo uso. Debes reemplazarla antes de operar la plataforma.</p><div className="mt-4 max-w-md rounded-lg border bg-background p-4 text-foreground"><ChangePasswordForm /></div></section> : null}
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Resumen de plataforma">
         <Metric label="Organizaciones" value={overview.summary.organizations} />

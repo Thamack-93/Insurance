@@ -13,11 +13,19 @@ export const PROTECTED_TENANT_TABLES = [
   "Client", "Insurer", "Policy", "Receipt", "PolicyEndorsement", "Payment", "Commission", "Task", "WorkItem", "Claim", "ClaimChecklistItem", "Quote", "Document", "ActivityLog", "AssistantActionDraft", "NotificationPreference", "NotificationEvent", "PolicyInsuredParty", "PolicyInsuredAsset", "TelegramLinkToken", "LedgerImportBatch", "LedgerImportRow", "LedgerImportAction", "LedgerImportIssue", "TelegramDraft", "MaintenanceRun", "ReceiptReconciliationIssue", "PolicyRenewalSuggestion", "DataQualitySuppressionRule", "AssistantReport", "AssistantReportSignal", "AssistantAiRun", "AssistantAiAttempt", "KnowledgeSource", "KnowledgeChunk", "Alert",
 ] as const;
 
-/** Global security telemetry may be attributed later, but is never auto-tagged in Cycle 1. */
-export const OPTIONAL_ORGANIZATION_TABLES = ["SecurityEventAggregate"] as const;
+/**
+ * Operational metadata may be attributed to an organization, but is never
+ * auto-tagged by the singleton transition trigger. Restore tooling must keep
+ * these control rows outside tenant data replacement.
+ */
+export const OPTIONAL_ORGANIZATION_TABLES = [
+  "SecurityEventAggregate",
+  "BackupArtifact",
+  "OrganizationRestoreRun",
+] as const;
 
 /** These rows are platform-scoped and must not acquire a Cycle 1 organization column. */
-export const PLATFORM_GLOBAL_TABLES = ["User", "Organization", "OrganizationMembership", "SystemSetting", "NotificationChannel", "TelegramWebhookUpdate", "GeneralKnowledgeSource", "GeneralKnowledgeChunk"] as const;
+export const PLATFORM_GLOBAL_TABLES = ["User", "Organization", "OrganizationMembership", "PlatformAuditLog", "SystemSetting", "NotificationChannel", "TelegramWebhookUpdate", "GeneralKnowledgeSource", "GeneralKnowledgeChunk"] as const;
 
 export const EXPECTED_TENANT_TRIGGERS = Object.fromEntries(
   PROTECTED_TENANT_TABLES.map((table) => [table, `${table}_transition_singleton_organization`]),

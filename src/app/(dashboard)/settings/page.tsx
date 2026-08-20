@@ -9,17 +9,11 @@ import { today, formatDate } from "@/lib/dates";
 import Link from "next/link";
 import { getSettings, updateSettings } from "@/lib/settings";
 import { getOnboardingStatus } from "@/lib/dashboard-queries";
-import { getBackupPreflightStatus } from "@/lib/backup";
 import { getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
 import { requireOrganizationContext } from "@/lib/organization-context";
 import { SettingsForm } from "@/components/forms/settings-form";
-import { BackupsPanel } from "@/components/settings/backups-panel";
 import { OnboardingPanel } from "@/components/settings/onboarding-panel";
 import { getOrganizationBackupStatus } from "@/lib/organization-backup-status";
-import {
-  createBackup,
-  listBackupsAction,
-} from "./backups-actions";
 
 export const maxDuration = 300;
 
@@ -38,10 +32,8 @@ export default async function SettingsPage() {
   const isTenantAdmin = organization.membershipRole === "OWNER" || organization.membershipRole === "ADMIN";
   const isPlatformAdmin = !!liveUser && liveUser.active && liveUser.platformRole === "SUPERADMIN";
   const aiStatus = getAssistantAiConnectionStatus();
-  const backupStatus = getBackupPreflightStatus();
-  const [settings, initialBackups, onboarding, ownerBackupStatus] = await Promise.all([
+  const [settings, onboarding, ownerBackupStatus] = await Promise.all([
     getSettings(),
-    isPlatformAdmin ? listBackupsAction().catch(() => []) : Promise.resolve([]),
     getOnboardingStatus(),
     organization.membershipRole === "OWNER" ? getOrganizationBackupStatus() : Promise.resolve(null),
   ]);
@@ -219,14 +211,6 @@ export default async function SettingsPage() {
           </Card>
         ) : null}
 
-        {isPlatformAdmin ? (
-          <BackupsPanel
-            initialBackups={initialBackups}
-            backupStatus={backupStatus}
-            createBackup={createBackup}
-            listBackups={listBackupsAction}
-          />
-        ) : null}
       </div>
     </div>
   );

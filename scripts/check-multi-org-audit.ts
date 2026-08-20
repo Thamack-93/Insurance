@@ -33,7 +33,7 @@ export async function auditMultiOrganizationState(client: PoolClient): Promise<A
   summary.organizationCount = organizations.rowCount ?? 0;
   if ((organizations.rowCount ?? 0) < 2) issues.push("MULTI_ORG_REQUIRES_AT_LEAST_TWO_ORGANIZATIONS");
   if (organizations.rows.some(({ kind }) => !["LEGACY", "CUSTOMER", "DEMO"].includes(kind))) issues.push("ORGANIZATION_KIND_INVALID");
-  if (organizations.rows.some(({ status }) => !["ACTIVE", "SUSPENDED"].includes(status))) issues.push("ORGANIZATION_STATUS_INVALID");
+  if (organizations.rows.some(({ status }) => !["ACTIVE", "SUSPENDED", "RESTORING"].includes(status))) issues.push("ORGANIZATION_STATUS_INVALID");
 
   const barrierNames = [
     "Organization_transition_singleton_idx",

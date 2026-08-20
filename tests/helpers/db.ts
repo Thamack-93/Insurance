@@ -93,7 +93,14 @@ export function hashTestPassword(password: string): string {
   return `scrypt$${salt}$${derived}`;
 }
 
-async function createSessionToken(payload: { userId: string; email: string; name: string; role: "ADMIN" | "AGENT"; organizationId?: string }) {
+async function createSessionToken(payload: {
+  userId: string;
+  email: string;
+  name: string;
+  role: "ADMIN" | "AGENT";
+  organizationId?: string;
+  sessionVersion: number;
+}) {
   const exp = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30;
   const data = { ...payload, exp };
   const payloadB64 = Buffer.from(JSON.stringify(data)).toString("base64url");
@@ -345,6 +352,7 @@ export async function getAdminSessionCookie(): Promise<string> {
     name: admin.name,
     role: "ADMIN",
     organizationId: "org_legacy_singleton_0001",
+    sessionVersion: admin.sessionVersion,
   });
 
   return `${SESSION_COOKIE_NAME}=${token}`;
@@ -370,6 +378,7 @@ export async function getAgentSessionCookie(): Promise<string> {
     name: agent.name,
     role: "AGENT",
     organizationId: "org_legacy_singleton_0001",
+    sessionVersion: agent.sessionVersion,
   });
 
   return `${SESSION_COOKIE_NAME}=${token}`;
