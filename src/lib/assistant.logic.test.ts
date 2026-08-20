@@ -555,6 +555,77 @@ describe("assistant router", () => {
     }));
   });
 
+  it("asks for the policy number before a concrete policy knowledge lookup", async () => {
+    mocks.evaluateAssistantInput.mockReturnValue({
+      allowed: true,
+      normalized: "que deducible aplica a mi poliza",
+      reason: "system",
+    });
+
+    const response = await buildAssistantReply(user, "¿Qué deducible aplica a mi póliza?");
+
+    expect(response.source).toBe("local");
+    expect(response.reply).toContain("número de póliza");
+    expect(mocks.buildAssistantAiReply).not.toHaveBeenCalled();
+    expect(mocks.executeNoraSimpleRead).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a client context as a policy context", async () => {
+    mocks.evaluateAssistantInput.mockReturnValue({ allowed: true, normalized: "que deducible aplica a mi poliza", reason: "system" });
+
+    const response = await buildAssistantReply(user, "¿Qué deducible aplica a mi póliza?", { contextText: "client Juan Pérez" });
+
+    expect(response.source).toBe("local");
+    expect(response.reply).toContain("número de póliza");
+    expect(mocks.buildAssistantAiReply).not.toHaveBeenCalled();
+  });
+
+  it("routes a bare policy number after clarification to portfolio search", async () => {
+    vi.stubEnv("NORA_AGENT_MODE", "admin");
+    mocks.evaluateAssistantInput.mockReturnValue({ allowed: true, normalized: "940454625", reason: "system" });
+    mocks.executeNoraSimpleRead.mockResolvedValue({
+      value: [{ id: "policy-1", type: "policy", title: "940454625" }],
+      toolTrace: [{ tool: "searchPortfolio", outcome: "success", durationMs: 12 }],
+      knowledgeCitations: [],
+    });
+    mocks.buildAssistantAiReply.mockResolvedValue({
+      ok: true,
+      value: {
+        runId: "run-policy-number",
+        tier: "minimax",
+        reply: "Encontré la póliza 940454625.",
+        sections: [],
+        quickPrompts: [],
+        mutation: null,
+        actionProposal: null,
+        knowledgeCitations: [{ sourceId: "internal-1", chunkId: "chunk-1", chunkOrdinal: 0, sourceType: "INTERNAL", title: "Condiciones de la póliza", version: "1.0", sourceUrl: null, authority: "Aseguradora", reviewedAt: null, page: 1, section: "Deducible" }],
+        toolTrace: [{ tool: "searchPortfolio", outcome: "success", durationMs: 12 }],
+        promptVersion: "nora-agent-v5",
+        executionProfile: "simple-read",
+        stepCount: 1,
+        terminationReason: "complete",
+        resolvedModel: "alibaba/qwen3.7-flash",
+        usage: null,
+        totalUsage: null,
+        finishReason: "stop",
+        providerMetadata: {},
+        durationMs: 100,
+        trace: [],
+      },
+    });
+
+    const response = await buildAssistantReply(user, "940454625", {
+      history: [{ role: "user", content: "¿Qué deducible aplica a mi póliza?" }],
+    });
+
+    expect(response.source).toBe("ai");
+    expect(mocks.executeNoraSimpleRead).not.toHaveBeenCalled();
+    expect(mocks.buildAssistantAiReply).toHaveBeenCalledWith(expect.objectContaining({
+      activeTools: ["searchPortfolio", "getEntitySummary", "searchKnowledgeBase"],
+      requiredTool: "searchPortfolio",
+    }));
+  });
+
   it("routes an explicit draft request through structured Luna even when the agent is enabled", async () => {
     vi.stubEnv("NORA_AGENT_MODE", "all");
     vi.stubEnv("DATABASE_URL", "");

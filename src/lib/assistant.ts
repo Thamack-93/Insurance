@@ -16,7 +16,7 @@ import { buildAssistantActionProposalFromPlan } from "@/lib/assistant-actions";
 import { createAssistantThemeKey, recordAssistantReportSignal } from "@/lib/assistant-reports";
 import { buildAssistantBlockedReply, buildGmmPrivacyReply, evaluateAssistantInput, evaluateGmmPrivacy } from "@/lib/assistant-guardrails";
 import { getNoraAiBudgetStatus, isNoraAgentEnabledForUser } from "@/lib/assistant-agent-config";
-import { requiresInternalKnowledgeEvidence } from "@/lib/knowledge-base";
+import { hasExplicitPolicyIdentifier, requiresInternalKnowledgeEvidence, requiresPolicyIdentifier } from "@/lib/knowledge-base";
 import type {
   AssistantAiDiagnostic,
   AssistantAiExecutionProfile,
@@ -90,6 +90,25 @@ function buildKnowledgeAbstentionReply() : AssistantReply {
     ],
     knowledgeCitations: [],
   };
+}
+
+function buildPolicyIdentifierClarificationReply(): AssistantReply {
+  return {
+    reply: "Para consultar el deducible o cualquier condición de una póliza concreta necesito identificarla primero. ¿Cuál es el número de póliza?",
+    sections: [],
+    quickPrompts: [
+      { label: "Buscar una póliza", prompt: "Buscar póliza" },
+    ],
+    knowledgeCitations: [],
+  };
+}
+
+function isBarePolicyIdentifier(normalized: string) {
+  return /^[a-z0-9][a-z0-9/-]{2,}$/u.test(normalized) && /\d/u.test(normalized);
+}
+
+function isPolicyContext(contextText: string | null | undefined) {
+  return /^(?:policy|p[oó]liza)\b/iu.test(contextText?.trim() ?? "");
 }
 
 function isDeterministicQuery(normalized: string) {
@@ -185,7 +204,8 @@ const OPERATIONAL_LOOKUP_TERMS = ["busca", "buscar", "muestra", "mostrar", "list
 function isOperationalLookup(normalized: string) {
   if (OPERATIONAL_LOOKUP_TERMS.some((term) => normalized.includes(term))) return true;
   if (["no coinciden", "inconsist", "descuadr", "solap", "fechas de vencimiento", "renovacion", "renovación", "audita", "concili"].some((term) => normalized.includes(term))) return true;
-  return /\b(?:p[oó]liza|cliente|recibo|siniestro|endoso)\b.*\b\d{3,}\b/u.test(normalized);
+  if (isBarePolicyIdentifier(normalized)) return true;
+  return hasExplicitPolicyIdentifier(normalized) || /\b(?:cliente|recibo|siniestro|endoso)\b.*\b\d{3,}\b/u.test(normalized);
 }
 
 function isKnowledgeIntent(normalized: string) {
@@ -193,12 +213,20 @@ function isKnowledgeIntent(normalized: string) {
   return KNOWLEDGE_INTENT_TERMS.some((term) => normalized.includes(term));
 }
 
-function resolveAgentExecutionPlan(normalized: string): {
+function resolveAgentExecutionPlan(normalized: string, options: { pendingPolicyQuestion?: boolean } = {}): {
   profile: AssistantAiExecutionProfile;
   activeTools?: string[];
   requiredTool?: string | null;
   knowledgeRequired?: boolean;
 } {
+  if (options.pendingPolicyQuestion) {
+    return {
+      profile: "simple-read",
+      activeTools: ["searchPortfolio", "getEntitySummary", "searchKnowledgeBase"],
+      requiredTool: "searchPortfolio",
+      knowledgeRequired: true,
+    };
+  }
   if (isKnowledgeIntent(normalized) && !hasMutationIntent(normalized)) {
     return { profile: "simple-read", activeTools: ["searchKnowledgeBase"], requiredTool: "searchKnowledgeBase", knowledgeRequired: true };
   }
@@ -509,6 +537,18 @@ export async function buildAssistantReply(
     };
   }
 
+  if (!isPolicyContext(options.contextText) && requiresPolicyIdentifier(message)) {
+    return {
+      ...buildPolicyIdentifierClarificationReply(),
+      source: "local",
+      reportId: null,
+      reportThemeKey: null,
+      reportThemeLabel: null,
+      aiPromptVersion: null,
+      aiToolTrace: [],
+    };
+  }
+
   const localMessage = options.contextText ? `${message}\n\nContexto explícitamente aceptado: ${options.contextText}.` : message;
   let localReply: AssistantReply | null = null;
   async function getLocalReply() {
@@ -519,7 +559,8 @@ export async function buildAssistantReply(
   const theme = detectTheme(normalized);
   const agentEnabled = isNoraAgentEnabledForUser(user);
   const mutationIntent = hasMutationIntent(normalized);
-  const agentExecutionPlan = agentEnabled && !mutationIntent ? resolveAgentExecutionPlan(normalized) : null;
+  const pendingPolicyQuestion = isBarePolicyIdentifier(normalized) && (options.history ?? []).some((entry) => entry.role === "user" && requiresPolicyIdentifier(entry.content));
+  const agentExecutionPlan = agentEnabled && !mutationIntent ? resolveAgentExecutionPlan(normalized, { pendingPolicyQuestion }) : null;
   const isKnownAgentRead = agentExecutionPlan?.profile === "simple-read";
   const knowledgeRequired = Boolean(agentExecutionPlan?.knowledgeRequired || (!mutationIntent && isKnowledgeIntent(normalized)));
   const isKnowledgeRead = knowledgeRequired;
@@ -607,7 +648,7 @@ export async function buildAssistantReply(
     });
     if (aiReply.ok) {
       const citations = aiReply.value.knowledgeCitations ?? [];
-      const internalEvidenceRequired = requiresInternalKnowledgeEvidence(message);
+      const internalEvidenceRequired = requiresInternalKnowledgeEvidence(message) || pendingPolicyQuestion;
       const hasRequiredInternalEvidence = !internalEvidenceRequired || (citations.length > 0 && citations.some((citation) => citation.sourceType === "INTERNAL"));
       const generatedGmmReplyIsSafe = !gmmMode || evaluateGmmPrivacy(aiReply.value.reply, Boolean(options.gmmMetadataOnly)).allowed;
       if (gmmMode && !generatedGmmReplyIsSafe) {
