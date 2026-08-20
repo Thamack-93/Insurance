@@ -85,6 +85,7 @@ const KNOWLEDGE_QUERY_STOPWORDS = new Set([
   "a", "al", "como", "cómo", "con", "cual", "cuál", "de", "del", "el", "en", "es", "la", "las", "lo", "los",
   "para", "por", "que", "qué", "se", "sobre", "son", "su", "sus", "un", "una", "unas", "uno", "unos",
   "define", "defineme", "defíname", "explica", "significa", "seguro", "seguros", "mi", "mis", "esta", "este", "tu", "tus",
+  "definicion", "definiciones", "general", "generales", "concepto", "conceptos", "basico", "basica", "basicos", "basicas",
   "suele", "suelen", "usual", "usuales", "frecuente", "frecuentes", "despues", "después", "siguiente", "siguientes", "siguen",
   "hacer", "necesito", "necesitas", "generar", "solicitar", "solicita", "programar", "programacion", "programación",
 ]);
