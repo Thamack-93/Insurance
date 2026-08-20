@@ -27,6 +27,7 @@ describe("insurance knowledge base rules", () => {
 
   it("removes question framing before full-text retrieval", () => {
     expect(buildKnowledgeSearchQuery("¿Qué significa prima?")).toBe("prima");
+    expect(buildKnowledgeSearchQuery("prima definición general")).toBe("prima");
     expect(buildKnowledgeSearchQuery("¿Qué es un deducible en seguros?")).toBe("deducible");
     expect(buildKnowledgeSearchQuery("¿Qué deducible aplica a mi póliza?")).toBe("deducible aplica poliza");
     expect(buildKnowledgeSearchQuery("¿Qué suele cubrir un seguro de Auto?")).toBe("cobertura auto");
