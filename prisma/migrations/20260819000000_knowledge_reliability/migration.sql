@@ -86,13 +86,13 @@ ALTER TEXT SEARCH CONFIGURATION policydesk_spanish
 
 CREATE INDEX "KnowledgeChunk_search_tsvector_idx"
   ON "KnowledgeChunk" USING GIN (
-    setweight(to_tsvector('policydesk_spanish', coalesce("section", '')), 'B') ||
-    setweight(to_tsvector('policydesk_spanish', coalesce("content", '')), 'D')
+    (setweight(to_tsvector('policydesk_spanish', coalesce("section", '')), 'B') ||
+     setweight(to_tsvector('policydesk_spanish', coalesce("content", '')), 'D'))
   );
 CREATE INDEX "GeneralKnowledgeChunk_search_tsvector_idx"
   ON "GeneralKnowledgeChunk" USING GIN (
-    setweight(to_tsvector('policydesk_spanish', coalesce("section", '')), 'B') ||
-    setweight(to_tsvector('policydesk_spanish', coalesce("content", '')), 'D')
+    (setweight(to_tsvector('policydesk_spanish', coalesce("section", '')), 'B') ||
+     setweight(to_tsvector('policydesk_spanish', coalesce("content", '')), 'D'))
   );
 
 CREATE UNIQUE INDEX "KnowledgeSource_active_scope_key"
