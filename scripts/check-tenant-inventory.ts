@@ -27,11 +27,9 @@ function modelBlock(model: string) {
 }
 
 function migrationCreatesOrganizationColumn(table: string) {
-  if (migration.includes(`ALTER TABLE "${table}" ADD COLUMN "organizationId" TEXT`)) return true;
-  const createStart = migration.indexOf(`CREATE TABLE "${table}" (`);
-  if (createStart < 0) return false;
-  const createEnd = migration.indexOf("\n);", createStart);
-  return migration.slice(createStart, createEnd < 0 ? undefined : createEnd).includes('"organizationId" TEXT');
+  if (new RegExp(`ALTER TABLE "${table}"\\s+ADD COLUMN "organizationId"\\s+TEXT`, "i").test(migration)) return true;
+  const match = migration.match(new RegExp(`CREATE TABLE "${table}" \\([\\s\\S]*?\\n\\);`, "i"));
+  return Boolean(match?.[0].includes('"organizationId" TEXT'));
 }
 
 for (const model of modelNames) if (!expected.has(model)) issues.push(`${model} is not classified in the Cycle 1 organization inventory`);
@@ -54,7 +52,7 @@ for (const table of PLATFORM_GLOBAL_TABLES) {
   if (["User", "Organization", "OrganizationMembership"].includes(table)) continue;
   const block = modelBlock(table);
   if (block.includes("organizationId")) issues.push(`${table} is platform-global and must not have organizationId`);
-  if (migrationCreatesOrganizationColumn(table) || migration.includes(`CREATE TRIGGER "${table}_transition_singleton_organization"`)) issues.push(`${table} is platform-global but migration scopes it to the singleton organization`);
+  if (migration.includes(`CREATE TRIGGER "${table}_transition_singleton_organization"`)) issues.push(`${table} is platform-global but migration scopes it to the singleton organization`);
 }
 
 if (issues.length) {

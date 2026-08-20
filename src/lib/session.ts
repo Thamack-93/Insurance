@@ -11,6 +11,10 @@ export type SessionPayload = {
   platformRole?: PlatformRoleSession;
   /** Signed selection hint only. Membership authorization is revalidated per request. */
   organizationId?: string;
+  /** Compared with User.sessionVersion to revoke existing sessions after resets. */
+  sessionVersion: number;
+  /** Signed routing hint; the database remains the source of truth. */
+  mustChangePassword?: boolean;
   exp: number;
 };
 
@@ -113,7 +117,7 @@ export async function verifySessionToken(token: string | undefined | null): Prom
     if (typeof payload.exp !== "number" || payload.exp < Math.floor(Date.now() / 1000)) {
       return null;
     }
-    if (!payload.userId || !payload.email) return null;
+    if (!payload.userId || !payload.email || typeof payload.sessionVersion !== "number") return null;
     if (payload.role !== "ADMIN" && payload.role !== "AGENT") {
       // Older tokens without a role default to AGENT for safety.
       payload.role = "AGENT";

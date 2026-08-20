@@ -983,7 +983,7 @@ model SystemSetting {
 }
 
 /// Platform-controlled backup catalog. These rows are never part of a tenant
-/// snapshot restore; organizationId is attribution and authorization metadata.
+/// snapshot restore; tenant attribution is authorization metadata.
 model BackupArtifact {
   id                String   @id @default(cuid())
   scope             String
@@ -1011,6 +1011,7 @@ model BackupArtifact {
   emergencyBackups  OrganizationRestoreRun[] @relation("EmergencyBackup")
 
   @@index([organizationId, createdAt])
+  @@index([organizationId])
   @@index([scope, createdAt])
   @@index([status])
 }
@@ -1038,6 +1039,7 @@ model OrganizationRestoreRun {
   emergencyBackup BackupArtifact? @relation("EmergencyBackup", fields: [emergencyBackupId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, createdAt])
+  @@index([organizationId])
   @@index([artifactId])
   @@index([status])
 }

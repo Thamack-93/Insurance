@@ -77,6 +77,7 @@ export async function getCurrentUser() {
   if (!session) return null;
   const db = getDb();
   const user = await db.user.findUnique({ where: { id: session.userId } });
+  if (!user || user.sessionVersion !== session.sessionVersion) return null;
   return user;
 }
 
@@ -107,7 +108,7 @@ export async function requireUser() {
   if (!session) throw new AuthError("Necesitas iniciar sesión.", 401);
   const db = getDb();
   const user = await db.user.findUnique({ where: { id: session.userId } });
-  if (!user || !user.active || user.id === SYSTEM_USER_ID) {
+  if (!user || user.sessionVersion !== session.sessionVersion || !user.active || user.id === SYSTEM_USER_ID) {
     throw new AuthError("Tu cuenta está deshabilitada.", 401);
   }
   return user;

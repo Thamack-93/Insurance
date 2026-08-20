@@ -8,6 +8,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 
 export const BACKUP_FORMAT = "policydesk-postgres-ndjson";
 export const BACKUP_FORMAT_VERSION = 1;
+export const TENANT_BACKUP_FORMAT_VERSION = 2;
 export const BACKUP_ALGORITHM = "AES-256-GCM";
 export const BACKUP_COMPRESSION = "gzip";
 export const BACKUP_AUTH_TAG_BYTES = 16;
@@ -26,9 +27,24 @@ export type BackupEncryptionHeader = {
   version: typeof BACKUP_FORMAT_VERSION;
 };
 
+export type BackupScope = "ORGANIZATION" | "LEGACY_SINGLETON" | "PLATFORM";
+export type BackupCapability = "COMPLETE" | "DATABASE_ONLY";
+export type RestoreRunStatus = "PREVIEW" | "PREPARED" | "APPLYING" | "PASS" | "FAIL" | "RESTORING";
+
 export type BackupManifest = {
   format: typeof BACKUP_FORMAT;
-  version: typeof BACKUP_FORMAT_VERSION;
+  version: typeof BACKUP_FORMAT_VERSION | typeof TENANT_BACKUP_FORMAT_VERSION;
+  scope?: BackupScope;
+  organization?: {
+    id: string;
+    name?: string;
+    slug?: string;
+  };
+  capability?: BackupCapability;
+  dependencies?: {
+    userIds: string[];
+  };
+  schemaFingerprint?: string;
   createdAt: string;
   completedAt: string;
   payload: {
@@ -50,6 +66,14 @@ export type BackupManifest = {
 };
 
 export type BackupManifestInput = Omit<BackupManifest, "manifestSha256">;
+
+export type OrganizationBackupManifestV2 = Omit<BackupManifest, "version" | "scope" | "organization" | "capability" | "dependencies"> & {
+  version: typeof TENANT_BACKUP_FORMAT_VERSION;
+  scope: "ORGANIZATION";
+  organization: { id: string; name?: string; slug?: string };
+  capability: BackupCapability;
+  dependencies: { userIds: string[] };
+};
 
 export type RetentionCandidate = {
   id: string;
@@ -232,7 +256,7 @@ export function verifyBackupManifest(value: unknown):
   const manifest = value as Partial<BackupManifest>;
   if (
     manifest.format !== BACKUP_FORMAT ||
-    manifest.version !== BACKUP_FORMAT_VERSION ||
+    (manifest.version !== BACKUP_FORMAT_VERSION && manifest.version !== TENANT_BACKUP_FORMAT_VERSION) ||
     typeof manifest.createdAt !== "string" ||
     typeof manifest.completedAt !== "string" ||
     manifest.compression !== BACKUP_COMPRESSION ||
@@ -253,6 +277,20 @@ export function verifyBackupManifest(value: unknown):
     typeof manifest.manifestSha256 !== "string"
   ) {
     return { valid: false, reason: "El manifiesto no tiene el formato esperado." };
+  }
+  if (manifest.version === TENANT_BACKUP_FORMAT_VERSION) {
+    if (manifest.scope !== "ORGANIZATION" || !manifest.organization?.id) {
+      return { valid: false, reason: "El manifiesto tenant no identifica su organización." };
+    }
+    if (manifest.capability !== "COMPLETE" && manifest.capability !== "DATABASE_ONLY") {
+      return { valid: false, reason: "La capacidad del backup tenant no es válida." };
+    }
+    if (!manifest.dependencies || !Array.isArray(manifest.dependencies.userIds)) {
+      return { valid: false, reason: "El manifiesto tenant no contiene dependencias globales." };
+    }
+    if (typeof manifest.schemaFingerprint !== "string" || !/^[a-f0-9]{64}$/i.test(manifest.schemaFingerprint)) {
+      return { valid: false, reason: "El manifiesto tenant no contiene fingerprint de schema." };
+    }
   }
   const { manifestSha256, ...unsigned } = manifest as BackupManifest;
   if (!hashesMatch(manifestSha256, sha256Hex(canonicalJson(unsigned)))) {

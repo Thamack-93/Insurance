@@ -20,7 +20,7 @@ export default async function UsersAdminPage() {
           title="Usuarios"
           description="Invita compañeros, ajusta sus permisos y administra el acceso a la correduría."
         />
-        <UsersAdminPanel initialUsers={users} currentUserId={context.userId} />
+        <UsersAdminPanel initialUsers={users} currentUserId={context.userId} canResetPasswords={context.membershipRole === "OWNER"} />
       </div>
     </div>
   );

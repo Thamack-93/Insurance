@@ -35,6 +35,7 @@ CREATE TABLE "BackupArtifact" (
 );
 
 CREATE INDEX "BackupArtifact_organizationId_createdAt_idx" ON "BackupArtifact"("organizationId", "createdAt");
+CREATE INDEX "BackupArtifact_organizationId_idx" ON "BackupArtifact"("organizationId");
 CREATE INDEX "BackupArtifact_scope_createdAt_idx" ON "BackupArtifact"("scope", "createdAt");
 CREATE INDEX "BackupArtifact_status_idx" ON "BackupArtifact"("status");
 
@@ -64,5 +65,6 @@ CREATE TABLE "OrganizationRestoreRun" (
 );
 
 CREATE INDEX "OrganizationRestoreRun_organizationId_createdAt_idx" ON "OrganizationRestoreRun"("organizationId", "createdAt");
+CREATE INDEX "OrganizationRestoreRun_organizationId_idx" ON "OrganizationRestoreRun"("organizationId");
 CREATE INDEX "OrganizationRestoreRun_artifactId_idx" ON "OrganizationRestoreRun"("artifactId");
 CREATE INDEX "OrganizationRestoreRun_status_idx" ON "OrganizationRestoreRun"("status");

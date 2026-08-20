@@ -61,6 +61,10 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
     return { ok: false, error: "Correo o contraseña incorrectos." };
   }
 
+  if (user.mustChangePassword && user.temporaryPasswordExpiresAt && user.temporaryPasswordExpiresAt <= new Date()) {
+    return { ok: false, error: "La contraseña temporal expiró. Solicita una nueva al administrador." };
+  }
+
   if (!user.active) {
     await recordSecurityEvent({
       alertType: SECURITY_EVENT_TYPES.loginDisabled,
@@ -97,6 +101,8 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
     role: user.role as UserRoleSession,
     platformRole: user.platformRole === "SUPERADMIN" ? "SUPERADMIN" : "NONE",
     organizationId: initialOrganizationId,
+    sessionVersion: user.sessionVersion,
+    mustChangePassword: user.mustChangePassword,
   });
 
   // ActivityLog is tenant-owned. Platform-only logins have no tenant and are

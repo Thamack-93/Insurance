@@ -6,6 +6,7 @@ import {
   parseBackupEncryptionKey,
   selectBackupRetention,
   verifyBackupManifest,
+  TENANT_BACKUP_FORMAT_VERSION,
 } from "@/lib/backup-logic";
 import {
   formatBackupPreflightError,
@@ -79,6 +80,29 @@ describe("backup manifest", () => {
       valid: false,
       reason: "El hash del manifiesto no coincide.",
     });
+  });
+
+  it("requires tenant attribution and dependencies for v2", () => {
+    const manifest = createBackupManifest({
+      format: "policydesk-postgres-ndjson",
+      version: TENANT_BACKUP_FORMAT_VERSION,
+      scope: "ORGANIZATION",
+      organization: { id: "org-pedro", name: "Pedro" },
+      capability: "COMPLETE",
+      dependencies: { userIds: ["usr-owner"] },
+      schemaFingerprint: "c".repeat(64),
+      createdAt: "2026-07-04T10:00:00.000Z",
+      completedAt: "2026-07-04T10:00:01.000Z",
+      payload: { filename: "tenant.ndjson.gz.enc", pathname: "organization-backups/org-pedro/tenant.ndjson.gz.enc", size: 1, sha256: "b".repeat(64) },
+      encryption: { algorithm: "AES-256-GCM", keyVersion: "v1", iv: IV.toString("base64"), authTagBytes: 16 },
+      compression: "gzip",
+      tables: [{ schema: "public", name: "Client", rowCount: 1 }],
+      totals: { tables: 1, rows: 1 },
+    });
+    expect(verifyBackupManifest(manifest)).toMatchObject({ valid: true });
+    const invalid = structuredClone(manifest);
+    delete invalid.dependencies;
+    expect(verifyBackupManifest(invalid)).toMatchObject({ valid: false });
   });
 });
 
