@@ -16,7 +16,7 @@ import { buildAssistantActionProposalFromPlan } from "@/lib/assistant-actions";
 import { createAssistantThemeKey, recordAssistantReportSignal } from "@/lib/assistant-reports";
 import { buildAssistantBlockedReply, buildGmmPrivacyReply, evaluateAssistantInput, evaluateGmmPrivacy } from "@/lib/assistant-guardrails";
 import { getNoraAiBudgetStatus, isNoraAgentEnabledForUser } from "@/lib/assistant-agent-config";
-import { requiresInternalKnowledgeEvidence } from "@/lib/knowledge-base";
+import { requiresInternalKnowledgeEvidence, requiresPolicyIdentifier } from "@/lib/knowledge-base";
 import type {
   AssistantAiDiagnostic,
   AssistantAiExecutionProfile,
@@ -87,6 +87,17 @@ function buildKnowledgeAbstentionReply() : AssistantReply {
     quickPrompts: [
       { label: "Buscar una póliza", prompt: "Buscar póliza" },
       { label: "Ver documentos", prompt: "¿Qué documento necesito revisar?" },
+    ],
+    knowledgeCitations: [],
+  };
+}
+
+function buildPolicyIdentifierClarificationReply(): AssistantReply {
+  return {
+    reply: "Para consultar el deducible o cualquier condición de una póliza concreta necesito identificarla primero. ¿Cuál es el número de póliza?",
+    sections: [],
+    quickPrompts: [
+      { label: "Buscar una póliza", prompt: "Buscar póliza" },
     ],
     knowledgeCitations: [],
   };
@@ -185,6 +196,7 @@ const OPERATIONAL_LOOKUP_TERMS = ["busca", "buscar", "muestra", "mostrar", "list
 function isOperationalLookup(normalized: string) {
   if (OPERATIONAL_LOOKUP_TERMS.some((term) => normalized.includes(term))) return true;
   if (["no coinciden", "inconsist", "descuadr", "solap", "fechas de vencimiento", "renovacion", "renovación", "audita", "concili"].some((term) => normalized.includes(term))) return true;
+  if (/^[a-z0-9][a-z0-9/-]{2,}$/u.test(normalized) && /\d/u.test(normalized)) return true;
   return /\b(?:p[oó]liza|cliente|recibo|siniestro|endoso)\b.*\b\d{3,}\b/u.test(normalized);
 }
 
@@ -500,6 +512,18 @@ export async function buildAssistantReply(
         { label: "Ver checklist", prompt: "Ver checklist de requisitos GMM" },
         { label: "Ver faltantes", prompt: "Mostrar requisitos faltantes de GMM" },
       ],
+      source: "local",
+      reportId: null,
+      reportThemeKey: null,
+      reportThemeLabel: null,
+      aiPromptVersion: null,
+      aiToolTrace: [],
+    };
+  }
+
+  if (!options.contextText && requiresPolicyIdentifier(message)) {
+    return {
+      ...buildPolicyIdentifierClarificationReply(),
       source: "local",
       reportId: null,
       reportThemeKey: null,

@@ -644,7 +644,8 @@ async function buildPromptReply(user: AssistantUser, message: string): Promise<A
     );
   }
 
-  if (normalized.includes("buscar") || normalized.includes("cliente") || normalized.includes("poliza") || normalized.includes("póliza")) {
+  const isBarePortfolioIdentifier = /^[a-z0-9][a-z0-9/-]{2,}$/u.test(normalized) && /\d/u.test(normalized);
+  if (normalized.includes("buscar") || normalized.includes("cliente") || normalized.includes("poliza") || normalized.includes("póliza") || isBarePortfolioIdentifier) {
     const results = await searchUserPortfolio(user, message);
     if (results.length === 0) {
       return informationalReply(

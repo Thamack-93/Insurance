@@ -79,6 +79,8 @@ const CONCRETE_POLICY_CONTEXT = [
   " mi ", " mis ", " esta ", " este ", " tu ", " tus ", " la poliza ", " la póliza ", " el contrato ",
 ];
 
+const POLICY_IDENTIFIER_PATTERN = /\b(?:p[oó]liza\s*(?:n[uú]mero|no\.?|#)?\s*)?(?:#?\s*[A-Z0-9]*\d[A-Z0-9/-]{2,})\b/iu;
+
 const KNOWLEDGE_QUERY_STOPWORDS = new Set([
   "a", "al", "como", "cómo", "con", "cual", "cuál", "de", "del", "el", "en", "es", "la", "las", "lo", "los",
   "para", "por", "que", "qué", "se", "sobre", "son", "su", "sus", "un", "una", "unas", "uno", "unos",
@@ -128,6 +130,24 @@ export function requiresInternalKnowledgeEvidence(question: string) {
   const refersToConcretePolicy = CONCRETE_POLICY_CONTEXT.some((term) => normalized.includes(term.normalize("NFD").replace(/\p{Diacritic}/gu, "")));
   if (isGeneralDefinition && !refersToConcretePolicy) return false;
   return CONTRACTUAL_TERMS.some((term) => normalized.includes(term.normalize("NFD").replace(/\p{Diacritic}/gu, "")));
+}
+
+/**
+ * Concrete policy questions need a policy identifier before Nora can look up
+ * tenant evidence. This is a clarification state, not a factual answer, so it
+ * must happen before the KB search/abstention path.
+ */
+export function requiresPolicyIdentifier(question: string) {
+  const normalized = ` ${question
+    .toLocaleLowerCase("es-MX")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")} `;
+  const hasConcreteContext = CONCRETE_POLICY_CONTEXT.some((term) => {
+    const normalizedTerm = term.normalize("NFD").replace(/\p{Diacritic}/gu, "").trim();
+    return normalized.includes(` ${normalizedTerm} `);
+  });
+  const asksForApplication = /\baplic(?:a|ar|an|able)\b/u.test(normalized);
+  return requiresInternalKnowledgeEvidence(question) && (hasConcreteContext || asksForApplication) && !POLICY_IDENTIFIER_PATTERN.test(question);
 }
 
 export function buildKnowledgeSearchQuery(question: string) {
