@@ -3,8 +3,10 @@ import { Building2, ChevronRight, ShieldCheck } from "lucide-react";
 import { Pagination } from "@/components/lists/pagination";
 import { requireSuperAdminOrRedirect } from "@/lib/auth";
 import { getPlatformOverview } from "@/lib/platform-dashboard";
+import { getPlatformBillingOverview } from "@/lib/platform-billing";
 import { getOrganizationOptions } from "@/lib/organization-context";
 import { ChangePasswordForm } from "@/components/settings/change-password-form";
+import { PlatformBillingPanel } from "@/components/platform/platform-billing-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +34,7 @@ function kindLabel(value: string) {
 export default async function PlatformPage({ searchParams }: { searchParams?: Promise<{ q?: string; status?: string; page?: string; forcePassword?: string }> }) {
   const platformAdmin = await requireSuperAdminOrRedirect();
   const params = (await searchParams) ?? {};
-  const [overview, organizationOptions] = await Promise.all([getPlatformOverview(params), getOrganizationOptions()]);
+  const [overview, organizationOptions, billing] = await Promise.all([getPlatformOverview(params), getOrganizationOptions(), getPlatformBillingOverview()]);
   const paginationParams = { q: params.q, status: params.status };
   const forcePassword = platformAdmin.mustChangePassword || params.forcePassword === "1";
 
@@ -97,6 +99,8 @@ export default async function PlatformPage({ searchParams }: { searchParams?: Pr
         )}
         <Pagination page={overview.page} pageSize={overview.pageSize} total={overview.total} basePath="/platform" searchParams={paginationParams} />
       </section>
+
+      <PlatformBillingPanel overview={billing} />
 
       <p className="text-sm text-muted-foreground">Este panel es de consulta. Para operar, selecciona una organización con membership activa.</p>
       {organizationOptions.length > 0 ? <Link href="/organization/select" className="text-sm font-medium text-primary underline">Entrar a mi organización operativa</Link> : <p className="text-sm text-muted-foreground">Esta cuenta master no tiene membership tenant y no puede abrir datos operativos.</p>}

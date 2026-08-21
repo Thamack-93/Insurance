@@ -4,6 +4,7 @@ import { ArrowLeft, ExternalLink, ShieldCheck } from "lucide-react";
 import { Pagination } from "@/components/lists/pagination";
 import { getOrganizationOptions } from "@/lib/organization-context";
 import { getPlatformOrganizationDetail } from "@/lib/platform-dashboard";
+import { getPlatformBillingDetail } from "@/lib/platform-billing";
 import { requireSuperAdminOrRedirect } from "@/lib/auth";
 import { getBackupPreflightStatus } from "@/lib/backup";
 import { OrganizationBackupsPanel } from "@/components/platform/organization-backups-panel";
@@ -12,6 +13,7 @@ import {
   listOrganizationBackupsAction,
 } from "@/app/(dashboard)/settings/backups-actions";
 import { PlatformPasswordReset } from "@/components/platform/platform-password-reset";
+import { PlatformOrganizationBillingPanel } from "@/components/platform/platform-billing-panel";
 import { getSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
@@ -46,8 +48,11 @@ export default async function PlatformOrganizationPage({ params, searchParams }:
   } catch {
     notFound();
   }
-  const detail = await getPlatformOrganizationDetail(decodedOrganizationId, { memberQuery: query.members, memberPage: query.memberPage });
-  if (!detail) notFound();
+  const [detail, billing] = await Promise.all([
+    getPlatformOrganizationDetail(decodedOrganizationId, { memberQuery: query.members, memberPage: query.memberPage }),
+    getPlatformBillingDetail(decodedOrganizationId),
+  ]);
+  if (!detail || !billing) notFound();
   const [options, initialBackups, settings] = await Promise.all([
     getOrganizationOptions(),
     listOrganizationBackupsAction(detail.organization.id).catch(() => []),
@@ -77,6 +82,8 @@ export default async function PlatformOrganizationPage({ params, searchParams }:
         listBackups={listOrganizationBackupsAction}
       />
       {detail.organization.health.length > 0 ? <p className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">Revisión requerida: {detail.organization.health.map(healthLabel).join(" · ")}</p> : <p className="rounded-lg border border-emerald-300/60 bg-emerald-50 p-3 text-sm text-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-200">La organización tiene Owner y miembros activos.</p>}
+
+      <PlatformOrganizationBillingPanel organizationId={detail.organization.id} detail={billing} />
 
       <section className="overflow-hidden rounded-xl border bg-card" aria-labelledby="platform-memberships"><div className="border-b p-4"><h2 id="platform-memberships" className="font-semibold">Memberships</h2><form className="mt-3 flex gap-2" method="get"><input name="members" defaultValue={query.members ?? ""} placeholder="Buscar usuario o email" className="h-9 min-w-0 flex-1 rounded-lg border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" /><button type="submit" className="h-9 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground">Buscar</button></form></div>{detail.memberships.length === 0 ? <p className="p-6 text-sm text-muted-foreground">No hay memberships que coincidan.</p> : <div className="overflow-x-auto"><table className="w-full min-w-[820px] text-left text-sm"><thead className="border-b text-xs uppercase tracking-wide text-muted-foreground"><tr><th className="px-4 py-3">Usuario</th><th className="px-4 py-3">Membership</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3">Último login</th><th className="px-4 py-3 text-right">Credenciales</th></tr></thead><tbody className="divide-y">{detail.memberships.map((membership) => <tr key={membership.id}><td className="px-4 py-3"><p className="font-medium">{membership.userName}</p><p className="text-xs text-muted-foreground">{membership.userEmail}</p></td><td className="px-4 py-3">{membership.role}</td><td className="px-4 py-3">{membership.active && membership.userActive ? "Activa" : "Inactiva"}</td><td className="px-4 py-3 text-muted-foreground">{formatDateTime(membership.lastLoginAt)}</td><td className="px-4 py-3 text-right"><PlatformPasswordReset userId={membership.userId} name={membership.userName} email={membership.userEmail} /></td></tr>)}</tbody></table></div>}<Pagination page={Number(query.memberPage ?? "1") || 1} pageSize={25} total={detail.membershipTotal} basePath={`/platform/organizations/${encodeURIComponent(detail.organization.id)}`} searchParams={memberPaginationParams} /></section>
 
