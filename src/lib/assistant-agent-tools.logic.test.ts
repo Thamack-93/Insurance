@@ -104,6 +104,27 @@ describe("Nora agent tool authorization", () => {
     });
   });
 
+  it("keeps general factual searches on the combined evidence route", async () => {
+    mocks.searchKnowledgeBase.mockResolvedValue({
+      results: [{ sourceId: "general-1", chunkId: "general-chunk-1", chunkOrdinal: 1, sourceType: "GENERAL", title: "Glosario", version: "2026-08-17", sourceUrl: "https://example.com/glosario", authority: "Demo", reviewedAt: null, page: null, section: "Conceptos", match: 0.6, excerpt: "La prima es el importe de contratación." }],
+      requiresInternalEvidence: false,
+      abstained: false,
+      executedQuery: "prima",
+      selectedSourceIds: ["general-1"],
+      citationCount: 1,
+      durationMs: 4,
+    });
+    const runtime = createNoraAgentTools({ id: "agent-1", role: "ADMIN" });
+    const search = runtime.tools.searchKnowledgeBase as DirectTool;
+
+    await expect(search.execute?.({ question: "¿Qué significa prima en seguros?", sourceType: "INTERNAL", limit: 5 }, {})).resolves.toMatchObject({ abstained: false });
+    expect(mocks.searchKnowledgeBase).toHaveBeenCalledWith(expect.objectContaining({ sourceType: "BOTH" }));
+    expect(runtime.snapshot().trace).toEqual([expect.objectContaining({
+      tool: "searchKnowledgeBase",
+      metadata: expect.objectContaining({ executedQuery: "prima", citationCount: 1, selectedSourceIds: ["general-1"] }),
+    })]);
+  });
+
   it("fails closed when the authenticated user changes between steps", async () => {
     mocks.requireOrganizationContext.mockResolvedValue({ userId: "other-user", organizationId: "org-default", membershipRole: "ADMIN" });
     const runtime = createNoraAgentTools({ id: "agent-1", role: "AGENT" });

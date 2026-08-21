@@ -112,7 +112,18 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
     const startedAt = Date.now();
     try {
       const result = outputSchema.parse(await operation());
-      trace.push({ tool: name, outcome: "success", durationMs: Date.now() - startedAt });
+      const entry: AssistantAiToolTraceEntry = { tool: name, outcome: "success", durationMs: Date.now() - startedAt };
+      if (name === "searchKnowledgeBase" && result && typeof result === "object" && "executedQuery" in result) {
+        const knowledgeResult = result as unknown as { executedQuery: string; selectedSourceIds: string[]; citationCount: number; abstentionReason?: string; durationMs: number };
+        entry.metadata = {
+          executedQuery: knowledgeResult.executedQuery,
+          selectedSourceIds: knowledgeResult.selectedSourceIds,
+          citationCount: knowledgeResult.citationCount,
+          ...(knowledgeResult.abstentionReason ? { abstentionReason: knowledgeResult.abstentionReason } : {}),
+          durationMs: knowledgeResult.durationMs,
+        };
+      }
+      trace.push(entry);
       return result;
     } catch (error) {
       trace.push({ tool: name, outcome: "error", durationMs: Date.now() - startedAt });
@@ -142,7 +153,7 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
         product: z.string().trim().max(120).nullish(),
         limit: z.number().int().min(1).max(5).default(5),
       }),
-      execute: ({ question, sourceType, insurerName, product, limit }) => traced("searchKnowledgeBase", knowledgeOutputSchema, async () => {
+      execute: ({ question, insurerName, product, limit }) => traced("searchKnowledgeBase", knowledgeOutputSchema, async () => {
         const scope = await requireNoraToolScope(user.id);
         if (options.gmmMetadataOnly && !evaluateGmmPrivacy(question, true).allowed) {
           throw new Error("La consulta GMM contiene narrativa sensible y no puede buscarse en Nora.");
@@ -150,21 +161,14 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
         const result = await searchActiveKnowledgeBase({
           organizationId: scope.organizationId,
           question,
-          sourceType: options.gmmMetadataOnly ? "GENERAL" : sourceType,
+          // The model cannot widen or narrow evidence policy. Contractual
+          // questions are forced to INTERNAL inside searchActiveKnowledgeBase;
+          // general factual questions must still see the curated GENERAL catalog.
+          sourceType: options.gmmMetadataOnly ? "GENERAL" : "BOTH",
           insurerName: options.gmmMetadataOnly ? null : insurerName,
           product: options.gmmMetadataOnly ? "GMM" : product,
           limit,
         });
-        const latestTrace = trace[trace.length - 1];
-        if (latestTrace) {
-          latestTrace.metadata = {
-            executedQuery: result.executedQuery,
-            selectedSourceIds: result.selectedSourceIds,
-            citationCount: result.citationCount,
-            ...(result.abstentionReason ? { abstentionReason: result.abstentionReason } : {}),
-            durationMs: result.durationMs,
-          };
-        }
         for (const citation of result.results) {
           knowledgeCitations.set(`${citation.sourceType}:${citation.chunkId}`, {
             sourceId: citation.sourceId,
