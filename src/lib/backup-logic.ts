@@ -43,6 +43,7 @@ export type BackupManifest = {
   capability?: BackupCapability;
   dependencies?: {
     userIds: string[];
+    planIds?: string[];
   };
   schemaFingerprint?: string;
   createdAt: string;
@@ -72,7 +73,7 @@ export type OrganizationBackupManifestV2 = Omit<BackupManifest, "version" | "sco
   scope: "ORGANIZATION";
   organization: { id: string; name?: string; slug?: string };
   capability: BackupCapability;
-  dependencies: { userIds: string[] };
+  dependencies: { userIds: string[]; planIds: string[] };
 };
 
 export type RetentionCandidate = {
@@ -287,6 +288,13 @@ export function verifyBackupManifest(value: unknown):
     }
     if (!manifest.dependencies || !Array.isArray(manifest.dependencies.userIds)) {
       return { valid: false, reason: "El manifiesto tenant no contiene dependencias globales." };
+    }
+    const hasBillingSubscriptions = manifest.tables.some((table) => table.schema === "public" && table.name === "OrganizationSubscription");
+    if (hasBillingSubscriptions && !Array.isArray(manifest.dependencies.planIds)) {
+      return { valid: false, reason: "El manifiesto tenant con billing no contiene dependencias de planes." };
+    }
+    if (manifest.dependencies.planIds !== undefined && manifest.dependencies.planIds.some((id) => typeof id !== "string" || id.length === 0)) {
+      return { valid: false, reason: "Las dependencias de planes del manifiesto tenant no son válidas." };
     }
     if (typeof manifest.schemaFingerprint !== "string" || !/^[a-f0-9]{64}$/i.test(manifest.schemaFingerprint)) {
       return { valid: false, reason: "El manifiesto tenant no contiene fingerprint de schema." };

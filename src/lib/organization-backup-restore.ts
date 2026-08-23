@@ -12,7 +12,7 @@ import {
 } from "@/lib/backup-restore-validation";
 import { RestoreIntegrityError } from "@/lib/backup-restore-validation";
 
-const OPTIONAL_TENANT_TABLES = new Set(["SecurityEventAggregate"]);
+const OPTIONAL_TENANT_TABLES = new Set(["SecurityEventAggregate", "OrganizationSubscription", "BillingCharge"]);
 const TENANT_TABLES = new Set([...PROTECTED_TENANT_TABLES, ...OPTIONAL_TENANT_TABLES]);
 
 const CYCLIC_NULLABLE_COLUMNS = [
@@ -98,11 +98,27 @@ async function assertDependencies(client: PoolClient, parsed: ParsedBackup, orga
     throw new RestoreIntegrityError("El backup contiene Document, pero los archivos documentales no están incluidos.", "TENANT_AUDIT_FAILED");
   }
   const dependencyIds = manifest.dependencies?.userIds ?? [];
-  if (dependencyIds.length === 0) return;
-  const result = await client.query<{ id: string }>(`SELECT "id" FROM "User" WHERE "id" = ANY($1::text[])`, [dependencyIds]);
-  const found = new Set(result.rows.map((row) => row.id));
-  const missing = dependencyIds.filter((id) => !found.has(id));
-  if (missing.length > 0) throw new RestoreIntegrityError(`Faltan usuarios globales dependientes (${missing.length}).`, "TENANT_AUDIT_FAILED");
+  if (dependencyIds.length > 0) {
+    const result = await client.query<{ id: string }>(`SELECT "id" FROM "User" WHERE "id" = ANY($1::text[])`, [dependencyIds]);
+    const found = new Set(result.rows.map((row) => row.id));
+    const missing = dependencyIds.filter((id) => !found.has(id));
+    if (missing.length > 0) throw new RestoreIntegrityError(`Faltan usuarios globales dependientes (${missing.length}).`, "TENANT_AUDIT_FAILED");
+  }
+
+  const subscriptionRows = parsed.rows.get("public.OrganizationSubscription") ?? [];
+  if (subscriptionRows.length > 0) {
+    const planIds = manifest.dependencies?.planIds;
+    if (!Array.isArray(planIds)) throw new RestoreIntegrityError("El backup con billing no declara sus dependencias de planes.", "BACKUP_SCHEMA_INCOMPATIBLE");
+    const referencedPlanIds = [...new Set(subscriptionRows.map((row) => row.data.planId).filter((value): value is string => typeof value === "string"))];
+    const undeclared = referencedPlanIds.filter((id) => !planIds.includes(id));
+    if (undeclared.length > 0) throw new RestoreIntegrityError(`El backup contiene planes no declarados (${undeclared.length}).`, "TENANT_AUDIT_FAILED");
+    if (planIds.length > 0) {
+      const result = await client.query<{ id: string }>(`SELECT "id" FROM "Plan" WHERE "id" = ANY($1::text[])`, [planIds]);
+      const found = new Set(result.rows.map((row) => row.id));
+      const missing = planIds.filter((id) => !found.has(id));
+      if (missing.length > 0) throw new RestoreIntegrityError(`Faltan planes globales dependientes (${missing.length}).`, "TENANT_AUDIT_FAILED");
+    }
+  }
 }
 
 async function dependencyOrder(client: PoolClient, tables: TenantTable[]) {
@@ -242,7 +258,7 @@ export async function restoreOrganizationBackup(input: {
     } else {
       await assertTargetOrganization(client, input.organizationId, input.allowRestoring === true);
     }
-    if (mode === "replace") await assertDependencies(client, parsed, input.organizationId, input.manifest);
+    await assertDependencies(client, parsed, input.organizationId, input.manifest);
     const ordered = await dependencyOrder(client, tables);
     await clearCyclicReferences(client, input.organizationId, tables);
     await deleteTenantRows(client, input.organizationId, ordered);

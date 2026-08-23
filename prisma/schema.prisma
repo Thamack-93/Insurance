@@ -182,6 +182,8 @@ model Organization {
   platformAuditTargets        PlatformAuditLog[]       @relation("PlatformAuditTargetOrganization")
   backupArtifacts              BackupArtifact[]
   organizationRestoreRuns     OrganizationRestoreRun[]
+  billingSubscriptions        OrganizationSubscription[]
+  billingCharges              BillingCharge[]
 
   @@index([status])
   @@index([kind])
@@ -276,6 +278,73 @@ model User {
   @@index([role])
   @@index([active])
   @@index([platformRole])
+}
+
+/// Global catalog for platform plans. This is not a customer policy product.
+model Plan {
+  id                 String   @id @default(cuid())
+  requestId          String   @unique
+  code               String   @unique
+  name               String
+  monthlyAmountMinor Int
+  currency           String   @db.VarChar(3)
+  active             Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @default(now()) @updatedAt
+
+  subscriptions OrganizationSubscription[]
+
+  @@index([active])
+}
+
+/// Organization-scoped platform subscription snapshot.
+model OrganizationSubscription {
+  id                 String   @id @default(cuid())
+  requestId          String   @unique
+  organizationId     String
+  planId             String
+  status             String   @default("TRIAL")
+  startedAt          DateTime @default(now())
+  endsAt             DateTime?
+  monthlyAmountMinor Int
+  currency           String   @db.VarChar(3)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @default(now()) @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  plan         Plan         @relation(fields: [planId], references: [id], onDelete: Restrict)
+  charges      BillingCharge[]
+
+  @@index([organizationId, status])
+  @@index([organizationId])
+  @@index([planId])
+  @@index([startedAt])
+}
+
+/// Internal platform charge ledger. It is not a policy premium/payment ledger.
+model BillingCharge {
+  id                 String   @id @default(cuid())
+  requestId          String   @unique
+  organizationId     String
+  subscriptionId     String?
+  periodStart        DateTime
+  periodEnd          DateTime
+  amountMinor        Int
+  currency           String   @db.VarChar(3)
+  status             String   @default("PENDING")
+  paidAt             DateTime?
+  externalReference  String?
+  reason             String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @default(now()) @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subscription OrganizationSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, periodStart])
+  @@index([organizationId])
+  @@index([organizationId, status, paidAt])
+  @@index([subscriptionId])
 }
 
 model Client {
