@@ -20,8 +20,10 @@ describe("tenant organization transition foundation", () => {
       "SecurityEventAggregate",
       "BackupArtifact",
       "OrganizationRestoreRun",
+      "OrganizationSubscription",
+      "BillingCharge",
     ]));
-    expect(PLATFORM_GLOBAL_TABLES).toEqual(expect.arrayContaining(["NotificationChannel", "TelegramWebhookUpdate"]));
+    expect(PLATFORM_GLOBAL_TABLES).toEqual(expect.arrayContaining(["Plan", "NotificationChannel", "TelegramWebhookUpdate"]));
   });
 
   it("ships normal, inspectable SQL guards", () => {

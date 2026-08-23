@@ -15,6 +15,10 @@ import {
 export const PLATFORM_BILLING_MONTHS = 6;
 export const PLATFORM_BILLING_CHARGE_LIMIT = 50;
 
+export function platformBillingMutationsEnabled() {
+  return process.env.PLATFORM_BILLING_MUTATIONS_ENABLED === "1";
+}
+
 export type PlatformBillingPlan = {
   id: string;
   code: string;
@@ -49,6 +53,7 @@ export type PlatformBillingCharge = {
 };
 
 export type PlatformBillingOverview = {
+  mutationsEnabled: boolean;
   currentMonth: string;
   currentMrrByCurrency: CurrencyTotals;
   cashThisMonthByCurrency: CurrencyTotals;
@@ -59,6 +64,7 @@ export type PlatformBillingOverview = {
 };
 
 export type PlatformBillingDetail = {
+  mutationsEnabled: boolean;
   subscriptions: PlatformBillingSubscription[];
   charges: PlatformBillingCharge[];
   plans: PlatformBillingPlan[];
@@ -147,6 +153,7 @@ export async function getPlatformBillingOverview(): Promise<PlatformBillingOverv
   ]);
   const current = latestMetricTotals(metrics);
   return {
+    mutationsEnabled: platformBillingMutationsEnabled(),
     currentMonth: current.month || months.at(-1)!.toISOString().slice(0, 7),
     currentMrrByCurrency: current.mrrByCurrency,
     cashThisMonthByCurrency: current.cashByCurrency,
@@ -195,6 +202,7 @@ export async function getPlatformBillingDetail(organizationId: string): Promise<
   const monthlyTrend = buildMonthlyBillingMetrics(months, subscriptionMetrics, chargeMetrics);
 
   return {
+    mutationsEnabled: platformBillingMutationsEnabled(),
     subscriptions: subscriptions.map((subscription) => ({ ...subscription, startedAt: subscription.startedAt.toISOString(), endsAt: subscription.endsAt?.toISOString() ?? null })),
     charges: charges.map((charge) => ({ ...charge, periodStart: charge.periodStart.toISOString(), periodEnd: charge.periodEnd.toISOString(), paidAt: charge.paidAt?.toISOString() ?? null })),
     plans: plans.map(toBillingPlan),

@@ -85,7 +85,7 @@ describe("backup manifest", () => {
   it("requires tenant attribution and dependencies for v2", () => {
     const manifest = createBackupManifest({
       format: "policydesk-postgres-ndjson",
-      version: TENANT_BACKUP_FORMAT_VERSION,
+      version: TENANT_BACKUP_FORMAT_VERSION as typeof TENANT_BACKUP_FORMAT_VERSION,
       scope: "ORGANIZATION",
       organization: { id: "org-pedro", name: "Pedro" },
       capability: "COMPLETE",
@@ -103,6 +103,28 @@ describe("backup manifest", () => {
     const invalid = structuredClone(manifest);
     delete invalid.dependencies;
     expect(verifyBackupManifest(invalid)).toMatchObject({ valid: false });
+  });
+
+  it("requires global plan dependencies when a tenant backup contains billing", () => {
+    const input = {
+      format: "policydesk-postgres-ndjson" as const,
+      version: TENANT_BACKUP_FORMAT_VERSION as typeof TENANT_BACKUP_FORMAT_VERSION,
+      scope: "ORGANIZATION" as const,
+      organization: { id: "org-pedro", name: "Pedro" },
+      capability: "COMPLETE" as const,
+      schemaFingerprint: "c".repeat(64),
+      createdAt: "2026-07-04T10:00:00.000Z",
+      completedAt: "2026-07-04T10:00:01.000Z",
+      payload: { filename: "tenant.ndjson.gz.enc", pathname: "organization-backups/org-pedro/tenant.ndjson.gz.enc", size: 1, sha256: "b".repeat(64) },
+      encryption: { algorithm: "AES-256-GCM" as const, keyVersion: "v1", iv: IV.toString("base64"), authTagBytes: 16 as const },
+      compression: "gzip" as const,
+      tables: [{ schema: "public", name: "OrganizationSubscription", rowCount: 1 }],
+      totals: { tables: 1, rows: 1 },
+    };
+    const missing = createBackupManifest({ ...input, dependencies: { userIds: ["usr-owner"] } });
+    expect(verifyBackupManifest(missing)).toMatchObject({ valid: false, reason: expect.stringContaining("planes") });
+    const valid = createBackupManifest({ ...input, dependencies: { userIds: ["usr-owner"], planIds: ["plan-pro"] } });
+    expect(verifyBackupManifest(valid)).toMatchObject({ valid: true });
   });
 });
 

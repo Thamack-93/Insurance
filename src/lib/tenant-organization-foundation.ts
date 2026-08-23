@@ -22,10 +22,12 @@ export const OPTIONAL_ORGANIZATION_TABLES = [
   "SecurityEventAggregate",
   "BackupArtifact",
   "OrganizationRestoreRun",
+  "OrganizationSubscription",
+  "BillingCharge",
 ] as const;
 
 /** These rows are platform-scoped and must not acquire a Cycle 1 organization column. */
-export const PLATFORM_GLOBAL_TABLES = ["User", "Organization", "OrganizationMembership", "PlatformAuditLog", "SystemSetting", "NotificationChannel", "TelegramWebhookUpdate", "GeneralKnowledgeSource", "GeneralKnowledgeChunk"] as const;
+export const PLATFORM_GLOBAL_TABLES = ["User", "Organization", "OrganizationMembership", "Plan", "PlatformAuditLog", "SystemSetting", "NotificationChannel", "TelegramWebhookUpdate", "GeneralKnowledgeSource", "GeneralKnowledgeChunk"] as const;
 
 export const EXPECTED_TENANT_TRIGGERS = Object.fromEntries(
   PROTECTED_TENANT_TABLES.map((table) => [table, `${table}_transition_singleton_organization`]),

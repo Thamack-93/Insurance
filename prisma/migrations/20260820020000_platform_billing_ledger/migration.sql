@@ -47,6 +47,8 @@ CREATE TABLE "OrganizationSubscription" (
 CREATE UNIQUE INDEX "OrganizationSubscription_requestId_key" ON "OrganizationSubscription"("requestId");
 CREATE INDEX "OrganizationSubscription_organizationId_status_idx"
   ON "OrganizationSubscription"("organizationId", "status");
+CREATE INDEX "OrganizationSubscription_organizationId_idx"
+  ON "OrganizationSubscription"("organizationId");
 CREATE INDEX "OrganizationSubscription_planId_idx" ON "OrganizationSubscription"("planId");
 CREATE INDEX "OrganizationSubscription_startedAt_idx" ON "OrganizationSubscription"("startedAt");
 CREATE UNIQUE INDEX "OrganizationSubscription_one_current_key"
@@ -85,6 +87,8 @@ CREATE TABLE "BillingCharge" (
 CREATE UNIQUE INDEX "BillingCharge_requestId_key" ON "BillingCharge"("requestId");
 CREATE INDEX "BillingCharge_organizationId_periodStart_idx"
   ON "BillingCharge"("organizationId", "periodStart");
+CREATE INDEX "BillingCharge_organizationId_idx"
+  ON "BillingCharge"("organizationId");
 CREATE INDEX "BillingCharge_organizationId_status_paidAt_idx"
   ON "BillingCharge"("organizationId", "status", "paidAt");
 CREATE INDEX "BillingCharge_subscriptionId_idx" ON "BillingCharge"("subscriptionId");

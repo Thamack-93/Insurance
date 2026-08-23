@@ -619,6 +619,8 @@ const TENANT_EXPORT_TABLES = new Set<string>([
   "OrganizationMembership",
   ...PROTECTED_TENANT_TABLES,
   "SecurityEventAggregate",
+  "OrganizationSubscription",
+  "BillingCharge",
 ]);
 
 async function getOrganizationBackupMetadata(organizationId: string) {
@@ -638,7 +640,11 @@ async function getOrganizationBackupMetadata(organizationId: string) {
       `SELECT "userId" FROM "OrganizationMembership" WHERE "organizationId" = $1 ORDER BY "userId"`,
       [organizationId],
     );
-    return { organization, userIds: memberships.rows.map((row) => row.userId) };
+    const plans = await pool.query<{ planId: string }>(
+      `SELECT DISTINCT "planId" FROM "OrganizationSubscription" WHERE "organizationId" = $1 ORDER BY "planId"`,
+      [organizationId],
+    );
+    return { organization, userIds: memberships.rows.map((row) => row.userId), planIds: plans.rows.map((row) => row.planId) };
   } finally {
     await pool.end().catch(() => undefined);
   }
@@ -704,7 +710,7 @@ export async function createOrganizationDatabaseBackup(
       slug: metadata.organization.slug,
     },
     capability,
-    dependencies: { userIds: metadata.userIds },
+    dependencies: { userIds: metadata.userIds, planIds: metadata.planIds },
     schemaFingerprint: sha256Hex(canonicalJson(stats.tables.map((table) => ({ schema: table.schema, name: table.name, rowCount: table.rowCount })))),
     createdAt: now.toISOString(),
     completedAt: new Date().toISOString(),

@@ -316,6 +316,7 @@ model OrganizationSubscription {
   charges      BillingCharge[]
 
   @@index([organizationId, status])
+  @@index([organizationId])
   @@index([planId])
   @@index([startedAt])
 }
@@ -341,6 +342,7 @@ model BillingCharge {
   subscription OrganizationSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, periodStart])
+  @@index([organizationId])
   @@index([organizationId, status, paidAt])
   @@index([subscriptionId])
 }

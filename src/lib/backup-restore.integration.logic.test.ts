@@ -76,6 +76,9 @@ async function seedFixture(databaseUrl: string) {
     for (const table of PROTECTED_TENANT_TABLES) {
       await client.query(`UPDATE "${table}" SET "organizationId" = $1 WHERE "organizationId" IS NULL`, [BOOTSTRAP_ORGANIZATION_ID]);
     }
+    await client.query(`INSERT INTO "Plan" (id,"requestId",code,name,"monthlyAmountMinor",currency,active,"createdAt","updatedAt") VALUES ('drill-plan','drill-plan-request','DRILL','Drill Plan',5000,'MXN',true,now(),now())`);
+    await client.query(`INSERT INTO "OrganizationSubscription" (id,"requestId","organizationId","planId",status,"startedAt","monthlyAmountMinor",currency,"createdAt","updatedAt") VALUES ('drill-subscription','drill-subscription-request',$1,'drill-plan','ACTIVE',now(),5000,'MXN',now(),now())`, [BOOTSTRAP_ORGANIZATION_ID]);
+    await client.query(`INSERT INTO "BillingCharge" (id,"requestId","organizationId","subscriptionId","periodStart","periodEnd","amountMinor",currency,status,"paidAt",reason,"createdAt","updatedAt") VALUES ('drill-charge','drill-charge-request',$1,'drill-subscription',now(),now() + interval '1 month',5000,'MXN','PAID',now(),'Restore drill billing charge',now(),now())`, [BOOTSTRAP_ORGANIZATION_ID]);
     await client.query(`UPDATE "Organization" SET status = 'ACTIVE' WHERE id = $1`, [BOOTSTRAP_ORGANIZATION_ID]);
   } finally {
     client.release();
@@ -186,6 +189,9 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
       const restored = await restoreVerifiedBackup({ targetDatabaseUrl: targetUrl, plaintext: valid.plaintext, manifest: valid.manifest });
       expect(restored.tableCounts.totalRows).toBeGreaterThan(0);
       expect(restored.triggerMode).toBe("session_replication_role");
+      expect(await scalarCount(targetUrl, "Plan")).toBe(1);
+      expect(await scalarCount(targetUrl, "OrganizationSubscription")).toBe(1);
+      expect(await scalarCount(targetUrl, "BillingCharge")).toBe(1);
       const orchestrationReport = await runBackupRestoreDrill({
         backupFilename: valid.manifest.payload.filename,
         targetDatabaseUrl: targetUrl,

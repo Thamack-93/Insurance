@@ -3,6 +3,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import { AuthError, requireSuperAdmin } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { platformBillingMutationsEnabled } from "@/lib/platform-billing";
 import { normalizeBillingCurrency, parseMinorAmount } from "@/lib/platform-billing.logic";
 import { revalidatePaths } from "@/lib/mutation-utils";
 
@@ -38,6 +39,10 @@ function safeError(error: unknown) {
   if (error instanceof Error && error.message.startsWith("POLICYDESK_BILLING_")) return error.message;
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return "La operación ya existe o viola una unicidad de billing.";
   return "No se pudo completar la operación de billing.";
+}
+
+function assertBillingMutationsEnabled() {
+  if (!platformBillingMutationsEnabled()) throw new Error("POLICYDESK_BILLING_MUTATIONS_DISABLED");
 }
 
 async function audit(tx: Prisma.TransactionClient, input: {
@@ -77,6 +82,7 @@ export async function createPlatformPlanAction(input: {
 }): Promise<BillingMutationResult> {
   try {
     const actor = await requireSuperAdmin();
+    assertBillingMutationsEnabled();
     const normalizedRequestId = requestIdInput(input.requestId);
     const code = text(input.code, 32).toUpperCase();
     const name = text(input.name, 120);
@@ -108,6 +114,7 @@ export async function assignPlatformSubscriptionAction(input: {
 }): Promise<BillingMutationResult> {
   try {
     const actor = await requireSuperAdmin();
+    assertBillingMutationsEnabled();
     const normalizedRequestId = requestIdInput(input.requestId);
     const organizationId = text(input.organizationId, 100);
     const planId = text(input.planId, 100);
@@ -159,6 +166,7 @@ export async function recordPlatformChargeAction(input: {
 }): Promise<BillingMutationResult> {
   try {
     const actor = await requireSuperAdmin();
+    assertBillingMutationsEnabled();
     const normalizedRequestId = requestIdInput(input.requestId);
     const organizationId = text(input.organizationId, 100);
     const subscriptionId = text(input.subscriptionId, 100) || null;
@@ -202,6 +210,7 @@ export async function transitionPlatformChargeAction(input: {
 }): Promise<BillingMutationResult> {
   try {
     const actor = await requireSuperAdmin();
+    assertBillingMutationsEnabled();
     const normalizedRequestId = requestIdInput(input.requestId);
     const chargeId = text(input.chargeId, 100);
     const status = text(input.status, 20).toUpperCase();
