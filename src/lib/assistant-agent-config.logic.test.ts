@@ -17,11 +17,28 @@ describe("Nora agent rollout configuration", () => {
     vi.unstubAllEnvs();
   });
 
-  it("fails closed when the rollout mode is missing or invalid", () => {
-    vi.stubEnv("NORA_AGENT_MODE", "invalid");
+  it.each([
+    [undefined, "off"],
+    ["", "off"],
+    ["   ", "off"],
+    ["invalid", "off"],
+    ["off", "off"],
+    ["admin", "admin"],
+    ["all", "all"],
+  ] as const)("resolves %s to %s without environment fallbacks", (configured, expected) => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    if (configured === undefined) vi.stubEnv("NORA_AGENT_MODE", undefined);
+    else vi.stubEnv("NORA_AGENT_MODE", configured);
 
-    expect(getNoraAgentMode()).toBe("off");
+    expect(getNoraAgentMode()).toBe(expected);
+  });
+
+  it("keeps Nora disabled for every user when Production has no explicit mode", () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("NORA_AGENT_MODE", undefined);
+
     expect(isNoraAgentEnabledForUser({ id: "admin-1", role: "ADMIN" })).toBe(false);
+    expect(isNoraAgentEnabledForUser({ id: "agent-1", role: "AGENT" })).toBe(false);
   });
 
   it("supports an admin-only pilot before enabling every agent", () => {
