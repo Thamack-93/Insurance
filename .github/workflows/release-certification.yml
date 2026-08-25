@@ -1,0 +1,339 @@
+name: Release Certification
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "SHA, branch or tag to certify"
+        required: true
+        default: main
+        type: string
+      verify_production:
+        description: "Run the explicitly authorized read-only Production verifier"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-certification-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    name: CODE CERTIFICATION / QUALITY
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NORA_SCOPE_BASE_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npm run db:generate
+      - name: Static architecture and tenant guards
+        run: |
+          npm run check:legacy-workitem-refs -- --static-only
+          node --import tsx scripts/check-tenant-inventory.ts
+          npm run check:tenant-write-scope
+          npm run check:tenant-read-scope
+          npm run check:organization-metadata-hardcodes
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm run test:unit
+      - name: Build
+        run: npm run build
+
+  disposable-tenant:
+    name: DISPOSABLE POSTGRESQL / TENANT ISOLATION
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NODE_ENV: test
+      TENANT_ISOLATION_TEST_DB: "1"
+      PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1"
+      TENANT_ISOLATION_RUN_ID: "${{ github.run_id }}_${{ github.run_attempt }}"
+      TENANT_ISOLATION_DB_NAME: "policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}"
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      DATABASE_URL_UNPOOLED: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
+      SESSION_SECRET: tenant-isolation-certification-secret-minimum-32-characters
+      VERCEL_ENV: ""
+      PLAYWRIGHT_E2E: "1"
+      TENANT_ISOLATION_E2E: "1"
+      PLAYWRIGHT_USE_PRODUCTION_SERVER: "1"
+      PLAYWRIGHT_HOST: localhost
+      PLAYWRIGHT_BASE_URL: http://localhost:4173
+      PORT: "4173"
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npm run db:generate
+      - name: Create dedicated tenant database
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          createdb -h 127.0.0.1 -U postgres "$TENANT_ISOLATION_DB_NAME"
+      - name: Apply migrations and check drift
+        run: |
+          npx prisma migrate deploy
+          npm run db:check-drift
+      - name: Create protected two-organization fixture
+        run: npm run test:tenant-fixture
+      - name: Tenant and knowledge isolation tests
+        run: npm run test:unit -- src/lib/organization-context.logic.test.ts src/lib/organization-context-resolution.logic.test.ts src/lib/tenant-isolation.integration.logic.test.ts src/lib/nora-context.logic.test.ts
+      - name: Tenant inventory audit
+        run: npm run check:tenant-guards
+      - name: Build disposable tenant application
+        run: npm run build
+      - name: Install Playwright browser
+        run: npx playwright install chromium
+      - name: Tenant isolation E2E
+        run: npx playwright test tests/e2e/tenant-isolation.spec.ts
+      - name: Drop dedicated tenant database
+        if: always()
+        shell: bash
+        run: |
+          export PGPASSWORD=postgres
+          dropdb -h 127.0.0.1 -U postgres --if-exists "$TENANT_ISOLATION_DB_NAME"
+
+  disposable-application:
+    name: DISPOSABLE POSTGRESQL / APPLICATION API E2E BILLING RESTORE
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1"
+      PLAYWRIGHT_USE_PRODUCTION_SERVER: "1"
+      PLAYWRIGHT_HOST: localhost
+      PLAYWRIGHT_BASE_URL: http://localhost:4173
+      PORT: "4173"
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
+      SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
+      SESSION_SECRET: application-certification-secret-minimum-32-characters
+      RESTORE_INTEGRATION: "1"
+      RESTORE_INTEGRATION_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npm run db:generate
+      - name: Apply migrations and check drift
+        run: |
+          npx prisma migrate deploy
+          npm run db:check-drift
+      - name: Tenant guards and transition integration
+        run: |
+          npm run check:tenant-guards
+          npm run test:unit -- src/lib/organization-transition.integration.logic.test.ts
+      - name: Billing integration
+        run: npm run test:unit -- src/lib/platform-billing.integration.logic.test.ts
+      - name: Backup and restore integration
+        run: npm run test:unit -- src/lib/backup-restore.integration.logic.test.ts
+      - name: Build disposable application
+        run: npm run build
+      - name: Install Playwright browser
+        run: npx playwright install chromium
+      - name: API tests
+        run: npm run test:api
+      - name: Application E2E
+        run: npm run test:e2e
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-certification-playwright-${{ github.run_attempt }}
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload sanitized restore reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-certification-restore-${{ github.run_attempt }}
+          path: artifacts/restore-drills
+          if-no-files-found: ignore
+          retention-days: 90
+
+  production-state:
+    name: PRODUCTION STATE VERIFICATION / READ ONLY
+    if: ${{ inputs.verify_production == true }}
+    environment: production-readonly-verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ""
+      DATABASE_URL_UNPOOLED: ${{ secrets.PRODUCTION_READONLY_DATABASE_URL }}
+      PRODUCTION_EXPECTED_TENANT_MODE: ${{ vars.PRODUCTION_EXPECTED_TENANT_MODE || 'single-org' }}
+      NORA_AGENT_MODE: ${{ vars.NORA_AGENT_MODE }}
+      PLATFORM_BILLING_MUTATIONS_ENABLED: ${{ vars.PLATFORM_BILLING_MUTATIONS_ENABLED }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 1
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run sanitized read-only verifier
+        id: verify
+        shell: bash
+        run: |
+          set +e
+          mkdir -p artifacts/production-verification
+          node --import tsx scripts/verify-production.ts --json > artifacts/production-verification/production.json
+          exit_code=$?
+          node -e 'const fs=require("node:fs"); const p="artifacts/production-verification/production.json"; let r={status:"BLOCKED"}; try { r=JSON.parse(fs.readFileSync(p,"utf8")); } catch {} console.log(`status=${r.status || "BLOCKED"}`); fs.appendFileSync(process.env.GITHUB_OUTPUT, `status=${r.status || "BLOCKED"}\nexit_code=${process.env.EXIT_CODE || ""}\n`);'
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload Production verification evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-certification-production-${{ github.run_attempt }}
+          path: artifacts/production-verification/production.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Fail certification when Production is blocked
+        if: steps.verify.outputs.status == 'BLOCKED'
+        run: exit 1
+
+  report:
+    name: RELEASE EVIDENCE / SANITIZED REPORT
+    if: always()
+    needs: [quality, disposable-tenant, disposable-application, production-state]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 1
+      - name: Download Production verifier evidence
+        if: needs.production-state.result != 'skipped'
+        continue-on-error: true
+        uses: actions/download-artifact@v6
+        with:
+          name: release-certification-production-${{ github.run_attempt }}
+          path: artifacts/production-verification
+      - name: Create sanitized release report
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          TENANT_RESULT: ${{ needs.disposable-tenant.result }}
+          APPLICATION_RESULT: ${{ needs.disposable-application.result }}
+          PRODUCTION_RESULT: ${{ needs.production-state.result }}
+          REQUESTED_REF: ${{ inputs.ref }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          mkdir -p artifacts/release-certification
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const cp = require("node:child_process");
+          const productionPath = "artifacts/production-verification/production.json";
+          let production = { status: process.env.PRODUCTION_RESULT === "skipped" ? "NOT_RUN" : "UNAVAILABLE" };
+          if (fs.existsSync(productionPath)) {
+            try {
+              const parsed = JSON.parse(fs.readFileSync(productionPath, "utf8"));
+              production = { status: parsed.status || "UNAVAILABLE", tenantMode: parsed.tenantMode || "UNKNOWN" };
+            } catch {}
+          }
+          const report = {
+            commitSha: cp.execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+            requestedRef: process.env.REQUESTED_REF,
+            generatedAt: new Date().toISOString(),
+            run: { id: process.env.RUN_ID, attempt: process.env.RUN_ATTEMPT },
+            codeCertification: { quality: process.env.QUALITY_RESULT },
+            disposablePostgres: {
+              tenantIsolation: process.env.TENANT_RESULT,
+              applicationApiE2E: process.env.APPLICATION_RESULT,
+            },
+            productionStateVerification: production,
+          };
+          fs.writeFileSync("artifacts/release-certification/report.json", JSON.stringify(report, null, 2) + "\n");
+          fs.writeFileSync("artifacts/release-certification/summary.md", [
+            "# PolicyDesk Release Certification",
+            "",
+            `- Commit SHA: ${report.commitSha}`,
+            `- Generated: ${report.generatedAt}`,
+            `- Code certification: ${report.codeCertification.quality}`,
+            `- Disposable tenant isolation: ${report.disposablePostgres.tenantIsolation}`,
+            `- Disposable application/API/E2E: ${report.disposablePostgres.applicationApiE2E}`,
+            `- Production state verification: ${report.productionStateVerification.status}`,
+            "",
+            "This report contains statuses only; it does not contain credentials, customer data, policy numbers, backup URLs, keys or Nora content.",
+            "",
+          ].join("\n"));
+          NODE
+      - name: Upload sanitized release evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-certification-${{ github.run_attempt }}
+          path: artifacts/release-certification
+          if-no-files-found: error
+          retention-days: 90

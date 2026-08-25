@@ -5,6 +5,11 @@ en Production y de lo que se ha probado en una base PostgreSQL desechable. La
 existencia de código, una migración o un script no demuestra por sí sola que una
 capacidad esté activa en Production.
 
+El contrato ejecutable del estado actual y el formato del verificador están en
+[`production-state-contract.md`](production-state-contract.md). La verificación
+se ejecuta con `npm run verify:production`; no aplica migraciones ni modifica
+Production.
+
 ## Estado actual
 
 | Capacidad | Código | Production actual | Evidencia disposable | Documentación |
