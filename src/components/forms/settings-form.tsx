@@ -232,55 +232,19 @@ export function SettingsForm({ initialSettings, updateSettings }: SettingsFormPr
       {/* Backup Section */}
       <Card>
         <CardHeader>
-          <CardTitle>Respaldo automático</CardTitle>
-          <CardDescription>Configuración de copias de seguridad</CardDescription>
+          <CardTitle>Política de respaldos</CardTitle>
+          <CardDescription>Cadencia obligatoria de recuperación</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Respaldo automático</Label>
-              <p className="text-sm text-muted-foreground">
-                El respaldo corre en un cron aparte de Telegram y crea un respaldo cifrado en
-                Blob privado cuando corresponde.
-              </p>
-            </div>
-            <Checkbox
-              checked={settings.autoBackup}
-              onCheckedChange={(checked: boolean) => handleChange("autoBackup", checked)}
-            />
+        <CardContent className="grid gap-3 text-sm text-muted-foreground md:grid-cols-2">
+          <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
+            <p className="font-medium text-foreground">Organizaciones · diario</p>
+            <p className="mt-1">Cada organización activa recibe un snapshot en la ejecución diaria de las 05:00 UTC.</p>
           </div>
-          {settings.autoBackup && (
-            <>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="backupFrequency">Frecuencia</Label>
-                  <Select
-                    value={settings.backupFrequency}
-                    onValueChange={(value) => handleChange("backupFrequency", value ?? "weekly")}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="daily">Diario</SelectItem>
-                      <SelectItem value="weekly">Semanal</SelectItem>
-                      <SelectItem value="monthly">Mensual</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className={fieldHint}>
-                    Mínimo entre respaldos. El job ignora ejecuciones más frecuentes.
-                  </p>
-                </div>
-                <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
-                  <p className="text-sm font-medium">Retención protegida</p>
-                  <p className={fieldHint}>
-                    Se conservan 4 copias diarias, 2 semanales y 1 mensual. Restaurar solo está
-                    permitido por CLI hacia una rama temporal de Neon.
-                  </p>
-                </div>
-              </div>
-            </>
-          )}
+          <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
+            <p className="font-medium text-foreground">Plataforma · semanal</p>
+            <p className="mt-1">El snapshot global se crea cada siete días y conserva 30 días de historial físico verificado.</p>
+          </div>
+          <p className="md:col-span-2">Los valores históricos autoBackup y backupFrequency se conservan temporalmente por compatibilidad, pero ya no controlan el scheduler.</p>
         </CardContent>
       </Card>
 

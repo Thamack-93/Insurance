@@ -62,7 +62,9 @@ function normalizePostgresConnectionString(connectionString: string) {
 }
 
 function assertDisposableTestDatabase(connectionString: string) {
-  if (process.env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB !== "1") return;
+  if (process.env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB !== "1") {
+    throw new Error("Playwright API/E2E requires PLAYWRIGHT_ENFORCE_DISPOSABLE_DB=1 and a disposable local PostgreSQL database.");
+  }
 
   try {
     const url = new URL(connectionString);

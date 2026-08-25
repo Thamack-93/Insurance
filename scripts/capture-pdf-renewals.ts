@@ -1,11 +1,10 @@
 import { readFile } from "node:fs/promises";
 
-import PDFParser from "pdf2json";
-
 import { SYSTEM_USER_ID } from "@/lib/auth";
 import { writeActivityLog } from "@/lib/activity-log";
 import { getDb } from "@/lib/db";
 import { parseDateInput } from "@/lib/form-utils";
+import { extractPdfTextFromBytes } from "@/lib/pdf-text-extraction";
 import { extractPolicyPdfDraftFromText, suggestPreviousPolicyNumber, type PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
 import { assertProductionMutationAllowed, parseCliArgs, requireOrganizationId } from "./_shared.ts";
 
@@ -71,20 +70,7 @@ function scoreTextMatch(needle: string, candidate: string) {
 
 async function parsePdfDraft(pdfPath: string) {
   const file = await readFile(pdfPath);
-  const pdfParser = new PDFParser();
-
-  const text = await new Promise<string>((resolve, reject) => {
-    pdfParser.on("pdfParser_dataReady", () => {
-      resolve(pdfParser.getRawTextContent());
-    });
-    pdfParser.on("pdfParser_dataError", (errData) => {
-      const errorMessage = errData && "parserError" in errData && errData.parserError instanceof Error
-        ? errData.parserError.message
-        : "PDF parsing failed";
-      reject(new Error(errorMessage));
-    });
-    pdfParser.parseBuffer(Buffer.from(file));
-  });
+  const { text } = await extractPdfTextFromBytes(file);
 
   const draft = extractPolicyPdfDraftFromText(text);
   return { draft, text };
@@ -380,6 +366,7 @@ async function captureRenewalCase(
     });
 
     await writeActivityLog({
+      organizationId,
       entityType: "Policy",
       entityId: sourcePolicy.id,
       action: "POLICY_MARK_RENEWED_FROM_PDF",

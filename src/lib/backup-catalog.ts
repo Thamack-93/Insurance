@@ -4,7 +4,7 @@ import { getDb } from "@/lib/db";
 import type { BackupEntry } from "@/lib/backup";
 import type { BackupCapability, BackupManifest, BackupScope, RestoreRunStatus } from "@/lib/backup-logic";
 
-export type BackupArtifactStatus = "DISCOVERED" | "VERIFIED" | "INVALID" | "BLOCKED";
+export type BackupArtifactStatus = "CREATING" | "DISCOVERED" | "VERIFIED" | "INVALID" | "BLOCKED" | "PRUNED";
 
 export type BackupArtifactView = {
   id: string;
@@ -36,6 +36,7 @@ export async function upsertBackupArtifact(input: {
 }) {
   const db = getDb();
   const manifest = input.manifest;
+  const status = input.status ?? (input.entry.manifestAvailable ? "DISCOVERED" : "INVALID");
   return db.backupArtifact.upsert({
     where: { pathname: input.entry.pathname },
     update: {
@@ -46,14 +47,19 @@ export async function upsertBackupArtifact(input: {
       size: input.entry.size,
       createdAt: input.entry.createdAt,
       manifestAvailable: input.entry.manifestAvailable,
-      formatVersion: manifest?.version ?? null,
-      keyVersion: manifest?.encryption.keyVersion ?? null,
-      payloadSha256: manifest?.payload.sha256 ?? null,
-      manifestSha256: manifest?.manifestSha256 ?? null,
-      status: input.status ?? (input.entry.manifestAvailable ? "DISCOVERED" : "INVALID"),
-      capability: input.capability ?? manifest?.capability ?? "DATABASE_ONLY",
-      sourceArtifactId: input.sourceArtifactId ?? undefined,
-      metadataJson: manifest ? JSON.stringify({ scope: manifest.scope, organization: manifest.organization }) : undefined,
+      ...(manifest
+        ? {
+            formatVersion: manifest.version,
+            keyVersion: manifest.encryption.keyVersion,
+            payloadSha256: manifest.payload.sha256,
+            manifestSha256: manifest.manifestSha256,
+            capability: input.capability ?? manifest.capability ?? "DATABASE_ONLY",
+            metadataJson: JSON.stringify({ scope: manifest.scope, organization: manifest.organization }),
+          }
+        : {}),
+      ...(input.status ? { status: input.status } : {}),
+      ...(input.capability ? { capability: input.capability } : {}),
+      ...(input.sourceArtifactId !== undefined ? { sourceArtifactId: input.sourceArtifactId } : {}),
     },
     create: {
       scope: input.scope,
@@ -68,7 +74,7 @@ export async function upsertBackupArtifact(input: {
       keyVersion: manifest?.encryption.keyVersion ?? null,
       payloadSha256: manifest?.payload.sha256 ?? null,
       manifestSha256: manifest?.manifestSha256 ?? null,
-      status: input.status ?? (input.entry.manifestAvailable ? "DISCOVERED" : "INVALID"),
+      status,
       capability: input.capability ?? manifest?.capability ?? "DATABASE_ONLY",
       sourceArtifactId: input.sourceArtifactId ?? null,
       metadataJson: manifest ? JSON.stringify({ scope: manifest.scope, organization: manifest.organization }) : null,
@@ -111,10 +117,86 @@ export async function getOrganizationBackupArtifacts(organizationId: string) {
   return artifacts.map(toView);
 }
 
+export async function getPlatformBackupArtifacts() {
+  const db = getDb();
+  const artifacts = await db.backupArtifact.findMany({
+    where: { scope: "PLATFORM", organizationId: null },
+    orderBy: { createdAt: "desc" },
+  });
+  return artifacts.map(toView);
+}
+
 export async function getBackupArtifact(id: string) {
   const db = getDb();
   const artifact = await db.backupArtifact.findUnique({ where: { id } });
   return artifact ? toView(artifact) : null;
+}
+
+export async function getBackupArtifactByPathname(pathname: string) {
+  const artifact = await getDb().backupArtifact.findUnique({ where: { pathname } });
+  return artifact ? toView(artifact) : null;
+}
+
+export async function getAllBackupArtifacts() {
+  const artifacts = await getDb().backupArtifact.findMany({ orderBy: { createdAt: "desc" } });
+  return artifacts.map(toView);
+}
+
+export async function getLatestVerifiedBackupArtifact(input: {
+  scope: "PLATFORM" | "ORGANIZATION";
+  organizationId?: string | null;
+}) {
+  const artifact = await getDb().backupArtifact.findFirst({
+    where: {
+      scope: input.scope,
+      organizationId: input.organizationId ?? null,
+      status: "VERIFIED",
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  return artifact ? toView(artifact) : null;
+}
+
+export async function reserveBackupArtifact(input: {
+  target: Pick<BackupEntry, "filename" | "pathname">;
+  scope: "PLATFORM" | "ORGANIZATION";
+  organizationId?: string | null;
+  createdAt: Date;
+}) {
+  const db = getDb();
+  const existing = await db.backupArtifact.findUnique({ where: { pathname: input.target.pathname } });
+  if (existing?.status === "VERIFIED") return toView(existing);
+  const artifact = await db.backupArtifact.upsert({
+    where: { pathname: input.target.pathname },
+    update: {
+      filename: input.target.filename,
+      scope: input.scope,
+      organizationId: input.organizationId ?? null,
+      status: "CREATING",
+    },
+    create: {
+      filename: input.target.filename,
+      pathname: input.target.pathname,
+      scope: input.scope,
+      organizationId: input.organizationId ?? null,
+      storage: "original",
+      size: 0,
+      createdAt: input.createdAt,
+      manifestAvailable: false,
+      status: "CREATING",
+      capability: "DATABASE_ONLY",
+    },
+  });
+  return toView(artifact);
+}
+
+export async function markBackupArtifactsPruned(pathnames: string[]) {
+  if (pathnames.length === 0) return 0;
+  const result = await getDb().backupArtifact.updateMany({
+    where: { pathname: { in: pathnames } },
+    data: { status: "PRUNED" },
+  });
+  return result.count;
 }
 
 export async function updateBackupArtifactStatus(id: string, status: BackupArtifactStatus, capability?: BackupCapability) {

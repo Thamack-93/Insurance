@@ -340,16 +340,36 @@ function createFallbackTelegramChannelState(userId: string): NotificationChannel
   };
 }
 
-export function getTelegramWebhookUrl(baseUrl = process.env.APP_BASE_URL?.trim()) {
+export function getTelegramWebhookUrl() {
+  const configuredBaseUrl = process.env.APP_BASE_URL?.trim();
   const resolvedBaseUrl =
-    normalizeBaseUrlCandidate(baseUrl) ??
-    normalizeBaseUrlCandidate(process.env.VERCEL_PROJECT_PRODUCTION_URL) ??
-    normalizeBaseUrlCandidate(process.env.NEXT_PUBLIC_APP_URL) ??
-    normalizeBaseUrlCandidate(process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ??
-    (process.env.NODE_ENV !== "production" ? normalizeBaseUrlCandidate("http://localhost:3000") : null);
+    process.env.NODE_ENV === "production"
+      ? configuredBaseUrl
+        ? (() => {
+            try {
+              return new URL(configuredBaseUrl);
+            } catch {
+              return null;
+            }
+          })()
+        : null
+      : normalizeBaseUrlCandidate(configuredBaseUrl) ?? normalizeBaseUrlCandidate("http://localhost:3000");
 
-  if (!resolvedBaseUrl) return null;
-  return new URL("/api/integrations/telegram/webhook", resolvedBaseUrl).toString();
+  if (
+    !resolvedBaseUrl ||
+    !resolvedBaseUrl.hostname ||
+    resolvedBaseUrl.username ||
+    resolvedBaseUrl.password ||
+    resolvedBaseUrl.search ||
+    resolvedBaseUrl.hash ||
+    resolvedBaseUrl.pathname !== "/" ||
+    !["http:", "https:"].includes(resolvedBaseUrl.protocol) ||
+    (process.env.NODE_ENV === "production" && resolvedBaseUrl.protocol !== "https:")
+  ) {
+    return null;
+  }
+
+  return new URL("/api/integrations/telegram/webhook", resolvedBaseUrl.origin).toString();
 }
 
 function getTelegramFileDownloadUrl(filePath: string) {
@@ -419,11 +439,9 @@ function getTelegramLinkSecret() {
   return "policydesk-dev-secret-change-in-production-please-0123456789";
 }
 
-export async function syncTelegramWebhook(baseUrl?: string): Promise<TelegramWebhookSyncResult> {
+export async function syncTelegramWebhook(): Promise<TelegramWebhookSyncResult> {
   const token = getTelegramBotToken();
-  const webhookUrl = getTelegramWebhookUrl(
-    baseUrl ?? process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.APP_BASE_URL?.trim(),
-  );
+  const webhookUrl = getTelegramWebhookUrl();
   const secret = getTelegramWebhookSecret();
 
   if (!token) {

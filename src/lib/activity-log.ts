@@ -29,7 +29,7 @@ export async function writeActivityLog({
   oldValue?: unknown;
   newValue?: unknown;
   userId?: string;
-  organizationId?: string | null;
+  organizationId: string;
   db?: PrismaClient | Prisma.TransactionClient;
 }) {
   const db = client ?? getDb();
@@ -43,7 +43,7 @@ export async function writeActivityLog({
       oldValue: oldValue === undefined ? null : safeJson(oldValue),
       newValue: newValue === undefined ? null : safeJson(newValue),
       userId: resolvedUserId,
-      ...(organizationId !== undefined ? { organizationId } : {}),
+      organizationId,
     },
   });
 }
@@ -62,12 +62,12 @@ export type ActivityEntry = {
 export async function getActivityForEntity(
   entityType: string,
   entityId: string,
-  limit = 20,
-  organizationId?: string,
+  limit: number,
+  organizationId: string,
 ): Promise<ActivityEntry[]> {
   const db = getDb();
   return db.activityLog.findMany({
-    where: { entityType, entityId, ...(organizationId ? { organizationId } : {}) },
+    where: { entityType, entityId, organizationId },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit,
   });

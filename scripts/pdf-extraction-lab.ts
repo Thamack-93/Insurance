@@ -167,7 +167,8 @@ async function extractPdfTextFromFile(pdfPath: string) {
   const loadingTask = pdfjs.getDocument({
     data,
     standardFontDataUrl,
-  });
+    isEvalSupported: false,
+  } as unknown as Parameters<typeof pdfjs.getDocument>[0]);
 
   const pdf = await loadingTask.promise;
   try {
@@ -187,7 +188,7 @@ async function extractPdfTextFromFile(pdfPath: string) {
       pageCount: pdf.numPages,
     };
   } finally {
-    await pdf.destroy().catch(() => {});
+    await loadingTask.destroy().catch(() => {});
   }
 }
 

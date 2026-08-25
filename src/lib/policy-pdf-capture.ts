@@ -1,7 +1,6 @@
 import "server-only";
 
-import PDFParser from "pdf2json";
-import { PDFParse } from "pdf-parse";
+import { extractPdfTextFromBytes } from "@/lib/pdf-text-extraction";
 import {
   extractPolicyPdfDraftFromText,
   normalizePdfPaymentFrequencyLabel,
@@ -27,53 +26,14 @@ function isInvalidPdfError(error: unknown) {
   return INVALID_PDF_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
 }
 
-async function extractTextWithPdf2Json(file: Uint8Array) {
-  const pdfParser = new PDFParser();
-
-  return new Promise<string>((resolve, reject) => {
-    pdfParser.on("pdfParser_dataReady", () => resolve(pdfParser.getRawTextContent()));
-    pdfParser.on("pdfParser_dataError", (errorData) => {
-      const message =
-        errorData && "parserError" in errorData && errorData.parserError instanceof Error
-          ? errorData.parserError.message
-          : "PDF parsing failed";
-      reject(new Error(message));
-    });
-    pdfParser.parseBuffer(Buffer.from(file));
-  });
-}
-
-async function extractTextWithPdfParse(file: Uint8Array) {
-  const parser = new PDFParse({ data: Buffer.from(file), verbosity: 0 });
-  try {
-    const result = await parser.getText({ pageJoiner: "" });
-    return result.text;
-  } finally {
-    await parser.destroy();
-  }
-}
-
 export async function parsePolicyPdfCapture(file: Uint8Array) {
-  const parseErrors: unknown[] = [];
-
   try {
-    const text = await extractTextWithPdf2Json(file);
+    const { text } = await extractPdfTextFromBytes(file);
     if (text.trim()) return extractPolicyPdfDraftFromText(text);
   } catch (error) {
-    parseErrors.push(error);
-  }
-
-  try {
-    const text = await extractTextWithPdfParse(file);
-    if (text.trim()) return extractPolicyPdfDraftFromText(text);
-  } catch (error) {
-    parseErrors.push(error);
-  }
-
-  if (parseErrors.some(isInvalidPdfError)) {
-    throw new PolicyPdfCaptureError("INVALID_PDF", "El PDF parece estar corrupto o no es un archivo PDF válido.");
-  }
-  if (parseErrors.length > 0) {
+    if (isInvalidPdfError(error)) {
+      throw new PolicyPdfCaptureError("INVALID_PDF", "El PDF parece estar corrupto o no es un archivo PDF válido.");
+    }
     throw new PolicyPdfCaptureError(
       "PARSE_FAILURE",
       "No pudimos analizar el PDF. Revisa que el archivo esté completo y tenga texto legible.",

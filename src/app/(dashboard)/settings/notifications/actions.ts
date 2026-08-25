@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
 import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
@@ -12,7 +11,6 @@ import {
   disconnectTelegramChannelForUser,
   sendTelegramBirthdayReminderForUser,
   sendTelegramDigestMessagesForUser,
-  syncTelegramWebhook,
   type TelegramLinkCodeResult,
 } from "@/lib/telegram";
 import { updateNotificationPreferences } from "@/lib/notification-foundation";
@@ -294,25 +292,5 @@ export async function setTelegramDigestHour(hour: number): Promise<MutationResul
   } catch (error) {
     logError("settings.notifications.telegram.digestHour", error);
     return errorResult("No se pudo actualizar el horario.");
-  }
-}
-
-export async function syncTelegramWebhookAction(_formData?: FormData): Promise<MutationResult> {
-  void _formData;
-  try {
-    const context = await requireOrganizationContext();
-    const user = { id: context.userId };
-    if (context.membershipRole === "AGENT") return errorResult("Solo un administrador puede sincronizar el webhook.");
-    const requestHeaders = await headers();
-    const proto = requestHeaders.get("x-forwarded-proto") ?? "https";
-    const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
-    if (!host) return errorResult("No se pudo determinar el dominio actual.");
-    const result = await syncTelegramWebhook(`${proto}://${host}`);
-    if (!result.ok) return errorResult(result.error);
-    revalidatePath("/settings/notifications");
-    return successResult(user.id, "/settings/notifications", result.message);
-  } catch (error) {
-    logError("settings.notifications.telegram.syncWebhook", error);
-    return errorResult("No se pudo sincronizar el webhook.");
   }
 }

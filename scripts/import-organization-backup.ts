@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { decryptBackupPayload, parseBackupContainerHeader, parseBackupEncryptionKey } from "../src/lib/backup-logic.ts";
-import { createOrganizationDatabaseBackup, getBackupDownload, verifyStoredBackup } from "../src/lib/backup.ts";
+import { getBackupDownload, verifyStoredBackup } from "../src/lib/backup.ts";
+import { createAndCatalogBackup } from "../src/lib/backup-orchestrator.ts";
 import { parseBackupRecords } from "../src/lib/backup-restore-validation.ts";
 import { restoreOrganizationBackup } from "../src/lib/organization-backup-restore.ts";
 
@@ -104,7 +105,7 @@ async function main() {
     console.log(JSON.stringify({ ok: true, mode, organizationId, filename, payloadSha256: manifest.payload.sha256, manifestSha256: manifest.manifestSha256, users: users.length, memberships: memberships.length, message: "Preflight únicamente; no se modificó la base." }, null, 2));
     return;
   }
-  const safetyBackup = mode === "replace" ? await createOrganizationDatabaseBackup(organizationId) : null;
+  const safetyBackup = mode === "replace" ? await createAndCatalogBackup({ scope: "ORGANIZATION", organizationId }) : null;
   const result = await restoreOrganizationBackup({ targetDatabaseUrl: directDatabaseUrl(), organizationId, plaintext, manifest, mode });
   const auditPool = new Pool({ connectionString: directDatabaseUrl(), max: 1, application_name: "policydesk-organization-import-audit" });
   const auditClient = await auditPool.connect();

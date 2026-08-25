@@ -1,12 +1,14 @@
 import "server-only";
 
-import { listBackups } from "@/lib/backup";
+import { getLatestVerifiedBackupArtifact } from "@/lib/backup-catalog";
+import { getBackupScheduleStatus, TENANT_BACKUP_INTERVAL_DAYS } from "@/lib/backup-schedule";
 import { requireOrganizationRole } from "@/lib/organization-context";
 
 export type OrganizationBackupStatus = {
   organizationId: string;
-  status: "AVAILABLE" | "UNAVAILABLE" | "NOT_CONFIGURED";
+  status: "HEALTHY" | "OVERDUE" | "UNAVAILABLE" | "NOT_CONFIGURED";
   latestCreatedAt: string | null;
+  nextDueAt: string | null;
 };
 
 /**
@@ -17,17 +19,20 @@ export type OrganizationBackupStatus = {
 export async function getOrganizationBackupStatus(): Promise<OrganizationBackupStatus> {
   const context = await requireOrganizationRole(["OWNER"]);
   try {
-    const [latest] = await listBackups();
+    const latest = await getLatestVerifiedBackupArtifact({ scope: "ORGANIZATION", organizationId: context.organizationId });
+    const schedule = getBackupScheduleStatus(latest ? new Date(latest.createdAt) : null, new Date(), TENANT_BACKUP_INTERVAL_DAYS);
     return {
       organizationId: context.organizationId,
-      status: latest ? "AVAILABLE" : "NOT_CONFIGURED",
-      latestCreatedAt: latest?.createdAt.toISOString() ?? null,
+      status: !latest ? "NOT_CONFIGURED" : schedule.due ? "OVERDUE" : "HEALTHY",
+      latestCreatedAt: latest?.createdAt ?? null,
+      nextDueAt: schedule.nextDueAt.toISOString(),
     };
   } catch {
     return {
       organizationId: context.organizationId,
       status: "UNAVAILABLE",
       latestCreatedAt: null,
+      nextDueAt: null,
     };
   }
 }

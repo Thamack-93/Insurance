@@ -15,8 +15,11 @@ export async function GET(
     await requireSuperAdmin();
     const { artifactId } = await params;
     const artifact = await getBackupArtifact(decodeURIComponent(artifactId));
-    if (!artifact || !artifact.organizationId || (artifact.scope !== "ORGANIZATION" && artifact.scope !== "LEGACY_SINGLETON")) {
-      return NextResponse.json({ error: "El artefacto no está disponible para una organización." }, { status: 404 });
+    if (!artifact || (artifact.scope !== "PLATFORM" && artifact.scope !== "ORGANIZATION")) {
+      return NextResponse.json({ error: "El artefacto no está disponible." }, { status: 404 });
+    }
+    if (artifact.status !== "VERIFIED") {
+      return NextResponse.json({ error: "Solo pueden descargarse artefactos verificados." }, { status: 409 });
     }
     const result = await getBackupDownload(artifact.filename, artifact.pathname);
     if (result?.statusCode !== 200 || !result.stream) {

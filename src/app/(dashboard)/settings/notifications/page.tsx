@@ -18,13 +18,7 @@ import {
   sendTelegramTestMessage,
   setTelegramMutationsEnabled,
   updateTelegramPreferences,
-  syncTelegramWebhookAction,
 } from "./actions";
-
-async function syncWebhookFormAction(_formData: FormData) {
-  "use server";
-  await syncTelegramWebhookAction(_formData);
-}
 
 export default async function NotificationSettingsPage() {
   const [user, context] = await Promise.all([requireUserOrRedirect(), requireOrganizationContext()]);
@@ -127,23 +121,6 @@ export default async function NotificationSettingsPage() {
             </CardContent>
           </Card>
         </section>
-
-        {context.membershipRole !== "AGENT" ? (
-          <Card className="border-border/60 bg-card/85 shadow-sm">
-            <CardHeader className="border-b border-border/70">
-              <CardTitle className="text-base">Webhook de Telegram</CardTitle>
-              <CardDescription>
-                Reconfigura el bot para que apunte al dominio actual de esta instalación.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
-              <span>La sincronización es manual para evitar efectos secundarios al abrir la página.</span>
-              <form action={syncWebhookFormAction}>
-                <Button type="submit" variant="outline">Sincronizar webhook</Button>
-              </form>
-            </CardContent>
-          </Card>
-        ) : null}
 
         <NotificationPreferencesPanel
           key={channel?.updatedAt.getTime() ?? 0}

@@ -101,16 +101,41 @@ describe("telegram.shared", () => {
     });
   });
 
-  it("builds the webhook url from an explicit base url", () => {
-    expect(getTelegramWebhookUrl("https://example.com")).toBe(
-      "https://example.com/api/integrations/telegram/webhook",
-    );
+  it("builds the webhook url only from APP_BASE_URL", () => {
+    const originalBaseUrl = process.env.APP_BASE_URL;
+    process.env.APP_BASE_URL = "https://example.com";
+    try {
+      expect(getTelegramWebhookUrl()).toBe("https://example.com/api/integrations/telegram/webhook");
+    } finally {
+      if (originalBaseUrl === undefined) delete process.env.APP_BASE_URL;
+      else process.env.APP_BASE_URL = originalBaseUrl;
+    }
+  });
+
+  it("rejects a missing or insecure Production APP_BASE_URL", () => {
+    const originalBaseUrl = process.env.APP_BASE_URL;
+    const originalNodeEnv = process.env.NODE_ENV;
+    const mutableEnv = process.env as Record<string, string | undefined>;
+    Object.assign(mutableEnv, { NODE_ENV: "production", APP_BASE_URL: "http://example.com" });
+    try {
+      expect(getTelegramWebhookUrl()).toBeNull();
+      process.env.APP_BASE_URL = "https://example.com/untrusted-path";
+      expect(getTelegramWebhookUrl()).toBeNull();
+      delete process.env.APP_BASE_URL;
+      expect(getTelegramWebhookUrl()).toBeNull();
+    } finally {
+      if (originalBaseUrl === undefined) delete process.env.APP_BASE_URL;
+      else process.env.APP_BASE_URL = originalBaseUrl;
+      if (originalNodeEnv === undefined) delete mutableEnv.NODE_ENV;
+      else mutableEnv.NODE_ENV = originalNodeEnv;
+    }
   });
 
   it("syncs the webhook with Telegram using the current domain", async () => {
     const originalFetch = global.fetch;
     const originalBotToken = process.env.TELEGRAM_BOT_TOKEN;
     const originalWebhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+    const originalBaseUrl = process.env.APP_BASE_URL;
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ ok: true }),
@@ -118,10 +143,11 @@ describe("telegram.shared", () => {
 
     process.env.TELEGRAM_BOT_TOKEN = "bot-token";
     process.env.TELEGRAM_WEBHOOK_SECRET = "webhook-secret";
+    process.env.APP_BASE_URL = "https://example.com";
     global.fetch = fetchMock as typeof fetch;
 
     try {
-      await expect(syncTelegramWebhook("https://example.com")).resolves.toMatchObject({
+      await expect(syncTelegramWebhook()).resolves.toMatchObject({
         ok: true,
         webhookUrl: "https://example.com/api/integrations/telegram/webhook",
       });
@@ -151,6 +177,8 @@ describe("telegram.shared", () => {
       } else {
         process.env.TELEGRAM_WEBHOOK_SECRET = originalWebhookSecret;
       }
+      if (originalBaseUrl === undefined) delete process.env.APP_BASE_URL;
+      else process.env.APP_BASE_URL = originalBaseUrl;
     }
   });
 });

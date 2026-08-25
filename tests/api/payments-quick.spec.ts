@@ -58,12 +58,10 @@ test.describe("POST /api/payments/quick", () => {
     const authCookie = await getAdminSessionCookie();
 
     try {
-      // First verify the receipt exists
       const db = getTestDb();
       const receipt = await db.receipt.findUnique({ where: { id: seeded.id } });
       if (!receipt) {
-        test.skip(true, "Test receipt not found in database");
-        return;
+        throw new Error(`Seeded receipt ${seeded.id} was not found in the disposable test database.`);
       }
 
       const response = await request.post("/api/payments/quick", {
@@ -75,21 +73,6 @@ test.describe("POST /api/payments/quick", () => {
           paymentMethod: "TRANSFER",
         },
       });
-
-      // API may not exist yet
-      if (response.status() === 404) {
-        test.skip(true, "API endpoint not implemented");
-        return;
-      }
-
-      // Check if API returns error about receipt not found
-      if (response.status() === 400) {
-        const body = await response.json();
-        if (body.error && body.error.includes("recibo no existe")) {
-          test.skip(true, "Receipt not found - test data issue");
-          return;
-        }
-      }
 
       expect(response.status()).toBe(200);
       const body = await response.json();
@@ -117,12 +100,10 @@ test.describe("POST /api/payments/quick", () => {
     const authCookie = await getAdminSessionCookie();
 
     try {
-      // First verify receipt exists
       const db = getTestDb();
       const receipt = await db.receipt.findUnique({ where: { id: seeded.id } });
       if (!receipt) {
-        test.skip(true, "Test receipt not found in database");
-        return;
+        throw new Error(`Seeded receipt ${seeded.id} was not found in the disposable test database.`);
       }
 
       // Pay first time.
@@ -135,12 +116,6 @@ test.describe("POST /api/payments/quick", () => {
           paymentMethod: "TRANSFER",
         },
       });
-      
-      // API may not exist yet
-      if (first.status() === 404) {
-        test.skip(true, "API endpoint not implemented");
-        return;
-      }
       
       expect(first.status()).toBe(200);
 

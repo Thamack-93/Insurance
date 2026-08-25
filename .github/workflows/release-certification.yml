@@ -22,17 +22,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  quality:
-    name: CODE CERTIFICATION / QUALITY
+  resolve-ref:
+    name: RESOLVE REQUESTED REF / NO SECRETS
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-      NORA_SCOPE_BASE_SHA: ${{ github.sha }}
+    timeout-minutes: 10
+    outputs:
+      certified_sha: ${{ steps.resolve.outputs.certified_sha }}
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: 1
+      - name: Resolve immutable certification SHA
+        id: resolve
+        shell: bash
+        run: echo "certified_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  quality:
+    name: CODE CERTIFICATION / QUALITY
+    needs: resolve-ref
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NORA_SCOPE_BASE_SHA: ${{ needs.resolve-ref.outputs.certified_sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve-ref.outputs.certified_sha }}
           fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
@@ -60,6 +77,7 @@ jobs:
 
   disposable-tenant:
     name: DISPOSABLE POSTGRESQL / TENANT ISOLATION
+    needs: resolve-ref
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -97,7 +115,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.resolve-ref.outputs.certified_sha }}
           fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
@@ -117,6 +135,26 @@ jobs:
         run: |
           npx prisma migrate deploy
           npm run db:check-drift
+      - name: Mark migrated tenant database
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          db_name="${TENANT_ISOLATION_DB_NAME}"
+          host_name="127.0.0.1"
+          fingerprint="$(printf 'local-postgres:%s:%s:%s' "$TENANT_ISOLATION_RUN_ID" "$db_name" "$host_name" | sha256sum | awk '{print $1}')"
+          psql -h "$host_name" -U postgres -d "$db_name" -v ON_ERROR_STOP=1 <<SQL
+          CREATE TABLE "__policydesk_tenant_isolation_run" (
+            run_id text PRIMARY KEY,
+            database_name text NOT NULL,
+            host text NOT NULL,
+            fingerprint text NOT NULL,
+            created_at timestamptz NOT NULL DEFAULT now()
+          );
+          INSERT INTO "__policydesk_tenant_isolation_run" (run_id, database_name, host, fingerprint)
+          VALUES ('$TENANT_ISOLATION_RUN_ID', '$db_name', '$host_name', '$fingerprint');
+          SQL
+          printf 'TENANT_ISOLATION_FINGERPRINT=%s\n' "$fingerprint" >> "$GITHUB_ENV"
       - name: Create protected two-organization fixture
         run: npm run test:tenant-fixture
       - name: Tenant and knowledge isolation tests
@@ -138,6 +176,7 @@ jobs:
 
   disposable-application:
     name: DISPOSABLE POSTGRESQL / APPLICATION API E2E BILLING RESTORE
+    needs: resolve-ref
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:
@@ -169,7 +208,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.resolve-ref.outputs.certified_sha }}
           fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
@@ -218,12 +257,29 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
 
+  production-policy:
+    name: PRODUCTION VERIFIER POLICY / MAIN ONLY
+    if: ${{ inputs.verify_production == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require workflow execution from main
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Production verification may only be requested from main."
+            exit 1
+          fi
+
   production-state:
     name: PRODUCTION STATE VERIFICATION / READ ONLY
     if: ${{ inputs.verify_production == true }}
+    needs: [resolve-ref, production-policy]
     environment: production-readonly-verification
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      verifier_sha: ${{ steps.source.outputs.verifier_sha }}
     env:
       DATABASE_URL: ""
       DATABASE_URL_UNPOOLED: ${{ secrets.PRODUCTION_READONLY_DATABASE_URL }}
@@ -233,8 +289,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.ref }}
+          ref: refs/heads/main
           fetch-depth: 1
+      - name: Record immutable Production verifier SHA
+        id: source
+        shell: bash
+        run: echo "verifier_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
@@ -267,12 +327,12 @@ jobs:
   report:
     name: RELEASE EVIDENCE / SANITIZED REPORT
     if: always()
-    needs: [quality, disposable-tenant, disposable-application, production-state]
+    needs: [resolve-ref, quality, disposable-tenant, disposable-application, production-policy, production-state]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.resolve-ref.outputs.certified_sha }}
           fetch-depth: 1
       - name: Download Production verifier evidence
         if: needs.production-state.result != 'skipped'
@@ -287,7 +347,10 @@ jobs:
           TENANT_RESULT: ${{ needs.disposable-tenant.result }}
           APPLICATION_RESULT: ${{ needs.disposable-application.result }}
           PRODUCTION_RESULT: ${{ needs.production-state.result }}
+          PRODUCTION_POLICY_RESULT: ${{ needs.production-policy.result }}
           REQUESTED_REF: ${{ inputs.ref }}
+          CERTIFIED_SHA: ${{ needs.resolve-ref.outputs.certified_sha }}
+          PRODUCTION_VERIFIER_SHA: ${{ needs.production-state.outputs.verifier_sha }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
@@ -304,7 +367,8 @@ jobs:
             } catch {}
           }
           const report = {
-            commitSha: cp.execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+            certifiedSha: process.env.CERTIFIED_SHA || cp.execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+            productionVerifierSha: process.env.PRODUCTION_VERIFIER_SHA || null,
             requestedRef: process.env.REQUESTED_REF,
             generatedAt: new Date().toISOString(),
             run: { id: process.env.RUN_ID, attempt: process.env.RUN_ATTEMPT },
@@ -313,13 +377,17 @@ jobs:
               tenantIsolation: process.env.TENANT_RESULT,
               applicationApiE2E: process.env.APPLICATION_RESULT,
             },
-            productionStateVerification: production,
+            productionStateVerification: {
+              ...production,
+              policy: process.env.PRODUCTION_POLICY_RESULT,
+            },
           };
           fs.writeFileSync("artifacts/release-certification/report.json", JSON.stringify(report, null, 2) + "\n");
           fs.writeFileSync("artifacts/release-certification/summary.md", [
             "# PolicyDesk Release Certification",
             "",
-            `- Commit SHA: ${report.commitSha}`,
+            `- Certified SHA: ${report.certifiedSha}`,
+            `- Production verifier SHA: ${report.productionVerifierSha || "NOT_RUN"}`,
             `- Generated: ${report.generatedAt}`,
             `- Code certification: ${report.codeCertification.quality}`,
             `- Disposable tenant isolation: ${report.disposablePostgres.tenantIsolation}`,

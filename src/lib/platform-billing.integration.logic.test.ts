@@ -10,6 +10,7 @@ const enabled = process.env.RESTORE_INTEGRATION === "1";
 const requireSuperAdmin = vi.hoisted(() => vi.fn());
 const platformBillingMutationsEnabled = vi.hoisted(() => vi.fn());
 const revalidatePath = vi.hoisted(() => vi.fn());
+const BILLING_ORGANIZATION_ID = "org_legacy_singleton_0001";
 
 const TestAuthError = vi.hoisted(() => class TestAuthError extends Error {});
 
@@ -53,7 +54,7 @@ async function seed(url: string) {
   const pool = new Pool({ connectionString: url, max: 1 });
   try {
     await pool.query(`INSERT INTO "User" (id,email,name,"passwordHash",role,"platformRole",active,"createdAt","updatedAt") VALUES ('billing-admin','billing-admin@example.test','Billing Admin','fixture','ADMIN','SUPERADMIN',true,now(),now())`);
-    await pool.query(`INSERT INTO "Organization" (id,name,slug,status,"timeZone","defaultCurrency","createdAt","updatedAt") VALUES ('billing-org','Billing Organization','billing-org','ACTIVE','Etc/GMT+6','MXN',now(),now())`);
+    await pool.query(`UPDATE "Organization" SET name = 'Billing Organization', slug = 'billing-org', status = 'ACTIVE', "updatedAt" = now() WHERE id = $1`, [BILLING_ORGANIZATION_ID]);
   } finally { await pool.end(); }
 }
 
@@ -79,36 +80,36 @@ describe.skipIf(!enabled)("platform billing disposable PostgreSQL integration", 
       const repeatedPlan = await createPlatformPlanAction({ requestId: "billing-plan-1", code: "PRO", name: "Profesional", monthlyAmountMinor: "10000", currency: "MXN" });
       expect(repeatedPlan).toMatchObject({ ok: true, id: planResult.id });
 
-      const subscriptionResult = await assignPlatformSubscriptionAction({ requestId: "billing-sub-1", organizationId: "billing-org", planId: planResult.id, status: "ACTIVE", reason: "Alta inicial autorizada" });
+      const subscriptionResult = await assignPlatformSubscriptionAction({ requestId: "billing-sub-1", organizationId: BILLING_ORGANIZATION_ID, planId: planResult.id, status: "ACTIVE", reason: "Alta inicial autorizada" });
       expect(subscriptionResult.ok).toBe(true);
       if (!subscriptionResult.ok) throw new Error(subscriptionResult.error);
-      const repeatedSubscription = await assignPlatformSubscriptionAction({ requestId: "billing-sub-1", organizationId: "billing-org", planId: planResult.id, status: "ACTIVE", reason: "Alta inicial autorizada" });
+      const repeatedSubscription = await assignPlatformSubscriptionAction({ requestId: "billing-sub-1", organizationId: BILLING_ORGANIZATION_ID, planId: planResult.id, status: "ACTIVE", reason: "Alta inicial autorizada" });
       expect(repeatedSubscription).toMatchObject({ ok: true, id: subscriptionResult.id });
 
       const secondPlan = await createPlatformPlanAction({ requestId: "billing-plan-2", code: "BASIC", name: "Básico", monthlyAmountMinor: "5000", currency: "MXN" });
       expect(secondPlan.ok).toBe(true);
       if (!secondPlan.ok) throw new Error(secondPlan.error);
-      const replacement = await assignPlatformSubscriptionAction({ requestId: "billing-sub-2", organizationId: "billing-org", planId: secondPlan.id, status: "ACTIVE", reason: "Cambio de plan autorizado" });
+      const replacement = await assignPlatformSubscriptionAction({ requestId: "billing-sub-2", organizationId: BILLING_ORGANIZATION_ID, planId: secondPlan.id, status: "ACTIVE", reason: "Cambio de plan autorizado" });
       expect(replacement.ok).toBe(true);
       if (!replacement.ok) throw new Error(replacement.error);
 
       const db = getDb();
-      expect(await db.organizationSubscription.count({ where: { organizationId: "billing-org", status: { in: ["TRIAL", "ACTIVE", "PAST_DUE"] } } })).toBe(1);
-      expect(await db.organizationSubscription.count({ where: { organizationId: "billing-org", status: "CANCELED" } })).toBe(1);
+      expect(await db.organizationSubscription.count({ where: { organizationId: BILLING_ORGANIZATION_ID, status: { in: ["TRIAL", "ACTIVE", "PAST_DUE"] } } })).toBe(1);
+      expect(await db.organizationSubscription.count({ where: { organizationId: BILLING_ORGANIZATION_ID, status: "CANCELED" } })).toBe(1);
 
-      const paid = await recordPlatformChargeAction({ requestId: "billing-charge-1", organizationId: "billing-org", subscriptionId: replacement.id, periodStart: "2026-08-01", periodEnd: "2026-08-31", amountMinor: "5000", currency: "MXN", status: "PAID", reason: "Cargo mensual autorizado" });
+      const paid = await recordPlatformChargeAction({ requestId: "billing-charge-1", organizationId: BILLING_ORGANIZATION_ID, subscriptionId: replacement.id, periodStart: "2026-08-01", periodEnd: "2026-08-31", amountMinor: "5000", currency: "MXN", status: "PAID", reason: "Cargo mensual autorizado" });
       expect(paid.ok).toBe(true);
       if (!paid.ok) throw new Error(paid.error);
-      const pending = await recordPlatformChargeAction({ requestId: "billing-charge-2", organizationId: "billing-org", periodStart: "2026-09-01", periodEnd: "2026-09-30", amountMinor: "5000", currency: "MXN", status: "PENDING", reason: "Cargo futuro autorizado" });
+      const pending = await recordPlatformChargeAction({ requestId: "billing-charge-2", organizationId: BILLING_ORGANIZATION_ID, periodStart: "2026-09-01", periodEnd: "2026-09-30", amountMinor: "5000", currency: "MXN", status: "PENDING", reason: "Cargo futuro autorizado" });
       expect(pending.ok).toBe(true);
       if (!pending.ok) throw new Error(pending.error);
       const voided = await transitionPlatformChargeAction({ requestId: "billing-charge-transition-1", chargeId: pending.id, status: "VOID", reason: "Anulación manual autorizada" });
       expect(voided).toMatchObject({ ok: true, id: pending.id });
-      const mismatch = await recordPlatformChargeAction({ requestId: "billing-charge-mismatch", organizationId: "billing-org", subscriptionId: replacement.id, periodStart: "2026-08-01", periodEnd: "2026-08-31", amountMinor: "5000", currency: "USD", status: "PENDING", reason: "Moneda incompatible" });
+      const mismatch = await recordPlatformChargeAction({ requestId: "billing-charge-mismatch", organizationId: BILLING_ORGANIZATION_ID, subscriptionId: replacement.id, periodStart: "2026-08-01", periodEnd: "2026-08-31", amountMinor: "5000", currency: "USD", status: "PENDING", reason: "Moneda incompatible" });
       expect(mismatch).toEqual({ ok: false, error: "POLICYDESK_BILLING_CURRENCY_MISMATCH" });
 
-      const subscriptionRows = await db.organizationSubscription.findMany({ where: { organizationId: "billing-org" }, select: { status: true, monthlyAmountMinor: true, currency: true, startedAt: true, endsAt: true } });
-      const chargeRows = await db.billingCharge.findMany({ where: { organizationId: "billing-org" }, select: { status: true, amountMinor: true, currency: true, paidAt: true } });
+      const subscriptionRows = await db.organizationSubscription.findMany({ where: { organizationId: BILLING_ORGANIZATION_ID }, select: { status: true, monthlyAmountMinor: true, currency: true, startedAt: true, endsAt: true } });
+      const chargeRows = await db.billingCharge.findMany({ where: { organizationId: BILLING_ORGANIZATION_ID }, select: { status: true, amountMinor: true, currency: true, paidAt: true } });
       const [metric] = buildMonthlyBillingMetrics([new Date("2026-08-01T00:00:00.000Z")], subscriptionRows, chargeRows);
       expect(metric?.mrrByCurrency).toEqual({ MXN: 5000 });
       expect(metric?.cashByCurrency.MXN).toBeGreaterThanOrEqual(5000);

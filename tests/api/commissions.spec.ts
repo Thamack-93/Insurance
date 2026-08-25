@@ -21,11 +21,6 @@ test.describe("Commissions API", () => {
         headers: { cookie: authCookie },
       });
 
-      if (response.status() === 404) {
-        test.skip(true, "API endpoint not implemented");
-        return;
-      }
-
       expect(response.status()).toBe(200);
       const body = await response.json();
 
@@ -106,11 +101,6 @@ test.describe("Commissions API", () => {
         headers: { cookie: authCookie, origin: getTestOrigin() },
         data: { status: "PAID", actualAmount: 95 },
       });
-
-      if (response.status() === 404) {
-        test.skip(true, "API endpoint not implemented");
-        return;
-      }
 
       expect(response.status()).toBe(200);
       const body = await response.json();
