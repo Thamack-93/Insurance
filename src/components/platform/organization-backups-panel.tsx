@@ -12,12 +12,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { BackupPreflightStatus } from "@/lib/backup";
 import type { MutationResult } from "@/lib/mutation-utils";
+import { getBackupScheduleStatus, TENANT_BACKUP_INTERVAL_DAYS } from "@/lib/backup-schedule";
 
 type Props = {
   organizationId: string;
   initialBackups: OrganizationBackupListItem[];
   backupStatus: BackupPreflightStatus;
-  rpoDays?: number;
   createBackup: (organizationId: string) => Promise<MutationResult>;
   listBackups: (organizationId: string) => Promise<OrganizationBackupListItem[]>;
 };
@@ -38,13 +38,14 @@ function formatDateTime(iso: string) {
   });
 }
 
-export function OrganizationBackupsPanel({ organizationId, initialBackups, backupStatus, rpoDays = 1, createBackup, listBackups }: Props) {
+export function OrganizationBackupsPanel({ organizationId, initialBackups, backupStatus, createBackup, listBackups }: Props) {
   const [backups, setBackups] = useState(initialBackups);
   const [now] = useState(() => Date.now());
   const [pendingCreate, startCreate] = useTransition();
   const [verifying, setVerifying] = useState<string | null>(null);
   const latestVerified = backups.find((backup) => backup.status === "VERIFIED");
-  const rpoMissed = !latestVerified || now - new Date(latestVerified.createdAt).getTime() > rpoDays * 86_400_000;
+  const schedule = getBackupScheduleStatus(latestVerified ? new Date(latestVerified.createdAt) : null, new Date(now), TENANT_BACKUP_INTERVAL_DAYS);
+  const rpoMissed = schedule.status !== "HEALTHY";
 
   async function refresh() {
     try {
@@ -80,7 +81,7 @@ export function OrganizationBackupsPanel({ organizationId, initialBackups, backu
   return (
     <SectionCard
       title="Respaldos de esta organización"
-      description="Los nuevos snapshots contienen únicamente datos tenant. Los históricos se muestran como respaldos globales legados de Pedro."
+      description="Snapshots diarios de esta organización. Los respaldos globales de plataforma se administran por separado en el panel SUPERADMIN."
       action={(
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" onClick={() => void refresh()}>
@@ -106,9 +107,7 @@ export function OrganizationBackupsPanel({ organizationId, initialBackups, backu
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="truncate text-sm font-medium text-foreground">{backup.filename}</p>
-                  <Badge variant={backup.scope === "ORGANIZATION" ? "default" : "outline"} className="rounded-full">
-                    {backup.scope === "ORGANIZATION" ? "Tenant" : "Legado global de Pedro"}
-                  </Badge>
+                  <Badge variant="default" className="rounded-full">Tenant</Badge>
                   {backup.capability === "DATABASE_ONLY" ? <Badge variant="destructive" className="rounded-full">Solo base de datos</Badge> : null}
                 </div>
                 <p className="text-xs text-muted-foreground">
@@ -119,18 +118,24 @@ export function OrganizationBackupsPanel({ organizationId, initialBackups, backu
                 <Button type="button" variant="outline" size="sm" disabled={!backup.manifestAvailable || verifying === backup.id} onClick={() => void handleVerify(backup.id)}>
                   <ShieldCheck className="mr-2 size-4" /> {verifying === backup.id ? "Verificando..." : "Verificar"}
                 </Button>
-                <Button asChild variant="outline" size="sm">
-                  <a href={`/api/backups/artifacts/${encodeURIComponent(backup.id)}/download`} download={backup.filename}>
+                {backup.status === "VERIFIED" ? (
+                  <Button asChild variant="outline" size="sm">
+                    <a href={`/api/backups/artifacts/${encodeURIComponent(backup.id)}/download`} download={backup.filename}>
+                      <Download className="mr-2 size-4" /> Descargar
+                    </a>
+                  </Button>
+                ) : (
+                  <Button type="button" variant="outline" size="sm" disabled>
                     <Download className="mr-2 size-4" /> Descargar
-                  </a>
-                </Button>
+                  </Button>
+                )}
               </div>
             </li>
           ))}
         </ul>
       )}
       <div className={`border-t px-6 py-3 text-sm ${rpoMissed ? "bg-amber-50 text-amber-900 dark:bg-amber-950/20 dark:text-amber-200" : "text-muted-foreground"}`}>
-        Último backup verificado: {latestVerified ? formatDateTime(latestVerified.createdAt) : "ninguno"} · RPO {rpoDays} día(s)
+        Último backup verificado: {latestVerified ? formatDateTime(latestVerified.createdAt) : "ninguno"} · Próximo vencimiento: {formatDateTime(schedule.nextDueAt.toISOString())} · RPO 1 día
         {rpoMissed ? " · RPO incumplido" : ""}
       </div>
     </SectionCard>

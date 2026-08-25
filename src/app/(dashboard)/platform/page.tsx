@@ -7,8 +7,21 @@ import { getPlatformBillingOverview } from "@/lib/platform-billing";
 import { getOrganizationOptions } from "@/lib/organization-context";
 import { ChangePasswordForm } from "@/components/settings/change-password-form";
 import { PlatformBillingPanel } from "@/components/platform/platform-billing-panel";
+import { Button } from "@/components/ui/button";
+import { syncPlatformTelegramWebhookAction } from "./telegram-actions";
+import { reconcileBackupCatalogAction } from "@/app/(dashboard)/settings/backups-actions";
 
 export const dynamic = "force-dynamic";
+
+async function syncTelegramWebhookFormAction() {
+  "use server";
+  await syncPlatformTelegramWebhookAction();
+}
+
+async function reconcileBackupCatalogFormAction() {
+  "use server";
+  await reconcileBackupCatalogAction();
+}
 
 function healthLabel(value: string) {
   if (value === "NO_ACTIVE_OWNER") return "Sin Owner activo";
@@ -101,6 +114,34 @@ export default async function PlatformPage({ searchParams }: { searchParams?: Pr
       </section>
 
       <PlatformBillingPanel overview={billing} />
+
+      <section className="rounded-xl border bg-card p-4" aria-labelledby="platform-telegram-webhook">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 id="platform-telegram-webhook" className="font-semibold">Webhook global de Telegram</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Sincroniza el bot exclusivamente con la URL canónica configurada en APP_BASE_URL.
+            </p>
+          </div>
+          <form action={syncTelegramWebhookFormAction}>
+            <Button type="submit" variant="outline">Sincronizar webhook</Button>
+          </form>
+        </div>
+      </section>
+
+      <section className="rounded-xl border bg-card p-4" aria-labelledby="platform-backup-reconciliation">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 id="platform-backup-reconciliation" className="font-semibold">Catálogo global de respaldos</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Descubre y verifica almacenamiento de forma explícita; abrir o refrescar el panel nunca escribe en el catálogo.
+            </p>
+          </div>
+          <form action={reconcileBackupCatalogFormAction}>
+            <Button type="submit" variant="outline">Reconciliar almacenamiento</Button>
+          </form>
+        </div>
+      </section>
 
       <p className="text-sm text-muted-foreground">Este panel es de consulta. Para operar, selecciona una organización con membership activa.</p>
       {organizationOptions.length > 0 ? <Link href="/organization/select" className="text-sm font-medium text-primary underline">Entrar a mi organización operativa</Link> : <p className="text-sm text-muted-foreground">Esta cuenta master no tiene membership tenant y no puede abrir datos operativos.</p>}

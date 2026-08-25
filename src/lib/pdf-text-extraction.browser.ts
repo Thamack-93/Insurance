@@ -16,22 +16,19 @@ export async function extractPdfTextFromFile(
   });
   type Pdfjs = typeof import("pdfjs-dist/webpack.mjs");
   type LoadingTask = ReturnType<Pdfjs["getDocument"]>;
-  type PdfDocument = Awaited<LoadingTask["promise"]>;
   let loadingTask: LoadingTask | null = null;
-  let pdf: PdfDocument | null = null;
   const destroyPdf = () => {
     void loadingTask?.destroy().catch(() => {});
-    void pdf?.destroy().catch(() => {});
   };
   control.signal.addEventListener("abort", destroyPdf, { once: true });
 
   try {
     const pdfjs = await abortablePdfPromise(import("pdfjs-dist/webpack.mjs"), control);
     const data = await abortablePdfPromise(file.arrayBuffer(), control);
-    loadingTask = pdfjs.getDocument({ data: new Uint8Array(data) });
+    const documentOptions = { data: new Uint8Array(data), isEvalSupported: false } as unknown as Parameters<typeof pdfjs.getDocument>[0];
+    loadingTask = pdfjs.getDocument(documentOptions);
     if (control.signal.aborted) destroyPdf();
     const resolvedPdf = await abortablePdfPromise(loadingTask.promise, control);
-    pdf = resolvedPdf;
     const pageTexts: string[] = [];
     for (let pageNumber = 1; pageNumber <= resolvedPdf.numPages; pageNumber += 1) {
       const page = await abortablePdfPromise(resolvedPdf.getPage(pageNumber), control);
@@ -44,7 +41,7 @@ export async function extractPdfTextFromFile(
     return pageTexts.join("\n");
   } finally {
     control.signal.removeEventListener("abort", destroyPdf);
-    await pdf?.destroy().catch(() => {});
+    await loadingTask?.destroy().catch(() => {});
     control.cleanup();
   }
 }

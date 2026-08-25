@@ -4,7 +4,8 @@ import { createHash } from "node:crypto";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Pool } from "pg";
-import { createDatabaseBackup, getBackupDownload, verifyStoredBackup } from "../src/lib/backup.ts";
+import { getBackupDownload, verifyStoredBackup } from "../src/lib/backup.ts";
+import { createAndCatalogBackup } from "../src/lib/backup-orchestrator.ts";
 import { decryptBackupPayload, parseBackupContainerHeader, parseBackupEncryptionKey } from "../src/lib/backup-logic.ts";
 import { createOrganizationRestoreRun, finishOrganizationRestoreRun, getBackupArtifact, upsertBackupArtifact } from "../src/lib/backup-catalog.ts";
 import { getDb } from "../src/lib/db.ts";
@@ -103,6 +104,7 @@ async function main() {
   if (!organizationId || !artifactId) throw new Error("Uso: npm run rollback:organization -- preview|prepare|apply|resume|recover-emergency|reopen --organization=<id> --artifact=<artifactId>");
   const artifact = await getBackupArtifact(artifactId);
   if (!artifact || artifact.organizationId !== organizationId || !["ORGANIZATION", "LEGACY_SINGLETON"].includes(artifact.scope)) throw new Error("El artefacto no corresponde a la organización.");
+  if (artifact.status !== "VERIFIED") throw new Error("Solo puede restaurarse un artefacto VERIFIED.");
   const { verification, plaintext } = await readPayload(artifact);
   const sha256 = verification.manifest.payload.sha256;
 
@@ -117,7 +119,7 @@ async function main() {
   confirmExact(organizationId, artifactId, sha256);
   const fingerprint = await targetFingerprint(databaseUrl);
   if (command === "prepare") {
-    const emergency = await createDatabaseBackup(new Date(), { emergency: true });
+    const emergency = await createAndCatalogBackup({ scope: "PLATFORM", emergency: true });
     const emergencyVerification = await verifyStoredBackup(emergency.filename, emergency.pathname);
     if (!emergencyVerification.valid) throw new Error("EMERGENCY_BACKUP_NOT_VERIFIED");
     const emergencyArtifact = await upsertBackupArtifact({ entry: emergency, scope: "PLATFORM", status: "VERIFIED", capability: "COMPLETE", manifest: emergency.manifest });

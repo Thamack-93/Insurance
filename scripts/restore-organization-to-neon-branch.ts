@@ -76,6 +76,7 @@ async function main() {
   });
   const artifact = await getBackupArtifact(artifactId);
   if (!artifact) throw new Error("No existe el artifactId solicitado.");
+  if (artifact.status !== "VERIFIED") throw new Error("Solo puede restaurarse un artefacto VERIFIED.");
   if (artifact.organizationId !== organizationId || !["ORGANIZATION", "LEGACY_SINGLETON"].includes(artifact.scope)) {
     throw new Error("El artefacto no está atribuido a la organización solicitada.");
   }

@@ -8,7 +8,7 @@ import path from "node:path";
 import * as XLSX from "@e965/xlsx";
 import { Client as PgClient } from "pg";
 import { businessStartOfDay, parseBusinessDateInput } from "../src/lib/business-dates.ts";
-import { createDatabaseBackup } from "../src/lib/backup.ts";
+import { createAndCatalogBackup } from "../src/lib/backup-orchestrator.ts";
 import { reconcileReceiptState } from "@/lib/receipt-reconciliation";
 import { receiptSequenceForNumber } from "@/lib/sorting";
 
@@ -921,7 +921,7 @@ async function runImport(args: Args) {
     pushSummary(report, "DB pagos antes", state.paymentReceiptIds.size);
 
     if (args.mode === "apply") {
-      const backup = await createDatabaseBackup();
+      const backup = await createAndCatalogBackup({ scope: "PLATFORM" });
       backupPath = backup.filename;
       pushSummary(report, "Backup previo", backupPath);
       await db.query("begin");

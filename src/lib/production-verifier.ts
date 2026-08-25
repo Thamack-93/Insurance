@@ -6,6 +6,11 @@ import {
   auditTenantFoundation,
   PROTECTED_TENANT_TABLES,
 } from "./tenant-organization-foundation.ts";
+import {
+  getBackupScheduleStatus,
+  PLATFORM_BACKUP_INTERVAL_DAYS,
+  TENANT_BACKUP_INTERVAL_DAYS,
+} from "./backup-schedule.ts";
 
 export type ProductionVerificationStatus = "PASS" | "WARN" | "BLOCKED";
 export type ProductionTenantMode = "single-org" | "multi-org";
@@ -237,16 +242,62 @@ async function verifyBilling(client: PoolClient, issues: VerificationIssue[]) {
 
 async function verifyBackup(client: PoolClient, issues: VerificationIssue[]) {
   try {
-    const [counts, invalidScopes, invalidManifest, invalidReferences] = await Promise.all([
+    const [counts, invalidScopes, invalidManifest, invalidReferences, tenantRows, globalLatest, unhealthyArtifacts] = await Promise.all([
       client.query<{ artifacts: string; restoreRuns: string }>(`SELECT (SELECT count(*) FROM "BackupArtifact")::text AS artifacts, (SELECT count(*) FROM "OrganizationRestoreRun")::text AS "restoreRuns"`),
       queryCount(client, `SELECT count(*)::text FROM "BackupArtifact" WHERE (scope = 'PLATFORM' AND "organizationId" IS NOT NULL) OR (scope IN ('ORGANIZATION', 'LEGACY_SINGLETON') AND "organizationId" IS NULL)`),
       queryCount(client, `SELECT count(*)::text FROM "BackupArtifact" WHERE "manifestAvailable" AND ("formatVersion" IS NULL OR "keyVersion" IS NULL OR "payloadSha256" IS NULL OR "manifestSha256" IS NULL)`),
       queryCount(client, `SELECT count(*)::text FROM "OrganizationRestoreRun" r LEFT JOIN "BackupArtifact" a ON a."id" = r."artifactId" WHERE a."id" IS NULL OR a."organizationId" IS DISTINCT FROM r."organizationId"`),
+      client.query<{ organizationId: string; latestVerifiedAt: Date | null }>(`
+        SELECT o."id" AS "organizationId", max(a."createdAt") AS "latestVerifiedAt"
+        FROM "Organization" o
+        LEFT JOIN "BackupArtifact" a
+          ON a."organizationId" = o."id" AND a.scope = 'ORGANIZATION' AND a.status = 'VERIFIED'
+        WHERE o.status = 'ACTIVE'
+        GROUP BY o."id"
+      `),
+      client.query<{ latestVerifiedAt: Date | null }>(`
+        SELECT max("createdAt") AS "latestVerifiedAt"
+        FROM "BackupArtifact"
+        WHERE scope = 'PLATFORM' AND "organizationId" IS NULL AND status = 'VERIFIED'
+      `),
+      client.query<{ blocked: string; staleCreating: string }>(`
+        SELECT
+          count(*) FILTER (WHERE status = 'BLOCKED')::text AS blocked,
+          count(*) FILTER (WHERE status = 'CREATING' AND "updatedAt" < now() - interval '2 hours')::text AS "staleCreating"
+        FROM "BackupArtifact"
+      `),
     ]);
     const row = counts.rows[0] ?? { artifacts: "0", restoreRuns: "0" };
+    const now = new Date();
+    const missingTenant = tenantRows.rows.filter((item) => !item.latestVerifiedAt).length;
+    const overdueTenant = tenantRows.rows.filter((item) => item.latestVerifiedAt && getBackupScheduleStatus(item.latestVerifiedAt, now, TENANT_BACKUP_INTERVAL_DAYS).due).length;
+    const latestGlobalAt = globalLatest.rows[0]?.latestVerifiedAt ?? null;
+    const globalSchedule = getBackupScheduleStatus(latestGlobalAt, now, PLATFORM_BACKUP_INTERVAL_DAYS);
+    const unhealthy = unhealthyArtifacts.rows[0] ?? { blocked: "0", staleCreating: "0" };
     if (invalidScopes || invalidManifest || invalidReferences) issues.push(issue("BACKUP_CATALOG_INTEGRITY_FAILED", "BLOCKED", "La consistencia del catálogo de backups falló."));
     if (Number(row.artifacts) === 0) issues.push(issue("BACKUP_CATALOG_EMPTY", "WARN", "El catálogo de backups no contiene artifacts; no se inspeccionaron payloads."));
-    return { status: aggregateVerificationStatus(issues), artifactCount: Number(row.artifacts), restoreRunCount: Number(row.restoreRuns), invalidScopeCount: invalidScopes, invalidManifestCount: invalidManifest, invalidReferenceCount: invalidReferences, payloadsInspected: false };
+    if (missingTenant > 0) issues.push(issue("TENANT_BACKUP_MISSING", "BLOCKED", `${missingTenant} organizaciones activas no tienen backup tenant VERIFIED.`));
+    if (overdueTenant > 0) issues.push(issue("TENANT_BACKUP_OVERDUE", "BLOCKED", `${overdueTenant} organizaciones activas tienen el RPO diario vencido.`));
+    if (!latestGlobalAt || globalSchedule.due) issues.push(issue("PLATFORM_BACKUP_OVERDUE", "BLOCKED", "El backup global semanal no existe o está vencido."));
+    if (Number(unhealthy.blocked) > 0) issues.push(issue("BACKUP_ARTIFACTS_BLOCKED", "BLOCKED", `El catálogo contiene ${Number(unhealthy.blocked)} artefactos BLOCKED.`));
+    if (Number(unhealthy.staleCreating) > 0) issues.push(issue("BACKUP_ARTIFACTS_STALE_CREATING", "BLOCKED", `El catálogo contiene ${Number(unhealthy.staleCreating)} artefactos CREATING antiguos.`));
+    return {
+      status: aggregateVerificationStatus(issues),
+      artifactCount: Number(row.artifacts),
+      restoreRunCount: Number(row.restoreRuns),
+      invalidScopeCount: invalidScopes,
+      invalidManifestCount: invalidManifest,
+      invalidReferenceCount: invalidReferences,
+      activeOrganizationCount: tenantRows.rowCount ?? 0,
+      tenantMissingCount: missingTenant,
+      tenantOverdueCount: overdueTenant,
+      platformWeeklyStatus: globalSchedule.status,
+      blockedArtifactCount: Number(unhealthy.blocked),
+      staleCreatingCount: Number(unhealthy.staleCreating),
+      catalogAndRpoOnly: true,
+      payloadsInspected: false,
+      recoverabilityVerified: false,
+    };
   } catch (error) {
     issues.push(issue("BACKUP_CHECK_FAILED", "BLOCKED", `No se pudo verificar el catálogo de backups (${safeErrorCode(error)}).`));
     return { status: "BLOCKED" };

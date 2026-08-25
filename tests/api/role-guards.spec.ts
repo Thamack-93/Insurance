@@ -3,15 +3,15 @@ import { getAdminSessionCookie, getAgentSessionCookie } from "../helpers/db";
 
 test.describe("role-based guards", () => {
   test("backup download requires authentication", async ({ request }) => {
-    const res = await request.get("/api/backups/anything.sqlite/download", {
+    const res = await request.get("/api/backups/artifacts/nonexistent/download", {
       maxRedirects: 0,
     });
-    expect([307, 401, 403, 404]).toContain(res.status());
+    expect(res.status()).toBe(401);
   });
 
   test("backup download rejects authenticated agents", async ({ request }) => {
     const authCookie = await getAgentSessionCookie();
-    const res = await request.get("/api/backups/anything.sqlite/download", {
+    const res = await request.get("/api/backups/artifacts/nonexistent/download", {
       headers: { cookie: authCookie },
       maxRedirects: 0,
     });

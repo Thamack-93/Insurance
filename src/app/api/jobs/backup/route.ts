@@ -2,8 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { runBackupJob } from "@/lib/backup-job";
 import { logError } from "@/lib/logger";
-import { acquireDistributedLock, checkDistributedRateLimit, securityFingerprint } from "@/lib/request-guards";
-import { rateLimitResponse } from "@/lib/api-security";
+import { acquirePostgresAdvisoryLock } from "@/lib/postgres-advisory-lock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,22 +22,15 @@ async function handleBackupRequest(request: Request) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const caller = securityFingerprint(request.headers.get("user-agent") ?? "cron");
-  const rateLimit = await checkDistributedRateLimit(`backup:${caller}`, {
-    limit: 2,
-    windowMs: 15 * 60 * 1000,
-    requireDistributed: true,
-  });
-  if (!rateLimit.allowed) return rateLimitResponse(rateLimit, "El backup está temporalmente limitado.");
-
-  const lock = await acquireDistributedLock("backup-job", 5 * 60 * 1000, true);
+  const lock = await acquirePostgresAdvisoryLock("policydesk:backup-job");
   if (!lock.acquired) {
     return lock.backend === "unavailable"
       ? NextResponse.json({ ok: false, error: "El control de ejecución no está disponible." }, { status: 503 })
       : NextResponse.json({ ok: false, error: "Ya existe un backup en ejecución." }, { status: 409 });
   }
   try {
-    return NextResponse.json(await runBackupJob());
+    const result = await runBackupJob();
+    return NextResponse.json(result, { status: result.ok ? 200 : 500 });
   } catch (error) {
     logError("api.jobs.backup", error);
     return NextResponse.json({ ok: false, error: "Backup failed" }, { status: 500 });

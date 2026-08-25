@@ -14,7 +14,6 @@ import {
 } from "@/app/(dashboard)/settings/backups-actions";
 import { PlatformPasswordReset } from "@/components/platform/platform-password-reset";
 import { PlatformOrganizationBillingPanel } from "@/components/platform/platform-billing-panel";
-import { getSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -53,10 +52,9 @@ export default async function PlatformOrganizationPage({ params, searchParams }:
     getPlatformBillingDetail(decodedOrganizationId),
   ]);
   if (!detail || !billing) notFound();
-  const [options, initialBackups, settings] = await Promise.all([
+  const [options, initialBackups] = await Promise.all([
     getOrganizationOptions(),
     listOrganizationBackupsAction(detail.organization.id).catch(() => []),
-    getSettings(),
   ]);
   const canSelectThisOrganization = options.some((option) => option.id === detail.organization.id);
   const memberPaginationParams = { members: query.members };
@@ -77,7 +75,6 @@ export default async function PlatformOrganizationPage({ params, searchParams }:
         organizationId={detail.organization.id}
         initialBackups={initialBackups}
         backupStatus={getBackupPreflightStatus()}
-        rpoDays={settings.backupFrequency === "daily" ? 1 : settings.backupFrequency === "weekly" ? 7 : 30}
         createBackup={createOrganizationBackup}
         listBackups={listOrganizationBackupsAction}
       />

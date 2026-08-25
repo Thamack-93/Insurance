@@ -12,12 +12,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { BackupPreflightStatus } from "@/lib/backup";
 import type { MutationResult } from "@/lib/mutation-utils";
+import { getBackupScheduleStatus, PLATFORM_BACKUP_INTERVAL_DAYS } from "@/lib/backup-schedule";
 
 type Props = {
   initialBackups: BackupListItem[];
   backupStatus: BackupPreflightStatus;
   createBackup: () => Promise<MutationResult>;
   listBackups: () => Promise<BackupListItem[]>;
+  reconcileBackups: () => Promise<MutationResult>;
 };
 
 function formatSize(bytes: number) {
@@ -45,12 +47,21 @@ export function BackupsPanel({
   backupStatus,
   createBackup,
   listBackups,
+  reconcileBackups,
 }: Props) {
   const [backups, setBackups] = useState<BackupListItem[]>(initialBackups);
   const [pendingCreate, startCreate] = useTransition();
   const [verifying, setVerifying] = useState<string | null>(null);
+  const [pendingReconcile, startReconcile] = useTransition();
+  const [now] = useState(() => new Date());
   const sorted = [...backups].sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt),
+  );
+  const latestVerified = sorted.find((backup) => backup.status === "VERIFIED");
+  const schedule = getBackupScheduleStatus(
+    latestVerified ? new Date(latestVerified.createdAt) : null,
+    now,
+    PLATFORM_BACKUP_INTERVAL_DAYS,
   );
 
   async function refresh() {
@@ -73,26 +84,42 @@ export function BackupsPanel({
     });
   }
 
-  async function handleVerify(filename: string) {
-    setVerifying(filename);
+  async function handleVerify(artifactId: string) {
+    setVerifying(artifactId);
     try {
-      const result = await verifyBackupAction(filename);
-      if (result.ok) toast.success(result.message);
-      else toast.error(result.error);
+      const result = await verifyBackupAction(artifactId);
+      if (result.ok) {
+        toast.success(result.message);
+        await refresh();
+      } else toast.error(result.error);
     } finally {
       setVerifying(null);
     }
   }
 
+  function handleReconcile() {
+    startReconcile(async () => {
+      const result = await reconcileBackups();
+      if (result.ok) {
+        toast.success(result.message);
+        await refresh();
+      } else toast.error(result.error);
+    });
+  }
+
   return (
     <SectionCard
-      title="Respaldos cifrados"
-      description="Snapshots Postgres privados, comprimidos y cifrados. Retención: 4 diarios, 2 semanales y 1 mensual. La restauración se realiza fuera de la web."
+      title="Respaldos globales de plataforma"
+      description="Snapshot completo global semanal, privado, comprimido y cifrado. Retención configurada: 30 días. La restauración se realiza fuera de la web."
       action={
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" onClick={() => void refresh()}>
             <RefreshCw className="mr-2 size-4" />
             Actualizar
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={handleReconcile} disabled={pendingReconcile}>
+            <ShieldCheck className="mr-2 size-4" />
+            {pendingReconcile ? "Reconciliando..." : "Reconciliar almacenamiento"}
           </Button>
           <Button type="button" size="sm" onClick={handleCreate} disabled={pendingCreate}>
             <Database className="mr-2 size-4" />
@@ -103,6 +130,8 @@ export function BackupsPanel({
     >
       <div className="border-b border-border/60 px-6 py-4">
         <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary" className="rounded-full">Global · semanal</Badge>
+          <Badge variant="secondary" className="rounded-full">Retención · 30 días</Badge>
           <Badge variant={backupStatus.ready ? "default" : "outline"} className="rounded-full">
             {backupStatus.ready ? "Backup listo" : "Backup incompleto"}
           </Badge>
@@ -124,6 +153,9 @@ export function BackupsPanel({
             </div>
           ))}
         </div>
+        <p className="mt-3 text-sm text-muted-foreground">
+          Último snapshot verificado: {latestVerified ? formatDateTime(latestVerified.createdAt) : "ninguno"} · Próximo vencimiento: {formatDateTime(schedule.nextDueAt.toISOString())} · Estado semanal: {schedule.status}
+        </p>
       </div>
       {sorted.length === 0 ? (
         <div className="p-6">
@@ -137,15 +169,18 @@ export function BackupsPanel({
         <ul className="divide-y divide-border/60">
           {sorted.map((backup) => (
             <li
-              key={backup.filename}
+              key={backup.id}
               className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-foreground">{backup.filename}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="truncate text-sm font-medium text-foreground">{backup.filename}</p>
+                  <Badge variant="outline" className="rounded-full">Global</Badge>
+                  <Badge variant={backup.status === "VERIFIED" ? "secondary" : "outline"} className="rounded-full">{backup.status}</Badge>
+                  {backup.capability === "DATABASE_ONLY" ? <Badge variant="destructive" className="rounded-full">Solo base de datos</Badge> : null}
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  {formatDateTime(backup.createdAt)} · {formatSize(backup.size)} ·{" "}
-                  {backup.manifestAvailable ? "manifiesto disponible" : "sin manifiesto"} · {" "}
-                  {backup.storage === "rekeyed" ? "copia re-cifrada" : "original"}
+                  {formatDateTime(backup.createdAt)} · {formatSize(backup.size)} · v{backup.formatVersion ?? "?"} · {backup.storage}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -153,21 +188,23 @@ export function BackupsPanel({
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={!backup.manifestAvailable || verifying === backup.filename}
-                  onClick={() => void handleVerify(backup.filename)}
+                  disabled={!backup.manifestAvailable || backup.status === "PRUNED" || verifying === backup.id}
+                  onClick={() => void handleVerify(backup.id)}
                 >
                   <ShieldCheck className="mr-2 size-4" />
-                  {verifying === backup.filename ? "Verificando..." : "Verificar"}
+                  {verifying === backup.id ? "Verificando..." : "Verificar"}
                 </Button>
-                <Button asChild variant="outline" size="sm">
-                  <a
-                    href={`/api/backups/${encodeURIComponent(backup.filename)}/download`}
-                    download={backup.filename}
-                  >
-                    <Download className="mr-2 size-4" />
-                    Descargar cifrado
-                  </a>
-                </Button>
+                {backup.status === "VERIFIED" ? (
+                  <Button asChild variant="outline" size="sm">
+                    <a href={`/api/backups/artifacts/${encodeURIComponent(backup.id)}/download`} download={backup.filename}>
+                      <Download className="mr-2 size-4" /> Descargar cifrado
+                    </a>
+                  </Button>
+                ) : (
+                  <Button type="button" variant="outline" size="sm" disabled>
+                    <Download className="mr-2 size-4" /> Descargar cifrado
+                  </Button>
+                )}
               </div>
             </li>
           ))}

@@ -1731,6 +1731,7 @@ export async function applyLedgerImportBatch(input: {
   });
 
   await writeActivityLog({
+    organizationId: input.organizationId,
     entityType: "LedgerImportBatch",
     entityId: batch.id,
     action: "LEDGER_IMPORT_BLOCK_APPLIED",

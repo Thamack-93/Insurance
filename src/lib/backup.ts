@@ -28,6 +28,7 @@ export const EMERGENCY_BACKUP_PREFIX = "emergency-backups/";
 // Copies created during a key migration are deliberately outside BACKUP_PREFIX so
 // regular retention can never prune either the source or the migration copy.
 const BACKUP_REKEY_PREFIX = "database-backup-rekeys/";
+export const GLOBAL_BACKUP_RETENTION_DAYS = 30;
 const BACKUP_EXTENSION = ".ndjson.gz.enc";
 const MANIFEST_SUFFIX = ".manifest.json";
 const EXPORT_BATCH_SIZE = 500;
@@ -62,6 +63,8 @@ export type BackupEntry = {
   organizationId?: string;
   storage?: "original" | "rekeyed";
 };
+
+export type BackupTarget = Pick<BackupEntry, "filename" | "pathname">;
 
 export type CreatedBackup = BackupEntry & {
   manifest: BackupManifest;
@@ -405,6 +408,57 @@ function compactTimestamp(date: Date) {
   return date.toISOString().replaceAll("-", "").replaceAll(":", "").replace(".", "");
 }
 
+function deterministicBackupNonce(value: string) {
+  return createHash("sha256").update(value).digest("hex").slice(0, 12);
+}
+
+function utcDayStart(value: Date) {
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+}
+
+function utcWeekStart(value: Date) {
+  const start = utcDayStart(value);
+  const daysSinceMonday = (start.getUTCDay() + 6) % 7;
+  start.setUTCDate(start.getUTCDate() - daysSinceMonday);
+  return start;
+}
+
+export function buildScheduledPlatformBackupTarget(now: Date): BackupTarget {
+  const keyVersion = assertValidKeyVersion(requireEnvironment("BACKUP_ENCRYPTION_KEY_VERSION"));
+  const period = utcWeekStart(now);
+  const nonce = deterministicBackupNonce(`platform:${period.toISOString()}:${keyVersion}`);
+  const filename = `policydesk-${compactTimestamp(period)}-${nonce}-kv-${keyVersion}${BACKUP_EXTENSION}`;
+  assertSafeBackupFilename(filename);
+  return { filename, pathname: `${BACKUP_PREFIX}${filename}` };
+}
+
+export function buildManualPlatformBackupTarget(now: Date, emergency = false): BackupTarget {
+  const keyVersion = assertValidKeyVersion(requireEnvironment("BACKUP_ENCRYPTION_KEY_VERSION"));
+  const nonce = randomBytes(6).toString("hex");
+  const filename = `${emergency ? "policydesk-emergency" : "policydesk"}-${compactTimestamp(now)}-${nonce}-kv-${keyVersion}${BACKUP_EXTENSION}`;
+  assertSafeBackupFilename(filename);
+  return { filename, pathname: `${emergency ? EMERGENCY_BACKUP_PREFIX : BACKUP_PREFIX}${filename}` };
+}
+
+export function buildScheduledOrganizationBackupTarget(organizationId: string, now: Date): BackupTarget {
+  const safeOrganizationId = assertSafeOrganizationId(organizationId);
+  const keyVersion = assertValidKeyVersion(requireEnvironment("BACKUP_ENCRYPTION_KEY_VERSION"));
+  const period = utcDayStart(now);
+  const nonce = deterministicBackupNonce(`organization:${safeOrganizationId}:${period.toISOString()}:${keyVersion}`);
+  const filename = `policydesk-org-${safeOrganizationId}-${compactTimestamp(period)}-${nonce}-kv-${keyVersion}${BACKUP_EXTENSION}`;
+  assertSafeBackupFilename(filename);
+  return { filename, pathname: `${TENANT_BACKUP_PREFIX}${safeOrganizationId}/${filename}` };
+}
+
+export function buildManualOrganizationBackupTarget(organizationId: string, now: Date): BackupTarget {
+  const safeOrganizationId = assertSafeOrganizationId(organizationId);
+  const keyVersion = assertValidKeyVersion(requireEnvironment("BACKUP_ENCRYPTION_KEY_VERSION"));
+  const nonce = randomBytes(6).toString("hex");
+  const filename = `policydesk-org-${safeOrganizationId}-${compactTimestamp(now)}-${nonce}-kv-${keyVersion}${BACKUP_EXTENSION}`;
+  assertSafeBackupFilename(filename);
+  return { filename, pathname: `${TENANT_BACKUP_PREFIX}${safeOrganizationId}/${filename}` };
+}
+
 function assertSafeBackupFilename(filename: string) {
   if (!BACKUP_FILENAME_PATTERN.test(filename)) throw new Error("Invalid backup filename.");
   return filename;
@@ -487,6 +541,10 @@ export function listRekeyedBackups(): Promise<BackupEntry[]> {
   return listBackupsInPrefix(BACKUP_REKEY_PREFIX);
 }
 
+export function listEmergencyBackups(): Promise<BackupEntry[]> {
+  return listBackupsInPrefix(EMERGENCY_BACKUP_PREFIX);
+}
+
 function assertSafeOrganizationId(organizationId: string) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(organizationId)) {
     throw new Error("Invalid organization id for backup storage.");
@@ -523,29 +581,43 @@ export function listOrganizationBackups(organizationId: string): Promise<BackupE
   return listTenantBackupsInPrefix(TENANT_BACKUP_PREFIX, organizationId);
 }
 
-export async function rotateBackups() {
+export async function rotateBackups(options: { retentionDays?: number } = {}) {
   const entries = await listBackups();
   const selection = selectBackupRetention(
     entries.map((entry) => ({ ...entry, id: entry.pathname })),
   );
-  if (selection.remove.length === 0) return [];
-  await del(
-    selection.remove.flatMap((entry) => [entry.pathname, `${entry.pathname}${MANIFEST_SUFFIX}`]),
+  const expired = options.retentionDays === undefined
+    ? []
+    : selection.keep.filter(
+        (entry) => Date.now() - entry.createdAt.getTime() >= options.retentionDays! * 86_400_000,
+      );
+  const toRemove = [...selection.remove, ...expired].filter(
+    (entry, index, all) => all.findIndex((candidate) => candidate.pathname === entry.pathname) === index,
   );
-  return selection.remove.map((entry) => entry.filename);
+  if (toRemove.length === 0) return [];
+  await del(
+    toRemove.flatMap((entry) => [entry.pathname, `${entry.pathname}${MANIFEST_SUFFIX}`]),
+  );
+  return toRemove.map((entry) => entry.pathname);
 }
 
-export async function createDatabaseBackup(now = new Date(), options: { emergency?: boolean } = {}): Promise<CreatedBackup> {
+export async function createDatabaseBackup(
+  now = new Date(),
+  options: { emergency?: boolean; retentionDays?: number; target?: BackupTarget; deferRotation?: boolean } = {},
+): Promise<CreatedBackup> {
   const preflight = getBackupPreflightStatus();
   if (!preflight.ready) {
     throw new Error(formatBackupPreflightError(preflight));
   }
   const { key, keyVersion } = getEncryptionConfiguration();
   const iv = randomBytes(12);
-  const nonce = randomBytes(6).toString("hex");
-  const filename = `${options.emergency ? "policydesk-emergency" : "policydesk"}-${compactTimestamp(now)}-${nonce}-kv-${keyVersion}${BACKUP_EXTENSION}`;
+  const target = options.target ?? buildManualPlatformBackupTarget(now, options.emergency);
+  const filename = target.filename;
   assertSafeBackupFilename(filename);
-  const pathname = `${options.emergency ? EMERGENCY_BACKUP_PREFIX : BACKUP_PREFIX}${filename}`;
+  const pathname = target.pathname;
+  if (options.target && pathname !== `${options.emergency ? EMERGENCY_BACKUP_PREFIX : BACKUP_PREFIX}${filename}`) {
+    throw new Error("El target global no coincide con su prefijo y filename.");
+  }
   const stats: ExportStats = { tables: [], totalRows: 0 };
   const hash = createHash("sha256");
   let encryptedSize = 0;
@@ -599,7 +671,9 @@ export async function createDatabaseBackup(now = new Date(), options: { emergenc
     throw error;
   }
 
-  const pruned = options.emergency ? [] : await rotateBackups();
+  const pruned = options.emergency || options.deferRotation ? [] : await rotateBackups(
+    options.retentionDays === undefined ? {} : { retentionDays: options.retentionDays },
+  );
   return {
     filename,
     pathname: uploaded.pathname,
@@ -655,12 +729,13 @@ async function rotateOrganizationBackups(organizationId: string) {
   const selection = selectBackupRetention(entries.map((entry) => ({ ...entry, id: entry.pathname })));
   if (selection.remove.length === 0) return [];
   await del(selection.remove.flatMap((entry) => [entry.pathname, `${entry.pathname}${MANIFEST_SUFFIX}`]));
-  return selection.remove.map((entry) => entry.filename);
+  return selection.remove.map((entry) => entry.pathname);
 }
 
 export async function createOrganizationDatabaseBackup(
   organizationId: string,
   now = new Date(),
+  options: { target?: BackupTarget; deferRotation?: boolean } = {},
 ): Promise<CreatedBackup> {
   const preflight = getBackupPreflightStatus();
   if (!preflight.ready) throw new Error(formatBackupPreflightError(preflight));
@@ -668,10 +743,13 @@ export async function createOrganizationDatabaseBackup(
   const metadata = await getOrganizationBackupMetadata(safeOrganizationId);
   const { key, keyVersion } = getEncryptionConfiguration();
   const iv = randomBytes(12);
-  const nonce = randomBytes(6).toString("hex");
-  const filename = `policydesk-org-${safeOrganizationId}-${compactTimestamp(now)}-${nonce}-kv-${keyVersion}${BACKUP_EXTENSION}`;
+  const target = options.target ?? buildManualOrganizationBackupTarget(safeOrganizationId, now);
+  const filename = target.filename;
   assertSafeBackupFilename(filename);
-  const pathname = `${TENANT_BACKUP_PREFIX}${safeOrganizationId}/${filename}`;
+  const pathname = target.pathname;
+  if (options.target && pathname !== `${TENANT_BACKUP_PREFIX}${safeOrganizationId}/${filename}`) {
+    throw new Error("El target tenant no coincide con su organización y filename.");
+  }
   const stats: ExportStats = { tables: [], totalRows: 0 };
   const hash = createHash("sha256");
   let encryptedSize = 0;
@@ -742,7 +820,7 @@ export async function createOrganizationDatabaseBackup(
     await del(uploaded.pathname).catch(() => undefined);
     throw error;
   }
-  const pruned = await rotateOrganizationBackups(safeOrganizationId);
+  const pruned = options.deferRotation ? [] : await rotateOrganizationBackups(safeOrganizationId);
   return {
     filename,
     pathname: uploaded.pathname,
@@ -821,6 +899,7 @@ export async function verifyStoredBackup(filename: string, pathnameHint?: string
     return { valid: false, filename, reason: "No se encontró el payload cifrado." };
   }
   const hash = createHash("sha256");
+  const encryptedChunks: Buffer[] = [];
   let size = 0;
   const reader = payloadResult.stream.getReader();
   try {
@@ -828,6 +907,7 @@ export async function verifyStoredBackup(filename: string, pathnameHint?: string
       const { done, value } = await reader.read();
       if (done) break;
       hash.update(value);
+      encryptedChunks.push(Buffer.from(value));
       size += value.byteLength;
     }
   } finally {
@@ -837,7 +917,23 @@ export async function verifyStoredBackup(filename: string, pathnameHint?: string
   if (size !== manifest.payload.size || sha256 !== manifest.payload.sha256) {
     return { valid: false, filename, reason: "El tamaño o hash del payload no coincide." };
   }
+  try {
+    const key = getEncryptionKeyForVersion(manifest.encryption.keyVersion);
+    const decrypted = decryptBackupPayload(Buffer.concat(encryptedChunks, size), key);
+    if (decrypted.header.keyVersion !== manifest.encryption.keyVersion || decrypted.plaintext.length === 0) {
+      return { valid: false, filename, reason: "El payload cifrado no coincide con el manifiesto." };
+    }
+  } catch {
+    return { valid: false, filename, reason: "El payload no pudo descifrarse con la clave declarada." };
+  }
   return { valid: true, filename, size, sha256, manifest };
+}
+
+export async function deleteStoredBackup(pathname: string) {
+  if (!pathname.startsWith(BACKUP_PREFIX) && !pathname.startsWith(TENANT_BACKUP_PREFIX) && !pathname.startsWith(BACKUP_REKEY_PREFIX) && !pathname.startsWith(EMERGENCY_BACKUP_PREFIX)) {
+    throw new Error("Invalid backup pathname.");
+  }
+  await del([pathname, `${pathname}${MANIFEST_SUFFIX}`]);
 }
 
 export async function getBackupDownload(filename: string, pathnameHint?: string) {
@@ -863,6 +959,7 @@ export type RekeyedBackup = {
 export async function rekeyStoredBackup(
   sourceFilename: string,
   now = new Date(),
+  sourcePathname?: string,
 ): Promise<RekeyedBackup> {
   assertSafeBackupFilename(sourceFilename);
   const rekeyStatus = getBackupRekeyStatus();
@@ -870,10 +967,10 @@ export async function rekeyStoredBackup(
     throw new Error(rekeyStatus.detail);
   }
 
-  const source = await verifyStoredBackup(sourceFilename);
+  const source = await verifyStoredBackup(sourceFilename, sourcePathname);
   if (!source.valid) throw new Error(`El respaldo origen no es válido: ${source.reason}`);
 
-  const sourceDownload = await getBackupDownload(sourceFilename);
+  const sourceDownload = await getBackupDownload(sourceFilename, sourcePathname);
   if (sourceDownload?.statusCode !== 200 || !sourceDownload.stream) {
     throw new Error("No se pudo leer el payload cifrado de origen.");
   }

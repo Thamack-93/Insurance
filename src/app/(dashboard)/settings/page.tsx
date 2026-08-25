@@ -14,6 +14,9 @@ import { requireOrganizationContext } from "@/lib/organization-context";
 import { SettingsForm } from "@/components/forms/settings-form";
 import { OnboardingPanel } from "@/components/settings/onboarding-panel";
 import { getOrganizationBackupStatus } from "@/lib/organization-backup-status";
+import { getBackupPreflightStatus } from "@/lib/backup";
+import { BackupsPanel } from "@/components/settings/backups-panel";
+import { createBackup, listBackupsAction, reconcileBackupCatalogAction } from "@/app/(dashboard)/settings/backups-actions";
 
 export const maxDuration = 300;
 
@@ -32,10 +35,11 @@ export default async function SettingsPage() {
   const isTenantAdmin = organization.membershipRole === "OWNER" || organization.membershipRole === "ADMIN";
   const isPlatformAdmin = !!liveUser && liveUser.active && liveUser.platformRole === "SUPERADMIN";
   const aiStatus = getAssistantAiConnectionStatus();
-  const [settings, onboarding, ownerBackupStatus] = await Promise.all([
+  const [settings, onboarding, ownerBackupStatus, globalBackups] = await Promise.all([
     getSettings(),
     getOnboardingStatus(),
-    organization.membershipRole === "OWNER" ? getOrganizationBackupStatus() : Promise.resolve(null),
+    organization.membershipRole === "OWNER" && !isPlatformAdmin ? getOrganizationBackupStatus() : Promise.resolve(null),
+    isPlatformAdmin ? listBackupsAction().catch(() => []) : Promise.resolve([]),
   ]);
 
   return (
@@ -73,8 +77,8 @@ export default async function SettingsPage() {
           />
           <MetricCard 
             title="Respaldo" 
-            value={settings.autoBackup ? "Auto" : "Manual"} 
-            description={settings.autoBackup ? `${settings.backupFrequency}` : "Sin respaldo automático"} 
+            value="Obligatorio"
+            description="Tenant diario · global semanal"
             icon={Database} 
             tone="emerald" 
           />
@@ -189,6 +193,16 @@ export default async function SettingsPage() {
           />
         ) : null}
 
+        {isPlatformAdmin ? (
+          <BackupsPanel
+            initialBackups={globalBackups}
+            backupStatus={getBackupPreflightStatus()}
+            createBackup={createBackup}
+            listBackups={listBackupsAction}
+            reconcileBackups={reconcileBackupCatalogAction}
+          />
+        ) : null}
+
         <OnboardingPanel initialDismissed={onboarding.dismissed} />
 
         {ownerBackupStatus ? (
@@ -198,14 +212,16 @@ export default async function SettingsPage() {
                 <Database className="size-4" /> Respaldo de mi organización
               </CardTitle>
               <CardDescription>
-                Estado del servicio de respaldo global. Los archivos físicos contienen datos de toda la plataforma y no se descargan desde una cuenta tenant.
+                Último respaldo verificado de tu organización. Los snapshots globales de plataforma se administran únicamente desde SUPERADMIN.
               </CardDescription>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
-              {ownerBackupStatus.status === "AVAILABLE" && ownerBackupStatus.latestCreatedAt
-                ? `Último respaldo disponible: ${formatDateTime(ownerBackupStatus.latestCreatedAt)}`
+              {ownerBackupStatus.status === "HEALTHY" && ownerBackupStatus.latestCreatedAt
+                ? `Último respaldo diario verificado: ${formatDateTime(ownerBackupStatus.latestCreatedAt)}. Próximo vencimiento: ${ownerBackupStatus.nextDueAt ? formatDateTime(ownerBackupStatus.nextDueAt) : "pendiente"}.`
+                : ownerBackupStatus.status === "OVERDUE" && ownerBackupStatus.latestCreatedAt
+                  ? `El último respaldo verificado fue ${formatDateTime(ownerBackupStatus.latestCreatedAt)} y el RPO diario está vencido.`
                 : ownerBackupStatus.status === "NOT_CONFIGURED"
-                  ? "Todavía no hay un respaldo global disponible."
+                  ? "Todavía no hay un respaldo diario de esta organización."
                   : "El estado del respaldo no está disponible temporalmente."}
             </CardContent>
           </Card>

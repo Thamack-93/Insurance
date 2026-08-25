@@ -25,6 +25,38 @@ describe("pdf text extraction deadlines", () => {
     vi.clearAllMocks();
   });
 
+  it("extracts and joins text from multiple server PDF pages", async () => {
+    const destroy = vi.fn().mockResolvedValue(undefined);
+    pdfMocks.serverGetDocument.mockReturnValue({
+      destroy,
+      promise: Promise.resolve({
+        numPages: 2,
+        getPage: async (pageNumber: number) => ({
+          getTextContent: async () => ({ items: [{ str: `Página ${pageNumber}`, transform: [1, 0, 0, 1, 0, 10] }] }),
+        }),
+      }),
+    });
+
+    await expect(extractPdfTextFromBytes(new Uint8Array([1, 2, 3]))).resolves.toEqual({
+      pageCount: 2,
+      text: "Página 1\nPágina 2",
+    });
+    expect(destroy).toHaveBeenCalled();
+  });
+
+  it("propagates a corrupt PDF.js document error and still destroys the loading task", async () => {
+    const destroy = vi.fn().mockResolvedValue(undefined);
+    pdfMocks.serverGetDocument.mockImplementation(() => ({
+      destroy,
+      promise: new Promise((_resolve, reject) => {
+        setTimeout(() => reject(new Error("Invalid PDF structure")), 0);
+      }),
+    }));
+
+    await expect(extractPdfTextFromBytes(new Uint8Array([1, 2, 3]))).rejects.toThrow("Invalid PDF structure");
+    expect(destroy).toHaveBeenCalled();
+  });
+
   it("cancels a browser extraction that exceeds its deadline", async () => {
     await import("pdfjs-dist/webpack.mjs");
     vi.useFakeTimers();
@@ -36,9 +68,11 @@ describe("pdf text extraction deadlines", () => {
       { timeoutMs: 50 },
     );
     const rejection = expect(extraction).rejects.toMatchObject({ code: "PDF_TEXT_EXTRACTION_TIMEOUT" });
+    await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(50);
 
     await rejection;
+    expect(pdfMocks.browserGetDocument).toHaveBeenCalledWith(expect.objectContaining({ isEvalSupported: false }));
   });
 
   it("cancels a server extraction that exceeds its deadline", async () => {
@@ -52,6 +86,7 @@ describe("pdf text extraction deadlines", () => {
     const rejection = expect(extraction).rejects.toMatchObject({ code: "PDF_TEXT_EXTRACTION_TIMEOUT" });
 
     await rejection;
+    expect(pdfMocks.serverGetDocument).toHaveBeenCalledWith(expect.objectContaining({ isEvalSupported: false }));
     expect(loadingTask.destroy).toHaveBeenCalled();
   });
 

@@ -103,8 +103,12 @@ export async function cancelPolicyForNonPayment(
     });
 
     const cancelledAt = now;
-    await tx.policy.updateMany({
-      where: { id: sourceReceipt.policyId, organizationId },
+    const policyUpdate = await tx.policy.updateMany({
+      where: {
+        id: sourceReceipt.policyId,
+        organizationId,
+        status: { in: ["ACTIVE", "PENDING"] },
+      },
       data: {
         status: "CANCELLED",
         cancellationReason: "NON_PAYMENT",
@@ -113,6 +117,14 @@ export async function cancelPolicyForNonPayment(
         updatedById: actorId,
       },
     });
+    if (policyUpdate.count !== 1) {
+      return {
+        cancelled: false,
+        policyId: sourceReceipt.policy.id,
+        policyNumber: sourceReceipt.policy.policyNumber,
+        oldestUnpaidDueDate: oldestUnpaid.dueDate,
+      };
+    }
     const policy = await tx.policy.findFirstOrThrow({ where: { id: sourceReceipt.policyId, organizationId } });
 
     for (const receipt of openReceipts) {

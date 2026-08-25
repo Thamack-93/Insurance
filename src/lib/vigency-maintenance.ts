@@ -489,6 +489,7 @@ export async function runPolicyVigencyAudit(input: {
             summary.policiesUpdated += 1;
 
             await writeActivityLog({
+              organizationId: input.organizationId,
               entityType: "Policy",
               entityId: policy.id,
               action: "POLICY_PAYMENT_FREQUENCY_NORMALIZED",
