@@ -43,6 +43,7 @@ Copia `.env.example` a `.env.local` y ajusta los valores:
 | `AI_GATEWAY_STRUCTURED_MODEL` | Opcional | Modelo para acciones y salidas estructuradas |
 | `AI_GATEWAY_STRUCTURED_FALLBACK_MODELS` | Opcional | Respaldo de acciones estructuradas |
 | `AI_GATEWAY_API_KEY` | Opcional | Credencial principal para AI Gateway; OIDC queda como respaldo |
+| `NORA_AGENT_MODE` | Opcional | `off`, `admin` o `all`; ausente o inválido resuelve a `off` |
 | `BLOB_READ_WRITE_TOKEN` | Producción | Acceso al store privado de Vercel Blob |
 | `BACKUP_ENCRYPTION_KEY` | Producción | Clave de 32 bytes para AES-256-GCM |
 | `BACKUP_ENCRYPTION_KEY_VERSION` | Producción | Versión activa de la clave de cifrado |
@@ -133,6 +134,18 @@ ALLOW_KNOWLEDGE_INTEGRITY_BACKFILL=1 npm run backfill:knowledge-integrity
 ```
 
 La arquitectura, el ciclo de vida, las garantías de tenant, las citas, GMM, inyección y los límites operativos están documentados en [`docs/internal/nora-knowledge-reliability.md`](docs/internal/nora-knowledge-reliability.md).
+
+## Estado multi-organización
+
+El repositorio contiene contexto tenant, memberships, panel SUPERADMIN, backup y
+restore por organización y la base para RLS. La ejecución actual sigue siendo
+mono-tenant mientras no se active explícitamente el cutover y no exista evidencia
+de una segunda organización. La matriz completa de capacidad, Production y
+PostgreSQL disposable está en [`docs/internal/production-reliability-matrix.md`](docs/internal/production-reliability-matrix.md).
+
+La validación profunda de aislamiento, RLS y restore se ejecuta manualmente desde
+GitHub Actions; la CI rápida de cada push conserva calidad, tests, scope tenant y
+build sin exigir un drill completo en cada cambio.
 
 ## Cambios de schema (Prisma)
 
