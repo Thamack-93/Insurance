@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useId } from "react";
+import { useId, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, CalendarDays, ChevronRight, CircleDollarSign, ClipboardList, ReceiptText, RefreshCw, ShieldAlert, ShieldCheck, type LucideIcon } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { TodayDashboardData } from "@/lib/dashboard-queries";
@@ -10,6 +10,7 @@ import { formatCurrency } from "@/lib/money";
 import { policyTypeLabel, statusLabel } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "@/components/badges/status-badge";
+import { Button } from "@/components/ui/button";
 import { ChartEmptyState } from "@/components/charts/chart-empty";
 import { ChartFrame } from "@/components/charts/chart-frame";
 import { ChartLegend } from "@/components/charts/chart-legend";
@@ -105,51 +106,98 @@ export function TodayMetricCards({ metrics, prevMonthLabel }: { metrics: Dashboa
   );
 }
 
-export function PolicyActivityChart({ data }: { data: TodayDashboardData["activity"] }) {
-  const policiesSeries = data.map((point) => ({ name: point.name, value: point.pólizas }));
-  const receiptsSeries = data.map((point) => ({ name: point.name, value: point.recibos }));
+type ActivityMode = "business" | "capture";
+
+const activityModeCopy: Record<ActivityMode, {
+  label: string;
+  subtitle: string;
+  policyLabel: string;
+  receiptLabel: string;
+  note: string;
+  shareLabel: string;
+}> = {
+  business: {
+    label: "Actividad real",
+    subtitle: "Últimos 6 meses · fechas del negocio",
+    policyLabel: "Inicios de vigencia",
+    receiptLabel: "Recibos por periodo",
+    note: "Usa el inicio de vigencia de las pólizas y el inicio del periodo de cada recibo.",
+    shareLabel: "Proporción de la actividad real de los últimos 6 meses.",
+  },
+  capture: {
+    label: "Captura en sistema",
+    subtitle: "Últimos 6 meses · registros en PolicyDesk",
+    policyLabel: "Pólizas registradas",
+    receiptLabel: "Recibos registrados",
+    note: "Incluye cargas masivas históricas; julio puede reflejar el momento de importación.",
+    shareLabel: "Proporción de los registros en sistema de los últimos 6 meses.",
+  },
+};
+
+export function PolicyActivityChart({ data, captureData }: { data: TodayDashboardData["activity"]; captureData: TodayDashboardData["captureActivity"] }) {
+  const [mode, setMode] = useState<ActivityMode>("business");
+  const selectedData = mode === "business" ? data : captureData;
+  const copy = activityModeCopy[mode];
+  const policiesSeries = selectedData.map((point) => ({ name: point.name, value: point.pólizas }));
+  const receiptsSeries = selectedData.map((point) => ({ name: point.name, value: point.recibos }));
   const seriesTotals = {
     "pólizas": policiesSeries.reduce((sum, point) => sum + point.value, 0),
     recibos: receiptsSeries.reduce((sum, point) => sum + point.value, 0),
   };
-  const hasData = data.some((point) => point.pólizas > 0 || point.recibos > 0);
+  const hasData = selectedData.some((point) => point.pólizas > 0 || point.recibos > 0);
 
   return (
     <section className="flex h-full flex-col rounded-xl border bg-card p-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)]" aria-labelledby="policy-activity-title">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 id="policy-activity-title" className="text-sm font-semibold">Actividad de pólizas</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">Últimos 6 meses</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{copy.subtitle}</p>
         </div>
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 rounded-full" style={{ background: "var(--chart-1)" }} aria-hidden />Emitidas</span>
-          <span className="flex items-center gap-1.5"><span className="w-4 border-t-2 border-dashed" style={{ borderColor: "var(--chart-2)" }} aria-hidden />Recibos</span>
+        <div className="inline-flex items-center rounded-md border bg-background p-1 shadow-sm" role="group" aria-label="Base de la gráfica">
+          {(Object.keys(activityModeCopy) as ActivityMode[]).map((option) => (
+            <Button
+              key={option}
+              type="button"
+              size="sm"
+              variant={mode === option ? "default" : "ghost"}
+              className={cn("h-7 rounded-md px-2.5 text-xs", mode === option ? "shadow-sm" : "text-muted-foreground")}
+              aria-pressed={mode === option}
+              onClick={() => setMode(option)}
+            >
+              {activityModeCopy[option].label}
+            </Button>
+          ))}
         </div>
+      </div>
+      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 rounded-full" style={{ background: "var(--chart-1)" }} aria-hidden />{copy.policyLabel}</span>
+        <span className="flex items-center gap-1.5"><span className="w-4 border-t-2 border-dashed" style={{ borderColor: "var(--chart-2)" }} aria-hidden />{copy.receiptLabel}</span>
+        <span className="basis-full text-[11px] sm:basis-auto">{copy.note}</span>
       </div>
       {hasData ? (
         <>
           {/* The screen-reader tables stay outside role="img": assistive tech
               does not expose the contents of an image role. */}
-          <ChartSrSummary title="Pólizas emitidas por mes" data={policiesSeries} />
-          <ChartSrSummary title="Recibos generados por mes" data={receiptsSeries} />
-          <div className="flex flex-1 flex-col" role="img" aria-label="Gráfica de líneas de actividad de pólizas y recibos de los últimos 6 meses">
+          <ChartSrSummary title={`${copy.policyLabel} por mes`} data={policiesSeries} />
+          <ChartSrSummary title={`${copy.receiptLabel} por mes`} data={receiptsSeries} />
+          <div className="flex flex-1 flex-col" role="img" aria-label={`Gráfica de líneas de ${copy.label.toLowerCase()} de pólizas y recibos de los últimos 6 meses`}>
             <ChartFrame>
-              <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
+              <LineChart data={selectedData} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                 <XAxis dataKey="name" {...CHART_AXIS_PROPS} />
                 <YAxis allowDecimals={false} {...CHART_AXIS_PROPS} />
                 <Tooltip
                   cursor={CHART_CURSOR_LINE}
-                  content={chartTooltip({ total: seriesTotals, shareLabel: "Proporción de los últimos 6 meses." })}
+                  content={chartTooltip({ total: seriesTotals, shareLabel: copy.shareLabel })}
                 />
-                <Line type="monotone" dataKey="pólizas" stroke="var(--chart-1)" strokeWidth={2.25} dot={{ r: 3 }} name="Emitidas" />
-                <Line type="monotone" dataKey="recibos" stroke="var(--chart-2)" strokeWidth={2.25} strokeDasharray="5 3" dot={{ r: 3 }} name="Recibos" />
+                <Line type="monotone" dataKey="pólizas" stroke="var(--chart-1)" strokeWidth={2.25} dot={{ r: 3 }} name={copy.policyLabel} />
+                <Line type="monotone" dataKey="recibos" stroke="var(--chart-2)" strokeWidth={2.25} strokeDasharray="5 3" dot={{ r: 3 }} name={copy.receiptLabel} />
               </LineChart>
             </ChartFrame>
           </div>
         </>
       ) : (
-        <ChartEmptyState message="Todavía no hay actividad en los últimos 6 meses." hint="Aquí verás las pólizas emitidas y los recibos generados por mes." />
+        <ChartEmptyState message={`Todavía no hay ${copy.label.toLowerCase()} en los últimos 6 meses.`} hint={`Aquí verás ${copy.policyLabel.toLowerCase()} y ${copy.receiptLabel.toLowerCase()} por mes.`} />
       )}
     </section>
   );

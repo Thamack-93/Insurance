@@ -18,6 +18,16 @@ export function pctChange(current: number, previous: number) {
   return Math.round(((current - previous) / previous) * 1000) / 10;
 }
 
+export function bucketDatesByMonth(dates: Date[], monthKeys: string[]) {
+  const index = new Map(monthKeys.map((key, i) => [key, i]));
+  const counts = monthKeys.map(() => 0);
+  for (const date of dates) {
+    const bucket = index.get(monthKeyFormatter.format(date));
+    if (bucket !== undefined) counts[bucket] += 1;
+  }
+  return counts;
+}
+
 export function bucketCommissionsByMonth(
   commissions: Array<{ expectedDate: Date; expectedAmount: unknown; actualAmount: unknown }>,
   monthKeys: string[],

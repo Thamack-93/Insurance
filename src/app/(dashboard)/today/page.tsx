@@ -152,7 +152,7 @@ export default async function TodayPage({ searchParams }: { searchParams?: Promi
         <TodayMetricCards metrics={dashboard.metrics} prevMonthLabel={dashboard.prevMonthLabel} />
 
         <div className="grid items-stretch gap-4 xl:grid-cols-3">
-          <div className="xl:col-span-2"><PolicyActivityChart data={dashboard.activity} /></div>
+          <div className="xl:col-span-2"><PolicyActivityChart data={dashboard.activity} captureData={dashboard.captureActivity} /></div>
           <PolicyStatusDonut data={dashboard.statusDistribution} />
         </div>
 

@@ -1,7 +1,7 @@
 import { subMonths } from "date-fns";
 import { getDb } from "@/lib/db";
 import { today } from "@/lib/dates";
-import { bucketCommissionsByMonth, MONTHLY_COMMISSION_STATUSES, pctChange } from "@/lib/dashboard.logic";
+import { bucketCommissionsByMonth, bucketDatesByMonth, MONTHLY_COMMISSION_STATUSES, pctChange } from "@/lib/dashboard.logic";
 import { BUSINESS_TIME_ZONE, businessAddDays, businessEndOfMonth, businessStartOfMonth } from "@/lib/business-dates";
 import { toNumber } from "@/lib/money";
 import { detectRisks } from "@/lib/risk-engine";
@@ -397,16 +397,6 @@ function lastSixMonths(now: Date) {
   return months;
 }
 
-function bucketByMonth(dates: Date[], months: Array<{ key: string; label: string }>) {
-  const index = new Map(months.map((month, i) => [month.key, i]));
-  const counts = months.map(() => 0);
-  for (const date of dates) {
-    const bucket = index.get(monthKeyFormatter.format(date));
-    if (bucket !== undefined) counts[bucket] += 1;
-  }
-  return counts;
-}
-
 export type TodayDashboardData = Awaited<ReturnType<typeof getTodayDashboardData>>;
 
 export async function getTodayDashboardData() {
@@ -443,8 +433,10 @@ export async function getTodayDashboardData() {
     commissionPrevActual,
     commissionPrevExpected,
     policiesForTrends,
+    policiesForCaptureTrends,
     renewalsForTrends,
-    receiptsForTrends,
+    receiptsForBusinessTrends,
+    receiptsForCaptureTrends,
     commissionsForTrends,
     policyStatusRows,
     recentPolicies,
@@ -491,9 +483,21 @@ export async function getTodayDashboardData() {
       take: 5000,
     }),
     db.policy.findMany({
+      where: { ...policyWhere, createdAt: { gte: trendStart } },
+      select: { createdAt: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: 5000,
+    }),
+    db.policy.findMany({
       where: { ...policyWhere, status: "ACTIVE", endDate: { gte: trendStart } },
       select: { endDate: true },
       orderBy: [{ endDate: "asc" }, { id: "asc" }],
+      take: 5000,
+    }),
+    db.receipt.findMany({
+      where: { ...receiptWhere, periodStartDate: { gte: trendStart }, status: { notIn: ["CANCELLED"] } },
+      select: { periodStartDate: true },
+      orderBy: [{ periodStartDate: "asc" }, { id: "asc" }],
       take: 5000,
     }),
     db.receipt.findMany({
@@ -526,17 +530,24 @@ export async function getTodayDashboardData() {
   ]);
 
   const months = lastSixMonths(now);
-  const newPoliciesSpark = bucketByMonth(policiesForTrends.map((row) => row.startDate), months);
-  const renewalsSpark = bucketByMonth(renewalsForTrends.map((row) => row.endDate), months);
+  const monthKeys = months.map((month) => month.key);
+  const monthIndex = new Map(monthKeys.map((key, index) => [key, index]));
+  const newPoliciesSpark = bucketDatesByMonth(policiesForTrends.map((row) => row.startDate), monthKeys);
+  const capturedPoliciesSpark = bucketDatesByMonth(policiesForCaptureTrends.map((row) => row.createdAt), monthKeys);
+  const renewalsSpark = bucketDatesByMonth(renewalsForTrends.map((row) => row.endDate), monthKeys);
 
   const pendingByMonth = months.map(() => 0);
-  const pendingIndex = new Map(months.map((month, i) => [month.key, i]));
   const receiptsPerMonth = months.map(() => 0);
-  for (const receipt of receiptsForTrends) {
-    const bucket = pendingIndex.get(monthKeyFormatter.format(receipt.createdAt));
+  const capturedReceiptsPerMonth = months.map(() => 0);
+  for (const receipt of receiptsForBusinessTrends) {
+    const bucket = monthIndex.get(monthKeyFormatter.format(receipt.periodStartDate));
+    if (bucket !== undefined) receiptsPerMonth[bucket] += 1;
+  }
+  for (const receipt of receiptsForCaptureTrends) {
+    const bucket = monthIndex.get(monthKeyFormatter.format(receipt.createdAt));
     if (bucket !== undefined) {
       pendingByMonth[bucket] += toNumber(receipt.amount);
-      receiptsPerMonth[bucket] += 1;
+      capturedReceiptsPerMonth[bucket] += 1;
     }
   }
 
@@ -576,6 +587,11 @@ export async function getTodayDashboardData() {
       name: month.label.charAt(0).toUpperCase() + month.label.slice(1),
       pólizas: newPoliciesSpark[i],
       recibos: receiptsPerMonth[i],
+    })),
+    captureActivity: months.map((month, i) => ({
+      name: month.label.charAt(0).toUpperCase() + month.label.slice(1),
+      pólizas: capturedPoliciesSpark[i],
+      recibos: capturedReceiptsPerMonth[i],
     })),
     statusDistribution: policyStatusRows
       .map((row) => ({ status: row.status, value: row._count.status }))
