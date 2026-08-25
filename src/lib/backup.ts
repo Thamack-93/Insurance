@@ -97,7 +97,20 @@ export type BackupVerification =
       sha256: string;
       manifest: BackupManifest;
     }
-  | { valid: false; filename: string; reason: string };
+  | {
+      valid: false;
+      filename: string;
+      reason: string;
+      code:
+        | "MANIFEST_NOT_FOUND"
+        | "MANIFEST_INVALID"
+        | "MANIFEST_SCOPE_MISMATCH"
+        | "PAYLOAD_NOT_FOUND"
+        | "PAYLOAD_HASH_MISMATCH"
+        | "PAYLOAD_DECRYPTION_FAILED"
+        | "PAYLOAD_HEADER_MISMATCH"
+        | "BLOB_UNAVAILABLE";
+    };
 
 function requireEnvironment(name: string) {
   const value = process.env[name]?.trim();
@@ -863,7 +876,12 @@ async function findBackupManifest(filename: string, pathnameHint?: string) {
         `${BACKUP_REKEY_PREFIX}${filename}`,
       ];
   for (const pathname of pathnames) {
-    const manifestResult = await get(`${pathname}${MANIFEST_SUFFIX}`, { access: "private" });
+    let manifestResult;
+    try {
+      manifestResult = await get(`${pathname}${MANIFEST_SUFFIX}`, { access: "private", useCache: false });
+    } catch {
+      return { unavailable: true as const };
+    }
     if (manifestResult?.statusCode === 200 && manifestResult.stream) {
       return { pathname, manifestResult };
     }
@@ -874,8 +892,11 @@ async function findBackupManifest(filename: string, pathnameHint?: string) {
 export async function verifyStoredBackup(filename: string, pathnameHint?: string): Promise<BackupVerification> {
   assertSafeBackupFilename(filename);
   const stored = await findBackupManifest(filename, pathnameHint);
+  if (stored && "unavailable" in stored) {
+    return { valid: false, filename, reason: "No se pudo consultar el manifiesto privado.", code: "BLOB_UNAVAILABLE" };
+  }
   if (!stored) {
-    return { valid: false, filename, reason: "No se encontró el manifiesto privado." };
+    return { valid: false, filename, reason: "No se encontró el manifiesto privado.", code: "MANIFEST_NOT_FOUND" };
   }
   const { pathname, manifestResult } = stored;
 
@@ -883,20 +904,25 @@ export async function verifyStoredBackup(filename: string, pathnameHint?: string
   try {
     parsed = JSON.parse((await readStream(manifestResult.stream, MAX_MANIFEST_BYTES)).toString("utf8"));
   } catch {
-    return { valid: false, filename, reason: "El manifiesto no contiene JSON válido." };
+    return { valid: false, filename, reason: "El manifiesto no contiene JSON válido.", code: "MANIFEST_INVALID" };
   }
   const manifestVerification = verifyBackupManifest(parsed);
   if (!manifestVerification.valid) {
-    return { valid: false, filename, reason: manifestVerification.reason };
+    return { valid: false, filename, reason: manifestVerification.reason, code: "MANIFEST_INVALID" };
   }
   const manifest = manifestVerification.manifest;
   if (manifest.payload.filename !== filename || manifest.payload.pathname !== pathname) {
-    return { valid: false, filename, reason: "El manifiesto apunta a otro respaldo." };
+    return { valid: false, filename, reason: "El manifiesto apunta a otro respaldo.", code: "MANIFEST_SCOPE_MISMATCH" };
   }
 
-  const payloadResult = await get(pathname, { access: "private" });
+  let payloadResult;
+  try {
+    payloadResult = await get(pathname, { access: "private", useCache: false });
+  } catch {
+    return { valid: false, filename, reason: "No se pudo consultar el payload cifrado.", code: "BLOB_UNAVAILABLE" };
+  }
   if (payloadResult?.statusCode !== 200 || !payloadResult.stream) {
-    return { valid: false, filename, reason: "No se encontró el payload cifrado." };
+    return { valid: false, filename, reason: "No se encontró el payload cifrado.", code: "PAYLOAD_NOT_FOUND" };
   }
   const hash = createHash("sha256");
   const encryptedChunks: Buffer[] = [];
@@ -915,16 +941,16 @@ export async function verifyStoredBackup(filename: string, pathnameHint?: string
   }
   const sha256 = hash.digest("hex");
   if (size !== manifest.payload.size || sha256 !== manifest.payload.sha256) {
-    return { valid: false, filename, reason: "El tamaño o hash del payload no coincide." };
+    return { valid: false, filename, reason: "El tamaño o hash del payload no coincide.", code: "PAYLOAD_HASH_MISMATCH" };
   }
   try {
     const key = getEncryptionKeyForVersion(manifest.encryption.keyVersion);
     const decrypted = decryptBackupPayload(Buffer.concat(encryptedChunks, size), key);
     if (decrypted.header.keyVersion !== manifest.encryption.keyVersion || decrypted.plaintext.length === 0) {
-      return { valid: false, filename, reason: "El payload cifrado no coincide con el manifiesto." };
+      return { valid: false, filename, reason: "El payload cifrado no coincide con el manifiesto.", code: "PAYLOAD_HEADER_MISMATCH" };
     }
   } catch {
-    return { valid: false, filename, reason: "El payload no pudo descifrarse con la clave declarada." };
+    return { valid: false, filename, reason: "El payload no pudo descifrarse con la clave declarada.", code: "PAYLOAD_DECRYPTION_FAILED" };
   }
   return { valid: true, filename, size, sha256, manifest };
 }
@@ -938,10 +964,10 @@ export async function deleteStoredBackup(pathname: string) {
 
 export async function getBackupDownload(filename: string, pathnameHint?: string) {
   assertSafeBackupFilename(filename);
-  if (pathnameHint) return get(pathnameHint, { access: "private" });
-  const primary = await get(`${BACKUP_PREFIX}${filename}`, { access: "private" });
+  if (pathnameHint) return get(pathnameHint, { access: "private", useCache: false });
+  const primary = await get(`${BACKUP_PREFIX}${filename}`, { access: "private", useCache: false });
   if (primary?.statusCode === 200 && primary.stream) return primary;
-  return get(`${BACKUP_REKEY_PREFIX}${filename}`, { access: "private" });
+  return get(`${BACKUP_REKEY_PREFIX}${filename}`, { access: "private", useCache: false });
 }
 
 export type RekeyedBackup = {

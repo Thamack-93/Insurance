@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createOrganizationAction } from "@/app/(dashboard)/platform/organizations/actions";
+import { createOrganizationAction } from "@/app/(platform)/platform/organizations/actions";
 
 export function OrganizationCreateForm() {
   const [pending, startTransition] = useTransition();

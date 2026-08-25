@@ -113,6 +113,7 @@ export async function createOrganizationAction(input: {
     if (result.status === "slug") return { ok: false, error: "Ya existe una organización con ese slug." };
     if (result.status === "email") return { ok: false, error: "Ya existe un usuario con ese correo." };
     revalidatePath("/platform");
+    revalidatePath("/platform/organizations");
     return {
       ok: true,
       organizationId: result.organizationId,

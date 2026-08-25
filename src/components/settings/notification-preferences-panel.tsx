@@ -71,6 +71,7 @@ export function NotificationPreferencesPanel({
   const [isSendingDigestNow, setIsSendingDigestNow] = useState(false);
   const [isSendingBirthdaysNow, setIsSendingBirthdaysNow] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
+  const [testResult, setTestResult] = useState<{ kind: "success" | "error"; message: string; at: string } | null>(null);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [isUpdatingMutations, setIsUpdatingMutations] = useState(false);
   const [generatedLink, setGeneratedLink] = useState<{ code: string; expiresAt: string } | null>(
@@ -106,10 +107,12 @@ export function NotificationPreferencesPanel({
     try {
       const result = await sendTelegramTestMessage();
       if (!result.ok) {
+        setTestResult({ kind: "error", message: result.error, at: new Date().toISOString() });
         toast.error(result.error);
         return;
       }
 
+      setTestResult({ kind: "success", message: result.message, at: new Date().toISOString() });
       toast.success(result.message);
       router.refresh();
     } finally {
@@ -348,6 +351,7 @@ export function NotificationPreferencesPanel({
                 {isDisconnecting ? "Desconectando…" : "Desconectar"}
               </Button>
             </div>
+            {testResult ? <p className={`text-sm ${testResult.kind === "success" ? "text-emerald-700 dark:text-emerald-300" : "text-red-700 dark:text-red-300"}`} role={testResult.kind === "error" ? "alert" : "status"} aria-live="polite">{testResult.message} · {new Date(testResult.at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}</p> : null}
           </div>
           </CardContent>
         </Card>

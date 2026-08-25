@@ -35,7 +35,7 @@ for (const file of sourceRoots.flatMap(filesUnder)) {
 }
 
 const requiredRuntimeReads: Array<[string, string]> = [
-  ["src/app/(dashboard)/platform/page.tsx", "getPlatformOverview"],
+  ["src/app/(platform)/platform/organizations/page.tsx", "getPlatformOverview"],
   ["src/app/(dashboard)/settings/page.tsx", "requireOrganizationContext"],
   ["src/app/(dashboard)/today/page.tsx", "getTodayData"],
   ["src/lib/dashboard-queries.ts", "requireOrganizationPortfolioReadScope"],

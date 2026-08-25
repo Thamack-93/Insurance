@@ -89,6 +89,7 @@ describe("immutable backup rekey", () => {
     expect(copy.manifest.createdAt).toBe(sourceManifest.createdAt);
     expect(stored.get(SOURCE_PATHNAME)).toEqual(encryptedSource);
     expect(del).not.toHaveBeenCalled();
+    expect(get.mock.calls.every(([, options]) => options?.access === "private" && options?.useCache === false)).toBe(true);
     await expect(verifyStoredBackup(copy.filename)).resolves.toMatchObject({ valid: true });
   });
 });

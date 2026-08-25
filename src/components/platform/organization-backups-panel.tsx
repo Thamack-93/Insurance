@@ -17,6 +17,7 @@ import { getBackupScheduleStatus, TENANT_BACKUP_INTERVAL_DAYS } from "@/lib/back
 type Props = {
   organizationId: string;
   initialBackups: OrganizationBackupListItem[];
+  initialLoadError?: string | null;
   backupStatus: BackupPreflightStatus;
   createBackup: (organizationId: string) => Promise<MutationResult>;
   listBackups: (organizationId: string) => Promise<OrganizationBackupListItem[]>;
@@ -38,8 +39,9 @@ function formatDateTime(iso: string) {
   });
 }
 
-export function OrganizationBackupsPanel({ organizationId, initialBackups, backupStatus, createBackup, listBackups }: Props) {
+export function OrganizationBackupsPanel({ organizationId, initialBackups, initialLoadError = null, backupStatus, createBackup, listBackups }: Props) {
   const [backups, setBackups] = useState(initialBackups);
+  const [loadError, setLoadError] = useState<string | null>(initialLoadError);
   const [now] = useState(() => Date.now());
   const [pendingCreate, startCreate] = useTransition();
   const [verifying, setVerifying] = useState<string | null>(null);
@@ -50,7 +52,9 @@ export function OrganizationBackupsPanel({ organizationId, initialBackups, backu
   async function refresh() {
     try {
       setBackups(await listBackups(organizationId));
+      setLoadError(null);
     } catch {
+      setLoadError("No se pudo consultar los respaldos de esta organización.");
       toast.error("No se pudo actualizar la lista de respaldos.");
     }
   }
@@ -98,7 +102,12 @@ export function OrganizationBackupsPanel({ organizationId, initialBackups, backu
           La configuración de backup no está lista; no se puede crear un snapshot.
         </p>
       ) : null}
-      {backups.length === 0 ? (
+      {loadError ? (
+        <div className="border-b border-red-200 bg-red-50 px-6 py-4 text-sm text-red-900 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-100" role="alert">
+          <p className="font-medium">{loadError}</p>
+          <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => void refresh()}>Reintentar consulta</Button>
+        </div>
+      ) : backups.length === 0 ? (
         <div className="p-6"><EmptyPanel icon={Database} title="Sin respaldos" description="Crea el primer snapshot de esta organización." /></div>
       ) : (
         <ul className="divide-y divide-border/60">

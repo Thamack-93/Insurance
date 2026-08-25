@@ -148,7 +148,7 @@ export async function sendTelegramTestMessage(): Promise<MutationResult> {
 
     if (event.status === "SENT") {
       revalidatePath("/settings/notifications");
-      return successResult(user.id, "/settings/notifications", "Mensaje de prueba enviado.");
+      return successResult(event.id, "/settings/notifications", "Telegram aceptó el mensaje de prueba.");
     }
 
     if (event.status === "SKIPPED") {

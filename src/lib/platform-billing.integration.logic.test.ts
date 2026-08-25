@@ -23,7 +23,7 @@ import {
   createPlatformPlanAction,
   recordPlatformChargeAction,
   transitionPlatformChargeAction,
-} from "@/app/(dashboard)/platform/billing-actions";
+} from "@/app/(platform)/platform/billing-actions";
 
 function databaseUrl(adminUrl: string, database: string) {
   const url = new URL(adminUrl);

@@ -15,7 +15,7 @@ vi.mock("@/lib/telegram", () => ({ syncTelegramWebhook }));
 vi.mock("@/lib/db", () => ({ getDb: () => ({ platformAuditLog: { create: createPlatformAudit } }) }));
 vi.mock("@/lib/logger", () => ({ logError: vi.fn() }));
 
-import { syncPlatformTelegramWebhookAction } from "@/app/(dashboard)/platform/telegram-actions";
+import { syncPlatformTelegramWebhookAction } from "@/app/(platform)/platform/telegram-actions";
 
 describe("platform Telegram webhook action", () => {
   beforeEach(() => {

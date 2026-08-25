@@ -1,22 +1,14 @@
 import { PageHeader } from "@/components/layout/page-header";
-import { MetricCard } from "@/components/pages-secondary/panels";
 import { Button } from "@/components/ui/button";
-import { BellRing, Bot, Database, Globe2, ArrowRight, Settings2, KeyRound, Users } from "@/components/icons";
+import { BellRing, Bot, Database, ArrowRight, KeyRound, Users } from "@/components/icons";
 import { Wrench } from "lucide-react";
-import { getCurrentUser } from "@/lib/auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { today, formatDate } from "@/lib/dates";
 import Link from "next/link";
-import { getSettings, updateSettings } from "@/lib/settings";
 import { getOnboardingStatus } from "@/lib/dashboard-queries";
 import { getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
 import { requireOrganizationContext } from "@/lib/organization-context";
-import { SettingsForm } from "@/components/forms/settings-form";
 import { OnboardingPanel } from "@/components/settings/onboarding-panel";
 import { getOrganizationBackupStatus } from "@/lib/organization-backup-status";
-import { getBackupPreflightStatus } from "@/lib/backup";
-import { BackupsPanel } from "@/components/settings/backups-panel";
-import { createBackup, listBackupsAction, reconcileBackupCatalogAction } from "@/app/(dashboard)/settings/backups-actions";
 
 export const maxDuration = 300;
 
@@ -29,17 +21,12 @@ function formatDateTime(value: string) {
 }
 
 export default async function SettingsPage() {
-  const now = today();
-  const liveUser = await getCurrentUser();
   const organization = await requireOrganizationContext();
   const isTenantAdmin = organization.membershipRole === "OWNER" || organization.membershipRole === "ADMIN";
-  const isPlatformAdmin = !!liveUser && liveUser.active && liveUser.platformRole === "SUPERADMIN";
   const aiStatus = getAssistantAiConnectionStatus();
-  const [settings, onboarding, ownerBackupStatus, globalBackups] = await Promise.all([
-    getSettings(),
+  const [onboarding, ownerBackupStatus] = await Promise.all([
     getOnboardingStatus(),
-    organization.membershipRole === "OWNER" && !isPlatformAdmin ? getOrganizationBackupStatus() : Promise.resolve(null),
-    isPlatformAdmin ? listBackupsAction().catch(() => []) : Promise.resolve([]),
+    organization.membershipRole === "OWNER" ? getOrganizationBackupStatus() : Promise.resolve(null),
   ]);
 
   return (
@@ -58,39 +45,6 @@ export default async function SettingsPage() {
             </Button>
           }
         />
-
-        {isPlatformAdmin ? (
-        <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-          <MetricCard 
-            title="Firma" 
-            value={settings.firmName} 
-            description="Nombre configurado" 
-            icon={Settings2} 
-            tone="blue" 
-          />
-          <MetricCard 
-            title="Moneda" 
-            value={settings.defaultCurrency} 
-            description="Divisa por defecto" 
-            icon={Globe2} 
-            tone="amber" 
-          />
-          <MetricCard 
-            title="Respaldo" 
-            value="Obligatorio"
-            description="Tenant diario · global semanal"
-            icon={Database} 
-            tone="emerald" 
-          />
-          <MetricCard 
-            title="Actualizado" 
-            value={formatDate(now)} 
-            description="Última actualización" 
-            icon={BellRing} 
-            tone="rose" 
-          />
-        </section>
-        ) : null}
 
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <Card>
@@ -185,23 +139,6 @@ export default async function SettingsPage() {
             </Card>
           ) : null}
         </section>
-
-        {isPlatformAdmin ? (
-          <SettingsForm
-            initialSettings={settings}
-            updateSettings={updateSettings}
-          />
-        ) : null}
-
-        {isPlatformAdmin ? (
-          <BackupsPanel
-            initialBackups={globalBackups}
-            backupStatus={getBackupPreflightStatus()}
-            createBackup={createBackup}
-            listBackups={listBackupsAction}
-            reconcileBackups={reconcileBackupCatalogAction}
-          />
-        ) : null}
 
         <OnboardingPanel initialDismissed={onboarding.dismissed} />
 

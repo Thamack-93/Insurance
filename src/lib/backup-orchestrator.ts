@@ -28,6 +28,15 @@ import {
 } from "@/lib/backup-catalog";
 import { selectBackupRetention } from "@/lib/backup-logic";
 import { getDb } from "@/lib/db";
+import { logError } from "@/lib/logger";
+import type { BackupVerification } from "@/lib/backup";
+
+const POST_UPLOAD_VERIFY_DELAYS_MS = [0, 500, 1_500, 3_000] as const;
+const TRANSIENT_VERIFY_CODES = new Set<string>([
+  "MANIFEST_NOT_FOUND",
+  "PAYLOAD_NOT_FOUND",
+  "BLOB_UNAVAILABLE",
+]);
 
 type CreateAndCatalogBackupInput = {
   scope: "PLATFORM" | "ORGANIZATION";
@@ -68,6 +77,60 @@ function createdFromVerification(
   };
 }
 
+function transientVerificationCode(verification: BackupVerification) {
+  return !verification.valid && TRANSIENT_VERIFY_CODES.has(verification.code);
+}
+
+async function verifyAfterUpload(input: {
+  filename: string;
+  pathname: string;
+  artifactId: string;
+  scope: "PLATFORM" | "ORGANIZATION";
+  organizationId?: string;
+}): Promise<BackupVerification> {
+  let last: BackupVerification = {
+    valid: false,
+    filename: input.filename,
+    reason: "No se pudo verificar el respaldo.",
+    code: "BLOB_UNAVAILABLE",
+  };
+
+  for (const [index, delayMs] of POST_UPLOAD_VERIFY_DELAYS_MS.entries()) {
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    try {
+      last = await verifyStoredBackup(input.filename, input.pathname);
+    } catch (error) {
+      last = {
+        valid: false,
+        filename: input.filename,
+        reason: "No se pudo consultar el respaldo almacenado.",
+        code: "BLOB_UNAVAILABLE",
+      };
+      logError("backup-orchestrator.verify", error, {
+        scope: input.scope,
+        organizationId: input.organizationId,
+        artifactId: input.artifactId,
+        stage: "post_upload",
+        attempt: index + 1,
+        code: last.code,
+      });
+    }
+
+    if (last.valid) return last;
+    logError("backup-orchestrator.verify", new Error(last.reason), {
+      scope: input.scope,
+      organizationId: input.organizationId,
+      artifactId: input.artifactId,
+      stage: "post_upload",
+      attempt: index + 1,
+      code: last.code,
+    });
+    if (!transientVerificationCode(last) || index === POST_UPLOAD_VERIFY_DELAYS_MS.length - 1) return last;
+  }
+
+  return last;
+}
+
 async function pruneVerifiedBackups(scope: "PLATFORM" | "ORGANIZATION", organizationId: string | undefined, now: Date) {
   const artifacts = scope === "PLATFORM"
     ? await getPlatformBackupArtifacts()
@@ -106,19 +169,32 @@ export async function createAndCatalogBackup(input: CreateAndCatalogBackupInput)
     createdAt: now,
   });
 
-  const existingVerification = await verifyStoredBackup(target.filename, target.pathname);
-  if (existingVerification.valid) {
+  let existingVerification: BackupVerification | null = null;
+  try {
+    existingVerification = await verifyStoredBackup(target.filename, target.pathname);
+  } catch (error) {
+    logError("backup-orchestrator.verify", error, {
+      scope: input.scope,
+      organizationId: input.organizationId,
+      artifactId: reserved.id,
+      stage: "existing_artifact",
+      attempt: 1,
+      code: "BLOB_UNAVAILABLE",
+    });
+  }
+  if (existingVerification?.valid) {
+    const verifiedExisting = existingVerification;
     try {
-      assertVerificationScope(input, existingVerification);
+      assertVerificationScope(input, verifiedExisting);
       await upsertBackupArtifact({
-        entry: createdFromVerification(target, existingVerification),
+        entry: createdFromVerification(target, verifiedExisting),
         scope: input.scope,
         organizationId: input.organizationId,
         status: "VERIFIED",
-        capability: existingVerification.manifest.capability,
-        manifest: existingVerification.manifest,
+        capability: verifiedExisting.manifest.capability,
+        manifest: verifiedExisting.manifest,
       });
-      return createdFromVerification(target, existingVerification);
+      return createdFromVerification(target, verifiedExisting);
     } catch (error) {
       await updateBackupArtifactStatus(reserved.id, "BLOCKED");
       throw error;
@@ -130,7 +206,13 @@ export async function createAndCatalogBackup(input: CreateAndCatalogBackupInput)
     const backup = input.scope === "PLATFORM"
       ? await createDatabaseBackup(now, { target, deferRotation: true, emergency: input.emergency })
       : await createOrganizationDatabaseBackup(input.organizationId!, now, { target, deferRotation: true });
-    const verification = await verifyStoredBackup(target.filename, target.pathname);
+    const verification = await verifyAfterUpload({
+      filename: target.filename,
+      pathname: target.pathname,
+      artifactId: reserved.id,
+      scope: input.scope,
+      organizationId: input.organizationId,
+    });
     if (!verification.valid) throw new Error(verification.reason);
     assertVerificationScope(input, verification);
     await upsertBackupArtifact({
