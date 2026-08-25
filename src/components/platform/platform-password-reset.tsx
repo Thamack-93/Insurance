@@ -15,7 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { resetTenantUserPasswordFromPlatform } from "@/app/(dashboard)/platform/actions";
+import { resetTenantUserPasswordFromPlatform } from "@/app/(platform)/platform/actions";
 
 export function PlatformPasswordReset({ userId, name, email }: { userId: string; name: string; email: string }) {
   const [open, setOpen] = useState(false);

@@ -52,16 +52,16 @@ export default async function PlatformOrganizationPage({ params, searchParams }:
     getPlatformBillingDetail(decodedOrganizationId),
   ]);
   if (!detail || !billing) notFound();
-  const [options, initialBackups] = await Promise.all([
+  const [options, backupResult] = await Promise.all([
     getOrganizationOptions(),
-    listOrganizationBackupsAction(detail.organization.id).catch(() => []),
+    listOrganizationBackupsAction(detail.organization.id).then((backups) => ({ backups, error: null as string | null })).catch(() => ({ backups: [], error: "No se pudo consultar los respaldos de esta organización." })),
   ]);
   const canSelectThisOrganization = options.some((option) => option.id === detail.organization.id);
   const memberPaginationParams = { members: query.members };
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <div className="flex items-center justify-between gap-3"><Link prefetch={false} href="/platform" className="inline-flex items-center gap-2 text-sm font-medium text-primary underline"><ArrowLeft className="size-4" aria-hidden />Volver a organizaciones</Link>{canSelectThisOrganization ? <Link prefetch={false} href="/organization/select" className="inline-flex items-center gap-2 text-sm font-medium text-primary underline">Seleccionar organización <ExternalLink className="size-4" aria-hidden /></Link> : null}</div>
+      <div className="flex items-center justify-between gap-3"><Link prefetch={false} href="/platform/organizations" className="inline-flex items-center gap-2 text-sm font-medium text-primary underline"><ArrowLeft className="size-4" aria-hidden />Volver a organizaciones</Link>{canSelectThisOrganization ? <Link prefetch={false} href="/organization/select" className="inline-flex items-center gap-2 text-sm font-medium text-primary underline">Seleccionar organización <ExternalLink className="size-4" aria-hidden /></Link> : null}</div>
       <header className="flex items-start justify-between gap-4"><div><p className="text-sm font-semibold text-muted-foreground">Organización · {detail.organization.kind}</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">{detail.organization.name}</h1><p className="mt-2 text-sm text-muted-foreground">{detail.organization.slug} · {statusLabel(detail.organization.status)} · {detail.organization.timeZone} · {detail.organization.defaultCurrency}</p></div><ShieldCheck className="size-7 text-primary" aria-hidden /></header>
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5" aria-label="Resumen de organización">
@@ -73,7 +73,8 @@ export default async function PlatformOrganizationPage({ params, searchParams }:
       </section>
       <OrganizationBackupsPanel
         organizationId={detail.organization.id}
-        initialBackups={initialBackups}
+        initialBackups={backupResult.backups}
+        initialLoadError={backupResult.error}
         backupStatus={getBackupPreflightStatus()}
         createBackup={createOrganizationBackup}
         listBackups={listOrganizationBackupsAction}

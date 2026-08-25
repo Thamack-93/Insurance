@@ -474,7 +474,7 @@ export async function changeMyPassword(input: {
       });
     }
 
-    return successResult(user.id, "/settings/account", "Contraseña actualizada.");
+    return successResult(user.id, user.platformRole === "SUPERADMIN" ? "/platform/account" : "/settings/account", "Contraseña actualizada.");
   } catch (error) {
     if (error instanceof AuthError) return errorResult(error.message);
     logError("settings.users.changeMyPassword", error);

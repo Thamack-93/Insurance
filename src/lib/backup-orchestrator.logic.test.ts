@@ -83,6 +83,19 @@ describe("createAndCatalogBackup", () => {
     expect(deleteStoredBackup).toHaveBeenCalledWith(target.pathname);
   });
 
+  it("retries transient post-upload availability without deleting the partial backup", async () => {
+    verifyStoredBackup
+      .mockResolvedValueOnce({ valid: false, filename: target.filename, reason: "missing manifest", code: "MANIFEST_NOT_FOUND" })
+      .mockResolvedValueOnce({ valid: false, filename: target.filename, reason: "missing payload", code: "PAYLOAD_NOT_FOUND" })
+      .mockResolvedValueOnce({ valid: true, filename: target.filename, size: 10, sha256: "a".repeat(64), manifest });
+
+    await createAndCatalogBackup({ scope: "PLATFORM", target, now: new Date("2026-08-25T05:00:00.000Z") });
+
+    expect(verifyStoredBackup).toHaveBeenCalledTimes(3);
+    expect(deleteStoredBackup).toHaveBeenCalledTimes(1);
+    expect(updateBackupArtifactStatus).not.toHaveBeenCalledWith("artifact-1", "BLOCKED");
+  });
+
   it("deletes expired verified payloads and marks their catalog rows PRUNED", async () => {
     verifyStoredBackup
       .mockResolvedValueOnce({ valid: false, filename: target.filename, reason: "missing" })

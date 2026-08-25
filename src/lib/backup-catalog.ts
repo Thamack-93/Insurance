@@ -3,6 +3,7 @@ import "server-only";
 import { getDb } from "@/lib/db";
 import type { BackupEntry } from "@/lib/backup";
 import type { BackupCapability, BackupManifest, BackupScope, RestoreRunStatus } from "@/lib/backup-logic";
+import { getBackupScheduleStatus, PLATFORM_BACKUP_INTERVAL_DAYS } from "@/lib/backup-schedule";
 
 export type BackupArtifactStatus = "CREATING" | "DISCOVERED" | "VERIFIED" | "INVALID" | "BLOCKED" | "PRUNED";
 
@@ -18,7 +19,7 @@ export type BackupArtifactView = {
   manifestAvailable: boolean;
   formatVersion: number | null;
   keyVersion: string | null;
-  status: string;
+  status: BackupArtifactStatus;
   capability: BackupCapability;
   sourceArtifactId: string | null;
   payloadSha256: string | null;
@@ -103,6 +104,7 @@ function toView(artifact: {
   return {
     ...artifact,
     scope: artifact.scope as BackupScope,
+    status: artifact.status as BackupArtifactStatus,
     capability: artifact.capability as BackupCapability,
     createdAt: artifact.createdAt.toISOString(),
   };
@@ -124,6 +126,23 @@ export async function getPlatformBackupArtifacts() {
     orderBy: { createdAt: "desc" },
   });
   return artifacts.map(toView);
+}
+
+export async function getPlatformBackupHealth(now = new Date()) {
+  const artifacts = await getPlatformBackupArtifacts();
+  const latestVerified = artifacts.find((artifact) => artifact.status === "VERIFIED") ?? null;
+  const schedule = getBackupScheduleStatus(
+    latestVerified ? new Date(latestVerified.createdAt) : null,
+    now,
+    PLATFORM_BACKUP_INTERVAL_DAYS,
+  );
+  return {
+    latestVerified,
+    nextDueAt: schedule.nextDueAt.toISOString(),
+    status: schedule.status,
+    creating: artifacts.filter((artifact) => artifact.status === "CREATING").length,
+    blocked: artifacts.filter((artifact) => artifact.status === "BLOCKED").length,
+  };
 }
 
 export async function getBackupArtifact(id: string) {

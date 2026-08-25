@@ -19,7 +19,7 @@ import {
   createPlatformPlanAction,
   recordPlatformChargeAction,
   transitionPlatformChargeAction,
-} from "@/app/(dashboard)/platform/billing-actions";
+} from "@/app/(platform)/platform/billing-actions";
 
 const planInput = {
   requestId: "plan-request-1",

@@ -16,6 +16,7 @@ import { getBackupScheduleStatus, PLATFORM_BACKUP_INTERVAL_DAYS } from "@/lib/ba
 
 type Props = {
   initialBackups: BackupListItem[];
+  initialLoadError?: string | null;
   backupStatus: BackupPreflightStatus;
   createBackup: () => Promise<MutationResult>;
   listBackups: () => Promise<BackupListItem[]>;
@@ -44,12 +45,15 @@ function formatDateTime(iso: string) {
 
 export function BackupsPanel({
   initialBackups,
+  initialLoadError = null,
   backupStatus,
   createBackup,
   listBackups,
   reconcileBackups,
 }: Props) {
   const [backups, setBackups] = useState<BackupListItem[]>(initialBackups);
+  const [loadError, setLoadError] = useState<string | null>(initialLoadError);
+  const [resultMessage, setResultMessage] = useState<string | null>(null);
   const [pendingCreate, startCreate] = useTransition();
   const [verifying, setVerifying] = useState<string | null>(null);
   const [pendingReconcile, startReconcile] = useTransition();
@@ -67,7 +71,9 @@ export function BackupsPanel({
   async function refresh() {
     try {
       setBackups(await listBackups());
+      setLoadError(null);
     } catch {
+      setLoadError("No se pudo consultar el catálogo de respaldos.");
       toast.error("No se pudo actualizar la lista de respaldos.");
     }
   }
@@ -76,9 +82,11 @@ export function BackupsPanel({
     startCreate(async () => {
       const result = await createBackup();
       if (result.ok) {
+        setResultMessage(result.message);
         toast.success(result.message);
         await refresh();
       } else {
+        setResultMessage(result.error);
         toast.error(result.error);
       }
     });
@@ -89,9 +97,13 @@ export function BackupsPanel({
     try {
       const result = await verifyBackupAction(artifactId);
       if (result.ok) {
+        setResultMessage(result.message);
         toast.success(result.message);
         await refresh();
-      } else toast.error(result.error);
+      } else {
+        setResultMessage(result.error);
+        toast.error(result.error);
+      }
     } finally {
       setVerifying(null);
     }
@@ -101,9 +113,13 @@ export function BackupsPanel({
     startReconcile(async () => {
       const result = await reconcileBackups();
       if (result.ok) {
+        setResultMessage(result.message);
         toast.success(result.message);
         await refresh();
-      } else toast.error(result.error);
+      } else {
+        setResultMessage(result.error);
+        toast.error(result.error);
+      }
     });
   }
 
@@ -157,7 +173,14 @@ export function BackupsPanel({
           Último snapshot verificado: {latestVerified ? formatDateTime(latestVerified.createdAt) : "ninguno"} · Próximo vencimiento: {formatDateTime(schedule.nextDueAt.toISOString())} · Estado semanal: {schedule.status}
         </p>
       </div>
-      {sorted.length === 0 ? (
+      {resultMessage ? <p className="border-b border-border/60 px-6 py-3 text-sm text-foreground" role="status" aria-live="polite">{resultMessage}</p> : null}
+      {loadError ? (
+        <div className="border-b border-red-200 bg-red-50 px-6 py-4 text-sm text-red-900 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-100" role="alert">
+          <p className="font-medium">{loadError}</p>
+          <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => void refresh()}>Reintentar consulta</Button>
+        </div>
+      ) : null}
+      {!loadError && sorted.length === 0 ? (
         <div className="p-6">
           <EmptyPanel
             icon={Database}
@@ -165,7 +188,7 @@ export function BackupsPanel({
             description="Crea el primer snapshot cifrado de la base Postgres."
           />
         </div>
-      ) : (
+      ) : !loadError ? (
         <ul className="divide-y divide-border/60">
           {sorted.map((backup) => (
             <li
@@ -209,7 +232,7 @@ export function BackupsPanel({
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
     </SectionCard>
   );
 }

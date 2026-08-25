@@ -10,7 +10,7 @@ import {
   assignPlatformSubscriptionAction,
   recordPlatformChargeAction,
   transitionPlatformChargeAction,
-} from "@/app/(dashboard)/platform/billing-actions";
+} from "@/app/(platform)/platform/billing-actions";
 import type { PlatformBillingDetail, PlatformBillingOverview } from "@/lib/platform-billing";
 import { formatMinorAmount } from "@/lib/platform-billing.logic";
 

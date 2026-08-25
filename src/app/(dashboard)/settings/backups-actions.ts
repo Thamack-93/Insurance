@@ -128,10 +128,11 @@ export async function createBackup(): Promise<MutationResult> {
     const backup = await createAndCatalogBackup({
       scope: "PLATFORM",
     });
-    revalidatePath("/settings");
+    revalidatePath("/platform/backups");
+    revalidatePath("/platform");
     return successResult(
       backup.filename,
-      "/settings",
+      "/platform/backups",
       `Respaldo cifrado creado: ${backup.filename}`,
     );
   } catch (error) {
@@ -162,7 +163,7 @@ export async function verifyBackupAction(artifactId: string): Promise<MutationRe
     await updateBackupArtifactStatus(artifact.id, "VERIFIED", verification.manifest.capability);
     return successResult(
       artifact.id,
-      "/settings",
+      "/platform/backups",
       `Respaldo verificado (${verification.manifest.totals.rows} filas).`,
     );
   } catch (error) {
@@ -196,10 +197,11 @@ export async function rekeyBackupAction(artifactId: string): Promise<MutationRes
       manifest: copy.manifest,
       sourceArtifactId: artifact.id,
     });
-    revalidatePath("/settings");
+    revalidatePath("/platform/backups");
+    revalidatePath("/platform");
     return successResult(
       copy.filename,
-      "/settings",
+      "/platform/backups",
       `Copia re-cifrada y verificada: ${copy.filename}. El respaldo original no fue modificado.`,
     );
   } catch (error) {
@@ -222,9 +224,9 @@ export async function reconcileBackupCatalogAction(): Promise<MutationResult> {
         metadataJson: JSON.stringify(result),
       },
     });
-    revalidatePath("/settings");
+    revalidatePath("/platform/backups");
     revalidatePath("/platform");
-    return successResult(actor.id, "/settings", `Catálogo reconciliado: ${result.verified} verificados, ${result.invalid} inválidos y ${result.blocked} bloqueados.`);
+    return successResult(actor.id, "/platform/backups", `Catálogo reconciliado: ${result.verified} verificados, ${result.invalid} inválidos y ${result.blocked} bloqueados.`);
   } catch (error) {
     if (error instanceof AuthError) return errorResult(error.message);
     logError("settings.backups.reconcile", error);

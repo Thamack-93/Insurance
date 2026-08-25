@@ -10,6 +10,7 @@ import {
   policyNavigation,
   reportsNavigation,
 } from "./navigation";
+import { getPlatformBreadcrumbSegments, isPlatformNavigationItemActive, platformNavigation } from "./platform-navigation";
 
 describe("global navigation", () => {
   it("exposes exactly the seven primary destinations in operational order", () => {
@@ -124,6 +125,31 @@ describe("breadcrumbs", () => {
     expect(getBreadcrumbSegments("/reports", new URLSearchParams("view=portfolio"))).toEqual([
       { segment: "reports", label: "Reportes" },
       { segment: "portfolio", label: "Reporte de cartera" },
+    ]);
+  });
+});
+
+describe("platform navigation", () => {
+  it("exposes only the five master destinations", () => {
+    expect(platformNavigation.map(({ id, label }) => ({ id, label }))).toEqual([
+      { id: "overview", label: "Resumen" },
+      { id: "organizations", label: "Organizaciones" },
+      { id: "billing", label: "Facturación" },
+      { id: "backups", label: "Respaldos" },
+      { id: "integrations", label: "Integraciones" },
+    ]);
+  });
+
+  it("keeps the overview active only at the platform root", () => {
+    const overview = platformNavigation[0];
+    expect(isPlatformNavigationItemActive(overview, "/platform")).toBe(true);
+    expect(isPlatformNavigationItemActive(overview, "/platform/organizations")).toBe(false);
+  });
+
+  it("builds platform breadcrumbs without leaking tenant navigation", () => {
+    expect(getPlatformBreadcrumbSegments("/platform/organizations/new")).toEqual([
+      { segment: "organizations", label: "Organizaciones" },
+      { segment: "new", label: "Nueva organización" },
     ]);
   });
 });

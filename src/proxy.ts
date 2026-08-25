@@ -37,10 +37,10 @@ export async function proxy(request: NextRequest) {
   }
 
   if (session.mustChangePassword) {
-    const allowed = (pathname === "/settings/account" && session.platformRole !== "SUPERADMIN") || (session.platformRole === "SUPERADMIN" && pathname === "/platform");
+    const allowed = (pathname === "/settings/account" && session.platformRole !== "SUPERADMIN") || (session.platformRole === "SUPERADMIN" && (pathname === "/platform" || pathname === "/platform/account"));
     if (!allowed) {
       const url = request.nextUrl.clone();
-      url.pathname = session.platformRole === "SUPERADMIN" ? "/platform" : "/settings/account";
+      url.pathname = session.platformRole === "SUPERADMIN" ? "/platform/account" : "/settings/account";
       url.search = "";
       url.searchParams.set("forcePassword", "1");
       return NextResponse.redirect(url);
