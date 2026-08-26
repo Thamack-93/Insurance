@@ -185,7 +185,8 @@ export default async function ClientsPage({
                 {
                   key: "status",
                   label: "Estado",
-                    options: [{ value: "ALL", label: "Todos" }, ...entityStatusOptions],
+                  allValue: "ALL",
+                  options: [{ value: "ALL", label: "Todos" }, ...entityStatusOptions],
                 },
               ]}
             />

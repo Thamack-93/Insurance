@@ -14,6 +14,7 @@ type ColumnFilterProps = {
   label: string;
   options: ColumnFilterOption[];
   placeholder?: string;
+  allValue?: string;
   className?: string;
 };
 
@@ -22,15 +23,17 @@ export function ColumnFilter({
   label,
   options,
   placeholder = "Todos",
+  allValue = "__all__",
   className,
 }: ColumnFilterProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const value = searchParams.get(filterKey) ?? "__all__";
+  const value = searchParams.get(filterKey) ?? allValue;
+  const filteredOptions = options.filter((option) => option.value !== allValue);
   const items = Object.fromEntries([
-    ["__all__", placeholder],
-    ...options.map((option) => [option.value, option.label]),
+    [allValue, placeholder],
+    ...filteredOptions.map((option) => [option.value, option.label]),
   ]);
 
   return (
@@ -41,7 +44,7 @@ export function ColumnFilter({
         value={value}
         onValueChange={(next) => {
           router.replace(
-            buildTableHref(pathname, searchParams, { [filterKey]: next === "__all__" ? null : next }, { resetPage: true }),
+            buildTableHref(pathname, searchParams, { [filterKey]: next === allValue ? null : next }, { resetPage: true }),
             { scroll: false },
           );
         }}
@@ -50,8 +53,8 @@ export function ColumnFilter({
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="__all__">{placeholder}</SelectItem>
-          {options.map((option) => (
+          <SelectItem value={allValue}>{placeholder}</SelectItem>
+          {filteredOptions.map((option) => (
             <SelectItem key={option.value} value={option.value}>
               {option.label}
             </SelectItem>

@@ -22,6 +22,8 @@ export type TableFilter = {
   label: string;
   options: ColumnFilterOption[];
   placeholder?: string;
+  /** Internal query value used by an existing "Todos" option, when applicable. */
+  allValue?: string;
 };
 
 function readTablePreferences(pathname: string) {
@@ -127,7 +129,14 @@ export function TableToolbar({
       <div className="flex flex-1 flex-wrap items-center gap-2">
         <ListSearch placeholder={searchPlaceholder} className="md:max-w-sm" />
         {filters.map((filter) => (
-          <ColumnFilter key={filter.key} filterKey={filter.key} label={filter.label} options={filter.options} placeholder={filter.placeholder ?? "Todos"} />
+          <ColumnFilter
+            key={filter.key}
+            filterKey={filter.key}
+            label={filter.label}
+            options={filter.options}
+            placeholder={filter.placeholder ?? "Todos"}
+            allValue={filter.allValue}
+          />
         ))}
         {isFiltered || hasSort ? (
           <Button type="button" variant="outline" onClick={clearAll}>
