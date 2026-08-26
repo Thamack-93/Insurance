@@ -79,7 +79,7 @@ describe("deleteUser", () => {
   it("protects an Owner from deletion", async () => {
     mocks.tx.organizationMembership.findFirst.mockResolvedValue({ role: "OWNER", active: true, user: { id: "target-1", active: true } });
     const result = await deleteUser("target-1");
-    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/Owner/i) });
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/propietario/i) });
     expect(mocks.tx.user.delete).not.toHaveBeenCalled();
   });
 
