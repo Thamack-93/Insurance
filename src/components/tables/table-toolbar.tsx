@@ -127,7 +127,7 @@ export function TableToolbar({
       <div className="flex flex-1 flex-wrap items-center gap-2">
         <ListSearch placeholder={searchPlaceholder} className="md:max-w-sm" />
         {filters.map((filter) => (
-          <ColumnFilter key={filter.key} filterKey={filter.key} label={filter.label} options={filter.options} placeholder={filter.placeholder ?? filter.label} />
+          <ColumnFilter key={filter.key} filterKey={filter.key} label={filter.label} options={filter.options} placeholder={filter.placeholder ?? "Todos"} />
         ))}
         {isFiltered || hasSort ? (
           <Button type="button" variant="outline" onClick={clearAll}>
