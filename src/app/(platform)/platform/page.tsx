@@ -3,13 +3,14 @@ import { Activity, ArrowRight, Building2, CreditCard, Database, ShieldCheck } fr
 import { requireSuperAdminOrRedirect } from "@/lib/auth";
 import { getPlatformOverview } from "@/lib/platform-dashboard";
 import { getPlatformBackupHealth } from "@/lib/backup-catalog";
+import { backupStatusLabel } from "@/lib/ui-labels";
 
 export const dynamic = "force-dynamic";
 
 const modules = [
-  { href: "/platform/organizations", label: "Organizaciones", description: "Salud, memberships, actividad y provisionamiento.", icon: Building2 },
+  { href: "/platform/organizations", label: "Organizaciones", description: "Salud, miembros, actividad y aprovisionamiento.", icon: Building2 },
   { href: "/platform/billing", label: "Facturación", description: "MRR, cargos, suscripciones y catálogo de planes.", icon: CreditCard },
-  { href: "/platform/backups", label: "Respaldos", description: "Estado, verificación y catálogo de snapshots globales.", icon: Database },
+  { href: "/platform/backups", label: "Respaldos", description: "Estado, verificación y catálogo de respaldos globales.", icon: Database },
   { href: "/platform/integrations", label: "Integraciones", description: "Controles globales de Telegram y servicios de plataforma.", icon: Activity },
 ];
 
@@ -29,7 +30,7 @@ export default async function PlatformPage({ searchParams }: { searchParams?: Pr
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-7">
       <header className="flex flex-col gap-5 rounded-2xl border border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-slate-50 p-6 dark:border-cyan-950 dark:from-cyan-950/40 dark:via-slate-950 dark:to-slate-950 sm:flex-row sm:items-start sm:justify-between sm:p-8">
-        <div><p className="text-sm font-semibold uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-300">Centro de control</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">Resumen de plataforma</h1><p className="mt-2 max-w-2xl text-sm text-muted-foreground">Supervisión global de organizaciones, memberships, salud y actividad. Esta sesión no abre datos operativos tenant.</p></div>
+        <div><p className="text-sm font-semibold uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-300">Centro de control</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">Resumen de plataforma</h1><p className="mt-2 max-w-2xl text-sm text-muted-foreground">Supervisión global de organizaciones, miembros, salud y actividad. Esta sesión no abre datos operativos de ninguna organización.</p></div>
         <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-cyan-600 text-white shadow-lg shadow-cyan-900/15"><ShieldCheck className="size-6" aria-hidden /></div>
       </header>
 
@@ -40,30 +41,30 @@ export default async function PlatformPage({ searchParams }: { searchParams?: Pr
         <Metric label="Activas" value={overview.summary.activeOrganizations} />
         <Metric label="Suspendidas" value={overview.summary.suspendedOrganizations} />
         <Metric label="Usuarios activos" value={overview.summary.activeUsers} />
-        <Metric label="Memberships" value={overview.summary.activeMemberships} />
-        <Metric label="Owners activos" value={overview.summary.activeOwners} />
+        <Metric label="Miembros" value={overview.summary.activeMemberships} />
+        <Metric label="Propietarios activos" value={overview.summary.activeOwners} />
         <Metric label="Admins master" value={overview.summary.activePlatformAdmins} />
       </section>
 
       <section className="rounded-2xl border bg-card p-5" aria-labelledby="platform-backup-health">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h2 id="platform-backup-health" className="font-semibold">Salud de backups globales</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Supervisión del último snapshot verificado y de la ventana semanal.</p>
+            <h2 id="platform-backup-health" className="font-semibold">Salud de respaldos globales</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Supervisión del último respaldo verificado y de la ventana semanal.</p>
           </div>
-          <Link href="/platform/backups" className="inline-flex items-center text-sm font-medium text-primary underline">Administrar backups <ArrowRight className="ml-1 size-4" aria-hidden /></Link>
+          <Link href="/platform/backups" className="inline-flex items-center text-sm font-medium text-primary underline">Administrar respaldos <ArrowRight className="ml-1 size-4" aria-hidden /></Link>
         </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Metric label="Último verificado" value={backupHealth.latestVerified ? new Date(backupHealth.latestVerified.createdAt).toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short" }) : "Ninguno"} />
           <Metric label="Próximo vencimiento" value={new Date(backupHealth.nextDueAt).toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short" })} />
-          <Metric label="Estado semanal" value={backupHealth.status} />
-          <Metric label="CREATING / BLOCKED" value={`${backupHealth.creating} / ${backupHealth.blocked}`} />
+          <Metric label="Estado semanal" value={backupStatusLabel(backupHealth.status)} />
+          <Metric label="En creación / bloqueados" value={`${backupHealth.creating} / ${backupHealth.blocked}`} />
         </div>
       </section>
 
       <section aria-labelledby="platform-modules"><div className="mb-3"><h2 id="platform-modules" className="text-lg font-semibold">Módulos de plataforma</h2><p className="mt-1 text-sm text-muted-foreground">Cada capacidad tiene ahora su propio espacio de trabajo.</p></div><div className="grid gap-4 md:grid-cols-2">{modules.map(({ href, label, description, icon: Icon }) => <Link key={href} href={href} className="group rounded-2xl border bg-card p-5 transition hover:-translate-y-0.5 hover:border-cyan-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500"><div className="flex items-start justify-between gap-4"><span className="grid size-10 place-items-center rounded-xl bg-cyan-50 text-cyan-700 dark:bg-cyan-950/50 dark:text-cyan-300"><Icon className="size-5" aria-hidden /></span><ArrowRight className="size-4 text-muted-foreground transition group-hover:translate-x-1 group-hover:text-cyan-600" aria-hidden /></div><h3 className="mt-5 font-semibold">{label}</h3><p className="mt-1 text-sm text-muted-foreground">{description}</p></Link>)}</div></section>
 
-      <p className="text-sm text-muted-foreground">Sesión master: {platformAdmin.email}. Las operaciones tenant requieren una membership explícita y se realizan desde el CRM de la organización.</p>
+      <p className="text-sm text-muted-foreground">Sesión principal: {platformAdmin.email}. Las operaciones de una organización requieren un acceso explícito y se realizan desde su CRM.</p>
     </div>
   );
 }

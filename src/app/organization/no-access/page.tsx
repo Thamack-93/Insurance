@@ -19,8 +19,8 @@ export default async function OrganizationNoAccessPage({
         <h1 className="text-2xl font-semibold">Sin organización activa</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           {reason === "corrupt"
-            ? "Tu cuenta tiene memberships incompatibles. El acceso operativo está bloqueado hasta que un administrador de plataforma corrija la asignación."
-            : "Tu cuenta todavía no tiene una membership activa. Contacta a un administrador de plataforma."}
+            ? "Tu cuenta tiene accesos incompatibles. El acceso operativo está bloqueado hasta que un administrador de plataforma corrija la asignación."
+            : "Tu cuenta todavía no tiene acceso activo a una organización. Contacta a un administrador de plataforma."}
         </p>
         {user.platformRole === "SUPERADMIN" ? <Link className="mt-5 inline-flex text-sm font-medium text-primary underline" href="/platform">Ir a Plataforma</Link> : null}
       </div>

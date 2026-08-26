@@ -37,6 +37,8 @@ import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query"
 import { getLatestMaintenanceRun } from "@/lib/vigency-maintenance";
 import { getUpcomingRenewals } from "@/lib/renewals";
 import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
+import { statusLabel } from "@/lib/status";
+import { dataQualityStatusLabel } from "@/lib/ui-labels";
 import { RunVigencyAuditButton } from "@/components/data-quality/run-vigency-audit-button";
 import { RunPaymentAuditButton } from "@/components/data-quality/run-payment-audit-button";
 import { ReviewActionButtons } from "@/components/data-quality/review-action-buttons";
@@ -516,14 +518,14 @@ export default async function DataQualityPage({
 
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <MetricCard
-                title="Score clientes"
+                title="Puntuación de clientes"
                 value={avgClientScore}
                 description={`Promedio de ${clientScores.length} clientes evaluados`}
                 icon={Users}
                 tone={avgClientScore >= 75 ? "emerald" : avgClientScore >= 50 ? "amber" : "rose"}
               />
               <MetricCard
-                title="Score pólizas"
+                title="Puntuación de pólizas"
                 value={avgPolicyScore}
                 description={`Promedio de ${policyScores.length} pólizas evaluadas`}
                 icon={FolderKanban}
@@ -554,7 +556,7 @@ export default async function DataQualityPage({
                     <TableHeader>
                       <TableRow className="bg-stone-50/70">
                         <TableHead>Cliente</TableHead>
-                        <TableHead>Score</TableHead>
+                        <TableHead>Puntuación</TableHead>
                         <TableHead>Nivel</TableHead>
                         <TableHead className="text-right">Pólizas</TableHead>
                         <TableHead className="text-right">Prima</TableHead>
@@ -614,7 +616,7 @@ export default async function DataQualityPage({
                     <TableHeader>
                       <TableRow className="bg-stone-50/70">
                         <TableHead>Póliza</TableHead>
-                        <TableHead>Score</TableHead>
+                        <TableHead>Puntuación</TableHead>
                         <TableHead>Nivel</TableHead>
                         <TableHead>Problemas</TableHead>
                         <TableHead className="text-right">Resolver</TableHead>
@@ -628,7 +630,7 @@ export default async function DataQualityPage({
                             {policy.poliza}
                           </Link>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {policy.cliente} · {policy.aseguradora} · {policy.status}
+                            {policy.cliente} · {policy.aseguradora} · {statusLabel(policy.status, "policy")}
                           </p>
                         </TableCell>
                           <TableCell>
@@ -727,7 +729,7 @@ export default async function DataQualityPage({
                                 {client.cliente}
                               </Link>
                               <p className="text-xs text-muted-foreground">
-                                Score: {client.score} · Completitud: {client.completitud}%
+                                Puntuación: {client.score} · Completitud: {client.completitud}%
                               </p>
                             </TableCell>
                             <TableCell>
@@ -876,7 +878,7 @@ export default async function DataQualityPage({
                   <p className="mt-1 text-2xl font-semibold">{latestAuditSummary?.receiptsReconciled ?? 0}</p>
                 </div>
                 <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Issues abiertos</p>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Problemas abiertos</p>
                   <p className="mt-1 text-2xl font-semibold">{latestAuditSummary?.receiptIssuesOpened ?? 0}</p>
                 </div>
               </div>
@@ -961,8 +963,8 @@ export default async function DataQualityPage({
                 <div className="mt-4 grid gap-3 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
                   <div>Familias revisadas: {latestPaymentAuditSummary.familiesReviewed ?? 0}</div>
                   <div>Familias con múltiples pólizas: {latestPaymentAuditSummary.familiesWithMultiplePolicies ?? 0}</div>
-                  <div>Issues abiertos: {latestPaymentAuditSummary.receiptIssuesOpened ?? 0}</div>
-                  <div>Issues resueltos: {latestPaymentAuditSummary.receiptIssuesResolved ?? 0}</div>
+                  <div>Problemas abiertos: {latestPaymentAuditSummary.receiptIssuesOpened ?? 0}</div>
+                  <div>Problemas resueltos: {latestPaymentAuditSummary.receiptIssuesResolved ?? 0}</div>
                 </div>
               ) : null}
               {latestPaymentAuditSummary?.reviewReceipts?.length ? (
@@ -1456,7 +1458,7 @@ export default async function DataQualityPage({
                     </div>
                     <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                       <p className="text-xs uppercase tracking-wide text-muted-foreground">Estado</p>
-                      <p className="mt-1 text-sm font-medium">{previewBatch.status}</p>
+                      <p className="mt-1 text-sm font-medium">{dataQualityStatusLabel(previewBatch.status)}</p>
                     </div>
                     <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 p-4">
                       <p className="text-xs uppercase tracking-wide text-muted-foreground">Creado</p>
@@ -1526,7 +1528,7 @@ export default async function DataQualityPage({
             </SectionCard>
 
             <SectionCard
-              title="Issues de ledger por revisar"
+              title="Problemas del libro contable por revisar"
               description="Cada fila queda agrupada por lote para que puedas aprobar o revisar por categoría."
             >
               <div className="mb-5">
@@ -1655,7 +1657,7 @@ export default async function DataQualityPage({
                     <div className="overflow-hidden rounded-xl border border-stone-200/80">
                       <div className="border-b border-stone-200/80 bg-stone-50/70 px-4 py-3">
                         <p className="text-sm font-semibold">Historial reciente</p>
-                        <p className="text-xs text-muted-foreground">Issues resueltos, descartados, suprimidos o fusionados.</p>
+                        <p className="text-xs text-muted-foreground">Problemas resueltos, descartados, suprimidos o fusionados.</p>
                       </div>
                       <Table>
                         <TableHeader>

@@ -14,10 +14,17 @@ import { getAssistantAiMonthlyUsageSummary, listAssistantAiRuns } from "@/lib/as
 import { getNoraAgentMode, getNoraAiMonthlySoftLimitUsd } from "@/lib/assistant-agent-config";
 import { listGeneralKnowledgeSources, listInternalKnowledgeSources } from "@/lib/knowledge-base";
 import { formatDate } from "@/lib/dates";
+import { statusLabel } from "@/lib/status";
 import { AssistantReportActionButtons } from "@/components/assistant/report-action-buttons";
 import { Gauge, ShieldCheck } from "lucide-react";
 import { KnowledgeBaseTester } from "@/components/settings/knowledge-base-tester";
 import { KnowledgeSourceActivationButton } from "@/components/settings/knowledge-source-actions";
+import {
+  assistantAiStatusLabel,
+  assistantAiTierLabel,
+  assistantReportKindLabel,
+  assistantReportStatusLabel,
+} from "@/lib/ui-labels";
 import {
   archiveAssistantReportAction,
   closeAssistantReportAction,
@@ -105,7 +112,7 @@ function ReportList({
                 <CardTitle className="flex flex-wrap items-center gap-2 text-base">
                   {report.title}
                   <Badge variant={statusTone(report.status)} className="rounded-full">
-                    {report.status}
+                    {assistantReportStatusLabel(report.status)}
                   </Badge>
                   <Badge variant="outline" className="rounded-full">
                     v{report.version}
@@ -115,7 +122,7 @@ function ReportList({
                   ) : null}
                 </CardTitle>
                 <CardDescription className="mt-1">
-                  {report.themeLabel} · {report.kind} · {report.signalCount} señales
+                  {report.themeLabel} · {assistantReportKindLabel(report.kind)} · {report.signalCount} señales
                 </CardDescription>
               </div>
               <AssistantReportActionButtons
@@ -198,14 +205,14 @@ function AiRunList({
                 <CardTitle className="flex flex-wrap items-center gap-2 text-base">
                   {getAssistantAiOperationLabel(run.operation)}
                   <Badge variant={run.status === "SUCCEEDED" ? "default" : run.status === "FAILED" ? "destructive" : "outline"} className="rounded-full">
-                    {run.status}
+                    {assistantAiStatusLabel(run.status)}
                   </Badge>
                   <Badge variant="outline" className="rounded-full">
-                    {run.tier}
+                    {assistantAiTierLabel(run.tier)}
                   </Badge>
                 </CardTitle>
                 <CardDescription className="mt-1">
-                  {run.requestedModel} · {run.attemptCount} intentos · {run.fallbackCount} fallback{run.fallbackCount === 1 ? "" : "s"}
+                  {run.requestedModel} · {run.attemptCount} intentos · {run.fallbackCount} alternativa{run.fallbackCount === 1 ? "" : "s"}
                 </CardDescription>
               </div>
               <div className="text-right text-xs text-muted-foreground">
@@ -265,16 +272,16 @@ function AiRunList({
                         #{attempt.attemptNumber} · {attempt.requestedModel}
                       </p>
                       <Badge variant="outline" className="rounded-full text-[10px] uppercase tracking-wide">
-                        {attempt.status}
+                        {assistantAiStatusLabel(attempt.status)}
                       </Badge>
                     </div>
                     <div className="mt-2 grid gap-1 sm:grid-cols-2">
-                      <span>Tier: {attempt.tier}</span>
-                      <span>Final: {attempt.finalModel ?? "sin dato"}</span>
+                      <span>Nivel: {assistantAiTierLabel(attempt.tier)}</span>
+                      <span>Modelo final: {attempt.finalModel ?? "sin dato"}</span>
                       <span>Motivo: {attempt.fallbackReason ?? "sin motivo"}</span>
                       <span>Duración: {formatDurationMs(attempt.durationMs ?? 0)}</span>
                       <span>Código: {attempt.code ?? "ok"}</span>
-                      <span>Finish: {attempt.finishReason ?? "sin dato"}</span>
+                      <span>Finalización: {attempt.finishReason ?? "sin dato"}</span>
                     </div>
                     {attempt.usage ? (
                       <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
@@ -389,7 +396,7 @@ export default async function AssistantSettingsPage() {
             </div>
             <p>
               {aiStatus.available
-                ? `La IA está lista para responder y generar mejoras con fallback a ${aiStatus.fallbackModels.join(", ")}.`
+                ? `La IA está lista para responder y generar mejoras con modelos alternativos: ${aiStatus.fallbackModels.join(", ")}.`
                 : "La IA no está disponible todavía. Revisa credenciales o entorno."}
             </p>
           </CardContent>
@@ -515,7 +522,7 @@ export default async function AssistantSettingsPage() {
                     <p className="text-xs text-muted-foreground">v{source.version} · {source.insurerName ?? "Aseguradora no indicada"} · {source.product ?? "Producto no indicado"} · {source._count.chunks} fragmentos</p>
                     <p className="mt-1 text-xs text-muted-foreground">{source.authority ?? "Fuente no indicada"}{source.reviewedAt ? ` · revisada ${formatDate(source.reviewedAt)}` : ""} · vigencia {source.effectiveFrom ? formatDate(source.effectiveFrom, "yyyy-MM-dd") : "sin inicio"}–{source.effectiveTo ? formatDate(source.effectiveTo, "yyyy-MM-dd") : "sin fin"}{source.sourceUrl ? <a className="ml-1 underline" href={source.sourceUrl} target="_blank" rel="noreferrer">origen</a> : null}</p>
                   </div>
-                  <Badge variant={source.status === "ACTIVE" && source.integrityVerifiedAt ? "default" : source.status === "ARCHIVED" ? "outline" : "secondary"} className="rounded-full">{integrityLabel(source) ?? validityLabel(source) ?? (source.integrityVerifiedAt ? source.status : `${source.status} · integridad pendiente`)}</Badge>
+                  <Badge variant={source.status === "ACTIVE" && source.integrityVerifiedAt ? "default" : source.status === "ARCHIVED" ? "outline" : "secondary"} className="rounded-full">{integrityLabel(source) ?? validityLabel(source) ?? (source.integrityVerifiedAt ? statusLabel(source.status) : `${statusLabel(source.status)} · integridad pendiente`)}</Badge>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {source.status !== "ACTIVE" && source.status !== "ARCHIVED" ? <KnowledgeSourceActivationButton action={activateKnowledgeSourceAction.bind(null, source.id)} title={source.title} version={source.version} chunkCount={source._count.chunks} effectiveFrom={source.effectiveFrom ? formatDate(source.effectiveFrom, "yyyy-MM-dd") : ""} effectiveTo={source.effectiveTo ? formatDate(source.effectiveTo, "yyyy-MM-dd") : ""} /> : null}
@@ -538,7 +545,7 @@ export default async function AssistantSettingsPage() {
                         <p className="text-xs text-muted-foreground">v{source.version} · {source.product ?? "General"} · {source._count.chunks} fragmentos</p>
                         <p className="mt-1 text-xs text-muted-foreground">{source.authority ?? "Fuente no indicada"}{source.reviewedAt ? ` · revisada ${formatDate(source.reviewedAt)}` : ""} · vigencia {source.effectiveFrom ? formatDate(source.effectiveFrom, "yyyy-MM-dd") : "sin inicio"}–{source.effectiveTo ? formatDate(source.effectiveTo, "yyyy-MM-dd") : "sin fin"}{source.sourceUrl ? <a className="ml-1 underline" href={source.sourceUrl} target="_blank" rel="noreferrer">origen</a> : null}</p>
                       </div>
-                      <Badge variant={source.status === "ACTIVE" && source.integrityVerifiedAt ? "default" : source.status === "ARCHIVED" ? "outline" : "secondary"} className="rounded-full">{integrityLabel(source) ?? validityLabel(source) ?? (source.integrityVerifiedAt ? source.status : `${source.status} · integridad pendiente`)}</Badge>
+                  <Badge variant={source.status === "ACTIVE" && source.integrityVerifiedAt ? "default" : source.status === "ARCHIVED" ? "outline" : "secondary"} className="rounded-full">{integrityLabel(source) ?? validityLabel(source) ?? (source.integrityVerifiedAt ? statusLabel(source.status) : `${statusLabel(source.status)} · integridad pendiente`)}</Badge>
                     </div>
                   </div>
                 ))}

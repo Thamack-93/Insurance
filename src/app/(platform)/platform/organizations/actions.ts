@@ -53,8 +53,8 @@ export async function createOrganizationAction(input: {
     if (!requestId || requestId.length > 128) return { ok: false, error: "La solicitud de creación no es válida." };
     if (name.length < 2 || name.length > 160) return { ok: false, error: "Captura un nombre de organización válido." };
     if (slug.length < 2 || slug.length > 80) return { ok: false, error: "El slug debe contener al menos 2 caracteres válidos." };
-    if (ownerName.length < 2 || ownerName.length > 160) return { ok: false, error: "Captura el nombre del Owner." };
-    if (!validEmail(ownerEmail)) return { ok: false, error: "Captura un correo válido para el Owner." };
+    if (ownerName.length < 2 || ownerName.length > 160) return { ok: false, error: "Captura el nombre del propietario." };
+    if (!validEmail(ownerEmail)) return { ok: false, error: "Captura un correo válido para el propietario." };
     if (!isSupportedTimeZone(timeZone)) return { ok: false, error: "La zona horaria no es válida." };
     if (!/^[A-Z]{3}$/.test(defaultCurrency)) return { ok: false, error: "La moneda debe ser un código de 3 letras." };
 
@@ -121,7 +121,7 @@ export async function createOrganizationAction(input: {
       ownerEmail: result.ownerEmail,
       temporaryPassword: result.temporaryPassword,
       alreadyExisted: result.status === "existing",
-      message: result.status === "existing" ? "La solicitud ya fue procesada; no se vuelve a mostrar la contraseña." : "Organización creada con Owner activo y contraseña temporal.",
+      message: result.status === "existing" ? "La solicitud ya fue procesada; no se vuelve a mostrar la contraseña." : "Organización creada con propietario activo y contraseña temporal.",
     };
   } catch (error) {
     if (error instanceof AuthError) return { ok: false, error: error.message };

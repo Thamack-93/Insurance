@@ -15,7 +15,7 @@ import { DocumentList } from "@/components/documents/document-list";
 import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
-import { policyTypeLabel } from "@/lib/status";
+import { policyTypeLabel, statusLabel } from "@/lib/status";
 import { claimOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function ClaimDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -82,7 +82,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
             title="Estado"
-            value={claim.status.replace(/_/g, " ")}
+            value={statusLabel(claim.status, "claim")}
             description={isClosed ? "Siniestro cerrado" : `Abierto hace ${daysOpen} días`}
             icon={BadgeCheck}
             tone={isClosed ? "emerald" : "amber"}

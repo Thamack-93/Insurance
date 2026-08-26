@@ -15,5 +15,5 @@ export default async function PlatformBackupsPage() {
   } catch {
     initialLoadError = "No se pudo consultar el catálogo de respaldos.";
   }
-  return <div className="mx-auto flex w-full max-w-6xl flex-col gap-6"><PageHeader eyebrow="Control de plataforma" title="Respaldos" description="Snapshots globales, privados y cifrados. La restauración continúa siendo CLI-only y requiere un destino temporal autorizado." /><BackupsPanel initialBackups={backups} initialLoadError={initialLoadError} backupStatus={getBackupPreflightStatus()} createBackup={createBackup} listBackups={listBackupsAction} reconcileBackups={reconcileBackupCatalogAction} /></div>;
+  return <div className="mx-auto flex w-full max-w-6xl flex-col gap-6"><PageHeader eyebrow="Control de plataforma" title="Respaldos" description="Respaldos globales, privados y cifrados. La restauración continúa siendo solo por CLI y requiere un destino temporal autorizado." /><BackupsPanel initialBackups={backups} initialLoadError={initialLoadError} backupStatus={getBackupPreflightStatus()} createBackup={createBackup} listBackups={listBackupsAction} reconcileBackups={reconcileBackupCatalogAction} /></div>;
 }

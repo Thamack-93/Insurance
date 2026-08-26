@@ -219,6 +219,7 @@ export function UploadForm({
           <div className="space-y-2">
             <Label htmlFor="documentType">Tipo de documento</Label>
             <Select
+              items={Object.fromEntries(documentTypeOptions.map((option) => [option.value, option.label]))}
               value={formData.documentType}
               onValueChange={(value) => setFormData((prev) => ({ ...prev, documentType: value || "" }))}
               disabled={uploading}

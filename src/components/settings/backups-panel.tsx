@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import type { BackupPreflightStatus } from "@/lib/backup";
 import type { MutationResult } from "@/lib/mutation-utils";
 import { getBackupScheduleStatus, PLATFORM_BACKUP_INTERVAL_DAYS } from "@/lib/backup-schedule";
+import { backupCapabilityLabel, backupStatusLabel, backupStorageLabel } from "@/lib/ui-labels";
 
 type Props = {
   initialBackups: BackupListItem[];
@@ -170,7 +171,7 @@ export function BackupsPanel({
           ))}
         </div>
         <p className="mt-3 text-sm text-muted-foreground">
-          Último snapshot verificado: {latestVerified ? formatDateTime(latestVerified.createdAt) : "ninguno"} · Próximo vencimiento: {formatDateTime(schedule.nextDueAt.toISOString())} · Estado semanal: {schedule.status}
+          Último respaldo verificado: {latestVerified ? formatDateTime(latestVerified.createdAt) : "ninguno"} · Próximo vencimiento: {formatDateTime(schedule.nextDueAt.toISOString())} · Estado semanal: {backupStatusLabel(schedule.status)}
         </p>
       </div>
       {resultMessage ? <p className="border-b border-border/60 px-6 py-3 text-sm text-foreground" role="status" aria-live="polite">{resultMessage}</p> : null}
@@ -185,7 +186,7 @@ export function BackupsPanel({
           <EmptyPanel
             icon={Database}
             title="Sin respaldos"
-            description="Crea el primer snapshot cifrado de la base Postgres."
+            description="Crea el primer respaldo cifrado de la base de datos."
           />
         </div>
       ) : !loadError ? (
@@ -199,11 +200,11 @@ export function BackupsPanel({
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="truncate text-sm font-medium text-foreground">{backup.filename}</p>
                   <Badge variant="outline" className="rounded-full">Global</Badge>
-                  <Badge variant={backup.status === "VERIFIED" ? "secondary" : "outline"} className="rounded-full">{backup.status}</Badge>
-                  {backup.capability === "DATABASE_ONLY" ? <Badge variant="destructive" className="rounded-full">Solo base de datos</Badge> : null}
+                  <Badge variant={backup.status === "VERIFIED" ? "secondary" : "outline"} className="rounded-full">{backupStatusLabel(backup.status)}</Badge>
+                  <Badge variant={backup.capability === "DATABASE_ONLY" ? "destructive" : "outline"} className="rounded-full">{backupCapabilityLabel(backup.capability)}</Badge>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {formatDateTime(backup.createdAt)} · {formatSize(backup.size)} · v{backup.formatVersion ?? "?"} · {backup.storage}
+                  {formatDateTime(backup.createdAt)} · {formatSize(backup.size)} · v{backup.formatVersion ?? "?"} · {backupStorageLabel(backup.storage)}
                 </p>
               </div>
               <div className="flex items-center gap-2">

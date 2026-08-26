@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { Building2 } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import { getOrganizationOptions, resolveOrganizationContext } from "@/lib/organization-context";
+import { roleLabel } from "@/lib/ui-labels";
 import { clearSelectedOrganizationAction, selectOrganizationAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ export default async function OrganizationSelectPage() {
           <p className="mt-1 text-sm text-muted-foreground">Tu cuenta pertenece a una sola organización. Confirma esa organización para reemplazar la selección obsoleta de tu sesión.</p>
           {resolution.status === "stale-selection" ? (
             <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              La selección firmada ya no coincide con tu membership activa. Renueva la sesión de forma explícita para continuar.
+              La selección firmada ya no coincide con tu acceso activo. Renueva la sesión de forma explícita para continuar.
             </p>
           ) : null}
         </div>
@@ -36,7 +37,7 @@ export default async function OrganizationSelectPage() {
                 <span className="grid size-10 place-items-center rounded-lg bg-primary/10 text-primary"><Building2 className="size-5" aria-hidden /></span>
                 <span className="min-w-0">
                   <span className="block truncate font-medium">{option.name}</span>
-                  <span className="block text-sm text-muted-foreground">{option.slug} · {option.role} · Renovar sesión</span>
+                  <span className="block text-sm text-muted-foreground">{option.slug} · {roleLabel(option.role)} · Renovar sesión</span>
                 </span>
               </button>
             </form>

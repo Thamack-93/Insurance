@@ -109,7 +109,7 @@ export function ClientForm({
 
           <FormSection title="Contacto" description="Canales y datos para operar la cuenta.">
             <FormGrid>
-              <FormField label="Email" htmlFor="email" error={errors.email?.message}>
+              <FormField label="Correo" htmlFor="email" error={errors.email?.message}>
                 <Input id="email" type="email" {...register("email")} />
               </FormField>
 

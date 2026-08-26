@@ -54,17 +54,17 @@ export function OrganizationCreateForm() {
       <form onSubmit={submit} className="space-y-5 rounded-xl border bg-card p-6">
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1 sm:col-span-2"><Label htmlFor="organization-name">Nombre</Label><Input id="organization-name" value={name} onChange={(event) => setName(event.target.value)} required maxLength={160} /></div>
-          <div className="space-y-1"><Label htmlFor="organization-slug">Slug</Label><Input id="organization-slug" value={slug} onChange={(event) => setSlug(event.target.value)} placeholder="se genera del nombre" maxLength={80} /></div>
+          <div className="space-y-1"><Label htmlFor="organization-slug">Identificador URL</Label><Input id="organization-slug" value={slug} onChange={(event) => setSlug(event.target.value)} placeholder="se genera del nombre" maxLength={80} /></div>
           <div className="space-y-1"><Label htmlFor="organization-currency">Moneda</Label><Input id="organization-currency" value={currency} onChange={(event) => setCurrency(event.target.value.toUpperCase())} maxLength={3} required /></div>
           <div className="space-y-1 sm:col-span-2"><Label htmlFor="organization-timezone">Zona horaria</Label><Input id="organization-timezone" value={timeZone} onChange={(event) => setTimeZone(event.target.value)} required /></div>
-          <div className="space-y-1"><Label htmlFor="owner-name">Nombre del Owner</Label><Input id="owner-name" value={ownerName} onChange={(event) => setOwnerName(event.target.value)} required maxLength={160} /></div>
-          <div className="space-y-1"><Label htmlFor="owner-email">Correo del Owner</Label><Input id="owner-email" type="email" value={ownerEmail} onChange={(event) => setOwnerEmail(event.target.value)} required maxLength={254} /></div>
+          <div className="space-y-1"><Label htmlFor="owner-name">Nombre del propietario</Label><Input id="owner-name" value={ownerName} onChange={(event) => setOwnerName(event.target.value)} required maxLength={160} /></div>
+          <div className="space-y-1"><Label htmlFor="owner-email">Correo del propietario</Label><Input id="owner-email" type="email" value={ownerEmail} onChange={(event) => setOwnerEmail(event.target.value)} required maxLength={254} /></div>
         </div>
         <Button type="submit" disabled={pending}><ShieldCheck className="mr-2 size-4" />{pending ? "Creando…" : "Crear organización"}</Button>
       </form>
       <aside className="rounded-xl border bg-muted/30 p-5 text-sm">
         <h2 className="font-semibold">Garantías de la operación</h2>
-        <ul className="mt-3 space-y-2 text-muted-foreground"><li>Se crea vacía y con un solo Owner activo.</li><li>No se copian clientes, pólizas, pagos ni documentos.</li><li>La contraseña temporal solo se muestra una vez.</li><li>El Owner debe cambiarla al entrar.</li></ul>
+        <ul className="mt-3 space-y-2 text-muted-foreground"><li>Se crea vacía y con un solo propietario activo.</li><li>No se copian clientes, pólizas, pagos ni documentos.</li><li>La contraseña temporal solo se muestra una vez.</li><li>El propietario debe cambiarla al entrar.</li></ul>
         {credential ? <div className="mt-5 space-y-2 rounded-lg border bg-background p-3 text-foreground"><p className="font-medium">Credencial temporal</p><p className="text-xs text-muted-foreground">{credential.email}</p><code className="block rounded bg-muted px-2 py-1 font-mono">{credential.password}</code><Button type="button" variant="outline" size="sm" onClick={copyCredential}><Copy className="mr-2 size-4" />Copiar</Button></div> : null}
       </aside>
     </div>

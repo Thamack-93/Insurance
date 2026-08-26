@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import type { BackupPreflightStatus } from "@/lib/backup";
 import type { MutationResult } from "@/lib/mutation-utils";
 import { getBackupScheduleStatus, TENANT_BACKUP_INTERVAL_DAYS } from "@/lib/backup-schedule";
+import { backupCapabilityLabel, backupStatusLabel, backupStorageLabel } from "@/lib/ui-labels";
 
 type Props = {
   organizationId: string;
@@ -99,7 +100,7 @@ export function OrganizationBackupsPanel({ organizationId, initialBackups, initi
     >
       {!backupStatus.ready ? (
         <p className="border-b border-border/60 px-6 py-3 text-sm text-amber-700 dark:text-amber-300">
-          La configuración de backup no está lista; no se puede crear un snapshot.
+          La configuración del respaldo no está lista; no se puede crear una copia.
         </p>
       ) : null}
       {loadError ? (
@@ -108,7 +109,7 @@ export function OrganizationBackupsPanel({ organizationId, initialBackups, initi
           <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => void refresh()}>Reintentar consulta</Button>
         </div>
       ) : backups.length === 0 ? (
-        <div className="p-6"><EmptyPanel icon={Database} title="Sin respaldos" description="Crea el primer snapshot de esta organización." /></div>
+        <div className="p-6"><EmptyPanel icon={Database} title="Sin respaldos" description="Crea el primer respaldo de esta organización." /></div>
       ) : (
         <ul className="divide-y divide-border/60">
           {backups.map((backup) => (
@@ -116,11 +117,11 @@ export function OrganizationBackupsPanel({ organizationId, initialBackups, initi
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="truncate text-sm font-medium text-foreground">{backup.filename}</p>
-                  <Badge variant="default" className="rounded-full">Tenant</Badge>
-                  {backup.capability === "DATABASE_ONLY" ? <Badge variant="destructive" className="rounded-full">Solo base de datos</Badge> : null}
+                  <Badge variant="default" className="rounded-full">Organización</Badge>
+                  <Badge variant={backup.capability === "DATABASE_ONLY" ? "destructive" : "outline"} className="rounded-full">{backupCapabilityLabel(backup.capability)}</Badge>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {formatDateTime(backup.createdAt)} · {formatSize(backup.size)} · {backup.status} · v{backup.formatVersion ?? "?"} · {backup.storage}
+                  {formatDateTime(backup.createdAt)} · {formatSize(backup.size)} · {backupStatusLabel(backup.status)} · v{backup.formatVersion ?? "?"} · {backupStorageLabel(backup.storage)}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -144,7 +145,7 @@ export function OrganizationBackupsPanel({ organizationId, initialBackups, initi
         </ul>
       )}
       <div className={`border-t px-6 py-3 text-sm ${rpoMissed ? "bg-amber-50 text-amber-900 dark:bg-amber-950/20 dark:text-amber-200" : "text-muted-foreground"}`}>
-        Último backup verificado: {latestVerified ? formatDateTime(latestVerified.createdAt) : "ninguno"} · Próximo vencimiento: {formatDateTime(schedule.nextDueAt.toISOString())} · RPO 1 día
+        Último respaldo verificado: {latestVerified ? formatDateTime(latestVerified.createdAt) : "ninguno"} · Próximo vencimiento: {formatDateTime(schedule.nextDueAt.toISOString())} · RPO 1 día
         {rpoMissed ? " · RPO incumplido" : ""}
       </div>
     </SectionCard>

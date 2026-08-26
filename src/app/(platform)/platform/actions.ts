@@ -74,7 +74,7 @@ export async function resetTenantUserPasswordFromPlatform(input: {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     if (result.status === "email") return { ok: false, error: "El correo de confirmación no coincide." };
-    if (result.status !== "updated") return { ok: false, error: "Solo puedes resetear usuarios tenant, no superadmins." };
+    if (result.status !== "updated") return { ok: false, error: "Solo puedes restablecer la contraseña de usuarios de una organización, no de superadministradores." };
 
     revalidatePath(`/platform/organizations/${encodeURIComponent(result.organizationId)}`);
     return {
@@ -87,6 +87,6 @@ export async function resetTenantUserPasswordFromPlatform(input: {
   } catch (error) {
     if (error instanceof AuthError) return { ok: false, error: error.message };
     logError("platform.resetTenantUserPassword", error);
-    return { ok: false, error: "No se pudo resetear la contraseña tenant." };
+    return { ok: false, error: "No se pudo restablecer la contraseña del usuario de la organización." };
   }
 }

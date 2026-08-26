@@ -27,6 +27,7 @@ import type { GlobalSearchResult } from "@/lib/search";
 import type { MutationResult } from "@/lib/mutation-utils";
 import { cn } from "@/lib/utils";
 import { paymentFrequencyOptions, policyStatusOptions } from "@/lib/domain-options";
+import { searchEntityLabel } from "@/lib/ui-labels";
 
 type SearchKind = "client" | "policy";
 type SearchScope = "portfolio" | "all";
@@ -231,11 +232,11 @@ function SearchDialog({
               </div>
           ) : query.trim().length < 2 ? (
               <div className="px-4 py-6 text-sm text-muted-foreground">
-                Empieza a escribir para ver coincidencias por nombre, RFC, email, teléfono, póliza, aseguradora, estado o serie.
+                Empieza a escribir para ver coincidencias por nombre, RFC, correo, teléfono, póliza, aseguradora, estado o serie.
               </div>
           ) : results.length === 0 ? (
               <div className="px-4 py-6 text-sm text-muted-foreground">
-                No encontramos coincidencias para esta búsqueda. Prueba con nombre, RFC, email, teléfono o cartera.
+                No encontramos coincidencias para esta búsqueda. Prueba con nombre, RFC, correo, teléfono o cartera.
               </div>
             ) : (
               <div className="divide-y divide-border/70">
@@ -254,7 +255,7 @@ function SearchDialog({
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="min-w-0 truncate font-medium text-foreground">{result.title}</span>
                         <Badge variant="outline" className="shrink-0 rounded-full text-[11px] uppercase tracking-wide">
-                          {result.type}
+                          {searchEntityLabel(result.type)}
                         </Badge>
                       </div>
                       <p className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">{result.subtitle ?? "Sin descripción"}</p>
@@ -587,7 +588,7 @@ export function ClientResolutionActions({
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor={`client-email-${clientId}`}>Email</Label>
+              <Label htmlFor={`client-email-${clientId}`}>Correo</Label>
               <Input id={`client-email-${clientId}`} value={emailValue} onChange={(event) => setEmailValue(event.target.value)} />
             </div>
             <div className="space-y-2">

@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
-import { policyTypeLabel } from "@/lib/status";
+import { policyTypeLabel, statusLabel } from "@/lib/status";
 import { quoteOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function QuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -74,7 +74,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
             title="Estado"
-            value={quote.status.replace(/_/g, " ")}
+            value={statusLabel(quote.status, "quote")}
             description={isExpired ? "Cotización cerrada" : isAccepted ? "Convertida a póliza" : `Activa hace ${daysOld} días`}
             icon={BadgeCheck}
             tone={isExpired ? "rose" : isAccepted ? "emerald" : "amber"}

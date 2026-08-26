@@ -112,6 +112,7 @@ export function DataFilters({
                   </label>
                   {filter.type === "select" && filter.options && (
                     <Select
+                      items={Object.fromEntries(filter.options.map((option) => [option.value, option.label]))}
                       value={
                         activeFilters.find((f) => f.key === filter.key)?.value ||
                         ""

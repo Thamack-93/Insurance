@@ -20,7 +20,7 @@ import { receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "
 import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
-import { policyTypeLabel } from "@/lib/status";
+import { policyTypeLabel, statusLabel } from "@/lib/status";
 import { isPaidWithinTolerance } from "@/lib/receipt-reconciliation";
 
 export default async function ReceiptDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -114,7 +114,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
           />
           <MetricCard
             title="Estado"
-            value={receipt.status}
+                value={statusLabel(receipt.status, "receipt")}
             description={receipt.paidDate ? `Pagado el ${formatDate(receipt.paidDate)}` : `Vence ${formatDate(receipt.dueDate)}`}
             icon={CircleDollarSign}
             tone={receipt.status === "PAID" ? "blue" : receipt.status === "OVERDUE" ? "rose" : "amber"}

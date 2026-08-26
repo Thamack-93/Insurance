@@ -28,11 +28,16 @@ export function ColumnFilter({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const value = searchParams.get(filterKey) ?? "__all__";
+  const items = Object.fromEntries([
+    ["__all__", placeholder],
+    ...options.map((option) => [option.value, option.label]),
+  ]);
 
   return (
     <label className={className}>
       <span className="sr-only">{label}</span>
       <Select
+        items={items}
         value={value}
         onValueChange={(next) => {
           router.replace(

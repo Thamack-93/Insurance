@@ -36,6 +36,7 @@ import { mergePolicyPdfFiles, PolicyPdfFilePicker } from "@/components/policies/
 import { PolicyCaptureCorrectionCard } from "@/components/assistant/policy-capture-correction-card";
 import { Conversation, ConversationContent, ConversationScrollButton } from "@/components/ai-elements/conversation";
 import { cleanupLegacyNoraState, clearPolicyCaptureHandoff, deletePolicyCaptureHandoffRemote, getNoraStorageMode, loadNoraSession, loadPolicyCaptureHandoff, NORA_SESSION_EVENT, persistPolicyCaptureHandoff, restorePolicyCaptureHandoff, saveNoraSession, type NoraStorageMode, type PolicyCaptureHandoffPayload } from "@/lib/nora-browser-session";
+import { assistantAiProfileLabel, assistantAiStatusLabel, assistantAiTerminationLabel, assistantAiTierLabel } from "@/lib/ui-labels";
 
 type Message = {
   id: string;
@@ -1332,8 +1333,8 @@ export function AssistantConsole({
                         <p className="mt-1 font-medium text-foreground">{message.aiRunId ?? "Sin folio"}</p>
                       </div>
                       <div>
-                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Tier</p>
-                        <p className="mt-1 font-medium text-foreground">{message.aiTier ?? "Sin dato"}</p>
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Nivel</p>
+                        <p className="mt-1 font-medium text-foreground">{assistantAiTierLabel(message.aiTier)}</p>
                       </div>
                       <div>
                         <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Modelo</p>
@@ -1345,21 +1346,21 @@ export function AssistantConsole({
                       </div>
                       <div>
                         <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Perfil</p>
-                        <p className="mt-1 font-medium text-foreground">{message.aiExecutionProfile ?? "Sin dato"}</p>
+                        <p className="mt-1 font-medium text-foreground">{assistantAiProfileLabel(message.aiExecutionProfile)}</p>
                       </div>
                       <div>
                         <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Terminación</p>
-                        <p className="mt-1 font-medium text-foreground">{message.aiTerminationReason ?? "Sin dato"}{message.aiStepCount != null ? ` · ${message.aiStepCount} pasos` : ""}</p>
+                        <p className="mt-1 font-medium text-foreground">{assistantAiTerminationLabel(message.aiTerminationReason)}{message.aiStepCount != null ? ` · ${message.aiStepCount} pasos` : ""}</p>
                       </div>
                     </div>
                     {message.aiUsage ? (
                       <div className={cn("grid gap-2 rounded-xl border border-border/60 bg-background/80 p-3", compact ? "grid-cols-2" : "sm:grid-cols-4")}>
                         <div>
-                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Input</p>
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Entrada</p>
                           <p className="mt-1 font-medium text-foreground">{formatTokenCount(message.aiUsage.inputTokens)}</p>
                         </div>
                         <div>
-                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Output</p>
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Salida</p>
                           <p className="mt-1 font-medium text-foreground">{formatTokenCount(message.aiUsage.outputTokens)}</p>
                         </div>
                         <div>
@@ -1396,15 +1397,15 @@ export function AssistantConsole({
                               Intento {entry.attemptNumber} · {entry.requestedModel}
                             </p>
                             <Badge variant="outline" className="rounded-full text-[10px] uppercase tracking-wide">
-                              {entry.status}
+                              {assistantAiStatusLabel(entry.status)}
                             </Badge>
                           </div>
                           <div className={cn("mt-2 grid gap-1", !compact && "sm:grid-cols-2")}>
-                            <span>Tier: {entry.tier}</span>
+                            <span>Nivel: {assistantAiTierLabel(entry.tier)}</span>
                             <span>Modelo final: {entry.finalModel ?? "sin dato"}</span>
                             <span>Motivo: {entry.fallbackReason ?? "sin motivo"}</span>
                             <span>Duración: {formatDurationMs(entry.durationMs ?? 0)}</span>
-                            <span>Finish: {entry.finishReason ?? "sin dato"}</span>
+                            <span>Finalización: {entry.finishReason ?? "sin dato"}</span>
                             <span>Código: {entry.code ?? "ok"}</span>
                           </div>
                           {entry.errorMessage ? <p className="mt-2 text-[11px] text-amber-800">Detalle: {entry.errorMessage}</p> : null}

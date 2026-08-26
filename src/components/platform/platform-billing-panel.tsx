@@ -29,7 +29,7 @@ function formatDate(value: string | null) {
 }
 
 function statusLabel(status: string) {
-  return ({ TRIAL: "Trial", ACTIVE: "Activa", PAST_DUE: "Vencida", CANCELED: "Cancelada", PENDING: "Pendiente", PAID: "Pagado", VOID: "Anulado", REFUNDED: "Reembolsado" } as Record<string, string>)[status] ?? status;
+  return ({ TRIAL: "Prueba", ACTIVE: "Activa", PAST_DUE: "Vencida", CANCELED: "Cancelada", PENDING: "Pendiente", PAID: "Pagado", VOID: "Anulado", REFUNDED: "Reembolsado" } as Record<string, string>)[status] ?? status;
 }
 
 function Section({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
@@ -54,7 +54,7 @@ export function PlatformBillingPanel({ overview }: { overview: PlatformBillingOv
   }
 
   return <div className="space-y-6">
-    <Section title="Billing interno de plataforma" description="MRR contratado y cargos de organizaciones. Se muestran por moneda y no se convierten entre sí.">
+    <Section title="Facturación interna de plataforma" description="MRR contratado y cargos de organizaciones. Se muestran por moneda y no se convierten entre sí.">
       <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="MRR vigente" value={totals(overview.currentMrrByCurrency)} icon={CreditCard} />
         <Metric label="Cobrado este mes" value={totals(overview.cashThisMonthByCurrency)} icon={CircleDollarSign} />
@@ -122,7 +122,7 @@ export function PlatformOrganizationBillingPanel({ organizationId, detail }: { o
   }
 
   return <div className="space-y-6">
-    <Section title="Billing de la organización" description="Las operaciones quedan registradas en PlatformAuditLog y reemplazan la suscripción vigente dentro de una transacción.">
+    <Section title="Facturación de la organización" description="Las operaciones quedan registradas en el registro de auditoría de plataforma y reemplazan la suscripción vigente dentro de una transacción.">
       <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3"><Metric label="MRR actual" value={totals((detail.monthlyTrend.at(-1)?.mrrByCurrency) ?? {})} icon={CreditCard} /><Metric label="Cobrado este mes" value={totals((detail.monthlyTrend.at(-1)?.cashByCurrency) ?? {})} icon={CircleDollarSign} /><Metric label="Meses visibles" value={String(detail.monthlyTrend.length)} icon={RefreshCw} /></div>
       <div className="overflow-x-auto border-t p-4"><table className="w-full min-w-[640px] text-left text-sm"><thead className="border-b text-xs uppercase tracking-wide text-muted-foreground"><tr><th className="px-2 py-2">Mes</th><th className="px-2 py-2">MRR</th><th className="px-2 py-2">Cobrado</th></tr></thead><tbody className="divide-y">{detail.monthlyTrend.map((month) => <tr key={month.month}><td className="px-2 py-2 font-medium">{month.month}</td><td className="px-2 py-2">{totals(month.mrrByCurrency)}</td><td className="px-2 py-2">{totals(month.cashByCurrency)}</td></tr>)}</tbody></table></div>
     </Section>
@@ -130,14 +130,14 @@ export function PlatformOrganizationBillingPanel({ organizationId, detail }: { o
     <Section title="Suscripción" description="Solo puede existir una suscripción vigente por organización.">
       {detail.mutationsEnabled ? <form onSubmit={assignSubscription} className="grid gap-3 border-b p-4 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Plan"><select className="h-8 w-full rounded-md border bg-background px-2 text-sm" value={subscription.planId} onChange={(event) => setSubscription({ ...subscription, planId: event.target.value })} required><option value="">Selecciona un plan</option>{detail.plans.map((plan) => <option key={plan.id} value={plan.id}>{plan.code} · {formatMinorAmount(plan.monthlyAmountMinor, plan.currency)}</option>)}</select></Field>
-        <Field label="Estado"><select className="h-8 w-full rounded-md border bg-background px-2 text-sm" value={subscription.status} onChange={(event) => setSubscription({ ...subscription, status: event.target.value })}><option value="TRIAL">Trial</option><option value="ACTIVE">Activa</option></select></Field>
+        <Field label="Estado"><select className="h-8 w-full rounded-md border bg-background px-2 text-sm" value={subscription.status} onChange={(event) => setSubscription({ ...subscription, status: event.target.value })}><option value="TRIAL">Prueba</option><option value="ACTIVE">Activa</option></select></Field>
         <Field label="Motivo"><Input value={subscription.reason} onChange={(event) => setSubscription({ ...subscription, reason: event.target.value })} minLength={10} maxLength={500} required placeholder="Alta o cambio autorizado" /></Field>
         <div className="flex items-end"><Button type="submit" disabled={pending}>{pending ? "Guardando…" : "Asignar"}</Button></div>
       </form> : <ReadOnlyNotice />}
       {detail.subscriptions.length === 0 ? <p className="p-4 text-sm text-muted-foreground">No hay suscripciones registradas.</p> : <div className="divide-y">{detail.subscriptions.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 p-4 text-sm"><div><p className="font-medium">{item.plan.code} · {item.plan.name}</p><p className="text-xs text-muted-foreground">{statusLabel(item.status)} · inicia {formatDate(item.startedAt)}{item.endsAt ? ` · termina ${formatDate(item.endsAt)}` : ""}</p></div><span>{formatMinorAmount(item.monthlyAmountMinor, item.currency)} / mes</span></div>)}</div>}
     </Section>
 
-    <Section title="Cargos" description="Solo un cargo PAID con paidAt cuenta como cash cobrado. Las correcciones requieren transición y motivo.">
+    <Section title="Cargos" description="Solo un cargo pagado con fecha de cobro cuenta como cobrado. Las correcciones requieren una transición y un motivo.">
       {detail.mutationsEnabled ? <form onSubmit={recordCharge} className="grid gap-3 border-b p-4 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Inicio"><Input type="date" value={charge.periodStart} onChange={(event) => setCharge({ ...charge, periodStart: event.target.value })} required /></Field>
         <Field label="Fin"><Input type="date" value={charge.periodEnd} onChange={(event) => setCharge({ ...charge, periodEnd: event.target.value })} required /></Field>
@@ -158,7 +158,7 @@ function Field({ label, children, className }: { label: string; children: React.
 }
 
 function ReadOnlyNotice() {
-  return <p className="border-b bg-muted/30 p-4 text-sm text-muted-foreground">Billing está en modo lectura. Las mutaciones se habilitarán después de completar la validación del entorno temporal.</p>;
+  return <p className="border-b bg-muted/30 p-4 text-sm text-muted-foreground">La facturación está en modo lectura. Las mutaciones se habilitarán después de completar la validación del entorno temporal.</p>;
 }
 
 function Metric({ label, value, icon: Icon }: { label: string; value: string; icon: typeof CreditCard }) {

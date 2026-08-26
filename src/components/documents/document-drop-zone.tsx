@@ -274,7 +274,11 @@ export function DocumentDropZone({
       <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto] sm:items-end">
         <div className="space-y-1">
           <Label htmlFor="dz-doctype" className="text-xs">Tipo de documento</Label>
-          <Select value={documentType} onValueChange={(v) => setDocumentType(v ?? "OTHER")}>
+          <Select
+            items={Object.fromEntries(documentTypeOptions.map((option) => [option.value, option.label]))}
+            value={documentType}
+            onValueChange={(v) => setDocumentType(v ?? "OTHER")}
+          >
             <SelectTrigger id="dz-doctype" className="h-9">
               <SelectValue placeholder="Tipo de documento" />
             </SelectTrigger>

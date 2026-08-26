@@ -143,7 +143,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
                 )}
                 {insurer.contactEmail && (
                   <div>
-                    <p className="text-muted-foreground">Email</p>
+                    <p className="text-muted-foreground">Correo</p>
                     <p className="font-medium">
                       <a href={`mailto:${insurer.contactEmail}`} className="hover:text-primary">
                         {insurer.contactEmail}

@@ -15,6 +15,7 @@ import { CommandPalette, type CommandPaletteGroup } from "@/components/command/c
 import { clientTypeOptions, currencyOptions, paymentFrequencyOptions, policyTypeOptions } from "@/lib/domain-options";
 import { formatCurrency } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
+import { statusLabel } from "@/lib/status";
 import {
   buildPolicyPdfCaptureReceiptPlan,
   inferClientType,
@@ -1101,7 +1102,7 @@ export function PolicyPdfCapturePanel({ userId, handoffId }: { userId: string; h
                   {preview.existingPolicyMatches.map((match) => (
                     <div key={`${match.id}-${match.matchReason}`}>
                       <p>
-                        {match.policyNumber} · {match.clientName} · {match.insurerName} · {match.startDate} a {match.endDate} · {match.status} · {match.matchReason === "serialNumber" ? "serie" : "número de póliza"}
+                        {match.policyNumber} · {match.clientName} · {match.insurerName} · {match.startDate} a {match.endDate} · {statusLabel(match.status, "policy")} · {match.matchReason === "serialNumber" ? "serie" : "número de póliza"}
                       </p>
                       {match.differences?.length ? <p className="mt-1 text-xs">Diferencias detectadas: {match.differences.join(" · ")}</p> : null}
                     </div>

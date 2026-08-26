@@ -107,7 +107,7 @@ export async function verifyOrganizationBackupAction(artifactId: string): Promis
     }
     if ((verification.manifest.scope ?? "PLATFORM") !== "ORGANIZATION" || verification.manifest.organization?.id !== artifact.organizationId) {
       await updateBackupArtifactStatus(artifact.id, "INVALID");
-      return errorResult("El backup no corresponde a la organización del catálogo.");
+      return errorResult("El respaldo no corresponde a la organización del catálogo.");
     }
     await updateBackupArtifactStatus(artifact.id, "VERIFIED", verification.manifest.capability);
     return successResult(artifact.id, `/platform/organizations/${encodeURIComponent(artifact.organizationId)}`, `Respaldo verificado (${verification.manifest.totals.rows} filas).`);

@@ -211,6 +211,7 @@ export function UsersAdminPanel({
                       <TableCell className="text-muted-foreground">{user.email}</TableCell>
                       <TableCell>
                         <Select
+                          items={{ OWNER: "Propietario", ADMIN: "Administrador", AGENT: "Agente" }}
                           value={user.role}
                           onValueChange={(v) => handleRoleChange(user.id, v as UserRole)}
                           disabled={pending || user.role === "OWNER"}
@@ -219,7 +220,7 @@ export function UsersAdminPanel({
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {user.role === "OWNER" ? <SelectItem value="OWNER">Owner</SelectItem> : null}
+                            {user.role === "OWNER" ? <SelectItem value="OWNER">Propietario</SelectItem> : null}
                             <SelectItem value="ADMIN">Administrador</SelectItem>
                             <SelectItem value="AGENT">Agente</SelectItem>
                           </SelectContent>
@@ -245,7 +246,7 @@ export function UsersAdminPanel({
                           size="sm"
                           disabled={pending || isMe || user.role === "OWNER"}
                           onClick={() => handleReset(user)}
-                          title={isMe || user.role === "OWNER" ? "El Owner no puede resetearse a sí mismo" : "Resetear contraseña"}
+                          title={isMe || user.role === "OWNER" ? "El propietario no puede restablecerse la contraseña a sí mismo" : "Restablecer contraseña"}
                         >
                           <KeyRound className="size-4" />
                         </Button> : null}
@@ -313,7 +314,11 @@ export function UsersAdminPanel({
             </div>
             <div className="space-y-1">
               <Label htmlFor="invite-role">Rol</Label>
-              <Select value={role} onValueChange={(v) => setRole(v as UserRole)}>
+              <Select
+                items={{ ADMIN: "Administrador", AGENT: "Agente" }}
+                value={role}
+                onValueChange={(v) => setRole(v as UserRole)}
+              >
                 <SelectTrigger id="invite-role">
                   <SelectValue />
                 </SelectTrigger>
@@ -360,7 +365,13 @@ export function UsersAdminPanel({
               {deleteTarget.portfolioClients > 0 ? (
                 <div className="space-y-2">
                   <Label htmlFor="delete-replacement">Reasignar cartera</Label>
-                  <Select value={replacementUserId} onValueChange={(value) => setReplacementUserId(value ?? "")}>
+                  <Select
+                    items={Object.fromEntries(initialUsers
+                      .filter((candidate) => candidate.id !== deleteTarget.id && candidate.active)
+                      .map((candidate) => [candidate.id, `${candidate.name} · ${candidate.email}`]))}
+                    value={replacementUserId}
+                    onValueChange={(value) => setReplacementUserId(value ?? "")}
+                  >
                     <SelectTrigger id="delete-replacement">
                       <SelectValue placeholder="Selecciona un usuario activo" />
                     </SelectTrigger>

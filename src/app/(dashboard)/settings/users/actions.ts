@@ -202,8 +202,8 @@ export async function changeUserRole(userId: string, role: UserRole): Promise<Mu
     });
 
     if (outcome === "missing") return errorResult("El usuario no pertenece a esta organización.");
-    if (outcome === "owner") return errorResult("El Owner no puede degradarse desde este flujo.");
-    if (outcome === "last-admin") return errorResult("Debe quedar al menos un Owner o Administrador activo.");
+    if (outcome === "owner") return errorResult("El propietario no puede degradarse desde este flujo.");
+    if (outcome === "last-admin") return errorResult("Debe quedar al menos un propietario o administrador activo.");
     if (outcome === "unchanged") return successResult(userId, "/settings/users", "Sin cambios.");
 
     revalidatePath("/settings/users");
@@ -257,8 +257,8 @@ export async function setUserActive(userId: string, active: boolean): Promise<Mu
     });
 
     if (outcome === "missing") return errorResult("El usuario no pertenece a esta organización.");
-    if (outcome === "owner") return errorResult("El Owner activo no puede desactivarse desde este flujo.");
-    if (outcome === "last-admin") return errorResult("Debe quedar al menos un Owner o Administrador activo.");
+    if (outcome === "owner") return errorResult("El propietario activo no puede desactivarse desde este flujo.");
+    if (outcome === "last-admin") return errorResult("Debe quedar al menos un propietario o administrador activo.");
     if (outcome === "unchanged") return successResult(userId, "/settings/users", "Sin cambios.");
 
     revalidatePath("/settings/users");
@@ -340,7 +340,7 @@ export async function deleteUser(userId: string, replacementUserId?: string): Pr
     });
 
     if (outcome.status === "missing") return errorResult("El usuario no pertenece a esta organización.");
-    if (outcome.status === "owner") return errorResult("El Owner no puede eliminarse desde este flujo.");
+    if (outcome.status === "owner") return errorResult("El propietario no puede eliminarse desde este flujo.");
     if (outcome.status === "active") return errorResult("Desactiva el usuario antes de eliminarlo.");
     if (outcome.status === "replacement-required") return errorResult("Selecciona un usuario activo para reasignar la cartera.");
     if (outcome.status === "invalid-replacement") return errorResult("El usuario de destino debe pertenecer y estar activo en esta organización.");
@@ -416,7 +416,7 @@ export async function changeMyPassword(input: {
     const next = String(input.newPassword ?? "");
 
     if (user.mustChangePassword && user.temporaryPasswordExpiresAt && user.temporaryPasswordExpiresAt.getTime() <= Date.now()) {
-      return errorResult("La contraseña temporal expiró. Solicita un nuevo reset al Owner o superadmin.");
+      return errorResult("La contraseña temporal expiró. Solicita un nuevo restablecimiento al propietario o superadministrador.");
     }
 
     if (!verifyPassword(current, user.passwordHash)) {

@@ -168,7 +168,7 @@ export default async function ClientsPage({
           description="Listado completo con búsqueda y paginación."
           action={
             <TableToolbar
-              searchPlaceholder="Buscar por nombre, email, teléfono o RFC..."
+              searchPlaceholder="Buscar por nombre, correo, teléfono o RFC..."
               resultCount={filteredCount}
               totalCount={totalCount}
               resultNoun={["cliente", "clientes"]}

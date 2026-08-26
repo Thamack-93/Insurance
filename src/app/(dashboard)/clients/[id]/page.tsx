@@ -193,7 +193,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
               <div className="grid gap-3 text-sm">
                 <div className="flex items-center gap-3">
                   <Mail className="size-4 text-muted-foreground" />
-                  <span>{client.email ?? "Sin email"}</span>
+                  <span>{client.email ?? "Sin correo"}</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <Phone className="size-4 text-muted-foreground" />

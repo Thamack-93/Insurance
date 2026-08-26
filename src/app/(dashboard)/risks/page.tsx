@@ -27,6 +27,7 @@ import { ClientResolutionActions, PolicyResolutionActions, RenewalResolutionActi
 import { PageRefreshTicker } from "@/components/risk-resolution/page-refresh-ticker";
 import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-button";
 import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
+import { statusLabel } from "@/lib/status";
 
 function riskHref(entityType: string, entityId: string) {
   if (entityType === "Client") return `/clients/${entityId}`;
@@ -58,7 +59,7 @@ const ISSUE_CODE_LABELS: Record<string, string> = {
   POLICY_PREMIUM_MISSING: "Prima faltante",
   POLICY_PENDING: "Pólizas pendientes",
   POLICY_PAYMENT_FREQUENCY_REVIEW: "Frecuencia de pago para revisar",
-  EMAIL_MISSING: "Email faltante",
+  EMAIL_MISSING: "Correo faltante",
   PHONE_MISSING: "Teléfono faltante",
   ADDRESS_MISSING: "Dirección faltante",
   RFC_MISSING: "RFC faltante",
@@ -232,14 +233,14 @@ export default async function RisksPage({
           tone="emerald"
         />
         <MetricCard
-          title="Score clientes"
+          title="Puntuación de clientes"
           value={avgClientScore}
           description={`Promedio de ${clientScores.length}`}
           icon={Users}
           tone={avgClientScore >= 75 ? "emerald" : avgClientScore >= 50 ? "amber" : "rose"}
         />
         <MetricCard
-          title="Score pólizas"
+          title="Puntuación de pólizas"
           value={avgPolicyScore}
           description={`Promedio de ${policyScores.length}`}
           icon={FolderKanban}
@@ -419,7 +420,7 @@ export default async function RisksPage({
                     <TableHeader>
                       <TableRow className="bg-muted/40">
                         <TableHead>Cliente</TableHead>
-                        <TableHead>Score</TableHead>
+                        <TableHead>Puntuación</TableHead>
                         <TableHead>Nivel</TableHead>
                         <TableHead className="text-right">Pólizas</TableHead>
                         <TableHead className="text-right">Prima</TableHead>
@@ -495,7 +496,7 @@ export default async function RisksPage({
                     <TableHeader>
                       <TableRow className="bg-muted/40">
                         <TableHead>Póliza</TableHead>
-                        <TableHead>Score</TableHead>
+                        <TableHead>Puntuación</TableHead>
                         <TableHead>Nivel</TableHead>
                         <TableHead>Problemas</TableHead>
                         <TableHead className="text-right">Acción</TableHead>
@@ -509,7 +510,7 @@ export default async function RisksPage({
                             {policy.poliza}
                           </Link>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {policy.cliente} · {policy.aseguradora} · {policy.status}
+                            {policy.cliente} · {policy.aseguradora} · {statusLabel(policy.status, "policy")}
                           </p>
                         </TableCell>
                         <TableCell>

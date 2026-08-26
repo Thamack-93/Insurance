@@ -51,7 +51,7 @@ export function PlatformPasswordReset({ userId, name, email }: { userId: string;
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Reset tenant</DialogTitle>
+          <DialogTitle>Restablecer contraseña</DialogTitle>
           <DialogDescription>{name} · {email}. Se invalidarán sus sesiones y deberá cambiar la temporal al entrar.</DialogDescription>
         </DialogHeader>
         {credential ? (
@@ -63,7 +63,7 @@ export function PlatformPasswordReset({ userId, name, email }: { userId: string;
         ) : (
           <div className="space-y-4">
             <div className="space-y-1"><Label htmlFor={`confirm-email-${userId}`}>Confirma el correo</Label><Input id={`confirm-email-${userId}`} type="email" value={confirmEmail} onChange={(event) => setConfirmEmail(event.target.value)} autoComplete="off" /></div>
-            <div className="space-y-1"><Label htmlFor={`reset-reason-${userId}`}>Motivo</Label><Input id={`reset-reason-${userId}`} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Ej. recuperación solicitada por el Owner" /></div>
+            <div className="space-y-1"><Label htmlFor={`reset-reason-${userId}`}>Motivo</Label><Input id={`reset-reason-${userId}`} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Ej. recuperación solicitada por el propietario" /></div>
           </div>
         )}
         <DialogFooter>

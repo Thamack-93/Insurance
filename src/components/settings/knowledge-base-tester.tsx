@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { statusLabel } from "@/lib/status";
 
 type SourceOption = { id: string; title: string; status: string; version: string };
 type SearchResult = {
@@ -59,7 +60,7 @@ export function KnowledgeBaseTester({ sources }: { sources: SourceOption[] }) {
         <Input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Escribe una pregunta operativa" maxLength={500} />
         <select value={sourceId} onChange={(event) => setSourceId(event.target.value)} className="h-10 rounded-md border border-input bg-background px-3 text-sm">
           <option value="">Todas las fuentes internas</option>
-          {sources.map((source) => <option key={source.id} value={source.id}>{source.title} · v{source.version} · {source.status}</option>)}
+          {sources.map((source) => <option key={source.id} value={source.id}>{source.title} · v{source.version} · {statusLabel(source.status)}</option>)}
         </select>
       </div>
       <Button type="button" onClick={() => void search()} disabled={loading || question.trim().length < 2} className="rounded-full">

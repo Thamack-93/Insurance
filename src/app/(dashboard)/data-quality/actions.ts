@@ -274,7 +274,7 @@ async function reviewReceiptIssue(issueId: string, decision: "APPROVE" | "DENY")
       "/risks",
     ]);
 
-    return successResult(issue.id, "/data-quality?tab=pagos", decision === "APPROVE" ? "Issue aprobado." : "Issue denegado.");
+    return successResult(issue.id, "/data-quality?tab=pagos", decision === "APPROVE" ? "Problema aprobado." : "Problema denegado.");
   } catch (error) {
     logError("data-quality.reviewReceiptIssue", error);
     return errorResult(error instanceof Error ? error.message : "No se pudo revisar el issue de recibo.");
@@ -416,7 +416,7 @@ async function reviewLedgerIssue(issueId: string, decision: "APPROVE" | "DENY"):
 
     revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
 
-    return successResult(issue.id, "/data-quality?tab=ledger", decision === "APPROVE" ? "Issue aprobado." : "Issue denegado.");
+    return successResult(issue.id, "/data-quality?tab=ledger", decision === "APPROVE" ? "Problema aprobado." : "Problema denegado.");
   } catch (error) {
     logError("data-quality.reviewLedgerIssue", error);
     return errorResult(error instanceof Error ? error.message : "No se pudo revisar el issue de ledger.");
@@ -533,7 +533,7 @@ export async function reopenReceiptReviewIssue(issueId: string): Promise<Mutatio
       "/risks",
     ]);
 
-    return successResult(issue.id, "/data-quality?tab=pagos", "Issue reabierto.");
+    return successResult(issue.id, "/data-quality?tab=pagos", "Problema reabierto.");
   } catch (error) {
     logError("data-quality.reopenReceiptReviewIssue", error);
     return errorResult(error instanceof Error ? error.message : "No se pudo reabrir el issue de recibo.");
@@ -594,7 +594,7 @@ export async function suppressReceiptReviewIssue(issueId: string): Promise<Mutat
       "/risks",
     ]);
 
-    return successResult(issue.id, "/data-quality?tab=pagos", "Issue suprimido.");
+    return successResult(issue.id, "/data-quality?tab=pagos", "Problema suprimido.");
   } catch (error) {
     logError("data-quality.suppressReceiptReviewIssue", error);
     return errorResult(error instanceof Error ? error.message : "No se pudo suprimir el issue de recibo.");
@@ -1034,7 +1034,7 @@ export async function reopenLedgerIssue(issueId: string): Promise<MutationResult
 
     revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
 
-    return successResult(issue.id, "/data-quality?tab=ledger", "Issue reabierto.");
+    return successResult(issue.id, "/data-quality?tab=ledger", "Problema reabierto.");
   } catch (error) {
     logError("data-quality.reopenLedgerIssue", error);
     return errorResult(error instanceof Error ? error.message : "No se pudo reabrir el issue de ledger.");
@@ -1085,7 +1085,7 @@ export async function suppressLedgerIssue(issueId: string): Promise<MutationResu
 
     revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
 
-    return successResult(issue.id, "/data-quality?tab=ledger", "Issue suprimido.");
+    return successResult(issue.id, "/data-quality?tab=ledger", "Problema suprimido.");
   } catch (error) {
     logError("data-quality.suppressLedgerIssue", error);
     return errorResult(error instanceof Error ? error.message : "No se pudo suprimir el issue de ledger.");

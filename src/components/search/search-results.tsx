@@ -17,6 +17,7 @@ import { useSearch, type SearchResult, type SearchResultType } from "./search-pr
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Highlight } from "./highlight";
+import { SEARCH_ENTITY_LABELS } from "@/lib/ui-labels";
 
 const entityIcons: Record<SearchResultType, React.ComponentType<{ className?: string }>> = {
   client: Users,
@@ -29,16 +30,7 @@ const entityIcons: Record<SearchResultType, React.ComponentType<{ className?: st
   document: FileText,
 };
 
-const entityLabels: Record<SearchResultType, string> = {
-  client: "Cliente",
-  policy: "Póliza",
-  receipt: "Recibo",
-  workItem: "Pendiente",
-  claim: "Siniestro",
-  quote: "Cotización",
-  insurer: "Aseguradora",
-  document: "Documento",
-};
+const entityLabels: Record<SearchResultType, string> = SEARCH_ENTITY_LABELS;
 
 const groupOrder: SearchResultType[] = [
   "client",

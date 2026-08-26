@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import type { GlobalSearchResult } from "@/lib/search";
+import { searchEntityLabel } from "@/lib/ui-labels";
 
 type PolicySearchDialogProps = {
   open: boolean;
@@ -214,7 +215,7 @@ function PolicySearchDialogBody({
                     <div className="flex min-w-0 items-center gap-2">
                       <span className="min-w-0 truncate font-medium text-foreground">{result.title}</span>
                       <Badge variant="outline" className="shrink-0 rounded-full text-[11px] uppercase tracking-wide">
-                        {result.type}
+                        {searchEntityLabel(result.type)}
                       </Badge>
                     </div>
                     <p className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">

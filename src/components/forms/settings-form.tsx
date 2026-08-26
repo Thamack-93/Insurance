@@ -132,6 +132,7 @@ export function SettingsForm({ initialSettings, updateSettings }: SettingsFormPr
             <div className="space-y-2">
               <Label htmlFor="defaultCurrency">Moneda por defecto</Label>
               <Select
+                items={{ MXN: "MXN - Peso Mexicano", USD: "USD - Dólar Americano" }}
                 value={settings.defaultCurrency}
                 onValueChange={(value) => handleChange("defaultCurrency", value ?? "MXN")}
               >
@@ -150,6 +151,11 @@ export function SettingsForm({ initialSettings, updateSettings }: SettingsFormPr
             <div className="space-y-2">
               <Label htmlFor="dateFormat">Formato de fecha</Label>
               <Select
+                items={{
+                  "DD/MM/YYYY": "DD/MM/YYYY",
+                  "MM/DD/YYYY": "MM/DD/YYYY",
+                  "YYYY-MM-DD": "YYYY-MM-DD",
+                }}
                 value={settings.dateFormat}
                 onValueChange={(value) => handleChange("dateFormat", value ?? "DD/MM/YYYY")}
               >
@@ -170,6 +176,7 @@ export function SettingsForm({ initialSettings, updateSettings }: SettingsFormPr
           <div className="space-y-2">
             <Label htmlFor="theme">Tema</Label>
             <Select
+              items={{ light: "Claro", dark: "Oscuro" }}
               value={settings.theme}
               onValueChange={(value) => handleChange("theme", value ?? "light")}
             >
@@ -238,11 +245,11 @@ export function SettingsForm({ initialSettings, updateSettings }: SettingsFormPr
         <CardContent className="grid gap-3 text-sm text-muted-foreground md:grid-cols-2">
           <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
             <p className="font-medium text-foreground">Organizaciones · diario</p>
-            <p className="mt-1">Cada organización activa recibe un snapshot en la ejecución diaria de las 05:00 UTC.</p>
+            <p className="mt-1">Cada organización activa recibe un respaldo en la ejecución diaria de las 05:00 UTC.</p>
           </div>
           <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
             <p className="font-medium text-foreground">Plataforma · semanal</p>
-            <p className="mt-1">El snapshot global se crea cada siete días y conserva 30 días de historial físico verificado.</p>
+            <p className="mt-1">El respaldo global se crea cada siete días y conserva 30 días de historial físico verificado.</p>
           </div>
           <p className="md:col-span-2">Los valores históricos autoBackup y backupFrequency se conservan temporalmente por compatibilidad, pero ya no controlan el scheduler.</p>
         </CardContent>
