@@ -41,16 +41,52 @@ export type QualitasPreparedPaymentLink = {
 
 export type QualitasHttpTransport = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+export type QualitasProviderEvent = {
+  event: "qualitas.payment_link.provider";
+  traceId: string;
+  step: "entrypoint" | "policy_lookup" | "pagar_ahora" | "contact_form" | "final_submission";
+  phase: "started" | "completed" | "redirect" | "timeout" | "network_error" | "response_too_large" | "flow_changed";
+  method?: string;
+  path?: string;
+  status?: number;
+  durationMs?: number;
+  redirectCount?: number;
+  finalSubmission?: boolean;
+  bodyBytes?: number;
+}
+
 export type QualitasRequestOptions = {
   transport?: QualitasHttpTransport;
   timeoutMs?: number;
+  finalTimeoutMs?: number;
   maxResponseBytes?: number;
+  traceId?: string;
+  onEvent?: (event: QualitasProviderEvent) => void;
 };
 
 const QUALITAS_HOST = "www.qualitas.com.mx";
 const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_FINAL_SUBMISSION_TIMEOUT_MS = 45_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 512 * 1024;
 const MAX_REDIRECTS = 2;
+
+function safeQualitasPath(value: string) {
+  try {
+    return new URL(value).pathname;
+  } catch {
+    return "[invalid-url]";
+  }
+}
+
+function emitQualitasProviderEvent(options: QualitasRequestOptions, event: Omit<QualitasProviderEvent, "event" | "traceId">) {
+  const payload: QualitasProviderEvent = {
+    event: "qualitas.payment_link.provider",
+    traceId: options.traceId ?? "untracked",
+    ...event,
+  };
+  options.onEvent?.(payload);
+  if (typeof console !== "undefined") console.info(`[${payload.event}]`, JSON.stringify(payload));
+}
 
 const QUALITAS_INSURER_NAMES = new Set([
   "qualitas",
@@ -287,15 +323,39 @@ async function requestWithSession(input: {
   cookieJar: Map<string, string>;
   options: QualitasRequestOptions;
   finalSubmission: boolean;
+  step: QualitasProviderEvent["step"];
 }): Promise<SessionResponse> {
   let url = input.url;
   let init = { ...input.init };
   const transport = input.options.transport ?? fetch;
-  const timeoutMs = input.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = input.finalSubmission
+    ? input.options.finalTimeoutMs ?? DEFAULT_FINAL_SUBMISSION_TIMEOUT_MS
+    : input.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxResponseBytes = input.options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
 
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
-    if (!isAllowedQualitasUrl(url)) return { finalUrl: url, redirectedToUnexpectedHost: true };
+    const startedAt = Date.now();
+    const method = (init.method ?? "GET").toUpperCase();
+    if (!isAllowedQualitasUrl(url)) {
+      emitQualitasProviderEvent(input.options, {
+        step: input.step,
+        phase: "flow_changed",
+        method,
+        path: safeQualitasPath(url),
+        durationMs: Date.now() - startedAt,
+        redirectCount: redirect,
+        finalSubmission: input.finalSubmission,
+      });
+      return { finalUrl: url, redirectedToUnexpectedHost: true };
+    }
+    emitQualitasProviderEvent(input.options, {
+      step: input.step,
+      phase: "started",
+      method,
+      path: safeQualitasPath(url),
+      redirectCount: redirect,
+      finalSubmission: input.finalSubmission,
+    });
     const headers = new Headers(init.headers);
     const cookies = cookieHeader(input.cookieJar);
     if (cookies) headers.set("Cookie", cookies);
@@ -306,23 +366,95 @@ async function requestWithSession(input: {
       updateCookieJar(response, input.cookieJar);
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get("location");
-        if (!location) return { response, finalUrl: url, bodyText: "" };
+        if (!location) {
+          emitQualitasProviderEvent(input.options, {
+            step: input.step,
+            phase: "flow_changed",
+            method,
+            path: safeQualitasPath(url),
+            status: response.status,
+            durationMs: Date.now() - startedAt,
+            redirectCount: redirect,
+            finalSubmission: input.finalSubmission,
+          });
+          return { response, finalUrl: url, bodyText: "" };
+        }
         const nextUrl = new URL(location, url).toString();
         if (!isAllowedQualitasUrl(nextUrl) || redirect === MAX_REDIRECTS) {
+          emitQualitasProviderEvent(input.options, {
+            step: input.step,
+            phase: "flow_changed",
+            method,
+            path: safeQualitasPath(nextUrl),
+            status: response.status,
+            durationMs: Date.now() - startedAt,
+            redirectCount: redirect + 1,
+            finalSubmission: input.finalSubmission,
+          });
           return { response, finalUrl: nextUrl, redirectedToUnexpectedHost: !isAllowedQualitasUrl(nextUrl) };
         }
+        emitQualitasProviderEvent(input.options, {
+          step: input.step,
+          phase: "redirect",
+          method,
+          path: safeQualitasPath(nextUrl),
+          status: response.status,
+          durationMs: Date.now() - startedAt,
+          redirectCount: redirect + 1,
+          finalSubmission: input.finalSubmission,
+        });
         const preserveBody = response.status === 307 || response.status === 308;
         init = preserveBody ? init : { ...init, method: "GET", body: undefined };
         url = nextUrl;
         continue;
       }
       const bodyText = await readBoundedResponseText(response, maxResponseBytes);
+      emitQualitasProviderEvent(input.options, {
+        step: input.step,
+        phase: "completed",
+        method,
+        path: safeQualitasPath(url),
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+        redirectCount: redirect,
+        finalSubmission: input.finalSubmission,
+        bodyBytes: new TextEncoder().encode(bodyText).byteLength,
+      });
       return { response, bodyText, finalUrl: url };
     } catch (error) {
-      if (error instanceof QualitasResponseTooLargeError) return { finalUrl: url, responseTooLarge: true };
+      if (error instanceof QualitasResponseTooLargeError) {
+        emitQualitasProviderEvent(input.options, {
+          step: input.step,
+          phase: "response_too_large",
+          method,
+          path: safeQualitasPath(url),
+          durationMs: Date.now() - startedAt,
+          redirectCount: redirect,
+          finalSubmission: input.finalSubmission,
+        });
+        return { finalUrl: url, responseTooLarge: true };
+      }
       if (error instanceof DOMException && error.name === "AbortError") {
+        emitQualitasProviderEvent(input.options, {
+          step: input.step,
+          phase: "timeout",
+          method,
+          path: safeQualitasPath(url),
+          durationMs: Date.now() - startedAt,
+          redirectCount: redirect,
+          finalSubmission: input.finalSubmission,
+        });
         return { finalUrl: url, timedOut: true };
       }
+      emitQualitasProviderEvent(input.options, {
+        step: input.step,
+        phase: "network_error",
+        method,
+        path: safeQualitasPath(url),
+        durationMs: Date.now() - startedAt,
+        redirectCount: redirect,
+        finalSubmission: input.finalSubmission,
+      });
       return { finalUrl: url, networkError: true };
     } finally {
       clearTimeout(timer);
@@ -364,6 +496,7 @@ export async function prepareQualitasPaymentLink(
     cookieJar,
     options,
     finalSubmission: false,
+    step: "entrypoint",
   });
   if (!initial.bodyText) return resultForSessionResponse(initial, false);
 
@@ -389,15 +522,26 @@ export async function prepareQualitasPaymentLink(
     cookieJar,
     options,
     finalSubmission: false,
+    step: "policy_lookup",
   });
   if (!policyResponse.bodyText) return resultForSessionResponse(policyResponse, false);
 
   const policyHtml = policyResponse.bodyText;
   let contactPage = policyResponse;
+  const contactFormStartedAt = Date.now();
   let contactForm = findFormContaining(policyHtml, "temail");
   if (!contactForm) {
     const pagarAhora = findPagarAhoraRequest(policyHtml, policyResponse.finalUrl);
-    if (!pagarAhora || !["GET", "POST"].includes(pagarAhora.method)) return resultForSessionResponse(policyResponse, false);
+    if (!pagarAhora || !["GET", "POST"].includes(pagarAhora.method)) {
+      emitQualitasProviderEvent(options, {
+        step: "pagar_ahora",
+        phase: "flow_changed",
+        path: safeQualitasPath(policyResponse.finalUrl),
+        finalSubmission: false,
+        durationMs: Date.now() - contactFormStartedAt,
+      });
+      return resultForSessionResponse(policyResponse, false);
+    }
     const pagarResponse = await requestWithSession({
       url: pagarAhora.url,
       init: pagarAhora.method === "GET"
@@ -418,13 +562,33 @@ export async function prepareQualitasPaymentLink(
       cookieJar,
       options,
       finalSubmission: false,
+      step: "pagar_ahora",
     });
     const pagarHtml = pagarResponse.bodyText;
     if (!pagarHtml) return resultForSessionResponse(pagarResponse, false);
     contactPage = pagarResponse;
     contactForm = findFormContaining(pagarHtml, "temail");
   }
-  if (!contactForm || formMethod(contactForm) !== "POST") return resultForSessionResponse(contactPage, false);
+  if (!contactForm || formMethod(contactForm) !== "POST") {
+    emitQualitasProviderEvent(options, {
+      step: "contact_form",
+      phase: "flow_changed",
+      path: safeQualitasPath(contactPage.finalUrl),
+      status: contactPage.response?.status,
+      durationMs: Date.now() - contactFormStartedAt,
+      finalSubmission: false,
+    });
+    return resultForSessionResponse(contactPage, false);
+  }
+  emitQualitasProviderEvent(options, {
+    step: "contact_form",
+    phase: "completed",
+    method: formMethod(contactForm),
+    path: safeQualitasPath(contactPage.finalUrl),
+    status: contactPage.response?.status,
+    durationMs: Date.now() - contactFormStartedAt,
+    finalSubmission: false,
+  });
   const finalActionUrl = formAction(contactForm, contactPage.finalUrl);
   const finalFields = Object.fromEntries(collectFormFields(contactForm));
   const resumeWsUrl = finalFields.resumenWSUrl ?? "";
@@ -478,6 +642,7 @@ export async function requestQualitasPaymentLink(
     cookieJar,
     options,
     finalSubmission: true,
+    step: "final_submission",
   });
   return resultForSessionResponse(response, true);
 }

@@ -15,6 +15,9 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Quálitas can take several seconds before returning the final email result.
+// The provider keeps the final submission single-shot and fail-closed.
+export const maxDuration = 60;
 
 function hasValidSecret(request: NextRequest) {
   return isTelegramWebhookSecretValid(request.headers.get("x-telegram-bot-api-secret-token"));
