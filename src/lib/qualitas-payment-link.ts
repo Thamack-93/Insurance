@@ -166,6 +166,47 @@ function findFormContaining(html: string, fieldName: string) {
   return getForms(html).find((form) => collectFormFields(form).has(fieldName)) ?? null;
 }
 
+function visibleHtmlText(value: string) {
+  return value.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function findPagarAhoraRequest(html: string, baseUrl: string) {
+  const pagarForm = getForms(html).find((form) => /pagar\s+ahora/i.test(visibleHtmlText(form)));
+  if (pagarForm) {
+    const action = formAction(pagarForm, baseUrl);
+    if (!action || !isAllowedQualitasUrl(action)) return null;
+    const fields = Object.fromEntries(collectFormFields(pagarForm));
+    for (const match of pagarForm.matchAll(/<input\b([^>]*)>/gi)) {
+      const attributes = match[1];
+      const name = getAttribute(attributes, "name");
+      const type = (getAttribute(attributes, "type") ?? "text").toLowerCase();
+      const value = getAttribute(attributes, "value") ?? "";
+      if (name && type === "submit" && /pagar\s+ahora/i.test(value)) fields[name] = value;
+    }
+    return { method: formMethod(pagarForm), url: action, fields };
+  }
+
+  const pagarLink = [...html.matchAll(/<a\b([^>]*)>[\s\S]*?<\/a>/gi)].find((match) => /pagar\s+ahora/i.test(visibleHtmlText(match[0])));
+  if (pagarLink) {
+    const href = getAttribute(pagarLink[1], "href");
+    if (!href) return null;
+    try {
+      const url = new URL(href, baseUrl).toString();
+      return isAllowedQualitasUrl(url) ? { method: "GET", url, fields: {} } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // The live Quálitas page renders Pagar ahora as a JavaScript button rather than a form/link.
+  // The observed destination is a same-host GET and does not perform a payment.
+  if (/pagar\s+ahora/i.test(visibleHtmlText(html))) {
+    const url = new URL("/web/qmx/pago-de-poliza/-/user-pago/pago-tdc", baseUrl).toString();
+    return { method: "GET", url, fields: {} };
+  }
+  return null;
+}
+
 function formAction(form: string, baseUrl: string) {
   const action = getAttribute(form.match(/<form\b([^>]*)>/i)?.[1] ?? "", "action") ?? baseUrl;
   try {
@@ -351,9 +392,38 @@ export async function prepareQualitasPaymentLink(
   });
   if (!policyResponse.bodyText) return resultForSessionResponse(policyResponse, false);
 
-  const contactForm = findFormContaining(policyResponse.bodyText, "temail");
-  if (!contactForm || formMethod(contactForm) !== "POST") return resultForSessionResponse(policyResponse, false);
-  const finalActionUrl = formAction(contactForm, policyResponse.finalUrl);
+  let contactPage = policyResponse;
+  let contactForm = findFormContaining(contactPage.bodyText, "temail");
+  if (!contactForm) {
+    const pagarAhora = findPagarAhoraRequest(policyResponse.bodyText, policyResponse.finalUrl);
+    if (!pagarAhora || !["GET", "POST"].includes(pagarAhora.method)) return resultForSessionResponse(policyResponse, false);
+    const pagarResponse = await requestWithSession({
+      url: pagarAhora.url,
+      init: pagarAhora.method === "GET"
+        ? {
+            method: "GET",
+            headers: { Accept: "text/html", Referer: policyResponse.finalUrl },
+          }
+        : {
+            method: "POST",
+            headers: {
+              Accept: "text/html",
+              "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+              Origin: new URL(pagarAhora.url).origin,
+              Referer: policyResponse.finalUrl,
+            },
+            body: new URLSearchParams(pagarAhora.fields),
+          },
+      cookieJar,
+      options,
+      finalSubmission: false,
+    });
+    if (!pagarResponse.bodyText) return resultForSessionResponse(pagarResponse, false);
+    contactPage = pagarResponse;
+    contactForm = findFormContaining(contactPage.bodyText, "temail");
+  }
+  if (!contactForm || formMethod(contactForm) !== "POST") return resultForSessionResponse(contactPage, false);
+  const finalActionUrl = formAction(contactForm, contactPage.finalUrl);
   const finalFields = Object.fromEntries(collectFormFields(contactForm));
   const resumeWsUrl = finalFields.resumenWSUrl ?? "";
   if (!finalActionUrl || !isAllowedQualitasUrl(finalActionUrl) || !resumeWsUrl || !isAllowedQualitasUrl(resumeWsUrl)) {
@@ -368,7 +438,7 @@ export async function prepareQualitasPaymentLink(
     finalActionUrl,
     finalFields,
     resumeWsUrl,
-    refererUrl: policyResponse.finalUrl,
+    refererUrl: contactPage.finalUrl,
   };
 }
 
