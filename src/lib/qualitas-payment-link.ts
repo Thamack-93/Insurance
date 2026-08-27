@@ -392,10 +392,11 @@ export async function prepareQualitasPaymentLink(
   });
   if (!policyResponse.bodyText) return resultForSessionResponse(policyResponse, false);
 
+  const policyHtml = policyResponse.bodyText;
   let contactPage = policyResponse;
-  let contactForm = findFormContaining(contactPage.bodyText, "temail");
+  let contactForm = findFormContaining(policyHtml, "temail");
   if (!contactForm) {
-    const pagarAhora = findPagarAhoraRequest(policyResponse.bodyText, policyResponse.finalUrl);
+    const pagarAhora = findPagarAhoraRequest(policyHtml, policyResponse.finalUrl);
     if (!pagarAhora || !["GET", "POST"].includes(pagarAhora.method)) return resultForSessionResponse(policyResponse, false);
     const pagarResponse = await requestWithSession({
       url: pagarAhora.url,
