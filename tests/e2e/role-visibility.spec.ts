@@ -34,7 +34,7 @@ test.describe("role visibility smoke tests", () => {
       ["/insurers", "Aseguradoras"],
       ["/documents", "Documentos"],
       ["/risks", "Riesgos y calidad"],
-      ["/data-quality", "Data Quality"],
+      ["/data-quality", "Calidad de datos"],
       ["/activity", "Actividad y seguridad"],
     ] as const) {
       await page.goto(path);
