@@ -86,6 +86,9 @@ export type QualitasProviderEvent = {
   hasPolicyForm?: boolean;
   hasContactForm?: boolean;
   hasResumeMarker?: boolean;
+  hasVisibleContactForm?: boolean;
+  hasVisibleResumeMarker?: boolean;
+  duplicateEvidence?: "JSON_CODE" | "TEXT_CODE" | "HTML_CODE" | "HTML_MESSAGE" | "NONE";
 }
 
 export type QualitasRequestOptions = {
@@ -174,12 +177,17 @@ type QualitasResponseSignals = {
   hasPolicyForm: boolean;
   hasContactForm: boolean;
   hasResumeMarker: boolean;
+  hasVisibleContactForm: boolean;
+  hasVisibleResumeMarker: boolean;
 };
+
+type QualitasDuplicateEvidence = "JSON_CODE" | "TEXT_CODE" | "HTML_CODE" | "HTML_MESSAGE" | "NONE";
 
 type QualitasProviderClassification = QualitasPaymentLinkResult & {
   contentType: QualitasProviderEvent["contentType"];
   signalTextLength: number;
   signals: QualitasResponseSignals;
+  duplicateEvidence: QualitasDuplicateEvidence;
 };
 
 function emptyQualitasSignals(): QualitasResponseSignals {
@@ -191,6 +199,8 @@ function emptyQualitasSignals(): QualitasResponseSignals {
     hasPolicyForm: false,
     hasContactForm: false,
     hasResumeMarker: false,
+    hasVisibleContactForm: false,
+    hasVisibleResumeMarker: false,
   };
 }
 
@@ -219,16 +229,30 @@ function classifyQualitasProviderResponse(input: {
 }): QualitasProviderClassification {
   const contentType = contentTypeFamily(input.contentType);
   const text = providerSignalText(input.bodyText, contentType);
+  const visibleMarkers = contentType === "html" ? visibleHtmlMarkers(input.bodyText ?? "") : {
+    hasVisibleContactForm: false,
+    hasVisibleResumeMarker: false,
+  };
   const signals: QualitasResponseSignals = {
     hasSuccessCode: /(?:c[oó]digo|codigo|code)\s*[:=]?\s*["']?0\b/.test(text),
     hasDuplicateCode: /(?:c[oó]digo|codigo|code)\s*[:=]?\s*["']?99991\b/.test(text),
     hasSuccessMessage: /se\s+gener[oó]\s+(?:el\s+)?(?:link|enlace)\s+de\s+pago/.test(text) && /se\s+envi[oó].*correo/.test(text),
-    hasDuplicateMessage: /(?:ya\s+se\s+encuentra|existe).*otro\s+(?:link|enlace)\s+de\s+pago\s+en\s+curso/.test(text),
+    hasDuplicateMessage: /(?:ya\s+se\s+encuentra|existe).*otro\s+(?:link|enlace|liga)\s+de\s+pago\s+en\s+curso/.test(text),
     hasPolicyForm: Boolean(input.bodyText && findFormContaining(input.bodyText, "numPoliza")),
     hasContactForm: Boolean(input.bodyText && findFormContaining(input.bodyText, "temail")),
     hasResumeMarker: Boolean(input.bodyText && /\bresumenWSUrl\b/i.test(input.bodyText)),
+    ...visibleMarkers,
   };
-  const base = { contentType, signalTextLength: text.length, signals };
+  const duplicateEvidence: QualitasDuplicateEvidence = contentType === "json" && (signals.hasDuplicateCode || signals.hasDuplicateMessage)
+    ? "JSON_CODE"
+    : contentType === "html" && !signals.hasVisibleContactForm && !signals.hasVisibleResumeMarker && signals.hasDuplicateMessage
+      ? "HTML_MESSAGE"
+      : contentType === "html" && !signals.hasVisibleContactForm && !signals.hasVisibleResumeMarker && signals.hasDuplicateCode
+        ? "HTML_CODE"
+        : contentType !== "html" && contentType !== "json" && (signals.hasDuplicateCode || signals.hasDuplicateMessage)
+          ? "TEXT_CODE"
+        : "NONE";
+  const base = { contentType, signalTextLength: text.length, signals, duplicateEvidence };
 
   if (input.timedOut) {
     return { ...qualitasResult(input.finalSubmission ? "UNCERTAIN" : "TIMEOUT", input.finalSubmission ? "FINAL_TIMEOUT" : "TIMEOUT_BEFORE_SUBMISSION"), ...base };
@@ -237,7 +261,7 @@ function classifyQualitasProviderResponse(input: {
     return { ...qualitasResult("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED"), ...base };
   }
   if (signals.hasSuccessCode) return { ...qualitasResult("SUCCESS", "SUCCESS_CODE_0"), ...base };
-  if (signals.hasDuplicateCode || signals.hasDuplicateMessage) {
+  if (duplicateEvidence !== "NONE") {
     return { ...qualitasResult("UNCERTAIN", "DUPLICATE_LINK_99991"), ...base };
   }
   if (input.status === 429 || /too many|rate limit|demasiadas solicitudes/.test(text)) {
@@ -342,8 +366,56 @@ function isHiddenHtmlElement(node: DefaultTreeAdapterTypes.Element) {
   if (node.attrs.some((attribute) => attribute.name.toLowerCase() === "hidden")) return true;
   if (nodeAttribute(node, "aria-hidden")?.toLowerCase() === "true") return true;
   if (tagName === "input" && nodeAttribute(node, "type")?.toLowerCase() === "hidden") return true;
+  const classTokens = (nodeAttribute(node, "class") ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (["hidden", "d-none", "invisible", "visually-hidden"].some((token) => classTokens.includes(token))) return true;
   const style = nodeAttribute(node, "style")?.replace(/\s+/g, "").toLowerCase() ?? "";
   return /(?:^|;)display:none(?:;|$)/.test(style) || /(?:^|;)visibility:hidden(?:;|$)/.test(style);
+}
+
+function visibleHtmlMarkers(value: string) {
+  const markers = {
+    hasVisibleContactForm: false,
+    hasVisibleResumeMarker: false,
+  };
+  const document = parse(value);
+
+  function collectFormFields(
+    node: DefaultTreeAdapterTypes.Node,
+    inheritedHidden: boolean,
+    fields: { contact: boolean; resume: boolean },
+  ) {
+    if ("tagName" in node) {
+      const element = node as DefaultTreeAdapterTypes.Element;
+      const hidden = inheritedHidden || isHiddenHtmlElement(element);
+      const tagName = element.tagName.toLowerCase();
+      const name = nodeAttribute(element, "name")?.toLowerCase();
+      const type = nodeAttribute(element, "type")?.toLowerCase();
+      if (!inheritedHidden && name === "resumenwsurl") fields.resume = true;
+      if (!inheritedHidden && name === "temail" && !(tagName === "input" && type === "hidden")) fields.contact = true;
+      if (hidden) return;
+    }
+    if (!("childNodes" in node)) return;
+    for (const child of node.childNodes) collectFormFields(child, inheritedHidden, fields);
+  }
+
+  function visit(node: DefaultTreeAdapterTypes.Node, inheritedHidden: boolean) {
+    if ("tagName" in node) {
+      const element = node as DefaultTreeAdapterTypes.Element;
+      const hidden = inheritedHidden || isHiddenHtmlElement(element);
+      if (element.tagName.toLowerCase() === "form" && !hidden) {
+        const fields = { contact: false, resume: false };
+        collectFormFields(element, false, fields);
+        markers.hasVisibleContactForm ||= fields.contact;
+        markers.hasVisibleResumeMarker ||= fields.resume;
+      }
+      if (hidden) return;
+    }
+    if (!("childNodes" in node)) return;
+    for (const child of node.childNodes) visit(child, inheritedHidden);
+  }
+
+  visit(document, false);
+  return markers;
 }
 
 function collectVisibleHtmlText(node: DefaultTreeAdapterTypes.Node, output: string[]) {
@@ -670,6 +742,7 @@ function resultForSessionResponse(
       contentType: "unknown",
       signalTextLength: 0,
       signals: emptyQualitasSignals(),
+      duplicateEvidence: "NONE",
     };
   } else if (result.networkError) {
     classification = {
@@ -677,6 +750,7 @@ function resultForSessionResponse(
       contentType: "unknown",
       signalTextLength: 0,
       signals: emptyQualitasSignals(),
+      duplicateEvidence: "NONE",
     };
   } else {
     classification = classifyQualitasProviderResponse({
@@ -701,6 +775,7 @@ function resultForSessionResponse(
       outcome: classification.outcome,
       reason: classification.reason,
       signalTextLength: classification.signalTextLength,
+      duplicateEvidence: classification.duplicateEvidence,
       ...classification.signals,
     });
   }

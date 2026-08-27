@@ -155,6 +155,9 @@ describe("qualitas-payment-link provider", () => {
       reason: "SUCCESS_CODE_0",
       hasSuccessCode: true,
       hasDuplicateCode: false,
+      hasVisibleContactForm: false,
+      hasVisibleResumeMarker: false,
+      duplicateEvidence: "NONE",
     }));
     expect(events.every((event) => event.traceId === "draft-redacted")).toBe(true);
     expect(JSON.stringify(events)).not.toContain("agent@example.com");
@@ -173,6 +176,53 @@ describe("qualitas-payment-link provider", () => {
 
     expect(result).toEqual({ outcome: "UNCERTAIN", reason: "DUPLICATE_LINK_99991" });
     expect(calls).toHaveLength(3);
+  });
+
+  it("does not classify a duplicate code while the visible contact form remains", async () => {
+    const { transport, calls } = sequenceTransport([
+      response(initialHtml),
+      response(contactHtml),
+      response(`<main>Código: 99991</main><form><input name="temail"><input type="hidden" name="resumenWSUrl" value="${resumeUrl}"></form>`, 200, {
+        "content-type": "text/html",
+      }),
+    ]);
+    const prepared = await prepareForFinal(transport);
+
+    await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({
+      outcome: "UNCERTAIN",
+      reason: "FINAL_RESPONSE_UNRECOGNIZED",
+    });
+    expect(calls).toHaveLength(3);
+  });
+
+  it("classifies a duplicate code in visible HTML without a contact form", async () => {
+    const { transport } = sequenceTransport([
+      response(initialHtml),
+      response(contactHtml),
+      response("<main>Código: 99991</main>", 200, { "content-type": "text/html" }),
+    ]);
+    const prepared = await prepareForFinal(transport);
+
+    await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({
+      outcome: "UNCERTAIN",
+      reason: "DUPLICATE_LINK_99991",
+    });
+  });
+
+  it("classifies a duplicate code in JSON", async () => {
+    const { transport } = sequenceTransport([
+      response(initialHtml),
+      response(contactHtml),
+      response(JSON.stringify({ codigo: 99991, mensaje: "Ya existe otra liga de pago en curso" }), 200, {
+        "content-type": "application/json",
+      }),
+    ]);
+    const prepared = await prepareForFinal(transport);
+
+    await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({
+      outcome: "UNCERTAIN",
+      reason: "DUPLICATE_LINK_99991",
+    });
   });
 
   it("does not treat duplicate text inside scripts as a duplicate response", async () => {
