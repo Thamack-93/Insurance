@@ -15,6 +15,7 @@ export type TelegramCommandName =
   | "confirmar"
   | "cancelar"
   | "pago"
+  | "pagoqualitas"
   | "poliza"
   | "recibos"
   | "renovaciones"
@@ -65,6 +66,7 @@ export function parseTelegramCommand(text: string): TelegramCommand | null {
     command === "confirmar" ||
     command === "cancelar" ||
     command === "pago" ||
+    command === "pagoqualitas" ||
     command === "poliza" ||
     command === "recibos" ||
     command === "renovaciones" ||
@@ -143,6 +145,7 @@ export function buildTelegramHelpMessage() {
     "",
     "Captura:",
     "/pago <póliza> <recibo> [hoy|YYYY-MM-DD] <método> - Preparar un pago.",
+    "/pagoqualitas <póliza> - Solicitar un enlace de pago de Quálitas.",
     "/poliza [campos] - Preparar una póliza y seguirla en PolicyDesk.",
     "/confirmar - Confirmar el borrador activo.",
     "/cancelar - Cancelar el borrador activo.",
@@ -240,4 +243,74 @@ export function buildTelegramDraftConfirmedMessage(label: string) {
 
 export function buildTelegramDraftCancelledMessage(label: string) {
   return [`${label} cancelado.`, "El borrador fue descartado."].join("\n");
+}
+
+export function buildTelegramQualitasUnavailableMessage() {
+  return "La integración de enlaces de pago de Quálitas no está disponible en este momento.";
+}
+
+export function buildTelegramQualitasPolicyPrompt() {
+  return "Escribe el número de póliza de Quálitas.";
+}
+
+export function buildTelegramQualitasRecipientPrompt(input: {
+  clientEmail: string | null;
+  agentEmail: string | null;
+}) {
+  const lines = ["¿A quién quieres que Quálitas envíe el enlace de pago?", ""];
+  if (input.clientEmail && input.agentEmail) {
+    lines.push(`Cliente: ${input.clientEmail}`, `Agente: ${input.agentEmail}`);
+  } else if (input.clientEmail) {
+    lines.push("El agente actual no tiene un correo válido registrado en PolicyDesk.", `Cliente: ${input.clientEmail}`);
+  } else if (input.agentEmail) {
+    lines.push("El cliente no tiene un correo registrado en PolicyDesk.", `Agente: ${input.agentEmail}`);
+  }
+  return lines.join("\n");
+}
+
+export function buildTelegramQualitasNoRecipientMessage() {
+  return "No hay un correo válido disponible ni para el cliente ni para el agente.\nActualiza el correo correspondiente en PolicyDesk antes de continuar.";
+}
+
+export function buildTelegramQualitasConfirmation(input: {
+  policyNumber: string;
+  clientName: string;
+  recipientLabel: "Cliente" | "Agente";
+  maskedEmail: string;
+}) {
+  return [
+    "Confirmar solicitud de enlace Quálitas",
+    "",
+    `Póliza: ${input.policyNumber}`,
+    `Cliente: ${input.clientName}`,
+    `Enviar a: ${input.recipientLabel} · ${input.maskedEmail}`,
+    "",
+    "Responde /confirmar para solicitarlo o /cancelar para descartarlo.",
+  ].join("\n");
+}
+
+export function buildTelegramQualitasSuccess(input: {
+  policyNumber: string;
+  recipientLabel: "Cliente" | "Agente";
+  maskedEmail: string;
+}) {
+  return [
+    "Solicitud enviada a Quálitas.",
+    "",
+    `El enlace de pago para la póliza •••${input.policyNumber.slice(-4)} fue solicitado para:`,
+    `${input.recipientLabel} · ${input.maskedEmail}`,
+  ].join("\n");
+}
+
+export function buildTelegramQualitasOutcomeMessage(outcome: string) {
+  switch (outcome) {
+    case "POLICY_NOT_FOUND": return "Quálitas no reconoció la póliza. No se envió ningún enlace.";
+    case "POLICY_NOT_ELIGIBLE": return "Quálitas indica que esta póliza no puede usar este flujo de pago.";
+    case "EMAIL_REJECTED": return "Quálitas rechazó el correo seleccionado. No se envió el enlace.";
+    case "UNCERTAIN": return "No pude confirmar si Quálitas procesó la solicitud.\n\nPara evitar enviar enlaces duplicados, PolicyDesk no la reenviará automáticamente.";
+    case "RATE_LIMITED": return "Se alcanzó el límite temporal de solicitudes a Quálitas. Intenta nuevamente más tarde.";
+    case "QUALITAS_UNAVAILABLE":
+    case "TIMEOUT": return "Quálitas no está respondiendo en este momento. Intenta nuevamente más tarde.";
+    default: return "No se pudo completar la solicitud de enlace de pago de Quálitas.";
+  }
 }
