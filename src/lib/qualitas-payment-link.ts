@@ -85,6 +85,12 @@ export function normalizeQualitasEmail(value: string | null | undefined) {
   return isValidQualitasEmail(normalized) ? normalized : null;
 }
 
+export function normalizeQualitasPolicyNumber(value: string | null | undefined) {
+  const normalized = value?.trim() ?? "";
+  if (!/^\d{1,10}$/.test(normalized)) return null;
+  return normalized.padStart(10, "0");
+}
+
 export function maskQualitasEmail(value: string) {
   const [localPart, domain] = value.split("@");
   if (!localPart || !domain) return "***";
@@ -307,7 +313,8 @@ export async function prepareQualitasPaymentLink(
     return { outcome: "UNEXPECTED_RESPONSE" };
   }
 
-  const policyNumber = input.policyNumber.trim();
+  const policyNumber = normalizeQualitasPolicyNumber(input.policyNumber);
+  if (!policyNumber) return { outcome: "UNEXPECTED_RESPONSE" };
   const recipientEmail = input.recipientEmail.trim().toLowerCase();
   const cookieJar = new Map<string, string>();
   const initial = await requestWithSession({
