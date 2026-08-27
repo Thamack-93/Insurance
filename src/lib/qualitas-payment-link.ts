@@ -419,9 +419,10 @@ export async function prepareQualitasPaymentLink(
       options,
       finalSubmission: false,
     });
-    if (!pagarResponse.bodyText) return resultForSessionResponse(pagarResponse, false);
+    const pagarHtml = pagarResponse.bodyText;
+    if (!pagarHtml) return resultForSessionResponse(pagarResponse, false);
     contactPage = pagarResponse;
-    contactForm = findFormContaining(contactPage.bodyText, "temail");
+    contactForm = findFormContaining(pagarHtml, "temail");
   }
   if (!contactForm || formMethod(contactForm) !== "POST") return resultForSessionResponse(contactPage, false);
   const finalActionUrl = formAction(contactForm, contactPage.finalUrl);
