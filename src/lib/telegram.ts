@@ -2914,9 +2914,13 @@ async function confirmQualitasTelegramDraft(input: {
 
   let outcome: QualitasPaymentLinkOutcome = "UNEXPECTED_RESPONSE";
   try {
-    const prepared = await prepareQualitasPaymentLink({ policyNumber: state.policyNumber, recipientEmail: state.recipientEmail });
+    const qualitasRequestOptions = { traceId: input.draft.id };
+    const prepared = await prepareQualitasPaymentLink(
+      { policyNumber: state.policyNumber, recipientEmail: state.recipientEmail },
+      qualitasRequestOptions,
+    );
     if (isQualitasPreparedPaymentLink(prepared)) {
-      outcome = (await requestQualitasPaymentLink(prepared)).outcome;
+      outcome = (await requestQualitasPaymentLink(prepared, qualitasRequestOptions)).outcome;
     } else {
       outcome = prepared.outcome;
     }
