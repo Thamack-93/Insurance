@@ -135,8 +135,6 @@ jobs:
         run: |
           npx prisma migrate deploy
           npm run db:check-drift
-      - name: Check Cycle 1 tenant guards before multi-org fixture
-        run: npm run check:tenant-guards
       - name: Mark migrated tenant database
         shell: bash
         run: |
@@ -157,6 +155,8 @@ jobs:
           VALUES ('$TENANT_ISOLATION_RUN_ID', '$db_name', '$host_name', '$fingerprint');
           SQL
           printf 'TENANT_ISOLATION_FINGERPRINT=%s\n' "$fingerprint" >> "$GITHUB_ENV"
+      - name: Check Cycle 1 tenant guards before multi-org fixture
+        run: npm run check:tenant-guards
       - name: Create protected two-organization fixture
         run: npm run test:tenant-fixture
       - name: Tenant and knowledge isolation tests
@@ -318,3 +318,92 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
+          name: release-certification-production-${{ github.run_attempt }}
+          path: artifacts/production-verification/production.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Fail certification when Production is blocked
+        if: steps.verify.outputs.status == 'BLOCKED'
+        run: exit 1
+
+  report:
+    name: RELEASE EVIDENCE / SANITIZED REPORT
+    if: always()
+    needs: [resolve-ref, quality, disposable-tenant, disposable-application, production-policy, production-state]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve-ref.outputs.certified_sha }}
+          fetch-depth: 1
+      - name: Download Production verifier evidence
+        if: needs.production-state.result != 'skipped'
+        continue-on-error: true
+        uses: actions/download-artifact@v6
+        with:
+          name: release-certification-production-${{ github.run_attempt }}
+          path: artifacts/production-verification
+      - name: Create sanitized release report
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          TENANT_RESULT: ${{ needs.disposable-tenant.result }}
+          APPLICATION_RESULT: ${{ needs.disposable-application.result }}
+          PRODUCTION_RESULT: ${{ needs.production-state.result }}
+          PRODUCTION_POLICY_RESULT: ${{ needs.production-policy.result }}
+          REQUESTED_REF: ${{ inputs.ref }}
+          CERTIFIED_SHA: ${{ needs.resolve-ref.outputs.certified_sha }}
+          PRODUCTION_VERIFIER_SHA: ${{ needs.production-state.outputs.verifier_sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          mkdir -p artifacts/release-certification
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const cp = require("node:child_process");
+          const productionPath = "artifacts/production-verification/production.json";
+          let production = { status: process.env.PRODUCTION_RESULT === "skipped" ? "NOT_RUN" : "UNAVAILABLE" };
+          if (fs.existsSync(productionPath)) {
+            try {
+              const parsed = JSON.parse(fs.readFileSync(productionPath, "utf8"));
+              production = { status: parsed.status || "UNAVAILABLE", tenantMode: parsed.tenantMode || "UNKNOWN" };
+            } catch {}
+          }
+          const report = {
+            certifiedSha: process.env.CERTIFIED_SHA || cp.execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+            productionVerifierSha: process.env.PRODUCTION_VERIFIER_SHA || null,
+            requestedRef: process.env.REQUESTED_REF,
+            generatedAt: new Date().toISOString(),
+            run: { id: process.env.RUN_ID, attempt: process.env.RUN_ATTEMPT },
+            codeCertification: { quality: process.env.QUALITY_RESULT },
+            disposablePostgres: {
+              tenantIsolation: process.env.TENANT_RESULT,
+              applicationApiE2E: process.env.APPLICATION_RESULT,
+            },
+            productionStateVerification: {
+              ...production,
+              policy: process.env.PRODUCTION_POLICY_RESULT,
+            },
+          };
+          fs.writeFileSync("artifacts/release-certification/report.json", JSON.stringify(report, null, 2) + "\n");
+          fs.writeFileSync("artifacts/release-certification/summary.md", [
+            "# PolicyDesk Release Certification",
+            "",
+            `- Certified SHA: ${report.certifiedSha}`,
+            `- Production verifier SHA: ${report.productionVerifierSha || "NOT_RUN"}`,
+            `- Generated: ${report.generatedAt}`,
+            `- Code certification: ${report.codeCertification.quality}`,
+            `- Disposable tenant isolation: ${report.disposablePostgres.tenantIsolation}`,
+            `- Disposable application/API/E2E: ${report.disposablePostgres.applicationApiE2E}`,
+            `- Production state verification: ${report.productionStateVerification.status}`,
+            "",
+            "This report contains statuses only; it does not contain credentials, customer data, policy numbers, backup URLs, keys or Nora content.",
+            "",
+          ].join("\n"));
+          NODE
+      - name: Upload sanitized release evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-certification-${{ github.run_attempt }}
+          path: artifacts/release-certification
+          if-no-files-found: error
+          retention-days: 90
