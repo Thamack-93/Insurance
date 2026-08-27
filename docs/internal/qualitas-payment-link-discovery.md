@@ -33,11 +33,11 @@ La segunda ejecución controlada se hizo con DevTools Network y `Preserve log` a
 - Se observaron cookies de sesión y de protección del proveedor; sólo se manejan en memoria por ejecución y no se guardan ni se registran. No apareció CAPTCHA ni challenge durante esta captura.
 - El tiempo observado del envío final fue aproximadamente 8.8 segundos. El timeout del adaptador es acotado y configurable.
 
-La consulta de póliza conserva la evidencia estática del formulario inicial: `POST` con acción `consulta-datos`, `numPoliza`, campos ocultos dinámicos y `p_auth` dinámico. La captura live no establece todavía un contrato estable para todos los redirects ni para cualquier cambio futuro del HTML.
+La consulta de póliza conserva la evidencia estática del formulario inicial: `POST` con acción `consulta-datos`, `numPoliza`, campos ocultos dinámicos y `p_auth` dinámico. La respuesta válida muestra los datos y recibos y un botón JavaScript `Pagar ahora`, que navega por `GET` a `/web/qmx/pago-de-poliza/-/user-pago/pago-tdc`; sólo después aparece el formulario de contacto.
 
 ## Estado
 
-La implementación provisional usa `SESSION_HTTP`: obtiene el formulario inicial, conserva los campos ocultos y cookies sólo en memoria, consulta la póliza, prepara el formulario de contacto y ejecuta un único envío multipart al endpoint observado. Sólo acepta HTTPS en `www.qualitas.com.mx`, limita redirects y tamaño de respuesta, y falla cerrada ante cambios de flujo o host.
+La implementación provisional usa `SESSION_HTTP`: obtiene el formulario inicial, conserva los campos ocultos y cookies sólo en memoria, consulta la póliza, reproduce la navegación `Pagar ahora` a `pago-tdc`, prepara el formulario de contacto y ejecuta un único envío multipart al endpoint observado. Sólo acepta HTTPS en `www.qualitas.com.mx`, limita redirects y tamaño de respuesta, y falla cerrada ante cambios de flujo o host.
 
 Clasificación técnica: `SESSION_HTTP`.
 

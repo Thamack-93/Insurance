@@ -13,6 +13,7 @@ import {
 } from "./qualitas-payment-link";
 
 const policyAction = "https://www.qualitas.com.mx/web/qmx/pago-de-poliza?p_p_id=pagopoliza_WAR_PagoPolizaportlet&p_p_lifecycle=1&p_p_state=normal&p_p_mode=view&_pagopoliza_WAR_PagoPolizaportlet_myaction=consulta-datos&p_auth=redacted";
+const paymentPageUrl = "https://www.qualitas.com.mx/web/qmx/pago-de-poliza/-/user-pago/pago-tdc";
 const finalAction = "https://www.qualitas.com.mx/web/qmx/pago-de-poliza?p_p_id=pagopoliza_WAR_PagoPolizaportlet&p_p_lifecycle=1&p_p_state=normal&p_p_mode=view&_pagopoliza_WAR_PagoPolizaportlet_myaction=envia-link-pago&p_auth=redacted";
 const resumeUrl = "https://www.qualitas.com.mx/web/qmx/pago-de-poliza/-/user-pago/resumen-ws";
 
@@ -27,6 +28,8 @@ const contactHtml = `<form method="post" action="${finalAction.replaceAll("&", "
   <input type="hidden" name="numTelefono" value="">
   <input name="temail" value="">
 </form>`;
+
+const paymentPageHtml = `<button type="button">Pagar ahora</button>`;
 
 function response(body: string, status = 200, headers?: HeadersInit) {
   return new Response(body, { status, headers });
@@ -99,6 +102,22 @@ describe("qualitas-payment-link provider", () => {
     expect((calls[2].init?.headers as Headers).get("X-Requested-With")).toBe("XMLHttpRequest");
     expect((calls[2].init?.headers as Headers).has("Cookie")).toBe(true);
     expect(JSON.stringify(result)).not.toContain("agent@example.com");
+  });
+
+  it("advances through Pagar ahora before discovering the contact form", async () => {
+    const { transport, calls } = sequenceTransport([
+      response(initialHtml),
+      response(paymentPageHtml),
+      response(contactHtml),
+    ]);
+
+    const prepared = await prepareForFinal(transport);
+
+    expect(calls).toHaveLength(3);
+    expect(calls[1].url).toBe(policyAction);
+    expect(calls[2].url).toBe(paymentPageUrl);
+    expect(calls[2].init?.method).toBe("GET");
+    expect(prepared).toMatchObject({ transportReady: true, refererUrl: paymentPageUrl });
   });
 
   it("maps the provider duplicate response to UNCERTAIN without retrying", async () => {
