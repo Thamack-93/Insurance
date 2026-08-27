@@ -13,7 +13,7 @@ const provider = vi.hoisted(() => ({
     return value.includes("@") ? value : null;
   }),
   prepareQualitasPaymentLink: vi.fn(async () => ({ transportReady: true })),
-  requestQualitasPaymentLink: vi.fn(async () => ({ outcome: "SUCCESS" as const })),
+  requestQualitasPaymentLink: vi.fn(async () => ({ outcome: "SUCCESS" as const, reason: "SUCCESS_CODE_0" as const })),
 }));
 
 const db = vi.hoisted(() => ({
@@ -241,7 +241,7 @@ describe("Telegram Quálitas payment-link flow", () => {
     expect(writeActivityLog).toHaveBeenCalledWith(expect.objectContaining({
       action: "QUALITAS_PAYMENT_LINK_REQUESTED",
       entityId: "policy-1",
-      newValue: expect.objectContaining({ recipientType: "CLIENT", result: "SUCCESS" }),
+      newValue: expect.objectContaining({ recipientType: "CLIENT", result: "SUCCESS", reason: "SUCCESS_CODE_0" }),
     }));
     expect(JSON.stringify(writeActivityLog.mock.calls[0])).not.toContain("client@example.com");
   });

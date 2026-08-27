@@ -302,7 +302,17 @@ export function buildTelegramQualitasSuccess(input: {
   ].join("\n");
 }
 
-export function buildTelegramQualitasOutcomeMessage(outcome: string) {
+export function buildTelegramQualitasOutcomeMessage(outcome: string, reason?: string) {
+  switch (reason) {
+    case "DUPLICATE_LINK_99991":
+      return "Quálitas reportó que ya existe una liga de pago en curso. No se generó otra.";
+    case "FINAL_RESPONSE_UNRECOGNIZED":
+      return "Quálitas respondió al envío, pero PolicyDesk no reconoció el acuse. No se reenviará automáticamente.";
+    case "FINAL_TIMEOUT":
+      return "Quálitas no confirmó el resultado antes del límite. No se reenviará automáticamente.";
+    case "FLOW_CHANGED":
+      return "El portal de Quálitas cambió y el envío no pudo completarse.";
+  }
   switch (outcome) {
     case "POLICY_NOT_FOUND": return "Quálitas no reconoció la póliza. No se envió ningún enlace.";
     case "POLICY_NOT_ELIGIBLE": return "Quálitas indica que esta póliza no puede usar este flujo de pago.";

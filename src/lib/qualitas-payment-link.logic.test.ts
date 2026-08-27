@@ -83,7 +83,7 @@ describe("qualitas-payment-link provider", () => {
     const prepared = await prepareForFinal(transport);
     const result = await requestQualitasPaymentLink(prepared, { transport });
 
-    expect(result).toEqual({ outcome: "SUCCESS" });
+    expect(result).toEqual({ outcome: "SUCCESS", reason: "SUCCESS_CODE_0" });
     expect(calls).toHaveLength(3);
     expect(calls[0].url).toBe(QUALITAS_PAYMENT_LINK_ENTRYPOINT);
     expect(new URL(calls[1].url).searchParams.get("_pagopoliza_WAR_PagoPolizaportlet_myaction")).toBe("consulta-datos");
@@ -120,6 +120,47 @@ describe("qualitas-payment-link provider", () => {
     expect(prepared).toMatchObject({ transportReady: true, refererUrl: paymentPageUrl });
   });
 
+  it("emits a redacted trace for every provider stage", async () => {
+    const { transport } = sequenceTransport([
+      response(initialHtml),
+      response(paymentPageHtml),
+      response(contactHtml),
+      response("Código: 0 Mensaje: Se genero link de pago y se envio al correo indicado."),
+    ]);
+    const events: Array<Record<string, unknown>> = [];
+    const options = {
+      transport,
+      traceId: "draft-redacted",
+      onEvent: (event: Record<string, unknown>) => events.push(event),
+    };
+
+    const prepared = await prepareQualitasPaymentLink(
+      { policyNumber: "0000000000", recipientEmail: "agent@example.com" },
+      options,
+    );
+    expect(prepared).toMatchObject({ transportReady: true });
+    await requestQualitasPaymentLink(prepared as QualitasPreparedPaymentLink, options);
+
+    expect(events.filter((event) => event.phase === "started").map((event) => event.step)).toEqual([
+      "entrypoint",
+      "policy_lookup",
+      "pagar_ahora",
+      "final_submission",
+    ]);
+    expect(events.some((event) => event.step === "contact_form" && event.phase === "completed")).toBe(true);
+    expect(events).toContainEqual(expect.objectContaining({
+      step: "final_submission",
+      phase: "classified",
+      outcome: "SUCCESS",
+      reason: "SUCCESS_CODE_0",
+      hasSuccessCode: true,
+      hasDuplicateCode: false,
+    }));
+    expect(events.every((event) => event.traceId === "draft-redacted")).toBe(true);
+    expect(JSON.stringify(events)).not.toContain("agent@example.com");
+    expect(JSON.stringify(events)).not.toContain("dynamicValue");
+  });
+
   it("maps the provider duplicate response to UNCERTAIN without retrying", async () => {
     const { transport, calls } = sequenceTransport([
       response(initialHtml),
@@ -130,8 +171,88 @@ describe("qualitas-payment-link provider", () => {
 
     const result = await requestQualitasPaymentLink(prepared, { transport });
 
-    expect(result).toEqual({ outcome: "UNCERTAIN" });
+    expect(result).toEqual({ outcome: "UNCERTAIN", reason: "DUPLICATE_LINK_99991" });
     expect(calls).toHaveLength(3);
+  });
+
+  it("does not treat duplicate text inside scripts as a duplicate response", async () => {
+    const { transport, calls } = sequenceTransport([
+      response(initialHtml),
+      response(contactHtml),
+      response(`<script>const legacyCode = "99991";</script><main>Código: 0 Mensaje: Se genero link de pago y se envio al correo indicado.</main>`),
+    ]);
+    const prepared = await prepareForFinal(transport);
+
+    await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({ outcome: "SUCCESS", reason: "SUCCESS_CODE_0" });
+    expect(calls).toHaveLength(3);
+  });
+
+  it("recognizes an HTML-encoded success code before hidden duplicate text", async () => {
+    const { transport, calls } = sequenceTransport([
+      response(initialHtml),
+      response(contactHtml),
+      response(`<main>C&#243;digo: 0 Mensaje: Se genero link de pago.</main><div hidden>99991</div>`),
+    ]);
+    const prepared = await prepareForFinal(transport);
+
+    await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({ outcome: "SUCCESS", reason: "SUCCESS_CODE_0" });
+    expect(calls).toHaveLength(3);
+  });
+
+  it("recognizes a named-entity success code before hidden duplicate text", async () => {
+    const { transport, calls } = sequenceTransport([
+      response(initialHtml),
+      response(contactHtml),
+      response(`<main>C&oacute;digo&nbsp;: 0 Mensaje: Se genero link de pago.</main><div hidden>99991</div>`),
+    ]);
+    const prepared = await prepareForFinal(transport);
+
+    await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({ outcome: "SUCCESS", reason: "SUCCESS_CODE_0" });
+    expect(calls).toHaveLength(3);
+  });
+
+  it("ignores a duplicate marker inside hidden HTML when no visible acuse exists", async () => {
+    const { transport } = sequenceTransport([
+      response(initialHtml),
+      response(contactHtml),
+      response(`<main>Solicitud recibida</main><div hidden>Código: 99991 Ya se encuentra otro link de pago en curso.</div>`),
+    ]);
+    const prepared = await prepareForFinal(transport);
+
+    await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({
+      outcome: "UNCERTAIN",
+      reason: "FINAL_RESPONSE_UNRECOGNIZED",
+    });
+  });
+
+  it("recognizes a JSON success acuse", async () => {
+    const { transport } = sequenceTransport([
+      response(initialHtml),
+      response(contactHtml),
+      response(JSON.stringify({ codigo: 0, mensaje: "Se genero link de pago y se envio al correo indicado." }), 200, {
+        "content-type": "application/json",
+      }),
+    ]);
+    const prepared = await prepareForFinal(transport);
+
+    await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({
+      outcome: "SUCCESS",
+      reason: "SUCCESS_CODE_0",
+    });
+  });
+
+  it("classifies a generic final HTTP 200 as submitted but unverified", async () => {
+    const { transport } = sequenceTransport([
+      response(initialHtml),
+      response(contactHtml),
+      response(`<main>Portal de pago</main>`),
+    ]);
+    const prepared = await prepareForFinal(transport);
+
+    await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({
+      outcome: "UNCERTAIN",
+      reason: "FINAL_RESPONSE_UNRECOGNIZED",
+    });
   });
 
   it("fails closed on a cross-host redirect", async () => {
@@ -142,7 +263,7 @@ describe("qualitas-payment-link provider", () => {
     await expect(prepareQualitasPaymentLink(
       { policyNumber: "0000000000", recipientEmail: "agent@example.com" },
       { transport },
-    )).resolves.toEqual({ outcome: "QUALITAS_FLOW_CHANGED" });
+    )).resolves.toEqual({ outcome: "QUALITAS_FLOW_CHANGED", reason: "FLOW_CHANGED" });
   });
 
   it("maps representative redacted provider fixtures", () => {
@@ -166,7 +287,7 @@ describe("qualitas-payment-link provider", () => {
     await expect(prepareQualitasPaymentLink(
       { policyNumber: "0000000000", recipientEmail: "agent@example.com" },
       { transport: timeoutTransport },
-    )).resolves.toEqual({ outcome: "TIMEOUT" });
+    )).resolves.toEqual({ outcome: "TIMEOUT", reason: "TIMEOUT_BEFORE_SUBMISSION" });
 
     const prepared: QualitasPreparedPaymentLink = {
       policyNumber: "0000000000",
@@ -178,7 +299,10 @@ describe("qualitas-payment-link provider", () => {
       resumeWsUrl: resumeUrl,
       refererUrl: "https://www.qualitas.com.mx/web/qmx/pago-de-poliza/-/user-pago/pago-tdc",
     };
-    await expect(requestQualitasPaymentLink(prepared, { transport: timeoutTransport })).resolves.toEqual({ outcome: "UNCERTAIN" });
+    await expect(requestQualitasPaymentLink(prepared, { transport: timeoutTransport })).resolves.toEqual({
+      outcome: "UNCERTAIN",
+      reason: "FINAL_TIMEOUT",
+    });
   });
 
   it("rejects an oversized response before interpreting it", async () => {
@@ -186,6 +310,6 @@ describe("qualitas-payment-link provider", () => {
     await expect(prepareQualitasPaymentLink(
       { policyNumber: "0000000000", recipientEmail: "agent@example.com" },
       { transport, maxResponseBytes: 8 },
-    )).resolves.toEqual({ outcome: "UNEXPECTED_RESPONSE" });
+    )).resolves.toEqual({ outcome: "UNEXPECTED_RESPONSE", reason: "RESPONSE_TOO_LARGE" });
   });
 });

@@ -1,4 +1,5 @@
 import "server-only";
+import { parse, type DefaultTreeAdapterTypes } from "parse5";
 
 export const QUALITAS_PAYMENT_LINK_ENTRYPOINT =
   "https://www.qualitas.com.mx/web/qmx/pago-de-poliza/-/user-pago/inicio";
@@ -18,8 +19,29 @@ export const QUALITAS_PAYMENT_LINK_OUTCOMES = [
 
 export type QualitasPaymentLinkOutcome = (typeof QUALITAS_PAYMENT_LINK_OUTCOMES)[number];
 
+export const QUALITAS_PAYMENT_LINK_REASONS = [
+  "SUCCESS_CODE_0",
+  "DUPLICATE_LINK_99991",
+  "FINAL_RESPONSE_UNRECOGNIZED",
+  "FINAL_TIMEOUT",
+  "FLOW_CHANGED",
+  "POLICY_NOT_FOUND",
+  "POLICY_NOT_ELIGIBLE",
+  "EMAIL_REJECTED",
+  "QUALITAS_UNAVAILABLE",
+  "RATE_LIMITED",
+  "TIMEOUT_BEFORE_SUBMISSION",
+  "RESPONSE_TOO_LARGE",
+  "NETWORK_ERROR",
+  "INVALID_INPUT",
+  "UNEXPECTED_RESPONSE",
+] as const;
+
+export type QualitasPaymentLinkReason = (typeof QUALITAS_PAYMENT_LINK_REASONS)[number];
+
 export type QualitasPaymentLinkResult = {
   outcome: QualitasPaymentLinkOutcome;
+  reason: QualitasPaymentLinkReason;
   paymentUrl?: string;
 };
 
@@ -45,7 +67,7 @@ export type QualitasProviderEvent = {
   event: "qualitas.payment_link.provider";
   traceId: string;
   step: "entrypoint" | "policy_lookup" | "pagar_ahora" | "contact_form" | "final_submission";
-  phase: "started" | "completed" | "redirect" | "timeout" | "network_error" | "response_too_large" | "flow_changed";
+  phase: "started" | "completed" | "classified" | "redirect" | "timeout" | "network_error" | "response_too_large" | "flow_changed";
   method?: string;
   path?: string;
   status?: number;
@@ -53,6 +75,17 @@ export type QualitasProviderEvent = {
   redirectCount?: number;
   finalSubmission?: boolean;
   bodyBytes?: number;
+  contentType?: "html" | "json" | "text" | "other" | "unknown";
+  outcome?: QualitasPaymentLinkOutcome;
+  reason?: QualitasPaymentLinkReason;
+  signalTextLength?: number;
+  hasSuccessCode?: boolean;
+  hasDuplicateCode?: boolean;
+  hasSuccessMessage?: boolean;
+  hasDuplicateMessage?: boolean;
+  hasPolicyForm?: boolean;
+  hasContactForm?: boolean;
+  hasResumeMarker?: boolean;
 }
 
 export type QualitasRequestOptions = {
@@ -133,25 +166,113 @@ export function maskQualitasEmail(value: string) {
   return `${localPart.slice(0, 1)}***@${domain}`;
 }
 
+type QualitasResponseSignals = {
+  hasSuccessCode: boolean;
+  hasDuplicateCode: boolean;
+  hasSuccessMessage: boolean;
+  hasDuplicateMessage: boolean;
+  hasPolicyForm: boolean;
+  hasContactForm: boolean;
+  hasResumeMarker: boolean;
+};
+
+type QualitasProviderClassification = QualitasPaymentLinkResult & {
+  contentType: QualitasProviderEvent["contentType"];
+  signalTextLength: number;
+  signals: QualitasResponseSignals;
+};
+
+function emptyQualitasSignals(): QualitasResponseSignals {
+  return {
+    hasSuccessCode: false,
+    hasDuplicateCode: false,
+    hasSuccessMessage: false,
+    hasDuplicateMessage: false,
+    hasPolicyForm: false,
+    hasContactForm: false,
+    hasResumeMarker: false,
+  };
+}
+
+function qualitasResult(
+  outcome: QualitasPaymentLinkOutcome,
+  reason: QualitasPaymentLinkReason,
+): QualitasPaymentLinkResult {
+  return { outcome, reason };
+}
+
+function contentTypeFamily(value: string | null | undefined): QualitasProviderEvent["contentType"] {
+  const normalized = value?.toLowerCase() ?? "";
+  if (normalized.includes("json")) return "json";
+  if (normalized.includes("html") || normalized.includes("xhtml")) return "html";
+  if (normalized.startsWith("text/")) return "text";
+  return normalized ? "other" : "unknown";
+}
+
+function classifyQualitasProviderResponse(input: {
+  status?: number;
+  bodyText?: string | null;
+  contentType?: string | null;
+  finalSubmission?: boolean;
+  timedOut?: boolean;
+  redirectedToUnexpectedHost?: boolean;
+}): QualitasProviderClassification {
+  const contentType = contentTypeFamily(input.contentType);
+  const text = providerSignalText(input.bodyText, contentType);
+  const signals: QualitasResponseSignals = {
+    hasSuccessCode: /(?:c[oó]digo|codigo|code)\s*[:=]?\s*["']?0\b/.test(text),
+    hasDuplicateCode: /(?:c[oó]digo|codigo|code)\s*[:=]?\s*["']?99991\b/.test(text),
+    hasSuccessMessage: /se\s+gener[oó]\s+(?:el\s+)?(?:link|enlace)\s+de\s+pago/.test(text) && /se\s+envi[oó].*correo/.test(text),
+    hasDuplicateMessage: /(?:ya\s+se\s+encuentra|existe).*otro\s+(?:link|enlace)\s+de\s+pago\s+en\s+curso/.test(text),
+    hasPolicyForm: Boolean(input.bodyText && findFormContaining(input.bodyText, "numPoliza")),
+    hasContactForm: Boolean(input.bodyText && findFormContaining(input.bodyText, "temail")),
+    hasResumeMarker: Boolean(input.bodyText && /\bresumenWSUrl\b/i.test(input.bodyText)),
+  };
+  const base = { contentType, signalTextLength: text.length, signals };
+
+  if (input.timedOut) {
+    return { ...qualitasResult(input.finalSubmission ? "UNCERTAIN" : "TIMEOUT", input.finalSubmission ? "FINAL_TIMEOUT" : "TIMEOUT_BEFORE_SUBMISSION"), ...base };
+  }
+  if (input.redirectedToUnexpectedHost) {
+    return { ...qualitasResult("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED"), ...base };
+  }
+  if (signals.hasSuccessCode) return { ...qualitasResult("SUCCESS", "SUCCESS_CODE_0"), ...base };
+  if (signals.hasDuplicateCode || signals.hasDuplicateMessage) {
+    return { ...qualitasResult("UNCERTAIN", "DUPLICATE_LINK_99991"), ...base };
+  }
+  if (input.status === 429 || /too many|rate limit|demasiadas solicitudes/.test(text)) {
+    return { ...qualitasResult("RATE_LIMITED", "RATE_LIMITED"), ...base };
+  }
+  if (input.status !== undefined && input.status >= 500) {
+    return { ...qualitasResult("QUALITAS_UNAVAILABLE", "QUALITAS_UNAVAILABLE"), ...base };
+  }
+  if (/no se encontr|no encontr|no existe|p[oó]liza .*inv[aá]lida|not found/.test(text)) {
+    return { ...qualitasResult("POLICY_NOT_FOUND", "POLICY_NOT_FOUND"), ...base };
+  }
+  if (/no puede|no es posible|no elegible|vigencia|flotilla|endoso|not eligible/.test(text)) {
+    return { ...qualitasResult("POLICY_NOT_ELIGIBLE", "POLICY_NOT_ELIGIBLE"), ...base };
+  }
+  if (/correo|email|e-mail/.test(text) && /rechaz|inv[aá]lid|no permitido|not valid|rejected/.test(text)) {
+    return { ...qualitasResult("EMAIL_REJECTED", "EMAIL_REJECTED"), ...base };
+  }
+  if (input.finalSubmission && input.status !== undefined && input.status < 400) {
+    return { ...qualitasResult("UNCERTAIN", "FINAL_RESPONSE_UNRECOGNIZED"), ...base };
+  }
+  return {
+    ...qualitasResult(input.status !== undefined && input.status >= 400 ? "UNEXPECTED_RESPONSE" : "QUALITAS_FLOW_CHANGED", input.status !== undefined && input.status >= 400 ? "UNEXPECTED_RESPONSE" : "FLOW_CHANGED"),
+    ...base,
+  };
+}
+
 export function normalizeQualitasProviderOutcome(input: {
   status?: number;
   bodyText?: string | null;
+  contentType?: string | null;
   finalSubmission?: boolean;
   timedOut?: boolean;
   redirectedToUnexpectedHost?: boolean;
 }): QualitasPaymentLinkOutcome {
-  if (input.timedOut) return input.finalSubmission ? "UNCERTAIN" : "TIMEOUT";
-  if (input.redirectedToUnexpectedHost) return "QUALITAS_FLOW_CHANGED";
-
-  const text = providerSignalText(input.bodyText);
-  if (/c[oó]digo\s*:\s*0\b/.test(text)) return "SUCCESS";
-  if (/99991|otro link de pago en curso/.test(text)) return "UNCERTAIN";
-  if (input.status === 429 || /too many|rate limit|demasiadas solicitudes/.test(text)) return "RATE_LIMITED";
-  if (input.status !== undefined && input.status >= 500) return "QUALITAS_UNAVAILABLE";
-  if (/no se encontr|no encontr|no existe|p[oó]liza .*inv[aá]lida|not found/.test(text)) return "POLICY_NOT_FOUND";
-  if (/no puede|no es posible|no elegible|vigencia|flotilla|endoso|not eligible/.test(text)) return "POLICY_NOT_ELIGIBLE";
-  if (/correo|email|e-mail/.test(text) && /rechaz|inv[aá]lid|no permitido|not valid|rejected/.test(text)) return "EMAIL_REJECTED";
-  return input.status !== undefined && input.status >= 400 ? "UNEXPECTED_RESPONSE" : "QUALITAS_FLOW_CHANGED";
+  return classifyQualitasProviderResponse(input).outcome;
 }
 
 export function isQualitasPaymentLinkEnabled() {
@@ -211,19 +332,70 @@ function findFormContaining(html: string, fieldName: string) {
   return getForms(html).find((form) => collectFormFields(form).has(fieldName)) ?? null;
 }
 
-function visibleHtmlText(value: string) {
-  return value
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<template[\s\S]*?<\/template>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function nodeAttribute(node: DefaultTreeAdapterTypes.Element, name: string) {
+  return node.attrs.find((attribute) => attribute.name.toLowerCase() === name)?.value ?? null;
 }
 
-function providerSignalText(value: string | null | undefined) {
-  return decodeHtml(visibleHtmlText(value ?? "")).toLowerCase();
+function isHiddenHtmlElement(node: DefaultTreeAdapterTypes.Element) {
+  const tagName = node.tagName.toLowerCase();
+  if (["script", "style", "template", "noscript"].includes(tagName)) return true;
+  if (node.attrs.some((attribute) => attribute.name.toLowerCase() === "hidden")) return true;
+  if (nodeAttribute(node, "aria-hidden")?.toLowerCase() === "true") return true;
+  if (tagName === "input" && nodeAttribute(node, "type")?.toLowerCase() === "hidden") return true;
+  const style = nodeAttribute(node, "style")?.replace(/\s+/g, "").toLowerCase() ?? "";
+  return /(?:^|;)display:none(?:;|$)/.test(style) || /(?:^|;)visibility:hidden(?:;|$)/.test(style);
+}
+
+function collectVisibleHtmlText(node: DefaultTreeAdapterTypes.Node, output: string[]) {
+  if (node.nodeName === "#text") {
+    output.push((node as DefaultTreeAdapterTypes.TextNode).value);
+    return;
+  }
+  if ("tagName" in node && isHiddenHtmlElement(node as DefaultTreeAdapterTypes.Element)) return;
+  if (!("childNodes" in node)) return;
+  for (const child of node.childNodes) collectVisibleHtmlText(child, output);
+}
+
+function visibleHtmlText(value: string) {
+  const output: string[] = [];
+  collectVisibleHtmlText(parse(value), output);
+  return output.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function collectJsonSignalText(value: unknown, output: string[]) {
+  if (value === null || value === undefined) return;
+  if (["string", "number", "boolean"].includes(typeof value)) {
+    output.push(String(value));
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectJsonSignalText(item, output);
+    return;
+  }
+  if (typeof value === "object") {
+    for (const [key, nested] of Object.entries(value)) {
+      output.push(key);
+      collectJsonSignalText(nested, output);
+    }
+  }
+}
+
+function providerSignalText(
+  value: string | null | undefined,
+  contentType: QualitasProviderEvent["contentType"] = "unknown",
+) {
+  const source = value ?? "";
+  const trimmed = source.trim();
+  if (contentType === "json" || /^[\[{]/.test(trimmed)) {
+    try {
+      const output: string[] = [];
+      collectJsonSignalText(JSON.parse(trimmed), output);
+      return output.join(" ").normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
+    } catch {
+      // Fall through to the HTML/text parser so malformed JSON still fails closed.
+    }
+  }
+  return visibleHtmlText(source).normalize("NFKC").toLowerCase();
 }
 
 function findPagarAhoraRequest(html: string, baseUrl: string) {
@@ -331,6 +503,7 @@ type SessionResponse = {
   response?: Response;
   bodyText?: string;
   finalUrl: string;
+  redirectCount?: number;
   timedOut?: boolean;
   networkError?: boolean;
   responseTooLarge?: boolean;
@@ -366,7 +539,7 @@ async function requestWithSession(input: {
         redirectCount: redirect,
         finalSubmission: input.finalSubmission,
       });
-      return { finalUrl: url, redirectedToUnexpectedHost: true };
+      return { finalUrl: url, redirectCount: redirect, redirectedToUnexpectedHost: true };
     }
     emitQualitasProviderEvent(input.options, {
       step: input.step,
@@ -397,7 +570,7 @@ async function requestWithSession(input: {
             redirectCount: redirect,
             finalSubmission: input.finalSubmission,
           });
-          return { response, finalUrl: url, bodyText: "" };
+          return { response, finalUrl: url, redirectCount: redirect, bodyText: "" };
         }
         const nextUrl = new URL(location, url).toString();
         if (!isAllowedQualitasUrl(nextUrl) || redirect === MAX_REDIRECTS) {
@@ -411,7 +584,7 @@ async function requestWithSession(input: {
             redirectCount: redirect + 1,
             finalSubmission: input.finalSubmission,
           });
-          return { response, finalUrl: nextUrl, redirectedToUnexpectedHost: !isAllowedQualitasUrl(nextUrl) };
+          return { response, finalUrl: nextUrl, redirectCount: redirect + 1, redirectedToUnexpectedHost: !isAllowedQualitasUrl(nextUrl) };
         }
         emitQualitasProviderEvent(input.options, {
           step: input.step,
@@ -439,8 +612,9 @@ async function requestWithSession(input: {
         redirectCount: redirect,
         finalSubmission: input.finalSubmission,
         bodyBytes: new TextEncoder().encode(bodyText).byteLength,
+        contentType: contentTypeFamily(response.headers.get("content-type")),
       });
-      return { response, bodyText, finalUrl: url };
+      return { response, bodyText, finalUrl: url, redirectCount: redirect };
     } catch (error) {
       if (error instanceof QualitasResponseTooLargeError) {
         emitQualitasProviderEvent(input.options, {
@@ -452,7 +626,7 @@ async function requestWithSession(input: {
           redirectCount: redirect,
           finalSubmission: input.finalSubmission,
         });
-        return { finalUrl: url, responseTooLarge: true };
+        return { finalUrl: url, redirectCount: redirect, responseTooLarge: true };
       }
       if (error instanceof DOMException && error.name === "AbortError") {
         emitQualitasProviderEvent(input.options, {
@@ -464,7 +638,7 @@ async function requestWithSession(input: {
           redirectCount: redirect,
           finalSubmission: input.finalSubmission,
         });
-        return { finalUrl: url, timedOut: true };
+        return { finalUrl: url, redirectCount: redirect, timedOut: true };
       }
       emitQualitasProviderEvent(input.options, {
         step: input.step,
@@ -475,27 +649,62 @@ async function requestWithSession(input: {
         redirectCount: redirect,
         finalSubmission: input.finalSubmission,
       });
-      return { finalUrl: url, networkError: true };
+      return { finalUrl: url, redirectCount: redirect, networkError: true };
     } finally {
       clearTimeout(timer);
     }
   }
 
-  return { finalUrl: url, redirectedToUnexpectedHost: true };
+  return { finalUrl: url, redirectCount: MAX_REDIRECTS, redirectedToUnexpectedHost: true };
 }
 
-function resultForSessionResponse(result: SessionResponse, finalSubmission: boolean): QualitasPaymentLinkResult {
-  if (result.responseTooLarge) return { outcome: "UNEXPECTED_RESPONSE" };
-  if (result.networkError) return { outcome: "QUALITAS_UNAVAILABLE" };
-  return {
-    outcome: normalizeQualitasProviderOutcome({
+function resultForSessionResponse(
+  result: SessionResponse,
+  finalSubmission: boolean,
+  options: QualitasRequestOptions,
+): QualitasPaymentLinkResult {
+  let classification: QualitasProviderClassification;
+  if (result.responseTooLarge) {
+    classification = {
+      ...qualitasResult(finalSubmission ? "UNCERTAIN" : "UNEXPECTED_RESPONSE", "RESPONSE_TOO_LARGE"),
+      contentType: "unknown",
+      signalTextLength: 0,
+      signals: emptyQualitasSignals(),
+    };
+  } else if (result.networkError) {
+    classification = {
+      ...qualitasResult(finalSubmission ? "UNCERTAIN" : "QUALITAS_UNAVAILABLE", "NETWORK_ERROR"),
+      contentType: "unknown",
+      signalTextLength: 0,
+      signals: emptyQualitasSignals(),
+    };
+  } else {
+    classification = classifyQualitasProviderResponse({
       status: result.response?.status,
       bodyText: result.bodyText,
+      contentType: result.response?.headers.get("content-type"),
       finalSubmission,
       timedOut: result.timedOut,
       redirectedToUnexpectedHost: result.redirectedToUnexpectedHost,
-    }),
-  };
+    });
+  }
+
+  if (finalSubmission) {
+    emitQualitasProviderEvent(options, {
+      step: "final_submission",
+      phase: "classified",
+      path: safeQualitasPath(result.finalUrl),
+      status: result.response?.status,
+      redirectCount: result.redirectCount,
+      finalSubmission: true,
+      contentType: classification.contentType,
+      outcome: classification.outcome,
+      reason: classification.reason,
+      signalTextLength: classification.signalTextLength,
+      ...classification.signals,
+    });
+  }
+  return qualitasResult(classification.outcome, classification.reason);
 }
 
 export async function prepareQualitasPaymentLink(
@@ -503,11 +712,11 @@ export async function prepareQualitasPaymentLink(
   options: QualitasRequestOptions = {},
 ): Promise<QualitasPreparedPaymentLink | QualitasPaymentLinkResult> {
   if (!input.policyNumber.trim() || !isValidQualitasEmail(input.recipientEmail)) {
-    return { outcome: "UNEXPECTED_RESPONSE" };
+    return qualitasResult("UNEXPECTED_RESPONSE", "INVALID_INPUT");
   }
 
   const policyNumber = normalizeQualitasPolicyNumber(input.policyNumber);
-  if (!policyNumber) return { outcome: "UNEXPECTED_RESPONSE" };
+  if (!policyNumber) return qualitasResult("UNEXPECTED_RESPONSE", "INVALID_INPUT");
   const recipientEmail = input.recipientEmail.trim().toLowerCase();
   const cookieJar = new Map<string, string>();
   const initial = await requestWithSession({
@@ -518,12 +727,12 @@ export async function prepareQualitasPaymentLink(
     finalSubmission: false,
     step: "entrypoint",
   });
-  if (!initial.bodyText) return resultForSessionResponse(initial, false);
+  if (!initial.bodyText) return resultForSessionResponse(initial, false, options);
 
   const policyForm = findFormContaining(initial.bodyText, "numPoliza");
-  if (!policyForm || formMethod(policyForm) !== "POST") return { outcome: "QUALITAS_FLOW_CHANGED" };
+  if (!policyForm || formMethod(policyForm) !== "POST") return qualitasResult("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED");
   const policyAction = formAction(policyForm, initial.finalUrl);
-  if (!policyAction || !isAllowedQualitasUrl(policyAction)) return { outcome: "QUALITAS_FLOW_CHANGED" };
+  if (!policyAction || !isAllowedQualitasUrl(policyAction)) return qualitasResult("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED");
   const policyFields = collectFormFields(policyForm);
   policyFields.set("numPoliza", policyNumber);
   const policyBody = new URLSearchParams(Object.fromEntries(policyFields));
@@ -544,7 +753,7 @@ export async function prepareQualitasPaymentLink(
     finalSubmission: false,
     step: "policy_lookup",
   });
-  if (!policyResponse.bodyText) return resultForSessionResponse(policyResponse, false);
+  if (!policyResponse.bodyText) return resultForSessionResponse(policyResponse, false, options);
 
   const policyHtml = policyResponse.bodyText;
   let contactPage = policyResponse;
@@ -560,7 +769,7 @@ export async function prepareQualitasPaymentLink(
         finalSubmission: false,
         durationMs: Date.now() - contactFormStartedAt,
       });
-      return resultForSessionResponse(policyResponse, false);
+      return resultForSessionResponse(policyResponse, false, options);
     }
     const pagarResponse = await requestWithSession({
       url: pagarAhora.url,
@@ -585,7 +794,7 @@ export async function prepareQualitasPaymentLink(
       step: "pagar_ahora",
     });
     const pagarHtml = pagarResponse.bodyText;
-    if (!pagarHtml) return resultForSessionResponse(pagarResponse, false);
+    if (!pagarHtml) return resultForSessionResponse(pagarResponse, false, options);
     contactPage = pagarResponse;
     contactForm = findFormContaining(pagarHtml, "temail");
   }
@@ -598,7 +807,7 @@ export async function prepareQualitasPaymentLink(
       durationMs: Date.now() - contactFormStartedAt,
       finalSubmission: false,
     });
-    return resultForSessionResponse(contactPage, false);
+    return resultForSessionResponse(contactPage, false, options);
   }
   emitQualitasProviderEvent(options, {
     step: "contact_form",
@@ -613,7 +822,7 @@ export async function prepareQualitasPaymentLink(
   const finalFields = Object.fromEntries(collectFormFields(contactForm));
   const resumeWsUrl = finalFields.resumenWSUrl ?? "";
   if (!finalActionUrl || !isAllowedQualitasUrl(finalActionUrl) || !resumeWsUrl || !isAllowedQualitasUrl(resumeWsUrl)) {
-    return { outcome: "QUALITAS_FLOW_CHANGED" };
+    return qualitasResult("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED");
   }
 
   return {
@@ -633,7 +842,7 @@ export async function requestQualitasPaymentLink(
   options: QualitasRequestOptions = {},
 ): Promise<QualitasPaymentLinkResult> {
   if (!prepared.transportReady || !isAllowedQualitasUrl(prepared.finalActionUrl) || !isAllowedQualitasUrl(prepared.resumeWsUrl)) {
-    return { outcome: "QUALITAS_FLOW_CHANGED" };
+    return qualitasResult("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED");
   }
   const cookieJar = new Map<string, string>();
   for (const pair of prepared.sessionCookie.split(/;\s*/)) {
@@ -664,5 +873,5 @@ export async function requestQualitasPaymentLink(
     finalSubmission: true,
     step: "final_submission",
   });
-  return resultForSessionResponse(response, true);
+  return resultForSessionResponse(response, true, options);
 }

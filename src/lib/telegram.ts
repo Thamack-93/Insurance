@@ -62,6 +62,8 @@ import {
   prepareQualitasPaymentLink,
   requestQualitasPaymentLink,
   type QualitasPaymentLinkOutcome,
+  type QualitasPaymentLinkReason,
+  type QualitasPaymentLinkResult,
   type QualitasPreparedPaymentLink,
 } from "@/lib/qualitas-payment-link";
 import { OPEN_WORK_ITEM_STATUSES, countWorkItems } from "@/lib/work-queue";
@@ -361,11 +363,20 @@ function logQualitasEvent(
     userId?: string;
     recipientType?: "CLIENT" | "AGENT";
     providerResult?: QualitasPaymentLinkOutcome;
+    providerReason?: QualitasPaymentLinkReason;
     durationMs?: number;
   },
 ) {
   if (typeof console === "undefined") return;
-  console.info(`[${event}]`, JSON.stringify({ event, ...metadata, timestamp: new Date().toISOString() }));
+  const { organizationId, policyId, userId, ...safeMetadata } = metadata;
+  console.info(`[${event}]`, JSON.stringify({
+    event,
+    ...safeMetadata,
+    ...(organizationId ? { organizationRef: securityFingerprint(organizationId) } : {}),
+    ...(policyId ? { policyRef: securityFingerprint(policyId) } : {}),
+    ...(userId ? { userRef: securityFingerprint(userId) } : {}),
+    timestamp: new Date().toISOString(),
+  }));
 }
 
 const TELEGRAM_FETCH_TIMEOUT_MS = 8_000;
@@ -2774,7 +2785,7 @@ async function processTelegramQualitasCallback(callback: TelegramCallbackQuery, 
 }
 
 function isQualitasPreparedPaymentLink(
-  value: QualitasPreparedPaymentLink | { outcome: QualitasPaymentLinkOutcome },
+  value: QualitasPreparedPaymentLink | QualitasPaymentLinkResult,
 ): value is QualitasPreparedPaymentLink {
   return "transportReady" in value;
 }
@@ -2791,6 +2802,7 @@ async function finalizeQualitasTelegramDraft(input: {
   userId: string;
   recipient: "CLIENT" | "AGENT";
   outcome: QualitasPaymentLinkOutcome;
+  reason: QualitasPaymentLinkReason;
   db: DbClient;
 }) {
   const status = input.outcome === "SUCCESS" ? "CONFIRMED" : input.outcome === "UNCERTAIN" ? "UNCERTAIN" : "FAILED";
@@ -2812,6 +2824,7 @@ async function finalizeQualitasTelegramDraft(input: {
         clientId: input.clientId,
         recipientType: input.recipient,
         result: qualitasAuditResult(input.outcome),
+        reason: input.reason,
       },
       userId: input.userId,
       db: tx,
@@ -2912,23 +2925,27 @@ async function confirmQualitasTelegramDraft(input: {
     recipientType: state.recipient,
   });
 
-  let outcome: QualitasPaymentLinkOutcome = "UNEXPECTED_RESPONSE";
+  let providerResult: QualitasPaymentLinkResult = {
+    outcome: "UNEXPECTED_RESPONSE",
+    reason: "UNEXPECTED_RESPONSE",
+  };
   try {
-    const qualitasRequestOptions = { traceId: input.draft.id };
+    const qualitasRequestOptions = { traceId: securityFingerprint(input.draft.id) };
     const prepared = await prepareQualitasPaymentLink(
       { policyNumber: state.policyNumber, recipientEmail: state.recipientEmail },
       qualitasRequestOptions,
     );
     if (isQualitasPreparedPaymentLink(prepared)) {
-      outcome = (await requestQualitasPaymentLink(prepared, qualitasRequestOptions)).outcome;
+      providerResult = await requestQualitasPaymentLink(prepared, qualitasRequestOptions);
     } else {
-      outcome = prepared.outcome;
+      providerResult = prepared;
     }
   } catch (error) {
-    logError("telegram.confirmQualitasPaymentLink", error, { draftId: input.draft.id });
-    outcome = "UNEXPECTED_RESPONSE";
+    logError("telegram.confirmQualitasPaymentLink", error, { draftRef: securityFingerprint(input.draft.id) });
+    providerResult = { outcome: "UNEXPECTED_RESPONSE", reason: "UNEXPECTED_RESPONSE" };
   }
 
+  const { outcome, reason } = providerResult;
   const outcomeEvent = outcome === "SUCCESS"
     ? "qualitas.payment_link.succeeded"
     : outcome === "UNCERTAIN"
@@ -2940,6 +2957,7 @@ async function confirmQualitasTelegramDraft(input: {
     userId: identity.user.id,
     recipientType: state.recipient,
     providerResult: outcome,
+    providerReason: reason,
     durationMs: Date.now() - startedAt,
   });
 
@@ -2952,10 +2970,11 @@ async function confirmQualitasTelegramDraft(input: {
       userId: identity.user.id,
       recipient: state.recipient,
       outcome,
+      reason,
       db,
     });
   } catch (error) {
-    logError("telegram.finalizeQualitasPaymentLink", error, { draftId: input.draft.id });
+    logError("telegram.finalizeQualitasPaymentLink", error, { draftRef: securityFingerprint(input.draft.id) });
     logQualitasEvent("qualitas.payment_link.uncertain", {
       organizationId: identity.organizationId,
       policyId: state.policyId,
@@ -2977,7 +2996,7 @@ async function confirmQualitasTelegramDraft(input: {
       }),
     };
   }
-  return { ok: false as const, replyText: buildTelegramQualitasOutcomeMessage(outcome) };
+  return { ok: false as const, replyText: buildTelegramQualitasOutcomeMessage(outcome, reason) };
 }
 
 async function confirmTelegramDraft(input: {
