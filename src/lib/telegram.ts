@@ -33,6 +33,13 @@ import {
   buildTelegramLinkSuccessMessage,
   buildTelegramPaymentDraftMessage,
   buildTelegramPolicyDraftMessage,
+  buildTelegramQualitasConfirmation,
+  buildTelegramQualitasNoRecipientMessage,
+  buildTelegramQualitasOutcomeMessage,
+  buildTelegramQualitasPolicyPrompt,
+  buildTelegramQualitasRecipientPrompt,
+  buildTelegramQualitasSuccess,
+  buildTelegramQualitasUnavailableMessage,
   buildTelegramStartMessage,
   buildTelegramStatusMessage,
   generateTelegramLinkCode,
@@ -47,6 +54,16 @@ import { isPaidWithinTolerance } from "@/lib/receipt-reconciliation";
 import { ACTIVE_RENEWAL_POLICY_WHERE } from "@/lib/renewal-decisions";
 import { shouldIncludeInRenewals } from "@/lib/renewals.logic";
 import { checkDistributedRateLimit, securityFingerprint } from "@/lib/request-guards";
+import {
+  isQualitasInsurerName,
+  isQualitasPaymentLinkEnabled,
+  maskQualitasEmail,
+  normalizeQualitasEmail,
+  prepareQualitasPaymentLink,
+  requestQualitasPaymentLink,
+  type QualitasPaymentLinkOutcome,
+  type QualitasPreparedPaymentLink,
+} from "@/lib/qualitas-payment-link";
 import { OPEN_WORK_ITEM_STATUSES, countWorkItems } from "@/lib/work-queue";
 import {
   birthdayAutomaticDedupeKey,
@@ -140,9 +157,26 @@ type TelegramMessage = {
   };
 };
 
+type TelegramInlineKeyboardButton = {
+  text: string;
+  callback_data: string;
+};
+
+type TelegramInlineKeyboardMarkup = {
+  inline_keyboard: TelegramInlineKeyboardButton[][];
+};
+
+type TelegramCallbackQuery = {
+  id: string;
+  from: TelegramUser;
+  message?: TelegramMessage;
+  data?: string;
+};
+
 export type TelegramWebhookUpdate = {
   update_id: number;
   message?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
 };
 
 export type TelegramLinkCodeResult =
@@ -179,11 +213,19 @@ export type TelegramSendResult =
       error: string;
     };
 
+export type TelegramCallbackResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
 export type TelegramWebhookProcessResult = {
   handled: boolean;
   chatId?: string;
   replyText?: string;
   draftId?: string;
+  replyMarkup?: TelegramInlineKeyboardMarkup;
+  callbackQueryId?: string;
+  removeReplyMarkup?: boolean;
+  callbackAnswerText?: string;
 };
 
 export type TelegramDailyDigestResult = {
@@ -265,10 +307,24 @@ type TelegramPolicyDraftState = {
   sourcePolicyNumber?: string | null;
 };
 
+type TelegramQualitasPaymentLinkDraftState = {
+  step: "policyNumber" | "recipient" | "ready";
+  policyId?: string;
+  policyNumber?: string;
+  clientId?: string;
+  clientName?: string;
+  clientEmail?: string | null;
+  agentUserId?: string;
+  agentEmail?: string | null;
+  recipient?: "CLIENT" | "AGENT";
+  recipientEmail?: string;
+};
+
 type TelegramDraftState = {
-  type: "PAYMENT_CAPTURE" | "POLICY_CAPTURE";
+  type: "PAYMENT_CAPTURE" | "POLICY_CAPTURE" | "QUALITAS_PAYMENT_LINK";
   payment?: TelegramPaymentDraftState;
   policy?: TelegramPolicyDraftState;
+  qualitas?: TelegramQualitasPaymentLinkDraftState;
 };
 
 const TELEGRAM_DRAFT_TTL_MS = 2 * 60 * 60 * 1000;
@@ -281,6 +337,36 @@ const TELEGRAM_DRAFT_CONTINUATION_RATE_LIMIT = {
   limit: 30,
   windowMs: 15 * 60 * 1000,
 };
+
+const TELEGRAM_QUALITAS_RATE_LIMITS = {
+  user: { limit: 5, windowMs: 15 * 60 * 1000 },
+  organization: { limit: 20, windowMs: 15 * 60 * 1000 },
+  policy: { limit: 2, windowMs: 60 * 60 * 1000 },
+};
+
+type QualitasObservabilityEvent =
+  | "qualitas.payment_link.started"
+  | "qualitas.payment_link.policy_verified"
+  | "qualitas.payment_link.recipient_selected"
+  | "qualitas.payment_link.confirmed"
+  | "qualitas.payment_link.succeeded"
+  | "qualitas.payment_link.failed"
+  | "qualitas.payment_link.uncertain";
+
+function logQualitasEvent(
+  event: QualitasObservabilityEvent,
+  metadata: {
+    organizationId?: string;
+    policyId?: string;
+    userId?: string;
+    recipientType?: "CLIENT" | "AGENT";
+    providerResult?: QualitasPaymentLinkOutcome;
+    durationMs?: number;
+  },
+) {
+  if (typeof console === "undefined") return;
+  console.info(`[${event}]`, JSON.stringify({ event, ...metadata, timestamp: new Date().toISOString() }));
+}
 
 const TELEGRAM_FETCH_TIMEOUT_MS = 8_000;
 const TELEGRAM_DATE_FORMATTER = new Intl.DateTimeFormat("es-MX", {
@@ -523,7 +609,12 @@ function buildPolicyDeskUrl(path: string) {
 function toTelegramDraftState(payloadJson: string): TelegramDraftState | null {
   try {
     const parsed = JSON.parse(payloadJson) as TelegramDraftState;
-    if (!parsed || (parsed.type !== "PAYMENT_CAPTURE" && parsed.type !== "POLICY_CAPTURE")) {
+    if (
+      !parsed ||
+      (parsed.type !== "PAYMENT_CAPTURE" &&
+        parsed.type !== "POLICY_CAPTURE" &&
+        parsed.type !== "QUALITAS_PAYMENT_LINK")
+    ) {
       return null;
     }
     return parsed;
@@ -682,6 +773,44 @@ async function getTelegramChannelByChatId(chatId: string, client?: DbClient) {
       type: "TELEGRAM",
     },
   });
+}
+
+type ActiveTelegramIdentity = {
+  channel: NonNullable<Awaited<ReturnType<typeof getTelegramChannelByChatId>>>;
+  organizationId: string;
+  membershipRole: string;
+  user: { id: string; email: string; name: string; active: boolean };
+};
+
+async function getActiveTelegramIdentityForChat(chatId: string, client?: DbClient): Promise<ActiveTelegramIdentity | null> {
+  const db = client ?? getDb();
+  const channel = await getTelegramChannelByChatId(chatId, db);
+  if (!channel?.isEnabled || channel.telegramChatId !== chatId) return null;
+
+  const memberships = await db.organizationMembership.findMany({
+    where: { userId: channel.userId },
+    select: {
+      organizationId: true,
+      role: true,
+      active: true,
+      organization: { select: { status: true } },
+      user: { select: { id: true, email: true, name: true, active: true } },
+    },
+    take: 2,
+  });
+
+  if (memberships.length !== 1) return null;
+  const membership = memberships[0];
+  if (!membership || !membership.active || membership.organization.status !== "ACTIVE" || !membership.user.active) {
+    return null;
+  }
+
+  return {
+    channel,
+    organizationId: membership.organizationId,
+    membershipRole: membership.role,
+    user: membership.user,
+  };
 }
 
 function parseTelegramIsoDate(value: string) {
@@ -992,7 +1121,11 @@ function parseTelegramDraftState(payloadJson: string): TelegramDraftState | null
   return toTelegramDraftState(payloadJson);
 }
 
-export async function sendTelegramMessage(chatId: string, text: string): Promise<TelegramSendResult> {
+export async function sendTelegramMessage(
+  chatId: string,
+  text: string,
+  replyMarkup?: TelegramInlineKeyboardMarkup,
+): Promise<TelegramSendResult> {
   const token = getTelegramBotToken();
   if (!token) {
     return { ok: false, error: "TELEGRAM_BOT_TOKEN no está configurado." };
@@ -1016,6 +1149,7 @@ export async function sendTelegramMessage(chatId: string, text: string): Promise
         chat_id: chatId,
         text: message.length <= 3900 ? message : `${message.slice(0, 3899)}…`,
         disable_web_page_preview: true,
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
       }),
       signal: controller.signal,
     });
@@ -1041,6 +1175,64 @@ export async function sendTelegramMessage(chatId: string, text: string): Promise
       ok: false,
       error: "No se pudo enviar el mensaje a Telegram.",
     };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function answerTelegramCallbackQuery(
+  callbackQueryId: string,
+  text?: string,
+): Promise<TelegramCallbackResult> {
+  const token = getTelegramBotToken();
+  if (!token) return { ok: false, error: "TELEGRAM_BOT_TOKEN no está configurado." };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TELEGRAM_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ callback_query_id: callbackQueryId, ...(text ? { text } : {}) }),
+      signal: controller.signal,
+    });
+    const payload = (await response.json().catch(() => null)) as { ok?: boolean; description?: string } | null;
+    if (!response.ok || !payload?.ok) {
+      return { ok: false, error: payload?.description ?? `Telegram respondió con estado ${response.status}.` };
+    }
+    return { ok: true };
+  } catch (error) {
+    logError("telegram.answerCallbackQuery", error, { callbackQueryId });
+    return { ok: false, error: "No se pudo confirmar la selección en Telegram." };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function removeTelegramInlineKeyboard(
+  chatId: string,
+  messageId: number,
+): Promise<TelegramCallbackResult> {
+  const token = getTelegramBotToken();
+  if (!token) return { ok: false, error: "TELEGRAM_BOT_TOKEN no está configurado." };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TELEGRAM_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }),
+      signal: controller.signal,
+    });
+    const payload = (await response.json().catch(() => null)) as { ok?: boolean; description?: string } | null;
+    if (!response.ok || !payload?.ok) {
+      return { ok: false, error: payload?.description ?? `Telegram respondió con estado ${response.status}.` };
+    }
+    return { ok: true };
+  } catch (error) {
+    logError("telegram.removeInlineKeyboard", error, { chatId, messageId });
+    return { ok: false, error: "No se pudo actualizar el teclado de Telegram." };
   } finally {
     clearTimeout(timeout);
   }
@@ -2214,6 +2406,576 @@ async function createTelegramPolicyDraftFromPdf(input: {
   };
 }
 
+const QUALITAS_CLIENT_CALLBACK = "qualitas_recipient_client";
+const QUALITAS_AGENT_CALLBACK = "qualitas_recipient_agent";
+
+function buildQualitasRecipientMarkup(state: TelegramQualitasPaymentLinkDraftState): TelegramInlineKeyboardMarkup {
+  const buttons: TelegramInlineKeyboardButton[] = [];
+  if (state.clientEmail) buttons.push({ text: "Cliente", callback_data: QUALITAS_CLIENT_CALLBACK });
+  if (state.agentEmail) buttons.push({ text: "Agente", callback_data: QUALITAS_AGENT_CALLBACK });
+  return { inline_keyboard: [buttons] };
+}
+
+function buildQualitasRecipientPrompt(state: TelegramQualitasPaymentLinkDraftState) {
+  return buildTelegramQualitasRecipientPrompt({
+    clientEmail: state.clientEmail ? maskQualitasEmail(state.clientEmail) : null,
+    agentEmail: state.agentEmail ? maskQualitasEmail(state.agentEmail) : null,
+  });
+}
+
+function normalizeTelegramRecipientText(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "cliente" || normalized === "client") return "CLIENT" as const;
+  if (normalized === "agente" || normalized === "agent") return "AGENT" as const;
+  return null;
+}
+
+async function findAuthorizedQualitasPolicy(input: {
+  identity: ActiveTelegramIdentity;
+  policyNumber?: string;
+  policyId?: string;
+  client?: DbClient;
+}) {
+  const db = input.client ?? getDb();
+  const policy = await db.policy.findFirst({
+    where: {
+      organizationId: input.identity.organizationId,
+      ...(input.policyId ? { id: input.policyId } : { policyNumber: input.policyNumber }),
+      client: {
+        organizationId: input.identity.organizationId,
+        ...(input.identity.membershipRole === "AGENT" ? { portfolioOwnerId: input.identity.user.id } : {}),
+      },
+    },
+    select: {
+      id: true,
+      policyNumber: true,
+      clientId: true,
+      insurerId: true,
+      client: { select: { id: true, fullName: true, email: true, organizationId: true } },
+      insurer: { select: { id: true, name: true, organizationId: true } },
+    },
+  });
+
+  if (
+    !policy ||
+    policy.client.organizationId !== input.identity.organizationId ||
+    policy.insurer.organizationId !== input.identity.organizationId ||
+    !isQualitasInsurerName(policy.insurer.name)
+  ) {
+    return null;
+  }
+
+  return policy;
+}
+
+function buildQualitasDraftState(input: {
+  policy: NonNullable<Awaited<ReturnType<typeof findAuthorizedQualitasPolicy>>>;
+  identity: ActiveTelegramIdentity;
+}): TelegramQualitasPaymentLinkDraftState {
+  const clientEmail = normalizeQualitasEmail(input.policy.client.email);
+  const agentEmail = normalizeQualitasEmail(input.identity.user.email);
+  return {
+    step: "recipient",
+    policyId: input.policy.id,
+    policyNumber: input.policy.policyNumber,
+    clientId: input.policy.client.id,
+    clientName: input.policy.client.fullName,
+    clientEmail,
+    agentUserId: input.identity.user.id,
+    agentEmail,
+  };
+}
+
+async function createTelegramQualitasDraft(input: { chatId: string; argument: string; client?: DbClient }) {
+  const db = input.client ?? getDb();
+  const identity = await getActiveTelegramIdentityForChat(input.chatId, db);
+  if (!identity) {
+    return { ok: false as const, replyText: buildTelegramLinkedChatRequiredMessage() };
+  }
+  if (!isQualitasPaymentLinkEnabled()) {
+    return { ok: false as const, replyText: buildTelegramQualitasUnavailableMessage() };
+  }
+  if (!isTelegramMutationsEnabled(identity.channel)) {
+    return {
+      ok: false as const,
+      replyText: "Los cambios reales por Telegram están desactivados. Actívalos en Configuración > Notificaciones para solicitar el enlace.",
+    };
+  }
+
+  logQualitasEvent("qualitas.payment_link.started", {
+    organizationId: identity.organizationId,
+    userId: identity.user.id,
+  });
+
+  const normalizedArgument = input.argument.trim();
+  const argumentParts = normalizedArgument.split(/\s+/).filter(Boolean);
+  if (argumentParts.length > 1) {
+    return { ok: false as const, replyText: "Usa /pagoqualitas <numero-poliza>." };
+  }
+
+  if (!normalizedArgument) {
+    const draft = await db.$transaction(async (tx) => {
+      await tx.telegramDraft.updateMany({
+        where: {
+          organizationId: identity.organizationId,
+          userId: identity.user.id,
+          channelId: identity.channel.id,
+          type: "QUALITAS_PAYMENT_LINK",
+          status: "COLLECTING",
+        },
+        data: { status: "CANCELLED", cancelledAt: new Date() },
+      });
+      return tx.telegramDraft.create({
+        data: {
+          organizationId: identity.organizationId,
+          userId: identity.user.id,
+          channelId: identity.channel.id,
+          type: "QUALITAS_PAYMENT_LINK",
+          status: "COLLECTING",
+          payloadJson: stringifyTelegramDraftState({
+            type: "QUALITAS_PAYMENT_LINK",
+            qualitas: { step: "policyNumber" },
+          }),
+          expiresAt: new Date(Date.now() + TELEGRAM_DRAFT_TTL_MS),
+        },
+      });
+    });
+    return { ok: true as const, replyText: buildTelegramQualitasPolicyPrompt(), draftId: draft.id };
+  }
+
+  const policy = await findAuthorizedQualitasPolicy({ identity, policyNumber: normalizedArgument, client: db });
+  if (!policy) {
+    return { ok: false as const, replyText: "No encontré una póliza Quálitas autorizada en PolicyDesk." };
+  }
+
+  logQualitasEvent("qualitas.payment_link.policy_verified", {
+    organizationId: identity.organizationId,
+    policyId: policy.id,
+    userId: identity.user.id,
+  });
+
+  const state = buildQualitasDraftState({ policy, identity });
+  if (!state.clientEmail && !state.agentEmail) {
+    return { ok: false as const, replyText: buildTelegramQualitasNoRecipientMessage() };
+  }
+
+  const draft = await db.$transaction(async (tx) => {
+    await tx.telegramDraft.updateMany({
+      where: {
+        organizationId: identity.organizationId,
+        userId: identity.user.id,
+        channelId: identity.channel.id,
+        type: "QUALITAS_PAYMENT_LINK",
+        status: "COLLECTING",
+      },
+      data: { status: "CANCELLED", cancelledAt: new Date() },
+    });
+    return tx.telegramDraft.create({
+      data: {
+        organizationId: identity.organizationId,
+        userId: identity.user.id,
+        channelId: identity.channel.id,
+        type: "QUALITAS_PAYMENT_LINK",
+        status: "COLLECTING",
+        payloadJson: stringifyTelegramDraftState({ type: "QUALITAS_PAYMENT_LINK", qualitas: state }),
+        expiresAt: new Date(Date.now() + TELEGRAM_DRAFT_TTL_MS),
+      },
+    });
+  });
+
+  return {
+    ok: true as const,
+    replyText: buildQualitasRecipientPrompt(state),
+    replyMarkup: buildQualitasRecipientMarkup(state),
+    draftId: draft.id,
+  };
+}
+
+async function continueTelegramQualitasDraftFromText(input: {
+  chatId: string;
+  text: string;
+  draft: { id: string; organizationId: string | null; channelId: string | null; payloadJson: string };
+  client?: DbClient;
+}) {
+  const db = input.client ?? getDb();
+  const identity = await getActiveTelegramIdentityForChat(input.chatId, db);
+  const payload = parseTelegramDraftState(input.draft.payloadJson);
+  if (!identity || !payload?.qualitas || payload.type !== "QUALITAS_PAYMENT_LINK") return null;
+  const state = payload.qualitas;
+
+  if (state.step === "policyNumber") {
+    const policy = await findAuthorizedQualitasPolicy({ identity, policyNumber: input.text.trim(), client: db });
+    if (!policy) {
+      return { handled: true as const, chatId: input.chatId, replyText: "No encontré una póliza Quálitas autorizada en PolicyDesk." };
+    }
+    logQualitasEvent("qualitas.payment_link.policy_verified", {
+      organizationId: identity.organizationId,
+      policyId: policy.id,
+      userId: identity.user.id,
+    });
+    const nextState = buildQualitasDraftState({ policy, identity });
+    await persistTelegramDraftState({
+      organizationId: identity.organizationId,
+      draftId: input.draft.id,
+      state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState },
+      client: db,
+    });
+    if (!nextState.clientEmail && !nextState.agentEmail) {
+      return { handled: true as const, chatId: input.chatId, replyText: buildTelegramQualitasNoRecipientMessage() };
+    }
+    return {
+      handled: true as const,
+      chatId: input.chatId,
+      replyText: buildQualitasRecipientPrompt(nextState),
+      replyMarkup: buildQualitasRecipientMarkup(nextState),
+    };
+  }
+
+  if (state.step === "ready") {
+    return {
+      handled: true as const,
+      chatId: input.chatId,
+      replyText: buildTelegramQualitasConfirmation({
+        policyNumber: state.policyNumber ?? "—",
+        clientName: state.clientName ?? "—",
+        recipientLabel: state.recipient === "AGENT" ? "Agente" : "Cliente",
+        maskedEmail: state.recipientEmail ? maskQualitasEmail(state.recipientEmail) : "***",
+      }),
+    };
+  }
+
+  const recipient = normalizeTelegramRecipientText(input.text);
+  if (!recipient || !state[recipient === "CLIENT" ? "clientEmail" : "agentEmail"]) {
+    return {
+      handled: true as const,
+      chatId: input.chatId,
+      replyText: buildQualitasRecipientPrompt(state),
+      replyMarkup: buildQualitasRecipientMarkup(state),
+    };
+  }
+
+  const recipientEmail = state[recipient === "CLIENT" ? "clientEmail" : "agentEmail"];
+  if (!recipientEmail) return null;
+  const nextState: TelegramQualitasPaymentLinkDraftState = {
+    ...state,
+    step: "ready",
+    recipient,
+    recipientEmail,
+  };
+  await persistTelegramDraftState({
+    organizationId: identity.organizationId,
+    draftId: input.draft.id,
+    state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState },
+    client: db,
+  });
+  logQualitasEvent("qualitas.payment_link.recipient_selected", {
+    organizationId: identity.organizationId,
+    policyId: nextState.policyId,
+    userId: identity.user.id,
+    recipientType: recipient,
+  });
+  return {
+    handled: true as const,
+    chatId: input.chatId,
+    replyText: buildTelegramQualitasConfirmation({
+      policyNumber: nextState.policyNumber ?? "—",
+      clientName: nextState.clientName ?? "—",
+      recipientLabel: recipient === "AGENT" ? "Agente" : "Cliente",
+      maskedEmail: maskQualitasEmail(recipientEmail),
+    }),
+  };
+}
+
+async function processTelegramQualitasCallback(callback: TelegramCallbackQuery, client?: DbClient) {
+  const chat = callback.message?.chat;
+  if (!chat || chat.type !== "private" || callback.from.id !== chat.id || !callback.data) {
+    return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Selección no válida." };
+  }
+  const selectedRecipient =
+    callback.data === QUALITAS_CLIENT_CALLBACK ? "CLIENT" as const :
+    callback.data === QUALITAS_AGENT_CALLBACK ? "AGENT" as const : null;
+  if (!selectedRecipient) {
+    return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Selección no válida." };
+  }
+
+  const db = client ?? getDb();
+  const identity = await getActiveTelegramIdentityForChat(String(chat.id), db);
+  if (!identity) {
+    return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Esta solicitud ya no está disponible." };
+  }
+  const draft = await db.telegramDraft.findFirst({
+    where: {
+      organizationId: identity.organizationId,
+      userId: identity.user.id,
+      channelId: identity.channel.id,
+      type: "QUALITAS_PAYMENT_LINK",
+      status: "COLLECTING",
+      expiresAt: { gt: new Date() },
+    },
+    orderBy: [{ createdAt: "desc" }],
+  });
+  const payload = draft ? parseTelegramDraftState(draft.payloadJson) : null;
+  const state = payload?.type === "QUALITAS_PAYMENT_LINK" ? payload.qualitas : null;
+  if (!draft || !state || state.step !== "recipient") {
+    return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "La selección ya fue procesada o expiró." };
+  }
+
+  const policy = await findAuthorizedQualitasPolicy({ identity, policyId: state.policyId, client: db });
+  if (!policy) {
+    return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "La póliza ya no está disponible." };
+  }
+  const currentState = buildQualitasDraftState({ policy, identity });
+  const selectedEmail = selectedRecipient === "CLIENT" ? currentState.clientEmail : currentState.agentEmail;
+  if (!selectedEmail) {
+    return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Ese correo ya no está disponible." };
+  }
+
+  const nextState: TelegramQualitasPaymentLinkDraftState = {
+    ...currentState,
+    step: "ready",
+    recipient: selectedRecipient,
+    recipientEmail: selectedEmail,
+  };
+  const updated = await db.telegramDraft.updateMany({
+    where: {
+      id: draft.id,
+      organizationId: identity.organizationId,
+      userId: identity.user.id,
+      channelId: identity.channel.id,
+      type: "QUALITAS_PAYMENT_LINK",
+      status: "COLLECTING",
+    },
+    data: { payloadJson: stringifyTelegramDraftState({ type: "QUALITAS_PAYMENT_LINK", qualitas: nextState }), updatedAt: new Date() },
+  });
+  if (updated.count !== 1) {
+    return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "La selección ya fue procesada." };
+  }
+
+  logQualitasEvent("qualitas.payment_link.recipient_selected", {
+    organizationId: identity.organizationId,
+    policyId: nextState.policyId,
+    userId: identity.user.id,
+    recipientType: selectedRecipient,
+  });
+
+  return {
+    handled: true as const,
+    chatId: String(chat.id),
+    callbackQueryId: callback.id,
+    callbackAnswerText: "Destinatario seleccionado.",
+    replyText: buildTelegramQualitasConfirmation({
+      policyNumber: nextState.policyNumber ?? "—",
+      clientName: nextState.clientName ?? "—",
+      recipientLabel: selectedRecipient === "AGENT" ? "Agente" : "Cliente",
+      maskedEmail: maskQualitasEmail(selectedEmail),
+    }),
+    removeReplyMarkup: true,
+  };
+}
+
+function isQualitasPreparedPaymentLink(
+  value: QualitasPreparedPaymentLink | { outcome: QualitasPaymentLinkOutcome },
+): value is QualitasPreparedPaymentLink {
+  return "transportReady" in value;
+}
+
+function qualitasAuditResult(outcome: QualitasPaymentLinkOutcome) {
+  return outcome === "SUCCESS" ? "SUCCESS" : outcome === "UNCERTAIN" ? "UNCERTAIN" : "FAILED";
+}
+
+async function finalizeQualitasTelegramDraft(input: {
+  draftId: string;
+  organizationId: string;
+  policyId: string;
+  clientId: string;
+  userId: string;
+  recipient: "CLIENT" | "AGENT";
+  outcome: QualitasPaymentLinkOutcome;
+  db: DbClient;
+}) {
+  const status = input.outcome === "SUCCESS" ? "CONFIRMED" : input.outcome === "UNCERTAIN" ? "UNCERTAIN" : "FAILED";
+  await input.db.$transaction(async (tx) => {
+    await tx.telegramDraft.update({
+      where: { id: input.draftId, organizationId: input.organizationId },
+      data: {
+        status,
+        ...(status === "CONFIRMED" ? { confirmedAt: new Date() } : {}),
+      },
+    });
+    await writeActivityLog({
+      organizationId: input.organizationId,
+      entityType: "Policy",
+      entityId: input.policyId,
+      action: "QUALITAS_PAYMENT_LINK_REQUESTED",
+      newValue: {
+        draftId: input.draftId,
+        clientId: input.clientId,
+        recipientType: input.recipient,
+        result: qualitasAuditResult(input.outcome),
+      },
+      userId: input.userId,
+      db: tx,
+    });
+  });
+}
+
+async function confirmQualitasTelegramDraft(input: {
+  chatId: string;
+  draft: { id: string; organizationId: string | null; userId: string; channelId: string | null; payloadJson: string; expiresAt: Date };
+  client?: DbClient;
+}) {
+  const startedAt = Date.now();
+  const db = input.client ?? getDb();
+  const identity = await getActiveTelegramIdentityForChat(input.chatId, db);
+  const payload = parseTelegramDraftState(input.draft.payloadJson);
+  const state = payload?.type === "QUALITAS_PAYMENT_LINK" ? payload.qualitas : null;
+  if (
+    !identity ||
+    input.draft.organizationId !== identity.organizationId ||
+    input.draft.userId !== identity.user.id ||
+    input.draft.channelId !== identity.channel.id ||
+    input.draft.expiresAt <= new Date() ||
+    !state
+  ) {
+    return { ok: false as const, replyText: "No hay ningún borrador activo para confirmar." };
+  }
+  if (!isQualitasPaymentLinkEnabled()) {
+    return { ok: false as const, replyText: buildTelegramQualitasUnavailableMessage() };
+  }
+  if (!isTelegramMutationsEnabled(identity.channel)) {
+    return { ok: false as const, replyText: "Los cambios reales por Telegram están desactivados. Actívalos en Configuración > Notificaciones para solicitar el enlace." };
+  }
+  if (state.step !== "ready" || !state.policyId || !state.clientId || !state.policyNumber || !state.recipient || !state.recipientEmail) {
+    return { ok: false as const, replyText: "La solicitud de enlace todavía no está completa." };
+  }
+
+  const policy = await findAuthorizedQualitasPolicy({ identity, policyId: state.policyId, client: db });
+  const currentClientEmail = normalizeQualitasEmail(policy?.client.email);
+  const currentAgentEmail = normalizeQualitasEmail(identity.user.email);
+  const currentRecipientEmail = state.recipient === "CLIENT" ? currentClientEmail : currentAgentEmail;
+  if (
+    !policy ||
+    policy.client.id !== state.clientId ||
+    policy.policyNumber !== state.policyNumber ||
+    state.agentUserId !== identity.user.id ||
+    currentRecipientEmail !== state.recipientEmail
+  ) {
+    const refreshedState = policy
+      ? { ...buildQualitasDraftState({ policy, identity }), step: "recipient" as const }
+      : { ...state, step: "recipient" as const };
+    await persistTelegramDraftState({
+      organizationId: identity.organizationId,
+      draftId: input.draft.id,
+      state: { type: "QUALITAS_PAYMENT_LINK", qualitas: refreshedState },
+      client: db,
+    });
+    return { ok: false as const, replyText: "El correo cambió desde que preparaste la solicitud.\nSelecciona nuevamente el destinatario." };
+  }
+
+  const limits = await Promise.all([
+    checkDistributedRateLimit(`telegram:qualitas:user:${securityFingerprint(identity.user.id)}`, { ...TELEGRAM_QUALITAS_RATE_LIMITS.user, requireDistributed: true }),
+    checkDistributedRateLimit(`telegram:qualitas:organization:${securityFingerprint(identity.organizationId)}`, { ...TELEGRAM_QUALITAS_RATE_LIMITS.organization, requireDistributed: true }),
+    checkDistributedRateLimit(`telegram:qualitas:policy:${securityFingerprint(state.policyId)}`, { ...TELEGRAM_QUALITAS_RATE_LIMITS.policy, requireDistributed: true }),
+  ]);
+  if (limits.some((limit) => !limit.allowed)) {
+    logQualitasEvent("qualitas.payment_link.failed", {
+      organizationId: identity.organizationId,
+      policyId: state.policyId,
+      userId: identity.user.id,
+      recipientType: state.recipient,
+      providerResult: "RATE_LIMITED",
+      durationMs: Date.now() - startedAt,
+    });
+    return { ok: false as const, replyText: buildTelegramQualitasOutcomeMessage("RATE_LIMITED") };
+  }
+
+  const claimed = await db.telegramDraft.updateMany({
+    where: {
+      id: input.draft.id,
+      organizationId: identity.organizationId,
+      userId: identity.user.id,
+      channelId: identity.channel.id,
+      type: "QUALITAS_PAYMENT_LINK",
+      status: "COLLECTING",
+      expiresAt: { gt: new Date() },
+    },
+    data: { status: "PROCESSING", updatedAt: new Date() },
+  });
+  if (claimed.count !== 1) {
+    return { ok: false as const, replyText: "Esta solicitud ya fue procesada o está siendo procesada." };
+  }
+
+  logQualitasEvent("qualitas.payment_link.confirmed", {
+    organizationId: identity.organizationId,
+    policyId: state.policyId,
+    userId: identity.user.id,
+    recipientType: state.recipient,
+  });
+
+  let outcome: QualitasPaymentLinkOutcome = "UNEXPECTED_RESPONSE";
+  try {
+    const prepared = await prepareQualitasPaymentLink({ policyNumber: state.policyNumber, recipientEmail: state.recipientEmail });
+    if (isQualitasPreparedPaymentLink(prepared)) {
+      outcome = (await requestQualitasPaymentLink(prepared)).outcome;
+    } else {
+      outcome = prepared.outcome;
+    }
+  } catch (error) {
+    logError("telegram.confirmQualitasPaymentLink", error, { draftId: input.draft.id });
+    outcome = "UNEXPECTED_RESPONSE";
+  }
+
+  const outcomeEvent = outcome === "SUCCESS"
+    ? "qualitas.payment_link.succeeded"
+    : outcome === "UNCERTAIN"
+      ? "qualitas.payment_link.uncertain"
+      : "qualitas.payment_link.failed";
+  logQualitasEvent(outcomeEvent, {
+    organizationId: identity.organizationId,
+    policyId: state.policyId,
+    userId: identity.user.id,
+    recipientType: state.recipient,
+    providerResult: outcome,
+    durationMs: Date.now() - startedAt,
+  });
+
+  try {
+    await finalizeQualitasTelegramDraft({
+      draftId: input.draft.id,
+      organizationId: identity.organizationId,
+      policyId: state.policyId,
+      clientId: state.clientId,
+      userId: identity.user.id,
+      recipient: state.recipient,
+      outcome,
+      db,
+    });
+  } catch (error) {
+    logError("telegram.finalizeQualitasPaymentLink", error, { draftId: input.draft.id });
+    logQualitasEvent("qualitas.payment_link.uncertain", {
+      organizationId: identity.organizationId,
+      policyId: state.policyId,
+      userId: identity.user.id,
+      recipientType: state.recipient,
+      providerResult: "UNCERTAIN",
+      durationMs: Date.now() - startedAt,
+    });
+    return { ok: false as const, replyText: buildTelegramQualitasOutcomeMessage("UNCERTAIN") };
+  }
+
+  if (outcome === "SUCCESS") {
+    return {
+      ok: true as const,
+      replyText: buildTelegramQualitasSuccess({
+        policyNumber: state.policyNumber,
+        recipientLabel: state.recipient === "AGENT" ? "Agente" : "Cliente",
+        maskedEmail: maskQualitasEmail(state.recipientEmail),
+      }),
+    };
+  }
+  return { ok: false as const, replyText: buildTelegramQualitasOutcomeMessage(outcome) };
+}
+
 async function confirmTelegramDraft(input: {
   chatId: string;
   client?: DbClient;
@@ -2240,6 +3002,10 @@ async function confirmTelegramDraft(input: {
       ok: false as const,
       replyText: "El borrador está dañado. Cancélalo y vuelve a intentarlo.",
     };
+  }
+
+  if (payload.type === "QUALITAS_PAYMENT_LINK") {
+    return confirmQualitasTelegramDraft({ chatId: input.chatId, draft });
   }
 
   if (draft.type === "PAYMENT_CAPTURE") {
@@ -2411,7 +3177,9 @@ async function cancelTelegramDraft(input: {
 
   return {
     ok: true as const,
-    replyText: buildTelegramDraftCancelledMessage(draft.type === "PAYMENT_CAPTURE" ? "Pago" : "Póliza"),
+    replyText: buildTelegramDraftCancelledMessage(
+      draft.type === "PAYMENT_CAPTURE" ? "Pago" : draft.type === "QUALITAS_PAYMENT_LINK" ? "Solicitud Quálitas" : "Póliza",
+    ),
   };
 }
 
@@ -2436,6 +3204,10 @@ async function continueTelegramDraftFromMessage(input: {
 
   const text = input.text.trim();
   if (!text) return null;
+
+  if (payload.type === "QUALITAS_PAYMENT_LINK") {
+    return continueTelegramQualitasDraftFromText({ chatId: input.chatId, text, draft, client: db });
+  }
 
   if (payload.type === "PAYMENT_CAPTURE") {
     const state = buildPaymentDraftStateFromInput(payload.payment ?? {});
@@ -3082,6 +3854,19 @@ export async function createAndDeliverTelegramNotificationEvent(input: {
 export async function processTelegramWebhookUpdate(
   update: TelegramWebhookUpdate,
 ): Promise<TelegramWebhookProcessResult> {
+  if (update.callback_query) {
+    try {
+      return await processTelegramQualitasCallback(update.callback_query);
+    } catch (error) {
+      logError("telegram.processCallbackQuery", error, { updateId: update.update_id });
+      return {
+        handled: true,
+        callbackQueryId: update.callback_query.id,
+        callbackAnswerText: "No se pudo procesar esta selección.",
+      };
+    }
+  }
+
   const message = update.message;
   if (!message?.text && !message?.document) {
     return { handled: false };
@@ -3209,6 +3994,19 @@ export async function processTelegramWebhookUpdate(
           handled: true,
           chatId,
           replyText: result.replyText,
+        };
+      }
+      case "pagoqualitas": {
+        const result = await createTelegramQualitasDraft({
+          chatId,
+          argument: command.argument ?? "",
+        });
+        return {
+          handled: true,
+          chatId,
+          replyText: result.replyText,
+          replyMarkup: result.replyMarkup,
+          draftId: result.draftId,
         };
       }
       case "vencidos": {
