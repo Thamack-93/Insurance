@@ -143,7 +143,7 @@ export function normalizeQualitasProviderOutcome(input: {
   if (input.timedOut) return input.finalSubmission ? "UNCERTAIN" : "TIMEOUT";
   if (input.redirectedToUnexpectedHost) return "QUALITAS_FLOW_CHANGED";
 
-  const text = input.bodyText?.toLowerCase() ?? "";
+  const text = providerSignalText(input.bodyText);
   if (/c[oó]digo\s*:\s*0\b/.test(text)) return "SUCCESS";
   if (/99991|otro link de pago en curso/.test(text)) return "UNCERTAIN";
   if (input.status === 429 || /too many|rate limit|demasiadas solicitudes/.test(text)) return "RATE_LIMITED";
@@ -203,7 +203,18 @@ function findFormContaining(html: string, fieldName: string) {
 }
 
 function visibleHtmlText(value: string) {
-  return value.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return value
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<template[\s\S]*?<\/template>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function providerSignalText(value: string | null | undefined) {
+  return decodeHtml(visibleHtmlText(value ?? "")).toLowerCase();
 }
 
 function findPagarAhoraRequest(html: string, baseUrl: string) {
