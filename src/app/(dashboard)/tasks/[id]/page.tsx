@@ -14,19 +14,9 @@ import { getDb } from "@/lib/db";
 import { daysSince, daysUntil, formatDate } from "@/lib/dates";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
-import { statusLabel } from "@/lib/status";
+import { priorityLabel, statusLabel } from "@/lib/status";
+import { documentTypeLabel, workItemTypeLabel } from "@/lib/ui-labels";
 import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
-
-const workItemTypeLabels: Record<string, string> = {
-  GENERAL: "General",
-  CLAIM: "Siniestro",
-  QUOTE: "Cotización",
-  RENEWAL: "Renovación",
-  PAYMENT: "Cobranza",
-  DOCUMENT: "Documento",
-  COMMISSION: "Comisión",
-  OTHER: "Otro",
-};
 
 export default async function WorkItemDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -97,7 +87,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
           />
           <MetricCard
             title="Prioridad"
-            value={workItem.priority}
+            value={priorityLabel(workItem.priority)}
             description="Nivel de urgencia asignado"
             icon={ClipboardList}
             tone={workItem.priority === "URGENT" ? "rose" : workItem.priority === "HIGH" ? "amber" : "blue"}
@@ -111,7 +101,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
           />
           <MetricCard
             title="Tipo"
-            value={workItemTypeLabels[workItem.taskType ?? "GENERAL"] ?? workItem.taskType ?? "GENERAL"}
+            value={workItemTypeLabel(workItem.taskType)}
             description="Clasificación operativa"
             icon={FileText}
             tone="emerald"
@@ -127,7 +117,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
                   <StatusBadge status={workItem.status} entity="workItem" />
                 </div>
                 <Badge variant="outline" className="rounded-full">
-                  {workItemTypeLabels[workItem.taskType ?? "GENERAL"] ?? workItem.taskType ?? "GENERAL"}
+                  {workItemTypeLabel(workItem.taskType)}
                 </Badge>
               </div>
 
@@ -223,7 +213,7 @@ export default async function WorkItemDetailPage({ params }: { params: Promise<{
                   {documents.map((document) => (
                     <TableRow key={document.id}>
                       <TableCell className="font-medium">{document.fileName}</TableCell>
-                      <TableCell>{document.documentType}</TableCell>
+                      <TableCell>{documentTypeLabel(document.documentType)}</TableCell>
                       <TableCell>{formatDate(document.uploadedAt)}</TableCell>
                     </TableRow>
                   ))}

@@ -15,16 +15,21 @@ import { DeleteReceiptButton } from "@/components/receipts/delete-receipt-button
 import { CancelReceiptButton } from "@/components/receipts/cancel-receipt-button";
 import { RehabilitateReceiptButton } from "@/components/receipts/rehabilitate-receipt-button";
 import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
+import { QuickPaymentDialog } from "@/components/payments/quick-payment-dialog";
 import { getDb } from "@/lib/db";
 import { receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import { policyTypeLabel, statusLabel } from "@/lib/status";
+import { documentTypeLabel, paymentMethodLabel } from "@/lib/ui-labels";
 import { isPaidWithinTolerance } from "@/lib/receipt-reconciliation";
+import { normalizeReturnTo } from "@/lib/return-to";
 
-export default async function ReceiptDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ReceiptDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
+  const query = (await searchParams) ?? {};
+  const returnTo = normalizeReturnTo(typeof query.returnTo === "string" ? query.returnTo : undefined, "/receipts");
   const scope = await requireOrganizationPortfolioReadScope();
   const isAdmin = scope.membershipRole !== "AGENT";
   const db = getDb();
@@ -77,6 +82,21 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
           actions={
             <>
               <NoraContextButton context={{ type: "receipt", id: receipt.id }} label="Registrar con Nora" />
+              {receipt.status === "PENDING" || receipt.status === "OVERDUE" ? (
+                <QuickPaymentDialog
+                  receipt={{
+                    id: receipt.id,
+                    receiptNumber: receipt.receiptNumber,
+                    originLabel: getReceiptOriginLabel(receipt),
+                    amount: toNumber(receipt.amount),
+                    currency: receipt.currency,
+                    dueDate: receipt.dueDate.toISOString(),
+                    client: { fullName: receipt.client.fullName },
+                    policy: { policyNumber: receipt.policy.policyNumber },
+                    endorsement: receipt.endorsement ? { endorsementNumber: receipt.endorsement.endorsementNumber, reference: receipt.endorsement.reference } : undefined,
+                  }}
+                />
+              ) : null}
               <Button asChild variant="outline" className="bg-card/70">
                 <Link href={`/receipts/${receipt.id}/edit`}>Editar recibo</Link>
               </Button>
@@ -93,7 +113,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
               ) : null}
               {isAdmin ? <DeleteReceiptButton id={receipt.id} receiptNumber={receipt.receiptNumber} /> : null}
               <Button asChild variant="outline" className="bg-card/70">
-                <Link href="/receipts">
+                <Link href={returnTo}>
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
                 </Link>
@@ -195,7 +215,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                 </div>
                 <div>
                   <p className="text-muted-foreground">Método de pago</p>
-                  <p className="font-medium">{receipt.paymentMethod ?? "Sin capturar"}</p>
+                  <p className="font-medium">{paymentMethodLabel(receipt.paymentMethod)}</p>
                 </div>
               </div>
 
@@ -231,7 +251,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                       <TableCell className="font-medium">
                         {formatCurrency(payment.amount, payment.currency)}
                       </TableCell>
-                      <TableCell>{payment.paymentMethod ?? "—"}</TableCell>
+                      <TableCell>{paymentMethodLabel(payment.paymentMethod)}</TableCell>
                       <TableCell className="font-mono text-xs">
                         {payment.reference ?? "—"}
                       </TableCell>
@@ -312,7 +332,7 @@ export default async function ReceiptDetailPage({ params }: { params: Promise<{ 
                   <div key={document.id} className="px-4 py-4">
                     <p className="font-medium text-foreground">{document.fileName}</p>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {document.documentType} · {formatDate(document.uploadedAt)}
+                      {documentTypeLabel(document.documentType)} · {formatDate(document.uploadedAt)}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">{document.mimeType}</p>
                   </div>

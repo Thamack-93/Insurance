@@ -26,6 +26,8 @@ import {
   requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
 import { buildTableHref } from "@/lib/table-query";
+import { paymentMethodLabel, dataQualityReasonLabel } from "@/lib/ui-labels";
+import { appendReturnTo } from "@/lib/return-to";
 import {
   buildOpenReceiptBaseWhere,
   buildReceiptListOrderBy,
@@ -57,6 +59,7 @@ export default async function ReceiptsPage({
     page: null,
     tab: "cobrar",
   });
+  const returnTo = buildTableHref("/receipts", params, {}, { resetPage: false });
 
   const baseWhere = buildOpenReceiptBaseWhere(scope.portfolioOwnerId, scope.organizationId);
   const scopedReceiptWhere = receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
@@ -276,7 +279,7 @@ export default async function ReceiptsPage({
               </div>
             ) : (
               <div className="px-3 py-3">
-                <CollectableReceipts receipts={collectableRows} />
+                <CollectableReceipts receipts={collectableRows} returnTo={returnTo} />
                 <Pagination
                   page={page}
                   pageSize={PAGE_SIZE}
@@ -315,7 +318,7 @@ export default async function ReceiptsPage({
                     { label: "Póliza", value: payment.policy.policyNumber },
                     { label: "Origen", value: getReceiptOriginLabel(payment.receipt) },
                     { label: "Fecha", value: formatDate(payment.paidDate) },
-                    { label: "Método", value: payment.paymentMethod ?? "Sin método" },
+                    { label: "Método", value: paymentMethodLabel(payment.paymentMethod) },
                     {
                       label: "Monto",
                       value: formatCurrency(payment.amount, payment.currency),
@@ -354,7 +357,7 @@ export default async function ReceiptsPage({
                   {safePaymentHistory.map((payment) => (
                     <TableRow key={payment.id}>
                       <TableCell className="font-medium">
-                        <Link href={`/receipts/${payment.receipt.id}`} className="hover:text-primary">
+                        <Link href={appendReturnTo(`/receipts/${payment.receipt.id}`, returnTo)} className="hover:text-primary">
                           {payment.receipt.receiptNumber}
                         </Link>
                       </TableCell>
@@ -378,7 +381,7 @@ export default async function ReceiptsPage({
                         )}
                       </TableCell>
                       <TableCell>{formatDate(payment.paidDate)}</TableCell>
-                      <TableCell>{payment.paymentMethod ?? "Sin método"}</TableCell>
+                      <TableCell>{paymentMethodLabel(payment.paymentMethod)}</TableCell>
                       <TableCell className="text-right font-medium">
                         {formatCurrency(payment.amount, payment.currency)}
                       </TableCell>
@@ -432,7 +435,7 @@ export default async function ReceiptsPage({
                         : "Póliza base",
                     },
                     { label: "Pago", value: receipt.paidDate ? formatDate(receipt.paidDate) : "—" },
-                    { label: "Método", value: receipt.paymentMethod ?? "Sin método" },
+                    { label: "Método", value: paymentMethodLabel(receipt.paymentMethod) },
                     {
                       label: "Monto",
                       value: formatCurrency(receipt.amount, receipt.currency),
@@ -456,7 +459,7 @@ export default async function ReceiptsPage({
                   {paidThisMonth.slice(0, 30).map((receipt) => (
                     <TableRow key={receipt.id}>
                       <TableCell className="font-medium">
-                        <Link href={`/receipts/${receipt.id}`} className="hover:text-primary">
+                        <Link href={appendReturnTo(`/receipts/${receipt.id}`, returnTo)} className="hover:text-primary">
                           {receipt.receiptNumber}
                         </Link>
                       </TableCell>
@@ -474,7 +477,7 @@ export default async function ReceiptsPage({
                         )}
                       </TableCell>
                       <TableCell>{receipt.paidDate ? formatDate(receipt.paidDate) : "—"}</TableCell>
-                      <TableCell>{receipt.paymentMethod ?? "Sin método"}</TableCell>
+                      <TableCell>{paymentMethodLabel(receipt.paymentMethod)}</TableCell>
                       <TableCell className="text-right font-medium">
                         {formatCurrency(receipt.amount, receipt.currency)}
                       </TableCell>
@@ -520,7 +523,7 @@ export default async function ReceiptsPage({
                       subtitle: receipt.client.fullName,
                       fields: [
                         { label: "Póliza", value: policy.policyNumber },
-                        { label: "Motivo", value: issue.reason },
+                          { label: "Motivo", value: dataQualityReasonLabel(issue.reason) },
                         {
                           label: "Recibo",
                           value: formatCurrency(receipt.amount, receipt.currency),
@@ -557,7 +560,7 @@ export default async function ReceiptsPage({
                     return (
                       <TableRow key={issue.id}>
                         <TableCell>
-                          <Link href={`/receipts/${receipt.id}`} className="font-medium hover:text-primary">
+                          <Link href={appendReturnTo(`/receipts/${receipt.id}`, returnTo)} className="font-medium hover:text-primary">
                             {receipt.receiptNumber}
                           </Link>
                         </TableCell>
@@ -568,7 +571,7 @@ export default async function ReceiptsPage({
                         </TableCell>
                         <TableCell>{receipt.client.fullName}</TableCell>
                         <TableCell className="max-w-xs text-xs text-muted-foreground">
-                          {issue.reason}
+                          {dataQualityReasonLabel(issue.reason)}
                         </TableCell>
                         <TableCell className="text-right">
                           {formatCurrency(receipt.amount, receipt.currency)}

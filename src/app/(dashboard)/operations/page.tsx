@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Prisma } from "@/generated/prisma/client";
 import { AlertTriangle, ArrowRight, CalendarClock, CheckCircle2, ClipboardList, Plus, ShieldCheck } from "@/components/icons";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { PageHeader } from "@/components/layout/page-header";
@@ -15,13 +16,18 @@ import { claimOperationalWhere, requireOrganizationPortfolioReadScope } from "@/
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 import { getWorkItems, OPEN_WORK_ITEM_STATUSES, type WorkQueueItem } from "@/lib/work-queue";
 import { buildOperationalWorkItemPresentation, type OperationalRenewalState } from "@/lib/operations-presentation";
-import { readTablePage } from "@/lib/table-query";
+import { readAllowedTableParam, readTablePage, readTableParam } from "@/lib/table-query";
 import { cn } from "@/lib/utils";
 import { getWorkItemHref } from "@/lib/work-item-navigation";
 import { RenewalBoard } from "@/components/renewals/renewal-board";
 import { getRenewalBoardOwners, loadRenewalBoard } from "@/lib/renewal-board";
 import { readRenewalBoardFilters } from "@/lib/renewal-board.logic";
 import { Badge } from "@/components/ui/badge";
+import { TableToolbar } from "@/components/tables/table-toolbar";
+import { PRIORITIES, WORK_ITEM_TYPES } from "@/lib/domain-values";
+import { workItemTypeLabel } from "@/lib/ui-labels";
+import { appendReturnTo } from "@/lib/return-to";
+import { buildCanonicalHref } from "@/lib/navigation-redirects";
 
 type OperationsView = "all" | "pending" | "renewals" | "renewal-board" | "claims";
 
@@ -55,8 +61,8 @@ const operationalStateLabels: Record<OperationalRenewalState, string> = {
   PENDIENTE: "Pendiente",
 };
 
-function WorkItemRow({ item }: { item: WorkQueueItem }) {
-  const href = getWorkItemHref(item);
+function WorkItemRow({ item, returnTo }: { item: WorkQueueItem; returnTo?: string }) {
+  const href = appendReturnTo(getWorkItemHref(item), returnTo);
   const clientLabel = item.client?.fullName ?? "Sin cliente asociado";
   const policyType = item.policy ? policyTypeLabel(item.policy.policyType) : "Tipo no disponible";
   const insurerLabel = item.insurer?.name ?? "Sin aseguradora asociada";
@@ -114,7 +120,7 @@ function WorkItemRow({ item }: { item: WorkQueueItem }) {
   );
 }
 
-function WorkItemColumn({ title, count, items, tone, viewAllHref }: { title: string; count: number; items: WorkQueueItem[]; tone: string; viewAllHref?: string }) {
+function WorkItemColumn({ title, count, items, tone, viewAllHref, returnTo }: { title: string; count: number; items: WorkQueueItem[]; tone: string; viewAllHref?: string; returnTo?: string }) {
   return (
     <Card size="sm" className="gap-0 py-0">
       <CardHeader className="border-b py-3">
@@ -127,7 +133,7 @@ function WorkItemColumn({ title, count, items, tone, viewAllHref }: { title: str
         </CardTitle>
       </CardHeader>
       <CardContent className="px-0">
-        {items.length ? <ul>{items.map((item) => <WorkItemRow key={item.id} item={item} />)}</ul> : (
+        {items.length ? <ul>{items.map((item) => <WorkItemRow key={item.id} item={item} returnTo={returnTo} />)}</ul> : (
           <p className="px-4 py-8 text-center text-sm text-muted-foreground">Nada pendiente en este grupo.</p>
         )}
       </CardContent>
@@ -143,6 +149,9 @@ export default async function OperationsPage({
   const params = (await searchParams) ?? {};
   const view = readView(typeof params.view === "string" ? params.view : undefined);
   const page = readTablePage(params);
+  const query = view === "pending" || view === "renewals" || view === "claims" ? readTableParam(params, "q")?.trim() : undefined;
+  const priority = view === "pending" ? readAllowedTableParam(params, "priority", PRIORITIES) : undefined;
+  const workItemType = view === "pending" ? readAllowedTableParam(params, "workItemType", WORK_ITEM_TYPES) : undefined;
   const scope = await requireOrganizationPortfolioReadScope();
   const db = getDb();
   const today = businessToday();
@@ -158,15 +167,48 @@ export default async function OperationsPage({
         ])
       : [null, []];
 
-  const [workItems, renewalPolicies, claims] = await Promise.all([
-    getWorkItems({ organizationId: scope.organizationId, statuses: OPEN_WORK_ITEM_STATUSES, portfolioOwnerId: scope.portfolioOwnerId, limit: 100 }),
-    loadEligibleRenewalPolicies({ endDate: { lte: nextThirty } }, scope.portfolioOwnerId),
+  const claimWhere: Prisma.ClaimWhereInput = {
+    AND: [
+      claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
+      { status: { notIn: ["RESOLVED", "CANCELLED"] } },
+      ...(query && view === "claims" ? [{
+        OR: [
+          { folio: { contains: query } },
+          { claimType: { contains: query } },
+          { client: { fullName: { contains: query } } },
+          { policy: { policyNumber: { contains: query } } },
+        ],
+      }] : []),
+    ],
+  };
+  const [workItems, renewalPolicies, claims, claimTotal] = await Promise.all([
+    getWorkItems({
+      organizationId: scope.organizationId,
+      statuses: OPEN_WORK_ITEM_STATUSES,
+      portfolioOwnerId: scope.portfolioOwnerId,
+      query: view === "pending" ? query : undefined,
+      priorities: priority ? [priority] : undefined,
+      workItemTypes: workItemType ? [workItemType] : undefined,
+      limit: view === "pending" ? undefined : 100,
+    }),
+    loadEligibleRenewalPolicies({
+      endDate: { lte: nextThirty },
+      ...(query && view === "renewals" ? {
+        OR: [
+          { policyNumber: { contains: query } },
+          { client: { fullName: { contains: query } } },
+          { insurer: { name: { contains: query } } },
+        ],
+      } : {}),
+    }, scope.portfolioOwnerId, scope.organizationId),
     db.claim.findMany({
-      where: { AND: [claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId), { status: { notIn: ["RESOLVED", "CANCELLED"] } }] },
+      where: claimWhere,
       select: { id: true, folio: true, claimType: true, status: true, incidentDate: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } },
       orderBy: [{ reportedDate: "desc" }, { id: "asc" }],
-      take: 50,
+      take: view === "claims" ? 25 : 50,
+      skip: view === "claims" ? (page - 1) * 25 : 0,
     }),
+    db.claim.count({ where: claimWhere }),
   ]);
 
   const overdue = workItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate) < today);
@@ -202,6 +244,13 @@ export default async function OperationsPage({
       description: "Casos abiertos que requieren seguimiento operativo.",
     },
   }[view];
+  const pendingFilterOptions = [
+    { value: "TASK", label: workItemTypeLabel("TASK") },
+    { value: "NOTIFICATION", label: workItemTypeLabel("NOTIFICATION") },
+  ];
+  const renewalSearchParams = { view: "renewals", q: query };
+  const claimSearchParams = { view: "claims", q: query };
+  const returnTo = buildCanonicalHref("/operations", params);
 
   return (
     <div className="space-y-5">
@@ -254,13 +303,13 @@ export default async function OperationsPage({
             ))}
           </section>
           <div className="grid gap-4 lg:grid-cols-2">
-            <WorkItemColumn title="Requieren atención" count={overdue.length + dueToday.length} items={[...overdue, ...dueToday].slice(0, 8)} tone="text-destructive" viewAllHref="/operations?view=pending" />
+            <WorkItemColumn title="Requieren atención" count={overdue.length + dueToday.length} items={[...overdue, ...dueToday].slice(0, 8)} tone="text-destructive" viewAllHref="/operations?view=pending" returnTo={returnTo} />
             <Card size="sm" className="gap-0 py-0">
               <CardHeader className="border-b py-3"><CardTitle>Renovaciones pendientes</CardTitle></CardHeader>
               <CardContent className="px-0">
                 {renewals.slice(0, 8).map((policy) => (
                   <div key={policy.id} className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b px-4 py-2.5 last:border-b-0">
-                    <Link href={`/policies/${policy.id}`} className="min-w-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <Link href={appendReturnTo(`/policies/${policy.id}`, returnTo)} className="min-w-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                       <p className="truncate text-sm font-medium">{policy.client.fullName}</p>
                       <p className="truncate font-mono text-xs text-muted-foreground">{policy.policyNumber} · {policy.insurer.name}</p>
                     </Link>
@@ -274,11 +323,22 @@ export default async function OperationsPage({
       ) : null}
 
       {view === "pending" ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <WorkItemColumn title="Atrasados" count={overdue.length} items={overdue} tone="text-destructive" />
-          <WorkItemColumn title="Hoy" count={dueToday.length} items={dueToday} tone="text-amber-700 dark:text-amber-300" />
-          <WorkItemColumn title="Próximos 7 días" count={upcoming.length} items={upcoming} tone="text-blue-700 dark:text-blue-300" />
-          <WorkItemColumn title="Por hacer" count={unscheduled.length} items={unscheduled} tone="text-foreground" />
+        <div className="space-y-4">
+          <TableToolbar
+            searchPlaceholder="Buscar pendiente, cliente, póliza o recibo..."
+            filters={[
+              { key: "priority", label: "Prioridad", options: PRIORITIES.map((value) => ({ value, label: value === "LOW" ? "Baja" : value === "MEDIUM" ? "Media" : value === "HIGH" ? "Alta" : "Urgente" })) },
+              { key: "workItemType", label: "Tipo", options: pendingFilterOptions },
+            ]}
+            resultCount={workItems.length}
+            resultNoun={["pendiente", "pendientes"]}
+          />
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <WorkItemColumn title="Atrasados" count={overdue.length} items={overdue} tone="text-destructive" returnTo={returnTo} />
+            <WorkItemColumn title="Hoy" count={dueToday.length} items={dueToday} tone="text-amber-700 dark:text-amber-300" returnTo={returnTo} />
+            <WorkItemColumn title="Próximos 7 días" count={upcoming.length} items={upcoming} tone="text-blue-700 dark:text-blue-300" returnTo={returnTo} />
+            <WorkItemColumn title="Por hacer" count={unscheduled.length} items={unscheduled} tone="text-foreground" returnTo={returnTo} />
+          </div>
         </div>
       ) : null}
 
@@ -291,6 +351,7 @@ export default async function OperationsPage({
           <Card className="gap-0 py-0">
             <CardHeader className="border-b py-4"><CardTitle className="flex items-center gap-2"><CalendarClock className="size-4" />Renovaciones pendientes</CardTitle></CardHeader>
             <CardContent className="px-0">
+              <div className="border-b px-4 py-3"><TableToolbar searchPlaceholder="Buscar póliza, cliente o aseguradora..." tableControls={false} /></div>
               {renewalCount > 0 && renewals.length > 0 ? (
                 <Table>
                   <TableHeader>
@@ -299,11 +360,11 @@ export default async function OperationsPage({
                   <TableBody>
                     {renewals.map((policy) => (
                       <TableRow key={policy.id}>
-                        <TableCell><Link href={`/policies/${policy.id}`} className="font-mono font-medium text-primary hover:underline">{policy.policyNumber}</Link></TableCell>
+                        <TableCell><Link href={appendReturnTo(`/policies/${policy.id}`, returnTo)} className="font-mono font-medium text-primary hover:underline">{policy.policyNumber}</Link></TableCell>
                         <TableCell>{policy.client.fullName}</TableCell>
                         <TableCell>{policy.insurer.name}</TableCell>
                         <TableCell><span className="font-mono text-xs">{formatDate(policy.endDate)}</span><span className="ml-2 text-xs text-amber-700 dark:text-amber-300">{formatBusinessDateRelative(policy.endDate)}</span></TableCell>
-                        <TableCell className="text-right"><Link href={`/policies/new?renewalFrom=${policy.id}`} className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-10")}>Renovar</Link></TableCell>
+                        <TableCell className="text-right"><Link href={appendReturnTo(`/policies/new?renewalFrom=${policy.id}`, returnTo)} className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-10")}>Renovar</Link></TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -315,7 +376,7 @@ export default async function OperationsPage({
                   pageSize={RENEWAL_PAGE_SIZE}
                   total={renewalCount}
                   basePath="/operations"
-                  searchParams={{ view: "renewals" }}
+                  searchParams={renewalSearchParams}
                 />
               ) : null}
             </CardContent>
@@ -336,15 +397,17 @@ export default async function OperationsPage({
         <Card className="gap-0 py-0">
           <CardHeader className="border-b py-4"><CardTitle>Siniestros abiertos</CardTitle></CardHeader>
           <CardContent className="px-0">
+            <div className="border-b px-4 py-3"><TableToolbar searchPlaceholder="Buscar folio, cliente, póliza o tipo..." tableControls={false} /></div>
             {claims.length ? claims.map((claim) => (
               <div key={claim.id} className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b px-4 py-2.5 last:border-b-0">
-                <Link href={`/claims/${claim.id}`} className="min-w-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <Link href={appendReturnTo(`/claims/${claim.id}`, returnTo)} className="min-w-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <p className="truncate text-sm font-medium">{claim.client.fullName} · {claim.claimType}</p>
                   <p className="truncate font-mono text-xs text-muted-foreground">{claim.folio} · {claim.policy.policyNumber} · {formatDate(claim.incidentDate)}</p>
                 </Link>
                 <StatusBadge status={claim.status} entity="claim" className="px-2 py-0.5 text-[11px]" />
               </div>
             )) : <p className="p-8 text-center text-sm text-muted-foreground"><CheckCircle2 className="mx-auto mb-2 size-5 text-emerald-600" />No hay siniestros abiertos.</p>}
+            <Pagination page={page} pageSize={25} total={claimTotal} basePath="/operations" searchParams={claimSearchParams} />
           </CardContent>
         </Card>
       ) : null}

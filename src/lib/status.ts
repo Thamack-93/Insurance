@@ -107,7 +107,7 @@ export function statusLabel(status: string | null | undefined, entity?: StatusEn
   return (
     overrides?.[status] ??
     (BASE_STATUS_LABELS as Record<string, string>)[status] ??
-    status
+    "Estado no reconocido"
   );
 }
 
@@ -127,7 +127,7 @@ export const renewalStageLabels: Record<string, string> = {
 
 export function renewalStageLabel(stage: string | null | undefined): string {
   if (!stage) return "Sin etapa";
-  return renewalStageLabels[stage] ?? stage;
+  return renewalStageLabels[stage] ?? "Etapa no reconocida";
 }
 
 export function getRenewalStageTone(stage: string): BadgeTone {
@@ -144,6 +144,11 @@ export const priorityLabels: Record<string, string> = {
   HIGH: "Alta",
   URGENT: "Urgente",
 };
+
+export function priorityLabel(priority: string | null | undefined) {
+  if (!priority) return "Sin prioridad";
+  return priorityLabels[priority] ?? "Prioridad no reconocida";
+}
 
 export function getStatusTone(status: string): BadgeTone {
   if (["ACTIVE", "PAID", "RENEWED", "RESOLVED", "DONE", "ACCEPTED", "POSTED"].includes(status)) {
@@ -181,5 +186,5 @@ export function policyTypeLabel(value: string) {
     OTRO: "Otro",
   };
 
-  return labels[value] ?? value;
+  return labels[value] ?? "Tipo no reconocido";
 }

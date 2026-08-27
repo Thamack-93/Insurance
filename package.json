@@ -38,6 +38,7 @@
     "verify:production": "node --import tsx scripts/verify-production.ts",
     "backfill:knowledge-integrity": "node --import tsx scripts/backfill-knowledge-integrity.ts",
     "check:navigation": "node scripts/check-navigation-reachability.mjs",
+    "check:receipt-platform-boundary": "node scripts/check-receipt-platform-boundary.mjs",
     "list:payments": "tsx scripts/list-next-payments.ts",
     "list:renewals": "tsx scripts/list-renewals.ts",
     "audit:renewals": "tsx scripts/audit-renewal-consistency.ts",

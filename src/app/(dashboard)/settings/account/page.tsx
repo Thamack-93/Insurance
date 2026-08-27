@@ -3,14 +3,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { requireUser } from "@/lib/auth";
 import { requireOrganizationContext } from "@/lib/organization-context";
 import { ChangePasswordForm } from "@/components/settings/change-password-form";
+import { roleLabel } from "@/lib/ui-labels";
 
 export const metadata = {
   title: "Mi cuenta · Configuración",
-};
-
-const ROLE_LABELS: Record<string, string> = {
-  ADMIN: "Administrador",
-  AGENT: "Agente",
 };
 
 export default async function MyAccountPage() {
@@ -29,7 +25,7 @@ export default async function MyAccountPage() {
           <CardHeader>
             <CardTitle>Datos de la cuenta</CardTitle>
             <CardDescription>
-              {user.name} · {user.email} · {ROLE_LABELS[organization.membershipRole] ?? organization.membershipRole}
+              {user.name} · {user.email} · {roleLabel(organization.membershipRole)}
             </CardDescription>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">

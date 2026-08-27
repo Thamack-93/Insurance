@@ -12,6 +12,7 @@ import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { policyTypeLabel, statusLabel } from "@/lib/status";
+import { documentTypeLabel } from "@/lib/ui-labels";
 import { quoteOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function QuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -49,7 +50,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
         <PageHeader
           eyebrow="Comercial"
           title={`Cotización ${quote.id.slice(0, 8)}`}
-          description={`${quote.policyType} · ${quote.client.fullName}`}
+          description={`${policyTypeLabel(quote.policyType)} · ${quote.client.fullName}`}
           actions={
             <div className="flex items-center gap-2">
               <Button asChild variant="outline" className="bg-card/70">
@@ -183,7 +184,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
                   {quote.documents.map((document) => (
                     <TableRow key={document.id}>
                       <TableCell className="font-medium">{document.fileName}</TableCell>
-                      <TableCell>{document.documentType}</TableCell>
+                      <TableCell>{documentTypeLabel(document.documentType)}</TableCell>
                       <TableCell>{formatDate(document.uploadedAt)}</TableCell>
                     </TableRow>
                   ))}

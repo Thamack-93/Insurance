@@ -21,6 +21,7 @@ import { formatDate, isOverdue } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { parseBusinessDateInput } from "@/lib/business-dates";
 import { bulkMarkReceiptsPaid } from "@/app/(dashboard)/receipts/actions";
+import { appendReturnTo } from "@/lib/return-to";
 
 export type CollectableReceipt = {
   id: string;
@@ -37,7 +38,7 @@ export type CollectableReceipt = {
   paymentCount: number;
 };
 
-export function CollectableReceipts({ receipts }: { receipts: CollectableReceipt[] }) {
+export function CollectableReceipts({ receipts, returnTo }: { receipts: CollectableReceipt[]; returnTo?: string }) {
   if (receipts.length === 0) return null;
 
   return (
@@ -46,7 +47,7 @@ export function CollectableReceipts({ receipts }: { receipts: CollectableReceipt
         <BulkToolbar receipts={receipts} />
         <div className="divide-y divide-border/70">
           {receipts.map((receipt) => (
-            <ReceiptRow key={receipt.id} receipt={receipt} />
+            <ReceiptRow key={receipt.id} receipt={receipt} returnTo={returnTo} />
           ))}
         </div>
       </div>
@@ -142,7 +143,7 @@ function BulkToolbar({ receipts }: { receipts: CollectableReceipt[] }) {
   );
 }
 
-function ReceiptRow({ receipt }: { receipt: CollectableReceipt }) {
+function ReceiptRow({ receipt, returnTo }: { receipt: CollectableReceipt; returnTo?: string }) {
   const { selectedItems, toggleItem } = useBulkActions();
   const isSelected = selectedItems.has(receipt.id);
   const due = parseBusinessDateInput(receipt.dueDate);
@@ -164,7 +165,7 @@ function ReceiptRow({ receipt }: { receipt: CollectableReceipt }) {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href={`/receipts/${receipt.id}`}
+              href={appendReturnTo(`/receipts/${receipt.id}`, returnTo)}
               className="font-medium text-foreground hover:text-primary"
             >
               {receipt.receiptNumber}

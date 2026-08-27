@@ -229,6 +229,7 @@ export default async function ClientsPage({
               total={filteredCount}
               query={query}
               canBulkEdit={scope.role === "ADMIN"}
+              returnTo={buildTableHref("/clients", params, {}, { resetPage: false })}
               searchParams={{
                 status: statusFilter ?? undefined,
                 type: typeFilter ?? undefined,

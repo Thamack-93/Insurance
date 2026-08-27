@@ -17,9 +17,12 @@ import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { policyTypeLabel, statusLabel } from "@/lib/status";
 import { claimOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
+import { normalizeReturnTo } from "@/lib/return-to";
 
-export default async function ClaimDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ClaimDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
+  const query = (await searchParams) ?? {};
+  const returnTo = normalizeReturnTo(typeof query.returnTo === "string" ? query.returnTo : undefined, "/operations?view=claims");
   const scope = await requireOrganizationPortfolioReadScope();
   const claimScope = claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const db = getDb();
@@ -68,7 +71,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ id
               </Button>
               <DeleteClaimButton id={claim.id} folio={claim.folio} />
               <Button asChild variant="outline" className="bg-card/70">
-                <Link href="/operations?view=claims">
+                <Link href={returnTo}>
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
                 </Link>

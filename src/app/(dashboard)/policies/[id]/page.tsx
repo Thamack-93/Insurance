@@ -24,6 +24,7 @@ import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import { getPolicyFamilyPolicies } from "@/lib/policy-families";
 import { policyTypeLabel } from "@/lib/status";
 import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
+import { normalizeReturnTo } from "@/lib/return-to";
 
 const frequencyLabels: Record<string, string> = {
   MONTHLY: "Mensual",
@@ -34,8 +35,10 @@ const frequencyLabels: Record<string, string> = {
   OTHER: "Otra",
 };
 
-export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function PolicyDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
+  const query = (await searchParams) ?? {};
+  const returnTo = normalizeReturnTo(typeof query.returnTo === "string" ? query.returnTo : undefined, "/policies");
   const scope = await requireOrganizationPortfolioReadScope();
   const isAdmin = scope.membershipRole !== "AGENT";
   const db = getDb();
@@ -232,7 +235,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
               </Button>
               {isAdmin ? <DeletePolicyButton id={id} policyNumber={policy.policyNumber} /> : null}
               <Button asChild variant="outline" className="rounded-full bg-card/70">
-                <Link href="/policies">
+                <Link href={returnTo}>
                   <ArrowLeft className="mr-2 size-4" />
                   Volver
                 </Link>

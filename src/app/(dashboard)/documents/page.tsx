@@ -4,6 +4,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
+import { documentTypeLabel } from "@/lib/ui-labels";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-states/empty-state";
@@ -203,7 +204,7 @@ export default async function DocumentsPage({
                           ) : null}
                         </div>
                       </TableCell>
-                      <TableCell>{document.documentType}</TableCell>
+                      <TableCell>{documentTypeLabel(document.documentType)}</TableCell>
                       <TableCell>
                         <div className="flex flex-col">
                           <span>{document.client?.fullName ?? "Sin cliente"}</span>
@@ -271,7 +272,7 @@ export default async function DocumentsPage({
                         "Sin póliza"
                       )}
                     </TableCell>
-                    <TableCell>{document.documentType}</TableCell>
+                    <TableCell>{documentTypeLabel(document.documentType)}</TableCell>
                     <TableCell>{formatDate(document.uploadedAt)}</TableCell>
                   </TableRow>
                 ))}

@@ -16,6 +16,7 @@ import {
 import { BulkActionsToolbar } from "@/components/bulk-actions/bulk-actions-toolbar";
 import { formatDate } from "@/lib/dates";
 import { bulkArchiveClients } from "@/app/(dashboard)/clients/actions";
+import { appendReturnTo } from "@/lib/return-to";
 
 export type ClientListRow = {
   id: string;
@@ -35,6 +36,7 @@ type ClientsListTableProps = {
   total: number;
   query: string;
   searchParams?: Record<string, string | undefined>;
+  returnTo?: string;
   /** Archiving is admin-only; hide the affordance for everyone else. */
   canBulkEdit?: boolean;
 };
@@ -50,12 +52,13 @@ export function ClientsListTable({
   total,
   query,
   searchParams = {},
+  returnTo,
   canBulkEdit = false,
 }: ClientsListTableProps) {
   return (
     <BulkActionsProvider>
       {canBulkEdit ? <ClientsBulkToolbar clients={clients} /> : null}
-      <ClientsCards clients={clients} selectable={canBulkEdit} />
+      <ClientsCards clients={clients} selectable={canBulkEdit} returnTo={returnTo} />
       <div className="hidden md:block">
         <Table>
           <TableHeader>
@@ -72,7 +75,7 @@ export function ClientsListTable({
           </TableHeader>
           <TableBody>
             {clients.map((client) => (
-              <ClientRow key={client.id} client={client} selectable={canBulkEdit} />
+              <ClientRow key={client.id} client={client} selectable={canBulkEdit} returnTo={returnTo} />
             ))}
           </TableBody>
         </Table>
@@ -108,7 +111,7 @@ function ClientsBulkToolbar({ clients }: { clients: ClientListRow[] }) {
   );
 }
 
-function ClientRow({ client, selectable }: { client: ClientListRow; selectable: boolean }) {
+function ClientRow({ client, selectable, returnTo }: { client: ClientListRow; selectable: boolean; returnTo?: string }) {
   const { selectedItems, toggleItem } = useBulkActions();
 
   return (
@@ -123,7 +126,7 @@ function ClientRow({ client, selectable }: { client: ClientListRow; selectable: 
         </TableCell>
       ) : null}
       <TableCell>
-        <Link href={`/clients/${client.id}`} className="font-medium text-foreground hover:text-primary">
+        <Link href={appendReturnTo(`/clients/${client.id}`, returnTo)} className="font-medium text-foreground hover:text-primary">
           {client.fullName}
         </Link>
         <p className="text-xs text-muted-foreground">
@@ -146,13 +149,13 @@ function ClientRow({ client, selectable }: { client: ClientListRow; selectable: 
   );
 }
 
-function ClientsCards({ clients, selectable }: { clients: ClientListRow[]; selectable: boolean }) {
+function ClientsCards({ clients, selectable, returnTo }: { clients: ClientListRow[]; selectable: boolean; returnTo?: string }) {
   const { selectedItems, toggleItem } = useBulkActions();
 
   const items: RecordCardItem[] = clients.map((client) => ({
     id: client.id,
     title: client.fullName,
-    href: `/clients/${client.id}`,
+    href: appendReturnTo(`/clients/${client.id}`, returnTo),
     subtitle: `${typeLabel(client.type)} · ${client.email ?? client.phone ?? "Sin contacto"}`,
     badge: <StatusBadge status={client.status} entity="client" />,
     leading: selectable ? (

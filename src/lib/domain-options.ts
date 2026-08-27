@@ -8,7 +8,8 @@ import {
   RECEIPT_STATUSES,
   TASK_STATUSES,
 } from "@/lib/domain-values";
-import { statusLabel, type StatusEntity } from "@/lib/status";
+import { policyTypeLabel, statusLabel, type StatusEntity } from "@/lib/status";
+import { documentTypeLabel, paymentMethodLabel, workItemTypeLabel } from "@/lib/ui-labels";
 
 export type SelectOption = {
   value: string;
@@ -37,16 +38,8 @@ export const clientTypeOptions: SelectOption[] = [
 export const entityStatusOptions: SelectOption[] = statusOptions(ENTITY_STATUSES, "client");
 
 export const policyTypeOptions: SelectOption[] = [
-  { value: "AUTO", label: "Auto" },
-  { value: "GMM", label: "GMM" },
-  { value: "VIDA", label: "Vida" },
-  { value: "DANOS", label: "Daños" },
-  { value: "FIANZAS", label: "Fianzas" },
-  { value: "HOGAR", label: "Hogar" },
-  { value: "RESPONSABILIDAD_CIVIL", label: "Responsabilidad Civil" },
-  { value: "EMPRESARIAL", label: "Empresarial" },
-  { value: "ACCIDENTES", label: "Accidentes" },
-  { value: "OTRO", label: "Otro" },
+  ...["AUTO", "GMM", "VIDA", "DANOS", "FIANZAS", "HOGAR", "RESPONSABILIDAD_CIVIL", "EMPRESARIAL", "ACCIDENTES", "OTRO"]
+    .map((value) => ({ value, label: policyTypeLabel(value) })),
 ];
 
 export const policyStatusOptions: SelectOption[] = statusOptions(POLICY_STATUSES, "policy");
@@ -73,14 +66,8 @@ export const commissionStatusOptions: SelectOption[] = statusOptions(
 );
 
 export const workItemTypeOptions: SelectOption[] = [
-  { value: "GENERAL", label: "General" },
-  { value: "CLAIM", label: "Siniestro" },
-  { value: "QUOTE", label: "Cotizacion" },
-  { value: "RENEWAL", label: "Renovacion" },
-  { value: "PAYMENT", label: "Cobranza" },
-  { value: "DOCUMENT", label: "Documento" },
-  { value: "COMMISSION", label: "Comision" },
-  { value: "OTHER", label: "Otro" },
+  ...["GENERAL", "CLAIM", "QUOTE", "RENEWAL", "PAYMENT", "DOCUMENT", "COMMISSION", "OTHER"]
+    .map((value) => ({ value, label: workItemTypeLabel(value) })),
 ];
 
 // DISMISSED is reachable only from the notification flow, never from the form.
@@ -98,16 +85,8 @@ export const claimStatusOptions: SelectOption[] = statusOptions(CLAIM_STATUSES, 
 export const quoteStatusOptions: SelectOption[] = statusOptions(QUOTE_STATUSES, "quote");
 
 export const documentTypeOptions: SelectOption[] = [
-  { value: "POLICY", label: "Póliza" },
-  { value: "RECEIPT", label: "Recibo" },
-  { value: "ENDORSEMENT", label: "Endoso" },
-  { value: "RENEWAL", label: "Renovación" },
-  { value: "ID", label: "Identificación" },
-  { value: "PAYMENT_PROOF", label: "Comprobante de Pago" },
-  { value: "QUOTE", label: "Cotización" },
-  { value: "CLAIM", label: "Siniestro" },
-  { value: "LETTER", label: "Carta" },
-  { value: "OTHER", label: "Otro" },
+  ...["POLICY", "RECEIPT", "ENDORSEMENT", "RENEWAL", "ID", "PAYMENT_PROOF", "QUOTE", "CLAIM", "LETTER", "OTHER"]
+    .map((value) => ({ value, label: documentTypeLabel(value) })),
 ];
 
 export const currencyOptions: SelectOption[] = [
@@ -116,9 +95,6 @@ export const currencyOptions: SelectOption[] = [
 ];
 
 export const paymentMethodOptions: SelectOption[] = [
-  { value: "TRANSFER", label: "Transferencia bancaria" },
-  { value: "CASH", label: "Efectivo" },
-  { value: "CHECK", label: "Cheque" },
-  { value: "CARD", label: "Tarjeta de crédito/débito" },
-  { value: "OTHER", label: "Otro" },
+  ...["TRANSFER", "CASH", "CHECK", "CARD", "OTHER"]
+    .map((value) => ({ value, label: paymentMethodLabel(value) })),
 ];

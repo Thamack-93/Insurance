@@ -30,19 +30,7 @@ import {
   bulkUpdateWorkItemPriority,
   bulkUpdateWorkItemStatus,
 } from "@/app/(dashboard)/tasks/actions";
-
-const workItemTypeLabels: Record<string, string> = {
-  TASK: "Pendiente",
-  NOTIFICATION: "Notificación",
-  GENERAL: "General",
-  CLAIM: "Siniestro",
-  QUOTE: "Cotización",
-  RENEWAL: "Renovación",
-  PAYMENT: "Cobranza",
-  DOCUMENT: "Documento",
-  COMMISSION: "Comisión",
-  OTHER: "Otro",
-};
+import { workItemTypeLabel } from "@/lib/ui-labels";
 
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "IN_PROGRESS", label: "En proceso" },
@@ -258,7 +246,7 @@ function WorkItemsTableInner({ workItems }: { workItems: WorkItemRow[] }) {
                   <span className="text-muted-foreground">Sin póliza</span>
                 )}
               </TableCell>
-              <TableCell>{workItemTypeLabels[workItem.workItemType] ?? workItem.workItemType}</TableCell>
+              <TableCell>{workItemTypeLabel(workItem.workItemType)}</TableCell>
               <TableCell>
                 {workItem.dueDate ? (
                   <span className="text-sm text-muted-foreground">

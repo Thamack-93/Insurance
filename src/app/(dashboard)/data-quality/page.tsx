@@ -38,7 +38,7 @@ import { getLatestMaintenanceRun } from "@/lib/vigency-maintenance";
 import { getUpcomingRenewals } from "@/lib/renewals";
 import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import { statusLabel } from "@/lib/status";
-import { dataQualityStatusLabel } from "@/lib/ui-labels";
+import { dataQualityReasonLabel, dataQualityStatusLabel } from "@/lib/ui-labels";
 import { RunVigencyAuditButton } from "@/components/data-quality/run-vigency-audit-button";
 import { RunPaymentAuditButton } from "@/components/data-quality/run-payment-audit-button";
 import { ReviewActionButtons } from "@/components/data-quality/review-action-buttons";
@@ -92,11 +92,6 @@ function formatGapDays(gapDays: number | null) {
   if (gapDays === null) return "—";
   if (gapDays === 0) return "mismo día";
   return `${gapDays} días`;
-}
-
-function receiptReviewReasonLabel(reason: string) {
-  if (reason === "payment_after_due_date") return "Pago después del vencimiento";
-  return reason;
 }
 
 function matchesTableQuery(query: string, ...values: Array<string | null | undefined>) {
@@ -438,7 +433,7 @@ export default async function DataQualityPage({
         <PageRefreshTicker />
         <PageHeader
           eyebrow="Calidad"
-          title="Data Quality"
+          title="Calidad de datos"
           description="Cada categoría abre su propia revisión: salud operativa, vigencias, pagos, renovaciones y ledger."
           actions={
             <>
@@ -915,7 +910,7 @@ export default async function DataQualityPage({
                           </TableCell>
                           <TableCell>{candidate.currentFrequency}</TableCell>
                           <TableCell className="text-right">{candidate.receiptCount}</TableCell>
-                          <TableCell className="max-w-md text-xs text-muted-foreground">{candidate.reason}</TableCell>
+                          <TableCell className="max-w-md text-xs text-muted-foreground">{dataQualityReasonLabel(candidate.reason)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -999,7 +994,7 @@ export default async function DataQualityPage({
                               <p className="text-xs text-muted-foreground">{issue.insurerName}</p>
                             </div>
                           </TableCell>
-                          <TableCell className="max-w-xs text-xs text-muted-foreground">{issue.reasons.join(", ")}</TableCell>
+                          <TableCell className="max-w-xs text-xs text-muted-foreground">{issue.reasons.map(dataQualityReasonLabel).join(", ")}</TableCell>
                           <TableCell className="text-right">{formatCurrency(issue.amount, "MXN")}</TableCell>
                           <TableCell className="text-right">{formatCurrency(issue.paidAmount, "MXN")}</TableCell>
                         </TableRow>
@@ -1011,7 +1006,7 @@ export default async function DataQualityPage({
             </SectionCard>
 
             <SectionCard
-              title="payment_after_due_date"
+              title="Pagos después del vencimiento"
               description="Estos son los 28 casos revisados: todos requieren validación porque el pago quedó después del vencimiento."
             >
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1046,7 +1041,7 @@ export default async function DataQualityPage({
               {openPaymentAfterDueDateIssues.length === 0 ? (
                 <div className="p-4">
                   <ReceiptText className="mb-3 size-5 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">No hay casos `payment_after_due_date` abiertos.</p>
+                  <p className="text-sm text-muted-foreground">No hay casos de pagos después del vencimiento abiertos.</p>
                 </div>
               ) : (
                 <div className="mt-5 space-y-4">
@@ -1096,7 +1091,7 @@ export default async function DataQualityPage({
                               <TableCell className="text-right">{formatCurrency(issue.amount, issue.currency)}</TableCell>
                               <TableCell>
                                 <Badge variant="outline" className="rounded-full">
-                                  {receiptReviewReasonLabel(issue.reason)}
+                                  {dataQualityReasonLabel(issue.reason)}
                                 </Badge>
                               </TableCell>
                               <TableCell className="text-right">
@@ -1172,7 +1167,7 @@ export default async function DataQualityPage({
                                 </Badge>
                               </TableCell>
                               <TableCell className="max-w-md text-xs text-muted-foreground">
-                                {issue.resolutionNote ?? issue.reason}
+                                {issue.resolutionNote ?? dataQualityReasonLabel(issue.reason)}
                               </TableCell>
                               <TableCell className="text-right">
                                 <ReviewActionButtons
@@ -1295,7 +1290,7 @@ export default async function DataQualityPage({
                                 )}
                               </TableCell>
                               <TableCell className="max-w-md text-xs text-muted-foreground">
-                                {suggestion.reason ?? suggestion.resolutionNote ?? "—"}
+                                {suggestion.resolutionNote ?? dataQualityReasonLabel(suggestion.reason) ?? "—"}
                               </TableCell>
                               <TableCell className="text-right">
                                 <RenewalResolutionActions
@@ -1386,7 +1381,7 @@ export default async function DataQualityPage({
                                 )}
                               </TableCell>
                               <TableCell className="max-w-md text-xs text-muted-foreground">
-                                {suggestion.resolutionNote ?? suggestion.reason ?? "—"}
+                                {suggestion.resolutionNote ?? dataQualityReasonLabel(suggestion.reason) ?? "—"}
                               </TableCell>
                               <TableCell className="text-right">
                                 <ReviewActionButtons

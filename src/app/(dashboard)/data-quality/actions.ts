@@ -13,10 +13,10 @@ import { runPaymentReconciliationAudit } from "@/lib/payment-maintenance";
 import { upsertSuppressionRule } from "@/lib/data-quality-rules";
 import { linkRenewalToPolicy, markRenewalAsNotContinuing } from "@/app/(dashboard)/renewals/actions";
 
-const REVIEW_APPROVED_NOTE = "Aprobado desde Data Quality.";
-const REVIEW_DENIED_NOTE = "Denegado desde Data Quality.";
-const REVIEW_SUPPRESSED_NOTE = "Suprimido por regla desde Data Quality.";
-const REVIEW_REOPENED_NOTE = "Reabierto desde Data Quality.";
+const REVIEW_APPROVED_NOTE = "Aprobado desde Calidad de datos.";
+const REVIEW_DENIED_NOTE = "Denegado desde Calidad de datos.";
+const REVIEW_SUPPRESSED_NOTE = "Suprimido por regla desde Calidad de datos.";
+const REVIEW_REOPENED_NOTE = "Reabierto desde Calidad de datos.";
 const REVIEW_CLOSED_NOTE = "Cerrado manualmente desde Riesgos y calidad.";
 
 async function requireAdmin() {

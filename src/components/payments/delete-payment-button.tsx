@@ -4,6 +4,7 @@ import { deletePayment } from "@/app/(dashboard)/payments/actions";
 import { ConfirmDeleteDialog } from "@/components/dialogs/confirm-delete-dialog";
 import { formatCurrency } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
+import { paymentMethodLabel } from "@/lib/ui-labels";
 
 type DeletePaymentButtonProps = {
   id: string;
@@ -41,7 +42,7 @@ export function DeletePaymentButton({
         <>
           ¿Seguro que quieres revertir el pago de <strong>{formatCurrency(amount, currency)}</strong>{" "}
           registrado el <strong>{formatDate(paidDate)}</strong>
-          {paymentMethod ? <> con método <strong>{paymentMethod}</strong></> : null}? El pago se conservará en la auditoría
+          {paymentMethod ? <> con método <strong>{paymentMethodLabel(paymentMethod)}</strong></> : null}? El pago se conservará en la auditoría
           y el recibo se volverá a conciliar.
         </>
       }

@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/empty-states/empty-state";
 import { formatDate } from "@/lib/dates";
 import { DocumentPreviewDialog } from "@/components/documents/document-preview-dialog";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
+import { documentTypeLabel } from "@/lib/ui-labels";
 
 export type DocumentListItem = {
   id: string;
@@ -85,7 +86,7 @@ export function DocumentList({
                 <span className="truncate">{doc.fileName}</span>
               </div>
             </TableCell>
-            <TableCell>{doc.documentType}</TableCell>
+            <TableCell>{documentTypeLabel(doc.documentType)}</TableCell>
             {showAssociation && (
               <TableCell className="text-sm text-muted-foreground">
                 {doc.associationLabel ?? "—"}

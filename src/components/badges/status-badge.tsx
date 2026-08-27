@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { getPriorityTone, getStatusTone, priorityLabels, statusLabel, type StatusEntity } from "@/lib/status";
+import { getPriorityTone, getStatusTone, priorityLabel, statusLabel, type StatusEntity } from "@/lib/status";
 
 const toneClass = {
   neutral: "border-border bg-muted text-muted-foreground",
@@ -35,7 +35,7 @@ export function PriorityBadge({ priority, className }: { priority: string; class
 
   return (
     <Badge variant="outline" className={cn("rounded-full px-2.5 py-1 font-medium", toneClass[tone], className)}>
-      {priorityLabels[priority] ?? priority}
+      {priorityLabel(priority)}
     </Badge>
   );
 }
@@ -45,8 +45,7 @@ export function SeverityBadge({ severity }: { severity: string }) {
 
   return (
     <Badge variant="outline" className={cn("rounded-full px-2.5 py-1 font-medium", toneClass[tone])}>
-      {severity === "CRITICAL" ? "Critico" : severity === "WARNING" ? "Warning" : "Info"}
+      {severity === "CRITICAL" ? "Crítica" : severity === "WARNING" ? "Advertencia" : "Información"}
     </Badge>
   );
 }
-

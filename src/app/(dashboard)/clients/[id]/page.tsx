@@ -19,13 +19,16 @@ import { getDb } from "@/lib/db";
 import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { clientOperationalWhere, claimOperationalWhere, quoteOperationalWhere, documentOperationalWhere } from "@/lib/portfolio-access";
 import { formatDate } from "@/lib/dates";
-import { statusLabel } from "@/lib/status";
+import { policyTypeLabel, statusLabel } from "@/lib/status";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { calculateAge, formatBirthdayDate } from "@/lib/birthday-reminders";
+import { normalizeReturnTo } from "@/lib/return-to";
 
-export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ClientDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
+  const query = (await searchParams) ?? {};
+  const returnTo = normalizeReturnTo(typeof query.returnTo === "string" ? query.returnTo : undefined, "/clients");
   const scope = await requireOrganizationPortfolioReadScope();
   const isAdmin = scope.membershipRole !== "AGENT";
   const db = getDb();
@@ -130,6 +133,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             <div className="flex items-center gap-2">
               <NoraContextButton context={{ type: "client", id: client.id }} />
               <Button asChild variant="outline" className="bg-card/70">
+                <Link href={`/policies?q=${encodeURIComponent(client.fullName)}`}>Ver pólizas</Link>
+              </Button>
+              <Button asChild variant="outline" className="bg-card/70">
                 <Link href={`/clients/${id}/edit`}>
                   <Pencil className="mr-2 size-4" />
                   Editar
@@ -137,7 +143,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
               </Button>
               {isAdmin ? <DeleteClientButton id={id} name={client.fullName} /> : null}
               <Button asChild variant="outline" className="bg-card/70">
-                <Link href="/clients">Volver a clientes</Link>
+                <Link href={returnTo}>Volver a clientes</Link>
               </Button>
             </div>
           }
@@ -281,7 +287,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                     <TableCell>{policy.insurer.name}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className="rounded-full">
-                        {policy.policyType}
+                        {policyTypeLabel(policy.policyType)}
                       </Badge>
                     </TableCell>
                     <TableCell>{policy.endDate ? formatDate(policy.endDate) : "Sin fecha"}</TableCell>
@@ -362,12 +368,12 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                 claims.map((claim) => (
                   <div key={claim.id} className="px-4 py-4">
                     <div className="flex items-center justify-between gap-3">
-                      <p className="font-medium text-foreground">{claim.folio}</p>
+                      <Link href={`/claims/${claim.id}`} className="font-medium text-foreground hover:text-primary">{claim.folio}</Link>
                       <StatusBadge status={claim.status} entity="claim" />
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">{claim.claimType}</p>
                     <p className="mt-2 text-xs text-muted-foreground">
-                      {claim.policy.policyNumber} · {claim.insurer.name} · {formatDate(claim.reportedDate)}
+                      <Link href={`/policies/${claim.policyId}`} className="hover:text-primary">{claim.policy.policyNumber}</Link> · {claim.insurer.name} · {formatDate(claim.reportedDate)}
                     </p>
                   </div>
                 ))
@@ -384,7 +390,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                   quotes.map((quote) => (
                     <div key={quote.id} className="px-4 py-4">
                       <div className="flex items-center justify-between gap-3">
-                        <p className="font-medium text-foreground">{quote.policyType}</p>
+                        <Link href={`/quotes/${quote.id}`} className="font-medium text-foreground hover:text-primary">{policyTypeLabel(quote.policyType)}</Link>
                         <Badge variant="outline" className="rounded-full">
                           {statusLabel(quote.status, "quote")}
                         </Badge>

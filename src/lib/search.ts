@@ -1,6 +1,7 @@
 import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
-import { statusLabel } from "@/lib/status";
+import { policyTypeLabel, statusLabel } from "@/lib/status";
+import { documentTypeLabel } from "@/lib/ui-labels";
 import { normalize, unaccentSql } from "@/lib/search-utils";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { getInsurerHref } from "@/lib/insurer-navigation";
@@ -484,7 +485,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string, org
       id: p.id,
       type: "policy",
       title: p.policyNumber,
-      subtitle: `${p.clientName ?? "Sin cliente"} · ${p.insurerName ?? "Sin aseguradora"} · ${p.policyType} · ${formatPolicyStatusLabel(p.status)}`,
+      subtitle: `${p.clientName ?? "Sin cliente"} · ${p.insurerName ?? "Sin aseguradora"} · ${policyTypeLabel(p.policyType)} · ${formatPolicyStatusLabel(p.status)}`,
       details: cleanStrings([
         formatPolicyValidity(p.startDate, p.endDate),
         p.insuredObject,
@@ -541,7 +542,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string, org
       id: q.id,
       type: "quote",
       title: q.id.slice(0, 8),
-      subtitle: `${q.clientName ?? "Sin cliente"} · ${q.policyType}`,
+      subtitle: `${q.clientName ?? "Sin cliente"} · ${policyTypeLabel(q.policyType)}`,
       details: cleanStrings([q.policyType, q.notes]),
       href: `/quotes/${q.id}`,
       match,
@@ -564,12 +565,12 @@ export async function globalSearch(query: string, portfolioOwnerId?: string, org
   for (const d of documents) {
     const match = pickMatch(d, ["fileName", "notes"], needle);
     let href = "/documents";
-    let subtitle = `${d.documentType}`;
+    let subtitle = documentTypeLabel(d.documentType);
     if (d.clientId) href = `/clients/${d.clientId}`;
     else if (d.policyId) href = `/policies/${d.policyId}`;
     else if (d.claimId) href = `/claims/${d.claimId}`;
     else if (d.receiptId) href = `/receipts/${d.receiptId}`;
-    if (d.parentLabel) subtitle = `${d.documentType} · ${d.parentLabel}`;
+    if (d.parentLabel) subtitle = `${documentTypeLabel(d.documentType)} · ${d.parentLabel}`;
     results.push({
       id: d.id,
       type: "document",

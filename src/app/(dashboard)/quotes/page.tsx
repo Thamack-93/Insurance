@@ -13,6 +13,7 @@ import { TableToolbar } from "@/components/tables/table-toolbar";
 import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
+import { policyTypeLabel } from "@/lib/status";
 import { quoteStatusOptions } from "@/lib/domain-options";
 import { quoteOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { buildTableHref } from "@/lib/table-query";
@@ -230,7 +231,7 @@ export default async function QuotesPage({
                         {quote.id.slice(0, 8)}
                       </Link>
                       <p className="text-xs text-muted-foreground">
-                        {quote.client.fullName} · {quote.policyType}
+                        {quote.client.fullName} · {policyTypeLabel(quote.policyType)}
                       </p>
                     </div>
                     <StatusBadge status={quote.status} entity="quote" />
