@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 import {
   QUALITAS_PAYMENT_LINK_ENTRYPOINT,
+  normalizeQualitasPolicyNumber,
   normalizeQualitasProviderOutcome,
   prepareQualitasPaymentLink,
   requestQualitasPaymentLink,
@@ -52,6 +53,23 @@ async function prepareForFinal(transport: QualitasHttpTransport) {
 }
 
 describe("qualitas-payment-link provider", () => {
+  it("pads stored nine-digit policy numbers for Quálitas", async () => {
+    expect(normalizeQualitasPolicyNumber("940454748")).toBe("0940454748");
+
+    const { transport, calls } = sequenceTransport([
+      response(initialHtml),
+      response(contactHtml),
+    ]);
+
+    const prepared = await prepareQualitasPaymentLink(
+      { policyNumber: "940454748", recipientEmail: "agent@example.com" },
+      { transport },
+    );
+
+    expect(prepared).toMatchObject({ transportReady: true, policyNumber: "0940454748" });
+    expect((calls[1].init?.body as URLSearchParams).get("numPoliza")).toBe("0940454748");
+  });
+
   it("discovers the session flow and sends the final multipart request", async () => {
     const { transport, calls } = sequenceTransport([
       response(initialHtml, 200, { "set-cookie": "JSESSIONID=session-only; Path=/" }),
