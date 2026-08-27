@@ -321,6 +321,32 @@ describe("Telegram Quálitas payment-link flow", () => {
     expect(JSON.stringify(writeActivityLog.mock.calls[0])).not.toContain("5550101234");
   });
 
+  it("keeps legacy ready drafts usable as email requests", async () => {
+    db.telegramDraft.findFirst.mockResolvedValue(draftWith({
+      step: "ready",
+      policyId: "policy-1",
+      policyNumber: "1234567890",
+      clientId: "client-1",
+      clientName: "Cliente Uno",
+      clientEmail: "client@example.com",
+      clientPhone: "5550101234",
+      agentUserId: "user-1",
+      agentEmail: "agent@example.com",
+      recipient: "CLIENT",
+      recipientEmail: "client@example.com",
+    }));
+    db.telegramDraft.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await processTelegramWebhookUpdate(message("/confirmar"));
+
+    expect(result.replyText).toContain("Correo · c***@example.com");
+    expect(provider.prepareQualitasPaymentLink).toHaveBeenCalledWith(expect.objectContaining({
+      recipientEmail: "client@example.com",
+      recipientPhone: null,
+      deliveryMethod: "EMAIL",
+    }), expect.anything());
+  });
+
   it("does not execute when another confirmation already claimed the draft", async () => {
     db.telegramDraft.findFirst.mockResolvedValue(draftWith({
       step: "ready",

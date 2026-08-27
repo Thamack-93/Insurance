@@ -330,6 +330,14 @@ type TelegramQualitasPaymentLinkDraftState = {
   deliveryMethod?: QualitasPaymentLinkDeliveryMethod;
 };
 
+function normalizeTelegramQualitasDraftState(state: TelegramQualitasPaymentLinkDraftState) {
+  // Drafts created before channel selection was added were email requests.
+  if (state.step === "ready" && !state.deliveryMethod && state.recipientEmail) {
+    return { ...state, deliveryMethod: "EMAIL" as const };
+  }
+  return state;
+}
+
 type TelegramDraftState = {
   type: "PAYMENT_CAPTURE" | "POLICY_CAPTURE" | "QUALITAS_PAYMENT_LINK";
   payment?: TelegramPaymentDraftState;
@@ -2655,7 +2663,7 @@ async function continueTelegramQualitasDraftFromText(input: {
   const identity = await getActiveTelegramIdentityForChat(input.chatId, db);
   const payload = parseTelegramDraftState(input.draft.payloadJson);
   if (!identity || !payload?.qualitas || payload.type !== "QUALITAS_PAYMENT_LINK") return null;
-  const state = payload.qualitas;
+  const state = normalizeTelegramQualitasDraftState(payload.qualitas);
 
   if (state.step === "policyNumber") {
     const policy = await findAuthorizedQualitasPolicy({ identity, policyNumber: input.text.trim(), client: db });
@@ -2798,7 +2806,9 @@ async function processTelegramQualitasCallback(callback: TelegramCallbackQuery, 
     orderBy: [{ createdAt: "desc" }],
   });
   const payload = draft ? parseTelegramDraftState(draft.payloadJson) : null;
-  const state = payload?.type === "QUALITAS_PAYMENT_LINK" ? payload.qualitas : null;
+  const state = payload?.type === "QUALITAS_PAYMENT_LINK" && payload.qualitas
+    ? normalizeTelegramQualitasDraftState(payload.qualitas)
+    : null;
   if (!draft || !state || (selectedRecipient && state.step !== "recipient") || (selectedChannel && state.step !== "channel")) {
     return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "La selección ya fue procesada o expiró." };
   }
@@ -2967,7 +2977,9 @@ async function confirmQualitasTelegramDraft(input: {
   const db = input.client ?? getDb();
   const identity = await getActiveTelegramIdentityForChat(input.chatId, db);
   const payload = parseTelegramDraftState(input.draft.payloadJson);
-  const state = payload?.type === "QUALITAS_PAYMENT_LINK" ? payload.qualitas : null;
+  const state = payload?.type === "QUALITAS_PAYMENT_LINK" && payload.qualitas
+    ? normalizeTelegramQualitasDraftState(payload.qualitas)
+    : null;
   if (
     !identity ||
     input.draft.organizationId !== identity.organizationId ||
