@@ -48,7 +48,7 @@ function sequenceTransport(responses: Response[]): { transport: QualitasHttpTran
 
 async function prepareForFinal(transport: QualitasHttpTransport) {
   const prepared = await prepareQualitasPaymentLink(
-    { policyNumber: "0000000000", recipientEmail: "agent@example.com" },
+    { policyNumber: "0000000000", recipientEmail: "agent@example.com", deliveryMethod: "EMAIL" },
     { transport },
   );
   expect(prepared).toMatchObject({ transportReady: true });
@@ -95,6 +95,7 @@ describe("qualitas-payment-link provider", () => {
 
     const finalBody = calls[2].init?.body as FormData;
     expect(finalBody).toBeInstanceOf(FormData);
+    expect(finalBody.get("tipo")).toBe("");
     expect(finalBody.get("numTelefono")).toBe("");
     expect(finalBody.get("temail")).toBe("agent@example.com");
     expect(finalBody.get("resumenWSUrl")).toBe(resumeUrl);
@@ -102,6 +103,29 @@ describe("qualitas-payment-link provider", () => {
     expect((calls[2].init?.headers as Headers).get("X-Requested-With")).toBe("XMLHttpRequest");
     expect((calls[2].init?.headers as Headers).has("Cookie")).toBe(true);
     expect(JSON.stringify(result)).not.toContain("agent@example.com");
+  });
+
+  it("sends WhatsApp with Quálitas' explicit channel value and normalized phone", async () => {
+    const { transport, calls } = sequenceTransport([
+      response(initialHtml),
+      response(contactHtml),
+      response("Código: 0 Mensaje: Se genero link de pago y se envio por WhatsApp."),
+    ]);
+    const prepared = await prepareQualitasPaymentLink({
+      policyNumber: "0000000000",
+      recipientPhone: "+52 55 1234 5678",
+      deliveryMethod: "WHATSAPP",
+    }, { transport });
+
+    expect(prepared).toMatchObject({ transportReady: true, deliveryMethod: "WHATSAPP", recipientPhone: "5512345678" });
+    await expect(requestQualitasPaymentLink(prepared as QualitasPreparedPaymentLink, { transport })).resolves.toEqual({
+      outcome: "SUCCESS",
+      reason: "SUCCESS_CODE_0",
+    });
+    const finalBody = calls[2].init?.body as FormData;
+    expect(finalBody.get("tipo")).toBe("3");
+    expect(finalBody.get("numTelefono")).toBe("5512345678");
+    expect(finalBody.get("temail")).toBe("");
   });
 
   it("advances through Pagar ahora before discovering the contact form", async () => {
@@ -200,6 +224,22 @@ describe("qualitas-payment-link provider", () => {
       response(initialHtml),
       response(contactHtml),
       response("<main>Código: 99991</main>", 200, { "content-type": "text/html" }),
+    ]);
+    const prepared = await prepareForFinal(transport);
+
+    await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({
+      outcome: "UNCERTAIN",
+      reason: "DUPLICATE_LINK_99991",
+    });
+  });
+
+  it("classifies Quálitas' visible in-process message even when the form remains in the HTML", async () => {
+    const { transport } = sequenceTransport([
+      response(initialHtml),
+      response(contactHtml),
+      response(`<main>Código: 99991<br>Mensaje: Error: Generacion de Link de pago para la póliza en proceso</main><form><input name="temail"></form>`, 200, {
+        "content-type": "text/html",
+      }),
     ]);
     const prepared = await prepareForFinal(transport);
 
@@ -344,6 +384,8 @@ describe("qualitas-payment-link provider", () => {
       recipientEmail: "agent@example.com",
       transportReady: true,
       sessionCookie: "session=memory-only",
+      recipientPhone: null,
+      deliveryMethod: "EMAIL",
       finalActionUrl: finalAction,
       finalFields: { resumenWSUrl: resumeUrl },
       resumeWsUrl: resumeUrl,

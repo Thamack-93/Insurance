@@ -47,12 +47,18 @@ export type QualitasPaymentLinkResult = {
 
 export type QualitasPaymentLinkInput = {
   policyNumber: string;
-  recipientEmail: string;
+  recipientEmail?: string | null;
+  recipientPhone?: string | null;
+  deliveryMethod?: QualitasPaymentLinkDeliveryMethod;
 };
+
+export type QualitasPaymentLinkDeliveryMethod = "EMAIL" | "WHATSAPP";
 
 export type QualitasPreparedPaymentLink = {
   policyNumber: string;
-  recipientEmail: string;
+  recipientEmail: string | null;
+  recipientPhone: string | null;
+  deliveryMethod: QualitasPaymentLinkDeliveryMethod;
   transportReady: true;
   sessionCookie: string;
   finalActionUrl: string;
@@ -152,6 +158,21 @@ export function isValidQualitasEmail(value: string | null | undefined): value is
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(normalized);
 }
 
+export function normalizeQualitasPhone(value: string | null | undefined) {
+  const digits = (value ?? "").replace(/\D/g, "");
+  const normalized = digits.startsWith("52") && digits.length === 12 ? digits.slice(2) : digits;
+  return /^\d{10}$/.test(normalized) ? normalized : null;
+}
+
+export function isValidQualitasPhone(value: string | null | undefined): value is string {
+  return normalizeQualitasPhone(value) !== null;
+}
+
+export function maskQualitasPhone(value: string) {
+  const normalized = normalizeQualitasPhone(value);
+  return normalized ? `••••••${normalized.slice(-4)}` : "••••";
+}
+
 export function normalizeQualitasEmail(value: string | null | undefined) {
   const normalized = value?.trim().toLowerCase() ?? "";
   return isValidQualitasEmail(normalized) ? normalized : null;
@@ -237,7 +258,7 @@ function classifyQualitasProviderResponse(input: {
     hasSuccessCode: /(?:c[oó]digo|codigo|code)\s*[:=]?\s*["']?0\b/.test(text),
     hasDuplicateCode: /(?:c[oó]digo|codigo|code)\s*[:=]?\s*["']?99991\b/.test(text),
     hasSuccessMessage: /se\s+gener[oó]\s+(?:el\s+)?(?:link|enlace)\s+de\s+pago/.test(text) && /se\s+envi[oó].*correo/.test(text),
-    hasDuplicateMessage: /(?:ya\s+se\s+encuentra|existe).*otro\s+(?:link|enlace|liga)\s+de\s+pago\s+en\s+curso/.test(text),
+    hasDuplicateMessage: /(?:ya\s+se\s+encuentra|existe).*otro\s+(?:link|enlace|liga)\s+de\s+pago\s+en\s+curso|generaci[oó]n\s+de\s+(?:link|enlace|liga)\s+de\s+pago\s+.*en\s+proceso/.test(text),
     hasPolicyForm: Boolean(input.bodyText && findFormContaining(input.bodyText, "numPoliza")),
     hasContactForm: Boolean(input.bodyText && findFormContaining(input.bodyText, "temail")),
     hasResumeMarker: Boolean(input.bodyText && /\bresumenWSUrl\b/i.test(input.bodyText)),
@@ -245,7 +266,7 @@ function classifyQualitasProviderResponse(input: {
   };
   const duplicateEvidence: QualitasDuplicateEvidence = contentType === "json" && (signals.hasDuplicateCode || signals.hasDuplicateMessage)
     ? "JSON_CODE"
-    : contentType === "html" && !signals.hasVisibleContactForm && !signals.hasVisibleResumeMarker && signals.hasDuplicateMessage
+    : contentType === "html" && signals.hasDuplicateMessage
       ? "HTML_MESSAGE"
       : contentType === "html" && !signals.hasVisibleContactForm && !signals.hasVisibleResumeMarker && signals.hasDuplicateCode
         ? "HTML_CODE"
@@ -786,13 +807,15 @@ export async function prepareQualitasPaymentLink(
   input: QualitasPaymentLinkInput,
   options: QualitasRequestOptions = {},
 ): Promise<QualitasPreparedPaymentLink | QualitasPaymentLinkResult> {
-  if (!input.policyNumber.trim() || !isValidQualitasEmail(input.recipientEmail)) {
+  const deliveryMethod = input.deliveryMethod ?? "EMAIL";
+  const recipientEmail = normalizeQualitasEmail(input.recipientEmail);
+  const recipientPhone = normalizeQualitasPhone(input.recipientPhone);
+  if (!input.policyNumber.trim() || (deliveryMethod === "EMAIL" ? !recipientEmail : !recipientPhone)) {
     return qualitasResult("UNEXPECTED_RESPONSE", "INVALID_INPUT");
   }
 
   const policyNumber = normalizeQualitasPolicyNumber(input.policyNumber);
   if (!policyNumber) return qualitasResult("UNEXPECTED_RESPONSE", "INVALID_INPUT");
-  const recipientEmail = input.recipientEmail.trim().toLowerCase();
   const cookieJar = new Map<string, string>();
   const initial = await requestWithSession({
     url: QUALITAS_PAYMENT_LINK_ENTRYPOINT,
@@ -903,6 +926,8 @@ export async function prepareQualitasPaymentLink(
   return {
     policyNumber,
     recipientEmail,
+    recipientPhone,
+    deliveryMethod,
     transportReady: true,
     sessionCookie: cookieHeader(cookieJar),
     finalActionUrl,
@@ -916,8 +941,18 @@ export async function requestQualitasPaymentLink(
   prepared: QualitasPreparedPaymentLink,
   options: QualitasRequestOptions = {},
 ): Promise<QualitasPaymentLinkResult> {
-  if (!prepared.transportReady || !isAllowedQualitasUrl(prepared.finalActionUrl) || !isAllowedQualitasUrl(prepared.resumeWsUrl)) {
-    return qualitasResult("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED");
+  const destinationIsValid = prepared.deliveryMethod === "EMAIL"
+    ? isValidQualitasEmail(prepared.recipientEmail)
+    : isValidQualitasPhone(prepared.recipientPhone);
+  if (
+    !prepared.transportReady ||
+    !destinationIsValid ||
+    !isAllowedQualitasUrl(prepared.finalActionUrl) ||
+    !isAllowedQualitasUrl(prepared.resumeWsUrl)
+  ) {
+    return !prepared.transportReady || !isAllowedQualitasUrl(prepared.finalActionUrl) || !isAllowedQualitasUrl(prepared.resumeWsUrl)
+      ? qualitasResult("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED")
+      : qualitasResult("UNEXPECTED_RESPONSE", "INVALID_INPUT");
   }
   const cookieJar = new Map<string, string>();
   for (const pair of prepared.sessionCookie.split(/;\s*/)) {
@@ -926,8 +961,9 @@ export async function requestQualitasPaymentLink(
   }
   const fields = new FormData();
   for (const [name, value] of Object.entries(prepared.finalFields)) fields.set(name, value);
-  fields.set("numTelefono", "");
-  fields.set("temail", prepared.recipientEmail);
+  fields.set("tipo", prepared.deliveryMethod === "WHATSAPP" ? "3" : "");
+  fields.set("numTelefono", prepared.recipientPhone ?? "");
+  fields.set("temail", prepared.recipientEmail ?? "");
   fields.set("resumenWSUrl", prepared.resumeWsUrl);
 
   const response = await requestWithSession({

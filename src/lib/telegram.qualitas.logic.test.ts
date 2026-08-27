@@ -12,6 +12,11 @@ const provider = vi.hoisted(() => ({
     const value = email?.trim().toLowerCase() ?? "";
     return value.includes("@") ? value : null;
   }),
+  normalizeQualitasPhone: vi.fn((phone: string | null | undefined) => {
+    const value = (phone ?? "").replace(/\D/g, "");
+    return value.length === 10 ? value : null;
+  }),
+  maskQualitasPhone: vi.fn((phone: string) => `••••••${phone.slice(-4)}`),
   prepareQualitasPaymentLink: vi.fn(async () => ({ transportReady: true })),
   requestQualitasPaymentLink: vi.fn(async () => ({ outcome: "SUCCESS" as const, reason: "SUCCESS_CODE_0" as const })),
 }));
@@ -56,7 +61,7 @@ const policy = {
   policyNumber: "1234567890",
   clientId: "client-1",
   insurerId: "insurer-1",
-  client: { id: "client-1", fullName: "Cliente Uno", email: "client@example.com", organizationId: "org-1" },
+  client: { id: "client-1", fullName: "Cliente Uno", email: "client@example.com", phone: "5550101234", organizationId: "org-1" },
   insurer: { id: "insurer-1", name: "Qualitas", organizationId: "org-1" },
 };
 
@@ -116,7 +121,7 @@ describe("Telegram Quálitas payment-link flow", () => {
   });
 
   it("offers only the currently available recipient", async () => {
-    db.policy.findFirst.mockResolvedValue({ ...policy, client: { ...policy.client, email: null } });
+    db.policy.findFirst.mockResolvedValue({ ...policy, client: { ...policy.client, email: null, phone: null } });
 
     const result = await processTelegramWebhookUpdate(message("/pagoqualitas 1234567890"));
 
@@ -126,7 +131,7 @@ describe("Telegram Quálitas payment-link flow", () => {
   });
 
   it("blocks the flow when neither email is valid", async () => {
-    db.policy.findFirst.mockResolvedValue({ ...policy, client: { ...policy.client, email: null } });
+    db.policy.findFirst.mockResolvedValue({ ...policy, client: { ...policy.client, email: null, phone: null } });
     db.organizationMembership.findMany.mockResolvedValue([{ ...membership, user: { ...membership.user, email: "invalid" } }]);
 
     const result = await processTelegramWebhookUpdate(message("/pagoqualitas 1234567890"));
@@ -160,7 +165,15 @@ describe("Telegram Quálitas payment-link flow", () => {
 
     expect(result.callbackQueryId).toBe("callback-1");
     expect(result.removeReplyMarkup).toBe(true);
-    expect(result.replyText).toContain("Cliente · c***@example.com");
+    expect(result.replyText).toContain("¿Por qué medio quieres enviar");
+    expect(result.replyMarkup).toEqual({
+      inline_keyboard: [
+        [
+          { text: "Correo", callback_data: "qualitas_channel_email" },
+          { text: "WhatsApp", callback_data: "qualitas_channel_whatsapp" },
+        ],
+      ],
+    });
     expect(provider.requestQualitasPaymentLink).not.toHaveBeenCalled();
   });
 
@@ -180,6 +193,37 @@ describe("Telegram Quálitas payment-link flow", () => {
     expect(provider.requestQualitasPaymentLink).not.toHaveBeenCalled();
   });
 
+  it("selects WhatsApp as an explicit channel without contacting Quálitas", async () => {
+    db.telegramDraft.findFirst.mockResolvedValue(draftWith({
+      step: "channel",
+      policyId: "policy-1",
+      policyNumber: "1234567890",
+      clientId: "client-1",
+      clientName: "Cliente Uno",
+      clientEmail: "client@example.com",
+      clientPhone: "5550101234",
+      agentUserId: "user-1",
+      agentEmail: "agent@example.com",
+      recipient: "CLIENT",
+      recipientEmail: "client@example.com",
+    }));
+    db.telegramDraft.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await processTelegramWebhookUpdate({
+      update_id: 4,
+      callback_query: {
+        id: "callback-channel-1",
+        from: { id: 123 },
+        message: { message_id: 10, chat: { id: 123, type: "private" } },
+        data: "qualitas_channel_whatsapp",
+      },
+    });
+
+    expect(result.callbackAnswerText).toBe("Canal seleccionado.");
+    expect(result.replyText).toContain("WhatsApp · ••••••1234");
+    expect(provider.requestQualitasPaymentLink).not.toHaveBeenCalled();
+  });
+
   it("accepts cliente text fallback and requires confirmation", async () => {
     db.telegramDraft.findFirst.mockResolvedValue(draftWith({
       step: "recipient",
@@ -195,7 +239,7 @@ describe("Telegram Quálitas payment-link flow", () => {
 
     const result = await processTelegramWebhookUpdate(message("cliente"));
 
-    expect(result.replyText).toContain("/confirmar");
+    expect(result.replyText).toContain("¿Por qué medio quieres enviar");
     expect(provider.requestQualitasPaymentLink).not.toHaveBeenCalled();
   });
 
@@ -211,11 +255,12 @@ describe("Telegram Quálitas payment-link flow", () => {
       agentEmail: "agent@example.com",
       recipient: "CLIENT",
       recipientEmail: "old@example.com",
+      deliveryMethod: "EMAIL",
     }));
 
     const result = await processTelegramWebhookUpdate(message("/confirmar"));
 
-    expect(result.replyText).toContain("El correo cambió");
+    expect(result.replyText).toContain("El destino cambió");
     expect(provider.requestQualitasPaymentLink).not.toHaveBeenCalled();
   });
 
@@ -231,6 +276,7 @@ describe("Telegram Quálitas payment-link flow", () => {
       agentEmail: "agent@example.com",
       recipient: "CLIENT",
       recipientEmail: "client@example.com",
+      deliveryMethod: "EMAIL",
     }));
     db.telegramDraft.updateMany.mockResolvedValue({ count: 1 });
 
@@ -246,6 +292,35 @@ describe("Telegram Quálitas payment-link flow", () => {
     expect(JSON.stringify(writeActivityLog.mock.calls[0])).not.toContain("client@example.com");
   });
 
+  it("confirms a WhatsApp request with the client phone and never sends an email", async () => {
+    db.telegramDraft.findFirst.mockResolvedValue(draftWith({
+      step: "ready",
+      policyId: "policy-1",
+      policyNumber: "1234567890",
+      clientId: "client-1",
+      clientName: "Cliente Uno",
+      clientEmail: "client@example.com",
+      clientPhone: "5550101234",
+      agentUserId: "user-1",
+      agentEmail: "agent@example.com",
+      recipient: "CLIENT",
+      recipientPhone: "5550101234",
+      deliveryMethod: "WHATSAPP",
+    }));
+    db.telegramDraft.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await processTelegramWebhookUpdate(message("/confirmar"));
+
+    expect(result.replyText).toContain("WhatsApp · ••••••1234");
+    expect(provider.prepareQualitasPaymentLink).toHaveBeenCalledWith(expect.objectContaining({
+      recipientEmail: null,
+      recipientPhone: "5550101234",
+      deliveryMethod: "WHATSAPP",
+    }), expect.anything());
+    expect(provider.requestQualitasPaymentLink).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(writeActivityLog.mock.calls[0])).not.toContain("5550101234");
+  });
+
   it("does not execute when another confirmation already claimed the draft", async () => {
     db.telegramDraft.findFirst.mockResolvedValue(draftWith({
       step: "ready",
@@ -258,6 +333,7 @@ describe("Telegram Quálitas payment-link flow", () => {
       agentEmail: "agent@example.com",
       recipient: "CLIENT",
       recipientEmail: "client@example.com",
+      deliveryMethod: "EMAIL",
     }));
     db.telegramDraft.updateMany.mockResolvedValue({ count: 0 });
 

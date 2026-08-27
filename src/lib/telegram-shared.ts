@@ -255,13 +255,21 @@ export function buildTelegramQualitasPolicyPrompt() {
 
 export function buildTelegramQualitasRecipientPrompt(input: {
   clientEmail: string | null;
+  clientPhone?: string | null;
   agentEmail: string | null;
 }) {
   const lines = ["¿A quién quieres que Quálitas envíe el enlace de pago?", ""];
-  if (input.clientEmail && input.agentEmail) {
-    lines.push(`Cliente: ${input.clientEmail}`, `Agente: ${input.agentEmail}`);
-  } else if (input.clientEmail) {
-    lines.push("El agente actual no tiene un correo válido registrado en PolicyDesk.", `Cliente: ${input.clientEmail}`);
+  const clientLabel = input.clientEmail && input.clientPhone
+    ? `Cliente: ${input.clientEmail} · WhatsApp: ${input.clientPhone}`
+    : input.clientEmail
+      ? `Cliente: ${input.clientEmail}`
+      : input.clientPhone
+        ? `Cliente · WhatsApp: ${input.clientPhone}`
+        : null;
+  if (clientLabel && input.agentEmail) {
+    lines.push(clientLabel, `Agente: ${input.agentEmail}`);
+  } else if (clientLabel) {
+    lines.push("El agente actual no tiene un correo válido registrado en PolicyDesk.", clientLabel);
   } else if (input.agentEmail) {
     lines.push("El cliente no tiene un correo registrado en PolicyDesk.", `Agente: ${input.agentEmail}`);
   }
@@ -272,18 +280,39 @@ export function buildTelegramQualitasNoRecipientMessage() {
   return "No hay un correo válido disponible ni para el cliente ni para el agente.\nActualiza el correo correspondiente en PolicyDesk antes de continuar.";
 }
 
+export function buildTelegramQualitasChannelPrompt(input: {
+  recipientLabel: "Cliente" | "Agente";
+  maskedEmail: string | null;
+  maskedPhone: string | null;
+}) {
+  const lines = [`¿Por qué medio quieres enviar el enlace para ${input.recipientLabel}?`, ""];
+  if (input.maskedEmail) lines.push(`Correo electrónico: ${input.maskedEmail}`);
+  if (input.maskedPhone) lines.push(`WhatsApp: ${input.maskedPhone}`);
+  if (!input.maskedPhone) lines.push("WhatsApp no está disponible porque falta un teléfono válido.");
+  return lines.join("\n");
+}
+
+export function buildTelegramQualitasPhonePrompt() {
+  return "Escribe el número de WhatsApp de 10 dígitos para esta solicitud, o responde /cancelar.";
+}
+
 export function buildTelegramQualitasConfirmation(input: {
   policyNumber: string;
   clientName: string;
   recipientLabel: "Cliente" | "Agente";
-  maskedEmail: string;
+  maskedEmail?: string;
+  maskedPhone?: string;
+  deliveryMethod?: "EMAIL" | "WHATSAPP";
 }) {
+  const destination = input.deliveryMethod === "WHATSAPP"
+    ? `WhatsApp · ${input.maskedPhone ?? "••••"}`
+    : `Correo · ${input.maskedEmail ?? "***"}`;
   return [
     "Confirmar solicitud de enlace Quálitas",
     "",
     `Póliza: ${input.policyNumber}`,
     `Cliente: ${input.clientName}`,
-    `Enviar a: ${input.recipientLabel} · ${input.maskedEmail}`,
+    `Enviar a: ${input.recipientLabel} · ${destination}`,
     "",
     "Responde /confirmar para solicitarlo o /cancelar para descartarlo.",
   ].join("\n");
@@ -292,13 +321,18 @@ export function buildTelegramQualitasConfirmation(input: {
 export function buildTelegramQualitasSuccess(input: {
   policyNumber: string;
   recipientLabel: "Cliente" | "Agente";
-  maskedEmail: string;
+  maskedEmail?: string;
+  maskedPhone?: string;
+  deliveryMethod?: "EMAIL" | "WHATSAPP";
 }) {
+  const destination = input.deliveryMethod === "WHATSAPP"
+    ? `WhatsApp · ${input.maskedPhone ?? "••••"}`
+    : `Correo · ${input.maskedEmail ?? "***"}`;
   return [
     "Solicitud enviada a Quálitas.",
     "",
     `El enlace de pago para la póliza •••${input.policyNumber.slice(-4)} fue solicitado para:`,
-    `${input.recipientLabel} · ${input.maskedEmail}`,
+    `${input.recipientLabel} · ${destination}`,
   ].join("\n");
 }
 
