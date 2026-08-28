@@ -135,6 +135,8 @@ jobs:
         run: |
           npx prisma migrate deploy
           npm run db:check-drift
+      - name: Check Cycle 1 tenant guards before multi-org fixture
+        run: npm run check:tenant-guards
       - name: Mark migrated tenant database
         shell: bash
         run: |

@@ -67,8 +67,8 @@ It expires automatically and is removed on logout; it is never written to the da
   - `/start`
   - `/help`
   - `/link <código>`
-- `/status`
-- `/pagoqualitas <póliza>`
+  - `/status`
+  - `/pagoqualitas <póliza>`
 - Telegram linking uses one-time codes stored as hashes with expiry.
 - Telegram test messages use the live bot token and update `NotificationEvent` status.
 - The digest contains overdue/today/upcoming receipts, renewals, overdue work and commissions.
