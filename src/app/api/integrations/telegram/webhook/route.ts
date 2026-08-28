@@ -7,12 +7,17 @@ import { recordSecurityEvent, SECURITY_EVENT_TYPES } from "@/lib/security-events
 import {
   isTelegramWebhookSecretValid,
   processTelegramWebhookUpdate,
+  answerTelegramCallbackQuery,
+  removeTelegramInlineKeyboard,
   sendTelegramMessage,
   type TelegramWebhookUpdate,
 } from "@/lib/telegram";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Quálitas can take several seconds before returning the final email result.
+// The provider keeps the final submission single-shot and fail-closed.
+export const maxDuration = 60;
 
 function hasValidSecret(request: NextRequest) {
   return isTelegramWebhookSecretValid(request.headers.get("x-telegram-bot-api-secret-token"));
@@ -85,8 +90,29 @@ export async function POST(request: NextRequest) {
 
     const result = await processTelegramWebhookUpdate(update);
 
+    if (result.callbackQueryId) {
+      const callbackReply = await answerTelegramCallbackQuery(result.callbackQueryId, result.callbackAnswerText);
+      if (!callbackReply.ok) {
+        logError("api.integrations.telegram.webhook.callback", new Error(callbackReply.error), {
+          callbackQueryId: result.callbackQueryId,
+        });
+      }
+    }
+
+    if (result.removeReplyMarkup && result.chatId && update.callback_query?.message?.message_id) {
+      const keyboardReply = await removeTelegramInlineKeyboard(
+        result.chatId,
+        update.callback_query.message.message_id,
+      );
+      if (!keyboardReply.ok) {
+        logError("api.integrations.telegram.webhook.keyboard", new Error(keyboardReply.error), {
+          chatId: result.chatId,
+        });
+      }
+    }
+
     if (result.handled && result.replyText && result.chatId) {
-      const reply = await sendTelegramMessage(result.chatId, result.replyText);
+      const reply = await sendTelegramMessage(result.chatId, result.replyText, result.replyMarkup);
       if (!reply.ok) {
         logError("api.integrations.telegram.webhook.reply", new Error(reply.error), {
           chatId: result.chatId,

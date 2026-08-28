@@ -4,6 +4,8 @@ import { requireUser } from "@/lib/auth";
 import { requireOrganizationContext } from "@/lib/organization-context";
 import { ChangePasswordForm } from "@/components/settings/change-password-form";
 import { roleLabel } from "@/lib/ui-labels";
+import { AgentPhoneForm } from "@/components/settings/agent-phone-form";
+import { updateMyPhone } from "./actions";
 
 export const metadata = {
   title: "Mi cuenta · Configuración",
@@ -30,6 +32,16 @@ export default async function MyAccountPage() {
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
             Si necesitas cambiar tu nombre, correo o rol, pídeselo a un Administrador.
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Datos para notificaciones</CardTitle>
+            <CardDescription>Guarda tu celular una sola vez para reutilizarlo en WhatsApp.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AgentPhoneForm initialPhone={user.phone} updateMyPhone={updateMyPhone} />
           </CardContent>
         </Card>
 

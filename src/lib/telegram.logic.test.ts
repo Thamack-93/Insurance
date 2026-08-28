@@ -20,6 +20,22 @@ import {
   parseTelegramPaymentArgument,
   parseTelegramPaymentDateInput,
 } from "./telegram";
+import {
+  buildTelegramQualitasConfirmation,
+  buildTelegramQualitasOutcomeMessage,
+  buildTelegramQualitasRecipientPrompt,
+  buildTelegramQualitasSuccess,
+  buildTelegramQualitasUnavailableMessage,
+} from "./telegram-shared";
+import {
+  isQualitasInsurerName,
+  isQualitasPaymentLinkEnabled,
+  isValidQualitasEmail,
+  maskQualitasEmail,
+  normalizeQualitasProviderOutcome,
+  prepareQualitasPaymentLink,
+  requestQualitasPaymentLink,
+} from "./qualitas-payment-link";
 
 describe("telegram.shared", () => {
   it("generates a readable hex link code", () => {
@@ -42,6 +58,15 @@ describe("telegram.shared", () => {
       raw: "/help@PolicyDeskBot",
     });
     expect(parseTelegramCommand("/resumen")).toEqual({ command: "resumen", argument: null, raw: "/resumen" });
+    expect(parseTelegramCommand("/pagoqualitas 1234567890")).toEqual({
+      command: "pagoqualitas",
+      argument: "1234567890",
+      raw: "/pagoqualitas 1234567890",
+    });
+    expect(parseTelegramCommand("/pagoqualitas@PolicyDeskBot 1234567890")).toMatchObject({
+      command: "pagoqualitas",
+      argument: "1234567890",
+    });
     expect(parseTelegramCommand("/link ABCD12")).toEqual({
       command: "link",
       argument: "ABCD12",
@@ -55,6 +80,7 @@ describe("telegram.shared", () => {
     expect(buildTelegramHelpMessage()).toContain("/status");
     expect(buildTelegramHelpMessage()).toContain("/buscar <texto>");
     expect(buildTelegramHelpMessage()).toContain("/resumen");
+    expect(buildTelegramHelpMessage()).toContain("/pagoqualitas <póliza>");
     expect(buildTelegramLinkSuccessMessage()).toContain("Chat vinculado");
     expect(buildTelegramLinkErrorMessage("Código inválido")).toContain("Código inválido");
     expect(
@@ -71,6 +97,70 @@ describe("telegram.shared", () => {
     expect(buildTelegramStatusMessage(true)).toContain("vinculado");
     expect(buildTelegramStatusMessage(true, false)).toContain("deshabilitados");
     expect(buildTelegramStatusMessage(false)).toContain("todavía no está vinculado");
+  });
+
+  it("builds the Quálitas recipient and confirmation messages without exposing full emails", () => {
+    const recipient = buildTelegramQualitasRecipientPrompt({
+      clientEmail: "j***@correo.com",
+      agentEmail: "p***@correo.com",
+    });
+    expect(recipient).toContain("Cliente: j***@correo.com");
+    expect(recipient).toContain("Agente: p***@correo.com");
+    expect(recipient).not.toContain("juan");
+
+    expect(buildTelegramQualitasConfirmation({
+      policyNumber: "1234567890",
+      clientName: "Juan Pérez",
+      recipientLabel: "Cliente",
+      maskedEmail: "j***@correo.com",
+    })).toContain("/confirmar");
+    expect(buildTelegramQualitasSuccess({
+      policyNumber: "1234567890",
+      recipientLabel: "Agente",
+      maskedEmail: "p***@correo.com",
+    })).toContain("•••7890");
+    expect(buildTelegramQualitasUnavailableMessage()).toMatch(/no está disponible/i);
+    expect(buildTelegramQualitasOutcomeMessage("UNCERTAIN", "DUPLICATE_LINK_99991")).toContain("ya existe una liga");
+    expect(buildTelegramQualitasOutcomeMessage("UNCERTAIN", "FINAL_RESPONSE_UNRECOGNIZED")).toContain("no reconoció el acuse");
+    expect(buildTelegramQualitasOutcomeMessage("UNCERTAIN", "FINAL_TIMEOUT")).toContain("antes del límite");
+    expect(buildTelegramQualitasOutcomeMessage("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED")).toContain("portal de Quálitas cambió");
+  });
+
+  it("uses exact Quálitas insurer identity and validates recipient emails", () => {
+    expect(isQualitasInsurerName("Quálitas Compañía de Seguros, S.A. de C.V.")).toBe(true);
+    expect(isQualitasInsurerName("Qualitas")).toBe(true);
+    expect(isQualitasInsurerName("Qualitas Brokerage")).toBe(false);
+    expect(isValidQualitasEmail("agent@example.com")).toBe(true);
+    expect(isValidQualitasEmail("not-an-email")).toBe(false);
+    expect(maskQualitasEmail("pedro@example.com")).toBe("p***@example.com");
+  });
+
+  it("keeps the Quálitas feature flag fail-closed", () => {
+    const original = process.env.QUALITAS_PAYMENT_LINK_ENABLED;
+    try {
+      for (const value of [undefined, "", "false", "1", "TRUE", "invalid"]) {
+        if (value === undefined) delete process.env.QUALITAS_PAYMENT_LINK_ENABLED;
+        else process.env.QUALITAS_PAYMENT_LINK_ENABLED = value;
+        expect(isQualitasPaymentLinkEnabled()).toBe(false);
+      }
+      process.env.QUALITAS_PAYMENT_LINK_ENABLED = "true";
+      expect(isQualitasPaymentLinkEnabled()).toBe(true);
+    } finally {
+      if (original === undefined) delete process.env.QUALITAS_PAYMENT_LINK_ENABLED;
+      else process.env.QUALITAS_PAYMENT_LINK_ENABLED = original;
+    }
+  });
+
+  it("normalizes provider outcomes and keeps the feature flag fail-closed", async () => {
+    expect(normalizeQualitasProviderOutcome({ status: 404, bodyText: "policy not found" })).toBe("POLICY_NOT_FOUND");
+    expect(normalizeQualitasProviderOutcome({ status: 429 })).toBe("RATE_LIMITED");
+    expect(normalizeQualitasProviderOutcome({ timedOut: true })).toBe("TIMEOUT");
+    expect(normalizeQualitasProviderOutcome({ timedOut: true, finalSubmission: true })).toBe("UNCERTAIN");
+    expect(normalizeQualitasProviderOutcome({ redirectedToUnexpectedHost: true })).toBe("QUALITAS_FLOW_CHANGED");
+
+    const prepared = await prepareQualitasPaymentLink({ policyNumber: "", recipientEmail: "agent@example.com" });
+    expect(prepared).toEqual({ outcome: "UNEXPECTED_RESPONSE", reason: "INVALID_INPUT" });
+    expect(requestQualitasPaymentLink).toBeTypeOf("function");
   });
 
   it("parses payment drafts without an amount and accepts hoy as the payment date", () => {
