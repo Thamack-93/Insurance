@@ -324,6 +324,7 @@ type TelegramQualitasPaymentLinkDraftState = {
   clientPhone?: string | null;
   agentUserId?: string;
   agentEmail?: string | null;
+  agentPhone?: string | null;
   recipient?: "CLIENT" | "AGENT";
   recipientEmail?: string;
   recipientPhone?: string;
@@ -807,7 +808,7 @@ type ActiveTelegramIdentity = {
   channel: NonNullable<Awaited<ReturnType<typeof getTelegramChannelByChatId>>>;
   organizationId: string;
   membershipRole: string;
-  user: { id: string; email: string; name: string; active: boolean };
+  user: { id: string; email: string; name: string; phone: string | null; active: boolean };
 };
 
 async function getActiveTelegramIdentityForChat(chatId: string, client?: DbClient): Promise<ActiveTelegramIdentity | null> {
@@ -822,7 +823,7 @@ async function getActiveTelegramIdentityForChat(chatId: string, client?: DbClien
       role: true,
       active: true,
       organization: { select: { status: true } },
-      user: { select: { id: true, email: true, name: true, active: true } },
+      user: { select: { id: true, email: true, name: true, phone: true, active: true } },
     },
     take: 2,
   });
@@ -2442,7 +2443,7 @@ const QUALITAS_WHATSAPP_CALLBACK = "qualitas_channel_whatsapp";
 function buildQualitasRecipientMarkup(state: TelegramQualitasPaymentLinkDraftState): TelegramInlineKeyboardMarkup {
   const buttons: TelegramInlineKeyboardButton[] = [];
   if (state.clientEmail || state.clientPhone) buttons.push({ text: "Cliente", callback_data: QUALITAS_CLIENT_CALLBACK });
-  if (state.agentEmail) buttons.push({ text: "Agente", callback_data: QUALITAS_AGENT_CALLBACK });
+  if (state.agentEmail || state.agentPhone) buttons.push({ text: "Agente", callback_data: QUALITAS_AGENT_CALLBACK });
   return { inline_keyboard: [buttons] };
 }
 
@@ -2464,7 +2465,7 @@ function buildQualitasRecipientPrompt(state: TelegramQualitasPaymentLinkDraftSta
 }
 
 function buildQualitasChannelPrompt(state: TelegramQualitasPaymentLinkDraftState) {
-  const availablePhone = state.recipientPhone ?? (state.recipient === "CLIENT" ? state.clientPhone : null);
+  const availablePhone = state.recipientPhone ?? (state.recipient === "CLIENT" ? state.clientPhone : state.agentPhone ?? null);
   return buildTelegramQualitasChannelPrompt({
     recipientLabel: state.recipient === "AGENT" ? "Agente" : "Cliente",
     maskedEmail: state.recipientEmail ? maskQualitasEmail(state.recipientEmail) : null,
@@ -2535,6 +2536,7 @@ function buildQualitasDraftState(input: {
   const clientEmail = normalizeQualitasEmail(input.policy.client.email);
   const clientPhone = normalizeQualitasPhone(input.policy.client.phone);
   const agentEmail = normalizeQualitasEmail(input.identity.user.email);
+  const agentPhone = normalizeQualitasPhone(input.identity.user.phone);
   return {
     step: "recipient",
     policyId: input.policy.id,
@@ -2545,6 +2547,7 @@ function buildQualitasDraftState(input: {
     clientPhone,
     agentUserId: input.identity.user.id,
     agentEmail,
+    agentPhone,
   };
 }
 
@@ -2617,7 +2620,7 @@ async function createTelegramQualitasDraft(input: { chatId: string; argument: st
   });
 
   const state = buildQualitasDraftState({ policy, identity });
-  if (!state.clientEmail && !state.clientPhone && !state.agentEmail) {
+  if (!state.clientEmail && !state.clientPhone && !state.agentEmail && !state.agentPhone) {
     return { ok: false as const, replyText: buildTelegramQualitasNoRecipientMessage() };
   }
 
@@ -2682,7 +2685,7 @@ async function continueTelegramQualitasDraftFromText(input: {
       state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState },
       client: db,
     });
-    if (!nextState.clientEmail && !nextState.clientPhone && !nextState.agentEmail) {
+    if (!nextState.clientEmail && !nextState.clientPhone && !nextState.agentEmail && !nextState.agentPhone) {
       return { handled: true as const, chatId: input.chatId, replyText: buildTelegramQualitasNoRecipientMessage() };
     }
     return {
@@ -2737,7 +2740,7 @@ async function continueTelegramQualitasDraftFromText(input: {
   const recipientEmail = recipient
     ? state[recipient === "CLIENT" ? "clientEmail" : "agentEmail"]
     : null;
-  const recipientPhone = recipient === "CLIENT" ? state.clientPhone : null;
+  const recipientPhone = recipient === "CLIENT" ? state.clientPhone : state.agentPhone ?? null;
   if (!recipient || (!recipientEmail && !recipientPhone)) {
     return {
       handled: true as const,
@@ -2820,7 +2823,7 @@ async function processTelegramQualitasCallback(callback: TelegramCallbackQuery, 
   const currentState = buildQualitasDraftState({ policy, identity });
   const activeRecipient = selectedRecipient ?? state.recipient;
   const selectedEmail = activeRecipient === "CLIENT" ? currentState.clientEmail : currentState.agentEmail;
-  const selectedPhone = activeRecipient === "CLIENT" ? currentState.clientPhone : null;
+  const selectedPhone = activeRecipient === "CLIENT" ? currentState.clientPhone : currentState.agentPhone;
   if (selectedRecipient && !selectedEmail && !selectedPhone) {
     return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Ese destino ya no está disponible." };
   }
@@ -3013,7 +3016,8 @@ async function confirmQualitasTelegramDraft(input: {
   const currentClientEmail = normalizeQualitasEmail(policy?.client.email);
   const currentAgentEmail = normalizeQualitasEmail(identity.user.email);
   const currentRecipientEmail = state.recipient === "CLIENT" ? currentClientEmail : currentAgentEmail;
-  const currentRecipientPhone = state.recipient === "CLIENT" ? normalizeQualitasPhone(policy?.client.phone) : state.recipientPhone;
+  const currentAgentPhone = state.agentPhone ? normalizeQualitasPhone(identity.user.phone) : state.recipientPhone;
+  const currentRecipientPhone = state.recipient === "CLIENT" ? normalizeQualitasPhone(policy?.client.phone) : currentAgentPhone;
   if (
     !policy ||
     policy.client.id !== state.clientId ||

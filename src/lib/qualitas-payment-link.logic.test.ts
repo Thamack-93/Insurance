@@ -6,11 +6,15 @@ import {
   QUALITAS_PAYMENT_LINK_ENTRYPOINT,
   normalizeQualitasPolicyNumber,
   normalizeQualitasProviderOutcome,
+  buildQualitasDeliveryFields,
+  qualitasRequestShapeSignature,
   prepareQualitasPaymentLink,
   requestQualitasPaymentLink,
   type QualitasHttpTransport,
+  type QualitasFormField,
   type QualitasPreparedPaymentLink,
 } from "./qualitas-payment-link";
+import { QUALITAS_NATIVE_REQUEST_FIXTURES } from "./qualitas-native-fixtures";
 
 const policyAction = "https://www.qualitas.com.mx/web/qmx/pago-de-poliza?p_p_id=pagopoliza_WAR_PagoPolizaportlet&p_p_lifecycle=1&p_p_state=normal&p_p_mode=view&_pagopoliza_WAR_PagoPolizaportlet_myaction=consulta-datos&p_auth=redacted";
 const paymentPageUrl = "https://www.qualitas.com.mx/web/qmx/pago-de-poliza/-/user-pago/pago-tdc";
@@ -26,6 +30,9 @@ const initialHtml = `<form method="post" action="${policyAction.replaceAll("&", 
 const contactHtml = `<form method="post" action="${finalAction.replaceAll("&", "&amp;")}">
   <input type="hidden" name="resumenWSUrl" value="${resumeUrl}">
   <input type="hidden" name="numTelefono" value="">
+  <input type="radio" name="tipo" value="" checked>
+  <input type="radio" name="tipo" value="3">
+  <input type="hidden" name="disabledDynamicField" value="must-not-send" disabled>
   <input name="temail" value="">
 </form>`;
 
@@ -73,7 +80,7 @@ describe("qualitas-payment-link provider", () => {
     expect((calls[1].init?.body as URLSearchParams).get("numPoliza")).toBe("0940454748");
   });
 
-  it("discovers the session flow and sends the final multipart request", async () => {
+  it("discovers the session flow and sends the final urlencoded request", async () => {
     const { transport, calls } = sequenceTransport([
       response(initialHtml, 200, { "set-cookie": "JSESSIONID=session-only; Path=/" }),
       response(contactHtml, 200, { "set-cookie": "route=route-only; Path=/" }),
@@ -93,16 +100,40 @@ describe("qualitas-payment-link provider", () => {
     expect(policyBody.get("numPoliza")).toBe("0000000000");
     expect(policyBody.get("dynamicField")).toBe("dynamicValue");
 
-    const finalBody = calls[2].init?.body as FormData;
-    expect(finalBody).toBeInstanceOf(FormData);
-    expect(finalBody.get("tipo")).toBe("");
+    const finalBody = calls[2].init?.body as URLSearchParams;
+    expect(finalBody).toBeInstanceOf(URLSearchParams);
+    expect(finalBody.get("tipo")).toBe("1");
     expect(finalBody.get("numTelefono")).toBe("");
     expect(finalBody.get("temail")).toBe("agent@example.com");
     expect(finalBody.get("resumenWSUrl")).toBe(resumeUrl);
-    expect((calls[2].init?.headers as Headers).get("X-Pjax")).toBe("true");
-    expect((calls[2].init?.headers as Headers).get("X-Requested-With")).toBe("XMLHttpRequest");
+    expect(finalBody.has("tipo")).toBe(true);
+    expect(finalBody.has("disabledDynamicField")).toBe(false);
+    expect((calls[2].init?.headers as Headers).get("Content-Type")).toBe("application/x-www-form-urlencoded");
+    expect((calls[2].init?.headers as Headers).has("X-Pjax")).toBe(false);
+    expect((calls[2].init?.headers as Headers).has("X-Requested-With")).toBe(false);
     expect((calls[2].init?.headers as Headers).has("Cookie")).toBe(true);
     expect(JSON.stringify(result)).not.toContain("agent@example.com");
+  });
+
+  it("does not classify a generic no puede phrase as policy eligibility", () => {
+    expect(normalizeQualitasProviderOutcome({
+      status: 200,
+      bodyText: "El portal no puede continuar con la solicitud.",
+      finalSubmission: true,
+    })).toBe("UNCERTAIN");
+  });
+
+  it("requires the final Código/Mensaje acuse before classifying eligibility", () => {
+    expect(normalizeQualitasProviderOutcome({
+      status: 200,
+      bodyText: "Póliza no puede usar este flujo. Portal de pago.",
+      finalSubmission: true,
+    })).toBe("UNCERTAIN");
+    expect(normalizeQualitasProviderOutcome({
+      status: 200,
+      bodyText: "Código: 1 Mensaje: La póliza no puede usar este flujo de pago.",
+      finalSubmission: true,
+    })).toBe("POLICY_NOT_ELIGIBLE");
   });
 
   it("sends WhatsApp with Quálitas' explicit channel value and normalized phone", async () => {
@@ -122,10 +153,12 @@ describe("qualitas-payment-link provider", () => {
       outcome: "SUCCESS",
       reason: "SUCCESS_CODE_0",
     });
-    const finalBody = calls[2].init?.body as FormData;
+    const finalBody = calls[2].init?.body as URLSearchParams;
+    expect(finalBody).toBeInstanceOf(URLSearchParams);
     expect(finalBody.get("tipo")).toBe("3");
     expect(finalBody.get("numTelefono")).toBe("5512345678");
     expect(finalBody.get("temail")).toBe("");
+    expect(finalBody.has("disabledDynamicField")).toBe(false);
   });
 
   it("advances through Pagar ahora before discovering the contact form", async () => {
@@ -142,6 +175,35 @@ describe("qualitas-payment-link provider", () => {
     expect(calls[2].url).toBe(paymentPageUrl);
     expect(calls[2].init?.method).toBe("GET");
     expect(prepared).toMatchObject({ transportReady: true, refererUrl: paymentPageUrl });
+  });
+
+  it("collects select, textarea, duplicate fields, and the selected Pagar ahora submitter", async () => {
+    const paymentFormHtml = `<form method="post" action="${paymentPageUrl}">
+      <input type="hidden" name="dynamic" value="one">
+      <input type="hidden" name="dynamic" value="two">
+      <select name="channel"><option value="email">Email</option><option value="whatsapp" selected>WhatsApp</option></select>
+      <textarea name="note">native text</textarea>
+      <button type="submit" name="ignore" value="other">Otra acción</button>
+      <button type="submit" name="pagar" value="Pagar ahora">Pagar ahora</button>
+    </form>`;
+    const { transport, calls } = sequenceTransport([
+      response(initialHtml),
+      response(paymentFormHtml),
+      response(contactHtml),
+    ]);
+
+    const prepared = await prepareForFinal(transport);
+
+    expect(calls[2].init?.method).toBe("POST");
+    const paymentBody = calls[2].init?.body as URLSearchParams;
+    expect([...paymentBody.entries()]).toEqual([
+      ["dynamic", "one"],
+      ["dynamic", "two"],
+      ["channel", "whatsapp"],
+      ["note", "native text"],
+      ["pagar", "Pagar ahora"],
+    ]);
+    expect(prepared).toMatchObject({ transportReady: true });
   });
 
   it("emits a redacted trace for every provider stage", async () => {
@@ -182,6 +244,12 @@ describe("qualitas-payment-link provider", () => {
       hasVisibleContactForm: false,
       hasVisibleResumeMarker: false,
       duplicateEvidence: "NONE",
+      deliveryMethod: "EMAIL",
+      requestVariant: "EMAIL_NATIVE_FORM",
+      hasTipoField: true,
+      hasEmailField: true,
+      hasPhoneField: true,
+      requestEncoding: "FORM_URLENCODED",
     }));
     expect(events.every((event) => event.traceId === "draft-redacted")).toBe(true);
     expect(JSON.stringify(events)).not.toContain("agent@example.com");
@@ -223,7 +291,7 @@ describe("qualitas-payment-link provider", () => {
     const { transport } = sequenceTransport([
       response(initialHtml),
       response(contactHtml),
-      response("<main>Código: 99991</main>", 200, { "content-type": "text/html" }),
+      response("<main>Código: 99991 Mensaje: Ya se encuentra otro link de pago en curso.</main>", 200, { "content-type": "text/html" }),
     ]);
     const prepared = await prepareForFinal(transport);
 
@@ -387,7 +455,7 @@ describe("qualitas-payment-link provider", () => {
       recipientPhone: null,
       deliveryMethod: "EMAIL",
       finalActionUrl: finalAction,
-      finalFields: { resumenWSUrl: resumeUrl },
+      finalFields: [{ name: "resumenWSUrl", value: resumeUrl, controlType: "input" }],
       resumeWsUrl: resumeUrl,
       refererUrl: "https://www.qualitas.com.mx/web/qmx/pago-de-poliza/-/user-pago/pago-tdc",
     };
@@ -403,5 +471,50 @@ describe("qualitas-payment-link provider", () => {
       { policyNumber: "0000000000", recipientEmail: "agent@example.com" },
       { transport, maxResponseBytes: 8 },
     )).resolves.toEqual({ outcome: "UNEXPECTED_RESPONSE", reason: "RESPONSE_TOO_LARGE" });
+  });
+
+  it("preserves ordered duplicate controls and applies channel-specific fields", () => {
+    const fields: QualitasFormField[] = [
+      { name: "dynamic", value: "one", controlType: "input" },
+      { name: "dynamic", value: "two", controlType: "input" },
+      { name: "tipo", value: "", controlType: "input" },
+      { name: "numTelefono", value: "old-phone", controlType: "input" },
+      { name: "temail", value: "old@example.com", controlType: "input" },
+      { name: "resumenWSUrl", value: resumeUrl, controlType: "input" },
+    ];
+
+    const email = buildQualitasDeliveryFields({
+      fields,
+      deliveryMethod: "EMAIL",
+      recipientEmail: "agent@example.com",
+      recipientPhone: null,
+      resumeWsUrl: resumeUrl,
+    });
+    expect(email.map((field) => field.name)).toEqual([
+      "numTelefono", "temail", "tipo", "resumenWSUrl", "dynamic", "dynamic",
+    ]);
+    expect(email.find((field) => field.name === "temail")?.value).toBe("agent@example.com");
+    expect(email.find((field) => field.name === "numTelefono")?.value).toBe("");
+    expect(email.find((field) => field.name === "tipo")?.value).toBe("1");
+
+    const whatsapp = buildQualitasDeliveryFields({
+      fields,
+      deliveryMethod: "WHATSAPP",
+      recipientEmail: null,
+      recipientPhone: "5512345678",
+      resumeWsUrl: resumeUrl,
+    });
+    expect(whatsapp.map((field) => field.name)).toEqual([
+      "numTelefono", "temail", "tipo", "resumenWSUrl", "dynamic", "dynamic",
+    ]);
+    expect(whatsapp.find((field) => field.name === "tipo")?.value).toBe("3");
+    expect(qualitasRequestShapeSignature(email, "EMAIL")).not.toBe(qualitasRequestShapeSignature(whatsapp, "WHATSAPP"));
+  });
+
+  it("matches the redacted native signatures for Email and WhatsApp", () => {
+    expect(qualitasRequestShapeSignature(QUALITAS_NATIVE_REQUEST_FIXTURES.EMAIL.fields, "EMAIL"))
+      .toBe(QUALITAS_NATIVE_REQUEST_FIXTURES.EMAIL.signature);
+    expect(qualitasRequestShapeSignature(QUALITAS_NATIVE_REQUEST_FIXTURES.WHATSAPP.fields, "WHATSAPP"))
+      .toBe(QUALITAS_NATIVE_REQUEST_FIXTURES.WHATSAPP.signature);
   });
 });

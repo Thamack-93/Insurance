@@ -350,7 +350,7 @@ export function buildTelegramQualitasOutcomeMessage(outcome: string, reason?: st
   switch (outcome) {
     case "POLICY_NOT_FOUND": return "Quálitas no reconoció la póliza. No se envió ningún enlace.";
     case "POLICY_NOT_ELIGIBLE": return "Quálitas indica que esta póliza no puede usar este flujo de pago.";
-    case "EMAIL_REJECTED": return "Quálitas rechazó el correo seleccionado. No se envió el enlace.";
+    case "EMAIL_REJECTED": return "Quálitas rechazó el correo seleccionado. No se envió el enlace. Intenta WhatsApp.";
     case "UNCERTAIN": return "No pude confirmar si Quálitas procesó la solicitud.\n\nPara evitar enviar enlaces duplicados, PolicyDesk no la reenviará automáticamente.";
     case "RATE_LIMITED": return "Se alcanzó el límite temporal de solicitudes a Quálitas. Intenta nuevamente más tarde.";
     case "QUALITAS_UNAVAILABLE":

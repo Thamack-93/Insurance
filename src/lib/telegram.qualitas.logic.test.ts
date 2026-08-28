@@ -13,7 +13,8 @@ const provider = vi.hoisted(() => ({
     return value.includes("@") ? value : null;
   }),
   normalizeQualitasPhone: vi.fn((phone: string | null | undefined) => {
-    const value = (phone ?? "").replace(/\D/g, "");
+    const raw = (phone ?? "").replace(/\D/g, "");
+    const value = raw.length === 12 && raw.startsWith("52") ? raw.slice(2) : raw;
     return value.length === 10 ? value : null;
   }),
   maskQualitasPhone: vi.fn((phone: string) => `••••••${phone.slice(-4)}`),
@@ -254,6 +255,44 @@ describe("Telegram Quálitas payment-link flow", () => {
     expect(result.replyText).toContain("número de WhatsApp de 10 dígitos");
     expect(result.removeReplyMarkup).toBe(true);
     expect(provider.requestQualitasPaymentLink).not.toHaveBeenCalled();
+  });
+
+  it("reuses the agent phone stored on the user profile", async () => {
+    db.organizationMembership.findMany.mockResolvedValue([{
+      ...membership,
+      user: { ...membership.user, phone: "+525550101234" },
+    }]);
+    db.telegramDraft.findFirst.mockResolvedValue(draftWith({
+      step: "recipient",
+      policyId: "policy-1",
+      policyNumber: "1234567890",
+      clientId: "client-1",
+      clientName: "Cliente Uno",
+      clientEmail: "client@example.com",
+      clientPhone: "5550101234",
+      agentUserId: "user-1",
+      agentEmail: "agent@example.com",
+      recipient: "AGENT",
+    }));
+    db.telegramDraft.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await processTelegramWebhookUpdate({
+      update_id: 6,
+      callback_query: {
+        id: "callback-agent-profile",
+        from: { id: 123 },
+        message: { message_id: 10, chat: { id: 123, type: "private" } },
+        data: "qualitas_recipient_agent",
+      },
+    });
+
+    expect(result.replyText).toContain("WhatsApp: ••••••1234");
+    expect(result.replyMarkup).toEqual({
+      inline_keyboard: [[
+        { text: "Correo", callback_data: "qualitas_channel_email" },
+        { text: "WhatsApp", callback_data: "qualitas_channel_whatsapp" },
+      ]],
+    });
   });
 
   it("accepts cliente text fallback and requires confirmation", async () => {

@@ -62,9 +62,15 @@ export type QualitasPreparedPaymentLink = {
   transportReady: true;
   sessionCookie: string;
   finalActionUrl: string;
-  finalFields: Record<string, string>;
+  finalFields: QualitasFormField[];
   resumeWsUrl: string;
   refererUrl: string;
+};
+
+export type QualitasFormField = {
+  name: string;
+  value: string;
+  controlType: "input" | "select" | "textarea" | "submit" | "synthetic";
 };
 
 export type QualitasHttpTransport = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -94,7 +100,18 @@ export type QualitasProviderEvent = {
   hasResumeMarker?: boolean;
   hasVisibleContactForm?: boolean;
   hasVisibleResumeMarker?: boolean;
+  hasPolicyEligibilityMessage?: boolean;
+  hasEmailRejectionMessage?: boolean;
   duplicateEvidence?: "JSON_CODE" | "TEXT_CODE" | "HTML_CODE" | "HTML_MESSAGE" | "NONE";
+  deliveryMethod?: QualitasPaymentLinkDeliveryMethod;
+  requestVariant?: "EMAIL_NATIVE_FORM" | "WHATSAPP_TIPO_3";
+  fieldCount?: number;
+  hasTipoField?: boolean;
+  hasEmailField?: boolean;
+  hasPhoneField?: boolean;
+  requestSignatureVersion?: "v2";
+  requestSignature?: string;
+  requestEncoding?: "FORM_URLENCODED" | "MULTIPART";
 }
 
 export type QualitasRequestOptions = {
@@ -200,6 +217,8 @@ type QualitasResponseSignals = {
   hasResumeMarker: boolean;
   hasVisibleContactForm: boolean;
   hasVisibleResumeMarker: boolean;
+  hasPolicyEligibilityMessage: boolean;
+  hasEmailRejectionMessage: boolean;
 };
 
 type QualitasDuplicateEvidence = "JSON_CODE" | "TEXT_CODE" | "HTML_CODE" | "HTML_MESSAGE" | "NONE";
@@ -222,6 +241,8 @@ function emptyQualitasSignals(): QualitasResponseSignals {
     hasResumeMarker: false,
     hasVisibleContactForm: false,
     hasVisibleResumeMarker: false,
+    hasPolicyEligibilityMessage: false,
+    hasEmailRejectionMessage: false,
   };
 }
 
@@ -245,11 +266,14 @@ function classifyQualitasProviderResponse(input: {
   bodyText?: string | null;
   contentType?: string | null;
   finalSubmission?: boolean;
+  deliveryMethod?: QualitasPaymentLinkDeliveryMethod;
   timedOut?: boolean;
   redirectedToUnexpectedHost?: boolean;
 }): QualitasProviderClassification {
   const contentType = contentTypeFamily(input.contentType);
-  const text = providerSignalText(input.bodyText, contentType);
+  const visibleText = providerSignalText(input.bodyText, contentType);
+  const acuseText = providerAcuseSignalText(input.bodyText, contentType);
+  const text = input.finalSubmission ? acuseText : visibleText;
   const visibleMarkers = contentType === "html" ? visibleHtmlMarkers(input.bodyText ?? "") : {
     hasVisibleContactForm: false,
     hasVisibleResumeMarker: false,
@@ -262,6 +286,8 @@ function classifyQualitasProviderResponse(input: {
     hasPolicyForm: Boolean(input.bodyText && findFormContaining(input.bodyText, "numPoliza")),
     hasContactForm: Boolean(input.bodyText && findFormContaining(input.bodyText, "temail")),
     hasResumeMarker: Boolean(input.bodyText && /\bresumenWSUrl\b/i.test(input.bodyText)),
+    hasPolicyEligibilityMessage: /p[oó]liza[\s\S]{0,160}(?:no puede|no es posible|no elegible|no permite|vigencia|flotilla|endoso)[\s\S]{0,160}(?:flujo|pago|vigencia|flotilla|endoso)?/.test(text),
+    hasEmailRejectionMessage: /(?:correo|e-?mail)[\s\S]{0,100}(?:rechaz|inv[aá]lid|no permitido|no acept)|(?:rechaz|inv[aá]lid|no permitido|no acept)[\s\S]{0,100}(?:correo|e-?mail)/.test(text),
     ...visibleMarkers,
   };
   const duplicateEvidence: QualitasDuplicateEvidence = contentType === "json" && (signals.hasDuplicateCode || signals.hasDuplicateMessage)
@@ -294,11 +320,11 @@ function classifyQualitasProviderResponse(input: {
   if (/no se encontr|no encontr|no existe|p[oó]liza .*inv[aá]lida|not found/.test(text)) {
     return { ...qualitasResult("POLICY_NOT_FOUND", "POLICY_NOT_FOUND"), ...base };
   }
-  if (/no puede|no es posible|no elegible|vigencia|flotilla|endoso|not eligible/.test(text)) {
-    return { ...qualitasResult("POLICY_NOT_ELIGIBLE", "POLICY_NOT_ELIGIBLE"), ...base };
-  }
-  if (/correo|email|e-mail/.test(text) && /rechaz|inv[aá]lid|no permitido|not valid|rejected/.test(text)) {
+  if (signals.hasEmailRejectionMessage) {
     return { ...qualitasResult("EMAIL_REJECTED", "EMAIL_REJECTED"), ...base };
+  }
+  if (signals.hasPolicyEligibilityMessage || /(?:policy|p[oó]liza)[\s\S]{0,80}not eligible|not eligible[\s\S]{0,80}(?:policy|p[oó]liza)/.test(text)) {
+    return { ...qualitasResult("POLICY_NOT_ELIGIBLE", "POLICY_NOT_ELIGIBLE"), ...base };
   }
   if (input.finalSubmission && input.status !== undefined && input.status < 400) {
     return { ...qualitasResult("UNCERTAIN", "FINAL_RESPONSE_UNRECOGNIZED"), ...base };
@@ -361,20 +387,76 @@ function getForms(html: string) {
   return [...html.matchAll(/<form\b[^>]*>[\s\S]*?<\/form>/gi)].map((match) => match[0]);
 }
 
-function collectFormFields(form: string) {
-  const fields = new Map<string, string>();
-  for (const match of form.matchAll(/<input\b([^>]*)>/gi)) {
-    const attributes = match[1];
-    const name = getAttribute(attributes, "name");
-    const type = (getAttribute(attributes, "type") ?? "text").toLowerCase();
-    if (!name || ["button", "file", "image", "reset", "submit"].includes(type)) continue;
-    fields.set(name, getAttribute(attributes, "value") ?? "");
+function elementAttribute(node: DefaultTreeAdapterTypes.Element, name: string) {
+  return node.attrs.find((attribute) => attribute.name.toLowerCase() === name.toLowerCase())?.value ?? null;
+}
+
+function hasElementAttribute(node: DefaultTreeAdapterTypes.Element, name: string) {
+  return node.attrs.some((attribute) => attribute.name.toLowerCase() === name.toLowerCase());
+}
+
+function textContent(node: DefaultTreeAdapterTypes.Node): string {
+  if (node.nodeName === "#text") return (node as DefaultTreeAdapterTypes.TextNode).value;
+  if (!("childNodes" in node)) return "";
+  return node.childNodes.map((child) => textContent(child)).join("");
+}
+
+function collectFormFields(form: string, options: { includeSubmitters?: boolean } = {}): QualitasFormField[] {
+  const fields: QualitasFormField[] = [];
+  const document = parse(form);
+
+  function collect(node: DefaultTreeAdapterTypes.Node) {
+    if ("tagName" in node) {
+      const element = node as DefaultTreeAdapterTypes.Element;
+      const tagName = element.tagName.toLowerCase();
+      const name = elementAttribute(element, "name");
+      const disabled = hasElementAttribute(element, "disabled");
+      const type = (elementAttribute(element, "type") ?? "text").toLowerCase();
+
+      if (name && !disabled) {
+        if (tagName === "input") {
+          if (["button", "file", "image", "reset"].includes(type)) {
+            // These controls are not successful form controls.
+          } else if (type === "submit") {
+            if (options.includeSubmitters) {
+              fields.push({ name, value: elementAttribute(element, "value") ?? "", controlType: "submit" });
+            }
+          } else if (!(type === "checkbox" || type === "radio") || hasElementAttribute(element, "checked")) {
+            fields.push({ name, value: elementAttribute(element, "value") ?? "", controlType: "input" });
+          }
+        } else if (tagName === "textarea") {
+          fields.push({ name, value: textContent(element), controlType: "textarea" });
+        } else if (tagName === "select") {
+          const optionsInSelect: DefaultTreeAdapterTypes.Element[] = [];
+          function collectOptions(child: DefaultTreeAdapterTypes.Node) {
+            if ("tagName" in child) {
+              const childElement = child as DefaultTreeAdapterTypes.Element;
+              if (childElement.tagName.toLowerCase() === "option") optionsInSelect.push(childElement);
+            }
+            if ("childNodes" in child) for (const nested of child.childNodes) collectOptions(nested);
+          }
+          collectOptions(element);
+          const selected = optionsInSelect.filter((option) => hasElementAttribute(option, "selected"));
+          const values = selected.length > 0 ? selected : optionsInSelect.slice(0, 1);
+          for (const option of values) {
+            if (hasElementAttribute(option, "disabled")) continue;
+            fields.push({ name, value: elementAttribute(option, "value") ?? textContent(option), controlType: "select" });
+            if (!hasElementAttribute(element, "multiple")) break;
+          }
+        } else if (tagName === "button" && options.includeSubmitters && type === "submit") {
+          fields.push({ name, value: elementAttribute(element, "value") ?? textContent(element).trim(), controlType: "submit" });
+        }
+      }
+    }
+    if ("childNodes" in node) for (const child of node.childNodes) collect(child);
   }
+
+  collect(document);
   return fields;
 }
 
 function findFormContaining(html: string, fieldName: string) {
-  return getForms(html).find((form) => collectFormFields(form).has(fieldName)) ?? null;
+  return getForms(html).find((form) => collectFormFields(form).some((field) => field.name === fieldName)) ?? null;
 }
 
 function nodeAttribute(node: DefaultTreeAdapterTypes.Element, name: string) {
@@ -411,8 +493,8 @@ function visibleHtmlMarkers(value: string) {
       const tagName = element.tagName.toLowerCase();
       const name = nodeAttribute(element, "name")?.toLowerCase();
       const type = nodeAttribute(element, "type")?.toLowerCase();
-      if (!inheritedHidden && name === "resumenwsurl") fields.resume = true;
-      if (!inheritedHidden && name === "temail" && !(tagName === "input" && type === "hidden")) fields.contact = true;
+      if (!hidden && name === "resumenwsurl") fields.resume = true;
+      if (!hidden && name === "temail" && !(tagName === "input" && type === "hidden")) fields.contact = true;
       if (hidden) return;
     }
     if (!("childNodes" in node)) return;
@@ -491,19 +573,27 @@ function providerSignalText(
   return visibleHtmlText(source).normalize("NFKC").toLowerCase();
 }
 
+function providerAcuseSignalText(
+  value: string | null | undefined,
+  contentType: QualitasProviderEvent["contentType"],
+) {
+  const text = providerSignalText(value, contentType);
+  const codeMatch = text.match(/\b(?:c[oó]digo|codigo|code)\s*[:=]?\s*["']?\d+/i);
+  if (!codeMatch || codeMatch.index === undefined) return "";
+  const block = text.slice(codeMatch.index, codeMatch.index + 2_000);
+  const messageMatch = block.match(/\b(?:mensaje|message)\s*[:=]?/i);
+  if (!messageMatch || messageMatch.index === undefined) return "";
+  return block.slice(0, Math.min(block.length, messageMatch.index + 1_000));
+}
+
 function findPagarAhoraRequest(html: string, baseUrl: string) {
   const pagarForm = getForms(html).find((form) => /pagar\s+ahora/i.test(visibleHtmlText(form)));
   if (pagarForm) {
     const action = formAction(pagarForm, baseUrl);
     if (!action || !isAllowedQualitasUrl(action)) return null;
-    const fields = Object.fromEntries(collectFormFields(pagarForm));
-    for (const match of pagarForm.matchAll(/<input\b([^>]*)>/gi)) {
-      const attributes = match[1];
-      const name = getAttribute(attributes, "name");
-      const type = (getAttribute(attributes, "type") ?? "text").toLowerCase();
-      const value = getAttribute(attributes, "value") ?? "";
-      if (name && type === "submit" && /pagar\s+ahora/i.test(value)) fields[name] = value;
-    }
+    const fields = collectFormFields(pagarForm, { includeSubmitters: true }).filter((field) => (
+      field.controlType !== "submit" || /pagar\s+ahora/i.test(`${field.name} ${field.value}`)
+    ));
     return { method: formMethod(pagarForm), url: action, fields };
   }
 
@@ -539,6 +629,59 @@ function formAction(form: string, baseUrl: string) {
 
 function formMethod(form: string) {
   return (getAttribute(form.match(/<form\b([^>]*)>/i)?.[1] ?? "", "method") ?? "get").toUpperCase();
+}
+
+function setFormField(fields: QualitasFormField[], name: string, value: string) {
+  const next = fields.map((field) => ({ ...field }));
+  const index = next.findIndex((field) => field.name === name);
+  if (index >= 0) {
+    next[index] = { ...next[index], value };
+    return next;
+  }
+  next.push({ name, value, controlType: "synthetic" });
+  return next;
+}
+
+function valueShape(name: string, value: string) {
+  if (!value) return "empty";
+  if (name === "tipo") return ["1", "2", "3"].includes(value) ? value : "other";
+  if (name === "temail") return isValidQualitasEmail(value) ? "email" : "invalid-email";
+  if (name === "numTelefono") return isValidQualitasPhone(value) ? "phone" : "invalid-phone";
+  if (name === "resumenWSUrl") {
+    try {
+      return isAllowedQualitasUrl(value) ? `url:${new URL(value).pathname}` : "external-url";
+    } catch {
+      return "invalid-url";
+    }
+  }
+  return "nonempty";
+}
+
+export function qualitasRequestShapeSignature(fields: QualitasFormField[], deliveryMethod: QualitasPaymentLinkDeliveryMethod) {
+  const source = `${deliveryMethod}|${fields.map((field) => `${field.name}:${valueShape(field.name, field.value)}`).join("|")}`;
+  let hash = 2_166_136_261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return `v2-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+export function buildQualitasDeliveryFields(input: {
+  fields: QualitasFormField[];
+  deliveryMethod: QualitasPaymentLinkDeliveryMethod;
+  recipientEmail: string | null;
+  recipientPhone: string | null;
+  resumeWsUrl: string;
+}) {
+  const channelFields: QualitasFormField[] = [
+    { name: "numTelefono", value: input.recipientPhone ?? "", controlType: "synthetic" },
+    { name: "temail", value: input.recipientEmail ?? "", controlType: "synthetic" },
+    { name: "tipo", value: input.deliveryMethod === "WHATSAPP" ? "3" : "1", controlType: "synthetic" },
+    { name: "resumenWSUrl", value: input.resumeWsUrl, controlType: "synthetic" },
+  ];
+  const passthroughFields = input.fields.filter((field) => !["numTelefono", "temail", "tipo", "resumenWSUrl"].includes(field.name));
+  return [...channelFields, ...passthroughFields.map((field) => ({ ...field }))];
 }
 
 function cookieHeader(cookieJar: Map<string, string>) {
@@ -755,6 +898,14 @@ function resultForSessionResponse(
   result: SessionResponse,
   finalSubmission: boolean,
   options: QualitasRequestOptions,
+  deliveryMethod?: QualitasPaymentLinkDeliveryMethod,
+  requestShape?: {
+    requestVariant: "EMAIL_NATIVE_FORM" | "WHATSAPP_TIPO_3";
+    fieldCount: number;
+    hasTipoField: boolean;
+    hasEmailField: boolean;
+    hasPhoneField: boolean;
+  },
 ): QualitasPaymentLinkResult {
   let classification: QualitasProviderClassification;
   if (result.responseTooLarge) {
@@ -779,6 +930,7 @@ function resultForSessionResponse(
       bodyText: result.bodyText,
       contentType: result.response?.headers.get("content-type"),
       finalSubmission,
+      deliveryMethod,
       timedOut: result.timedOut,
       redirectedToUnexpectedHost: result.redirectedToUnexpectedHost,
     });
@@ -795,6 +947,8 @@ function resultForSessionResponse(
       contentType: classification.contentType,
       outcome: classification.outcome,
       reason: classification.reason,
+      deliveryMethod,
+      ...requestShape,
       signalTextLength: classification.signalTextLength,
       duplicateEvidence: classification.duplicateEvidence,
       ...classification.signals,
@@ -832,8 +986,9 @@ export async function prepareQualitasPaymentLink(
   const policyAction = formAction(policyForm, initial.finalUrl);
   if (!policyAction || !isAllowedQualitasUrl(policyAction)) return qualitasResult("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED");
   const policyFields = collectFormFields(policyForm);
-  policyFields.set("numPoliza", policyNumber);
-  const policyBody = new URLSearchParams(Object.fromEntries(policyFields));
+  const policyBody = new URLSearchParams(
+    setFormField(policyFields, "numPoliza", policyNumber).map((field): [string, string] => [field.name, field.value]),
+  );
   const policyResponse = await requestWithSession({
     url: policyAction,
     init: {
@@ -884,7 +1039,11 @@ export async function prepareQualitasPaymentLink(
               Origin: new URL(pagarAhora.url).origin,
               Referer: policyResponse.finalUrl,
             },
-            body: new URLSearchParams(pagarAhora.fields),
+            body: new URLSearchParams(
+              Array.isArray(pagarAhora.fields)
+                ? pagarAhora.fields.map((field): [string, string] => [field.name, field.value])
+                : Object.entries(pagarAhora.fields),
+            ),
           },
       cookieJar,
       options,
@@ -917,8 +1076,8 @@ export async function prepareQualitasPaymentLink(
     finalSubmission: false,
   });
   const finalActionUrl = formAction(contactForm, contactPage.finalUrl);
-  const finalFields = Object.fromEntries(collectFormFields(contactForm));
-  const resumeWsUrl = finalFields.resumenWSUrl ?? "";
+  const finalFields = collectFormFields(contactForm);
+  const resumeWsUrl = finalFields.find((field) => field.name === "resumenWSUrl")?.value ?? "";
   if (!finalActionUrl || !isAllowedQualitasUrl(finalActionUrl) || !resumeWsUrl || !isAllowedQualitasUrl(resumeWsUrl)) {
     return qualitasResult("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED");
   }
@@ -959,23 +1118,35 @@ export async function requestQualitasPaymentLink(
     const separator = pair.indexOf("=");
     if (separator > 0) cookieJar.set(pair.slice(0, separator), pair.slice(separator + 1));
   }
-  const fields = new FormData();
-  for (const [name, value] of Object.entries(prepared.finalFields)) fields.set(name, value);
-  fields.set("tipo", prepared.deliveryMethod === "WHATSAPP" ? "3" : "");
-  fields.set("numTelefono", prepared.recipientPhone ?? "");
-  fields.set("temail", prepared.recipientEmail ?? "");
-  fields.set("resumenWSUrl", prepared.resumeWsUrl);
+  const finalFields = buildQualitasDeliveryFields({
+    fields: prepared.finalFields,
+    deliveryMethod: prepared.deliveryMethod,
+    recipientEmail: prepared.recipientEmail,
+    recipientPhone: prepared.recipientPhone,
+    resumeWsUrl: prepared.resumeWsUrl,
+  });
+  const fields = new URLSearchParams();
+  for (const field of finalFields) fields.append(field.name, field.value);
+  const requestShape = {
+    requestVariant: prepared.deliveryMethod === "EMAIL" ? "EMAIL_NATIVE_FORM" as const : "WHATSAPP_TIPO_3" as const,
+    fieldCount: finalFields.length,
+    hasTipoField: finalFields.some((field) => field.name === "tipo"),
+    hasEmailField: finalFields.some((field) => field.name === "temail"),
+    hasPhoneField: finalFields.some((field) => field.name === "numTelefono"),
+    requestSignatureVersion: "v2" as const,
+    requestSignature: qualitasRequestShapeSignature(finalFields, prepared.deliveryMethod),
+    requestEncoding: "FORM_URLENCODED" as const,
+  };
 
   const response = await requestWithSession({
     url: prepared.finalActionUrl,
     init: {
       method: "POST",
       headers: {
-        Accept: "*/*",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         Origin: new URL(prepared.finalActionUrl).origin,
         Referer: prepared.refererUrl,
-        "X-Pjax": "true",
-        "X-Requested-With": "XMLHttpRequest",
+        "Content-Type": "application/x-www-form-urlencoded",
       },
       body: fields,
     },
@@ -984,5 +1155,5 @@ export async function requestQualitasPaymentLink(
     finalSubmission: true,
     step: "final_submission",
   });
-  return resultForSessionResponse(response, true, options);
+  return resultForSessionResponse(response, true, options, prepared.deliveryMethod, requestShape);
 }
