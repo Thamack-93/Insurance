@@ -46,11 +46,11 @@ test.describe("operation queue context", () => {
       await expect(renewalLink).toContainText("Venció");
       await expect(renewalLink).toContainText("Vencida");
       await expect(renewalLink).toContainText("Abrir póliza");
-      await expect(renewalLink).toHaveAttribute("href", `/policies/${policy!.id}`);
+      await expect(renewalLink).toHaveAttribute("href", `/policies/${policy!.id}?returnTo=%2Foperations`);
       expect((await renewalLink.innerText()).split(policy!.policyNumber)).toHaveLength(2);
 
       await renewalLink.click();
-      await expect(page).toHaveURL(new RegExp(`/policies/${policy!.id}$`));
+      await expect(page).toHaveURL(new RegExp(`/policies/${policy!.id}(?:\\?.*)?$`));
       await expect(page.getByRole("heading", { name: policy!.policyNumber, exact: true })).toBeVisible();
     } finally {
       if (workItemId) await db.workItem.delete({ where: { id: workItemId } }).catch(() => undefined);
@@ -95,7 +95,7 @@ test.describe("operation queue context", () => {
       await expect(renewalLink).toContainText(fixture.insurerName);
       await expect(renewalLink).toContainText("Renueva");
       await expect(renewalLink).toContainText("Abrir póliza");
-      await expect(renewalLink).toHaveAttribute("href", `/policies/${policy!.id}`);
+      await expect(renewalLink).toHaveAttribute("href", `/policies/${policy!.id}?returnTo=%2Foperations`);
     } finally {
       if (workItemId) await db.workItem.delete({ where: { id: workItemId } }).catch(() => undefined);
       await cleanupPolicyFixture(fixture);
@@ -138,7 +138,7 @@ test.describe("operation queue context", () => {
       await expect(renewalLink).toContainText(fixture.insurerName);
       await expect(renewalLink).toContainText("Renueva");
       await expect(renewalLink).toContainText("Abrir póliza");
-      await expect(renewalLink).toHaveAttribute("href", `/policies/${fixture.policyId}`);
+      await expect(renewalLink).toHaveAttribute("href", `/policies/${fixture.policyId}?returnTo=%2Foperations`);
       expect((await renewalLink.innerText()).split(fixture.policyNumber)).toHaveLength(2);
     } finally {
       if (workItemId) await db.workItem.delete({ where: { id: workItemId } }).catch(() => undefined);

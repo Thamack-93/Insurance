@@ -88,6 +88,8 @@ test("superadmin can inspect both organizations without operational bypass", asy
   await page.getByRole("button", { name: "Iniciar sesión" }).click();
   await expect(page).toHaveURL(/\/platform$/);
   await expect(page.getByRole("heading", { name: "Resumen de plataforma" })).toBeVisible();
+  await page.goto("/platform/organizations");
+  await expect(page.locator("main").getByRole("heading", { name: "Organizaciones", exact: true })).toBeVisible();
   await expect(page.getByText("PolicyDesk Legacy Organization")).toBeVisible();
   await expect(page.getByText("Pedro Alfredo Gómez Lorenzo")).toBeVisible();
   await expect(page.getByText("PolicyDesk Demo Broker")).toBeVisible();
@@ -111,15 +113,14 @@ test("superadmin can open the global backup panel without triggering mutations",
   await page.getByLabel("Contraseña").fill("tenant-fixture-password");
   await page.getByRole("button", { name: "Iniciar sesión" }).click();
   await expect(page).toHaveURL(/\/platform$/);
-  await expect(page.getByRole("link", { name: /Administrar backups/ })).toBeVisible();
   await page.goto("/platform/backups");
-  await expect(page.getByRole("heading", { name: "Respaldos" })).toBeVisible();
+  await expect(page.locator("main").getByRole("heading", { name: "Respaldos", exact: true })).toBeVisible();
   await expect(page.getByText("Respaldos globales de plataforma")).toBeVisible();
   await expect(page.getByRole("button", { name: "Reconciliar almacenamiento" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Crear respaldo ahora" })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Respaldos" })).toBeVisible();
+  await expect(page.locator("main").getByRole("heading", { name: "Respaldos", exact: true })).toBeVisible();
 });
 
 test("tenant users cannot open the master panel by URL", async ({ page }) => {

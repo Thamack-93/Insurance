@@ -135,6 +135,8 @@ jobs:
         run: |
           npx prisma migrate deploy
           npm run db:check-drift
+      - name: Check Cycle 1 tenant guards before multi-org fixture
+        run: npm run check:tenant-guards
       - name: Mark migrated tenant database
         shell: bash
         run: |
@@ -159,8 +161,8 @@ jobs:
         run: npm run test:tenant-fixture
       - name: Tenant and knowledge isolation tests
         run: npm run test:unit -- src/lib/organization-context.logic.test.ts src/lib/organization-context-resolution.logic.test.ts src/lib/tenant-isolation.integration.logic.test.ts src/lib/nora-context.logic.test.ts
-      - name: Tenant inventory audit
-        run: npm run check:tenant-guards
+      - name: Tenant inventory audit after multi-org fixture
+        run: node --import tsx scripts/check-tenant-inventory.ts
       - name: Build disposable tenant application
         run: npm run build
       - name: Install Playwright browser

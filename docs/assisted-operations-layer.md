@@ -68,11 +68,22 @@ It expires automatically and is removed on logout; it is never written to the da
   - `/help`
   - `/link <código>`
   - `/status`
+  - `/pagoqualitas <póliza>`
 - Telegram linking uses one-time codes stored as hashes with expiry.
 - Telegram test messages use the live bot token and update `NotificationEvent` status.
 - The digest contains overdue/today/upcoming receipts, renewals, overdue work and commissions.
 - Webhook synchronization is an explicit admin action; opening settings has no external side effect.
 - Telegram remains deterministic. Freeform AI replies are intentionally not enabled there.
+- `/pagoqualitas` is an insurer-specific Quálitas payment-link request. It resolves an
+  authorized PolicyDesk policy, offers only the current client or linked agent email, and
+  requires explicit `/confirmar`; arbitrary Telegram emails are not accepted.
+- Recipient buttons are inline Telegram buttons, with `cliente`/`agente` text as fallback.
+  The request is protected by `telegramMutationsEnabled`, `QUALITAS_PAYMENT_LINK_ENABLED`,
+  tenant/portfolio authorization, confirmation-time revalidation and rate limiting.
+- Provider failures are sanitized. A final timeout is `UNCERTAIN` and is not retried
+  automatically. PolicyDesk never handles card data or stores payment URLs by default.
+- This integration depends on Quálitas' current public workflow and has a kill switch in
+  `QUALITAS_PAYMENT_LINK_ENABLED`; website changes require a new discovery review.
 
 ### Nora AI
 

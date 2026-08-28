@@ -181,7 +181,7 @@ test.describe("Data quality renewals tab", () => {
     await page.goto("/data-quality");
 
     await expect(page).toHaveURL(/\/data-quality$/);
-    await expect(page.getByRole("heading", { name: "Data Quality", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Calidad de datos", exact: true })).toBeVisible();
   });
 
   test("No renovada runs the real renewal-closing flow from data quality", async ({ page }) => {
