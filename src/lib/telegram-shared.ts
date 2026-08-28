@@ -288,7 +288,7 @@ export function buildTelegramQualitasChannelPrompt(input: {
   const lines = [`¿Por qué medio quieres enviar el enlace para ${input.recipientLabel}?`, ""];
   if (input.maskedEmail) lines.push(`Correo electrónico: ${input.maskedEmail}`);
   if (input.maskedPhone) lines.push(`WhatsApp: ${input.maskedPhone}`);
-  if (!input.maskedPhone) lines.push("WhatsApp no está disponible porque falta un teléfono válido.");
+  if (!input.maskedPhone) lines.push("WhatsApp: puedes capturar un número de 10 dígitos después de seleccionarlo.");
   return lines.join("\n");
 }
 

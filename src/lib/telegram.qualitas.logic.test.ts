@@ -224,6 +224,38 @@ describe("Telegram Quálitas payment-link flow", () => {
     expect(provider.requestQualitasPaymentLink).not.toHaveBeenCalled();
   });
 
+  it("offers WhatsApp for an agent and asks for the number when it is not stored", async () => {
+    db.telegramDraft.findFirst.mockResolvedValue(draftWith({
+      step: "channel",
+      policyId: "policy-1",
+      policyNumber: "1234567890",
+      clientId: "client-1",
+      clientName: "Cliente Uno",
+      clientEmail: "client@example.com",
+      clientPhone: "5550101234",
+      agentUserId: "user-1",
+      agentEmail: "agent@example.com",
+      recipient: "AGENT",
+      recipientEmail: "agent@example.com",
+    }));
+    db.telegramDraft.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await processTelegramWebhookUpdate({
+      update_id: 5,
+      callback_query: {
+        id: "callback-agent-whatsapp",
+        from: { id: 123 },
+        message: { message_id: 10, chat: { id: 123, type: "private" } },
+        data: "qualitas_channel_whatsapp",
+      },
+    });
+
+    expect(result.callbackAnswerText).toBe("Falta el teléfono.");
+    expect(result.replyText).toContain("número de WhatsApp de 10 dígitos");
+    expect(result.removeReplyMarkup).toBe(true);
+    expect(provider.requestQualitasPaymentLink).not.toHaveBeenCalled();
+  });
+
   it("accepts cliente text fallback and requires confirmation", async () => {
     db.telegramDraft.findFirst.mockResolvedValue(draftWith({
       step: "recipient",

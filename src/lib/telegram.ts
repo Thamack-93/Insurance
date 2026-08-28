@@ -2449,7 +2449,7 @@ function buildQualitasRecipientMarkup(state: TelegramQualitasPaymentLinkDraftSta
 function buildQualitasChannelMarkup(state: TelegramQualitasPaymentLinkDraftState): TelegramInlineKeyboardMarkup {
   const buttons: TelegramInlineKeyboardButton[] = [];
   if (state.recipientEmail) buttons.push({ text: "Correo", callback_data: QUALITAS_EMAIL_CALLBACK });
-  if (state.recipientPhone || state.recipient === "CLIENT" && state.clientPhone) {
+  if (state.recipientPhone || state.recipient === "CLIENT" && state.clientPhone || state.recipient === "AGENT") {
     buttons.push({ text: "WhatsApp", callback_data: QUALITAS_WHATSAPP_CALLBACK });
   }
   return { inline_keyboard: [buttons] };
