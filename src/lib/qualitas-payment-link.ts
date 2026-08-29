@@ -582,7 +582,7 @@ function providerAcuseSignalText(
   if (!codeMatch || codeMatch.index === undefined) return "";
   const block = text.slice(codeMatch.index, codeMatch.index + 2_000);
   const messageMatch = block.match(/\b(?:mensaje|message)\s*[:=]?/i);
-  if (!messageMatch || messageMatch.index === undefined) return "";
+  if (!messageMatch || messageMatch.index === undefined) return block;
   return block.slice(0, Math.min(block.length, messageMatch.index + 1_000));
 }
 

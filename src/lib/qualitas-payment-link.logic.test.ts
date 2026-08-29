@@ -14,7 +14,10 @@ import {
   type QualitasFormField,
   type QualitasPreparedPaymentLink,
 } from "./qualitas-payment-link";
-import { QUALITAS_NATIVE_REQUEST_FIXTURES } from "./qualitas-native-fixtures";
+import {
+  QUALITAS_FINAL_RESPONSE_FIXTURES,
+  QUALITAS_NATIVE_REQUEST_FIXTURES,
+} from "./qualitas-native-fixtures";
 
 const policyAction = "https://www.qualitas.com.mx/web/qmx/pago-de-poliza?p_p_id=pagopoliza_WAR_PagoPolizaportlet&p_p_lifecycle=1&p_p_state=normal&p_p_mode=view&_pagopoliza_WAR_PagoPolizaportlet_myaction=consulta-datos&p_auth=redacted";
 const paymentPageUrl = "https://www.qualitas.com.mx/web/qmx/pago-de-poliza/-/user-pago/pago-tdc";
@@ -367,6 +370,29 @@ describe("qualitas-payment-link provider", () => {
 
     await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({ outcome: "SUCCESS", reason: "SUCCESS_CODE_0" });
     expect(calls).toHaveLength(3);
+  });
+
+  it("recognizes the real visible success acuse without a Mensaje label", async () => {
+    const { transport } = sequenceTransport([
+      response(initialHtml),
+      response(contactHtml),
+      response(QUALITAS_FINAL_RESPONSE_FIXTURES.EMAIL_SUCCESS_WITHOUT_MESSAGE_LABEL),
+    ]);
+    const prepared = await prepareForFinal(transport);
+
+    await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({
+      outcome: "SUCCESS",
+      reason: "SUCCESS_CODE_0",
+    });
+  });
+
+  it("does not classify a success code that exists only in a script", () => {
+    expect(normalizeQualitasProviderOutcome({
+      status: 200,
+      contentType: "text/html",
+      bodyText: QUALITAS_FINAL_RESPONSE_FIXTURES.HIDDEN_SUCCESS_CODE,
+      finalSubmission: true,
+    })).toBe("UNCERTAIN");
   });
 
   it("ignores a duplicate marker inside hidden HTML when no visible acuse exists", async () => {
