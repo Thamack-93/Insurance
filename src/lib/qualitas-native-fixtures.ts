@@ -22,3 +22,10 @@ export const QUALITAS_NATIVE_REQUEST_FIXTURES = {
     signature: "v2-b4e023c1",
   },
 } as const;
+
+export const QUALITAS_FINAL_RESPONSE_FIXTURES = {
+  EMAIL_SUCCESS_WITHOUT_MESSAGE_LABEL:
+    "<main>Código: 0 - Se genero link de pago y se envio a redacted@example.com.</main>",
+  HIDDEN_SUCCESS_CODE:
+    "<script>const legacyCode = 0;</script><main>Solicitud recibida</main>",
+} as const;
