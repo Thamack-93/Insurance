@@ -339,7 +339,7 @@ export function buildTelegramQualitasSuccess(input: {
 export function buildTelegramQualitasOutcomeMessage(outcome: string, reason?: string) {
   switch (reason) {
     case "DUPLICATE_LINK_99991":
-      return "Quálitas reportó que ya existe una liga de pago en curso. No se generó otra.";
+      return "Quálitas indica que ya hay otra liga de pago en proceso para esta póliza.";
     case "FINAL_RESPONSE_UNRECOGNIZED":
       return "Quálitas respondió al envío, pero PolicyDesk no reconoció el acuse. No se reenviará automáticamente.";
     case "FINAL_TIMEOUT":
@@ -351,10 +351,8 @@ export function buildTelegramQualitasOutcomeMessage(outcome: string, reason?: st
     case "POLICY_NOT_FOUND": return "Quálitas no reconoció la póliza. No se envió ningún enlace.";
     case "POLICY_NOT_ELIGIBLE": return "Quálitas indica que esta póliza no puede usar este flujo de pago.";
     case "EMAIL_REJECTED": return "Quálitas rechazó el correo seleccionado. No se envió el enlace. Intenta WhatsApp.";
-    case "UNCERTAIN": return "No pude confirmar si Quálitas procesó la solicitud.\n\nPara evitar enviar enlaces duplicados, PolicyDesk no la reenviará automáticamente.";
-    case "RATE_LIMITED": return "Se alcanzó el límite temporal de solicitudes a Quálitas. Intenta nuevamente más tarde.";
-    case "QUALITAS_UNAVAILABLE":
-    case "TIMEOUT": return "Quálitas no está respondiendo en este momento. Intenta nuevamente más tarde.";
+    case "UNCERTAIN_POST_SUBMISSION": return "No pude confirmar si Quálitas procesó la solicitud.\n\nPara evitar enviar enlaces duplicados, PolicyDesk no la reenviará automáticamente.";
+    case "PROVIDER_UNAVAILABLE": return "Quálitas no está respondiendo en este momento. Intenta nuevamente más tarde.";
     default: return "No se pudo completar la solicitud de enlace de pago de Quálitas.";
   }
 }

@@ -58,7 +58,7 @@ function sequenceTransport(responses: Response[]): { transport: QualitasHttpTran
 
 async function prepareForFinal(transport: QualitasHttpTransport) {
   const prepared = await prepareQualitasPaymentLink(
-    { policyNumber: "0000000000", recipientEmail: "agent@example.com", deliveryMethod: "EMAIL" },
+    { policyNumber: "0000000000", deliveryChannel: "EMAIL", destination: "agent@example.com", correlationId: "test-correlation" },
     { transport },
   );
   expect(prepared).toMatchObject({ transportReady: true });
@@ -75,11 +75,11 @@ describe("qualitas-payment-link provider", () => {
     ]);
 
     const prepared = await prepareQualitasPaymentLink(
-      { policyNumber: "940454748", recipientEmail: "agent@example.com" },
+      { policyNumber: "940454748", deliveryChannel: "EMAIL", destination: "agent@example.com", correlationId: "test-correlation" },
       { transport },
     );
 
-    expect(prepared).toMatchObject({ transportReady: true, policyNumber: "0940454748" });
+    expect(prepared).toMatchObject({ transportReady: true, request: { policyNumber: "0940454748" } });
     expect((calls[1].init?.body as URLSearchParams).get("numPoliza")).toBe("0940454748");
   });
 
@@ -118,12 +118,38 @@ describe("qualitas-payment-link provider", () => {
     expect(JSON.stringify(result)).not.toContain("agent@example.com");
   });
 
+  it("marks final submission immediately before the single final POST", async () => {
+    const { transport, calls } = sequenceTransport([
+      response(initialHtml),
+      response(contactHtml),
+      response("Código: 0 Mensaje: Se genero link de pago."),
+    ]);
+    const started = vi.fn();
+    const prepared = await prepareForFinal(transport);
+    const result = await requestQualitasPaymentLink(prepared, { transport, onFinalSubmissionStarted: started });
+
+    expect(result.outcome).toBe("SUCCESS");
+    expect(started).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(3);
+  });
+
+  it("does not send the final POST if the durable STARTED claim fails", async () => {
+    const { transport, calls } = sequenceTransport([response(initialHtml), response(contactHtml)]);
+    const prepared = await prepareForFinal(transport);
+
+    await expect(requestQualitasPaymentLink(prepared, {
+      transport,
+      onFinalSubmissionStarted: () => { throw new Error("START_CLAIM_FAILED"); },
+    })).rejects.toThrow("START_CLAIM_FAILED");
+    expect(calls).toHaveLength(2);
+  });
+
   it("does not classify a generic no puede phrase as policy eligibility", () => {
     expect(normalizeQualitasProviderOutcome({
       status: 200,
       bodyText: "El portal no puede continuar con la solicitud.",
       finalSubmission: true,
-    })).toBe("UNCERTAIN");
+    })).toBe("UNCERTAIN_POST_SUBMISSION");
   });
 
   it("requires the final Código/Mensaje acuse before classifying eligibility", () => {
@@ -131,7 +157,7 @@ describe("qualitas-payment-link provider", () => {
       status: 200,
       bodyText: "Póliza no puede usar este flujo. Portal de pago.",
       finalSubmission: true,
-    })).toBe("UNCERTAIN");
+    })).toBe("UNCERTAIN_POST_SUBMISSION");
     expect(normalizeQualitasProviderOutcome({
       status: 200,
       bodyText: "Código: 1 Mensaje: La póliza no puede usar este flujo de pago.",
@@ -147,11 +173,12 @@ describe("qualitas-payment-link provider", () => {
     ]);
     const prepared = await prepareQualitasPaymentLink({
       policyNumber: "0000000000",
-      recipientPhone: "+52 55 1234 5678",
-      deliveryMethod: "WHATSAPP",
+      deliveryChannel: "WHATSAPP",
+      destination: "+52 55 1234 5678",
+      correlationId: "test-correlation",
     }, { transport });
 
-    expect(prepared).toMatchObject({ transportReady: true, deliveryMethod: "WHATSAPP", recipientPhone: "5512345678" });
+    expect(prepared).toMatchObject({ transportReady: true, request: { deliveryChannel: "WHATSAPP", destination: "5512345678" } });
     await expect(requestQualitasPaymentLink(prepared as QualitasPreparedPaymentLink, { transport })).resolves.toEqual({
       outcome: "SUCCESS",
       reason: "SUCCESS_CODE_0",
@@ -224,7 +251,7 @@ describe("qualitas-payment-link provider", () => {
     };
 
     const prepared = await prepareQualitasPaymentLink(
-      { policyNumber: "0000000000", recipientEmail: "agent@example.com" },
+      { policyNumber: "0000000000", deliveryChannel: "EMAIL", destination: "agent@example.com", correlationId: "test-correlation" },
       options,
     );
     expect(prepared).toMatchObject({ transportReady: true });
@@ -259,7 +286,7 @@ describe("qualitas-payment-link provider", () => {
     expect(JSON.stringify(events)).not.toContain("dynamicValue");
   });
 
-  it("maps the provider duplicate response to UNCERTAIN without retrying", async () => {
+  it("maps the provider duplicate response to ALREADY_IN_PROGRESS without retrying", async () => {
     const { transport, calls } = sequenceTransport([
       response(initialHtml),
       response(contactHtml),
@@ -269,7 +296,7 @@ describe("qualitas-payment-link provider", () => {
 
     const result = await requestQualitasPaymentLink(prepared, { transport });
 
-    expect(result).toEqual({ outcome: "UNCERTAIN", reason: "DUPLICATE_LINK_99991" });
+    expect(result).toEqual({ outcome: "ALREADY_IN_PROGRESS", reason: "DUPLICATE_LINK_99991" });
     expect(calls).toHaveLength(3);
   });
 
@@ -284,7 +311,7 @@ describe("qualitas-payment-link provider", () => {
     const prepared = await prepareForFinal(transport);
 
     await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({
-      outcome: "UNCERTAIN",
+      outcome: "UNCERTAIN_POST_SUBMISSION",
       reason: "FINAL_RESPONSE_UNRECOGNIZED",
     });
     expect(calls).toHaveLength(3);
@@ -299,7 +326,7 @@ describe("qualitas-payment-link provider", () => {
     const prepared = await prepareForFinal(transport);
 
     await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({
-      outcome: "UNCERTAIN",
+      outcome: "ALREADY_IN_PROGRESS",
       reason: "DUPLICATE_LINK_99991",
     });
   });
@@ -315,7 +342,7 @@ describe("qualitas-payment-link provider", () => {
     const prepared = await prepareForFinal(transport);
 
     await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({
-      outcome: "UNCERTAIN",
+      outcome: "ALREADY_IN_PROGRESS",
       reason: "DUPLICATE_LINK_99991",
     });
   });
@@ -331,7 +358,7 @@ describe("qualitas-payment-link provider", () => {
     const prepared = await prepareForFinal(transport);
 
     await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({
-      outcome: "UNCERTAIN",
+      outcome: "ALREADY_IN_PROGRESS",
       reason: "DUPLICATE_LINK_99991",
     });
   });
@@ -392,7 +419,7 @@ describe("qualitas-payment-link provider", () => {
       contentType: "text/html",
       bodyText: QUALITAS_FINAL_RESPONSE_FIXTURES.HIDDEN_SUCCESS_CODE,
       finalSubmission: true,
-    })).toBe("UNCERTAIN");
+    })).toBe("UNCERTAIN_POST_SUBMISSION");
   });
 
   it("ignores a duplicate marker inside hidden HTML when no visible acuse exists", async () => {
@@ -404,7 +431,7 @@ describe("qualitas-payment-link provider", () => {
     const prepared = await prepareForFinal(transport);
 
     await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({
-      outcome: "UNCERTAIN",
+      outcome: "UNCERTAIN_POST_SUBMISSION",
       reason: "FINAL_RESPONSE_UNRECOGNIZED",
     });
   });
@@ -434,7 +461,7 @@ describe("qualitas-payment-link provider", () => {
     const prepared = await prepareForFinal(transport);
 
     await expect(requestQualitasPaymentLink(prepared, { transport })).resolves.toEqual({
-      outcome: "UNCERTAIN",
+      outcome: "UNCERTAIN_POST_SUBMISSION",
       reason: "FINAL_RESPONSE_UNRECOGNIZED",
     });
   });
@@ -445,19 +472,19 @@ describe("qualitas-payment-link provider", () => {
     );
 
     await expect(prepareQualitasPaymentLink(
-      { policyNumber: "0000000000", recipientEmail: "agent@example.com" },
+      { policyNumber: "0000000000", deliveryChannel: "EMAIL", destination: "agent@example.com", correlationId: "test-correlation" },
       { transport },
-    )).resolves.toEqual({ outcome: "QUALITAS_FLOW_CHANGED", reason: "FLOW_CHANGED" });
+    )).resolves.toEqual({ outcome: "PROVIDER_FLOW_CHANGED", reason: "FLOW_CHANGED" });
   });
 
   it("maps representative redacted provider fixtures", () => {
     const fixtures: Array<[Parameters<typeof normalizeQualitasProviderOutcome>[0], string]> = [
       [{ status: 404, bodyText: "Póliza no encontrada" }, "POLICY_NOT_FOUND"],
       [{ status: 200, bodyText: "Póliza no elegible por vigencia" }, "POLICY_NOT_ELIGIBLE"],
-      [{ status: 200, bodyText: "Correo inválido o no permitido" }, "EMAIL_REJECTED"],
-      [{ status: 429, bodyText: "Demasiadas solicitudes" }, "RATE_LIMITED"],
-      [{ status: 500, bodyText: "Servicio temporalmente no disponible" }, "QUALITAS_UNAVAILABLE"],
-      [{ status: 200, bodyText: "Respuesta no reconocida" }, "QUALITAS_FLOW_CHANGED"],
+      [{ status: 200, bodyText: "Correo inválido o no permitido" }, "DESTINATION_REJECTED"],
+      [{ status: 429, bodyText: "Demasiadas solicitudes" }, "PROVIDER_UNAVAILABLE"],
+      [{ status: 500, bodyText: "Servicio temporalmente no disponible" }, "PROVIDER_UNAVAILABLE"],
+      [{ status: 200, bodyText: "Respuesta no reconocida" }, "PROVIDER_FLOW_CHANGED"],
     ];
     for (const [input, expected] of fixtures) {
       expect(normalizeQualitasProviderOutcome(input)).toBe(expected);
@@ -469,24 +496,21 @@ describe("qualitas-payment-link provider", () => {
       throw new DOMException("timed out", "AbortError");
     });
     await expect(prepareQualitasPaymentLink(
-      { policyNumber: "0000000000", recipientEmail: "agent@example.com" },
+      { policyNumber: "0000000000", deliveryChannel: "EMAIL", destination: "agent@example.com", correlationId: "test-correlation" },
       { transport: timeoutTransport },
-    )).resolves.toEqual({ outcome: "TIMEOUT", reason: "TIMEOUT_BEFORE_SUBMISSION" });
+    )).resolves.toEqual({ outcome: "TIMEOUT_PRE_SUBMISSION", reason: "TIMEOUT_BEFORE_SUBMISSION" });
 
     const prepared: QualitasPreparedPaymentLink = {
-      policyNumber: "0000000000",
-      recipientEmail: "agent@example.com",
+      request: { policyNumber: "0000000000", deliveryChannel: "EMAIL", destination: "agent@example.com", correlationId: "test-correlation" },
       transportReady: true,
       sessionCookie: "session=memory-only",
-      recipientPhone: null,
-      deliveryMethod: "EMAIL",
       finalActionUrl: finalAction,
       finalFields: [{ name: "resumenWSUrl", value: resumeUrl, controlType: "input" }],
       resumeWsUrl: resumeUrl,
       refererUrl: "https://www.qualitas.com.mx/web/qmx/pago-de-poliza/-/user-pago/pago-tdc",
     };
     await expect(requestQualitasPaymentLink(prepared, { transport: timeoutTransport })).resolves.toEqual({
-      outcome: "UNCERTAIN",
+      outcome: "UNCERTAIN_POST_SUBMISSION",
       reason: "FINAL_TIMEOUT",
     });
   });
@@ -494,7 +518,7 @@ describe("qualitas-payment-link provider", () => {
   it("rejects an oversized response before interpreting it", async () => {
     const transport: QualitasHttpTransport = vi.fn(async () => response(initialHtml));
     await expect(prepareQualitasPaymentLink(
-      { policyNumber: "0000000000", recipientEmail: "agent@example.com" },
+      { policyNumber: "0000000000", deliveryChannel: "EMAIL", destination: "agent@example.com", correlationId: "test-correlation" },
       { transport, maxResponseBytes: 8 },
     )).resolves.toEqual({ outcome: "UNEXPECTED_RESPONSE", reason: "RESPONSE_TOO_LARGE" });
   });
@@ -511,9 +535,8 @@ describe("qualitas-payment-link provider", () => {
 
     const email = buildQualitasDeliveryFields({
       fields,
-      deliveryMethod: "EMAIL",
-      recipientEmail: "agent@example.com",
-      recipientPhone: null,
+      deliveryChannel: "EMAIL",
+      destination: "agent@example.com",
       resumeWsUrl: resumeUrl,
     });
     expect(email.map((field) => field.name)).toEqual([
@@ -525,9 +548,8 @@ describe("qualitas-payment-link provider", () => {
 
     const whatsapp = buildQualitasDeliveryFields({
       fields,
-      deliveryMethod: "WHATSAPP",
-      recipientEmail: null,
-      recipientPhone: "5512345678",
+      deliveryChannel: "WHATSAPP",
+      destination: "5512345678",
       resumeWsUrl: resumeUrl,
     });
     expect(whatsapp.map((field) => field.name)).toEqual([

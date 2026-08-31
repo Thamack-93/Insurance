@@ -23,6 +23,7 @@
     "check:tenant-read-scope": "node --import tsx scripts/check-tenant-read-scope.ts",
     "check:activity-log-scope": "node --import tsx scripts/check-activity-log-scope.ts",
     "check:organization-metadata-hardcodes": "node --import tsx scripts/check-organization-metadata-hardcodes.ts",
+    "check:qualitas-flow": "node --import tsx scripts/check-qualitas-flow.mjs",
     "provision:platform-admin": "node --import tsx scripts/provision-platform-admin.ts",
     "db:sync-work-items": "tsx scripts/backfill-work-items.ts",
     "clean:cache": "node --import tsx scripts/clean-cache.ts cache",

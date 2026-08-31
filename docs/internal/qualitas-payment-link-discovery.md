@@ -1,6 +1,19 @@
 # Descubrimiento del flujo de pago Quálitas
 
-Fecha de revisión: 2026-08-26
+Fecha de revisión: 2026-08-29
+
+Este documento es la fuente única de verdad para el protocolo, la máquina de estados,
+los resultados, las banderas, el diagnóstico y el piloto controlado.
+
+## Base y ramas
+
+La rama de trabajo `codex/qualitas-assisted-operations-reliability` parte del `main`
+remoto verificado en `81215d8`. Las ramas remotas Quálitas
+(`qualitas-payment-link-leading-zero`, `qualitas-payment-link-pagar-ahora` y
+`qualitas-payment-link-session-http`) son ancestros de ese `main`; no hay trabajo
+divergente pendiente de integrar. El ref remoto local de billing es obsoleto y también
+ancestral. Se conserva el trabajo de certificación tenant y el guard de Cycle 1 ya
+integrados en `main`.
 
 ## Evidencia pública observada
 
@@ -30,7 +43,7 @@ La segunda ejecución controlada se hizo con DevTools Network y `Preserve log` a
 - En Email, `numTelefono` va vacío, `temail` contiene el correo seleccionado y `tipo=1`. En WhatsApp, `numTelefono` contiene el teléfono seleccionado, `temail` va vacío y `tipo=3`. `resumenWSUrl` es dinámico en ambos casos.
 - Headers observados en el submit nativo de documento: `Accept`, `Accept-Language`, `Content-Type`, `Cookie`, `Origin`, `Referer`, `Sec-CH-UA*`, `Upgrade-Insecure-Requests` y `User-Agent`. No se observaron `X-Pjax` ni `X-Requested-With`.
 - La respuesta observada fue `200` HTML. El acuse exitoso contiene `Código: 0`; no devuelve una URL de pago directa.
-- La respuesta repetida posterior fue `Código: 99991`, `Ya se encuentra otro link de pago en curso`. Se clasifica como `UNCERTAIN` y no se reintenta.
+- La respuesta repetida posterior fue `Código: 99991`, `Ya se encuentra otro link de pago en curso`. Se clasifica como `ALREADY_IN_PROGRESS`: es terminal, reconocido y no reintentable.
 - Se observaron cookies de sesión y de protección del proveedor; sólo se manejan en memoria por ejecución y no se guardan ni se registran. No apareció CAPTCHA ni challenge durante esta captura.
 - El tiempo observado del envío final fue aproximadamente 8.8 segundos. El timeout del adaptador es acotado y configurable.
 
@@ -57,6 +70,70 @@ La implementación provisional usa `SESSION_HTTP`: obtiene el formulario inicial
 
 Clasificación técnica: `SESSION_HTTP`.
 
-Estado de release: `NOT READY`. Aún falta la certificación del SHA exacto, la validación completa con PostgreSQL descartable y confirmar en un piloto que la recepción, legitimidad de la liga y ausencia de duplicados cumplen los criterios operativos.
+## Contrato operativo vigente
+
+La solicitud del adaptador es `QualitasDeliveryRequest` con `policyNumber`,
+`deliveryChannel` (`EMAIL` o `WHATSAPP`), `destination` y `correlationId`.
+El adaptador sólo devuelve `SUCCESS`, `ALREADY_IN_PROGRESS`, `POLICY_NOT_FOUND`,
+`POLICY_NOT_ELIGIBLE`, `DESTINATION_REJECTED`, `PROVIDER_FLOW_CHANGED`,
+`PROVIDER_UNAVAILABLE`, `TIMEOUT_PRE_SUBMISSION`, `UNCERTAIN_POST_SUBMISSION` o
+`UNEXPECTED_RESPONSE`.
+
+La máquina de estados de Telegram es:
+
+`COMMAND_RECEIVED` → `POLICY_RESOLUTION` → `recipient` → `channel`/`phone` →
+`ready` → claim atómico `PROCESSING` → consulta de entrypoint/póliza → opcional
+`Pagar ahora` → formulario de contacto → POST final → `CONFIRMED`, `FAILED` o
+`UNCERTAIN`. `CANCELLED` se persiste y la expiración se determina con `expiresAt`.
+
+El `payloadJson` versionado conserva `submissionState` (`NOT_STARTED`, `STARTED`,
+`ACKNOWLEDGED`), `correlationId`, `destinationSource` (`PROFILE` o `MANUAL`),
+canal y un resultado terminal sanitizado. `STARTED` se escribe inmediatamente antes
+del POST final; cualquier error posterior es `UNCERTAIN_POST_SUBMISSION` y nunca se
+reanuda automáticamente. El código `99991` devuelve: “Quálitas indica que ya hay
+otra liga de pago en proceso para esta póliza.”
+
+Para WhatsApp de Agente se prefiere `User.phone`. Sólo si falta se solicita un número
+manual, se normaliza y enmascara, se etiqueta como capturado para esta solicitud y no
+se guarda en el perfil ni en logs. Se revalida el mismo valor normalizado al confirmar.
+El destinatario Cliente está detrás de `QUALITAS_PAYMENT_LINK_CLIENT_RECIPIENT_ENABLED=false`,
+subordinado a `QUALITAS_PAYMENT_LINK_ENABLED`.
+
+Toda respuesta pasa por un único clasificador: decodificación de entidades y filtro de
+contenido oculto se aplican una sola vez. La traza estructurada usa el `correlationId`,
+IDs internos de organización/póliza/usuario, etapa, canal, resultado, razón y duración;
+el diagnóstico sólo conserva encoding, cantidad/presencia de campos y firma segura.
+Nunca registra destinos, números de póliza, cookies, tokens, URLs con tokens, HTML ni
+cuerpos de respuesta.
+
+## Diagnóstico y piloto
+
+Las fixtures estáticas se validan en Vitest. `npm run check:qualitas-flow` sólo con
+`QUALITAS_FLOW_LIVE=1` hace un GET acotado y de sólo lectura al entrypoint, sin cookies
+persistentes, datos de clientes ni POST final; nunca corre en CI o cron.
+
+La certificación debe usar el SHA candidato inmutable, PostgreSQL descartable, las
+comprobaciones de alcance tenant, build, drift y Release Certification. Después se
+ejecutan, con autorización explícita, Agent Email, Agent WhatsApp y un duplicado
+controlado. Cada piloto exige exactamente un intento intencional, recepción y liga
+legítima, ningún pago, un ActivityLog seguro y traza saneada. El gate Cliente sólo se
+activa después de que ambos canales de Agente y el duplicado pasen.
+
+Estado de release: `NOT READY`. La implementación local y los fixtures no sustituyen la
+certificación del SHA exacto, PostgreSQL descartable ni los pilotos manuales. Hasta que
+exista esa evidencia, el release permanece `KEEP AGENT-ONLY PILOT`.
 
 El flag de producción permanece `QUALITAS_PAYMENT_LINK_ENABLED=false`. No ejecutar CAPTCHA, anti-bot, autenticación ni controles de acceso.
+
+## Inventario de cierre mínimo
+
+- **Canónico:** `QualitasDeliveryRequest`, resultados canónicos, builders Email/WhatsApp,
+  clasificador único y estado de sesión del draft.
+- **Compatibilidad:** no se conserva compatibilidad con drafts `ready` antiguos ni con
+  aliases o formas duplicadas del contrato.
+- **Diagnóstico:** una sola traza terminal saneada y un único `ActivityLog`; los datos de
+  destino, cookies, tokens, HTML y cuerpos de respuesta quedan fuera.
+- **Obsoleto:** normalizadores legacy sin transformación, eventos de observabilidad
+  paralelos y cualquier reanudación automática tras `STARTED`.
+- **Sólo pruebas:** fixtures estáticos y pruebas Vitest cubren parser/builders; el script
+  `check:qualitas-flow` sólo ejecuta el GET live opt-in y acotado.

@@ -6,6 +6,7 @@ import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { writeActivityLog } from "@/lib/activity-log";
+import { assertOrganizationContextInTransaction, type OrganizationContext } from "@/lib/organization-context";
 import { recordPayment } from "@/lib/payment-service";
 import { buildPolicyPdfCapturePreviewFromText } from "@/lib/policy-pdf-capture-preview";
 import { extractPdfTextFromBytes } from "@/lib/pdf-text-extraction";
@@ -70,6 +71,7 @@ import {
   type QualitasPaymentLinkResult,
   type QualitasPreparedPaymentLink,
   type QualitasPaymentLinkDeliveryMethod,
+  type QualitasDeliveryRequest,
 } from "@/lib/qualitas-payment-link";
 import { OPEN_WORK_ITEM_STATUSES, countWorkItems } from "@/lib/work-queue";
 import {
@@ -329,15 +331,10 @@ type TelegramQualitasPaymentLinkDraftState = {
   recipientEmail?: string;
   recipientPhone?: string;
   deliveryMethod?: QualitasPaymentLinkDeliveryMethod;
+  destinationSource?: "PROFILE" | "MANUAL";
+  correlationId?: string;
+  submissionState?: "NOT_STARTED" | "STARTED" | "ACKNOWLEDGED";
 };
-
-function normalizeTelegramQualitasDraftState(state: TelegramQualitasPaymentLinkDraftState) {
-  // Drafts created before channel selection was added were email requests.
-  if (state.step === "ready" && !state.deliveryMethod && state.recipientEmail) {
-    return { ...state, deliveryMethod: "EMAIL" as const };
-  }
-  return state;
-}
 
 type TelegramDraftState = {
   type: "PAYMENT_CAPTURE" | "POLICY_CAPTURE" | "QUALITAS_PAYMENT_LINK";
@@ -363,36 +360,33 @@ const TELEGRAM_QUALITAS_RATE_LIMITS = {
   policy: { limit: 2, windowMs: 60 * 60 * 1000 },
 };
 
-type QualitasObservabilityEvent =
-  | "qualitas.payment_link.started"
-  | "qualitas.payment_link.policy_verified"
-  | "qualitas.payment_link.recipient_selected"
-  | "qualitas.payment_link.confirmed"
-  | "qualitas.payment_link.succeeded"
-  | "qualitas.payment_link.failed"
-  | "qualitas.payment_link.uncertain";
+export function isQualitasClientRecipientEnabled() {
+  return process.env.QUALITAS_PAYMENT_LINK_CLIENT_RECIPIENT_ENABLED?.trim() === "true";
+}
 
-function logQualitasEvent(
-  event: QualitasObservabilityEvent,
-  metadata: {
-    organizationId?: string;
-    policyId?: string;
-    userId?: string;
-    recipientType?: "CLIENT" | "AGENT";
-    deliveryMethod?: QualitasPaymentLinkDeliveryMethod;
-    providerResult?: QualitasPaymentLinkOutcome;
-    providerReason?: QualitasPaymentLinkReason;
-    durationMs?: number;
-  },
-) {
+function logQualitasTrace(input: {
+  correlationId: string;
+  organizationId: string;
+  policyId: string;
+  userId: string;
+  providerStep: "entrypoint" | "policy_lookup" | "pagar_ahora" | "contact_form" | "final_submission";
+  deliveryChannel: QualitasPaymentLinkDeliveryMethod;
+  outcome: QualitasPaymentLinkOutcome;
+  reason: QualitasPaymentLinkReason;
+  durationMs: number;
+}) {
   if (typeof console === "undefined") return;
-  const { organizationId, policyId, userId, ...safeMetadata } = metadata;
-  console.info(`[${event}]`, JSON.stringify({
-    event,
-    ...safeMetadata,
-    ...(organizationId ? { organizationRef: securityFingerprint(organizationId) } : {}),
-    ...(policyId ? { policyRef: securityFingerprint(policyId) } : {}),
-    ...(userId ? { userRef: securityFingerprint(userId) } : {}),
+  console.info("[qualitas.payment_link.trace]", JSON.stringify({
+    event: "qualitas.payment_link.trace",
+    correlationId: input.correlationId,
+    organizationId: input.organizationId,
+    policyId: input.policyId,
+    userId: input.userId,
+    providerStep: input.providerStep,
+    deliveryChannel: input.deliveryChannel,
+    outcome: input.outcome,
+    reason: input.reason,
+    durationMs: input.durationMs,
     timestamp: new Date().toISOString(),
   }));
 }
@@ -808,6 +802,7 @@ type ActiveTelegramIdentity = {
   channel: NonNullable<Awaited<ReturnType<typeof getTelegramChannelByChatId>>>;
   organizationId: string;
   membershipRole: string;
+  context: OrganizationContext;
   user: { id: string; email: string; name: string; phone: string | null; active: boolean };
 };
 
@@ -819,11 +814,12 @@ async function getActiveTelegramIdentityForChat(chatId: string, client?: DbClien
   const memberships = await db.organizationMembership.findMany({
     where: { userId: channel.userId },
     select: {
+      id: true,
       organizationId: true,
       role: true,
       active: true,
-      organization: { select: { status: true } },
-      user: { select: { id: true, email: true, name: true, phone: true, active: true } },
+      organization: { select: { id: true, name: true, slug: true, status: true } },
+      user: { select: { id: true, email: true, name: true, phone: true, active: true, role: true, platformRole: true } },
     },
     take: 2,
   });
@@ -838,6 +834,19 @@ async function getActiveTelegramIdentityForChat(chatId: string, client?: DbClien
     channel,
     organizationId: membership.organizationId,
     membershipRole: membership.role,
+    context: {
+      userId: membership.user.id,
+      userEmail: membership.user.email,
+      userName: membership.user.name,
+      userRole: membership.user.role,
+      platformRole: membership.user.platformRole,
+      organizationId: membership.organization.id,
+      organizationName: membership.organization.name,
+      organizationSlug: membership.organization.slug,
+      organizationStatus: membership.organization.status,
+      membershipId: membership.id,
+      membershipRole: membership.role as OrganizationContext["membershipRole"],
+    },
     user: membership.user,
   };
 }
@@ -1099,14 +1108,51 @@ async function persistTelegramDraftState(input: {
   draftId: string;
   state: TelegramDraftState;
   client?: DbClient;
+  context?: OrganizationContext;
 }) {
   const db = input.client ?? getDb();
+  if (input.context) {
+    return db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, input.context!);
+      return tx.telegramDraft.update({
+        where: { id: input.draftId, organizationId: input.organizationId },
+        data: {
+          payloadJson: stringifyTelegramDraftState(input.state),
+          updatedAt: new Date(),
+        },
+      });
+    });
+  }
   return db.telegramDraft.update({
     where: { id: input.draftId, organizationId: input.organizationId },
     data: {
       payloadJson: stringifyTelegramDraftState(input.state),
       updatedAt: new Date(),
     },
+  });
+}
+
+async function updateQualitasDraftState(input: {
+  db: DbClient;
+  context: OrganizationContext;
+  draftId: string;
+  userId: string;
+  channelId: string;
+  state: TelegramDraftState;
+}) {
+  return input.db.$transaction(async (tx) => {
+    await assertOrganizationContextInTransaction(tx, input.context);
+    return tx.telegramDraft.updateMany({
+      where: {
+        id: input.draftId,
+        organizationId: input.context.organizationId,
+        userId: input.userId,
+        channelId: input.channelId,
+        type: "QUALITAS_PAYMENT_LINK",
+        status: "COLLECTING",
+      },
+      data: { payloadJson: stringifyTelegramDraftState(input.state), updatedAt: new Date() },
+    });
   });
 }
 
@@ -2442,7 +2488,7 @@ const QUALITAS_WHATSAPP_CALLBACK = "qualitas_channel_whatsapp";
 
 function buildQualitasRecipientMarkup(state: TelegramQualitasPaymentLinkDraftState): TelegramInlineKeyboardMarkup {
   const buttons: TelegramInlineKeyboardButton[] = [];
-  if (state.clientEmail || state.clientPhone) buttons.push({ text: "Cliente", callback_data: QUALITAS_CLIENT_CALLBACK });
+  if (isQualitasClientRecipientEnabled() && (state.clientEmail || state.clientPhone)) buttons.push({ text: "Cliente", callback_data: QUALITAS_CLIENT_CALLBACK });
   if (state.agentEmail || state.agentPhone) buttons.push({ text: "Agente", callback_data: QUALITAS_AGENT_CALLBACK });
   return { inline_keyboard: [buttons] };
 }
@@ -2548,6 +2594,8 @@ function buildQualitasDraftState(input: {
     agentUserId: input.identity.user.id,
     agentEmail,
     agentPhone,
+    correlationId: crypto.randomUUID(),
+    submissionState: "NOT_STARTED",
   };
 }
 
@@ -2567,11 +2615,6 @@ async function createTelegramQualitasDraft(input: { chatId: string; argument: st
     };
   }
 
-  logQualitasEvent("qualitas.payment_link.started", {
-    organizationId: identity.organizationId,
-    userId: identity.user.id,
-  });
-
   const normalizedArgument = input.argument.trim();
   const argumentParts = normalizedArgument.split(/\s+/).filter(Boolean);
   if (argumentParts.length > 1) {
@@ -2580,6 +2623,7 @@ async function createTelegramQualitasDraft(input: { chatId: string; argument: st
 
   if (!normalizedArgument) {
     const draft = await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, identity.context);
       await tx.telegramDraft.updateMany({
         where: {
           organizationId: identity.organizationId,
@@ -2599,7 +2643,7 @@ async function createTelegramQualitasDraft(input: { chatId: string; argument: st
           status: "COLLECTING",
           payloadJson: stringifyTelegramDraftState({
             type: "QUALITAS_PAYMENT_LINK",
-            qualitas: { step: "policyNumber" },
+            qualitas: { step: "policyNumber", correlationId: crypto.randomUUID(), submissionState: "NOT_STARTED" },
           }),
           expiresAt: new Date(Date.now() + TELEGRAM_DRAFT_TTL_MS),
         },
@@ -2613,18 +2657,13 @@ async function createTelegramQualitasDraft(input: { chatId: string; argument: st
     return { ok: false as const, replyText: "No encontré una póliza Quálitas autorizada en PolicyDesk." };
   }
 
-  logQualitasEvent("qualitas.payment_link.policy_verified", {
-    organizationId: identity.organizationId,
-    policyId: policy.id,
-    userId: identity.user.id,
-  });
-
   const state = buildQualitasDraftState({ policy, identity });
-  if (!state.clientEmail && !state.clientPhone && !state.agentEmail && !state.agentPhone) {
+  if (!state.agentEmail && !state.agentPhone && (!isQualitasClientRecipientEnabled() || (!state.clientEmail && !state.clientPhone))) {
     return { ok: false as const, replyText: buildTelegramQualitasNoRecipientMessage() };
   }
 
   const draft = await db.$transaction(async (tx) => {
+    await assertOrganizationContextInTransaction(tx, identity.context);
     await tx.telegramDraft.updateMany({
       where: {
         organizationId: identity.organizationId,
@@ -2666,26 +2705,22 @@ async function continueTelegramQualitasDraftFromText(input: {
   const identity = await getActiveTelegramIdentityForChat(input.chatId, db);
   const payload = parseTelegramDraftState(input.draft.payloadJson);
   if (!identity || !payload?.qualitas || payload.type !== "QUALITAS_PAYMENT_LINK") return null;
-  const state = normalizeTelegramQualitasDraftState(payload.qualitas);
+  const state = payload.qualitas;
 
   if (state.step === "policyNumber") {
     const policy = await findAuthorizedQualitasPolicy({ identity, policyNumber: input.text.trim(), client: db });
     if (!policy) {
       return { handled: true as const, chatId: input.chatId, replyText: "No encontré una póliza Quálitas autorizada en PolicyDesk." };
     }
-    logQualitasEvent("qualitas.payment_link.policy_verified", {
-      organizationId: identity.organizationId,
-      policyId: policy.id,
-      userId: identity.user.id,
-    });
     const nextState = buildQualitasDraftState({ policy, identity });
     await persistTelegramDraftState({
       organizationId: identity.organizationId,
       draftId: input.draft.id,
       state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState },
       client: db,
+      context: identity.context,
     });
-    if (!nextState.clientEmail && !nextState.clientPhone && !nextState.agentEmail && !nextState.agentPhone) {
+    if (!nextState.agentEmail && !nextState.agentPhone && (!isQualitasClientRecipientEnabled() || (!nextState.clientEmail && !nextState.clientPhone))) {
       return { handled: true as const, chatId: input.chatId, replyText: buildTelegramQualitasNoRecipientMessage() };
     }
     return {
@@ -2710,19 +2745,22 @@ async function continueTelegramQualitasDraftFromText(input: {
       if (!state.recipientEmail) {
         return { handled: true as const, chatId: input.chatId, replyText: buildQualitasChannelPrompt(state), replyMarkup: buildQualitasChannelMarkup(state) };
       }
-      const nextState: TelegramQualitasPaymentLinkDraftState = { ...state, step: "ready", deliveryMethod: "EMAIL", recipientPhone: undefined };
-      await persistTelegramDraftState({ organizationId: identity.organizationId, draftId: input.draft.id, state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState }, client: db });
+      const nextState: TelegramQualitasPaymentLinkDraftState = { ...state, step: "ready", deliveryMethod: "EMAIL", recipientPhone: undefined, destinationSource: "PROFILE" };
+      await persistTelegramDraftState({ organizationId: identity.organizationId, draftId: input.draft.id, state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState }, client: db, context: identity.context });
       return { handled: true as const, chatId: input.chatId, replyText: buildQualitasConfirmation(nextState) };
     }
     if (channel === "whatsapp" || channel === "wa") {
       const phone = state.recipientPhone ?? (state.recipient === "CLIENT" ? state.clientPhone : null);
       if (!phone) {
-        const nextState = { ...state, step: "phone" as const, deliveryMethod: "WHATSAPP" as const };
-        await persistTelegramDraftState({ organizationId: identity.organizationId, draftId: input.draft.id, state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState }, client: db });
+        if (state.recipient !== "AGENT") {
+          return { handled: true as const, chatId: input.chatId, replyText: buildQualitasChannelPrompt(state), replyMarkup: buildQualitasChannelMarkup(state) };
+        }
+        const nextState = { ...state, step: "phone" as const, deliveryMethod: "WHATSAPP" as const, destinationSource: "MANUAL" as const };
+        await persistTelegramDraftState({ organizationId: identity.organizationId, draftId: input.draft.id, state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState }, client: db, context: identity.context });
         return { handled: true as const, chatId: input.chatId, replyText: buildTelegramQualitasPhonePrompt() };
       }
-      const nextState: TelegramQualitasPaymentLinkDraftState = { ...state, step: "ready", deliveryMethod: "WHATSAPP", recipientPhone: phone };
-      await persistTelegramDraftState({ organizationId: identity.organizationId, draftId: input.draft.id, state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState }, client: db });
+      const nextState: TelegramQualitasPaymentLinkDraftState = { ...state, step: "ready", deliveryMethod: "WHATSAPP", recipientPhone: phone, destinationSource: "PROFILE" };
+      await persistTelegramDraftState({ organizationId: identity.organizationId, draftId: input.draft.id, state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState }, client: db, context: identity.context });
       return { handled: true as const, chatId: input.chatId, replyText: buildQualitasConfirmation(nextState) };
     }
     return { handled: true as const, chatId: input.chatId, replyText: buildQualitasChannelPrompt(state), replyMarkup: buildQualitasChannelMarkup(state) };
@@ -2731,12 +2769,15 @@ async function continueTelegramQualitasDraftFromText(input: {
   if (state.step === "phone") {
     const phone = normalizeQualitasPhone(input.text);
     if (!phone) return { handled: true as const, chatId: input.chatId, replyText: buildTelegramQualitasPhonePrompt() };
-    const nextState: TelegramQualitasPaymentLinkDraftState = { ...state, step: "ready", deliveryMethod: "WHATSAPP", recipientPhone: phone };
-    await persistTelegramDraftState({ organizationId: identity.organizationId, draftId: input.draft.id, state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState }, client: db });
+    const nextState: TelegramQualitasPaymentLinkDraftState = { ...state, step: "ready", deliveryMethod: "WHATSAPP", recipientPhone: phone, destinationSource: "MANUAL" };
+    await persistTelegramDraftState({ organizationId: identity.organizationId, draftId: input.draft.id, state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState }, client: db, context: identity.context });
     return { handled: true as const, chatId: input.chatId, replyText: buildQualitasConfirmation(nextState) };
   }
 
   const recipient = normalizeTelegramRecipientText(input.text);
+  if (recipient === "CLIENT" && !isQualitasClientRecipientEnabled()) {
+    return { handled: true as const, chatId: input.chatId, replyText: buildQualitasRecipientPrompt(state), replyMarkup: buildQualitasRecipientMarkup(state) };
+  }
   const recipientEmail = recipient
     ? state[recipient === "CLIENT" ? "clientEmail" : "agentEmail"]
     : null;
@@ -2756,18 +2797,14 @@ async function continueTelegramQualitasDraftFromText(input: {
     recipient,
     recipientEmail: recipientEmail ?? undefined,
     recipientPhone: recipientPhone ?? undefined,
+    destinationSource: "PROFILE",
   };
   await persistTelegramDraftState({
     organizationId: identity.organizationId,
     draftId: input.draft.id,
     state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState },
     client: db,
-  });
-  logQualitasEvent("qualitas.payment_link.recipient_selected", {
-    organizationId: identity.organizationId,
-    policyId: nextState.policyId,
-    userId: identity.user.id,
-    recipientType: recipient,
+    context: identity.context,
   });
   return {
     handled: true as const,
@@ -2810,7 +2847,7 @@ async function processTelegramQualitasCallback(callback: TelegramCallbackQuery, 
   });
   const payload = draft ? parseTelegramDraftState(draft.payloadJson) : null;
   const state = payload?.type === "QUALITAS_PAYMENT_LINK" && payload.qualitas
-    ? normalizeTelegramQualitasDraftState(payload.qualitas)
+    ? payload.qualitas
     : null;
   if (!draft || !state || (selectedRecipient && state.step !== "recipient") || (selectedChannel && state.step !== "channel")) {
     return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "La selección ya fue procesada o expiró." };
@@ -2822,6 +2859,9 @@ async function processTelegramQualitasCallback(callback: TelegramCallbackQuery, 
   }
   const currentState = buildQualitasDraftState({ policy, identity });
   const activeRecipient = selectedRecipient ?? state.recipient;
+  if (selectedRecipient === "CLIENT" && !isQualitasClientRecipientEnabled()) {
+    return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Ese destinatario no está habilitado." };
+  }
   const selectedEmail = activeRecipient === "CLIENT" ? currentState.clientEmail : currentState.agentEmail;
   const selectedPhone = activeRecipient === "CLIENT" ? currentState.clientPhone : currentState.agentPhone;
   if (selectedRecipient && !selectedEmail && !selectedPhone) {
@@ -2836,8 +2876,11 @@ async function processTelegramQualitasCallback(callback: TelegramCallbackQuery, 
       return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Ese correo ya no está disponible." };
     }
     if (selectedChannel === "WHATSAPP" && !selectedPhone) {
-      const nextState: TelegramQualitasPaymentLinkDraftState = { ...state, step: "phone", deliveryMethod: "WHATSAPP" };
-      await persistTelegramDraftState({ organizationId: identity.organizationId, draftId: draft.id, state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState }, client: db });
+      if (activeRecipient !== "AGENT") {
+        return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Ese destino ya no está disponible." };
+      }
+      const nextState: TelegramQualitasPaymentLinkDraftState = { ...state, step: "phone", deliveryMethod: "WHATSAPP", destinationSource: "MANUAL" };
+      await persistTelegramDraftState({ organizationId: identity.organizationId, draftId: draft.id, state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState }, client: db, context: identity.context });
       return {
         handled: true as const,
         chatId: String(chat.id),
@@ -2853,17 +2896,15 @@ async function processTelegramQualitasCallback(callback: TelegramCallbackQuery, 
       deliveryMethod: selectedChannel,
       recipientEmail: selectedChannel === "EMAIL" ? selectedEmail ?? undefined : undefined,
       recipientPhone: selectedChannel === "WHATSAPP" ? selectedPhone ?? state.recipientPhone : undefined,
+      destinationSource: "PROFILE",
     };
-    const updated = await db.telegramDraft.updateMany({
-      where: {
-        id: draft.id,
-        organizationId: identity.organizationId,
-        userId: identity.user.id,
-        channelId: identity.channel.id,
-        type: "QUALITAS_PAYMENT_LINK",
-        status: "COLLECTING",
-      },
-      data: { payloadJson: stringifyTelegramDraftState({ type: "QUALITAS_PAYMENT_LINK", qualitas: nextState }), updatedAt: new Date() },
+    const updated = await updateQualitasDraftState({
+      db,
+      context: identity.context,
+      draftId: draft.id,
+      userId: identity.user.id,
+      channelId: identity.channel.id,
+      state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState },
     });
     if (updated.count !== 1) {
       return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "La selección ya fue procesada." };
@@ -2887,28 +2928,19 @@ async function processTelegramQualitasCallback(callback: TelegramCallbackQuery, 
     recipient: selectedRecipient,
     recipientEmail: selectedEmail ?? undefined,
     recipientPhone: selectedPhone ?? undefined,
+    destinationSource: "PROFILE",
   };
-  const updated = await db.telegramDraft.updateMany({
-    where: {
-      id: draft.id,
-      organizationId: identity.organizationId,
-      userId: identity.user.id,
-      channelId: identity.channel.id,
-      type: "QUALITAS_PAYMENT_LINK",
-      status: "COLLECTING",
-    },
-    data: { payloadJson: stringifyTelegramDraftState({ type: "QUALITAS_PAYMENT_LINK", qualitas: nextState }), updatedAt: new Date() },
+  const updated = await updateQualitasDraftState({
+    db,
+    context: identity.context,
+    draftId: draft.id,
+    userId: identity.user.id,
+    channelId: identity.channel.id,
+    state: { type: "QUALITAS_PAYMENT_LINK", qualitas: nextState },
   });
   if (updated.count !== 1) {
     return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "La selección ya fue procesada." };
   }
-
-  logQualitasEvent("qualitas.payment_link.recipient_selected", {
-    organizationId: identity.organizationId,
-    policyId: nextState.policyId,
-    userId: identity.user.id,
-    recipientType: selectedRecipient,
-  });
 
   return {
     handled: true as const,
@@ -2928,7 +2960,13 @@ function isQualitasPreparedPaymentLink(
 }
 
 function qualitasAuditResult(outcome: QualitasPaymentLinkOutcome) {
-  return outcome === "SUCCESS" ? "SUCCESS" : outcome === "UNCERTAIN" ? "UNCERTAIN" : "FAILED";
+  return outcome === "SUCCESS" ? "SUCCESS" : outcome === "ALREADY_IN_PROGRESS" ? "ALREADY_IN_PROGRESS" : outcome === "UNCERTAIN_POST_SUBMISSION" ? "UNCERTAIN" : "FAILED";
+}
+
+function qualitasSubmissionStateForOutcome(outcome: QualitasPaymentLinkOutcome) {
+  if (outcome === "SUCCESS" || outcome === "ALREADY_IN_PROGRESS") return "ACKNOWLEDGED" as const;
+  if (outcome === "UNCERTAIN_POST_SUBMISSION") return "STARTED" as const;
+  return "NOT_STARTED" as const;
 }
 
 async function finalizeQualitasTelegramDraft(input: {
@@ -2941,14 +2979,33 @@ async function finalizeQualitasTelegramDraft(input: {
   deliveryMethod: QualitasPaymentLinkDeliveryMethod;
   outcome: QualitasPaymentLinkOutcome;
   reason: QualitasPaymentLinkReason;
+  submissionState: "NOT_STARTED" | "STARTED" | "ACKNOWLEDGED";
+  correlationId: string;
+  destinationSource?: "PROFILE" | "MANUAL";
+  context: OrganizationContext;
   db: DbClient;
 }) {
-  const status = input.outcome === "SUCCESS" ? "CONFIRMED" : input.outcome === "UNCERTAIN" ? "UNCERTAIN" : "FAILED";
+  const status = input.outcome === "SUCCESS" ? "CONFIRMED" : input.outcome === "ALREADY_IN_PROGRESS" ? "ALREADY_IN_PROGRESS" : input.outcome === "UNCERTAIN_POST_SUBMISSION" ? "UNCERTAIN" : "FAILED";
   await input.db.$transaction(async (tx) => {
+    await assertOrganizationContextInTransaction(tx, input.context);
     await tx.telegramDraft.update({
       where: { id: input.draftId, organizationId: input.organizationId },
       data: {
         status,
+        payloadJson: JSON.stringify({
+          type: "QUALITAS_PAYMENT_LINK",
+          qualitas: {
+            policyId: input.policyId,
+            clientId: input.clientId,
+            recipient: input.recipient,
+            deliveryMethod: input.deliveryMethod,
+            correlationId: input.correlationId,
+            destinationSource: input.destinationSource,
+            submissionState: input.submissionState,
+            outcome: input.outcome,
+            reason: input.reason,
+          },
+        }),
         ...(status === "CONFIRMED" ? { confirmedAt: new Date() } : {}),
       },
     });
@@ -2981,7 +3038,7 @@ async function confirmQualitasTelegramDraft(input: {
   const identity = await getActiveTelegramIdentityForChat(input.chatId, db);
   const payload = parseTelegramDraftState(input.draft.payloadJson);
   const state = payload?.type === "QUALITAS_PAYMENT_LINK" && payload.qualitas
-    ? normalizeTelegramQualitasDraftState(payload.qualitas)
+    ? payload.qualitas
     : null;
   if (
     !identity ||
@@ -2996,6 +3053,9 @@ async function confirmQualitasTelegramDraft(input: {
   if (!isQualitasPaymentLinkEnabled()) {
     return { ok: false as const, replyText: buildTelegramQualitasUnavailableMessage() };
   }
+  if (state?.recipient === "CLIENT" && !isQualitasClientRecipientEnabled()) {
+    return { ok: false as const, replyText: buildTelegramQualitasUnavailableMessage() };
+  }
   if (!isTelegramMutationsEnabled(identity.channel)) {
     return { ok: false as const, replyText: "Los cambios reales por Telegram están desactivados. Actívalos en Configuración > Notificaciones para solicitar el enlace." };
   }
@@ -3007,7 +3067,9 @@ async function confirmQualitasTelegramDraft(input: {
     !state.recipient ||
     !state.deliveryMethod ||
     (state.deliveryMethod === "EMAIL" && !state.recipientEmail) ||
-    (state.deliveryMethod === "WHATSAPP" && !state.recipientPhone)
+    (state.deliveryMethod === "WHATSAPP" && !state.recipientPhone) ||
+    state.submissionState !== "NOT_STARTED" ||
+    !state.correlationId
   ) {
     return { ok: false as const, replyText: "La solicitud de enlace todavía no está completa." };
   }
@@ -3016,15 +3078,18 @@ async function confirmQualitasTelegramDraft(input: {
   const currentClientEmail = normalizeQualitasEmail(policy?.client.email);
   const currentAgentEmail = normalizeQualitasEmail(identity.user.email);
   const currentRecipientEmail = state.recipient === "CLIENT" ? currentClientEmail : currentAgentEmail;
-  const currentAgentPhone = state.agentPhone ? normalizeQualitasPhone(identity.user.phone) : state.recipientPhone;
+  const currentAgentPhone = normalizeQualitasPhone(identity.user.phone);
   const currentRecipientPhone = state.recipient === "CLIENT" ? normalizeQualitasPhone(policy?.client.phone) : currentAgentPhone;
+  const phoneMatches = state.destinationSource === "MANUAL"
+    ? state.recipient === "AGENT" && normalizeQualitasPhone(state.recipientPhone) === state.recipientPhone
+    : currentRecipientPhone === state.recipientPhone;
   if (
     !policy ||
     policy.client.id !== state.clientId ||
     policy.policyNumber !== state.policyNumber ||
     state.agentUserId !== identity.user.id ||
     (state.deliveryMethod === "EMAIL" && currentRecipientEmail !== state.recipientEmail) ||
-    (state.deliveryMethod === "WHATSAPP" && currentRecipientPhone !== state.recipientPhone)
+    (state.deliveryMethod === "WHATSAPP" && !phoneMatches)
   ) {
     const refreshedState = policy
       ? { ...buildQualitasDraftState({ policy, identity }), step: "recipient" as const }
@@ -3044,53 +3109,63 @@ async function confirmQualitasTelegramDraft(input: {
     checkDistributedRateLimit(`telegram:qualitas:policy:${securityFingerprint(state.policyId)}`, { ...TELEGRAM_QUALITAS_RATE_LIMITS.policy, requireDistributed: true }),
   ]);
   if (limits.some((limit) => !limit.allowed)) {
-    logQualitasEvent("qualitas.payment_link.failed", {
-      organizationId: identity.organizationId,
-      policyId: state.policyId,
-      userId: identity.user.id,
-      recipientType: state.recipient,
-      providerResult: "RATE_LIMITED",
-      durationMs: Date.now() - startedAt,
-    });
     return { ok: false as const, replyText: buildTelegramQualitasOutcomeMessage("RATE_LIMITED") };
   }
 
-  const claimed = await db.telegramDraft.updateMany({
-    where: {
-      id: input.draft.id,
-      organizationId: identity.organizationId,
-      userId: identity.user.id,
-      channelId: identity.channel.id,
-      type: "QUALITAS_PAYMENT_LINK",
-      status: "COLLECTING",
-      expiresAt: { gt: new Date() },
-    },
-    data: { status: "PROCESSING", updatedAt: new Date() },
+  const claimed = await db.$transaction(async (tx) => {
+    await assertOrganizationContextInTransaction(tx, identity.context);
+    return tx.telegramDraft.updateMany({
+      where: {
+        id: input.draft.id,
+        organizationId: identity.organizationId,
+        userId: identity.user.id,
+        channelId: identity.channel.id,
+        type: "QUALITAS_PAYMENT_LINK",
+        status: "COLLECTING",
+        expiresAt: { gt: new Date() },
+      },
+      data: { status: "PROCESSING", updatedAt: new Date(), payloadJson: JSON.stringify({ ...payload, qualitas: { ...state, submissionState: "NOT_STARTED" } }) },
+    });
   });
   if (claimed.count !== 1) {
     return { ok: false as const, replyText: "Esta solicitud ya fue procesada o está siendo procesada." };
   }
 
-  logQualitasEvent("qualitas.payment_link.confirmed", {
-    organizationId: identity.organizationId,
-    policyId: state.policyId,
-    userId: identity.user.id,
-    recipientType: state.recipient,
-  });
-
   let providerResult: QualitasPaymentLinkResult = {
     outcome: "UNEXPECTED_RESPONSE",
     reason: "UNEXPECTED_RESPONSE",
   };
+  let submissionStarted = false;
   try {
-    const qualitasRequestOptions = { traceId: securityFingerprint(input.draft.id) };
-    const prepared = await prepareQualitasPaymentLink(
-      {
-        policyNumber: state.policyNumber,
-        recipientEmail: state.deliveryMethod === "EMAIL" ? state.recipientEmail : null,
-        recipientPhone: state.deliveryMethod === "WHATSAPP" ? state.recipientPhone : null,
-        deliveryMethod: state.deliveryMethod,
+    const qualitasRequestOptions = {
+      traceId: state.correlationId ?? securityFingerprint(input.draft.id),
+      correlationId: state.correlationId ?? input.draft.id,
+      onFinalSubmissionStarted: async () => {
+        const updated = await db.$transaction(async (tx) => {
+          await assertOrganizationContextInTransaction(tx, identity.context);
+          return tx.telegramDraft.updateMany({
+            where: {
+              id: input.draft.id,
+              organizationId: identity.organizationId,
+              userId: identity.user.id,
+              channelId: identity.channel.id,
+              status: "PROCESSING",
+            },
+            data: { payloadJson: JSON.stringify({ ...payload, qualitas: { ...state, submissionState: "STARTED" } }), updatedAt: new Date() },
+          });
+        });
+        if (updated.count !== 1) throw new Error("QUALITAS_DRAFT_START_CLAIM_FAILED");
+        submissionStarted = true;
       },
+    };
+    const request: QualitasDeliveryRequest = {
+      policyNumber: state.policyNumber,
+      deliveryChannel: state.deliveryMethod,
+      destination: state.deliveryMethod === "EMAIL" ? state.recipientEmail! : state.recipientPhone!,
+      correlationId: state.correlationId ?? input.draft.id,
+    };
+    const prepared = await prepareQualitasPaymentLink(
+      request,
       qualitasRequestOptions,
     );
     if (isQualitasPreparedPaymentLink(prepared)) {
@@ -3100,26 +3175,23 @@ async function confirmQualitasTelegramDraft(input: {
     }
   } catch (error) {
     logError("telegram.confirmQualitasPaymentLink", error, { draftRef: securityFingerprint(input.draft.id) });
-    providerResult = { outcome: "UNEXPECTED_RESPONSE", reason: "UNEXPECTED_RESPONSE" };
+    providerResult = submissionStarted
+      ? { outcome: "UNCERTAIN_POST_SUBMISSION", reason: "FINAL_TIMEOUT" }
+      : { outcome: "UNEXPECTED_RESPONSE", reason: "UNEXPECTED_RESPONSE" };
   }
 
   const { outcome, reason } = providerResult;
-  const outcomeEvent = outcome === "SUCCESS"
-    ? "qualitas.payment_link.succeeded"
-    : outcome === "UNCERTAIN"
-      ? "qualitas.payment_link.uncertain"
-      : "qualitas.payment_link.failed";
-  logQualitasEvent(outcomeEvent, {
+  logQualitasTrace({
+    correlationId: state.correlationId ?? input.draft.id,
     organizationId: identity.organizationId,
     policyId: state.policyId,
     userId: identity.user.id,
-    recipientType: state.recipient,
-    deliveryMethod: state.deliveryMethod,
-    providerResult: outcome,
-    providerReason: reason,
+    providerStep: "final_submission",
+    deliveryChannel: state.deliveryMethod,
+    outcome,
+    reason,
     durationMs: Date.now() - startedAt,
   });
-
   try {
     await finalizeQualitasTelegramDraft({
       draftId: input.draft.id,
@@ -3131,19 +3203,15 @@ async function confirmQualitasTelegramDraft(input: {
       deliveryMethod: state.deliveryMethod,
       outcome,
       reason,
+      submissionState: qualitasSubmissionStateForOutcome(outcome),
+      correlationId: state.correlationId ?? input.draft.id,
+      destinationSource: state.destinationSource,
+      context: identity.context,
       db,
     });
   } catch (error) {
     logError("telegram.finalizeQualitasPaymentLink", error, { draftRef: securityFingerprint(input.draft.id) });
-    logQualitasEvent("qualitas.payment_link.uncertain", {
-      organizationId: identity.organizationId,
-      policyId: state.policyId,
-      userId: identity.user.id,
-      recipientType: state.recipient,
-      providerResult: "UNCERTAIN",
-      durationMs: Date.now() - startedAt,
-    });
-    return { ok: false as const, replyText: buildTelegramQualitasOutcomeMessage("UNCERTAIN") };
+    return { ok: false as const, replyText: buildTelegramQualitasOutcomeMessage("UNCERTAIN_POST_SUBMISSION") };
   }
 
   if (outcome === "SUCCESS") {

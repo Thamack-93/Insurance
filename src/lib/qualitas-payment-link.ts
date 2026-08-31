@@ -1,19 +1,20 @@
 import "server-only";
 import { parse, type DefaultTreeAdapterTypes } from "parse5";
+import { normalizeMexicanPhone } from "./phone";
 
 export const QUALITAS_PAYMENT_LINK_ENTRYPOINT =
   "https://www.qualitas.com.mx/web/qmx/pago-de-poliza/-/user-pago/inicio";
 
 export const QUALITAS_PAYMENT_LINK_OUTCOMES = [
   "SUCCESS",
+  "ALREADY_IN_PROGRESS",
   "POLICY_NOT_FOUND",
   "POLICY_NOT_ELIGIBLE",
-  "EMAIL_REJECTED",
-  "QUALITAS_UNAVAILABLE",
-  "QUALITAS_FLOW_CHANGED",
-  "RATE_LIMITED",
-  "TIMEOUT",
-  "UNCERTAIN",
+  "DESTINATION_REJECTED",
+  "PROVIDER_FLOW_CHANGED",
+  "PROVIDER_UNAVAILABLE",
+  "TIMEOUT_PRE_SUBMISSION",
+  "UNCERTAIN_POST_SUBMISSION",
   "UNEXPECTED_RESPONSE",
 ] as const;
 
@@ -45,20 +46,17 @@ export type QualitasPaymentLinkResult = {
   paymentUrl?: string;
 };
 
-export type QualitasPaymentLinkInput = {
+export type QualitasDeliveryRequest = {
   policyNumber: string;
-  recipientEmail?: string | null;
-  recipientPhone?: string | null;
-  deliveryMethod?: QualitasPaymentLinkDeliveryMethod;
+  deliveryChannel: QualitasPaymentLinkDeliveryMethod;
+  destination: string;
+  correlationId: string;
 };
 
 export type QualitasPaymentLinkDeliveryMethod = "EMAIL" | "WHATSAPP";
 
 export type QualitasPreparedPaymentLink = {
-  policyNumber: string;
-  recipientEmail: string | null;
-  recipientPhone: string | null;
-  deliveryMethod: QualitasPaymentLinkDeliveryMethod;
+  request: QualitasDeliveryRequest;
   transportReady: true;
   sessionCookie: string;
   finalActionUrl: string;
@@ -78,6 +76,7 @@ export type QualitasHttpTransport = (input: RequestInfo | URL, init?: RequestIni
 export type QualitasProviderEvent = {
   event: "qualitas.payment_link.provider";
   traceId: string;
+  correlationId?: string;
   step: "entrypoint" | "policy_lookup" | "pagar_ahora" | "contact_form" | "final_submission";
   phase: "started" | "completed" | "classified" | "redirect" | "timeout" | "network_error" | "response_too_large" | "flow_changed";
   method?: string;
@@ -120,7 +119,9 @@ export type QualitasRequestOptions = {
   finalTimeoutMs?: number;
   maxResponseBytes?: number;
   traceId?: string;
+  correlationId?: string;
   onEvent?: (event: QualitasProviderEvent) => void;
+  onFinalSubmissionStarted?: () => Promise<void> | void;
 };
 
 const QUALITAS_HOST = "www.qualitas.com.mx";
@@ -141,10 +142,10 @@ function emitQualitasProviderEvent(options: QualitasRequestOptions, event: Omit<
   const payload: QualitasProviderEvent = {
     event: "qualitas.payment_link.provider",
     traceId: options.traceId ?? "untracked",
+    correlationId: options.correlationId,
     ...event,
   };
   options.onEvent?.(payload);
-  if (typeof console !== "undefined") console.info(`[${payload.event}]`, JSON.stringify(payload));
 }
 
 const QUALITAS_INSURER_NAMES = new Set([
@@ -176,9 +177,8 @@ export function isValidQualitasEmail(value: string | null | undefined): value is
 }
 
 export function normalizeQualitasPhone(value: string | null | undefined) {
-  const digits = (value ?? "").replace(/\D/g, "");
-  const normalized = digits.startsWith("52") && digits.length === 12 ? digits.slice(2) : digits;
-  return /^\d{10}$/.test(normalized) ? normalized : null;
+  const normalized = normalizeMexicanPhone(value);
+  return normalized ? normalized.slice(3) : null;
 }
 
 export function isValidQualitasPhone(value: string | null | undefined): value is string {
@@ -302,35 +302,35 @@ function classifyQualitasProviderResponse(input: {
   const base = { contentType, signalTextLength: text.length, signals, duplicateEvidence };
 
   if (input.timedOut) {
-    return { ...qualitasResult(input.finalSubmission ? "UNCERTAIN" : "TIMEOUT", input.finalSubmission ? "FINAL_TIMEOUT" : "TIMEOUT_BEFORE_SUBMISSION"), ...base };
+    return { ...qualitasResult(input.finalSubmission ? "UNCERTAIN_POST_SUBMISSION" : "TIMEOUT_PRE_SUBMISSION", input.finalSubmission ? "FINAL_TIMEOUT" : "TIMEOUT_BEFORE_SUBMISSION"), ...base };
   }
   if (input.redirectedToUnexpectedHost) {
-    return { ...qualitasResult("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED"), ...base };
+    return { ...qualitasResult("PROVIDER_FLOW_CHANGED", "FLOW_CHANGED"), ...base };
   }
   if (signals.hasSuccessCode) return { ...qualitasResult("SUCCESS", "SUCCESS_CODE_0"), ...base };
   if (duplicateEvidence !== "NONE") {
-    return { ...qualitasResult("UNCERTAIN", "DUPLICATE_LINK_99991"), ...base };
+    return { ...qualitasResult("ALREADY_IN_PROGRESS", "DUPLICATE_LINK_99991"), ...base };
   }
   if (input.status === 429 || /too many|rate limit|demasiadas solicitudes/.test(text)) {
-    return { ...qualitasResult("RATE_LIMITED", "RATE_LIMITED"), ...base };
+    return { ...qualitasResult("PROVIDER_UNAVAILABLE", "RATE_LIMITED"), ...base };
   }
   if (input.status !== undefined && input.status >= 500) {
-    return { ...qualitasResult("QUALITAS_UNAVAILABLE", "QUALITAS_UNAVAILABLE"), ...base };
+    return { ...qualitasResult("PROVIDER_UNAVAILABLE", "QUALITAS_UNAVAILABLE"), ...base };
   }
   if (/no se encontr|no encontr|no existe|p[oó]liza .*inv[aá]lida|not found/.test(text)) {
     return { ...qualitasResult("POLICY_NOT_FOUND", "POLICY_NOT_FOUND"), ...base };
   }
   if (signals.hasEmailRejectionMessage) {
-    return { ...qualitasResult("EMAIL_REJECTED", "EMAIL_REJECTED"), ...base };
+    return { ...qualitasResult("DESTINATION_REJECTED", "EMAIL_REJECTED"), ...base };
   }
   if (signals.hasPolicyEligibilityMessage || /(?:policy|p[oó]liza)[\s\S]{0,80}not eligible|not eligible[\s\S]{0,80}(?:policy|p[oó]liza)/.test(text)) {
     return { ...qualitasResult("POLICY_NOT_ELIGIBLE", "POLICY_NOT_ELIGIBLE"), ...base };
   }
   if (input.finalSubmission && input.status !== undefined && input.status < 400) {
-    return { ...qualitasResult("UNCERTAIN", "FINAL_RESPONSE_UNRECOGNIZED"), ...base };
+    return { ...qualitasResult("UNCERTAIN_POST_SUBMISSION", "FINAL_RESPONSE_UNRECOGNIZED"), ...base };
   }
   return {
-    ...qualitasResult(input.status !== undefined && input.status >= 400 ? "UNEXPECTED_RESPONSE" : "QUALITAS_FLOW_CHANGED", input.status !== undefined && input.status >= 400 ? "UNEXPECTED_RESPONSE" : "FLOW_CHANGED"),
+    ...qualitasResult(input.status !== undefined && input.status >= 400 ? "UNEXPECTED_RESPONSE" : "PROVIDER_FLOW_CHANGED", input.status !== undefined && input.status >= 400 ? "UNEXPECTED_RESPONSE" : "FLOW_CHANGED"),
     ...base,
   };
 }
@@ -669,15 +669,16 @@ export function qualitasRequestShapeSignature(fields: QualitasFormField[], deliv
 
 export function buildQualitasDeliveryFields(input: {
   fields: QualitasFormField[];
-  deliveryMethod: QualitasPaymentLinkDeliveryMethod;
-  recipientEmail: string | null;
-  recipientPhone: string | null;
+  deliveryChannel: QualitasPaymentLinkDeliveryMethod;
+  destination: string;
   resumeWsUrl: string;
 }) {
+  const recipientEmail = input.deliveryChannel === "EMAIL" ? normalizeQualitasEmail(input.destination) : null;
+  const recipientPhone = input.deliveryChannel === "WHATSAPP" ? normalizeQualitasPhone(input.destination) : null;
   const channelFields: QualitasFormField[] = [
-    { name: "numTelefono", value: input.recipientPhone ?? "", controlType: "synthetic" },
-    { name: "temail", value: input.recipientEmail ?? "", controlType: "synthetic" },
-    { name: "tipo", value: input.deliveryMethod === "WHATSAPP" ? "3" : "1", controlType: "synthetic" },
+    { name: "numTelefono", value: recipientPhone ?? "", controlType: "synthetic" },
+    { name: "temail", value: recipientEmail ?? "", controlType: "synthetic" },
+    { name: "tipo", value: input.deliveryChannel === "WHATSAPP" ? "3" : "1", controlType: "synthetic" },
     { name: "resumenWSUrl", value: input.resumeWsUrl, controlType: "synthetic" },
   ];
   const passthroughFields = input.fields.filter((field) => !["numTelefono", "temail", "tipo", "resumenWSUrl"].includes(field.name));
@@ -761,6 +762,8 @@ async function requestWithSession(input: {
     ? input.options.finalTimeoutMs ?? DEFAULT_FINAL_SUBMISSION_TIMEOUT_MS
     : input.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxResponseBytes = input.options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+  let finalSubmissionStarted = false;
+  let finalSubmissionClaimAttempted = false;
 
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
     const startedAt = Date.now();
@@ -791,6 +794,11 @@ async function requestWithSession(input: {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      if (input.finalSubmission && !finalSubmissionStarted) {
+        finalSubmissionClaimAttempted = true;
+        await input.options.onFinalSubmissionStarted?.();
+        finalSubmissionStarted = true;
+      }
       const response = await transport(url, { ...init, headers, redirect: "manual", signal: controller.signal });
       updateCookieJar(response, input.cookieJar);
       if (response.status >= 300 && response.status < 400) {
@@ -852,6 +860,9 @@ async function requestWithSession(input: {
       });
       return { response, bodyText, finalUrl: url, redirectCount: redirect };
     } catch (error) {
+      if (input.finalSubmission && finalSubmissionClaimAttempted && !finalSubmissionStarted) {
+        throw error;
+      }
       if (error instanceof QualitasResponseTooLargeError) {
         emitQualitasProviderEvent(input.options, {
           step: input.step,
@@ -910,7 +921,7 @@ function resultForSessionResponse(
   let classification: QualitasProviderClassification;
   if (result.responseTooLarge) {
     classification = {
-      ...qualitasResult(finalSubmission ? "UNCERTAIN" : "UNEXPECTED_RESPONSE", "RESPONSE_TOO_LARGE"),
+      ...qualitasResult(finalSubmission ? "UNCERTAIN_POST_SUBMISSION" : "UNEXPECTED_RESPONSE", "RESPONSE_TOO_LARGE"),
       contentType: "unknown",
       signalTextLength: 0,
       signals: emptyQualitasSignals(),
@@ -918,7 +929,7 @@ function resultForSessionResponse(
     };
   } else if (result.networkError) {
     classification = {
-      ...qualitasResult(finalSubmission ? "UNCERTAIN" : "QUALITAS_UNAVAILABLE", "NETWORK_ERROR"),
+      ...qualitasResult(finalSubmission ? "UNCERTAIN_POST_SUBMISSION" : "PROVIDER_UNAVAILABLE", "NETWORK_ERROR"),
       contentType: "unknown",
       signalTextLength: 0,
       signals: emptyQualitasSignals(),
@@ -958,13 +969,13 @@ function resultForSessionResponse(
 }
 
 export async function prepareQualitasPaymentLink(
-  input: QualitasPaymentLinkInput,
+  input: QualitasDeliveryRequest,
   options: QualitasRequestOptions = {},
 ): Promise<QualitasPreparedPaymentLink | QualitasPaymentLinkResult> {
-  const deliveryMethod = input.deliveryMethod ?? "EMAIL";
-  const recipientEmail = normalizeQualitasEmail(input.recipientEmail);
-  const recipientPhone = normalizeQualitasPhone(input.recipientPhone);
-  if (!input.policyNumber.trim() || (deliveryMethod === "EMAIL" ? !recipientEmail : !recipientPhone)) {
+  const deliveryMethod = input.deliveryChannel;
+  const recipientEmail = deliveryMethod === "EMAIL" ? normalizeQualitasEmail(input.destination) : null;
+  const recipientPhone = deliveryMethod === "WHATSAPP" ? normalizeQualitasPhone(input.destination) : null;
+  if (!input.policyNumber.trim() || !input.correlationId.trim() || (deliveryMethod === "EMAIL" ? !recipientEmail : !recipientPhone)) {
     return qualitasResult("UNEXPECTED_RESPONSE", "INVALID_INPUT");
   }
 
@@ -982,9 +993,9 @@ export async function prepareQualitasPaymentLink(
   if (!initial.bodyText) return resultForSessionResponse(initial, false, options);
 
   const policyForm = findFormContaining(initial.bodyText, "numPoliza");
-  if (!policyForm || formMethod(policyForm) !== "POST") return qualitasResult("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED");
+  if (!policyForm || formMethod(policyForm) !== "POST") return qualitasResult("PROVIDER_FLOW_CHANGED", "FLOW_CHANGED");
   const policyAction = formAction(policyForm, initial.finalUrl);
-  if (!policyAction || !isAllowedQualitasUrl(policyAction)) return qualitasResult("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED");
+  if (!policyAction || !isAllowedQualitasUrl(policyAction)) return qualitasResult("PROVIDER_FLOW_CHANGED", "FLOW_CHANGED");
   const policyFields = collectFormFields(policyForm);
   const policyBody = new URLSearchParams(
     setFormField(policyFields, "numPoliza", policyNumber).map((field): [string, string] => [field.name, field.value]),
@@ -1079,14 +1090,15 @@ export async function prepareQualitasPaymentLink(
   const finalFields = collectFormFields(contactForm);
   const resumeWsUrl = finalFields.find((field) => field.name === "resumenWSUrl")?.value ?? "";
   if (!finalActionUrl || !isAllowedQualitasUrl(finalActionUrl) || !resumeWsUrl || !isAllowedQualitasUrl(resumeWsUrl)) {
-    return qualitasResult("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED");
+    return qualitasResult("PROVIDER_FLOW_CHANGED", "FLOW_CHANGED");
   }
 
   return {
-    policyNumber,
-    recipientEmail,
-    recipientPhone,
-    deliveryMethod,
+    request: {
+      ...input,
+      policyNumber,
+      destination: deliveryMethod === "EMAIL" ? recipientEmail! : recipientPhone!,
+    },
     transportReady: true,
     sessionCookie: cookieHeader(cookieJar),
     finalActionUrl,
@@ -1100,9 +1112,9 @@ export async function requestQualitasPaymentLink(
   prepared: QualitasPreparedPaymentLink,
   options: QualitasRequestOptions = {},
 ): Promise<QualitasPaymentLinkResult> {
-  const destinationIsValid = prepared.deliveryMethod === "EMAIL"
-    ? isValidQualitasEmail(prepared.recipientEmail)
-    : isValidQualitasPhone(prepared.recipientPhone);
+  const destinationIsValid = prepared.request.deliveryChannel === "EMAIL"
+    ? isValidQualitasEmail(prepared.request.destination)
+    : isValidQualitasPhone(prepared.request.destination);
   if (
     !prepared.transportReady ||
     !destinationIsValid ||
@@ -1110,7 +1122,7 @@ export async function requestQualitasPaymentLink(
     !isAllowedQualitasUrl(prepared.resumeWsUrl)
   ) {
     return !prepared.transportReady || !isAllowedQualitasUrl(prepared.finalActionUrl) || !isAllowedQualitasUrl(prepared.resumeWsUrl)
-      ? qualitasResult("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED")
+      ? qualitasResult("PROVIDER_FLOW_CHANGED", "FLOW_CHANGED")
       : qualitasResult("UNEXPECTED_RESPONSE", "INVALID_INPUT");
   }
   const cookieJar = new Map<string, string>();
@@ -1120,21 +1132,20 @@ export async function requestQualitasPaymentLink(
   }
   const finalFields = buildQualitasDeliveryFields({
     fields: prepared.finalFields,
-    deliveryMethod: prepared.deliveryMethod,
-    recipientEmail: prepared.recipientEmail,
-    recipientPhone: prepared.recipientPhone,
+    deliveryChannel: prepared.request.deliveryChannel,
+    destination: prepared.request.destination,
     resumeWsUrl: prepared.resumeWsUrl,
   });
   const fields = new URLSearchParams();
   for (const field of finalFields) fields.append(field.name, field.value);
   const requestShape = {
-    requestVariant: prepared.deliveryMethod === "EMAIL" ? "EMAIL_NATIVE_FORM" as const : "WHATSAPP_TIPO_3" as const,
+    requestVariant: prepared.request.deliveryChannel === "EMAIL" ? "EMAIL_NATIVE_FORM" as const : "WHATSAPP_TIPO_3" as const,
     fieldCount: finalFields.length,
     hasTipoField: finalFields.some((field) => field.name === "tipo"),
     hasEmailField: finalFields.some((field) => field.name === "temail"),
     hasPhoneField: finalFields.some((field) => field.name === "numTelefono"),
     requestSignatureVersion: "v2" as const,
-    requestSignature: qualitasRequestShapeSignature(finalFields, prepared.deliveryMethod),
+    requestSignature: qualitasRequestShapeSignature(finalFields, prepared.request.deliveryChannel),
     requestEncoding: "FORM_URLENCODED" as const,
   };
 
@@ -1155,5 +1166,5 @@ export async function requestQualitasPaymentLink(
     finalSubmission: true,
     step: "final_submission",
   });
-  return resultForSessionResponse(response, true, options, prepared.deliveryMethod, requestShape);
+  return resultForSessionResponse(response, true, options, prepared.request.deliveryChannel, requestShape);
 }

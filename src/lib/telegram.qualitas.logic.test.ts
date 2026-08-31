@@ -36,6 +36,7 @@ vi.mock("@/lib/request-guards", () => ({
   securityFingerprint: (value: string) => `fingerprint:${value}`,
 }));
 vi.mock("@/lib/activity-log", () => ({ writeActivityLog }));
+vi.mock("@/lib/organization-context", () => ({ assertOrganizationContextInTransaction: vi.fn(async () => {}) }));
 vi.mock("@/lib/qualitas-payment-link", () => provider);
 
 import { processTelegramWebhookUpdate } from "./telegram";
@@ -67,6 +68,9 @@ const policy = {
 };
 
 function draftWith(qualitas: Record<string, unknown>) {
+  const currentShape = qualitas.step !== "ready" || qualitas.deliveryMethod
+    ? { correlationId: "draft-correlation", submissionState: "NOT_STARTED" }
+    : {};
   return {
     id: "draft-1",
     organizationId: "org-1",
@@ -74,7 +78,7 @@ function draftWith(qualitas: Record<string, unknown>) {
     channelId: "channel-1",
     type: "QUALITAS_PAYMENT_LINK",
     status: "COLLECTING",
-    payloadJson: JSON.stringify({ type: "QUALITAS_PAYMENT_LINK", qualitas }),
+    payloadJson: JSON.stringify({ type: "QUALITAS_PAYMENT_LINK", qualitas: { ...currentShape, ...qualitas } }),
     expiresAt: new Date(Date.now() + 60_000),
   };
 }
@@ -88,6 +92,7 @@ function message(text: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  process.env.QUALITAS_PAYMENT_LINK_CLIENT_RECIPIENT_ENABLED = "true";
   db.notificationChannel.findFirst.mockResolvedValue(channel);
   db.organizationMembership.findFirst.mockResolvedValue({ organizationId: "org-1" });
   db.organizationMembership.findMany.mockResolvedValue([membership]);
@@ -97,10 +102,22 @@ beforeEach(() => {
   db.telegramDraft.update.mockResolvedValue({});
   db.telegramDraft.updateMany.mockResolvedValue({ count: 0 });
   db.$transaction.mockImplementation(async (callback: (transaction: typeof db) => unknown) => callback(db));
+  provider.requestQualitasPaymentLink.mockResolvedValue({ outcome: "SUCCESS", reason: "SUCCESS_CODE_0" });
   checkDistributedRateLimit.mockResolvedValue({ allowed: true, remaining: 10, retryAfterMs: 0, backend: "local" });
 });
 
 describe("Telegram Quálitas payment-link flow", () => {
+  it("keeps client delivery disabled unless the rollout gate is explicitly enabled", async () => {
+    process.env.QUALITAS_PAYMENT_LINK_CLIENT_RECIPIENT_ENABLED = "false";
+
+    const result = await processTelegramWebhookUpdate(message("/pagoqualitas 1234567890"));
+
+    expect(result.replyMarkup).toEqual({
+      inline_keyboard: [[{ text: "Agente", callback_data: "qualitas_recipient_agent" }]],
+    });
+    expect(JSON.stringify(result.replyMarkup)).not.toContain("cliente");
+  });
+
   it("creates a recipient draft with fixed, non-sensitive callback data", async () => {
     const result = await processTelegramWebhookUpdate(message("/pagoqualitas 1234567890"));
 
@@ -384,15 +401,51 @@ describe("Telegram Quálitas payment-link flow", () => {
 
     expect(result.replyText).toContain("WhatsApp · ••••••1234");
     expect(provider.prepareQualitasPaymentLink).toHaveBeenCalledWith(expect.objectContaining({
-      recipientEmail: null,
-      recipientPhone: "5550101234",
-      deliveryMethod: "WHATSAPP",
+      deliveryChannel: "WHATSAPP",
+      destination: "5550101234",
+      correlationId: expect.any(String),
     }), expect.anything());
     expect(provider.requestQualitasPaymentLink).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(writeActivityLog.mock.calls[0])).not.toContain("5550101234");
   });
 
-  it("keeps legacy ready drafts usable as email requests", async () => {
+  it("treats Quálitas 99991 as a terminal acknowledged duplicate", async () => {
+    db.telegramDraft.findFirst.mockResolvedValue(draftWith({
+      step: "ready", policyId: "policy-1", policyNumber: "1234567890", clientId: "client-1",
+      clientName: "Cliente Uno", agentUserId: "user-1", agentEmail: "agent@example.com",
+      recipient: "AGENT", recipientEmail: "agent@example.com", deliveryMethod: "EMAIL",
+    }));
+    db.telegramDraft.updateMany.mockResolvedValue({ count: 1 });
+    provider.requestQualitasPaymentLink.mockResolvedValue({ outcome: "ALREADY_IN_PROGRESS" as never, reason: "DUPLICATE_LINK_99991" as never });
+
+    const result = await processTelegramWebhookUpdate(message("/confirmar"));
+
+    expect(result.replyText).toBe("Quálitas indica que ya hay otra liga de pago en proceso para esta póliza.");
+    expect(provider.requestQualitasPaymentLink).toHaveBeenCalledTimes(1);
+    expect(writeActivityLog).toHaveBeenCalledWith(expect.objectContaining({
+      newValue: expect.objectContaining({ result: "ALREADY_IN_PROGRESS" }),
+    }));
+  });
+
+  it("persists post-submit uncertainty without retrying", async () => {
+    db.telegramDraft.findFirst.mockResolvedValue(draftWith({
+      step: "ready", policyId: "policy-1", policyNumber: "1234567890", clientId: "client-1",
+      clientName: "Cliente Uno", agentUserId: "user-1", agentEmail: "agent@example.com",
+      recipient: "AGENT", recipientEmail: "agent@example.com", deliveryMethod: "EMAIL",
+    }));
+    db.telegramDraft.updateMany.mockResolvedValue({ count: 1 });
+    provider.requestQualitasPaymentLink.mockResolvedValue({ outcome: "UNCERTAIN_POST_SUBMISSION" as never, reason: "FINAL_TIMEOUT" as never });
+
+    const result = await processTelegramWebhookUpdate(message("/confirmar"));
+
+    expect(result.replyText).toContain("No se reenviará automáticamente");
+    expect(provider.requestQualitasPaymentLink).toHaveBeenCalledTimes(1);
+    expect(writeActivityLog).toHaveBeenCalledWith(expect.objectContaining({
+      newValue: expect.objectContaining({ result: "UNCERTAIN" }),
+    }));
+  });
+
+  it("rejects legacy ready drafts without an explicit channel", async () => {
     db.telegramDraft.findFirst.mockResolvedValue(draftWith({
       step: "ready",
       policyId: "policy-1",
@@ -410,12 +463,8 @@ describe("Telegram Quálitas payment-link flow", () => {
 
     const result = await processTelegramWebhookUpdate(message("/confirmar"));
 
-    expect(result.replyText).toContain("Correo · c***@example.com");
-    expect(provider.prepareQualitasPaymentLink).toHaveBeenCalledWith(expect.objectContaining({
-      recipientEmail: "client@example.com",
-      recipientPhone: null,
-      deliveryMethod: "EMAIL",
-    }), expect.anything());
+    expect(result.replyText).toContain("todavía no está completa");
+    expect(provider.prepareQualitasPaymentLink).not.toHaveBeenCalled();
   });
 
   it("does not execute when another confirmation already claimed the draft", async () => {

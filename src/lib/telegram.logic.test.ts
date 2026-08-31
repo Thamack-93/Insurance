@@ -120,7 +120,7 @@ describe("telegram.shared", () => {
       maskedEmail: "p***@correo.com",
     })).toContain("•••7890");
     expect(buildTelegramQualitasUnavailableMessage()).toMatch(/no está disponible/i);
-    expect(buildTelegramQualitasOutcomeMessage("UNCERTAIN", "DUPLICATE_LINK_99991")).toContain("ya existe una liga");
+    expect(buildTelegramQualitasOutcomeMessage("UNCERTAIN", "DUPLICATE_LINK_99991")).toContain("ya hay otra liga de pago en proceso");
     expect(buildTelegramQualitasOutcomeMessage("UNCERTAIN", "FINAL_RESPONSE_UNRECOGNIZED")).toContain("no reconoció el acuse");
     expect(buildTelegramQualitasOutcomeMessage("UNCERTAIN", "FINAL_TIMEOUT")).toContain("antes del límite");
     expect(buildTelegramQualitasOutcomeMessage("QUALITAS_FLOW_CHANGED", "FLOW_CHANGED")).toContain("portal de Quálitas cambió");
@@ -153,12 +153,12 @@ describe("telegram.shared", () => {
 
   it("normalizes provider outcomes and keeps the feature flag fail-closed", async () => {
     expect(normalizeQualitasProviderOutcome({ status: 404, bodyText: "policy not found" })).toBe("POLICY_NOT_FOUND");
-    expect(normalizeQualitasProviderOutcome({ status: 429 })).toBe("RATE_LIMITED");
-    expect(normalizeQualitasProviderOutcome({ timedOut: true })).toBe("TIMEOUT");
-    expect(normalizeQualitasProviderOutcome({ timedOut: true, finalSubmission: true })).toBe("UNCERTAIN");
-    expect(normalizeQualitasProviderOutcome({ redirectedToUnexpectedHost: true })).toBe("QUALITAS_FLOW_CHANGED");
+    expect(normalizeQualitasProviderOutcome({ status: 429 })).toBe("PROVIDER_UNAVAILABLE");
+    expect(normalizeQualitasProviderOutcome({ timedOut: true })).toBe("TIMEOUT_PRE_SUBMISSION");
+    expect(normalizeQualitasProviderOutcome({ timedOut: true, finalSubmission: true })).toBe("UNCERTAIN_POST_SUBMISSION");
+    expect(normalizeQualitasProviderOutcome({ redirectedToUnexpectedHost: true })).toBe("PROVIDER_FLOW_CHANGED");
 
-    const prepared = await prepareQualitasPaymentLink({ policyNumber: "", recipientEmail: "agent@example.com" });
+    const prepared = await prepareQualitasPaymentLink({ policyNumber: "", deliveryChannel: "EMAIL", destination: "agent@example.com", correlationId: "test-correlation" });
     expect(prepared).toEqual({ outcome: "UNEXPECTED_RESPONSE", reason: "INVALID_INPUT" });
     expect(requestQualitasPaymentLink).toBeTypeOf("function");
   });

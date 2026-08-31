@@ -75,11 +75,15 @@ It expires automatically and is removed on logout; it is never written to the da
 - Webhook synchronization is an explicit admin action; opening settings has no external side effect.
 - Telegram remains deterministic. Freeform AI replies are intentionally not enabled there.
 - `/pagoqualitas` is an insurer-specific Quálitas payment-link request. It resolves an
-  authorized PolicyDesk policy, offers only the current client or linked agent email, and
-  requires explicit `/confirmar`; arbitrary Telegram emails are not accepted.
+  authorized PolicyDesk policy, requires explicit `/confirmar`, and accepts only the
+  profile destinations shown by the flow. Agent WhatsApp prefers `User.phone`; if absent,
+  the Agent may capture a one-request manual number that is normalized, masked and never
+  saved to the profile or activity log.
 - Recipient buttons are inline Telegram buttons, with `cliente`/`agente` text as fallback.
   The request is protected by `telegramMutationsEnabled`, `QUALITAS_PAYMENT_LINK_ENABLED`,
-  tenant/portfolio authorization, confirmation-time revalidation and rate limiting.
+  tenant/portfolio authorization, confirmation-time revalidation and rate limiting. Client
+  delivery is separately disabled by default via `QUALITAS_PAYMENT_LINK_CLIENT_RECIPIENT_ENABLED`
+  until the Agent pilots pass.
 - Provider failures are sanitized. A final timeout is `UNCERTAIN` and is not retried
   automatically. PolicyDesk never handles card data or stores payment URLs by default.
 - This integration depends on Quálitas' current public workflow and has a kill switch in
