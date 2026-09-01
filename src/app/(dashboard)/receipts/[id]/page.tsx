@@ -27,6 +27,7 @@ import { isPaidWithinTolerance } from "@/lib/receipt-reconciliation";
 import { normalizeReturnTo } from "@/lib/return-to";
 import { QualitasPaymentLinkDialog } from "@/components/receipts/qualitas-payment-link-dialog";
 import { isQualitasClientRecipientEnabled, isQualitasInsurerName, isQualitasPaymentLinkEnabled } from "@/lib/qualitas-payment-link";
+import { WhatsAppReminderButton } from "@/components/receipts/whatsapp-reminder-button";
 
 export default async function ReceiptDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
@@ -99,6 +100,9 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
                     endorsement: receipt.endorsement ? { endorsementNumber: receipt.endorsement.endorsementNumber, reference: receipt.endorsement.reference } : undefined,
                   }}
                 />
+              ) : null}
+              {receipt.status === "PENDING" || receipt.status === "OVERDUE" ? (
+                <WhatsAppReminderButton receiptId={receipt.id} />
               ) : null}
               {(receipt.status === "PENDING" || receipt.status === "OVERDUE") && isQualitasInsurerName(receipt.insurer.name) ? (
                 <QualitasPaymentLinkDialog

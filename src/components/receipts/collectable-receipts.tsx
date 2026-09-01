@@ -23,6 +23,7 @@ import { parseBusinessDateInput } from "@/lib/business-dates";
 import { bulkMarkReceiptsPaid } from "@/app/(dashboard)/receipts/actions";
 import { appendReturnTo } from "@/lib/return-to";
 import { QualitasPaymentLinkDialog } from "@/components/receipts/qualitas-payment-link-dialog";
+import { WhatsAppReminderButton } from "@/components/receipts/whatsapp-reminder-button";
 
 export type CollectableReceipt = {
   id: string;
@@ -218,6 +219,9 @@ function ReceiptRow({ receipt, returnTo }: { receipt: CollectableReceipt; return
             endorsement: receipt.endorsement,
           }}
         />
+        {receipt.status === "PENDING" || receipt.status === "OVERDUE" ? (
+          <WhatsAppReminderButton receiptId={receipt.id} />
+        ) : null}
         {receipt.qualitasEligible ? (
           <QualitasPaymentLinkDialog
             receipt={{
