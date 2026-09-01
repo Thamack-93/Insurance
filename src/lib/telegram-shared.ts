@@ -18,6 +18,7 @@ export type TelegramCommandName =
   | "pagoqualitas"
   | "poliza"
   | "recibos"
+  | "recordar"
   | "renovaciones"
   | "resumen"
   | "vencidos"
@@ -69,6 +70,7 @@ export function parseTelegramCommand(text: string): TelegramCommand | null {
     command === "pagoqualitas" ||
     command === "poliza" ||
     command === "recibos" ||
+    command === "recordar" ||
     command === "renovaciones" ||
     command === "resumen" ||
     command === "vencidos" ||
@@ -139,6 +141,7 @@ export function buildTelegramHelpMessage() {
     "/hoy - Cobros de hoy.",
     "/proximos [días] [página] - Cobros próximos.",
     "/recibos [días] [página] - Cobros vencidos y próximos.",
+    "/recordar [póliza recibo] - Preparar recordatorio manual por WhatsApp.",
     "/renovaciones [días] [página] - Renovaciones próximas.",
     "/tareas [días] [página] - Tareas abiertas próximas.",
     "/buscar <texto> - Buscar clientes, pólizas, recibos, tareas o archivos.",

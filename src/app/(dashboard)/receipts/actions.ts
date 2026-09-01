@@ -19,13 +19,9 @@ import {
 } from "@/lib/qualitas-payment-link-service";
 import type { QualitasPaymentLinkDeliveryMethod } from "@/lib/qualitas-payment-link";
 import {
-  buildReceiptDueMessage,
-  buildWhatsAppReminderUrl,
-  selectWhatsAppPhone,
-  WHATSAPP_RECEIPT_TEMPLATE,
-  type WhatsAppPhoneSource,
-} from "@/lib/whatsapp-reminder";
-import { normalizeMexicanPhone } from "@/lib/phone";
+  prepareWhatsAppReceiptReminderForContext,
+} from "@/lib/whatsapp-reminder-service";
+import type { WhatsAppPhoneSource } from "@/lib/whatsapp-reminder";
 
 const ALLOWED_PAYMENT_METHODS = ["TRANSFER", "CASH", "CARD", "CHECK", "OTHER"] as const;
 type AllowedPaymentMethod = (typeof ALLOWED_PAYMENT_METHODS)[number];
@@ -434,125 +430,14 @@ export async function prepareWhatsAppReceiptReminder(
     return { ok: false, error: "El recibo seleccionado no es válido." };
   }
 
-  const captured = input.capturedPhone?.trim();
-  if (captured && !normalizeMexicanPhone(captured)) {
-    return { ok: false, error: "Captura un teléfono mexicano válido de 10 dígitos." };
-  }
-
   try {
     const context = await requireOrganizationContext();
-    const result = await getDb().$transaction(async (tx) => {
-      await assertOrganizationContextInTransaction(tx, context);
-
-      const receipt = await tx.receipt.findFirst({
-        where: {
-          id: input.receiptId,
-          organizationId: context.organizationId,
-          status: { in: ["PENDING", "OVERDUE"] },
-          ...(context.membershipRole === "AGENT" ? receiptPortfolioWhere(context.userId) : {}),
-          client: { organizationId: context.organizationId },
-          policy: {
-            organizationId: context.organizationId,
-            status: { not: "CANCELLED" },
-            client: { organizationId: context.organizationId },
-          },
-          insurer: { organizationId: context.organizationId },
-        },
-        select: {
-          id: true,
-          status: true,
-          dueDate: true,
-          amount: true,
-          currency: true,
-          client: { select: { id: true, fullName: true, phone: true, secondaryPhone: true } },
-          policy: { select: { policyNumber: true, clientId: true } },
-          insurer: { select: { name: true } },
-          payments: { where: { status: "POSTED" }, select: { id: true }, take: 1 },
-        },
-      });
-
-      if (!receipt) {
-        throw new Error("El recibo ya no está disponible para un recordatorio.");
-      }
-      if (receipt.policy.clientId !== receipt.client.id) {
-        throw new Error("El recibo y la póliza vinculada requieren revisión manual.");
-      }
-      if (receipt.payments.length > 0) {
-        throw new Error("El recibo tiene un pago registrado; requiere revisión manual antes de enviar un recordatorio.");
-      }
-
-      const capturedNormalized = captured ? normalizeMexicanPhone(captured) : null;
-      const existingPrimary = normalizeMexicanPhone(receipt.client.phone);
-      const existingSecondary = normalizeMexicanPhone(receipt.client.secondaryPhone);
-      let selection = selectWhatsAppPhone({
-        primary: receipt.client.phone,
-        secondary: receipt.client.secondaryPhone,
-      });
-
-      if (capturedNormalized) {
-        const existing = existingPrimary ?? existingSecondary;
-        if (existing && existing !== capturedNormalized) {
-          throw new Error("El teléfono del cliente cambió; vuelve a intentarlo para evitar sobrescribirlo.");
-        }
-
-        if (!existing) {
-          const updated = await tx.client.updateMany({
-            where: {
-              id: receipt.client.id,
-              organizationId: context.organizationId,
-              phone: receipt.client.phone,
-              secondaryPhone: receipt.client.secondaryPhone,
-            },
-            data: { phone: capturedNormalized, updatedById: context.userId },
-          });
-          if (updated.count !== 1) {
-            throw new Error("El teléfono del cliente cambió; vuelve a intentarlo para evitar sobrescribirlo.");
-          }
-          await writeActivityLog({
-            entityType: "Client",
-            entityId: receipt.client.id,
-            action: "CLIENT_PHONE_CAPTURED_FOR_WHATSAPP",
-            newValue: { captured: true, source: "RECEIPT_REMINDER" },
-            userId: context.userId,
-            organizationId: context.organizationId,
-            db: tx,
-          });
-          selection = { normalized: capturedNormalized, source: "CAPTURED" };
-        } else {
-          selection = selectWhatsAppPhone({
-            primary: receipt.client.phone,
-            secondary: receipt.client.secondaryPhone,
-          });
-        }
-      }
-
-      if (!selection) return { outcome: "CAPTURE_PHONE" as const };
-
-      const message = buildReceiptDueMessage({
-        clientName: receipt.client.fullName,
-        insurerName: receipt.insurer.name,
-        policyNumber: receipt.policy.policyNumber,
-        dueDate: receipt.dueDate,
-        amount: receipt.amount,
-        currency: receipt.currency,
-      });
-      const url = buildWhatsAppReminderUrl(selection.normalized, message);
-
-      await writeActivityLog({
-        entityType: "Receipt",
-        entityId: receipt.id,
-        action: "WHATSAPP_REMINDER_OPENED",
-        newValue: {
-          phoneSource: selection.source,
-          template: WHATSAPP_RECEIPT_TEMPLATE,
-          status: "HANDOFF_OPENED_NOT_SENT",
-        },
-        userId: context.userId,
-        organizationId: context.organizationId,
-        db: tx,
-      });
-
-      return { outcome: "OPEN_WHATSAPP" as const, url, phoneSource: selection.source };
+    const result = await prepareWhatsAppReceiptReminderForContext({
+      db: getDb(),
+      context,
+      receiptId: input.receiptId,
+      capturedPhone: input.capturedPhone,
+      sourceChannel: "WEB",
     });
 
     if (result.outcome === "CAPTURE_PHONE") {

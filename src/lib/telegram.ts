@@ -54,6 +54,9 @@ import {
 import { globalSearch } from "@/lib/search";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
 import { isPaidWithinTolerance } from "@/lib/receipt-reconciliation";
+import { normalizeMexicanPhone } from "@/lib/phone";
+import { prepareWhatsAppReceiptReminderForContext } from "@/lib/whatsapp-reminder-service";
+import { isSafeWhatsAppReminderUrl, selectWhatsAppPhone } from "@/lib/whatsapp-reminder";
 import { ACTIVE_RENEWAL_POLICY_WHERE } from "@/lib/renewal-decisions";
 import { shouldIncludeInRenewals } from "@/lib/renewals.logic";
 import { checkDistributedRateLimit, securityFingerprint } from "@/lib/request-guards";
@@ -171,6 +174,9 @@ type TelegramMessage = {
 type TelegramInlineKeyboardButton = {
   text: string;
   callback_data: string;
+} | {
+  text: string;
+  url: string;
 };
 
 type TelegramInlineKeyboardMarkup = {
@@ -344,10 +350,20 @@ type TelegramQualitasPaymentLinkDraftState = {
 };
 
 type TelegramDraftState = {
-  type: "PAYMENT_CAPTURE" | "POLICY_CAPTURE" | "QUALITAS_PAYMENT_LINK";
+  type: "PAYMENT_CAPTURE" | "POLICY_CAPTURE" | "QUALITAS_PAYMENT_LINK" | "WHATSAPP_RECEIPT_REMINDER";
   payment?: TelegramPaymentDraftState;
   policy?: TelegramPolicyDraftState;
   qualitas?: TelegramQualitasPaymentLinkDraftState;
+  whatsappReminder?: TelegramWhatsAppReceiptReminderDraftState;
+};
+
+type TelegramWhatsAppReceiptReminderDraftState = {
+  step: "receipt" | "phone" | "ready";
+  receiptId?: string;
+  policyNumber?: string;
+  receiptNumber?: string;
+  clientName?: string;
+  capturedPhone?: string;
 };
 
 const TELEGRAM_DRAFT_TTL_MS = 2 * 60 * 60 * 1000;
@@ -639,7 +655,8 @@ function toTelegramDraftState(payloadJson: string): TelegramDraftState | null {
       !parsed ||
       (parsed.type !== "PAYMENT_CAPTURE" &&
         parsed.type !== "POLICY_CAPTURE" &&
-        parsed.type !== "QUALITAS_PAYMENT_LINK")
+        parsed.type !== "QUALITAS_PAYMENT_LINK" &&
+        parsed.type !== "WHATSAPP_RECEIPT_REMINDER")
     ) {
       return null;
     }
@@ -2499,6 +2516,9 @@ const DIGEST_PAGE_PREFIX = "digest_receipts_page:";
 const DIGEST_RECEIPT_PREFIX = "digest_receipt:";
 const DIGEST_PAYMENT_PREFIX = "digest_payment:";
 const DIGEST_QUALITAS_PREFIX = "digest_qualitas:";
+const DIGEST_WHATSAPP_PREFIX = "digest_whatsapp:";
+const WHATSAPP_REMINDER_CONFIRM_CALLBACK = "whatsapp_reminder_confirm";
+const WHATSAPP_REMINDER_CANCEL_CALLBACK = "whatsapp_reminder_cancel";
 
 function buildQualitasRecipientMarkup(state: TelegramQualitasPaymentLinkDraftState): TelegramInlineKeyboardMarkup {
   const buttons: TelegramInlineKeyboardButton[] = [];
@@ -2539,24 +2559,78 @@ function digestCallbackValue(prefix: string, id: string) {
 }
 
 function buildDigestReceiptSelectionMarkup(items: TelegramReceiptItem[], page: number, totalPages: number): TelegramInlineKeyboardMarkup {
-  const rows = items.map((item) => [{
+  const rows: Array<Array<{ text: string; callback_data: string }>> = items.map((item) => [{
     text: `${item.clientName.slice(0, 22)} · ${item.receiptNumber}`,
     callback_data: digestCallbackValue(DIGEST_RECEIPT_PREFIX, item.id) ?? DIGEST_MANAGE_CALLBACK,
   }]);
-  const navigation: TelegramInlineKeyboardButton[] = [];
+  const navigation: Array<{ text: string; callback_data: string }> = [];
   if (page > 1) navigation.push({ text: "‹ Anteriores", callback_data: `${DIGEST_PAGE_PREFIX}${page - 1}` });
   if (page < totalPages) navigation.push({ text: "Siguientes ›", callback_data: `${DIGEST_PAGE_PREFIX}${page + 1}` });
   if (navigation.length > 0) rows.push(navigation);
   return { inline_keyboard: rows };
 }
 
-function buildDigestReceiptActionMarkup(input: { receiptId: string; isQualitas: boolean; canRecordPayment: boolean }): TelegramInlineKeyboardMarkup | undefined {
+async function buildTelegramReceiptListMarkup(input: {
+  userId: string;
+  from?: Date;
+  to: Date;
+  page: number;
+  client?: DbClient;
+}) {
+  const receipts = await getTelegramReceipts({
+    userId: input.userId,
+    from: input.from,
+    to: input.to,
+    limit: TELEGRAM_QUERY_RESULT_LIMIT,
+    skip: (input.page - 1) * TELEGRAM_QUERY_RESULT_LIMIT,
+    client: input.client,
+  });
+  return receipts.items.length > 0
+    ? buildDigestReceiptSelectionMarkup(receipts.items, input.page, getTelegramTotalPages(receipts.total))
+    : undefined;
+}
+
+function buildDigestReceiptActionMarkup(input: { receiptId: string; isQualitas: boolean; canRecordPayment: boolean; canPrepareWhatsApp: boolean }): TelegramInlineKeyboardMarkup | undefined {
   const row: TelegramInlineKeyboardButton[] = [];
   const paymentCallback = digestCallbackValue(DIGEST_PAYMENT_PREFIX, input.receiptId);
   const qualitasCallback = digestCallbackValue(DIGEST_QUALITAS_PREFIX, input.receiptId);
+  const whatsappCallback = digestCallbackValue(DIGEST_WHATSAPP_PREFIX, input.receiptId);
   if (input.canRecordPayment && paymentCallback) row.push({ text: "Registrar pago", callback_data: paymentCallback });
   if (input.isQualitas && qualitasCallback) row.push({ text: "Solicitar liga Quálitas", callback_data: qualitasCallback });
+  if (input.canPrepareWhatsApp && whatsappCallback) row.push({ text: "Avisar por WhatsApp", callback_data: whatsappCallback });
   return row.length > 0 ? { inline_keyboard: [row] } : undefined;
+}
+
+function maskTelegramPhone(value: string) {
+  const normalized = normalizeMexicanPhone(value);
+  return normalized ? `+52 ••••${normalized.slice(-4)}` : "teléfono capturado";
+}
+
+function buildTelegramWhatsAppPhonePrompt() {
+  return [
+    "Este recibo no tiene un teléfono mexicano válido.",
+    "Escribe 10 dígitos o un número con +52.",
+    "El número se guardará como teléfono principal y permanecerá visible en este chat privado.",
+    "Después podrás confirmar con /confirmar o cancelar con /cancelar.",
+  ].join("\n");
+}
+
+function buildTelegramWhatsAppConfirmation(state: TelegramWhatsAppReceiptReminderDraftState) {
+  return [
+    "Teléfono listo para el recordatorio de WhatsApp.",
+    state.capturedPhone ? `Destino: ${maskTelegramPhone(state.capturedPhone)}` : "Destino: teléfono guardado del cliente",
+    "Se guardará el teléfono capturado si aún no existe y se preparará un mensaje editable.",
+    "Pulsa Guardar y abrir WhatsApp, o responde /confirmar.",
+  ].join("\n");
+}
+
+function buildTelegramWhatsAppPreparedMessage() {
+  return "Recordatorio preparado. No se ha enviado ningún mensaje; revisa el texto en WhatsApp antes de pulsar Enviar.";
+}
+
+function buildTelegramWhatsAppPreparedMarkup(url: string): TelegramInlineKeyboardMarkup {
+  if (!isSafeWhatsAppReminderUrl(url)) throw new Error("La URL de WhatsApp no es segura.");
+  return { inline_keyboard: [[{ text: "Abrir WhatsApp · mensaje aún no enviado", url }]] };
 }
 
 function buildQualitasConfirmation(state: TelegramQualitasPaymentLinkDraftState) {
@@ -2897,19 +2971,188 @@ async function getAuthorizedDigestReceipt(identity: ActiveTelegramIdentity, rece
       id: receiptId,
       organizationId: identity.organizationId,
       status: { in: ["PENDING", "OVERDUE"] },
-      policy: { status: { not: "CANCELLED" } },
+      policy: {
+        organizationId: identity.organizationId,
+        status: { not: "CANCELLED" },
+        client: { organizationId: identity.organizationId },
+      },
       client: {
         organizationId: identity.organizationId,
         ...(identity.membershipRole === "AGENT" ? { portfolioOwnerId: identity.user.id } : {}),
       },
+      insurer: { organizationId: identity.organizationId },
     },
     include: {
-      client: { select: { fullName: true } },
-      policy: { select: { id: true, policyNumber: true } },
+      client: { select: { id: true, fullName: true, phone: true, secondaryPhone: true } },
+      policy: { select: { id: true, policyNumber: true, clientId: true } },
       insurer: { select: { name: true } },
       payments: { where: { status: "POSTED" }, select: { id: true } },
     },
   });
+}
+
+async function createTelegramWhatsAppReminderDraft(input: {
+  chatId: string;
+  receiptId: string;
+  client?: DbClient;
+}) {
+  const db = input.client ?? getDb();
+  const identity = await getActiveTelegramIdentityForChat(input.chatId, db);
+  if (!identity) return { ok: false as const, replyText: buildTelegramLinkedChatRequiredMessage() };
+  if (!isTelegramMutationsEnabled(identity.channel)) {
+    return {
+      ok: false as const,
+      replyText: "Los cambios reales por Telegram están desactivados. Actívalos en Configuración > Notificaciones para preparar el recordatorio.",
+    };
+  }
+
+  const active = await getActiveTelegramDraftForChat(input.chatId, db);
+  if (active.draft) {
+    return {
+      ok: false as const,
+      replyText: "Ya tienes un borrador activo. Responde /confirmar o usa /cancelar antes de preparar otro recordatorio.",
+    };
+  }
+
+  const receipt = await getAuthorizedDigestReceipt(identity, input.receiptId, db);
+  if (!receipt || receipt.policy.clientId !== receipt.client.id || receipt.payments.length > 0) {
+    return {
+      ok: false as const,
+      replyText: receipt?.payments.length ? "El recibo tiene un pago registrado; requiere revisión manual." : "El recibo ya no está disponible para un recordatorio.",
+    };
+  }
+
+  const draft = await db.$transaction(async (tx) => {
+    await assertOrganizationContextInTransaction(tx, identity.context);
+    return tx.telegramDraft.create({
+      data: {
+        organizationId: identity.organizationId,
+        userId: identity.user.id,
+        channelId: identity.channel.id,
+        type: "WHATSAPP_RECEIPT_REMINDER",
+        status: "COLLECTING",
+        payloadJson: stringifyTelegramDraftState({
+          type: "WHATSAPP_RECEIPT_REMINDER",
+          whatsappReminder: {
+            step: "ready",
+            receiptId: receipt.id,
+            policyNumber: receipt.policy.policyNumber,
+            receiptNumber: receipt.receiptNumber,
+            clientName: receipt.client.fullName,
+          },
+        }),
+        expiresAt: new Date(Date.now() + TELEGRAM_DRAFT_TTL_MS),
+      },
+    });
+  });
+
+  const selection = selectWhatsAppPhone({
+    primary: receipt.client.phone,
+    secondary: receipt.client.secondaryPhone,
+  });
+  if (!selection) {
+    await persistTelegramDraftState({
+      organizationId: identity.organizationId,
+      draftId: draft.id,
+      state: {
+        type: "WHATSAPP_RECEIPT_REMINDER",
+        whatsappReminder: {
+          step: "phone",
+          receiptId: receipt.id,
+          policyNumber: receipt.policy.policyNumber,
+          receiptNumber: receipt.receiptNumber,
+          clientName: receipt.client.fullName,
+        },
+      },
+      client: db,
+      context: identity.context,
+    });
+    return { ok: true as const, replyText: buildTelegramWhatsAppPhonePrompt(), draftId: draft.id };
+  }
+
+  try {
+    const result = await prepareWhatsAppReceiptReminderForContext({
+      db,
+      context: identity.context,
+      receiptId: receipt.id,
+      sourceChannel: "TELEGRAM",
+      telegramDraftId: draft.id,
+    });
+    if (result.outcome !== "OPEN_WHATSAPP") throw new Error("El recibo requiere un teléfono para continuar.");
+    return {
+      ok: true as const,
+      replyText: buildTelegramWhatsAppPreparedMessage(),
+      replyMarkup: buildTelegramWhatsAppPreparedMarkup(result.url),
+      draftId: draft.id,
+      removeReplyMarkup: true,
+    };
+  } catch (error) {
+    await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, identity.context);
+      await tx.telegramDraft.updateMany({
+        where: { id: draft.id, organizationId: identity.organizationId, status: "COLLECTING" },
+        data: { status: "CANCELLED", cancelledAt: new Date() },
+      });
+    });
+    return { ok: false as const, replyText: error instanceof Error ? error.message : "No se pudo preparar el recordatorio." };
+  }
+}
+
+async function processTelegramWhatsAppReminderCallback(callback: TelegramCallbackQuery) {
+  const chat = callback.message?.chat;
+  if (!chat || chat.type !== "private" || callback.from.id !== chat.id || !callback.data) {
+    return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Selección no válida." };
+  }
+  const db = getDb();
+  const identity = await getActiveTelegramIdentityForChat(String(chat.id), db);
+  if (!identity) return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Esta sesión de Telegram ya no está autorizada." };
+  const active = await getActiveTelegramDraftForChat(String(chat.id), db);
+  const payload = active.draft ? parseTelegramDraftState(active.draft.payloadJson) : null;
+  if (!active.draft || active.draft.type !== "WHATSAPP_RECEIPT_REMINDER" || payload?.type !== "WHATSAPP_RECEIPT_REMINDER") {
+    return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "El recordatorio ya fue procesado o expiró." };
+  }
+
+  if (callback.data === WHATSAPP_REMINDER_CANCEL_CALLBACK) {
+    await db.$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, identity.context);
+      const updated = await tx.telegramDraft.updateMany({
+        where: { id: active.draft!.id, organizationId: identity.organizationId, userId: identity.user.id, status: "COLLECTING", type: "WHATSAPP_RECEIPT_REMINDER" },
+        data: { status: "CANCELLED", cancelledAt: new Date() },
+      });
+      if (updated.count !== 1) throw new Error("El recordatorio ya fue procesado o expiró.");
+      await writeActivityLog({
+        organizationId: identity.organizationId,
+        entityType: "TelegramDraft",
+        entityId: active.draft!.id,
+        action: "TELEGRAM_DRAFT_CANCELLED",
+        newValue: { type: "WHATSAPP_RECEIPT_REMINDER" },
+        userId: identity.user.id,
+        db: tx,
+      });
+    });
+    return { handled: true as const, chatId: String(chat.id), callbackQueryId: callback.id, callbackAnswerText: "Recordatorio cancelado.", replyText: "Recordatorio cancelado.", removeReplyMarkup: true };
+  }
+
+  if (callback.data !== WHATSAPP_REMINDER_CONFIRM_CALLBACK) {
+    return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Selección no válida." };
+  }
+
+  const result = await confirmTelegramWhatsAppReminder({
+    chatId: String(chat.id),
+    draft: active.draft,
+    identity,
+    channel: active.channel!,
+    client: db,
+  });
+  return {
+    handled: true as const,
+    chatId: String(chat.id),
+    callbackQueryId: callback.id,
+    callbackAnswerText: result.ok ? "Recordatorio preparado." : "No se pudo preparar el recordatorio.",
+    replyText: result.replyText,
+    ...(("replyMarkup" in result && result.replyMarkup) ? { replyMarkup: result.replyMarkup } : {}),
+    ...(("removeReplyMarkup" in result && result.removeReplyMarkup) ? { removeReplyMarkup: true } : {}),
+  };
 }
 
 async function processTelegramDigestCallback(callback: TelegramCallbackQuery) {
@@ -2919,9 +3162,7 @@ async function processTelegramDigestCallback(callback: TelegramCallbackQuery) {
   }
   const db = getDb();
   const identity = await getActiveTelegramIdentityForChat(String(chat.id), db);
-  if (!identity || !isTelegramMutationsEnabled(identity.channel)) {
-    return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Los cambios reales por Telegram están desactivados." };
-  }
+  if (!identity) return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Esta sesión de Telegram ya no está autorizada." };
 
   const data = callback.data;
   if (data === DIGEST_MANAGE_CALLBACK || data.startsWith(DIGEST_PAGE_PREFIX)) {
@@ -2940,7 +3181,7 @@ async function processTelegramDigestCallback(callback: TelegramCallbackQuery) {
     };
   }
 
-  const receiptId = [DIGEST_RECEIPT_PREFIX, DIGEST_PAYMENT_PREFIX, DIGEST_QUALITAS_PREFIX].find((prefix) => data.startsWith(prefix))
+  const receiptId = [DIGEST_RECEIPT_PREFIX, DIGEST_PAYMENT_PREFIX, DIGEST_QUALITAS_PREFIX, DIGEST_WHATSAPP_PREFIX].find((prefix) => data.startsWith(prefix))
     ? data.slice(data.indexOf(":") + 1)
     : null;
   if (!receiptId) return { handled: false as const };
@@ -2948,7 +3189,7 @@ async function processTelegramDigestCallback(callback: TelegramCallbackQuery) {
   if (!receipt) return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "El recibo ya no está disponible." };
 
   if (data.startsWith(DIGEST_RECEIPT_PREFIX)) {
-    const actionMarkup = buildDigestReceiptActionMarkup({ receiptId: receipt.id, canRecordPayment: receipt.payments.length === 0, isQualitas: isQualitasInsurerName(receipt.insurer.name) && isQualitasPaymentLinkEnabled() });
+    const actionMarkup = buildDigestReceiptActionMarkup({ receiptId: receipt.id, canRecordPayment: receipt.payments.length === 0, canPrepareWhatsApp: receipt.payments.length === 0, isQualitas: isQualitasInsurerName(receipt.insurer.name) && isQualitasPaymentLinkEnabled() });
     return {
       handled: true as const,
       chatId: String(chat.id),
@@ -2960,12 +3201,32 @@ async function processTelegramDigestCallback(callback: TelegramCallbackQuery) {
   }
 
   if (data.startsWith(DIGEST_PAYMENT_PREFIX)) {
+    if (!isTelegramMutationsEnabled(identity.channel)) {
+      return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Las mutaciones de Telegram están desactivadas." };
+    }
     const result = await createTelegramPaymentDraft({ chatId: String(chat.id), argument: `${receipt.policy.policyNumber} ${receipt.receiptNumber}`, client: db });
     return { handled: true as const, chatId: String(chat.id), callbackQueryId: callback.id, callbackAnswerText: "Borrador de pago preparado.", replyText: result.replyText };
   }
 
+  if (data.startsWith(DIGEST_WHATSAPP_PREFIX)) {
+    const result = await createTelegramWhatsAppReminderDraft({ chatId: String(chat.id), receiptId: receipt.id, client: db });
+    return {
+      handled: true as const,
+      chatId: String(chat.id),
+      callbackQueryId: callback.id,
+      callbackAnswerText: result.ok ? "Recordatorio preparado." : "No se pudo preparar el recordatorio.",
+      replyText: result.replyText,
+      ...(result.replyMarkup ? { replyMarkup: result.replyMarkup } : {}),
+      ...(result.removeReplyMarkup ? { removeReplyMarkup: true } : {}),
+      ...(result.draftId ? { draftId: result.draftId } : {}),
+    };
+  }
+
   if (!isQualitasInsurerName(receipt.insurer.name) || !isQualitasPaymentLinkEnabled()) {
     return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "La liga Quálitas no está disponible para este recibo." };
+  }
+  if (!isTelegramMutationsEnabled(identity.channel)) {
+    return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Las mutaciones de Telegram están desactivadas." };
   }
   const result = await createTelegramQualitasDraft({ chatId: String(chat.id), argument: receipt.policy.policyNumber, policyId: receipt.policy.id, receiptId: receipt.id, client: db });
   return {
@@ -3199,6 +3460,47 @@ async function finalizeQualitasTelegramDraft(input: {
       db: tx,
     });
   });
+}
+
+async function confirmTelegramWhatsAppReminder(input: {
+  chatId: string;
+  draft: { id: string; organizationId: string | null; payloadJson: string };
+  identity: ActiveTelegramIdentity;
+  channel: NonNullable<Awaited<ReturnType<typeof getTelegramChannelByChatId>>>;
+  client?: DbClient;
+}) {
+  const db = input.client ?? getDb();
+  if (!isTelegramMutationsEnabled(input.channel)) {
+    return { ok: false as const, replyText: "Las mutaciones de Telegram están desactivadas. Actívalas en Configuración > Notificaciones para preparar el recordatorio." };
+  }
+  const payload = parseTelegramDraftState(input.draft.payloadJson);
+  const state = payload?.type === "WHATSAPP_RECEIPT_REMINDER" ? payload.whatsappReminder : null;
+  if (!state?.receiptId || state.step !== "ready") {
+    return { ok: false as const, replyText: "El recordatorio todavía no está completo. Escribe un teléfono o usa /cancelar." };
+  }
+
+  try {
+    const result = await prepareWhatsAppReceiptReminderForContext({
+      db,
+      context: input.identity.context,
+      receiptId: state.receiptId,
+      capturedPhone: state.capturedPhone,
+      sourceChannel: "TELEGRAM",
+      telegramDraftId: input.draft.id,
+    });
+    if (result.outcome === "CAPTURE_PHONE") {
+      return { ok: false as const, replyText: buildTelegramWhatsAppPhonePrompt() };
+    }
+    return {
+      ok: true as const,
+      replyText: buildTelegramWhatsAppPreparedMessage(),
+      replyMarkup: buildTelegramWhatsAppPreparedMarkup(result.url),
+      removeReplyMarkup: true,
+    };
+  } catch (error) {
+    logError("telegram.confirmWhatsAppReminder", error, { draftRef: securityFingerprint(input.draft.id) });
+    return { ok: false as const, replyText: error instanceof Error ? error.message : "No se pudo preparar el recordatorio." };
+  }
 }
 
 async function confirmQualitasTelegramDraft(input: {
@@ -3436,6 +3738,17 @@ async function confirmTelegramDraft(input: {
     };
   }
 
+  if (payload.type === "WHATSAPP_RECEIPT_REMINDER") {
+    const result = await confirmTelegramWhatsAppReminder({
+      chatId: input.chatId,
+      draft,
+      identity,
+      channel,
+      client: db,
+    });
+    return result;
+  }
+
   if (payload.type === "QUALITAS_PAYMENT_LINK") {
     return confirmQualitasTelegramDraft({ chatId: input.chatId, draft });
   }
@@ -3604,7 +3917,7 @@ async function cancelTelegramDraft(input: {
   return {
     ok: true as const,
     replyText: buildTelegramDraftCancelledMessage(
-      draft.type === "PAYMENT_CAPTURE" ? "Pago" : draft.type === "QUALITAS_PAYMENT_LINK" ? "Solicitud Quálitas" : "Póliza",
+      draft.type === "PAYMENT_CAPTURE" ? "Pago" : draft.type === "QUALITAS_PAYMENT_LINK" ? "Solicitud Quálitas" : draft.type === "WHATSAPP_RECEIPT_REMINDER" ? "Recordatorio de WhatsApp" : "Póliza",
     ),
   };
 }
@@ -3630,6 +3943,49 @@ async function continueTelegramDraftFromMessage(input: {
 
   const text = input.text.trim();
   if (!text) return null;
+
+  if (payload.type === "WHATSAPP_RECEIPT_REMINDER") {
+    const state = payload.whatsappReminder;
+    if (!state) return { handled: true as const, chatId: input.chatId, replyText: "El borrador está dañado. Usa /cancelar y vuelve a intentarlo." };
+    const identity = await getActiveTelegramIdentityForChat(input.chatId, db);
+    if (!identity) return { handled: true as const, chatId: input.chatId, replyText: "Esta sesión de Telegram ya no está autorizada." };
+    if (state.step === "phone") {
+      const normalized = normalizeMexicanPhone(text);
+      if (!normalized) {
+        return { handled: true as const, chatId: input.chatId, replyText: "Escribe un teléfono mexicano válido de 10 dígitos o con +52." };
+      }
+      const nextState: TelegramWhatsAppReceiptReminderDraftState = { ...state, step: "ready", capturedPhone: normalized };
+      await persistTelegramDraftState({
+        organizationId: draft.organizationId!,
+        draftId: draft.id,
+        state: { type: "WHATSAPP_RECEIPT_REMINDER", whatsappReminder: nextState },
+        client: db,
+        context: identity.context,
+      });
+      return {
+        handled: true as const,
+        chatId: input.chatId,
+        replyText: buildTelegramWhatsAppConfirmation(nextState),
+        replyMarkup: {
+          inline_keyboard: [[
+            { text: "Guardar y abrir WhatsApp", callback_data: WHATSAPP_REMINDER_CONFIRM_CALLBACK },
+            { text: "Cancelar", callback_data: WHATSAPP_REMINDER_CANCEL_CALLBACK },
+          ]],
+        },
+      };
+    }
+    return {
+      handled: true as const,
+      chatId: input.chatId,
+      replyText: buildTelegramWhatsAppConfirmation(state),
+      replyMarkup: {
+        inline_keyboard: [[
+          { text: "Guardar y abrir WhatsApp", callback_data: WHATSAPP_REMINDER_CONFIRM_CALLBACK },
+          { text: "Cancelar", callback_data: WHATSAPP_REMINDER_CANCEL_CALLBACK },
+        ]],
+      },
+    };
+  }
 
   if (payload.type === "QUALITAS_PAYMENT_LINK") {
     return continueTelegramQualitasDraftFromText({ chatId: input.chatId, text, draft, client: db });
@@ -4288,6 +4644,9 @@ export async function processTelegramWebhookUpdate(
       if (update.callback_query.data?.startsWith("digest_")) {
         return await processTelegramDigestCallback(update.callback_query);
       }
+      if (update.callback_query.data?.startsWith("whatsapp_reminder_")) {
+        return await processTelegramWhatsAppReminderCallback(update.callback_query);
+      }
       return await processTelegramQualitasCallback(update.callback_query);
     } catch (error) {
       logError("telegram.processCallbackQuery", error, { updateId: update.update_id });
@@ -4428,6 +4787,38 @@ export async function processTelegramWebhookUpdate(
           replyText: result.replyText,
         };
       }
+      case "recordar": {
+        const channel = await getTelegramChannelByChatId(chatId);
+        if (!channel?.isEnabled || !channel.telegramChatId) {
+          return { handled: true, chatId, replyText: buildTelegramLinkedChatRequiredMessage() };
+        }
+        const parts = (command.argument ?? "").trim().split(/\s+/).filter(Boolean);
+        if (parts.length === 0) {
+          const selection = await getDigestReceiptSelection(channel.userId);
+          return {
+            handled: true,
+            chatId,
+            replyText: selection.items.length > 0 ? "Selecciona el recibo para preparar un recordatorio manual por WhatsApp." : "No hay recibos abiertos disponibles para un recordatorio.",
+            ...(selection.items.length > 0 ? { replyMarkup: buildDigestReceiptSelectionMarkup(selection.items.slice(0, 10), 1, selection.totalPages) } : {}),
+          };
+        }
+        if (parts.length !== 2) {
+          return { handled: true, chatId, replyText: "Usa /recordar <numero-poliza> <numero-recibo>." };
+        }
+        const receipt = await getUserLinkedReceiptByPolicyAndNumber(channel.userId, parts[0]!, parts[1]!);
+        if (!receipt) {
+          return { handled: true, chatId, replyText: "No encontré un recibo único para esa póliza y ese número." };
+        }
+        const result = await createTelegramWhatsAppReminderDraft({ chatId, receiptId: receipt.id });
+        return {
+          handled: true,
+          chatId,
+          replyText: result.replyText,
+          ...(("replyMarkup" in result && result.replyMarkup) ? { replyMarkup: result.replyMarkup } : {}),
+          ...(("removeReplyMarkup" in result && result.removeReplyMarkup) ? { removeReplyMarkup: true } : {}),
+          ...(result.draftId ? { draftId: result.draftId } : {}),
+        };
+      }
       case "pagoqualitas": {
         const result = await createTelegramQualitasDraft({
           chatId,
@@ -4460,10 +4851,14 @@ export async function processTelegramWebhookUpdate(
           };
         }
 
+        const replyText = await buildTelegramOverdueReply(channel.userId, range.page);
+        const dayStart = businessStartOfDay(new Date());
+        const replyMarkup = await buildTelegramReceiptListMarkup({ userId: channel.userId, to: new Date(dayStart.getTime() - 1), page: range.page });
         return {
           handled: true,
           chatId,
-          replyText: await buildTelegramOverdueReply(channel.userId, range.page),
+          replyText,
+          ...(replyMarkup ? { replyMarkup } : {}),
         };
       }
       case "hoy": {
@@ -4485,10 +4880,14 @@ export async function processTelegramWebhookUpdate(
           };
         }
 
+        const replyText = await buildTelegramTodayReply(channel.userId, range.page);
+        const dayStart = businessStartOfDay(new Date());
+        const replyMarkup = await buildTelegramReceiptListMarkup({ userId: channel.userId, from: dayStart, to: businessEndOfDay(dayStart), page: range.page });
         return {
           handled: true,
           chatId,
-          replyText: await buildTelegramTodayReply(channel.userId, range.page),
+          replyText,
+          ...(replyMarkup ? { replyMarkup } : {}),
         };
       }
       case "proximos": {
@@ -4510,10 +4909,14 @@ export async function processTelegramWebhookUpdate(
           };
         }
 
+        const replyText = await buildTelegramUpcomingReceiptsReply(channel.userId, range.days, range.page);
+        const queryRange = getTelegramQueryRangeFromNow(range.days);
+        const replyMarkup = await buildTelegramReceiptListMarkup({ userId: channel.userId, from: queryRange.from, to: queryRange.to, page: range.page });
         return {
           handled: true,
           chatId,
-          replyText: await buildTelegramUpcomingReceiptsReply(channel.userId, range.days, range.page),
+          replyText,
+          ...(replyMarkup ? { replyMarkup } : {}),
         };
       }
       case "poliza": {
@@ -4530,11 +4933,15 @@ export async function processTelegramWebhookUpdate(
       }
       case "confirmar": {
         const result = await confirmTelegramDraft({ chatId });
-        return {
+        const response: TelegramWebhookProcessResult = {
           handled: true,
           chatId,
           replyText: result.replyText,
         };
+        const resultWithMarkup = result as { replyMarkup?: TelegramInlineKeyboardMarkup; removeReplyMarkup?: boolean };
+        if (resultWithMarkup.replyMarkup) response.replyMarkup = resultWithMarkup.replyMarkup;
+        if (resultWithMarkup.removeReplyMarkup) response.removeReplyMarkup = true;
+        return response;
       }
       case "cancelar": {
         const result = await cancelTelegramDraft({ chatId });
@@ -4598,10 +5005,16 @@ export async function processTelegramWebhookUpdate(
             ? await buildTelegramReceiptsReply(channel.userId, range.days, range.page)
             : await buildTelegramRenewalsReply(channel.userId, range.days, range.page);
 
+        const dayStart = businessStartOfDay(new Date());
+        const replyMarkup = command.command === "recibos"
+          ? await buildTelegramReceiptListMarkup({ userId: channel.userId, to: businessEndOfDay(businessAddDays(dayStart, range.days)), page: range.page })
+          : undefined;
+
         return {
           handled: true,
           chatId,
           replyText,
+          ...(replyMarkup ? { replyMarkup } : {}),
         };
       }
       case "tareas": {
