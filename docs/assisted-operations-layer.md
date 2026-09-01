@@ -66,9 +66,15 @@ It expires automatically and is removed on logout; it is never written to the da
 - Supported commands:
   - `/start`
   - `/help`
+  - `/ayuda`
   - `/link <código>`
   - `/status`
+  - `/hoy`, `/vencidos [página]`, `/proximos [días] [página]`, `/recibos [días] [página]`
+  - `/recordar [póliza recibo]`
+  - `/pago <póliza> <recibo> [fecha] <método>`
   - `/pagoqualitas <póliza>`
+  - `/renovaciones`, `/tareas`, `/buscar <texto>`
+  - `/confirmar` y `/cancelar`
 - Telegram linking uses one-time codes stored as hashes with expiry.
 - Telegram test messages use the live bot token and update `NotificationEvent` status.
 - The digest contains overdue/today/upcoming receipts, renewals for the next 30 calendar dates,
@@ -77,6 +83,11 @@ It expires automatically and is removed on logout; it is never written to the da
   the existing Quálitas-link or payment-capture drafts; neither action executes on the first click.
 - Webhook synchronization is an explicit admin action; opening settings has no external side effect.
 - Telegram remains deterministic. Freeform AI replies are intentionally not enabled there.
+- Telegram separates read-only navigation from mutating actions. Receipt selectors and pagination
+  remain available when `telegramMutationsEnabled` is off; payment, Quálitas and WhatsApp preparation
+  revalidate that flag at the point of mutation.
+- The bot command menu is synchronized together with the webhook, and `/start`, `/help` and `/status`
+  explain the distinction between queries, confirmed changes and the manual WhatsApp handoff.
 - `/pagoqualitas` is an insurer-specific Quálitas payment-link request. It resolves an
   authorized PolicyDesk policy, requires explicit `/confirmar`, and accepts only the
   profile destinations shown by the flow. Agent WhatsApp prefers `User.phone`; if absent,
@@ -122,6 +133,8 @@ It expires automatically and is removed on logout; it is never written to the da
 - `NEXT_PUBLIC_NORA_SESSION_PERSISTENCE=false` is an emergency rollback switch. Nora falls back to
   in-memory state for the current tab without changing database or provider behavior.
 - Telegram does not interpret freeform AI commands.
+- PolicyDesk does not automate personal WhatsApp accounts. The WhatsApp reminder flow only prepares
+  an editable `wa.me` handoff; the agent must press **Enviar** inside WhatsApp.
 - AI never directly writes a client, policy, receipt, payment or task without the existing
   confirmation flow.
 

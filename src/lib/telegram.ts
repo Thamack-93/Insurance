@@ -45,6 +45,7 @@ import {
   buildTelegramQualitasUnavailableMessage,
   buildTelegramStartMessage,
   buildTelegramStatusMessage,
+  TELEGRAM_BOT_COMMANDS,
   generateTelegramLinkCode,
   hashTelegramLinkCode,
   normalizeTelegramLinkCode,
@@ -377,6 +378,21 @@ const TELEGRAM_DRAFT_CONTINUATION_RATE_LIMIT = {
   windowMs: 15 * 60 * 1000,
 };
 
+function logTelegramMetric(input: {
+  operation: "command" | "callback" | "telegram_send" | "bot_sync";
+  result: "handled" | "rejected" | "failed" | "success";
+  durationMs: number;
+}) {
+  if (typeof console === "undefined") return;
+  console.info("[telegram.metric]", JSON.stringify({
+    event: "telegram.metric",
+    operation: input.operation,
+    result: input.result,
+    durationMs: input.durationMs,
+    timestamp: new Date().toISOString(),
+  }));
+}
+
 const TELEGRAM_QUALITAS_RATE_LIMITS = {
   user: { limit: 5, windowMs: 15 * 60 * 1000 },
   organization: { limit: 20, windowMs: 15 * 60 * 1000 },
@@ -584,6 +600,7 @@ export async function syncTelegramWebhook(): Promise<TelegramWebhookSyncResult> 
     return { ok: false, error: "TELEGRAM_WEBHOOK_SECRET no está configurado." };
   }
 
+  const startedAt = Date.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TELEGRAM_FETCH_TIMEOUT_MS);
 
@@ -612,13 +629,35 @@ export async function syncTelegramWebhook(): Promise<TelegramWebhookSyncResult> 
       };
     }
 
+    const commandsResponse = await fetch(`https://api.telegram.org/bot${token}/setMyCommands`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ commands: TELEGRAM_BOT_COMMANDS }),
+      signal: controller.signal,
+    });
+    const commandsPayload = (await commandsResponse.json().catch(() => null)) as
+      | { ok?: boolean; description?: string }
+      | null;
+
+    if (!commandsResponse.ok || !commandsPayload?.ok) {
+      logTelegramMetric({ operation: "bot_sync", result: "failed", durationMs: Date.now() - startedAt });
+      return {
+        ok: false,
+        error: commandsPayload?.description ?? `Telegram rechazó el menú de comandos (${commandsResponse.status}).`,
+      };
+    }
+
+    logTelegramMetric({ operation: "bot_sync", result: "success", durationMs: Date.now() - startedAt });
     return {
       ok: true,
       webhookUrl,
-      message: "Webhook de Telegram sincronizado con el dominio actual.",
+      message: "Webhook y menú de comandos de Telegram sincronizados con el dominio actual.",
     };
   } catch (error) {
-    logError("telegram.syncWebhook", error, { webhookUrl });
+    logTelegramMetric({ operation: "bot_sync", result: "failed", durationMs: Date.now() - startedAt });
+    logError("telegram.syncWebhook", error);
     return {
       ok: false,
       error: "No se pudo sincronizar el webhook de Telegram.",
@@ -893,7 +932,7 @@ async function getActiveTelegramDraftForChat(chatId: string, client?: DbClient) 
   const db = client ?? getDb();
   const channel = await getTelegramChannelByChatId(chatId, db);
   if (!channel?.isEnabled) {
-    return { channel: null, draft: null };
+    return { channel: null, draft: null, expired: false };
   }
   const organizationId = await requireActiveTelegramOrganization(channel.userId, db);
 
@@ -908,7 +947,20 @@ async function getActiveTelegramDraftForChat(chatId: string, client?: DbClient) 
     orderBy: [{ createdAt: "desc" }],
   });
 
-  return { channel, draft };
+  if (draft) return { channel, draft, expired: false };
+
+  const lastCollectingDraft = await db.telegramDraft.findFirst({
+    where: {
+      organizationId,
+      userId: channel.userId,
+      channelId: channel.id,
+      status: "COLLECTING",
+    },
+    orderBy: [{ createdAt: "desc" }],
+    select: { expiresAt: true },
+  });
+
+  return { channel, draft: null, expired: Boolean(lastCollectingDraft && lastCollectingDraft.expiresAt <= new Date()) };
 }
 
 function extractTelegramKeyValuePayload(argument: string) {
@@ -1231,6 +1283,7 @@ export async function sendTelegramMessage(
     return { ok: false, error: "El mensaje está vacío." };
   }
 
+  const startedAt = Date.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TELEGRAM_FETCH_TIMEOUT_MS);
 
@@ -1254,18 +1307,21 @@ export async function sendTelegramMessage(
       | null;
 
     if (!response.ok || !payload?.ok) {
+      logTelegramMetric({ operation: "telegram_send", result: "failed", durationMs: Date.now() - startedAt });
       return {
         ok: false,
         error: payload?.description ?? `Telegram respondió con estado ${response.status}.`,
       };
     }
 
+    logTelegramMetric({ operation: "telegram_send", result: "success", durationMs: Date.now() - startedAt });
     return {
       ok: true,
       messageId: payload.result?.message_id ?? 0,
     };
   } catch (error) {
-    logError("telegram.sendMessage", error, { chatId });
+    logTelegramMetric({ operation: "telegram_send", result: "failed", durationMs: Date.now() - startedAt });
+    logError("telegram.sendMessage", error);
     return {
       ok: false,
       error: "No se pudo enviar el mensaje a Telegram.",
@@ -3710,7 +3766,7 @@ async function confirmTelegramDraft(input: {
   client?: DbClient;
 }) {
   const db = input.client ?? getDb();
-  const { channel, draft } = await getActiveTelegramDraftForChat(input.chatId, db);
+  const { channel, draft, expired } = await getActiveTelegramDraftForChat(input.chatId, db);
   if (!channel) {
     return {
       ok: false as const,
@@ -3726,7 +3782,9 @@ async function confirmTelegramDraft(input: {
   if (!draft) {
     return {
       ok: false as const,
-      replyText: "No hay ningún borrador activo para confirmar.",
+      replyText: expired
+        ? "El borrador expiró después de dos horas. Inicia la operación de nuevo; no se reanudará automáticamente."
+        : "No hay ningún borrador activo para confirmar.",
     };
   }
 
@@ -3879,7 +3937,7 @@ async function cancelTelegramDraft(input: {
   client?: DbClient;
 }) {
   const db = input.client ?? getDb();
-  const { channel, draft } = await getActiveTelegramDraftForChat(input.chatId, db);
+  const { channel, draft, expired } = await getActiveTelegramDraftForChat(input.chatId, db);
   if (!channel) {
     return {
       ok: false as const,
@@ -3890,7 +3948,9 @@ async function cancelTelegramDraft(input: {
   if (!draft) {
     return {
       ok: false as const,
-      replyText: "No hay ningún borrador activo para cancelar.",
+      replyText: expired
+        ? "El borrador ya expiró. No hay nada que cancelar; inicia la operación de nuevo."
+        : "No hay ningún borrador activo para cancelar.",
     };
   }
 
@@ -4584,7 +4644,9 @@ export async function deliverTelegramNotificationEvent(
     const result = await sendTelegramMessage(
       channel.telegramChatId,
       formatTelegramNotificationText(event.title, event.body),
-      channel.telegramMutationsEnabled ? replyMarkup : undefined,
+      // Read-only receipt navigation remains available with mutations off.
+      // Every mutating callback rechecks telegramMutationsEnabled server-side.
+      replyMarkup,
     );
 
     if (!result.ok) {
@@ -4636,7 +4698,7 @@ export async function createAndDeliverTelegramNotificationEvent(input: {
   return deliverTelegramNotificationEvent(event.id, input.organizationId, input.replyMarkup);
 }
 
-export async function processTelegramWebhookUpdate(
+async function processTelegramWebhookUpdateInternal(
   update: TelegramWebhookUpdate,
 ): Promise<TelegramWebhookProcessResult> {
   if (update.callback_query) {
@@ -5076,6 +5138,34 @@ export async function processTelegramWebhookUpdate(
       chatId,
       replyText: "No se pudo procesar este comando ahora mismo.",
     };
+  }
+}
+
+/**
+ * Public webhook entrypoint with a small, content-free operational metric.
+ * The metric intentionally omits chat IDs, command arguments and payloads so
+ * it remains useful for reliability without becoming a second audit trail.
+ */
+export async function processTelegramWebhookUpdate(
+  update: TelegramWebhookUpdate,
+): Promise<TelegramWebhookProcessResult> {
+  const startedAt = Date.now();
+  const operation = update.callback_query ? "callback" : "command";
+  try {
+    const result = await processTelegramWebhookUpdateInternal(update);
+    const rejected = Boolean(
+      result.callbackAnswerText &&
+      /no válida|expiró|procesad|autorizad|desactivad|disponible/i.test(result.callbackAnswerText),
+    );
+    logTelegramMetric({
+      operation,
+      result: rejected ? "rejected" : result.handled ? "handled" : "failed",
+      durationMs: Date.now() - startedAt,
+    });
+    return result;
+  } catch (error) {
+    logTelegramMetric({ operation, result: "failed", durationMs: Date.now() - startedAt });
+    throw error;
   }
 }
 

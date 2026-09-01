@@ -9,6 +9,7 @@ import {
   buildTelegramPaymentDraftMessage,
   buildTelegramStartMessage,
   buildTelegramStatusMessage,
+  TELEGRAM_BOT_COMMANDS,
   generateTelegramLinkCode,
   hashTelegramLinkCode,
   normalizeTelegramLinkCode,
@@ -102,6 +103,17 @@ describe("telegram.shared", () => {
     expect(buildTelegramHelpMessage()).toContain("/buscar <texto>");
     expect(buildTelegramHelpMessage()).toContain("/resumen");
     expect(buildTelegramHelpMessage()).toContain("/pagoqualitas <póliza>");
+    expect(buildTelegramHelpMessage()).toContain("Consultas (solo lectura):");
+    expect(buildTelegramHelpMessage()).toContain("WhatsApp siempre abre un mensaje editable");
+    expect(TELEGRAM_BOT_COMMANDS.map((item) => item.command)).toEqual([
+      "hoy",
+      "vencidos",
+      "proximos",
+      "recibos",
+      "recordar",
+      "pago",
+      "ayuda",
+    ]);
     expect(buildTelegramLinkSuccessMessage()).toContain("Chat vinculado");
     expect(buildTelegramLinkErrorMessage("Código inválido")).toContain("Código inválido");
     expect(
@@ -247,10 +259,15 @@ describe("telegram.shared", () => {
     const originalBotToken = process.env.TELEGRAM_BOT_TOKEN;
     const originalWebhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
     const originalBaseUrl = process.env.APP_BASE_URL;
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ ok: true }),
-    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ok: true }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ok: true }),
+      });
 
     process.env.TELEGRAM_BOT_TOKEN = "bot-token";
     process.env.TELEGRAM_WEBHOOK_SECRET = "webhook-secret";
@@ -274,6 +291,13 @@ describe("telegram.shared", () => {
             secret_token: "webhook-secret",
             drop_pending_updates: false,
           }),
+        }),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://api.telegram.org/botbot-token/setMyCommands",
+        expect.objectContaining({
+          method: "POST",
+          body: expect.stringContaining('"command":"hoy"'),
         }),
       );
     } finally {

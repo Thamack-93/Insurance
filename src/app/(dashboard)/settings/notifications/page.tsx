@@ -34,7 +34,7 @@ export default async function NotificationSettingsPage() {
         <PageHeader
           eyebrow="Sistema"
           title="Notificaciones"
-          description="Prepara Telegram, revisa el resumen diario y confirma el estado del cron de Telegram."
+          description="Configura Telegram como tu consola operativa y revisa el estado de sus avisos."
           actions={
             <Button asChild variant="outline">
               <Link href="/settings">
@@ -68,13 +68,14 @@ export default async function NotificationSettingsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Acceso</CardTitle>
-              <CardDescription>Solo se administra tu canal de Telegram y el envío manual.</CardDescription>
+              <CardTitle className="text-base">Asistente Telegram</CardTitle>
+              <CardDescription>La configuración se completa en tres pasos.</CardDescription>
             </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
-              {context.membershipRole !== "AGENT"
-                ? "Cuenta de administrador activa."
-                : "Cuenta de agente activa."}
+            <CardContent className="space-y-1 text-sm text-muted-foreground">
+              <p>Cuenta: {context.membershipRole === "AGENT" ? "agente" : "administrador"}.</p>
+              <p>1. Genera un código y usa /link en un chat privado.</p>
+              <p>2. Envía un mensaje de prueba.</p>
+              <p>3. Activa cambios reales sólo cuando quieras mutar datos.</p>
             </CardContent>
           </Card>
 

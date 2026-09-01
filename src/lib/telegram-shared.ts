@@ -6,6 +6,21 @@ export const TELEGRAM_QUERY_MAX_DAYS = 365;
 export const TELEGRAM_QUERY_RESULT_LIMIT = 20;
 export const TELEGRAM_DIGEST_SECTION_LIMIT = 10;
 
+/**
+ * The command menu is deliberately kept small and operational.  It mirrors
+ * the commands that are safe to discover from Telegram without exposing
+ * implementation details or insurer-specific flags.
+ */
+export const TELEGRAM_BOT_COMMANDS = [
+  { command: "hoy", description: "Cobros que vencen hoy" },
+  { command: "vencidos", description: "Cobros vencidos" },
+  { command: "proximos", description: "Cobros de los próximos días" },
+  { command: "recibos", description: "Lista de cobros abiertos" },
+  { command: "recordar", description: "Preparar WhatsApp manual" },
+  { command: "pago", description: "Preparar un registro de pago" },
+  { command: "ayuda", description: "Ver ayuda y límites" },
+] as const;
+
 export type TelegramCommandName =
   | "start"
   | "help"
@@ -122,8 +137,8 @@ export function buildTelegramStartMessage() {
     "PolicyDesk Telegram está listo para vincular este chat.",
     "",
     "Genera un código desde Configuración > Notificaciones y envía /link CÓDIGO en este chat privado.",
-    "Después podrás usar /status para revisar el estado del vínculo y /ayuda para ver los comandos útiles.",
-    "Los cambios reales por Telegram están desactivados por defecto; actívalos en Configuración > Notificaciones si los necesitas.",
+    "Después usa /status para revisar el vínculo y /ayuda para ver las consultas disponibles.",
+    "Las consultas no cambian datos. Los pagos, capturas y preparaciones de WhatsApp requieren una confirmación y la bandera de cambios reales.",
   ].join("\n");
 }
 
@@ -135,7 +150,7 @@ export function buildTelegramHelpMessage() {
     "/link <código> - Vincular este chat con tu cuenta de PolicyDesk.",
     "/status - Ver si este chat ya está vinculado.",
     "",
-    "Consulta:",
+    "Consultas (solo lectura):",
     "/resumen - Resumen diario en cualquier momento.",
     "/vencidos [página] - Cobros vencidos.",
     "/hoy - Cobros de hoy.",
@@ -146,15 +161,16 @@ export function buildTelegramHelpMessage() {
     "/tareas [días] [página] - Tareas abiertas próximas.",
     "/buscar <texto> - Buscar clientes, pólizas, recibos, tareas o archivos.",
     "",
-    "Captura:",
+    "Operaciones con confirmación:",
     "/pago <póliza> <recibo> [hoy|YYYY-MM-DD] <método> - Preparar un pago.",
     "/pagoqualitas <póliza> - Solicitar un enlace de pago de Quálitas.",
     "/poliza [campos] - Preparar una póliza y seguirla en PolicyDesk.",
     "/confirmar - Confirmar el borrador activo.",
     "/cancelar - Cancelar el borrador activo.",
     "",
-    "Si falta información, el bot te la irá pidiendo paso a paso.",
-    "Los cambios reales por Telegram están desactivados por defecto; actívalos en Configuración > Notificaciones.",
+    "WhatsApp siempre abre un mensaje editable en wa.me; PolicyDesk nunca pulsa Enviar por ti.",
+    "Si falta información, el bot te la irá pidiendo paso a paso. Solo puede existir un borrador activo por chat.",
+    "Los cambios reales están desactivados por defecto; actívalos en Configuración > Notificaciones.",
   ].join("\n");
 }
 
@@ -172,9 +188,10 @@ export function buildTelegramStatusMessage(connected: boolean, mutationsEnabled 
         "Este chat ya está vinculado con PolicyDesk.",
         "Telegram está activo para este usuario.",
         mutationsEnabled
-          ? "Los cambios reales por Telegram están habilitados."
-          : "Los cambios reales por Telegram están deshabilitados. Actívalos en Configuración > Notificaciones.",
-        "Usa /help para ver los comandos disponibles.",
+          ? "Cambios reales: habilitados para pagos, capturas y preparaciones externas después de confirmar."
+          : "Cambios reales: deshabilitados. Las consultas siguen disponibles; actívalos en Configuración > Notificaciones para mutaciones.",
+        "WhatsApp: preparación manual; el envío final siempre lo haces tú dentro de WhatsApp.",
+        "Usa /ayuda para ver el menú completo.",
       ].join("\n")
     : [
         "Este chat todavía no está vinculado.",

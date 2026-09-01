@@ -269,7 +269,8 @@ export function NotificationPreferencesPanel({
           <CardDescription>
             Telegram ya puede vincularse con tu cuenta. Aquí ves el estado y haces pruebas o
             envíos manuales del resumen diario. El envío manual no consume el envío automático
-            del cron.
+            del cron. Los recordatorios de WhatsApp siempre requieren que tú pulses Enviar en
+            WhatsApp.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -381,7 +382,7 @@ export function NotificationPreferencesPanel({
               </Label>
               <p className="text-sm text-muted-foreground">
                 {connected
-                  ? "Si lo activas, /pago y /confirmar podrán registrar cambios reales después de completar el borrador."
+                  ? "Si lo activas, /pago, /confirmar, recordatorios de WhatsApp y Liga Quálitas podrán completar cambios después de su confirmación."
                   : "Conecta primero Telegram para habilitar esta opción."}
               </p>
             </div>
