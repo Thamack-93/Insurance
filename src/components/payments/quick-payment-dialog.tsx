@@ -13,6 +13,7 @@ import { formatDateInput } from "@/lib/form-utils";
 import { parseBusinessDateInput } from "@/lib/business-dates";
 import { Badge } from "@/components/ui/badge";
 import { createPayment } from "@/app/(dashboard)/payments/actions";
+import { cn } from "@/lib/utils";
 
 type QuickPaymentDialogProps = {
   receipt: {
@@ -27,9 +28,10 @@ type QuickPaymentDialogProps = {
     endorsement?: { endorsementNumber: string; reference?: string | null };
   };
   onPaymentComplete?: () => void;
+  className?: string;
 };
 
-export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentDialogProps) {
+export function QuickPaymentDialog({ receipt, onPaymentComplete, className }: QuickPaymentDialogProps) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -65,7 +67,7 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete }: QuickPaymentD
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogTrigger render={<Button size="sm" className="gap-2" />}>
+      <DialogTrigger render={<Button size="sm" className={cn("gap-2", className)} />}>
         <CreditCard className="h-4 w-4" />
         Pagar
       </DialogTrigger>

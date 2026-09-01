@@ -160,7 +160,7 @@ function ReceiptRow({ receipt, returnTo }: { receipt: CollectableReceipt; return
 
   return (
     <div
-      className="flex flex-col gap-3 px-3 py-3 md:flex-row md:items-center md:justify-between"
+      className="flex flex-col gap-4 px-4 py-4 xl:flex-row xl:items-center xl:justify-between"
       data-selected={isSelected}
     >
       <div className="flex min-w-0 flex-1 items-start gap-3">
@@ -201,12 +201,17 @@ function ReceiptRow({ receipt, returnTo }: { receipt: CollectableReceipt; return
           <p className="mt-1 text-xs text-muted-foreground">Vence {formatDate(due)}</p>
         </div>
       </div>
-      <div className="flex items-center gap-3 md:text-right">
-        <div>
-          <p className="font-semibold">{formatCurrency(receipt.amount, receipt.currency)}</p>
-          <p className="text-xs text-muted-foreground">{receipt.currency}</p>
+      <div className="flex flex-col gap-3 border-t border-border/60 pt-3 xl:min-w-[25rem] xl:border-t-0 xl:pt-0">
+        <div className="flex items-baseline justify-between gap-3 xl:justify-end">
+          <span className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Monto</span>
+          <div className="text-right">
+            <p className="font-semibold tabular-nums">{formatCurrency(receipt.amount, receipt.currency)}</p>
+            <p className="text-xs text-muted-foreground">{receipt.currency}</p>
+          </div>
         </div>
-        <QuickPaymentDialog
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:flex xl:flex-wrap xl:justify-end">
+          <QuickPaymentDialog
+            className="w-full xl:w-auto"
             receipt={{
               id: receipt.id,
               receiptNumber: receipt.receiptNumber,
@@ -215,38 +220,40 @@ function ReceiptRow({ receipt, returnTo }: { receipt: CollectableReceipt; return
               currency: receipt.currency,
               dueDate: receipt.dueDate,
               client: { fullName: receipt.client.fullName },
-            policy: { policyNumber: receipt.policy.policyNumber },
-            endorsement: receipt.endorsement,
-          }}
-        />
-        {receipt.status === "PENDING" || receipt.status === "OVERDUE" ? (
-          <WhatsAppReminderButton receiptId={receipt.id} />
-        ) : null}
-        {receipt.qualitasEligible ? (
-          <QualitasPaymentLinkDialog
-            receipt={{
-              id: receipt.id,
-              receiptNumber: receipt.receiptNumber,
-              dueDate: receipt.dueDate,
-              amount: receipt.amount,
-              currency: receipt.currency,
-              client: { fullName: receipt.client.fullName, email: receipt.clientEmail, phone: receipt.clientPhone },
               policy: { policyNumber: receipt.policy.policyNumber },
-              insurer: { name: receipt.insurer.name },
+              endorsement: receipt.endorsement,
             }}
-            agent={{ email: receipt.agentEmail ?? null, phone: receipt.agentPhone ?? null }}
-            enabled={Boolean(receipt.qualitasEnabled)}
-            clientRecipientEnabled={Boolean(receipt.qualitasClientRecipientEnabled)}
           />
-        ) : null}
-        {receipt.status !== "CANCELLED" && receipt.paymentCount === 0 ? (
-          <CancelReceiptButton
-            id={receipt.id}
-            receiptNumber={receipt.receiptNumber}
-            triggerLabel="Cancelar"
-            triggerClassName="h-8 bg-card/70 px-3 text-xs"
-          />
-        ) : null}
+          {receipt.status === "PENDING" || receipt.status === "OVERDUE" ? (
+            <WhatsAppReminderButton receiptId={receipt.id} className="w-full xl:w-auto" />
+          ) : null}
+          {receipt.qualitasEligible ? (
+            <QualitasPaymentLinkDialog
+              receipt={{
+                id: receipt.id,
+                receiptNumber: receipt.receiptNumber,
+                dueDate: receipt.dueDate,
+                amount: receipt.amount,
+                currency: receipt.currency,
+                client: { fullName: receipt.client.fullName, email: receipt.clientEmail, phone: receipt.clientPhone },
+                policy: { policyNumber: receipt.policy.policyNumber },
+                insurer: { name: receipt.insurer.name },
+              }}
+              agent={{ email: receipt.agentEmail ?? null, phone: receipt.agentPhone ?? null }}
+              enabled={Boolean(receipt.qualitasEnabled)}
+              clientRecipientEnabled={Boolean(receipt.qualitasClientRecipientEnabled)}
+              className="w-full xl:w-auto"
+            />
+          ) : null}
+          {receipt.status !== "CANCELLED" && receipt.paymentCount === 0 ? (
+            <CancelReceiptButton
+              id={receipt.id}
+              receiptNumber={receipt.receiptNumber}
+              triggerLabel="Cancelar"
+              triggerClassName="h-8 w-full bg-card/70 px-3 text-xs xl:w-auto"
+            />
+          ) : null}
+        </div>
       </div>
     </div>
   );

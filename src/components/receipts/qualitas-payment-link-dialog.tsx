@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
 import { requestQualitasPaymentLink } from "@/app/(dashboard)/receipts/actions";
+import { cn } from "@/lib/utils";
 
 type Recipient = "CLIENT" | "AGENT";
 type Channel = "EMAIL" | "WHATSAPP";
@@ -26,6 +27,7 @@ type Props = {
   agent: { email: string | null; phone: string | null };
   clientRecipientEnabled: boolean;
   enabled: boolean;
+  className?: string;
 }
 
 function maskedEmail(value: string) {
@@ -37,7 +39,7 @@ function maskedPhone(value: string) {
   return `••••••${value.replace(/\D/g, "").slice(-4)}`;
 }
 
-export function QualitasPaymentLinkDialog({ receipt, agent, clientRecipientEnabled, enabled }: Props) {
+export function QualitasPaymentLinkDialog({ receipt, agent, clientRecipientEnabled, enabled, className }: Props) {
   const [open, setOpen] = useState(false);
   const [recipient, setRecipient] = useState<Recipient | null>(null);
   const [channel, setChannel] = useState<Channel | null>(null);
@@ -77,7 +79,7 @@ export function QualitasPaymentLinkDialog({ receipt, agent, clientRecipientEnabl
 
   return (
     <Dialog open={open} onOpenChange={(next) => { setOpen(next); if (!next) reset(); }}>
-      <DialogTrigger render={<Button size="sm" variant="outline" className="h-8 gap-1 px-3 text-xs" />}>
+      <DialogTrigger render={<Button size="sm" variant="outline" className={cn("h-8 gap-1 px-3 text-xs", className)} />}>
         <Link2 className="size-3.5" />
         Liga Quálitas
       </DialogTrigger>

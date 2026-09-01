@@ -14,8 +14,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { prepareWhatsAppReceiptReminder } from "@/app/(dashboard)/receipts/actions";
+import { cn } from "@/lib/utils";
 
-export function WhatsAppReminderButton({ receiptId }: { receiptId: string }) {
+export function WhatsAppReminderButton({ receiptId, className }: { receiptId: string; className?: string }) {
   const [captureOpen, setCaptureOpen] = useState(false);
   const [capturedPhone, setCapturedPhone] = useState("");
   const [captureError, setCaptureError] = useState<string | null>(null);
@@ -61,7 +62,7 @@ export function WhatsAppReminderButton({ receiptId }: { receiptId: string }) {
         type="button"
         size="sm"
         variant="outline"
-        className="h-8 gap-1 px-3 text-xs"
+        className={cn("h-8 gap-1 px-3 text-xs", className)}
         onClick={() => prepare()}
         disabled={isPending}
         aria-label="Avisar por WhatsApp"
