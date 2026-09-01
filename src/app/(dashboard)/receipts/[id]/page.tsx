@@ -25,6 +25,8 @@ import { policyTypeLabel, statusLabel } from "@/lib/status";
 import { documentTypeLabel, paymentMethodLabel } from "@/lib/ui-labels";
 import { isPaidWithinTolerance } from "@/lib/receipt-reconciliation";
 import { normalizeReturnTo } from "@/lib/return-to";
+import { QualitasPaymentLinkDialog } from "@/components/receipts/qualitas-payment-link-dialog";
+import { isQualitasClientRecipientEnabled, isQualitasInsurerName, isQualitasPaymentLinkEnabled } from "@/lib/qualitas-payment-link";
 
 export default async function ReceiptDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
@@ -33,6 +35,7 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
   const scope = await requireOrganizationPortfolioReadScope();
   const isAdmin = scope.membershipRole !== "AGENT";
   const db = getDb();
+  const agentContact = await db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } });
 
   const receipt = await db.receipt.findFirst({
     where: { id, ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
@@ -95,6 +98,23 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
                     policy: { policyNumber: receipt.policy.policyNumber },
                     endorsement: receipt.endorsement ? { endorsementNumber: receipt.endorsement.endorsementNumber, reference: receipt.endorsement.reference } : undefined,
                   }}
+                />
+              ) : null}
+              {(receipt.status === "PENDING" || receipt.status === "OVERDUE") && isQualitasInsurerName(receipt.insurer.name) ? (
+                <QualitasPaymentLinkDialog
+                  receipt={{
+                    id: receipt.id,
+                    receiptNumber: receipt.receiptNumber,
+                    dueDate: receipt.dueDate.toISOString(),
+                    amount: toNumber(receipt.amount),
+                    currency: receipt.currency,
+                    client: { fullName: receipt.client.fullName, email: receipt.client.email, phone: receipt.client.phone },
+                    policy: { policyNumber: receipt.policy.policyNumber },
+                    insurer: { name: receipt.insurer.name },
+                  }}
+                  agent={{ email: scope.context.userEmail, phone: agentContact?.phone ?? null }}
+                  enabled={isQualitasPaymentLinkEnabled()}
+                  clientRecipientEnabled={isQualitasClientRecipientEnabled()}
                 />
               ) : null}
               <Button asChild variant="outline" className="bg-card/70">

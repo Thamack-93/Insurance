@@ -64,6 +64,7 @@ import {
   maskQualitasEmail,
   normalizeQualitasPhone,
   normalizeQualitasEmail,
+  isQualitasClientRecipientEnabled,
   prepareQualitasPaymentLink,
   requestQualitasPaymentLink,
   type QualitasPaymentLinkOutcome,
@@ -132,6 +133,7 @@ type TelegramListResult<T> = {
 type TelegramDigestMessagePart = {
   title: string;
   body: string;
+  replyMarkup?: TelegramInlineKeyboardMarkup;
 };
 
 type TelegramUser = {
@@ -332,6 +334,11 @@ type TelegramQualitasPaymentLinkDraftState = {
   recipientPhone?: string;
   deliveryMethod?: QualitasPaymentLinkDeliveryMethod;
   destinationSource?: "PROFILE" | "MANUAL";
+  originatingReceiptId?: string;
+  originatingReceiptNumber?: string;
+  originatingDueDate?: string;
+  originatingAmount?: number;
+  originatingCurrency?: string;
   correlationId?: string;
   submissionState?: "NOT_STARTED" | "STARTED" | "ACKNOWLEDGED";
 };
@@ -359,10 +366,6 @@ const TELEGRAM_QUALITAS_RATE_LIMITS = {
   organization: { limit: 20, windowMs: 15 * 60 * 1000 },
   policy: { limit: 2, windowMs: 60 * 60 * 1000 },
 };
-
-export function isQualitasClientRecipientEnabled() {
-  return process.env.QUALITAS_PAYMENT_LINK_CLIENT_RECIPIENT_ENABLED?.trim() === "true";
-}
 
 function logQualitasTrace(input: {
   correlationId: string;
@@ -1590,7 +1593,7 @@ function formatTelegramDigestSummary(input: {
     `Vencidos: ${getTelegramSummaryLabel(input.overdueReceipts.total, "recibo")}`,
     `Hoy: ${getTelegramSummaryLabel(input.todayReceipts.total, "recibo")}`,
     `Próximos 14 días: ${getTelegramSummaryLabel(input.upcomingReceipts.total, "recibo")}`,
-    `Renovaciones 7 días: ${getTelegramSummaryLabel(input.upcomingRenewals.total, "póliza")}`,
+    `Renovaciones 30 días: ${getTelegramSummaryLabel(input.upcomingRenewals.total, "póliza")}`,
     `Pendientes atrasados: ${getTelegramSummaryLabel(input.pendingWorkItems.total, "tarea")}`,
     `Comisiones por revisar: ${getTelegramSummaryLabel(input.commissions.total, "comisión")}`,
   ].join("\n");
@@ -1625,7 +1628,7 @@ function formatTelegramDigestDetailLines(input: {
       emptyText: "Sin recibos próximos.",
     }),
     buildTelegramSection({
-      title: "Renovaciones próximas 7 días",
+      title: "Renovaciones próximas 30 días",
       total: input.upcomingRenewals.total,
       lines: input.upcomingRenewals.items.map((item) => formatTelegramRenewalLine(item, input.timeZone)),
       emptyText: "Sin renovaciones próximas.",
@@ -1647,7 +1650,7 @@ function formatTelegramDigestDetailLines(input: {
   return sections;
 }
 
-function buildTelegramDailyDigestMessages(input: {
+export function buildTelegramDailyDigestMessages(input: {
   dayStart: Date;
   timeZone: string;
   overdueReceipts: TelegramListResult<TelegramReceiptItem>;
@@ -1664,7 +1667,13 @@ function buildTelegramDailyDigestMessages(input: {
   const detailMessages = splitTelegramMessageLines(detailLines);
 
   return [
-    { title: "Resumen diario PolicyDesk", body: summary },
+    {
+      title: "Resumen diario PolicyDesk",
+      body: summary,
+      replyMarkup: {
+        inline_keyboard: [[{ text: "Gestionar cobros", callback_data: DIGEST_MANAGE_CALLBACK }]],
+      },
+    },
     ...detailMessages.map((body, index) => ({
       title: detailMessages.length > 1 ? `Resumen diario PolicyDesk · detalle ${index + 1}/${detailMessages.length}` : "Resumen diario PolicyDesk · detalle",
       body,
@@ -1925,7 +1934,7 @@ export async function buildTelegramDailyDigestMessagesByUser(userId: string, cli
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
   const tomorrowStart = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
   const upcomingEnd = new Date(dayStart.getTime() + 14 * 24 * 60 * 60 * 1000 - 1);
-  const renewalEnd = new Date(dayStart.getTime() + 7 * 24 * 60 * 60 * 1000 - 1);
+  const renewalEnd = new Date(dayStart.getTime() + 30 * 24 * 60 * 60 * 1000 - 1);
   const [overdueReceipts, todayReceipts, upcomingReceipts, upcomingRenewals, pendingRows, commissionRows] = await Promise.all([
     getTelegramReceipts({
       userId,
@@ -2015,6 +2024,7 @@ export async function sendTelegramDigestMessagesForUser(input: {
       priority: "LOW",
       userId: input.userId,
       force: true,
+      replyMarkup: part.replyMarkup,
     });
 
     if (event?.status === "SENT") {
@@ -2164,7 +2174,6 @@ async function createTelegramPaymentDraft(input: {
         organizationId,
         userId: channel.userId,
         channelId: channel.id,
-        type: "PAYMENT_CAPTURE",
         status: "COLLECTING",
       },
       data: {
@@ -2485,6 +2494,11 @@ const QUALITAS_CLIENT_CALLBACK = "qualitas_recipient_client";
 const QUALITAS_AGENT_CALLBACK = "qualitas_recipient_agent";
 const QUALITAS_EMAIL_CALLBACK = "qualitas_channel_email";
 const QUALITAS_WHATSAPP_CALLBACK = "qualitas_channel_whatsapp";
+const DIGEST_MANAGE_CALLBACK = "digest_manage_receipts";
+const DIGEST_PAGE_PREFIX = "digest_receipts_page:";
+const DIGEST_RECEIPT_PREFIX = "digest_receipt:";
+const DIGEST_PAYMENT_PREFIX = "digest_payment:";
+const DIGEST_QUALITAS_PREFIX = "digest_qualitas:";
 
 function buildQualitasRecipientMarkup(state: TelegramQualitasPaymentLinkDraftState): TelegramInlineKeyboardMarkup {
   const buttons: TelegramInlineKeyboardButton[] = [];
@@ -2519,6 +2533,32 @@ function buildQualitasChannelPrompt(state: TelegramQualitasPaymentLinkDraftState
   });
 }
 
+function digestCallbackValue(prefix: string, id: string) {
+  const value = `${prefix}${id}`;
+  return value.length <= 64 ? value : null;
+}
+
+function buildDigestReceiptSelectionMarkup(items: TelegramReceiptItem[], page: number, totalPages: number): TelegramInlineKeyboardMarkup {
+  const rows = items.map((item) => [{
+    text: `${item.clientName.slice(0, 22)} · ${item.receiptNumber}`,
+    callback_data: digestCallbackValue(DIGEST_RECEIPT_PREFIX, item.id) ?? DIGEST_MANAGE_CALLBACK,
+  }]);
+  const navigation: TelegramInlineKeyboardButton[] = [];
+  if (page > 1) navigation.push({ text: "‹ Anteriores", callback_data: `${DIGEST_PAGE_PREFIX}${page - 1}` });
+  if (page < totalPages) navigation.push({ text: "Siguientes ›", callback_data: `${DIGEST_PAGE_PREFIX}${page + 1}` });
+  if (navigation.length > 0) rows.push(navigation);
+  return { inline_keyboard: rows };
+}
+
+function buildDigestReceiptActionMarkup(input: { receiptId: string; isQualitas: boolean; canRecordPayment: boolean }): TelegramInlineKeyboardMarkup | undefined {
+  const row: TelegramInlineKeyboardButton[] = [];
+  const paymentCallback = digestCallbackValue(DIGEST_PAYMENT_PREFIX, input.receiptId);
+  const qualitasCallback = digestCallbackValue(DIGEST_QUALITAS_PREFIX, input.receiptId);
+  if (input.canRecordPayment && paymentCallback) row.push({ text: "Registrar pago", callback_data: paymentCallback });
+  if (input.isQualitas && qualitasCallback) row.push({ text: "Solicitar liga Quálitas", callback_data: qualitasCallback });
+  return row.length > 0 ? { inline_keyboard: [row] } : undefined;
+}
+
 function buildQualitasConfirmation(state: TelegramQualitasPaymentLinkDraftState) {
   return buildTelegramQualitasConfirmation({
     policyNumber: state.policyNumber ?? "—",
@@ -2527,6 +2567,10 @@ function buildQualitasConfirmation(state: TelegramQualitasPaymentLinkDraftState)
     deliveryMethod: state.deliveryMethod,
     maskedEmail: state.recipientEmail ? maskQualitasEmail(state.recipientEmail) : undefined,
     maskedPhone: state.recipientPhone ? maskQualitasPhone(state.recipientPhone) : undefined,
+    originatingReceiptNumber: state.originatingReceiptNumber,
+    originatingDueDate: state.originatingDueDate,
+    originatingAmount: state.originatingAmount,
+    originatingCurrency: state.originatingCurrency,
   });
 }
 
@@ -2578,6 +2622,7 @@ async function findAuthorizedQualitasPolicy(input: {
 function buildQualitasDraftState(input: {
   policy: NonNullable<Awaited<ReturnType<typeof findAuthorizedQualitasPolicy>>>;
   identity: ActiveTelegramIdentity;
+  origin?: { id: string; receiptNumber: string; dueDate: Date; amount: number; currency: string };
 }): TelegramQualitasPaymentLinkDraftState {
   const clientEmail = normalizeQualitasEmail(input.policy.client.email);
   const clientPhone = normalizeQualitasPhone(input.policy.client.phone);
@@ -2594,12 +2639,17 @@ function buildQualitasDraftState(input: {
     agentUserId: input.identity.user.id,
     agentEmail,
     agentPhone,
+    originatingReceiptId: input.origin?.id,
+    originatingReceiptNumber: input.origin?.receiptNumber,
+    originatingDueDate: input.origin?.dueDate.toISOString(),
+    originatingAmount: input.origin?.amount,
+    originatingCurrency: input.origin?.currency,
     correlationId: crypto.randomUUID(),
     submissionState: "NOT_STARTED",
   };
 }
 
-async function createTelegramQualitasDraft(input: { chatId: string; argument: string; client?: DbClient }) {
+async function createTelegramQualitasDraft(input: { chatId: string; argument: string; policyId?: string; receiptId?: string; client?: DbClient }) {
   const db = input.client ?? getDb();
   const identity = await getActiveTelegramIdentityForChat(input.chatId, db);
   if (!identity) {
@@ -2629,7 +2679,6 @@ async function createTelegramQualitasDraft(input: { chatId: string; argument: st
           organizationId: identity.organizationId,
           userId: identity.user.id,
           channelId: identity.channel.id,
-          type: "QUALITAS_PAYMENT_LINK",
           status: "COLLECTING",
         },
         data: { status: "CANCELLED", cancelledAt: new Date() },
@@ -2652,12 +2701,20 @@ async function createTelegramQualitasDraft(input: { chatId: string; argument: st
     return { ok: true as const, replyText: buildTelegramQualitasPolicyPrompt(), draftId: draft.id };
   }
 
-  const policy = await findAuthorizedQualitasPolicy({ identity, policyNumber: normalizedArgument, client: db });
+  let origin: { id: string; receiptNumber: string; dueDate: Date; amount: number; currency: string } | undefined;
+  if (input.receiptId) {
+    const selectedReceipt = await getAuthorizedDigestReceipt(identity, input.receiptId, db);
+    if (!selectedReceipt || (input.policyId && selectedReceipt.policy.id !== input.policyId)) {
+      return { ok: false as const, replyText: "El recibo ya no está disponible." };
+    }
+    origin = { id: selectedReceipt.id, receiptNumber: selectedReceipt.receiptNumber, dueDate: selectedReceipt.dueDate, amount: toNumber(selectedReceipt.amount), currency: selectedReceipt.currency };
+  }
+  const policy = await findAuthorizedQualitasPolicy({ identity, ...(input.policyId ? { policyId: input.policyId } : { policyNumber: normalizedArgument }), client: db });
   if (!policy) {
     return { ok: false as const, replyText: "No encontré una póliza Quálitas autorizada en PolicyDesk." };
   }
 
-  const state = buildQualitasDraftState({ policy, identity });
+  const state = buildQualitasDraftState({ policy, identity, origin });
   if (!state.agentEmail && !state.agentPhone && (!isQualitasClientRecipientEnabled() || (!state.clientEmail && !state.clientPhone))) {
     return { ok: false as const, replyText: buildTelegramQualitasNoRecipientMessage() };
   }
@@ -2669,7 +2726,6 @@ async function createTelegramQualitasDraft(input: { chatId: string; argument: st
         organizationId: identity.organizationId,
         userId: identity.user.id,
         channelId: identity.channel.id,
-        type: "QUALITAS_PAYMENT_LINK",
         status: "COLLECTING",
       },
       data: { status: "CANCELLED", cancelledAt: new Date() },
@@ -2814,6 +2870,114 @@ async function continueTelegramQualitasDraftFromText(input: {
   };
 }
 
+async function getDigestReceiptSelection(userId: string, client?: DbClient) {
+  const db = client ?? getDb();
+  const dayStart = startOfDayInTimeZone(new Date(), DEFAULT_TIMEZONE);
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
+  const tomorrowStart = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+  const upcomingEnd = new Date(dayStart.getTime() + 14 * 24 * 60 * 60 * 1000 - 1);
+  const [overdue, today, upcoming] = await Promise.all([
+    getTelegramReceipts({ userId, to: new Date(dayStart.getTime() - 1), limit: TELEGRAM_DIGEST_SECTION_LIMIT, client: db }),
+    getTelegramReceipts({ userId, from: dayStart, to: dayEnd, limit: TELEGRAM_DIGEST_SECTION_LIMIT, client: db }),
+    getTelegramReceipts({ userId, from: tomorrowStart, to: upcomingEnd, limit: TELEGRAM_DIGEST_SECTION_LIMIT, client: db }),
+  ]);
+  const seen = new Set<string>();
+  const items = [...overdue.items, ...today.items, ...upcoming.items].filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+  return { items, totalPages: Math.max(1, Math.ceil(items.length / 10)) };
+}
+
+async function getAuthorizedDigestReceipt(identity: ActiveTelegramIdentity, receiptId: string, client?: DbClient) {
+  const db = client ?? getDb();
+  return db.receipt.findFirst({
+    where: {
+      id: receiptId,
+      organizationId: identity.organizationId,
+      status: { in: ["PENDING", "OVERDUE"] },
+      policy: { status: { not: "CANCELLED" } },
+      client: {
+        organizationId: identity.organizationId,
+        ...(identity.membershipRole === "AGENT" ? { portfolioOwnerId: identity.user.id } : {}),
+      },
+    },
+    include: {
+      client: { select: { fullName: true } },
+      policy: { select: { id: true, policyNumber: true } },
+      insurer: { select: { name: true } },
+      payments: { where: { status: "POSTED" }, select: { id: true } },
+    },
+  });
+}
+
+async function processTelegramDigestCallback(callback: TelegramCallbackQuery) {
+  const chat = callback.message?.chat;
+  if (!chat || chat.type !== "private" || callback.from.id !== chat.id || !callback.data) {
+    return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Selección no válida." };
+  }
+  const db = getDb();
+  const identity = await getActiveTelegramIdentityForChat(String(chat.id), db);
+  if (!identity || !isTelegramMutationsEnabled(identity.channel)) {
+    return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Los cambios reales por Telegram están desactivados." };
+  }
+
+  const data = callback.data;
+  if (data === DIGEST_MANAGE_CALLBACK || data.startsWith(DIGEST_PAGE_PREFIX)) {
+    const page = data === DIGEST_MANAGE_CALLBACK ? 1 : Number(data.slice(DIGEST_PAGE_PREFIX.length));
+    if (!Number.isSafeInteger(page) || page < 1) return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Página no válida." };
+    const selection = await getDigestReceiptSelection(identity.user.id, db);
+    const currentPage = Math.min(page, selection.totalPages);
+    const items = selection.items.slice((currentPage - 1) * 10, currentPage * 10);
+    return {
+      handled: true as const,
+      chatId: String(chat.id),
+      callbackQueryId: callback.id,
+      callbackAnswerText: "Recibos actualizados.",
+      replyText: items.length > 0 ? "Selecciona el recibo que quieres gestionar." : "No hay recibos abiertos en el rango del resumen.",
+      replyMarkup: buildDigestReceiptSelectionMarkup(items, currentPage, selection.totalPages),
+    };
+  }
+
+  const receiptId = [DIGEST_RECEIPT_PREFIX, DIGEST_PAYMENT_PREFIX, DIGEST_QUALITAS_PREFIX].find((prefix) => data.startsWith(prefix))
+    ? data.slice(data.indexOf(":") + 1)
+    : null;
+  if (!receiptId) return { handled: false as const };
+  const receipt = await getAuthorizedDigestReceipt(identity, receiptId, db);
+  if (!receipt) return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "El recibo ya no está disponible." };
+
+  if (data.startsWith(DIGEST_RECEIPT_PREFIX)) {
+    const actionMarkup = buildDigestReceiptActionMarkup({ receiptId: receipt.id, canRecordPayment: receipt.payments.length === 0, isQualitas: isQualitasInsurerName(receipt.insurer.name) && isQualitasPaymentLinkEnabled() });
+    return {
+      handled: true as const,
+      chatId: String(chat.id),
+      callbackQueryId: callback.id,
+      callbackAnswerText: "Recibo seleccionado.",
+      replyText: `Recibo ${receipt.receiptNumber}\n${receipt.client.fullName} · Póliza ${receipt.policy.policyNumber} · ${receipt.insurer.name}\n\nElige una acción.`,
+      ...(actionMarkup ? { replyMarkup: actionMarkup } : { replyText: `Recibo ${receipt.receiptNumber}\nNo hay una acción disponible para este recibo en su estado actual.` }),
+    };
+  }
+
+  if (data.startsWith(DIGEST_PAYMENT_PREFIX)) {
+    const result = await createTelegramPaymentDraft({ chatId: String(chat.id), argument: `${receipt.policy.policyNumber} ${receipt.receiptNumber}`, client: db });
+    return { handled: true as const, chatId: String(chat.id), callbackQueryId: callback.id, callbackAnswerText: "Borrador de pago preparado.", replyText: result.replyText };
+  }
+
+  if (!isQualitasInsurerName(receipt.insurer.name) || !isQualitasPaymentLinkEnabled()) {
+    return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "La liga Quálitas no está disponible para este recibo." };
+  }
+  const result = await createTelegramQualitasDraft({ chatId: String(chat.id), argument: receipt.policy.policyNumber, policyId: receipt.policy.id, receiptId: receipt.id, client: db });
+  return {
+    handled: true as const,
+    chatId: String(chat.id),
+    callbackQueryId: callback.id,
+    callbackAnswerText: "Solicitud preparada.",
+    replyText: result.replyText,
+    replyMarkup: result.replyMarkup,
+  };
+}
+
 async function processTelegramQualitasCallback(callback: TelegramCallbackQuery, client?: DbClient) {
   const chat = callback.message?.chat;
   if (!chat || chat.type !== "private" || callback.from.id !== chat.id || !callback.data) {
@@ -2857,7 +3021,14 @@ async function processTelegramQualitasCallback(callback: TelegramCallbackQuery, 
   if (!policy) {
     return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "La póliza ya no está disponible." };
   }
-  const currentState = buildQualitasDraftState({ policy, identity });
+  const currentState = {
+    ...buildQualitasDraftState({ policy, identity }),
+    originatingReceiptId: state.originatingReceiptId,
+    originatingReceiptNumber: state.originatingReceiptNumber,
+    originatingDueDate: state.originatingDueDate,
+    originatingAmount: state.originatingAmount,
+    originatingCurrency: state.originatingCurrency,
+  };
   const activeRecipient = selectedRecipient ?? state.recipient;
   if (selectedRecipient === "CLIENT" && !isQualitasClientRecipientEnabled()) {
     return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Ese destinatario no está habilitado." };
@@ -2982,6 +3153,7 @@ async function finalizeQualitasTelegramDraft(input: {
   submissionState: "NOT_STARTED" | "STARTED" | "ACKNOWLEDGED";
   correlationId: string;
   destinationSource?: "PROFILE" | "MANUAL";
+  originatingReceiptId?: string;
   context: OrganizationContext;
   db: DbClient;
 }) {
@@ -3017,6 +3189,7 @@ async function finalizeQualitasTelegramDraft(input: {
       newValue: {
         draftId: input.draftId,
         clientId: input.clientId,
+        receiptId: input.originatingReceiptId ?? null,
         recipientType: input.recipient,
         deliveryMethod: input.deliveryMethod,
         result: qualitasAuditResult(input.outcome),
@@ -3206,6 +3379,7 @@ async function confirmQualitasTelegramDraft(input: {
       submissionState: qualitasSubmissionStateForOutcome(outcome),
       correlationId: state.correlationId ?? input.draft.id,
       destinationSource: state.destinationSource,
+      originatingReceiptId: state.originatingReceiptId,
       context: identity.context,
       db,
     });
@@ -3240,6 +3414,11 @@ async function confirmTelegramDraft(input: {
       ok: false as const,
       replyText: buildTelegramLinkedChatRequiredMessage(),
     };
+  }
+
+  const identity = await getActiveTelegramIdentityForChat(input.chatId, db);
+  if (!identity) {
+    return { ok: false as const, replyText: "Esta sesión de Telegram ya no está autorizada." };
   }
 
   if (!draft) {
@@ -3300,8 +3479,19 @@ async function confirmTelegramDraft(input: {
     }
 
     try {
-      const result = await recordPayment(
-        {
+      await db.$transaction(async (tx) => {
+        await assertOrganizationContextInTransaction(tx, identity.context);
+        const permitted = await tx.receipt.findFirst({
+          where: {
+            id: receipt.id,
+            organizationId: draft.organizationId!,
+            status: { in: ["PENDING", "OVERDUE"] },
+            ...(identity?.membershipRole === "AGENT" ? { client: { portfolioOwnerId: channel.userId } } : {}),
+          },
+          select: { id: true },
+        });
+        if (!permitted) throw new Error("El recibo ya no está disponible para registrar el pago.");
+        const result = await recordPayment({
           organizationId: draft.organizationId!,
           receiptId: receipt.id,
           amount: Number(state.amount),
@@ -3310,31 +3500,14 @@ async function confirmTelegramDraft(input: {
           reference: state.reference ?? null,
           notes: "Pago capturado por Telegram.",
           actorId: channel.userId,
-        },
-        db,
-      );
-
-      await db.telegramDraft.update({
-        where: { id: draft.id, organizationId: draft.organizationId! },
-        data: {
-          status: "CONFIRMED",
-          confirmedAt: new Date(),
-        },
-      });
-
-      await writeActivityLog({
-        organizationId: draft.organizationId!,
-        entityType: "TelegramDraft",
-        entityId: draft.id,
-        action: "TELEGRAM_PAYMENT_DRAFT_CONFIRMED",
-        newValue: {
-          receiptId: receipt.id,
-          paymentId: result.payment.id,
-          amount: state.amount,
-          paidDate: state.paidDate,
-        },
-        userId: channel.userId,
-        db,
+        }, tx);
+        await tx.telegramDraft.update({ where: { id: draft.id, organizationId: draft.organizationId! }, data: { status: "CONFIRMED", confirmedAt: new Date() } });
+        await writeActivityLog({
+          organizationId: draft.organizationId!, entityType: "TelegramDraft", entityId: draft.id,
+          action: "TELEGRAM_PAYMENT_DRAFT_CONFIRMED",
+          newValue: { receiptId: receipt.id, paymentId: result.payment.id, amount: state.amount, paidDate: state.paidDate },
+          userId: channel.userId, db: tx,
+        });
       });
 
       return {
@@ -4024,6 +4197,7 @@ export async function disconnectTelegramChannelForUser(input: {
 export async function deliverTelegramNotificationEvent(
   eventId: string,
   organizationId: string,
+  replyMarkup?: TelegramInlineKeyboardMarkup,
   client?: DbClient,
 ): Promise<NotificationEventRecord | null> {
   const db = client ?? getDb();
@@ -4054,6 +4228,7 @@ export async function deliverTelegramNotificationEvent(
     const result = await sendTelegramMessage(
       channel.telegramChatId,
       formatTelegramNotificationText(event.title, event.body),
+      channel.telegramMutationsEnabled ? replyMarkup : undefined,
     );
 
     if (!result.ok) {
@@ -4080,6 +4255,7 @@ export async function createAndDeliverTelegramNotificationEvent(input: {
   receiptId?: string | null;
   dedupeKey?: string | null;
   force?: boolean;
+  replyMarkup?: TelegramInlineKeyboardMarkup;
 }): Promise<NotificationEventRecord | null> {
   const event = await createNotificationEvent({
     organizationId: input.organizationId,
@@ -4101,7 +4277,7 @@ export async function createAndDeliverTelegramNotificationEvent(input: {
     return event;
   }
 
-  return deliverTelegramNotificationEvent(event.id, input.organizationId);
+  return deliverTelegramNotificationEvent(event.id, input.organizationId, input.replyMarkup);
 }
 
 export async function processTelegramWebhookUpdate(
@@ -4109,6 +4285,9 @@ export async function processTelegramWebhookUpdate(
 ): Promise<TelegramWebhookProcessResult> {
   if (update.callback_query) {
     try {
+      if (update.callback_query.data?.startsWith("digest_")) {
+        return await processTelegramDigestCallback(update.callback_query);
+      }
       return await processTelegramQualitasCallback(update.callback_query);
     } catch (error) {
       logError("telegram.processCallbackQuery", error, { updateId: update.update_id });

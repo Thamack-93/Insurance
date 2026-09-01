@@ -7,6 +7,7 @@ const writeActivityLog = vi.hoisted(() => vi.fn());
 const provider = vi.hoisted(() => ({
   isQualitasInsurerName: vi.fn(() => true),
   isQualitasPaymentLinkEnabled: vi.fn(() => true),
+  isQualitasClientRecipientEnabled: vi.fn(() => process.env.QUALITAS_PAYMENT_LINK_CLIENT_RECIPIENT_ENABLED === "true"),
   maskQualitasEmail: vi.fn((email: string) => `${email.slice(0, 1)}***@${email.split("@")[1]}`),
   normalizeQualitasEmail: vi.fn((email: string | null | undefined) => {
     const value = email?.trim().toLowerCase() ?? "";

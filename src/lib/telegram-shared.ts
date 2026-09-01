@@ -303,6 +303,10 @@ export function buildTelegramQualitasConfirmation(input: {
   maskedEmail?: string;
   maskedPhone?: string;
   deliveryMethod?: "EMAIL" | "WHATSAPP";
+  originatingReceiptNumber?: string;
+  originatingDueDate?: string;
+  originatingAmount?: number;
+  originatingCurrency?: string;
 }) {
   const destination = input.deliveryMethod === "WHATSAPP"
     ? `WhatsApp · ${input.maskedPhone ?? "••••"}`
@@ -312,6 +316,7 @@ export function buildTelegramQualitasConfirmation(input: {
     "",
     `Póliza: ${input.policyNumber}`,
     `Cliente: ${input.clientName}`,
+    input.originatingReceiptNumber ? `Contexto: Recibo ${input.originatingReceiptNumber}${input.originatingDueDate ? ` · vence ${input.originatingDueDate.slice(0, 10)}` : ""}${input.originatingAmount != null ? ` · ${input.originatingAmount} ${input.originatingCurrency ?? "MXN"}` : ""}` : null,
     `Enviar a: ${input.recipientLabel} · ${destination}`,
     "",
     "Responde /confirmar para solicitarlo o /cancelar para descartarlo.",

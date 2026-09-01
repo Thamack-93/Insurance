@@ -71,7 +71,10 @@ It expires automatically and is removed on logout; it is never written to the da
   - `/pagoqualitas <póliza>`
 - Telegram linking uses one-time codes stored as hashes with expiry.
 - Telegram test messages use the live bot token and update `NotificationEvent` status.
-- The digest contains overdue/today/upcoming receipts, renewals, overdue work and commissions.
+- The digest contains overdue/today/upcoming receipts, renewals for the next 30 calendar dates,
+  overdue work and commissions. When Telegram mutations are enabled, its summary message also
+  offers a transient `Gestionar cobros` selector that re-reads the current receipts and can start
+  the existing Quálitas-link or payment-capture drafts; neither action executes on the first click.
 - Webhook synchronization is an explicit admin action; opening settings has no external side effect.
 - Telegram remains deterministic. Freeform AI replies are intentionally not enabled there.
 - `/pagoqualitas` is an insurer-specific Quálitas payment-link request. It resolves an

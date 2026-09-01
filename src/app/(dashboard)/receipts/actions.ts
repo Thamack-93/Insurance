@@ -13,6 +13,11 @@ import { NON_PAYMENT_CANCELLATION_DAYS } from "@/lib/nonpayment-cancellation.log
 import { receiptPortfolioWhere } from "@/lib/portfolio-access";
 import { assertOrganizationContextInTransaction, requireOrganizationContext, requireOrganizationRole, type OrganizationContext } from "@/lib/organization-context";
 import { receiptSequenceForNumber } from "@/lib/sorting";
+import {
+  requestQualitasPaymentLinkForReceipt,
+  type QualitasRecipientType,
+} from "@/lib/qualitas-payment-link-service";
+import type { QualitasPaymentLinkDeliveryMethod } from "@/lib/qualitas-payment-link";
 
 const ALLOWED_PAYMENT_METHODS = ["TRANSFER", "CASH", "CARD", "CHECK", "OTHER"] as const;
 type AllowedPaymentMethod = (typeof ALLOWED_PAYMENT_METHODS)[number];
@@ -361,5 +366,41 @@ export async function deleteReceipt(id: string): Promise<MutationResult> {
   } catch (error) {
     if (error instanceof AuthError) return errorResult(error.message);
     return errorResult(error instanceof Error ? error.message : "No se pudo eliminar el recibo.");
+  }
+}
+
+export type RequestQualitasPaymentLinkInput = {
+  receiptId: string;
+  recipientType: QualitasRecipientType;
+  deliveryChannel: QualitasPaymentLinkDeliveryMethod;
+};
+
+export type RequestQualitasPaymentLinkResult =
+  | { ok: true; id: string; redirectTo: string; message: string; outcome: string; destination: string }
+  | { ok: false; error: string };
+
+export async function requestQualitasPaymentLink(
+  input: RequestQualitasPaymentLinkInput,
+): Promise<RequestQualitasPaymentLinkResult> {
+  if (!input.receiptId || !["CLIENT", "AGENT"].includes(input.recipientType) || !["EMAIL", "WHATSAPP"].includes(input.deliveryChannel)) {
+    return { ok: false, error: "La selección de destinatario o canal no es válida." };
+  }
+
+  try {
+    const context = await requireOrganizationContext();
+    const result = await requestQualitasPaymentLinkForReceipt({ ...input, context });
+    if (!result.ok) return result;
+    revalidatePaths(["/receipts", `/receipts/${input.receiptId}`, "/dashboard", "/today"]);
+    return {
+      ok: true,
+      id: input.receiptId,
+      redirectTo: `/receipts/${input.receiptId}`,
+      message: result.message,
+      outcome: result.outcome,
+      destination: result.destination,
+    };
+  } catch (error) {
+    if (error instanceof AuthError) return { ok: false, error: error.message };
+    return { ok: false, error: "No se pudo solicitar la liga de pago de Quálitas." };
   }
 }

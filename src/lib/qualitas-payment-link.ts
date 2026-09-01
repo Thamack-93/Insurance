@@ -350,6 +350,10 @@ export function isQualitasPaymentLinkEnabled() {
   return process.env.QUALITAS_PAYMENT_LINK_ENABLED?.trim() === "true";
 }
 
+export function isQualitasClientRecipientEnabled() {
+  return process.env.QUALITAS_PAYMENT_LINK_CLIENT_RECIPIENT_ENABLED?.trim() === "true";
+}
+
 function isAllowedQualitasUrl(value: string | URL) {
   try {
     const url = new URL(value.toString());

@@ -22,6 +22,7 @@ import { formatCurrency } from "@/lib/money";
 import { parseBusinessDateInput } from "@/lib/business-dates";
 import { bulkMarkReceiptsPaid } from "@/app/(dashboard)/receipts/actions";
 import { appendReturnTo } from "@/lib/return-to";
+import { QualitasPaymentLinkDialog } from "@/components/receipts/qualitas-payment-link-dialog";
 
 export type CollectableReceipt = {
   id: string;
@@ -36,6 +37,13 @@ export type CollectableReceipt = {
   insurer: { name: string };
   endorsement?: { endorsementNumber: string; reference?: string | null };
   paymentCount: number;
+  clientEmail?: string | null;
+  clientPhone?: string | null;
+  agentEmail?: string | null;
+  agentPhone?: string | null;
+  qualitasEnabled?: boolean;
+  qualitasClientRecipientEnabled?: boolean;
+  qualitasEligible?: boolean;
 };
 
 export function CollectableReceipts({ receipts, returnTo }: { receipts: CollectableReceipt[]; returnTo?: string }) {
@@ -197,7 +205,7 @@ function ReceiptRow({ receipt, returnTo }: { receipt: CollectableReceipt; return
           <p className="font-semibold">{formatCurrency(receipt.amount, receipt.currency)}</p>
           <p className="text-xs text-muted-foreground">{receipt.currency}</p>
         </div>
-          <QuickPaymentDialog
+        <QuickPaymentDialog
             receipt={{
               id: receipt.id,
               receiptNumber: receipt.receiptNumber,
@@ -210,6 +218,23 @@ function ReceiptRow({ receipt, returnTo }: { receipt: CollectableReceipt; return
             endorsement: receipt.endorsement,
           }}
         />
+        {receipt.qualitasEligible ? (
+          <QualitasPaymentLinkDialog
+            receipt={{
+              id: receipt.id,
+              receiptNumber: receipt.receiptNumber,
+              dueDate: receipt.dueDate,
+              amount: receipt.amount,
+              currency: receipt.currency,
+              client: { fullName: receipt.client.fullName, email: receipt.clientEmail, phone: receipt.clientPhone },
+              policy: { policyNumber: receipt.policy.policyNumber },
+              insurer: { name: receipt.insurer.name },
+            }}
+            agent={{ email: receipt.agentEmail ?? null, phone: receipt.agentPhone ?? null }}
+            enabled={Boolean(receipt.qualitasEnabled)}
+            clientRecipientEnabled={Boolean(receipt.qualitasClientRecipientEnabled)}
+          />
+        ) : null}
         {receipt.status !== "CANCELLED" && receipt.paymentCount === 0 ? (
           <CancelReceiptButton
             id={receipt.id}

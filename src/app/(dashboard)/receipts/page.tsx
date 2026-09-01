@@ -28,6 +28,7 @@ import {
 import { buildTableHref } from "@/lib/table-query";
 import { paymentMethodLabel, dataQualityReasonLabel } from "@/lib/ui-labels";
 import { appendReturnTo } from "@/lib/return-to";
+import { isQualitasClientRecipientEnabled, isQualitasInsurerName, isQualitasPaymentLinkEnabled } from "@/lib/qualitas-payment-link";
 import {
   buildOpenReceiptBaseWhere,
   buildReceiptListOrderBy,
@@ -51,6 +52,7 @@ export default async function ReceiptsPage({
 
   const db = getDb();
   const scope = await requireOrganizationPortfolioReadScope();
+  const agentContact = await db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } });
   const now = today();
   const monthStart = businessStartOfMonth(now);
   const clearFiltersHref = buildTableHref("/receipts", params, {
@@ -159,6 +161,13 @@ export default async function ReceiptsPage({
         : undefined,
       originLabel: getReceiptOriginLabel(receipt),
       paymentCount: receipt._count.payments,
+      clientEmail: receipt.client.email,
+      clientPhone: receipt.client.phone,
+      agentEmail: scope.context.userEmail,
+      agentPhone: agentContact?.phone ?? null,
+      qualitasEnabled: isQualitasPaymentLinkEnabled(),
+      qualitasClientRecipientEnabled: isQualitasClientRecipientEnabled(),
+      qualitasEligible: isQualitasInsurerName(receipt.insurer.name),
     }));
 
   const safePaymentHistory = paymentHistory.filter((payment) => payment.receipt && payment.client && payment.policy);
