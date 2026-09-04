@@ -435,6 +435,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'policydesk_platform_owner') THEN
     RAISE EXCEPTION 'POLICYDESK_TENANT_PLATFORM_OWNER_ROLE_MISSING';
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'policydesk_readonly') THEN
+    RAISE EXCEPTION 'POLICYDESK_TENANT_READONLY_ROLE_MISSING';
+  END IF;
 END
 $roles$;
 
@@ -442,7 +445,7 @@ DO $grants$
 DECLARE table_name text;
 BEGIN
   EXECUTE 'REVOKE ALL ON SCHEMA public FROM PUBLIC';
-  EXECUTE 'GRANT USAGE ON SCHEMA public TO policydesk_app, policydesk_platform_owner';
+  EXECUTE 'GRANT USAGE ON SCHEMA public TO policydesk_app, policydesk_platform_owner, policydesk_readonly';
   FOREACH table_name IN ARRAY ARRAY[
     'Client','Insurer','Policy','Receipt','PolicyEndorsement','Payment',
     'Commission','Task','WorkItem','Claim','ClaimChecklistItem','Quote',
@@ -456,6 +459,7 @@ BEGIN
   ] LOOP
     EXECUTE format('REVOKE ALL ON TABLE %I FROM PUBLIC', table_name);
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I TO policydesk_app', table_name);
+    EXECUTE format('GRANT SELECT ON TABLE %I TO policydesk_readonly', table_name);
   END LOOP;
   FOREACH table_name IN ARRAY ARRAY[
     'OrganizationCapability','OrganizationSetting','DemoOrganizationState','DemoUploadArtifact',
@@ -463,6 +467,7 @@ BEGIN
   ] LOOP
     EXECUTE format('REVOKE ALL ON TABLE %I FROM PUBLIC', table_name);
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I TO policydesk_app', table_name);
+    EXECUTE format('GRANT SELECT ON TABLE %I TO policydesk_readonly', table_name);
   END LOOP;
   EXECUTE 'REVOKE ALL ON TABLE "User","Organization","OrganizationMembership","NotificationChannel","TelegramWebhookUpdate","SystemSetting","Session","UserPreference","PlatformRuntimeState" FROM PUBLIC';
   EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "User","Organization","OrganizationMembership","NotificationChannel","TelegramWebhookUpdate","SystemSetting","Session","UserPreference" TO policydesk_app';
@@ -471,6 +476,7 @@ BEGIN
   EXECUTE 'GRANT SELECT ON TABLE "PlatformRuntimeState" TO policydesk_app';
   EXECUTE 'GRANT SELECT ON TABLE "Plan","GeneralKnowledgeSource","GeneralKnowledgeChunk" TO policydesk_app';
   EXECUTE 'GRANT SELECT, INSERT ON TABLE "PlatformAuditLog" TO policydesk_app';
+  EXECUTE 'GRANT SELECT ON TABLE "User","Organization","OrganizationMembership","Plan","PlatformAuditLog","SystemSetting","NotificationChannel","TelegramWebhookUpdate","GeneralKnowledgeSource","GeneralKnowledgeChunk","Session","UserPreference","PlatformRuntimeState","_prisma_migrations" TO policydesk_readonly';
   -- The SECURITY DEFINER aggregate runs as this non-login owner. Grant only
   -- the three relations it reads; BYPASSRLS alone does not grant SELECT.
   EXECUTE 'GRANT SELECT ON TABLE "Organization","Client","Policy" TO policydesk_platform_owner';

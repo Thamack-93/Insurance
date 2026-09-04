@@ -39,7 +39,8 @@ async function main() {
   const databaseUrl = directDatabaseUrl();
   const appRole = roleName(process.env.TENANT_RLS_APP_ROLE, "policydesk_app");
   const ownerRole = roleName(process.env.TENANT_RLS_PLATFORM_OWNER_ROLE, "policydesk_platform_owner");
-  if (appRole !== "policydesk_app" || ownerRole !== "policydesk_platform_owner") {
+  const readOnlyRole = roleName(process.env.PRODUCTION_READONLY_ROLE, "policydesk_readonly");
+  if (appRole !== "policydesk_app" || ownerRole !== "policydesk_platform_owner" || readOnlyRole !== "policydesk_readonly") {
     throw new Error("TENANT_ROLE_PREP_REQUIRES_CANONICAL_ROLE_NAMES");
   }
 
@@ -65,15 +66,24 @@ async function main() {
       await client.query(`CREATE ROLE ${identifier(ownerRole)} NOLOGIN NOSUPERUSER BYPASSRLS NOINHERIT`);
     }
 
+    const readOnlyExists = await client.query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AS exists", [readOnlyRole]);
+    if (readOnlyExists.rows[0]?.exists) {
+      await client.query(`ALTER ROLE ${identifier(readOnlyRole)} LOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT`);
+    } else {
+      await client.query(`CREATE ROLE ${identifier(readOnlyRole)} LOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT`);
+    }
+
     const roles = await client.query<{ rolname: string; rolsuper: boolean; rolbypassrls: boolean; rolcanlogin: boolean; rolinherit: boolean }>(
       "SELECT rolname, rolsuper, rolbypassrls, rolcanlogin, rolinherit FROM pg_roles WHERE rolname = ANY($1::text[]) ORDER BY rolname",
-      [[appRole, ownerRole]],
+      [[appRole, ownerRole, readOnlyRole]],
     );
     const app = roles.rows.find((role) => role.rolname === appRole);
     const owner = roles.rows.find((role) => role.rolname === ownerRole);
+    const readOnly = roles.rows.find((role) => role.rolname === readOnlyRole);
     if (!app || app.rolsuper || app.rolbypassrls || !app.rolcanlogin || app.rolinherit) throw new Error("TENANT_APP_ROLE_CONFIGURATION_FAILED");
     if (!owner || owner.rolsuper || !owner.rolbypassrls || owner.rolcanlogin || owner.rolinherit) throw new Error("TENANT_PLATFORM_OWNER_ROLE_CONFIGURATION_FAILED");
-    console.log(JSON.stringify({ ok: true, appRole, platformOwnerRole: ownerRole, passwordProvisioned: false }));
+    if (!readOnly || readOnly.rolsuper || readOnly.rolbypassrls || !readOnly.rolcanlogin || readOnly.rolinherit) throw new Error("TENANT_READONLY_ROLE_CONFIGURATION_FAILED");
+    console.log(JSON.stringify({ ok: true, appRole, platformOwnerRole: ownerRole, readOnlyRole, passwordProvisioned: false }));
   } finally {
     client.release();
     await pool.end();

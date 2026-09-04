@@ -40,6 +40,14 @@ production verifier all pass.
    migration, provision two organizations and multiple users, and run:
    `TENANT_ISOLATION_TEST_DB=1 PLAYWRIGHT_ENFORCE_DISPOSABLE_DB=1 npm run
    test:tenant-rls`.
+   Remote certification additionally requires `NODE_ENV=test`,
+   `TENANT_ISOLATION_REMOTE_BRANCH=1`, an exact
+   `cert-stage3-<sha>` branch name, branch ID, direct endpoint host, database,
+   run ID and the SHA-256 fingerprint calculated by
+   `tenant-certification-target.mjs`. The guard rejects `main`, Vercel
+   Production/Preview, a mismatched endpoint and an app-role URL. The runtime
+   exact-role test uses the corresponding pooled host; migrations and
+   maintenance use only the direct administrative host.
 4. Run the complete static gates (`check:tenant-read-scope`,
    `check:tenant-write-scope`, route/action inventories, inventory/backfill
    checks), browser E2E, and the encrypted backup restore drill on a temporary

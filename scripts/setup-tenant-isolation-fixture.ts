@@ -1,47 +1,17 @@
-import { createHash, randomBytes, scryptSync } from "node:crypto";
+import { randomBytes, scryptSync } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 import type { Prisma } from "../src/generated/prisma/client";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { EXPECTED_TENANT_TRIGGERS } from "../src/lib/tenant-organization-foundation";
+import { assertDisposableCertificationTarget } from "./tenant-certification-target.mjs";
 
 const connectionString = process.env.DATABASE_URL?.trim();
-if (
-  process.env.NODE_ENV !== "test" ||
-  process.env.TENANT_ISOLATION_TEST_DB !== "1" ||
-  process.env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB !== "1"
-) {
-  throw new Error("Tenant isolation fixture requires NODE_ENV=test, TENANT_ISOLATION_TEST_DB=1 and PLAYWRIGHT_ENFORCE_DISPOSABLE_DB=1.");
-}
-if (process.env.VERCEL_ENV === "production" || process.env.VERCEL_ENV === "preview") {
-  throw new Error("Tenant isolation fixture refuses Vercel environments.");
-}
 if (!connectionString) throw new Error("DATABASE_URL is required.");
-
-const target = new URL(connectionString);
-const runId = process.env.TENANT_ISOLATION_RUN_ID?.trim();
-const expectedDatabase = process.env.TENANT_ISOLATION_DB_NAME?.trim();
-const configuredFingerprint = process.env.TENANT_ISOLATION_FINGERPRINT?.trim();
-const currentDatabase = decodeURIComponent(target.pathname.replace(/^\//, "").split("?")[0]);
-const canonicalHost = target.hostname.toLowerCase();
-if (!runId || !expectedDatabase || !configuredFingerprint) {
-  throw new Error("Tenant isolation fixture requires run ID, dedicated database name and fingerprint.");
-}
-if (
-  !/^policydesk_tenant_test_[A-Za-z0-9_]+$/.test(expectedDatabase) ||
-  currentDatabase !== expectedDatabase ||
-  ["postgres", "template0", "template1"].includes(currentDatabase.toLowerCase())
-) {
-  throw new Error("Tenant isolation fixture requires the exact dedicated database name.");
-}
-if (!["localhost", "127.0.0.1", "::1"].includes(canonicalHost)) {
-  throw new Error("Tenant isolation fixture requires a local disposable PostgreSQL host.");
-}
-const expectedFingerprint = createHash("sha256")
-  .update(`local-postgres:${runId}:${expectedDatabase}:${canonicalHost}`)
-  .digest("hex");
-if (configuredFingerprint !== expectedFingerprint) {
-  throw new Error("Tenant isolation fixture fingerprint does not match the dedicated target.");
-}
+const certificationTarget = assertDisposableCertificationTarget(connectionString);
+const runId = certificationTarget.runId;
+const expectedDatabase = certificationTarget.database;
+const configuredFingerprint = certificationTarget.fingerprint;
+const canonicalHost = certificationTarget.host;
 
 const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 const hash = (password: string) => {

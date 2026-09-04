@@ -2,6 +2,7 @@ import "dotenv/config";
 
 import { Pool } from "pg";
 import { PROTECTED_TENANT_TABLES } from "../src/lib/tenant-organization-foundation.ts";
+import { assertDisposableCertificationTarget, canonicalNeonHost } from "./tenant-certification-target.mjs";
 
 function requireDisposableEnv() {
   if (process.env.TENANT_ISOLATION_TEST_DB !== "1" || process.env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB !== "1") {
@@ -24,7 +25,16 @@ async function main() {
   if (!adminUrl || !runtimeUrl) throw new Error("DATABASE_ADMIN_URL and TENANT_RLS_RUNTIME_DATABASE_URL (or DATABASE_URL) are required.");
   const adminTarget = new URL(adminUrl);
   const runtimeTarget = new URL(runtimeUrl);
-  if (!["localhost", "127.0.0.1", "::1"].includes(runtimeTarget.hostname.toLowerCase())) throw new Error("RLS_RUNTIME_DATABASE_MUST_BE_LOCAL_DISPOSABLE");
+  const certificationTarget = assertDisposableCertificationTarget(adminUrl);
+  if (certificationTarget.mode === "local") {
+    if (!["localhost", "127.0.0.1", "::1"].includes(runtimeTarget.hostname.toLowerCase())) {
+      throw new Error("RLS_RUNTIME_DATABASE_MUST_MATCH_LOCAL_DISPOSABLE_TARGET");
+    }
+  } else {
+    if (!/-pooler(?=\.)/.test(runtimeTarget.hostname) || canonicalNeonHost(runtimeTarget.hostname) !== certificationTarget.host) {
+      throw new Error("RLS_RUNTIME_DATABASE_MUST_USE_CERTIFICATION_BRANCH_POOLER");
+    }
+  }
   if (connectionUser(runtimeUrl) !== appRole) throw new Error("RLS_RUNTIME_CONNECTION_MUST_USE_APP_ROLE");
   if (connectionUser(adminUrl) === appRole) throw new Error("RLS_ADMIN_CONNECTION_MUST_NOT_USE_APP_ROLE");
   if (adminTarget.pathname !== runtimeTarget.pathname) throw new Error("RLS_ADMIN_AND_RUNTIME_TARGET_MISMATCH");

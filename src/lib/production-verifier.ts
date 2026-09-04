@@ -389,6 +389,29 @@ async function verifyDatabaseRole(client: PoolClient, mode: ProductionTenantMode
     if (expected && row?.current_user !== expected) issues.push(issue("RUNTIME_ROLE_UNEXPECTED", "BLOCKED", `current_user no coincide con el rol esperado ${expected}.`));
     if (!expected && mode === "multi-org") issues.push(issue("RUNTIME_ROLE_NOT_DECLARED", "BLOCKED", usingReadOnlyVerifier ? "PRODUCTION_READONLY_ROLE es obligatorio cuando se usa PRODUCTION_READONLY_DATABASE_URL." : "TENANT_RLS_APP_ROLE es obligatorio en modo multi-org."));
     if (usingReadOnlyVerifier && !process.env.TENANT_RLS_APP_ROLE?.trim() && mode === "multi-org") issues.push(issue("RUNTIME_ROLE_NOT_DECLARED", "BLOCKED", "TENANT_RLS_APP_ROLE también es obligatorio para verificar los grants del runtime."));
+    let readOnlyUnexpectedPrivileges = 0;
+    let readOnlySecurityDefiners = 0;
+    if (usingReadOnlyVerifier && row) {
+      readOnlyUnexpectedPrivileges = await queryCount(client, `
+        SELECT count(*)::text AS count
+          FROM information_schema.role_table_grants
+         WHERE grantee = current_user AND privilege_type <> 'SELECT'
+      `);
+      if (readOnlyUnexpectedPrivileges > 0) {
+        issues.push(issue("READONLY_ROLE_CAN_WRITE", "BLOCKED", `El rol verifier tiene ${readOnlyUnexpectedPrivileges} privilegios distintos de SELECT.`));
+      }
+      readOnlySecurityDefiners = await queryCount(client, `
+        SELECT count(*)::text AS count
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public'
+           AND p.prosecdef
+           AND has_function_privilege(current_user, p.oid, 'EXECUTE')
+      `);
+      if (readOnlySecurityDefiners > 0) {
+        issues.push(issue("READONLY_ROLE_CAN_EXECUTE_SECURITY_DEFINER", "BLOCKED", `El rol verifier puede ejecutar ${readOnlySecurityDefiners} funciones SECURITY DEFINER.`));
+      }
+    }
     const owners = await queryCount(client, `SELECT count(*)::text AS count FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = ANY($1::text[]) AND pg_get_userbyid(c.relowner) = current_user`, [PROTECTED_TENANT_TABLES]);
     if (owners > 0) issues.push(issue("RUNTIME_ROLE_OWNS_PROTECTED_TABLE", "BLOCKED", "El rol runtime no puede ser dueño de tablas protegidas."));
     const securityDefiner = await client.query<{ owner: string | null; canLogin: boolean | null; bypassRls: boolean | null; config: string[] | null }>(`
@@ -497,6 +520,8 @@ async function verifyDatabaseRole(client: PoolClient, mode: ProductionTenantMode
       securityDefinerOwner: aggregateOwner?.owner ?? null,
       securityDefinerOwnerCanLogin: aggregateOwner?.canLogin ?? null,
       securityDefinerOwnerBypassRls: aggregateOwner?.bypassRls ?? null,
+      readOnlyUnexpectedPrivileges,
+      readOnlySecurityDefiners,
     };
   } catch (error) {
     issues.push(issue("RUNTIME_ROLE_CHECK_FAILED", "BLOCKED", `No se pudo verificar el rol runtime (${safeErrorCode(error)}).`));

@@ -2,6 +2,7 @@ import "dotenv/config";
 
 import { Pool } from "pg";
 import { PROTECTED_TENANT_TABLES, BOOTSTRAP_ORGANIZATION_ID } from "../src/lib/tenant-organization-foundation.ts";
+import { assertDisposableCertificationTarget } from "./tenant-certification-target.mjs";
 
 const ROLLBACK_LOCK = "policydesk-multi-org-rollback-v1";
 
@@ -19,7 +20,9 @@ function ident(value: string) {
 
 async function main() {
   if (process.env.ENABLE_TENANT_RLS_ROLLBACK !== "1") throw new Error("ENABLE_TENANT_RLS_ROLLBACK=1 es obligatorio.");
-  const pool = new Pool({ connectionString: directDatabaseUrl(), max: 1, application_name: "policydesk-multi-org-rollback" });
+  const databaseUrl = directDatabaseUrl();
+  if (process.env.TENANT_ISOLATION_TEST_DB === "1") assertDisposableCertificationTarget(databaseUrl);
+  const pool = new Pool({ connectionString: databaseUrl, max: 1, application_name: "policydesk-multi-org-rollback" });
   const client = await pool.connect();
   let lockHeld = false;
   try {
