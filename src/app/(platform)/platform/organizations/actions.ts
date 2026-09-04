@@ -38,7 +38,10 @@ export async function createOrganizationAction(input: {
 }): Promise<CreateOrganizationResult> {
   try {
     const actor = await requireSuperAdmin();
-    if (process.env.PLATFORM_ORG_PROVISIONING_ENABLED !== "1") {
+    // Stage 3 only exposes the isolated DEMO factory. Paid CUSTOMER onboarding
+    // remains a separate commercial workflow and cannot accidentally create a
+    // second production tenant during the cutover release.
+    if (process.env.PLATFORM_CUSTOMER_PROVISIONING_ENABLED !== "1") {
       return { ok: false, error: "La creación de organizaciones aún no está habilitada para este entorno." };
     }
 

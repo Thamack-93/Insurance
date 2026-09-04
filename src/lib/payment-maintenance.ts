@@ -2,7 +2,7 @@ import "server-only";
 
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
-import { getDb } from "@/lib/db";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { reconcileReceiptState } from "@/lib/receipt-reconciliation";
 import { logError } from "@/lib/logger";
 import { toNumber } from "@/lib/money";
@@ -100,7 +100,12 @@ export async function getLatestPaymentMaintenanceRun(
   organizationId: string,
   client?: DbClient,
 ): Promise<MaintenanceRunSnapshot | null> {
-  const db = client ?? getDb();
+  if (!client) {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => getLatestPaymentMaintenanceRun(type, organizationId, tx));
+  }
+  const db = client;
   return db.maintenanceRun.findFirst({
     where: { type, organizationId },
     orderBy: { startedAt: "desc" },
@@ -113,7 +118,12 @@ export async function runPaymentReconciliationAudit(input: {
   client?: DbClient;
   now?: Date;
 }): Promise<{ run: MaintenanceRunSnapshot; summary: PaymentAuditSummary }> {
-  const db = input.client ?? getDb();
+  if (!input.client) {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== input.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => runPaymentReconciliationAudit({ ...input, client: tx }));
+  }
+  const db = input.client;
   const now = input.now ?? new Date();
 
   const run = await db.maintenanceRun.create({

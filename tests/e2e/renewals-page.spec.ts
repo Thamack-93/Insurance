@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { authenticatePageAsAdmin, getTestDb, cleanupRecentRenewalWorkItems } from "../helpers/db";
+
+const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
 import { addDays, addYears } from "date-fns";
 
 test.describe("Renewals Page (/renewals)", () => {
@@ -41,6 +43,7 @@ test.describe("Renewals Page (/renewals)", () => {
     // Create policy with urgent renewal (today)
     const policy = await db.policy.create({
       data: {
+        organizationId: TEST_ORGANIZATION_ID,
         policyNumber: `REN-E2E-${Date.now()}`,
         clientId: client.id,
         insurerId: insurer.id,
@@ -75,6 +78,7 @@ test.describe("Renewals Page (/renewals)", () => {
 
     const policy = await db.policy.create({
       data: {
+        organizationId: TEST_ORGANIZATION_ID,
         policyNumber: `REN-E2E-${Date.now()}`,
         clientId: client.id,
         insurerId: insurer.id,
@@ -115,6 +119,7 @@ test.describe("Renewals Page (/renewals)", () => {
     const policyNumber = `REN-E2E-${Date.now()}`;
     const policy = await db.policy.create({
       data: {
+        organizationId: TEST_ORGANIZATION_ID,
         policyNumber,
         clientId: client.id,
         insurerId: insurer.id,

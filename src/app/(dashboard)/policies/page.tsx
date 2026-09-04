@@ -11,7 +11,6 @@ import { EmptyState } from "@/components/empty-states/empty-state";
 import { Pagination } from "@/components/lists/pagination";
 import { TableToolbar } from "@/components/tables/table-toolbar";
 import { SortableTableHead } from "@/components/tables/sortable-table-head";
-import { getDb } from "@/lib/db";
 import { businessAddDays } from "@/lib/business-dates";
 import { daysUntil, formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
@@ -22,6 +21,7 @@ import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 import { buildTableHref, readAllowedTableParam, readTablePage, readTableSort } from "@/lib/table-query";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { policyNavigation } from "@/lib/navigation";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 
 const PAGE_SIZE = 25;
 
@@ -41,8 +41,8 @@ export default async function PoliciesPage({
   const typeFilter = readAllowedTableParam(params, "type", policyTypeOptions.map((option) => option.value));
   const { sortKey, direction } = readTableSort(params);
 
-  const db = getDb();
   const scope = await requireOrganizationPortfolioReadScope();
+  return withTenantOrganization(scope.organizationId, async (db) => {
   const now = today();
   const in60 = businessAddDays(now, 60);
   const portfolioWhere = policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
@@ -55,11 +55,13 @@ export default async function PoliciesPage({
     },
     scope.portfolioOwnerId,
     scope.organizationId,
+    db,
   );
   const renewalRiskPoliciesPromise = loadEligibleRenewalPolicies(
     { endDate: { lt: now } },
     scope.portfolioOwnerId,
     scope.organizationId,
+    db,
   );
 
   const where: Prisma.PolicyWhereInput = query
@@ -381,4 +383,5 @@ export default async function PoliciesPage({
       </div>
     </div>
   );
+  });
 }

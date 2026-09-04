@@ -1,3 +1,5 @@
+import { createHash, randomUUID } from "node:crypto";
+
 const encoder = new TextEncoder();
 
 export type UserRoleSession = "ADMIN" | "AGENT";
@@ -15,10 +17,14 @@ export type SessionPayload = {
   sessionVersion: number;
   /** Signed routing hint; the database remains the source of truth. */
   mustChangePassword?: boolean;
+  /** Database session id; the signed cookie is only a presentation token. */
+  sessionId?: string;
   exp: number;
 };
 
-const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+export const SESSION_IDLE_TTL_SECONDS = 60 * 60 * 12;
+export const SESSION_ABSOLUTE_TTL_SECONDS = 60 * 60 * 24 * 7;
+const SESSION_TTL_SECONDS = SESSION_ABSOLUTE_TTL_SECONDS;
 
 const DEV_SECRET = "policydesk-dev-secret-change-in-production-please-0123456789";
 
@@ -131,3 +137,11 @@ export async function verifySessionToken(token: string | undefined | null): Prom
 
 export const SESSION_COOKIE_NAME = "pd_session";
 export const SESSION_TTL = SESSION_TTL_SECONDS;
+
+export function hashSessionToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+export function newSessionId() {
+  return randomUUID();
+}

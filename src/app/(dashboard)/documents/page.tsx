@@ -10,12 +10,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { EmptyState } from "@/components/empty-states/empty-state";
 import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
-import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { UploadForm } from "@/components/documents/upload-form";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
 import { documentOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 
 function associationLabel(document: {
   policy?: { policyNumber: string } | null;
@@ -40,7 +40,7 @@ export default async function DocumentsPage({
   searchParams?: Promise<{ q?: string; page?: string }>;
 }) {
   const scope = await requireOrganizationPortfolioReadScope();
-  const db = getDb();
+  return withTenantOrganization(scope.organizationId, async (db) => {
   const documentsEnabled = areDocumentFilesEnabled();
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
@@ -293,4 +293,5 @@ export default async function DocumentsPage({
       </div>
     </div>
   );
+  });
 }

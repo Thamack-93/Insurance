@@ -9,10 +9,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { EmptyState } from "@/components/empty-states/empty-state";
 import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
-import { getDb } from "@/lib/db";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import { claimOperationalWhere, policyOperationalWhere } from "@/lib/portfolio-access";
+import { withTenantTransaction } from "@/lib/organization-context";
 
 const PAGE_SIZE = 25;
 
@@ -30,8 +30,7 @@ export default async function InsurersPage({
   const policyScope = policyOperationalWhere(undefined, context.organizationId);
   const claimScope = claimOperationalWhere(undefined, context.organizationId);
 
-  const db = getDb();
-
+  return withTenantTransaction(context, async (db) => {
   const where: Prisma.InsurerWhereInput = {
     organizationId: context.organizationId,
     ...(status ? { status } : {}),
@@ -256,4 +255,5 @@ export default async function InsurersPage({
       </div>
     </div>
   );
+  });
 }

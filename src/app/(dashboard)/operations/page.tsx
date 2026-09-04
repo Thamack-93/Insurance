@@ -8,7 +8,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Pagination } from "@/components/lists/pagination";
-import { getDb } from "@/lib/db";
 import { businessAddDays, businessStartOfDay, businessToday, formatBusinessDateRelative } from "@/lib/business-dates";
 import { formatDate } from "@/lib/dates";
 import { policyTypeLabel } from "@/lib/status";
@@ -28,6 +27,7 @@ import { PRIORITIES, WORK_ITEM_TYPES } from "@/lib/domain-values";
 import { workItemTypeLabel } from "@/lib/ui-labels";
 import { appendReturnTo } from "@/lib/return-to";
 import { buildCanonicalHref } from "@/lib/navigation-redirects";
+import { withTenantTransaction } from "@/lib/organization-context";
 
 type OperationsView = "all" | "pending" | "renewals" | "renewal-board" | "claims";
 
@@ -153,7 +153,6 @@ export default async function OperationsPage({
   const priority = view === "pending" ? readAllowedTableParam(params, "priority", PRIORITIES) : undefined;
   const workItemType = view === "pending" ? readAllowedTableParam(params, "workItemType", WORK_ITEM_TYPES) : undefined;
   const scope = await requireOrganizationPortfolioReadScope();
-  const db = getDb();
   const today = businessToday();
   const nextSeven = businessAddDays(today, 7);
   const nextThirty = businessAddDays(today, 30);
@@ -181,7 +180,7 @@ export default async function OperationsPage({
       }] : []),
     ],
   };
-  const [workItems, renewalPolicies, claims, claimTotal] = await Promise.all([
+  const [workItems, renewalPolicies, claimData] = await Promise.all([
     getWorkItems({
       organizationId: scope.organizationId,
       statuses: OPEN_WORK_ITEM_STATUSES,
@@ -201,15 +200,18 @@ export default async function OperationsPage({
         ],
       } : {}),
     }, scope.portfolioOwnerId, scope.organizationId),
-    db.claim.findMany({
-      where: claimWhere,
-      select: { id: true, folio: true, claimType: true, status: true, incidentDate: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } },
-      orderBy: [{ reportedDate: "desc" }, { id: "asc" }],
-      take: view === "claims" ? 25 : 50,
-      skip: view === "claims" ? (page - 1) * 25 : 0,
-    }),
-    db.claim.count({ where: claimWhere }),
+    withTenantTransaction(scope.context, async (db) => ({
+      claims: await db.claim.findMany({
+        where: claimWhere,
+        select: { id: true, folio: true, claimType: true, status: true, incidentDate: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } },
+        orderBy: [{ reportedDate: "desc" }, { id: "asc" }],
+        take: view === "claims" ? 25 : 50,
+        skip: view === "claims" ? (page - 1) * 25 : 0,
+      }),
+      claimTotal: await db.claim.count({ where: claimWhere }),
+    })),
   ]);
+  const { claims, claimTotal } = claimData;
 
   const overdue = workItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate) < today);
   const dueToday = workItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate).getTime() === today.getTime());

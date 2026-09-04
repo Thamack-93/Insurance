@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { AuthError } from "@/lib/auth";
-import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody, securityFingerprint } from "@/lib/request-guards";
@@ -9,7 +8,7 @@ import { rateLimitResponse, guardErrorResponse } from "@/lib/api-security";
 import { parseDateInput } from "@/lib/form-utils";
 import { businessToday } from "@/lib/business-dates";
 import { assertClientOrganizationAccess, assertPolicyOrganizationAccess } from "@/lib/portfolio-access";
-import { assertOrganizationContextInTransaction, requireOrganizationContext } from "@/lib/organization-context";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { inferClientType, type PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
 import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
 import { revalidatePaths } from "@/lib/mutation-utils";
@@ -161,8 +160,6 @@ export async function POST(request: NextRequest) {
     if (draft.clientBirthDate && (!parsedBirthDate || Number.isNaN(parsedBirthDate.getTime()) || parsedBirthDate > businessToday())) {
       return NextResponse.json({ error: "La fecha de nacimiento no es válida." }, { status: 400 });
     }
-    const db = getDb();
-
     try {
       await assertClientOrganizationAccess(payload.clientId, context);
       await assertPolicyOrganizationAccess(payload.sourcePolicyId, context);
@@ -182,16 +179,16 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
-    const insurer = await db.insurer.findFirst({
+    const insurer = await withTenantTransaction(context, (tx) => tx.insurer.findFirst({
       where: { id: payload.insurerId, organizationId: context.organizationId },
       select: { id: true, name: true },
-    });
+    }));
 
     if (!insurer) {
       return NextResponse.json({ error: "La aseguradora seleccionada ya no existe." }, { status: 404 });
     }
 
-    const sourcePolicy = await db.policy.findFirst({
+    const sourcePolicy = await withTenantTransaction(context, (tx) => tx.policy.findFirst({
       where: { id: payload.sourcePolicyId, organizationId: context.organizationId },
       select: {
         id: true,
@@ -202,7 +199,7 @@ export async function POST(request: NextRequest) {
         insurerId: true,
         policyType: true,
       },
-    });
+    }));
 
     if (!sourcePolicy) {
       return NextResponse.json({ error: "La póliza origen ya no existe." }, { status: 404 });
@@ -225,8 +222,7 @@ export async function POST(request: NextRequest) {
     const targetStartDate = parseDateInput(draft.startDate);
     const targetEndDate = parseDateInput(draft.endDate);
 
-    const result = await db.$transaction(async (tx) => {
-      await assertOrganizationContextInTransaction(tx, context);
+    const result = await withTenantTransaction(context, async (tx) => {
       const [currentSource, currentInsurer] = await Promise.all([
         tx.policy.findFirst({ where: { id: sourcePolicy.id, organizationId: context.organizationId }, select: { id: true, clientId: true, insurerId: true } }),
         tx.insurer.findFirst({ where: { id: insurer.id, organizationId: context.organizationId }, select: { id: true } }),
@@ -316,8 +312,9 @@ export async function POST(request: NextRequest) {
             data: policyData,
           })
         : await tx.policy.create({
-            data: {
+          data: {
               ...policyData,
+              organizationId: context.organizationId,
               createdById: context.userId,
             },
           });

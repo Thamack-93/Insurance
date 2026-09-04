@@ -1,5 +1,4 @@
 import type { Prisma } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
 import { businessAddDays } from "@/lib/business-dates";
 import { formatCurrency } from "@/lib/money";
@@ -15,6 +14,7 @@ import {
   receiptOperationalWhere,
   workItemOperationalWhere,
 } from "@/lib/portfolio-access";
+import { requireOrganizationContext, withTenantTransaction, type TenantDb } from "@/lib/organization-context";
 
 export type RiskFinding = {
   alertType: string;
@@ -28,8 +28,13 @@ export type RiskFinding = {
 
 const TAKE_LIMIT = 25;
 
-export async function detectRisks(portfolioOwnerId: string | undefined, organizationId: string): Promise<RiskFinding[]> {
-  const db = getDb();
+export async function detectRisks(portfolioOwnerId: string | undefined, organizationId: string, client?: TenantDb): Promise<RiskFinding[]> {
+  if (!client) {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => detectRisks(portfolioOwnerId, organizationId, tx));
+  }
+  const db = client;
   const now = today();
   const in60 = businessAddDays(now, 60);
   const olderThan15 = businessAddDays(now, -15);
@@ -150,6 +155,7 @@ export async function detectRisks(portfolioOwnerId: string | undefined, organiza
       },
       portfolioOwnerId,
       organizationId,
+      db,
     ).then((policies) => policies.slice(0, TAKE_LIMIT)),
     // Duplicate detection now happens in the database via groupBy.
     db.policy.groupBy({

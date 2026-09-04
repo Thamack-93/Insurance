@@ -2,7 +2,9 @@ import "dotenv/config";
 
 import { verifyProductionState } from "../src/lib/production-verifier.ts";
 
-const connectionString = process.env.DATABASE_URL_UNPOOLED?.trim() || process.env.DATABASE_URL?.trim();
+const expectedTenantMode = process.env.PRODUCTION_EXPECTED_TENANT_MODE?.trim() || "single-org";
+const connectionString = process.env.PRODUCTION_READONLY_DATABASE_URL?.trim() ||
+  (expectedTenantMode === "single-org" ? process.env.DATABASE_URL?.trim() : "");
 const json = process.argv.includes("--json");
 
 function printHuman(report: Awaited<ReturnType<typeof verifyProductionState>>) {
@@ -22,7 +24,7 @@ async function main() {
       generatedAt: new Date().toISOString(),
       tenantMode: process.env.PRODUCTION_EXPECTED_TENANT_MODE ?? "single-org",
       sections: {},
-      issues: [{ code: "DATABASE_URL_REQUIRED", severity: "BLOCKED", message: "DATABASE_URL_UNPOOLED o DATABASE_URL es obligatorio." }],
+      issues: [{ code: "DATABASE_URL_REQUIRED", severity: "BLOCKED", message: expectedTenantMode === "multi-org" ? "PRODUCTION_READONLY_DATABASE_URL es obligatorio en modo multi-org." : "PRODUCTION_READONLY_DATABASE_URL o DATABASE_URL es obligatorio." }],
     };
     if (json) console.log(JSON.stringify(report, null, 2));
     else printHuman(report as Awaited<ReturnType<typeof verifyProductionState>>);

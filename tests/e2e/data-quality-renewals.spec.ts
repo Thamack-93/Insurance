@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 import { addDays } from "date-fns";
 import { authenticatePageAsAdmin, getTestDb } from "../helpers/db";
 
+const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
+
 type SeededRenewalCase = {
   sourcePolicyId: string;
   targetPolicyId?: string;
@@ -68,6 +70,7 @@ test.describe("Data quality renewals tab", () => {
     const nonce = Date.now().toString(36);
     const sourcePolicy = await db.policy.create({
       data: {
+        organizationId: TEST_ORGANIZATION_ID,
         policyNumber: `REN-DQ-${nonce}-SRC`,
         clientId: client!.id,
         insurerId: insurer!.id,
@@ -85,6 +88,7 @@ test.describe("Data quality renewals tab", () => {
     let targetPolicyId: string | undefined;
     const sourceReceipt = await db.receipt.create({
       data: {
+        organizationId: TEST_ORGANIZATION_ID,
         receiptNumber: `REN-DQ-${nonce}-REC`,
         policyId: sourcePolicy.id,
         clientId: client!.id,
@@ -101,6 +105,7 @@ test.describe("Data quality renewals tab", () => {
     receiptIds.add(sourceReceipt.id);
     await db.payment.create({
       data: {
+        organizationId: TEST_ORGANIZATION_ID,
         receiptId: sourceReceipt.id,
         policyId: sourcePolicy.id,
         clientId: client!.id,
@@ -117,6 +122,7 @@ test.describe("Data quality renewals tab", () => {
     if (options?.withTargetPolicy) {
       const targetPolicy = await db.policy.create({
         data: {
+          organizationId: TEST_ORGANIZATION_ID,
           policyNumber: `REN-DQ-${nonce}-DST`,
           clientId: client!.id,
           insurerId: insurer!.id,
@@ -135,6 +141,7 @@ test.describe("Data quality renewals tab", () => {
 
     const suggestion = await db.policyRenewalSuggestion.create({
       data: {
+        organizationId: TEST_ORGANIZATION_ID,
         sourcePolicyId: sourcePolicy.id,
         targetPolicyId: targetPolicyId ?? null,
         status: "PENDING",
@@ -146,6 +153,7 @@ test.describe("Data quality renewals tab", () => {
     const workItemId = `wi-${nonce}`;
     await db.workItem.create({
       data: {
+        organizationId: TEST_ORGANIZATION_ID,
         id: workItemId,
         sourceType: "Task",
         sourceId: workItemId,
@@ -225,6 +233,7 @@ test.describe("Data quality renewals tab", () => {
     const db0 = getTestDb();
     const followUp = await db0.workItem.create({
       data: {
+        organizationId: TEST_ORGANIZATION_ID,
         sourceType: "Renewal",
         sourceId: `policy:${seeded.sourcePolicyId}:renewal-followup`,
         workItemType: "TASK",

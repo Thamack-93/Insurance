@@ -17,8 +17,7 @@ import { Pagination } from "@/components/lists/pagination";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { Button } from "@/components/ui/button";
 import { getAllActivity } from "@/lib/activity-log";
-import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
-import { getDb } from "@/lib/db";
+import { requireOrganizationRoleOrRedirect, withTenantTransaction } from "@/lib/organization-context";
 import { cn } from "@/lib/utils";
 import type { Prisma } from "@/generated/prisma/client";
 
@@ -155,8 +154,6 @@ export default async function ActivityPage({
   const from = parseDate(fromRaw);
   const to = parseDate(toRaw, true);
   const baseWhere = { organizationId: context.organizationId, ...buildBaseWhere({ entityType, entityId, from, to }) };
-  const db = getDb();
-
   const filter = {
     entityType,
     entityId,
@@ -166,8 +163,9 @@ export default async function ActivityPage({
     to,
   };
 
+  return withTenantTransaction(context, async (db) => {
   const [activity, total, summary] = await Promise.all([
-    getAllActivity({ organizationId: context.organizationId, filter, page, pageSize: PAGE_SIZE }),
+    getAllActivity({ organizationId: context.organizationId, filter, page, pageSize: PAGE_SIZE, client: db }),
     db.activityLog.count({ where: baseWhere }),
     Promise.all(
       ACTIVITY_VIEWS.map(async (view) => ({
@@ -339,4 +337,5 @@ export default async function ActivityPage({
       </div>
     </div>
   );
+  });
 }

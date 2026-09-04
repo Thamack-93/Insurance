@@ -42,7 +42,7 @@ function normalizePostgresConnectionString(connectionString: string) {
 }
 
 const databaseUrl =
-  process.env.DATABASE_URL_UNPOOLED?.trim() || process.env.DATABASE_URL?.trim();
+  process.env.DATABASE_ADMIN_URL?.trim() || process.env.DATABASE_URL_UNPOOLED?.trim() || process.env.DATABASE_URL?.trim();
 const generatedClientFallbackUrl =
   "postgresql://postgres:postgres@127.0.0.1:5432/policydesk?sslmode=disable";
 const resolvedDatabaseUrl = databaseUrl ?? generatedClientFallbackUrl;
@@ -51,7 +51,7 @@ const isPostgresUrl = /^postgres(ql)?:\/\//i.test(resolvedDatabaseUrl);
 
 if (!isPostgresUrl) {
   throw new Error(
-    "DATABASE_URL_UNPOOLED or DATABASE_URL must point to Postgres for Prisma client generation. SQLite fallback is no longer supported in the Prisma runtime.",
+    "DATABASE_ADMIN_URL, DATABASE_URL_UNPOOLED or DATABASE_URL must point to Postgres for Prisma client generation. SQLite fallback is no longer supported in the Prisma runtime.",
   );
 }
 

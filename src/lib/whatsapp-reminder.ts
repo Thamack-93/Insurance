@@ -2,6 +2,7 @@ import { formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { daysBetweenBusinessDates } from "@/lib/business-dates";
 import { normalizeMexicanPhone } from "@/lib/phone";
+import { isSyntheticOutboundPhone } from "@/lib/outbound-contact-guard";
 
 export const WHATSAPP_RECEIPT_TEMPLATE = "receipt_due_v1" as const;
 
@@ -28,6 +29,7 @@ export function selectWhatsAppPhone({
   ];
 
   for (const [source, value] of candidates) {
+    if (isSyntheticOutboundPhone(value)) continue;
     const normalized = normalizeMexicanPhone(value);
     if (normalized) return { normalized, source };
   }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { AuthError } from "@/lib/auth";
 import { requireOrganizationContext } from "@/lib/organization-context";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody } from "@/lib/request-guards";
 import { rateLimitResponse } from "@/lib/api-security";
 import { buildPolicyPdfCapturePreviewFromDraft } from "@/lib/policy-pdf-capture-preview";
@@ -110,6 +111,8 @@ const correctionSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const context = await requireOrganizationContext();
+    const noraCapability = await resolveOrganizationCapability(context.organizationId, "NORA");
+    if (!noraCapability.enabled) return NextResponse.json({ error: "Nora no está habilitada para esta organización." }, { status: 403 });
     try {
       assertSameOrigin(request, "policy capture correction");
     } catch {

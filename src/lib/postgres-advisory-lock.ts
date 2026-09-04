@@ -2,6 +2,7 @@ import "server-only";
 
 import { Pool, type PoolClient } from "pg";
 import { logError } from "@/lib/logger";
+import { getDirectDatabaseUrl } from "@/lib/db";
 
 export type PostgresAdvisoryLock = {
   acquired: boolean;
@@ -10,9 +11,12 @@ export type PostgresAdvisoryLock = {
 };
 
 function getPostgresConnectionString() {
-  const connectionString =
-    process.env.DATABASE_URL_UNPOOLED?.trim() || process.env.DATABASE_URL?.trim() || "";
-  return /^postgres(ql)?:\/\//i.test(connectionString) ? connectionString : null;
+  try {
+    const connectionString = getDirectDatabaseUrl();
+    return /^postgres(ql)?:\/\//i.test(connectionString) ? connectionString : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function acquirePostgresAdvisoryLock(key: string): Promise<PostgresAdvisoryLock> {

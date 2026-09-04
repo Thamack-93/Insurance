@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { AuthError } from "@/lib/auth";
+import { requireOrganizationContext } from "@/lib/organization-context";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 import { toCsv, toWorkbook, workbookToBuffer } from "@/lib/export";
 import { EXPORT_DATASETS, isExportDatasetKey } from "@/lib/export-datasets";
 import { logError } from "@/lib/logger";
@@ -49,6 +51,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   try {
+    const context = await requireOrganizationContext();
+    const capability = await resolveOrganizationCapability(context.organizationId, "EXPORTS");
+    if (!capability.enabled) return NextResponse.json({ error: "Las exportaciones no están habilitadas para esta organización." }, { status: 403 });
     // `load` resolves the portfolio scope itself, so the export can never
     // return rows the requesting user cannot already see on screen.
     const result = await EXPORT_DATASETS[dataset].load(

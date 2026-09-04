@@ -16,7 +16,7 @@ function identifier(value: string) {
 }
 
 function connectionString() {
-  const value = process.env.DATABASE_URL_UNPOOLED?.trim() || process.env.DATABASE_URL?.trim();
+  const value = process.env.DATABASE_ADMIN_URL?.trim();
   if (!value) throw new Error("POLICYDESK_MULTI_ORG_DATABASE_REQUIRED");
   return value;
 }
@@ -26,14 +26,14 @@ async function count(client: PoolClient, sql: string, values: unknown[] = []) {
   return Number(result.rows[0]?.count ?? 0);
 }
 
-export async function auditMultiOrganizationState(client: PoolClient): Promise<AuditResult> {
+export async function auditMultiOrganizationState(client: PoolClient, options: { requireTwoOrganizations?: boolean } = {}): Promise<AuditResult> {
   const issues: string[] = [];
   const summary: Record<string, number | string | boolean> = {};
   const organizations = await client.query<{ id: string; kind: string; status: string }>(`SELECT "id","kind","status" FROM "Organization" ORDER BY "id"`);
   summary.organizationCount = organizations.rowCount ?? 0;
-  if ((organizations.rowCount ?? 0) < 2) issues.push("MULTI_ORG_REQUIRES_AT_LEAST_TWO_ORGANIZATIONS");
+  if ((organizations.rowCount ?? 0) < (options.requireTwoOrganizations === false ? 1 : 2)) issues.push("MULTI_ORG_REQUIRES_AT_LEAST_TWO_ORGANIZATIONS");
   if (organizations.rows.some(({ kind }) => !["LEGACY", "CUSTOMER", "DEMO"].includes(kind))) issues.push("ORGANIZATION_KIND_INVALID");
-  if (organizations.rows.some(({ status }) => !["ACTIVE", "SUSPENDED", "RESTORING"].includes(status))) issues.push("ORGANIZATION_STATUS_INVALID");
+  if (organizations.rows.some(({ status }) => !["ACTIVE", "SUSPENDED", "RESTORING", "PROVISIONING", "RESETTING"].includes(status))) issues.push("ORGANIZATION_STATUS_INVALID");
 
   const barrierNames = [
     "Organization_transition_singleton_idx",

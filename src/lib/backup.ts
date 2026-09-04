@@ -21,6 +21,7 @@ import {
   type BackupManifest,
 } from "@/lib/backup-logic";
 import { PROTECTED_TENANT_TABLES } from "@/lib/tenant-organization-foundation";
+import { getDirectDatabaseUrl } from "@/lib/db";
 
 const BACKUP_PREFIX = "database-backups/";
 const TENANT_BACKUP_PREFIX = "organization-backups/";
@@ -140,14 +141,16 @@ export function getBackupPreflightStatus(): BackupPreflightStatus {
     ),
   );
 
-  const databaseUrl = process.env.DATABASE_URL?.trim();
+  const isProduction = process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
+  const databaseUrl = process.env.DATABASE_ADMIN_URL?.trim() ||
+    (!isProduction ? (process.env.DATABASE_URL_UNPOOLED?.trim() || process.env.DATABASE_URL?.trim()) : "");
   checks.push(
     buildBackupPreflightCheck(
       "database",
       "Postgres",
       databaseUrl && /^postgres(ql)?:\/\//i.test(databaseUrl)
-        ? "DATABASE_URL apunta a Postgres."
-        : "DATABASE_URL debe apuntar a Postgres hosted.",
+        ? (process.env.DATABASE_ADMIN_URL?.trim() ? "DATABASE_ADMIN_URL apunta a Postgres directo." : "Postgres directo configurado para un entorno no productivo.")
+        : (isProduction ? "DATABASE_ADMIN_URL debe apuntar a un Postgres directo en producción." : "DATABASE_ADMIN_URL o DATABASE_URL debe apuntar a Postgres."),
       Boolean(databaseUrl && /^postgres(ql)?:\/\//i.test(databaseUrl)),
     ),
   );
@@ -318,7 +321,7 @@ type SnapshotScope = {
 };
 
 async function* exportPostgresSnapshot(createdAt: Date, stats: ExportStats, scope: SnapshotScope = {}) {
-  const connectionString = requireEnvironment("DATABASE_URL");
+  const connectionString = getDirectDatabaseUrl();
   if (!/^postgres(ql)?:\/\//i.test(connectionString)) {
     throw new Error("DATABASE_URL must point to Postgres for database backups.");
   }
@@ -359,7 +362,7 @@ async function* exportPostgresSnapshot(createdAt: Date, stats: ExportStats, scop
       const orderBy = table.primaryKey.length
         ? table.primaryKey.map(quoteIdentifier).join(", ")
         : "ctid";
-      const where = scope.organizationId ? organizationSnapshotWhere(table, scope.organizationId) : "";
+      const where = scope.organizationId ? organizationSnapshotWhere(table, scope.organizationId) : platformSnapshotWhere(table);
       await client.query(
         `DECLARE backup_rows NO SCROLL CURSOR FOR SELECT * FROM ${tableReference(table)}${where} ORDER BY ${orderBy}`,
       );
@@ -415,6 +418,28 @@ function organizationSnapshotWhere(table: Pick<TableDescription, "name">, organi
     return ` WHERE "id" IN (SELECT "userId" FROM "OrganizationMembership" WHERE "organizationId" = '${escaped}') AND "platformRole" = 'NONE'`;
   }
   return ` WHERE "organizationId" = '${escaped}'`;
+}
+
+function platformSnapshotWhere(table: Pick<TableDescription, "name">) {
+  const name = table.name;
+  if (name === "Organization") return ` WHERE "kind" <> 'DEMO'`;
+  if (name === "OrganizationMembership") return ` WHERE "organizationId" IN (SELECT "id" FROM "Organization" WHERE "kind" <> 'DEMO')`;
+  if (name === "User") return ` WHERE "id" IN (SELECT "userId" FROM "OrganizationMembership" WHERE "organizationId" IN (SELECT "id" FROM "Organization" WHERE "kind" <> 'DEMO')) OR "platformRole" = 'SUPERADMIN' OR "id" = 'system-user-0000'`;
+  if (name === "Session" || name === "UserPreference" || name === "NotificationChannel") return ` WHERE "userId" IN (SELECT "userId" FROM "OrganizationMembership" WHERE "organizationId" IN (SELECT "id" FROM "Organization" WHERE "kind" <> 'DEMO')) OR "userId" IN (SELECT "id" FROM "User" WHERE "platformRole" = 'SUPERADMIN')`;
+  if (name === "BackupArtifact") return ` WHERE "organizationId" IS NULL OR "organizationId" IN (SELECT "id" FROM "Organization" WHERE "kind" <> 'DEMO')`;
+  if (name === "OrganizationRestoreRun") return ` WHERE "organizationId" IN (SELECT "id" FROM "Organization" WHERE "kind" <> 'DEMO')`;
+  if (name === "PlatformAuditLog") {
+    // Platform audit evidence is retained, but a DEMO tenant must not leak
+    // into a logical platform backup through either side of the audit event.
+    // Keep global/operator events (NULL actor/target) while excluding any
+    // event attributed to a DEMO member or organization.
+    return ` WHERE ("targetOrganizationId" IS NULL OR "targetOrganizationId" IN (SELECT "id" FROM "Organization" WHERE "kind" <> 'DEMO'))
+      AND ("actorUserId" IS NULL OR "actorUserId" NOT IN (SELECT "userId" FROM "OrganizationMembership" WHERE "organizationId" IN (SELECT "id" FROM "Organization" WHERE "kind" = 'DEMO')))
+      AND ("targetUserId" IS NULL OR "targetUserId" NOT IN (SELECT "userId" FROM "OrganizationMembership" WHERE "organizationId" IN (SELECT "id" FROM "Organization" WHERE "kind" = 'DEMO')))`;
+  }
+  if (name === "OrganizationSubscription" || name === "BillingCharge" || name === "SecurityEventAggregate" || name === "OrganizationCapability" || name === "OrganizationSetting" || name === "DemoOrganizationState" || name === "DemoUploadArtifact") return ` WHERE "organizationId" IN (SELECT "id" FROM "Organization" WHERE "kind" <> 'DEMO')`;
+  if (PROTECTED_TENANT_TABLES.includes(name as (typeof PROTECTED_TENANT_TABLES)[number])) return ` WHERE "organizationId" IN (SELECT "id" FROM "Organization" WHERE "kind" <> 'DEMO')`;
+  return "";
 }
 
 function compactTimestamp(date: Date) {
@@ -623,6 +648,7 @@ export async function createDatabaseBackup(
     throw new Error(formatBackupPreflightError(preflight));
   }
   const { key, keyVersion } = getEncryptionConfiguration();
+  const demoExclusion = await getDemoExclusionStats();
   const iv = randomBytes(12);
   const target = options.target ?? buildManualPlatformBackupTarget(now, options.emergency);
   const filename = target.filename;
@@ -670,6 +696,7 @@ export async function createDatabaseBackup(
     compression: "gzip",
     tables: stats.tables,
     totals: { tables: stats.tables.length, rows: stats.totalRows },
+    demoExclusion,
   });
   try {
     await put(`${pathname}${MANIFEST_SUFFIX}`, canonicalJson(manifest), {
@@ -698,12 +725,29 @@ export async function createDatabaseBackup(
   };
 }
 
+async function getDemoExclusionStats() {
+  const pool = new Pool({ connectionString: getDirectDatabaseUrl(), max: 1, application_name: "policydesk-backup-demo-exclusion" });
+  try {
+    const organizations = await pool.query<{ count: string }>(`SELECT count(*)::text AS count FROM "Organization" WHERE "kind" = 'DEMO'`);
+    let protectedRowsExcluded = 0;
+    for (const table of PROTECTED_TENANT_TABLES) {
+      const result = await pool.query<{ count: string }>(`SELECT count(*)::text AS count FROM "${table}" WHERE "organizationId" IN (SELECT "id" FROM "Organization" WHERE "kind" = 'DEMO')`);
+      protectedRowsExcluded += Number(result.rows[0]?.count ?? 0);
+    }
+    return { policy: "EXCLUDE_DEMO" as const, organizationCount: Number(organizations.rows[0]?.count ?? 0), protectedRowsExcluded };
+  } finally {
+    await pool.end().catch(() => undefined);
+  }
+}
+
 export const backupDatabase = createDatabaseBackup;
 
 const TENANT_EXPORT_TABLES = new Set<string>([
   "Organization",
   "User",
   "OrganizationMembership",
+  "OrganizationCapability",
+  "OrganizationSetting",
   ...PROTECTED_TENANT_TABLES,
   "SecurityEventAggregate",
   "OrganizationSubscription",
@@ -711,7 +755,7 @@ const TENANT_EXPORT_TABLES = new Set<string>([
 ]);
 
 async function getOrganizationBackupMetadata(organizationId: string) {
-  const connectionString = requireEnvironment("DATABASE_URL");
+  const connectionString = getDirectDatabaseUrl();
   const pool = new Pool({ connectionString, max: 1, application_name: "policydesk-organization-backup-metadata" });
   try {
     const result = await pool.query<{
@@ -719,9 +763,11 @@ async function getOrganizationBackupMetadata(organizationId: string) {
       name: string;
       slug: string;
       status: string;
-    }>(`SELECT "id", "name", "slug", "status" FROM "Organization" WHERE "id" = $1`, [organizationId]);
+      kind: string;
+    }>(`SELECT "id", "name", "slug", "status", "kind" FROM "Organization" WHERE "id" = $1`, [organizationId]);
     const organization = result.rows[0];
     if (!organization) throw new Error("La organización no existe.");
+    if (organization.kind === "DEMO") throw new Error("Los respaldos tenant no están disponibles para organizaciones DEMO.");
     if (organization.status === "RESTORING") throw new Error("La organización está en RESTORING y no puede respaldarse.");
     const memberships = await pool.query<{ userId: string }>(
       `SELECT "userId" FROM "OrganizationMembership" WHERE "organizationId" = $1 ORDER BY "userId"`,

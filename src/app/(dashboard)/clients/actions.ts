@@ -1,6 +1,5 @@
 "use server";
 
-import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { AuthError } from "@/lib/auth";
 import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
@@ -11,6 +10,7 @@ import {
   assertOrganizationContextInTransaction,
   requireOrganizationContext,
   requireOrganizationRole,
+  withTenantTransaction,
 } from "@/lib/organization-context";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
@@ -154,11 +154,10 @@ export async function createClient(values: ClientFormValues): Promise<MutationRe
   }
 
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
     const userId = context.userId;
     const normalized = normalizeClientInput(parsed.data);
-    const client = await db.$transaction(async (tx) => {
+    const client = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       normalized.referidorId = await ensureValidReferidor(tx, normalized.referidorId, undefined, context.organizationId);
       const created = await tx.client.create({
@@ -198,12 +197,11 @@ export async function updateClient(id: string, values: ClientFormValues): Promis
   }
 
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
     const userId = context.userId;
     const ownerScope = context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {};
     const normalized = normalizeClientInput(parsed.data);
-    const result = await db.$transaction(async (tx) => {
+    const result = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const previousClient = await tx.client.findFirst({
         where: { id, organizationId: context.organizationId, ...ownerScope },
@@ -232,10 +230,10 @@ export async function updateClient(id: string, values: ClientFormValues): Promis
     });
     if (!result) return errorResult("El cliente ya no existe o no está disponible.");
     const { client, previousClient } = result;
-    const referidos = await db.client.findMany({
+    const referidos = await withTenantTransaction(context, (tx) => tx.client.findMany({
       where: { referidorId: id, organizationId: context.organizationId },
       select: { id: true },
-    });
+    }));
 
     revalidatePaths(
       collectRevalidatePaths(client.id, [previousClient.referidorId, client.referidorId, ...referidos.map((item) => item.id)]),
@@ -261,11 +259,10 @@ export async function updateClientQualityFields(
   },
 ): Promise<MutationResult> {
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
     const userId = context.userId;
     const ownerScope = context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {};
-    const client = await db.$transaction(async (tx) => {
+    const client = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const previousClient = await tx.client.findFirst({
         where: { id, organizationId: context.organizationId, ...ownerScope },
@@ -346,8 +343,7 @@ export async function consolidateClientIntoTarget(
       return errorResult("Selecciona un cliente distinto para consolidar.");
     }
 
-    const db = getDb();
-    const sourceClient = await db.client.findFirst({
+    const sourceClient = await withTenantTransaction(context, (tx) => tx.client.findFirst({
       where: { id: sourceClientId, organizationId: context.organizationId },
       select: {
         id: true,
@@ -364,8 +360,8 @@ export async function consolidateClientIntoTarget(
         portfolioOwnerId: true,
         status: true,
       },
-    });
-    const targetClient = await db.client.findFirst({
+    }));
+    const targetClient = await withTenantTransaction(context, (tx) => tx.client.findFirst({
       where: { id: targetClientId, organizationId: context.organizationId },
       select: {
         id: true,
@@ -382,7 +378,7 @@ export async function consolidateClientIntoTarget(
         portfolioOwnerId: true,
         status: true,
       },
-    });
+    }));
 
     if (!sourceClient) {
       return errorResult("El cliente origen ya no existe.");
@@ -394,7 +390,7 @@ export async function consolidateClientIntoTarget(
     const cleanedReason = reason.trim();
     const summaryReason = cleanedReason || `Consolidación manual hacia ${targetClient.fullName}.`;
 
-    await db.$transaction(async (tx) => {
+    await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
       const mergedMetadata = mergeClientMetadata(targetClient, sourceClient);
       await tx.client.update({
@@ -475,9 +471,8 @@ export async function bulkArchiveClients(ids: string[]): Promise<MutationResult>
     const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
     const scopedIds = Array.from(new Set(ids.filter((id) => typeof id === "string" && id.length > 0)));
     if (scopedIds.length === 0) return errorResult("Selecciona al menos un cliente para archivar.");
-    const db = getDb();
     const ownerScope = context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {};
-    const result = await db.$transaction(async (tx) => {
+    const result = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
       const updated = await tx.client.updateMany({
         where: { id: { in: scopedIds }, organizationId: context.organizationId, ...ownerScope },
@@ -505,9 +500,7 @@ export async function bulkArchiveClients(ids: string[]): Promise<MutationResult>
 export async function deleteClient(id: string): Promise<MutationResult> {
   try {
     const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
-    const db = getDb();
-
-    const result = await db.$transaction(async (tx) => {
+    const result = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
       const existingClient = await tx.client.findFirst({
         where: { id, organizationId: context.organizationId },
@@ -581,8 +574,7 @@ export async function reassignClientPortfolio(input: {
     const reason = input.reason.trim();
     if (!reason) return errorResult("Captura el motivo de la reasignación.");
 
-    const db = getDb();
-    const result = await db.$transaction(async (tx) => {
+    const result = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
       const [client, ownerMembership] = await Promise.all([
         tx.client.findFirst({

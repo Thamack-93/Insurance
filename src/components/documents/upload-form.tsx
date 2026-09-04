@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { documentTypeOptions } from "@/lib/domain-options";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
@@ -27,15 +28,8 @@ interface UploadFormProps {
   disabled?: boolean;
 }
 
-const ALLOWED_TYPES = [
-  "application/pdf",
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-];
-const MAX_BYTES = 10 * 1024 * 1024;
+const ALLOWED_TYPES = ["application/pdf"];
+const MAX_BYTES = 15 * 1024 * 1024;
 
 type UploadDocument = {
   id: string;
@@ -62,6 +56,7 @@ export function UploadForm({
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploadConsent, setUploadConsent] = useState(false);
   const [formData, setFormData] = useState<{
     documentType: string;
     notes: string;
@@ -103,11 +98,11 @@ export function UploadForm({
     const valid: File[] = [];
     for (const f of selected) {
       if (!ALLOWED_TYPES.includes(f.type)) {
-        setError(`${f.name}: tipo no permitido (PDF, JPG, PNG, WebP o Word).`);
+        setError(`${f.name}: solo se aceptan PDFs.`);
         return;
       }
       if (f.size > MAX_BYTES) {
-        setError(`${f.name}: el archivo supera 10 MB.`);
+        setError(`${f.name}: el archivo supera 15 MB.`);
         return;
       }
       valid.push(f);
@@ -127,6 +122,10 @@ export function UploadForm({
       setError("Selecciona el tipo de documento.");
       return;
     }
+    if (!uploadConsent) {
+      setError("Confirma tu autorización, el procesamiento por proveedores de IA aprobados, la retención del original por 48 horas y el riesgo de que no hay antivirus externo por archivo.");
+      return;
+    }
 
     setUploading(true);
     setError(null);
@@ -137,6 +136,7 @@ export function UploadForm({
       Object.entries(formData).forEach(([key, value]) => {
         if (value) formDataToSend.append(key, value);
       });
+      formDataToSend.append("uploadConsent", "1");
 
       const response = await fetch("/api/documents/upload", {
         method: "POST",
@@ -162,6 +162,7 @@ export function UploadForm({
       docs.forEach((d) => onSuccess?.(d));
 
       setFiles([]);
+      setUploadConsent(false);
       setFormData({ documentType: "", notes: "", ...associations });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "No se pudo subir.";
@@ -180,7 +181,7 @@ export function UploadForm({
           Subir documentos
         </CardTitle>
         <CardDescription>
-          PDF, JPG, PNG, WebP o Word. Máximo 10 MB por archivo. Puedes seleccionar varios.
+          Solo PDF validado. Máximo 15 MB y 100 páginas por archivo. En DEMO, los originales se purgan según la política de retención.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -201,7 +202,7 @@ export function UploadForm({
               type="file"
               multiple
               onChange={handleFileChange}
-              accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
+              accept=".pdf,application/pdf"
               disabled={uploading}
             />
             {files.length > 0 && (
@@ -215,6 +216,11 @@ export function UploadForm({
               </ul>
             )}
           </div>
+
+          <label className="flex items-start gap-2 text-xs text-muted-foreground">
+            <Checkbox checked={uploadConsent} onCheckedChange={(checked) => setUploadConsent(checked === true)} disabled={uploading} />
+            <span>Confirmo que tengo autorización, acepto el procesamiento por proveedores de IA aprobados y entiendo que el original se conserva hasta 48 horas (sin antivirus externo por archivo).</span>
+          </label>
 
           <div className="space-y-2">
             <Label htmlFor="documentType">Tipo de documento</Label>

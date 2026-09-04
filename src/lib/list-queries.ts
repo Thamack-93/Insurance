@@ -1,8 +1,8 @@
-import { getDb } from "@/lib/db";
 import { businessAddDays, businessEndOfDay, businessStartOfDay } from "@/lib/business-dates";
 import { daysUntil, today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
 import { OPEN_WORK_ITEM_STATUSES, getWorkItems } from "@/lib/work-queue";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 
 type ReceiptStatus = "PENDING" | "PAID" | "OVERDUE" | "CANCELLED";
 type PolicyStatus = "ACTIVE" | "EXPIRED" | "CANCELLED" | "RENEWED" | "PENDING";
@@ -48,6 +48,8 @@ export type OpenWorkItemsOptions = {
   skip?: number;
   statuses?: WorkItemStatus[];
   portfolioOwnerId?: string;
+  /** Optional transaction-bound tenant client for webhook/job callers. */
+  client?: Parameters<typeof getWorkItems>[1];
 };
 
 export type DuePaymentItem = {
@@ -122,77 +124,79 @@ export type OpenWorkItemItem = {
 };
 
 export async function getDuePayments(options: DuePaymentsOptions) {
-  const db = getDb();
   const range = resolveRange(options.from, options.to, 60);
   const statuses = options.statuses ?? ["PENDING", "OVERDUE"];
 
-  const rows = await db.receipt.findMany({
-    where: {
-      organizationId: options.organizationId,
-      dueDate: { gte: range.from, lte: range.to },
-      status: { in: statuses },
-    },
-    include: {
-      client: { select: { id: true, fullName: true } },
-      policy: { select: { id: true, policyNumber: true, policyType: true } },
-      insurer: { select: { id: true, name: true } },
-    },
-    orderBy: [
-      { dueDate: "asc" },
-      { receiptSequence: { sort: "asc", nulls: "last" } },
-      { receiptNumber: "asc" },
-      { id: "asc" },
-    ],
-    take: options.limit,
-    skip: options.skip,
-  });
+  return withTenantOrganization(options.organizationId, async (db) => {
+    const rows = await db.receipt.findMany({
+      where: {
+        organizationId: options.organizationId,
+        dueDate: { gte: range.from, lte: range.to },
+        status: { in: statuses },
+      },
+      include: {
+        client: { select: { id: true, fullName: true } },
+        policy: { select: { id: true, policyNumber: true, policyType: true } },
+        insurer: { select: { id: true, name: true } },
+      },
+      orderBy: [
+        { dueDate: "asc" },
+        { receiptSequence: { sort: "asc", nulls: "last" } },
+        { receiptNumber: "asc" },
+        { id: "asc" },
+      ],
+      take: options.limit,
+      skip: options.skip,
+    });
 
-  return rows.map<DuePaymentItem>((row) => ({
-    id: row.id,
-    receiptNumber: row.receiptNumber,
-    dueDate: row.dueDate,
-    status: row.status as ReceiptStatus,
-    amount: toNumber(row.amount),
-    currency: row.currency,
-    daysUntilDue: daysUntil(row.dueDate),
-    client: row.client,
-    policy: row.policy,
-    insurer: row.insurer,
-  }));
+    return rows.map<DuePaymentItem>((row) => ({
+      id: row.id,
+      receiptNumber: row.receiptNumber,
+      dueDate: row.dueDate,
+      status: row.status as ReceiptStatus,
+      amount: toNumber(row.amount),
+      currency: row.currency,
+      daysUntilDue: daysUntil(row.dueDate),
+      client: row.client,
+      policy: row.policy,
+      insurer: row.insurer,
+    }));
+  });
 }
 
 export async function getRenewals(options: RenewalOptions) {
-  const db = getDb();
   const range = resolveRange(options.from, options.to, 60);
   const statuses = options.statuses ?? ["ACTIVE"];
 
-  const rows = await db.policy.findMany({
-    where: {
-      organizationId: options.organizationId,
-      endDate: { gte: range.from, lte: range.to },
-      status: { in: statuses },
-    },
-    include: {
-      client: { select: { id: true, fullName: true } },
-      insurer: { select: { id: true, name: true } },
-    },
-    orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }, { id: "asc" }],
-    take: options.limit,
-    skip: options.skip,
-  });
+  return withTenantOrganization(options.organizationId, async (db) => {
+    const rows = await db.policy.findMany({
+      where: {
+        organizationId: options.organizationId,
+        endDate: { gte: range.from, lte: range.to },
+        status: { in: statuses },
+      },
+      include: {
+        client: { select: { id: true, fullName: true } },
+        insurer: { select: { id: true, name: true } },
+      },
+      orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }, { id: "asc" }],
+      take: options.limit,
+      skip: options.skip,
+    });
 
-  return rows.map<RenewalItem>((row) => ({
-    id: row.id,
-    policyNumber: row.policyNumber,
-    policyType: row.policyType,
-    status: row.status as PolicyStatus,
-    endDate: row.endDate,
-    premiumAmount: toNumber(row.premiumAmount),
-    currency: row.currency,
-    daysUntilRenewal: daysUntil(row.endDate),
-    client: row.client,
-    insurer: row.insurer,
-  }));
+    return rows.map<RenewalItem>((row) => ({
+      id: row.id,
+      policyNumber: row.policyNumber,
+      policyType: row.policyType,
+      status: row.status as PolicyStatus,
+      endDate: row.endDate,
+      premiumAmount: toNumber(row.premiumAmount),
+      currency: row.currency,
+      daysUntilRenewal: daysUntil(row.endDate),
+      client: row.client,
+      insurer: row.insurer,
+    }));
+  });
 }
 
 export async function getOpenWorkItems(options: OpenWorkItemsOptions) {
@@ -208,7 +212,7 @@ export async function getOpenWorkItems(options: OpenWorkItemsOptions) {
     skip: options.skip,
     portfolioOwnerId: options.portfolioOwnerId,
     organizationId: options.organizationId,
-  });
+  }, options.client);
 
   return rows.map<OpenWorkItemItem>((row) => ({
     id: row.sourceId ?? row.id,

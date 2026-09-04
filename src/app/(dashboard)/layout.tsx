@@ -15,7 +15,7 @@ import type { NotificationRecord } from "@/lib/notifications";
 import { requireUserOrRedirect } from "@/lib/auth";
 import { THEME_COOKIE } from "@/lib/settings-runtime";
 import { NoraSessionProvider } from "@/components/assistant/nora-session-provider";
-import { resolveOrganizationContext } from "@/lib/organization-context";
+import { resolveOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 
 const fallbackSettings: Settings = {
   firmName: "PG",
@@ -56,6 +56,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   const user = await requireUserOrRedirect();
   const organizationResolution = await resolveOrganizationContext();
   const organization = organizationResolution.status === "ready" ? organizationResolution.context : null;
+  const organizationKind = organization ? await withTenantTransaction(organization, (tx) => tx.organization.findUnique({ where: { id: organization.organizationId }, select: { kind: true } })) : null;
   const isTenantAdmin = Boolean(organization && organization.membershipRole !== "AGENT");
   // Mirrors the root layout: the theme is known server-side from the cookie, so
   // the theme toggle can render its destination label without a hydration gap.
@@ -77,7 +78,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   }));
   return (
     <SearchProvider>
-      <NoraSessionProvider userId={user.id}>
+      <NoraSessionProvider userId={user.id} organizationId={organization?.organizationId ?? ""} demoMode={organizationKind?.kind === "DEMO"}>
         <RuntimeSettingsHydrator settings={settings} />
         <div className="min-h-screen">
           <a

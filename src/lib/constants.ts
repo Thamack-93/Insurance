@@ -10,7 +10,7 @@ export const RENEWAL_MEDIUM_DAYS = 60;
 export const COMMISSION_DEFAULT_RATE = 0.10;
 export const COMMISSION_OFFSET_DAYS = 30;
 
-export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
 export const DASHBOARD_LIST_LIMIT = 50;
 export const NO_REFERIDOR_VALUE = "NONE";

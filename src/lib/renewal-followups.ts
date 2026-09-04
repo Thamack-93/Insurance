@@ -1,7 +1,6 @@
 import "server-only";
 
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { SYSTEM_USER_ID } from "@/lib/auth";
 import { logError } from "@/lib/logger";
@@ -10,6 +9,7 @@ import { renewalStageLabel } from "@/lib/status";
 import { upsertWorkItemFromSource } from "@/lib/work-items";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { forEachRenewalCandidate, type RenewalBoardCard } from "@/lib/renewal-board";
+import { withSystemOrganizationTransaction } from "@/lib/organization-context";
 import {
   buildRenewalFollowUpMessage,
   businessWeekKey,
@@ -58,7 +58,12 @@ export async function closeRenewalFollowUp(
   userId: string | null,
   client?: DbClient,
 ): Promise<boolean> {
-  const db = client ?? getDb();
+  if (!client) {
+    return withSystemOrganizationTransaction(organizationId, "renewal follow-up", (tx) =>
+      closeRenewalFollowUp(organizationId, policyId, userId, tx),
+    );
+  }
+  const db = client;
   const item = await db.workItem.findFirst({
     where: {
       organizationId,
@@ -96,8 +101,8 @@ export async function runRenewalFollowUpScan(
   };
 
   try {
-    const db = getDb();
-    const weekKey = businessWeekKey(now);
+    await withSystemOrganizationTransaction(organizationId, "renewal follow-up", async (tx) => {
+      const weekKey = businessWeekKey(now);
 
     // Sin alcance de cartera y sin ventana de vencimiento: el job corre para
     // toda la casa y cada aviso se dirige al responsable de la póliza.
@@ -118,7 +123,7 @@ export async function runRenewalFollowUpScan(
       });
 
       const dedupeKey = renewalFollowUpDedupeKey(card.policyId, card.stage, weekKey);
-      const alreadyNotified = await db.notificationEvent.findUnique({
+      const alreadyNotified = await tx.notificationEvent.findUnique({
         where: { organizationId_dedupeKey: { organizationId: card.organizationId, dedupeKey } },
         select: { id: true },
       });
@@ -144,7 +149,7 @@ export async function runRenewalFollowUpScan(
           createdById: null,
           updatedById: null,
         },
-        db,
+        tx,
       );
 
       if (workItem) summary.workItemsUpserted += 1;
@@ -166,7 +171,7 @@ export async function runRenewalFollowUpScan(
           workItemId: workItem?.id ?? null,
           dedupeKey,
         },
-        db,
+        tx,
       );
 
       if (!event) return;
@@ -185,9 +190,9 @@ export async function runRenewalFollowUpScan(
           notificationStatus: event.status,
         },
         userId: SYSTEM_USER_ID,
-        db,
+        db: tx,
       });
-    });
+    }, now, tx);
 
     summary.scanned = scanned;
 
@@ -197,7 +202,7 @@ export async function runRenewalFollowUpScan(
     // que además ya salieron del barrido.
     // Sólo los pendientes que generó este barrido: los pendientes normales de
     // renovación tienen su propio ciclo de vida y no se tocan.
-    const stale = await db.workItem.findMany({
+    const stale = await tx.workItem.findMany({
       where: {
         organizationId,
         sourceType: "Renewal",
@@ -209,13 +214,15 @@ export async function runRenewalFollowUpScan(
     });
 
     if (stale.length > 0) {
-      const closed = await db.workItem.updateMany({
+      const closed = await tx.workItem.updateMany({
         where: { organizationId, id: { in: stale.map((item) => item.id) } },
         data: { status: "RESOLVED", closedDate: now },
       });
       summary.workItemsClosed = closed.count;
     }
 
+    return summary;
+    });
     return summary;
   } catch (error) {
     logError("renewal-followups.runRenewalFollowUpScan", error);

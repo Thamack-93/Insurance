@@ -8,16 +8,16 @@ import {
 
 describe("manual WhatsApp receipt reminders", () => {
   it("normalizes and selects primary, then secondary, then captured", () => {
-    expect(selectWhatsAppPhone({ primary: "55 1234 5678", secondary: "81 1234 5678" })).toEqual({
-      normalized: "+525512345678",
+    expect(selectWhatsAppPhone({ primary: "55 9876 5432", secondary: "81 1234 5678" })).toEqual({
+      normalized: "+525598765432",
       source: "PRIMARY",
     });
     expect(selectWhatsAppPhone({ primary: "bad", secondary: "+52 81 1234 5678" })).toEqual({
       normalized: "+528112345678",
       source: "SECONDARY",
     });
-    expect(selectWhatsAppPhone({ primary: "bad", secondary: "also bad", captured: "55-1234-5678" })).toEqual({
-      normalized: "+525512345678",
+    expect(selectWhatsAppPhone({ primary: "bad", secondary: "also bad", captured: "55-9876-5432" })).toEqual({
+      normalized: "+525598765432",
       source: "CAPTURED",
     });
     expect(selectWhatsAppPhone({ primary: "123", secondary: null })).toBeNull();

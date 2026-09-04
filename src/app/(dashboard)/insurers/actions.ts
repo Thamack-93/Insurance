@@ -1,9 +1,8 @@
 "use server";
 
-import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { AuthError } from "@/lib/auth";
-import { assertOrganizationContextInTransaction, requireOrganizationRole } from "@/lib/organization-context";
+import { assertOrganizationContextInTransaction, requireOrganizationRole, withTenantTransaction } from "@/lib/organization-context";
 import { logError } from "@/lib/logger";
 import type { InsurerFormValues } from "@/lib/validations";
 import {
@@ -28,8 +27,7 @@ function normalizeInsurerInput(values: InsurerFormValues) {
 export async function createInsurer(values: InsurerFormValues): Promise<MutationResult> {
   try {
     const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
-    const db = getDb();
-    const insurer = await db.$transaction(async (tx) => {
+    const insurer = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
       const created = await tx.insurer.create({ data: { organizationId: context.organizationId, ...normalizeInsurerInput(values) } });
       await writeActivityLog({ organizationId: context.organizationId, action: "CREATE_INSURER", entityType: "Insurer", entityId: created.id, newValue: { name: created.name }, userId: context.userId, db: tx });
@@ -49,8 +47,7 @@ export async function createInsurer(values: InsurerFormValues): Promise<Mutation
 export async function updateInsurer(id: string, values: InsurerFormValues): Promise<MutationResult> {
   try {
     const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
-    const db = getDb();
-    const insurer = await db.$transaction(async (tx) => {
+    const insurer = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
       const existing = await tx.insurer.findFirst({ where: { id, organizationId: context.organizationId } });
       if (!existing) throw new Error("INSURER_NOT_FOUND");
@@ -72,8 +69,7 @@ export async function updateInsurer(id: string, values: InsurerFormValues): Prom
 export async function deleteInsurer(id: string): Promise<MutationResult> {
   try {
     const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
-    const db = getDb();
-    const result = await db.$transaction(async (tx) => {
+    const result = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
       const existingInsurer = await tx.insurer.findFirst({
         where: { id, organizationId: context.organizationId },

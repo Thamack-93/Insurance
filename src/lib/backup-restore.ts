@@ -388,6 +388,25 @@ export async function restoreVerifiedBackup(input: RestoreInput): Promise<Restor
       await client.query("SET LOCAL session_replication_role = origin");
     }
 
+    // DEMO rows are excluded from platform logical backups. Re-run the
+    // retention boundary on the restored branch before any environment can be
+    // reopened, so an accidentally retained expired artifact cannot survive a
+    // restore verification pass.
+    await client.query(`
+      DELETE FROM "DemoUploadArtifact"
+       WHERE "expiresAt" <= CURRENT_TIMESTAMP
+          OR "status" IN ('PURGED', 'FAILED')
+    `);
+    await client.query(`
+      UPDATE "Organization" o
+         SET "status" = 'SUSPENDED', "updatedAt" = CURRENT_TIMESTAMP
+       WHERE o."kind" = 'DEMO'
+         AND EXISTS (
+           SELECT 1 FROM "DemoOrganizationState" s
+            WHERE s."organizationId" = o."id" AND s."trialEndsAt" <= CURRENT_TIMESTAMP
+         )
+    `);
+
     const tableCounts = await validateTableCounts(
       client,
       parsed,

@@ -1,9 +1,8 @@
 "use server";
 
-import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
-import { assertOrganizationContextInTransaction, requireOrganizationContext } from "@/lib/organization-context";
+import { assertOrganizationContextInTransaction, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import type { ClaimFormValues } from "@/lib/validations";
 import {
   errorResult,
@@ -32,9 +31,8 @@ function normalizeClaimInput(values: ClaimFormValues) {
 
 export async function createClaim(values: ClaimFormValues): Promise<MutationResult> {
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
-    const claim = await db.$transaction(async (tx) => {
+    const claim = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const client = await tx.client.findFirst({
         where: {
@@ -83,9 +81,8 @@ export async function createClaim(values: ClaimFormValues): Promise<MutationResu
 
 export async function updateClaim(id: string, values: ClaimFormValues): Promise<MutationResult> {
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
-    const claim = await db.$transaction(async (tx) => {
+    const claim = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const existing = await tx.claim.findFirst({
         where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) },
@@ -127,9 +124,8 @@ export async function updateClaim(id: string, values: ClaimFormValues): Promise<
 
 export async function deleteClaim(id: string): Promise<MutationResult> {
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
-    const existingClaim = await db.$transaction(async (tx) => {
+    const existingClaim = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const existing = await tx.claim.findFirst({
         where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) },

@@ -44,6 +44,11 @@
     // prefix on a "// Validate <path>" line), which breaks `npm run typecheck`
     // for reasons unrelated to our source. Route/page signatures are still
     // validated through ".next/types/**/*.ts", which `next build` generates.
-    ".next/dev/**"
+    ".next/dev/**",
+    // A concurrent/previous Next build can leave collision-suffixed copies of
+    // generated route declarations (for example "routes.d 2.ts" or
+    // "routes.d 3.ts"). Files containing that collision suffix are not part
+    // of Next's active generated type graph and must not be checked twice.
+    ".next/types/**/* *.ts"
   ]
 }

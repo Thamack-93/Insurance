@@ -2,7 +2,7 @@ import { createClaim } from "@/app/(dashboard)/claims/actions";
 import { ClaimForm } from "@/components/forms/claim-form";
 import { createClaimDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
-import { getDb } from "@/lib/db";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 import {
   clientOperationalWhere,
   policyOperationalWhere,
@@ -11,7 +11,7 @@ import {
 
 export default async function NewClaimPage() {
   const scope = await requireOrganizationPortfolioReadScope();
-  const db = getDb();
+  return withTenantOrganization(scope.organizationId, async (db) => {
   const [clients, policies, insurers] = await Promise.all([
     db.client.findMany({
       where: {
@@ -63,4 +63,5 @@ export default async function NewClaimPage() {
       </div>
     </div>
   );
+  });
 }

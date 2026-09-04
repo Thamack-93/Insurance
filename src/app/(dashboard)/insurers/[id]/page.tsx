@@ -9,7 +9,7 @@ import { StatusBadge } from "@/components/badges/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { getDb } from "@/lib/db";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
@@ -24,8 +24,7 @@ import {
 export default async function InsurerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const context = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
   const { id } = await params;
-  const db = getDb();
-
+  return withTenantOrganization(context.organizationId, async (db) => {
   const insurer = await db.insurer.findFirst({
     where: { id, organizationId: context.organizationId },
   });
@@ -52,7 +51,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
       orderBy: [{ expectedDate: "desc" }, { id: "desc" }],
       take: 10,
     }),
-    getActivityForEntity("Insurer", id, 20, context.organizationId),
+    getActivityForEntity("Insurer", id, 20, context.organizationId, db),
   ]);
 
   const activePolicies = policies.filter((p) => p.status === "ACTIVE");
@@ -313,4 +312,5 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
       </div>
     </div>
   );
+});
 }

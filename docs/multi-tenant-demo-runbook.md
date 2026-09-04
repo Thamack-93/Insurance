@@ -1,0 +1,123 @@
+# Multi-tenant and DEMO operating runbook
+
+This runbook is the release boundary for PolicyDesk's shared Neon/Vercel
+multi-tenant deployment. A second production organization must not be created
+until the tenant transaction layer, exact-role RLS tests, backup drill, and
+production verifier all pass.
+
+## Database roles and environment
+
+- `DATABASE_URL`: pooled Neon URL for the application runtime, using the
+  restricted `TENANT_RLS_APP_ROLE` credential.
+- `DATABASE_ADMIN_URL`: direct Neon URL for migrations, cutover, restore, and
+  operator backup work. It is never a runtime fallback.
+- `PRODUCTION_READONLY_DATABASE_URL`: direct read-only verifier URL.
+- `PRODUCTION_READONLY_ROLE`: `current_user` for that verifier connection;
+  it must be non-owner, non-superuser, and non-`BYPASSRLS`.
+- `TENANT_RLS_APP_ROLE`: expected non-owner, non-superuser, non-`BYPASSRLS`
+  runtime login role (default `policydesk_app`; created and hardened by the
+  direct operator preflight, with its managed password/credential set outside
+  Prisma migrations).
+- `TENANT_RLS_PLATFORM_OWNER_ROLE`: non-login owner for the narrowly scoped
+  platform aggregate (defaults to `policydesk_platform_owner`).
+- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`: mandatory in
+  production; missing or unavailable Redis fails closed for rate limits and
+  distributed locks.
+- `BLOB_READ_WRITE_TOKEN`: mandatory for production and DEMO document uploads.
+- `PLATFORM_ORG_PROVISIONING_ENABLED=1`: explicit operator switch, enabled only
+  after the multi-org cutover evidence is archived.
+- `PLATFORM_CUSTOMER_PROVISIONING_ENABLED=0`: remains disabled during Stage 3;
+  enabling the DEMO factory must not accidentally expose paid CUSTOMER
+  creation before the commercial onboarding release.
+- `PLATFORM_EMAIL_ENABLED=0|1`: global email kill switch for the future email
+  provider; tenant capabilities can never override an explicit `0`.
+
+## Cutover sequence
+
+1. Repair the read-only verifier target and capture a clean singleton audit.
+2. Deploy the tenant-aware application while RLS is still disabled.
+3. Create a disposable Neon branch from production. Apply the additive
+   migration, provision two organizations and multiple users, and run:
+   `TENANT_ISOLATION_TEST_DB=1 PLAYWRIGHT_ENFORCE_DISPOSABLE_DB=1 npm run
+   test:tenant-rls`.
+4. Run the complete static gates (`check:tenant-read-scope`,
+   `check:tenant-write-scope`, route/action inventories, inventory/backfill
+   checks), browser E2E, and the encrypted backup restore drill on a temporary
+   branch.
+5. Stop tenant mutations and scheduled business jobs, drain writes, and set
+   `PlatformRuntimeState.writeMode = 'MAINTENANCE'` with the administrative
+   connection.
+6. Run `ENABLE_TENANT_RLS_CUTOVER=1 npm run cutover:multi-org`. The wrapper
+   invokes `npm run prepare:tenant-roles` over `DATABASE_ADMIN_URL` before
+   applying the committed `20260831010000_multi_tenant_rls_cutover` migration;
+   role DDL is deliberately not embedded in Prisma's transactional migrations.
+   The migration refuses to run while the write mode is `OPEN` and leaves the
+   platform in maintenance mode.
+7. Switch and verify the pooled runtime credential. Run
+   `npm run verify:production` with `PRODUCTION_EXPECTED_TENANT_MODE=multi-org`
+   and set `ENABLE_TENANT_RLS_CUTOVER=1` in the runtime deployment so platform
+   aggregates use the approved SECURITY DEFINER path. Then run application
+   smoke, exports/search/Nora checks, Prisma drift, and backup compatibility
+   checks.
+8. Exit maintenance only after every check is archived against the deployed
+   SHA. If anything fails before a second organization exists, keep maintenance
+   active and use the tested rollback migration. After multiple organizations
+   exist, suspend affected organizations and forward-fix; never deploy the old
+   singleton application.
+
+The static read/write inventories are necessary CI gates, not a substitute for
+the transaction boundary. The current rollout report still contains legacy
+root-`getDb()` call sites; `check:tenant-dal:strict` must be green (with every
+protected read inside `withTenantTransaction` or an explicitly enumerated
+system tenant transaction) before the final RLS migration is allowed to reach
+production.
+
+## DEMO provisioning and reset
+
+Platform-only provisioning is invite-only and idempotent:
+
+- `provisionDemoOrganization` creates a `PROVISIONING` organization, a
+  deterministic synthetic baseline, one owner plus up to four additional
+  `@policydesk.local` users,
+  trial subscription/capabilities, then activates only after validation.
+- Temporary passwords are high entropy, expire in 24 hours, and require a
+  first-login change. Alias users have no email recovery; a superadmin performs
+  audited out-of-band resets.
+- Every real DEMO upload requires the consent notice, is private under a
+  tenant-prefixed Blob path, and is recorded in `DemoUploadArtifact`. The
+  original Blob is purged after 48 hours.
+- The document endpoint currently accepts only structurally validated PDFs
+  (15 MB and 100 pages maximum) for both CUSTOMER and DEMO tenants; Nora's
+  temporary PDF path applies the same guard before OCR or an AI provider.
+- The first upload sets `realDataResetAt = uploadedAt + 7 days`; later uploads
+  never extend it. Reset marks the org `RESETTING`, denies sessions/jobs,
+  purges files, clears protected rows, reseeds the deterministic baseline,
+  increments `dataVersion`, verifies invariants, and reactivates. Users,
+  memberships, subscription, and capabilities survive. A failed verification
+  leaves the org suspended and alerts operators.
+- At 30 days the org is suspended unless a superadmin explicitly extends the
+  trial. Hard deletion is a separate audited operator action.
+
+## Backups and privacy
+
+Platform logical backups include `CUSTOMER`/`LEGACY` organizations and exclude
+DEMO organizations, their users/memberships, tenant records, optional control
+rows, channels, and settings. Manifests record the exclusion policy and counts;
+tenant backup actions are unavailable to DEMO. Restore validation reruns expired
+DEMO purging before reopening the environment. Neon point-in-time history is
+limited by the configured encrypted retention window and must be disclosed in
+the demo privacy notice.
+
+DEMO integrations are real, not simulated. Every outbound action requires a
+live organization, capability resolution, rate limits, audit, and explicit
+recipient/content confirmation where applicable. Quálitas remains unavailable
+until its global provider pilot is certified.
+
+## Commercial handoff
+
+Customer onboarding remains sales-assisted with manual invoicing. Before a
+paying customer is activated, complete email invitations/verification,
+password-reset tokens, session/device review and revoke-all-sessions, suspicious
+login notifications, privacy/DPA/terms, retention and incident runbooks,
+access-review evidence, Mexico-focused legal review, and the documented
+residual no-MFA risk acceptance.

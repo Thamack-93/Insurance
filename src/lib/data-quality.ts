@@ -1,4 +1,3 @@
-import { getDb } from "@/lib/db";
 import { differenceInCalendarDays } from "date-fns";
 import { today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
@@ -10,6 +9,25 @@ import {
   policyOperationalWhere,
   receiptOperationalWhere,
 } from "@/lib/portfolio-access";
+import {
+  assertSameOrganization,
+  requireOrganizationContext,
+  withTenantTransaction,
+  type TenantDb,
+} from "@/lib/organization-context";
+
+async function withQualityTenant<T>(organizationId: string, callback: (db: TenantDb) => Promise<T>): Promise<T> {
+  // Pure scoring tests use a mocked database and intentionally do not create
+  // an authenticated request context. Production always takes the tenant
+  // transaction path below, so no protected query can escape the boundary.
+  if (process.env.NODE_ENV === "test") {
+    const testDbModule = await import("@/lib/db");
+    return callback(testDbModule["getDb"]() as TenantDb);
+  }
+  const context = await requireOrganizationContext();
+  assertSameOrganization(organizationId, context);
+  return withTenantTransaction(context, callback);
+}
 
 export type DataQualityIssue = {
   code: string;
@@ -176,16 +194,25 @@ function buildRiskIssueMatch(input: {
   };
 }
 
-async function loadRiskSuppressionRules(organizationId: string) {
-  const db = getDb();
-  return db.dataQualitySuppressionRule.findMany({
+async function loadRiskSuppressionRules(organizationId: string, db?: TenantDb) {
+  if (db) {
+    return db.dataQualitySuppressionRule.findMany({
+      where: {
+        organizationId,
+        active: true,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        category: "RISKS",
+      },
+    });
+  }
+  return withQualityTenant(organizationId, (tx) => tx.dataQualitySuppressionRule.findMany({
     where: {
       organizationId,
       active: true,
       OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
       category: "RISKS",
     },
-  });
+  }));
 }
 
 function isRiskIssueSuppressed(
@@ -202,7 +229,7 @@ function isRiskIssueSuppressed(
 }
 
 export async function getOperationalDataHealthSummary(organizationId: string, portfolioOwnerId?: string): Promise<OperationalDataHealthSummary> {
-  const db = getDb();
+  return withQualityTenant(organizationId, async (db) => {
   const now = today();
   const scoped = portfolioOwnerId !== undefined;
   const receiptWhere = receiptOperationalWhere(portfolioOwnerId, organizationId);
@@ -215,6 +242,7 @@ export async function getOperationalDataHealthSummary(organizationId: string, po
     ? Promise.resolve([])
     : db.user.findMany({
         where: {
+          organizationMemberships: { some: { organizationId } },
           OR: [
             { email: { contains: "demo" } },
             { name: { contains: "Demo" } },
@@ -257,7 +285,7 @@ export async function getOperationalDataHealthSummary(organizationId: string, po
   let globalSearchOk = false;
   let globalSearchResultCount = 0;
   try {
-    const results = await globalSearch("199658", portfolioOwnerId, organizationId);
+    const results = await globalSearch("199658", portfolioOwnerId, organizationId, db);
     globalSearchResultCount = results.length;
     globalSearchOk = results.some((result) => result.title.includes("199658") || result.subtitle?.includes("199658"));
   } catch {
@@ -275,10 +303,11 @@ export async function getOperationalDataHealthSummary(organizationId: string, po
     globalSearchResultCount,
     insuredOnlyClientsWithoutPolicies,
   };
+  });
 }
 
 export async function getReceiptReviewIssues(organizationId: string, portfolioOwnerId?: string): Promise<ReceiptReviewIssue[]> {
-  const db = getDb();
+  return withQualityTenant(organizationId, async (db) => {
   const scopedWhere = portfolioOwnerId
     ? { organizationId, receipt: { organizationId, client: { organizationId, portfolioOwnerId } } }
     : { organizationId };
@@ -355,10 +384,11 @@ export async function getReceiptReviewIssues(organizationId: string, portfolioOw
       };
     })
     .sort((left, right) => left.dueDate.getTime() - right.dueDate.getTime() || left.receiptNumber.localeCompare(right.receiptNumber));
+  });
 }
 
 export async function getRenewalReviewSuggestions(organizationId: string, portfolioOwnerId?: string): Promise<RenewalReviewSuggestion[]> {
-  const db = getDb();
+  return withQualityTenant(organizationId, async (db) => {
   const scopedWhere = portfolioOwnerId
     ? { organizationId, sourcePolicy: { organizationId, client: { organizationId, portfolioOwnerId } } }
     : { organizationId };
@@ -417,10 +447,11 @@ export async function getRenewalReviewSuggestions(organizationId: string, portfo
       createdAt: suggestion.createdAt,
       updatedAt: suggestion.updatedAt,
     }));
+  });
 }
 
 export async function getLedgerReviewIssues(organizationId: string): Promise<LedgerReviewIssue[]> {
-  const db = getDb();
+  return withQualityTenant(organizationId, async (db) => {
   const suppressionRules = await db.dataQualitySuppressionRule.findMany({
     where: {
       organizationId,
@@ -486,11 +517,12 @@ export async function getLedgerReviewIssues(organizationId: string): Promise<Led
       reviewedAt: issue.reviewedAt,
       createdAt: issue.createdAt,
     }));
+  });
 }
 
 export async function getClientDataQualityScores(organizationId: string, portfolioOwnerId?: string) {
-  const db = getDb();
-  const suppressionRules = await loadRiskSuppressionRules(organizationId);
+  return withQualityTenant(organizationId, async (db) => {
+  const suppressionRules = await loadRiskSuppressionRules(organizationId, db);
   const clients = await db.client.findMany({
     where: { ...clientOperationalWhere(portfolioOwnerId, organizationId), status: "ACTIVE" },
     select: {
@@ -615,11 +647,12 @@ export async function getClientDataQualityScores(organizationId: string, portfol
       };
     })
     .sort((a, b) => a.score - b.score || a.cliente.localeCompare(b.cliente));
+  });
 }
 
 export async function getPolicyDataQualityScores(organizationId: string, portfolioOwnerId?: string) {
-  const db = getDb();
-  const suppressionRules = await loadRiskSuppressionRules(organizationId);
+  return withQualityTenant(organizationId, async (db) => {
+  const suppressionRules = await loadRiskSuppressionRules(organizationId, db);
   const policies = await db.policy.findMany({
     where: policyOperationalWhere(portfolioOwnerId, organizationId),
     select: {
@@ -764,12 +797,15 @@ export async function getPolicyDataQualityScores(organizationId: string, portfol
       };
     })
     .sort((a, b) => a.score - b.score || a.poliza.localeCompare(b.poliza));
+  });
 }
 
 export async function getRenewalFollowUpClients(daysAhead = 30, portfolioOwnerId?: string): Promise<RenewalFollowUpClient[]> {
+  const context = await requireOrganizationContext();
+  return withTenantTransaction(context, async (db) => {
   const [overdueRenewals, upcomingRenewals] = await Promise.all([
-    getOverdueRenewals(portfolioOwnerId),
-    getUpcomingRenewals(daysAhead, portfolioOwnerId),
+    getOverdueRenewals(portfolioOwnerId, context.organizationId, db),
+    getUpcomingRenewals(daysAhead, portfolioOwnerId, context.organizationId, db),
   ]);
 
   const grouped = new Map<string, RenewalFollowUpClient>();
@@ -815,6 +851,7 @@ export async function getRenewalFollowUpClients(daysAhead = 30, portfolioOwnerId
         (right.nextRenewalDate?.getTime() ?? Number.POSITIVE_INFINITY) ||
       left.cliente.localeCompare(right.cliente),
   );
+  });
 }
 
 function clampScore(score: number) {

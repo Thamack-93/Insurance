@@ -2,11 +2,17 @@ import { timingSafeEqual } from "node:crypto";
 import { DEFAULT_TIMEZONE, daysUntil, formatDate } from "@/lib/dates";
 import { businessAddDays, businessEndOfDay, businessStartOfDay, parseBusinessDateInput } from "@/lib/business-dates";
 import { getOpenWorkItems } from "@/lib/list-queries";
-import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { writeActivityLog } from "@/lib/activity-log";
-import { assertOrganizationContextInTransaction, type OrganizationContext } from "@/lib/organization-context";
+import {
+  assertOrganizationContextInTransaction,
+  requireOrganizationContext,
+  type OrganizationContext,
+  type TenantDb,
+  withSystemOrganizationTransaction,
+  withTenantTransaction,
+} from "@/lib/organization-context";
 import { recordPayment } from "@/lib/payment-service";
 import { buildPolicyPdfCapturePreviewFromText } from "@/lib/policy-pdf-capture-preview";
 import { extractPdfTextFromBytes } from "@/lib/pdf-text-extraction";
@@ -85,8 +91,15 @@ import {
   getBirthdayRemindersForUser,
 } from "@/lib/birthday-reminders";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
+import { getTelegramPlatformDb, runTelegramTenantDb } from "@/lib/telegram-platform";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
+
+function runDbTransaction<T>(db: DbClient, callback: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  const transaction = (db as PrismaClient).$transaction;
+  return typeof transaction === "function" ? transaction.call(db, callback) as Promise<T> : callback(db as Prisma.TransactionClient);
+}
 
 async function requireActiveTelegramOrganization(userId: string, db: DbClient): Promise<string> {
   const membership = await db.organizationMembership.findFirst({
@@ -99,6 +112,8 @@ async function requireActiveTelegramOrganization(userId: string, db: DbClient): 
     select: { organizationId: true },
   });
   if (!membership) throw new Error("ORGANIZATION_ACCESS_DENIED");
+  const capability = await resolveOrganizationCapability(membership.organizationId, "TELEGRAM", db as TenantDb);
+  if (!capability.enabled) throw new Error("TELEGRAM_CAPABILITY_DISABLED");
   return membership.organizationId;
 }
 type TelegramReceiptItem = {
@@ -799,7 +814,7 @@ export async function markTelegramDigestAsAutoSentForUser(
   timeZone = DEFAULT_TIMEZONE,
   client?: DbClient,
 ) {
-  const db = client ?? getDb();
+  const db = client ?? getTelegramPlatformDb();
   try {
     const user = await db.user.findUnique({
       where: { id: userId },
@@ -836,7 +851,7 @@ export function isTelegramWebhookSecretValid(headerValue: string | null) {
 }
 
 async function getTelegramChannelByUserId(userId: string, client?: DbClient) {
-  const db = client ?? getDb();
+  const db = client ?? getTelegramPlatformDb();
   return db.notificationChannel.findUnique({
     where: {
       userId_type: {
@@ -848,7 +863,7 @@ async function getTelegramChannelByUserId(userId: string, client?: DbClient) {
 }
 
 async function getTelegramChannelByChatId(chatId: string, client?: DbClient) {
-  const db = client ?? getDb();
+  const db = client ?? getTelegramPlatformDb();
   return db.notificationChannel.findFirst({
     where: {
       telegramChatId: chatId,
@@ -866,7 +881,7 @@ type ActiveTelegramIdentity = {
 };
 
 async function getActiveTelegramIdentityForChat(chatId: string, client?: DbClient): Promise<ActiveTelegramIdentity | null> {
-  const db = client ?? getDb();
+  const db = client ?? getTelegramPlatformDb();
   const channel = await getTelegramChannelByChatId(chatId, db);
   if (!channel?.isEnabled || channel.telegramChatId !== chatId) return null;
 
@@ -929,7 +944,7 @@ export function parseTelegramPaymentDateInput(value: string) {
 }
 
 async function getActiveTelegramDraftForChat(chatId: string, client?: DbClient) {
-  const db = client ?? getDb();
+  const db = client ?? getTelegramPlatformDb();
   const channel = await getTelegramChannelByChatId(chatId, db);
   if (!channel?.isEnabled) {
     return { channel: null, draft: null, expired: false };
@@ -1133,7 +1148,7 @@ async function getUserLinkedReceiptByPolicyAndNumber(
   receiptNumber: string,
   client?: DbClient,
 ) {
-  const db = client ?? getDb();
+  const db = client ?? getTelegramPlatformDb();
   const organizationId = await requireActiveTelegramOrganization(userId, db);
   const exact = await db.receipt.findFirst({
     where: {
@@ -1182,9 +1197,9 @@ async function persistTelegramDraftState(input: {
   client?: DbClient;
   context?: OrganizationContext;
 }) {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   if (input.context) {
-    return db.$transaction(async (tx) => {
+    return runDbTransaction(db, async (tx) => {
       await assertOrganizationContextInTransaction(tx, input.context!);
       return tx.telegramDraft.update({
         where: { id: input.draftId, organizationId: input.organizationId },
@@ -1212,7 +1227,7 @@ async function updateQualitasDraftState(input: {
   channelId: string;
   state: TelegramDraftState;
 }) {
-  return input.db.$transaction(async (tx) => {
+  return runDbTransaction(input.db, async (tx) => {
     await assertOrganizationContextInTransaction(tx, input.context);
     return tx.telegramDraft.updateMany({
       where: {
@@ -1397,7 +1412,7 @@ async function getTelegramReceipts(input: {
   skip?: number;
   client?: DbClient;
 }): Promise<TelegramListResult<TelegramReceiptItem>> {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   const organizationId = await requireActiveTelegramOrganization(input.userId, db);
 
   const where: Prisma.ReceiptWhereInput = {
@@ -1461,7 +1476,7 @@ async function getTelegramRenewals(input: {
   skip?: number;
   client?: DbClient;
 }): Promise<TelegramListResult<TelegramRenewalItem>> {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   const organizationId = await requireActiveTelegramOrganization(input.userId, db);
 
   const where: Prisma.PolicyWhereInput = {
@@ -1918,7 +1933,7 @@ export async function buildTelegramUpcomingReceiptsReply(userId: string, days: n
 }
 
 export async function buildTelegramTasksReply(userId: string, days: number, page = 1, client?: DbClient) {
-  const db = client ?? getDb();
+  const db = client ?? getTelegramPlatformDb();
   const organizationId = await requireActiveTelegramOrganization(userId, db);
   const dayStart = businessStartOfDay(new Date());
   const to = businessEndOfDay(businessAddDays(dayStart, days));
@@ -1930,7 +1945,7 @@ export async function buildTelegramTasksReply(userId: string, days: number, page
       to,
       portfolioOwnerId: userId,
       organizationId,
-    }),
+    }, db as TenantDb),
     getOpenWorkItems({
       from: dayStart,
       to,
@@ -1938,6 +1953,7 @@ export async function buildTelegramTasksReply(userId: string, days: number, page
       skip: (page - 1) * TELEGRAM_QUERY_RESULT_LIMIT,
       portfolioOwnerId: userId,
       organizationId,
+      client: db as TenantDb,
     }),
   ]);
 
@@ -1952,13 +1968,15 @@ export async function buildTelegramTasksReply(userId: string, days: number, page
 }
 
 export async function buildTelegramSearchReply(userId: string, query: string, client?: DbClient) {
-  void client;
+  const db = client ?? getTelegramPlatformDb();
   const normalized = query.trim();
   if (!normalized) {
     return "Escribe /buscar <texto> para buscar clientes, pólizas, recibos, tareas o archivos.";
   }
 
-  const results = await globalSearch(normalized, userId);
+  const organizationId = await requireActiveTelegramOrganization(userId, db);
+  const transactionClient = typeof (db as PrismaClient).$transaction === "function" ? undefined : db as TenantDb;
+  const results = await globalSearch(normalized, userId, organizationId, transactionClient);
   if (results.length === 0) {
     return `No encontré resultados para "${normalized}".`;
   }
@@ -2001,7 +2019,7 @@ function startOfDayInTimeZone(date: Date, timeZone: string) {
 }
 
 export async function buildTelegramDailyDigestMessagesByUser(userId: string, client?: DbClient, timeZone = DEFAULT_TIMEZONE) {
-  const db = client ?? getDb();
+  const db = client ?? getTelegramPlatformDb();
   const organizationId = await requireActiveTelegramOrganization(userId, db);
   const dayStart = startOfDayInTimeZone(new Date(), timeZone);
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
@@ -2036,7 +2054,7 @@ export async function buildTelegramDailyDigestMessagesByUser(userId: string, cli
       limit: TELEGRAM_DIGEST_SECTION_LIMIT,
       client,
     }),
-    getOpenWorkItems({ organizationId, to: dayStart, limit: TELEGRAM_DIGEST_SECTION_LIMIT, portfolioOwnerId: userId }),
+    getOpenWorkItems({ organizationId, to: dayStart, limit: TELEGRAM_DIGEST_SECTION_LIMIT, portfolioOwnerId: userId, client: db as TenantDb }),
     db.commission.findMany({
       where: {
         organizationId,
@@ -2081,7 +2099,7 @@ export async function sendTelegramDigestMessagesForUser(input: {
   mode: "manual" | "automatic";
   timeZone?: string;
 }) {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   const organizationId = await requireActiveTelegramOrganization(input.userId, db);
   const timeZone = input.timeZone ?? DEFAULT_TIMEZONE;
   const parts = await buildTelegramDailyDigestMessagesByUser(input.userId, db, timeZone);
@@ -2098,6 +2116,7 @@ export async function sendTelegramDigestMessagesForUser(input: {
       userId: input.userId,
       force: true,
       replyMarkup: part.replyMarkup,
+      client: db,
     });
 
     if (event?.status === "SENT") {
@@ -2126,7 +2145,7 @@ export async function sendTelegramBirthdayReminderForUser(input: {
   timeZone?: string;
   now?: Date;
 }): Promise<TelegramBirthdayReminderResult> {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   const organizationId = await requireActiveTelegramOrganization(input.userId, db);
   const timeZone = input.timeZone ?? DEFAULT_TIMEZONE;
   const now = input.now ?? new Date();
@@ -2152,6 +2171,7 @@ export async function sendTelegramBirthdayReminderForUser(input: {
     userId: input.userId,
     dedupeKey: input.mode === "automatic" ? birthdayAutomaticDedupeKey(input.userId, now, timeZone) : null,
     force: input.mode === "manual",
+    client: db,
   });
 
   if (event?.status === "SENT") {
@@ -2164,7 +2184,7 @@ export async function sendTelegramBirthdayReminderForUser(input: {
 }
 
 export async function sendDailyTelegramBirthdays(client?: DbClient): Promise<TelegramDailyBirthdaysResult> {
-  const db = client ?? getDb();
+  const db = client ?? getTelegramPlatformDb();
   const channels = await db.notificationChannel.findMany({
     where: {
       type: "TELEGRAM",
@@ -2212,7 +2232,7 @@ async function createTelegramPaymentDraft(input: {
   argument: string;
   client?: DbClient;
 }) {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   const channel = await getTelegramChannelByChatId(input.chatId, db);
   if (!channel?.isEnabled || !channel.telegramChatId) {
     return {
@@ -2241,7 +2261,7 @@ async function createTelegramPaymentDraft(input: {
     };
   }
 
-  const draft = await db.$transaction(async (tx) => {
+  const draft = await runDbTransaction(db, async (tx) => {
     await tx.telegramDraft.updateMany({
       where: {
         organizationId,
@@ -2348,7 +2368,7 @@ async function createTelegramPolicyDraft(input: {
   argument: string;
   client?: DbClient;
 }) {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   const channel = await getTelegramChannelByChatId(input.chatId, db);
   if (!channel?.isEnabled || !channel.telegramChatId) {
     return {
@@ -2366,7 +2386,7 @@ async function createTelegramPolicyDraft(input: {
     };
   }
 
-  const draft = await db.$transaction(async (tx) => {
+  const draft = await runDbTransaction(db, async (tx) => {
     await tx.telegramDraft.updateMany({
       where: {
         organizationId,
@@ -2430,7 +2450,7 @@ async function createTelegramPolicyDraftFromPdf(input: {
   caption?: string | null;
   client?: DbClient;
 }) {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   const channel = await getTelegramChannelByChatId(input.chatId, db);
   if (!channel?.isEnabled || !channel.telegramChatId) {
     return {
@@ -2502,7 +2522,7 @@ async function createTelegramPolicyDraftFromPdf(input: {
   );
 
   const payload = buildTelegramPolicyDraftPayloadFromPreview(preview);
-  const draft = await db.$transaction(async (tx) => {
+  const draft = await runDbTransaction(db, async (tx) => {
     await tx.telegramDraft.updateMany({
       where: {
         organizationId,
@@ -2717,7 +2737,7 @@ async function findAuthorizedQualitasPolicy(input: {
   policyId?: string;
   client?: DbClient;
 }) {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   const policy = await db.policy.findFirst({
     where: {
       organizationId: input.identity.organizationId,
@@ -2780,7 +2800,7 @@ function buildQualitasDraftState(input: {
 }
 
 async function createTelegramQualitasDraft(input: { chatId: string; argument: string; policyId?: string; receiptId?: string; client?: DbClient }) {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   const identity = await getActiveTelegramIdentityForChat(input.chatId, db);
   if (!identity) {
     return { ok: false as const, replyText: buildTelegramLinkedChatRequiredMessage() };
@@ -2802,7 +2822,7 @@ async function createTelegramQualitasDraft(input: { chatId: string; argument: st
   }
 
   if (!normalizedArgument) {
-    const draft = await db.$transaction(async (tx) => {
+    const draft = await runDbTransaction(db, async (tx) => {
       await assertOrganizationContextInTransaction(tx, identity.context);
       await tx.telegramDraft.updateMany({
         where: {
@@ -2849,7 +2869,7 @@ async function createTelegramQualitasDraft(input: { chatId: string; argument: st
     return { ok: false as const, replyText: buildTelegramQualitasNoRecipientMessage() };
   }
 
-  const draft = await db.$transaction(async (tx) => {
+  const draft = await runDbTransaction(db, async (tx) => {
     await assertOrganizationContextInTransaction(tx, identity.context);
     await tx.telegramDraft.updateMany({
       where: {
@@ -2887,7 +2907,7 @@ async function continueTelegramQualitasDraftFromText(input: {
   draft: { id: string; organizationId: string | null; channelId: string | null; payloadJson: string };
   client?: DbClient;
 }) {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   const identity = await getActiveTelegramIdentityForChat(input.chatId, db);
   const payload = parseTelegramDraftState(input.draft.payloadJson);
   if (!identity || !payload?.qualitas || payload.type !== "QUALITAS_PAYMENT_LINK") return null;
@@ -3001,7 +3021,7 @@ async function continueTelegramQualitasDraftFromText(input: {
 }
 
 async function getDigestReceiptSelection(userId: string, client?: DbClient) {
-  const db = client ?? getDb();
+  const db = client ?? getTelegramPlatformDb();
   const dayStart = startOfDayInTimeZone(new Date(), DEFAULT_TIMEZONE);
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
   const tomorrowStart = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
@@ -3021,7 +3041,7 @@ async function getDigestReceiptSelection(userId: string, client?: DbClient) {
 }
 
 async function getAuthorizedDigestReceipt(identity: ActiveTelegramIdentity, receiptId: string, client?: DbClient) {
-  const db = client ?? getDb();
+  const db = client ?? getTelegramPlatformDb();
   return db.receipt.findFirst({
     where: {
       id: receiptId,
@@ -3052,7 +3072,7 @@ async function createTelegramWhatsAppReminderDraft(input: {
   receiptId: string;
   client?: DbClient;
 }) {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   const identity = await getActiveTelegramIdentityForChat(input.chatId, db);
   if (!identity) return { ok: false as const, replyText: buildTelegramLinkedChatRequiredMessage() };
   if (!isTelegramMutationsEnabled(identity.channel)) {
@@ -3078,7 +3098,7 @@ async function createTelegramWhatsAppReminderDraft(input: {
     };
   }
 
-  const draft = await db.$transaction(async (tx) => {
+  const draft = await runDbTransaction(db, async (tx) => {
     await assertOrganizationContextInTransaction(tx, identity.context);
     return tx.telegramDraft.create({
       data: {
@@ -3143,7 +3163,7 @@ async function createTelegramWhatsAppReminderDraft(input: {
       removeReplyMarkup: true,
     };
   } catch (error) {
-    await db.$transaction(async (tx) => {
+    await runDbTransaction(db, async (tx) => {
       await assertOrganizationContextInTransaction(tx, identity.context);
       await tx.telegramDraft.updateMany({
         where: { id: draft.id, organizationId: identity.organizationId, status: "COLLECTING" },
@@ -3159,7 +3179,7 @@ async function processTelegramWhatsAppReminderCallback(callback: TelegramCallbac
   if (!chat || chat.type !== "private" || callback.from.id !== chat.id || !callback.data) {
     return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Selección no válida." };
   }
-  const db = getDb();
+  const db = getTelegramPlatformDb();
   const identity = await getActiveTelegramIdentityForChat(String(chat.id), db);
   if (!identity) return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Esta sesión de Telegram ya no está autorizada." };
   const active = await getActiveTelegramDraftForChat(String(chat.id), db);
@@ -3169,7 +3189,7 @@ async function processTelegramWhatsAppReminderCallback(callback: TelegramCallbac
   }
 
   if (callback.data === WHATSAPP_REMINDER_CANCEL_CALLBACK) {
-    await db.$transaction(async (tx) => {
+    await runDbTransaction(db, async (tx) => {
       await assertOrganizationContextInTransaction(tx, identity.context);
       const updated = await tx.telegramDraft.updateMany({
         where: { id: active.draft!.id, organizationId: identity.organizationId, userId: identity.user.id, status: "COLLECTING", type: "WHATSAPP_RECEIPT_REMINDER" },
@@ -3216,7 +3236,7 @@ async function processTelegramDigestCallback(callback: TelegramCallbackQuery) {
   if (!chat || chat.type !== "private" || callback.from.id !== chat.id || !callback.data) {
     return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Selección no válida." };
   }
-  const db = getDb();
+  const db = getTelegramPlatformDb();
   const identity = await getActiveTelegramIdentityForChat(String(chat.id), db);
   if (!identity) return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Esta sesión de Telegram ya no está autorizada." };
 
@@ -3310,7 +3330,7 @@ async function processTelegramQualitasCallback(callback: TelegramCallbackQuery, 
     return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Selección no válida." };
   }
 
-  const db = client ?? getDb();
+  const db = client ?? getTelegramPlatformDb();
   const identity = await getActiveTelegramIdentityForChat(String(chat.id), db);
   if (!identity) {
     return { handled: true as const, callbackQueryId: callback.id, callbackAnswerText: "Esta solicitud ya no está disponible." };
@@ -3475,7 +3495,7 @@ async function finalizeQualitasTelegramDraft(input: {
   db: DbClient;
 }) {
   const status = input.outcome === "SUCCESS" ? "CONFIRMED" : input.outcome === "ALREADY_IN_PROGRESS" ? "ALREADY_IN_PROGRESS" : input.outcome === "UNCERTAIN_POST_SUBMISSION" ? "UNCERTAIN" : "FAILED";
-  await input.db.$transaction(async (tx) => {
+  await runDbTransaction(input.db, async (tx) => {
     await assertOrganizationContextInTransaction(tx, input.context);
     await tx.telegramDraft.update({
       where: { id: input.draftId, organizationId: input.organizationId },
@@ -3525,7 +3545,7 @@ async function confirmTelegramWhatsAppReminder(input: {
   channel: NonNullable<Awaited<ReturnType<typeof getTelegramChannelByChatId>>>;
   client?: DbClient;
 }) {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   if (!isTelegramMutationsEnabled(input.channel)) {
     return { ok: false as const, replyText: "Las mutaciones de Telegram están desactivadas. Actívalas en Configuración > Notificaciones para preparar el recordatorio." };
   }
@@ -3565,7 +3585,7 @@ async function confirmQualitasTelegramDraft(input: {
   client?: DbClient;
 }) {
   const startedAt = Date.now();
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   const identity = await getActiveTelegramIdentityForChat(input.chatId, db);
   const payload = parseTelegramDraftState(input.draft.payloadJson);
   const state = payload?.type === "QUALITAS_PAYMENT_LINK" && payload.qualitas
@@ -3581,6 +3601,8 @@ async function confirmQualitasTelegramDraft(input: {
   ) {
     return { ok: false as const, replyText: "No hay ningún borrador activo para confirmar." };
   }
+  const qualitasCapability = await resolveOrganizationCapability(identity.organizationId, "QUALITAS");
+  if (!qualitasCapability.enabled) return { ok: false as const, replyText: buildTelegramQualitasUnavailableMessage() };
   if (!isQualitasPaymentLinkEnabled()) {
     return { ok: false as const, replyText: buildTelegramQualitasUnavailableMessage() };
   }
@@ -3643,7 +3665,7 @@ async function confirmQualitasTelegramDraft(input: {
     return { ok: false as const, replyText: buildTelegramQualitasOutcomeMessage("RATE_LIMITED") };
   }
 
-  const claimed = await db.$transaction(async (tx) => {
+  const claimed = await runDbTransaction(db, async (tx) => {
     await assertOrganizationContextInTransaction(tx, identity.context);
     return tx.telegramDraft.updateMany({
       where: {
@@ -3672,7 +3694,7 @@ async function confirmQualitasTelegramDraft(input: {
       traceId: state.correlationId ?? securityFingerprint(input.draft.id),
       correlationId: state.correlationId ?? input.draft.id,
       onFinalSubmissionStarted: async () => {
-        const updated = await db.$transaction(async (tx) => {
+        const updated = await runDbTransaction(db, async (tx) => {
           await assertOrganizationContextInTransaction(tx, identity.context);
           return tx.telegramDraft.updateMany({
             where: {
@@ -3765,7 +3787,7 @@ async function confirmTelegramDraft(input: {
   chatId: string;
   client?: DbClient;
 }) {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   const { channel, draft, expired } = await getActiveTelegramDraftForChat(input.chatId, db);
   if (!channel) {
     return {
@@ -3850,7 +3872,7 @@ async function confirmTelegramDraft(input: {
     }
 
     try {
-      await db.$transaction(async (tx) => {
+      await runDbTransaction(db, async (tx) => {
         await assertOrganizationContextInTransaction(tx, identity.context);
         const permitted = await tx.receipt.findFirst({
           where: {
@@ -3936,7 +3958,7 @@ async function cancelTelegramDraft(input: {
   chatId: string;
   client?: DbClient;
 }) {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   const { channel, draft, expired } = await getActiveTelegramDraftForChat(input.chatId, db);
   if (!channel) {
     return {
@@ -3987,7 +4009,7 @@ async function continueTelegramDraftFromMessage(input: {
   text: string;
   client?: DbClient;
 }) {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   const { channel, draft } = await getActiveTelegramDraftForChat(input.chatId, db);
   if (!channel) return null;
   if (!draft) return null;
@@ -4274,7 +4296,7 @@ async function continueTelegramDraftFromMessage(input: {
 }
 
 export async function sendDailyTelegramDigests(client?: DbClient): Promise<TelegramDailyDigestResult> {
-  const db = client ?? getDb();
+  const db = client ?? getTelegramPlatformDb();
   const channels = await db.notificationChannel.findMany({
     where: {
       type: "TELEGRAM",
@@ -4338,10 +4360,10 @@ export async function createTelegramLinkCodeForUser(input: {
   actorId: string;
   client?: DbClient;
 }): Promise<TelegramLinkCodeResult> {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
 
   try {
-    const result = await db.$transaction(async (tx) => {
+    const result = await runDbTransaction(db, async (tx) => {
       await tx.telegramLinkToken.deleteMany({
         where: {
           organizationId: input.organizationId,
@@ -4412,7 +4434,7 @@ export async function connectTelegramChannelFromCode(input: {
 }): Promise<TelegramActionResult> {
   // TENANT_READ_SCOPE_GLOBAL_TOKEN: the random, hashed, single-use token is the
   // authorization locator; its persisted organizationId scopes every follow-up.
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
   const chatId = normalizeChatId(input.chatId);
   const normalizedCode = normalizeTelegramLinkCode(input.code);
 
@@ -4428,7 +4450,7 @@ export async function connectTelegramChannelFromCode(input: {
   }
 
   try {
-    const result = await db.$transaction(async (tx) => {
+    const result = await runDbTransaction(db, async (tx) => {
       const tokenHash = hashTelegramLinkCode(normalizedCode, getTelegramLinkSecret());
       const token = await tx.telegramLinkToken.findFirst({
         where: {
@@ -4545,10 +4567,10 @@ export async function disconnectTelegramChannelForUser(input: {
   actorId: string;
   client?: DbClient;
 }): Promise<TelegramActionResult> {
-  const db = input.client ?? getDb();
+  const db = input.client ?? getTelegramPlatformDb();
 
   try {
-    const result = await db.$transaction(async (tx) => {
+    const result = await runDbTransaction(db, async (tx) => {
       await ensureNotificationDefaultsForUser(input.organizationId, input.userId, tx);
       const current = await getTelegramChannelByUserId(input.userId, tx);
       if (!current || (!current.isEnabled && !current.telegramChatId)) {
@@ -4616,7 +4638,7 @@ export async function deliverTelegramNotificationEvent(
   replyMarkup?: TelegramInlineKeyboardMarkup,
   client?: DbClient,
 ): Promise<NotificationEventRecord | null> {
-  const db = client ?? getDb();
+  const db = client ?? getTelegramPlatformDb();
 
   try {
     const event = await db.notificationEvent.findFirst({ where: { id: eventId, organizationId } });
@@ -4626,6 +4648,10 @@ export async function deliverTelegramNotificationEvent(
     }
     if (event.channelType !== "TELEGRAM") {
       return await markNotificationSkipped(event.id, event.organizationId!, "Canal no soportado.", db);
+    }
+    const capability = await resolveOrganizationCapability(organizationId, "TELEGRAM", db as TenantDb);
+    if (!capability.enabled) {
+      return await markNotificationSkipped(event.id, event.organizationId!, "Telegram está deshabilitado por la plataforma o la organización.", db);
     }
 
     const channel = await db.notificationChannel.findUnique({
@@ -4674,6 +4700,7 @@ export async function createAndDeliverTelegramNotificationEvent(input: {
   dedupeKey?: string | null;
   force?: boolean;
   replyMarkup?: TelegramInlineKeyboardMarkup;
+  client?: DbClient;
 }): Promise<NotificationEventRecord | null> {
   const event = await createNotificationEvent({
     organizationId: input.organizationId,
@@ -4689,13 +4716,13 @@ export async function createAndDeliverTelegramNotificationEvent(input: {
     dedupeKey: input.dedupeKey ?? null,
     channelType: "TELEGRAM",
     force: input.force,
-  });
+  }, input.client);
 
   if (!event || event.status !== "PENDING") {
     return event;
   }
 
-  return deliverTelegramNotificationEvent(event.id, input.organizationId, input.replyMarkup);
+  return deliverTelegramNotificationEvent(event.id, input.organizationId, input.replyMarkup, input.client);
 }
 
 async function processTelegramWebhookUpdateInternal(
@@ -5152,7 +5179,22 @@ export async function processTelegramWebhookUpdate(
   const startedAt = Date.now();
   const operation = update.callback_query ? "callback" : "command";
   try {
-    const result = await processTelegramWebhookUpdateInternal(update);
+    if (process.env.PLATFORM_TELEGRAM_ENABLED?.trim() === "0") {
+      throw new Error("TELEGRAM_CAPABILITY_DISABLED");
+    }
+    const chatValue = update.callback_query?.message?.chat.id ?? update.message?.chat.id;
+    const chatId = chatValue === undefined ? null : normalizeChatId(chatValue);
+    const platformDb = getTelegramPlatformDb();
+    // Resolve the linked identity through platform-global channel metadata,
+    // then run the entire webhook helper graph on one explicit system tenant
+    // transaction. Unlinked /link and help messages remain platform-only and
+    // never touch protected tenant rows.
+    const identity = chatId ? await getActiveTelegramIdentityForChat(chatId, platformDb).catch(() => null) : null;
+    const result = identity
+      ? await withSystemOrganizationTransaction(identity.organizationId, "telegram webhook", (tx) =>
+          runTelegramTenantDb(tx, () => processTelegramWebhookUpdateInternal(update)),
+        )
+      : await processTelegramWebhookUpdateInternal(update);
     const rejected = Boolean(
       result.callbackAnswerText &&
       /no válida|expiró|procesad|autorizad|desactivad|disponible/i.test(result.callbackAnswerText),
@@ -5170,14 +5212,22 @@ export async function processTelegramWebhookUpdate(
 }
 
 export async function getTelegramChannelStateForUser(organizationId: string, userId: string, client?: DbClient) {
-  const db = client ?? getDb();
-  try {
+  const load = async (db: DbClient) => {
     await ensureNotificationDefaultsForUser(organizationId, userId, db);
     return (await getTelegramChannelByUserId(userId, db)) ?? createFallbackTelegramChannelState(userId);
-  } catch (error) {
-    logError("telegram.getTelegramChannelStateForUser", error, { userId });
-    return createFallbackTelegramChannelState(userId);
-  }
+  };
+
+  if (client) return load(client);
+
+  // Unit tests use a mocked Prisma client without an authenticated request.
+  // Production callers must never fall back to a root client: the channel is
+  // global metadata, but ensureNotificationDefaultsForUser also writes the
+  // tenant-scoped NotificationPreference rows.
+  if (process.env.NODE_ENV === "test") return load(getTelegramPlatformDb());
+
+  const context = await requireOrganizationContext();
+  if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  return withTenantTransaction(context, (tx) => load(tx));
 }
 
 export { TELEGRAM_LINK_TOKEN_TTL_MINUTES };

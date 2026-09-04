@@ -174,11 +174,11 @@ describe("qualitas-payment-link provider", () => {
     const prepared = await prepareQualitasPaymentLink({
       policyNumber: "0000000000",
       deliveryChannel: "WHATSAPP",
-      destination: "+52 55 1234 5678",
+      destination: "+52 55 9876 5432",
       correlationId: "test-correlation",
     }, { transport });
 
-    expect(prepared).toMatchObject({ transportReady: true, request: { deliveryChannel: "WHATSAPP", destination: "5512345678" } });
+    expect(prepared).toMatchObject({ transportReady: true, request: { deliveryChannel: "WHATSAPP", destination: "5598765432" } });
     await expect(requestQualitasPaymentLink(prepared as QualitasPreparedPaymentLink, { transport })).resolves.toEqual({
       outcome: "SUCCESS",
       reason: "SUCCESS_CODE_0",
@@ -186,7 +186,7 @@ describe("qualitas-payment-link provider", () => {
     const finalBody = calls[2].init?.body as URLSearchParams;
     expect(finalBody).toBeInstanceOf(URLSearchParams);
     expect(finalBody.get("tipo")).toBe("3");
-    expect(finalBody.get("numTelefono")).toBe("5512345678");
+    expect(finalBody.get("numTelefono")).toBe("5598765432");
     expect(finalBody.get("temail")).toBe("");
     expect(finalBody.has("disabledDynamicField")).toBe(false);
   });

@@ -2,8 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireOrganizationRole } from "@/lib/organization-context";
-import { getDb } from "@/lib/db";
+import {
+  requireOrganizationRole,
+  withTenantTransaction,
+  type OrganizationContext,
+  type TenantDb,
+} from "@/lib/organization-context";
 import { writeActivityLog } from "@/lib/activity-log";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { logError } from "@/lib/logger";
@@ -21,7 +25,13 @@ const REVIEW_CLOSED_NOTE = "Cerrado manualmente desde Riesgos y calidad.";
 
 async function requireAdmin() {
   const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
-  return { id: context.userId, organizationId: context.organizationId };
+  return { ...context, id: context.userId };
+}
+
+type DataQualityActor = OrganizationContext & { id: string };
+
+function withDataQualityTransaction<T>(actor: DataQualityActor, callback: (db: TenantDb) => Promise<T>) {
+  return withTenantTransaction(actor, callback);
 }
 
 function buildLedgerTabHref(batchId?: string | null) {
@@ -86,8 +96,7 @@ function buildLedgerSuppressionCriteria(issue: {
   };
 }
 
-async function loadReceiptIssue(issueId: string, organizationId: string) {
-  const db = getDb();
+async function loadReceiptIssue(issueId: string, organizationId: string, db: TenantDb) {
   return db.receiptReconciliationIssue.findFirst({
     where: { id: issueId, organizationId },
     include: {
@@ -109,8 +118,7 @@ async function loadReceiptIssue(issueId: string, organizationId: string) {
   });
 }
 
-async function loadRenewalSuggestion(suggestionId: string, organizationId: string) {
-  const db = getDb();
+async function loadRenewalSuggestion(suggestionId: string, organizationId: string, db: TenantDb) {
   return db.policyRenewalSuggestion.findFirst({
     where: { id: suggestionId, organizationId },
     include: {
@@ -138,7 +146,6 @@ async function closeRiskIssueSet(input: {
   note?: string;
 }) {
   const actor = await requireAdmin();
-  const db = getDb();
   const issueCodes = [...new Set(input.issueCodes.map((code) => code.trim()).filter(Boolean))];
 
   if (!issueCodes.length) {
@@ -148,43 +155,44 @@ async function closeRiskIssueSet(input: {
   const closeNote = input.note?.trim() || REVIEW_CLOSED_NOTE;
   const ruleIds: string[] = [];
 
-  for (const issueCode of issueCodes) {
-    const suppressionRule = await upsertSuppressionRule(
-      {
-        category: "RISKS",
-        issueCode,
-        criteria: {
-          entityType: input.entityType,
-          entityId: input.entityId,
+  await withDataQualityTransaction(actor, async (db) => {
+    for (const issueCode of issueCodes) {
+      const suppressionRule = await upsertSuppressionRule(
+        {
+          category: "RISKS",
+          issueCode,
+          criteria: {
+            entityType: input.entityType,
+            entityId: input.entityId,
+          },
+          reason: closeNote,
+          actorId: actor.id,
+          organizationId: actor.organizationId,
         },
-        reason: closeNote,
-        actorId: actor.id,
-        organizationId: actor.organizationId,
-      },
-      db,
-    );
-    ruleIds.push(suppressionRule.id);
-  }
+        db,
+      );
+      ruleIds.push(suppressionRule.id);
+    }
 
-  await writeActivityLog({
-    entityType: input.entityType,
-    entityId: input.entityId,
-    action: "RISK_ISSUES_CLOSED",
-    newValue: {
-      issueCodes,
-      note: closeNote,
-      suppressionRuleIds: ruleIds,
-    },
-    userId: actor.id,
-    organizationId: actor.organizationId,
-    db,
+    await writeActivityLog({
+      entityType: input.entityType,
+      entityId: input.entityId,
+      action: "RISK_ISSUES_CLOSED",
+      newValue: {
+        issueCodes,
+        note: closeNote,
+        suppressionRuleIds: ruleIds,
+      },
+      userId: actor.id,
+      organizationId: actor.organizationId,
+      db,
+    });
   });
 
   revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
 }
 
-async function loadLedgerIssue(issueId: string, organizationId: string) {
-  const db = getDb();
+async function loadLedgerIssue(issueId: string, organizationId: string, db: TenantDb) {
   return db.ledgerImportIssue.findFirst({
     where: { id: issueId, organizationId },
     include: {
@@ -210,71 +218,73 @@ async function loadLedgerIssue(issueId: string, organizationId: string) {
 async function reviewReceiptIssue(issueId: string, decision: "APPROVE" | "DENY"): Promise<MutationResult> {
   try {
     const actor = await requireAdmin();
-    const db = getDb();
-    const issue = await db.receiptReconciliationIssue.findFirst({
-      where: { id: issueId, organizationId: actor.organizationId },
-      include: {
-        receipt: {
-          select: {
-            id: true,
-            receiptNumber: true,
-            policyId: true,
-            clientId: true,
+    return await withDataQualityTransaction(actor, async (db) => {
+      const issue = await db.receiptReconciliationIssue.findFirst({
+        where: { id: issueId, organizationId: actor.organizationId },
+        include: {
+          receipt: {
+            select: {
+              id: true,
+              receiptNumber: true,
+              policyId: true,
+              clientId: true,
+            },
+          },
+          policy: {
+            select: {
+              id: true,
+              policyNumber: true,
+            },
           },
         },
-        policy: {
-          select: {
-            id: true,
-            policyNumber: true,
-          },
+      });
+
+      if (!issue || !issue.receipt || !issue.policy) {
+        return errorResult("El issue de recibo ya no existe.");
+      }
+
+      if (issue.status !== "OPEN") {
+        return successResult(issue.id, "/data-quality?tab=pagos", "El issue ya estaba revisado.");
+      }
+
+      const nextStatus = decision === "APPROVE" ? "RESOLVED" : "DISMISSED";
+      const reviewedAt = new Date();
+
+      await db.receiptReconciliationIssue.updateMany({
+        where: { id: issue.id, organizationId: actor.organizationId },
+        data: {
+          status: nextStatus,
+          reviewedAt,
+          reviewedById: actor.id,
+          resolutionNote: decision === "APPROVE" ? REVIEW_APPROVED_NOTE : REVIEW_DENIED_NOTE,
         },
-      },
+      });
+
+      await writeActivityLog({
+        entityType: "ReceiptReconciliationIssue",
+        entityId: issue.id,
+        action: decision === "APPROVE" ? "RECEIPT_REVIEW_APPROVED" : "RECEIPT_REVIEW_DENIED",
+        oldValue: issue,
+        newValue: { ...issue, status: nextStatus, reviewedAt, reviewedById: actor.id },
+        userId: actor.id,
+        organizationId: actor.organizationId,
+        db,
+      });
+
+      revalidatePaths([
+        "/data-quality",
+        "/receipts",
+        `/receipts/${issue.receipt.id}`,
+        `/policies/${issue.policy.id}`,
+        "/due-payments",
+        "/dashboard",
+        "/today",
+        "/portfolio",
+        "/risks",
+      ]);
+
+      return successResult(issue.id, "/data-quality?tab=pagos", decision === "APPROVE" ? "Problema aprobado." : "Problema denegado.");
     });
-
-    if (!issue || !issue.receipt || !issue.policy) {
-      return errorResult("El issue de recibo ya no existe.");
-    }
-
-    if (issue.status !== "OPEN") {
-      return successResult(issue.id, "/data-quality?tab=pagos", "El issue ya estaba revisado.");
-    }
-
-    const nextStatus = decision === "APPROVE" ? "RESOLVED" : "DISMISSED";
-    const reviewedAt = new Date();
-
-    await db.receiptReconciliationIssue.updateMany({
-      where: { id: issue.id, organizationId: actor.organizationId },
-      data: {
-        status: nextStatus,
-        reviewedAt,
-        reviewedById: actor.id,
-        resolutionNote: decision === "APPROVE" ? REVIEW_APPROVED_NOTE : REVIEW_DENIED_NOTE,
-      },
-    });
-
-    await writeActivityLog({
-      entityType: "ReceiptReconciliationIssue",
-      entityId: issue.id,
-      action: decision === "APPROVE" ? "RECEIPT_REVIEW_APPROVED" : "RECEIPT_REVIEW_DENIED",
-      oldValue: issue,
-      newValue: { ...issue, status: nextStatus, reviewedAt, reviewedById: actor.id },
-      userId: actor.id,
-      organizationId: actor.organizationId,
-    });
-
-    revalidatePaths([
-      "/data-quality",
-      "/receipts",
-      `/receipts/${issue.receipt.id}`,
-      `/policies/${issue.policy.id}`,
-      "/due-payments",
-      "/dashboard",
-      "/today",
-      "/portfolio",
-      "/risks",
-    ]);
-
-    return successResult(issue.id, "/data-quality?tab=pagos", decision === "APPROVE" ? "Problema aprobado." : "Problema denegado.");
   } catch (error) {
     logError("data-quality.reviewReceiptIssue", error);
     return errorResult(error instanceof Error ? error.message : "No se pudo revisar el issue de recibo.");
@@ -287,8 +297,7 @@ async function reviewRenewalSuggestion(
 ): Promise<MutationResult> {
   try {
     const actor = await requireAdmin();
-    const db = getDb();
-    const suggestion = await db.policyRenewalSuggestion.findFirst({
+    const suggestion = await withDataQualityTransaction(actor, (db) => db.policyRenewalSuggestion.findFirst({
       where: { id: suggestionId, organizationId: actor.organizationId },
       include: {
         sourcePolicy: {
@@ -305,7 +314,7 @@ async function reviewRenewalSuggestion(
           },
         },
       },
-    });
+    }));
 
     if (!suggestion) {
       return errorResult("La sugerencia de renovación ya no existe.");
@@ -325,24 +334,27 @@ async function reviewRenewalSuggestion(
     const nextStatus = "DECLINED";
     const reviewedAt = new Date();
 
-    await db.policyRenewalSuggestion.updateMany({
-      where: { id: suggestion.id, organizationId: actor.organizationId },
-      data: {
-        status: nextStatus,
-        reviewedAt,
-        reviewedById: actor.id,
-        resolutionNote: REVIEW_DENIED_NOTE,
-      },
-    });
+    await withDataQualityTransaction(actor, async (db) => {
+      await db.policyRenewalSuggestion.updateMany({
+        where: { id: suggestion.id, organizationId: actor.organizationId },
+        data: {
+          status: nextStatus,
+          reviewedAt,
+          reviewedById: actor.id,
+          resolutionNote: REVIEW_DENIED_NOTE,
+        },
+      });
 
-    await writeActivityLog({
-      entityType: "PolicyRenewalSuggestion",
-      entityId: suggestion.id,
-      action: "RENEWAL_REVIEW_DENIED",
-      oldValue: suggestion,
-      newValue: { ...suggestion, status: nextStatus, reviewedAt, reviewedById: actor.id },
-      userId: actor.id,
-      organizationId: actor.organizationId,
+      await writeActivityLog({
+        entityType: "PolicyRenewalSuggestion",
+        entityId: suggestion.id,
+        action: "RENEWAL_REVIEW_DENIED",
+        oldValue: suggestion,
+        newValue: { ...suggestion, status: nextStatus, reviewedAt, reviewedById: actor.id },
+        userId: actor.id,
+        organizationId: actor.organizationId,
+        db,
+      });
     });
 
     revalidatePaths([
@@ -369,54 +381,56 @@ async function reviewRenewalSuggestion(
 async function reviewLedgerIssue(issueId: string, decision: "APPROVE" | "DENY"): Promise<MutationResult> {
   try {
     const actor = await requireAdmin();
-    const db = getDb();
-    const issue = await db.ledgerImportIssue.findFirst({
-      where: { id: issueId, organizationId: actor.organizationId },
-      include: {
-        batch: {
-          select: {
-            id: true,
-            sourceCsvName: true,
-            sourcePaidName: true,
+    return await withDataQualityTransaction(actor, async (db) => {
+      const issue = await db.ledgerImportIssue.findFirst({
+        where: { id: issueId, organizationId: actor.organizationId },
+        include: {
+          batch: {
+            select: {
+              id: true,
+              sourceCsvName: true,
+              sourcePaidName: true,
+            },
           },
         },
-      },
+      });
+
+      if (!issue) {
+        return errorResult("El issue de ledger ya no existe.");
+      }
+
+      if (issue.status !== "OPEN") {
+        return successResult(issue.id, "/data-quality?tab=ledger", "El issue ya estaba revisado.");
+      }
+
+      const nextStatus = decision === "APPROVE" ? "RESOLVED" : "DISMISSED";
+      const reviewedAt = new Date();
+
+      await db.ledgerImportIssue.updateMany({
+        where: { id: issue.id, organizationId: actor.organizationId },
+        data: {
+          status: nextStatus,
+          reviewedAt,
+          reviewedById: actor.id,
+          resolutionNote: decision === "APPROVE" ? REVIEW_APPROVED_NOTE : REVIEW_DENIED_NOTE,
+        },
+      });
+
+      await writeActivityLog({
+        entityType: "LedgerImportIssue",
+        entityId: issue.id,
+        action: decision === "APPROVE" ? "LEDGER_ISSUE_APPROVED" : "LEDGER_ISSUE_DENIED",
+        oldValue: issue,
+        newValue: { ...issue, status: nextStatus, reviewedAt, reviewedById: actor.id },
+        userId: actor.id,
+        organizationId: actor.organizationId,
+        db,
+      });
+
+      revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
+
+      return successResult(issue.id, "/data-quality?tab=ledger", decision === "APPROVE" ? "Problema aprobado." : "Problema denegado.");
     });
-
-    if (!issue) {
-      return errorResult("El issue de ledger ya no existe.");
-    }
-
-    if (issue.status !== "OPEN") {
-      return successResult(issue.id, "/data-quality?tab=ledger", "El issue ya estaba revisado.");
-    }
-
-    const nextStatus = decision === "APPROVE" ? "RESOLVED" : "DISMISSED";
-    const reviewedAt = new Date();
-
-    await db.ledgerImportIssue.updateMany({
-      where: { id: issue.id, organizationId: actor.organizationId },
-      data: {
-        status: nextStatus,
-        reviewedAt,
-        reviewedById: actor.id,
-        resolutionNote: decision === "APPROVE" ? REVIEW_APPROVED_NOTE : REVIEW_DENIED_NOTE,
-      },
-    });
-
-    await writeActivityLog({
-      entityType: "LedgerImportIssue",
-      entityId: issue.id,
-      action: decision === "APPROVE" ? "LEDGER_ISSUE_APPROVED" : "LEDGER_ISSUE_DENIED",
-      oldValue: issue,
-      newValue: { ...issue, status: nextStatus, reviewedAt, reviewedById: actor.id },
-      userId: actor.id,
-      organizationId: actor.organizationId,
-    });
-
-    revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
-
-    return successResult(issue.id, "/data-quality?tab=ledger", decision === "APPROVE" ? "Problema aprobado." : "Problema denegado.");
   } catch (error) {
     logError("data-quality.reviewLedgerIssue", error);
     return errorResult(error instanceof Error ? error.message : "No se pudo revisar el issue de ledger.");
@@ -444,7 +458,7 @@ export async function linkRenewalSuggestionToPolicy(
 ): Promise<MutationResult> {
   try {
     const actor = await requireAdmin();
-    const suggestion = await loadRenewalSuggestion(suggestionId, actor.organizationId);
+    const suggestion = await withDataQualityTransaction(actor, (db) => loadRenewalSuggestion(suggestionId, actor.organizationId, db));
     if (!suggestion) {
       return errorResult("La sugerencia de renovación ya no existe.");
     }
@@ -465,7 +479,7 @@ export async function linkRenewalSuggestionToPolicy(
 export async function markRenewalSuggestionAsNotContinuing(suggestionId: string): Promise<MutationResult> {
   try {
     const actor = await requireAdmin();
-    const suggestion = await loadRenewalSuggestion(suggestionId, actor.organizationId);
+    const suggestion = await withDataQualityTransaction(actor, (db) => loadRenewalSuggestion(suggestionId, actor.organizationId, db));
     if (!suggestion) {
       return errorResult("La sugerencia de renovación ya no existe.");
     }
@@ -491,34 +505,36 @@ export async function denyReceiptReviewIssue(issueId: string): Promise<MutationR
 export async function reopenReceiptReviewIssue(issueId: string): Promise<MutationResult> {
   try {
     const actor = await requireAdmin();
-    const db = getDb();
-    const issue = await loadReceiptIssue(issueId, actor.organizationId);
+    const issue = await withDataQualityTransaction(actor, (db) => loadReceiptIssue(issueId, actor.organizationId, db));
     if (!issue) {
       return errorResult("El issue de recibo ya no existe.");
     }
 
-    await db.receiptReconciliationIssue.updateMany({
-      where: { id: issue.id, organizationId: actor.organizationId },
-      data: {
-        status: "OPEN",
-        suppressedByRuleId: null,
-        duplicateOfId: null,
-        mergedAt: null,
-        mergedById: null,
-        reviewedAt: null,
-        reviewedById: null,
-        resolutionNote: null,
-      },
-    });
+    await withDataQualityTransaction(actor, async (db) => {
+      await db.receiptReconciliationIssue.updateMany({
+        where: { id: issue.id, organizationId: actor.organizationId },
+        data: {
+          status: "OPEN",
+          suppressedByRuleId: null,
+          duplicateOfId: null,
+          mergedAt: null,
+          mergedById: null,
+          reviewedAt: null,
+          reviewedById: null,
+          resolutionNote: null,
+        },
+      });
 
-    await writeActivityLog({
-      entityType: "ReceiptReconciliationIssue",
-      entityId: issue.id,
-      action: "RECEIPT_REVIEW_REOPENED",
-      oldValue: issue,
-      newValue: { ...issue, status: "OPEN", reviewedAt: null, reviewedById: null },
-      userId: actor.id,
-      organizationId: actor.organizationId,
+      await writeActivityLog({
+        entityType: "ReceiptReconciliationIssue",
+        entityId: issue.id,
+        action: "RECEIPT_REVIEW_REOPENED",
+        oldValue: issue,
+        newValue: { ...issue, status: "OPEN", reviewedAt: null, reviewedById: null },
+        userId: actor.id,
+        organizationId: actor.organizationId,
+        db,
+      });
     });
 
     revalidatePaths([
@@ -543,50 +559,54 @@ export async function reopenReceiptReviewIssue(issueId: string): Promise<Mutatio
 export async function suppressReceiptReviewIssue(issueId: string): Promise<MutationResult> {
   try {
     const actor = await requireAdmin();
-    const db = getDb();
-    const issue = await loadReceiptIssue(issueId, actor.organizationId);
+    const issue = await withDataQualityTransaction(actor, (db) => loadReceiptIssue(issueId, actor.organizationId, db));
     if (!issue || !issue.receipt || !issue.policy) {
       return errorResult("El issue de recibo ya no existe.");
     }
+    const receipt = issue.receipt;
+    const policy = issue.policy;
 
-    const suppressionRule = await upsertSuppressionRule({
-      category: "PAYMENTS",
-      issueCode: issue.reason,
-      criteria: buildReceiptSuppressionCriteria(issue),
-      reason: `Suprimir ${issue.reason} para ${issue.policy.policyNumber}/${issue.receipt.receiptNumber}.`,
-      actorId: actor.id,
-      organizationId: actor.organizationId,
-    }, db);
+    await withDataQualityTransaction(actor, async (db) => {
+      const suppressionRule = await upsertSuppressionRule({
+        category: "PAYMENTS",
+        issueCode: issue.reason,
+        criteria: buildReceiptSuppressionCriteria(issue),
+        reason: `Suprimir ${issue.reason} para ${policy.policyNumber}/${receipt.receiptNumber}.`,
+        actorId: actor.id,
+        organizationId: actor.organizationId,
+      }, db);
 
-    await db.receiptReconciliationIssue.updateMany({
-      where: { id: issue.id, organizationId: actor.organizationId },
-      data: {
-        status: "DISMISSED",
-        suppressedByRuleId: suppressionRule.id,
-        duplicateOfId: null,
-        mergedAt: null,
-        mergedById: null,
-        reviewedAt: new Date(),
-        reviewedById: actor.id,
-        resolutionNote: `${REVIEW_SUPPRESSED_NOTE} ${suppressionRule.reason ?? suppressionRule.issueCode}.`,
-      },
-    });
+      await db.receiptReconciliationIssue.updateMany({
+        where: { id: issue.id, organizationId: actor.organizationId },
+        data: {
+          status: "DISMISSED",
+          suppressedByRuleId: suppressionRule.id,
+          duplicateOfId: null,
+          mergedAt: null,
+          mergedById: null,
+          reviewedAt: new Date(),
+          reviewedById: actor.id,
+          resolutionNote: `${REVIEW_SUPPRESSED_NOTE} ${suppressionRule.reason ?? suppressionRule.issueCode}.`,
+        },
+      });
 
-    await writeActivityLog({
-      entityType: "ReceiptReconciliationIssue",
-      entityId: issue.id,
-      action: "RECEIPT_REVIEW_SUPPRESSED",
-      oldValue: issue,
-      newValue: { ...issue, status: "DISMISSED", suppressedByRuleId: suppressionRule.id, reviewedAt: new Date(), reviewedById: actor.id },
-      userId: actor.id,
-      organizationId: actor.organizationId,
+      await writeActivityLog({
+        entityType: "ReceiptReconciliationIssue",
+        entityId: issue.id,
+        action: "RECEIPT_REVIEW_SUPPRESSED",
+        oldValue: issue,
+        newValue: { ...issue, status: "DISMISSED", suppressedByRuleId: suppressionRule.id, reviewedAt: new Date(), reviewedById: actor.id },
+        userId: actor.id,
+        organizationId: actor.organizationId,
+        db,
+      });
     });
 
     revalidatePaths([
       "/data-quality",
       "/receipts",
-      `/receipts/${issue.receipt.id}`,
-      `/policies/${issue.policy.id}`,
+      `/receipts/${receipt.id}`,
+      `/policies/${policy.id}`,
       "/due-payments",
       "/dashboard",
       "/today",
@@ -604,8 +624,8 @@ export async function suppressReceiptReviewIssue(issueId: string): Promise<Mutat
 export async function bulkReceiptReviewIssuesAction(formData: FormData): Promise<void> {
   try {
     const actor = await requireAdmin();
-    const db = getDb();
-    const issueIds = parseIssueIds(formData);
+    return await withDataQualityTransaction(actor, async (db) => {
+      const issueIds = parseIssueIds(formData);
     const operation = parseOperation(formData);
 
     if (!issueIds.length) {
@@ -655,6 +675,7 @@ export async function bulkReceiptReviewIssuesAction(formData: FormData): Promise
         },
         userId: actor.id,
         organizationId: actor.organizationId,
+        db,
       });
       revalidatePaths(["/data-quality", "/receipts", "/due-payments", "/dashboard", "/today", "/portfolio", "/risks"]);
       return;
@@ -717,9 +738,11 @@ export async function bulkReceiptReviewIssuesAction(formData: FormData): Promise
       newValue: { operation, issueIds },
       userId: actor.id,
       organizationId: actor.organizationId,
+      db,
     });
     revalidatePaths(["/data-quality", "/receipts", "/due-payments", "/dashboard", "/today", "/portfolio", "/risks"]);
-    return;
+      return;
+    });
   } catch (error) {
     logError("data-quality.bulkReceiptReviewIssues", error);
     throw error instanceof Error ? error : new Error("No se pudo aplicar la revisión en lote de recibos.");
@@ -737,34 +760,36 @@ export async function denyRenewalSuggestionReview(suggestionId: string): Promise
 export async function reopenRenewalSuggestionReview(suggestionId: string): Promise<MutationResult> {
   try {
     const actor = await requireAdmin();
-    const db = getDb();
-    const suggestion = await loadRenewalSuggestion(suggestionId, actor.organizationId);
+    const suggestion = await withDataQualityTransaction(actor, (db) => loadRenewalSuggestion(suggestionId, actor.organizationId, db));
     if (!suggestion) {
       return errorResult("La sugerencia de renovación ya no existe.");
     }
 
-    await db.policyRenewalSuggestion.updateMany({
-      where: { id: suggestion.id, organizationId: actor.organizationId },
-      data: {
-        status: "PENDING",
-        suppressedByRuleId: null,
-        duplicateOfId: null,
-        mergedAt: null,
-        mergedById: null,
-        reviewedAt: null,
-        reviewedById: null,
-        resolutionNote: null,
-      },
-    });
+    await withDataQualityTransaction(actor, async (db) => {
+      await db.policyRenewalSuggestion.updateMany({
+        where: { id: suggestion.id, organizationId: actor.organizationId },
+        data: {
+          status: "PENDING",
+          suppressedByRuleId: null,
+          duplicateOfId: null,
+          mergedAt: null,
+          mergedById: null,
+          reviewedAt: null,
+          reviewedById: null,
+          resolutionNote: null,
+        },
+      });
 
-    await writeActivityLog({
-      entityType: "PolicyRenewalSuggestion",
-      entityId: suggestion.id,
-      action: "RENEWAL_REVIEW_REOPENED",
-      oldValue: suggestion,
-      newValue: { ...suggestion, status: "PENDING", reviewedAt: null, reviewedById: null },
-      userId: actor.id,
-      organizationId: actor.organizationId,
+      await writeActivityLog({
+        entityType: "PolicyRenewalSuggestion",
+        entityId: suggestion.id,
+        action: "RENEWAL_REVIEW_REOPENED",
+        oldValue: suggestion,
+        newValue: { ...suggestion, status: "PENDING", reviewedAt: null, reviewedById: null },
+        userId: actor.id,
+        organizationId: actor.organizationId,
+        db,
+      });
     });
 
     revalidatePaths([
@@ -787,43 +812,45 @@ export async function reopenRenewalSuggestionReview(suggestionId: string): Promi
 export async function suppressRenewalSuggestionReview(suggestionId: string): Promise<MutationResult> {
   try {
     const actor = await requireAdmin();
-    const db = getDb();
-    const suggestion = await loadRenewalSuggestion(suggestionId, actor.organizationId);
+    const suggestion = await withDataQualityTransaction(actor, (db) => loadRenewalSuggestion(suggestionId, actor.organizationId, db));
     if (!suggestion) {
       return errorResult("La sugerencia de renovación ya no existe.");
     }
 
-    const suppressionRule = await upsertSuppressionRule({
-      category: "RENOVATIONS",
-      issueCode: suggestion.reason ?? "RENEWAL_SUGGESTION",
-      criteria: buildRenewalSuppressionCriteria(suggestion),
-      reason: `Suprimir renovación para ${suggestion.sourcePolicy.policyNumber}.`,
-      actorId: actor.id,
-      organizationId: actor.organizationId,
-    }, db);
+    await withDataQualityTransaction(actor, async (db) => {
+      const suppressionRule = await upsertSuppressionRule({
+        category: "RENOVATIONS",
+        issueCode: suggestion.reason ?? "RENEWAL_SUGGESTION",
+        criteria: buildRenewalSuppressionCriteria(suggestion),
+        reason: `Suprimir renovación para ${suggestion.sourcePolicy.policyNumber}.`,
+        actorId: actor.id,
+        organizationId: actor.organizationId,
+      }, db);
 
-    await db.policyRenewalSuggestion.updateMany({
-      where: { id: suggestion.id, organizationId: actor.organizationId },
-      data: {
-        status: "DECLINED",
-        suppressedByRuleId: suppressionRule.id,
-        duplicateOfId: null,
-        mergedAt: null,
-        mergedById: null,
-        reviewedAt: new Date(),
-        reviewedById: actor.id,
-        resolutionNote: `${REVIEW_SUPPRESSED_NOTE} ${suppressionRule.reason ?? suppressionRule.issueCode}.`,
-      },
-    });
+      await db.policyRenewalSuggestion.updateMany({
+        where: { id: suggestion.id, organizationId: actor.organizationId },
+        data: {
+          status: "DECLINED",
+          suppressedByRuleId: suppressionRule.id,
+          duplicateOfId: null,
+          mergedAt: null,
+          mergedById: null,
+          reviewedAt: new Date(),
+          reviewedById: actor.id,
+          resolutionNote: `${REVIEW_SUPPRESSED_NOTE} ${suppressionRule.reason ?? suppressionRule.issueCode}.`,
+        },
+      });
 
-    await writeActivityLog({
-      entityType: "PolicyRenewalSuggestion",
-      entityId: suggestion.id,
-      action: "RENEWAL_REVIEW_SUPPRESSED",
-      oldValue: suggestion,
-      newValue: { ...suggestion, status: "DECLINED", suppressedByRuleId: suppressionRule.id, reviewedAt: new Date(), reviewedById: actor.id },
-      userId: actor.id,
-      organizationId: actor.organizationId,
+      await writeActivityLog({
+        entityType: "PolicyRenewalSuggestion",
+        entityId: suggestion.id,
+        action: "RENEWAL_REVIEW_SUPPRESSED",
+        oldValue: suggestion,
+        newValue: { ...suggestion, status: "DECLINED", suppressedByRuleId: suppressionRule.id, reviewedAt: new Date(), reviewedById: actor.id },
+        userId: actor.id,
+        organizationId: actor.organizationId,
+        db,
+      });
     });
 
     revalidatePaths([
@@ -846,8 +873,8 @@ export async function suppressRenewalSuggestionReview(suggestionId: string): Pro
 export async function bulkRenewalSuggestionReviewsAction(formData: FormData): Promise<void> {
   try {
     const actor = await requireAdmin();
-    const db = getDb();
-    const suggestionIds = parseIssueIds(formData);
+    return await withDataQualityTransaction(actor, async (db) => {
+      const suggestionIds = parseIssueIds(formData);
     const operation = parseOperation(formData);
 
     if (!suggestionIds.length) {
@@ -873,7 +900,7 @@ export async function bulkRenewalSuggestionReviewsAction(formData: FormData): Pr
       }
 
       for (const suggestion of suggestions) {
-        const result = await linkRenewalToPolicy(suggestion.sourcePolicyId, suggestion.targetPolicyId!);
+        const result = await linkRenewalToPolicy(suggestion.sourcePolicyId, suggestion.targetPolicyId!, db);
         if (!result.ok) {
           throw new Error(result.error);
         }
@@ -890,6 +917,7 @@ export async function bulkRenewalSuggestionReviewsAction(formData: FormData): Pr
         },
         userId: actor.id,
         organizationId: actor.organizationId,
+        db,
       });
       revalidatePaths(["/data-quality", "/renewals", "/dashboard", "/today", "/portfolio", "/risks"]);
       return;
@@ -922,6 +950,7 @@ export async function bulkRenewalSuggestionReviewsAction(formData: FormData): Pr
         newValue: { masterId: master.id, duplicateIds: duplicates.map((duplicate) => duplicate.id) },
         userId: actor.id,
         organizationId: actor.organizationId,
+        db,
       });
       revalidatePaths(["/data-quality", "/renewals", "/dashboard", "/today", "/portfolio", "/risks"]);
       return;
@@ -982,9 +1011,11 @@ export async function bulkRenewalSuggestionReviewsAction(formData: FormData): Pr
       newValue: { operation, suggestionIds },
       userId: actor.id,
       organizationId: actor.organizationId,
+      db,
     });
     revalidatePaths(["/data-quality", "/renewals", "/dashboard", "/today", "/portfolio", "/risks"]);
-    return;
+      return;
+    });
   } catch (error) {
     logError("data-quality.bulkRenewalSuggestionReviews", error);
     throw error instanceof Error ? error : new Error("No se pudo aplicar la revisión en lote de renovaciones.");
@@ -1002,34 +1033,36 @@ export async function denyLedgerIssue(issueId: string): Promise<MutationResult> 
 export async function reopenLedgerIssue(issueId: string): Promise<MutationResult> {
   try {
     const actor = await requireAdmin();
-    const db = getDb();
-    const issue = await loadLedgerIssue(issueId, actor.organizationId);
+    const issue = await withDataQualityTransaction(actor, (db) => loadLedgerIssue(issueId, actor.organizationId, db));
     if (!issue) {
       return errorResult("El issue de ledger ya no existe.");
     }
 
-    await db.ledgerImportIssue.updateMany({
-      where: { id: issue.id, organizationId: actor.organizationId },
-      data: {
-        status: "OPEN",
-        suppressedByRuleId: null,
-        duplicateOfId: null,
-        mergedAt: null,
-        mergedById: null,
-        reviewedAt: null,
-        reviewedById: null,
-        resolutionNote: null,
-      },
-    });
+    await withDataQualityTransaction(actor, async (db) => {
+      await db.ledgerImportIssue.updateMany({
+        where: { id: issue.id, organizationId: actor.organizationId },
+        data: {
+          status: "OPEN",
+          suppressedByRuleId: null,
+          duplicateOfId: null,
+          mergedAt: null,
+          mergedById: null,
+          reviewedAt: null,
+          reviewedById: null,
+          resolutionNote: null,
+        },
+      });
 
-    await writeActivityLog({
-      entityType: "LedgerImportIssue",
-      entityId: issue.id,
-      action: "LEDGER_ISSUE_REOPENED",
-      oldValue: issue,
-      newValue: { ...issue, status: "OPEN", reviewedAt: null, reviewedById: null },
-      userId: actor.id,
-      organizationId: actor.organizationId,
+      await writeActivityLog({
+        entityType: "LedgerImportIssue",
+        entityId: issue.id,
+        action: "LEDGER_ISSUE_REOPENED",
+        oldValue: issue,
+        newValue: { ...issue, status: "OPEN", reviewedAt: null, reviewedById: null },
+        userId: actor.id,
+        organizationId: actor.organizationId,
+        db,
+      });
     });
 
     revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
@@ -1044,43 +1077,45 @@ export async function reopenLedgerIssue(issueId: string): Promise<MutationResult
 export async function suppressLedgerIssue(issueId: string): Promise<MutationResult> {
   try {
     const actor = await requireAdmin();
-    const db = getDb();
-    const issue = await loadLedgerIssue(issueId, actor.organizationId);
+    const issue = await withDataQualityTransaction(actor, (db) => loadLedgerIssue(issueId, actor.organizationId, db));
     if (!issue) {
       return errorResult("El issue de ledger ya no existe.");
     }
 
-    const suppressionRule = await upsertSuppressionRule({
-      category: "LEDGER",
-      issueCode: issue.issueType,
-      criteria: buildLedgerSuppressionCriteria(issue),
-      reason: `Suprimir issue ${issue.issueType} del batch ${issue.batch.sourceCsvName}.`,
-      actorId: actor.id,
-      organizationId: actor.organizationId,
-    }, db);
+    await withDataQualityTransaction(actor, async (db) => {
+      const suppressionRule = await upsertSuppressionRule({
+        category: "LEDGER",
+        issueCode: issue.issueType,
+        criteria: buildLedgerSuppressionCriteria(issue),
+        reason: `Suprimir issue ${issue.issueType} del batch ${issue.batch.sourceCsvName}.`,
+        actorId: actor.id,
+        organizationId: actor.organizationId,
+      }, db);
 
-    await db.ledgerImportIssue.updateMany({
-      where: { id: issue.id, organizationId: actor.organizationId },
-      data: {
-        status: "DISMISSED",
-        suppressedByRuleId: suppressionRule.id,
-        duplicateOfId: null,
-        mergedAt: null,
-        mergedById: null,
-        reviewedAt: new Date(),
-        reviewedById: actor.id,
-        resolutionNote: `${REVIEW_SUPPRESSED_NOTE} ${suppressionRule.reason ?? suppressionRule.issueCode}.`,
-      },
-    });
+      await db.ledgerImportIssue.updateMany({
+        where: { id: issue.id, organizationId: actor.organizationId },
+        data: {
+          status: "DISMISSED",
+          suppressedByRuleId: suppressionRule.id,
+          duplicateOfId: null,
+          mergedAt: null,
+          mergedById: null,
+          reviewedAt: new Date(),
+          reviewedById: actor.id,
+          resolutionNote: `${REVIEW_SUPPRESSED_NOTE} ${suppressionRule.reason ?? suppressionRule.issueCode}.`,
+        },
+      });
 
-    await writeActivityLog({
-      entityType: "LedgerImportIssue",
-      entityId: issue.id,
-      action: "LEDGER_ISSUE_SUPPRESSED",
-      oldValue: issue,
-      newValue: { ...issue, status: "DISMISSED", suppressedByRuleId: suppressionRule.id, reviewedAt: new Date(), reviewedById: actor.id },
-      userId: actor.id,
-      organizationId: actor.organizationId,
+      await writeActivityLog({
+        entityType: "LedgerImportIssue",
+        entityId: issue.id,
+        action: "LEDGER_ISSUE_SUPPRESSED",
+        oldValue: issue,
+        newValue: { ...issue, status: "DISMISSED", suppressedByRuleId: suppressionRule.id, reviewedAt: new Date(), reviewedById: actor.id },
+        userId: actor.id,
+        organizationId: actor.organizationId,
+        db,
+      });
     });
 
     revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
@@ -1095,8 +1130,8 @@ export async function suppressLedgerIssue(issueId: string): Promise<MutationResu
 export async function bulkLedgerIssuesAction(formData: FormData): Promise<void> {
   try {
     const actor = await requireAdmin();
-    const db = getDb();
-    const issueIds = parseIssueIds(formData);
+    return await withDataQualityTransaction(actor, async (db) => {
+      const issueIds = parseIssueIds(formData);
     const operation = parseOperation(formData);
 
     if (!issueIds.length) {
@@ -1143,6 +1178,7 @@ export async function bulkLedgerIssuesAction(formData: FormData): Promise<void> 
         newValue: { masterId: master.id, duplicateIds: duplicates.map((duplicate) => duplicate.id) },
         userId: actor.id,
         organizationId: actor.organizationId,
+        db,
       });
       revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
       return;
@@ -1205,9 +1241,11 @@ export async function bulkLedgerIssuesAction(formData: FormData): Promise<void> 
       newValue: { operation, issueIds },
       userId: actor.id,
       organizationId: actor.organizationId,
+      db,
     });
     revalidatePaths(["/data-quality", "/dashboard", "/today", "/portfolio", "/risks"]);
-    return;
+      return;
+    });
   } catch (error) {
     logError("data-quality.bulkLedgerIssues", error);
     throw error instanceof Error ? error : new Error("No se pudo aplicar la revisión en lote de ledger.");

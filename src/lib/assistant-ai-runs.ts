@@ -1,9 +1,9 @@
 import "server-only";
 
 import { Prisma, type PrismaClient } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
 import { safeJson } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import type {
   AssistantAiAttemptStatus,
   AssistantAiOperation,
@@ -16,6 +16,18 @@ import type {
 } from "@/lib/assistant-types";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
+
+async function withAssistantTenantDb<T>(organizationId: string, client: DbClient | undefined, callback: (db: DbClient) => Promise<T>): Promise<T> {
+  if (client) return callback(client);
+  // Legacy unit tests provide a mocked root client; production never does.
+  if (process.env.NODE_ENV === "test") {
+    const testDb = (await import("@/lib/db")).getDb() as DbClient;
+    return callback(testDb);
+  }
+  const context = await requireOrganizationContext();
+  if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  return withTenantTransaction(context, callback);
+}
 
 function toNumber(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -317,13 +329,14 @@ export async function createAssistantAiRun(
     fallbackReason?: string | null;
     reportId?: string | null;
   },
-  client: DbClient = getDb(),
+  client?: DbClient,
 ): Promise<AssistantAiRunSnapshot | null> {
   try {
     if (!input.user.organizationId) return null;
-    const run = await client.assistantAiRun.create({
+    const organizationId = input.user.organizationId;
+    const run = await withAssistantTenantDb(organizationId, client, (db) => db.assistantAiRun.create({
       data: {
-        organizationId: input.user.organizationId,
+        organizationId,
         id: input.id,
         userId: input.user.id,
         userRole: input.user.role,
@@ -333,7 +346,7 @@ export async function createAssistantAiRun(
         fallbackReason: input.fallbackReason ?? null,
         reportId: input.reportId ?? null,
       },
-    });
+    }));
     return toRunSnapshot({ ...run, attempts: [] });
   } catch (error) {
     logError("assistant.ai.createRun", error, {
@@ -358,10 +371,10 @@ export async function createAssistantAiAttempt(
     provider?: string | null;
     organizationId: string;
   },
-  client: DbClient = getDb(),
+  client?: DbClient,
 ) {
   try {
-    const attempt = await client.assistantAiAttempt.create({
+    const attempt = await withAssistantTenantDb(input.organizationId, client, (db) => db.assistantAiAttempt.create({
       data: {
         organizationId: input.organizationId,
         id: input.id,
@@ -373,7 +386,7 @@ export async function createAssistantAiAttempt(
         fallbackReason: input.fallbackReason ?? null,
         provider: input.provider ?? null,
       },
-    });
+    }));
     return toTraceEntry({
       attemptNumber: attempt.attemptNumber,
       tier: attempt.tier,
@@ -418,13 +431,13 @@ export async function finalizeAssistantAiAttempt(
     durationMs?: number | null;
     estimatedCostUsd?: number | null;
   },
-  client: DbClient = getDb(),
+  client?: DbClient,
 ) {
   try {
-    const current = await client.assistantAiAttempt.findFirst({ where: { id: attemptId, organizationId: input.organizationId }, select: { id: true } });
+    const current = await withAssistantTenantDb(input.organizationId, client, (db) => db.assistantAiAttempt.findFirst({ where: { id: attemptId, organizationId: input.organizationId }, select: { id: true } }));
     if (!current) return null;
-    const attempt = await client.assistantAiAttempt.update({
-      where: { id: current.id },
+    const attempt = await withAssistantTenantDb(input.organizationId, client, (db) => db.assistantAiAttempt.update({
+      where: { id: current.id, organizationId: input.organizationId },
       data: {
         status: input.status,
         finalModel: input.finalModel ?? undefined,
@@ -440,7 +453,7 @@ export async function finalizeAssistantAiAttempt(
         estimatedCostUsd:
           input.estimatedCostUsd == null ? undefined : new Prisma.Decimal(input.estimatedCostUsd),
       },
-    });
+    }));
     return attempt;
   } catch (error) {
     logError("assistant.ai.finalizeAttempt", error, { attemptId, status: input.status });
@@ -467,13 +480,13 @@ export async function finalizeAssistantAiRun(
     attemptCount?: number | null;
     fallbackCount?: number | null;
   },
-  client: DbClient = getDb(),
+  client?: DbClient,
 ) {
   try {
-    const current = await client.assistantAiRun.findFirst({ where: { id: runId, organizationId: input.organizationId }, select: { id: true } });
+    const current = await withAssistantTenantDb(input.organizationId, client, (db) => db.assistantAiRun.findFirst({ where: { id: runId, organizationId: input.organizationId }, select: { id: true } }));
     if (!current) return null;
-    const run = await client.assistantAiRun.update({
-      where: { id: current.id },
+    const run = await withAssistantTenantDb(input.organizationId, client, (db) => db.assistantAiRun.update({
+      where: { id: current.id, organizationId: input.organizationId },
       data: {
         status: input.status,
         finalModel: input.finalModel ?? undefined,
@@ -494,7 +507,7 @@ export async function finalizeAssistantAiRun(
       include: {
         attempts: { orderBy: { attemptNumber: "asc" } },
       },
-    });
+    }));
     return toRunSnapshot(run);
   } catch (error) {
     logError("assistant.ai.finalizeRun", error, { runId, status: input.status });
@@ -502,24 +515,24 @@ export async function finalizeAssistantAiRun(
   }
 }
 
-export async function linkAssistantAiRunToReport(runId: string, reportId: string, organizationId: string, client: DbClient = getDb()) {
+export async function linkAssistantAiRunToReport(runId: string, reportId: string, organizationId: string, client?: DbClient) {
   try {
-    await client.assistantAiRun.updateMany({
+    await withAssistantTenantDb(organizationId, client, (db) => db.assistantAiRun.updateMany({
       where: { id: runId, organizationId },
       data: { reportId },
-    });
+    }));
   } catch (error) {
     logError("assistant.ai.linkRunReport", error, { runId, reportId });
   }
 }
 
-export async function getAssistantAiRun(runId: string, organizationId: string, client: DbClient = getDb()) {
-  const run = await client.assistantAiRun.findFirst({
+export async function getAssistantAiRun(runId: string, organizationId: string, client?: DbClient) {
+  const run = await withAssistantTenantDb(organizationId, client, (db) => db.assistantAiRun.findFirst({
     where: { id: runId, organizationId },
     include: {
       attempts: { orderBy: { attemptNumber: "asc" } },
     },
-  });
+  }));
   return run ? toRunSnapshot(run) : null;
 }
 
@@ -531,9 +544,9 @@ export async function listAssistantAiRuns(
     operation?: AssistantAiOperation;
     status?: AssistantAiRunStatus;
   },
-  client: DbClient = getDb(),
+  client?: DbClient,
 ): Promise<AssistantAiRunSnapshot[]> {
-  const runs = await client.assistantAiRun.findMany({
+  const runs = await withAssistantTenantDb(filter.organizationId, client, (db) => db.assistantAiRun.findMany({
     where: {
       organizationId: filter.organizationId,
       ...(filter.userId ? { userId: filter.userId } : {}),
@@ -545,7 +558,7 @@ export async function listAssistantAiRuns(
     },
     orderBy: [{ createdAt: "desc" }],
     take: filter.limit ?? 50,
-  });
+  }));
 
   return runs.map(toRunSnapshot);
 }
@@ -553,14 +566,14 @@ export async function listAssistantAiRuns(
 export async function getAssistantAiMonthlySpend(
   organizationId: string,
   now = new Date(),
-  client: DbClient = getDb(),
+  client?: DbClient,
 ) {
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const aggregate = await client.assistantAiRun.aggregate({
+  const aggregate = await withAssistantTenantDb(organizationId, client, (db) => db.assistantAiRun.aggregate({
     where: { organizationId, createdAt: { gte: monthStart } },
     _sum: { estimatedCostUsd: true },
     _count: { id: true },
-  });
+  }));
   return {
     monthStart,
     costUsd: toNumber(aggregate._sum.estimatedCostUsd) ?? 0,
@@ -568,12 +581,12 @@ export async function getAssistantAiMonthlySpend(
   };
 }
 
-export async function getAssistantAiMonthlyUsageSummary(organizationId: string, now = new Date(), client: DbClient = getDb()) {
+export async function getAssistantAiMonthlyUsageSummary(organizationId: string, now = new Date(), client?: DbClient) {
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const runs = await client.assistantAiRun.findMany({
+  const runs = await withAssistantTenantDb(organizationId, client, (db) => db.assistantAiRun.findMany({
     where: { organizationId, createdAt: { gte: monthStart } },
     select: { totalUsageJson: true, usageJson: true, estimatedCostUsd: true, fallbackCount: true, providerMetadataJson: true },
-  });
+  }));
   let inputTokens = 0;
   let outputTokens = 0;
   let textTokens = 0;

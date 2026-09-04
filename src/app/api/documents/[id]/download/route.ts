@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { getDb } from "@/lib/db";
-import { assertSafeDocumentPath } from "@/lib/files";
+import { get } from "@vercel/blob";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
 import { logError } from "@/lib/logger";
 import { AuthError } from "@/lib/auth";
-import { requireOrganizationContext } from "@/lib/organization-context";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { recordSecurityAccessDenied, SECURITY_EVENT_TYPES } from "@/lib/security-events";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 
 type DownloadableDocument = {
   id: string;
@@ -33,7 +31,7 @@ export async function GET(
   documentId = id;
 
   try {
-    if (!areDocumentFilesEnabled()) {
+    if (!areDocumentFilesEnabled() || !process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
       return NextResponse.json(
         { error: "La descarga de documentos está deshabilitada en este demo." },
         { status: 501 },
@@ -43,6 +41,8 @@ export async function GET(
     // Reject deactivated/unauthenticated users immediately.
     try {
       context = await requireOrganizationContext();
+      const capability = await resolveOrganizationCapability(context.organizationId, "DOCUMENTS");
+      if (!capability.enabled) return NextResponse.json({ error: "Los documentos no están habilitados para esta organización." }, { status: 403 });
     } catch (authErr) {
       if (authErr instanceof AuthError) {
         await recordSecurityAccessDenied({
@@ -59,8 +59,7 @@ export async function GET(
     }
 
     // Get document metadata from database
-    const db = getDb();
-    const document = (await db.document.findFirst({
+    const document = await withTenantTransaction(context, async (tx) => tx.document.findFirst({
       where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { OR: [
         { client: { portfolioOwnerId: context.userId } },
         { policy: { client: { portfolioOwnerId: context.userId } } },
@@ -88,52 +87,31 @@ export async function GET(
       );
     }
 
-    // Validate file path security
-    const fullPath = path.resolve(document.filePath);
-    const safePath = assertSafeDocumentPath(fullPath);
-
-    // Read file from disk
-    const fileBuffer = await readFile(safePath);
-
-    // Inline preview vs attachment download
     const inline = request.nextUrl.searchParams.get("inline") === "1";
     const disposition = inline ? "inline" : "attachment";
     const safeFileName = document.fileName.replace(/["\\]/g, "_");
 
-    const headers = new Headers();
-    headers.set("Content-Type", document.mimeType);
-    headers.set("Content-Disposition", `${disposition}; filename="${safeFileName}"`);
-    headers.set("Content-Length", fileBuffer.length.toString());
+    if (document.filePath.startsWith("blob:")) {
+      const blob = await get(document.filePath.slice("blob:".length), { access: "private" });
+      if (!blob) return NextResponse.json({ error: "El archivo ya no se encuentra disponible." }, { status: 404 });
+      const headers = new Headers({
+        "Content-Type": document.mimeType,
+        "Content-Disposition": `${disposition}; filename="${safeFileName}"`,
+        "Cache-Control": "private, no-store",
+      });
+      return new NextResponse(blob.stream, { status: 200, headers });
+    }
 
-    return new NextResponse(fileBuffer, {
-      status: 200,
-      headers,
-    });
+    // Local filesystem paths are intentionally unsupported after the private
+    // Blob cutover. Operators must migrate any legacy metadata before reopening
+    // document access; never read an arbitrary path from a tenant row.
+    return NextResponse.json(
+      { error: "Este documento usa almacenamiento legado y no está disponible." },
+      { status: 410 },
+    );
 
   } catch (error) {
     logError("api.documents.download", error);
-
-    if (error instanceof Error && error.message.includes("Document path must stay inside")) {
-      await recordSecurityAccessDenied({
-        alertType: SECURITY_EVENT_TYPES.documentPathInvalid,
-        title: "Ruta de documento no válida",
-        description: "Se intentó acceder a un archivo fuera del directorio permitido.",
-        severity: "WARNING",
-        entityType: "SecurityEvent",
-        entityId: `document-download:path:${documentId}`,
-      });
-      return NextResponse.json(
-        { error: "Ruta de archivo no válida." },
-        { status: 403 }
-      );
-    }
-
-    if (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") {
-      return NextResponse.json(
-        { error: "El archivo ya no se encuentra disponible en el servidor." },
-        { status: 404 }
-      );
-    }
 
     return NextResponse.json(
       { error: "No se pudo descargar el documento. Intenta de nuevo." },

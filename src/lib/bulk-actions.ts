@@ -1,11 +1,11 @@
-"use server";
+import "server-only";
 
-import { getDb } from "./db";
 import { writeActivityLog } from "./activity-log";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "./mutation-utils";
 import { logError } from "./logger";
-import { assertOrganizationContextInTransaction, requireOrganizationRole } from "./organization-context";
-type AnyDb = ReturnType<typeof getDb>;
+import { assertOrganizationContextInTransaction, requireOrganizationRole, withTenantTransaction } from "./organization-context";
+import type { Prisma, PrismaClient } from "@/generated/prisma/client";
+type AnyDb = PrismaClient | Prisma.TransactionClient;
 
 type EntityType = "client" | "policy" | "receipt" | "task" | "claim" | "quote" | "insurer";
 
@@ -51,8 +51,7 @@ export async function bulkDelete(
 
   try {
     const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
-    const db = getDb();
-    const result = await db.$transaction(async (tx) => {
+    const result = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
       return getDelegate(tx as AnyDb, entityType).deleteMany({ where: { id: { in: ids }, organizationId: context.organizationId } });
     });
@@ -88,8 +87,7 @@ export async function bulkUpdateStatus(
 
   try {
     const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
-    const db = getDb();
-    const result = await db.$transaction(async (tx) => {
+    const result = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
       return getDelegate(tx as AnyDb, entityType).updateMany({
         where: { id: { in: ids }, organizationId: context.organizationId },

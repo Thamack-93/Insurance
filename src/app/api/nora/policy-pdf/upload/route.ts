@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { handleUpload } from "@vercel/blob/client";
 import { AuthError, requireUser } from "@/lib/auth";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody, RequestGuardError } from "@/lib/request-guards";
 import { guardErrorResponse, rateLimitResponse } from "@/lib/api-security";
@@ -8,6 +10,7 @@ import {
   NORA_POLICY_PDF_MAX_BYTES,
   isNoraPolicyPdfPathname,
 } from "@/lib/nora-pdf-storage.shared";
+import { DEMO_UPLOAD_MAX_BYTES } from "@/lib/demo-upload-validation";
 
 export const runtime = "nodejs";
 
@@ -29,7 +32,15 @@ function uploadErrorResponse(error: unknown) {
 
 export async function POST(request: NextRequest) {
   try {
+    if (process.env.PLATFORM_UPLOADS_ENABLED?.trim() === "0") {
+      return NextResponse.json({ error: "Las subidas están deshabilitadas temporalmente por la plataforma." }, { status: 501 });
+    }
     const user = await requireUser();
+    const organization = await requireOrganizationContext();
+    const organizationKind = await withTenantTransaction(organization, (tx) => tx.organization.findUnique({ where: { id: organization.organizationId }, select: { kind: true } }));
+    const demoUpload = organizationKind?.kind === "DEMO";
+    const noraCapability = await resolveOrganizationCapability(organization.organizationId, "NORA");
+    if (!noraCapability.enabled) return NextResponse.json({ error: "Nora no está habilitada para esta organización." }, { status: 403 });
 
     try {
       assertSameOrigin(request, "nora policy pdf upload");
@@ -60,17 +71,17 @@ export async function POST(request: NextRequest) {
       request,
       body,
       onBeforeGenerateToken: async (pathname) => {
-        if (!isNoraPolicyPdfPathname(pathname, user.id)) {
+        if (!isNoraPolicyPdfPathname(pathname, user.id, organization.organizationId)) {
           throw new Error("La ruta temporal del PDF no es válida.");
         }
 
         return {
           allowedContentTypes: ["application/pdf"],
-          maximumSizeInBytes: NORA_POLICY_PDF_MAX_BYTES,
+          maximumSizeInBytes: demoUpload ? DEMO_UPLOAD_MAX_BYTES : NORA_POLICY_PDF_MAX_BYTES,
           validUntil: Date.now() + 30 * 60 * 1000,
           addRandomSuffix: true,
           allowOverwrite: false,
-          cacheControlMaxAge: 60,
+          cacheControlMaxAge: 0,
         };
       },
     });

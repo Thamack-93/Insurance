@@ -136,11 +136,12 @@ describe.skipIf(!enabled)("organization transition executable backfill", () => {
       // the database barrier must cover them even without a Prisma extension.
       const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
       try {
-        await prisma.client.create({ data: { id: "prisma-create", fullName: "Prisma create" } });
-        await prisma.client.createMany({ data: [{ id: "prisma-many-1", fullName: "Prisma many one" }, { id: "prisma-many-2", fullName: "Prisma many two" }] });
-        await prisma.client.upsert({ where: { id: "prisma-upsert" }, create: { id: "prisma-upsert", fullName: "Prisma upsert" }, update: { fullName: "Prisma upsert changed" } });
-        await prisma.quote.create({ data: { id: "prisma-nested", policyType: "AUTO", requestedDate: new Date(), client: { create: { id: "prisma-nested-client", fullName: "Prisma nested client" } } } });
-        await prisma.$transaction(async (tx) => tx.client.create({ data: { id: "prisma-transaction", fullName: "Prisma transaction" } }));
+        await prisma.client.create({ data: { id: "prisma-create", organizationId: BOOTSTRAP_ORGANIZATION_ID, fullName: "Prisma create" } });
+        await prisma.client.createMany({ data: [{ id: "prisma-many-1", organizationId: BOOTSTRAP_ORGANIZATION_ID, fullName: "Prisma many one" }, { id: "prisma-many-2", organizationId: BOOTSTRAP_ORGANIZATION_ID, fullName: "Prisma many two" }] });
+        await prisma.client.upsert({ where: { id: "prisma-upsert" }, create: { id: "prisma-upsert", organizationId: BOOTSTRAP_ORGANIZATION_ID, fullName: "Prisma upsert" }, update: { fullName: "Prisma upsert changed" } });
+        await prisma.client.create({ data: { id: "prisma-nested-client", organizationId: BOOTSTRAP_ORGANIZATION_ID, fullName: "Prisma nested client" } });
+        await prisma.quote.create({ data: { id: "prisma-nested", organizationId: BOOTSTRAP_ORGANIZATION_ID, clientId: "prisma-nested-client", policyType: "AUTO", requestedDate: new Date() } });
+        await prisma.$transaction(async (tx) => tx.client.create({ data: { id: "prisma-transaction", organizationId: BOOTSTRAP_ORGANIZATION_ID, fullName: "Prisma transaction" } }));
       } finally { await prisma.$disconnect(); }
       expect((await scalar(url, `SELECT count(*)::int AS count FROM "Client" WHERE id LIKE 'prisma-%' AND "organizationId" IS NULL`)).rows[0].count).toBe(0);
       expect((await scalar(url, `SELECT "organizationId" FROM "Quote" WHERE id = 'prisma-nested'`)).rows[0].organizationId).toBe(BOOTSTRAP_ORGANIZATION_ID);

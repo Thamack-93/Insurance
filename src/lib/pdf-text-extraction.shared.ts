@@ -1,10 +1,13 @@
 export type PdfTextExtractionOptions = {
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Hard parser boundary applied after PDF.js resolves the document. */
+  maxPages?: number;
 };
 
 export const DEFAULT_BROWSER_PDF_TEXT_EXTRACTION_TIMEOUT_MS = 12_000;
 export const DEFAULT_SERVER_PDF_TEXT_EXTRACTION_TIMEOUT_MS = 20_000;
+export const DEFAULT_PDF_TEXT_EXTRACTION_MAX_PAGES = 100;
 
 export class PdfTextExtractionTimeoutError extends Error {
   readonly code = "PDF_TEXT_EXTRACTION_TIMEOUT";

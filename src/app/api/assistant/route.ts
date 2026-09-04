@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { AuthError, requireUser } from "@/lib/auth";
 import { requireOrganizationContext } from "@/lib/organization-context";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 import { buildAssistantReply, getAssistantHomeSnapshot } from "@/lib/assistant";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody, RequestGuardError } from "@/lib/request-guards";
@@ -26,6 +27,10 @@ export async function GET() {
   try {
     const user = await requireUser();
     const organization = await requireOrganizationContext();
+    const noraCapability = await resolveOrganizationCapability(organization.organizationId, "NORA");
+    if (!noraCapability.enabled) {
+      return NextResponse.json({ error: "Nora no está habilitada para esta organización." }, { status: 403 });
+    }
     console.log(
       JSON.stringify({
         level: "info",
@@ -64,6 +69,10 @@ export async function POST(request: NextRequest) {
   try {
     const user = await requireUser();
     const organization = await requireOrganizationContext();
+    const noraCapability = await resolveOrganizationCapability(organization.organizationId, "NORA");
+    if (!noraCapability.enabled) {
+      return NextResponse.json({ error: "Nora no está habilitada para esta organización." }, { status: 403 });
+    }
     const requestId = request.headers.get("x-vercel-id");
     console.log(
       JSON.stringify({

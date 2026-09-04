@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { updateClient } from "@/app/(dashboard)/clients/actions";
 import { ClientForm } from "@/components/forms/client-form";
 import { PageHeader } from "@/components/layout/page-header";
-import { getDb } from "@/lib/db";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 import { createClientDefaults } from "@/lib/form-defaults";
 import { formatDateInput } from "@/lib/form-utils";
 import type { SelectOption } from "@/lib/domain-options";
@@ -12,7 +12,7 @@ import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 export default async function EditClientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const scope = await requireOrganizationPortfolioReadScope();
-  const db = getDb();
+  return withTenantOrganization(scope.organizationId, async (db) => {
   const [client, referidorClients] = await Promise.all([
     db.client.findFirst({ where: { id, organizationId: scope.organizationId } }),
     db.client.findMany({
@@ -65,4 +65,5 @@ export default async function EditClientPage({ params }: { params: Promise<{ id:
       </div>
     </div>
   );
+  });
 }

@@ -8,6 +8,7 @@ import { writeActivityLog } from "@/lib/activity-log";
 import { getRequestIp, checkDistributedRateLimit, securityFingerprint } from "@/lib/request-guards";
 import { recordSecurityEvent, SECURITY_EVENT_TYPES } from "@/lib/security-events";
 import { headers } from "next/headers";
+import { withSystemOrganizationTransaction } from "@/lib/organization-context";
 
 export type LoginResult = { ok: true } | { ok: false; error: string };
 
@@ -103,17 +104,20 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
     organizationId: initialOrganizationId,
     sessionVersion: user.sessionVersion,
     mustChangePassword: user.mustChangePassword,
-  });
+  }, { fingerprint: `login:${emailFingerprint}:${ipFingerprint}` });
 
   // ActivityLog is tenant-owned. Platform-only logins have no tenant and are
   // intentionally represented by global security telemetry instead.
   if (initialOrganizationId) {
-    await writeActivityLog({
-      entityType: "User",
-      entityId: user.id,
-      action: "USER_LOGIN",
-      userId: user.id,
-      organizationId: initialOrganizationId,
+    await withSystemOrganizationTransaction(initialOrganizationId, "login", async (tx) => {
+      await writeActivityLog({
+        entityType: "User",
+        entityId: user.id,
+        action: "USER_LOGIN",
+        userId: user.id,
+        organizationId: initialOrganizationId,
+        db: tx,
+      });
     });
   }
 

@@ -13,6 +13,7 @@ const TEST_ADMIN_NAME = "CI Admin";
 const TEST_AGENT_EMAIL = "ci-agent@policydesk.local";
 const TEST_AGENT_NAME = "CI Agent";
 const TEST_INSURER_NAME = "Test Insurer";
+const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
 
 function loadLocalEnvFile(filePath: string) {
   if (!fs.existsSync(filePath)) return;
@@ -223,9 +224,10 @@ export async function seedPolicyFixture(prefix: string): Promise<SeededPolicyFix
   const clientName = `Test Client ${suffix}`;
   const insurerName = `${TEST_INSURER_NAME} ${suffix}`;
   const policyNumber = `TEST-POL-${suffix}`;
-  const insurer = await db.insurer.create({ data: { name: insurerName, status: "ACTIVE" } });
+  const insurer = await db.insurer.create({ data: { organizationId: TEST_ORGANIZATION_ID, name: insurerName, status: "ACTIVE" } });
   const client = await db.client.create({
     data: {
+      organizationId: TEST_ORGANIZATION_ID,
       fullName: clientName,
       email: `${suffix.toLowerCase()}@policydesk.local`,
       status: "ACTIVE",
@@ -237,6 +239,7 @@ export async function seedPolicyFixture(prefix: string): Promise<SeededPolicyFix
   });
   const policy = await db.policy.create({
     data: {
+      organizationId: TEST_ORGANIZATION_ID,
       policyNumber,
       clientId: client.id,
       insurerId: insurer.id,
@@ -281,6 +284,7 @@ export async function seedPendingReceipt(prefix: string): Promise<SeededReceipt>
 
   const receipt = await db.receipt.create({
     data: {
+      organizationId: TEST_ORGANIZATION_ID,
       receiptNumber,
       policyId: policy.id,
       clientId: policy.clientId,

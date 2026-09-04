@@ -55,7 +55,7 @@ export async function upsertBackupArtifact(input: {
             payloadSha256: manifest.payload.sha256,
             manifestSha256: manifest.manifestSha256,
             capability: input.capability ?? manifest.capability ?? "DATABASE_ONLY",
-            metadataJson: JSON.stringify({ scope: manifest.scope, organization: manifest.organization }),
+            metadataJson: JSON.stringify({ scope: manifest.scope, organization: manifest.organization, demoExclusion: manifest.demoExclusion }),
           }
         : {}),
       ...(input.status ? { status: input.status } : {}),
@@ -78,7 +78,7 @@ export async function upsertBackupArtifact(input: {
       status,
       capability: input.capability ?? manifest?.capability ?? "DATABASE_ONLY",
       sourceArtifactId: input.sourceArtifactId ?? null,
-      metadataJson: manifest ? JSON.stringify({ scope: manifest.scope, organization: manifest.organization }) : null,
+      metadataJson: manifest ? JSON.stringify({ scope: manifest.scope, organization: manifest.organization, demoExclusion: manifest.demoExclusion }) : null,
     },
   });
 }

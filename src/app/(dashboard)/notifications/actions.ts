@@ -1,16 +1,14 @@
 "use server";
 
-import { getDb } from "@/lib/db";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { mapNotificationStatusToWorkItemStatus, upsertWorkItemFromSource } from "@/lib/work-items";
-import { requireOrganizationContext, assertOrganizationContextInTransaction } from "@/lib/organization-context";
+import { requireOrganizationContext, assertOrganizationContextInTransaction, withTenantTransaction } from "@/lib/organization-context";
 
 export async function markNotificationRead(id: string): Promise<MutationResult> {
   if (!id) return errorResult("Notificación no encontrada.");
   try {
     const context = await requireOrganizationContext();
-    const db = getDb();
-    const changed = await db.$transaction(async (tx) => {
+    const changed = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const existing = await tx.alert.findFirst({ where: { id, organizationId: context.organizationId } });
       if (!existing) return false;
@@ -43,9 +41,8 @@ export async function markNotificationRead(id: string): Promise<MutationResult> 
 export async function markAllNotificationsRead(): Promise<MutationResult> {
   try {
     const context = await requireOrganizationContext();
-    const db = getDb();
     const now = new Date();
-    const result = await db.$transaction(async (tx) => {
+    const result = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const alerts = await tx.alert.updateMany({
         where: { organizationId: context.organizationId, readAt: null },

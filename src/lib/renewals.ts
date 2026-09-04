@@ -1,8 +1,7 @@
-"use server";
+import "server-only";
 
 import { connection } from "next/server";
 import type { Prisma } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
 import { today, daysUntil, formatDate } from "@/lib/dates";
 import { businessAddDays } from "@/lib/business-dates";
 import { writeActivityLog } from "@/lib/activity-log";
@@ -11,6 +10,7 @@ import { upsertWorkItemFromSource } from "@/lib/work-items";
 import { ACTIVE_RENEWAL_POLICY_WHERE } from "@/lib/renewal-decisions";
 import { LATEST_RENEWAL_RECEIPT_INCLUDE, getLatestReceiptStatus } from "@/lib/renewal-receipt";
 import { shouldIncludeInRenewals } from "@/lib/renewals.logic";
+import { requireOrganizationContext, withTenantTransaction, type TenantDb } from "@/lib/organization-context";
 
 export interface RenewalOpportunity {
   organizationId: string;
@@ -89,12 +89,21 @@ export async function loadEligibleRenewalPolicies(
   additionalWhere: Prisma.PolicyWhereInput,
   portfolioOwnerId?: string,
   organizationId?: string,
+  client?: TenantDb,
 ): Promise<RenewalPolicyRecord[]> {
   await connection();
-  const db = getDb();
+  const context = await requireOrganizationContext();
+  if (organizationId && organizationId !== context.organizationId) {
+    throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  }
+  const effectiveOrganizationId = context.organizationId;
 
-  const policies = await db.policy.findMany({
-    where: buildRenewalWhere(portfolioOwnerId, organizationId, additionalWhere),
+  if (!client) {
+    return withTenantTransaction(context, (tx) => loadEligibleRenewalPolicies(additionalWhere, portfolioOwnerId, effectiveOrganizationId, tx));
+  }
+
+  const policies = await client.policy.findMany({
+    where: buildRenewalWhere(portfolioOwnerId, effectiveOrganizationId, additionalWhere),
     include: {
       client: {
         select: {
@@ -122,7 +131,7 @@ export async function loadEligibleRenewalPolicies(
   ) as RenewalPolicyRecord[];
 }
 
-export async function getUpcomingRenewals(daysAhead: number = 90, portfolioOwnerId?: string) {
+export async function getUpcomingRenewals(daysAhead: number = 90, portfolioOwnerId?: string, organizationId?: string, client?: TenantDb) {
   try {
     const todayDate = today();
     const futureDate = businessAddDays(todayDate, daysAhead);
@@ -134,6 +143,8 @@ export async function getUpcomingRenewals(daysAhead: number = 90, portfolioOwner
         },
       },
       portfolioOwnerId,
+      organizationId,
+      client,
     );
 
     return policies.map(mapPolicyToRenewalOpportunity);
@@ -143,7 +154,7 @@ export async function getUpcomingRenewals(daysAhead: number = 90, portfolioOwner
   }
 }
 
-export async function getOverdueRenewals(portfolioOwnerId?: string) {
+export async function getOverdueRenewals(portfolioOwnerId?: string, organizationId?: string, client?: TenantDb) {
   try {
     const todayDate = today();
     const policies = await loadEligibleRenewalPolicies(
@@ -153,6 +164,8 @@ export async function getOverdueRenewals(portfolioOwnerId?: string) {
         },
       },
       portfolioOwnerId,
+      organizationId,
+      client,
     );
     return policies.map(mapPolicyToRenewalOpportunity);
   } catch (error) {
@@ -162,10 +175,15 @@ export async function getOverdueRenewals(portfolioOwnerId?: string) {
 }
 
 export async function createRenewalWorkItems() {
-  const db = getDb();
-
   try {
-    const upcomingRenewals = await getUpcomingRenewals(60);
+    const context = await requireOrganizationContext();
+    return await withTenantTransaction(context, async (db) => {
+    const upcomingRenewals = (await loadEligibleRenewalPolicies(
+      { endDate: { gte: today(), lte: businessAddDays(today(), 60) } },
+      context.membershipRole === "AGENT" ? context.userId : undefined,
+      context.organizationId,
+      db,
+    )).map(mapPolicyToRenewalOpportunity);
     let workItemsCreated = 0;
 
     for (const renewal of upcomingRenewals) {
@@ -212,6 +230,7 @@ export async function createRenewalWorkItems() {
     }
 
     return { workItemsCreated };
+    });
   } catch (error) {
     logError("renewals.createRenewalWorkItems", error);
     return { workItemsCreated: 0 };

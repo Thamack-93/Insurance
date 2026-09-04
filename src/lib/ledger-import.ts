@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { parse as parseCsv } from "csv-parse/sync";
 import * as XLSX from "@e965/xlsx";
 import type { PrismaClient, Prisma, EndorsementStatus } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { businessStartOfDay, parseBusinessDateInput } from "@/lib/business-dates";
 import { toNumber } from "@/lib/money";
 import { PaymentConflictError, recordPayment } from "@/lib/payment-service";
@@ -826,7 +826,12 @@ export async function createLedgerImportPreview(input: {
   db?: DbClient;
   now?: Date;
 }): Promise<LedgerImportPreviewResult> {
-  const db = input.db ?? getDb();
+  if (!input.db) {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== input.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => createLedgerImportPreview({ ...input, db: tx }));
+  }
+  const db = input.db;
   const policyRows = readLedgerRows(input.csvName, input.csvBuffer);
   const paidRows = readPaidRows(input.paidName, input.paidBuffer);
   const csvHash = hashContent(input.csvBuffer);
@@ -1352,7 +1357,12 @@ export async function applyLedgerImportBatch(input: {
   batchId: string;
   db?: DbClient;
 }): Promise<LedgerImportApplyResult> {
-  const db = input.db ?? getDb();
+  if (!input.db) {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== input.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => applyLedgerImportBatch({ ...input, db: tx }));
+  }
+  const db = input.db;
   const now = new Date();
   const batch = await db.ledgerImportBatch.findFirst({
     where: { id: input.batchId, organizationId: input.organizationId },
@@ -1491,6 +1501,7 @@ export async function applyLedgerImportBatch(input: {
     }
 
     const data = {
+      organizationId: input.organizationId,
       status: mapEndorsementStatus(policyRow.status, policyRow.periodEnd, now),
       startDate: policyRow.periodStart,
       endDate: policyRow.periodEnd,
@@ -1521,6 +1532,7 @@ export async function applyLedgerImportBatch(input: {
       });
       await db.ledgerImportAction.create({
         data: {
+          organizationId: input.organizationId,
           batchId: batch.id,
           rowId: row.id,
           actionType: existingEndorsement ? "ENDORSEMENT_UPDATED_FROM_LEDGER" : "ENDORSEMENT_CREATED_FROM_LEDGER",
@@ -1576,6 +1588,7 @@ export async function applyLedgerImportBatch(input: {
       });
       await db.ledgerImportIssue.create({
         data: {
+          organizationId: input.organizationId,
           batchId: batch.id,
           rowId: row.id,
           issueType: "PAYMENT_NOT_APPLICABLE",
@@ -1605,7 +1618,7 @@ export async function applyLedgerImportBatch(input: {
           : "Pago importado desde XLS de pagos.",
         sourceEvidenceKey: evidenceKey,
         actorId: input.actorId,
-      });
+      }, db);
 
       await db.ledgerImportRow.update({
         where: { id: row.id },
@@ -1619,6 +1632,7 @@ export async function applyLedgerImportBatch(input: {
 
       await db.ledgerImportAction.create({
         data: {
+          organizationId: input.organizationId,
           batchId: batch.id,
           rowId: row.id,
           actionType: "PAYMENT_APPLIED_FROM_LEDGER",
@@ -1679,6 +1693,7 @@ export async function applyLedgerImportBatch(input: {
       });
       await db.ledgerImportIssue.create({
         data: {
+          organizationId: input.organizationId,
           batchId: batch.id,
           rowId: row.id,
           issueType: "PAYMENT_APPLY_FAILED",
@@ -1723,6 +1738,7 @@ export async function applyLedgerImportBatch(input: {
 
   await db.ledgerImportAction.create({
     data: {
+      organizationId: input.organizationId,
       batchId: batch.id,
       actionType: "LEDGER_IMPORT_BLOCK_APPLIED",
       performedById: input.actorId,

@@ -1,11 +1,19 @@
 import "server-only";
 
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
 import { claimOperationalWhere } from "@/lib/portfolio-access";
 import type { PolicyType } from "@/lib/domain-values";
+import type { OrganizationContext } from "@/lib/organization-context";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
+
+async function withChecklistTenant<T>(organizationId: string, client: DbClient | undefined, callback: (db: DbClient) => Promise<T>) {
+  if (client) return callback(client);
+  const { requireOrganizationContext, withTenantTransaction } = await import("@/lib/organization-context");
+  const context: OrganizationContext = await requireOrganizationContext();
+  if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  return withTenantTransaction(context, callback);
+}
 
 export const CLAIM_CHECKLIST_STATUSES = ["MISSING", "REQUESTED", "RECEIVED", "WAIVED"] as const;
 export type ClaimChecklistStatusValue = (typeof CLAIM_CHECKLIST_STATUSES)[number];
@@ -66,9 +74,10 @@ export async function getClaimChecklistSummary(
   claimId: string,
   organizationId: string,
   portfolioOwnerId?: string,
-  client: DbClient = getDb(),
+  client?: DbClient,
 ) {
-  const claim = await client.claim.findFirst({
+  return withChecklistTenant(organizationId, client, async (db) => {
+  const claim = await db.claim.findFirst({
     where: { AND: [{ id: claimId }, claimOperationalWhere(portfolioOwnerId, organizationId)] },
     select: {
       id: true,
@@ -114,6 +123,7 @@ export async function getClaimChecklistSummary(
     items,
     counts: Object.fromEntries(CLAIM_CHECKLIST_STATUSES.map((status) => [status, items.filter((item) => item.status === status).length])),
   };
+  });
 }
 
 export async function updateClaimChecklistStatus(
@@ -124,9 +134,10 @@ export async function updateClaimChecklistStatus(
   },
   organizationId: string,
   portfolioOwnerId?: string,
-  client: DbClient = getDb(),
+  client?: DbClient,
 ) {
-  const claim = await client.claim.findFirst({
+  return withChecklistTenant(organizationId, client, async (db) => {
+  const claim = await db.claim.findFirst({
     where: { AND: [{ id: input.claimId }, claimOperationalWhere(portfolioOwnerId, organizationId)] },
     select: { id: true, policy: { select: { policyType: true } } },
   });
@@ -135,9 +146,10 @@ export async function updateClaimChecklistStatus(
   if (!template || !CLAIM_CHECKLIST_STATUSES.includes(input.status)) return null;
 
   const now = new Date();
-  return client.claimChecklistItem.upsert({
+  return db.claimChecklistItem.upsert({
     where: { claimId_requirementCode: { claimId: claim.id, requirementCode: template.code } },
     create: {
+      organizationId,
       claimId: claim.id,
       requirementCode: template.code,
       label: template.label,
@@ -153,5 +165,6 @@ export async function updateClaimChecklistStatus(
       receivedAt: input.status === "RECEIVED" ? now : null,
       waivedAt: input.status === "WAIVED" ? now : null,
     },
+  });
   });
 }

@@ -63,8 +63,12 @@ jobs:
         run: |
           npm run check:legacy-workitem-refs -- --static-only
           node --import tsx scripts/check-tenant-inventory.ts
+          npm run check:tenant-dal:strict
           npm run check:tenant-write-scope
           npm run check:tenant-read-scope
+          npm run check:api-security
+          npm run check:server-actions
+          npm run check:activity-log-scope
           npm run check:organization-metadata-hardcodes
       - name: Lint
         run: npm run lint
@@ -89,11 +93,15 @@ jobs:
       TENANT_ISOLATION_DB_NAME: "policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}"
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
       DATABASE_URL_UNPOOLED: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      DATABASE_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
       SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
       SESSION_SECRET: tenant-isolation-certification-secret-minimum-32-characters
       VERCEL_ENV: ""
       PLAYWRIGHT_E2E: "1"
       TENANT_ISOLATION_E2E: "1"
+      TENANT_RLS_APP_ROLE: policydesk_app
+      TENANT_RLS_ORG_A: org_legacy_singleton_0001
+      TENANT_RLS_ORG_B: org_pedro_gomez_0001
       PLAYWRIGHT_USE_PRODUCTION_SERVER: "1"
       PLAYWRIGHT_HOST: localhost
       PLAYWRIGHT_BASE_URL: http://localhost:4173
@@ -131,10 +139,9 @@ jobs:
           set -euo pipefail
           export PGPASSWORD=postgres
           createdb -h 127.0.0.1 -U postgres "$TENANT_ISOLATION_DB_NAME"
-      - name: Apply migrations and check drift
+      - name: Apply singleton migrations and check drift
         run: |
-          npx prisma migrate deploy
-          npm run db:check-drift
+          npm run db:migrate:singleton-ci
       - name: Check Cycle 1 tenant guards before multi-org fixture
         run: npm run check:tenant-guards
       - name: Mark migrated tenant database
@@ -161,6 +168,13 @@ jobs:
         run: npm run check:tenant-guards
       - name: Create protected two-organization fixture
         run: npm run test:tenant-fixture
+      - name: Enter maintenance before RLS cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          psql -h 127.0.0.1 -U postgres -d "$TENANT_ISOLATION_DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'UPDATE "PlatformRuntimeState" SET "writeMode" = '\''MAINTENANCE'\'', "reason" = '\''release tenant certification'\'', "updatedAt" = now() WHERE "id" = 1;'
       - name: Tenant and knowledge isolation tests
         run: npm run test:unit -- src/lib/organization-context.logic.test.ts src/lib/organization-context-resolution.logic.test.ts src/lib/tenant-isolation.integration.logic.test.ts src/lib/nora-context.logic.test.ts
       - name: Tenant inventory audit after multi-org fixture
@@ -169,7 +183,24 @@ jobs:
         run: npm run build
       - name: Install Playwright browser
         run: npx playwright install chromium
-      - name: Tenant isolation E2E
+      - name: Apply versioned RLS cutover as the only schema executor
+        run: ENABLE_TENANT_RLS_CUTOVER=1 npm run cutover:multi-org
+      - name: Provision restricted runtime credential after RLS
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          psql -h 127.0.0.1 -U postgres -d "$TENANT_ISOLATION_DB_NAME" -v ON_ERROR_STOP=1 \
+            -c "ALTER ROLE policydesk_app PASSWORD 'tenant-isolation-runtime-password';"
+          runtime_url="postgresql://policydesk_app:tenant-isolation-runtime-password@127.0.0.1:5432/${TENANT_ISOLATION_DB_NAME}?schema=public"
+          printf 'TENANT_RLS_RUNTIME_DATABASE_URL=%s\n' "$runtime_url" >> "$GITHUB_ENV"
+          printf 'DATABASE_URL=%s\n' "$runtime_url" >> "$GITHUB_ENV"
+          printf 'DATABASE_URL_UNPOOLED=%s\n' "$runtime_url" >> "$GITHUB_ENV"
+      - name: Exact-role pooled RLS certification
+        run: npm run test:tenant-rls
+      - name: Check Prisma drift after cutover
+        run: npm run db:check-drift
+      - name: Tenant isolation E2E after forced RLS
         run: npx playwright test tests/e2e/tenant-isolation.spec.ts
       - name: Drop dedicated tenant database
         if: always()
@@ -222,10 +253,8 @@ jobs:
         run: npm ci
       - name: Generate Prisma client
         run: npm run db:generate
-      - name: Apply migrations and check drift
-        run: |
-          npx prisma migrate deploy
-          npm run db:check-drift
+      - name: Apply singleton migrations
+        run: npm run db:migrate:singleton-ci
       - name: Tenant guards and transition integration
         run: |
           npm run check:tenant-guards
@@ -286,7 +315,11 @@ jobs:
       verifier_sha: ${{ steps.source.outputs.verifier_sha }}
     env:
       DATABASE_URL: ""
-      DATABASE_URL_UNPOOLED: ${{ secrets.PRODUCTION_READONLY_DATABASE_URL }}
+      DATABASE_URL_UNPOOLED: ""
+      PRODUCTION_READONLY_DATABASE_URL: ${{ secrets.PRODUCTION_READONLY_DATABASE_URL }}
+      PRODUCTION_READONLY_ROLE: ${{ vars.PRODUCTION_READONLY_ROLE || 'policydesk_readonly' }}
+      TENANT_RLS_APP_ROLE: ${{ vars.TENANT_RLS_APP_ROLE || 'policydesk_app' }}
+      TENANT_RLS_PLATFORM_OWNER_ROLE: ${{ vars.TENANT_RLS_PLATFORM_OWNER_ROLE || 'policydesk_platform_owner' }}
       PRODUCTION_EXPECTED_TENANT_MODE: ${{ vars.PRODUCTION_EXPECTED_TENANT_MODE || 'single-org' }}
       NORA_AGENT_MODE: ${{ vars.NORA_AGENT_MODE }}
       PLATFORM_BILLING_MUTATIONS_ENABLED: ${{ vars.PLATFORM_BILLING_MUTATIONS_ENABLED }}

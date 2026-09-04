@@ -3,6 +3,7 @@ import "server-only";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
 import { assertOrganizationContextInTransaction, type OrganizationContext } from "@/lib/organization-context";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 import { receiptPortfolioWhere } from "@/lib/portfolio-access";
 import { normalizeMexicanPhone } from "@/lib/phone";
 import {
@@ -36,8 +37,10 @@ export async function prepareWhatsAppReceiptReminderForContext(input: {
     throw new Error("Captura un teléfono mexicano válido de 10 dígitos.");
   }
 
-  return db.$transaction(async (tx) => {
+  const run = async (tx: Prisma.TransactionClient) => {
     await assertOrganizationContextInTransaction(tx, context);
+    const capability = await resolveOrganizationCapability(context.organizationId, "WHATSAPP", tx);
+    if (!capability.enabled) throw new Error("WHATSAPP_CAPABILITY_DISABLED");
 
     const receipt = await tx.receipt.findFirst({
       where: {
@@ -165,5 +168,12 @@ export async function prepareWhatsAppReceiptReminderForContext(input: {
     }
 
     return { outcome: "OPEN_WHATSAPP" as const, url, phoneSource: selection.source };
-  });
+  };
+  // Request handlers should pass a transaction-bound TenantDb. Keep the root
+  // client fallback only for legacy callers, where this function itself still
+  // establishes the tenant transaction and revalidates membership.
+  if ("$transaction" in db) {
+    return db.$transaction(run);
+  }
+  return run(db as Prisma.TransactionClient);
 }

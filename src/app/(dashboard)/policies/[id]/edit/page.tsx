@@ -3,7 +3,7 @@ import { updatePolicy } from "@/app/(dashboard)/policies/actions";
 import { PolicyForm } from "@/components/forms/policy-form";
 import { createPolicyDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
-import { getDb } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/organization-context";
 import { formatDateInput } from "@/lib/form-utils";
 import type { PolicyRenewalSource } from "@/lib/policy-renewal";
 import type { PolicyFormValues } from "@/lib/validations";
@@ -13,8 +13,7 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
   const { id } = await params;
   const scope = await requireOrganizationPortfolioReadScope();
   const isAdmin = scope.membershipRole !== "AGENT";
-  const db = getDb();
-  const [policy, clients, insurers] = await Promise.all([
+  const [policy, clients, insurers] = await withTenantTransaction(scope.context, (db) => Promise.all([
     db.policy.findFirst({
       where: { id, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: {
@@ -50,7 +49,7 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
-  ]);
+  ]));
 
   if (!policy) {
     notFound();

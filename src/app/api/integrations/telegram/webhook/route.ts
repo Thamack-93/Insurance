@@ -36,6 +36,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  if (process.env.PLATFORM_TELEGRAM_ENABLED?.trim() === "0") {
+    return NextResponse.json({ ok: false, error: "Telegram está deshabilitado temporalmente por la plataforma." }, { status: 503 });
+  }
   const ipFingerprint = securityFingerprint(`ip:${getRequestIp(request)}`);
   const rateLimit = await checkDistributedRateLimit(`telegram:webhook:${ipFingerprint}`, {
     limit: 60,

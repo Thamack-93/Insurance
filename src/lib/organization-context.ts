@@ -190,6 +190,20 @@ export async function assertOrganizationContextInTransaction(
   context: OrganizationContext,
   allowedRoles: readonly OrganizationRole[] = ORGANIZATION_ROLES,
 ): Promise<void> {
+  // Set the tenant GUC inside the same transaction as the authorization
+  // revalidation. This makes legacy `db.$transaction` callers safe during the
+  // RLS cutover as long as they invoke this guard before touching protected
+  // models; the preferred API remains withTenantTransaction.
+  await tx.$executeRaw(Prisma.sql`SELECT set_config('app.organization_id', ${context.organizationId}, true)`);
+  try {
+    const runtimeState = await tx.platformRuntimeState.findUnique({ where: { id: 1 }, select: { writeMode: true } });
+    if (runtimeState && runtimeState.writeMode !== "OPEN") throw new AuthError("POLICYDESK_MAINTENANCE_MODE", 503);
+  } catch (error) {
+    // The additive migration is allowed to be absent only in legacy local
+    // environments. Production must fail closed when its write-mode control
+    // cannot be read.
+    if (process.env.NODE_ENV === "production" || !(error instanceof Error && /does not exist|P2021|relation/i.test(error.message))) throw error;
+  }
   const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
     SELECT m."id"
       FROM "OrganizationMembership" m
@@ -224,6 +238,53 @@ export async function withOrganizationTransaction<T>(
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }
 
+/** Public naming from the multi-tenant DAL contract. */
+export type TenantDb = Prisma.TransactionClient;
+export const withTenantTransaction = withOrganizationTransaction;
+
+/**
+ * Tenant transaction for platform jobs. Callers must enumerate organizations
+ * explicitly and pass one concrete id; there is deliberately no global
+ * fallback. The organization row is locked before any tenant query runs.
+ */
+export async function withSystemOrganizationTransaction<T>(
+  organizationId: string,
+  reason: string,
+  callback: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  if (!organizationId.trim()) throw new AuthError("ORGANIZATION_CONTEXT_REQUIRED", 400);
+  if (!reason.trim()) throw new AuthError("SYSTEM_TENANT_REASON_REQUIRED", 400);
+  const db = getDb();
+  return db.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string; status: string; kind: string }>>(Prisma.sql`
+      SELECT "id", "status", "kind"
+        FROM "Organization"
+       WHERE "id" = ${organizationId}
+       FOR UPDATE
+    `);
+    const organization = rows[0];
+    if (!organization) throw new AuthError("ORGANIZATION_NOT_FOUND", 404);
+    const activeOrProvisioning = ["ACTIVE", "PROVISIONING"].includes(organization.status);
+    const approvedDemoMaintenance = organization.kind === "DEMO" && ["demo file retention", "demo reset", "demo summary"].includes(reason);
+    const approvedCapabilityRead = reason === "capability resolution";
+    const approvedLifecycle = ["demo trial extend", "demo trial suspend", "organization suspend", "organization reactivate"].includes(reason);
+    if (!activeOrProvisioning && !approvedDemoMaintenance && !approvedLifecycle && !approvedCapabilityRead) {
+      throw new AuthError("ORGANIZATION_NOT_ACTIVE", 403);
+    }
+    const runtimeState = await tx.platformRuntimeState.findUnique({ where: { id: 1 }, select: { writeMode: true } }).catch((error) => {
+      if (process.env.NODE_ENV !== "production" && error instanceof Error && /does not exist|P2021|relation/i.test(error.message)) return null;
+      throw error;
+    });
+    if (runtimeState && runtimeState.writeMode !== "OPEN" && !approvedDemoMaintenance && !approvedLifecycle && !approvedCapabilityRead) {
+      throw new AuthError("POLICYDESK_MAINTENANCE_MODE", 503);
+    }
+    await tx.$executeRaw(Prisma.sql`SELECT set_config('app.organization_id', ${organizationId}, true)`);
+    return callback(tx);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+}
+
+export const withSystemTenantTransaction = withSystemOrganizationTransaction;
+
 export async function selectOrganization(organizationId: string) {
   const user = await requireUser();
   const db = getDb();
@@ -254,6 +315,18 @@ export async function selectOrganization(organizationId: string) {
     throw new AuthError("ORGANIZATION_CONTEXT_STALE", 409);
   }
 
+  await withSystemOrganizationTransaction(membership.organizationId, "organization select", async (tx) => {
+    await writeActivityLog({
+      entityType: "OrganizationMembership",
+      entityId: membership.id,
+      action: "ORGANIZATION_SELECTED",
+      userId: user.id,
+      organizationId: membership.organizationId,
+      newValue: { organizationId: membership.organizationId },
+      db: tx,
+    });
+  });
+
   await setSessionCookie({
     userId: user.id,
     email: user.email,
@@ -263,15 +336,6 @@ export async function selectOrganization(organizationId: string) {
     organizationId: membership.organizationId,
     sessionVersion: user.sessionVersion,
     mustChangePassword: user.mustChangePassword,
-  });
-
-  await writeActivityLog({
-    entityType: "OrganizationMembership",
-    entityId: membership.id,
-    action: "ORGANIZATION_SELECTED",
-    userId: user.id,
-    organizationId: membership.organizationId,
-    newValue: { organizationId: membership.organizationId },
   });
 }
 

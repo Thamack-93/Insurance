@@ -16,7 +16,7 @@ import { CancelReceiptButton } from "@/components/receipts/cancel-receipt-button
 import { RehabilitateReceiptButton } from "@/components/receipts/rehabilitate-receipt-button";
 import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
 import { QuickPaymentDialog } from "@/components/payments/quick-payment-dialog";
-import { getDb } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/organization-context";
 import { receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
@@ -35,40 +35,27 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
   const returnTo = normalizeReturnTo(typeof query.returnTo === "string" ? query.returnTo : undefined, "/receipts");
   const scope = await requireOrganizationPortfolioReadScope();
   const isAdmin = scope.membershipRole !== "AGENT";
-  const db = getDb();
-  const agentContact = await db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } });
-
-  const receipt = await db.receipt.findFirst({
-    where: { id, ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
-    include: { client: true, policy: true, insurer: true, document: true, endorsement: true },
+  const data = await withTenantTransaction(scope.context, async (db) => {
+    const agentContact = await db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } });
+    const receipt = await db.receipt.findFirst({
+      where: { id, ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
+      include: { client: true, policy: true, insurer: true, document: true, endorsement: true },
+    });
+    if (!receipt) return { receipt: null, agentContact, payments: [], commissions: [], documents: [], relatedReceipts: [], activity: [] };
+    const [payments, commissions, documents, relatedReceipts, activity] = await Promise.all([
+      db.payment.findMany({ where: { receiptId: id, organizationId: scope.organizationId }, orderBy: [{ paidDate: "desc" }, { id: "desc" }] }),
+      db.commission.findMany({ where: { receiptId: id, organizationId: scope.organizationId }, include: { insurer: true }, orderBy: [{ expectedDate: "desc" }, { id: "desc" }] }),
+      db.document.findMany({ where: { receiptId: id, organizationId: scope.organizationId }, orderBy: [{ uploadedAt: "desc" }, { id: "desc" }] }),
+      db.receipt.findMany({ where: { policyId: receipt.policyId, organizationId: scope.organizationId, id: { not: id } }, include: { endorsement: true }, orderBy: [{ dueDate: "desc" }, { receiptSequence: { sort: "desc", nulls: "last" } }, { receiptNumber: "desc" }, { id: "desc" }], take: 5 }),
+      getActivityForEntity("Receipt", id, 20, scope.organizationId, db),
+    ]);
+    return { receipt, agentContact, payments, commissions, documents, relatedReceipts, activity };
   });
+  const { receipt, agentContact, payments, commissions, documents, relatedReceipts, activity } = data;
 
   if (!receipt) {
     notFound();
   }
-
-  const [payments, commissions, documents, relatedReceipts, activity] = await Promise.all([
-    db.payment.findMany({
-      where: { receiptId: id, organizationId: scope.organizationId },
-      orderBy: [{ paidDate: "desc" }, { id: "desc" }],
-    }),
-    db.commission.findMany({
-      where: { receiptId: id, organizationId: scope.organizationId },
-      include: { insurer: true },
-      orderBy: [{ expectedDate: "desc" }, { id: "desc" }],
-    }),
-    db.document.findMany({
-      where: { receiptId: id, organizationId: scope.organizationId },
-      orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
-    }),
-    db.receipt.findMany({
-      where: { policyId: receipt.policyId, organizationId: scope.organizationId, id: { not: id } },
-      include: { endorsement: true },
-      orderBy: [{ dueDate: "desc" }, { receiptSequence: { sort: "desc", nulls: "last" } }, { receiptNumber: "desc" }, { id: "desc" }],
-      take: 5,
-    }),
-    getActivityForEntity("Receipt", id, 20, scope.organizationId),
-  ]);
 
   const postedPayments = payments.filter((payment) => payment.status === "POSTED");
   const paidAmount = postedPayments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);

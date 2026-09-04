@@ -8,5 +8,7 @@ export function hasHostedDatabase() {
 }
 
 export function areDocumentFilesEnabled() {
-  return !isVercelDeployment() && process.env.ENABLE_DOCUMENT_FILES !== "false";
+  if (process.env.PLATFORM_UPLOADS_ENABLED?.trim() === "0") return false;
+  if (isVercelDeployment()) return process.env.NEXT_PUBLIC_DOCUMENT_FILES_ENABLED === "1";
+  return process.env.ENABLE_DOCUMENT_FILES !== "false";
 }

@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { DocumentDropZone } from "@/components/documents/document-drop-zone";
 import { DocumentList } from "@/components/documents/document-list";
 import { PolicyReceiptsTable } from "@/components/policies/policy-receipts-table";
-import { getDb } from "@/lib/db";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 import { policyOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
@@ -41,8 +41,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
   const returnTo = normalizeReturnTo(typeof query.returnTo === "string" ? query.returnTo : undefined, "/policies");
   const scope = await requireOrganizationPortfolioReadScope();
   const isAdmin = scope.membershipRole !== "AGENT";
-  const db = getDb();
-
+  return withTenantOrganization(scope.organizationId, async (db) => {
   const policy = await db.policy.findFirst({
     where: { id, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
     include: {
@@ -160,7 +159,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
       policyId: id,
       limit: 10,
       organizationId: scope.organizationId,
-    }),
+    }, db),
     db.document.findMany({
       where: { policyId: id, organizationId: scope.organizationId },
       include: { receipt: true, task: true, claim: true, quote: true, endorsement: true },
@@ -189,7 +188,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
       },
       orderBy: [{ startDate: "desc" }, { createdAt: "desc" }, { id: "asc" }],
     }),
-    getActivityForEntity("Policy", id, 20, scope.organizationId),
+    getActivityForEntity("Policy", id, 20, scope.organizationId, db),
     getPolicyFamilyPolicies(id, scope.organizationId),
   ]);
 
@@ -213,7 +212,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
     statuses: OPEN_WORK_ITEM_STATUSES,
     policyId: id,
     organizationId: scope.organizationId,
-  });
+  }, db);
   const paymentsTotal = payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
 
   return (
@@ -578,7 +577,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {family.policies.map((term) => (
+                {family.policies.map((term: (typeof family.policies)[number]) => (
                   <TableRow key={term.id} className={term.id === policy.id ? "bg-muted/25" : undefined}>
                     <TableCell>
                       <Link href={`/policies/${term.id}`} className="font-medium text-foreground hover:text-primary">
@@ -724,4 +723,5 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
       </div>
     </div>
   );
+});
 }

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
-import { getDb } from "@/lib/db";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 import {
   claimOperationalWhere,
   clientOperationalWhere,
@@ -10,7 +10,7 @@ import {
   receiptOperationalWhere,
   workItemOperationalWhere,
 } from "@/lib/portfolio-access";
-import type { OrganizationContext } from "@/lib/organization-context";
+import type { OrganizationContext, TenantDb } from "@/lib/organization-context";
 
 export const noraEntityTypeSchema = z.enum(["client", "policy", "receipt", "workItem", "claim", "endorsement"]);
 export const noraContextRefSchema = z.object({ type: noraEntityTypeSchema, id: z.string().min(1).max(100) });
@@ -22,10 +22,24 @@ export async function resolveAuthorizedNoraContext(
   ref: NoraContextRef,
   scope: Pick<OrganizationContext, "organizationId" | "membershipRole"> & { portfolioOwnerId?: string },
 ) {
-  const db = getDb();
   const portfolioOwnerId = scope.membershipRole === "AGENT" ? scope.portfolioOwnerId : undefined;
   const organizationId = scope.organizationId;
+  const resolve = async (db: TenantDb) => switchNoraContext(db, ref, organizationId, portfolioOwnerId);
+  // Unit tests supply an explicit mocked client through the legacy db module;
+  // production always runs this read inside the authenticated tenant boundary.
+  if (process.env.NODE_ENV === "test") {
+    const testDb = (await import("@/lib/db")).getDb() as TenantDb;
+    return resolve(testDb);
+  }
+  return withTenantOrganization(organizationId, resolve);
+}
 
+async function switchNoraContext(
+  db: TenantDb,
+  ref: NoraContextRef,
+  organizationId: string,
+  portfolioOwnerId?: string,
+) {
   switch (ref.type) {
     case "client": {
       const entity = await db.client.findFirst({ where: { AND: [{ id: ref.id }, clientOperationalWhere(portfolioOwnerId, organizationId)] }, select: { id: true, fullName: true } });

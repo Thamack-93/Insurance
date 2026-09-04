@@ -1,4 +1,4 @@
-"use server";
+import "server-only";
 
 import { getDb } from "@/lib/db";
 import { revalidatePath } from "next/cache";
@@ -7,6 +7,7 @@ import { errorResult, successResult, type MutationResult } from "@/lib/mutation-
 import { logError } from "@/lib/logger";
 import { setRuntimeSettings, THEME_COOKIE } from "@/lib/settings-runtime";
 import { AuthError, requireSuperAdmin, requireUser } from "@/lib/auth";
+import { assertOrganizationContextInTransaction, requireOrganizationContext, requireOrganizationRole, withTenantTransaction } from "@/lib/organization-context";
 
 export type Settings = {
   firmName: string;
@@ -41,14 +42,20 @@ const defaultSettings: Settings = {
 };
 
 export async function getSettings(): Promise<Settings> {
+  const user = await requireUser();
+  const context = await requireOrganizationContext();
   const db = getDb();
   
   try {
     // Get all settings from database
-    const dbSettings = await db.systemSetting.findMany();
+    const [organizationSettings, platformSettings, userTheme] = await Promise.all([
+      withTenantTransaction(context, (tx) => tx.organizationSetting.findMany({ where: { organizationId: context.organizationId } })),
+      db.systemSetting.findMany({ where: { key: { not: { startsWith: "theme:" } } } }),
+      db.userPreference.findUnique({ where: { userId_key: { userId: user.id, key: "theme" } }, select: { value: true } }),
+    ]);
     
     // Convert to object
-    const settingsMap = dbSettings.reduce<Record<string, string>>((acc, setting) => {
+    const settingsMap = [...platformSettings, ...organizationSettings].reduce<Record<string, string>>((acc, setting) => {
       acc[setting.key] = setting.value;
       return acc;
     }, {});
@@ -62,7 +69,7 @@ export async function getSettings(): Promise<Settings> {
       firmRfc: settingsMap.firmRfc ?? defaultSettings.firmRfc,
       defaultCurrency: settingsMap.defaultCurrency ?? defaultSettings.defaultCurrency,
       dateFormat: settingsMap.dateFormat ?? defaultSettings.dateFormat,
-      theme: settingsMap.theme ?? defaultSettings.theme,
+      theme: userTheme?.value ?? settingsMap.theme ?? defaultSettings.theme,
       emailNotifications: settingsMap.emailNotifications === "true",
       smsNotifications: settingsMap.smsNotifications === "true",
       autoBackup: settingsMap.autoBackup === "true",
@@ -91,10 +98,10 @@ export async function updateUserTheme(theme: string): Promise<MutationResult> {
     });
 
     const db = getDb();
-    await db.systemSetting.upsert({
-      where: { key: `theme:${user.id}` },
+    await db.userPreference.upsert({
+      where: { userId_key: { userId: user.id, key: "theme" } },
       update: { value: theme },
-      create: { key: `theme:${user.id}`, value: theme },
+      create: { userId: user.id, key: "theme", value: theme },
     });
 
     return successResult("", "", "Tema guardado.");
@@ -141,5 +148,24 @@ export async function updateSettings(settings: Partial<Settings>): Promise<Mutat
     return errorResult(
       "No se pudo guardar la configuración. Verifica la conexión a la base de datos.",
     );
+  }
+}
+
+/** Tenant settings mutation; platform SystemSetting is never used for these keys. */
+export async function updateOrganizationSettings(settings: Partial<Settings>): Promise<MutationResult> {
+  try {
+    const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
+    await withTenantTransaction(context, async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
+      for (const [key, value] of Object.entries(settings)) {
+        await tx.organizationSetting.upsert({ where: { organizationId_key: { organizationId: context.organizationId, key } }, update: { value: String(value) }, create: { organizationId: context.organizationId, key, value: String(value) } });
+      }
+    });
+    revalidatePath("/settings");
+    return successResult("", "/settings", "Configuración de organización guardada.");
+  } catch (error) {
+    if (error instanceof AuthError) return errorResult(error.message);
+    logError("settings.updateOrganizationSettings", error);
+    return errorResult("No se pudo guardar la configuración de la organización.");
   }
 }

@@ -1,7 +1,7 @@
-import { getDb } from "@/lib/db";
 import { normalize } from "@/lib/search-utils";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { normalizeCaptureIdentity, scoreCaptureIdentity } from "@/lib/policy-pdf-capture.shared";
+import { requireOrganizationContext, withTenantTransaction, type TenantDb } from "@/lib/organization-context";
 
 export type PolicyCaptureSearchKind = "client" | "insurer" | "policy";
 
@@ -45,8 +45,7 @@ function includesNormalized(haystack: string | null | undefined, needle: string)
   return normalize(haystack).includes(needle);
 }
 
-async function searchClients(query: string, organizationId: string, portfolioOwnerId?: string | null) {
-  const db = getDb();
+async function searchClients(query: string, organizationId: string, portfolioOwnerId: string | null | undefined, db: TenantDb) {
   const needle = normalize(query);
   const databaseQuery = normalizeCaptureIdentity(query).split(" ").filter(Boolean).slice(0, 2).join(" ") || query;
   const baseWhere = {
@@ -129,8 +128,7 @@ async function searchClients(query: string, organizationId: string, portfolioOwn
   }));
 }
 
-async function searchInsurers(query: string, organizationId: string) {
-  const db = getDb();
+async function searchInsurers(query: string, organizationId: string, db: TenantDb) {
   const needle = normalize(query);
   const databaseQuery = normalizeCaptureIdentity(query).split(" ").filter(Boolean).slice(0, 2).join(" ") || query;
   const baseWhere = { organizationId, status: { not: "ARCHIVED" as const } };
@@ -201,8 +199,8 @@ async function searchPolicies(
     insurerId?: string | null;
     portfolioOwnerId?: string | null;
   },
+  db: TenantDb,
 ) {
-  const db = getDb();
   const needle = normalize(query);
   const policyNumberVariants = buildPolicyNumberSearchVariants(query);
   const identifierQuery = /^[A-Z0-9/-]{7,}$/i.test(query.replace(/\s+/g, ""));
@@ -310,10 +308,15 @@ export async function searchPolicyCaptureEntities(
   },
 ): Promise<PolicyCaptureSearchItem[]> {
   const normalizedQuery = query.trim();
-  if (kind === "client") return searchClients(normalizedQuery, filters.organizationId, filters.portfolioOwnerId);
-  if (kind === "insurer") return searchInsurers(normalizedQuery, filters.organizationId);
-  if (kind === "policy") return searchPolicies(normalizedQuery, filters);
-  return [];
+  if (!filters.organizationId) return [];
+  const context = await requireOrganizationContext();
+  if (context.organizationId !== filters.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  return withTenantTransaction(context, async (db) => {
+    if (kind === "client") return searchClients(normalizedQuery, filters.organizationId, filters.portfolioOwnerId, db);
+    if (kind === "insurer") return searchInsurers(normalizedQuery, filters.organizationId, db);
+    if (kind === "policy") return searchPolicies(normalizedQuery, filters, db);
+    return [];
+  });
 }
 
 export function matchesPolicyCaptureItem(item: PolicyCaptureSearchItem, query: string) {

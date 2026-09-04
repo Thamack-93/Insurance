@@ -2,6 +2,7 @@ import "server-only";
 
 import { getAssistantAiMonthlySpend } from "@/lib/assistant-ai-runs";
 import type { AssistantUser } from "@/lib/assistant-types";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 
 export type NoraAgentMode = "off" | "admin" | "all";
 
@@ -22,8 +23,18 @@ export function getNoraAiMonthlySoftLimitUsd() {
 }
 
 export async function getNoraAiBudgetStatus(organizationId?: string) {
-  const limitUsd = getNoraAiMonthlySoftLimitUsd();
-  if (!process.env.DATABASE_URL?.trim() || !organizationId) return { allowed: true, warning: null, spentUsd: 0, limitUsd };
+  if (!organizationId) {
+    if (process.env.NODE_ENV === "production") return { allowed: false, warning: "Nora requiere un contexto de organización válido.", spentUsd: 0, limitUsd: 0 };
+    const limitUsd = getNoraAiMonthlySoftLimitUsd();
+    return { allowed: true, warning: null, spentUsd: 0, limitUsd };
+  }
+  const capability = await resolveOrganizationCapability(organizationId, "NORA").catch(() => {
+    if (process.env.NODE_ENV === "production") return { enabled: false, limitValue: 0 };
+    return { enabled: true, limitValue: null };
+  });
+  const limitUsd = capability.limitValue ?? getNoraAiMonthlySoftLimitUsd();
+  if (!capability.enabled) return { allowed: false, warning: "Nora no está habilitada para esta organización.", spentUsd: 0, limitUsd };
+  if (!process.env.DATABASE_URL?.trim()) return { allowed: true, warning: null, spentUsd: 0, limitUsd };
   const monthly = await getAssistantAiMonthlySpend(organizationId);
   const ratio = limitUsd > 0 ? monthly.costUsd / limitUsd : 1;
   if (ratio >= 1) {

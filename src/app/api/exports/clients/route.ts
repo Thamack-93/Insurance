@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
 import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { clientOperationalWhere } from "@/lib/portfolio-access";
+import { withTenantTransaction } from "@/lib/organization-context";
 import { toWorkbook, workbookToBuffer, type ExportSheet } from "@/lib/export";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,8 +20,9 @@ function safeFilePart(value: string) {
 
 export async function GET() {
   const scope = await requireOrganizationPortfolioReadScope();
-  const db = getDb();
-  const clients = await db.client.findMany({
+  const capability = await resolveOrganizationCapability(scope.organizationId, "EXPORTS");
+  if (!capability.enabled) return NextResponse.json({ error: "Las exportaciones no están habilitadas para esta organización." }, { status: 403 });
+  const clients = await withTenantTransaction(scope.context, (tx) => tx.client.findMany({
     where: clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
     orderBy: { fullName: "asc" },
     select: {
@@ -34,7 +36,7 @@ export async function GET() {
       createdAt: true,
       _count: { select: { policies: true, receipts: true } },
     },
-  });
+  }));
 
   const generatedAt = new Date();
   type ClientRow = (typeof clients)[number];

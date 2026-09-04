@@ -3,7 +3,7 @@ import { updateClaim } from "@/app/(dashboard)/claims/actions";
 import { ClaimForm } from "@/components/forms/claim-form";
 import { createClaimDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
-import { getDb } from "@/lib/db";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 import { formatDateInput } from "@/lib/form-utils";
 import type { ClaimFormValues } from "@/lib/validations";
 import {
@@ -16,8 +16,7 @@ import {
 export default async function EditClaimPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const scope = await requireOrganizationPortfolioReadScope();
-  const db = getDb();
-
+  return withTenantOrganization(scope.organizationId, async (db) => {
   const [claim, clients, policies, insurers] = await Promise.all([
     db.claim.findFirst({ where: { id, ...claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId) } }),
     db.client.findMany({
@@ -90,4 +89,5 @@ export default async function EditClaimPage({ params }: { params: Promise<{ id: 
       </div>
     </div>
   );
+  });
 }

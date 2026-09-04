@@ -48,10 +48,13 @@ function normalizePostgresConnectionString(connectionString: string) {
 
 export function getDb() {
   if (!globalForPrisma.prisma) {
-    const rawConnectionString = (process.env.DATABASE_URL_UNPOOLED?.trim()) || (process.env.DATABASE_URL?.trim());
+    // Web/runtime traffic must use the pooled, restricted application URL.
+    // Direct connections are reserved for operator tooling and migrations.
+    const rawConnectionString = (process.env.DATABASE_URL?.trim()) ||
+      (process.env.NODE_ENV === "production" ? "" : process.env.DATABASE_URL_UNPOOLED?.trim());
     const connectionString = rawConnectionString ? normalizePostgresConnectionString(rawConnectionString) : "";
     if (!connectionString) {
-      throw new Error("DATABASE_URL_UNPOOLED or DATABASE_URL is required to initialize Prisma.");
+      throw new Error("DATABASE_URL is required to initialize the Prisma runtime client.");
     }
     if (!/^postgres(ql)?:\/\//i.test(connectionString)) {
       throw new Error(
@@ -65,6 +68,28 @@ export function getDb() {
   }
 
   return globalForPrisma.prisma;
+}
+
+/**
+ * Direct connection for migrations, backup/restore and other operator-only
+ * workflows. This helper is intentionally not used by request-time DAL code.
+ */
+export function getDirectDatabaseUrl(): string {
+  const admin = process.env.DATABASE_ADMIN_URL?.trim();
+  const value = admin || process.env.DATABASE_URL_UNPOOLED?.trim();
+  if (!value) throw new Error("DATABASE_ADMIN_URL is required for direct operational database work.");
+  if (!admin && (process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production")) {
+    throw new Error("DATABASE_ADMIN_URL is required for direct operational database work in production.");
+  }
+  if (/pooler/i.test(value)) throw new Error("DATABASE_ADMIN_URL must be a direct Neon connection, not a pooler URL.");
+  try {
+    const username = decodeURIComponent(new URL(value).username);
+    const runtimeRole = process.env.TENANT_RLS_APP_ROLE?.trim() || "policydesk_app";
+    if (username === runtimeRole) throw new Error("DATABASE_ADMIN_URL_MUST_NOT_USE_RUNTIME_ROLE");
+  } catch (error) {
+    if (error instanceof Error && error.message === "DATABASE_ADMIN_URL_MUST_NOT_USE_RUNTIME_ROLE") throw error;
+  }
+  return normalizePostgresConnectionString(value);
 }
 
 export async function resetDb() {

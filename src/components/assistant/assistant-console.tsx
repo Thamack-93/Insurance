@@ -406,6 +406,8 @@ function CapturePreviewCard({
 export function AssistantConsole({
   snapshot,
   userId,
+  organizationId,
+  demoMode = false,
   variant = "workspace",
   context = null,
   initialPrompt,
@@ -415,6 +417,8 @@ export function AssistantConsole({
 }: {
   snapshot: AssistantSnapshot;
   userId: string;
+  organizationId: string;
+  demoMode?: boolean;
   variant?: "workspace" | "panel";
   context?: NoraContextRef | null;
   initialPrompt?: string;
@@ -646,7 +650,7 @@ export function AssistantConsole({
     updateUploadState(file, { status: "uploading", progress: 0, label: "Subiendo…", retryable: false });
     try {
       const uploaded = await uploadPdfWithRetry({
-        pathname: buildNoraPolicyPdfPathname(userId, file.name),
+        pathname: buildNoraPolicyPdfPathname(organizationId, userId, file.name),
         file,
         handleUploadUrl: "/api/nora/policy-pdf/upload",
         clientPayload: JSON.stringify({ userId, purpose, fileName: file.name, operationId: operationId ?? null }),
@@ -957,7 +961,7 @@ export function AssistantConsole({
       const extractedText = options.combinedText ?? await extractPdfTextFromFile(file, { timeoutMs: 12_000, signal }).catch(() => "");
       const mode = wantsExplicitAi(prompt) ? "ai" : "local";
       const commonPayload = { fileName: file.name, prompt };
-      const retentionPromise = extractedText.trim() && mode === "local"
+      const retentionPromise = extractedText.trim() && mode === "local" && !demoMode
         ? retainPdf(file, "nora-policy-pdf", signal, operationId)
         : null;
       retentionPending = Boolean(retentionPromise);
@@ -971,12 +975,12 @@ export function AssistantConsole({
           storageFallbackError = error instanceof PdfCaptureUploadError
             ? error
             : new PdfCaptureUploadError("No se pudo conservar temporalmente el PDF.", { code: "UPLOAD_UNKNOWN", retryable: false, attempts: 0 });
-          if (!(mode === "ai" && extractedText.trim())) throw error;
+          if (!(mode === "ai" && extractedText.trim()) || demoMode) throw error;
         }
       }
       let response: Response;
 
-      if (extractedText.trim() && mode === "local") {
+      if (extractedText.trim() && mode === "local" && !demoMode) {
         response = await fetchPdfCaptureWithTimeout("/api/nora/policy-pdf/analyze", {
           method: "POST",
           headers: { "content-type": "application/json" },

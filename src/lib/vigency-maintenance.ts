@@ -3,7 +3,7 @@ import "server-only";
 import { addYears, differenceInCalendarDays } from "date-fns";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
-import { getDb } from "@/lib/db";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { inferClearPaymentFrequency } from "@/lib/payment-frequency";
 import { reconcileReceiptState } from "@/lib/receipt-reconciliation";
 import { toNumber } from "@/lib/money";
@@ -171,7 +171,12 @@ export async function getLatestMaintenanceRun(
   organizationId: string,
   client?: DbClient,
 ): Promise<MaintenanceRunSnapshot | null> {
-  const db = client ?? getDb();
+  if (!client) {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => getLatestMaintenanceRun(type, organizationId, tx));
+  }
+  const db = client;
   return db.maintenanceRun.findFirst({
     where: { type, organizationId },
     orderBy: { startedAt: "desc" },
@@ -184,7 +189,12 @@ export async function runPolicyVigencyAudit(input: {
   client?: DbClient;
   now?: Date;
 }): Promise<{ run: MaintenanceRunSnapshot; summary: VigencyAuditSummary }> {
-  const db = input.client ?? getDb();
+  if (!input.client) {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== input.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => runPolicyVigencyAudit({ ...input, client: tx }));
+  }
+  const db = input.client;
   const now = input.now ?? new Date();
   const run = await db.maintenanceRun.create({
     data: {
@@ -410,6 +420,7 @@ export async function runPolicyVigencyAudit(input: {
           } else {
             const created = (await db.policy.create({
               data: {
+                organizationId: input.organizationId,
                 policyNumber: familyRoot.policyNumber,
                 familyRootId: index === 0 ? null : familyRoot.id,
                 renewedFromPolicyId: index === 0 ? null : nextPolicies[index - 1]?.id ?? null,

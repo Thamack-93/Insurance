@@ -1,7 +1,6 @@
-"use server";
+import "server-only";
 
 import type { Prisma } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { businessAddDays } from "@/lib/business-dates";
 import { today } from "@/lib/dates";
@@ -13,12 +12,23 @@ import { commissionOperationalWhere } from "@/lib/portfolio-access";
 import {
   assertOrganizationContextInTransaction,
   requireOrganizationContext,
+  withTenantTransaction,
 } from "@/lib/organization-context";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 
 type CommissionScope = {
   organizationId: string;
   portfolioOwnerId?: string;
 };
+
+async function requireCommissionScope(scope: CommissionScope): Promise<CommissionScope> {
+  const context = await requireOrganizationContext();
+  if (scope.organizationId !== context.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  if (context.membershipRole === "AGENT" && scope.portfolioOwnerId && scope.portfolioOwnerId !== context.userId) {
+    throw new Error("PORTFOLIO_SCOPE_MISMATCH");
+  }
+  return { organizationId: context.organizationId, portfolioOwnerId: context.membershipRole === "AGENT" ? context.userId : scope.portfolioOwnerId };
+}
 
 export interface CommissionCalculation {
   policyId: string;
@@ -36,12 +46,10 @@ export async function calculateCommissionsForPolicy(
   policyId: string,
   receiptId?: string,
 ): Promise<MutationResult> {
-  const db = getDb();
-
   try {
     const context = await requireOrganizationContext();
     const portfolioOwnerId = context.membershipRole === "AGENT" ? context.userId : undefined;
-    return await db.$transaction(async (tx) => {
+    return await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
     // Get policy details
     const policy = await tx.policy.findFirst({
@@ -141,12 +149,10 @@ export async function updateCommissionStatus(
   status: CommissionStatus,
   actualAmount?: number,
 ): Promise<MutationResult> {
-  const db = getDb();
-
   try {
     const context = await requireOrganizationContext();
     const portfolioOwnerId = context.membershipRole === "AGENT" ? context.userId : undefined;
-    return await db.$transaction(async (tx) => {
+    return await withTenantTransaction(context, async (tx) => {
     await assertOrganizationContextInTransaction(tx, context);
     const commission = await tx.commission.findFirst({
       where: { id: commissionId, ...commissionOperationalWhere(portfolioOwnerId, context.organizationId) },
@@ -209,7 +215,7 @@ export async function getCommissionStats(
   dateRange: { start: Date; end: Date } | undefined,
   scope: CommissionScope,
 ) {
-  const db = getDb();
+  scope = await requireCommissionScope(scope);
   
   try {
     const whereClause: Prisma.CommissionWhereInput = {
@@ -224,6 +230,7 @@ export async function getCommissionStats(
         : {}),
     };
 
+    return await withTenantOrganization(scope.organizationId, async (db) => {
     const stats = await db.commission.aggregate({
       where: { ...whereClause, organizationId: scope.organizationId },
       _sum: {
@@ -258,6 +265,7 @@ export async function getCommissionStats(
         actualAmount: Number(item._sum.actualAmount || 0),
       })),
     };
+    });
   } catch (error) {
     logError("commissions.getCommissionStats", error);
     return {
@@ -270,12 +278,10 @@ export async function getCommissionStats(
 }
 
 export async function getOverdueCommissions(scope: CommissionScope) {
-  const db = getDb();
-  
+  scope = await requireCommissionScope(scope);
   try {
     const todayDate = today();
-    
-    const overdueCommissions = await db.commission.findMany({
+    const overdueCommissions = await withTenantOrganization(scope.organizationId, (db) => db.commission.findMany({
       where: {
         ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
         expectedDate: {
@@ -311,7 +317,7 @@ export async function getOverdueCommissions(scope: CommissionScope) {
         },
       },
       orderBy: [{ expectedDate: "asc" }, { id: "asc" }],
-    });
+    }));
 
     return overdueCommissions.map(commission => ({
       ...commission,
@@ -326,14 +332,14 @@ export async function getOverdueCommissions(scope: CommissionScope) {
 }
 
 export async function autoUpdateCommissionStatuses(scope: CommissionScope) {
-  const db = getDb();
-
+  scope = await requireCommissionScope(scope);
   try {
     const todayDate = today();
     const operationalWhere = commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
 
     // Sequential transitions: a commission may need EXPECTED→PENDING→OVERDUE
     // in the same run if its receipt was just paid AND it's already past due.
+    return await withTenantOrganization(scope.organizationId, async (db) => {
     const pendingResult = await db.commission.updateMany({
       where: {
         organizationId: scope.organizationId,
@@ -357,6 +363,7 @@ export async function autoUpdateCommissionStatuses(scope: CommissionScope) {
       updatedToPending: pendingResult.count,
       updatedToOverdue: overdueResult.count,
     };
+    });
   } catch (error) {
     logError("commissions.autoUpdateCommissionStatuses", error);
     return {

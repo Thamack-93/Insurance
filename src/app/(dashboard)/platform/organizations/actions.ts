@@ -38,7 +38,7 @@ export async function createOrganizationAction(input: {
 }): Promise<CreateOrganizationResult> {
   try {
     const actor = await requireSuperAdmin();
-    if (process.env.PLATFORM_ORG_PROVISIONING_ENABLED !== "1") {
+    if (process.env.PLATFORM_CUSTOMER_PROVISIONING_ENABLED !== "1") {
       return { ok: false, error: "La creación de organizaciones aún no está habilitada para este entorno." };
     }
 

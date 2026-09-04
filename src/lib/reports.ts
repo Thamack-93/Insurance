@@ -1,11 +1,22 @@
-"use server";
+import "server-only";
 
 import type { Claim, Commission } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { formatDate, today } from "@/lib/dates";
 import { logError } from "@/lib/logger";
 import { subMonths, subYears } from "date-fns";
+import {
+  assertSameOrganization,
+  requireOrganizationContext,
+  withTenantTransaction,
+  type TenantDb,
+} from "@/lib/organization-context";
+
+async function withReportTransaction<T>(organizationId: string, callback: (db: TenantDb) => Promise<T>) {
+  const context = await requireOrganizationContext();
+  assertSameOrganization(organizationId, context);
+  return withTenantTransaction(context, callback);
+}
 
 export interface ReportData<T = unknown> {
   period: string;
@@ -59,9 +70,8 @@ export async function generateFinancialReport(
   period: string,
   organizationId: string,
 ): Promise<ReportData> {
-  const db = getDb();
-  
-  try {
+  return withReportTransaction(organizationId, async (db) => {
+    try {
     // Get policies in the period
     const policies = await db.policy.findMany({
       where: {
@@ -134,7 +144,8 @@ export async function generateFinancialReport(
   } catch (error) {
     logError("reports.generateFinancialReport", error);
     throw error;
-  }
+    }
+  });
 }
 
 export async function generatePolicyTypeReport(
@@ -143,9 +154,8 @@ export async function generatePolicyTypeReport(
   period: string,
   organizationId: string,
 ): Promise<ReportData> {
-  const db = getDb();
-  
-  try {
+  return withReportTransaction(organizationId, async (db) => {
+    try {
     const policies = await db.policy.findMany({
       where: {
         organizationId,
@@ -209,7 +219,8 @@ export async function generatePolicyTypeReport(
   } catch (error) {
     logError("reports.generatePolicyTypeReport", error);
     throw error;
-  }
+    }
+  });
 }
 
 export async function generateClientPerformanceReport(
@@ -218,9 +229,8 @@ export async function generateClientPerformanceReport(
   period: string,
   organizationId: string,
 ): Promise<ReportData> {
-  const db = getDb();
-  
-  try {
+  return withReportTransaction(organizationId, async (db) => {
+    try {
     const clients = await db.client.findMany({
       where: { organizationId },
       include: {
@@ -276,13 +286,13 @@ export async function generateClientPerformanceReport(
   } catch (error) {
     logError("reports.generateClientPerformanceReport", error);
     throw error;
-  }
+    }
+  });
 }
 
 export async function generateMonthlyTrendsReport(year: number, organizationId: string): Promise<ReportData> {
-  const db = getDb();
-  
-  try {
+  return withReportTransaction(organizationId, async (db) => {
+    try {
     const monthlyData = [];
     
     for (let month = 0; month < 12; month++) {
@@ -336,7 +346,8 @@ export async function generateMonthlyTrendsReport(year: number, organizationId: 
   } catch (error) {
     logError("reports.generateMonthlyTrendsReport", error);
     throw error;
-  }
+    }
+  });
 }
 
 export async function generateInsurerPerformanceReport(
@@ -345,9 +356,8 @@ export async function generateInsurerPerformanceReport(
   period: string,
   organizationId: string,
 ): Promise<ReportData> {
-  const db = getDb();
-  
-  try {
+  return withReportTransaction(organizationId, async (db) => {
+    try {
     const insurers = await db.insurer.findMany({
       where: { organizationId },
       include: {
@@ -400,13 +410,13 @@ export async function generateInsurerPerformanceReport(
   } catch (error) {
     logError("reports.generateInsurerPerformanceReport", error);
     throw error;
-  }
+    }
+  });
 }
 
 export async function getAvailableReportPeriods(organizationId: string) {
-  const db = getDb();
-  
-  try {
+  return withReportTransaction(organizationId, async (db) => {
+    try {
     const oldestPolicy = await db.policy.findFirst({
       where: { organizationId },
       orderBy: { startDate: "asc" },
@@ -492,5 +502,6 @@ export async function getAvailableReportPeriods(organizationId: string) {
       available: false,
       message: "Error al obtener períodos disponibles",
     };
-  }
+    }
+  });
 }

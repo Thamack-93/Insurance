@@ -60,20 +60,10 @@ describe("telegram channel state", () => {
     expect(logErrorMock).not.toHaveBeenCalled();
   });
 
-  it("falls back to a disconnected state when loading Telegram state fails", async () => {
+  it("surfaces Telegram state load failures instead of masking them as disconnected", async () => {
     notificationChannelUpsert.mockRejectedValue(new Error("database unavailable"));
 
-    await expect(getTelegramChannelStateForUser("org-1", "user-1")).resolves.toMatchObject({
-      userId: "user-1",
-      type: "TELEGRAM",
-      telegramChatId: null,
-      isEnabled: false,
-      telegramMutationsEnabled: false,
-    });
-    expect(logErrorMock).toHaveBeenCalledWith(
-      "telegram.getTelegramChannelStateForUser",
-      expect.any(Error),
-      { userId: "user-1" },
-    );
+    await expect(getTelegramChannelStateForUser("org-1", "user-1")).rejects.toThrow("database unavailable");
+    expect(logErrorMock).not.toHaveBeenCalled();
   });
 });

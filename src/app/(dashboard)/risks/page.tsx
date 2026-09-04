@@ -18,7 +18,6 @@ import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UrlTabs } from "@/components/ui/url-tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { TableToolbar } from "@/components/tables/table-toolbar";
-import { getDb } from "@/lib/db";
 import { detectRisks } from "@/lib/risk-engine";
 import { getClientDataQualityScores, getPolicyDataQualityScores } from "@/lib/data-quality";
 import { daysUntil, formatDate } from "@/lib/dates";
@@ -26,7 +25,7 @@ import { formatCurrency } from "@/lib/money";
 import { ClientResolutionActions, PolicyResolutionActions, RenewalResolutionActions } from "@/components/risk-resolution/resolution-actions";
 import { PageRefreshTicker } from "@/components/risk-resolution/page-refresh-ticker";
 import { RefreshPageButton } from "@/components/risk-resolution/refresh-page-button";
-import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
+import { requireOrganizationRoleOrRedirect, withTenantTransaction } from "@/lib/organization-context";
 import { statusLabel } from "@/lib/status";
 
 function riskHref(entityType: string, entityId: string) {
@@ -117,10 +116,9 @@ export default async function RisksPage({
   const issueCodeFilter = params.issueCode;
   const query = (params.q ?? "").trim().toLowerCase();
 
-  const db = getDb();
   const [risks, openNotifications, clientScores, policyScores] = await Promise.all([
     detectRisks(undefined, organizationContext.organizationId),
-    db.alert.findMany({ where: { organizationId: organizationContext.organizationId, status: "OPEN" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] }),
+    withTenantTransaction(organizationContext, (db) => db.alert.findMany({ where: { organizationId: organizationContext.organizationId, status: "OPEN" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] })),
     getClientDataQualityScores(organizationContext.organizationId),
     getPolicyDataQualityScores(organizationContext.organizationId),
   ]);

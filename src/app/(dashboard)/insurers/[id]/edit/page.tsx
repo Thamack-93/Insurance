@@ -3,15 +3,14 @@ import { updateInsurer } from "@/app/(dashboard)/insurers/actions";
 import { InsurerForm } from "@/components/forms/insurer-form";
 import { createInsurerDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
-import { getDb } from "@/lib/db";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 import type { InsurerFormValues } from "@/lib/validations";
 import { requireOrganizationRole } from "@/lib/organization-context";
 
 export default async function EditInsurerPage({ params }: { params: Promise<{ id: string }> }) {
   const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
   const { id } = await params;
-  const db = getDb();
-
+  return withTenantOrganization(context.organizationId, async (db) => {
   const insurer = await db.insurer.findFirst({
     where: { id, organizationId: context.organizationId },
   });
@@ -50,4 +49,5 @@ export default async function EditInsurerPage({ params }: { params: Promise<{ id
       </div>
     </div>
   );
+});
 }

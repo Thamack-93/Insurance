@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { authenticatePageAsAdmin, cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../helpers/db";
 
+const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
+
 test.describe("operation queue context", () => {
   test("resolves legacy renewal context and links to the policy", async ({ page }) => {
     const db = getTestDb();
@@ -18,6 +20,7 @@ test.describe("operation queue context", () => {
 
       const workItem = await db.workItem.create({
         data: {
+          organizationId: TEST_ORGANIZATION_ID,
           sourceType: "Renewal",
           sourceId,
           workItemType: "TASK",
@@ -68,6 +71,7 @@ test.describe("operation queue context", () => {
     try {
       const workItem = await db.workItem.create({
         data: {
+          organizationId: TEST_ORGANIZATION_ID,
           sourceType: "Renewal",
           sourceId: reference,
           workItemType: "TASK",
@@ -111,6 +115,7 @@ test.describe("operation queue context", () => {
     try {
       const workItem = await db.workItem.create({
         data: {
+          organizationId: TEST_ORGANIZATION_ID,
           sourceType: "Task",
           sourceId,
           workItemType: "TASK",
@@ -189,6 +194,7 @@ test.describe("operation queue context", () => {
       await db.policy.update({ where: { id: fixture.policyId }, data: { endDate: yesterday } });
       await db.receipt.create({
         data: {
+          organizationId: TEST_ORGANIZATION_ID,
           receiptNumber: `CANCELLED-${Date.now()}`,
           policyId: fixture.policyId,
           clientId: fixture.clientId,

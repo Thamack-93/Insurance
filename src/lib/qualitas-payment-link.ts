@@ -1,6 +1,7 @@
 import "server-only";
 import { parse, type DefaultTreeAdapterTypes } from "parse5";
 import { normalizeMexicanPhone } from "./phone";
+import { isSyntheticOutboundEmail, isSyntheticOutboundPhone } from "./outbound-contact-guard";
 
 export const QUALITAS_PAYMENT_LINK_ENTRYPOINT =
   "https://www.qualitas.com.mx/web/qmx/pago-de-poliza/-/user-pago/inicio";
@@ -979,7 +980,7 @@ export async function prepareQualitasPaymentLink(
   const deliveryMethod = input.deliveryChannel;
   const recipientEmail = deliveryMethod === "EMAIL" ? normalizeQualitasEmail(input.destination) : null;
   const recipientPhone = deliveryMethod === "WHATSAPP" ? normalizeQualitasPhone(input.destination) : null;
-  if (!input.policyNumber.trim() || !input.correlationId.trim() || (deliveryMethod === "EMAIL" ? !recipientEmail : !recipientPhone)) {
+  if (!input.policyNumber.trim() || !input.correlationId.trim() || (deliveryMethod === "EMAIL" ? !recipientEmail || isSyntheticOutboundEmail(recipientEmail) : !recipientPhone || isSyntheticOutboundPhone(recipientPhone))) {
     return qualitasResult("UNEXPECTED_RESPONSE", "INVALID_INPUT");
   }
 

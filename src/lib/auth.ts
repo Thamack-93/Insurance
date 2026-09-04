@@ -4,8 +4,12 @@ import { cache } from "react";
 import { getDb } from "@/lib/db";
 import {
   SESSION_COOKIE_NAME,
+  SESSION_ABSOLUTE_TTL_SECONDS,
+  SESSION_IDLE_TTL_SECONDS,
   SESSION_TTL,
   createSessionToken,
+  hashSessionToken,
+  newSessionId,
   verifySessionToken,
   type SessionPayload,
   type UserRoleSession,
@@ -43,8 +47,16 @@ export function verifyPassword(password: string, stored: string): boolean {
   }
 }
 
-export async function setSessionCookie(payload: Omit<SessionPayload, "exp">) {
-  const { token } = await createSessionToken(payload);
+export async function setSessionCookie(payload: Omit<SessionPayload, "exp">, options: { fingerprint?: string } = {}) {
+  const sessionId = payload.sessionId ?? newSessionId();
+  const { token } = await createSessionToken({ ...payload, sessionId });
+  try {
+    const db = getDb();
+    const now = new Date();
+    await db.session.create({ data: { id: sessionId, userId: payload.userId, tokenHash: hashSessionToken(token), lastSeenAt: now, idleExpiresAt: new Date(now.getTime() + SESSION_IDLE_TTL_SECONDS * 1000), absoluteExpiresAt: new Date(now.getTime() + SESSION_ABSOLUTE_TTL_SECONDS * 1000), fingerprint: options.fingerprint ?? null } });
+  } catch (error) {
+    if (process.env.NODE_ENV === "production") throw error;
+  }
   const store = await cookies();
   store.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
@@ -69,7 +81,22 @@ export async function clearSessionCookie() {
 export const getSession = cache(async (): Promise<SessionPayload | null> => {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE_NAME)?.value;
-  return verifySessionToken(token);
+  const session = await verifySessionToken(token);
+  if (!session) return null;
+  if (!session.sessionId) return process.env.NODE_ENV === "production" ? null : session;
+  try {
+    const db = getDb();
+    const now = new Date();
+    const row = await db.session.findFirst({ where: { id: session.sessionId, userId: session.userId, tokenHash: hashSessionToken(token ?? ""), revokedAt: null, idleExpiresAt: { gt: now }, absoluteExpiresAt: { gt: now } }, select: { id: true, lastSeenAt: true } });
+    if (!row) return null;
+    if (now.getTime() - row.lastSeenAt.getTime() > 5 * 60 * 1000) {
+      await db.session.update({ where: { id: row.id }, data: { lastSeenAt: now, idleExpiresAt: new Date(now.getTime() + SESSION_IDLE_TTL_SECONDS * 1000) } });
+    }
+    return session;
+  } catch {
+    if (process.env.NODE_ENV === "production") return null;
+    return session;
+  }
 });
 
 export async function getCurrentUser() {

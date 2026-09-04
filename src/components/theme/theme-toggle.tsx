@@ -4,7 +4,7 @@ import { useSyncExternalStore, useTransition } from "react";
 import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
-import { updateUserTheme } from "@/lib/settings";
+import { updateUserTheme } from "@/app/(dashboard)/settings/actions";
 
 export type ThemeMode = "light" | "dark";
 
