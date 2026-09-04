@@ -91,7 +91,10 @@ async function main() {
     for (const item of users) {
       await tx.user.upsert({
         where: { id: item.id },
-        update: { email: item.email, name: item.name, role: item.role, platformRole: item.id === PLATFORM_USER_ID ? "SUPERADMIN" : "NONE", active: true },
+        // Refresh the deterministic credential on every certification run so
+        // a production clone with pre-existing fixture IDs cannot leave the
+        // browser suite with stale passwords.
+        update: { email: item.email, name: item.name, passwordHash: hash("tenant-fixture-password"), role: item.role, platformRole: item.id === PLATFORM_USER_ID ? "SUPERADMIN" : "NONE", active: true },
         create: { id: item.id, email: item.email, name: item.name, passwordHash: hash("tenant-fixture-password"), role: item.role, platformRole: item.id === PLATFORM_USER_ID ? "SUPERADMIN" : "NONE", active: true },
       });
       if (item.org && item.membershipRole) {
