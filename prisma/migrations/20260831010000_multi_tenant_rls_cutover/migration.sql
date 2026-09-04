@@ -445,7 +445,11 @@ DO $grants$
 DECLARE table_name text;
 BEGIN
   EXECUTE 'REVOKE ALL ON SCHEMA public FROM PUBLIC';
-  EXECUTE 'GRANT USAGE ON SCHEMA public TO policydesk_app, policydesk_platform_owner, policydesk_readonly';
+  EXECUTE 'GRANT USAGE ON SCHEMA public TO policydesk_app, policydesk_readonly';
+  -- PostgreSQL requires CREATE on the containing schema before ownership of a
+  -- function can be transferred. This role is non-login and owns only the
+  -- narrowly scoped aggregate below.
+  EXECUTE 'GRANT USAGE, CREATE ON SCHEMA public TO policydesk_platform_owner';
   FOREACH table_name IN ARRAY ARRAY[
     'Client','Insurer','Policy','Receipt','PolicyEndorsement','Payment',
     'Commission','Task','WorkItem','Claim','ClaimChecklistItem','Quote',

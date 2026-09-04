@@ -26,12 +26,12 @@ describeDisposable("tenant isolation disposable fixture", () => {
       });
       expect(organizations.find((organization) => organization.id === "org_demo_broker_0001")?.kind).toBe("DEMO");
       const pedro = await db.user.findUnique({ where: { id: "tenant-pedro-gomez" }, include: { organizationMemberships: true } });
-      expect(pedro?.email).toBe("pedroagl93@gmail.com");
+      expect(pedro?.email).toBe("tenant-owner-b@policydesk.local");
       expect(pedro?.organizationMemberships).toEqual([
         expect.objectContaining({ organizationId: "org_pedro_gomez_0001", role: "OWNER", active: true }),
       ]);
-      const superadmin = await db.user.findUnique({ where: { id: "platform_admin_demo_0001" }, include: { organizationMemberships: true } });
-      expect(superadmin?.email).toBe("admin@policydesk.local");
+      const superadmin = await db.user.findUnique({ where: { id: "tenant-platform-admin" }, include: { organizationMemberships: true } });
+      expect(superadmin?.email).toBe("tenant-platform-admin@policydesk.local");
       expect(superadmin?.platformRole).toBe("SUPERADMIN");
       expect(superadmin?.organizationMemberships).toHaveLength(0);
       const clients = await db.client.findMany({ where: { id: { in: ["tenant-client-a", "tenant-client-b"] } }, select: { id: true, organizationId: true } });
@@ -86,7 +86,7 @@ describeDisposable("tenant isolation disposable fixture", () => {
 
     const pedro = await getPlatformOrganizationDetail("org_pedro_gomez_0001");
     expect(pedro?.organization.name).toBe("Pedro Alfredo Gómez Lorenzo");
-    expect(pedro?.memberships.some((membership) => membership.userEmail === "pedroagl93@gmail.com" && membership.role === "OWNER")).toBe(true);
+    expect(pedro?.memberships.some((membership) => membership.userEmail === "tenant-owner-b@policydesk.local" && membership.role === "OWNER")).toBe(true);
     expect(pedro?.activities.every((activity) => activity.entityId !== "legacy-secret" && !("oldValue" in activity) && !("newValue" in activity))).toBe(true);
     expect(await getPlatformOrganizationDetail("does-not-exist")).toBeNull();
   });

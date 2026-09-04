@@ -462,10 +462,20 @@ async function verifyDatabaseRole(client: PoolClient, mode: ProductionTenantMode
       expectedPrivileges.set("GeneralKnowledgeSource", new Set(["SELECT"]));
       expectedPrivileges.set("GeneralKnowledgeChunk", new Set(["SELECT"]));
       expectedPrivileges.set("PlatformRuntimeState", new Set(["SELECT"]));
+      // information_schema.role_table_grants only exposes another role's
+      // rows to privileged catalog readers. The production verifier itself is
+      // intentionally read-only, so inspect the public ACL directly; the
+      // existing has_table_privilege checks above still validate every
+      // required grant from PostgreSQL's privilege evaluator.
       const granted = await client.query<{ table_name: string; privilege_type: string }>(`
-        SELECT table_name, privilege_type
-          FROM information_schema.role_table_grants
-         WHERE grantee = $1 AND table_schema = 'public'
+        SELECT c.relname AS table_name, acl.privilege_type
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          CROSS JOIN LATERAL aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) acl
+          JOIN pg_roles grantee ON grantee.oid = acl.grantee
+         WHERE n.nspname = 'public'
+           AND grantee.rolname = $1
+           AND c.relkind IN ('r', 'p')
       `, [runtimeRole]);
       const actualPrivileges = new Map<string, Set<string>>();
       for (const grant of granted.rows) {

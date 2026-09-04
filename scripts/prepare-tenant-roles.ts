@@ -48,7 +48,8 @@ async function main() {
   const client = await pool.connect();
   try {
     const current = await client.query<{ current_user: string }>("SELECT current_user");
-    if (current.rows[0]?.current_user === appRole || current.rows[0]?.current_user === ownerRole) {
+    const administrativeRole = current.rows[0]?.current_user;
+    if (!administrativeRole || administrativeRole === appRole || administrativeRole === ownerRole || administrativeRole === readOnlyRole) {
       throw new Error("TENANT_ROLE_PREP_REQUIRES_ADMIN_CONNECTION");
     }
 
@@ -65,6 +66,10 @@ async function main() {
     } else {
       await client.query(`CREATE ROLE ${identifier(ownerRole)} NOLOGIN NOSUPERUSER BYPASSRLS NOINHERIT`);
     }
+    // Managed Neon owners are intentionally not superusers. Explicit SET-role
+    // membership is required so the direct administrative connection can
+    // transfer ownership of the narrowly scoped SECURITY DEFINER function.
+    await client.query(`GRANT ${identifier(ownerRole)} TO ${identifier(administrativeRole)}`);
 
     const readOnlyExists = await client.query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AS exists", [readOnlyRole]);
     if (readOnlyExists.rows[0]?.exists) {
