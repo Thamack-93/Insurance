@@ -8,6 +8,44 @@ import { isRenewalStage, isTerminalRenewalStage, resolveRenewalStage } from "@/l
 import { closeRenewalFollowUp } from "@/lib/renewal-followups";
 import { renewalStageLabel } from "@/lib/status";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
+import {
+  prepareRenewalWhatsAppContactForContext,
+  prepareRenewalQuoteShareForContext,
+  type RenewalWhatsAppResult,
+} from "@/lib/renewal-whatsapp-service";
+
+function renewalWhatsAppError(error: unknown) {
+  const message = error instanceof Error ? error.message : "No se pudo preparar el contacto.";
+  if (message === "WHATSAPP_CAPABILITY_DISABLED") return "WhatsApp no está disponible para esta organización.";
+  if (message === "ORGANIZATION_CONTEXT_MISMATCH" || message === "UNAUTHENTICATED") return "No se pudo validar la organización activa.";
+  if (/^(Captura un teléfono mexicano válido|El teléfono del cliente cambió|La renovación ya no está disponible|Esta póliza ya se renovó|Esta renovación ya se cerró)/i.test(message)) return message;
+  return "No se pudo preparar el contacto de WhatsApp.";
+}
+
+export async function prepareRenewalWhatsAppContact(input: { policyId: string; capturedPhone?: string }): Promise<RenewalWhatsAppResult | { outcome: "ERROR"; error: string }> {
+  try {
+    if (!input?.policyId?.trim()) return { outcome: "ERROR", error: "La póliza no es válida." };
+    const context = await requireOrganizationContext();
+    const result = await getDb().$transaction((tx) => prepareRenewalWhatsAppContactForContext({ db: tx, context, policyId: input.policyId, capturedPhone: input.capturedPhone }));
+    revalidatePaths(["/operations", "/activity", "/clients"]);
+    return result;
+  } catch (error) {
+    return { outcome: "ERROR", error: renewalWhatsAppError(error) };
+  }
+}
+
+export async function prepareRenewalQuoteShare(input: { policyId: string; handoff: "NATIVE_SHARE" | "WHATSAPP_FALLBACK"; capturedPhone?: string }): Promise<RenewalWhatsAppResult | { outcome: "ERROR"; error: string }> {
+  try {
+    if (!input?.policyId?.trim()) return { outcome: "ERROR", error: "La póliza no es válida." };
+    if (input.handoff !== "NATIVE_SHARE" && input.handoff !== "WHATSAPP_FALLBACK") return { outcome: "ERROR", error: "La forma de compartir no es válida." };
+    const context = await requireOrganizationContext();
+    const result = await getDb().$transaction((tx) => prepareRenewalQuoteShareForContext({ db: tx, context, policyId: input.policyId, handoff: input.handoff, capturedPhone: input.capturedPhone }));
+    revalidatePaths(["/operations", "/activity", "/clients"]);
+    return result;
+  } catch (error) {
+    return { outcome: "ERROR", error: renewalWhatsAppError(error) };
+  }
+}
 
 export async function markRenewalAsNotContinuing(policyId: string): Promise<MutationResult> {
   try {

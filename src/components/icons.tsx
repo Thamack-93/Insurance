@@ -75,6 +75,7 @@ export {
   Repeat,
   Settings,
   Settings2,
+  Share2,
   Shield,
   ShieldAlert,
   ShieldCheck,

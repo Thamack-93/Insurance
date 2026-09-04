@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { RenewalBoardFilters as BoardFilters } from "@/components/renewals/renewal-board-filters";
 import { RenewalStageMenu } from "@/components/renewals/renewal-stage-menu";
+import { RenewalWhatsAppAssistant } from "@/components/renewals/renewal-whatsapp-assistant";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { getRenewalStageTone, policyTypeLabel, renewalStageLabel } from "@/lib/status";
@@ -11,6 +12,7 @@ import { cn } from "@/lib/utils";
 import type { RenewalBoardCard, RenewalBoardColumn, RenewalBoardData } from "@/lib/renewal-board";
 import { RENEWAL_BOARD_COLUMN_PREVIEW } from "@/lib/renewal-board";
 import type { RenewalBoardFilters } from "@/lib/renewal-board.logic";
+import { isTerminalRenewalStage } from "@/lib/renewal-board.logic";
 
 const stageAccent: Record<string, string> = {
   PENDING: "bg-muted-foreground/40",
@@ -87,25 +89,22 @@ function RenewalCard({ card }: { card: RenewalBoardCard }) {
         </div>
       </dl>
 
-      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-        {card.renewedToPolicyId ? (
-          <Link
-            href={`/policies/${card.renewedToPolicyId}`}
-            className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
-          >
-            Ver renovación
-          </Link>
-        ) : captureHref ? (
-          <Link href={captureHref} className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
-            Capturar renovación
-          </Link>
+      <div className="mt-3 space-y-2">
+        {card.renewedToPolicyId || captureHref ? (
+          <div className="flex justify-end">
+            {card.renewedToPolicyId ? (
+              <Link href={`/policies/${card.renewedToPolicyId}`} className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>Ver renovación</Link>
+            ) : captureHref ? (
+              <Link href={captureHref} className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>Capturar renovación</Link>
+            ) : null}
+          </div>
         ) : null}
-        <RenewalStageMenu
-          policyId={card.policyId}
-          policyNumber={card.policyNumber}
-          stage={card.stage}
-          captureHref={captureHref}
-        />
+        {!isTerminalRenewalStage(card.stage) ? (
+          <div className="flex items-center justify-end gap-2">
+            <RenewalWhatsAppAssistant policyId={card.policyId} clientName={card.clientName} stage={card.stage} />
+            <RenewalStageMenu policyId={card.policyId} policyNumber={card.policyNumber} stage={card.stage} captureHref={captureHref} />
+          </div>
+        ) : null}
       </div>
     </li>
   );
