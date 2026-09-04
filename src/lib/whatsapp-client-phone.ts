@@ -27,14 +27,15 @@ export async function resolveClientWhatsAppPhone({
     throw new Error("Captura un teléfono mexicano válido de 10 dígitos.");
   }
 
-  const existingPrimary = normalizeMexicanPhone(client.phone);
-  const existingSecondary = normalizeMexicanPhone(client.secondaryPhone);
   let selection = selectWhatsAppPhone({ primary: client.phone, secondary: client.secondaryPhone });
   if (!captured) return selection;
 
   const capturedNormalized = normalizeMexicanPhone(captured);
   if (!capturedNormalized) throw new Error("Captura un teléfono mexicano válido de 10 dígitos.");
-  const existing = existingPrimary ?? existingSecondary;
+  // Synthetic demo phones are intentionally ignored by selectWhatsAppPhone,
+  // so a captured number can replace them. Keep the raw values in the
+  // optimistic predicate below to reject concurrent edits.
+  const existing = selection?.normalized ?? null;
   if (existing && existing !== capturedNormalized) {
     throw new Error("El teléfono del cliente cambió; vuelve a intentarlo para evitar sobrescribirlo.");
   }
