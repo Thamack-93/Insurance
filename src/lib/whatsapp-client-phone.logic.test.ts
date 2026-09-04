@@ -23,4 +23,28 @@ describe("shared WhatsApp client phone capture", () => {
     await expect(resolveClientWhatsAppPhone({ tx, organizationId: "org-a", userId: "user-a", client, capturedPhone: "55 1234 5678", source: "RENEWAL_CONTACT" })).rejects.toThrow("cambió");
     expect(writeActivityLog).not.toHaveBeenCalled();
   });
+
+  it("replaces a synthetic stored phone while preserving it in the optimistic predicate", async () => {
+    const syntheticClient = { id: "client-a", phone: "+52 5555555555", secondaryPhone: null };
+    const tx = { client: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) } } as never;
+
+    await expect(resolveClientWhatsAppPhone({
+      tx,
+      organizationId: "org-a",
+      userId: "user-a",
+      client: syntheticClient,
+      capturedPhone: "55 1234 5678",
+      source: "RENEWAL_CONTACT",
+    })).resolves.toEqual({ normalized: "+525512345678", source: "CAPTURED" });
+
+    expect((tx as { client: { updateMany: ReturnType<typeof vi.fn> } }).client.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "client-a",
+        organizationId: "org-a",
+        phone: "+52 5555555555",
+        secondaryPhone: null,
+      },
+      data: { phone: "+525512345678", updatedById: "user-a" },
+    });
+  });
 });
