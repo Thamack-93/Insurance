@@ -5,6 +5,13 @@ import { getDb } from "@/lib/db";
 import { withSystemOrganizationTransaction } from "@/lib/organization-context";
 import { resetDemoOrganizationForSystem } from "@/lib/demo-organizations";
 
+export const DEMO_PURGE_PREVENTIVE_HOURS = 47;
+export const DEMO_PURGE_DEADLINE_HOURS = 48;
+export const DEMO_PURGE_ALERT_MINUTES = 30;
+
+const PURGE_PREVENTIVE_MS = DEMO_PURGE_PREVENTIVE_HOURS * 60 * 60 * 1000;
+const PURGE_DEADLINE_MS = DEMO_PURGE_DEADLINE_HOURS * 60 * 60 * 1000;
+
 function sanitizedFailureCode(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : "";
   const match = message.match(/\b[A-Z][A-Z0-9_]{2,}\b/);
@@ -20,12 +27,16 @@ export async function purgeDemoUploadArtifacts(now = new Date(), organizationId?
   const demoOrganizations = await db.organization.findMany({ where: { kind: "DEMO", ...(organizationId ? { id: organizationId } : {}) }, select: { id: true } });
   let filesPurged = 0;
   for (const organization of demoOrganizations) {
-    let expired: Array<{ id: string; organizationId: string; blobPath: string }> = [];
+    let expired: Array<{ id: string; organizationId: string; blobPath: string; uploadedAt: Date; expiresAt: Date }> = [];
     try {
       expired = await withSystemOrganizationTransaction(organization.id, "demo file retention", (tx) => tx.demoUploadArtifact.findMany({
-        where: { organizationId: organization.id, status: "ACTIVE", expiresAt: { lte: now } },
-        select: { id: true, organizationId: true, blobPath: true },
-        orderBy: { expiresAt: "asc" },
+        where: {
+          organizationId: organization.id,
+          status: "ACTIVE",
+          OR: [{ purgeAfterAt: { lte: now } }, { expiresAt: { lte: now } }],
+        },
+        select: { id: true, organizationId: true, blobPath: true, uploadedAt: true, expiresAt: true },
+        orderBy: { purgeAfterAt: "asc" },
         take: 500,
       }));
     } catch {
@@ -36,11 +47,11 @@ export async function purgeDemoUploadArtifacts(now = new Date(), organizationId?
     for (const artifact of expired) {
     try {
       await withSystemOrganizationTransaction(artifact.organizationId, "demo file retention", async (tx) => {
-        await tx.demoUploadArtifact.updateMany({ where: { id: artifact.id, status: "ACTIVE" }, data: { purgeAttempts: { increment: 1 } } });
+        await tx.demoUploadArtifact.updateMany({ where: { id: artifact.id, status: "ACTIVE" }, data: { purgeAttempts: { increment: 1 }, lastPurgeAt: now } });
       });
       if (artifact.blobPath.startsWith("blob:")) await del(artifact.blobPath.slice("blob:".length));
       await withSystemOrganizationTransaction(artifact.organizationId, "demo file retention", async (tx) => {
-        await tx.demoUploadArtifact.updateMany({ where: { id: artifact.id, status: "ACTIVE" }, data: { status: "PURGED", validationStatus: "PURGED", deletedAt: now, lastPurgeFailureCode: null } });
+        await tx.demoUploadArtifact.updateMany({ where: { id: artifact.id, status: "ACTIVE" }, data: { status: "PURGED", validationStatus: "PURGED", deletedAt: now, lastPurgeAt: now, blobDeleteConfirmedAt: now, purgeBreachAt: null, lastPurgeFailureCode: null } });
       });
       filesPurged++;
     } catch (error) {
@@ -48,7 +59,11 @@ export async function purgeDemoUploadArtifacts(now = new Date(), organizationId?
       // code. Purge continues even for suspended or failed DEMO tenants.
       const failureCode = error instanceof Error && /BLOB|fetch|storage|timeout/i.test(error.message) ? "BLOB_DELETE_FAILED" : "PURGE_FAILED";
       await withSystemOrganizationTransaction(artifact.organizationId, "demo file retention", async (tx) => {
-        await tx.demoUploadArtifact.updateMany({ where: { id: artifact.id, status: "ACTIVE" }, data: { lastPurgeFailureCode: failureCode } });
+        const breach = now.getTime() >= artifact.expiresAt.getTime();
+        await tx.demoUploadArtifact.updateMany({ where: { id: artifact.id, status: "ACTIVE" }, data: { lastPurgeFailureCode: failureCode, lastPurgeAt: now, purgeBreachAt: breach ? now : undefined } });
+        if (now.getTime() >= artifact.uploadedAt.getTime() + (DEMO_PURGE_DEADLINE_HOURS * 60 - DEMO_PURGE_ALERT_MINUTES) * 60_000) {
+          await tx.platformAuditLog.create({ data: { targetOrganizationId: artifact.organizationId, action: "DEMO_UPLOAD_PURGE_WARNING", reason: breach ? "original exceeded contractual retention deadline" : "preventive purge retry pending", metadataJson: JSON.stringify({ artifactId: artifact.id, failureCode }) } });
+        }
       }).catch(() => undefined);
     }
     }
@@ -59,7 +74,7 @@ export async function purgeDemoUploadArtifacts(now = new Date(), organizationId?
 export async function runDemoRetention(now = new Date()) {
   const db = getDb();
   const filesPurged = await purgeDemoUploadArtifacts(now);
-  const demoOrganizations = await db.organization.findMany({ where: { kind: "DEMO" }, select: { id: true, status: true, demoState: { select: { trialEndsAt: true, realDataResetAt: true, resetStatus: true } } } });
+  const demoOrganizations = await db.organization.findMany({ where: { kind: "DEMO" }, select: { id: true, status: true, demoState: { select: { trialEndsAt: true, realDataResetAt: true, resetStatus: true, resetLeaseExpiresAt: true } } } });
   let resets = 0;
   let suspended = 0;
   let failures = 0;
@@ -82,9 +97,12 @@ export async function runDemoRetention(now = new Date()) {
       });
       suspended++;
     }
-    if (state.realDataResetAt && state.realDataResetAt <= now && state.resetStatus === "IDLE") {
+    const resetDeadline = state.realDataResetAt;
+    const resetDue = resetDeadline && resetDeadline <= now;
+    const staleReset = state.resetStatus === "RESETTING" && state.resetLeaseExpiresAt && state.resetLeaseExpiresAt <= now;
+    if (resetDue && (state.resetStatus === "IDLE" || state.resetStatus === "FAILED" || staleReset)) {
       try {
-        await resetDemoOrganizationForSystem(organization.id, `demo-retention-reset:${organization.id}:${state.realDataResetAt.toISOString()}`);
+        await resetDemoOrganizationForSystem(organization.id, `demo-retention-reset:${organization.id}:${resetDeadline?.toISOString() ?? now.toISOString()}`);
         resets++;
         if (trialExpired) {
           await withSystemOrganizationTransaction(organization.id, "demo trial suspend", async (tx) => {
@@ -101,4 +119,11 @@ export async function runDemoRetention(now = new Date()) {
     }
   }
   return { filesPurged, resets, suspended, failures };
+}
+
+export function demoUploadRetentionDeadline(uploadedAt: Date) {
+  return {
+    purgeAfterAt: new Date(uploadedAt.getTime() + PURGE_PREVENTIVE_MS),
+    expiresAt: new Date(uploadedAt.getTime() + PURGE_DEADLINE_MS),
+  };
 }

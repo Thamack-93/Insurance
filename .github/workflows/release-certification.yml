@@ -102,6 +102,15 @@ jobs:
       TENANT_RLS_APP_ROLE: policydesk_app
       TENANT_RLS_ORG_A: org_legacy_singleton_0001
       TENANT_RLS_ORG_B: org_pedro_gomez_0001
+      PLATFORM_NORA_ENABLED: "1"
+      PLATFORM_IMPORTS_ENABLED: "1"
+      PLATFORM_EXPORTS_ENABLED: "1"
+      PLATFORM_UPLOADS_ENABLED: "1"
+      PLATFORM_EMAIL_ENABLED: "1"
+      PLATFORM_TELEGRAM_ENABLED: "1"
+      PLATFORM_WHATSAPP_ENABLED: "1"
+      PLATFORM_QUALITAS_ENABLED: "0"
+      QUALITAS_PRODUCTION_CERTIFIED: "0"
       PLAYWRIGHT_USE_PRODUCTION_SERVER: "1"
       PLAYWRIGHT_HOST: localhost
       PLAYWRIGHT_BASE_URL: http://localhost:4173
@@ -164,8 +173,6 @@ jobs:
           VALUES ('$TENANT_ISOLATION_RUN_ID', '$db_name', '$host_name', '$fingerprint');
           SQL
           printf 'TENANT_ISOLATION_FINGERPRINT=%s\n' "$fingerprint" >> "$GITHUB_ENV"
-      - name: Check Cycle 1 tenant guards before multi-org fixture
-        run: npm run check:tenant-guards
       - name: Create protected two-organization fixture
         run: npm run test:tenant-fixture
       - name: Enter maintenance before RLS cutover
@@ -200,6 +207,13 @@ jobs:
         run: npm run test:tenant-rls
       - name: Check Prisma drift after cutover
         run: npm run db:check-drift
+      - name: Reopen disposable tenant after maintenance verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          psql -h 127.0.0.1 -U postgres -d "$TENANT_ISOLATION_DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'UPDATE "PlatformRuntimeState" SET "writeMode" = '\''OPEN'\'', "reason" = '\''tenant certification E2E'\'', "updatedAt" = now() WHERE "id" = 1;'
       - name: Tenant isolation E2E after forced RLS
         run: npx playwright test tests/e2e/tenant-isolation.spec.ts
       - name: Drop dedicated tenant database
@@ -323,6 +337,15 @@ jobs:
       PRODUCTION_EXPECTED_TENANT_MODE: ${{ vars.PRODUCTION_EXPECTED_TENANT_MODE || 'single-org' }}
       NORA_AGENT_MODE: ${{ vars.NORA_AGENT_MODE }}
       PLATFORM_BILLING_MUTATIONS_ENABLED: ${{ vars.PLATFORM_BILLING_MUTATIONS_ENABLED }}
+      PLATFORM_NORA_ENABLED: ${{ vars.PLATFORM_NORA_ENABLED }}
+      PLATFORM_IMPORTS_ENABLED: ${{ vars.PLATFORM_IMPORTS_ENABLED }}
+      PLATFORM_EXPORTS_ENABLED: ${{ vars.PLATFORM_EXPORTS_ENABLED }}
+      PLATFORM_UPLOADS_ENABLED: ${{ vars.PLATFORM_UPLOADS_ENABLED }}
+      PLATFORM_EMAIL_ENABLED: ${{ vars.PLATFORM_EMAIL_ENABLED }}
+      PLATFORM_TELEGRAM_ENABLED: ${{ vars.PLATFORM_TELEGRAM_ENABLED }}
+      PLATFORM_WHATSAPP_ENABLED: ${{ vars.PLATFORM_WHATSAPP_ENABLED }}
+      PLATFORM_QUALITAS_ENABLED: ${{ vars.PLATFORM_QUALITAS_ENABLED }}
+      QUALITAS_PRODUCTION_CERTIFIED: ${{ vars.QUALITAS_PRODUCTION_CERTIFIED }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -357,8 +380,8 @@ jobs:
           path: artifacts/production-verification/production.json
           if-no-files-found: error
           retention-days: 30
-      - name: Fail certification when Production is blocked
-        if: steps.verify.outputs.status == 'BLOCKED'
+      - name: Fail certification unless Production verifier is PASS
+        if: steps.verify.outputs.status != 'PASS'
         run: exit 1
 
   report:

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { del, list } from "@vercel/blob";
 import { Prisma } from "@/generated/prisma/client";
 import { AuthError, hashPassword, requireSuperAdmin } from "@/lib/auth";
@@ -315,7 +315,7 @@ async function purgeDemoPrivateBlobs(organizationId: string) {
 }
 
 async function performDemoReset(organizationId: string, requestId: string, dryRun: boolean, actorUserId: string, reason: string) {
-  const lock = await acquireDistributedLock(`demo-reset:${organizationId}`, 10 * 60_000, true);
+  const lock = await acquireDistributedLock(`demo-reset:${organizationId}`, 120_000, true);
   if (!lock.acquired) throw new Error("DEMO_RESET_LOCK_UNAVAILABLE");
   let resetStarted = false;
   let fencingVersion: number | null = null;
@@ -323,10 +323,19 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
     const resetPlan = await withSystemOrganizationTransaction(organizationId, "demo reset", async (tx) => {
       const organization = await tx.organization.findUnique({ where: { id: organizationId }, select: { id: true, kind: true, status: true } });
       if (!organization || organization.kind !== "DEMO") throw new Error("DEMO_RESET_REQUIRES_DEMO_ORGANIZATION");
-      const state = await tx.demoOrganizationState.findUnique({ where: { organizationId } });
+      let state = await tx.demoOrganizationState.findUnique({ where: { organizationId } });
       if (!state) throw new Error("DEMO_STATE_MISSING");
-      if (state.resetStatus === "RESETTING") throw new Error("DEMO_RESET_ALREADY_RUNNING");
+      if (state.resetStatus === "RESETTING") {
+        if (!state.resetLeaseExpiresAt || state.resetLeaseExpiresAt > new Date()) throw new Error("DEMO_RESET_ALREADY_RUNNING");
+        await tx.demoOrganizationState.update({ where: { organizationId }, data: { resetStatus: "FAILED", resetPhase: "RECOVERING", resetFailure: "DEMO_RESET_LEASE_EXPIRED", resetAttemptId: null, resetLeaseExpiresAt: null, resetHeartbeatAt: new Date() } });
+        await tx.organization.updateMany({ where: { id: organizationId, kind: "DEMO" }, data: { status: "SUSPENDED" } });
+        await tx.platformAuditLog.create({ data: { targetOrganizationId: organizationId, action: "DEMO_RESET_STALE_RECOVERED", reason: "reset lease expired before completion" } });
+        state = { ...state, resetStatus: "FAILED", dataVersion: state.dataVersion };
+      }
       const counts = { clients: await tx.client.count({ where: { organizationId } }), policies: await tx.policy.count({ where: { organizationId } }) };
+      if (!dryRun && state.resetRequestId === requestId && state.resetStatus === "IDLE" && state.lastResetAt) {
+        return { organizationId, requestId, dryRun: false, replayed: true, counts };
+      }
       if (dryRun) {
         await tx.platformAuditLog.create({ data: { requestId, actorUserId: actorUserId === SYSTEM_USER_ID ? null : actorUserId, targetOrganizationId: organizationId, action: "DEMO_ORGANIZATION_RESET_DRY_RUN", reason, metadataJson: JSON.stringify(counts) } });
         return { organizationId, requestId, dryRun: true, counts };
@@ -336,18 +345,22 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
       // another worker takes over, its newer version prevents this worker
       // from reseeding or reactivating the tenant.
       const nextDataVersion = state.dataVersion + 1;
+      const attemptId = randomUUID();
+      const leaseExpiresAt = new Date(Date.now() + 120_000);
       const started = await tx.demoOrganizationState.updateMany({ where: { organizationId, dataVersion: state.dataVersion, resetStatus: { in: ["IDLE", "FAILED"] } }, data: { resetStatus: "RESETTING", resetFailure: null, dataVersion: nextDataVersion } });
       if (started.count !== 1) throw new Error("DEMO_RESET_ALREADY_RUNNING");
+      await tx.demoOrganizationState.update({ where: { organizationId }, data: { resetPhase: "PREPARING", resetAttemptId: attemptId, resetRequestId: requestId, resetStartedAt: new Date(), resetHeartbeatAt: new Date(), resetLeaseExpiresAt: leaseExpiresAt, resetAttempts: { increment: 1 } } });
       const demoUsers = await tx.organizationMembership.findMany({ where: { organizationId }, select: { userId: true } });
       await tx.user.updateMany({ where: { id: { in: demoUsers.map(({ userId }) => userId) } }, data: { sessionVersion: { increment: 1 } } });
       await tx.session.updateMany({ where: { userId: { in: demoUsers.map(({ userId }) => userId) }, revokedAt: null }, data: { revokedAt: new Date() } });
       const artifacts = await tx.demoUploadArtifact.findMany({ where: { organizationId, status: "ACTIVE" }, select: { blobPath: true } });
-      return { organizationId, requestId, dryRun: false, counts, dataVersion: nextDataVersion, artifacts: artifacts.map(({ blobPath }) => blobPath), userIds: demoUsers.map(({ userId }) => userId) };
+      return { organizationId, requestId, dryRun: false, counts, dataVersion: nextDataVersion, attemptId, artifacts: artifacts.map(({ blobPath }) => blobPath), userIds: demoUsers.map(({ userId }) => userId) };
     });
-    if (resetPlan.dryRun) return resetPlan;
+    if (resetPlan.dryRun || ("replayed" in resetPlan && resetPlan.replayed)) return resetPlan;
 
     resetStarted = true;
     fencingVersion = resetPlan.dataVersion ?? null;
+    await withSystemOrganizationTransaction(organizationId, "demo reset", (tx) => tx.demoOrganizationState.updateMany({ where: { organizationId, resetAttemptId: resetPlan.attemptId, dataVersion: resetPlan.dataVersion, resetStatus: "RESETTING" }, data: { resetPhase: "PURGING", resetHeartbeatAt: new Date(), resetLeaseExpiresAt: new Date(Date.now() + 120_000) } }));
     for (const blobPath of resetPlan.artifacts ?? []) {
       if (blobPath.startsWith("blob:")) await del(blobPath.slice("blob:".length));
       // Renew after every object so a large tenant cannot outlive its lease.
@@ -369,6 +382,7 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
     // committed. Prefix cleanup closes that orphan window and removes Nora
     // handoffs/temporary PDFs as part of the same DEMO reset boundary.
     await purgeDemoPrivateBlobs(organizationId);
+    await withSystemOrganizationTransaction(organizationId, "demo reset", (tx) => tx.demoOrganizationState.updateMany({ where: { organizationId, resetAttemptId: resetPlan.attemptId, dataVersion: resetPlan.dataVersion, resetStatus: "RESETTING" }, data: { resetPhase: "RESEEDING", resetHeartbeatAt: new Date(), resetLeaseExpiresAt: new Date(Date.now() + 120_000) } }));
     if (!(await lock.renew())) {
       throw new Error("DEMO_RESET_LOCK_EXPIRED");
     }
@@ -389,6 +403,7 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
       const state = lockedStates[0];
       if (!state || state.resetStatus !== "RESETTING") throw new Error("DEMO_RESET_STATE_CHANGED");
       if (state.dataVersion !== resetPlan.dataVersion) throw new Error("DEMO_RESET_FENCING_FAILED");
+      await tx.demoOrganizationState.updateMany({ where: { organizationId, resetAttemptId: resetPlan.attemptId, dataVersion: resetPlan.dataVersion, resetStatus: "RESETTING" }, data: { resetPhase: "VERIFYING", resetHeartbeatAt: new Date(), resetLeaseExpiresAt: new Date(Date.now() + 120_000) } });
       await deleteDemoTenantRows(tx, organizationId);
       const owner = await tx.organizationMembership.findFirst({ where: { organizationId, role: "OWNER", active: true }, select: { userId: true } });
       if (!owner) throw new Error("DEMO_OWNER_MISSING");
@@ -402,7 +417,7 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
       // final lifecycle state atomically so a successful reset never exposes
       // an expired DEMO as ACTIVE, even for one request between transactions.
       const trialExpired = state.trialEndsAt <= new Date();
-      const fencedState = await tx.demoOrganizationState.updateMany({ where: { organizationId, dataVersion: resetPlan.dataVersion, resetStatus: "RESETTING" }, data: { resetStatus: "IDLE", lastResetAt: new Date(), realDataResetAt: null, resetFailure: null, dataVersion: { increment: 1 } } });
+      const fencedState = await tx.demoOrganizationState.updateMany({ where: { organizationId, dataVersion: resetPlan.dataVersion, resetAttemptId: resetPlan.attemptId, resetStatus: "RESETTING" }, data: { resetStatus: "IDLE", resetPhase: "IDLE", resetAttemptId: null, resetHeartbeatAt: null, resetLeaseExpiresAt: null, lastResetAt: new Date(), realDataResetAt: null, resetFailure: null, dataVersion: { increment: 1 } } });
       if (fencedState.count !== 1) throw new Error("DEMO_RESET_FENCING_FAILED");
       const reactivated = await tx.organization.updateMany({ where: { id: organizationId, status: "RESETTING" }, data: { status: trialExpired ? "SUSPENDED" : "ACTIVE" } });
       if (reactivated.count !== 1) throw new Error("DEMO_RESET_STATE_CHANGED");
@@ -418,7 +433,7 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
           // state. A stale worker must not overwrite a newer reset attempt.
           // This CAS is also safe after a lease expiry: it leaves the tenant
           // suspended instead of marooning it in RESETTING.
-          const fencedFailure = await tx.demoOrganizationState.updateMany({ where: { organizationId, ...(fencingVersion === null ? {} : { dataVersion: fencingVersion }), resetStatus: "RESETTING" }, data: { resetStatus: "FAILED", resetFailure: failure } });
+          const fencedFailure = await tx.demoOrganizationState.updateMany({ where: { organizationId, ...(fencingVersion === null ? {} : { dataVersion: fencingVersion }), resetStatus: "RESETTING" }, data: { resetStatus: "FAILED", resetPhase: "IDLE", resetAttemptId: null, resetHeartbeatAt: null, resetLeaseExpiresAt: null, resetFailure: failure } });
           if (fencedFailure.count === 0) return;
           await tx.organization.updateMany({ where: { id: organizationId, kind: "DEMO", status: "RESETTING" }, data: { status: "SUSPENDED" } });
           await tx.platformAuditLog.create({ data: { requestId, actorUserId: actorUserId === SYSTEM_USER_ID ? null : actorUserId, targetOrganizationId: organizationId, action: "DEMO_ORGANIZATION_RESET_FAILED", reason: `${reason}: reset verification or private-file purge failed`, metadataJson: JSON.stringify({ failure }) } });

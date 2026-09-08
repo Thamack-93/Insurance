@@ -87,6 +87,23 @@ export async function GET(
       );
     }
 
+    // DEMO Blob metadata is the access-control ledger as well as the purge
+    // ledger. Once the contractual deadline passes, deny access even if the
+    // provider has not yet confirmed physical deletion.
+    const demoArtifactIsAccessible = await withTenantTransaction(context, async (tx) => {
+      const organization = await tx.organization.findUnique({ where: { id: context.organizationId }, select: { kind: true } });
+      if (organization?.kind !== "DEMO") return true;
+      if (!document.filePath.startsWith("blob:")) return false;
+      const artifact = await tx.demoUploadArtifact.findFirst({
+        where: { organizationId: context.organizationId, blobPath: document.filePath, status: "ACTIVE", expiresAt: { gt: new Date() } },
+        select: { id: true },
+      });
+      return Boolean(artifact);
+    });
+    if (!demoArtifactIsAccessible) {
+      return NextResponse.json({ error: "El archivo DEMO ya no está disponible." }, { status: 410 });
+    }
+
     const inline = request.nextUrl.searchParams.get("inline") === "1";
     const disposition = inline ? "inline" : "attachment";
     const safeFileName = document.fileName.replace(/["\\]/g, "_");

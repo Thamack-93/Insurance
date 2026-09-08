@@ -75,6 +75,8 @@
     "test:tenant-fixture": "node --import tsx scripts/setup-tenant-isolation-fixture.ts",
     "test:tenant-rls": "node --import tsx scripts/test-tenant-rls.ts",
     "certify:tenant-rls": "node --import tsx scripts/certify-tenant-rls.ts",
+    "backup:create:platform": "node --import tsx scripts/create-platform-backup.ts",
+    "backup:create:organization": "node --import tsx scripts/create-organization-backup.ts",
     "validate:demo-upload": "node --import tsx scripts/validate-demo-upload.ts"
   },
   "dependencies": {

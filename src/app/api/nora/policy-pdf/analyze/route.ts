@@ -21,6 +21,7 @@ import {
   SECURITY_EVENT_TYPES,
 } from "@/lib/security-events";
 import { DEMO_UPLOAD_MAX_BYTES, validateDemoPdf } from "@/lib/demo-upload-validation";
+import { demoUploadRetentionDeadline } from "@/lib/demo-retention";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -217,7 +218,8 @@ export async function POST(request: NextRequest) {
               blobPath: `blob:${blobUrl}`,
               kind: "NORA_POLICY_PDF",
               uploadedAt,
-              expiresAt: new Date(uploadedAt.getTime() + 48 * 60 * 60 * 1000),
+              ...demoUploadRetentionDeadline(uploadedAt),
+              dataVersion: state.dataVersion,
               sizeBytes: validation.sizeBytes,
               sha256: validation.sha256,
               detectedMimeType: validation.detectedMimeType,

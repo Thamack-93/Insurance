@@ -15,6 +15,7 @@ import {
 import { z } from "zod";
 import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 import { DEMO_UPLOAD_MAX_BYTES, validateDemoPdf } from "@/lib/demo-upload-validation";
+import { demoUploadRetentionDeadline } from "@/lib/demo-retention";
 
 const uploadSchema = z.object({
   clientId: z.string().optional(),
@@ -347,6 +348,7 @@ export async function POST(request: NextRequest) {
           }
           for (const result of results) {
             if (!result.ok || !result.document || !result.storagePath) continue;
+            const retention = demoUploadRetentionDeadline(uploadedAt);
             await tx.demoUploadArtifact.create({
               data: {
                 organizationId: context.organizationId,
@@ -354,7 +356,8 @@ export async function POST(request: NextRequest) {
                 blobPath: result.storagePath,
                 kind: result.document.documentType,
                 uploadedAt,
-                expiresAt: new Date(uploadedAt.getTime() + 48 * 60 * 60 * 1000),
+                ...retention,
+                dataVersion: (await tx.demoOrganizationState.findUnique({ where: { organizationId: context.organizationId }, select: { dataVersion: true } }))?.dataVersion ?? 1,
                 sizeBytes: result.sizeBytes,
                 sha256: result.sha256,
                 detectedMimeType: result.detectedMimeType,

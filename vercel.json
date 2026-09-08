@@ -23,7 +23,7 @@
     },
     {
       "path": "/api/jobs/demo-retention",
-      "schedule": "30 4 * * *"
+      "schedule": "*/15 * * * *"
     }
   ]
 }

@@ -1139,6 +1139,13 @@ model DemoOrganizationState {
   realDataResetAt DateTime?
   lastResetAt     DateTime?
   resetStatus     String    @default("IDLE")
+  resetPhase      String    @default("IDLE")
+  resetAttemptId  String?   @unique
+  resetRequestId  String?
+  resetStartedAt  DateTime?
+  resetHeartbeatAt DateTime?
+  resetLeaseExpiresAt DateTime?
+  resetAttempts   Int       @default(0)
   resetFailure    String?
   dataVersion     Int       @default(1)
   createdAt       DateTime  @default(now())
@@ -1148,6 +1155,7 @@ model DemoOrganizationState {
 
   @@index([trialEndsAt, resetStatus])
   @@index([realDataResetAt])
+  @@index([resetStatus, resetLeaseExpiresAt])
 }
 
 /// Private Blob provenance and purge ledger for DEMO uploads.
@@ -1158,8 +1166,13 @@ model DemoUploadArtifact {
   blobPath       String    @unique
   kind           String    @default("POLICY_DOCUMENT")
   uploadedAt     DateTime  @default(now())
+  purgeAfterAt   DateTime
   expiresAt      DateTime
   deletedAt      DateTime?
+  lastPurgeAt    DateTime?
+  blobDeleteConfirmedAt DateTime?
+  purgeBreachAt  DateTime?
+  dataVersion    Int       @default(1)
   status         String    @default("ACTIVE")
   sizeBytes      Int?
   sha256         String?
@@ -1173,6 +1186,7 @@ model DemoUploadArtifact {
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, expiresAt, status])
+  @@index([organizationId, purgeAfterAt, status])
   @@index([userId, uploadedAt])
   @@index([organizationId, validationStatus, status])
 }

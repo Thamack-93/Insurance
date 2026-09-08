@@ -6,7 +6,8 @@ import { Pool } from "pg";
 import { assertDisposableCertificationTarget } from "./tenant-certification-target.mjs";
 
 const execFileAsync = promisify(execFile);
-const CUTOVER_LOCK = "policydesk-multi-org-cutover-v2";
+export const MULTI_ORG_TRANSITION_LOCK = "policydesk-multi-org-transition-v3";
+const CUTOVER_LOCK = MULTI_ORG_TRANSITION_LOCK;
 
 function directDatabaseUrl() {
   const value = process.env.DATABASE_ADMIN_URL?.trim();

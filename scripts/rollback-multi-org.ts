@@ -4,7 +4,7 @@ import { Pool } from "pg";
 import { PROTECTED_TENANT_TABLES, BOOTSTRAP_ORGANIZATION_ID } from "../src/lib/tenant-organization-foundation.ts";
 import { assertDisposableCertificationTarget } from "./tenant-certification-target.mjs";
 
-const ROLLBACK_LOCK = "policydesk-multi-org-rollback-v1";
+const ROLLBACK_LOCK = "policydesk-multi-org-transition-v3";
 
 function directDatabaseUrl() {
   const value = process.env.DATABASE_ADMIN_URL?.trim();
