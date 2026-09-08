@@ -39,7 +39,20 @@ export function buildWhatsAppUrl(phone: string, message: string): string {
 export function isSafeWhatsAppUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && url.hostname === "wa.me" && /^\/[0-9]{12}$/.test(url.pathname);
+    const params = Array.from(url.searchParams.keys());
+    return (
+      url.protocol === "https:" &&
+      url.hostname === "wa.me" &&
+      !/^https:\/\/wa\.me:/i.test(value) &&
+      url.port === "" &&
+      url.username === "" &&
+      url.password === "" &&
+      url.hash === "" &&
+      /^\/[0-9]{12}$/.test(url.pathname) &&
+      params.length === 1 &&
+      params[0] === "text" &&
+      url.searchParams.get("text") !== null
+    );
   } catch {
     return false;
   }
