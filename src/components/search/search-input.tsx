@@ -7,7 +7,7 @@ import { useSearch } from "./search-provider";
 import { SearchResults } from "./search-results";
 
 export function SearchInput() {
-  const { searchQuery, setSearchQuery, performSearch, clearSearch } = useSearch();
+  const { searchQuery, setSearchQuery, performSearch, clearSearch, activeResultIndex, setActiveResultIndex } = useSearch();
   const [isOpen, setIsOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -48,8 +48,24 @@ export function SearchInput() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const resultCount = document.querySelectorAll("[data-search-result]").length;
+      if (resultCount > 0) {
+        const delta = e.key === "ArrowDown" ? 1 : -1;
+        setActiveResultIndex((activeResultIndex + delta + resultCount) % resultCount);
+      }
+      return;
+    }
+    if (e.key === "Enter" && activeResultIndex >= 0) {
+      e.preventDefault();
+      const target = document.querySelectorAll<HTMLButtonElement>("[data-search-result]")[activeResultIndex];
+      target?.click();
+      return;
+    }
     if (e.key === "Escape") {
       setIsOpen(false);
+      setActiveResultIndex(-1);
       inputRef.current?.blur();
     }
   };
@@ -62,6 +78,11 @@ export function SearchInput() {
           ref={inputRef}
           type="text"
           placeholder="Buscar clientes, pólizas, siniestros..."
+          aria-label="Buscar clientes, pólizas, siniestros"
+          role="combobox"
+          aria-expanded={isOpen}
+          aria-controls="global-search-results"
+          aria-activedescendant={activeResultIndex >= 0 ? `global-search-result-${activeResultIndex}` : undefined}
           value={searchQuery}
           onChange={handleInputChange}
           onFocus={handleFocus}

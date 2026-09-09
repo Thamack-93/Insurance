@@ -1,14 +1,30 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { getDb } from "@/lib/db";
 import { claimOperationalWhere } from "@/lib/portfolio-access";
 import type { PolicyType } from "@/lib/domain-values";
+import { writeActivityLog } from "@/lib/activity-log";
+import { requireOrganizationContext, withOrganizationTransaction } from "@/lib/organization-context";
+import { CLAIM_CHECKLIST_STATUSES, type ClaimChecklistStatusValue } from "@/lib/claim-checklist-values";
+
+export { CLAIM_CHECKLIST_STATUSES, CLAIM_CHECKLIST_STATUS_LABELS, isClaimChecklistPending } from "@/lib/claim-checklist-values";
+export type { ClaimChecklistStatusValue } from "@/lib/claim-checklist-values";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
-export const CLAIM_CHECKLIST_STATUSES = ["MISSING", "REQUESTED", "RECEIVED", "WAIVED"] as const;
-export type ClaimChecklistStatusValue = (typeof CLAIM_CHECKLIST_STATUSES)[number];
+export function createCustomClaimRequirementCode() {
+  return `CUSTOM:${randomUUID()}`;
+}
+
+export function checklistTimestamps(status: ClaimChecklistStatusValue, now: Date) {
+  return {
+    requestedAt: status === "REQUESTED" ? now : null,
+    receivedAt: status === "RECEIVED" ? now : null,
+    waivedAt: status === "WAIVED" ? now : null,
+  };
+}
 
 type ChecklistTemplateItem = {
   code: string;
@@ -124,34 +140,61 @@ export async function updateClaimChecklistStatus(
   },
   organizationId: string,
   portfolioOwnerId?: string,
-  client: DbClient = getDb(),
-) {
-  const claim = await client.claim.findFirst({
+  client?: DbClient,
+  actorUserId?: string,
+): Promise<{ id: string; status: ClaimChecklistStatusValue; updatedAt: Date } | null> {
+  if (!client && actorUserId) {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== organizationId) return null;
+    return withOrganizationTransaction(context, (tx) => updateClaimChecklistStatus(input, organizationId, portfolioOwnerId, tx, actorUserId));
+  }
+  const db = client ?? getDb();
+  const claim = await db.claim.findFirst({
     where: { AND: [{ id: input.claimId }, claimOperationalWhere(portfolioOwnerId, organizationId)] },
-    select: { id: true, policy: { select: { policyType: true } } },
+    select: { id: true, status: true, policy: { select: { policyType: true } } },
   });
   if (!claim) return null;
+  if (claim.status === "RESOLVED" || claim.status === "CANCELLED") return null;
   const template = getClaimChecklistTemplate(claim.policy.policyType).find((item) => item.code === input.requirementCode);
   if (!template || !CLAIM_CHECKLIST_STATUSES.includes(input.status)) return null;
 
+  const checklistDelegate = db.claimChecklistItem as unknown as { findUnique?: (args: unknown) => Promise<{ id: string; status: ClaimChecklistStatusValue; updatedAt: Date } | null> };
+  const current = checklistDelegate.findUnique
+    ? await checklistDelegate.findUnique({
+        where: { claimId_requirementCode: { claimId: claim.id, requirementCode: template.code } },
+        select: { id: true, status: true, updatedAt: true },
+      })
+    : null;
+  if (current?.status === input.status) return current;
   const now = new Date();
-  return client.claimChecklistItem.upsert({
+  const updated = await db.claimChecklistItem.upsert({
     where: { claimId_requirementCode: { claimId: claim.id, requirementCode: template.code } },
     create: {
       claimId: claim.id,
+      organizationId,
       requirementCode: template.code,
       label: template.label,
       status: input.status,
-      requestedAt: input.status === "REQUESTED" ? now : null,
-      receivedAt: input.status === "RECEIVED" ? now : null,
-      waivedAt: input.status === "WAIVED" ? now : null,
+      ...checklistTimestamps(input.status, now),
     },
     update: {
+      organizationId,
       label: template.label,
       status: input.status,
-      requestedAt: input.status === "REQUESTED" ? now : null,
-      receivedAt: input.status === "RECEIVED" ? now : null,
-      waivedAt: input.status === "WAIVED" ? now : null,
+      ...checklistTimestamps(input.status, now),
     },
   });
+  if (actorUserId) {
+    await writeActivityLog({
+      organizationId,
+      action: "UPDATE_CLAIM_REQUIREMENT",
+      entityType: "Claim",
+      entityId: claim.id,
+      oldValue: { requirementCode: template.code, oldStatus: current?.status ?? "MISSING" },
+      newValue: { requirementCode: template.code, label: template.label, newStatus: input.status },
+      userId: actorUserId,
+      db,
+    });
+  }
+  return updated;
 }

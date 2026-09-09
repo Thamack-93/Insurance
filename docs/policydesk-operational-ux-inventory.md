@@ -38,6 +38,15 @@ require disposable PostgreSQL/browser validation.
 | Recibo detalle | ¿Está pagado, cuánto falta y qué acción procede? | Quick payment for pending/overdue receipt | Receipt, policy, client, payment history, reconciliation | Header has edit/cancel/delete but no prominent quick-payment action; fixed back link loses list state. | Promote existing quick-payment dialog; group destructive actions; add safe return. |
 | Siniestros | ¿Qué casos abiertos necesitan seguimiento? | Open claim | Claim, client, policy, insurer, status, incident date | Alias redirects to Operations; canonical list has no search/pagination controls. | Add validated search/pagination without changing claim lifecycle. |
 | Siniestro detalle | ¿Cuál es el siguiente seguimiento del caso? | Edit/follow up an open claim | Claim, client, policy, insurer, documents, tasks | Existing edit/delete/back actions have similar prominence; related tasks are not surfaced from the detail. | State-aware action hierarchy and related links where data exists. |
+
+### Requisitos de siniestros
+
+El detalle de cada siniestro puede contener una checklist operativa persistida en `ClaimChecklistItem`.
+Los estados son `MISSING` (Faltante), `REQUESTED` (Solicitado), `RECEIVED` (Recibido) y `WAIVED` (No aplica).
+Los requisitos no cambian automáticamente el estado del siniestro. Un requisito recibido puede vincularse a un
+documento ya asociado al mismo siniestro; el documento permanece independiente si se desvincula o se elimina el requisito.
+La checklist guardada y la orientación de Nora son datos distintos: Nora puede mostrar plantillas orientativas, pero no
+se crean filas por consultar el detalle.
 | Pendientes | ¿Qué trabajo está atrasado, vence hoy o está próximo? | Open or update a work item | Due date, priority, type, entity context | Canonical Operations view is card-based and currently lacks the list toolbar used elsewhere. `getWorkItems` supports query/filter inputs, but Operations does not pass them. | Add URL-backed query and existing priority/type filters; retain bucket layout. |
 | Pendiente detalle | ¿Qué relación y fecha límite tiene este trabajo? | Edit/resolve through existing flow | Client, policy, receipt, due date, status, priority | Priority is rendered directly in one metric; fixed back link loses queue filters. | Centralize priority label and preserve queue return. |
 | Riesgos | ¿Qué hallazgos requieren corrección y dónde? | Open the affected entity or resolve issue | Risk type, severity, entity, issue code | It overlaps with Data Quality; filters are custom and must retain active state. | Clarify ownership/cross-links, map visible codes, avoid deleting a sole entry point. |
@@ -103,4 +112,3 @@ require disposable PostgreSQL/browser validation.
 3. P1: standardize URL-backed list controls and reset behavior.
 4. P2: simplify duplicated presentation and improve narrow-screen/accessibility
    behavior after functional paths are stable.
-
