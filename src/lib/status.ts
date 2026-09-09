@@ -33,6 +33,7 @@ export const BASE_STATUS_LABELS = {
   WAITING_INSURER: "Esperando aseguradora",
   WAITING_DOCUMENT: "Esperando documento",
   REQUESTED: "Solicitado",
+  RECEIVED: "Recibido",
   MISSING: "Faltante",
   WAIVED: "No aplica",
   SENT: "Enviado",
@@ -153,7 +154,7 @@ export function priorityLabel(priority: string | null | undefined) {
 }
 
 export function getStatusTone(status: string): BadgeTone {
-  if (["ACTIVE", "PAID", "RENEWED", "RESOLVED", "DONE", "ACCEPTED", "POSTED"].includes(status)) {
+  if (["ACTIVE", "PAID", "RENEWED", "RESOLVED", "DONE", "ACCEPTED", "POSTED", "RECEIVED"].includes(status)) {
     return "success";
   }
   if (["OVERDUE", "EXPIRED", "CRITICAL"].includes(status)) return "critical";

@@ -31,7 +31,7 @@ export function SidebarNav({
 
         return (
           <div key={group.label} className="space-y-1">
-            {!collapsed ? <p className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-sidebar-foreground/50 first:pt-0">{group.label}</p> : null}
+            {!collapsed ? <p className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-sidebar-foreground/70 first:pt-0">{group.label}</p> : null}
             {groupItems.map((item) => {
               const Icon = item.icon;
               const active = isNavigationItemActive(item, pathname);
