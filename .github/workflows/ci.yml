@@ -245,12 +245,18 @@ jobs:
     timeout-minutes: 35
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NODE_ENV: test
+      TENANT_ISOLATION_TEST_DB: "1"
       PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1"
+      TENANT_ISOLATION_RUN_ID: "${{ github.run_id }}_${{ github.run_attempt }}"
+      TENANT_ISOLATION_DB_NAME: "policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}"
       PLAYWRIGHT_USE_PRODUCTION_SERVER: "1"
       PLAYWRIGHT_HOST: localhost
       PLAYWRIGHT_BASE_URL: http://localhost:4173
       PORT: "4173"
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      DATABASE_URL_UNPOOLED: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      DATABASE_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
       SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
       SESSION_SECRET: ci-session-secret-minimum-32-characters-long
       RESTORE_INTEGRATION: "1"
@@ -284,6 +290,15 @@ jobs:
 
       - name: Generate Prisma client
         run: npm run db:generate
+
+      - name: Create dedicated certification database
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          createdb -h 127.0.0.1 -U postgres "$TENANT_ISOLATION_DB_NAME"
+          fingerprint=$(node -e 'const {createHash}=require("node:crypto"); const runId=process.env.TENANT_ISOLATION_RUN_ID; const db=process.env.TENANT_ISOLATION_DB_NAME; console.log(createHash("sha256").update(`local-postgres:${runId}:${db}:127.0.0.1`).digest("hex"));')
+          echo "TENANT_ISOLATION_FINGERPRINT=$fingerprint" >> "$GITHUB_ENV"
 
       - name: Apply Prisma migrations
         run: npm run db:migrate:singleton-ci
@@ -336,3 +351,10 @@ jobs:
           path: artifacts/restore-drills
           if-no-files-found: ignore
           retention-days: 90
+
+      - name: Drop dedicated certification database
+        if: always()
+        shell: bash
+        run: |
+          export PGPASSWORD=postgres
+          dropdb -h 127.0.0.1 -U postgres --if-exists "$TENANT_ISOLATION_DB_NAME"
