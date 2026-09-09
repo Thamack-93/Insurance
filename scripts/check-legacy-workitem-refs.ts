@@ -46,6 +46,10 @@ const LEGACY_READ_FILES = new Set([
 // the Task write detector remains strict everywhere else.
 const AUDIT_COMPAT_FILES = new Set(["src/lib/tenant-organization-foundation.ts"]);
 
+// DEMO seed/reset paths intentionally recreate the historical Task fixture so
+// operators can inspect legacy compatibility; they are not runtime writes.
+const DEMO_COMPAT_FILES = new Set(["src/lib/demo-seed.ts", "src/lib/demo-organizations.ts"]);
+
 const MIGRATION_FILES = new Set([
   "scripts/backfill-work-items.ts",
   "scripts/backfill-business-dates.ts",
@@ -56,6 +60,7 @@ const MIGRATION_FILES = new Set([
 
 function classify(file: string, snippet: string): Classification {
   if (MIGRATION_FILES.has(file)) return "migration-only";
+  if (DEMO_COMPAT_FILES.has(file)) return "migration-only";
   if (file === "scripts/check-legacy-workitem-refs.ts") return "migration-only";
   // Restore compatibility inventory is declarative FK metadata, not a Task writer.
   if ((file === "src/lib/backup-restore.ts" && snippet.includes("Document_taskId_fkey"))
