@@ -235,7 +235,11 @@ export async function withOrganizationTransaction<T>(
     await tx.$executeRaw(Prisma.sql`SELECT set_config('app.organization_id', ${context.organizationId}, true)`);
     await assertOrganizationContextInTransaction(tx, context);
     return callback(tx);
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }, {
+    isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+    maxWait: 10_000,
+    timeout: 15_000,
+  });
 }
 
 /** Public naming from the multi-tenant DAL contract. */
