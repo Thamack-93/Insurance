@@ -1,10 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createHmac, randomBytes, scryptSync } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 import type { Page } from "@playwright/test";
 import { PrismaClient } from "../../src/generated/prisma/client.ts";
-import { hashSessionToken, newSessionId, SESSION_ABSOLUTE_TTL_SECONDS, SESSION_IDLE_TTL_SECONDS } from "../../src/lib/session.ts";
 
 const localEnvPath = path.join(process.cwd(), ".env.local");
 const SESSION_COOKIE_NAME = "pd_session";
@@ -15,6 +14,8 @@ const TEST_AGENT_EMAIL = "ci-agent@policydesk.local";
 const TEST_AGENT_NAME = "CI Agent";
 const TEST_INSURER_NAME = "Test Insurer";
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
+const SESSION_IDLE_TTL_SECONDS = 60 * 60 * 12;
+const SESSION_ABSOLUTE_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 function loadLocalEnvFile(filePath: string) {
   if (!fs.existsSync(filePath)) return;
@@ -105,7 +106,7 @@ async function createSessionToken(payload: {
   organizationId?: string;
   sessionVersion: number;
 }) {
-  const sessionId = newSessionId();
+  const sessionId = randomUUID();
   const exp = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30;
   const data = { ...payload, sessionId, exp };
   const payloadB64 = Buffer.from(JSON.stringify(data)).toString("base64url");
@@ -116,7 +117,7 @@ async function createSessionToken(payload: {
     data: {
       id: sessionId,
       userId: payload.userId,
-      tokenHash: hashSessionToken(token),
+      tokenHash: createHash("sha256").update(token).digest("hex"),
       lastSeenAt: now,
       idleExpiresAt: new Date(now.getTime() + SESSION_IDLE_TTL_SECONDS * 1000),
       absoluteExpiresAt: new Date(now.getTime() + SESSION_ABSOLUTE_TTL_SECONDS * 1000),
