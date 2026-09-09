@@ -249,6 +249,9 @@ export async function validateRestoreSchema(client: PoolClient, parsed: ParsedBa
     NotificationPreference: ["id", "userId", "eventType", "channelType"],
     NotificationEvent: ["id", "userId", "channelType"],
     SystemSetting: ["id", "key", "value"],
+    // DemoOrganizationState is keyed by organizationId; it intentionally has
+    // no surrogate id column.
+    DemoOrganizationState: ["organizationId", "seedVersion", "trialEndsAt", "resetStatus", "resetPhase", "dataVersion"],
   };
   for (const table of [...PROTECTED_TENANT_TABLES, ...OPTIONAL_ORGANIZATION_TABLES]) {
     requiredColumns[table] = [...(requiredColumns[table] ?? ["id"]), "organizationId"];
