@@ -39,6 +39,10 @@ export function safeJson(value: unknown, maxLength = 5000) {
   return `${text.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
+const transactionRegistryGlobal = globalThis as typeof globalThis & {
+  __policydeskTenantTransactions?: WeakSet<object>;
+};
+
 export async function writeActivityLog({
   entityType,
   entityId,
@@ -74,7 +78,10 @@ export async function writeActivityLog({
   // still pass it while they are being migrated; route those calls through a
   // fresh, membership-validated tenant transaction instead of allowing a
   // context-free ActivityLog insert during forced RLS.
-  if (client && !("$transaction" in client)) return create(client as Prisma.TransactionClient);
+  if (client && (
+    (typeof client === "object" && client !== null && transactionRegistryGlobal.__policydeskTenantTransactions?.has(client))
+    || !("$transaction" in client)
+  )) return create(client as Prisma.TransactionClient);
   return withTenantActivity(organizationId, create);
 }
 

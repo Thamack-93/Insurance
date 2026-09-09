@@ -5,6 +5,21 @@ import { AuthError, clearSessionCookie, getSession, requireUser, setSessionCooki
 import { writeActivityLog } from "@/lib/activity-log";
 import { Prisma } from "@/generated/prisma/client";
 
+// Prisma's interactive transaction proxy does not expose a stable runtime
+// type that helpers can use to distinguish it from the root client. Keep a
+// process-local registry so activity/audit helpers can reuse the current
+// transaction instead of opening a nested transaction on the same tenant.
+type TenantTransactionRegistry = WeakSet<object>;
+const transactionRegistryGlobal = globalThis as typeof globalThis & {
+  __policydeskTenantTransactions?: TenantTransactionRegistry;
+};
+const tenantTransactionRegistry =
+  transactionRegistryGlobal.__policydeskTenantTransactions ??= new WeakSet<object>();
+
+export function isTenantTransactionClient(value: unknown): value is Prisma.TransactionClient {
+  return typeof value === "object" && value !== null && tenantTransactionRegistry.has(value);
+}
+
 export const ORGANIZATION_ROLES = ["OWNER", "ADMIN", "AGENT"] as const;
 export type OrganizationRole = (typeof ORGANIZATION_ROLES)[number];
 
@@ -232,6 +247,7 @@ export async function withOrganizationTransaction<T>(
 ): Promise<T> {
   const db = getDb();
   return db.$transaction(async (tx) => {
+    tenantTransactionRegistry.add(tx);
     await tx.$executeRaw(Prisma.sql`SELECT set_config('app.organization_id', ${context.organizationId}, true)`);
     await assertOrganizationContextInTransaction(tx, context);
     return callback(tx);
