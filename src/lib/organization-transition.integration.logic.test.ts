@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { Pool } from "pg";
@@ -17,9 +18,23 @@ function databaseUrl(adminUrl: string, database: string) {
 }
 
 async function migrate(url: string) {
-  await execFileAsync("npx", ["prisma", "migrate", "deploy"], {
+  const database = new URL(url).pathname.replace(/^\//, "");
+  const runId = `organization-transition-${process.pid}`;
+  const fingerprint = createHash("sha256").update(`local-postgres:${runId}:${database}:127.0.0.1`).digest("hex");
+  await execFileAsync(process.execPath, ["scripts/migrate-singleton-ci.mjs"], {
     cwd: process.cwd(),
-    env: { ...process.env, DATABASE_URL: url, DATABASE_URL_UNPOOLED: "", NODE_ENV: "test" },
+    env: {
+      ...process.env,
+      DATABASE_URL: url,
+      DATABASE_URL_UNPOOLED: url,
+      DATABASE_ADMIN_URL: url,
+      NODE_ENV: "test",
+      TENANT_ISOLATION_TEST_DB: "1",
+      PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1",
+      TENANT_ISOLATION_RUN_ID: runId,
+      TENANT_ISOLATION_DB_NAME: database,
+      TENANT_ISOLATION_FINGERPRINT: fingerprint,
+    },
     maxBuffer: 4 * 1024 * 1024,
   });
 }
@@ -93,7 +108,7 @@ describe.skipIf(!enabled)("organization transition executable backfill", () => {
   it("keeps preview read-only, applies idempotently, and enforces the singleton guards", async () => {
     const adminUrl = process.env.RESTORE_INTEGRATION_ADMIN_URL ?? process.env.DATABASE_URL;
     if (!adminUrl) throw new Error("RESTORE_INTEGRATION_ADMIN_URL or DATABASE_URL is required.");
-    const name = `org_transition_${process.pid}_${Date.now()}`.replace(/[^a-z0-9_]/gi, "").toLowerCase();
+    const name = `policydesk_tenant_test_org_transition_${process.pid}_${Date.now()}`.replace(/[^a-z0-9_]/gi, "").toLowerCase();
     const url = databaseUrl(adminUrl, name);
     try {
       await createDatabase(adminUrl, name);
@@ -151,7 +166,7 @@ describe.skipIf(!enabled)("organization transition executable backfill", () => {
   it("rejects invalid Owners and rolls all late failures back", async () => {
     const adminUrl = process.env.RESTORE_INTEGRATION_ADMIN_URL ?? process.env.DATABASE_URL;
     if (!adminUrl) throw new Error("RESTORE_INTEGRATION_ADMIN_URL or DATABASE_URL is required.");
-    const name = `org_transition_fail_${process.pid}_${Date.now()}`.replace(/[^a-z0-9_]/gi, "").toLowerCase();
+    const name = `policydesk_tenant_test_org_transition_fail_${process.pid}_${Date.now()}`.replace(/[^a-z0-9_]/gi, "").toLowerCase();
     const url = databaseUrl(adminUrl, name);
     try {
       await createDatabase(adminUrl, name);
