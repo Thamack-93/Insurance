@@ -24,9 +24,26 @@ function connectionForDatabase(adminUrl: string, database: string) {
 }
 
 async function runMigrations(databaseUrl: string) {
-  await execFileAsync("npx", ["prisma", "migrate", "deploy"], {
+  const target = new URL(databaseUrl);
+  const database = decodeURIComponent(target.pathname.replace(/^\//, "").split("?")[0]);
+  const runId = `backup-restore-${process.pid}`;
+  const fingerprint = createHash("sha256")
+    .update(`local-postgres:${runId}:${database}:${target.hostname.toLowerCase()}`)
+    .digest("hex");
+  await execFileAsync(process.execPath, ["scripts/migrate-singleton-ci.mjs"], {
     cwd: process.cwd(),
-    env: { PATH: process.env.PATH ?? "", DATABASE_URL: databaseUrl, DATABASE_URL_UNPOOLED: "", NODE_ENV: "test" },
+    env: {
+      ...process.env,
+      DATABASE_URL: databaseUrl,
+      DATABASE_URL_UNPOOLED: databaseUrl,
+      DATABASE_ADMIN_URL: databaseUrl,
+      NODE_ENV: "test",
+      TENANT_ISOLATION_TEST_DB: "1",
+      PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1",
+      TENANT_ISOLATION_RUN_ID: runId,
+      TENANT_ISOLATION_DB_NAME: database,
+      TENANT_ISOLATION_FINGERPRINT: fingerprint,
+    },
     maxBuffer: 4 * 1024 * 1024,
   });
 }
@@ -174,8 +191,8 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
     const adminUrl = process.env.RESTORE_INTEGRATION_ADMIN_URL ?? process.env.DATABASE_URL;
     if (!adminUrl) throw new Error("RESTORE_INTEGRATION_ADMIN_URL or DATABASE_URL is required.");
     const suffix = `${process.pid}_${Date.now()}`.replace(/[^0-9_]/g, "");
-    const sourceName = `restore_source_${suffix}`;
-    const targetName = `restore_target_${suffix}`;
+    const sourceName = `policydesk_tenant_test_restore_source_${suffix}`;
+    const targetName = `policydesk_tenant_test_restore_target_${suffix}`;
     const sourceUrl = connectionForDatabase(adminUrl, sourceName);
     const targetUrl = connectionForDatabase(adminUrl, targetName);
     try {
