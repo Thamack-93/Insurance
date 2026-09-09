@@ -4,6 +4,7 @@ import { createHmac, randomBytes, scryptSync } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 import type { Page } from "@playwright/test";
 import { PrismaClient } from "../../src/generated/prisma/client.ts";
+import { hashSessionToken, newSessionId, SESSION_ABSOLUTE_TTL_SECONDS, SESSION_IDLE_TTL_SECONDS } from "../../src/lib/session.ts";
 
 const localEnvPath = path.join(process.cwd(), ".env.local");
 const SESSION_COOKIE_NAME = "pd_session";
@@ -104,11 +105,24 @@ async function createSessionToken(payload: {
   organizationId?: string;
   sessionVersion: number;
 }) {
+  const sessionId = newSessionId();
   const exp = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30;
-  const data = { ...payload, exp };
+  const data = { ...payload, sessionId, exp };
   const payloadB64 = Buffer.from(JSON.stringify(data)).toString("base64url");
   const signatureB64 = createHmac("sha256", getSessionSecret()).update(payloadB64).digest("base64url");
-  return { token: `${payloadB64}.${signatureB64}`, exp };
+  const token = `${payloadB64}.${signatureB64}`;
+  const now = new Date();
+  await getTestDb().session.create({
+    data: {
+      id: sessionId,
+      userId: payload.userId,
+      tokenHash: hashSessionToken(token),
+      lastSeenAt: now,
+      idleExpiresAt: new Date(now.getTime() + SESSION_IDLE_TTL_SECONDS * 1000),
+      absoluteExpiresAt: new Date(now.getTime() + SESSION_ABSOLUTE_TTL_SECONDS * 1000),
+    },
+  });
+  return { token, exp };
 }
 
 export function getTestDb() {
