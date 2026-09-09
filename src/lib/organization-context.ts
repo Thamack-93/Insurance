@@ -205,6 +205,15 @@ export async function assertOrganizationContextInTransaction(
   context: OrganizationContext,
   allowedRoles: readonly OrganizationRole[] = ORGANIZATION_ROLES,
 ): Promise<void> {
+  return validateOrganizationContextInTransaction(tx, context, allowedRoles, true);
+}
+
+async function validateOrganizationContextInTransaction(
+  tx: Prisma.TransactionClient,
+  context: OrganizationContext,
+  allowedRoles: readonly OrganizationRole[],
+  lock: boolean,
+): Promise<void> {
   // Set the tenant GUC inside the same transaction as the authorization
   // revalidation. This makes legacy `db.$transaction` callers safe during the
   // RLS cutover as long as they invoke this guard before touching protected
@@ -231,7 +240,7 @@ export async function assertOrganizationContextInTransaction(
        AND m."active"
        AND u."active"
        AND o."status" = 'ACTIVE'
-     FOR UPDATE OF m, u, o
+     ${lock ? Prisma.sql`FOR UPDATE OF m, u, o` : Prisma.empty}
   `);
   if (!rows[0]) throw new AuthError("ORGANIZATION_ACCESS_DENIED", 403);
 }
@@ -249,7 +258,11 @@ export async function withOrganizationTransaction<T>(
   return db.$transaction(async (tx) => {
     tenantTransactionRegistry.add(tx);
     await tx.$executeRaw(Prisma.sql`SELECT set_config('app.organization_id', ${context.organizationId}, true)`);
-    await assertOrganizationContextInTransaction(tx, context);
+    // Read transactions still revalidate the live tenant boundary, but do
+    // not serialize every concurrent page query behind the same membership
+    // row. Mutations call assertOrganizationContextInTransaction explicitly
+    // and retain the strong row locks required for the write boundary.
+    await validateOrganizationContextInTransaction(tx, context, ORGANIZATION_ROLES, false);
     return callback(tx);
   }, {
     isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
