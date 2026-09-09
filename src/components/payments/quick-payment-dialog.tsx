@@ -29,11 +29,12 @@ type QuickPaymentDialogProps = {
   };
   onPaymentComplete?: () => void;
   className?: string;
+  initialOpen?: boolean;
 };
 
-export function QuickPaymentDialog({ receipt, onPaymentComplete, className }: QuickPaymentDialogProps) {
+export function QuickPaymentDialog({ receipt, onPaymentComplete, className, initialOpen = false }: QuickPaymentDialogProps) {
   const router = useRouter();
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(initialOpen);
   const [isPending, startTransition] = useTransition();
   const [paidDate, setPaidDate] = useState(formatDateInput(today()));
 
@@ -158,6 +159,7 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete, className }: Qu
               onClick={handleQuickPayment}
               disabled={isPending}
               className="flex-1"
+              aria-label={`Pagar ${formatCurrency(receipt.amount, receipt.currency)}`}
             >
               {isPending
                 ? "Procesando..."

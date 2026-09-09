@@ -1,9 +1,14 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { claimOperationalWhere } from "@/lib/portfolio-access";
 import type { PolicyType } from "@/lib/domain-values";
 import type { OrganizationContext } from "@/lib/organization-context";
+import { CLAIM_CHECKLIST_STATUSES, type ClaimChecklistStatusValue } from "@/lib/claim-checklist-values";
+
+export { CLAIM_CHECKLIST_STATUSES, CLAIM_CHECKLIST_STATUS_LABELS, isClaimChecklistPending } from "@/lib/claim-checklist-values";
+export type { ClaimChecklistStatusValue } from "@/lib/claim-checklist-values";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -15,8 +20,17 @@ async function withChecklistTenant<T>(organizationId: string, client: DbClient |
   return withTenantTransaction(context, callback);
 }
 
-export const CLAIM_CHECKLIST_STATUSES = ["MISSING", "REQUESTED", "RECEIVED", "WAIVED"] as const;
-export type ClaimChecklistStatusValue = (typeof CLAIM_CHECKLIST_STATUSES)[number];
+export function createCustomClaimRequirementCode() {
+  return `CUSTOM:${randomUUID()}`;
+}
+
+export function checklistTimestamps(status: ClaimChecklistStatusValue, now: Date) {
+  return {
+    requestedAt: status === "REQUESTED" ? now : null,
+    receivedAt: status === "RECEIVED" ? now : null,
+    waivedAt: status === "WAIVED" ? now : null,
+  };
+}
 
 type ChecklistTemplateItem = {
   code: string;
@@ -139,9 +153,10 @@ export async function updateClaimChecklistStatus(
   return withChecklistTenant(organizationId, client, async (db) => {
   const claim = await db.claim.findFirst({
     where: { AND: [{ id: input.claimId }, claimOperationalWhere(portfolioOwnerId, organizationId)] },
-    select: { id: true, policy: { select: { policyType: true } } },
+    select: { id: true, status: true, policy: { select: { policyType: true } } },
   });
   if (!claim) return null;
+  if (claim.status === "RESOLVED" || claim.status === "CANCELLED") return null;
   const template = getClaimChecklistTemplate(claim.policy.policyType).find((item) => item.code === input.requirementCode);
   if (!template || !CLAIM_CHECKLIST_STATUSES.includes(input.status)) return null;
 
@@ -154,16 +169,12 @@ export async function updateClaimChecklistStatus(
       requirementCode: template.code,
       label: template.label,
       status: input.status,
-      requestedAt: input.status === "REQUESTED" ? now : null,
-      receivedAt: input.status === "RECEIVED" ? now : null,
-      waivedAt: input.status === "WAIVED" ? now : null,
+      ...checklistTimestamps(input.status, now),
     },
     update: {
       label: template.label,
       status: input.status,
-      requestedAt: input.status === "REQUESTED" ? now : null,
-      receivedAt: input.status === "RECEIVED" ? now : null,
-      waivedAt: input.status === "WAIVED" ? now : null,
+      ...checklistTimestamps(input.status, now),
     },
   });
   });

@@ -181,7 +181,7 @@ export default async function OperationsPage({
     ],
   };
   const [workItems, renewalPolicies, claimData] = await Promise.all([
-    getWorkItems({
+    view === "all" || view === "pending" ? getWorkItems({
       organizationId: scope.organizationId,
       statuses: OPEN_WORK_ITEM_STATUSES,
       portfolioOwnerId: scope.portfolioOwnerId,
@@ -189,8 +189,8 @@ export default async function OperationsPage({
       priorities: priority ? [priority] : undefined,
       workItemTypes: workItemType ? [workItemType] : undefined,
       limit: view === "pending" ? undefined : 100,
-    }),
-    loadEligibleRenewalPolicies({
+    }) : Promise.resolve([]),
+    view === "all" || view === "renewals" ? loadEligibleRenewalPolicies({
       endDate: { lte: nextThirty },
       ...(query && view === "renewals" ? {
         OR: [
@@ -199,7 +199,7 @@ export default async function OperationsPage({
           { insurer: { name: { contains: query } } },
         ],
       } : {}),
-    }, scope.portfolioOwnerId, scope.organizationId),
+    }, scope.portfolioOwnerId, scope.organizationId) : Promise.resolve([]),
     withTenantTransaction(scope.context, async (db) => ({
       claims: await db.claim.findMany({
         where: claimWhere,
@@ -212,6 +212,19 @@ export default async function OperationsPage({
     })),
   ]);
   const { claims, claimTotal } = claimData;
+  const checklistCounts = view === "claims" && claims.length > 0
+    ? await withTenantTransaction(scope.context, async (db) => db.claimChecklistItem.groupBy({
+        by: ["claimId", "status"],
+        where: { organizationId: scope.organizationId, claimId: { in: claims.map((claim) => claim.id) } },
+        _count: { _all: true },
+      }))
+    : [];
+  const pendingByClaim = new Map<string, number>();
+  const totalByClaim = new Map<string, number>();
+  for (const row of checklistCounts) {
+    totalByClaim.set(row.claimId, (totalByClaim.get(row.claimId) ?? 0) + row._count._all);
+    if (row.status === "MISSING" || row.status === "REQUESTED") pendingByClaim.set(row.claimId, (pendingByClaim.get(row.claimId) ?? 0) + row._count._all);
+  }
 
   const overdue = workItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate) < today);
   const dueToday = workItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate).getTime() === today.getTime());
@@ -386,7 +399,15 @@ export default async function OperationsPage({
         </div>
       ) : null}
 
-      {view === "renewal-board" && board ? (
+      {view === "renewal-board" && board?.error ? (
+        <section role="alert" className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-5 text-sm text-destructive">
+          <p className="font-semibold">No pudimos cargar el tablero de renovaciones.</p>
+          <p className="mt-1">La información no está disponible temporalmente. Intenta actualizar la vista.</p>
+          <Link href={buildCanonicalHref("/operations", params)} className="mt-3 inline-flex font-medium underline underline-offset-4">Reintentar</Link>
+        </section>
+      ) : null}
+
+      {view === "renewal-board" && board && !board.error ? (
         <RenewalBoard
           board={board}
           filters={boardFilters}
@@ -405,6 +426,7 @@ export default async function OperationsPage({
                 <Link href={appendReturnTo(`/claims/${claim.id}`, returnTo)} className="min-w-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <p className="truncate text-sm font-medium">{claim.client.fullName} · {claim.claimType}</p>
                   <p className="truncate font-mono text-xs text-muted-foreground">{claim.folio} · {claim.policy.policyNumber} · {formatDate(claim.incidentDate)}</p>
+                  <p className="text-xs text-muted-foreground">{totalByClaim.has(claim.id) ? (pendingByClaim.has(claim.id) ? `${pendingByClaim.get(claim.id)} requisitos pendientes` : "Sin requisitos pendientes") : "Sin requisitos"}</p>
                 </Link>
                 <StatusBadge status={claim.status} entity="claim" className="px-2 py-0.5 text-[11px]" />
               </div>

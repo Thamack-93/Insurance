@@ -8,6 +8,7 @@ import {
   FileSignature,
   History,
   MessageSquare,
+  Share2,
   PlayCircle,
   ShieldAlert,
   Siren,
@@ -47,6 +48,8 @@ const actionIconMap: Record<string, IconTone> = {
   RENEWAL_STAGE_CHANGE: { icon: ArrowRight, tone: "bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300" },
   RENEWAL_FOLLOWUP_REMINDER: { icon: BellRing, tone: "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" },
   RENEWAL_DECLINED: { icon: CircleX, tone: "bg-muted text-muted-foreground" },
+  RENEWAL_WHATSAPP_PREPARED: { icon: MessageSquare, tone: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
+  RENEWAL_QUOTE_SHARE_PREPARED: { icon: Share2, tone: "bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300" },
   RENEW: { icon: History, tone: "bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300" },
   WHATSAPP_REMINDER_OPENED: { icon: MessageSquare, tone: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
   WHATSAPP_REMINDER_PREPARED: { icon: MessageSquare, tone: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
@@ -69,6 +72,11 @@ const defaultIcon: IconTone = { icon: Activity, tone: "bg-muted text-muted-foreg
 const actionLabelMap: Record<string, string> = {
   CREATE: "Creado",
   UPDATE: "Actualizado",
+  CREATE_CLAIM_REQUIREMENT: "Requisito de siniestro agregado",
+  UPDATE_CLAIM_REQUIREMENT: "Requisito de siniestro actualizado",
+  DELETE_CLAIM_REQUIREMENT: "Requisito de siniestro eliminado",
+  LINK_CLAIM_REQUIREMENT_DOCUMENT: "Documento vinculado al requisito",
+  UNLINK_CLAIM_REQUIREMENT_DOCUMENT: "Documento desvinculado del requisito",
   DELETE: "Eliminado",
   PAY: "Pago registrado",
   PAID: "Pago registrado",
@@ -78,6 +86,8 @@ const actionLabelMap: Record<string, string> = {
   RENEWAL_STAGE_CHANGE: "Etapa de renovación",
   RENEWAL_FOLLOWUP_REMINDER: "Recordatorio de renovación",
   RENEWAL_DECLINED: "No renueva",
+  RENEWAL_WHATSAPP_PREPARED: "WhatsApp de renovación preparado",
+  RENEWAL_QUOTE_SHARE_PREPARED: "Cotización preparada para compartir",
   RENEWAL_LINKED: "Renovación vinculada",
   RENEW: "Renovado",
   WHATSAPP_REMINDER_OPENED: "Recordatorio de WhatsApp preparado",
@@ -120,6 +130,7 @@ function lookupAction(action: string): IconTone {
 
 function formatActionLabel(action: string) {
   const upper = action.toUpperCase();
+  if (actionLabelMap[upper]) return actionLabelMap[upper];
   for (const key of Object.keys(actionLabelMap)) {
     if (upper === key || upper.startsWith(`${key}_`) || upper.startsWith(key)) {
       return actionLabelMap[key];

@@ -33,6 +33,9 @@ export const BASE_STATUS_LABELS = {
   WAITING_INSURER: "Esperando aseguradora",
   WAITING_DOCUMENT: "Esperando documento",
   REQUESTED: "Solicitado",
+  RECEIVED: "Recibido",
+  MISSING: "Faltante",
+  WAIVED: "No aplica",
   SENT: "Enviado",
   ACCEPTED: "Aceptado",
   REJECTED: "Rechazado",
@@ -151,7 +154,7 @@ export function priorityLabel(priority: string | null | undefined) {
 }
 
 export function getStatusTone(status: string): BadgeTone {
-  if (["ACTIVE", "PAID", "RENEWED", "RESOLVED", "DONE", "ACCEPTED", "POSTED"].includes(status)) {
+  if (["ACTIVE", "PAID", "RENEWED", "RESOLVED", "DONE", "ACCEPTED", "POSTED", "RECEIVED"].includes(status)) {
     return "success";
   }
   if (["OVERDUE", "EXPIRED", "CRITICAL"].includes(status)) return "critical";
@@ -162,6 +165,7 @@ export function getStatusTone(status: string): BadgeTone {
     return "warning";
   }
   if (["IN_PROGRESS", "SENT", "EXPECTED", "REQUESTED"].includes(status)) return "info";
+  if (status === "MISSING") return "warning";
   return "neutral";
 }
 

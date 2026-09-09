@@ -36,6 +36,8 @@ type SearchContextType = {
   setSearchQuery: (query: string) => void;
   performSearch: (query: string) => Promise<void>;
   clearSearch: () => void;
+  activeResultIndex: number;
+  setActiveResultIndex: (index: number) => void;
 };
 
 const SearchContext = createContext<SearchContextType | undefined>(undefined);
@@ -44,6 +46,7 @@ export function SearchProvider({ children }: { children: React.ReactNode }) {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [activeResultIndex, setActiveResultIndex] = useState(-1);
   const abortControllerRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
 
@@ -57,6 +60,7 @@ export function SearchProvider({ children }: { children: React.ReactNode }) {
   const updateSearchQuery = useCallback((query: string) => {
     cancelActiveSearch();
     setSearchQuery(query);
+    setActiveResultIndex(-1);
     if (!query.trim()) {
       setSearchResults([]);
     }
@@ -82,6 +86,7 @@ export function SearchProvider({ children }: { children: React.ReactNode }) {
       const results: SearchResult[] = await response.json();
       if (requestId !== requestIdRef.current) return;
       setSearchResults(results);
+      setActiveResultIndex(-1);
     } catch {
       if (abortController.signal.aborted || requestId !== requestIdRef.current) return;
       setSearchResults([]);
@@ -97,6 +102,7 @@ export function SearchProvider({ children }: { children: React.ReactNode }) {
     cancelActiveSearch();
     setSearchQuery("");
     setSearchResults([]);
+    setActiveResultIndex(-1);
   }, [cancelActiveSearch]);
 
   useEffect(() => {
@@ -115,6 +121,8 @@ export function SearchProvider({ children }: { children: React.ReactNode }) {
         setSearchQuery: updateSearchQuery,
         performSearch,
         clearSearch,
+        activeResultIndex,
+        setActiveResultIndex,
       }}
     >
       {children}

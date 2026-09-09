@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, BadgeCheck, CalendarClock, FileText, History, Pencil, ShieldCheck } from "@/components/icons";
 import { DeleteClaimButton } from "@/components/claims/delete-claim-button";
+import { ClaimRequirementsSection } from "@/components/claims/claim-requirements-section";
 import { PageHeader } from "@/components/layout/page-header";
 import { NoraContextButton } from "@/components/assistant/nora-session-provider";
 import { AuditByline } from "@/components/audit/audit-byline";
@@ -34,6 +35,7 @@ export default async function ClaimDetailPage({ params, searchParams }: { params
       policy: { include: { insurer: true } },
       insurer: true,
       documents: { orderBy: [{ uploadedAt: "desc" }, { id: "desc" }] },
+      checklistItems: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
     },
   });
 
@@ -204,6 +206,23 @@ export default async function ClaimDetailPage({ params, searchParams }: { params
             </div>
           </SectionCard>
         </section>
+
+        <ClaimRequirementsSection
+          claimId={claim.id}
+          claimStatus={claim.status}
+          items={claim.checklistItems.map((item) => ({
+            id: item.id,
+            requirementCode: item.requirementCode,
+            label: item.label,
+            status: item.status,
+            requestedAt: item.requestedAt?.toISOString() ?? null,
+            receivedAt: item.receivedAt?.toISOString() ?? null,
+            waivedAt: item.waivedAt?.toISOString() ?? null,
+            updatedAt: item.updatedAt.toISOString(),
+            documentId: item.documentId,
+          }))}
+          documents={claim.documents.map((document) => ({ id: document.id, fileName: document.fileName }))}
+        />
 
         {relatedClaims.length > 0 && (
           <SectionCard title="Otros siniestros de la póliza" description="Historial relacionado.">

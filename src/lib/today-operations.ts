@@ -74,8 +74,8 @@ export function buildFocusItems(data: TodayData): FocusItemModel[] {
     dueText: `Vencimiento: ${formatDate(receipt.dueDate)} · Vencido ${formatRelativeDate(receipt.dueDate)}`,
     amount: receipt.amount,
     currency: receipt.currency,
-    href: "/receipts?tab=cobrar",
-    actionLabel: "Cobrar",
+    href: `/receipts/${receipt.id}?quickPayment=1`,
+    actionLabel: "Registrar pago",
     detailsHref: `/receipts/${receipt.id}`,
     detailsLabel: "Ver recibo",
   }));
@@ -90,8 +90,8 @@ export function buildFocusItems(data: TodayData): FocusItemModel[] {
     dueText: `Vencimiento: ${formatDate(receipt.dueDate)} · Vence hoy`,
     amount: receipt.amount,
     currency: receipt.currency,
-    href: "/receipts?tab=cobrar",
-    actionLabel: "Cobrar",
+    href: `/receipts/${receipt.id}?quickPayment=1`,
+    actionLabel: "Registrar pago",
     detailsHref: `/receipts/${receipt.id}`,
     detailsLabel: "Ver recibo",
   }));
@@ -152,7 +152,7 @@ export function buildTodayOperationsModel(
       dateStyle: "full",
       timeZone: "Etc/GMT+6",
     }).format(now),
-    summary: `Tienes ${actionLabel} ${actionCount === 1 ? "acción" : "acciones"} que requieren atención. ${data.paymentsDueToday.length} ${data.paymentsDueToday.length === 1 ? "afecta" : "afectan"} a clientes hoy.`,
+    summary: `Tienes ${actionLabel} ${actionCount === 1 ? "acción" : "acciones"} que requieren atención. ${data.paymentsDueToday.length} ${data.paymentsDueToday.length === 1 ? "recibo vence" : "recibos vencen"} hoy.`,
     summaryMetrics: [
       { id: "overdue", label: "Vencidos", description: "Recibos atrasados", ...overdue, tone: "critical", href: "/receipts?tab=cobrar&status=overdue" },
       { id: "due-today", label: "Vencen hoy", description: "Recibos del día", ...dueToday, tone: "warning", href: "/receipts?tab=cobrar&status=today" },

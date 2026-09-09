@@ -237,7 +237,10 @@ jobs:
           dropdb -h 127.0.0.1 -U postgres --if-exists "$TENANT_ISOLATION_DB_NAME"
 
   application:
-    if: github.event_name == 'workflow_dispatch'
+    # Keep the full disposable-Postgres application/browser path available on
+    # demand, and run it automatically for pull requests so UI regressions do
+    # not wait for a manual certification dispatch.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:

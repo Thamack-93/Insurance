@@ -3,13 +3,11 @@ import "server-only";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
 import { assertOrganizationContextInTransaction, type OrganizationContext } from "@/lib/organization-context";
-import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 import { receiptPortfolioWhere } from "@/lib/portfolio-access";
-import { normalizeMexicanPhone } from "@/lib/phone";
+import { resolveClientWhatsAppPhone } from "@/lib/whatsapp-client-phone";
 import {
   buildReceiptDueMessage,
   buildWhatsAppReminderUrl,
-  selectWhatsAppPhone,
   WHATSAPP_RECEIPT_TEMPLATE,
   type WhatsAppPhoneSource,
 } from "@/lib/whatsapp-reminder";
@@ -33,14 +31,8 @@ export async function prepareWhatsAppReceiptReminderForContext(input: {
   const { db, context } = input;
   const captured = input.capturedPhone?.trim() || null;
 
-  if (captured && !normalizeMexicanPhone(captured)) {
-    throw new Error("Captura un teléfono mexicano válido de 10 dígitos.");
-  }
-
   const run = async (tx: Prisma.TransactionClient) => {
     await assertOrganizationContextInTransaction(tx, context);
-    const capability = await resolveOrganizationCapability(context.organizationId, "WHATSAPP", tx);
-    if (!capability.enabled) throw new Error("WHATSAPP_CAPABILITY_DISABLED");
 
     const receipt = await tx.receipt.findFirst({
       where: {
@@ -76,47 +68,15 @@ export async function prepareWhatsAppReceiptReminderForContext(input: {
       throw new Error("El recibo tiene un pago registrado; requiere revisión manual antes de enviar un recordatorio.");
     }
 
-    const existingPrimary = normalizeMexicanPhone(receipt.client.phone);
-    const existingSecondary = normalizeMexicanPhone(receipt.client.secondaryPhone);
-    let selection = selectWhatsAppPhone({ primary: receipt.client.phone, secondary: receipt.client.secondaryPhone });
-
-    if (captured) {
-      const capturedNormalized = normalizeMexicanPhone(captured);
-      if (!capturedNormalized) throw new Error("Captura un teléfono mexicano válido de 10 dígitos.");
-      const existing = existingPrimary ?? existingSecondary;
-      if (existing && existing !== capturedNormalized) {
-        throw new Error("El teléfono del cliente cambió; vuelve a intentarlo para evitar sobrescribirlo.");
-      }
-
-      if (!existing) {
-        const updated = await tx.client.updateMany({
-          where: {
-            id: receipt.client.id,
-            organizationId: context.organizationId,
-            phone: receipt.client.phone,
-            secondaryPhone: receipt.client.secondaryPhone,
-          },
-          data: { phone: capturedNormalized, updatedById: context.userId },
-        });
-        if (updated.count !== 1) {
-          throw new Error("El teléfono del cliente cambió; vuelve a intentarlo para evitar sobrescribirlo.");
-        }
-        await writeActivityLog({
-          entityType: "Client",
-          entityId: receipt.client.id,
-          action: "CLIENT_PHONE_CAPTURED_FOR_WHATSAPP",
-      newValue: input.sourceChannel === "TELEGRAM"
-        ? { captured: true, source: "RECEIPT_REMINDER", sourceChannel: input.sourceChannel }
-        : { captured: true, source: "RECEIPT_REMINDER" },
-          userId: context.userId,
-          organizationId: context.organizationId,
-          db: tx,
-        });
-        selection = { normalized: capturedNormalized, source: "CAPTURED" };
-      } else {
-        selection = selectWhatsAppPhone({ primary: receipt.client.phone, secondary: receipt.client.secondaryPhone });
-      }
-    }
+    const selection = await resolveClientWhatsAppPhone({
+      tx,
+      organizationId: context.organizationId,
+      userId: context.userId,
+      client: receipt.client,
+      capturedPhone: captured,
+      source: "RECEIPT_REMINDER",
+      sourceChannel: input.sourceChannel,
+    });
 
     if (!selection) return { outcome: "CAPTURE_PHONE" as const };
 
@@ -169,11 +129,5 @@ export async function prepareWhatsAppReceiptReminderForContext(input: {
 
     return { outcome: "OPEN_WHATSAPP" as const, url, phoneSource: selection.source };
   };
-  // Request handlers should pass a transaction-bound TenantDb. Keep the root
-  // client fallback only for legacy callers, where this function itself still
-  // establishes the tenant transaction and revalidates membership.
-  if ("$transaction" in db) {
-    return db.$transaction(run);
-  }
-  return run(db as Prisma.TransactionClient);
+  return "$transaction" in db ? db.$transaction(run) : run(db as Prisma.TransactionClient);
 }

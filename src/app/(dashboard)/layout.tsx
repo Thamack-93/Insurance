@@ -45,6 +45,7 @@ async function getSafeDashboardShellData(organizationId?: string) {
     unreadNotificationCount: unreadResult.status === "fulfilled" ? unreadResult.value : 0,
     recentNotifications:
       notificationsResult.status === "fulfilled" ? notificationsResult.value : ([] as NotificationRecord[]),
+    notificationsUnavailable: unreadResult.status === "rejected" || notificationsResult.status === "rejected",
   };
 }
 
@@ -64,7 +65,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   const initialTheme = themeCookie === "dark" ? "dark" : "light";
   // Load settings once per request: hydrates the server runtime cache and
   // is forwarded to the client so format helpers stay consistent on both sides.
-  const { settings, unreadNotificationCount, recentNotifications } = await getSafeDashboardShellData(organization?.organizationId);
+  const { settings, unreadNotificationCount, recentNotifications, notificationsUnavailable } = await getSafeDashboardShellData(organization?.organizationId);
   const bellNotifications = recentNotifications.map((notification) => ({
     id: notification.id,
     alertType: notification.alertType,
@@ -94,12 +95,21 @@ export default async function DashboardLayout({ children }: { children: ReactNod
                 isAdmin={isTenantAdmin}
                 isSuperAdmin={user.platformRole === "SUPERADMIN"}
                 hasOrganizationContext={Boolean(organization)}
+                organizationName={organization?.organizationName}
+                membershipRole={organization?.membershipRole}
                 userMenu={<UserMenu />}
                 unreadNotificationCount={unreadNotificationCount}
                 notifications={bellNotifications}
                 initialTheme={initialTheme}
               />
-              <main id="main-content" className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">{children}</main>
+              <main id="main-content" className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+                {notificationsUnavailable ? (
+                  <div role="status" className="mb-4 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                    Las notificaciones no están disponibles temporalmente. El resto de la operación continúa funcionando.
+                  </div>
+                ) : null}
+                {children}
+              </main>
             </div>
           </div>
           <CommandPaletteWrapper

@@ -134,7 +134,11 @@ It expires automatically and is removed on logout; it is never written to the da
   in-memory state for the current tab without changing database or provider behavior.
 - Telegram does not interpret freeform AI commands.
 - PolicyDesk does not automate personal WhatsApp accounts. The WhatsApp reminder flow only prepares
-  an editable `wa.me` handoff; the agent must press **Enviar** inside WhatsApp.
+  an editable `wa.me` handoff; the agent must press **Enviar** inside WhatsApp. Renewal cards also
+  offer a separate contact handoff and a quotation handoff. A quotation PDF stays on the device:
+  supported browsers open the native share sheet, while desktop fallback opens a validated `wa.me`
+  destination and the agent attaches the PDF manually. Neither path claims delivery or changes the
+  renewal stage.
 - AI never directly writes a client, policy, receipt, payment or task without the existing
   confirmation flow.
 

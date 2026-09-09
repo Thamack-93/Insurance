@@ -4,13 +4,14 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { RenewalBoardFilters as BoardFilters } from "@/components/renewals/renewal-board-filters";
 import { RenewalStageMenu } from "@/components/renewals/renewal-stage-menu";
+import { RenewalWhatsAppAssistant } from "@/components/renewals/renewal-whatsapp-assistant";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { getRenewalStageTone, policyTypeLabel, renewalStageLabel } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { RenewalBoardCard, RenewalBoardColumn, RenewalBoardData } from "@/lib/renewal-board";
-import { RENEWAL_BOARD_COLUMN_PREVIEW } from "@/lib/renewal-board";
 import type { RenewalBoardFilters } from "@/lib/renewal-board.logic";
+import { isTerminalRenewalStage } from "@/lib/renewal-board.logic";
 
 const stageAccent: Record<string, string> = {
   PENDING: "bg-muted-foreground/40",
@@ -37,7 +38,8 @@ function daysLabel(days: number) {
 }
 
 function RenewalCard({ card }: { card: RenewalBoardCard }) {
-  const overdue = card.daysUntilRenewal < 0;
+  const closed = isTerminalRenewalStage(card.stage);
+  const overdue = !closed && card.daysUntilRenewal < 0;
   const captureHref = card.canCapture ? `/policies/new?renewalFrom=${card.policyId}` : undefined;
 
   return (
@@ -74,7 +76,7 @@ function RenewalCard({ card }: { card: RenewalBoardCard }) {
           <dt className="sr-only">Vencimiento</dt>
           <dd className="font-mono text-xs">{formatDate(card.endDate)}</dd>
           <dd className={cn("text-xs", overdue ? "text-destructive" : "text-muted-foreground")}>
-            {daysLabel(card.daysUntilRenewal)}
+            {closed ? `Cerró ${formatDate(card.endDate)}` : daysLabel(card.daysUntilRenewal)}
           </dd>
         </div>
         <div>
@@ -87,33 +89,28 @@ function RenewalCard({ card }: { card: RenewalBoardCard }) {
         </div>
       </dl>
 
-      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-        {card.renewedToPolicyId ? (
-          <Link
-            href={`/policies/${card.renewedToPolicyId}`}
-            className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
-          >
-            Ver renovación
-          </Link>
-        ) : captureHref ? (
-          <Link href={captureHref} className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>
-            Capturar renovación
-          </Link>
+      <div className="mt-3 space-y-2">
+        {card.renewedToPolicyId || captureHref ? (
+          <div className="flex justify-end">
+            {card.renewedToPolicyId ? (
+              <Link href={`/policies/${card.renewedToPolicyId}`} className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>Ver renovación</Link>
+            ) : captureHref ? (
+              <Link href={captureHref} className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}>Capturar renovación</Link>
+            ) : null}
+          </div>
         ) : null}
-        <RenewalStageMenu
-          policyId={card.policyId}
-          policyNumber={card.policyNumber}
-          stage={card.stage}
-          captureHref={captureHref}
-        />
+        {!isTerminalRenewalStage(card.stage) ? (
+          <div className="flex items-center justify-end gap-2">
+            <RenewalWhatsAppAssistant policyId={card.policyId} clientName={card.clientName} stage={card.stage} />
+            <RenewalStageMenu policyId={card.policyId} policyNumber={card.policyNumber} stage={card.stage} captureHref={captureHref} />
+          </div>
+        ) : null}
       </div>
     </li>
   );
 }
 
 function BoardColumn({ column }: { column: RenewalBoardColumn }) {
-  const hidden = column.count - column.cards.length;
-
   return (
     <section
       aria-label={`${renewalStageLabel(column.stage)}: ${column.count} renovaciones`}
@@ -148,12 +145,6 @@ function BoardColumn({ column }: { column: RenewalBoardColumn }) {
               <RenewalCard key={card.policyId} card={card} />
             ))}
           </ul>
-          {hidden > 0 ? (
-            <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
-              Y {hidden} más. Acota la ventana o el responsable para verlas; se muestran las {RENEWAL_BOARD_COLUMN_PREVIEW} más
-              próximas a vencer.
-            </p>
-          ) : null}
         </>
       ) : (
         <p className="px-3 py-8 text-center text-sm text-muted-foreground">Sin renovaciones en esta etapa.</p>

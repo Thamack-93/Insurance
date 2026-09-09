@@ -1,8 +1,12 @@
 "use server";
 
+import { getDb } from "@/lib/db";
+import type { Prisma } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
 import { assertOrganizationContextInTransaction, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
+import { claimOperationalWhere } from "@/lib/portfolio-access";
+import { CLAIM_CHECKLIST_STATUSES, type ClaimChecklistStatusValue, checklistTimestamps, createCustomClaimRequirementCode } from "@/lib/claim-checklists";
 import type { ClaimFormValues } from "@/lib/validations";
 import {
   errorResult,
@@ -158,5 +162,111 @@ export async function deleteClaim(id: string): Promise<MutationResult> {
   } catch (error) {
     logError("claims.deleteClaim", error, { id });
     return errorResult("No se pudo eliminar el siniestro. Intenta de nuevo.");
+  }
+}
+
+type ChecklistInput = { claimId: string };
+type ChecklistStatusInput = ChecklistInput & { itemId: string; status: ClaimChecklistStatusValue; expectedUpdatedAt?: string };
+
+async function findWritableClaim(tx: Prisma.TransactionClient, claimId: string, organizationId: string, portfolioOwnerId?: string) {
+  return tx.claim.findFirst({ where: { id: claimId, ...claimOperationalWhere(portfolioOwnerId, organizationId) }, select: { id: true, status: true } });
+}
+
+export async function createClaimRequirement(claimId: string, label: string): Promise<MutationResult> {
+  try {
+    const context = await requireOrganizationContext();
+    const normalized = label.trim();
+    if (!normalized || normalized.length > 200) return errorResult("El requisito debe tener entre 1 y 200 caracteres.");
+    const item = await getDb().$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const claim = await findWritableClaim(tx, claimId, context.organizationId, context.membershipRole === "AGENT" ? context.userId : undefined);
+      if (!claim) throw new Error("CLAIM_NOT_FOUND");
+      if (claim.status === "RESOLVED" || claim.status === "CANCELLED") throw new Error("CLAIM_TERMINAL");
+      const created = await tx.claimChecklistItem.create({ data: { organizationId: context.organizationId, claimId, requirementCode: createCustomClaimRequirementCode(), label: normalized, status: "MISSING" } });
+      await writeActivityLog({ organizationId: context.organizationId, action: "CREATE_CLAIM_REQUIREMENT", entityType: "Claim", entityId: claimId, newValue: { requirementCode: created.requirementCode, label: created.label, status: created.status }, userId: context.userId, db: tx });
+      return created;
+    });
+    revalidatePaths([`/claims/${claimId}`, "/claims", "/operations"]);
+    return successResult(item.id, `/claims/${claimId}`, "Requisito agregado.");
+  } catch (error) {
+    logError("claims.createClaimRequirement", error, { claimId });
+    return errorResult("No se pudo agregar el requisito.");
+  }
+}
+
+export async function updateClaimRequirementStatus(input: ChecklistStatusInput): Promise<MutationResult> {
+  try {
+    if (!CLAIM_CHECKLIST_STATUSES.includes(input.status)) return errorResult("Estado de requisito inválido.");
+    const context = await requireOrganizationContext();
+    const item = await getDb().$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const claim = await findWritableClaim(tx, input.claimId, context.organizationId, context.membershipRole === "AGENT" ? context.userId : undefined);
+      if (!claim) throw new Error("CLAIM_NOT_FOUND");
+      if (claim.status === "RESOLVED" || claim.status === "CANCELLED") throw new Error("CLAIM_TERMINAL");
+      const current = await tx.claimChecklistItem.findFirst({ where: { id: input.itemId, claimId: input.claimId, organizationId: context.organizationId } });
+      if (!current) throw new Error("REQUIREMENT_NOT_FOUND");
+      if (input.expectedUpdatedAt && current.updatedAt.toISOString() !== input.expectedUpdatedAt) throw new Error("STALE_REQUIREMENT");
+      if (current.status === input.status) return current;
+      const updated = await tx.claimChecklistItem.update({ where: { id: current.id }, data: { status: input.status, ...checklistTimestamps(input.status, new Date()) } });
+      await writeActivityLog({ organizationId: context.organizationId, action: "UPDATE_CLAIM_REQUIREMENT", entityType: "Claim", entityId: input.claimId, oldValue: { requirementCode: current.requirementCode, label: current.label, status: current.status }, newValue: { requirementCode: updated.requirementCode, label: updated.label, status: updated.status }, userId: context.userId, db: tx });
+      return updated;
+    });
+    revalidatePaths([`/claims/${input.claimId}`, "/claims", "/operations"]);
+    return successResult(item.id, `/claims/${input.claimId}`, "Requisito actualizado.");
+  } catch (error) {
+    logError("claims.updateClaimRequirementStatus", error, { claimId: input.claimId, itemId: input.itemId });
+    const message = error instanceof Error && error.message === "STALE_REQUIREMENT" ? "El requisito cambió; actualiza la página." : "No se pudo actualizar el requisito.";
+    return errorResult(message);
+  }
+}
+
+export async function deleteClaimRequirement(input: ChecklistInput & { itemId: string; expectedUpdatedAt?: string }): Promise<MutationResult> {
+  try {
+    const context = await requireOrganizationContext();
+    await getDb().$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const claim = await findWritableClaim(tx, input.claimId, context.organizationId, context.membershipRole === "AGENT" ? context.userId : undefined);
+      if (!claim) throw new Error("CLAIM_NOT_FOUND");
+      if (claim.status === "RESOLVED" || claim.status === "CANCELLED") throw new Error("CLAIM_TERMINAL");
+      const current = await tx.claimChecklistItem.findFirst({ where: { id: input.itemId, claimId: input.claimId, organizationId: context.organizationId } });
+      if (!current || !current.requirementCode.startsWith("CUSTOM:")) throw new Error("REQUIREMENT_NOT_CUSTOM");
+      if (input.expectedUpdatedAt && current.updatedAt.toISOString() !== input.expectedUpdatedAt) throw new Error("STALE_REQUIREMENT");
+      await tx.claimChecklistItem.delete({ where: { id: current.id } });
+      await writeActivityLog({ organizationId: context.organizationId, action: "DELETE_CLAIM_REQUIREMENT", entityType: "Claim", entityId: input.claimId, oldValue: { requirementCode: current.requirementCode, label: current.label, status: current.status }, userId: context.userId, db: tx });
+    });
+    revalidatePaths([`/claims/${input.claimId}`, "/claims", "/operations"]);
+    return successResult(input.itemId, `/claims/${input.claimId}`, "Requisito eliminado.");
+  } catch (error) {
+    logError("claims.deleteClaimRequirement", error, { claimId: input.claimId, itemId: input.itemId });
+    return errorResult(error instanceof Error && error.message === "STALE_REQUIREMENT" ? "El requisito cambió; actualiza la página." : "No se pudo eliminar el requisito.");
+  }
+}
+
+export async function setClaimRequirementDocument(input: ChecklistInput & { itemId: string; documentId: string | null; expectedUpdatedAt?: string }): Promise<MutationResult> {
+  try {
+    const context = await requireOrganizationContext();
+    await getDb().$transaction(async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const claim = await findWritableClaim(tx, input.claimId, context.organizationId, context.membershipRole === "AGENT" ? context.userId : undefined);
+      if (!claim) throw new Error("CLAIM_NOT_FOUND");
+      if (claim.status === "RESOLVED" || claim.status === "CANCELLED") throw new Error("CLAIM_TERMINAL");
+      const current = await tx.claimChecklistItem.findFirst({ where: { id: input.itemId, claimId: input.claimId, organizationId: context.organizationId } });
+      if (!current) throw new Error("REQUIREMENT_NOT_FOUND");
+      if (input.expectedUpdatedAt && current.updatedAt.toISOString() !== input.expectedUpdatedAt) throw new Error("STALE_REQUIREMENT");
+      let documentId: string | null = null;
+      if (input.documentId) {
+        const document = await tx.document.findFirst({ where: { id: input.documentId, organizationId: context.organizationId, claimId: input.claimId }, select: { id: true } });
+        if (!document) throw new Error("DOCUMENT_NOT_ELIGIBLE");
+        documentId = document.id;
+      }
+      if (current.documentId === documentId) return;
+      await tx.claimChecklistItem.update({ where: { id: current.id }, data: { documentId } });
+      await writeActivityLog({ organizationId: context.organizationId, action: documentId ? "LINK_CLAIM_REQUIREMENT_DOCUMENT" : "UNLINK_CLAIM_REQUIREMENT_DOCUMENT", entityType: "Claim", entityId: input.claimId, oldValue: { requirementCode: current.requirementCode, documentId: current.documentId }, newValue: { requirementCode: current.requirementCode, documentId }, userId: context.userId, db: tx });
+    });
+    revalidatePaths([`/claims/${input.claimId}`]);
+    return successResult(input.itemId, `/claims/${input.claimId}`, input.documentId ? "Documento vinculado." : "Documento desvinculado.");
+  } catch (error) {
+    logError("claims.setClaimRequirementDocument", error, { claimId: input.claimId, itemId: input.itemId });
+    return errorResult(error instanceof Error && error.message === "STALE_REQUIREMENT" ? "El requisito cambió; actualiza la página." : "No se pudo vincular el documento.");
   }
 }

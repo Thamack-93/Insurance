@@ -15,6 +15,8 @@ export function AppTopbar({
   isAdmin = false,
   isSuperAdmin = false,
   hasOrganizationContext = false,
+  organizationName,
+  membershipRole,
   unreadNotificationCount,
   notifications,
   initialTheme,
@@ -23,6 +25,8 @@ export function AppTopbar({
   isAdmin?: boolean;
   isSuperAdmin?: boolean;
   hasOrganizationContext?: boolean;
+  organizationName?: string;
+  membershipRole?: string;
   unreadNotificationCount: number;
   notifications: BellNotification[];
   initialTheme: ThemeMode;
@@ -59,6 +63,12 @@ export function AppTopbar({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {hasOrganizationContext && organizationName ? (
+            <div className="hidden max-w-52 truncate rounded-md border bg-card px-2.5 py-1 text-xs text-muted-foreground xl:block" title={organizationName}>
+              <span className="font-medium text-foreground">{organizationName}</span>
+              {membershipRole ? <span className="ml-1.5">· {membershipRole === "AGENT" ? "Agente" : "Administrador"}</span> : null}
+            </div>
+          ) : null}
           <ThemeToggle initialTheme={initialTheme} />
           {hasOrganizationContext ? (
             <button

@@ -51,10 +51,13 @@ const STEPS: Step[] = [
   },
 ];
 
-export function OnboardingChecklist({ status }: { status: OnboardingStatus }) {
+export function OnboardingChecklist({ status, role = "ADMIN" }: { status: OnboardingStatus; role?: "ADMIN" | "AGENT" }) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-  const completedCount = STEPS.filter((s) => status[s.key] > 0).length;
+  const steps = STEPS.filter((step) => role !== "AGENT" || step.key !== "insurers");
+  const completedCount = steps.filter((s) => status[s.key] > 0).length;
+
+  if (steps.every((step) => status[step.key] > 0)) return null;
 
   const onDismiss = () => {
     startTransition(async () => {
@@ -71,7 +74,7 @@ export function OnboardingChecklist({ status }: { status: OnboardingStatus }) {
   return (
     <SectionCard
       title="Empieza aquí"
-      description={`Da los primeros pasos para tener tu cartera operando (${completedCount}/${STEPS.length}).`}
+      description={`Da los primeros pasos para tener tu cartera operando (${completedCount}/${steps.length}).`}
       action={
         <Button variant="ghost" size="sm" onClick={onDismiss} disabled={pending} className="text-muted-foreground">
           {pending ? "Ocultando..." : "Ocultar guía"}
@@ -79,7 +82,7 @@ export function OnboardingChecklist({ status }: { status: OnboardingStatus }) {
       }
     >
       <ul className="divide-y divide-border/70">
-        {STEPS.map((step) => {
+        {steps.map((step) => {
           const done = status[step.key] > 0;
           const Icon = step.icon;
           return (
