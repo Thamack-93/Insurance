@@ -230,12 +230,18 @@ jobs:
     timeout-minutes: 50
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NODE_ENV: test
+      TENANT_ISOLATION_TEST_DB: "1"
       PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1"
+      TENANT_ISOLATION_RUN_ID: "${{ github.run_id }}_${{ github.run_attempt }}"
+      TENANT_ISOLATION_DB_NAME: "policydesk_release_test_${{ github.run_id }}_${{ github.run_attempt }}"
       PLAYWRIGHT_USE_PRODUCTION_SERVER: "1"
       PLAYWRIGHT_HOST: localhost
       PLAYWRIGHT_BASE_URL: http://localhost:4173
       PORT: "4173"
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_release_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      DATABASE_URL_UNPOOLED: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_release_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      DATABASE_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_release_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
       SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
       SESSION_SECRET: application-certification-secret-minimum-32-characters
       RESTORE_INTEGRATION: "1"
@@ -267,6 +273,14 @@ jobs:
         run: npm ci
       - name: Generate Prisma client
         run: npm run db:generate
+      - name: Create dedicated application database
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          createdb -h 127.0.0.1 -U postgres "$TENANT_ISOLATION_DB_NAME"
+          fingerprint="$(printf 'local-postgres:%s:%s:%s' "$TENANT_ISOLATION_RUN_ID" "$TENANT_ISOLATION_DB_NAME" 127.0.0.1 | sha256sum | awk '{print $1}')"
+          printf 'TENANT_ISOLATION_FINGERPRINT=%s\n' "$fingerprint" >> "$GITHUB_ENV"
       - name: Apply singleton migrations
         run: npm run db:migrate:singleton-ci
       - name: Tenant guards and transition integration
@@ -303,6 +317,12 @@ jobs:
           path: artifacts/restore-drills
           if-no-files-found: ignore
           retention-days: 90
+      - name: Drop dedicated application database
+        if: always()
+        shell: bash
+        run: |
+          export PGPASSWORD=postgres
+          dropdb -h 127.0.0.1 -U postgres --if-exists "$TENANT_ISOLATION_DB_NAME"
 
   production-policy:
     name: PRODUCTION VERIFIER POLICY / MAIN ONLY

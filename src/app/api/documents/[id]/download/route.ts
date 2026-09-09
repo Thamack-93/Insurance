@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { get } from "@vercel/blob";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
+import { assertSafeDocumentPath } from "@/lib/files";
 import { logError } from "@/lib/logger";
 import { AuthError } from "@/lib/auth";
 import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
@@ -31,7 +34,7 @@ export async function GET(
   documentId = id;
 
   try {
-    if (!areDocumentFilesEnabled() || !process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
+    if (!areDocumentFilesEnabled()) {
       return NextResponse.json(
         { error: "La descarga de documentos está deshabilitada en este demo." },
         { status: 501 },
@@ -109,6 +112,9 @@ export async function GET(
     const safeFileName = document.fileName.replace(/["\\]/g, "_");
 
     if (document.filePath.startsWith("blob:")) {
+      if (!process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
+        return NextResponse.json({ error: "El almacenamiento de documentos no está configurado." }, { status: 503 });
+      }
       const blob = await get(document.filePath.slice("blob:".length), { access: "private" });
       if (!blob) return NextResponse.json({ error: "El archivo ya no se encuentra disponible." }, { status: 404 });
       const headers = new Headers({
@@ -119,13 +125,24 @@ export async function GET(
       return new NextResponse(blob.stream, { status: 200, headers });
     }
 
-    // Local filesystem paths are intentionally unsupported after the private
-    // Blob cutover. Operators must migrate any legacy metadata before reopening
-    // document access; never read an arbitrary path from a tenant row.
-    return NextResponse.json(
-      { error: "Este documento usa almacenamiento legado y no está disponible." },
-      { status: 410 },
-    );
+    if (document.filePath.startsWith("demo://")) {
+      return NextResponse.json({ error: "Este documento DEMO es sólo metadata." }, { status: 410 });
+    }
+
+    // Keep the bounded legacy reader during the Blob migration so existing
+    // customer documents remain downloadable. The path is constrained to the
+    // private document store and never read directly from tenant metadata.
+    const safePath = assertSafeDocumentPath(path.resolve(document.filePath));
+    const fileBuffer = await readFile(safePath);
+    return new NextResponse(fileBuffer, {
+      status: 200,
+      headers: {
+        "Content-Type": document.mimeType,
+        "Content-Disposition": `${disposition}; filename="${safeFileName}"`,
+        "Content-Length": fileBuffer.length.toString(),
+        "Cache-Control": "private, no-store",
+      },
+    });
 
   } catch (error) {
     logError("api.documents.download", error);

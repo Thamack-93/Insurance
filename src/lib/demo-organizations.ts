@@ -183,7 +183,7 @@ export async function provisionDemoOrganization(input: DemoProvisioningInput): P
     }
     await tx.organization.upsert({ where: { id: organizationId }, update: { name, slug, kind: "DEMO", status: "PROVISIONING" }, create: { id: organizationId, name, slug, kind: "DEMO", status: "PROVISIONING", timeZone: "America/Mexico_City", defaultCurrency: "MXN" } });
     const existingOwner = await tx.user.findUnique({ where: { id: ownerUserId }, select: { passwordHash: true } });
-    await tx.user.upsert({ where: { id: ownerUserId }, update: { email: ownerEmail, name: ownerName, role: "ADMIN", platformRole: "NONE", active: true, mustChangePassword: true, temporaryPasswordExpiresAt: existingOwner ? undefined : new Date(now.getTime() + 86_400_000), ...(existingOwner ? {} : { passwordHash: hashPassword(password) }) }, create: { id: ownerUserId, email: ownerEmail, name: ownerName, passwordHash: hashPassword(password), role: "ADMIN", platformRole: "NONE", active: true, mustChangePassword: true, temporaryPasswordExpiresAt: new Date(now.getTime() + 86_400_000) } });
+    await tx.user.upsert({ where: { id: ownerUserId }, update: { email: ownerEmail, name: ownerName, role: "ADMIN", platformRole: "NONE", active: true, mustChangePassword: true, passwordHash: hashPassword(password), temporaryPasswordExpiresAt: new Date(now.getTime() + 86_400_000) }, create: { id: ownerUserId, email: ownerEmail, name: ownerName, passwordHash: hashPassword(password), role: "ADMIN", platformRole: "NONE", active: true, mustChangePassword: true, temporaryPasswordExpiresAt: new Date(now.getTime() + 86_400_000) } });
     await tx.organizationMembership.upsert({ where: { userId: ownerUserId }, update: { organizationId, role: "OWNER", active: true }, create: { organizationId, userId: ownerUserId, role: "OWNER", active: true } });
     // The DEMO plan is platform configuration, installed by a versioned
     // migration. Runtime app credentials may read it but must never create or
@@ -197,7 +197,7 @@ export async function provisionDemoOrganization(input: DemoProvisioningInput): P
     const existingState = await tx.demoOrganizationState.findUnique({ where: { organizationId }, select: { trialEndsAt: true } });
     const effectiveTrialEndsAt = existingState?.trialEndsAt ?? trialEndsAt;
     await tx.demoOrganizationState.upsert({ where: { organizationId }, update: { seedVersion: DEMO_SEED_VERSION, trialEndsAt: effectiveTrialEndsAt, resetStatus: "IDLE", resetFailure: null }, create: { organizationId, seedVersion: DEMO_SEED_VERSION, trialEndsAt: effectiveTrialEndsAt, resetStatus: "IDLE", dataVersion: 1 } });
-      return { active: false as const, temporaryPassword: existingOwner ? "" : password, trialEndsAt: effectiveTrialEndsAt, requestId };
+      return { active: false as const, temporaryPassword: password, trialEndsAt: effectiveTrialEndsAt, requestId };
     });
     if (setup.active) return { organizationId, ownerUserId, ownerEmail, temporaryPassword: setup.temporaryPassword, credentials: [], trialEndsAt: setup.trialEndsAt, seedVersion: DEMO_SEED_VERSION };
 

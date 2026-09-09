@@ -388,10 +388,18 @@ export async function restoreVerifiedBackup(input: RestoreInput): Promise<Restor
       await client.query("SET LOCAL session_replication_role = origin");
     }
 
-    // DEMO rows are excluded from platform logical backups. Re-run the
-    // retention boundary on the restored branch before any environment can be
-    // reopened, so an accidentally retained expired artifact cannot survive a
-    // restore verification pass.
+    const tableCounts = await validateTableCounts(
+      client,
+      parsed,
+      input.manifest.tables,
+      input.manifest.totals.rows,
+    );
+    const foreignKeys = await validateForeignKeys(client);
+    const domainChecks = await validateDomainInvariants(client);
+    const sequences = await synchronizeSequences(client);
+
+    // Retention cleanup runs only after snapshot counts and invariants have
+    // been captured, so cleanup cannot invalidate the restore evidence.
     await client.query(`
       DELETE FROM "DemoUploadArtifact"
        WHERE "expiresAt" <= CURRENT_TIMESTAMP
@@ -406,16 +414,6 @@ export async function restoreVerifiedBackup(input: RestoreInput): Promise<Restor
             WHERE s."organizationId" = o."id" AND s."trialEndsAt" <= CURRENT_TIMESTAMP
          )
     `);
-
-    const tableCounts = await validateTableCounts(
-      client,
-      parsed,
-      input.manifest.tables,
-      input.manifest.totals.rows,
-    );
-    const foreignKeys = await validateForeignKeys(client);
-    const domainChecks = await validateDomainInvariants(client);
-    const sequences = await synchronizeSequences(client);
     await client.query("COMMIT");
     transactionStarted = false;
     return {
