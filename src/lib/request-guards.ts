@@ -152,6 +152,10 @@ export async function acquireDistributedLock(key: string, ttlMs: number, require
 }
 
 export function distributedRateLimitRequired() {
+  // The disposable PostgreSQL application job starts Next in production mode
+  // but intentionally has no external Redis service. Keep production safety
+  // strict while allowing that isolated CI server to exercise the handlers.
+  if (process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true") return process.env.REQUIRE_DISTRIBUTED_RATE_LIMIT === "1";
   return process.env.REQUIRE_DISTRIBUTED_RATE_LIMIT === "1" || process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
 }
 
