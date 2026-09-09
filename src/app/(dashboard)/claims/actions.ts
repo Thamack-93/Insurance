@@ -1,6 +1,5 @@
 "use server";
 
-import { getDb } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
@@ -177,7 +176,7 @@ export async function createClaimRequirement(claimId: string, label: string): Pr
     const context = await requireOrganizationContext();
     const normalized = label.trim();
     if (!normalized || normalized.length > 200) return errorResult("El requisito debe tener entre 1 y 200 caracteres.");
-    const item = await getDb().$transaction(async (tx) => {
+    const item = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const claim = await findWritableClaim(tx, claimId, context.organizationId, context.membershipRole === "AGENT" ? context.userId : undefined);
       if (!claim) throw new Error("CLAIM_NOT_FOUND");
@@ -198,7 +197,7 @@ export async function updateClaimRequirementStatus(input: ChecklistStatusInput):
   try {
     if (!CLAIM_CHECKLIST_STATUSES.includes(input.status)) return errorResult("Estado de requisito inválido.");
     const context = await requireOrganizationContext();
-    const item = await getDb().$transaction(async (tx) => {
+    const item = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const claim = await findWritableClaim(tx, input.claimId, context.organizationId, context.membershipRole === "AGENT" ? context.userId : undefined);
       if (!claim) throw new Error("CLAIM_NOT_FOUND");
@@ -223,7 +222,7 @@ export async function updateClaimRequirementStatus(input: ChecklistStatusInput):
 export async function deleteClaimRequirement(input: ChecklistInput & { itemId: string; expectedUpdatedAt?: string }): Promise<MutationResult> {
   try {
     const context = await requireOrganizationContext();
-    await getDb().$transaction(async (tx) => {
+    await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const claim = await findWritableClaim(tx, input.claimId, context.organizationId, context.membershipRole === "AGENT" ? context.userId : undefined);
       if (!claim) throw new Error("CLAIM_NOT_FOUND");
@@ -245,7 +244,7 @@ export async function deleteClaimRequirement(input: ChecklistInput & { itemId: s
 export async function setClaimRequirementDocument(input: ChecklistInput & { itemId: string; documentId: string | null; expectedUpdatedAt?: string }): Promise<MutationResult> {
   try {
     const context = await requireOrganizationContext();
-    await getDb().$transaction(async (tx) => {
+    await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const claim = await findWritableClaim(tx, input.claimId, context.organizationId, context.membershipRole === "AGENT" ? context.userId : undefined);
       if (!claim) throw new Error("CLAIM_NOT_FOUND");

@@ -1,7 +1,6 @@
 "use server";
 
 import type { Prisma } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { assertOrganizationContextInTransaction, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
@@ -27,7 +26,7 @@ export async function prepareRenewalWhatsAppContact(input: { policyId: string; c
   try {
     if (!input?.policyId?.trim()) return { outcome: "ERROR", error: "La póliza no es válida." };
     const context = await requireOrganizationContext();
-    const result = await getDb().$transaction((tx) => prepareRenewalWhatsAppContactForContext({ db: tx, context, policyId: input.policyId, capturedPhone: input.capturedPhone }));
+    const result = await withTenantTransaction(context, (tx) => prepareRenewalWhatsAppContactForContext({ db: tx, context, policyId: input.policyId, capturedPhone: input.capturedPhone }));
     revalidatePaths(["/operations", "/activity", "/clients"]);
     return result;
   } catch (error) {
@@ -40,7 +39,7 @@ export async function prepareRenewalQuoteShare(input: { policyId: string; handof
     if (!input?.policyId?.trim()) return { outcome: "ERROR", error: "La póliza no es válida." };
     if (input.handoff !== "NATIVE_SHARE" && input.handoff !== "WHATSAPP_FALLBACK") return { outcome: "ERROR", error: "La forma de compartir no es válida." };
     const context = await requireOrganizationContext();
-    const result = await getDb().$transaction((tx) => prepareRenewalQuoteShareForContext({ db: tx, context, policyId: input.policyId, handoff: input.handoff, capturedPhone: input.capturedPhone }));
+    const result = await withTenantTransaction(context, (tx) => prepareRenewalQuoteShareForContext({ db: tx, context, policyId: input.policyId, handoff: input.handoff, capturedPhone: input.capturedPhone }));
     revalidatePaths(["/operations", "/activity", "/clients"]);
     return result;
   } catch (error) {

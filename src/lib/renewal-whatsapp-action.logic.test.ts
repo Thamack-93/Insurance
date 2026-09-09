@@ -10,7 +10,11 @@ const mocks = vi.hoisted(() => ({
   revalidatePath: vi.fn(),
 }));
 
-vi.mock("@/lib/organization-context", () => ({ requireOrganizationContext: mocks.requireOrganizationContext, assertOrganizationContextInTransaction: vi.fn() }));
+vi.mock("@/lib/organization-context", () => ({
+  requireOrganizationContext: mocks.requireOrganizationContext,
+  assertOrganizationContextInTransaction: vi.fn(),
+  withTenantTransaction: vi.fn(async (_context: unknown, callback: (tx: unknown) => unknown) => callback({})),
+}));
 vi.mock("@/lib/db", () => ({ getDb: mocks.getDb }));
 vi.mock("@/lib/renewal-whatsapp-service", () => ({ prepareRenewalWhatsAppContactForContext: mocks.prepareContact, prepareRenewalQuoteShareForContext: mocks.prepareQuote }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
