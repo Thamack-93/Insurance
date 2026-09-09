@@ -10,7 +10,6 @@ import { formatCurrency } from "@/lib/money";
 import { getRenewalStageTone, policyTypeLabel, renewalStageLabel } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { RenewalBoardCard, RenewalBoardColumn, RenewalBoardData } from "@/lib/renewal-board";
-import { RENEWAL_BOARD_COLUMN_PREVIEW } from "@/lib/renewal-board";
 import type { RenewalBoardFilters } from "@/lib/renewal-board.logic";
 import { isTerminalRenewalStage } from "@/lib/renewal-board.logic";
 
@@ -39,7 +38,8 @@ function daysLabel(days: number) {
 }
 
 function RenewalCard({ card }: { card: RenewalBoardCard }) {
-  const overdue = card.daysUntilRenewal < 0;
+  const closed = isTerminalRenewalStage(card.stage);
+  const overdue = !closed && card.daysUntilRenewal < 0;
   const captureHref = card.canCapture ? `/policies/new?renewalFrom=${card.policyId}` : undefined;
 
   return (
@@ -76,7 +76,7 @@ function RenewalCard({ card }: { card: RenewalBoardCard }) {
           <dt className="sr-only">Vencimiento</dt>
           <dd className="font-mono text-xs">{formatDate(card.endDate)}</dd>
           <dd className={cn("text-xs", overdue ? "text-destructive" : "text-muted-foreground")}>
-            {daysLabel(card.daysUntilRenewal)}
+            {closed ? `Cerró ${formatDate(card.endDate)}` : daysLabel(card.daysUntilRenewal)}
           </dd>
         </div>
         <div>
@@ -111,8 +111,6 @@ function RenewalCard({ card }: { card: RenewalBoardCard }) {
 }
 
 function BoardColumn({ column }: { column: RenewalBoardColumn }) {
-  const hidden = column.count - column.cards.length;
-
   return (
     <section
       aria-label={`${renewalStageLabel(column.stage)}: ${column.count} renovaciones`}
@@ -147,12 +145,6 @@ function BoardColumn({ column }: { column: RenewalBoardColumn }) {
               <RenewalCard key={card.policyId} card={card} />
             ))}
           </ul>
-          {hidden > 0 ? (
-            <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
-              Y {hidden} más. Acota la ventana o el responsable para verlas; se muestran las {RENEWAL_BOARD_COLUMN_PREVIEW} más
-              próximas a vencer.
-            </p>
-          ) : null}
         </>
       ) : (
         <p className="px-3 py-8 text-center text-sm text-muted-foreground">Sin renovaciones en esta etapa.</p>

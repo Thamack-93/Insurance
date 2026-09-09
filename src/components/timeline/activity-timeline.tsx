@@ -72,6 +72,11 @@ const defaultIcon: IconTone = { icon: Activity, tone: "bg-muted text-muted-foreg
 const actionLabelMap: Record<string, string> = {
   CREATE: "Creado",
   UPDATE: "Actualizado",
+  CREATE_CLAIM_REQUIREMENT: "Requisito de siniestro agregado",
+  UPDATE_CLAIM_REQUIREMENT: "Requisito de siniestro actualizado",
+  DELETE_CLAIM_REQUIREMENT: "Requisito de siniestro eliminado",
+  LINK_CLAIM_REQUIREMENT_DOCUMENT: "Documento vinculado al requisito",
+  UNLINK_CLAIM_REQUIREMENT_DOCUMENT: "Documento desvinculado del requisito",
   DELETE: "Eliminado",
   PAY: "Pago registrado",
   PAID: "Pago registrado",
@@ -125,6 +130,7 @@ function lookupAction(action: string): IconTone {
 
 function formatActionLabel(action: string) {
   const upper = action.toUpperCase();
+  if (actionLabelMap[upper]) return actionLabelMap[upper];
   for (const key of Object.keys(actionLabelMap)) {
     if (upper === key || upper.startsWith(`${key}_`) || upper.startsWith(key)) {
       return actionLabelMap[key];

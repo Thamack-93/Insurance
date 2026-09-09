@@ -32,6 +32,7 @@ import { WhatsAppReminderButton } from "@/components/receipts/whatsapp-reminder-
 export default async function ReceiptDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
   const query = (await searchParams) ?? {};
+  const quickPaymentRequested = query.quickPayment === "1";
   const returnTo = normalizeReturnTo(typeof query.returnTo === "string" ? query.returnTo : undefined, "/receipts");
   const scope = await requireOrganizationPortfolioReadScope();
   const isAdmin = scope.membershipRole !== "AGENT";
@@ -99,6 +100,7 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
                     policy: { policyNumber: receipt.policy.policyNumber },
                     endorsement: receipt.endorsement ? { endorsementNumber: receipt.endorsement.endorsementNumber, reference: receipt.endorsement.reference } : undefined,
                   }}
+                  initialOpen={quickPaymentRequested}
                 />
               ) : null}
               {receipt.status === "PENDING" || receipt.status === "OVERDUE" ? (

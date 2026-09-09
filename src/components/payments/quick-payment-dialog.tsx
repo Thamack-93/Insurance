@@ -29,11 +29,12 @@ type QuickPaymentDialogProps = {
   };
   onPaymentComplete?: () => void;
   className?: string;
+  initialOpen?: boolean;
 };
 
-export function QuickPaymentDialog({ receipt, onPaymentComplete, className }: QuickPaymentDialogProps) {
+export function QuickPaymentDialog({ receipt, onPaymentComplete, className, initialOpen = false }: QuickPaymentDialogProps) {
   const router = useRouter();
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(initialOpen);
   const [isPending, startTransition] = useTransition();
   const [paidDate, setPaidDate] = useState(formatDateInput(today()));
 
@@ -69,7 +70,7 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete, className }: Qu
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogTrigger render={<Button size="sm" className={cn("gap-2", className)} />}>
         <CreditCard className="h-4 w-4" />
-        Pagar
+        Registrar pago
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
@@ -158,10 +159,11 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete, className }: Qu
               onClick={handleQuickPayment}
               disabled={isPending}
               className="flex-1"
+              aria-label={`Registrar pago de ${formatCurrency(receipt.amount, receipt.currency)}`}
             >
               {isPending
                 ? "Procesando..."
-                : `Pagar ${formatCurrency(receipt.amount, receipt.currency)}`}
+                : `Registrar pago · ${formatCurrency(receipt.amount, receipt.currency)}`}
             </Button>
             <Button variant="outline" onClick={() => setIsOpen(false)} disabled={isPending}>
               Cancelar

@@ -6,12 +6,31 @@ const claimOperationalWhere = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/portfolio-access", () => ({ claimOperationalWhere }));
 vi.mock("@/lib/db", () => ({ getDb: vi.fn() }));
 
-import { getClaimChecklistSummary, updateClaimChecklistStatus } from "@/lib/claim-checklists";
+import { getClaimChecklistSummary, updateClaimChecklistStatus, checklistTimestamps, createCustomClaimRequirementCode } from "@/lib/claim-checklists";
+import { isClaimChecklistPending, CLAIM_CHECKLIST_STATUS_LABELS } from "@/lib/claim-checklist-values";
 
 describe("claim checklist metadata", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     claimOperationalWhere.mockReturnValue({ ownerId: "agent-1" });
+  });
+
+  it("defines pending states and Spanish presentation labels", () => {
+    expect(isClaimChecklistPending("MISSING")).toBe(true);
+    expect(isClaimChecklistPending("REQUESTED")).toBe(true);
+    expect(isClaimChecklistPending("RECEIVED")).toBe(false);
+    expect(CLAIM_CHECKLIST_STATUS_LABELS.WAIVED).toBe("No aplica");
+  });
+
+  it("keeps only the timestamp represented by the new state", () => {
+    const now = new Date("2026-09-08T12:00:00.000Z");
+    expect(checklistTimestamps("REQUESTED", now)).toEqual({ requestedAt: now, receivedAt: null, waivedAt: null });
+    expect(checklistTimestamps("RECEIVED", now)).toEqual({ requestedAt: null, receivedAt: now, waivedAt: null });
+    expect(checklistTimestamps("MISSING", now)).toEqual({ requestedAt: null, receivedAt: null, waivedAt: null });
+  });
+
+  it("generates an internal custom code", () => {
+    expect(createCustomClaimRequirementCode()).toMatch(/^CUSTOM:[0-9a-f-]{36}$/);
   });
 
   it("merges the GMM template without creating records during a read", async () => {
@@ -96,5 +115,18 @@ describe("claim checklist metadata", () => {
     expect(serialized).not.toContain("diagnosis");
     expect(serialized).not.toContain("notes");
     expect(serialized).not.toContain("content");
+  });
+
+  it("does not rewrite or audit a repeated status", async () => {
+    const client = {
+      claim: { findFirst: vi.fn().mockResolvedValue({ id: "claim-1", status: "OPEN", policy: { policyType: "AUTO" } }) },
+      claimChecklistItem: {
+        findUnique: vi.fn().mockResolvedValue({ id: "item-1", status: "RECEIVED", updatedAt: new Date() }),
+        upsert: vi.fn(),
+      },
+    };
+    const result = await updateClaimChecklistStatus({ claimId: "claim-1", requirementCode: "adjuster_evidence", status: "RECEIVED" }, "org-a", "agent-1", client as never);
+    expect(result?.id).toBe("item-1");
+    expect(client.claimChecklistItem.upsert).not.toHaveBeenCalled();
   });
 });

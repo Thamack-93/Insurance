@@ -25,9 +25,6 @@ import {
  */
 export const RENEWAL_BOARD_LIMIT = 400;
 
-/** Tarjetas visibles por columna antes de resumir el resto. */
-export const RENEWAL_BOARD_COLUMN_PREVIEW = 25;
-
 export type RenewalBoardCard = {
   organizationId: string;
   policyId: string;
@@ -69,6 +66,7 @@ export type RenewalBoardData = {
   total: number;
   stalledCount: number;
   truncated: boolean;
+  error?: string;
 };
 
 const renewalBoardInclude = {
@@ -205,7 +203,10 @@ export async function loadRenewalBoard(
       return {
         stage,
         count: stageCards.length,
-        cards: stageCards.slice(0, RENEWAL_BOARD_COLUMN_PREVIEW),
+        // Keep every loaded card reachable. The loader still caps pathological
+        // datasets and advertises that cap separately; a second per-column
+        // preview cap made valid renewals impossible to discover.
+        cards: stageCards,
         premiumTotal: stageCards.reduce((sum, card) => sum + card.premiumAmount, 0),
         premiumTotalCurrency: currencies.size === 1 ? [...currencies][0] : null,
       };
@@ -219,7 +220,7 @@ export async function loadRenewalBoard(
       truncated,
     };
   } catch (error) {
-    logError("renewal-board.loadRenewalBoard", error, { window: filters.window });
+    logError("renewal-board.loadRenewalBoard", error, { errorCode: "RENEWAL_BOARD_LOAD_FAILED", window: filters.window });
     return {
       columns: RENEWAL_STAGES.map((stage) => ({
         stage,
@@ -232,6 +233,7 @@ export async function loadRenewalBoard(
       total: 0,
       stalledCount: 0,
       truncated: false,
+      error: "RENEWAL_BOARD_LOAD_FAILED",
     };
   }
 }

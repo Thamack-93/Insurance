@@ -33,6 +33,8 @@ export const BASE_STATUS_LABELS = {
   WAITING_INSURER: "Esperando aseguradora",
   WAITING_DOCUMENT: "Esperando documento",
   REQUESTED: "Solicitado",
+  MISSING: "Faltante",
+  WAIVED: "No aplica",
   SENT: "Enviado",
   ACCEPTED: "Aceptado",
   REJECTED: "Rechazado",
@@ -162,6 +164,7 @@ export function getStatusTone(status: string): BadgeTone {
     return "warning";
   }
   if (["IN_PROGRESS", "SENT", "EXPECTED", "REQUESTED"].includes(status)) return "info";
+  if (status === "MISSING") return "warning";
   return "neutral";
 }
 

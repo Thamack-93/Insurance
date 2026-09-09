@@ -418,6 +418,14 @@ export async function getTodayDashboardData() {
     scope.portfolioOwnerId,
     scope.organizationId,
   );
+  // Use the same eligibility rules as the renewal destination list. A raw
+  // policy count includes records whose latest receipt or lifecycle makes
+  // them ineligible, which caused Hoy and Operations to disagree.
+  const upcomingRenewalPoliciesPromise = loadEligibleRenewalPolicies(
+    { endDate: { gte: now, lte: in30 } },
+    scope.portfolioOwnerId,
+    scope.organizationId,
+  );
 
   const [
     activePolicies,
@@ -425,7 +433,7 @@ export async function getTodayDashboardData() {
     newPoliciesPrevMonth,
     renewalsMonth,
     renewalsPrevMonth,
-    renewals30,
+    upcomingRenewalPolicies,
     pendingMonthAgg,
     pendingPrevMonthAgg,
     commissionMonthActual,
@@ -451,7 +459,7 @@ export async function getTodayDashboardData() {
     db.policy.count({
       where: { ...policyWhere, status: "ACTIVE", endDate: { gte: prevMonthStart, lte: prevMonthEnd } },
     }),
-    db.policy.count({ where: { ...policyWhere, status: "ACTIVE", endDate: { gte: now, lte: in30 } } }),
+    upcomingRenewalPoliciesPromise,
     db.receipt.aggregate({
       where: { ...receiptWhere, dueDate: { gte: monthStart, lte: monthEnd }, status: { in: ["PENDING", "OVERDUE"] } },
       _sum: { amount: true },
@@ -568,7 +576,7 @@ export async function getTodayDashboardData() {
         spark: newPoliciesSpark,
       },
       renewals: {
-        value: renewals30,
+        value: upcomingRenewalPolicies.length,
         delta: pctChange(renewalsMonth, renewalsPrevMonth),
         spark: renewalsSpark,
       },
@@ -609,7 +617,7 @@ export async function getTodayDashboardData() {
       status: policy.status,
     })),
     alerts: [
-      { id: "renewals", label: "Renovaciones próximas", detail: "Próximos 30 días", count: renewals30, tone: "warning" as const, href: "/operations?view=renewals" },
+      { id: "renewals", label: "Renovaciones próximas", detail: "Próximos 30 días", count: upcomingRenewalPolicies.length, tone: "warning" as const, href: "/operations?view=renewals" },
       { id: "overdue", label: "Cobros vencidos", detail: "Requieren atención", count: overdueReceiptsCount, tone: "critical" as const, href: "/receipts?tab=cobrar" },
       { id: "expired", label: "Renovaciones vencidas", detail: "Sin resolver", count: overdueRenewalPolicies.length, tone: "critical" as const, href: "/operations?view=renewals" },
       { id: "tasks", label: "Pendientes abiertos", detail: "Por resolver", count: openTasksCount, tone: "information" as const, href: "/operations?view=pending" },

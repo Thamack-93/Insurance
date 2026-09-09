@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowUpRight, FileSignature, FileUp, Plus, ReceiptText } from "@/components/icons";
 import { getSession } from "@/lib/auth";
-import { getTodayDashboardData, getTodayData } from "@/lib/dashboard-queries";
+import { getOnboardingStatus, getTodayData } from "@/lib/dashboard-queries";
 import { formatDate, formatRelativeDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { buildTodayOperationsModel } from "@/lib/today-operations";
@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { todayNavigation } from "@/lib/navigation";
 import { InsightsView } from "@/components/dashboard/insights-view";
-import { AlertsPanel, PolicyActivityChart, PolicyStatusDonut, RecentPoliciesTable, TodayMetricCards } from "@/components/dashboard/today-dashboard";
+import { OnboardingChecklist } from "@/components/dashboard/onboarding-checklist";
 import {
   EmptyOperationalState,
   EntityMeta,
@@ -36,7 +36,7 @@ export default async function TodayPage({ searchParams }: { searchParams?: Promi
     );
   }
 
-  const [data, session, dashboard] = await Promise.all([getTodayData(), getSession(), getTodayDashboardData()]);
+  const [data, session, onboarding] = await Promise.all([getTodayData(), getSession(), getOnboardingStatus()]);
   const model = buildTodayOperationsModel(data, { name: session?.name });
 
   return (
@@ -61,6 +61,8 @@ export default async function TodayPage({ searchParams }: { searchParams?: Promi
         }
       />
 
+      {!onboarding.complete && !onboarding.dismissed ? <OnboardingChecklist status={onboarding} role={session?.role} /> : null}
+
       {/* Zona primaria: lo que exige una acción hoy. Se envuelve en una
           superficie propia con acento para que pese más que el contexto. */}
       <section
@@ -74,10 +76,7 @@ export default async function TodayPage({ searchParams }: { searchParams?: Promi
 
         <OperationalSummary metrics={model.summaryMetrics} />
 
-        <div className="grid gap-4 xl:grid-cols-3">
-          <div className="xl:col-span-2"><FocusQueue items={model.focusItems} /></div>
-          <AlertsPanel alerts={dashboard.alerts} />
-        </div>
+        <FocusQueue items={model.focusItems} />
 
         <div className="grid gap-4 lg:grid-cols-3">
           <OperationalSection
@@ -138,25 +137,6 @@ export default async function TodayPage({ searchParams }: { searchParams?: Promi
             <Link href="/tasks/new" className={cn(buttonVariants({ variant: "ghost" }), "min-h-11 justify-start sm:ml-auto sm:w-auto")}><FileSignature className="size-4" />Crear pendiente</Link>
           </div>
         </section>
-      </section>
-
-      {/* Zona secundaria: contexto informativo del mes, sin marco de acento. */}
-      <section aria-labelledby="today-context-zone" className="space-y-4">
-        <div className="flex items-center gap-3">
-          <h2 id="today-context-zone" className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-            Contexto del mes
-          </h2>
-          <span className="h-px flex-1 bg-border" aria-hidden />
-        </div>
-
-        <TodayMetricCards metrics={dashboard.metrics} prevMonthLabel={dashboard.prevMonthLabel} />
-
-        <div className="grid items-stretch gap-4 xl:grid-cols-3">
-          <div className="xl:col-span-2"><PolicyActivityChart data={dashboard.activity} captureData={dashboard.captureActivity} /></div>
-          <PolicyStatusDonut data={dashboard.statusDistribution} />
-        </div>
-
-        <RecentPoliciesTable policies={dashboard.recentPolicies} />
       </section>
 
       <div className="sr-only" aria-live="polite">

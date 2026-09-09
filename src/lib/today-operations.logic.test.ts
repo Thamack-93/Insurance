@@ -98,7 +98,7 @@ describe("today operations presentation logic", () => {
 
     expect(model.greeting).toBe("Buenas tardes, Pedro");
     expect(model.summary).toContain("Tienes 0 acciones");
-    expect(model.summary).toContain("0 afectan a clientes hoy");
+    expect(model.summary).toContain("0 recibos vencen hoy");
     expect(model.summaryMetrics).toHaveLength(6);
     expect(model.summaryMetrics.map((metric) => metric.label)).toEqual([
       "Vencidos",

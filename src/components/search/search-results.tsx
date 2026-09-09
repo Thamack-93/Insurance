@@ -44,7 +44,7 @@ const groupOrder: SearchResultType[] = [
 ];
 
 export const SearchResults = memo(function SearchResults() {
-  const { searchResults, isSearching, searchQuery, clearSearch } = useSearch();
+  const { searchResults, isSearching, searchQuery, clearSearch, activeResultIndex } = useSearch();
   const router = useRouter();
 
   if (!searchQuery) return null;
@@ -56,8 +56,10 @@ export const SearchResults = memo(function SearchResults() {
     grouped.set(r.type, arr);
   }
 
+  let flatIndex = -1;
+
   return (
-    <div className="absolute left-0 right-0 top-full z-50 mt-2 max-h-[420px] overflow-y-auto rounded-md border bg-popover shadow-lg">
+    <div id="global-search-results" role="listbox" className="absolute left-0 right-0 top-full z-50 mt-2 max-h-[420px] overflow-y-auto rounded-md border bg-popover shadow-lg">
       <div className="border-b p-3">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Search className="size-4" />
@@ -82,10 +84,16 @@ export const SearchResults = memo(function SearchResults() {
                   <div className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     {entityLabels[type]}
                   </div>
-                  {items.map((result) => (
+                  {items.map((result) => {
+                    flatIndex += 1;
+                    const resultIndex = flatIndex;
+                    return (
                     <button
                       key={result.id}
-                      className="flex w-full items-start gap-3 px-4 py-2 text-left transition-colors hover:bg-muted/40"
+                      id={`global-search-result-${resultIndex}`}
+                      type="button"
+                      data-search-result
+                      className={`flex w-full items-start gap-3 px-4 py-2 text-left transition-colors hover:bg-muted/40 ${activeResultIndex === resultIndex ? "bg-muted/60" : ""}`}
                       onClick={() => {
                         router.push(result.href);
                         clearSearch();
@@ -114,7 +122,8 @@ export const SearchResults = memo(function SearchResults() {
                         )}
                       </div>
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
               );
             })}

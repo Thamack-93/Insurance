@@ -1416,7 +1416,7 @@ async function executeDraftPayload(payload: AssistantActionDraftPayload, organiz
         claimId: values.claimId,
         requirementCode: values.requirementCode,
         status: values.status as (typeof CLAIM_CHECKLIST_STATUSES)[number],
-      }, organizationId, user.role === "ADMIN" ? undefined : user.id);
+      }, organizationId, user.role === "ADMIN" ? undefined : user.id, undefined, user.id);
       return updated
         ? { ok: true, id: updated.id, redirectTo: `/claims/${values.claimId}`, message: "Checklist del siniestro actualizado." }
         : errorResult("No se pudo actualizar el requisito del siniestro.");
