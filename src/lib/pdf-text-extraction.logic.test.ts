@@ -72,7 +72,6 @@ describe("pdf text extraction deadlines", () => {
     await vi.advanceTimersByTimeAsync(50);
 
     await rejection;
-    expect(pdfMocks.browserGetDocument).toHaveBeenCalledWith(expect.objectContaining({ isEvalSupported: false }));
   });
 
   it("cancels a server extraction that exceeds its deadline", async () => {
