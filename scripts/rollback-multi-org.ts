@@ -5,6 +5,7 @@ import { PROTECTED_TENANT_TABLES, BOOTSTRAP_ORGANIZATION_ID } from "../src/lib/t
 import { assertDisposableCertificationTarget } from "./tenant-certification-target.mjs";
 
 const ROLLBACK_LOCK = "policydesk-multi-org-transition-v3";
+const ROLLBACK_COMPENSATION_VERSION = "20260831010000_multi_tenant_rls_cutover->singleton-v1";
 
 function directDatabaseUrl() {
   const value = process.env.DATABASE_ADMIN_URL?.trim();
@@ -20,6 +21,9 @@ function ident(value: string) {
 
 async function main() {
   if (process.env.ENABLE_TENANT_RLS_ROLLBACK !== "1") throw new Error("ENABLE_TENANT_RLS_ROLLBACK=1 es obligatorio.");
+  if (process.env.TENANT_RLS_ROLLBACK_VERSION?.trim() !== ROLLBACK_COMPENSATION_VERSION) {
+    throw new Error(`TENANT_RLS_ROLLBACK_VERSION=${ROLLBACK_COMPENSATION_VERSION} es obligatorio.`);
+  }
   const databaseUrl = directDatabaseUrl();
   if (process.env.TENANT_ISOLATION_TEST_DB === "1") assertDisposableCertificationTarget(databaseUrl);
   const pool = new Pool({ connectionString: databaseUrl, max: 1, application_name: "policydesk-multi-org-rollback" });
@@ -116,7 +120,7 @@ async function main() {
     await client.query('CREATE TRIGGER "OrganizationMembership_transition_guard" BEFORE INSERT OR UPDATE OR DELETE ON "OrganizationMembership" FOR EACH ROW EXECUTE FUNCTION policydesk_guard_singleton_membership()');
     await client.query('UPDATE "PlatformRuntimeState" SET "writeMode" = \'MAINTENANCE\', "reason" = \'break-glass singleton rollback\', "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = 1');
     await client.query("COMMIT");
-    console.log(`Singleton rollback PASS: ${PROTECTED_TENANT_TABLES.length} tenant tables have RLS disabled and transition barriers restored.`);
+    console.log(`Singleton rollback PASS (${ROLLBACK_COMPENSATION_VERSION}): ${PROTECTED_TENANT_TABLES.length} tenant tables have RLS disabled and transition barriers restored.`);
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     console.error(error instanceof Error ? error.message : "POLICYDESK_MULTI_ORG_ROLLBACK_FAILED");

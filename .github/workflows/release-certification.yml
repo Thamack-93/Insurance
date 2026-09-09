@@ -349,7 +349,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: refs/heads/main
+          ref: ${{ needs.resolve-ref.outputs.certified_sha }}
           fetch-depth: 1
       - name: Record immutable Production verifier SHA
         id: source
@@ -369,7 +369,7 @@ jobs:
           mkdir -p artifacts/production-verification
           node --import tsx scripts/verify-production.ts --json > artifacts/production-verification/production.json
           exit_code=$?
-          node -e 'const fs=require("node:fs"); const p="artifacts/production-verification/production.json"; let r={status:"BLOCKED"}; try { r=JSON.parse(fs.readFileSync(p,"utf8")); } catch {} console.log(`status=${r.status || "BLOCKED"}`); fs.appendFileSync(process.env.GITHUB_OUTPUT, `status=${r.status || "BLOCKED"}\nexit_code=${process.env.EXIT_CODE || ""}\n`);'
+          node -e 'const fs=require("node:fs"); const p="artifacts/production-verification/production.json"; let r={status:"BLOCKED"}; try { r=JSON.parse(fs.readFileSync(p,"utf8")); } catch {} console.log(`status=${r.status || "BLOCKED"}`); fs.appendFileSync(process.env.GITHUB_OUTPUT, `status=${r.status || "BLOCKED"}\n`);'
           echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
           exit 0
       - name: Upload Production verification evidence
@@ -381,7 +381,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Fail certification unless Production verifier is PASS
-        if: steps.verify.outputs.status != 'PASS'
+        if: steps.verify.outputs.status != 'PASS' || steps.verify.outputs.exit_code != '0'
         run: exit 1
 
   report:
