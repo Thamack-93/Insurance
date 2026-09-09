@@ -206,7 +206,7 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
       const restored = await restoreVerifiedBackup({ targetDatabaseUrl: targetUrl, plaintext: valid.plaintext, manifest: valid.manifest });
       expect(restored.tableCounts.totalRows).toBeGreaterThan(0);
       expect(restored.triggerMode).toBe("session_replication_role");
-      expect(await scalarCount(targetUrl, "Plan")).toBe(1);
+      expect(await scalarCount(targetUrl, "Plan")).toBe(await scalarCount(sourceUrl, "Plan"));
       expect(await scalarCount(targetUrl, "OrganizationSubscription")).toBe(1);
       expect(await scalarCount(targetUrl, "BillingCharge")).toBe(1);
       const orchestrationReport = await runBackupRestoreDrill({
