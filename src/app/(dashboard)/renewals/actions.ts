@@ -1,6 +1,7 @@
 "use server";
 
 import type { Prisma } from "@/generated/prisma/client";
+import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { assertOrganizationContextInTransaction, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
