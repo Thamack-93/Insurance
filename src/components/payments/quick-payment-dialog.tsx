@@ -70,7 +70,7 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete, className, init
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogTrigger render={<Button size="sm" className={cn("gap-2", className)} />}>
         <CreditCard className="h-4 w-4" />
-        Registrar pago
+        Pagar
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
@@ -159,11 +159,11 @@ export function QuickPaymentDialog({ receipt, onPaymentComplete, className, init
               onClick={handleQuickPayment}
               disabled={isPending}
               className="flex-1"
-              aria-label={`Registrar pago de ${formatCurrency(receipt.amount, receipt.currency)}`}
+              aria-label={`Pagar ${formatCurrency(receipt.amount, receipt.currency)}`}
             >
               {isPending
                 ? "Procesando..."
-                : `Registrar pago · ${formatCurrency(receipt.amount, receipt.currency)}`}
+                : `Pagar ${formatCurrency(receipt.amount, receipt.currency)}`}
             </Button>
             <Button variant="outline" onClick={() => setIsOpen(false)} disabled={isPending}>
               Cancelar
