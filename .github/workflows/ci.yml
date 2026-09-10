@@ -53,6 +53,18 @@ jobs:
       - name: Check tenant read scope
         run: npm run check:tenant-read-scope
 
+      - name: Check tenant DAL inventory
+        run: npm run check:tenant-dal:strict
+
+      - name: Check API security manifest
+        run: npm run check:api-security
+
+      - name: Check Server Action authorization
+        run: npm run check:server-actions
+
+      - name: Check activity-log tenant scope
+        run: npm run check:activity-log-scope
+
       - name: Check organization metadata hardcodes
         run: npm run check:organization-metadata-hardcodes
 
@@ -66,7 +78,7 @@ jobs:
         run: npm run test:unit
 
   tenant-isolation:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -78,6 +90,7 @@ jobs:
       TENANT_ISOLATION_DB_NAME: "policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}"
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
       DATABASE_URL_UNPOOLED: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      DATABASE_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
       SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
       SESSION_SECRET: tenant-isolation-ci-secret-minimum-32-characters
       VERCEL_ENV: ""
@@ -87,6 +100,18 @@ jobs:
       PLAYWRIGHT_HOST: localhost
       PLAYWRIGHT_BASE_URL: http://localhost:4173
       PORT: "4173"
+      TENANT_RLS_APP_ROLE: policydesk_app
+      TENANT_RLS_ORG_A: org_legacy_singleton_0001
+      TENANT_RLS_ORG_B: org_pedro_gomez_0001
+      PLATFORM_NORA_ENABLED: "1"
+      PLATFORM_IMPORTS_ENABLED: "1"
+      PLATFORM_EXPORTS_ENABLED: "1"
+      PLATFORM_UPLOADS_ENABLED: "1"
+      PLATFORM_EMAIL_ENABLED: "1"
+      PLATFORM_TELEGRAM_ENABLED: "1"
+      PLATFORM_WHATSAPP_ENABLED: "1"
+      PLATFORM_QUALITAS_ENABLED: "0"
+      QUALITAS_PRODUCTION_CERTIFIED: "0"
     services:
       postgres:
         image: postgres:16-alpine
@@ -121,9 +146,11 @@ jobs:
           export PGPASSWORD=postgres
           db_name="${TENANT_ISOLATION_DB_NAME}"
           createdb -h 127.0.0.1 -U postgres "$db_name"
+          fingerprint="$(printf 'local-postgres:%s:%s:%s' "$TENANT_ISOLATION_RUN_ID" "$db_name" '127.0.0.1' | sha256sum | awk '{print $1}')"
+          printf 'TENANT_ISOLATION_FINGERPRINT=%s\n' "$fingerprint" >> "$GITHUB_ENV"
 
       - name: Apply migrations to disposable PostgreSQL
-        run: npx prisma migrate deploy
+        run: npm run db:migrate:singleton-ci
 
       - name: Mark migrated tenant database
         shell: bash
@@ -164,8 +191,61 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         timeout-minutes: 8
         run: npx playwright install chromium
-      - name: Tenant isolation Chromium E2E
+      - name: Enter maintenance mode for disposable RLS cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          psql -h 127.0.0.1 -U postgres -d "$TENANT_ISOLATION_DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'UPDATE "PlatformRuntimeState" SET "writeMode" = '\''MAINTENANCE'\'', "reason" = '\''tenant isolation certification'\'', "updatedAt" = now() WHERE "id" = 1;'
+      - name: Apply committed RLS cutover on disposable PostgreSQL
+        run: ENABLE_TENANT_RLS_CUTOVER=1 npm run cutover:multi-org
+      - name: Provision restricted runtime credential for post-RLS browser smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          psql -h 127.0.0.1 -U postgres -d "$TENANT_ISOLATION_DB_NAME" -v ON_ERROR_STOP=1 \
+            -c "ALTER ROLE policydesk_app PASSWORD 'tenant-isolation-runtime-password';"
+          runtime_url="postgresql://policydesk_app:tenant-isolation-runtime-password@127.0.0.1:5432/${TENANT_ISOLATION_DB_NAME}?schema=public"
+          printf 'DATABASE_URL=%s\n' "$runtime_url" >> "$GITHUB_ENV"
+          printf 'DATABASE_URL_UNPOOLED=%s\n' "$runtime_url" >> "$GITHUB_ENV"
+      - name: Run exact-role RLS tests
+        run: npm run test:tenant-rls
+      - name: Check Prisma drift after cutover
+        run: npm run db:check-drift
+      - name: Reopen disposable tenant after maintenance verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          psql -h 127.0.0.1 -U postgres -d "$TENANT_ISOLATION_DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'UPDATE "PlatformRuntimeState" SET "writeMode" = '\''OPEN'\'', "reason" = '\''tenant certification E2E'\'', "updatedAt" = now() WHERE "id" = 1;'
+      - name: Tenant isolation Chromium E2E after forced RLS
         run: npx playwright test tests/e2e/tenant-isolation.spec.ts
+      - name: Archive Stage 2 tenant evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p stage2-evidence
+          git rev-parse HEAD > stage2-evidence/deployed-sha.txt
+          set +e
+          node --import tsx scripts/check-tenant-dal-inventory.mjs --json > stage2-evidence/tenant-dal-inventory.json
+          node --import tsx scripts/check-tenant-read-scope.ts --json > stage2-evidence/tenant-read-scope.json
+          node --import tsx scripts/check-tenant-write-scope.ts --json > stage2-evidence/tenant-write-scope.json
+          node scripts/check-api-security-manifest.mjs > stage2-evidence/api-security.txt
+          node scripts/check-server-actions.mjs > stage2-evidence/server-actions.txt
+          set -e
+          cp -R playwright-report stage2-evidence/playwright-report 2>/dev/null || true
+          cp -R test-results stage2-evidence/test-results 2>/dev/null || true
+      - name: Upload Stage 2 tenant evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage2-tenant-evidence-${{ github.sha }}
+          path: stage2-evidence
+          if-no-files-found: warn
 
       - name: Drop dedicated tenant database
         if: always()
@@ -183,16 +263,32 @@ jobs:
     timeout-minutes: 35
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NODE_ENV: test
+      TENANT_ISOLATION_TEST_DB: "1"
       PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1"
+      TENANT_ISOLATION_RUN_ID: "${{ github.run_id }}_${{ github.run_attempt }}"
+      TENANT_ISOLATION_DB_NAME: "policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}"
       PLAYWRIGHT_USE_PRODUCTION_SERVER: "1"
       PLAYWRIGHT_HOST: localhost
       PLAYWRIGHT_BASE_URL: http://localhost:4173
       PORT: "4173"
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      DATABASE_URL_UNPOOLED: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      DATABASE_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
       SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
       SESSION_SECRET: ci-session-secret-minimum-32-characters-long
       RESTORE_INTEGRATION: "1"
       RESTORE_INTEGRATION_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
+      VERCEL_ENV: ""
+      PLATFORM_NORA_ENABLED: "1"
+      PLATFORM_IMPORTS_ENABLED: "1"
+      PLATFORM_EXPORTS_ENABLED: "1"
+      PLATFORM_UPLOADS_ENABLED: "1"
+      PLATFORM_EMAIL_ENABLED: "1"
+      PLATFORM_TELEGRAM_ENABLED: "1"
+      PLATFORM_WHATSAPP_ENABLED: "1"
+      PLATFORM_QUALITAS_ENABLED: "0"
+      QUALITAS_PRODUCTION_CERTIFIED: "0"
     services:
       postgres:
         image: postgres:16-alpine
@@ -223,11 +319,17 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
-      - name: Apply Prisma migrations
-        run: npx prisma migrate deploy
+      - name: Create dedicated certification database
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          createdb -h 127.0.0.1 -U postgres "$TENANT_ISOLATION_DB_NAME"
+          fingerprint="$(printf 'local-postgres:%s:%s:%s' "$TENANT_ISOLATION_RUN_ID" "$TENANT_ISOLATION_DB_NAME" '127.0.0.1' | sha256sum | awk '{print $1}')"
+          echo "TENANT_ISOLATION_FINGERPRINT=$fingerprint" >> "$GITHUB_ENV"
 
-      - name: Check migration drift
-        run: npm run db:check-drift
+      - name: Apply Prisma migrations
+        run: npm run db:migrate:singleton-ci
 
       - name: Check Cycle 1 tenant guards
         run: npm run check:tenant-guards
@@ -277,3 +379,10 @@ jobs:
           path: artifacts/restore-drills
           if-no-files-found: ignore
           retention-days: 90
+
+      - name: Drop dedicated certification database
+        if: always()
+        shell: bash
+        run: |
+          export PGPASSWORD=postgres
+          dropdb -h 127.0.0.1 -U postgres --if-exists "$TENANT_ISOLATION_DB_NAME"

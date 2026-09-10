@@ -13,7 +13,7 @@ import { EmptyState } from "@/components/empty-states/empty-state";
 import { Pagination } from "@/components/lists/pagination";
 import { TableToolbar } from "@/components/tables/table-toolbar";
 import { SortableTableHead } from "@/components/tables/sortable-table-head";
-import { getDb } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/organization-context";
 import { daysUntil, formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
@@ -38,7 +38,6 @@ export default async function PortfolioPage({
   const policyScope = policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const clientScope = clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const receiptScope = receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
-  const db = getDb();
   const now = today();
   const in60 = new Date(now);
   in60.setDate(in60.getDate() + 60);
@@ -92,18 +91,7 @@ export default async function PortfolioPage({
               ? [{ premiumAmount: direction ?? "desc" }, { endDate: "asc" as const }]
               : [{ premiumAmount: "desc" as const }, { endDate: "asc" as const }];
 
-  const [
-    activeCount,
-    pagedPolicies,
-    portfolioAgg,
-    activePolicyCount,
-    activeClientCount,
-    activeInsurerCount,
-    renewalSoonPolicies,
-    dueReceipts,
-    insurerDistribution,
-    topClientsRows,
-  ] = await Promise.all([
+  const directPortfolioData = withTenantTransaction(scope.context, (db) => Promise.all([
     db.policy.count({ where }),
     db.policy.findMany({
       where,
@@ -133,7 +121,6 @@ export default async function PortfolioPage({
           : {}),
       },
     }),
-    renewalSoonPromise,
     db.receipt.findMany({
       where: {
         ...receiptScope,
@@ -159,14 +146,26 @@ export default async function PortfolioPage({
       orderBy: { _sum: { premiumAmount: "desc" } },
       take: 10,
     }),
-  ]);
+  ]));
+  const [directPortfolioValues, renewalSoonPolicies] = await Promise.all([directPortfolioData, renewalSoonPromise]);
+  const [
+    activeCount,
+    pagedPolicies,
+    portfolioAgg,
+    activePolicyCount,
+    activeClientCount,
+    activeInsurerCount,
+    dueReceipts,
+    insurerDistribution,
+    topClientsRows,
+  ] = directPortfolioValues;
   const topClientIds = topClientsRows.map((row) => row.clientId);
   const topClientNames = topClientIds.length
     ? new Map(
-        (await db.client.findMany({
+        (await withTenantTransaction(scope.context, (db) => db.client.findMany({
           where: { ...clientScope, id: { in: topClientIds } },
           select: { id: true, fullName: true },
-        })).map((c) => [c.id, c.fullName] as const),
+        }))).map((c) => [c.id, c.fullName] as const),
       )
     : new Map<string, string>();
   const topClientsByExposure = topClientsRows.map((row) => ({
@@ -180,10 +179,10 @@ export default async function PortfolioPage({
   const insurerIds = insurerDistribution.map((row) => row.insurerId);
   const insurerNames = insurerIds.length
     ? new Map(
-        (await db.insurer.findMany({
+        (await withTenantTransaction(scope.context, (db) => db.insurer.findMany({
           where: { id: { in: insurerIds } },
           select: { id: true, name: true },
-        })).map((i) => [i.id, i.name] as const),
+        }))).map((i) => [i.id, i.name] as const),
       )
     : new Map<string, string>();
   const activeByInsurer = insurerDistribution
@@ -196,7 +195,7 @@ export default async function PortfolioPage({
     .sort((a, b) => b.value - a.value)
     .slice(0, 10);
   const selectedInsurer = insurerFilter
-    ? await db.insurer.findFirst({
+    ? await withTenantTransaction(scope.context, (db) => db.insurer.findFirst({
         where: {
           id: insurerFilter,
           ...(scope.portfolioOwnerId || insurerFilter
@@ -204,7 +203,7 @@ export default async function PortfolioPage({
             : {}),
         },
         select: { id: true, name: true },
-      })
+      }))
     : null;
   const insurerOptions = activeByInsurer.map((insurer) => ({ value: insurer.id, label: insurer.name }));
   const selectedInsurerName = selectedInsurer?.name ?? (insurerFilter ? "Aseguradora seleccionada" : null);

@@ -2,10 +2,11 @@ import "server-only";
 
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
-import { getDb } from "@/lib/db";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import {
   PAYMENT_CLOSE_TOLERANCE,
   reconcileReceiptState,
+  type ReceiptReconciliationResult,
 } from "@/lib/receipt-reconciliation";
 import { isBusinessDateOverdue } from "@/lib/business-dates";
 
@@ -40,8 +41,13 @@ export async function reconcileReceiptById(
   receiptId: string,
   actorId: string,
   client?: DbClient,
-) {
-  const db = client ?? getDb();
+): Promise<ReceiptReconciliationResult> {
+  if (!client) {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => reconcileReceiptById(organizationId, receiptId, actorId, tx));
+  }
+  const db = client;
   const receipt = await db.receipt.findFirst({
     where: { id: receiptId, organizationId },
     include: {
@@ -157,8 +163,17 @@ export async function reconcileReceiptById(
   return snapshot;
 }
 
-export async function recordPayment(input: RecordPaymentInput, client?: DbClient) {
-  const db = client ?? getDb();
+export async function recordPayment(input: RecordPaymentInput, client?: DbClient): Promise<{
+  payment: Prisma.PaymentGetPayload<Prisma.PaymentDefaultArgs>;
+  receipt: Prisma.ReceiptGetPayload<Prisma.ReceiptDefaultArgs>;
+  reconciliation: ReceiptReconciliationResult;
+}> {
+  if (!client) {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== input.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => recordPayment(input, tx));
+  }
+  const db = client;
   const reference = normalizedReference(input.reference);
 
   if (!Number.isFinite(input.amount) || input.amount <= 0) {
@@ -276,8 +291,13 @@ export type RehabilitateReceiptPaymentInput = Omit<RecordPaymentInput, "receiptI
 export async function rehabilitateReceiptPayment(
   input: RehabilitateReceiptPaymentInput,
   client?: DbClient,
-) {
-  const db = client ?? getDb();
+): Promise<{ payment: Prisma.PaymentGetPayload<Prisma.PaymentDefaultArgs>; receipt: Prisma.PolicyGetPayload<Prisma.PolicyDefaultArgs>; reopenedReceiptCount: number }> {
+  if (!client) {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== input.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => rehabilitateReceiptPayment(input, tx));
+  }
+  const db = client;
   const reference = normalizedReference(input.reference);
 
   if (!Number.isFinite(input.amount) || input.amount <= 0) {

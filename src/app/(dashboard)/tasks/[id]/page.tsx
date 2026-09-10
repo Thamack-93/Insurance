@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DeleteWorkItemButton } from "@/components/tasks/delete-task-button";
-import { getDb } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/organization-context";
 import { daysSince, daysUntil, formatDate } from "@/lib/dates";
 import { ActivityTimeline } from "@/components/timeline/activity-timeline";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
@@ -20,32 +20,21 @@ import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function WorkItemDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const db = getDb();
   const scope = await requireOrganizationPortfolioReadScope();
-
-  const workItem = await findWorkItemByRouteId(id, scope.organizationId, db, scope.portfolioOwnerId);
+  const data = await withTenantTransaction(scope.context, async (db) => {
+    const workItem = await findWorkItemByRouteId(id, scope.organizationId, db, scope.portfolioOwnerId);
+    if (!workItem) return { workItem: null, documents: [], activityLogs: [] };
+    const [documents, activityLogs] = await Promise.all([
+      db.document.findMany({ where: { organizationId: scope.organizationId, taskId: workItem.sourceId ?? workItem.id }, orderBy: [{ uploadedAt: "desc" }, { id: "desc" }] }),
+      db.activityLog.findMany({ where: { entityId: { in: [id, workItem.id] }, entityType: "WorkItem", organizationId: scope.organizationId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 10 }),
+    ]);
+    return { workItem, documents, activityLogs };
+  });
+  const { workItem, documents, activityLogs } = data;
 
   if (!workItem) {
     notFound();
   }
-
-  const [documents, activityLogs] = await Promise.all([
-    db.document.findMany({
-      // WorkItem keeps sourceId stable when a legacy Task is normalized, so
-      // this remains a narrow compatibility lookup without loading all docs.
-      where: { organizationId: scope.organizationId, taskId: workItem.sourceId ?? workItem.id },
-      orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
-    }),
-    db.activityLog.findMany({
-      where: {
-        entityId: { in: [id, workItem.id] },
-        entityType: "WorkItem",
-        organizationId: scope.organizationId,
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 10,
-    }),
-  ]);
 
   const isClosed = workItem.status === "RESOLVED" || workItem.status === "CANCELLED" || workItem.status === "ARCHIVED" || workItem.status === "DISMISSED";
   const isOverdue = workItem.dueDate && workItem.dueDate < new Date() && !isClosed;

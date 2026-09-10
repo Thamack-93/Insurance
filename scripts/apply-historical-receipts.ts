@@ -250,6 +250,7 @@ async function reconcileReceipt(organizationId: string, receiptId: string, actor
     } else {
       await db.receiptReconciliationIssue.create({
         data: {
+          organizationId,
           receiptId: receipt.id,
           policyId: receipt.policyId,
           reason,

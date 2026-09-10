@@ -54,7 +54,7 @@ export function ChangePasswordForm() {
           value={newPassword}
           onChange={(e) => setNewPassword(e.target.value)}
           required
-          minLength={8}
+          minLength={12}
         />
       </div>
       <div className="space-y-1">
@@ -66,7 +66,7 @@ export function ChangePasswordForm() {
           value={confirmPassword}
           onChange={(e) => setConfirmPassword(e.target.value)}
           required
-          minLength={8}
+          minLength={12}
         />
       </div>
       <Button type="submit" disabled={pending}>

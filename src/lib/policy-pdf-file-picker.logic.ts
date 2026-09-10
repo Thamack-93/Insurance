@@ -7,7 +7,7 @@ export function validatePolicyPdfFile(file: PolicyPdfFileLike) {
   if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf" && file.type !== "application/octet-stream") {
     return "Solo se aceptan archivos PDF.";
   }
-  if (file.size > 10 * 1024 * 1024) return "Supera el máximo individual de 10 MB.";
+  if (file.size > 15 * 1024 * 1024) return "Supera el máximo individual de 15 MB.";
   return null;
 }
 

@@ -55,7 +55,7 @@ export function PolicyPdfFilePicker({ files, onFilesChange, disabled = false, cl
         >
           <FileUp className="mx-auto size-5 text-muted-foreground" />
           <p className="mt-2 text-sm font-medium">{label}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Selector tradicional o arrastre · hasta {POLICY_PDF_MAX_FILES} archivos · 10 MB c/u</p>
+          <p className="mt-1 text-xs text-muted-foreground">Selector tradicional o arrastre · hasta {POLICY_PDF_MAX_FILES} archivos · 15 MB c/u</p>
         </div>
       ) : null}
       <input ref={inputRef} type="file" accept="application/pdf,.pdf" multiple className="hidden" disabled={disabled} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = ""; }} />

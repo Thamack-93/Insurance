@@ -1,9 +1,9 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { AlertSeverity } from "@/lib/domain-values";
 import { resolveAlertEntityLink } from "@/lib/alert-links";
-import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { mapNotificationStatusToWorkItemStatus, upsertWorkItemFromSource } from "@/lib/work-items";
+import { withTenantOrganization, type TenantTransactionClient } from "@/lib/tenant-dal";
 
 export { notificationLink } from "@/lib/notifications-shared";
 
@@ -40,8 +40,9 @@ export type NotificationFilter = {
  * flows. Best-effort: failures are logged but not thrown so the originating
  * flow keeps working.
  */
-export async function createNotification(input: NotificationInput): Promise<NotificationRecord | null> {
-  const db = getDb();
+export async function createNotification(input: NotificationInput, client?: TenantTransactionClient): Promise<NotificationRecord | null> {
+  if (!client) return withTenantOrganization(input.organizationId, (tx) => createNotification(input, tx));
+  const db = client;
   try {
     const entityType = input.entityType ?? "System";
     const entityId = input.entityId ?? "general";
@@ -72,7 +73,7 @@ export async function createNotification(input: NotificationInput): Promise<Noti
       readAt: alert.readAt,
       createdById: null,
       updatedById: null,
-    });
+    }, db);
     return alert as NotificationRecord;
   } catch (error) {
     logError("notifications.createNotification", error, { type: input.type });
@@ -81,11 +82,10 @@ export async function createNotification(input: NotificationInput): Promise<Noti
 }
 
 export async function getUnreadNotificationCount(organizationId: string): Promise<number> {
-  const db = getDb();
   try {
-    return await db.alert.count({
+    return await withTenantOrganization(organizationId, (db) => db.alert.count({
       where: { organizationId, readAt: null, status: { not: "RESOLVED" } },
-    });
+    }));
   } catch (error) {
     logError("notifications.getUnreadNotificationCount", error);
     return 0;
@@ -93,13 +93,12 @@ export async function getUnreadNotificationCount(organizationId: string): Promis
 }
 
 export async function getUnreadNotifications(organizationId: string, limit = 10): Promise<NotificationRecord[]> {
-  const db = getDb();
   try {
-    const rows = await db.alert.findMany({
+    const rows = await withTenantOrganization(organizationId, (db) => db.alert.findMany({
       where: { organizationId, readAt: null, status: { not: "RESOLVED" } },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: limit,
-    });
+    }));
     return rows as NotificationRecord[];
   } catch (error) {
     logError("notifications.getUnreadNotifications", error);
@@ -112,13 +111,12 @@ export async function getUnreadNotifications(organizationId: string, limit = 10)
  * RESOLVED so dismissed/resolved noise stays out of the tray.
  */
 export async function getRecentNotifications(limit: number, organizationId: string): Promise<NotificationRecord[]> {
-  const db = getDb();
   try {
-    const rows = await db.alert.findMany({
+    const rows = await withTenantOrganization(organizationId, (db) => db.alert.findMany({
       where: { organizationId, status: { not: "RESOLVED" } },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: limit,
-    });
+    }));
     return rows as NotificationRecord[];
   } catch (error) {
     logError("notifications.getRecentNotifications", error);
@@ -137,7 +135,6 @@ export async function getAllNotifications({
   page?: number;
   pageSize?: number;
 }): Promise<{ entries: NotificationRecord[]; total: number }> {
-  const db = getDb();
   const where: Prisma.AlertWhereInput = { organizationId };
   if (filter.type) where.alertType = filter.type;
   if (filter.read === "read") where.readAt = { not: null };
@@ -147,7 +144,7 @@ export async function getAllNotifications({
   const skip = (safePage - 1) * pageSize;
 
   try {
-    const [entries, total] = await Promise.all([
+    const [entries, total] = await withTenantOrganization(organizationId, (db) => Promise.all([
       db.alert.findMany({
         where,
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -155,7 +152,7 @@ export async function getAllNotifications({
         take: pageSize,
       }),
       db.alert.count({ where }),
-    ]);
+    ]));
     return { entries: entries as NotificationRecord[], total };
   } catch (error) {
     logError("notifications.getAllNotifications", error);
@@ -164,14 +161,13 @@ export async function getAllNotifications({
 }
 
 export async function getNotificationTypes(organizationId: string): Promise<string[]> {
-  const db = getDb();
   try {
-    const rows = await db.alert.findMany({
+    const rows = await withTenantOrganization(organizationId, (db) => db.alert.findMany({
       where: { organizationId },
       distinct: ["alertType"],
       select: { alertType: true },
       orderBy: { alertType: "asc" },
-    });
+    }));
     return rows.map((row) => row.alertType);
   } catch (error) {
     logError("notifications.getNotificationTypes", error);

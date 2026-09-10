@@ -1,9 +1,9 @@
 "use server";
 
-import { getDb } from "@/lib/db";
+import type { Prisma } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
-import { assertOrganizationContextInTransaction, requireOrganizationContext } from "@/lib/organization-context";
+import { assertOrganizationContextInTransaction, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { isRenewalStage, isTerminalRenewalStage, resolveRenewalStage } from "@/lib/renewal-board.logic";
 import { closeRenewalFollowUp } from "@/lib/renewal-followups";
 import { renewalStageLabel } from "@/lib/status";
@@ -26,7 +26,7 @@ export async function prepareRenewalWhatsAppContact(input: { policyId: string; c
   try {
     if (!input?.policyId?.trim()) return { outcome: "ERROR", error: "La póliza no es válida." };
     const context = await requireOrganizationContext();
-    const result = await getDb().$transaction((tx) => prepareRenewalWhatsAppContactForContext({ db: tx, context, policyId: input.policyId, capturedPhone: input.capturedPhone }));
+    const result = await withTenantTransaction(context, (tx) => prepareRenewalWhatsAppContactForContext({ db: tx, context, policyId: input.policyId, capturedPhone: input.capturedPhone }));
     revalidatePaths(["/operations", "/activity", "/clients"]);
     return result;
   } catch (error) {
@@ -39,7 +39,7 @@ export async function prepareRenewalQuoteShare(input: { policyId: string; handof
     if (!input?.policyId?.trim()) return { outcome: "ERROR", error: "La póliza no es válida." };
     if (input.handoff !== "NATIVE_SHARE" && input.handoff !== "WHATSAPP_FALLBACK") return { outcome: "ERROR", error: "La forma de compartir no es válida." };
     const context = await requireOrganizationContext();
-    const result = await getDb().$transaction((tx) => prepareRenewalQuoteShareForContext({ db: tx, context, policyId: input.policyId, handoff: input.handoff, capturedPhone: input.capturedPhone }));
+    const result = await withTenantTransaction(context, (tx) => prepareRenewalQuoteShareForContext({ db: tx, context, policyId: input.policyId, handoff: input.handoff, capturedPhone: input.capturedPhone }));
     revalidatePaths(["/operations", "/activity", "/clients"]);
     return result;
   } catch (error) {
@@ -49,23 +49,22 @@ export async function prepareRenewalQuoteShare(input: { policyId: string; handof
 
 export async function markRenewalAsNotContinuing(policyId: string): Promise<MutationResult> {
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
     const userId = context.userId;
 
-    const policy = await db.policy.findFirst({
+    const policy = await withTenantTransaction(context, (tx) => tx.policy.findFirst({
       where: { id: policyId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: userId } } : {}) },
       include: {
         client: { select: { fullName: true } },
       },
-    });
+    }));
 
     if (!policy) {
       return errorResult("La póliza ya no existe.");
     }
 
     const now = new Date();
-    const { workItemCancelled, suggestionCreated } = await db.$transaction(async (tx) => {
+    const { workItemCancelled, suggestionCreated } = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const workItem = await tx.workItem.findFirst({
         where: {
@@ -127,6 +126,7 @@ export async function markRenewalAsNotContinuing(policyId: string): Promise<Muta
       } else {
         await tx.policyRenewalSuggestion.create({
           data: {
+            organizationId: context.organizationId,
             sourcePolicyId: policy.id,
             targetPolicyId: null,
             status: "DECLINED",
@@ -209,11 +209,10 @@ export async function setRenewalStage(policyId: string, stage: string): Promise<
       return markRenewalAsNotContinuing(policyId);
     }
 
-    const db = getDb();
     const context = await requireOrganizationContext();
     const userId = context.userId;
 
-    const policy = await db.policy.findFirst({
+    const policy = await withTenantTransaction(context, (tx) => tx.policy.findFirst({
       where: { id: policyId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: userId } } : {}) },
       select: {
         id: true,
@@ -223,7 +222,7 @@ export async function setRenewalStage(policyId: string, stage: string): Promise<
         client: { select: { fullName: true } },
         sourceRenewalSuggestions: { where: { status: "DECLINED" }, select: { id: true }, take: 1 },
       },
-    });
+    }));
 
     if (!policy) {
       return errorResult("La póliza ya no existe.");
@@ -249,7 +248,7 @@ export async function setRenewalStage(policyId: string, stage: string): Promise<
 
     const now = new Date();
 
-    await db.$transaction(async (tx) => {
+    await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       await tx.policy.update({
         where: { id: policy.id },
@@ -302,18 +301,17 @@ export async function setRenewalStage(policyId: string, stage: string): Promise<
   }
 }
 
-export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId: string): Promise<MutationResult> {
+export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId: string, client?: Prisma.TransactionClient): Promise<MutationResult> {
   try {
     if (sourcePolicyId === targetPolicyId) {
       return errorResult("La póliza origen y la destino no pueden ser la misma.");
     }
 
-    const db = getDb();
     const context = await requireOrganizationContext();
     const userId = context.userId;
 
-    const [sourcePolicy, targetPolicy] = await Promise.all([
-      db.policy.findFirst({
+    const loadPolicies = (tx: Prisma.TransactionClient) => Promise.all([
+      tx.policy.findFirst({
         where: { id: sourcePolicyId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: userId } } : {}) },
         select: {
           id: true,
@@ -324,7 +322,7 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
           status: true,
         },
       }),
-      db.policy.findFirst({
+      tx.policy.findFirst({
         where: { id: targetPolicyId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: userId } } : {}) },
         select: {
           id: true,
@@ -336,6 +334,7 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
         },
       }),
     ]);
+    const [sourcePolicy, targetPolicy] = client ? await loadPolicies(client) : await withTenantTransaction(context, loadPolicies);
 
     if (!sourcePolicy) {
       return errorResult("La póliza origen ya no existe.");
@@ -351,7 +350,7 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
     const familyRootId = sourcePolicy.familyRootId ?? sourcePolicy.id;
     let workItemClosed = false;
 
-    await db.$transaction(async (tx) => {
+    const persist = async (tx: Prisma.TransactionClient) => {
       await assertOrganizationContextInTransaction(tx, context);
       const workItem = await tx.workItem.findFirst({
         where: {
@@ -400,6 +399,7 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
       } else {
         await tx.policyRenewalSuggestion.create({
           data: {
+            organizationId: context.organizationId,
             sourcePolicyId: sourcePolicy.id,
             targetPolicyId: targetPolicy.id,
             status: "ACCEPTED",
@@ -447,7 +447,9 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
         userId,
         db: tx,
       });
-    });
+    };
+    if (client) await persist(client);
+    else await withTenantTransaction(context, persist);
 
     revalidatePaths([
       "/operations",

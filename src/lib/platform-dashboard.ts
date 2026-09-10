@@ -113,7 +113,8 @@ async function tenantMetricStats(organizationIds: string[]): Promise<Map<string,
   // Keep the compatible pre-cutover deployment working. Once FORCE RLS is
   // enabled, the flag is switched with the cutover and only the restricted
   // aggregate function is used.
-  if (process.env.ENABLE_TENANT_RLS_CUTOVER !== "1") {
+  const multiOrganizationRuntime = process.env.ENABLE_TENANT_RLS_CUTOVER === "1" || process.env.PRODUCTION_EXPECTED_TENANT_MODE?.trim() === "multi-org";
+  if (!multiOrganizationRuntime) {
     const [clients, policies] = await Promise.all([
       db.client.groupBy({ by: ["organizationId"], where: { organizationId: { in: organizationIds } }, _count: { _all: true } }),
       db.policy.groupBy({ by: ["organizationId"], where: { organizationId: { in: organizationIds } }, _count: { _all: true } }),

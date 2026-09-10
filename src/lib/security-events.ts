@@ -1,9 +1,9 @@
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { SYSTEM_USER_ID } from "@/lib/auth";
-import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { writeActivityLog } from "@/lib/activity-log";
 import { securityFingerprint } from "@/lib/request-guards";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 
 export type SecurityEventSeverity = "INFO" | "WARNING" | "CRITICAL";
 
@@ -35,8 +35,13 @@ export type SecurityEventInput = {
   organizationId?: string | null;
 };
 
-export async function recordSecurityEvent(input: SecurityEventInput) {
-  const db = input.db ?? getDb();
+export async function recordSecurityEvent(input: SecurityEventInput): Promise<Prisma.AlertGetPayload<Prisma.AlertDefaultArgs> | null> {
+  if (input.organizationId && !input.db) {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== input.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => recordSecurityEvent({ ...input, db: tx }));
+  }
+  const db = input.db ?? (await import("@/lib/db")).getDb();
   const now = new Date();
   const windowStart = new Date(Math.floor(now.getTime() / 60_000) * 60_000);
   const fingerprint = input.fingerprint ?? securityFingerprint(input.entityId ?? input.alertType);

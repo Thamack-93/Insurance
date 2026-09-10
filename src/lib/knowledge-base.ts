@@ -1,12 +1,13 @@
 import "server-only";
 
 import { Prisma } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
 import { getBusinessDateKey, BUSINESS_TIME_ZONE } from "@/lib/business-dates";
 import { hashKnowledgeContent, hashKnowledgeManifest, KNOWLEDGE_INTEGRITY_VERSION } from "@/lib/knowledge-integrity";
 import {
   assertOrganizationContextInTransaction,
   requireOrganizationContext,
+  withTenantTransaction,
+  type TenantDb,
   type OrganizationContext,
 } from "@/lib/organization-context";
 
@@ -277,8 +278,7 @@ export async function createInternalKnowledgeSource(input: {
   if (input.effectiveFrom && input.effectiveTo && input.effectiveTo < input.effectiveFrom) throw new Error("La vigencia final no puede ser anterior a la inicial.");
   const contentHash = hashKnowledgeContent(`${title}\n${version}\n${content}`);
   const manifestHash = hashKnowledgeManifest(title, version, chunks.map((chunk, ordinal) => ({ ...chunk, ordinal, page: chunk.page ?? null })));
-  const db = getDb();
-  return db.$transaction(async (tx) => {
+  return withTenantTransaction(input.context, async (tx) => {
     await assertOrganizationContextInTransaction(tx, input.context, ["OWNER", "ADMIN"]);
     const source = await tx.knowledgeSource.create({
       data: {
@@ -317,17 +317,21 @@ export async function createInternalKnowledgeSource(input: {
 
 export async function listInternalKnowledgeSources(organizationId: string) {
   if (!organizationId) return [];
-  const db = getDb();
-  return db.knowledgeSource.findMany({
+  const context = await requireOrganizationContext();
+  if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  return withTenantTransaction(context, (db) => db.knowledgeSource.findMany({
     where: { organizationId },
     select: { id: true, title: true, insurerName: true, product: true, version: true, status: true, sourceUrl: true, authority: true, reviewedAt: true, effectiveFrom: true, effectiveTo: true, manifestHash: true, integrityVersion: true, integrityVerifiedAt: true, createdAt: true, updatedAt: true, _count: { select: { chunks: true } } },
     orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
     take: 100,
-  });
+  }));
 }
 
 export async function listGeneralKnowledgeSources() {
-  const db = getDb();
+  // General knowledge is platform-global and intentionally outside the tenant
+  // transaction; protected KnowledgeSource/KnowledgeChunk access is always
+  // handled by the tenant DAL below.
+  const db = (await import("@/lib/db")).getDb();
   return db.generalKnowledgeSource.findMany({
     select: { id: true, title: true, product: true, version: true, status: true, sourceUrl: true, authority: true, reviewedAt: true, effectiveFrom: true, effectiveTo: true, manifestHash: true, integrityVersion: true, integrityVerifiedAt: true, createdAt: true, updatedAt: true, _count: { select: { chunks: true } } },
     orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
@@ -336,8 +340,7 @@ export async function listGeneralKnowledgeSources() {
 }
 
 export async function activateInternalKnowledgeSource(context: OrganizationContext, sourceId: string) {
-  const db = getDb();
-  return db.$transaction(async (tx) => {
+  return withTenantTransaction(context, async (tx) => {
     await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
     const source = await tx.knowledgeSource.findFirst({ where: { id: sourceId, organizationId: context.organizationId }, include: { chunks: { orderBy: { ordinal: "asc" }, select: { ordinal: true, content: true, section: true, page: true } } } });
     if (!source) throw new Error("Fuente no encontrada en la organización activa.");
@@ -352,8 +355,7 @@ export async function activateInternalKnowledgeSource(context: OrganizationConte
 }
 
 export async function archiveInternalKnowledgeSource(context: OrganizationContext, sourceId: string) {
-  const db = getDb();
-  return db.$transaction(async (tx) => {
+  return withTenantTransaction(context, async (tx) => {
     await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
     const result = await tx.knowledgeSource.updateMany({ where: { id: sourceId, organizationId: context.organizationId }, data: { status: "ARCHIVED" } });
     if (!result.count) throw new Error("Fuente no encontrada en la organización activa.");
@@ -412,8 +414,7 @@ function textQuery(query: string) {
   return Prisma.sql`websearch_to_tsquery('policydesk_spanish', ${query})`;
 }
 
-async function searchInternal(input: { organizationId: string; question: string; insurerName?: string | null; product?: string | null; sourceId?: string | null; limit: number; includeDraft: boolean; asOfDate: string }) {
-  const db = getDb();
+async function searchInternal(input: { organizationId: string; question: string; insurerName?: string | null; product?: string | null; sourceId?: string | null; limit: number; includeDraft: boolean; asOfDate: string }, db: TenantDb) {
   const searchQuery = buildKnowledgeSearchQuery(input.question);
   const vector = rankVector(Prisma.sql`s."title"`, Prisma.sql`c."section"`, Prisma.sql`c."content"`);
   const document = documentVector(Prisma.sql`c."section"`, Prisma.sql`c."content"`);
@@ -449,8 +450,7 @@ async function searchInternal(input: { organizationId: string; question: string;
   `);
 }
 
-async function searchGeneral(input: { question: string; product?: string | null; limit: number; asOfDate: string }) {
-  const db = getDb();
+async function searchGeneral(input: { question: string; product?: string | null; limit: number; asOfDate: string }, db: TenantDb) {
   const searchQuery = buildKnowledgeSearchQuery(input.question);
   const vector = rankVector(Prisma.sql`s."title"`, Prisma.sql`c."section"`, Prisma.sql`c."content"`);
   const document = documentVector(Prisma.sql`c."section"`, Prisma.sql`c."content"`);
@@ -527,8 +527,7 @@ function deduplicateResults(results: KnowledgeSearchResult[], question: string, 
     .slice(0, limit);
 }
 
-async function getKnowledgeAsOfDate(organizationId: string) {
-  const db = getDb();
+async function getKnowledgeAsOfDate(organizationId: string, db: TenantDb) {
   const organization = await db.organization.findUnique({ where: { id: organizationId }, select: { timeZone: true } });
   return getBusinessDateKey(new Date(), organization?.timeZone || BUSINESS_TIME_ZONE);
 }
@@ -563,20 +562,24 @@ export async function searchActiveKnowledgeBase(input: {
   if (!input.organizationId || question.length < 2) return responseFor({ startedAt, question, contractual: false, results: [], abstentionReason: "NO_RELEVANT_EVIDENCE" });
   const contractual = requiresInternalKnowledgeEvidence(question);
   const requested = input.sourceType ?? "BOTH";
-  const asOfDate = input.asOfDate ?? await getKnowledgeAsOfDate(input.organizationId);
+  const context = await requireOrganizationContext();
+  if (context.organizationId !== input.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
   try {
-    const internalPromise = requested !== "GENERAL"
-      ? searchInternal({ organizationId: input.organizationId, question, insurerName: input.insurerName, product: input.product, sourceId: input.sourceId, limit, includeDraft: false, asOfDate })
-      : Promise.resolve([] as SearchRow[]);
-    const generalPromise = !contractual && requested !== "INTERNAL"
-      ? searchGeneral({ question, product: input.product, limit, asOfDate })
-      : Promise.resolve([] as SearchRow[]);
-    const [internalRows, generalRows] = await Promise.all([internalPromise, generalPromise]);
-    const results = deduplicateResults([
-      ...internalRows.map((row) => toResult(row, "INTERNAL")),
-      ...generalRows.map((row) => toResult(row, "GENERAL")),
-    ], question, limit);
-    return responseFor({ startedAt, question, contractual, results, abstentionReason: contractual ? "INTERNAL_EVIDENCE_REQUIRED" : "NO_RELEVANT_EVIDENCE" });
+    return await withTenantTransaction(context, async (db) => {
+      const asOfDate = input.asOfDate ?? await getKnowledgeAsOfDate(input.organizationId, db);
+      const internalPromise = requested !== "GENERAL"
+        ? searchInternal({ organizationId: input.organizationId, question, insurerName: input.insurerName, product: input.product, sourceId: input.sourceId, limit, includeDraft: false, asOfDate }, db)
+        : Promise.resolve([] as SearchRow[]);
+      const generalPromise = !contractual && requested !== "INTERNAL"
+        ? searchGeneral({ question, product: input.product, limit, asOfDate }, db)
+        : Promise.resolve([] as SearchRow[]);
+      const [internalRows, generalRows] = await Promise.all([internalPromise, generalPromise]);
+      const results = deduplicateResults([
+        ...internalRows.map((row) => toResult(row, "INTERNAL")),
+        ...generalRows.map((row) => toResult(row, "GENERAL")),
+      ], question, limit);
+      return responseFor({ startedAt, question, contractual, results, abstentionReason: contractual ? "INTERNAL_EVIDENCE_REQUIRED" : "NO_RELEVANT_EVIDENCE" });
+    });
   } catch {
     return responseFor({ startedAt, question, contractual, results: [], abstentionReason: "SEARCH_ERROR" });
   }
@@ -595,10 +598,12 @@ export async function previewInternalKnowledgeSource(input: {
     throw new Error("La previsualización de fuentes requiere permisos de administración en la organización activa.");
   }
   const question = cleanText(input.question, 500);
-  const asOfDate = input.asOfDate ?? await getKnowledgeAsOfDate(input.organizationId);
-  const rows = await searchInternal({ organizationId: input.organizationId, question, sourceId: input.sourceId, limit: Math.min(Math.max(input.limit ?? 5, 1), 5), includeDraft: true, asOfDate });
-  const results = deduplicateResults(rows.map((row) => toResult(row, "INTERNAL")), question, Math.min(Math.max(input.limit ?? 5, 1), 5));
-  return responseFor({ startedAt, question, contractual: requiresInternalKnowledgeEvidence(question), results, abstentionReason: "NO_RELEVANT_EVIDENCE" });
+  return withTenantTransaction(context, async (db) => {
+    const asOfDate = input.asOfDate ?? await getKnowledgeAsOfDate(input.organizationId, db);
+    const rows = await searchInternal({ organizationId: input.organizationId, question, sourceId: input.sourceId, limit: Math.min(Math.max(input.limit ?? 5, 1), 5), includeDraft: true, asOfDate }, db);
+    const results = deduplicateResults(rows.map((row) => toResult(row, "INTERNAL")), question, Math.min(Math.max(input.limit ?? 5, 1), 5));
+    return responseFor({ startedAt, question, contractual: requiresInternalKnowledgeEvidence(question), results, abstentionReason: "NO_RELEVANT_EVIDENCE" });
+  });
 }
 
 /** @deprecated Use searchActiveKnowledgeBase or previewInternalKnowledgeSource. */

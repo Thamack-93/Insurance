@@ -10,7 +10,6 @@ import { ClientsListTable } from "@/components/clients/clients-list-table";
 import { EmptyState } from "@/components/empty-states/empty-state";
 import { TableEmptyState } from "@/components/tables/table-empty-state";
 import { TableToolbar } from "@/components/tables/table-toolbar";
-import { getDb } from "@/lib/db";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { entityStatusOptions } from "@/lib/domain-options";
 import { buildTableHref } from "@/lib/table-query";
@@ -21,6 +20,7 @@ import {
 } from "@/lib/list-filters";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { clientOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 
 const PAGE_SIZE = 25;
 
@@ -36,8 +36,8 @@ export default async function ClientsPage({
   const typeFilter = filters.type;
   const isFiltered = Boolean(query || typeFilter || (params.status && params.status !== "ACTIVE"));
 
-  const db = getDb();
   const scope = await requireOrganizationPortfolioReadScope();
+  return withTenantOrganization(scope.organizationId, async (db) => {
   const portfolioWhere = clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const clearFiltersHref = buildTableHref("/clients", params, {
     q: null,
@@ -295,4 +295,5 @@ export default async function ClientsPage({
       </div>
     </div>
   );
+  });
 }

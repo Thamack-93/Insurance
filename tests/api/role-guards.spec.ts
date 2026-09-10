@@ -31,6 +31,27 @@ test.describe("role-based guards", () => {
     expect(res.status()).toBe(200);
   });
 
+  test("Nora capability preflight allows authenticated assistant and reports", async ({ request }) => {
+    const authCookie = await getAdminSessionCookie();
+    const assistant = await request.get("/api/assistant", {
+      headers: { cookie: authCookie },
+    });
+    expect(assistant.status()).toBe(200);
+
+    const report = await request.get("/api/nora/reports?type=overdue", {
+      headers: { cookie: authCookie },
+    });
+    expect(report.status()).toBe(200);
+
+    const response = await request.post("/api/assistant", {
+      headers: { cookie: authCookie, origin: "http://localhost:4173" },
+      data: { message: "Dame una receta de pasta" },
+    });
+    expect(response.status()).toBe(200);
+    const body = await response.json();
+    expect(body.success).toBe(true);
+  });
+
   test("payments quick requires authentication", async ({ request }) => {
     const res = await request.post("/api/payments/quick", { data: {} });
     expect(res.status()).toBe(401);

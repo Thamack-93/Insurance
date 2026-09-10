@@ -37,7 +37,19 @@ vi.mock("@/lib/request-guards", () => ({
   securityFingerprint: (value: string) => `fingerprint:${value}`,
 }));
 vi.mock("@/lib/activity-log", () => ({ writeActivityLog }));
-vi.mock("@/lib/organization-context", () => ({ assertOrganizationContextInTransaction: vi.fn(async () => {}) }));
+vi.mock("@/lib/organization-context", () => ({
+  assertOrganizationContextInTransaction: vi.fn(async () => {}),
+  withSystemOrganizationTransaction: vi.fn(async (_organizationId: string, _reason: string, callback: (tx: typeof db) => unknown) => callback(db)),
+}));
+vi.mock("@/lib/organization-capabilities", () => ({
+  resolveOrganizationCapability: vi.fn(async (organizationId: string, capability: string) => ({
+    organizationId,
+    capability,
+    enabled: true,
+    limitValue: null,
+    reason: "PLAN",
+  })),
+}));
 vi.mock("@/lib/qualitas-payment-link", () => provider);
 
 import { processTelegramWebhookUpdate } from "./telegram";

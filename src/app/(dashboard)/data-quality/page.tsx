@@ -29,14 +29,13 @@ import {
   getReceiptReviewIssues,
   getRenewalReviewSuggestions,
 } from "@/lib/data-quality";
-import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
 import { getLatestMaintenanceRun } from "@/lib/vigency-maintenance";
 import { getUpcomingRenewals } from "@/lib/renewals";
-import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
+import { requireOrganizationRoleOrRedirect, withTenantTransaction } from "@/lib/organization-context";
 import { statusLabel } from "@/lib/status";
 import { dataQualityReasonLabel, dataQualityStatusLabel } from "@/lib/ui-labels";
 import { RunVigencyAuditButton } from "@/components/data-quality/run-vigency-audit-button";
@@ -114,7 +113,6 @@ export default async function DataQualityPage({
   const page = readTablePage(params);
   const { sortKey, direction } = readTableSort(params);
   const previewBatchId = typeof params.ledgerBatch === "string" ? params.ledgerBatch : null;
-  const db = getDb();
   const portfolioOwnerId = undefined;
   const [
     clientScores,
@@ -137,7 +135,8 @@ export default async function DataQualityPage({
     getLedgerReviewIssues(organizationContext.organizationId),
     getUpcomingRenewals(30, portfolioOwnerId),
   ]);
-  const previewBatch = previewBatchId
+  const previewData = await withTenantTransaction(organizationContext, async (db) => {
+    const previewBatch = previewBatchId
       ? await db.ledgerImportBatch.findFirst({
         where: { id: previewBatchId, organizationId: organizationContext.organizationId },
         include: {
@@ -156,7 +155,13 @@ export default async function DataQualityPage({
           },
         },
       })
-    : null;
+      : null;
+    const previewRowCounts = previewBatch
+      ? await db.ledgerImportRow.groupBy({ by: ["status"], where: { batchId: previewBatch.id }, _count: { status: true } })
+      : [];
+    return { previewBatch, previewRowCounts };
+  });
+  const { previewBatch, previewRowCounts } = previewData;
   const previewSummary = (() => {
     if (!previewBatch?.summaryJson) return null;
     try {
@@ -165,13 +170,6 @@ export default async function DataQualityPage({
       return null;
     }
   })();
-  const previewRowCounts = previewBatch
-    ? await db.ledgerImportRow.groupBy({
-        by: ["status"],
-        where: { batchId: previewBatch.id },
-        _count: { status: true },
-      })
-    : [];
   const readyRowCount = previewRowCounts.find((row) => row.status === "READY")?._count.status ?? 0;
   const reviewRowCount = previewRowCounts.find((row) => row.status === "REVIEW")?._count.status ?? 0;
 

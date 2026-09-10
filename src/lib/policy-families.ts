@@ -1,6 +1,6 @@
-import { getDb } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
+import { requireOrganizationContext, withTenantTransaction, type TenantDb } from "@/lib/organization-context";
 
 type PolicyFamilyPolicy = {
   id: string;
@@ -25,10 +25,14 @@ export async function resolvePolicyFamilyRootId(input: {
   clientId: string;
   insurerId: string;
   excludePolicyId?: string;
-}) {
-  const db = getDb();
+}, client?: TenantDb): Promise<string | null> {
+  if (!client) {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== input.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => resolvePolicyFamilyRootId(input, tx));
+  }
   const policyNumberVariants = buildPolicyNumberSearchVariants(input.policyNumber);
-  const existing = await db.policy.findFirst({
+  const existing = await client.policy.findFirst({
     where: {
       organizationId: input.organizationId,
       OR: policyNumberVariants.map((variant) => ({ policyNumber: variant })),
@@ -47,9 +51,13 @@ export async function resolvePolicyFamilyRootId(input: {
   return existing.familyRootId ?? existing.id;
 }
 
-export async function getPolicyFamilyPolicies(policyId: string, organizationId?: string) {
-  const db = getDb();
-  const current = await db.policy.findFirst({
+export async function getPolicyFamilyPolicies(policyId: string, organizationId?: string, client?: TenantDb): Promise<{ familyRootId: string; policies: Array<PolicyFamilyPolicy & { premiumAmount: number }> } | null> {
+  if (!client) {
+    const context = await requireOrganizationContext();
+    if (organizationId && organizationId !== context.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => getPolicyFamilyPolicies(policyId, context.organizationId, tx));
+  }
+  const current = await client.policy.findFirst({
     where: { id: policyId, ...(organizationId ? { organizationId } : {}) },
     select: { id: true, familyRootId: true },
   });
@@ -59,7 +67,7 @@ export async function getPolicyFamilyPolicies(policyId: string, organizationId?:
   }
 
   const familyRootId = current.familyRootId ?? current.id;
-  const policies = await db.policy.findMany({
+  const policies = await client.policy.findMany({
     where: {
       OR: [{ id: familyRootId }, { familyRootId }],
       ...(organizationId ? { organizationId } : {}),

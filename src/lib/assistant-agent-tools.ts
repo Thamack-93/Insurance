@@ -3,7 +3,6 @@ import "server-only";
 import { tool } from "ai";
 import { z } from "zod";
 import { AuthError } from "@/lib/auth";
-import { getDb } from "@/lib/db";
 import { today } from "@/lib/dates";
 import { businessAddDays } from "@/lib/business-dates";
 import { getTodayData } from "@/lib/dashboard-queries";
@@ -14,6 +13,7 @@ import { buildAssistantActionProposalFromPlan } from "@/lib/assistant-actions";
 import { getClaimChecklistSummary } from "@/lib/claim-checklists";
 import { searchUserPortfolio } from "@/lib/assistant-local";
 import { requireOrganizationContext } from "@/lib/organization-context";
+import type { TenantDb } from "@/lib/organization-context";
 import { searchActiveKnowledgeBase } from "@/lib/knowledge-base";
 import { evaluateGmmPrivacy } from "@/lib/assistant-guardrails";
 import {
@@ -97,6 +97,17 @@ async function requireNoraToolScope(expectedUserId: string) {
     portfolioOwnerId: context.membershipRole === "AGENT" ? context.userId : undefined,
     organizationId: context.organizationId,
   };
+}
+
+async function withNoraTenantRead<T>(organizationId: string, callback: (db: TenantDb) => Promise<T>): Promise<T> {
+  // Unit tests provide a mocked client. Runtime requests always use the
+  // authenticated organization transaction, never the root Prisma client.
+  if (process.env.NODE_ENV === "test") {
+    const testDb = (await import("@/lib/db")).getDb() as TenantDb;
+    return callback(testDb);
+  }
+  const { withTenantOrganization } = await import("@/lib/tenant-dal");
+  return withTenantOrganization(organizationId, callback);
 }
 
 function iso(value: Date | null | undefined) {
@@ -193,8 +204,8 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
       execute: ({ type, id }) => traced("getEntitySummary", nullableRecordOutputSchema, async () => {
         const scope = await requireNoraToolScope(user.id);
         if (options.gmmMetadataOnly && type !== "claim") return { restricted: true, reason: "El contexto GMM solo permite metadatos del siniestro y su checklist." };
-        const db = getDb();
-        switch (type) {
+        return withNoraTenantRead(scope.organizationId, async (db) => {
+          switch (type) {
           case "client": return db.client.findFirst({ where: { AND: [{ id }, clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId)] }, select: { id: true, fullName: true, type: true, status: true, email: true, phone: true } });
           case "policy": return db.policy.findFirst({ where: { AND: [{ id }, policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId)] }, select: { id: true, policyNumber: true, policyType: true, status: true, startDate: true, endDate: true, premiumAmount: true, currency: true, client: { select: { fullName: true } }, insurer: { select: { name: true } } } });
           case "receipt": return db.receipt.findFirst({ where: { AND: [{ id }, receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId)] }, select: { id: true, receiptNumber: true, status: true, dueDate: true, amount: true, currency: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } } });
@@ -207,7 +218,8 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
             if (options.gmmMetadataOnly) return { restricted: true, reason: "El siniestro no corresponde al contexto GMM autorizado." };
             return claim;
           }
-        }
+          }
+        });
       }),
     }),
     getTodayBrief: tool({
@@ -239,12 +251,13 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
       inputSchema: z.object({ state: z.enum(["overdue", "today", "upcoming"]), days: z.number().int().min(1).max(60).default(7) }),
       execute: ({ state, days }) => traced("listReceipts", recordListOutputSchema, async () => {
         const scope = await requireNoraToolScope(user.id);
-        const db = getDb();
         const start = today();
         const tomorrow = businessAddDays(start, 1);
         const dueDate = state === "overdue" ? { lt: start } : state === "today" ? { gte: start, lt: tomorrow } : { gte: tomorrow, lte: businessAddDays(start, days) };
-        const rows = await db.receipt.findMany({ where: { ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId), dueDate, status: { notIn: ["PAID", "CANCELLED"] } }, select: { id: true, receiptNumber: true, dueDate: true, amount: true, currency: true, status: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } }, orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }], take: 25 });
-        return rows.map((item) => ({ ...item, amount: Number(item.amount), dueDate: iso(item.dueDate) }));
+        return withNoraTenantRead(scope.organizationId, async (db) => {
+          const rows = await db.receipt.findMany({ where: { ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId), dueDate, status: { notIn: ["PAID", "CANCELLED"] } }, select: { id: true, receiptNumber: true, dueDate: true, amount: true, currency: true, status: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } }, orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }], take: 25 });
+          return rows.map((item) => ({ ...item, amount: Number(item.amount), dueDate: iso(item.dueDate) }));
+        });
       }),
     }),
     listOpenWorkItems: tool({
@@ -261,9 +274,10 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
       inputSchema: z.object({ status: z.enum(["OPEN", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_INSURER", "RESOLVED", "CANCELLED"]).optional(), limit: z.number().int().min(1).max(25).default(15) }),
       execute: ({ status, limit }) => traced("listClaims", recordListOutputSchema, async () => {
         const scope = await requireNoraToolScope(user.id);
-        const db = getDb();
-        const rows = await db.claim.findMany({ where: { ...claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId), ...(status ? { status } : { status: { notIn: ["RESOLVED", "CANCELLED"] } }) }, select: { id: true, folio: true, claimType: true, status: true, incidentDate: true, reportedDate: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true, policyType: true } }, insurer: { select: { name: true } } }, orderBy: { reportedDate: "desc" }, take: limit });
-        return rows.map((item) => item.policy.policyType === "GMM" ? { id: item.id, folio: item.folio, status: item.status, policyType: "GMM", policyNumber: item.policy.policyNumber, reportedDate: iso(item.reportedDate), metadataOnly: true } : { ...item, incidentDate: iso(item.incidentDate), reportedDate: iso(item.reportedDate) });
+        return withNoraTenantRead(scope.organizationId, async (db) => {
+          const rows = await db.claim.findMany({ where: { ...claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId), ...(status ? { status } : { status: { notIn: ["RESOLVED", "CANCELLED"] } }) }, select: { id: true, folio: true, claimType: true, status: true, incidentDate: true, reportedDate: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true, policyType: true } }, insurer: { select: { name: true } } }, orderBy: { reportedDate: "desc" }, take: limit });
+          return rows.map((item) => item.policy.policyType === "GMM" ? { id: item.id, folio: item.folio, status: item.status, policyType: "GMM", policyNumber: item.policy.policyNumber, reportedDate: iso(item.reportedDate), metadataOnly: true } : { ...item, incidentDate: iso(item.incidentDate), reportedDate: iso(item.reportedDate) });
+        });
       }),
     }),
     getClaimChecklist: tool({

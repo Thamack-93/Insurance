@@ -33,7 +33,7 @@ export function useNoraSession() {
   return value;
 }
 
-export function NoraSessionProvider({ children, userId }: { children: ReactNode; userId: string }) {
+export function NoraSessionProvider({ children, userId, organizationId = "", demoMode = false }: { children: ReactNode; userId: string; organizationId?: string; demoMode?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [context, setContext] = useState<NoraContextRef | null>(null);
@@ -118,6 +118,8 @@ export function NoraSessionProvider({ children, userId }: { children: ReactNode;
             <LazyAssistantConsole
               snapshot={snapshot}
               userId={userId}
+              organizationId={organizationId}
+              demoMode={demoMode}
               variant="panel"
               context={context}
               initialPrompt={starterPrompt}

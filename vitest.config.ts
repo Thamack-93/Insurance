@@ -11,6 +11,7 @@ export default defineConfig({
       "src/app/(dashboard)/settings/backups-actions.logic.test.ts",
     ],
     environment: "node",
+    setupFiles: ["./vitest.setup.ts"],
     pool: "forks",
     maxWorkers: 1,
     fileParallelism: false,

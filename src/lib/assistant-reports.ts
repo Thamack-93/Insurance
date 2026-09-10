@@ -1,6 +1,5 @@
 import "server-only";
 
-import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { safeJson, writeActivityLog } from "@/lib/activity-log";
 import type {
@@ -11,8 +10,33 @@ import type {
   AssistantReportStatus,
 } from "@/lib/assistant-types";
 import { Prisma, type PrismaClient } from "@/generated/prisma/client";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
+
+async function withReportDb<T>(organizationId: string, client: DbClient | undefined, callback: (db: DbClient) => Promise<T>): Promise<T> {
+  if (client) return callback(client);
+  if (process.env.NODE_ENV === "test") {
+    const testDb = (await import("@/lib/db")).getDb() as DbClient;
+    return callback(testDb);
+  }
+  const context = await requireOrganizationContext();
+  if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  return withTenantTransaction(context, callback);
+}
+
+async function withReportTransaction<T>(organizationId: string, client: DbClient | undefined, callback: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  if (client && "$transaction" in client) return client.$transaction(callback);
+  if (client) return callback(client);
+  if (process.env.NODE_ENV === "test") {
+    const testDb = (await import("@/lib/db")).getDb() as DbClient;
+    if ("$transaction" in testDb) return testDb.$transaction(callback);
+    return callback(testDb);
+  }
+  const context = await requireOrganizationContext();
+  if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  return withTenantTransaction(context, callback);
+}
 
 const ACTIVE_REPORT_STATUSES = new Set<AssistantReportStatus>(["COLLECTING", "OPEN"]);
 const CLOSED_REPORT_STATUSES = new Set<AssistantReportStatus>(["RESOLVED", "ARCHIVED", "DELETED"]);
@@ -179,13 +203,13 @@ export function createAssistantThemeKey(parts: Array<string | null | undefined>)
 
 export async function listAssistantReports(
   filter: AssistantReportListFilter,
-  client: DbClient = getDb(),
+  client?: DbClient,
 ): Promise<AssistantReportSnapshot[]> {
   const where: Prisma.AssistantReportWhereInput = { organizationId: filter.organizationId };
   if (filter.kind) where.kind = filter.kind;
   if (filter.status) where.status = filter.status;
 
-  const reports = await client.assistantReport.findMany({
+  const reports = await withReportDb(filter.organizationId, client, (db) => db.assistantReport.findMany({
     where: { ...where, organizationId: filter.organizationId },
     include: {
       signals: {
@@ -195,18 +219,18 @@ export async function listAssistantReports(
     },
     orderBy: [{ lastSignalAt: "desc" }, { createdAt: "desc" }],
     take: filter.limit ?? 100,
-  });
+  }));
 
   return reports.map(buildSnapshot);
 }
 
-export async function getAssistantReport(reportId: string, organizationId: string, client: DbClient = getDb()) {
-  const report = await client.assistantReport.findFirst({
+export async function getAssistantReport(reportId: string, organizationId: string, client?: DbClient) {
+  const report = await withReportDb(organizationId, client, (db) => db.assistantReport.findFirst({
     where: { id: reportId, organizationId },
     include: {
       signals: { orderBy: { createdAt: "desc" }, take: 25 },
     },
-  });
+  }));
 
   return report ? buildSnapshot(report) : null;
 }
@@ -263,7 +287,6 @@ function buildEvidenceEntry(input: AssistantReportSignalInput) {
 }
 
 export async function recordAssistantReportSignal(input: AssistantReportSignalInput): Promise<AssistantReportSnapshot> {
-  const client = input.client ?? getDb();
   const now = new Date();
   const themeKey = normalizeThemeKey(input.themeKey);
   const themeLabel = toThemeLabel(input.themeLabel || input.themeKey);
@@ -274,7 +297,7 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
   const plan = redactAssistantReportText(input.plan, 3_000);
 
   try {
-    return await client.$transaction(async (tx) => {
+    return await withReportTransaction(input.organizationId, input.client, async (tx) => {
       await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`${input.organizationId}:${input.kind}:${themeKey}`}))`);
       const reports = await tx.assistantReport.findMany({
         where: {
@@ -446,10 +469,11 @@ export async function recordAssistantReportSignal(input: AssistantReportSignalIn
   }
 }
 
-async function setReportStatus(reportId: string, organizationId: string, status: AssistantReportStatus, actorId: string, client: DbClient = getDb()) {
+async function setReportStatus(reportId: string, organizationId: string, status: AssistantReportStatus, actorId: string, client?: DbClient) {
+  return withReportTransaction(organizationId, client, async (tx) => {
   const now = new Date();
-  const existing = await client.assistantReport.findFirstOrThrow({ where: { id: reportId, organizationId } });
-  await client.assistantReport.updateMany({
+  const existing = await tx.assistantReport.findFirstOrThrow({ where: { id: reportId, organizationId } });
+  await tx.assistantReport.updateMany({
     where: { id: reportId, organizationId },
     data: {
       status,
@@ -468,24 +492,26 @@ async function setReportStatus(reportId: string, organizationId: string, status:
     newValue: { status },
     userId: actorId,
     organizationId,
-    db: client,
+    db: tx,
   });
 
   return buildSnapshot(report);
+  });
 }
 
-export async function closeAssistantReport(reportId: string, organizationId: string, actorId: string, client: DbClient = getDb()) {
+export async function closeAssistantReport(reportId: string, organizationId: string, actorId: string, client?: DbClient) {
   return setReportStatus(reportId, organizationId, "RESOLVED", actorId, client);
 }
 
-export async function archiveAssistantReport(reportId: string, organizationId: string, actorId: string, client: DbClient = getDb()) {
+export async function archiveAssistantReport(reportId: string, organizationId: string, actorId: string, client?: DbClient) {
   return setReportStatus(reportId, organizationId, "ARCHIVED", actorId, client);
 }
 
-export async function reopenAssistantReport(reportId: string, organizationId: string, actorId: string, client: DbClient = getDb()) {
-  const report = await client.assistantReport.findFirst({ where: { id: reportId, organizationId } });
+export async function reopenAssistantReport(reportId: string, organizationId: string, actorId: string, client?: DbClient) {
+  return withReportTransaction(organizationId, client, async (tx) => {
+  const report = await tx.assistantReport.findFirst({ where: { id: reportId, organizationId } });
   if (!report) throw new Error("El reporte ya no existe.");
-  const active = await client.assistantReport.findFirst({
+  const active = await tx.assistantReport.findFirst({
     where: {
       id: { not: reportId },
       organizationId,
@@ -496,12 +522,14 @@ export async function reopenAssistantReport(reportId: string, organizationId: st
     select: { id: true },
   });
   if (active) throw new Error("Ya existe una versión activa de este tema.");
-  return setReportStatus(reportId, organizationId, "OPEN", actorId, client);
+  return setReportStatus(reportId, organizationId, "OPEN", actorId, tx);
+  });
 }
 
-export async function deleteAssistantReport(reportId: string, organizationId: string, actorId: string, client: DbClient = getDb()) {
-  const report = await client.assistantReport.findFirstOrThrow({ where: { id: reportId, organizationId } });
-  await client.assistantReport.deleteMany({ where: { id: reportId, organizationId } });
+export async function deleteAssistantReport(reportId: string, organizationId: string, actorId: string, client?: DbClient) {
+  return withReportTransaction(organizationId, client, async (tx) => {
+  const report = await tx.assistantReport.findFirstOrThrow({ where: { id: reportId, organizationId } });
+  await tx.assistantReport.deleteMany({ where: { id: reportId, organizationId } });
 
   await writeActivityLog({
     entityType: "AssistantReport",
@@ -510,7 +538,7 @@ export async function deleteAssistantReport(reportId: string, organizationId: st
     newValue: { id: report.id, kind: report.kind, themeKey: report.themeKey },
     userId: actorId,
     organizationId,
-    db: client,
+    db: tx,
   });
 
   return buildSnapshot({
@@ -520,5 +548,6 @@ export async function deleteAssistantReport(reportId: string, organizationId: st
     resolvedAt: report.resolvedAt,
     archivedAt: report.archivedAt,
     deletedAt: new Date(),
+  });
   });
 }

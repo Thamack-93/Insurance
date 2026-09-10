@@ -103,21 +103,29 @@ async function redisCommand(command: string[]) {
 }
 
 export async function acquireDistributedLock(key: string, ttlMs: number, requireDistributed = distributedRateLimitRequired()) {
+  if (!Number.isInteger(ttlMs) || ttlMs < 1_000) throw new Error("DISTRIBUTED_LOCK_TTL_INVALID");
   const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const config = getDistributedRateLimitConfig();
   const mustUseDistributed = requireDistributed && distributedRateLimitRequired();
 
   if (!config) {
-    if (mustUseDistributed) return { acquired: false, backend: "unavailable" as const, release: async () => {} };
+    if (mustUseDistributed) return { acquired: false, backend: "unavailable" as const, token: null, renew: async () => false, release: async () => {} };
     const now = Date.now();
     const existing = localLocks.get(key);
     if (existing && existing.expiresAt > now) {
-      return { acquired: false, backend: "local" as const, release: async () => {} };
+      return { acquired: false, backend: "local" as const, token: null, renew: async () => false, release: async () => {} };
     }
     localLocks.set(key, { token, expiresAt: now + ttlMs });
     return {
       acquired: true,
       backend: "local" as const,
+      token,
+      renew: async () => {
+        const current = localLocks.get(key);
+        if (!current || current.token !== token || current.expiresAt <= Date.now()) return false;
+        current.expiresAt = Date.now() + ttlMs;
+        return true;
+      },
       release: async () => {
         if (localLocks.get(key)?.token === token) localLocks.delete(key);
       },
@@ -126,22 +134,35 @@ export async function acquireDistributedLock(key: string, ttlMs: number, require
 
   const result = await redisCommand(["SET", `policydesk:lock:${key}`, token, "NX", "PX", String(ttlMs)]);
   if (result !== "OK") {
-    return { acquired: false, backend: result === null ? ("unavailable" as const) : ("distributed" as const), release: async () => {} };
+    return { acquired: false, backend: result === null ? ("unavailable" as const) : ("distributed" as const), token: null, renew: async () => false, release: async () => {} };
   }
 
   return {
     acquired: true,
     backend: "distributed" as const,
+    token,
+    renew: async () => {
+      const renewed = await redisCommand(["EVAL", "if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('pexpire',KEYS[1],ARGV[2]) else return 0 end", "1", `policydesk:lock:${key}`, token, String(ttlMs)]);
+      return Number(renewed ?? 0) === 1;
+    },
     release: async () => {
       await redisCommand(["EVAL", "if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end", "1", `policydesk:lock:${key}`, token]);
     },
   };
 }
 
-function distributedRateLimitRequired() {
-  // Redis is optional for the current single-user deployment. Set this to 1
-  // when the project is ready to fail closed without distributed protection.
-  return process.env.REQUIRE_DISTRIBUTED_RATE_LIMIT === "1";
+export function distributedRateLimitRequired() {
+  // The disposable PostgreSQL application job starts Next in production mode
+  // but intentionally has no external Redis service. Keep production safety
+  // strict while allowing that isolated CI server to exercise the handlers.
+  if (process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true") return process.env.REQUIRE_DISTRIBUTED_RATE_LIMIT === "1";
+  return process.env.REQUIRE_DISTRIBUTED_RATE_LIMIT === "1" || process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
+}
+
+export function assertDistributedRateLimitConfigured() {
+  if (distributedRateLimitRequired() && !getDistributedRateLimitConfig()) {
+    throw new Error("UPSTASH_REDIS_REST_URL y UPSTASH_REDIS_REST_TOKEN son obligatorios en producción.");
+  }
 }
 
 export async function checkDistributedRateLimit(

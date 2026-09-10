@@ -4,6 +4,7 @@ import { Pool, type PoolClient } from "pg";
 import { auditMultiOrganizationState } from "../../scripts/check-multi-org-audit.ts";
 import {
   auditTenantFoundation,
+  OPTIONAL_ORGANIZATION_TABLES,
   PROTECTED_TENANT_TABLES,
 } from "./tenant-organization-foundation.ts";
 import {
@@ -72,7 +73,7 @@ async function queryCount(client: PoolClient, sql: string, values: unknown[] = [
   return Number(result.rows[0]?.count ?? 0);
 }
 
-async function verifyMigrations(client: PoolClient, issues: VerificationIssue[]) {
+async function verifyMigrations(client: PoolClient, issues: VerificationIssue[], mode: ProductionTenantMode) {
   const expected = migrationNames();
   try {
     const result = await client.query<{
@@ -84,10 +85,15 @@ async function verifyMigrations(client: PoolClient, issues: VerificationIssue[])
     const rows = result.rows;
     const applied = new Set(rows.filter((row) => row.finished_at && !row.rolled_back_at).map((row) => row.migration_name));
     const pending = expected.filter((name) => !applied.has(name));
+    const pendingCutover = pending.filter((name) => name === "20260831010000_multi_tenant_rls_cutover");
+    const blockingPending = mode === "single-org"
+      ? pending.filter((name) => name !== "20260831010000_multi_tenant_rls_cutover")
+      : pending;
     const unknown = rows.filter((row) => !expected.includes(row.migration_name)).map((row) => row.migration_name);
     const incomplete = rows.filter((row) => !row.finished_at || row.rolled_back_at || row.applied_steps_count < 0).map((row) => row.migration_name);
     const duplicateNames = [...new Set(rows.map((row) => row.migration_name).filter((name, index, all) => all.indexOf(name) !== index))];
-    if (pending.length) issues.push(issue("MIGRATIONS_PENDING", "BLOCKED", `Production no tiene aplicadas ${pending.length} migraciones del repositorio.`));
+    if (blockingPending.length) issues.push(issue("MIGRATIONS_PENDING", "BLOCKED", `Production no tiene aplicadas ${blockingPending.length} migraciones del repositorio.`));
+    if (pendingCutover.length && mode === "single-org") issues.push(issue("TENANT_CUTOVER_PENDING", "WARN", "La migración RLS final permanece pendiente mientras Production sigue en singleton; debe aplicarse durante la ventana de mantenimiento."));
     if (unknown.length) issues.push(issue("MIGRATIONS_UNKNOWN", "BLOCKED", `Production contiene ${unknown.length} migraciones ausentes del repositorio.`));
     if (incomplete.length) issues.push(issue("MIGRATIONS_INCOMPLETE", "BLOCKED", `Production contiene ${incomplete.length} migraciones fallidas o incompletas.`));
     if (duplicateNames.length) issues.push(issue("MIGRATIONS_DUPLICATE", "BLOCKED", `Production contiene ${duplicateNames.length} migraciones duplicadas.`));
@@ -96,6 +102,8 @@ async function verifyMigrations(client: PoolClient, issues: VerificationIssue[])
       repositoryMigrationCount: expected.length,
       appliedMigrationCount: applied.size,
       pendingMigrationCount: pending.length,
+      blockingPendingMigrationCount: blockingPending.length,
+      pendingCutoverMigration: pendingCutover.length === 1,
       unknownMigrationCount: unknown.length,
       incompleteMigrationCount: incomplete.length,
       duplicateMigrationCount: duplicateNames.length,
@@ -112,8 +120,8 @@ async function verifyOrganization(client: PoolClient, mode: ProductionTenantMode
     const organizations = await client.query<{ status: string }>(`SELECT "status" FROM "Organization" ORDER BY "id"`);
     const count = organizations.rowCount ?? 0;
     if (mode === "single-org" && count !== 1) issues.push(issue("ORGANIZATION_COUNT_INVALID", "BLOCKED", `El estado singleton requiere exactamente una organización; se encontraron ${count}.`));
-    if (mode === "multi-org" && count < 2) issues.push(issue("MULTI_ORG_COUNT_INVALID", "BLOCKED", "El estado multi-org requiere al menos dos organizaciones."));
-    if (organizations.rows.some((row) => !["ACTIVE", "SUSPENDED", "RESTORING", "BOOTSTRAP"].includes(row.status))) {
+    if (mode === "multi-org" && count < 1) issues.push(issue("MULTI_ORG_COUNT_INVALID", "BLOCKED", "El estado multi-org requiere al menos una organización; la certificación de dos organizaciones ocurre antes del cutover."));
+    if (organizations.rows.some((row) => !["ACTIVE", "SUSPENDED", "RESTORING", "BOOTSTRAP", "PROVISIONING", "RESETTING"].includes(row.status))) {
       issues.push(issue("ORGANIZATION_STATUS_INVALID", "BLOCKED", "Existe una organización con un estado no reconocido."));
     }
     if (mode === "single-org" && organizations.rows[0]?.status !== "ACTIVE") {
@@ -132,7 +140,18 @@ async function verifyOrganization(client: PoolClient, mode: ProductionTenantMode
     const barrierObjectCount = barrier.rowCount ?? 0;
     if (mode === "single-org" && barrierObjectCount < 5) issues.push(issue("SINGLETON_BARRIER_MISSING", "BLOCKED", "La barrera singleton no está completa."));
     if (mode === "multi-org" && barrierObjectCount > 0) issues.push(issue("SINGLETON_BARRIER_PRESENT", "BLOCKED", "La barrera singleton sigue presente tras declarar multi-org."));
-    return { status: aggregateVerificationStatus(issues), organizationCount: count, statusValues: [...new Set(organizations.rows.map((row) => row.status))], singletonBarrierObjectCount: barrierObjectCount };
+    const ownerTrigger = await client.query<{ tgenabled: string; functionName: string }>(`
+      SELECT t.tgenabled, p.proname AS "functionName"
+        FROM pg_trigger t
+        JOIN pg_class c ON c.oid = t.tgrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_proc p ON p.oid = t.tgfoid
+       WHERE n.nspname = 'public' AND c.relname = 'OrganizationMembership'
+         AND t.tgname = 'policydesk_owner_membership_invariant'
+    `);
+    const ownerInvariantInstalled = ownerTrigger.rows.length === 1 && ownerTrigger.rows[0].tgenabled === "O" && ownerTrigger.rows[0].functionName === "policydesk_guard_owner_membership";
+    if (mode === "multi-org" && !ownerInvariantInstalled) issues.push(issue("OWNER_INVARIANT_TRIGGER_MISSING", "BLOCKED", "Falta el trigger final de invariante de propietario por organización."));
+    return { status: aggregateVerificationStatus(issues), organizationCount: count, statusValues: [...new Set(organizations.rows.map((row) => row.status))], singletonBarrierObjectCount: barrierObjectCount, ownerInvariantInstalled };
   } catch (error) {
     issues.push(issue("ORGANIZATION_CHECK_FAILED", "BLOCKED", `No se pudo verificar Organization (${safeErrorCode(error)}).`));
     return { status: "BLOCKED" };
@@ -143,7 +162,7 @@ async function verifyTenant(client: PoolClient, mode: ProductionTenantMode, issu
   try {
     const result = mode === "single-org"
       ? await auditTenantFoundation(client, { requireActive: true })
-      : await auditMultiOrganizationState(client);
+      : await auditMultiOrganizationState(client, { requireTwoOrganizations: false });
     if (!result.ok) issues.push(issue("TENANT_AUDIT_FAILED", "BLOCKED", `El audit tenant reportó ${result.issues.length} inconsistencias.`));
     return { status: aggregateVerificationStatus(issues), auditPassed: result.ok, issueCount: result.issues.length, summary: sanitizeSummary(result.summary) };
   } catch (error) {
@@ -242,7 +261,7 @@ async function verifyBilling(client: PoolClient, issues: VerificationIssue[]) {
 
 async function verifyBackup(client: PoolClient, issues: VerificationIssue[]) {
   try {
-    const [counts, invalidScopes, invalidManifest, invalidReferences, tenantRows, globalLatest, unhealthyArtifacts] = await Promise.all([
+    const [counts, invalidScopes, invalidManifest, invalidReferences, tenantRows, globalLatest, unhealthyArtifacts, demoState] = await Promise.all([
       client.query<{ artifacts: string; restoreRuns: string }>(`SELECT (SELECT count(*) FROM "BackupArtifact")::text AS artifacts, (SELECT count(*) FROM "OrganizationRestoreRun")::text AS "restoreRuns"`),
       queryCount(client, `SELECT count(*)::text FROM "BackupArtifact" WHERE (scope = 'PLATFORM' AND "organizationId" IS NOT NULL) OR (scope IN ('ORGANIZATION', 'LEGACY_SINGLETON') AND "organizationId" IS NULL)`),
       queryCount(client, `SELECT count(*)::text FROM "BackupArtifact" WHERE "manifestAvailable" AND ("formatVersion" IS NULL OR "keyVersion" IS NULL OR "payloadSha256" IS NULL OR "manifestSha256" IS NULL)`),
@@ -253,6 +272,7 @@ async function verifyBackup(client: PoolClient, issues: VerificationIssue[]) {
         LEFT JOIN "BackupArtifact" a
           ON a."organizationId" = o."id" AND a.scope = 'ORGANIZATION' AND a.status = 'VERIFIED'
         WHERE o.status = 'ACTIVE'
+          AND o.kind <> 'DEMO'
         GROUP BY o."id"
       `),
       client.query<{ latestVerifiedAt: Date | null }>(`
@@ -265,6 +285,13 @@ async function verifyBackup(client: PoolClient, issues: VerificationIssue[]) {
           count(*) FILTER (WHERE status = 'BLOCKED')::text AS blocked,
           count(*) FILTER (WHERE status = 'CREATING' AND "updatedAt" < now() - interval '2 hours')::text AS "staleCreating"
         FROM "BackupArtifact"
+      `),
+      client.query<{ activeDemos: string; demoBackupArtifacts: string; manifestsWithDemoPolicy: string; platformVerified: string }>(`
+        SELECT
+          (SELECT count(*) FROM "Organization" WHERE "kind" = 'DEMO' AND "status" = 'ACTIVE')::text AS "activeDemos",
+          (SELECT count(*) FROM "BackupArtifact" a JOIN "Organization" o ON o."id" = a."organizationId" WHERE o."kind" = 'DEMO' AND a.scope = 'ORGANIZATION')::text AS "demoBackupArtifacts",
+          (SELECT count(*) FROM "BackupArtifact" WHERE scope = 'PLATFORM' AND status = 'VERIFIED' AND "metadataJson" IS NOT NULL AND ("metadataJson"::jsonb #>> ARRAY['demoExclusion','policy']) = 'EXCLUDE_DEMO')::text AS "manifestsWithDemoPolicy",
+          (SELECT count(*) FROM "BackupArtifact" WHERE scope = 'PLATFORM' AND status = 'VERIFIED')::text AS "platformVerified"
       `),
     ]);
     const row = counts.rows[0] ?? { artifacts: "0", restoreRuns: "0" };
@@ -281,6 +308,9 @@ async function verifyBackup(client: PoolClient, issues: VerificationIssue[]) {
     if (!latestGlobalAt || globalSchedule.due) issues.push(issue("PLATFORM_BACKUP_OVERDUE", "BLOCKED", "El backup global semanal no existe o está vencido."));
     if (Number(unhealthy.blocked) > 0) issues.push(issue("BACKUP_ARTIFACTS_BLOCKED", "BLOCKED", `El catálogo contiene ${Number(unhealthy.blocked)} artefactos BLOCKED.`));
     if (Number(unhealthy.staleCreating) > 0) issues.push(issue("BACKUP_ARTIFACTS_STALE_CREATING", "BLOCKED", `El catálogo contiene ${Number(unhealthy.staleCreating)} artefactos CREATING antiguos.`));
+    const demo = demoState.rows[0] ?? { activeDemos: "0", demoBackupArtifacts: "0", manifestsWithDemoPolicy: "0", platformVerified: "0" };
+    if (Number(demo.demoBackupArtifacts) > 0) issues.push(issue("DEMO_BACKUP_NOT_EXCLUDED", "BLOCKED", `El catálogo contiene ${Number(demo.demoBackupArtifacts)} artifacts de backup de organizaciones DEMO.`));
+    if (Number(demo.platformVerified) > 0 && Number(demo.manifestsWithDemoPolicy) === 0) issues.push(issue("DEMO_EXCLUSION_MANIFEST_MISSING", "BLOCKED", "Ningún backup de plataforma VERIFIED declara la exclusión DEMO."));
     return {
       status: aggregateVerificationStatus(issues),
       artifactCount: Number(row.artifacts),
@@ -294,6 +324,9 @@ async function verifyBackup(client: PoolClient, issues: VerificationIssue[]) {
       platformWeeklyStatus: globalSchedule.status,
       blockedArtifactCount: Number(unhealthy.blocked),
       staleCreatingCount: Number(unhealthy.staleCreating),
+      activeDemoCount: Number(demo.activeDemos),
+      demoBackupArtifactCount: Number(demo.demoBackupArtifacts),
+      demoExclusionManifestCount: Number(demo.manifestsWithDemoPolicy),
       catalogAndRpoOnly: true,
       payloadsInspected: false,
       recoverabilityVerified: false,
@@ -309,13 +342,201 @@ export function resolveProductionTenantMode(value = process.env.PRODUCTION_EXPEC
   return normalized === "single-org" || normalized === "multi-org" ? normalized : "INVALID";
 }
 
-function verifyRuntimeConfiguration(issues: VerificationIssue[]) {
+function verifyRuntimeConfiguration(issues: VerificationIssue[], mode: ProductionTenantMode) {
   const configuredNoraMode = process.env.NORA_AGENT_MODE?.trim().toLowerCase();
   const noraAgentMode = configuredNoraMode === "off" || configuredNoraMode === "admin" || configuredNoraMode === "all" ? configuredNoraMode : "off";
   if (!configuredNoraMode || !["off", "admin", "all"].includes(configuredNoraMode)) {
     issues.push(issue("NORA_MODE_NOT_EXPLICIT", "WARN", "NORA_AGENT_MODE no está explícitamente configurado; Nora permanece fail-closed en off."));
   }
-  return { status: aggregateVerificationStatus(issues), noraAgentMode, noraModeExplicit: configuredNoraMode === noraAgentMode, billingMutationsGuarded: process.env.PLATFORM_BILLING_MUTATIONS_ENABLED !== "1" };
+  const killSwitches = [
+    "PLATFORM_UPLOADS_ENABLED",
+    "PLATFORM_NORA_ENABLED",
+    "PLATFORM_IMPORTS_ENABLED",
+    "PLATFORM_EXPORTS_ENABLED",
+    "PLATFORM_EMAIL_ENABLED",
+    "PLATFORM_TELEGRAM_ENABLED",
+    "PLATFORM_WHATSAPP_ENABLED",
+    "PLATFORM_QUALITAS_ENABLED",
+  ] as const;
+  const missingKillSwitches = killSwitches.filter((name) => !["0", "1"].includes(process.env[name]?.trim() ?? ""));
+  if (missingKillSwitches.length > 0) {
+    issues.push(issue(
+      "GLOBAL_KILL_SWITCHES_NOT_EXPLICIT",
+      mode === "multi-org" ? "BLOCKED" : "WARN",
+      `Faltan ${missingKillSwitches.length} kill switches globales explícitos para el entorno de ejecución.`,
+    ));
+  }
+  return {
+    status: aggregateVerificationStatus(issues),
+    noraAgentMode,
+    noraModeExplicit: configuredNoraMode === noraAgentMode,
+    billingMutationsGuarded: process.env.PLATFORM_BILLING_MUTATIONS_ENABLED !== "1",
+    killSwitchesExplicit: missingKillSwitches.length === 0,
+    missingKillSwitchCount: missingKillSwitches.length,
+  };
+}
+
+async function verifyDatabaseRole(client: PoolClient, mode: ProductionTenantMode, issues: VerificationIssue[], usingReadOnlyVerifier: boolean) {
+  try {
+    const current = await client.query<{ current_user: string; rolsuper: boolean; rolbypassrls: boolean; rolcanlogin: boolean }>(`SELECT current_user, r.rolsuper, r.rolbypassrls, r.rolcanlogin FROM pg_roles r WHERE r.rolname = current_user`);
+    const row = current.rows[0];
+    const expected = usingReadOnlyVerifier
+      ? process.env.PRODUCTION_READONLY_ROLE?.trim()
+      : process.env.TENANT_RLS_APP_ROLE?.trim();
+    if (!row) issues.push(issue("RUNTIME_ROLE_MISSING", "BLOCKED", "No se pudo resolver current_user en pg_roles."));
+    if (row?.rolsuper || row?.rolbypassrls) issues.push(issue("RUNTIME_ROLE_BYPASSES_RLS", "BLOCKED", "El runtime verifier usa un rol superusuario o BYPASSRLS."));
+    if (row && !row.rolcanlogin) issues.push(issue("RUNTIME_ROLE_CANNOT_LOGIN", "BLOCKED", "El rol runtime no puede iniciar sesión con DATABASE_URL."));
+    if (expected && row?.current_user !== expected) issues.push(issue("RUNTIME_ROLE_UNEXPECTED", "BLOCKED", `current_user no coincide con el rol esperado ${expected}.`));
+    if (!expected && mode === "multi-org") issues.push(issue("RUNTIME_ROLE_NOT_DECLARED", "BLOCKED", usingReadOnlyVerifier ? "PRODUCTION_READONLY_ROLE es obligatorio cuando se usa PRODUCTION_READONLY_DATABASE_URL." : "TENANT_RLS_APP_ROLE es obligatorio en modo multi-org."));
+    if (usingReadOnlyVerifier && !process.env.TENANT_RLS_APP_ROLE?.trim() && mode === "multi-org") issues.push(issue("RUNTIME_ROLE_NOT_DECLARED", "BLOCKED", "TENANT_RLS_APP_ROLE también es obligatorio para verificar los grants del runtime."));
+    let readOnlyUnexpectedPrivileges = 0;
+    let readOnlySecurityDefiners = 0;
+    if (usingReadOnlyVerifier && row) {
+      readOnlyUnexpectedPrivileges = await queryCount(client, `
+        SELECT count(*)::text AS count
+          FROM information_schema.role_table_grants
+         WHERE grantee = current_user AND privilege_type <> 'SELECT'
+      `);
+      if (readOnlyUnexpectedPrivileges > 0) {
+        issues.push(issue("READONLY_ROLE_CAN_WRITE", "BLOCKED", `El rol verifier tiene ${readOnlyUnexpectedPrivileges} privilegios distintos de SELECT.`));
+      }
+      readOnlySecurityDefiners = await queryCount(client, `
+        SELECT count(*)::text AS count
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public'
+           AND p.prosecdef
+           AND has_function_privilege(current_user, p.oid, 'EXECUTE')
+      `);
+      if (readOnlySecurityDefiners > 0) {
+        issues.push(issue("READONLY_ROLE_CAN_EXECUTE_SECURITY_DEFINER", "BLOCKED", `El rol verifier puede ejecutar ${readOnlySecurityDefiners} funciones SECURITY DEFINER.`));
+      }
+    }
+    const owners = await queryCount(client, `SELECT count(*)::text AS count FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = ANY($1::text[]) AND pg_get_userbyid(c.relowner) = current_user`, [PROTECTED_TENANT_TABLES]);
+    if (owners > 0) issues.push(issue("RUNTIME_ROLE_OWNS_PROTECTED_TABLE", "BLOCKED", "El rol runtime no puede ser dueño de tablas protegidas."));
+    const securityDefiner = await client.query<{ owner: string | null; canLogin: boolean | null; bypassRls: boolean | null; config: string[] | null }>(`
+      SELECT pg_get_userbyid(p.proowner) AS owner, r.rolcanlogin AS "canLogin", r.rolbypassrls AS "bypassRls", p.proconfig AS config
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        LEFT JOIN pg_roles r ON r.rolname = pg_get_userbyid(p.proowner)
+       WHERE n.nspname = 'public' AND p.proname = 'policydesk_platform_tenant_metrics'
+       ORDER BY p.oid DESC
+       LIMIT 1
+    `);
+    const aggregateOwner = securityDefiner.rows[0];
+    const expectedAggregateOwner = process.env.TENANT_RLS_PLATFORM_OWNER_ROLE?.trim() || "policydesk_platform_owner";
+    if (!aggregateOwner) issues.push(issue("SECURITY_DEFINER_MISSING", "BLOCKED", "Falta el aggregate SECURITY DEFINER de platform."));
+    else {
+      if (aggregateOwner.owner !== expectedAggregateOwner) issues.push(issue("SECURITY_DEFINER_OWNER_UNEXPECTED", "BLOCKED", `El aggregate SECURITY DEFINER debe pertenecer a ${expectedAggregateOwner}.`));
+      if (aggregateOwner.canLogin) issues.push(issue("SECURITY_DEFINER_OWNER_LOGIN", "BLOCKED", "El dueño del aggregate SECURITY DEFINER no puede iniciar sesión."));
+      if (!aggregateOwner.bypassRls) issues.push(issue("SECURITY_DEFINER_OWNER_RLS", "BLOCKED", "El dueño del aggregate SECURITY DEFINER debe poder leer agregados fuera de un tenant."));
+      if (!aggregateOwner.config?.some((entry) => entry === "search_path=pg_catalog, public")) {
+        issues.push(issue("SECURITY_DEFINER_SEARCH_PATH_UNSAFE", "BLOCKED", "El aggregate SECURITY DEFINER debe fijar search_path=pg_catalog, public."));
+      }
+    }
+    let missingRuntimePrivileges = 0;
+    let unexpectedRuntimePrivileges = 0;
+    let platformRuntimeStateCanWrite = false;
+    const runtimeRole = process.env.TENANT_RLS_APP_ROLE?.trim() || expected;
+    if (runtimeRole) {
+      missingRuntimePrivileges = await queryCount(client, `
+        SELECT count(*)::text FROM unnest($2::text[]) AS tables(table_name)
+         WHERE NOT has_table_privilege($1, format('public.%I', table_name), 'SELECT')
+            OR NOT has_table_privilege($1, format('public.%I', table_name), 'INSERT')
+            OR NOT has_table_privilege($1, format('public.%I', table_name), 'UPDATE')
+            OR NOT has_table_privilege($1, format('public.%I', table_name), 'DELETE')
+      `, [runtimeRole, PROTECTED_TENANT_TABLES]);
+      if (missingRuntimePrivileges > 0) issues.push(issue("RUNTIME_GRANTS_INCOMPLETE", "BLOCKED", `El rol runtime carece de DML explícito en ${missingRuntimePrivileges} tablas protegidas.`));
+
+      // Verify the complete least-privilege matrix, not only the protected
+      // tables. This catches a role that can still mutate platform plans,
+      // runtime state, or other global control rows after the cutover.
+      const expectedPrivileges = new Map<string, Set<string>>();
+      for (const table of PROTECTED_TENANT_TABLES) expectedPrivileges.set(table, new Set(["SELECT", "INSERT", "UPDATE", "DELETE"]));
+      for (const table of OPTIONAL_ORGANIZATION_TABLES) expectedPrivileges.set(table, new Set(["SELECT", "INSERT", "UPDATE", "DELETE"]));
+      for (const table of ["User", "Organization", "OrganizationMembership", "NotificationChannel", "TelegramWebhookUpdate", "SystemSetting", "Session", "UserPreference"]) {
+        expectedPrivileges.set(table, new Set(["SELECT", "INSERT", "UPDATE", "DELETE"]));
+      }
+      expectedPrivileges.set("PlatformAuditLog", new Set(["SELECT", "INSERT"]));
+      expectedPrivileges.set("Plan", new Set(["SELECT"]));
+      expectedPrivileges.set("GeneralKnowledgeSource", new Set(["SELECT"]));
+      expectedPrivileges.set("GeneralKnowledgeChunk", new Set(["SELECT"]));
+      expectedPrivileges.set("PlatformRuntimeState", new Set(["SELECT"]));
+      // information_schema.role_table_grants only exposes another role's
+      // rows to privileged catalog readers. The production verifier itself is
+      // intentionally read-only, so inspect the public ACL directly; the
+      // existing has_table_privilege checks above still validate every
+      // required grant from PostgreSQL's privilege evaluator.
+      const granted = await client.query<{ table_name: string; privilege_type: string }>(`
+        SELECT c.relname AS table_name, acl.privilege_type
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          CROSS JOIN LATERAL aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) acl
+          JOIN pg_roles grantee ON grantee.oid = acl.grantee
+         WHERE n.nspname = 'public'
+           AND grantee.rolname = $1
+           AND c.relkind IN ('r', 'p')
+      `, [runtimeRole]);
+      const actualPrivileges = new Map<string, Set<string>>();
+      for (const grant of granted.rows) {
+        const privileges = actualPrivileges.get(grant.table_name) ?? new Set<string>();
+        privileges.add(grant.privilege_type);
+        actualPrivileges.set(grant.table_name, privileges);
+      }
+      for (const [table, privileges] of expectedPrivileges) {
+        for (const privilege of privileges) {
+          if (!actualPrivileges.get(table)?.has(privilege)) missingRuntimePrivileges++;
+        }
+      }
+      for (const [table, privileges] of actualPrivileges) {
+        const expectedForTable = expectedPrivileges.get(table);
+        for (const privilege of privileges) {
+          if (!expectedForTable?.has(privilege)) unexpectedRuntimePrivileges++;
+        }
+      }
+      if (unexpectedRuntimePrivileges > 0) issues.push(issue("RUNTIME_GRANTS_TOO_BROAD", "BLOCKED", `El rol runtime tiene ${unexpectedRuntimePrivileges} privilegios de tabla fuera de la matriz aprobada.`));
+      if (missingRuntimePrivileges > 0 && !issues.some((item) => item.code === "RUNTIME_GRANTS_INCOMPLETE")) {
+        issues.push(issue("RUNTIME_GRANTS_INCOMPLETE", "BLOCKED", `La matriz de privilegios runtime tiene ${missingRuntimePrivileges} permisos faltantes.`));
+      }
+
+      const privilegedFunctions = await client.query<{ proname: string; has_execute: boolean }>(`
+        SELECT p.proname, has_function_privilege($1, p.oid, 'EXECUTE') AS has_execute
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public' AND p.prosecdef
+      `, [runtimeRole]);
+      const allowedSecurityDefiners = new Set(["policydesk_platform_tenant_metrics"]);
+      const unauthorizedSecurityDefiners = privilegedFunctions.rows.filter((fn) => fn.has_execute && !allowedSecurityDefiners.has(fn.proname));
+      if (unauthorizedSecurityDefiners.length > 0) issues.push(issue("RUNTIME_SECURITY_DEFINER_GRANTS_TOO_BROAD", "BLOCKED", `El rol runtime puede ejecutar ${unauthorizedSecurityDefiners.length} funciones SECURITY DEFINER no aprobadas.`));
+      const controlPrivilege = await client.query<{ canInsert: boolean; canUpdate: boolean; canDelete: boolean }>(`
+        SELECT has_table_privilege($1, 'public."PlatformRuntimeState"', 'INSERT') AS "canInsert",
+               has_table_privilege($1, 'public."PlatformRuntimeState"', 'UPDATE') AS "canUpdate",
+               has_table_privilege($1, 'public."PlatformRuntimeState"', 'DELETE') AS "canDelete"
+      `, [runtimeRole]);
+      platformRuntimeStateCanWrite = Boolean(controlPrivilege.rows[0]?.canInsert || controlPrivilege.rows[0]?.canUpdate || controlPrivilege.rows[0]?.canDelete);
+      if (platformRuntimeStateCanWrite) issues.push(issue("PLATFORM_RUNTIME_STATE_GRANT_TOO_BROAD", "BLOCKED", "El rol runtime no puede modificar PlatformRuntimeState; ese flujo es operativo y directo."));
+    }
+    return {
+      status: aggregateVerificationStatus(issues),
+      currentUser: row?.current_user ?? "UNKNOWN",
+      expectedRole: expected ?? null,
+      isSuperuser: row?.rolsuper ?? null,
+      bypassRls: row?.rolbypassrls ?? null,
+      canLogin: row?.rolcanlogin ?? null,
+      protectedTablesOwned: owners,
+      missingRuntimePrivileges,
+      unexpectedRuntimePrivileges,
+      platformRuntimeStateCanWrite,
+      securityDefinerOwner: aggregateOwner?.owner ?? null,
+      securityDefinerOwnerCanLogin: aggregateOwner?.canLogin ?? null,
+      securityDefinerOwnerBypassRls: aggregateOwner?.bypassRls ?? null,
+      readOnlyUnexpectedPrivileges,
+      readOnlySecurityDefiners,
+    };
+  } catch (error) {
+    issues.push(issue("RUNTIME_ROLE_CHECK_FAILED", "BLOCKED", `No se pudo verificar el rol runtime (${safeErrorCode(error)}).`));
+    return { status: "BLOCKED", currentUser: "UNKNOWN" };
+  }
 }
 
 export async function verifyProductionState(connectionString: string): Promise<ProductionVerificationReport> {
@@ -335,20 +556,22 @@ export async function verifyProductionState(connectionString: string): Promise<P
     const billingIssues: VerificationIssue[] = [];
     const backupIssues: VerificationIssue[] = [];
     const runtimeIssues: VerificationIssue[] = [];
-    const [migrations, organization, tenant, rls, knowledge, billing, backup, runtimeConfiguration] = await Promise.all([
-      verifyMigrations(client, migrationIssues),
+    const usingReadOnlyVerifier = Boolean(process.env.PRODUCTION_READONLY_DATABASE_URL?.trim());
+    const [migrations, organization, tenant, rls, knowledge, billing, backup, runtimeConfiguration, databaseRole] = await Promise.all([
+      verifyMigrations(client, migrationIssues, mode),
       verifyOrganization(client, mode, organizationIssues),
       verifyTenant(client, mode, tenantIssues),
       verifyRls(client, mode, rlsIssues),
       verifyKnowledge(client, knowledgeIssues),
       verifyBilling(client, billingIssues),
       verifyBackup(client, backupIssues),
-      Promise.resolve(verifyRuntimeConfiguration(runtimeIssues)),
+      Promise.resolve(verifyRuntimeConfiguration(runtimeIssues, mode)),
+      verifyDatabaseRole(client, mode, runtimeIssues, usingReadOnlyVerifier),
     ]);
     await client.query("ROLLBACK");
     const allIssues = [...issues, ...migrationIssues, ...organizationIssues, ...tenantIssues, ...rlsIssues, ...knowledgeIssues, ...billingIssues, ...backupIssues, ...runtimeIssues];
     const status = aggregateVerificationStatus(allIssues);
-    return { status, generatedAt: new Date().toISOString(), tenantMode, sections: { migrations, organization, tenant, rls, knowledge, billing, backup, runtimeConfiguration }, issues: allIssues };
+    return { status, generatedAt: new Date().toISOString(), tenantMode, sections: { migrations, organization, tenant, rls, knowledge, billing, backup, runtimeConfiguration: { ...runtimeConfiguration, databaseRole } }, issues: allIssues };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     return {

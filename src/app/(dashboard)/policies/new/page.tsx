@@ -4,10 +4,9 @@ import { createPolicyDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUserOrRedirect } from "@/lib/auth";
-import { getDb } from "@/lib/db";
 import { buildRenewalPolicyDefaults, type PolicyRenewalSource } from "@/lib/policy-renewal";
 import { clientOperationalWhere, policyOperationalWhere } from "@/lib/portfolio-access";
-import { requireOrganizationContext } from "@/lib/organization-context";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import type { PolicyFormValues } from "@/lib/validations";
 
 type TelegramDraftAiReview = {
@@ -80,9 +79,8 @@ export default async function NewPolicyPage({
   const user = await requireUserOrRedirect();
   const context = await requireOrganizationContext();
   const params = (await searchParams) ?? {};
-  const db = getDb();
   const portfolioOwnerId = context.membershipRole === "ADMIN" || context.membershipRole === "OWNER" ? undefined : context.userId;
-  const [clients, insurers, mostUsedInsurer] = await Promise.all([
+  const [clients, insurers, mostUsedInsurer] = await withTenantTransaction(context, (db) => Promise.all([
     db.client.findMany({
       where: { status: { not: "ARCHIVED" }, ...clientOperationalWhere(portfolioOwnerId, context.organizationId) },
       orderBy: { fullName: "asc" },
@@ -100,12 +98,12 @@ export default async function NewPolicyPage({
       orderBy: { _count: { insurerId: "desc" } },
       take: 1,
     }),
-  ]);
+  ]));
 
   let telegramDraftDefaults: Partial<PolicyFormValues> = {};
   let telegramAiReview: TelegramDraftAiReview | null = null;
   if (params.telegramDraft) {
-    const draft = await db.telegramDraft.findFirst({
+    const draft = await withTenantTransaction(context, (db) => db.telegramDraft.findFirst({
       where: {
         id: params.telegramDraft,
         organizationId: context.organizationId,
@@ -113,7 +111,7 @@ export default async function NewPolicyPage({
         type: "POLICY_CAPTURE",
       },
       select: { payloadJson: true, status: true, expiresAt: true },
-    });
+    }));
 
     if (draft && draft.status !== "CANCELLED" && draft.expiresAt > new Date()) {
       telegramDraftDefaults = parseTelegramDraftPolicyDefaults(draft.payloadJson);
@@ -123,13 +121,13 @@ export default async function NewPolicyPage({
 
   let renewalSource: PolicyRenewalSource | null = null;
   if (params.renewalFrom) {
-    const source = await db.policy.findFirst({
+    const source = await withTenantTransaction(context, (db) => db.policy.findFirst({
       where: { id: params.renewalFrom, ...policyOperationalWhere(portfolioOwnerId, context.organizationId) },
       include: {
         client: { select: { id: true, fullName: true } },
         insurer: { select: { id: true, name: true } },
       },
-    });
+    }));
 
     if (source) {
       try {

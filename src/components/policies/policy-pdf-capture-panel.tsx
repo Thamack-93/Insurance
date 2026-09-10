@@ -72,7 +72,7 @@ type InlineClientResponse = {
   error?: string;
 };
 
-const MAX_PDF_BYTES = 10 * 1024 * 1024;
+const MAX_PDF_BYTES = 15 * 1024 * 1024;
 function makeCaptureHandoffId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
@@ -177,7 +177,7 @@ function fieldConfidenceBadge(confidence: "high" | "medium" | "low") {
   );
 }
 
-export function PolicyPdfCapturePanel({ userId, handoffId }: { userId: string; handoffId?: string }) {
+export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false, handoffId }: { userId: string; organizationId: string; demoMode?: boolean; handoffId?: string }) {
   const router = useRouter();
   const [isConfirming, setIsConfirming] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -501,7 +501,7 @@ export function PolicyPdfCapturePanel({ userId, handoffId }: { userId: string; h
       return;
     }
     if (targetFile.size > MAX_PDF_BYTES) {
-      setError("El PDF supera el tamaño máximo de 10 MB.");
+      setError("El PDF supera el tamaño máximo de 15 MB.");
       return;
     }
 
@@ -520,10 +520,10 @@ export function PolicyPdfCapturePanel({ userId, handoffId }: { userId: string; h
       // Do not start an optional Blob upload in parallel here: a cancelled or
       // unavailable retention upload must not abort an otherwise valid capture.
       let uploaded: Awaited<ReturnType<typeof uploadPdfWithRetry>> | null = null;
-      if (!extractedText.trim()) {
+      if (demoMode || !extractedText.trim()) {
         try {
           uploaded = await uploadPdfWithRetry({
-            pathname: buildNoraPolicyPdfPathname(userId, targetFile.name),
+            pathname: buildNoraPolicyPdfPathname(organizationId, userId, targetFile.name),
             file: targetFile,
             handleUploadUrl: "/api/nora/policy-pdf/upload",
             clientPayload: JSON.stringify({ userId, purpose: "policy-capture", fileName: targetFile.name, operationId }),
@@ -534,7 +534,7 @@ export function PolicyPdfCapturePanel({ userId, handoffId }: { userId: string; h
         }
       }
       let response: Response;
-      if (extractedText.trim()) {
+      if (extractedText.trim() && !demoMode) {
         response = await fetchPdfCaptureWithTimeout("/api/nora/policy-pdf/analyze", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

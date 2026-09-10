@@ -30,11 +30,18 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 
 - `SESSION_SECRET`
 - `DATABASE_URL`
-- `ENABLE_DOCUMENT_FILES=false`
+- `DATABASE_ADMIN_URL` solo para migraciones, cutover y operaciones de backup/restore fuera del runtime
+- `PRODUCTION_READONLY_DATABASE_URL` y `PRODUCTION_READONLY_ROLE` para el verificador productivo
+- `PRODUCTION_EXPECTED_TENANT_MODE` (`single-org` hasta completar cutover; después `multi-org`)
+- `ENABLE_TENANT_RLS_CUTOVER=1` solo después del cutover RLS y verifier multi-org PASS
+- `TENANT_RLS_APP_ROLE=policydesk_app` cuando se active el runtime
+  multi-tenant; prepara `policydesk_app` y `policydesk_platform_owner` con
+  `npm run prepare:tenant-roles` sobre `DATABASE_ADMIN_URL` antes del cutover
+- `NEXT_PUBLIC_DOCUMENT_FILES_ENABLED=1` when private Blob uploads are ready
 - `CRON_SECRET`
-- `UPSTASH_REDIS_REST_URL` opcional para rate limiting distribuido
-- `UPSTASH_REDIS_REST_TOKEN` opcional para rate limiting distribuido
-- `REQUIRE_DISTRIBUTED_RATE_LIMIT=0` mientras el proyecto tenga un único usuario
+- `UPSTASH_REDIS_REST_URL` requerido en producción para rate limiting y locks
+- `UPSTASH_REDIS_REST_TOKEN` requerido en producción para rate limiting y locks
+- `REQUIRE_DISTRIBUTED_RATE_LIMIT=1` en producción (fallo cerrado)
 - `SECURITY_EVENT_FINGERPRINT_SECRET`
 - `AI_GATEWAY_MODEL`
 - `AI_GATEWAY_FALLBACK_MODELS`
@@ -51,9 +58,19 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 1. Crear la base de datos hosted.
 2. Crear una rama protegida para preview; no seedear ni resetear la base actual.
 3. Configurar las variables de entorno en Vercel.
-4. Conectar un Blob store privado.
-5. Mantener los cuatro cron diarios en Vercel, todos protegidos por `CRON_SECRET`: `/api/jobs/backup` a las `05:00 UTC`, `/api/jobs/nonpayment-cancellation` a las `06:00 UTC`, `/api/jobs/telegram-digest` a las `14:00 UTC` (08:00, hora de Ciudad de México) y `/api/jobs/telegram-birthdays` a las `15:00 UTC` (09:00, hora de Ciudad de México). El aviso de cumpleaños se deduplica por usuario y fecha local; el reenvío manual es independiente.
-6. Mantener el fallback local de rate limiting para el despliegue actual. Cuando aumente el tráfico, configurar Redis y cambiar `REQUIRE_DISTRIBUTED_RATE_LIMIT=1` para fallar cerrado si Redis no está disponible.
+4. Conectar un Blob store privado y configurar `BLOB_READ_WRITE_TOKEN`; DEMO
+   uploads require the private store and are automatically purged after 48 hours.
+5. Mantener los cron diarios en Vercel, todos protegidos por `CRON_SECRET`:
+   `/api/jobs/demo-retention` (04:30 UTC) purga Blob, resetea DEMO y suspende
+   trials vencidos; `/api/jobs/backup` (05:00 UTC),
+   `/api/jobs/nonpayment-cancellation` (06:00 UTC),
+   `/api/jobs/renewal-followups` (13:30 UTC), `/api/jobs/telegram-digest`
+   (14:00 UTC, 08:00 hora de Ciudad de México) y
+   `/api/jobs/telegram-birthdays` (15:00 UTC, 09:00 hora de Ciudad de México).
+   El aviso de cumpleaños se deduplica por usuario y fecha local; el reenvío
+   manual es independiente.
+6. Configurar Upstash Redis antes de habilitar usuarios DEMO. En producción la
+   ausencia o caída de Redis bloquea rate limits y locks de forma fail-closed.
 7. Desplegar preview, validar y luego integrar la rama principal. Vercel despliega
    `main` automáticamente.
 
@@ -74,8 +91,9 @@ No guardar una conexión administrativa en Vercel y no ejecutar migraciones desd
 ## Validaciones mínimas
 
 - La app no debe resetear, truncar ni seedear la base actual.
-- No debe intentar escribir archivos PDF en runtime.
-- `Document` debe operar solo como metadata en esta fase.
+- No debe intentar escribir archivos PDF en el filesystem efímero de Vercel.
+- `Document` almacena metadata; el original se guarda en Blob privado y los
+  originales DEMO expiran a las 48 horas.
 - Los backups deben poder crearse, listarse y verificarse solo por admin.
 - Un backup verificado criptográficamente no sustituye un restore drill. El drill sigue siendo CLI-only, hacia una rama temporal explícitamente autorizada y nunca hacia producción.
 

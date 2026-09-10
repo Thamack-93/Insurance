@@ -38,7 +38,7 @@ const TRANSIENT_VERIFY_CODES = new Set<string>([
   "BLOB_UNAVAILABLE",
 ]);
 
-type CreateAndCatalogBackupInput = {
+export type CreateAndCatalogBackupInput = {
   scope: "PLATFORM" | "ORGANIZATION";
   organizationId?: string;
   now?: Date;

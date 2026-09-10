@@ -1,7 +1,6 @@
 import "server-only";
 
-import type { Prisma } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
+import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { businessToday, daysBetweenBusinessDates } from "@/lib/business-dates";
 import { RENEWAL_STAGES, type RenewalStage } from "@/lib/domain-values";
 import { logError } from "@/lib/logger";
@@ -17,6 +16,8 @@ import {
   type RenewalBoardFilters,
   type RenewalStallState,
 } from "@/lib/renewal-board.logic";
+import { withTenantOrganization } from "@/lib/tenant-dal";
+import { withSystemOrganizationTransaction } from "@/lib/organization-context";
 
 /**
  * Máximo de pólizas que el tablero carga de una sola vez. Con la ventana más
@@ -181,13 +182,12 @@ export async function loadRenewalBoard(
   const today = businessToday();
 
   try {
-    const db = getDb();
-    const policies = await db.policy.findMany({
+    const policies = await withTenantOrganization(organizationId, (db) => db.policy.findMany({
       where: buildRenewalBoardWhere(filters, portfolioOwnerId, organizationId, today),
       include: renewalBoardInclude,
       orderBy: [{ endDate: "asc" }, { id: "asc" }],
       take: RENEWAL_BOARD_LIMIT + 1,
-    });
+    }));
 
     const truncated = policies.length > RENEWAL_BOARD_LIMIT;
     const cards: RenewalBoardCard[] = [];
@@ -258,8 +258,14 @@ export async function forEachRenewalCandidate(
   organizationId: string,
   handle: (card: RenewalBoardCard) => Promise<void>,
   today: Date = businessToday(),
+  client?: PrismaClient | Prisma.TransactionClient,
 ): Promise<{ scanned: number }> {
-  const db = getDb();
+  if (!client) {
+    return withSystemOrganizationTransaction(organizationId, "renewal follow-up", (tx) =>
+      forEachRenewalCandidate(organizationId, handle, today, tx),
+    );
+  }
+  const db = client;
   let cursor: string | undefined;
   let scanned = 0;
 
@@ -294,8 +300,7 @@ export async function forEachRenewalCandidate(
  */
 export async function getRenewalBoardOwners(portfolioOwnerId: string | undefined, organizationId: string) {
   try {
-    const db = getDb();
-    const users = await db.user.findMany({
+    const users = await withTenantOrganization(organizationId, (db) => db.user.findMany({
       where: {
         active: true,
         ...(portfolioOwnerId ? { id: portfolioOwnerId } : {}),
@@ -304,7 +309,7 @@ export async function getRenewalBoardOwners(portfolioOwnerId: string | undefined
       },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
-    });
+    }));
     return users;
   } catch (error) {
     logError("renewal-board.getRenewalBoardOwners", error);

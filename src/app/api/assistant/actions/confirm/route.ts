@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { AuthError, requireUser } from "@/lib/auth";
+import { requireOrganizationContext } from "@/lib/organization-context";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody } from "@/lib/request-guards";
 import { confirmAssistantActionDraft } from "@/lib/assistant-actions";
@@ -16,6 +18,11 @@ const confirmSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const user = await requireUser();
+    const organization = await requireOrganizationContext();
+    const noraCapability = await resolveOrganizationCapability(organization.organizationId, "NORA");
+    if (!noraCapability.enabled) {
+      return NextResponse.json({ error: "Nora no está habilitada para esta organización." }, { status: 403 });
+    }
 
     try {
       assertSameOrigin(request, "assistant action confirm");

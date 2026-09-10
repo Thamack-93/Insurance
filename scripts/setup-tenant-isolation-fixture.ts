@@ -1,47 +1,17 @@
-import { createHash, randomBytes, scryptSync } from "node:crypto";
+import { randomBytes, scryptSync } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 import type { Prisma } from "../src/generated/prisma/client";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { EXPECTED_TENANT_TRIGGERS } from "../src/lib/tenant-organization-foundation";
+import { assertDisposableCertificationTarget } from "./tenant-certification-target.mjs";
 
 const connectionString = process.env.DATABASE_URL?.trim();
-if (
-  process.env.NODE_ENV !== "test" ||
-  process.env.TENANT_ISOLATION_TEST_DB !== "1" ||
-  process.env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB !== "1"
-) {
-  throw new Error("Tenant isolation fixture requires NODE_ENV=test, TENANT_ISOLATION_TEST_DB=1 and PLAYWRIGHT_ENFORCE_DISPOSABLE_DB=1.");
-}
-if (process.env.VERCEL_ENV === "production" || process.env.VERCEL_ENV === "preview") {
-  throw new Error("Tenant isolation fixture refuses Vercel environments.");
-}
 if (!connectionString) throw new Error("DATABASE_URL is required.");
-
-const target = new URL(connectionString);
-const runId = process.env.TENANT_ISOLATION_RUN_ID?.trim();
-const expectedDatabase = process.env.TENANT_ISOLATION_DB_NAME?.trim();
-const configuredFingerprint = process.env.TENANT_ISOLATION_FINGERPRINT?.trim();
-const currentDatabase = decodeURIComponent(target.pathname.replace(/^\//, "").split("?")[0]);
-const canonicalHost = target.hostname.toLowerCase();
-if (!runId || !expectedDatabase || !configuredFingerprint) {
-  throw new Error("Tenant isolation fixture requires run ID, dedicated database name and fingerprint.");
-}
-if (
-  !/^policydesk_tenant_test_[A-Za-z0-9_]+$/.test(expectedDatabase) ||
-  currentDatabase !== expectedDatabase ||
-  ["postgres", "template0", "template1"].includes(currentDatabase.toLowerCase())
-) {
-  throw new Error("Tenant isolation fixture requires the exact dedicated database name.");
-}
-if (!["localhost", "127.0.0.1", "::1"].includes(canonicalHost)) {
-  throw new Error("Tenant isolation fixture requires a local disposable PostgreSQL host.");
-}
-const expectedFingerprint = createHash("sha256")
-  .update(`local-postgres:${runId}:${expectedDatabase}:${canonicalHost}`)
-  .digest("hex");
-if (configuredFingerprint !== expectedFingerprint) {
-  throw new Error("Tenant isolation fixture fingerprint does not match the dedicated target.");
-}
+const certificationTarget = assertDisposableCertificationTarget(connectionString);
+const runId = certificationTarget.runId;
+const expectedDatabase = certificationTarget.database;
+const configuredFingerprint = certificationTarget.fingerprint;
+const canonicalHost = certificationTarget.host;
 
 const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 const hash = (password: string) => {
@@ -53,6 +23,7 @@ const LEGACY_ORGANIZATION_ID = "org_legacy_singleton_0001";
 const PEDRO_ORGANIZATION_ID = "org_pedro_gomez_0001";
 const DEMO_ORGANIZATION_ID = "org_demo_broker_0001";
 const PEDRO_USER_ID = "tenant-pedro-gomez";
+const PLATFORM_USER_ID = "tenant-platform-admin";
 
 async function validateMarker() {
   const marker = await db.$queryRaw<Array<{ run_id: string; database_name: string; host: string; fingerprint: string }>>`
@@ -112,16 +83,19 @@ async function main() {
       { id: "tenant-agent-a", email: "tenant-agent-a@policydesk.local", name: "Tenant Agent A", role: "AGENT", org: orgA.id, membershipRole: "AGENT" },
       { id: "tenant-admin-b", email: "tenant-admin-b@policydesk.local", name: "Tenant Admin B", role: "ADMIN", org: orgB.id, membershipRole: "ADMIN" },
       { id: "tenant-agent-b", email: "tenant-agent-b@policydesk.local", name: "Tenant Agent B", role: "AGENT", org: orgB.id, membershipRole: "AGENT" },
-      { id: PEDRO_USER_ID, email: "pedroagl93@gmail.com", name: "Pedro Alfredo Gómez Lorenzo", role: "ADMIN", org: orgB.id, membershipRole: "OWNER" },
+      { id: PEDRO_USER_ID, email: "tenant-owner-b@policydesk.local", name: "Tenant Owner B", role: "ADMIN", org: orgB.id, membershipRole: "OWNER" },
       { id: "tenant-demo-owner", email: "demo-owner@policydesk.local", name: "Demo Owner", role: "ADMIN", org: orgDemo.id, membershipRole: "OWNER" },
       { id: "tenant-demo-agent", email: "demo-agent@policydesk.local", name: "Demo Agent", role: "AGENT", org: orgDemo.id, membershipRole: "AGENT" },
-      { id: "platform_admin_demo_0001", email: "admin@policydesk.local", name: "Admin Demo", role: "ADMIN", org: null, membershipRole: null },
+      { id: PLATFORM_USER_ID, email: "tenant-platform-admin@policydesk.local", name: "Tenant Platform Admin", role: "ADMIN", org: null, membershipRole: null },
     ] as const;
     for (const item of users) {
       await tx.user.upsert({
         where: { id: item.id },
-        update: { email: item.email, name: item.name, role: item.role, platformRole: item.id === "platform_admin_demo_0001" ? "SUPERADMIN" : "NONE", active: true },
-        create: { id: item.id, email: item.email, name: item.name, passwordHash: hash("tenant-fixture-password"), role: item.role, platformRole: item.id === "platform_admin_demo_0001" ? "SUPERADMIN" : "NONE", active: true },
+        // Refresh the deterministic credential on every certification run so
+        // a production clone with pre-existing fixture IDs cannot leave the
+        // browser suite with stale passwords.
+        update: { email: item.email, name: item.name, passwordHash: hash("tenant-fixture-password"), role: item.role, platformRole: item.id === PLATFORM_USER_ID ? "SUPERADMIN" : "NONE", active: true },
+        create: { id: item.id, email: item.email, name: item.name, passwordHash: hash("tenant-fixture-password"), role: item.role, platformRole: item.id === PLATFORM_USER_ID ? "SUPERADMIN" : "NONE", active: true },
       });
       if (item.org && item.membershipRole) {
         await tx.organizationMembership.upsert({
@@ -131,11 +105,17 @@ async function main() {
         });
       }
     }
-    await tx.organizationMembership.upsert({
-      where: { organizationId_userId: { organizationId: orgA.id, userId: "tenant-admin-a" } },
-      update: { role: "OWNER", active: true },
-      create: { organizationId: orgA.id, userId: "tenant-admin-a", role: "OWNER", active: true },
+    const activeLegacyOwners = await tx.organizationMembership.count({
+      where: { organizationId: orgA.id, role: "OWNER", active: true, user: { active: true } },
     });
+    if (activeLegacyOwners > 1) throw new Error("Tenant isolation fixture refuses multiple active legacy owners.");
+    if (activeLegacyOwners === 0) {
+      await tx.organizationMembership.upsert({
+        where: { organizationId_userId: { organizationId: orgA.id, userId: "tenant-admin-a" } },
+        update: { role: "OWNER", active: true },
+        create: { organizationId: orgA.id, userId: "tenant-admin-a", role: "OWNER", active: true },
+      });
+    }
     for (const [orgId, suffix, ownerId] of [[orgA.id, "A", "tenant-agent-a"], [orgB.id, "B", "tenant-agent-b"], [orgDemo.id, "C", "tenant-demo-agent"]] as const) {
       const insurer = await tx.insurer.upsert({
         where: { id: `tenant-insurer-${suffix.toLowerCase()}` },
@@ -219,7 +199,7 @@ async function main() {
       },
     });
     console.log(JSON.stringify({ ok: true, organizations: [orgA.id, orgB.id, orgDemo.id], users: users.map((user) => user.id) }));
-  });
+  }, { maxWait: 20_000, timeout: 120_000 });
 }
 
 main().catch((error) => {

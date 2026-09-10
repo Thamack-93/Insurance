@@ -13,7 +13,7 @@ import { StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
 import { DocumentDropZone } from "@/components/documents/document-drop-zone";
 import { DocumentList } from "@/components/documents/document-list";
-import { getDb } from "@/lib/db";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { policyTypeLabel, statusLabel } from "@/lib/status";
@@ -26,7 +26,7 @@ export default async function ClaimDetailPage({ params, searchParams }: { params
   const returnTo = normalizeReturnTo(typeof query.returnTo === "string" ? query.returnTo : undefined, "/operations?view=claims");
   const scope = await requireOrganizationPortfolioReadScope();
   const claimScope = claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
-  const db = getDb();
+  return withTenantOrganization(scope.organizationId, async (db) => {
 
   const claim = await db.claim.findFirst({
     where: { id, ...claimScope },
@@ -49,7 +49,7 @@ export default async function ClaimDetailPage({ params, searchParams }: { params
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 5,
     }),
-    getActivityForEntity("Claim", id, 20, scope.organizationId),
+    getActivityForEntity("Claim", id, 20, scope.organizationId, db),
   ]);
 
   const isClosed = claim.status === "RESOLVED" || claim.status === "CANCELLED";
@@ -270,4 +270,5 @@ export default async function ClaimDetailPage({ params, searchParams }: { params
       </div>
     </div>
   );
+});
 }

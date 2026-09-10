@@ -1,5 +1,4 @@
 import { subMonths } from "date-fns";
-import { getDb } from "@/lib/db";
 import { today } from "@/lib/dates";
 import { bucketCommissionsByMonth, bucketDatesByMonth, MONTHLY_COMMISSION_STATUSES, pctChange } from "@/lib/dashboard.logic";
 import { BUSINESS_TIME_ZONE, businessAddDays, businessEndOfMonth, businessStartOfMonth } from "@/lib/business-dates";
@@ -15,10 +14,11 @@ import {
   requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 
 export async function getDashboardData() {
-  const db = getDb();
   const scope = await requireOrganizationPortfolioReadScope();
+  return withTenantOrganization(scope.organizationId, async (db) => {
   const now = today();
   const in7 = businessAddDays(now, 7);
   const in60 = businessAddDays(now, 60);
@@ -36,6 +36,7 @@ export async function getDashboardData() {
     },
     scope.portfolioOwnerId,
     scope.organizationId,
+    db,
   );
   const [
     activePolicies,
@@ -69,14 +70,14 @@ export async function getDashboardData() {
       statuses: OPEN_WORK_ITEM_STATUSES,
       portfolioOwnerId: scope.portfolioOwnerId,
       organizationId: scope.organizationId,
-    }),
+    }, db),
     countWorkItems({
       workItemTypes: ["TASK"],
       statuses: OPEN_WORK_ITEM_STATUSES,
       priorities: ["URGENT"],
       portfolioOwnerId: scope.portfolioOwnerId,
       organizationId: scope.organizationId,
-    }),
+    }, db),
     // Per-row fallback: actualAmount when set, otherwise expectedAmount.
     // We split into two aggregates to reproduce SUM(COALESCE(actualAmount, expectedAmount))
     // without scanning every row in JS.
@@ -123,14 +124,14 @@ export async function getDashboardData() {
     db.activityLog.findMany({ where: { organizationId: scope.organizationId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 }),
     db.alert.findMany({ where: { organizationId: scope.organizationId, status: "OPEN" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 }),
     db.alert.count({ where: { organizationId: scope.organizationId, status: "OPEN", alertType: { startsWith: "SECURITY_" } } }),
-    detectRisks(scope.portfolioOwnerId, scope.organizationId),
+    detectRisks(scope.portfolioOwnerId, scope.organizationId, db),
     getWorkItems({
       workItemTypes: ["TASK"],
       statuses: OPEN_WORK_ITEM_STATUSES,
       limit: 12,
       portfolioOwnerId: scope.portfolioOwnerId,
       organizationId: scope.organizationId,
-    }),
+    }, db),
   ]);
 
   const insurerIds = insurerDistributionRows.map((row) => row.insurerId);
@@ -185,6 +186,7 @@ export async function getDashboardData() {
       monthRange: { monthStart, monthEnd },
     },
   };
+  });
 }
 
 export type OnboardingStatus = {
@@ -197,28 +199,29 @@ export type OnboardingStatus = {
 };
 
 export async function getOnboardingStatus(): Promise<OnboardingStatus> {
-  const db = getDb();
   const scope = await requireOrganizationPortfolioReadScope();
-  const [insurers, clients, policies, receipts, dismissedRow] = await Promise.all([
+  return withTenantOrganization(scope.organizationId, async (db) => {
+    const [insurers, clients, policies, receipts, dismissedRow] = await Promise.all([
     db.insurer.count({ where: { organizationId: scope.organizationId } }),
     db.client.count({ where: clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId) }),
     db.policy.count({ where: policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) }),
     db.receipt.count({ where: receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) }),
-    db.systemSetting.findUnique({ where: { key: `onboardingDismissed:${scope.organizationId}` } }),
+    db.organizationSetting.findUnique({ where: { organizationId_key: { organizationId: scope.organizationId, key: "onboardingDismissed" } } }),
   ]);
-  return {
+    return {
     insurers,
     clients,
     policies,
     receipts,
     dismissed: dismissedRow?.value === "true",
     complete: insurers > 0 && clients > 0 && policies > 0 && receipts > 0,
-  };
+    };
+  });
 }
 
 export async function getTodayData() {
-  const db = getDb();
   const scope = await requireOrganizationPortfolioReadScope();
+  return withTenantOrganization(scope.organizationId, async (db) => {
   const now = today();
   const tomorrow = businessAddDays(now, 1);
   const in7 = businessAddDays(now, 7);
@@ -234,6 +237,7 @@ export async function getTodayData() {
     },
     scope.portfolioOwnerId,
     scope.organizationId,
+    db,
   );
 
   const [
@@ -272,7 +276,7 @@ export async function getTodayData() {
       limit: 8,
       portfolioOwnerId: scope.portfolioOwnerId,
       organizationId: scope.organizationId,
-    }),
+    }, db),
     db.client.findMany({
       where: {
         ...clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
@@ -294,7 +298,7 @@ export async function getTodayData() {
       take: 8,
     }),
     db.activityLog.findMany({ where: { organizationId: scope.organizationId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8 }),
-    detectRisks(scope.portfolioOwnerId, scope.organizationId),
+    detectRisks(scope.portfolioOwnerId, scope.organizationId, db),
   ]);
 
   const overdueWorkItemRows = overdueWorkItems.map((item) => ({
@@ -330,6 +334,7 @@ export async function getTodayData() {
     criticalRisks: risks.filter((risk) => risk.severity === "CRITICAL").slice(0, 6),
     recentActivity,
   };
+  });
 }
 
 function groupDatesByWeek<T extends Record<string, unknown>>(items: T[], field: keyof T) {
@@ -400,8 +405,8 @@ function lastSixMonths(now: Date) {
 export type TodayDashboardData = Awaited<ReturnType<typeof getTodayDashboardData>>;
 
 export async function getTodayDashboardData() {
-  const db = getDb();
   const scope = await requireOrganizationPortfolioReadScope();
+  return withTenantOrganization(scope.organizationId, async (db) => {
   const now = today();
   const in30 = businessAddDays(now, 30);
   const monthStart = businessStartOfMonth(now);
@@ -417,6 +422,7 @@ export async function getTodayDashboardData() {
     { endDate: { lt: now } },
     scope.portfolioOwnerId,
     scope.organizationId,
+    db,
   );
   // Use the same eligibility rules as the renewal destination list. A raw
   // policy count includes records whose latest receipt or lifecycle makes
@@ -534,7 +540,7 @@ export async function getTodayDashboardData() {
       statuses: OPEN_WORK_ITEM_STATUSES,
       portfolioOwnerId: scope.portfolioOwnerId,
       organizationId: scope.organizationId,
-    }),
+    }, db),
   ]);
 
   const months = lastSixMonths(now);
@@ -624,4 +630,5 @@ export async function getTodayDashboardData() {
     ],
     prevMonthLabel: prevMonthLabelFormatter.format(subMonths(now, 1)).replace(".", ""),
   };
+  });
 }

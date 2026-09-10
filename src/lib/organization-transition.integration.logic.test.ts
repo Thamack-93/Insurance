@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { Pool } from "pg";
@@ -17,9 +18,23 @@ function databaseUrl(adminUrl: string, database: string) {
 }
 
 async function migrate(url: string) {
-  await execFileAsync("npx", ["prisma", "migrate", "deploy"], {
+  const database = new URL(url).pathname.replace(/^\//, "");
+  const runId = `organization-transition-${process.pid}`;
+  const fingerprint = createHash("sha256").update(`local-postgres:${runId}:${database}:127.0.0.1`).digest("hex");
+  await execFileAsync(process.execPath, ["scripts/migrate-singleton-ci.mjs"], {
     cwd: process.cwd(),
-    env: { ...process.env, DATABASE_URL: url, DATABASE_URL_UNPOOLED: "", NODE_ENV: "test" },
+    env: {
+      ...process.env,
+      DATABASE_URL: url,
+      DATABASE_URL_UNPOOLED: url,
+      DATABASE_ADMIN_URL: url,
+      NODE_ENV: "test",
+      TENANT_ISOLATION_TEST_DB: "1",
+      PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1",
+      TENANT_ISOLATION_RUN_ID: runId,
+      TENANT_ISOLATION_DB_NAME: database,
+      TENANT_ISOLATION_FINGERPRINT: fingerprint,
+    },
     maxBuffer: 4 * 1024 * 1024,
   });
 }
@@ -93,7 +108,7 @@ describe.skipIf(!enabled)("organization transition executable backfill", () => {
   it("keeps preview read-only, applies idempotently, and enforces the singleton guards", async () => {
     const adminUrl = process.env.RESTORE_INTEGRATION_ADMIN_URL ?? process.env.DATABASE_URL;
     if (!adminUrl) throw new Error("RESTORE_INTEGRATION_ADMIN_URL or DATABASE_URL is required.");
-    const name = `org_transition_${process.pid}_${Date.now()}`.replace(/[^a-z0-9_]/gi, "").toLowerCase();
+    const name = `policydesk_tenant_test_org_transition_${process.pid}_${Date.now()}`.replace(/[^a-z0-9_]/gi, "").toLowerCase();
     const url = databaseUrl(adminUrl, name);
     try {
       await createDatabase(adminUrl, name);
@@ -136,11 +151,12 @@ describe.skipIf(!enabled)("organization transition executable backfill", () => {
       // the database barrier must cover them even without a Prisma extension.
       const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
       try {
-        await prisma.client.create({ data: { id: "prisma-create", fullName: "Prisma create" } });
-        await prisma.client.createMany({ data: [{ id: "prisma-many-1", fullName: "Prisma many one" }, { id: "prisma-many-2", fullName: "Prisma many two" }] });
-        await prisma.client.upsert({ where: { id: "prisma-upsert" }, create: { id: "prisma-upsert", fullName: "Prisma upsert" }, update: { fullName: "Prisma upsert changed" } });
-        await prisma.quote.create({ data: { id: "prisma-nested", policyType: "AUTO", requestedDate: new Date(), client: { create: { id: "prisma-nested-client", fullName: "Prisma nested client" } } } });
-        await prisma.$transaction(async (tx) => tx.client.create({ data: { id: "prisma-transaction", fullName: "Prisma transaction" } }));
+        await prisma.client.create({ data: { id: "prisma-create", organizationId: BOOTSTRAP_ORGANIZATION_ID, fullName: "Prisma create" } });
+        await prisma.client.createMany({ data: [{ id: "prisma-many-1", organizationId: BOOTSTRAP_ORGANIZATION_ID, fullName: "Prisma many one" }, { id: "prisma-many-2", organizationId: BOOTSTRAP_ORGANIZATION_ID, fullName: "Prisma many two" }] });
+        await prisma.client.upsert({ where: { id: "prisma-upsert" }, create: { id: "prisma-upsert", organizationId: BOOTSTRAP_ORGANIZATION_ID, fullName: "Prisma upsert" }, update: { fullName: "Prisma upsert changed" } });
+        await prisma.client.create({ data: { id: "prisma-nested-client", organizationId: BOOTSTRAP_ORGANIZATION_ID, fullName: "Prisma nested client" } });
+        await prisma.quote.create({ data: { id: "prisma-nested", organizationId: BOOTSTRAP_ORGANIZATION_ID, clientId: "prisma-nested-client", policyType: "AUTO", requestedDate: new Date() } });
+        await prisma.$transaction(async (tx) => tx.client.create({ data: { id: "prisma-transaction", organizationId: BOOTSTRAP_ORGANIZATION_ID, fullName: "Prisma transaction" } }));
       } finally { await prisma.$disconnect(); }
       expect((await scalar(url, `SELECT count(*)::int AS count FROM "Client" WHERE id LIKE 'prisma-%' AND "organizationId" IS NULL`)).rows[0].count).toBe(0);
       expect((await scalar(url, `SELECT "organizationId" FROM "Quote" WHERE id = 'prisma-nested'`)).rows[0].organizationId).toBe(BOOTSTRAP_ORGANIZATION_ID);
@@ -150,7 +166,7 @@ describe.skipIf(!enabled)("organization transition executable backfill", () => {
   it("rejects invalid Owners and rolls all late failures back", async () => {
     const adminUrl = process.env.RESTORE_INTEGRATION_ADMIN_URL ?? process.env.DATABASE_URL;
     if (!adminUrl) throw new Error("RESTORE_INTEGRATION_ADMIN_URL or DATABASE_URL is required.");
-    const name = `org_transition_fail_${process.pid}_${Date.now()}`.replace(/[^a-z0-9_]/gi, "").toLowerCase();
+    const name = `policydesk_tenant_test_org_transition_fail_${process.pid}_${Date.now()}`.replace(/[^a-z0-9_]/gi, "").toLowerCase();
     const url = databaseUrl(adminUrl, name);
     try {
       await createDatabase(adminUrl, name);

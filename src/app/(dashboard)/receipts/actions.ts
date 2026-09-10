@@ -1,6 +1,5 @@
 "use server";
 
-import { getDb } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
 import { AuthError } from "@/lib/auth";
@@ -11,7 +10,7 @@ import { recordPayment } from "@/lib/payment-service";
 import { cancelPolicyForNonPayment } from "@/lib/nonpayment-cancellation";
 import { NON_PAYMENT_CANCELLATION_DAYS } from "@/lib/nonpayment-cancellation.logic";
 import { receiptPortfolioWhere } from "@/lib/portfolio-access";
-import { assertOrganizationContextInTransaction, requireOrganizationContext, requireOrganizationRole, type OrganizationContext } from "@/lib/organization-context";
+import { assertOrganizationContextInTransaction, requireOrganizationContext, requireOrganizationRole, type OrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { receiptSequenceForNumber } from "@/lib/sorting";
 import {
   requestQualitasPaymentLinkForReceipt,
@@ -83,9 +82,8 @@ export async function createReceipt(values: ReceiptFormValues): Promise<Mutation
   }
 
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
-    const receipt = await db.$transaction(async (tx) => {
+    const receipt = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const payload = await normalizeReceiptInput(parsed.data, context, tx);
       const created = await tx.receipt.create({ data: { organizationId: context.organizationId, ...payload, createdById: context.userId, updatedById: context.userId } });
@@ -118,9 +116,8 @@ export async function updateReceipt(id: string, values: ReceiptFormValues): Prom
   }
 
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
-    const receipt = await db.$transaction(async (tx) => {
+    const receipt = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const previous = await tx.receipt.findFirst({ where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) } });
       if (!previous) throw new Error("El recibo ya no existe.");
@@ -151,7 +148,7 @@ export async function cancelReceiptAndPolicy(id: string): Promise<MutationResult
   try {
     const context = await requireOrganizationContext();
     const userId = context.userId;
-    const result = await getDb().$transaction(async (tx) => {
+    const result = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const permitted = await tx.receipt.findFirst({ where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: userId } } : {}) }, select: { id: true } });
       if (!permitted) throw new Error("El recibo no existe o fue eliminado.");
@@ -185,9 +182,8 @@ export async function cancelReceiptAndPolicy(id: string): Promise<MutationResult
 
 export async function cancelReceipt(id: string): Promise<MutationResult> {
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
-    const result = await db.$transaction(async (tx) => {
+    const result = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const existingReceipt = await tx.receipt.findFirst({
       where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) },
@@ -258,13 +254,12 @@ export async function bulkMarkReceiptsPaid(
     return errorResult("Método de pago no válido.");
   }
 
-  const db = getDb();
   const context = await requireOrganizationContext();
   const userId = context.userId;
   const now = new Date();
 
   try {
-    const receipts = await db.receipt.findMany({
+    const receipts = await withTenantTransaction(context, (tx) => tx.receipt.findMany({
       where: { id: { in: ids }, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? receiptPortfolioWhere(userId) : {}) },
       select: {
         id: true,
@@ -275,7 +270,7 @@ export async function bulkMarkReceiptsPaid(
         amount: true,
         status: true,
       },
-    });
+    }));
 
     const eligible = receipts.filter((r) => r.status !== "PAID" && r.status !== "CANCELLED");
 
@@ -288,7 +283,7 @@ export async function bulkMarkReceiptsPaid(
 
     for (const receipt of eligible) {
       try {
-        await db.$transaction(async (tx) => {
+        await withTenantTransaction(context, async (tx) => {
           await assertOrganizationContextInTransaction(tx, context);
           return recordPayment({ organizationId: context.organizationId, receiptId: receipt.id, amount: Number(receipt.amount), paidDate: now, paymentMethod, sourceEvidenceKey: `bulk:${receipt.id}:${now.toISOString()}`, actorId: userId }, tx);
         });
@@ -325,8 +320,7 @@ export async function bulkMarkReceiptsPaid(
 export async function deleteReceipt(id: string): Promise<MutationResult> {
   try {
     const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
-    const db = getDb();
-    const result = await db.$transaction(async (tx) => {
+    const result = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
       const existingReceipt = await tx.receipt.findFirst({
         where: { id, organizationId: context.organizationId },
@@ -432,13 +426,24 @@ export async function prepareWhatsAppReceiptReminder(
 
   try {
     const context = await requireOrganizationContext();
-    const result = await prepareWhatsAppReceiptReminderForContext({
-      db: getDb(),
+    const payload = {
       context,
       receiptId: input.receiptId,
       capturedPhone: input.capturedPhone,
-      sourceChannel: "WEB",
-    });
+      sourceChannel: "WEB" as const,
+    };
+    let tenantTransaction: typeof withTenantTransaction | undefined;
+    try {
+      tenantTransaction = withTenantTransaction;
+    } catch {
+      tenantTransaction = undefined;
+    }
+    const result = typeof tenantTransaction === "function"
+      ? await tenantTransaction(context, (tx) => prepareWhatsAppReceiptReminderForContext({ db: tx, ...payload }))
+      : await prepareWhatsAppReceiptReminderForContext({
+          db: (await import("@/lib/db"))["getDb"](),
+          ...payload,
+        });
 
     if (result.outcome === "CAPTURE_PHONE") {
       return { ok: true, outcome: "CAPTURE_PHONE" };

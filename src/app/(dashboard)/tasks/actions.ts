@@ -2,7 +2,6 @@
 
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { createNotification } from "@/lib/notifications";
 import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
@@ -10,13 +9,14 @@ import { mapTaskStatusToWorkItemStatus } from "@/lib/work-items";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
 import { workItemSchema, type WorkItemFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
-import { requireOrganizationContext, assertOrganizationContextInTransaction, type OrganizationContext } from "@/lib/organization-context";
+import { requireOrganizationContext, assertOrganizationContextInTransaction, type OrganizationContext, withTenantTransaction, type TenantDb } from "@/lib/organization-context";
 import {
   workItemPortfolioWhere,
 } from "@/lib/portfolio-access";
 
-async function normalizeWorkItemRelations(values: WorkItemFormValues, context: OrganizationContext) {
-  const db = getDb();
+async function normalizeWorkItemRelations(values: WorkItemFormValues, context: OrganizationContext, client?: TenantDb): Promise<{ receiptId: string | null; policyId: string | null; clientId: string | null; insurerId: string | null }> {
+  if (!client) return withTenantTransaction(context, (tx) => normalizeWorkItemRelations(values, context, tx));
+  const db = client;
   const receiptId = optionalRelationId(values.receiptId);
   const policyId = optionalRelationId(values.policyId);
   const clientId = optionalRelationId(values.clientId);
@@ -79,8 +79,8 @@ async function normalizeWorkItemRelations(values: WorkItemFormValues, context: O
   };
 }
 
-async function normalizeWorkItemInput(values: WorkItemFormValues, context: OrganizationContext, existingFolio?: string) {
-  const relations = await normalizeWorkItemRelations(values, context);
+async function normalizeWorkItemInput(values: WorkItemFormValues, context: OrganizationContext, existingFolio?: string, client?: TenantDb) {
+  const relations = await normalizeWorkItemRelations(values, context, client);
 
   return {
     folio: existingFolio ?? `PD-${new Date().getUTCFullYear()}-${String(Date.now()).slice(-6)}`,
@@ -118,13 +118,12 @@ export async function createWorkItem(values: WorkItemFormValues): Promise<Mutati
   }
 
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
     const userId = context.userId;
-    const payload = await normalizeWorkItemInput(parsed.data, context);
     const workItemId = randomUUID();
-    const workItem = await db.$transaction(async (tx) => {
+    const workItem = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
+      const payload = await normalizeWorkItemInput(parsed.data, context, undefined, tx);
       const createdWorkItem = await tx.workItem.create({
         data: {
           organizationId: context.organizationId,
@@ -206,17 +205,16 @@ export async function updateWorkItem(id: string, values: WorkItemFormValues): Pr
   }
 
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
     const userId = context.userId;
-    const previousWorkItem = await findWorkItemByRouteId(id, context.organizationId, undefined, context.membershipRole === "AGENT" ? userId : undefined);
+    const previousWorkItem = await withTenantTransaction(context, (tx) => findWorkItemByRouteId(id, context.organizationId, tx, context.membershipRole === "AGENT" ? userId : undefined));
 
     if (!previousWorkItem) {
       return errorResult("El pendiente ya no existe o no pertenece a tu cartera.");
     }
-    const payload = await normalizeWorkItemInput(parsed.data, context, previousWorkItem.folio ?? undefined);
-    const workItem = await db.$transaction(async (tx) => {
+    const workItem = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
+      const payload = await normalizeWorkItemInput(parsed.data, context, previousWorkItem.folio ?? undefined, tx);
       await tx.workItem.updateMany({
         where: { id: previousWorkItem.id, organizationId: context.organizationId },
         data: {
@@ -303,10 +301,9 @@ export async function bulkUpdateWorkItemStatus(ids: string[], status: string): P
   if (!isAllowedStatus(status)) {
     return errorResult("Estado no válido.");
   }
-  const db = getDb();
   try {
     const context = await requireOrganizationContext();
-    await db.$transaction(async (tx) => {
+    await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       await tx.workItem.updateMany({
         where: buildWorkItemBulkWhere(context, ids),
@@ -328,10 +325,9 @@ export async function bulkUpdateWorkItemPriority(ids: string[], priority: string
   if (!isAllowedPriority(priority)) {
     return errorResult("Prioridad no válida.");
   }
-  const db = getDb();
   try {
     const context = await requireOrganizationContext();
-    await db.$transaction(async (tx) => {
+    await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       await tx.workItem.updateMany({
         where: buildWorkItemBulkWhere(context, ids),
@@ -347,19 +343,18 @@ export async function bulkUpdateWorkItemPriority(ids: string[], priority: string
 
 export async function bulkDeleteWorkItems(ids: string[]): Promise<MutationResult> {
   if (!ids.length) return errorResult("No hay pendientes seleccionados.");
-  const db = getDb();
   try {
     const context = await requireOrganizationContext();
-    const workItems = await db.workItem.findMany({
+    const workItems = await withTenantTransaction(context, (tx) => tx.workItem.findMany({
       where: buildWorkItemBulkWhere(context, ids),
       select: { id: true, sourceId: true, folio: true, title: true, clientId: true, policyId: true },
-    });
+    }));
 
     if (workItems.length === 0) {
       return errorResult("Los pendientes ya no existen.");
     }
 
-    await db.$transaction(async (tx) => {
+    await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       await tx.workItem.deleteMany({ where: { organizationId: context.organizationId, id: { in: workItems.map((workItem) => workItem.id) } } });
       for (const workItem of workItems) {
@@ -387,15 +382,14 @@ export async function bulkDeleteWorkItems(ids: string[]): Promise<MutationResult
 }
 export async function deleteWorkItem(id: string): Promise<MutationResult> {
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
-    const existingWorkItem = await findWorkItemByRouteId(id, context.organizationId, undefined, context.membershipRole === "AGENT" ? context.userId : undefined);
+    const existingWorkItem = await withTenantTransaction(context, (tx) => findWorkItemByRouteId(id, context.organizationId, tx, context.membershipRole === "AGENT" ? context.userId : undefined));
 
     if (!existingWorkItem) {
       return errorResult("El pendiente ya no existe.");
     }
 
-    await db.$transaction(async (tx) => {
+    await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       await tx.workItem.deleteMany({ where: { id: existingWorkItem.id, organizationId: context.organizationId } });
 

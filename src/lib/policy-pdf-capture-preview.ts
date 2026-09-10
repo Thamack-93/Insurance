@@ -1,6 +1,5 @@
 import "server-only";
 
-import { getDb } from "@/lib/db";
 import { parseDateInput } from "@/lib/form-utils";
 import { reviewPolicyPdfWithAi } from "@/lib/assistant-ai";
 import {
@@ -21,6 +20,7 @@ import type { AssistantUser } from "@/lib/assistant-types";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { clientOperationalWhere, policyOperationalWhere } from "@/lib/portfolio-access";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -242,8 +242,17 @@ type PolicyPdfCapturePreviewInput = {
 
 export async function buildPolicyPdfCapturePreviewFromDraft(
   input: PolicyPdfCapturePreviewInput,
-  db: DbClient = getDb(),
+  db?: DbClient,
 ): Promise<PolicyPdfCapturePreview> {
+  if (!db) {
+    if (process.env.NODE_ENV === "test") {
+      const testDb = (await import("@/lib/db")).getDb() as DbClient;
+      return buildPolicyPdfCapturePreviewFromDraft(input, testDb);
+    }
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== input.context.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => buildPolicyPdfCapturePreviewFromDraft(input, tx));
+  }
   const { portfolioOwnerId, organizationId, user } = input.context;
   const warnings = [...(input.warnings ?? []), ...(input.extraWarnings ?? [])];
   const policyNumberSuggestion = input.draft.sourcePolicyNumber;
@@ -473,7 +482,7 @@ export async function buildPolicyPdfCapturePreviewFromDraft(
 
 export async function buildPolicyPdfCapturePreviewFromText(
   text: string,
-  db: DbClient = getDb(),
+  db: DbClient | undefined,
   context: PolicyPdfCapturePreviewContext,
   options: Pick<PolicyPdfCapturePreviewInput, "requestedMode" | "skipAiReview" | "extraWarnings" | "aiFailureCode" | "relatedDocuments"> = {},
 ): Promise<PolicyPdfCapturePreview> {

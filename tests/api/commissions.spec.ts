@@ -8,6 +8,8 @@ import {
   getTestOrigin,
 } from "../helpers/db";
 
+const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
+
 test.describe("Commissions API", () => {
   test.describe("GET /api/commissions/stats", () => {
     test("returns 401 without session", async ({ request }) => {
@@ -60,6 +62,7 @@ test.describe("Commissions API", () => {
 
       await db.commission.create({
         data: {
+          organizationId: TEST_ORGANIZATION_ID,
           policyId,
           clientId: receipt.clientId,
           insurerId: receipt.insurerId,

@@ -63,8 +63,12 @@ jobs:
         run: |
           npm run check:legacy-workitem-refs -- --static-only
           node --import tsx scripts/check-tenant-inventory.ts
+          npm run check:tenant-dal:strict
           npm run check:tenant-write-scope
           npm run check:tenant-read-scope
+          npm run check:api-security
+          npm run check:server-actions
+          npm run check:activity-log-scope
           npm run check:organization-metadata-hardcodes
       - name: Lint
         run: npm run lint
@@ -89,11 +93,24 @@ jobs:
       TENANT_ISOLATION_DB_NAME: "policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}"
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
       DATABASE_URL_UNPOOLED: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      DATABASE_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
       SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
       SESSION_SECRET: tenant-isolation-certification-secret-minimum-32-characters
       VERCEL_ENV: ""
       PLAYWRIGHT_E2E: "1"
       TENANT_ISOLATION_E2E: "1"
+      TENANT_RLS_APP_ROLE: policydesk_app
+      TENANT_RLS_ORG_A: org_legacy_singleton_0001
+      TENANT_RLS_ORG_B: org_pedro_gomez_0001
+      PLATFORM_NORA_ENABLED: "1"
+      PLATFORM_IMPORTS_ENABLED: "1"
+      PLATFORM_EXPORTS_ENABLED: "1"
+      PLATFORM_UPLOADS_ENABLED: "1"
+      PLATFORM_EMAIL_ENABLED: "1"
+      PLATFORM_TELEGRAM_ENABLED: "1"
+      PLATFORM_WHATSAPP_ENABLED: "1"
+      PLATFORM_QUALITAS_ENABLED: "0"
+      QUALITAS_PRODUCTION_CERTIFIED: "0"
       PLAYWRIGHT_USE_PRODUCTION_SERVER: "1"
       PLAYWRIGHT_HOST: localhost
       PLAYWRIGHT_BASE_URL: http://localhost:4173
@@ -131,10 +148,11 @@ jobs:
           set -euo pipefail
           export PGPASSWORD=postgres
           createdb -h 127.0.0.1 -U postgres "$TENANT_ISOLATION_DB_NAME"
-      - name: Apply migrations and check drift
+          fingerprint="$(printf 'local-postgres:%s:%s:%s' "$TENANT_ISOLATION_RUN_ID" "$TENANT_ISOLATION_DB_NAME" '127.0.0.1' | sha256sum | awk '{print $1}')"
+          printf 'TENANT_ISOLATION_FINGERPRINT=%s\n' "$fingerprint" >> "$GITHUB_ENV"
+      - name: Apply singleton migrations and check drift
         run: |
-          npx prisma migrate deploy
-          npm run db:check-drift
+          npm run db:migrate:singleton-ci
       - name: Check Cycle 1 tenant guards before multi-org fixture
         run: npm run check:tenant-guards
       - name: Mark migrated tenant database
@@ -157,10 +175,15 @@ jobs:
           VALUES ('$TENANT_ISOLATION_RUN_ID', '$db_name', '$host_name', '$fingerprint');
           SQL
           printf 'TENANT_ISOLATION_FINGERPRINT=%s\n' "$fingerprint" >> "$GITHUB_ENV"
-      - name: Check Cycle 1 tenant guards before multi-org fixture
-        run: npm run check:tenant-guards
       - name: Create protected two-organization fixture
         run: npm run test:tenant-fixture
+      - name: Enter maintenance before RLS cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          psql -h 127.0.0.1 -U postgres -d "$TENANT_ISOLATION_DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'UPDATE "PlatformRuntimeState" SET "writeMode" = '\''MAINTENANCE'\'', "reason" = '\''release tenant certification'\'', "updatedAt" = now() WHERE "id" = 1;'
       - name: Tenant and knowledge isolation tests
         run: npm run test:unit -- src/lib/organization-context.logic.test.ts src/lib/organization-context-resolution.logic.test.ts src/lib/tenant-isolation.integration.logic.test.ts src/lib/nora-context.logic.test.ts
       - name: Tenant inventory audit after multi-org fixture
@@ -169,7 +192,31 @@ jobs:
         run: npm run build
       - name: Install Playwright browser
         run: npx playwright install chromium
-      - name: Tenant isolation E2E
+      - name: Apply versioned RLS cutover as the only schema executor
+        run: ENABLE_TENANT_RLS_CUTOVER=1 npm run cutover:multi-org
+      - name: Provision restricted runtime credential after RLS
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          psql -h 127.0.0.1 -U postgres -d "$TENANT_ISOLATION_DB_NAME" -v ON_ERROR_STOP=1 \
+            -c "ALTER ROLE policydesk_app PASSWORD 'tenant-isolation-runtime-password';"
+          runtime_url="postgresql://policydesk_app:tenant-isolation-runtime-password@127.0.0.1:5432/${TENANT_ISOLATION_DB_NAME}?schema=public"
+          printf 'TENANT_RLS_RUNTIME_DATABASE_URL=%s\n' "$runtime_url" >> "$GITHUB_ENV"
+          printf 'DATABASE_URL=%s\n' "$runtime_url" >> "$GITHUB_ENV"
+          printf 'DATABASE_URL_UNPOOLED=%s\n' "$runtime_url" >> "$GITHUB_ENV"
+      - name: Exact-role pooled RLS certification
+        run: npm run test:tenant-rls
+      - name: Check Prisma drift after cutover
+        run: npm run db:check-drift
+      - name: Reopen disposable tenant after maintenance verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          psql -h 127.0.0.1 -U postgres -d "$TENANT_ISOLATION_DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'UPDATE "PlatformRuntimeState" SET "writeMode" = '\''OPEN'\'', "reason" = '\''tenant certification E2E'\'', "updatedAt" = now() WHERE "id" = 1;'
+      - name: Tenant isolation E2E after forced RLS
         run: npx playwright test tests/e2e/tenant-isolation.spec.ts
       - name: Drop dedicated tenant database
         if: always()
@@ -185,16 +232,32 @@ jobs:
     timeout-minutes: 50
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NODE_ENV: test
+      TENANT_ISOLATION_TEST_DB: "1"
       PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1"
+      TENANT_ISOLATION_RUN_ID: "${{ github.run_id }}_${{ github.run_attempt }}"
+      TENANT_ISOLATION_DB_NAME: "policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}"
       PLAYWRIGHT_USE_PRODUCTION_SERVER: "1"
       PLAYWRIGHT_HOST: localhost
       PLAYWRIGHT_BASE_URL: http://localhost:4173
       PORT: "4173"
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      DATABASE_URL_UNPOOLED: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      DATABASE_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
       SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
       SESSION_SECRET: application-certification-secret-minimum-32-characters
       RESTORE_INTEGRATION: "1"
       RESTORE_INTEGRATION_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
+      VERCEL_ENV: ""
+      PLATFORM_NORA_ENABLED: "1"
+      PLATFORM_IMPORTS_ENABLED: "1"
+      PLATFORM_EXPORTS_ENABLED: "1"
+      PLATFORM_UPLOADS_ENABLED: "1"
+      PLATFORM_EMAIL_ENABLED: "1"
+      PLATFORM_TELEGRAM_ENABLED: "1"
+      PLATFORM_WHATSAPP_ENABLED: "1"
+      PLATFORM_QUALITAS_ENABLED: "0"
+      QUALITAS_PRODUCTION_CERTIFIED: "0"
     services:
       postgres:
         image: postgres:16-alpine
@@ -222,10 +285,16 @@ jobs:
         run: npm ci
       - name: Generate Prisma client
         run: npm run db:generate
-      - name: Apply migrations and check drift
+      - name: Create dedicated application database
+        shell: bash
         run: |
-          npx prisma migrate deploy
-          npm run db:check-drift
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          createdb -h 127.0.0.1 -U postgres "$TENANT_ISOLATION_DB_NAME"
+          fingerprint="$(printf 'local-postgres:%s:%s:%s' "$TENANT_ISOLATION_RUN_ID" "$TENANT_ISOLATION_DB_NAME" '127.0.0.1' | sha256sum | awk '{print $1}')"
+          printf 'TENANT_ISOLATION_FINGERPRINT=%s\n' "$fingerprint" >> "$GITHUB_ENV"
+      - name: Apply singleton migrations
+        run: npm run db:migrate:singleton-ci
       - name: Tenant guards and transition integration
         run: |
           npm run check:tenant-guards
@@ -260,6 +329,12 @@ jobs:
           path: artifacts/restore-drills
           if-no-files-found: ignore
           retention-days: 90
+      - name: Drop dedicated application database
+        if: always()
+        shell: bash
+        run: |
+          export PGPASSWORD=postgres
+          dropdb -h 127.0.0.1 -U postgres --if-exists "$TENANT_ISOLATION_DB_NAME"
 
   production-policy:
     name: PRODUCTION VERIFIER POLICY / MAIN ONLY
@@ -286,14 +361,27 @@ jobs:
       verifier_sha: ${{ steps.source.outputs.verifier_sha }}
     env:
       DATABASE_URL: ""
-      DATABASE_URL_UNPOOLED: ${{ secrets.PRODUCTION_READONLY_DATABASE_URL }}
+      DATABASE_URL_UNPOOLED: ""
+      PRODUCTION_READONLY_DATABASE_URL: ${{ secrets.PRODUCTION_READONLY_DATABASE_URL }}
+      PRODUCTION_READONLY_ROLE: ${{ vars.PRODUCTION_READONLY_ROLE || 'policydesk_readonly' }}
+      TENANT_RLS_APP_ROLE: ${{ vars.TENANT_RLS_APP_ROLE || 'policydesk_app' }}
+      TENANT_RLS_PLATFORM_OWNER_ROLE: ${{ vars.TENANT_RLS_PLATFORM_OWNER_ROLE || 'policydesk_platform_owner' }}
       PRODUCTION_EXPECTED_TENANT_MODE: ${{ vars.PRODUCTION_EXPECTED_TENANT_MODE || 'single-org' }}
       NORA_AGENT_MODE: ${{ vars.NORA_AGENT_MODE }}
       PLATFORM_BILLING_MUTATIONS_ENABLED: ${{ vars.PLATFORM_BILLING_MUTATIONS_ENABLED }}
+      PLATFORM_NORA_ENABLED: ${{ vars.PLATFORM_NORA_ENABLED }}
+      PLATFORM_IMPORTS_ENABLED: ${{ vars.PLATFORM_IMPORTS_ENABLED }}
+      PLATFORM_EXPORTS_ENABLED: ${{ vars.PLATFORM_EXPORTS_ENABLED }}
+      PLATFORM_UPLOADS_ENABLED: ${{ vars.PLATFORM_UPLOADS_ENABLED }}
+      PLATFORM_EMAIL_ENABLED: ${{ vars.PLATFORM_EMAIL_ENABLED }}
+      PLATFORM_TELEGRAM_ENABLED: ${{ vars.PLATFORM_TELEGRAM_ENABLED }}
+      PLATFORM_WHATSAPP_ENABLED: ${{ vars.PLATFORM_WHATSAPP_ENABLED }}
+      PLATFORM_QUALITAS_ENABLED: ${{ vars.PLATFORM_QUALITAS_ENABLED }}
+      QUALITAS_PRODUCTION_CERTIFIED: ${{ vars.QUALITAS_PRODUCTION_CERTIFIED }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: refs/heads/main
+          ref: ${{ needs.resolve-ref.outputs.certified_sha }}
           fetch-depth: 1
       - name: Record immutable Production verifier SHA
         id: source
@@ -313,7 +401,7 @@ jobs:
           mkdir -p artifacts/production-verification
           node --import tsx scripts/verify-production.ts --json > artifacts/production-verification/production.json
           exit_code=$?
-          node -e 'const fs=require("node:fs"); const p="artifacts/production-verification/production.json"; let r={status:"BLOCKED"}; try { r=JSON.parse(fs.readFileSync(p,"utf8")); } catch {} console.log(`status=${r.status || "BLOCKED"}`); fs.appendFileSync(process.env.GITHUB_OUTPUT, `status=${r.status || "BLOCKED"}\nexit_code=${process.env.EXIT_CODE || ""}\n`);'
+          node -e 'const fs=require("node:fs"); const p="artifacts/production-verification/production.json"; let r={status:"BLOCKED"}; try { r=JSON.parse(fs.readFileSync(p,"utf8")); } catch {} console.log(`status=${r.status || "BLOCKED"}`); fs.appendFileSync(process.env.GITHUB_OUTPUT, `status=${r.status || "BLOCKED"}\n`);'
           echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
           exit 0
       - name: Upload Production verification evidence
@@ -324,8 +412,8 @@ jobs:
           path: artifacts/production-verification/production.json
           if-no-files-found: error
           retention-days: 30
-      - name: Fail certification when Production is blocked
-        if: steps.verify.outputs.status == 'BLOCKED'
+      - name: Fail certification unless Production verifier is PASS
+        if: steps.verify.outputs.status != 'PASS' || steps.verify.outputs.exit_code != '0'
         run: exit 1
 
   report:
@@ -357,6 +445,7 @@ jobs:
           PRODUCTION_VERIFIER_SHA: ${{ needs.production-state.outputs.verifier_sha }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
+          VERIFY_PRODUCTION: ${{ inputs.verify_production }}
         run: |
           mkdir -p artifacts/release-certification
           node - <<'NODE'
@@ -401,6 +490,28 @@ jobs:
             "This report contains statuses only; it does not contain credentials, customer data, policy numbers, backup URLs, keys or Nora content.",
             "",
           ].join("\n"));
+          const required = {
+            quality: process.env.QUALITY_RESULT,
+            tenantIsolation: process.env.TENANT_RESULT,
+            applicationApiE2E: process.env.APPLICATION_RESULT,
+          };
+          const failures = Object.entries(required)
+            .filter(([, status]) => status !== "success")
+            .map(([name, status]) => `${name}=${status || "missing"}`);
+          if (process.env.VERIFY_PRODUCTION === "true") {
+            if (process.env.PRODUCTION_POLICY_RESULT !== "success") {
+              failures.push(`productionPolicy=${process.env.PRODUCTION_POLICY_RESULT || "missing"}`);
+            }
+            if (process.env.PRODUCTION_RESULT !== "success" || production.status !== "PASS") {
+              failures.push(`productionState=${process.env.PRODUCTION_RESULT || "missing"}/${production.status}`);
+            }
+            if (!report.productionVerifierSha) failures.push("productionVerifierSha=missing");
+          }
+          if (failures.length) {
+            console.error(`Release certification aggregate FAIL: ${failures.join(", ")}`);
+            process.exit(1);
+          }
+          console.log("Release certification aggregate PASS");
           NODE
       - name: Upload sanitized release evidence
         uses: actions/upload-artifact@v6

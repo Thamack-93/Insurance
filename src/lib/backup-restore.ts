@@ -397,6 +397,23 @@ export async function restoreVerifiedBackup(input: RestoreInput): Promise<Restor
     const foreignKeys = await validateForeignKeys(client);
     const domainChecks = await validateDomainInvariants(client);
     const sequences = await synchronizeSequences(client);
+
+    // Retention cleanup runs only after snapshot counts and invariants have
+    // been captured, so cleanup cannot invalidate the restore evidence.
+    await client.query(`
+      DELETE FROM "DemoUploadArtifact"
+       WHERE "expiresAt" <= CURRENT_TIMESTAMP
+          OR "status" IN ('PURGED', 'FAILED')
+    `);
+    await client.query(`
+      UPDATE "Organization" o
+         SET "status" = 'SUSPENDED', "updatedAt" = CURRENT_TIMESTAMP
+       WHERE o."kind" = 'DEMO'
+         AND EXISTS (
+           SELECT 1 FROM "DemoOrganizationState" s
+            WHERE s."organizationId" = o."id" AND s."trialEndsAt" <= CURRENT_TIMESTAMP
+         )
+    `);
     await client.query("COMMIT");
     transactionStarted = false;
     return {

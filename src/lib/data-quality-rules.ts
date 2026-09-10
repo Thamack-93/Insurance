@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 
 export type DataQualityRuleCategory = "PAYMENTS" | "RENOVATIONS" | "LEDGER" | "RISKS";
 
@@ -47,8 +47,14 @@ export function matchesSuppressionCriteria(criteriaJson: string, fields: Record<
   return Object.entries(criteria).every(([key, expected]) => String(fields[key] ?? "") === expected);
 }
 
-export async function getActiveSuppressionRules(organizationId: string, client: DbClient = getDb()): Promise<SuppressionRuleSnapshot[]> {
-  const rules = await client.dataQualitySuppressionRule.findMany({
+export async function getActiveSuppressionRules(organizationId: string, client?: DbClient): Promise<SuppressionRuleSnapshot[]> {
+  if (!client || typeof (client as PrismaClient).$transaction === "function") {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => getActiveSuppressionRules(organizationId, tx));
+  }
+  const db = client as Prisma.TransactionClient;
+  const rules = await db.dataQualitySuppressionRule.findMany({
     where: {
       organizationId,
       active: true,
@@ -77,9 +83,15 @@ export async function findMatchingSuppressionRule(
     fields: Record<string, unknown>;
   },
   organizationId: string,
-  client: DbClient = getDb(),
+  client?: DbClient,
 ): Promise<SuppressionRuleSnapshot | null> {
-  const rules = await client.dataQualitySuppressionRule.findMany({
+  if (!client || typeof (client as PrismaClient).$transaction === "function") {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => findMatchingSuppressionRule(input, organizationId, tx));
+  }
+  const db = client as Prisma.TransactionClient;
+  const rules = await db.dataQualitySuppressionRule.findMany({
     where: {
       organizationId,
       category: input.category,
@@ -116,10 +128,16 @@ export async function upsertSuppressionRule(
     actorId: string;
     organizationId: string;
   },
-  client: DbClient = getDb(),
+  client?: DbClient,
 ): Promise<SuppressionRuleSnapshot> {
+  if (!client || typeof (client as PrismaClient).$transaction === "function") {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== input.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => upsertSuppressionRule(input, tx));
+  }
   const criteriaJson = stringifySuppressionCriteria(input.criteria);
-  const rule = await client.dataQualitySuppressionRule.upsert({
+  const db = client as Prisma.TransactionClient;
+  const rule = await db.dataQualitySuppressionRule.upsert({
     where: {
       organizationId_category_issueCode_criteriaJson: {
         organizationId: input.organizationId,
@@ -162,11 +180,17 @@ export async function upsertSuppressionRule(
   };
 }
 
-export async function deactivateSuppressionRule(ruleId: string, organizationId: string, actorId: string, client: DbClient = getDb()) {
-  const rule = await client.dataQualitySuppressionRule.findFirstOrThrow({
+export async function deactivateSuppressionRule(ruleId: string, organizationId: string, actorId: string, client?: DbClient): Promise<SuppressionRuleSnapshot> {
+  if (!client || typeof (client as PrismaClient).$transaction === "function") {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => deactivateSuppressionRule(ruleId, organizationId, actorId, tx));
+  }
+  const db = client as Prisma.TransactionClient;
+  const rule = await db.dataQualitySuppressionRule.findFirstOrThrow({
     where: { id: ruleId, organizationId },
   });
-  await client.dataQualitySuppressionRule.updateMany({
+  await db.dataQualitySuppressionRule.updateMany({
     where: { id: ruleId, organizationId },
     data: {
       active: false,

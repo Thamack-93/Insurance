@@ -58,7 +58,7 @@ test("separate browser contexts remain isolated in organizations A and B", async
 
 test("superadmin without membership is confined to the platform shell", async ({ page }) => {
   await page.goto("/login");
-  await page.getByLabel("Correo electrónico").fill("admin@policydesk.local");
+  await page.getByLabel("Correo electrónico").fill("tenant-platform-admin@policydesk.local");
   await page.getByLabel("Contraseña").fill("tenant-fixture-password");
   await page.getByRole("button", { name: "Iniciar sesión" }).click();
   await expect(page).toHaveURL(/\/platform$/);
@@ -83,7 +83,7 @@ test("superadmin without membership is confined to the platform shell", async ({
 test("superadmin can inspect both organizations without operational bypass", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/login");
-  await page.getByLabel("Correo electrónico").fill("admin@policydesk.local");
+  await page.getByLabel("Correo electrónico").fill("tenant-platform-admin@policydesk.local");
   await page.getByLabel("Contraseña").fill("tenant-fixture-password");
   await page.getByRole("button", { name: "Iniciar sesión" }).click();
   await expect(page).toHaveURL(/\/platform$/);
@@ -92,11 +92,11 @@ test("superadmin can inspect both organizations without operational bypass", asy
   await expect(page.locator("main").getByRole("heading", { name: "Organizaciones", exact: true })).toBeVisible();
   await expect(page.getByText("PolicyDesk Legacy Organization")).toBeVisible();
   await expect(page.getByText("Pedro Alfredo Gómez Lorenzo")).toBeVisible();
-  await expect(page.getByText("PolicyDesk Demo Broker")).toBeVisible();
+  await expect(page.locator("main").getByText("PolicyDesk Demo Broker", { exact: true }).first()).toBeVisible();
   await page.getByRole("link", { name: /Pedro Alfredo Gómez Lorenzo/ }).click();
   await expect(page).toHaveURL(/\/platform\/organizations\/org_pedro_gomez_0001$/);
   await expect(page.getByRole("heading", { name: "Pedro Alfredo Gómez Lorenzo" })).toBeVisible();
-  await expect(page.getByText("pedroagl93@gmail.com", { exact: true })).toBeVisible();
+  await expect(page.getByText("tenant-owner-b@policydesk.local", { exact: true })).toBeVisible();
   await expect(page.getByText("Este detalle es de consulta.")).toBeVisible();
   await page.goto("/platform/organizations/does-not-exist");
   // Next.js may stream an HTTP 200 before notFound() resolves; the rendered
@@ -109,7 +109,7 @@ test("superadmin can inspect both organizations without operational bypass", asy
 test("superadmin can open the global backup panel without triggering mutations", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/login");
-  await page.getByLabel("Correo electrónico").fill("admin@policydesk.local");
+  await page.getByLabel("Correo electrónico").fill("tenant-platform-admin@policydesk.local");
   await page.getByLabel("Contraseña").fill("tenant-fixture-password");
   await page.getByRole("button", { name: "Iniciar sesión" }).click();
   await expect(page).toHaveURL(/\/platform$/);
@@ -178,7 +178,7 @@ test("tenant policy mutation UI is enabled and capture routes validate input", a
 
 test("Pedro signs into his isolated organization and cannot see legacy clients", async ({ page }) => {
   await page.goto("/login");
-  await page.getByLabel("Correo electrónico").fill("pedroagl93@gmail.com");
+  await page.getByLabel("Correo electrónico").fill("tenant-owner-b@policydesk.local");
   await page.getByLabel("Contraseña").fill("tenant-fixture-password");
   await page.getByRole("button", { name: "Iniciar sesión" }).click();
   await expect(page).toHaveURL(/\/today$/);

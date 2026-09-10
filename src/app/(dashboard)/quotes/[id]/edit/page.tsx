@@ -3,7 +3,7 @@ import { updateQuote } from "@/app/(dashboard)/quotes/actions";
 import { QuoteForm } from "@/components/forms/quote-form";
 import { createQuoteDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
-import { getDb } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/organization-context";
 import { formatDateInput } from "@/lib/form-utils";
 import type { QuoteFormValues } from "@/lib/validations";
 import {
@@ -15,9 +15,7 @@ import {
 export default async function EditQuotePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const scope = await requireOrganizationPortfolioReadScope();
-  const db = getDb();
-
-  const [quote, clients, insurers] = await Promise.all([
+  const [quote, clients, insurers] = await withTenantTransaction(scope.context, (db) => Promise.all([
     db.quote.findFirst({ where: { id, ...quoteOperationalWhere(scope.portfolioOwnerId, scope.organizationId) } }),
     db.client.findMany({
       where: {
@@ -32,7 +30,7 @@ export default async function EditQuotePage({ params }: { params: Promise<{ id: 
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
-  ]);
+  ]));
 
   if (!quote) {
     notFound();

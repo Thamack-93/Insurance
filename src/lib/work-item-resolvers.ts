@@ -1,6 +1,6 @@
 import type { PrismaClient, Prisma } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
 import { workItemPortfolioWhere } from "@/lib/portfolio-access";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 
 type WorkItemResolverDb = PrismaClient | Prisma.TransactionClient;
 
@@ -21,7 +21,12 @@ export async function findWorkItemByRouteId(
   client?: WorkItemResolverDb,
   portfolioOwnerId?: string,
 ): Promise<WorkItemResolverRecord | null> {
-  const db = client ?? getDb();
+  if (!client || typeof (client as PrismaClient).$transaction === "function") {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) => findWorkItemByRouteId(id, organizationId, tx, portfolioOwnerId));
+  }
+  const db = client as Prisma.TransactionClient;
 
   return db.workItem.findFirst({
     where: {

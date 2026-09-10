@@ -21,7 +21,7 @@ type BackupJobItem = {
   status: "created" | "skipped" | "failed";
   backup?: string;
   pathname?: string;
-  reason?: "interval_not_reached" | "backup_failed";
+  reason?: "interval_not_reached" | "backup_failed" | "demo_excluded";
 };
 
 export type BackupJobResult = {
@@ -58,11 +58,15 @@ export async function runBackupJob(options: { force?: boolean; now?: Date } = {}
 
   const organizations = await getDb().organization.findMany({
     where: { status: "ACTIVE" },
-    select: { id: true },
+    select: { id: true, kind: true },
     orderBy: { id: "asc" },
   });
   const organizationResults: Array<BackupJobItem & { organizationId: string }> = [];
   for (const organization of organizations) {
+    if (organization.kind === "DEMO") {
+      organizationResults.push({ organizationId: organization.id, status: "skipped", reason: "demo_excluded" });
+      continue;
+    }
     try {
       const latest = await getLatestVerifiedBackupArtifact({
         scope: "ORGANIZATION",

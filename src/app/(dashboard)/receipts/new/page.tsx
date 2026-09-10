@@ -2,7 +2,7 @@ import { createReceipt } from "@/app/(dashboard)/receipts/actions";
 import { ReceiptForm } from "@/components/forms/receipt-form";
 import { createReceiptDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
-import { getDb } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/organization-context";
 import { formatDate } from "@/lib/dates";
 import { formatDateInput } from "@/lib/form-utils";
 import {
@@ -16,13 +16,12 @@ export default async function NewReceiptPage({
 }: {
   searchParams?: Promise<{ policyId?: string; endorsementId?: string }>;
 }) {
-  const db = getDb();
   const scope = await requireOrganizationPortfolioReadScope();
   const params = (await searchParams) ?? {};
   const policyId = params.policyId?.trim() || "";
   const endorsementId = params.endorsementId?.trim() || "";
 
-  const [policies, selectedPolicy, selectedEndorsement] = await Promise.all([
+  const [policies, selectedPolicy, selectedEndorsement] = await withTenantTransaction(scope.context, (db) => Promise.all([
     db.policy.findMany({
       where: { status: { not: "CANCELLED" }, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: { client: true },
@@ -44,7 +43,7 @@ export default async function NewReceiptPage({
           },
         })
       : Promise.resolve(null),
-  ]);
+  ]));
 
   const contextPolicy = selectedEndorsement?.policy ?? selectedPolicy;
   const policyOptions = contextPolicy

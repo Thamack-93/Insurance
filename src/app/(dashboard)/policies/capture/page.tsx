@@ -4,9 +4,12 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { PolicyPdfCapturePanel } from "@/components/policies/policy-pdf-capture-panel";
 import { requireUserOrRedirect } from "@/lib/auth";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 
 export default async function PolicyPdfCapturePage({ searchParams }: { searchParams?: Promise<{ handoffId?: string }> }) {
   const user = await requireUserOrRedirect();
+  const organization = await requireOrganizationContext();
+  const organizationKind = await withTenantTransaction(organization, (tx) => tx.organization.findUnique({ where: { id: organization.organizationId }, select: { kind: true } }));
   const params = (await searchParams) ?? {};
   return (
     <div className="flex flex-col gap-6">
@@ -25,7 +28,7 @@ export default async function PolicyPdfCapturePage({ searchParams }: { searchPar
           }
         />
 
-        <PolicyPdfCapturePanel userId={user.id} handoffId={params.handoffId} />
+        <PolicyPdfCapturePanel userId={user.id} organizationId={organization.organizationId} demoMode={organizationKind?.kind === "DEMO"} handoffId={params.handoffId} />
       </div>
     </div>
   );

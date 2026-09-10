@@ -1,4 +1,3 @@
-import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { policyTypeLabel, statusLabel } from "@/lib/status";
 import { documentTypeLabel } from "@/lib/ui-labels";
@@ -6,6 +5,7 @@ import { normalize, unaccentSql } from "@/lib/search-utils";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { getInsurerHref } from "@/lib/insurer-navigation";
 import { Prisma } from "@/generated/prisma/client";
+import type { TenantDb } from "@/lib/organization-context";
 
 export { normalize, unaccentSql };
 
@@ -198,9 +198,8 @@ async function rawSearch<T extends RowWithId>(
   extraSelect: Prisma.Sql = Prisma.empty,
   extraWhere?: Prisma.Sql,
   scopeWhere?: Prisma.Sql,
+  db?: TenantDb,
 ): Promise<T[]> {
-  const db = getDb();
-
   assertAllowedIdentifier("updatedAt");
   for (const column of [...selectCols, ...searchCols]) {
     assertAllowedIdentifier(column);
@@ -217,10 +216,11 @@ async function rawSearch<T extends RowWithId>(
   const orderBySql = orderBy ?? Prisma.sql`ORDER BY ${Prisma.raw('"updatedAt"')} DESC`;
   const combinedWhere = scopeWhere ? Prisma.sql`(${searchWhere}) AND ${scopeWhere}` : searchWhere;
   const sql = Prisma.sql`SELECT ${cols}${extraSelect} FROM ${tableSql} WHERE ${combinedWhere} ${orderBySql} LIMIT ${limit}`;
+  if (!db) throw new Error("TENANT_DB_REQUIRED");
   return (await db.$queryRaw<T[]>(sql)) as T[];
 }
 
-export async function globalSearch(query: string, portfolioOwnerId?: string, organizationId?: string): Promise<GlobalSearchResult[]> {
+async function globalSearchInTransaction(query: string, portfolioOwnerId: string | undefined, organizationId: string, db: TenantDb): Promise<GlobalSearchResult[]> {
   const q = query.trim();
   if (!q) return [];
   const needle = normalize(q);
@@ -334,6 +334,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string, org
       Prisma.empty,
       undefined,
       withOrganizationScope("Client", scopedClientWhere, organizationId),
+      db,
     ),
     (async () => {
       const policyNeedles = buildPolicyNumberSearchVariants(q);
@@ -384,6 +385,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string, org
                 )
             )`,
             withOrganizationScope("Policy", scopedPolicyWhere, organizationId),
+            db,
           ),
         ),
       );
@@ -403,6 +405,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string, org
       Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Receipt"."clientId") AS "clientName"`,
       undefined,
       withOrganizationScope("Receipt", scopedReceiptWhere, organizationId),
+      db,
     ),
     rawSearch<WorkItemRow>(
       "WorkItem",
@@ -414,6 +417,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string, org
       Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "WorkItem"."clientId") AS "clientName"`,
       undefined,
       withOrganizationScope("WorkItem", scopedWorkItemWhere, organizationId),
+      db,
     ),
     rawSearch<ClaimRow>(
       "Claim",
@@ -425,6 +429,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string, org
       Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Claim"."clientId") AS "clientName"`,
       undefined,
       withOrganizationScope("Claim", scopedClaimWhere, organizationId),
+      db,
     ),
     rawSearch<QuoteRow>(
       "Quote",
@@ -436,6 +441,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string, org
       Prisma.sql`, (SELECT "fullName" FROM "Client" WHERE "Client"."id" = "Quote"."clientId") AS "clientName"`,
       undefined,
       withOrganizationScope("Quote", scopedQuoteWhere, organizationId),
+      db,
     ),
     rawSearch<InsurerRow>(
       "Insurer",
@@ -447,6 +453,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string, org
       Prisma.empty,
       undefined,
       withOrganizationScope("Insurer", scopedInsurerWhere, organizationId),
+      db,
     ),
     rawSearch<DocumentRow>(
       "Document",
@@ -463,6 +470,7 @@ export async function globalSearch(query: string, portfolioOwnerId?: string, org
         ) AS "parentLabel"`,
       undefined,
       withOrganizationScope("Document", scopedDocumentWhere, organizationId),
+      db,
     ),
   ]);
 
@@ -591,4 +599,24 @@ export async function globalSearch(query: string, portfolioOwnerId?: string, org
   });
 
   return results;
+}
+
+/** Public request-time search entry point. The organization is always derived
+ * from the live membership context; callers may only repeat it as a checked
+ * hint for compatibility with existing action signatures. */
+export async function globalSearch(query: string, portfolioOwnerId?: string, organizationId?: string, client?: TenantDb): Promise<GlobalSearchResult[]> {
+  const { requireOrganizationContext, withTenantTransaction } = await import("@/lib/organization-context");
+  // A system tenant caller (for example a linked Telegram webhook) already
+  // established and revalidated the organization inside its transaction. It
+  // must not fall back to a request cookie lookup, which would otherwise open
+  // a second transaction and lose the tenant GUC.
+  if (client) {
+    if (!organizationId) throw new Error("ORGANIZATION_CONTEXT_REQUIRED");
+    return globalSearchInTransaction(query, portfolioOwnerId, organizationId, client);
+  }
+  const context = await requireOrganizationContext();
+  const effectiveOrganizationId = organizationId ?? context.organizationId;
+  if (effectiveOrganizationId !== context.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  if (client) return globalSearchInTransaction(query, portfolioOwnerId, effectiveOrganizationId, client);
+  return withTenantTransaction(context, (db) => globalSearchInTransaction(query, portfolioOwnerId, effectiveOrganizationId, db));
 }

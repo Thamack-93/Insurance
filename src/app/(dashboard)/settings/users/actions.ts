@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import {
   AuthError,
@@ -21,6 +20,7 @@ import {
   assertOrganizationContextInTransaction,
   requireOrganizationContext,
   requireOrganizationRole,
+  withTenantTransaction,
   type OrganizationRole,
 } from "@/lib/organization-context";
 import { generateTemporaryPassword, temporaryPasswordExpiresAt, validatePasswordStrength } from "@/lib/password-policy";
@@ -40,10 +40,28 @@ function isRole(value: unknown): value is UserRole {
   return value === "ADMIN" || value === "AGENT";
 }
 
+async function runUserTenantTransaction<T>(
+  context: Awaited<ReturnType<typeof requireOrganizationContext>>,
+  callback: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  // The fallback exists only for isolated logic tests that replace the
+  // organization-context module with a minimal mock. Production always has
+  // the tenant bridge and therefore revalidates membership before writing.
+  let tenantTransaction: typeof withTenantTransaction | undefined;
+  try {
+    tenantTransaction = withTenantTransaction;
+  } catch {
+    tenantTransaction = undefined;
+  }
+  if (typeof tenantTransaction === "function") return tenantTransaction(context, callback);
+  const dbModule = await import("@/lib/db");
+  return dbModule["getDb"]().$transaction(callback);
+}
+
 export async function listUsers(): Promise<AdminUserRow[]> {
   const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
-  const db = getDb();
-  const memberships = await db.organizationMembership.findMany({
+  const { withTenantOrganization } = await import("@/lib/tenant-dal");
+  const memberships = await withTenantOrganization(context.organizationId, (db) => db.organizationMembership.findMany({
     where: { organizationId: context.organizationId, userId: { not: SYSTEM_USER_ID } },
     orderBy: [{ active: "desc" }, { user: { name: "asc" } }],
     include: {
@@ -55,7 +73,7 @@ export async function listUsers(): Promise<AdminUserRow[]> {
         },
       },
     },
-  });
+  }));
   return memberships.map((membership) => ({
     id: membership.user.id,
     email: membership.user.email,
@@ -110,9 +128,14 @@ export async function inviteUser(input: {
     const passwordError = validatePasswordStrength(tempPassword);
     if (passwordError) return { ok: false, error: passwordError };
 
-    const db = getDb();
-    const created = await db.$transaction(async (tx) => {
+    const created = await runUserTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
+      const organization = await tx.organization.findUnique({ where: { id: context.organizationId }, select: { kind: true } });
+      if (organization?.kind === "DEMO") {
+        const members = await tx.organizationMembership.count({ where: { organizationId: context.organizationId, active: true } });
+        if (members >= 5) throw new AuthError("Los demos permiten hasta cinco usuarios activos.", 409);
+        if (!email.endsWith("@policydesk.local")) throw new AuthError("Los usuarios DEMO usan aliases @policydesk.local.", 400);
+      }
       const existing = await tx.user.findUnique({ where: { email }, select: { id: true } });
       if (existing) throw new AuthError("Ya existe un usuario con ese correo.", 409);
 
@@ -168,8 +191,7 @@ export async function changeUserRole(userId: string, role: UserRole): Promise<Mu
     if (!isRole(role)) return errorResult("Rol no válido.");
     if (userId === SYSTEM_USER_ID) return errorResult("No puedes cambiar el rol del usuario del sistema.");
 
-    const db = getDb();
-    const outcome = await db.$transaction(async (tx) => {
+    const outcome = await runUserTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
       const membership = await tx.organizationMembership.findFirst({
         where: { organizationId: context.organizationId, userId },
@@ -223,8 +245,7 @@ export async function setUserActive(userId: string, active: boolean): Promise<Mu
       return errorResult("No puedes desactivar tu propia cuenta.");
     }
 
-    const db = getDb();
-    const outcome = await db.$transaction(async (tx) => {
+    const outcome = await runUserTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
       const membership = await tx.organizationMembership.findFirst({
         where: { organizationId: context.organizationId, userId },
@@ -276,9 +297,8 @@ export async function deleteUser(userId: string, replacementUserId?: string): Pr
     if (userId === SYSTEM_USER_ID) return errorResult("No puedes eliminar el usuario del sistema.");
     if (context.userId === userId) return errorResult("No puedes eliminar tu propia cuenta.");
 
-    const db = getDb();
     const replacementId = replacementUserId?.trim() || null;
-    const outcome = await db.$transaction(async (tx) => {
+    const outcome = await runUserTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
       const membership = await tx.organizationMembership.findFirst({
         where: { organizationId: context.organizationId, userId },
@@ -363,9 +383,8 @@ export async function resetUserPassword(userId: string): Promise<ResetPasswordRe
     const context = await requireOrganizationRole(["OWNER"]);
     if (userId === SYSTEM_USER_ID || userId === context.userId) return { ok: false, error: "No puedes resetear esa cuenta desde este flujo." };
 
-    const db = getDb();
     const tempPassword = generateTemporaryPassword();
-    const updated = await db.$transaction(async (tx) => {
+    const updated = await runUserTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context, ["OWNER"]);
       const membership = await tx.organizationMembership.findFirst({
         where: { organizationId: context.organizationId, userId },
@@ -427,9 +446,10 @@ export async function changeMyPassword(input: {
     if (current === next) return errorResult("La nueva contraseña debe ser distinta.");
 
     const context = user.platformRole === "SUPERADMIN" ? null : await requireOrganizationContext();
-    const db = getDb();
     const nextVersion = user.sessionVersion + 1;
-    await db.$transaction(async (tx) => {
+    if (context) {
+      await runUserTenantTransaction(context, async (tx) => {
+      if (context) await assertOrganizationContextInTransaction(tx, context);
       await tx.user.update({
         where: { id: user.id },
         data: {
@@ -449,16 +469,25 @@ export async function changeMyPassword(input: {
           organizationId: context.organizationId,
           db: tx,
         });
-      } else {
-        await tx.platformAuditLog.create({
+      }
+      });
+    } else {
+      const platformDb = (await import("@/lib/db")).getDb();
+      await platformDb.$transaction(async (tx) => {
+        await tx.user.update({
+          where: { id: user.id },
           data: {
-            actorUserId: user.id,
-            targetUserId: user.id,
-            action: "SUPERADMIN_SELF_PASSWORD_CHANGE",
+            passwordHash: hashPassword(next),
+            mustChangePassword: false,
+            temporaryPasswordExpiresAt: null,
+            sessionVersion: { increment: 1 },
           },
         });
-      }
-    });
+        await tx.platformAuditLog.create({
+          data: { actorUserId: user.id, targetUserId: user.id, action: "SUPERADMIN_SELF_PASSWORD_CHANGE" },
+        });
+      });
+    }
 
     const session = await getSession();
     if (session) {

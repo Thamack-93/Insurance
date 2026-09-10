@@ -14,7 +14,6 @@ import { TableEmptyState } from "@/components/tables/table-empty-state";
 import { TableToolbar } from "@/components/tables/table-toolbar";
 import { CollectableReceipts, type CollectableReceipt } from "@/components/receipts/collectable-receipts";
 import { DeletePaymentButton } from "@/components/payments/delete-payment-button";
-import { getDb } from "@/lib/db";
 import { formatDate, today } from "@/lib/dates";
 import { businessStartOfMonth } from "@/lib/business-dates";
 import { formatCurrency, toNumber } from "@/lib/money";
@@ -35,6 +34,7 @@ import {
   buildReceiptListWhere,
   readReceiptListFilters,
 } from "@/lib/list-filters";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 
 const PAGE_SIZE = 25;
 
@@ -50,8 +50,8 @@ export default async function ReceiptsPage({
   const statusFilter = filters.status;
   const isFiltered = Boolean(query || statusFilter);
 
-  const db = getDb();
   const scope = await requireOrganizationPortfolioReadScope();
+  return withTenantOrganization(scope.organizationId, async (db) => {
   const agentContact = await db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } });
   const now = today();
   const monthStart = businessStartOfMonth(now);
@@ -600,4 +600,5 @@ export default async function ReceiptsPage({
       </UrlTabs>
     </div>
   );
+  });
 }

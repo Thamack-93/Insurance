@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createHmac, randomBytes, scryptSync } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 import type { Page } from "@playwright/test";
 import { PrismaClient } from "../../src/generated/prisma/client.ts";
@@ -13,6 +13,9 @@ const TEST_ADMIN_NAME = "CI Admin";
 const TEST_AGENT_EMAIL = "ci-agent@policydesk.local";
 const TEST_AGENT_NAME = "CI Agent";
 const TEST_INSURER_NAME = "Test Insurer";
+const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
+const SESSION_IDLE_TTL_SECONDS = 60 * 60 * 12;
+const SESSION_ABSOLUTE_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 function loadLocalEnvFile(filePath: string) {
   if (!fs.existsSync(filePath)) return;
@@ -103,11 +106,24 @@ async function createSessionToken(payload: {
   organizationId?: string;
   sessionVersion: number;
 }) {
+  const sessionId = randomUUID();
   const exp = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30;
-  const data = { ...payload, exp };
+  const data = { ...payload, sessionId, exp };
   const payloadB64 = Buffer.from(JSON.stringify(data)).toString("base64url");
   const signatureB64 = createHmac("sha256", getSessionSecret()).update(payloadB64).digest("base64url");
-  return { token: `${payloadB64}.${signatureB64}`, exp };
+  const token = `${payloadB64}.${signatureB64}`;
+  const now = new Date();
+  await getTestDb().session.create({
+    data: {
+      id: sessionId,
+      userId: payload.userId,
+      tokenHash: createHash("sha256").update(token).digest("hex"),
+      lastSeenAt: now,
+      idleExpiresAt: new Date(now.getTime() + SESSION_IDLE_TTL_SECONDS * 1000),
+      absoluteExpiresAt: new Date(now.getTime() + SESSION_ABSOLUTE_TTL_SECONDS * 1000),
+    },
+  });
+  return { token, exp };
 }
 
 export function getTestDb() {
@@ -223,9 +239,10 @@ export async function seedPolicyFixture(prefix: string): Promise<SeededPolicyFix
   const clientName = `Test Client ${suffix}`;
   const insurerName = `${TEST_INSURER_NAME} ${suffix}`;
   const policyNumber = `TEST-POL-${suffix}`;
-  const insurer = await db.insurer.create({ data: { name: insurerName, status: "ACTIVE" } });
+  const insurer = await db.insurer.create({ data: { organizationId: TEST_ORGANIZATION_ID, name: insurerName, status: "ACTIVE" } });
   const client = await db.client.create({
     data: {
+      organizationId: TEST_ORGANIZATION_ID,
       fullName: clientName,
       email: `${suffix.toLowerCase()}@policydesk.local`,
       status: "ACTIVE",
@@ -237,6 +254,7 @@ export async function seedPolicyFixture(prefix: string): Promise<SeededPolicyFix
   });
   const policy = await db.policy.create({
     data: {
+      organizationId: TEST_ORGANIZATION_ID,
       policyNumber,
       clientId: client.id,
       insurerId: insurer.id,
@@ -281,6 +299,7 @@ export async function seedPendingReceipt(prefix: string): Promise<SeededReceipt>
 
   const receipt = await db.receipt.create({
     data: {
+      organizationId: TEST_ORGANIZATION_ID,
       receiptNumber,
       policyId: policy.id,
       clientId: policy.clientId,

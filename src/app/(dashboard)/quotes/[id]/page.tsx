@@ -8,7 +8,7 @@ import { MetricCard, SectionCard } from "@/components/pages-secondary/panels";
 import { StatusBadge } from "@/components/badges/status-badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { getDb } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/organization-context";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { policyTypeLabel, statusLabel } from "@/lib/status";
@@ -19,26 +19,27 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   const { id } = await params;
   const scope = await requireOrganizationPortfolioReadScope();
   const quoteScope = quoteOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
-  const db = getDb();
-
-  const quote = await db.quote.findFirst({
-    where: { id, ...quoteScope },
-    include: {
-      client: true,
-      insurer: true,
-      documents: { orderBy: { uploadedAt: "desc" } },
-    },
+  const { quote, relatedQuotes } = await withTenantTransaction(scope.context, async (db) => {
+    const quote = await db.quote.findFirst({
+      where: { id, ...quoteScope },
+      include: {
+        client: true,
+        insurer: true,
+        documents: { orderBy: { uploadedAt: "desc" } },
+      },
+    });
+    if (!quote) return { quote: null, relatedQuotes: [] };
+    const relatedQuotes = await db.quote.findMany({
+      where: { ...quoteScope, clientId: quote.clientId, id: { not: id } },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    });
+    return { quote, relatedQuotes };
   });
 
   if (!quote) {
     notFound();
   }
-
-  const relatedQuotes = await db.quote.findMany({
-    where: { ...quoteScope, clientId: quote.clientId, id: { not: id } },
-    orderBy: { createdAt: "desc" },
-    take: 5,
-  });
 
   const isExpired = quote.status === "EXPIRED" || quote.status === "CANCELLED" || quote.status === "REJECTED";
   const isAccepted = quote.status === "ACCEPTED";

@@ -1,9 +1,8 @@
 "use server";
 
-import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
-import { assertOrganizationContextInTransaction, requireOrganizationContext } from "@/lib/organization-context";
+import { assertOrganizationContextInTransaction, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { statusLabel } from "@/lib/status";
 import type { QuoteFormValues } from "@/lib/validations";
 import {
@@ -29,9 +28,8 @@ function normalizeQuoteInput(values: QuoteFormValues) {
 
 export async function createQuote(values: QuoteFormValues): Promise<MutationResult> {
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
-    const quote = await db.$transaction(async (tx) => {
+    const quote = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const client = await tx.client.findFirst({ where: { id: values.clientId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {}) }, select: { id: true } });
       const insurer = values.insurerId ? await tx.insurer.findFirst({ where: { id: values.insurerId, organizationId: context.organizationId }, select: { id: true } }) : true;
@@ -58,9 +56,8 @@ export async function createQuote(values: QuoteFormValues): Promise<MutationResu
 
 export async function updateQuote(id: string, values: QuoteFormValues): Promise<MutationResult> {
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
-    const quote = await db.$transaction(async (tx) => {
+    const quote = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const existing = await tx.quote.findFirst({ where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) } });
       const client = await tx.client.findFirst({ where: { id: values.clientId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {}) }, select: { id: true } });
@@ -89,9 +86,8 @@ export async function updateQuote(id: string, values: QuoteFormValues): Promise<
 
 export async function deleteQuote(id: string): Promise<MutationResult> {
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
-    const existingQuote = await db.$transaction(async (tx) => {
+    const existingQuote = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const existing = await tx.quote.findFirst({ where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) } });
       if (!existing) throw new Error("QUOTE_NOT_FOUND");
@@ -135,8 +131,7 @@ export async function bulkUpdateQuoteStatus(
 
   try {
     const context = await requireOrganizationContext();
-    const db = getDb();
-    const outcome = await db.$transaction(async (tx) => {
+    const outcome = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const permitted = await tx.quote.findMany({
         where: { id: { in: ids }, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) },

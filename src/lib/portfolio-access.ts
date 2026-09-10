@@ -2,8 +2,7 @@ import "server-only";
 
 import type { Prisma } from "@/generated/prisma/client";
 import { AuthError } from "@/lib/auth";
-import { getDb } from "@/lib/db";
-import { requireOrganizationContext, type OrganizationContext } from "@/lib/organization-context";
+import { requireOrganizationContext, type OrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 
 export type PortfolioReadScope = {
   id: string;
@@ -161,39 +160,36 @@ export function workItemOperationalWhere(portfolioOwnerId: string | undefined, o
 }
 
 export async function assertClientOrganizationAccess(clientId: string, context: OrganizationContext) {
-  const db = getDb();
-  const client = await db.client.findFirst({
+  const client = await withTenantTransaction(context, (tx) => tx.client.findFirst({
     where: {
       id: clientId,
       organizationId: context.organizationId,
       ...(context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {}),
     },
     select: { id: true },
-  });
+  }));
   if (!client) throw new AuthError("No tienes acceso a este cliente.", 403);
 }
 
 export async function assertPolicyOrganizationAccess(policyId: string, context: OrganizationContext) {
-  const db = getDb();
-  const policy = await db.policy.findFirst({
+  const policy = await withTenantTransaction(context, (tx) => tx.policy.findFirst({
     where: {
       id: policyId,
       ...policyOperationalWhere(context.membershipRole === "AGENT" ? context.userId : undefined, context.organizationId),
     },
     select: { id: true },
-  });
+  }));
   if (!policy) throw new AuthError("No tienes acceso a esta póliza.", 403);
 }
 
 export async function assertEndorsementOrganizationAccess(endorsementId: string, context: OrganizationContext) {
-  const db = getDb();
-  const endorsement = await db.policyEndorsement.findFirst({
+  const endorsement = await withTenantTransaction(context, (tx) => tx.policyEndorsement.findFirst({
     where: {
       id: endorsementId,
       organizationId: context.organizationId,
       ...(context.membershipRole === "AGENT" ? { policy: { client: { portfolioOwnerId: context.userId } } } : {}),
     },
     select: { id: true },
-  });
+  }));
   if (!endorsement) throw new AuthError("No tienes acceso a este endoso.", 403);
 }

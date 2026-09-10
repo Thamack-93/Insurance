@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { AuthError } from "@/lib/auth";
-import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { assertSameOrigin, checkDistributedRateLimit, getRequestIp, readJsonBody, securityFingerprint } from "@/lib/request-guards";
 import { guardErrorResponse, rateLimitResponse } from "@/lib/api-security";
@@ -9,7 +8,7 @@ import { writeActivityLog } from "@/lib/activity-log";
 import { inferClientType } from "@/lib/policy-pdf-capture.shared";
 import { parseDateInput } from "@/lib/form-utils";
 import { businessToday } from "@/lib/business-dates";
-import { assertOrganizationContextInTransaction, requireOrganizationContext } from "@/lib/organization-context";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 
 export const runtime = "nodejs";
 
@@ -58,7 +57,6 @@ export async function POST(request: NextRequest) {
     if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
     const payload = createClientSchema.parse(await readJsonBody(request, 16 * 1024));
-    const db = getDb();
     const inferredType = payload.type ?? inferClientType(payload.fullName, normalizeText(payload.rfc));
     const rfc = normalizeText(payload.rfc)?.toUpperCase() ?? null;
     const email = normalizeText(payload.email);
@@ -66,7 +64,7 @@ export async function POST(request: NextRequest) {
     const address = normalizeText(payload.address);
     const birthDate = inferredType === "PERSON" ? normalizeBirthDate(payload.birthDate) : null;
 
-    const existing = await db.client.findFirst({
+    const existing = await withTenantTransaction(context, (tx) => tx.client.findFirst({
       where: {
         organizationId: context.organizationId,
         status: { not: "ARCHIVED" },
@@ -91,7 +89,7 @@ export async function POST(request: NextRequest) {
         address: true,
         birthDate: true,
       },
-    });
+    }));
 
     if (existing) {
       return NextResponse.json({
@@ -110,8 +108,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const client = await db.$transaction(async (tx) => {
-      await assertOrganizationContextInTransaction(tx, context);
+    const client = await withTenantTransaction(context, async (tx) => {
       const created = await tx.client.create({ data: {
         organizationId: context.organizationId,
         fullName: payload.fullName.trim(),

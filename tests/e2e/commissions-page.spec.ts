@@ -7,6 +7,8 @@ import {
   authenticatePageAsAdmin,
 } from "../helpers/db";
 
+const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
+
 test.describe("Commissions Page (/commissions)", () => {
   let receiptId = "";
   let policyId = "";
@@ -62,6 +64,7 @@ test.describe("Commissions Page (/commissions)", () => {
       // Create commission record directly
       await db.commission.create({
         data: {
+          organizationId: TEST_ORGANIZATION_ID,
           policyId,
           clientId: policy.clientId,
           insurerId: policy.insurerId,

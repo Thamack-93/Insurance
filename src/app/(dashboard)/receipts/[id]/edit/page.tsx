@@ -4,7 +4,7 @@ import { ReceiptForm } from "@/components/forms/receipt-form";
 import { createReceiptDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { CancelReceiptOnlyButton } from "@/components/receipts/cancel-receipt-button";
-import { getDb } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/organization-context";
 import { formatDateInput } from "@/lib/form-utils";
 import type { ReceiptFormValues } from "@/lib/validations";
 import { policyOperationalWhere, receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
@@ -12,43 +12,36 @@ import { policyOperationalWhere, receiptOperationalWhere, requireOrganizationPor
 export default async function EditReceiptPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const scope = await requireOrganizationPortfolioReadScope();
-  const db = getDb();
-  const receipt = await db.receipt.findFirst({
-    where: { id, ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
-    include: {
-      client: true,
-      policy: true,
-      insurer: true,
-      endorsement: {
-        include: {
-          policy: {
-            include: { client: true },
+  const { receipt, policies } = await withTenantTransaction(scope.context, async (db) => {
+    const receipt = await db.receipt.findFirst({
+      where: { id, ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
+      include: {
+        client: true,
+        policy: true,
+        insurer: true,
+        endorsement: {
+          include: {
+            policy: {
+              include: { client: true },
+            },
           },
         },
       },
-    },
+    });
+    if (!receipt) return { receipt: null, policies: [] };
+    const policies = receipt.endorsement
+      ? [{ id: receipt.policyId, policyNumber: receipt.policy.policyNumber, currency: receipt.policy.currency, client: { fullName: receipt.client.fullName } }]
+      : await db.policy.findMany({
+          where: { status: { not: "CANCELLED" }, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
+          include: { client: true },
+          orderBy: { policyNumber: "asc" },
+        });
+    return { receipt, policies };
   });
 
   if (!receipt) {
     notFound();
   }
-
-  const policies = receipt.endorsement
-    ? [
-        {
-          id: receipt.policyId,
-          policyNumber: receipt.policy.policyNumber,
-          currency: receipt.policy.currency,
-          client: {
-            fullName: receipt.client.fullName,
-          },
-        },
-      ]
-    : await db.policy.findMany({
-        where: { status: { not: "CANCELLED" }, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
-        include: { client: true },
-        orderBy: { policyNumber: "asc" },
-      });
 
   const endorsementOptions = receipt.endorsement
     ? [

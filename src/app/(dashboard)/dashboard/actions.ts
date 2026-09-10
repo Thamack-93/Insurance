@@ -1,22 +1,19 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { errorResult, successResult, type MutationResult } from "@/lib/mutation-utils";
-import { requireOrganizationContext } from "@/lib/organization-context";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 
 export async function setOnboardingDismissed(dismissed: boolean): Promise<MutationResult> {
-  const db = getDb();
   const value = dismissed ? "true" : "false";
   try {
     const context = await requireOrganizationContext();
-    const key = `onboardingDismissed:${context.organizationId}`;
-    await db.systemSetting.upsert({
-      where: { key },
+    await withTenantTransaction(context, (tx) => tx.organizationSetting.upsert({
+      where: { organizationId_key: { organizationId: context.organizationId, key: "onboardingDismissed" } },
       update: { value },
-      create: { key, value },
-    });
+      create: { organizationId: context.organizationId, key: "onboardingDismissed", value },
+    }));
     revalidatePath("/dashboard");
     revalidatePath("/settings");
     return successResult(

@@ -6,11 +6,9 @@ export const exportsDir = path.join(dataDir, "exports");
 
 export function assertSafeDocumentPath(filePath: string) {
   const resolved = path.resolve(filePath);
-  const allowed = path.resolve(documentsDir);
-
+  const allowed = `${path.resolve(documentsDir)}${path.sep}`;
   if (!resolved.startsWith(allowed)) {
-    throw new Error("Document path must stay within the document store.");
+    throw new Error("Document path must stay inside the document store.");
   }
-
   return resolved;
 }

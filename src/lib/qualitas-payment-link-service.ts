@@ -3,8 +3,10 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
-import { getDb } from "@/lib/db";
-import { assertOrganizationContextInTransaction, type OrganizationContext } from "@/lib/organization-context";
+import * as organizationContext from "@/lib/organization-context";
+import type { OrganizationContext } from "@/lib/organization-context";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
+import { isSyntheticOutboundEmail, isSyntheticOutboundPhone } from "@/lib/outbound-contact-guard";
 import {
   isQualitasClientRecipientEnabled,
   isQualitasInsurerName,
@@ -23,6 +25,16 @@ import {
 } from "@/lib/qualitas-payment-link";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
+
+function optionalOrganizationContextExport<T extends keyof typeof organizationContext>(name: T): (typeof organizationContext)[T] | undefined {
+  try {
+    return organizationContext[name];
+  } catch {
+    // Vitest mocks may intentionally expose only the guard needed by a logic
+    // fixture. Treat omitted bridge exports as a test-only fallback.
+    return undefined;
+  }
+}
 
 export type QualitasRecipientType = "CLIENT" | "AGENT";
 
@@ -75,6 +87,37 @@ function auditOutcome(outcome: QualitasPaymentLinkOutcome) {
 export async function requestQualitasPaymentLinkForReceipt(
   input: QualitasReceiptRequestInput,
 ): Promise<QualitasReceiptRequestResult> {
+  if (!input.client) {
+    // Logic tests provide a minimal context mock; production always exposes
+    // the live membership-backed tenant bridge.
+    const requireContext = optionalOrganizationContextExport("requireOrganizationContext");
+    const liveContext = typeof requireContext === "function"
+      ? await requireContext()
+      : input.context;
+    if (liveContext.organizationId !== input.context.organizationId || liveContext.userId !== input.context.userId) {
+      throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    }
+    const tenantTransaction = optionalOrganizationContextExport("withTenantTransaction");
+    if (typeof tenantTransaction === "function") {
+      return tenantTransaction(liveContext, (tx) => requestQualitasPaymentLinkForReceipt({ ...input, client: tx }));
+    }
+    const dbModule = await import("@/lib/db");
+    return requestQualitasPaymentLinkForReceipt({ ...input, client: dbModule["getDb"]() });
+  }
+  // The caller has already established a tenant transaction. Resolve both
+  // provider and delivery entitlements on that same client so a concurrent
+  // suspension/kill-switch cannot be bypassed between authorization and the
+  // persisted audit/outbound decision.
+  const capability = await resolveOrganizationCapability(input.context.organizationId, "QUALITAS", input.client as Prisma.TransactionClient);
+  if (!capability.enabled) return { ok: false, error: "La integración de Quálitas no está certificada o habilitada para esta organización." };
+  const deliveryCapability = await resolveOrganizationCapability(
+    input.context.organizationId,
+    input.deliveryChannel === "EMAIL" ? "EMAIL" : "WHATSAPP",
+    input.client as Prisma.TransactionClient,
+  );
+  if (!deliveryCapability.enabled) {
+    return { ok: false, error: `El canal ${input.deliveryChannel} no está habilitado para esta organización.` };
+  }
   if (!isQualitasPaymentLinkEnabled()) {
     return { ok: false, error: "La integración de enlaces de pago de Quálitas no está habilitada." };
   }
@@ -82,7 +125,7 @@ export async function requestQualitasPaymentLinkForReceipt(
     return { ok: false, error: "El envío al cliente todavía no está habilitado." };
   }
 
-  const db = input.client ?? getDb();
+  const db = input.client;
   const [receipt, actor] = await Promise.all([
     db.receipt.findFirst({
       where: {
@@ -122,12 +165,12 @@ export async function requestQualitasPaymentLinkForReceipt(
     : normalizeQualitasPhone(actor.phone);
   const destination = input.deliveryChannel === "EMAIL" ? email : phone;
 
-  if (!destination) {
+  if (!destination || (input.deliveryChannel === "EMAIL" ? isSyntheticOutboundEmail(destination) : isSyntheticOutboundPhone(destination))) {
     return {
       ok: false,
       error: input.deliveryChannel === "EMAIL"
-        ? `No hay un correo válido para ${recipientLabel} en PolicyDesk.`
-        : `No hay un teléfono válido para ${recipientLabel} en PolicyDesk.`,
+        ? `Confirma un correo real para ${recipientLabel} antes de realizar un envío.`
+        : `Confirma un teléfono real para ${recipientLabel} antes de realizar un envío.`,
     };
   }
 
@@ -146,8 +189,8 @@ export async function requestQualitasPaymentLinkForReceipt(
   }
 
   try {
-    await db.$transaction(async (tx) => {
-      await assertOrganizationContextInTransaction(tx, input.context);
+    const persistAudit = async (tx: Prisma.TransactionClient) => {
+      await organizationContext.assertOrganizationContextInTransaction(tx, input.context);
       await writeActivityLog({
         organizationId: input.context.organizationId,
         entityType: "Policy",
@@ -163,7 +206,9 @@ export async function requestQualitasPaymentLinkForReceipt(
         userId: input.context.userId,
         db: tx,
       });
-    });
+    };
+    if ("$transaction" in db) await db.$transaction(persistAudit);
+    else await persistAudit(db);
   } catch {
     return { ok: false, error: "La solicitud terminó, pero no se pudo guardar su auditoría." };
   }

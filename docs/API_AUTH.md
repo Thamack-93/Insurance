@@ -5,7 +5,7 @@ All routes under `src/app/api/` require a valid session cookie (`pd_session`) un
 | Route | Method | Auth | Role |
 |-------|--------|------|------|
 | `/api/auth/logout` | POST | Public | — |
-| `/api/jobs/backup` | POST | Bearer `CRON_SECRET` | Cron job interno / diagnóstico |
+| `/api/jobs/*` | GET / POST | Bearer `CRON_SECRET` | Cron interno: backup, renovaciones, retención DEMO, Telegram y cancelación |
 | `/api/integrations/telegram/webhook` | GET / POST | Public for Telegram webhook | Telegram secret header on POST |
 | `/api/search` | GET | Session | Any active user |
 | `/api/payments/quick` | POST | Session | Any active user |

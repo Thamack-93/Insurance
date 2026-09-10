@@ -6,6 +6,7 @@ import { reconstructPdfTextFromTextContent } from "@/lib/pdf-text-reconstruction
 import {
   abortablePdfPromise,
   createPdfTextExtractionControl,
+  DEFAULT_PDF_TEXT_EXTRACTION_MAX_PAGES,
   DEFAULT_SERVER_PDF_TEXT_EXTRACTION_TIMEOUT_MS,
   type PdfTextExtractionOptions,
 } from "@/lib/pdf-text-extraction.shared";
@@ -38,6 +39,10 @@ export async function extractPdfTextFromBytes(
     loadingTask = pdfjs.getDocument(documentOptions);
     if (control.signal.aborted) destroyPdf();
     const resolvedPdf = await abortablePdfPromise(loadingTask.promise, control);
+    const maxPages = options.maxPages ?? DEFAULT_PDF_TEXT_EXTRACTION_MAX_PAGES;
+    if (resolvedPdf.numPages > maxPages) {
+      throw new Error(`PDF_PAGE_LIMIT_EXCEEDED:${maxPages}`);
+    }
     const pageTexts: string[] = [];
 
     for (let pageNumber = 1; pageNumber <= resolvedPdf.numPages; pageNumber += 1) {

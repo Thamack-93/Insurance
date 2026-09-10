@@ -49,7 +49,7 @@ export default async function MyAccountPage() {
           <CardHeader>
             <CardTitle>Cambiar contraseña</CardTitle>
             <CardDescription>
-              La nueva contraseña debe tener al menos 8 caracteres y combinar letras y números.
+              La nueva contraseña debe tener al menos 12 caracteres y combinar mayúsculas, minúsculas, números y símbolos.
             </CardDescription>
           </CardHeader>
           <CardContent>

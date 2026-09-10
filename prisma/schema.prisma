@@ -140,6 +140,7 @@ model Organization {
   defaultCurrency String   @default("MXN")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @default(now()) @updatedAt
+  activatedAt     DateTime?
 
   memberships                 OrganizationMembership[]
   clients                     Client[]
@@ -179,11 +180,15 @@ model Organization {
   knowledgeChunks             KnowledgeChunk[]
   alerts                      Alert[]
   securityEventAggregates     SecurityEventAggregate[]
-  platformAuditTargets        PlatformAuditLog[]       @relation("PlatformAuditTargetOrganization")
-  backupArtifacts              BackupArtifact[]
+  platformAuditTargets        PlatformAuditLog[]           @relation("PlatformAuditTargetOrganization")
+  backupArtifacts             BackupArtifact[]
   organizationRestoreRuns     OrganizationRestoreRun[]
   billingSubscriptions        OrganizationSubscription[]
   billingCharges              BillingCharge[]
+  capabilities                OrganizationCapability[]
+  settings                    OrganizationSetting[]
+  demoState                   DemoOrganizationState?
+  demoUploadArtifacts         DemoUploadArtifact[]
 
   @@index([status])
   @@index([kind])
@@ -273,7 +278,10 @@ model User {
   createdAssistantAiRuns              AssistantAiRun[]             @relation("AssistantAiRunUser")
   createdKnowledgeSources             KnowledgeSource[]            @relation("KnowledgeSourceCreatedBy")
   organizationMemberships             OrganizationMembership[]
-  platformAuditLogs                   PlatformAuditLog[]          @relation("PlatformAuditActor")
+  platformAuditLogs                   PlatformAuditLog[]           @relation("PlatformAuditActor")
+  sessions                            Session[]
+  userPreferences                     UserPreference[]
+  demoUploadArtifacts                 DemoUploadArtifact[]
 
   @@index([email])
   @@index([role])
@@ -300,20 +308,20 @@ model Plan {
 
 /// Organization-scoped platform subscription snapshot.
 model OrganizationSubscription {
-  id                 String   @id @default(cuid())
-  requestId          String   @unique
+  id                 String    @id @default(cuid())
+  requestId          String    @unique
   organizationId     String
   planId             String
-  status             String   @default("TRIAL")
-  startedAt          DateTime @default(now())
+  status             String    @default("TRIAL")
+  startedAt          DateTime  @default(now())
   endsAt             DateTime?
   monthlyAmountMinor Int
-  currency           String   @db.VarChar(3)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @default(now()) @updatedAt
+  currency           String    @db.VarChar(3)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @default(now()) @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  plan         Plan         @relation(fields: [planId], references: [id], onDelete: Restrict)
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  plan         Plan            @relation(fields: [planId], references: [id], onDelete: Restrict)
   charges      BillingCharge[]
 
   @@index([organizationId, status])
@@ -324,22 +332,22 @@ model OrganizationSubscription {
 
 /// Internal platform charge ledger. It is not a policy premium/payment ledger.
 model BillingCharge {
-  id                 String   @id @default(cuid())
-  requestId          String   @unique
-  organizationId     String
-  subscriptionId     String?
-  periodStart        DateTime
-  periodEnd          DateTime
-  amountMinor        Int
-  currency           String   @db.VarChar(3)
-  status             String   @default("PENDING")
-  paidAt             DateTime?
-  externalReference  String?
-  reason             String
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @default(now()) @updatedAt
+  id                String    @id @default(cuid())
+  requestId         String    @unique
+  organizationId    String
+  subscriptionId    String?
+  periodStart       DateTime
+  periodEnd         DateTime
+  amountMinor       Int
+  currency          String    @db.VarChar(3)
+  status            String    @default("PENDING")
+  paidAt            DateTime?
+  externalReference String?
+  reason            String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @default(now()) @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   subscription OrganizationSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, periodStart])
@@ -349,8 +357,8 @@ model BillingCharge {
 }
 
 model Client {
-  organizationId         String?
-  organization           Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId         String
+  organization           Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                     String        @id @default(cuid())
   fullName               String
   type                   String        @default("PERSON")
@@ -398,15 +406,15 @@ model Client {
 
 /// Platform-global audit trail for SUPERADMIN operations.
 model PlatformAuditLog {
-  id                   String        @id @default(cuid())
-  requestId            String?       @unique
+  id                   String   @id @default(cuid())
+  requestId            String?  @unique
   actorUserId          String?
   targetOrganizationId String?
   targetUserId         String?
   action               String
   reason               String?
   metadataJson         String?
-  createdAt            DateTime      @default(now())
+  createdAt            DateTime @default(now())
 
   actor              User?         @relation("PlatformAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
   targetOrganization Organization? @relation("PlatformAuditTargetOrganization", fields: [targetOrganizationId], references: [id], onDelete: SetNull)
@@ -418,8 +426,8 @@ model PlatformAuditLog {
 }
 
 model Insurer {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   name           String
   portalUrl      String?
@@ -446,8 +454,8 @@ model Insurer {
 }
 
 model Policy {
-  organizationId      String?
-  organization        Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId      String
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                  String        @id @default(cuid())
   policyNumber        String
   clientId            String
@@ -519,8 +527,8 @@ model Policy {
 }
 
 model Receipt {
-  organizationId           String?
-  organization             Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId           String
+  organization             Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                       String        @id @default(cuid())
   receiptNumber            String
   /// Numeric suffix used only for stable human ordering; the displayed
@@ -583,8 +591,8 @@ model Receipt {
 }
 
 model PolicyEndorsement {
-  organizationId    String?
-  organization      Organization?     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId    String
+  organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                String            @id @default(cuid())
   endorsementNumber String
   policyId          String
@@ -620,8 +628,8 @@ model PolicyEndorsement {
 }
 
 model Payment {
-  organizationId    String?
-  organization      Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                String        @id @default(cuid())
   receiptId         String
   policyId          String
@@ -662,8 +670,8 @@ model Payment {
 }
 
 model Commission {
-  organizationId String?
-  organization   Organization?    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String           @id @default(cuid())
   policyId       String
   receiptId      String?
@@ -694,8 +702,8 @@ model Commission {
 }
 
 model Task {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   folio          String
   clientId       String?
@@ -738,8 +746,8 @@ model Task {
 }
 
 model WorkItem {
-  organizationId String?
-  organization   Organization?  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String         @id @default(cuid())
   sourceType     String?
   sourceId       String?
@@ -800,8 +808,8 @@ model WorkItem {
 }
 
 model Claim {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   folio          String
   clientId       String
@@ -840,8 +848,8 @@ model Claim {
 }
 
 model ClaimChecklistItem {
-  organizationId  String?
-  organization    Organization?        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId  String
+  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id              String               @id @default(cuid())
   claimId         String
   documentId      String?
@@ -865,8 +873,8 @@ model ClaimChecklistItem {
 }
 
 model Quote {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   clientId       String
   insurerId      String?
@@ -899,8 +907,8 @@ model Quote {
 }
 
 model Document {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   clientId       String?
   policyId       String?
@@ -1052,6 +1060,146 @@ model SystemSetting {
   @@index([key])
 }
 
+/// Organization-level entitlement resolved against the globally certified
+/// integration catalog and plan. The override can only narrow an entitlement.
+model OrganizationCapability {
+  id             String   @id @default(cuid())
+  organizationId String
+  key            String
+  enabled        Boolean  @default(false)
+  limitValue     Int?
+  source         String   @default("PLAN")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+  @@index([organizationId, enabled])
+}
+
+/// Tenant setting store. Legacy SystemSetting remains platform-global for the
+/// cutover; new tenant code must use this table.
+model OrganizationSetting {
+  id             String   @id @default(cuid())
+  organizationId String
+  key            String
+  value          String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
+}
+
+/// User-scoped preferences are intentionally global because a user belongs to
+/// exactly one organization in the current product contract.
+model UserPreference {
+  id        String   @id @default(cuid())
+  userId    String
+  key       String
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@index([userId])
+}
+
+/// Revocable database-backed session metadata. Token material is never stored
+/// in plaintext; the application stores a SHA-256 token hash.
+model Session {
+  id                String    @id @default(cuid())
+  userId            String
+  tokenHash         String    @unique
+  createdAt         DateTime  @default(now())
+  lastSeenAt        DateTime  @default(now())
+  idleExpiresAt     DateTime
+  absoluteExpiresAt DateTime
+  revokedAt         DateTime?
+  fingerprint       String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([idleExpiresAt])
+  @@index([absoluteExpiresAt])
+}
+
+/// DEMO-only lifecycle state. A single row exists for each DEMO organization;
+/// users, memberships, subscription and capabilities survive resets.
+model DemoOrganizationState {
+  organizationId  String    @id
+  seedVersion     String
+  trialEndsAt     DateTime
+  realDataResetAt DateTime?
+  lastResetAt     DateTime?
+  resetStatus     String    @default("IDLE")
+  resetPhase      String    @default("IDLE")
+  resetAttemptId  String?   @unique
+  resetRequestId  String?
+  resetStartedAt  DateTime?
+  resetHeartbeatAt DateTime?
+  resetLeaseExpiresAt DateTime?
+  resetAttempts   Int       @default(0)
+  resetFailure    String?
+  dataVersion     Int       @default(1)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([trialEndsAt, resetStatus])
+  @@index([realDataResetAt])
+  @@index([resetStatus, resetLeaseExpiresAt])
+}
+
+/// Private Blob provenance and purge ledger for DEMO uploads.
+model DemoUploadArtifact {
+  id             String    @id @default(cuid())
+  organizationId String
+  userId         String
+  blobPath       String    @unique
+  kind           String    @default("POLICY_DOCUMENT")
+  uploadedAt     DateTime  @default(now())
+  purgeAfterAt   DateTime
+  expiresAt      DateTime
+  deletedAt      DateTime?
+  lastPurgeAt    DateTime?
+  blobDeleteConfirmedAt DateTime?
+  purgeBreachAt  DateTime?
+  dataVersion    Int       @default(1)
+  status         String    @default("ACTIVE")
+  sizeBytes      Int?
+  sha256         String?
+  detectedMimeType String?
+  validationStatus String   @default("ACCEPTED")
+  validatedAt    DateTime?
+  purgeAttempts  Int       @default(0)
+  lastPurgeFailureCode String?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, expiresAt, status])
+  @@index([organizationId, purgeAfterAt, status])
+  @@index([userId, uploadedAt])
+  @@index([organizationId, validationStatus, status])
+}
+
+/// Singleton platform write-mode switch used during the short cutover/reset
+/// maintenance window. Application code may only read this row.
+model PlatformRuntimeState {
+  id        Int      @id @default(1)
+  writeMode String   @default("OPEN")
+  reason    String?
+  updatedAt DateTime @updatedAt
+}
+
 /// Platform-controlled backup catalog. These rows are never part of a tenant
 /// snapshot restore; tenant attribution is authorization metadata.
 model BackupArtifact {
@@ -1074,11 +1222,11 @@ model BackupArtifact {
   metadataJson      String?
   updatedAt         DateTime @updatedAt
 
-  organization      Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  sourceArtifact    BackupArtifact? @relation("BackupArtifactRekey", fields: [sourceArtifactId], references: [id], onDelete: SetNull)
-  rekeyedCopies     BackupArtifact[] @relation("BackupArtifactRekey")
-  restoreArtifacts  OrganizationRestoreRun[] @relation("RestoreArtifact")
-  emergencyBackups  OrganizationRestoreRun[] @relation("EmergencyBackup")
+  organization     Organization?            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  sourceArtifact   BackupArtifact?          @relation("BackupArtifactRekey", fields: [sourceArtifactId], references: [id], onDelete: SetNull)
+  rekeyedCopies    BackupArtifact[]         @relation("BackupArtifactRekey")
+  restoreArtifacts OrganizationRestoreRun[] @relation("RestoreArtifact")
+  emergencyBackups OrganizationRestoreRun[] @relation("EmergencyBackup")
 
   @@index([organizationId, createdAt])
   @@index([organizationId])
@@ -1088,7 +1236,7 @@ model BackupArtifact {
 
 /// Durable operational audit for tenant restore preparation/application.
 model OrganizationRestoreRun {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   organizationId    String
   artifactId        String
   emergencyBackupId String?
@@ -1099,13 +1247,13 @@ model OrganizationRestoreRun {
   failureCode       String?
   targetFingerprint String?
   reportFingerprint String?
-  startedAt         DateTime @default(now())
+  startedAt         DateTime  @default(now())
   completedAt       DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  artifact        BackupArtifact @relation("RestoreArtifact", fields: [artifactId], references: [id], onDelete: Restrict)
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  artifact        BackupArtifact  @relation("RestoreArtifact", fields: [artifactId], references: [id], onDelete: Restrict)
   emergencyBackup BackupArtifact? @relation("EmergencyBackup", fields: [emergencyBackupId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, createdAt])
@@ -1115,8 +1263,8 @@ model OrganizationRestoreRun {
 }
 
 model ActivityLog {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   entityType     String
   entityId       String
@@ -1135,8 +1283,8 @@ model ActivityLog {
 }
 
 model AssistantActionDraft {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   userId         String
   title          String
@@ -1183,8 +1331,8 @@ model NotificationChannel {
 }
 
 model NotificationPreference {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   userId         String
   eventType      String
@@ -1204,8 +1352,8 @@ model NotificationPreference {
 }
 
 model NotificationEvent {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   type           String
   title          String
@@ -1244,8 +1392,8 @@ model NotificationEvent {
 }
 
 model PolicyInsuredParty {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   policyId       String
   fullName       String
@@ -1264,8 +1412,8 @@ model PolicyInsuredParty {
 }
 
 model PolicyInsuredAsset {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   policyId       String
   assetType      String
@@ -1286,8 +1434,8 @@ model PolicyInsuredAsset {
 }
 
 model TelegramLinkToken {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   userId         String
   tokenHash      String        @unique
@@ -1304,8 +1452,8 @@ model TelegramLinkToken {
 }
 
 model LedgerImportBatch {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   sourceCsvName  String
   sourceCsvHash  String
@@ -1334,8 +1482,8 @@ model LedgerImportBatch {
 }
 
 model LedgerImportRow {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   batchId        String
   sourceType     String
@@ -1366,8 +1514,8 @@ model LedgerImportRow {
 }
 
 model LedgerImportAction {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   batchId        String
   rowId          String?
@@ -1389,8 +1537,8 @@ model LedgerImportAction {
 }
 
 model LedgerImportIssue {
-  organizationId     String?
-  organization       Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId     String
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                 String        @id @default(cuid())
   batchId            String
   rowId              String?
@@ -1431,8 +1579,8 @@ model LedgerImportIssue {
 }
 
 model TelegramDraft {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   userId         String
   channelId      String?
@@ -1458,8 +1606,8 @@ model TelegramDraft {
 }
 
 model MaintenanceRun {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   type           String
   status         String        @default("PENDING")
@@ -1482,8 +1630,8 @@ model MaintenanceRun {
 }
 
 model ReceiptReconciliationIssue {
-  organizationId     String?
-  organization       Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId     String
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                 String        @id @default(cuid())
   maintenanceRunId   String?
   receiptId          String?
@@ -1526,8 +1674,8 @@ model ReceiptReconciliationIssue {
 }
 
 model PolicyRenewalSuggestion {
-  organizationId     String?
-  organization       Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId     String
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                 String        @id @default(cuid())
   maintenanceRunId   String?
   sourcePolicyId     String
@@ -1569,8 +1717,8 @@ model PolicyRenewalSuggestion {
 }
 
 model DataQualitySuppressionRule {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   category       String
   issueCode      String
@@ -1601,8 +1749,8 @@ model DataQualitySuppressionRule {
 }
 
 model AssistantReport {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   kind           String
   themeKey       String
@@ -1643,8 +1791,8 @@ model AssistantReport {
 }
 
 model AssistantReportSignal {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   reportId       String
   signalKind     String
@@ -1664,8 +1812,8 @@ model AssistantReportSignal {
 }
 
 model AssistantAiRun {
-  organizationId       String?
-  organization         Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId       String
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                   String        @id @default(cuid())
   userId               String
   userRole             String
@@ -1708,8 +1856,8 @@ model AssistantAiRun {
 }
 
 model AssistantAiAttempt {
-  organizationId       String?
-  organization         Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId       String
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                   String        @id @default(cuid())
   runId                String
   attemptNumber        Int
@@ -1745,8 +1893,8 @@ model AssistantAiAttempt {
 }
 
 model Alert {
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String        @id @default(cuid())
   alertType      String
   severity       String

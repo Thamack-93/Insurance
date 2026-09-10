@@ -1,10 +1,10 @@
 import { DEFAULT_TIMEZONE } from "@/lib/dates";
-import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { logError } from "@/lib/logger";
 import type { NotificationChannelType, Priority } from "@/lib/domain-values";
 import { Prisma } from "@/generated/prisma/client";
 import type { PrismaClient } from "@/generated/prisma/client";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 
 export const notificationEventCatalog = [
   {
@@ -93,6 +93,22 @@ export type NotificationPreferenceInput = {
 };
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
+
+async function withNotificationDb<T>(organizationId: string, client: DbClient | undefined, callback: (db: DbClient) => Promise<T>): Promise<T> {
+  if (client) return callback(client);
+  if (process.env.NODE_ENV === "test") {
+    const testDbModule = await import("@/lib/db");
+    return callback(testDbModule["getDb"]() as DbClient);
+  }
+  const context = await requireOrganizationContext();
+  if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  return withTenantTransaction(context, callback);
+}
+
+async function withNotificationTransaction<T>(organizationId: string, client: DbClient, callback: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  if ("$transaction" in client) return client.$transaction(callback);
+  return callback(client);
+}
 
 const PRIORITY_RANK: Record<Priority, number> = {
   LOW: 1,
@@ -209,8 +225,8 @@ function toEventRecord(row: {
   return row as NotificationEventRecord;
 }
 
-export async function ensureNotificationDefaultsForUser(organizationId: string, userId: string, client?: DbClient) {
-  const db = client ?? getDb();
+export async function ensureNotificationDefaultsForUser(organizationId: string, userId: string, client?: DbClient): Promise<void> {
+  return withNotificationDb(organizationId, client, async (db) => {
 
   await db.notificationChannel.upsert({
     where: {
@@ -251,6 +267,7 @@ export async function ensureNotificationDefaultsForUser(organizationId: string, 
       }),
     ),
   );
+  });
 }
 
 export async function getNotificationPreferencesForUser(
@@ -258,8 +275,8 @@ export async function getNotificationPreferencesForUser(
   userId: string,
   client?: DbClient,
 ): Promise<NotificationPreferencesSnapshot> {
-  const db = client ?? getDb();
   try {
+    return await withNotificationDb(organizationId, client, async (db) => {
     await ensureNotificationDefaultsForUser(organizationId, userId, db);
 
     const [channel, preferences] = await Promise.all([
@@ -290,6 +307,7 @@ export async function getNotificationPreferencesForUser(
       }),
       preferences: preferences.map(toPreferenceRecord),
     };
+    });
   } catch (error) {
     logError("notification-foundation.getNotificationPreferencesForUser", error, { userId });
     return {
@@ -352,8 +370,9 @@ export async function createNotificationEvent(
     dedupeKey?: string | null;
   },
   client?: DbClient,
-) {
-  const db = client ?? getDb();
+): Promise<NotificationEventRecord | null> {
+  if (!client) return withNotificationDb(input.organizationId, undefined, (db) => createNotificationEvent(input, db));
+  const db = client;
   const channelType = input.channelType ?? "TELEGRAM";
   const shouldSend = input.force
     ? true
@@ -418,8 +437,9 @@ export async function createNotificationEvent(
   }
 }
 
-export async function markNotificationSent(id: string, organizationId: string, client?: DbClient) {
-  const db = client ?? getDb();
+export async function markNotificationSent(id: string, organizationId: string, client?: DbClient): Promise<NotificationEventRecord | null> {
+  if (!client) return withNotificationDb(organizationId, undefined, (db) => markNotificationSent(id, organizationId, db));
+  const db = client;
   try {
     await db.notificationEvent.updateMany({
       where: { id, organizationId },
@@ -437,8 +457,9 @@ export async function markNotificationSent(id: string, organizationId: string, c
   }
 }
 
-export async function markNotificationFailed(id: string, organizationId: string, errorMessage: string, client?: DbClient) {
-  const db = client ?? getDb();
+export async function markNotificationFailed(id: string, organizationId: string, errorMessage: string, client?: DbClient): Promise<NotificationEventRecord | null> {
+  if (!client) return withNotificationDb(organizationId, undefined, (db) => markNotificationFailed(id, organizationId, errorMessage, db));
+  const db = client;
   try {
     await db.notificationEvent.updateMany({
       where: { id, organizationId },
@@ -455,8 +476,9 @@ export async function markNotificationFailed(id: string, organizationId: string,
   }
 }
 
-export async function markNotificationSkipped(id: string, organizationId: string, reason?: string, client?: DbClient) {
-  const db = client ?? getDb();
+export async function markNotificationSkipped(id: string, organizationId: string, reason?: string, client?: DbClient): Promise<NotificationEventRecord | null> {
+  if (!client) return withNotificationDb(organizationId, undefined, (db) => markNotificationSkipped(id, organizationId, reason, db));
+  const db = client;
   try {
     await db.notificationEvent.updateMany({
       where: { id, organizationId },
@@ -479,8 +501,9 @@ export async function updateNotificationPreferences(input: {
   preferences: NotificationPreferenceInput[];
   actorId: string;
   client?: DbClient;
-}) {
-  const db = input.client ?? getDb();
+}): Promise<NotificationPreferenceRecord[] | null> {
+  if (!input.client) return withNotificationDb(input.organizationId, undefined, (db) => updateNotificationPreferences({ ...input, client: db }));
+  const db = input.client;
   const cleanPreferences = input.preferences.filter((item) => isNotificationEventType(item.eventType));
 
   try {
@@ -497,7 +520,7 @@ export async function updateNotificationPreferences(input: {
       existing.map((row) => [`${row.channelType}:${row.eventType}`, toPreferenceRecord(row)]),
     );
 
-    const result = await db.$transaction(async (tx) => {
+    const result = await withNotificationTransaction(input.organizationId, db, async (tx) => {
       const updatedRows: NotificationPreferenceRecord[] = [];
 
       for (const preference of cleanPreferences) {

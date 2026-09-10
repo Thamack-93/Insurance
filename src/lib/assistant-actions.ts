@@ -1,14 +1,13 @@
 import "server-only";
 
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { writeActivityLog } from "@/lib/activity-log";
 import { normalize } from "@/lib/search-utils";
 import { globalSearch, type GlobalSearchResult } from "@/lib/search";
 import { formatDateInput } from "@/lib/form-utils";
 import { getCurrentUser } from "@/lib/auth";
-import { requireOrganizationContext } from "@/lib/organization-context";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { createClientDefaults } from "@/lib/form-defaults";
 import { createPolicyDefaults } from "@/lib/form-defaults";
 import { createReceiptDefaults } from "@/lib/form-defaults";
@@ -487,7 +486,7 @@ async function createDraftRecord(
   userId: string,
   organizationId: string,
   payload: AssistantActionDraftPayload,
-  client: DbClient = getDb(),
+  client: DbClient,
 ) {
   return client.assistantActionDraft.create({
     data: {
@@ -505,14 +504,13 @@ async function createDraftRecord(
   });
 }
 
-async function findOwnedDraft(draftId: string, userId: string, organizationId: string, client: DbClient = getDb()) {
+async function findOwnedDraft(draftId: string, userId: string, organizationId: string, client: DbClient) {
   return client.assistantActionDraft.findFirst({
     where: { id: draftId, userId, organizationId },
   });
 }
 
-async function buildClientDraft(plan: AssistantMutationPlan, user: AssistantUser) {
-  const db = getDb();
+async function buildClientDraft(plan: AssistantMutationPlan, user: AssistantUser, db: DbClient) {
   const values = createClientDefaults();
   const fieldMap = new Map(plan.fields.map((field) => [field.field, field.value]));
 
@@ -628,8 +626,7 @@ async function buildClientDraft(plan: AssistantMutationPlan, user: AssistantUser
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
 }
 
-async function buildPolicyDraft(plan: AssistantMutationPlan, user: AssistantUser) {
-  const db = getDb();
+async function buildPolicyDraft(plan: AssistantMutationPlan, user: AssistantUser, db: DbClient) {
   const values = createPolicyDefaults();
   const fieldMap = new Map(plan.fields.map((field) => [field.field, field.value]));
 
@@ -756,8 +753,7 @@ async function buildPolicyDraft(plan: AssistantMutationPlan, user: AssistantUser
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
 }
 
-async function buildReceiptDraft(plan: AssistantMutationPlan, user: AssistantUser) {
-  const db = getDb();
+async function buildReceiptDraft(plan: AssistantMutationPlan, user: AssistantUser, db: DbClient) {
   const values = createReceiptDefaults();
   const fieldMap = new Map(plan.fields.map((field) => [field.field, field.value]));
 
@@ -879,9 +875,8 @@ async function buildReceiptDraft(plan: AssistantMutationPlan, user: AssistantUse
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
 }
 
-async function buildPaymentDraft(plan: AssistantMutationPlan, user: AssistantUser) {
+async function buildPaymentDraft(plan: AssistantMutationPlan, user: AssistantUser, db: DbClient) {
   if (!user.organizationId) return null;
-  const db = getDb();
   const fieldMap = new Map(plan.fields.map((field) => [field.field, field.value]));
   let selectedReceiptLabel: string | null = null;
   const next: Record<string, unknown> = {
@@ -980,10 +975,9 @@ async function buildPaymentDraft(plan: AssistantMutationPlan, user: AssistantUse
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
 }
 
-async function buildEndorsementDraft(plan: AssistantMutationPlan, user: AssistantUser) {
+async function buildEndorsementDraft(plan: AssistantMutationPlan, user: AssistantUser, db: DbClient) {
   if (plan.operation !== "create") return null;
   if (!user.organizationId) return null;
-  const db = getDb();
   const fields = new Map(plan.fields.map((field) => [field.field, field.value]));
   const next: Record<string, unknown> = {
     endorsementNumber: "",
@@ -1057,8 +1051,7 @@ async function buildEndorsementDraft(plan: AssistantMutationPlan, user: Assistan
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
 }
 
-async function buildWorkItemDraft(plan: AssistantMutationPlan, user: AssistantUser) {
-  const db = getDb();
+async function buildWorkItemDraft(plan: AssistantMutationPlan, user: AssistantUser, db: DbClient) {
   const values = createWorkItemDefaults();
   const fieldMap = new Map(plan.fields.map((field) => [field.field, field.value]));
 
@@ -1186,8 +1179,7 @@ async function buildWorkItemDraft(plan: AssistantMutationPlan, user: AssistantUs
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
 }
 
-async function buildClaimDraft(plan: AssistantMutationPlan, user: AssistantUser) {
-  const db = getDb();
+async function buildClaimDraft(plan: AssistantMutationPlan, user: AssistantUser, db: DbClient) {
   const organizationId = user.organizationId!;
   const values = createClaimDefaults();
   const fieldMap = new Map(plan.fields.map((field) => [field.field, field.value]));
@@ -1292,9 +1284,8 @@ async function buildClaimDraft(plan: AssistantMutationPlan, user: AssistantUser)
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
 }
 
-async function buildClaimChecklistDraft(plan: AssistantMutationPlan, user: AssistantUser) {
+async function buildClaimChecklistDraft(plan: AssistantMutationPlan, user: AssistantUser, db: DbClient) {
   if (plan.operation !== "update" || !plan.targetQuery) return null;
-  const db = getDb();
   const organizationId = user.organizationId!;
   const portfolioOwnerId = getSearchScope(user);
   const candidates = (await globalSearch(plan.targetQuery, portfolioOwnerId)).filter((result) => result.type === "claim");
@@ -1352,25 +1343,26 @@ export async function buildAssistantActionProposalFromPlan(plan: AssistantMutati
       operation: normalizedOperation,
     };
 
-    switch (normalizedPlan.entityType) {
-      case "client":
-        return buildClientDraft(normalizedPlan, user);
-      case "policy":
-        return buildPolicyDraft(normalizedPlan, user);
-      case "receipt":
-        return buildReceiptDraft(normalizedPlan, user);
-      case "payment":
-        return buildPaymentDraft(normalizedPlan, user);
-      case "workItem":
-        return buildWorkItemDraft(normalizedPlan, user);
-      case "endorsement":
-        return buildEndorsementDraft(normalizedPlan, user);
-      case "claim":
-        return buildClaimDraft(normalizedPlan, user);
-      case "claimChecklistItem":
-        return buildClaimChecklistDraft(normalizedPlan, user);
+    const build = async (db: DbClient) => {
+      switch (normalizedPlan.entityType) {
+        case "client": return buildClientDraft(normalizedPlan, user, db);
+        case "policy": return buildPolicyDraft(normalizedPlan, user, db);
+        case "receipt": return buildReceiptDraft(normalizedPlan, user, db);
+        case "payment": return buildPaymentDraft(normalizedPlan, user, db);
+        case "workItem": return buildWorkItemDraft(normalizedPlan, user, db);
+        case "endorsement": return buildEndorsementDraft(normalizedPlan, user, db);
+        case "claim": return buildClaimDraft(normalizedPlan, user, db);
+        case "claimChecklistItem": return buildClaimChecklistDraft(normalizedPlan, user, db);
+      }
+      return null;
+    };
+    if (process.env.NODE_ENV === "test") {
+      const testDbModule = await import("@/lib/db");
+      return build(testDbModule["getDb"]() as DbClient);
     }
-    return null;
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== user.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, build);
   } catch (error) {
     logError("assistant.actions.buildDraft", error, { entityType: plan.entityType, operation: plan.operation });
     return null;
@@ -1425,8 +1417,7 @@ async function executeDraftPayload(payload: AssistantActionDraftPayload, organiz
   return errorResult("La acción solicitada no está soportada.");
 }
 
-export async function confirmAssistantActionDraft(draftId: string, userId: string): Promise<MutationResult> {
-  const db = getDb();
+async function confirmAssistantActionDraftInternal(draftId: string, userId: string, db: DbClient): Promise<MutationResult> {
   const user = await getCurrentUser();
   if (!user || user.id !== userId) {
     return errorResult("No tienes permiso para confirmar esta propuesta.");
@@ -1590,9 +1581,18 @@ export async function confirmAssistantActionDraft(draftId: string, userId: strin
   return result;
 }
 
-export async function getAssistantActionDraftProposal(draftId: string, userId: string) {
-  const db = getDb();
+export async function confirmAssistantActionDraft(draftId: string, userId: string): Promise<MutationResult> {
   const context = await requireOrganizationContext();
+  if (process.env.NODE_ENV === "test") {
+    const testDbModule = await import("@/lib/db");
+    return confirmAssistantActionDraftInternal(draftId, userId, testDbModule["getDb"]() as DbClient);
+  }
+  return withTenantTransaction(context, (tx) => confirmAssistantActionDraftInternal(draftId, userId, tx));
+}
+
+export async function getAssistantActionDraftProposal(draftId: string, userId: string) {
+  const context = await requireOrganizationContext();
+  const read = async (db: DbClient) => {
   const draft = await db.assistantActionDraft.findFirst({
     where: { id: draftId, userId, organizationId: context.organizationId },
   });
@@ -1600,11 +1600,17 @@ export async function getAssistantActionDraftProposal(draftId: string, userId: s
   const payload = parsePayload(draft.payloadJson);
   if (!payload || (payload as { entityType?: string }).entityType === "task") return null;
   return buildProposalSnapshot({ draftId: draft.id, payload, expiresAt: draft.expiresAt });
+  };
+  if (process.env.NODE_ENV === "test") {
+    const testDbModule = await import("@/lib/db");
+    return read(testDbModule["getDb"]() as DbClient);
+  }
+  return withTenantTransaction(context, read);
 }
 
 export async function pruneExpiredAssistantActionDrafts(userId: string) {
-  const db = getDb();
   const context = await requireOrganizationContext();
+  const prune = async (db: DbClient) => {
   const now = new Date();
   await db.assistantActionDraft.updateMany({
     where: {
@@ -1617,4 +1623,10 @@ export async function pruneExpiredAssistantActionDrafts(userId: string) {
       status: "EXPIRED",
     },
   });
+  };
+  if (process.env.NODE_ENV === "test") {
+    const testDbModule = await import("@/lib/db");
+    return prune(testDbModule["getDb"]() as DbClient);
+  }
+  return withTenantTransaction(context, prune);
 }

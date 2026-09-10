@@ -6,6 +6,7 @@ import { Upload, X, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -44,8 +45,8 @@ type Props = {
   disabled?: boolean;
 };
 
-const ALLOWED_EXT = [".pdf", ".jpg", ".jpeg", ".png", ".webp", ".doc", ".docx"];
-const MAX_BYTES = 10 * 1024 * 1024;
+const ALLOWED_EXT = [".pdf"];
+const MAX_BYTES = 15 * 1024 * 1024;
 
 type BatchResult = {
   ok: boolean;
@@ -71,6 +72,7 @@ function uploadBatch(
     for (const f of files) fd.append("files", f);
     fd.append("documentType", documentType);
     fd.append("rollback", "1");
+    fd.append("uploadConsent", "1");
     Object.entries(associations).forEach(([k, v]) => {
       if (v) fd.append(k, v);
     });
@@ -121,17 +123,18 @@ export function DocumentDropZone({
   const [documentType, setDocumentType] = useState<string>(defaultDocumentType);
   const [isDragging, setIsDragging] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [uploadConsent, setUploadConsent] = useState(false);
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const next: Item[] = [];
     for (const file of Array.from(files)) {
       const ext = "." + (file.name.split(".").pop() || "").toLowerCase();
       if (!ALLOWED_EXT.includes(ext)) {
-        toast.error(`${file.name}: tipo no permitido`);
+        toast.error(`${file.name}: solo se aceptan PDFs`);
         continue;
       }
       if (file.size > MAX_BYTES) {
-        toast.error(`${file.name}: supera 10 MB`);
+        toast.error(`${file.name}: supera 15 MB`);
         continue;
       }
       next.push({
@@ -149,6 +152,10 @@ export function DocumentDropZone({
   const startUpload = async () => {
     if (!documentType) {
       toast.error("Selecciona el tipo de documento.");
+      return;
+    }
+    if (!uploadConsent) {
+      toast.error("Confirma tu autorización, el procesamiento por proveedores de IA aprobados, la retención del original por 48 horas y el riesgo de que no hay antivirus externo por archivo.");
       return;
     }
     const queued = items.filter((it) => it.status === "queued" || it.status === "error");
@@ -195,6 +202,7 @@ export function DocumentDropZone({
     );
 
     setBusy(false);
+    if (okCount > 0) setUploadConsent(false);
 
     if (res.rolledBack) {
       toast.error(
@@ -256,7 +264,7 @@ export function DocumentDropZone({
         <div>
           <p className="text-sm font-medium text-foreground">{title}</p>
           <p className="text-xs text-muted-foreground">{description}</p>
-          <p className="mt-1 text-xs text-muted-foreground">PDF, JPG, PNG, WebP o Word · máx. 10 MB c/u</p>
+          <p className="mt-1 text-xs text-muted-foreground">Solo PDF validado · máx. 15 MB y 100 páginas c/u</p>
         </div>
         <input
           ref={inputRef}
@@ -296,6 +304,11 @@ export function DocumentDropZone({
           {busy ? "Subiendo..." : `Subir ${items.filter((i) => i.status === "queued" || i.status === "error").length || ""}`.trim()}
         </Button>
       </div>
+
+      <label className="flex items-start gap-2 text-xs text-muted-foreground">
+        <Checkbox checked={uploadConsent} onCheckedChange={(checked) => setUploadConsent(checked === true)} disabled={busy} />
+        <span>Confirmo que tengo autorización, acepto el procesamiento por proveedores de IA aprobados y entiendo que el original se conserva hasta 48 horas (sin antivirus externo por archivo).</span>
+      </label>
 
       {items.length > 0 && (
         <ul className="space-y-2">

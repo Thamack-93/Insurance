@@ -23,6 +23,15 @@ const writeActivityLog = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/db", () => ({ getDb: () => db }));
 vi.mock("@/lib/activity-log", () => ({ writeActivityLog }));
 vi.mock("@/lib/organization-context", () => ({ assertOrganizationContextInTransaction: vi.fn(async () => {}) }));
+vi.mock("@/lib/organization-capabilities", () => ({
+  resolveOrganizationCapability: vi.fn(async (organizationId: string, capability: string) => ({
+    organizationId,
+    capability,
+    enabled: true,
+    limitValue: null,
+    reason: "PLAN",
+  })),
+}));
 vi.mock("@/lib/qualitas-payment-link", () => provider);
 
 import { requestQualitasPaymentLinkForReceipt } from "./qualitas-payment-link-service";

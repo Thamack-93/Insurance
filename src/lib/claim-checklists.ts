@@ -2,17 +2,24 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
 import { claimOperationalWhere } from "@/lib/portfolio-access";
 import type { PolicyType } from "@/lib/domain-values";
 import { writeActivityLog } from "@/lib/activity-log";
-import { requireOrganizationContext, withOrganizationTransaction } from "@/lib/organization-context";
+import { requireOrganizationContext, withOrganizationTransaction, type OrganizationContext } from "@/lib/organization-context";
 import { CLAIM_CHECKLIST_STATUSES, type ClaimChecklistStatusValue } from "@/lib/claim-checklist-values";
 
 export { CLAIM_CHECKLIST_STATUSES, CLAIM_CHECKLIST_STATUS_LABELS, isClaimChecklistPending } from "@/lib/claim-checklist-values";
 export type { ClaimChecklistStatusValue } from "@/lib/claim-checklist-values";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
+
+async function withChecklistTenant<T>(organizationId: string, client: DbClient | undefined, callback: (db: DbClient) => Promise<T>) {
+  if (client) return callback(client);
+  const { requireOrganizationContext, withTenantTransaction } = await import("@/lib/organization-context");
+  const context: OrganizationContext = await requireOrganizationContext();
+  if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  return withTenantTransaction(context, callback);
+}
 
 export function createCustomClaimRequirementCode() {
   return `CUSTOM:${randomUUID()}`;
@@ -82,9 +89,10 @@ export async function getClaimChecklistSummary(
   claimId: string,
   organizationId: string,
   portfolioOwnerId?: string,
-  client: DbClient = getDb(),
+  client?: DbClient,
 ) {
-  const claim = await client.claim.findFirst({
+  return withChecklistTenant(organizationId, client, async (db) => {
+  const claim = await db.claim.findFirst({
     where: { AND: [{ id: claimId }, claimOperationalWhere(portfolioOwnerId, organizationId)] },
     select: {
       id: true,
@@ -130,6 +138,7 @@ export async function getClaimChecklistSummary(
     items,
     counts: Object.fromEntries(CLAIM_CHECKLIST_STATUSES.map((status) => [status, items.filter((item) => item.status === status).length])),
   };
+  });
 }
 
 export async function updateClaimChecklistStatus(
@@ -146,9 +155,9 @@ export async function updateClaimChecklistStatus(
   if (!client && actorUserId) {
     const context = await requireOrganizationContext();
     if (context.organizationId !== organizationId) return null;
-    return withOrganizationTransaction(context, (tx) => updateClaimChecklistStatus(input, organizationId, portfolioOwnerId, tx, actorUserId));
+    return withOrganizationTransaction<{ id: string; status: ClaimChecklistStatusValue; updatedAt: Date } | null>(context, (tx) => updateClaimChecklistStatus(input, organizationId, portfolioOwnerId, tx, actorUserId));
   }
-  const db = client ?? getDb();
+  return withChecklistTenant(organizationId, client, async (db) => {
   const claim = await db.claim.findFirst({
     where: { AND: [{ id: input.claimId }, claimOperationalWhere(portfolioOwnerId, organizationId)] },
     select: { id: true, status: true, policy: { select: { policyType: true } } },
@@ -166,19 +175,19 @@ export async function updateClaimChecklistStatus(
       })
     : null;
   if (current?.status === input.status) return current;
+
   const now = new Date();
   const updated = await db.claimChecklistItem.upsert({
     where: { claimId_requirementCode: { claimId: claim.id, requirementCode: template.code } },
     create: {
-      claimId: claim.id,
       organizationId,
+      claimId: claim.id,
       requirementCode: template.code,
       label: template.label,
       status: input.status,
       ...checklistTimestamps(input.status, now),
     },
     update: {
-      organizationId,
       label: template.label,
       status: input.status,
       ...checklistTimestamps(input.status, now),
@@ -197,4 +206,5 @@ export async function updateClaimChecklistStatus(
     });
   }
   return updated;
+  });
 }

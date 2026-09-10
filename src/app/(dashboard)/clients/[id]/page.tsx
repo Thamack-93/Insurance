@@ -15,7 +15,6 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DocumentDropZone } from "@/components/documents/document-drop-zone";
 import { DocumentList } from "@/components/documents/document-list";
-import { getDb } from "@/lib/db";
 import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { clientOperationalWhere, claimOperationalWhere, quoteOperationalWhere, documentOperationalWhere } from "@/lib/portfolio-access";
 import { formatDate } from "@/lib/dates";
@@ -24,6 +23,7 @@ import { formatCurrency, toNumber } from "@/lib/money";
 import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { calculateAge, formatBirthdayDate } from "@/lib/birthday-reminders";
 import { normalizeReturnTo } from "@/lib/return-to";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 
 export default async function ClientDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
@@ -31,7 +31,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
   const returnTo = normalizeReturnTo(typeof query.returnTo === "string" ? query.returnTo : undefined, "/clients");
   const scope = await requireOrganizationPortfolioReadScope();
   const isAdmin = scope.membershipRole !== "AGENT";
-  const db = getDb();
+  return withTenantOrganization(scope.organizationId, async (db) => {
 
   const client = await db.client.findFirst({
     where: { id, ...clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
@@ -78,7 +78,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
       clientId: id,
       limit: 10,
       organizationId: scope.organizationId,
-    }),
+    }, db),
     db.claim.findMany({
       where: { clientId: id, ...claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: { policy: true, insurer: true },
@@ -108,7 +108,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
       orderBy: { fullName: "asc" },
       take: 10,
     }),
-    getActivityForEntity("Client", id, 20, scope.organizationId),
+    getActivityForEntity("Client", id, 20, scope.organizationId, db),
   ]);
 
   const activePolicies = policies.filter((policy) => policy.status === "ACTIVE");
@@ -118,7 +118,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
     statuses: OPEN_WORK_ITEM_STATUSES,
     clientId: id,
     organizationId: scope.organizationId,
-  });
+  }, db);
   const activePremium = activePolicies.reduce((sum, policy) => sum + toNumber(policy.premiumAmount), 0);
 
   return (
@@ -458,4 +458,5 @@ export default async function ClientDetailPage({ params, searchParams }: { param
       </div>
     </div>
   );
+  });
 }

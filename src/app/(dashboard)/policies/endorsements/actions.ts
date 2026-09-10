@@ -1,12 +1,11 @@
 "use server";
 
-import { getDb } from "@/lib/db";
 import { writeActivityLog } from "@/lib/activity-log";
 import { AuthError } from "@/lib/auth";
 import { normalizeOptionalText, parseDateInput } from "@/lib/form-utils";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { assertEndorsementOrganizationAccess, assertPolicyOrganizationAccess } from "@/lib/portfolio-access";
-import { assertOrganizationContextInTransaction, requireOrganizationContext } from "@/lib/organization-context";
+import { assertOrganizationContextInTransaction, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { endorsementSchema, type EndorsementFormValues } from "@/lib/validations";
 
 function normalizeEndorsementInput(values: EndorsementFormValues, policyCurrency: string) {
@@ -32,34 +31,33 @@ export async function createEndorsement(values: EndorsementFormValues): Promise<
   }
 
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
     const userId = context.userId;
     await assertPolicyOrganizationAccess(parsed.data.policyId, context);
 
-    const policy = await db.policy.findFirst({
+    const policy = await withTenantTransaction(context, (tx) => tx.policy.findFirst({
       where: { id: parsed.data.policyId, organizationId: context.organizationId },
       select: { id: true, policyNumber: true, currency: true, clientId: true },
-    });
+    }));
 
     if (!policy) {
       return errorResult("La poliza seleccionada ya no existe.");
     }
 
-    const duplicate = await db.policyEndorsement.findFirst({
+    const duplicate = await withTenantTransaction(context, (tx) => tx.policyEndorsement.findFirst({
       where: {
         organizationId: context.organizationId,
         policyId: policy.id,
         endorsementNumber: parsed.data.endorsementNumber.trim(),
       },
       select: { id: true },
-    });
+    }));
 
     if (duplicate) {
       return errorResult("Ya existe un endoso con ese numero para esta poliza.");
     }
 
-    const endorsement = await db.$transaction(async (tx) => {
+    const endorsement = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const currentPolicy = await tx.policy.findFirst({ where: { id: policy.id, organizationId: context.organizationId }, select: { id: true } });
       if (!currentPolicy) throw new AuthError("La póliza ya no pertenece a tu organización.", 403);
@@ -94,12 +92,11 @@ export async function updateEndorsement(id: string, values: EndorsementFormValue
   }
 
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
     const userId = context.userId;
     await assertEndorsementOrganizationAccess(id, context);
 
-    const existingEndorsement = await db.policyEndorsement.findFirst({
+    const existingEndorsement = await withTenantTransaction(context, (tx) => tx.policyEndorsement.findFirst({
       where: { id, organizationId: context.organizationId },
       select: {
         id: true,
@@ -122,7 +119,7 @@ export async function updateEndorsement(id: string, values: EndorsementFormValue
           },
         },
       },
-    });
+    }));
 
     if (!existingEndorsement) {
       return errorResult("El endoso ya no existe.");
@@ -132,7 +129,7 @@ export async function updateEndorsement(id: string, values: EndorsementFormValue
       return errorResult("No se puede mover un endoso a otra poliza desde esta pantalla.");
     }
 
-    const duplicate = await db.policyEndorsement.findFirst({
+    const duplicate = await withTenantTransaction(context, (tx) => tx.policyEndorsement.findFirst({
       where: {
         organizationId: context.organizationId,
         policyId: existingEndorsement.policyId,
@@ -140,13 +137,13 @@ export async function updateEndorsement(id: string, values: EndorsementFormValue
         id: { not: id },
       },
       select: { id: true },
-    });
+    }));
 
     if (duplicate) {
       return errorResult("Ya existe un endoso con ese numero para esta poliza.");
     }
 
-    const updatedEndorsement = await db.$transaction(async (tx) => {
+    const updatedEndorsement = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       const updated = await tx.policyEndorsement.update({ where: { id, organizationId: context.organizationId }, data: { ...normalizeEndorsementInput(parsed.data, existingEndorsement.policy.currency), policyId: existingEndorsement.policyId, updatedById: userId } });
       await writeActivityLog({ organizationId: context.organizationId, entityType: "PolicyEndorsement", entityId: updated.id, action: "ENDORSEMENT_UPDATE", oldValue: existingEndorsement, newValue: updated, userId, db: tx });
@@ -173,12 +170,11 @@ export async function updateEndorsement(id: string, values: EndorsementFormValue
 
 export async function deleteEndorsement(id: string): Promise<MutationResult> {
   try {
-    const db = getDb();
     const context = await requireOrganizationContext();
     const userId = context.userId;
     await assertEndorsementOrganizationAccess(id, context);
 
-    const existingEndorsement = await db.policyEndorsement.findFirst({
+    const existingEndorsement = await withTenantTransaction(context, (tx) => tx.policyEndorsement.findFirst({
       where: { id, organizationId: context.organizationId },
       include: {
         policy: {
@@ -191,7 +187,7 @@ export async function deleteEndorsement(id: string): Promise<MutationResult> {
           select: { id: true },
         },
       },
-    });
+    }));
 
     if (!existingEndorsement) {
       return errorResult("El endoso ya no existe.");
@@ -205,7 +201,7 @@ export async function deleteEndorsement(id: string): Promise<MutationResult> {
       return errorResult("No se puede eliminar: el endoso tiene documentos asociados.");
     }
 
-    await db.$transaction(async (tx) => {
+    await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       await tx.policyEndorsement.delete({ where: { id, organizationId: context.organizationId } });
       await writeActivityLog({ organizationId: context.organizationId, entityType: "PolicyEndorsement", entityId: id, action: "ENDORSEMENT_DELETE", oldValue: existingEndorsement, userId, db: tx });

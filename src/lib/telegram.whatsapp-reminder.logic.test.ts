@@ -5,6 +5,7 @@ vi.mock("server-only", () => ({}));
 const checkDistributedRateLimit = vi.hoisted(() => vi.fn());
 const writeActivityLog = vi.hoisted(() => vi.fn());
 const assertOrganizationContextInTransaction = vi.hoisted(() => vi.fn());
+const withSystemOrganizationTransaction = vi.hoisted(() => vi.fn());
 const db = vi.hoisted(() => ({
   notificationChannel: { findFirst: vi.fn() },
   organizationMembership: { findFirst: vi.fn(), findMany: vi.fn() },
@@ -20,7 +21,7 @@ vi.mock("@/lib/request-guards", () => ({
   securityFingerprint: (value: string) => `fingerprint:${value}`,
 }));
 vi.mock("@/lib/activity-log", () => ({ writeActivityLog }));
-vi.mock("@/lib/organization-context", () => ({ assertOrganizationContextInTransaction }));
+vi.mock("@/lib/organization-context", () => ({ assertOrganizationContextInTransaction, withSystemOrganizationTransaction }));
 
 import { processTelegramWebhookUpdate } from "./telegram";
 
@@ -86,6 +87,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   checkDistributedRateLimit.mockResolvedValue({ allowed: true });
   assertOrganizationContextInTransaction.mockResolvedValue(undefined);
+  withSystemOrganizationTransaction.mockImplementation(async (_organizationId: string, _reason: string, callback: (tx: typeof db) => unknown) => callback(db));
   db.notificationChannel.findFirst.mockResolvedValue(channel);
   db.organizationMembership.findMany.mockResolvedValue([membership]);
   db.organizationMembership.findFirst.mockResolvedValue({ organizationId: "org-1" });

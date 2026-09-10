@@ -3,7 +3,7 @@ import { updateWorkItem } from "@/app/(dashboard)/tasks/actions";
 import { WorkItemForm } from "@/components/forms/task-form";
 import { createWorkItemDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
-import { getDb } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/organization-context";
 import { formatDateInput } from "@/lib/form-utils";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
 import type { WorkItemFormValues } from "@/lib/validations";
@@ -11,9 +11,8 @@ import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function EditWorkItemPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const db = getDb();
   const scope = await requireOrganizationPortfolioReadScope();
-  const [workItem, clients, policies, insurers, receipts] = await Promise.all([
+  const [workItem, clients, policies, insurers, receipts] = await withTenantTransaction(scope.context, (db) => Promise.all([
     findWorkItemByRouteId(id, scope.organizationId, db, scope.portfolioOwnerId),
     db.client.findMany({
       where: { organizationId: scope.organizationId, ...(scope.portfolioOwnerId ? { portfolioOwnerId: scope.portfolioOwnerId } : {}), status: { not: "ARCHIVED" } },
@@ -35,7 +34,7 @@ export default async function EditWorkItemPage({ params }: { params: Promise<{ i
       orderBy: { dueDate: "asc" },
       select: { id: true, receiptNumber: true },
     }),
-  ]);
+  ]));
 
   if (!workItem) {
     notFound();

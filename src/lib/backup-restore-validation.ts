@@ -1,6 +1,7 @@
 import type { PoolClient, QueryResultRow } from "pg";
 import type { RestoreFailureCode } from "@/lib/backup-restore-errors";
 import { auditTenantFoundation, OPTIONAL_ORGANIZATION_TABLES, PROTECTED_TENANT_TABLES } from "@/lib/tenant-organization-foundation";
+import { auditMultiOrganizationState } from "../../scripts/check-multi-org-audit";
 
 export const RESTORE_SKIPPED_TABLES = new Set(["_prisma_migrations"]);
 
@@ -248,6 +249,9 @@ export async function validateRestoreSchema(client: PoolClient, parsed: ParsedBa
     NotificationPreference: ["id", "userId", "eventType", "channelType"],
     NotificationEvent: ["id", "userId", "channelType"],
     SystemSetting: ["id", "key", "value"],
+    // DemoOrganizationState is keyed by organizationId; it intentionally has
+    // no surrogate id column.
+    DemoOrganizationState: ["organizationId", "seedVersion", "trialEndsAt", "resetStatus", "resetPhase", "dataVersion"],
   };
   for (const table of [...PROTECTED_TENANT_TABLES, ...OPTIONAL_ORGANIZATION_TABLES]) {
     requiredColumns[table] = [...(requiredColumns[table] ?? ["id"]), "organizationId"];
@@ -400,8 +404,14 @@ export async function validateDomainInvariants(client: PoolClient): Promise<Doma
     if (!check.ok) throw new RestoreIntegrityError(`${name} falló con ${countValue} registros.`);
   };
 
-  const tenantAudit = await auditTenantFoundation(client, { requireActive: true });
-  const tenantCheck = { name: "tenant_backfill", count: tenantAudit.issues.length, ok: tenantAudit.ok, detail: tenantAudit.issues.join("; ") || "singleton tenant audit passed" };
+  // A pre-cutover restore is intentionally singleton; a post-cutover backup
+  // can contain several CUSTOMER/LEGACY organizations. Select the matching
+  // audit so restore verification remains valid in either declared mode.
+  const organizationCount = await count(client, `SELECT count(*)::text AS count FROM "Organization"`);
+  const tenantAudit = organizationCount > 1
+    ? await auditMultiOrganizationState(client, { requireTwoOrganizations: false })
+    : await auditTenantFoundation(client, { requireActive: true });
+  const tenantCheck = { name: "tenant_backfill", count: tenantAudit.issues.length, ok: tenantAudit.ok, detail: tenantAudit.issues.join("; ") || (organizationCount > 1 ? "multi-org tenant audit passed" : "singleton tenant audit passed") };
   checks.push(tenantCheck);
   if (!tenantAudit.ok) throw new RestoreIntegrityError(`La auditoría tenant falló: ${tenantAudit.issues.join("; ")}`, "TENANT_AUDIT_FAILED");
 

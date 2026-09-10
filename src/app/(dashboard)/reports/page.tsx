@@ -6,7 +6,6 @@ import { PageHeader } from "@/components/layout/page-header";
 import { MetricCard } from "@/components/pages-secondary/panels";
 import { ReportDownloadCard, type ReportDownloadDefinition } from "@/components/reports/report-download-card";
 import { Button } from "@/components/ui/button";
-import { getDb } from "@/lib/db";
 import { businessAddDays, businessToday, formatBusinessDateInput } from "@/lib/business-dates";
 import { countWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
@@ -16,6 +15,7 @@ import {
   receiptOperationalWhere,
   requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 
 type ReportView = "collections" | "renewals" | "portfolio" | "commissions" | "operations";
 
@@ -114,17 +114,17 @@ function buildDefinitions(now: Date): Record<ReportView, ReportDownloadDefinitio
 
 export default async function ReportsPage({ searchParams }: { searchParams?: Promise<{ view?: string }> }) {
   const view = readReportView((await searchParams)?.view);
-  const db = getDb();
   const scope = await requireOrganizationPortfolioReadScope();
-  const now = businessToday();
-  const in60 = businessAddDays(now, 60);
+  return withTenantOrganization(scope.organizationId, async (db) => {
+    const now = businessToday();
+    const in60 = businessAddDays(now, 60);
 
   const [activePolicies, dueReceipts, renewalsSoonPolicies, openWorkItems, risks, paidCommissions] = await Promise.all([
     db.policy.count({ where: { ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId), status: "ACTIVE" } }),
     db.receipt.count({ where: { ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId), dueDate: { gte: now, lte: in60 }, status: { notIn: ["PAID", "CANCELLED"] } } }),
-    loadEligibleRenewalPolicies({ endDate: { gte: now, lte: in60 } }, scope.portfolioOwnerId),
-    countWorkItems({ organizationId: scope.organizationId, statuses: OPEN_WORK_ITEM_STATUSES, portfolioOwnerId: scope.portfolioOwnerId }),
-    db.alert.count({ where: { status: "OPEN" } }),
+    loadEligibleRenewalPolicies({ endDate: { gte: now, lte: in60 } }, scope.portfolioOwnerId, scope.organizationId, db),
+    countWorkItems({ organizationId: scope.organizationId, statuses: OPEN_WORK_ITEM_STATUSES, portfolioOwnerId: scope.portfolioOwnerId }, db),
+    db.alert.count({ where: { organizationId: scope.organizationId, status: "OPEN" } }),
     db.commission.count({ where: { ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId), status: "PAID" } }),
   ]);
   const definition = buildDefinitions(now)[view];
@@ -150,4 +150,5 @@ export default async function ReportsPage({ searchParams }: { searchParams?: Pro
       <ReportDownloadCard key={view} definition={definition} />
     </div>
   );
+  });
 }

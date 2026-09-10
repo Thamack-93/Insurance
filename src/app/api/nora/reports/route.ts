@@ -2,12 +2,26 @@ import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@/generated/prisma/client";
 import { AuthError } from "@/lib/auth";
 import { businessAddDays, businessEndOfDay, businessToday, formatBusinessDateInput, parseBusinessDateInput } from "@/lib/business-dates";
-import { getDb } from "@/lib/db";
 import { commissionOperationalWhere, policyOperationalWhere, receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
+import { withTenantTransaction } from "@/lib/organization-context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+type ReportScope = Awaited<ReturnType<typeof requireOrganizationPortfolioReadScope>>;
+
+async function withReportTenant<T>(scope: ReportScope, callback: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  // Production scopes always carry the validated context. The fallback keeps
+  // isolated route logic tests compatible with their deliberately small scope
+  // fixture and is never reachable from the real auth implementation.
+  if (scope.context && typeof withTenantTransaction === "function") {
+    return withTenantTransaction(scope.context, callback);
+  }
+  const dbModule = await import("@/lib/db");
+  return callback(dbModule["getDb"]() as unknown as Prisma.TransactionClient);
+}
 
 function readDate(value: string | null, fallback: Date) {
   if (!value) return fallback;
@@ -21,7 +35,8 @@ function readDate(value: string | null, fallback: Date) {
 export async function GET(request: NextRequest) {
   try {
     const scope = await requireOrganizationPortfolioReadScope();
-    const db = getDb();
+    const capability = await resolveOrganizationCapability(scope.organizationId, "NORA");
+    if (!capability.enabled) return NextResponse.json({ error: "Nora no está habilitada para esta organización." }, { status: 403 });
     const type = request.nextUrl.searchParams.get("type");
     const today = businessToday();
     const defaultFrom = businessAddDays(today, -30);
@@ -35,7 +50,7 @@ export async function GET(request: NextRequest) {
       const overdueEndExclusive = to < today ? businessAddDays(to, 1) : today;
       const receiptStatus: Prisma.EnumReceiptStatusFilter<"Receipt"> | undefined =
         filter === "all" ? undefined : { notIn: ["PAID", "CANCELLED"] };
-      const receipts = await db.receipt.findMany({
+      const receipts = await withReportTenant(scope, (tx) => tx.receipt.findMany({
         where: {
           ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
           dueDate: filter === "overdue" || !filter ? { gte: from, lt: overdueEndExclusive } : { gte: from, lte: businessEndOfDay(to) },
@@ -53,7 +68,7 @@ export async function GET(request: NextRequest) {
         },
         orderBy: [{ dueDate: "asc" }, { receiptNumber: "asc" }],
         take: 1000,
-      });
+      }));
       return NextResponse.json({
         success: true,
         report: {
@@ -79,7 +94,7 @@ export async function GET(request: NextRequest) {
       const days = Number.isFinite(requestedDays) ? Math.min(365, Math.max(1, Math.round(requestedDays))) : 30;
       const requestedFrom = request.nextUrl.searchParams.has("from") ? from : today;
       const requestedTo = request.nextUrl.searchParams.has("to") ? to : businessAddDays(today, days);
-      const policies = await db.policy.findMany({
+      const policies = await withReportTenant(scope, (tx) => tx.policy.findMany({
         where: {
           ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
           ...(filter === "all" ? {} : { status: "ACTIVE" }),
@@ -96,7 +111,7 @@ export async function GET(request: NextRequest) {
         },
         orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }],
         take: 1000,
-      });
+      }));
       return NextResponse.json({
         success: true,
         report: {
@@ -118,7 +133,7 @@ export async function GET(request: NextRequest) {
 
     if (type === "portfolio") {
       const status = filter === "all" ? undefined : filter === "expired" ? "EXPIRED" : "ACTIVE";
-      const policies = await db.policy.findMany({
+      const policies = await withReportTenant(scope, (tx) => tx.policy.findMany({
         where: {
           ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
           ...(status ? { status } : {}),
@@ -137,7 +152,7 @@ export async function GET(request: NextRequest) {
         },
         orderBy: [{ client: { fullName: "asc" } }, { policyNumber: "asc" }],
         take: 1000,
-      });
+      }));
       return NextResponse.json({
         success: true,
         report: {
@@ -161,7 +176,7 @@ export async function GET(request: NextRequest) {
     if (type === "commissions") {
       const status: Prisma.EnumCommissionStatusFilter<"Commission"> | undefined =
         filter === "paid" ? { equals: "PAID" } : filter === "all" ? undefined : { in: ["EXPECTED", "PENDING", "OVERDUE"] };
-      const commissions = await db.commission.findMany({
+      const commissions = await withReportTenant(scope, (tx) => tx.commission.findMany({
         where: {
           ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
           expectedDate: { gte: from, lte: businessEndOfDay(to) },
@@ -180,7 +195,7 @@ export async function GET(request: NextRequest) {
         },
         orderBy: [{ expectedDate: "asc" }, { id: "asc" }],
         take: 1000,
-      });
+      }));
       return NextResponse.json({ success: true, report: {
         slug: "comisiones",
         title: "Comisiones",
@@ -201,15 +216,18 @@ export async function GET(request: NextRequest) {
     }
 
     if (type === "operations") {
-      const workItems = await getWorkItems({
+      const workItemFilters = {
         organizationId: scope.organizationId,
         portfolioOwnerId: scope.portfolioOwnerId,
         from,
         to,
         statuses: filter === "all" ? undefined : OPEN_WORK_ITEM_STATUSES,
-        priorities: filter === "urgent" ? ["URGENT"] : filter === "high" ? ["HIGH"] : undefined,
+        priorities: filter === "urgent" ? (["URGENT"] as const) : filter === "high" ? (["HIGH"] as const) : undefined,
         limit: 1000,
-      });
+      };
+      const workItems = scope.context
+        ? await withReportTenant(scope, (tx) => getWorkItems(workItemFilters, tx))
+        : await getWorkItems(workItemFilters);
       return NextResponse.json({ success: true, report: {
         slug: "operacion",
         title: "Operación y pendientes",

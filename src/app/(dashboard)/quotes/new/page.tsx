@@ -2,13 +2,12 @@ import { createQuote } from "@/app/(dashboard)/quotes/actions";
 import { QuoteForm } from "@/components/forms/quote-form";
 import { createQuoteDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
-import { getDb } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/organization-context";
 import { clientOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function NewQuotePage() {
   const scope = await requireOrganizationPortfolioReadScope();
-  const db = getDb();
-  const [clients, insurers] = await Promise.all([
+  const [clients, insurers] = await withTenantTransaction(scope.context, (db) => Promise.all([
     db.client.findMany({
       where: {
         ...clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
@@ -22,7 +21,7 @@ export default async function NewQuotePage() {
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
-  ]);
+  ]));
 
   const clientOptions = clients.map((c) => ({ value: c.id, label: c.fullName }));
   const insurerOptions = insurers.map((i) => ({ value: i.id, label: i.name }));

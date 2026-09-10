@@ -10,7 +10,6 @@ import { EmptyState } from "@/components/empty-states/empty-state";
 import { QuotesListTable } from "@/components/quotes/quotes-list-table";
 import { TableEmptyState } from "@/components/tables/table-empty-state";
 import { TableToolbar } from "@/components/tables/table-toolbar";
-import { getDb } from "@/lib/db";
 import { daysSince, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
@@ -22,6 +21,7 @@ import {
   buildQuoteListWhere,
   readQuoteListFilters,
 } from "@/lib/list-filters";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 
 const PAGE_SIZE = 25;
 
@@ -43,8 +43,7 @@ export default async function QuotesPage({
     page: null,
   });
 
-  const db = getDb();
-
+  return withTenantOrganization(scope.organizationId, async (db) => {
   const where = buildQuoteListWhere(filters, scope.portfolioOwnerId, scope.organizationId);
   const orderBy = buildQuoteListOrderBy(filters);
 
@@ -277,4 +276,5 @@ export default async function QuotesPage({
       </div>
     </div>
   );
+  });
 }

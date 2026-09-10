@@ -2,9 +2,9 @@ import type {
   Prisma,
   PrismaClient,
 } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import type { WorkItemStatus } from "@/lib/domain-values";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 
 export type WorkItemSourceType = "Task" | "WorkItem" | "Renewal" | "Notification";
 
@@ -59,8 +59,9 @@ function normalizeNullableSeverity(value?: string | null) {
   return value ?? null;
 }
 
-export async function upsertWorkItemFromSource(input: WorkItemSyncInput, client?: WorkItemDb) {
-  const db = client ?? getDb();
+export async function upsertWorkItemFromSource(input: WorkItemSyncInput, client?: WorkItemDb): Promise<Prisma.WorkItemGetPayload<Prisma.WorkItemDefaultArgs> | null> {
+  if (!client) return withTenantOrganization(input.organizationId, (tx) => upsertWorkItemFromSource(input, tx));
+  const db = client;
 
   const createData: Prisma.WorkItemUncheckedCreateInput = {
     organizationId: input.organizationId,
@@ -139,8 +140,9 @@ export async function upsertWorkItemFromSource(input: WorkItemSyncInput, client?
   }
 }
 
-export async function deleteWorkItemBySource(organizationId: string, sourceType: WorkItemSourceType, sourceId: string, client?: WorkItemDb) {
-  const db = client ?? getDb();
+export async function deleteWorkItemBySource(organizationId: string, sourceType: WorkItemSourceType, sourceId: string, client?: WorkItemDb): Promise<void> {
+  if (!client) return withTenantOrganization(organizationId, (tx) => deleteWorkItemBySource(organizationId, sourceType, sourceId, tx));
+  const db = client;
 
   try {
     await db.workItem.delete({

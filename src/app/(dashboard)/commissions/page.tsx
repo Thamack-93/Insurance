@@ -14,7 +14,7 @@ import { TableToolbar } from "@/components/tables/table-toolbar";
 import { getCommissionStats, getOverdueCommissions, autoUpdateCommissionStatuses } from "@/lib/commissions";
 import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
-import { getDb } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/organization-context";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { commissionOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
@@ -64,23 +64,25 @@ export default async function CommissionsPage({
                 ? [{ status: direction ?? "asc" }, { expectedDate: "asc" as const }, { id: "asc" as const }]
                 : [{ expectedDate: "asc" as const }, { id: "asc" as const }];
 
-  const db = getDb();
-  const [stats, overdueCommissions, openCount, openCommissions, paidCommissions] = await Promise.all([
+  const [stats, overdueCommissions, directCommissionData] = await Promise.all([
     getCommissionStats(undefined, scope),
     getOverdueCommissions(scope),
-    db.commission.count({ where: openWhere }),
-    db.commission.findMany({
-      where: openWhere,
-      include: { client: true, insurer: true, policy: true, receipt: true },
-      orderBy: sortKey ? orderBy : [{ expectedDate: "asc" }, { id: "asc" }],
-    }),
-    db.commission.findMany({
-      where: { ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId), status: "PAID" },
-      include: { client: true, insurer: true, policy: true, receipt: true },
-      orderBy: [{ paidDate: "desc" }, { expectedDate: "desc" }],
-      take: 10,
-    }),
+    withTenantTransaction(scope.context, async (db) => ({
+      openCount: await db.commission.count({ where: openWhere }),
+      openCommissions: await db.commission.findMany({
+        where: openWhere,
+        include: { client: true, insurer: true, policy: true, receipt: true },
+        orderBy: sortKey ? orderBy : [{ expectedDate: "asc" }, { id: "asc" }],
+      }),
+      paidCommissions: await db.commission.findMany({
+        where: { ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId), status: "PAID" },
+        include: { client: true, insurer: true, policy: true, receipt: true },
+        orderBy: [{ paidDate: "desc" }, { expectedDate: "desc" }],
+        take: 10,
+      }),
+    })),
   ]);
+  const { openCount, openCommissions, paidCommissions } = directCommissionData;
 
   const orderedOpenCommissions = [...openCommissions].sort((left, right) => (
     compareCommissionStatusDesc(left.status, right.status) ||

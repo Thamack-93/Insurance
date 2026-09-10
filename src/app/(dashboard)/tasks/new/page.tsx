@@ -2,13 +2,12 @@ import { createWorkItem } from "@/app/(dashboard)/tasks/actions";
 import { WorkItemForm } from "@/components/forms/task-form";
 import { createWorkItemDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
-import { getDb } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/organization-context";
 import { clientOperationalWhere, policyOperationalWhere, receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function NewWorkItemPage() {
   const scope = await requireOrganizationPortfolioReadScope();
-  const db = getDb();
-  const [clients, policies, insurers, receipts] = await Promise.all([
+  const [clients, policies, insurers, receipts] = await withTenantTransaction(scope.context, (db) => Promise.all([
     db.client.findMany({
       where: { status: { not: "ARCHIVED" }, ...clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       orderBy: { fullName: "asc" },
@@ -29,7 +28,7 @@ export default async function NewWorkItemPage() {
       orderBy: { dueDate: "asc" },
       select: { id: true, receiptNumber: true },
     }),
-  ]);
+  ]));
 
   return (
     <div className="flex flex-col gap-6">

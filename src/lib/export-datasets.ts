@@ -1,7 +1,7 @@
 import "server-only";
 
-import { getDb } from "@/lib/db";
 import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 import { formatDate } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
 import { policyTypeLabel, statusLabel } from "@/lib/status";
@@ -58,14 +58,12 @@ const clientsDataset: ExportDataset = {
   async load(params) {
     const scope = await requireOrganizationPortfolioReadScope();
     const filters = readClientListFilters(params);
-    const db = getDb();
-
-    const records = await db.client.findMany({
+    const records = await withTenantOrganization(scope.organizationId, (db) => db.client.findMany({
       where: buildClientListWhere(filters, scope.portfolioOwnerId, scope.organizationId),
       orderBy: buildClientListOrderBy(filters),
       include: { _count: { select: { policies: true, receipts: true, tasks: true } } },
       take: EXPORT_ROW_LIMIT + 1,
-    });
+    }));
 
     const truncated = records.length > EXPORT_ROW_LIMIT;
 
@@ -106,14 +104,12 @@ const policiesDataset: ExportDataset = {
   async load(params) {
     const scope = await requireOrganizationPortfolioReadScope();
     const filters = readPolicyListFilters(params);
-    const db = getDb();
-
-    const records = await db.policy.findMany({
+    const records = await withTenantOrganization(scope.organizationId, (db) => db.policy.findMany({
       where: buildPolicyListWhere(filters, scope.portfolioOwnerId, scope.organizationId),
       orderBy: buildPolicyListOrderBy(filters),
       include: { client: true, insurer: true },
       take: EXPORT_ROW_LIMIT + 1,
-    });
+    }));
 
     const truncated = records.length > EXPORT_ROW_LIMIT;
 
@@ -152,14 +148,12 @@ const receiptsDataset: ExportDataset = {
   async load(params) {
     const scope = await requireOrganizationPortfolioReadScope();
     const filters = readReceiptListFilters(params);
-    const db = getDb();
-
-    const records = await db.receipt.findMany({
+    const records = await withTenantOrganization(scope.organizationId, (db) => db.receipt.findMany({
       where: buildReceiptListWhere(filters, scope.portfolioOwnerId, scope.organizationId),
       orderBy: buildReceiptListOrderBy(filters),
       include: { client: true, policy: true, insurer: true, endorsement: true },
       take: EXPORT_ROW_LIMIT + 1,
-    });
+    }));
 
     const truncated = records.length > EXPORT_ROW_LIMIT;
 
@@ -198,14 +192,12 @@ const quotesDataset: ExportDataset = {
   async load(params) {
     const scope = await requireOrganizationPortfolioReadScope();
     const filters = readQuoteListFilters(params);
-    const db = getDb();
-
-    const records = await db.quote.findMany({
+    const records = await withTenantOrganization(scope.organizationId, (db) => db.quote.findMany({
       where: buildQuoteListWhere(filters, scope.portfolioOwnerId, scope.organizationId),
       orderBy: buildQuoteListOrderBy(filters),
       include: { client: true, insurer: true },
       take: EXPORT_ROW_LIMIT + 1,
-    });
+    }));
 
     const truncated = records.length > EXPORT_ROW_LIMIT;
 

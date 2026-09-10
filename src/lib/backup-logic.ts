@@ -63,6 +63,11 @@ export type BackupManifest = {
   compression: typeof BACKUP_COMPRESSION;
   tables: Array<{ schema: string; name: string; rowCount: number }>;
   totals: { tables: number; rows: number };
+  demoExclusion?: {
+    policy: "EXCLUDE_DEMO";
+    organizationCount: number;
+    protectedRowsExcluded: number;
+  };
   manifestSha256: string;
 };
 

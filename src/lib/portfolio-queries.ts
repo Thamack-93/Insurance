@@ -1,4 +1,3 @@
-import { getDb } from "@/lib/db";
 import { businessAddDays, businessEndOfDay, businessStartOfDay } from "@/lib/business-dates";
 import { today } from "@/lib/dates";
 import { toNumber } from "@/lib/money";
@@ -9,6 +8,7 @@ import {
   policyOperationalWhere,
   requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
+import { withTenantOrganization } from "@/lib/tenant-dal";
 
 type CommissionStatus = "EXPECTED" | "PENDING" | "PAID" | "OVERDUE" | "CANCELLED";
 
@@ -84,9 +84,9 @@ export type CommissionSummary = {
 };
 
 export async function getPortfolioMetrics() {
-  const db = getDb();
   const scope = await requireOrganizationPortfolioReadScope();
-  const fechaCorte = today();
+  return withTenantOrganization(scope.organizationId, async (db) => {
+    const fechaCorte = today();
   const policyWhere = policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
 
   const [clients, policies] = await Promise.all([
@@ -212,7 +212,7 @@ export async function getPortfolioMetrics() {
     totalPolizas: policies.length,
   };
 
-  return {
+    return {
     fechaCorte,
     primaTotal,
     polizasActivas: activePolicies.length,
@@ -226,13 +226,14 @@ export async function getPortfolioMetrics() {
       .sort((a, b) => b.totalPolizas - a.totalPolizas || b.primaTotal - a.primaTotal)
       .slice(0, 10),
     saludDatos,
-  } satisfies PortfolioMetrics;
+    } satisfies PortfolioMetrics;
+  });
 }
 
 export async function getCommissionSummary(options: CommissionSummaryOptions = {}) {
-  const db = getDb();
   const scope = await requireOrganizationPortfolioReadScope();
-  const rango = resolveRange(options.from, options.to, 60);
+  return withTenantOrganization(scope.organizationId, async (db) => {
+    const rango = resolveRange(options.from, options.to, 60);
 
   const commissions = await db.commission.findMany({
     where: {
@@ -292,7 +293,7 @@ export async function getCommissionSummary(options: CommissionSummaryOptions = {
     porAseguradora.set(insurerKey, currentInsurer);
   }
 
-  return {
+    return {
     rango: {
       desde: rango.from,
       hasta: rango.to,
@@ -303,7 +304,8 @@ export async function getCommissionSummary(options: CommissionSummaryOptions = {
     saldoPendiente: Math.max(montoEsperado - montoCobrado, 0),
     porEstado: [...porEstado.values()].sort((a, b) => b.montoEsperado - a.montoEsperado),
     porAseguradora: [...porAseguradora.values()].sort((a, b) => b.montoEsperado - a.montoEsperado),
-  } satisfies CommissionSummary;
+    } satisfies CommissionSummary;
+  });
 }
 
 function resolveRange(from?: Date, to?: Date, fallbackDays = 60) {

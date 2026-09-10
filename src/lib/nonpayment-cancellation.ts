@@ -4,10 +4,11 @@ import { randomUUID } from "node:crypto";
 import { addDays } from "date-fns";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
-import { getDb } from "@/lib/db";
+import { getDb as getPlatformDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
 import { SYSTEM_USER_ID } from "@/lib/auth";
 import { NON_PAYMENT_CANCELLATION_DAYS } from "@/lib/nonpayment-cancellation.logic";
+import { requireOrganizationContext, withSystemOrganizationTransaction, withTenantTransaction } from "@/lib/organization-context";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -36,7 +37,6 @@ export async function cancelPolicyForNonPayment(
   now = new Date(),
   options: { client?: DbClient; enforceCutoff?: boolean } = {},
 ): Promise<NonPaymentCancellationResult> {
-  const db = options.client ?? getDb();
   const cutoff = cancellationCutoff(now);
 
   const cancel = async (tx: DbClient) => {
@@ -187,12 +187,18 @@ export async function cancelPolicyForNonPayment(
     };
   };
 
-  if (options.client) return cancel(db);
-  return db.$transaction(cancel);
+  if (options.client) return cancel(options.client);
+  if (process.env.NODE_ENV === "test") {
+    const { getDb: getTestDb } = await import("@/lib/db");
+    return getTestDb().$transaction(cancel);
+  }
+  const context = await requireOrganizationContext();
+  if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  return withTenantTransaction(context, (tx) => cancel(tx));
 }
 
 export async function runNonPaymentCancellationJob(options: { now?: Date; actorId?: string } = {}) {
-  const db = getDb();
+  const db = getPlatformDb();
   const now = options.now ?? new Date();
   const actorId = options.actorId ?? SYSTEM_USER_ID;
   const cutoff = cancellationCutoff(now);
@@ -203,18 +209,18 @@ export async function runNonPaymentCancellationJob(options: { now?: Date; actorI
   let cancelledReceipts = 0;
 
   for (const organization of organizations) {
-    const candidates = await db.receipt.findMany({
+    const candidates = await withSystemOrganizationTransaction(organization.id, "non-payment cancellation", (tx) => tx.receipt.findMany({
       where: { organizationId: organization.id, ...unpaidReceiptWhere, dueDate: { lt: cutoff }, policy: { organizationId: organization.id, status: { notIn: ["CANCELLED", "EXPIRED", "RENEWED"] } } },
       select: { id: true, policyId: true },
       orderBy: { dueDate: "asc" },
-    });
+    }));
     const policyIds = [...new Set(candidates.map((candidate) => candidate.policyId))];
     evaluatedPolicies += policyIds.length;
     for (const policyId of policyIds) {
       const source = candidates.find((candidate) => candidate.policyId === policyId);
       if (!source) continue;
       try {
-        const result = await cancelPolicyForNonPayment(organization.id, source.id, actorId, now);
+        const result = await withSystemOrganizationTransaction(organization.id, "non-payment cancellation", (tx) => cancelPolicyForNonPayment(organization.id, source.id, actorId, now, { client: tx }));
         if (result.cancelled) {
           cancelledPolicies += 1;
           cancelledReceipts += result.cancelledReceiptCount ?? 0;

@@ -1,9 +1,9 @@
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import type { Priority, WorkItemStatus, WorkItemType } from "@/lib/domain-values";
-import { getDb } from "@/lib/db";
 import { businessEndOfDay, businessStartOfDay } from "@/lib/business-dates";
 import { shouldKeepRenewalWorkItemPolicy } from "@/lib/renewals.logic";
 import { compareDateAsc, compareNaturalText, comparePriorityDesc } from "@/lib/sorting";
+import type { TenantDb } from "@/lib/organization-context";
 
 export const OPEN_WORK_ITEM_STATUSES = [
   "OPEN",
@@ -21,7 +21,7 @@ export const CLOSED_WORK_ITEM_STATUSES = [
   "DISMISSED",
 ] as const satisfies readonly WorkItemStatus[];
 
-type WorkQueueDb = PrismaClient | Prisma.TransactionClient;
+type WorkQueueDb = TenantDb | PrismaClient;
 
 const policyQueueSelect = {
   id: true,
@@ -168,8 +168,7 @@ export type WorkQueueFilters = {
   organizationId: string;
 };
 
-export async function getWorkItems(filters: WorkQueueFilters) {
-  const db = getDb();
+async function queryWorkItems(filters: WorkQueueFilters, db: WorkQueueDb) {
   const where = buildWhere(filters);
 
   const items = await db.workItem.findMany({
@@ -184,6 +183,22 @@ export async function getWorkItems(filters: WorkQueueFilters) {
   return filters.limit === undefined
     ? resolvedItems.slice(start)
     : resolvedItems.slice(start, start + filters.limit);
+}
+
+export async function getWorkItems(filters: WorkQueueFilters, client?: WorkQueueDb) {
+  if (client) return queryWorkItems(filters, client);
+
+  // Logic tests provide a mocked root client. Production request code must
+  // establish the tenant GUC through the authenticated transaction instead.
+  if (process.env.NODE_ENV === "test") {
+    const testDb = (await import("@/lib/db")).getDb();
+    return queryWorkItems(filters, testDb);
+  }
+
+  const { requireOrganizationContext, withTenantTransaction } = await import("@/lib/organization-context");
+  const context = await requireOrganizationContext();
+  if (context.organizationId !== filters.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  return withTenantTransaction(context, (tx) => queryWorkItems(filters, tx));
 }
 
 /**
@@ -304,8 +319,8 @@ async function resolveLegacyRenewalRelations(
   });
 }
 
-export async function countWorkItems(filters: WorkQueueFilters) {
-  return (await getWorkItems(filters)).length;
+export async function countWorkItems(filters: WorkQueueFilters, client?: WorkQueueDb) {
+  return (await getWorkItems(filters, client)).length;
 }
 
 function buildWhere(filters: WorkQueueFilters): Prisma.WorkItemWhereInput {

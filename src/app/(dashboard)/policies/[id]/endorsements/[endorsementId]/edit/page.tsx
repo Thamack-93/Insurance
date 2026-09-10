@@ -4,7 +4,7 @@ import { updateEndorsement } from "@/app/(dashboard)/policies/endorsements/actio
 import { EndorsementForm } from "@/components/forms/endorsement-form";
 import { createEndorsementDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
-import { getDb } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/organization-context";
 import { formatDate } from "@/lib/dates";
 import { formatDateInput } from "@/lib/form-utils";
 import type { EndorsementFormValues } from "@/lib/validations";
@@ -21,9 +21,7 @@ export default async function EditEndorsementPage({
 }) {
   const { id, endorsementId } = await params;
   const scope = await requireOrganizationPortfolioReadScope();
-  const db = getDb();
-
-  const [policy, endorsement] = await Promise.all([
+  const [policy, endorsement] = await withTenantTransaction(scope.context, (db) => Promise.all([
     db.policy.findFirst({
       where: { id, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: { client: true, insurer: true },
@@ -32,7 +30,7 @@ export default async function EditEndorsementPage({
       where: { id: endorsementId, ...endorsementOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: { policy: { include: { client: true, insurer: true } } },
     }),
-  ]);
+  ]));
 
   if (!policy || !endorsement || endorsement.policyId !== policy.id) {
     notFound();
