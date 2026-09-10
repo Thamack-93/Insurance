@@ -148,6 +148,8 @@ jobs:
           set -euo pipefail
           export PGPASSWORD=postgres
           createdb -h 127.0.0.1 -U postgres "$TENANT_ISOLATION_DB_NAME"
+          fingerprint="$(printf 'local-postgres:%s:%s:%s' "$TENANT_ISOLATION_RUN_ID" "$TENANT_ISOLATION_DB_NAME" '127.0.0.1' | sha256sum | awk '{print $1}')"
+          printf 'TENANT_ISOLATION_FINGERPRINT=%s\n' "$fingerprint" >> "$GITHUB_ENV"
       - name: Apply singleton migrations and check drift
         run: |
           npm run db:migrate:singleton-ci
@@ -234,18 +236,28 @@ jobs:
       TENANT_ISOLATION_TEST_DB: "1"
       PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1"
       TENANT_ISOLATION_RUN_ID: "${{ github.run_id }}_${{ github.run_attempt }}"
-      TENANT_ISOLATION_DB_NAME: "policydesk_release_test_${{ github.run_id }}_${{ github.run_attempt }}"
+      TENANT_ISOLATION_DB_NAME: "policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}"
       PLAYWRIGHT_USE_PRODUCTION_SERVER: "1"
       PLAYWRIGHT_HOST: localhost
       PLAYWRIGHT_BASE_URL: http://localhost:4173
       PORT: "4173"
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_release_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
-      DATABASE_URL_UNPOOLED: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_release_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
-      DATABASE_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_release_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      DATABASE_URL_UNPOOLED: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
+      DATABASE_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/policydesk_tenant_test_${{ github.run_id }}_${{ github.run_attempt }}?schema=public
       SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/shadow?schema=public
       SESSION_SECRET: application-certification-secret-minimum-32-characters
       RESTORE_INTEGRATION: "1"
       RESTORE_INTEGRATION_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
+      VERCEL_ENV: ""
+      PLATFORM_NORA_ENABLED: "1"
+      PLATFORM_IMPORTS_ENABLED: "1"
+      PLATFORM_EXPORTS_ENABLED: "1"
+      PLATFORM_UPLOADS_ENABLED: "1"
+      PLATFORM_EMAIL_ENABLED: "1"
+      PLATFORM_TELEGRAM_ENABLED: "1"
+      PLATFORM_WHATSAPP_ENABLED: "1"
+      PLATFORM_QUALITAS_ENABLED: "0"
+      QUALITAS_PRODUCTION_CERTIFIED: "0"
     services:
       postgres:
         image: postgres:16-alpine
@@ -279,7 +291,7 @@ jobs:
           set -euo pipefail
           export PGPASSWORD=postgres
           createdb -h 127.0.0.1 -U postgres "$TENANT_ISOLATION_DB_NAME"
-          fingerprint="$(printf 'local-postgres:%s:%s:%s' "$TENANT_ISOLATION_RUN_ID" "$TENANT_ISOLATION_DB_NAME" 127.0.0.1 | sha256sum | awk '{print $1}')"
+          fingerprint="$(printf 'local-postgres:%s:%s:%s' "$TENANT_ISOLATION_RUN_ID" "$TENANT_ISOLATION_DB_NAME" '127.0.0.1' | sha256sum | awk '{print $1}')"
           printf 'TENANT_ISOLATION_FINGERPRINT=%s\n' "$fingerprint" >> "$GITHUB_ENV"
       - name: Apply singleton migrations
         run: npm run db:migrate:singleton-ci
@@ -433,6 +445,7 @@ jobs:
           PRODUCTION_VERIFIER_SHA: ${{ needs.production-state.outputs.verifier_sha }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
+          VERIFY_PRODUCTION: ${{ inputs.verify_production }}
         run: |
           mkdir -p artifacts/release-certification
           node - <<'NODE'
@@ -477,6 +490,28 @@ jobs:
             "This report contains statuses only; it does not contain credentials, customer data, policy numbers, backup URLs, keys or Nora content.",
             "",
           ].join("\n"));
+          const required = {
+            quality: process.env.QUALITY_RESULT,
+            tenantIsolation: process.env.TENANT_RESULT,
+            applicationApiE2E: process.env.APPLICATION_RESULT,
+          };
+          const failures = Object.entries(required)
+            .filter(([, status]) => status !== "success")
+            .map(([name, status]) => `${name}=${status || "missing"}`);
+          if (process.env.VERIFY_PRODUCTION === "true") {
+            if (process.env.PRODUCTION_POLICY_RESULT !== "success") {
+              failures.push(`productionPolicy=${process.env.PRODUCTION_POLICY_RESULT || "missing"}`);
+            }
+            if (process.env.PRODUCTION_RESULT !== "success" || production.status !== "PASS") {
+              failures.push(`productionState=${process.env.PRODUCTION_RESULT || "missing"}/${production.status}`);
+            }
+            if (!report.productionVerifierSha) failures.push("productionVerifierSha=missing");
+          }
+          if (failures.length) {
+            console.error(`Release certification aggregate FAIL: ${failures.join(", ")}`);
+            process.exit(1);
+          }
+          console.log("Release certification aggregate PASS");
           NODE
       - name: Upload sanitized release evidence
         uses: actions/upload-artifact@v6

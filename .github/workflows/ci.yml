@@ -78,7 +78,7 @@ jobs:
         run: npm run test:unit
 
   tenant-isolation:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -103,6 +103,15 @@ jobs:
       TENANT_RLS_APP_ROLE: policydesk_app
       TENANT_RLS_ORG_A: org_legacy_singleton_0001
       TENANT_RLS_ORG_B: org_pedro_gomez_0001
+      PLATFORM_NORA_ENABLED: "1"
+      PLATFORM_IMPORTS_ENABLED: "1"
+      PLATFORM_EXPORTS_ENABLED: "1"
+      PLATFORM_UPLOADS_ENABLED: "1"
+      PLATFORM_EMAIL_ENABLED: "1"
+      PLATFORM_TELEGRAM_ENABLED: "1"
+      PLATFORM_WHATSAPP_ENABLED: "1"
+      PLATFORM_QUALITAS_ENABLED: "0"
+      QUALITAS_PRODUCTION_CERTIFIED: "0"
     services:
       postgres:
         image: postgres:16-alpine
@@ -137,6 +146,8 @@ jobs:
           export PGPASSWORD=postgres
           db_name="${TENANT_ISOLATION_DB_NAME}"
           createdb -h 127.0.0.1 -U postgres "$db_name"
+          fingerprint="$(printf 'local-postgres:%s:%s:%s' "$TENANT_ISOLATION_RUN_ID" "$db_name" '127.0.0.1' | sha256sum | awk '{print $1}')"
+          printf 'TENANT_ISOLATION_FINGERPRINT=%s\n' "$fingerprint" >> "$GITHUB_ENV"
 
       - name: Apply migrations to disposable PostgreSQL
         run: npm run db:migrate:singleton-ci
@@ -203,6 +214,13 @@ jobs:
         run: npm run test:tenant-rls
       - name: Check Prisma drift after cutover
         run: npm run db:check-drift
+      - name: Reopen disposable tenant after maintenance verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          psql -h 127.0.0.1 -U postgres -d "$TENANT_ISOLATION_DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'UPDATE "PlatformRuntimeState" SET "writeMode" = '\''OPEN'\'', "reason" = '\''tenant certification E2E'\'', "updatedAt" = now() WHERE "id" = 1;'
       - name: Tenant isolation Chromium E2E after forced RLS
         run: npx playwright test tests/e2e/tenant-isolation.spec.ts
       - name: Archive Stage 2 tenant evidence
@@ -261,6 +279,16 @@ jobs:
       SESSION_SECRET: ci-session-secret-minimum-32-characters-long
       RESTORE_INTEGRATION: "1"
       RESTORE_INTEGRATION_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
+      VERCEL_ENV: ""
+      PLATFORM_NORA_ENABLED: "1"
+      PLATFORM_IMPORTS_ENABLED: "1"
+      PLATFORM_EXPORTS_ENABLED: "1"
+      PLATFORM_UPLOADS_ENABLED: "1"
+      PLATFORM_EMAIL_ENABLED: "1"
+      PLATFORM_TELEGRAM_ENABLED: "1"
+      PLATFORM_WHATSAPP_ENABLED: "1"
+      PLATFORM_QUALITAS_ENABLED: "0"
+      QUALITAS_PRODUCTION_CERTIFIED: "0"
     services:
       postgres:
         image: postgres:16-alpine
@@ -297,7 +325,7 @@ jobs:
           set -euo pipefail
           export PGPASSWORD=postgres
           createdb -h 127.0.0.1 -U postgres "$TENANT_ISOLATION_DB_NAME"
-          fingerprint=$(node -e 'const {createHash}=require("node:crypto"); const runId=process.env.TENANT_ISOLATION_RUN_ID; const db=process.env.TENANT_ISOLATION_DB_NAME; console.log(createHash("sha256").update(`local-postgres:${runId}:${db}:127.0.0.1`).digest("hex"));')
+          fingerprint="$(printf 'local-postgres:%s:%s:%s' "$TENANT_ISOLATION_RUN_ID" "$TENANT_ISOLATION_DB_NAME" '127.0.0.1' | sha256sum | awk '{print $1}')"
           echo "TENANT_ISOLATION_FINGERPRINT=$fingerprint" >> "$GITHUB_ENV"
 
       - name: Apply Prisma migrations

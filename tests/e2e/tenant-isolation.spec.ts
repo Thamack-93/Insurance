@@ -92,7 +92,7 @@ test("superadmin can inspect both organizations without operational bypass", asy
   await expect(page.locator("main").getByRole("heading", { name: "Organizaciones", exact: true })).toBeVisible();
   await expect(page.getByText("PolicyDesk Legacy Organization")).toBeVisible();
   await expect(page.getByText("Pedro Alfredo Gómez Lorenzo")).toBeVisible();
-  await expect(page.getByText("PolicyDesk Demo Broker")).toBeVisible();
+  await expect(page.locator("main").getByText("PolicyDesk Demo Broker", { exact: true }).first()).toBeVisible();
   await page.getByRole("link", { name: /Pedro Alfredo Gómez Lorenzo/ }).click();
   await expect(page).toHaveURL(/\/platform\/organizations\/org_pedro_gomez_0001$/);
   await expect(page.getByRole("heading", { name: "Pedro Alfredo Gómez Lorenzo" })).toBeVisible();
