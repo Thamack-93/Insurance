@@ -14,17 +14,25 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { prepareWhatsAppReceiptReminder } from "@/app/(dashboard)/receipts/actions";
+import { isSafeWhatsAppUrl } from "@/lib/whatsapp";
 import { cn } from "@/lib/utils";
 
 export function WhatsAppReminderButton({ receiptId, className }: { receiptId: string; className?: string }) {
   const [captureOpen, setCaptureOpen] = useState(false);
   const [capturedPhone, setCapturedPhone] = useState("");
   const [captureError, setCaptureError] = useState<string | null>(null);
+  const [preparedUrl, setPreparedUrl] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function openPreparedWhatsApp(url: string) {
     setCaptureOpen(false);
-    window.location.assign(url);
+    if (!isSafeWhatsAppUrl(url)) {
+      toast.error("No se pudo validar la liga de WhatsApp.");
+      return;
+    }
+    setPreparedUrl(url);
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (!opened) toast.info("WhatsApp quedó listo. Usa el enlace para abrirlo.");
   }
 
   function prepare(phone?: string) {
@@ -70,6 +78,18 @@ export function WhatsAppReminderButton({ receiptId, className }: { receiptId: st
         <MessageSquare className="size-3.5" />
         {isPending ? "Preparando..." : "Avisar por WhatsApp"}
       </Button>
+
+      {preparedUrl ? (
+        <a
+          href={preparedUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs font-medium text-primary underline underline-offset-2"
+          onClick={() => setPreparedUrl(null)}
+        >
+          Continuar con WhatsApp
+        </a>
+      ) : null}
 
       <Dialog
         open={captureOpen}

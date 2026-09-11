@@ -78,9 +78,10 @@ function unavailableSchemaFallback(organizationId: string, capability: Organizat
 }
 
 /**
- * Resolve an entitlement in one place. Global provider certification is an
- * upper bound: an organization override can disable a feature but can never
- * enable a globally uncertified integration.
+ * Resolve an entitlement in one place. Global provider certification remains
+ * the default upper bound. A capability marked OPERATOR_CERTIFIED is an
+ * explicit, audited exception for the single organization that an operator
+ * has approved for a controlled pilot.
  */
 export async function resolveOrganizationCapability(
   organizationId: string,
@@ -161,9 +162,6 @@ async function resolveCapabilityWithClient(
   if (organization.status !== "ACTIVE") {
     return { organizationId, capability, enabled: false, limitValue: null, reason: "ORG_SUSPENDED" };
   }
-  if (!isGloballyCertified(capability)) {
-    return { organizationId, capability, enabled: false, limitValue: null, reason: "GLOBAL_UNCERTIFIED" };
-  }
   const plan = organization.billingSubscriptions?.[0]?.plan;
   const subscription = organization.billingSubscriptions?.[0];
   const subscriptionCurrent = !subscription || (!subscription.endsAt || subscription.endsAt > new Date());
@@ -172,6 +170,9 @@ async function resolveCapabilityWithClient(
   const operatorCertifiedEnable = capability === "QUALITAS"
     && override?.enabled === true
     && override.source === OPERATOR_CERTIFIED_OVERRIDE_SOURCE;
+  if (!isGloballyCertified(capability) && !operatorCertifiedEnable) {
+    return { organizationId, capability, enabled: false, limitValue: null, reason: "GLOBAL_UNCERTIFIED" };
+  }
   if (!planEnabled && !operatorCertifiedEnable) {
     return { organizationId, capability, enabled: false, limitValue: null, reason: "PLAN_DISABLED" };
   }
