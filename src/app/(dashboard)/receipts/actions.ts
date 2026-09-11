@@ -388,7 +388,14 @@ export async function requestQualitasPaymentLink(
     const context = await requireOrganizationContext();
     const result = await requestQualitasPaymentLinkForReceipt({ ...input, context });
     if (!result.ok) return result;
-    revalidatePaths(["/receipts", `/receipts/${input.receiptId}`, "/dashboard", "/today"]);
+    // The provider request and its audit are already committed at this point.
+    // A cache revalidation failure must not turn a confirmed Quálitas delivery
+    // into a false error in the operator UI.
+    try {
+      revalidatePaths(["/receipts", `/receipts/${input.receiptId}`, "/dashboard", "/today"]);
+    } catch {
+      // Best effort only: the next navigation will refresh the same data.
+    }
     return {
       ok: true,
       id: input.receiptId,
