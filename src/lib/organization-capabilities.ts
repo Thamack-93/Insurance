@@ -22,7 +22,7 @@ type CapabilityOrganization = {
   id: string;
   kind: string;
   status: string;
-  capabilities?: Array<{ enabled: boolean; limitValue: number | null }>;
+  capabilities?: Array<{ enabled: boolean; limitValue: number | null; source?: string | null }>;
   billingSubscriptions?: Array<{ status?: string; endsAt?: Date | null; plan: { code: string; active: boolean } | null }>;
 };
 
@@ -59,6 +59,8 @@ const defaultPlanEntitlements: Record<OrganizationCapabilityKey, boolean> = {
   WHATSAPP: true,
   QUALITAS: false,
 };
+
+const OPERATOR_CERTIFIED_OVERRIDE_SOURCE = "OPERATOR_CERTIFIED";
 
 function unavailableSchemaFallback(organizationId: string, capability: OrganizationCapabilityKey): ResolvedOrganizationCapability {
   const globallyAvailable = isGloballyCertified(capability);
@@ -142,7 +144,7 @@ async function resolveCapabilityWithClient(
         id: true,
         kind: true,
         status: true,
-        capabilities: { where: { key: capability }, select: { enabled: true, limitValue: true } },
+        capabilities: { where: { key: capability }, select: { enabled: true, limitValue: true, source: true } },
         billingSubscriptions: {
           where: { status: { in: ["ACTIVE", "TRIAL"] } },
           orderBy: { createdAt: "desc" },
@@ -166,10 +168,13 @@ async function resolveCapabilityWithClient(
   const subscription = organization.billingSubscriptions?.[0];
   const subscriptionCurrent = !subscription || (!subscription.endsAt || subscription.endsAt > new Date());
   const planEnabled = subscriptionCurrent && Boolean(plan?.active ?? true) && defaultPlanEntitlements[capability];
-  if (!planEnabled) {
+  const override = organization.capabilities?.[0];
+  const operatorCertifiedEnable = capability === "QUALITAS"
+    && override?.enabled === true
+    && override.source === OPERATOR_CERTIFIED_OVERRIDE_SOURCE;
+  if (!planEnabled && !operatorCertifiedEnable) {
     return { organizationId, capability, enabled: false, limitValue: null, reason: "PLAN_DISABLED" };
   }
-  const override = organization.capabilities?.[0];
   if (override && !override.enabled) {
     return { organizationId, capability, enabled: false, limitValue: override.limitValue ?? null, reason: "ORG_OVERRIDE" };
   }
