@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   buildRenewalFollowUpMessage,
   businessWeekKey,
+  canScheduleRenewalManualFollowUp,
   DEFAULT_RENEWAL_BOARD_WINDOW,
   getRenewalStallState,
   readRenewalBoardFilters,
   renewalFollowUpDedupeKey,
+  renewalFollowUpShortcutDate,
   renewalFollowUpWorkItemSourceId,
+  renewalManualFollowUpWorkItemSourceId,
   RENEWAL_FOLLOWUP_SOURCE_SUFFIX,
   renewalWindowRange,
   resolveRenewalStage,
@@ -208,9 +211,25 @@ describe("renewal-board.logic — estancamiento fuera de la ventana del tablero"
 
 describe("renewal-board.logic — identidad del recordatorio", () => {
   it("distingue el pendiente de seguimiento de un pendiente de renovación normal", () => {
-    const sourceId = renewalFollowUpWorkItemSourceId("p1");
-    expect(sourceId.endsWith(RENEWAL_FOLLOWUP_SOURCE_SUFFIX)).toBe(true);
-    expect(`policy:p1`.endsWith(RENEWAL_FOLLOWUP_SOURCE_SUFFIX)).toBe(false);
-    expect(`renewal:p1`.endsWith(RENEWAL_FOLLOWUP_SOURCE_SUFFIX)).toBe(false);
+    const automaticSourceId = renewalFollowUpWorkItemSourceId("p1");
+    const manualSourceId = renewalManualFollowUpWorkItemSourceId("p1");
+    expect(automaticSourceId.endsWith(RENEWAL_FOLLOWUP_SOURCE_SUFFIX)).toBe(true);
+    expect(manualSourceId).not.toBe(automaticSourceId);
+    expect(manualSourceId.endsWith(RENEWAL_FOLLOWUP_SOURCE_SUFFIX)).toBe(false);
+    expect(manualSourceId).toBe("policy:p1:renewal-manual-followup");
+  });
+
+  it("calcula los accesos rápidos como fechas de negocio estables", () => {
+    expect(getBusinessDateKey(renewalFollowUpShortcutDate("tomorrow", today))).toBe("2026-08-08");
+    expect(getBusinessDateKey(renewalFollowUpShortcutDate("three-days", today))).toBe("2026-08-10");
+    expect(getBusinessDateKey(renewalFollowUpShortcutDate("one-week", today))).toBe("2026-08-14");
+  });
+
+  it("sólo permite programar en etapas activas", () => {
+    expect(canScheduleRenewalManualFollowUp("PENDING")).toBe(true);
+    expect(canScheduleRenewalManualFollowUp("CONTACTED")).toBe(true);
+    expect(canScheduleRenewalManualFollowUp("QUOTED")).toBe(true);
+    expect(canScheduleRenewalManualFollowUp("WON")).toBe(false);
+    expect(canScheduleRenewalManualFollowUp("LOST")).toBe(false);
   });
 });

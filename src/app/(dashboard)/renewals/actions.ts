@@ -2,10 +2,11 @@
 
 import type { Prisma } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
+import { formatBusinessDateInput, parseBusinessDateInput } from "@/lib/business-dates";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { assertOrganizationContextInTransaction, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
-import { isRenewalStage, isTerminalRenewalStage, resolveRenewalStage } from "@/lib/renewal-board.logic";
-import { closeRenewalFollowUp } from "@/lib/renewal-followups";
+import { canScheduleRenewalManualFollowUp, isRenewalStage, isTerminalRenewalStage, renewalManualFollowUpWorkItemSourceId, resolveRenewalStage } from "@/lib/renewal-board.logic";
+import { closeRenewalFollowUp, closeRenewalManualFollowUp, upsertRenewalManualFollowUp } from "@/lib/renewal-followups";
 import { renewalStageLabel } from "@/lib/status";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import {
@@ -47,6 +48,154 @@ export async function prepareRenewalQuoteShare(input: { policyId: string; handof
   }
 }
 
+type RenewalManualFollowUpActionInput = {
+  policyId: string;
+  dueDate: string;
+  notes?: string;
+};
+
+const renewalMutationPolicyWhere = (context: Awaited<ReturnType<typeof requireOrganizationContext>>, policyId: string) => ({
+  id: policyId,
+  organizationId: context.organizationId,
+  ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}),
+});
+
+export async function scheduleRenewalManualFollowUp(input: RenewalManualFollowUpActionInput): Promise<MutationResult> {
+  try {
+    const policyId = input?.policyId?.trim();
+    const dateKey = input?.dueDate?.trim();
+    if (!policyId) return errorResult("La póliza no es válida.");
+    if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return errorResult("La fecha de seguimiento no es válida.");
+
+    const dueDate = parseBusinessDateInput(dateKey);
+    if (Number.isNaN(dueDate.getTime())) return errorResult("La fecha de seguimiento no es válida.");
+
+    const notes = typeof input.notes === "string" ? input.notes.trim() : "";
+    if (notes.length > 500) return errorResult("La nota no puede tener más de 500 caracteres.");
+
+    const context = await requireOrganizationContext();
+    const result = await withTenantTransaction(context, async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const policy = await tx.policy.findFirst({
+        where: renewalMutationPolicyWhere(context, policyId),
+        select: {
+          id: true,
+          policyNumber: true,
+          status: true,
+          renewalStage: true,
+          clientId: true,
+          insurerId: true,
+          sourceRenewalSuggestions: { where: { status: "DECLINED" }, select: { id: true }, take: 1 },
+        },
+      });
+
+      if (!policy) return errorResult("La póliza ya no existe o no tienes acceso a ella.");
+
+      const stage = resolveRenewalStage({
+        policyStatus: policy.status,
+        renewalStage: policy.renewalStage,
+        hasDeclinedSuggestion: policy.sourceRenewalSuggestions.length > 0,
+      });
+      if (policy.status !== "ACTIVE" || !canScheduleRenewalManualFollowUp(stage)) {
+        return errorResult("Esta renovación ya no está disponible para seguimiento.");
+      }
+
+      const mutation = await upsertRenewalManualFollowUp({
+        organizationId: context.organizationId,
+        policyId: policy.id,
+        policyNumber: policy.policyNumber,
+        clientId: policy.clientId,
+        insurerId: policy.insurerId,
+        stage,
+        dueDate,
+        notes: notes || null,
+        userId: context.userId,
+      }, tx);
+
+      await writeActivityLog({
+        organizationId: context.organizationId,
+        entityType: "Policy",
+        entityId: policy.id,
+        action: mutation.created ? "SCHEDULE_RENEWAL_FOLLOWUP" : "RESCHEDULE_RENEWAL_FOLLOWUP",
+        oldValue: mutation.created ? undefined : {
+          dueDate: mutation.previousDueDate ? formatBusinessDateInput(mutation.previousDueDate) : null,
+          stage,
+          noteExists: Boolean(notes),
+        },
+        newValue: {
+          dueDate: formatBusinessDateInput(dueDate),
+          stage,
+          noteExists: Boolean(notes),
+        },
+        userId: context.userId,
+        db: tx,
+      });
+
+      return successResult(
+        policy.id,
+        "/operations?view=renewal-board",
+        mutation.created ? "Seguimiento programado." : "Seguimiento reprogramado.",
+      );
+    });
+
+    revalidatePaths(["/operations", "/today", "/tasks", "/dashboard", "/activity", `/policies/${policyId}`]);
+    return result;
+  } catch (error) {
+    return errorResult(error instanceof Error ? error.message : "No se pudo programar el seguimiento.");
+  }
+}
+
+export async function clearRenewalManualFollowUp(policyId: string): Promise<MutationResult> {
+  try {
+    const normalizedPolicyId = policyId?.trim();
+    if (!normalizedPolicyId) return errorResult("La póliza no es válida.");
+
+    const context = await requireOrganizationContext();
+    const result = await withTenantTransaction(context, async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const policy = await tx.policy.findFirst({
+        where: renewalMutationPolicyWhere(context, normalizedPolicyId),
+        select: {
+          id: true,
+          renewalStage: true,
+          status: true,
+          sourceRenewalSuggestions: { where: { status: "DECLINED" }, select: { id: true }, take: 1 },
+        },
+      });
+      if (!policy) return errorResult("La póliza ya no existe o no tienes acceso a ella.");
+
+      const stage = resolveRenewalStage({
+        policyStatus: policy.status,
+        renewalStage: policy.renewalStage,
+        hasDeclinedSuggestion: policy.sourceRenewalSuggestions.length > 0,
+      });
+      const closed = await closeRenewalManualFollowUp(context.organizationId, policy.id, context.userId, tx);
+      if (!closed) return successResult(policy.id, "/operations?view=renewal-board", "No había un seguimiento abierto.");
+
+      await writeActivityLog({
+        organizationId: context.organizationId,
+        entityType: "Policy",
+        entityId: policy.id,
+        action: "CLEAR_RENEWAL_FOLLOWUP",
+        oldValue: {
+          dueDate: closed.dueDate ? formatBusinessDateInput(closed.dueDate) : null,
+          stage,
+        },
+        newValue: { status: "CANCELLED", stage },
+        userId: context.userId,
+        db: tx,
+      });
+
+      return successResult(policy.id, "/operations?view=renewal-board", "Seguimiento eliminado.");
+    });
+
+    revalidatePaths(["/operations", "/today", "/tasks", "/dashboard", "/activity", `/policies/${normalizedPolicyId}`]);
+    return result;
+  } catch (error) {
+    return errorResult(error instanceof Error ? error.message : "No se pudo quitar el seguimiento.");
+  }
+}
+
 export async function markRenewalAsNotContinuing(policyId: string): Promise<MutationResult> {
   try {
     const context = await requireOrganizationContext();
@@ -72,6 +221,7 @@ export async function markRenewalAsNotContinuing(policyId: string): Promise<Muta
           workItemType: "TASK",
           taskType: "RENEWAL",
           policyId,
+          sourceId: { not: renewalManualFollowUpWorkItemSourceId(policy.id) },
           status: { in: [...OPEN_WORK_ITEM_STATUSES] },
         },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -140,6 +290,18 @@ export async function markRenewalAsNotContinuing(policyId: string): Promise<Muta
 
       // El recordatorio de "sin avance" ya no aplica: la renovación se cerró.
       await closeRenewalFollowUp(context.organizationId, policy.id, userId, tx);
+      const manualFollowUp = await closeRenewalManualFollowUp(context.organizationId, policy.id, userId, tx, now);
+      if (manualFollowUp) {
+        await writeActivityLog({
+          organizationId: context.organizationId,
+          entityType: "Policy",
+          entityId: policy.id,
+          action: "RENEWAL_FOLLOWUP_CLOSED_TERMINAL",
+          newValue: { renewalStage: "LOST", status: "CANCELLED" },
+          userId,
+          db: tx,
+        });
+      }
 
       await writeActivityLog({
         organizationId: context.organizationId,
@@ -358,6 +520,7 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
           workItemType: "TASK",
           taskType: "RENEWAL",
           policyId: sourcePolicy.id,
+          sourceId: { not: renewalManualFollowUpWorkItemSourceId(sourcePolicy.id) },
           status: { in: [...OPEN_WORK_ITEM_STATUSES] },
         },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -431,6 +594,18 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
 
       // La renovación quedó cerrada: su recordatorio de "sin avance" sobra.
       await closeRenewalFollowUp(context.organizationId, sourcePolicy.id, userId, tx);
+      const manualFollowUp = await closeRenewalManualFollowUp(context.organizationId, sourcePolicy.id, userId, tx, now);
+      if (manualFollowUp) {
+        await writeActivityLog({
+          organizationId: context.organizationId,
+          entityType: "Policy",
+          entityId: sourcePolicy.id,
+          action: "RENEWAL_FOLLOWUP_CLOSED_TERMINAL",
+          newValue: { renewalStage: "WON", status: "CANCELLED" },
+          userId,
+          db: tx,
+        });
+      }
 
       await writeActivityLog({
         organizationId: context.organizationId,

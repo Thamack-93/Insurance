@@ -13,11 +13,13 @@ import {
   renewalWindowRange,
   resolveRenewalStage,
   UNASSIGNED_OWNER_VALUE,
+  renewalManualFollowUpWorkItemSourceId,
   type RenewalBoardFilters,
   type RenewalStallState,
 } from "@/lib/renewal-board.logic";
 import { withTenantOrganization } from "@/lib/tenant-dal";
 import { withSystemOrganizationTransaction } from "@/lib/organization-context";
+import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 
 /**
  * Máximo de pólizas que el tablero carga de una sola vez. Con la ventana más
@@ -49,6 +51,11 @@ export type RenewalBoardCard = {
   canCapture: boolean;
   /** Póliza de renovación ya creada, para conservar la trazabilidad. */
   renewedToPolicyId: string | null;
+  manualFollowUp?: {
+    id: string;
+    dueDate: Date;
+    notes: string | null;
+  } | null;
 };
 
 export type RenewalBoardColumn = {
@@ -182,19 +189,47 @@ export async function loadRenewalBoard(
   const today = businessToday();
 
   try {
-    const policies = await withTenantOrganization(organizationId, (db) => db.policy.findMany({
-      where: buildRenewalBoardWhere(filters, portfolioOwnerId, organizationId, today),
-      include: renewalBoardInclude,
-      orderBy: [{ endDate: "asc" }, { id: "asc" }],
-      take: RENEWAL_BOARD_LIMIT + 1,
-    }));
+    const { policies, manualFollowUps } = await withTenantOrganization(organizationId, async (db) => {
+      const policies = await db.policy.findMany({
+        where: buildRenewalBoardWhere(filters, portfolioOwnerId, organizationId, today),
+        include: renewalBoardInclude,
+        orderBy: [{ endDate: "asc" }, { id: "asc" }],
+        take: RENEWAL_BOARD_LIMIT + 1,
+      });
+
+      const visiblePolicyIds = policies.slice(0, RENEWAL_BOARD_LIMIT).map((policy) => policy.id);
+      const manualFollowUps = visiblePolicyIds.length
+        ? await db.workItem.findMany({
+            where: {
+              organizationId,
+              sourceType: "Renewal",
+              sourceId: { in: visiblePolicyIds.map(renewalManualFollowUpWorkItemSourceId) },
+              status: { in: [...OPEN_WORK_ITEM_STATUSES] },
+              dueDate: { not: null },
+            },
+            select: { id: true, sourceId: true, dueDate: true, notes: true },
+          })
+        : [];
+
+      return { policies, manualFollowUps };
+    });
+
+    const manualPolicyIdBySourceId = new Map(
+      policies.slice(0, RENEWAL_BOARD_LIMIT).map((policy) => [renewalManualFollowUpWorkItemSourceId(policy.id), policy.id] as const),
+    );
+    const manualFollowUpByPolicyId = new Map(
+      manualFollowUps.flatMap((item) => {
+        const policyId = manualPolicyIdBySourceId.get(item.sourceId ?? "");
+        return policyId && item.dueDate ? [[policyId, { id: item.id, dueDate: item.dueDate, notes: item.notes }] as const] : [];
+      }),
+    );
 
     const truncated = policies.length > RENEWAL_BOARD_LIMIT;
     const cards: RenewalBoardCard[] = [];
 
     for (const policy of policies.slice(0, RENEWAL_BOARD_LIMIT)) {
       const card = toRenewalBoardCard(policy, today);
-      if (card) cards.push(card);
+      if (card) cards.push({ ...card, manualFollowUp: manualFollowUpByPolicyId.get(card.policyId) ?? null });
     }
 
     const columns: RenewalBoardColumn[] = RENEWAL_STAGES.map((stage) => {

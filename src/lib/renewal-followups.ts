@@ -14,6 +14,7 @@ import {
   buildRenewalFollowUpMessage,
   businessWeekKey,
   renewalFollowUpDedupeKey,
+  renewalManualFollowUpWorkItemSourceId,
   renewalFollowUpWorkItemSourceId,
   RENEWAL_FOLLOWUP_SOURCE_SUFFIX,
 } from "@/lib/renewal-board.logic";
@@ -51,6 +52,133 @@ export type RenewalFollowUpSummary = {
  * la bandeja en ruido y el usuario deja de creerle.
  */
 type DbClient = PrismaClient | Prisma.TransactionClient;
+
+export type RenewalManualFollowUpInput = {
+  organizationId: string;
+  policyId: string;
+  policyNumber: string;
+  clientId: string;
+  insurerId: string;
+  stage: string;
+  dueDate: Date;
+  notes: string | null;
+  userId: string;
+};
+
+export type RenewalManualFollowUpMutation = {
+  id: string;
+  created: boolean;
+  previousDueDate: Date | null;
+};
+
+/**
+ * Crea o reactiva el único siguiente seguimiento manual de una póliza.
+ * Mantiene una identidad distinta del recordatorio automático de estancamiento
+ * y escribe `closedDate = null` al reprogramar un registro ya cerrado.
+ */
+export async function upsertRenewalManualFollowUp(
+  input: RenewalManualFollowUpInput,
+  client: Prisma.TransactionClient,
+): Promise<RenewalManualFollowUpMutation> {
+  const sourceId = renewalManualFollowUpWorkItemSourceId(input.policyId);
+  const existing = await client.workItem.findUnique({
+    where: {
+      organizationId_sourceType_sourceId: {
+        organizationId: input.organizationId,
+        sourceType: "Renewal",
+        sourceId,
+      },
+    },
+    select: { id: true, dueDate: true },
+  });
+  const title = `Seguimiento renovación · ${input.policyNumber}`;
+  const description = `Siguiente contacto de renovación en etapa ${input.stage}.`;
+  const data = {
+    organizationId: input.organizationId,
+    sourceType: "Renewal",
+    sourceId,
+    workItemType: "TASK",
+    taskType: "RENEWAL",
+    status: "OPEN" as const,
+    priority: "MEDIUM",
+    title,
+    description,
+    entityType: "Policy",
+    entityId: input.policyId,
+    clientId: input.clientId,
+    policyId: input.policyId,
+    insurerId: input.insurerId,
+    dueDate: input.dueDate,
+    closedDate: null,
+    notes: input.notes,
+    createdById: input.userId,
+    updatedById: input.userId,
+  } satisfies Prisma.WorkItemUncheckedCreateInput;
+
+  const item = await client.workItem.upsert({
+    where: {
+      organizationId_sourceType_sourceId: {
+        organizationId: input.organizationId,
+        sourceType: "Renewal",
+        sourceId,
+      },
+    },
+    create: data,
+    update: {
+      organizationId: input.organizationId,
+      workItemType: data.workItemType,
+      taskType: data.taskType,
+      status: data.status,
+      priority: data.priority,
+      title: data.title,
+      description: data.description,
+      entityType: data.entityType,
+      entityId: data.entityId,
+      clientId: data.clientId,
+      policyId: data.policyId,
+      insurerId: data.insurerId,
+      dueDate: data.dueDate,
+      closedDate: null,
+      notes: data.notes,
+      updatedById: data.updatedById,
+    },
+    select: { id: true },
+  });
+
+  return {
+    id: item.id,
+    created: !existing,
+    previousDueDate: existing?.dueDate ?? null,
+  };
+}
+
+/** Cierra exclusivamente el siguiente seguimiento manual, nunca el automático. */
+export async function closeRenewalManualFollowUp(
+  organizationId: string,
+  policyId: string,
+  userId: string | null,
+  client: Prisma.TransactionClient,
+  closedDate = new Date(),
+) {
+  const item = await client.workItem.findUnique({
+    where: {
+      organizationId_sourceType_sourceId: {
+        organizationId,
+        sourceType: "Renewal",
+        sourceId: renewalManualFollowUpWorkItemSourceId(policyId),
+      },
+    },
+    select: { id: true, dueDate: true, status: true },
+  });
+
+  if (!item || !OPEN_WORK_ITEM_STATUSES.includes(item.status as (typeof OPEN_WORK_ITEM_STATUSES)[number])) return null;
+
+  return client.workItem.update({
+    where: { id: item.id },
+    data: { status: "CANCELLED", closedDate, updatedById: userId },
+    select: { id: true, dueDate: true, status: true },
+  });
+}
 
 export async function closeRenewalFollowUp(
   organizationId: string,

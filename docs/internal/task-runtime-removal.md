@@ -12,7 +12,7 @@ flujos nuevos no deben crear, actualizar ni eliminar filas de `Task`.
 | --- | --- | --- |
 | UI `/tasks` y detalle | Canónica | Resuelve por `WorkItem.id`; acepta `sourceType=Task` solo para rutas históricas. |
 | Crear/editar pendientes | Canónica | Persiste exclusivamente `WorkItem`; un marcador legacy `Task` se normaliza al guardar. |
-| Renovaciones y recordatorios | Canónica | Usa `sourceType=Renewal`, no `Task`. |
+| Renovaciones y recordatorios | Canónica | Usa `sourceType=Renewal`, no `Task`. El recordatorio automático de "sin avance" usa `policy:<id>:renewal-followup`; el siguiente seguimiento manual usa `policy:<id>:renewal-manual-followup`. Ambos aparecen en WorkItem/Today, pero sólo el manual se puede programar, reprogramar o quitar desde el tablero. |
 | Nora y asistente | Canónica | El tipo permitido es `workItem`; propuestas antiguas con `task` se rechazan con mensaje explícito. |
 | Documentos nuevos | Canónica | Se rechaza `taskId` en uploads nuevos; los documentos históricos siguen siendo auditables. |
 | Consolidación de clientes | Canónica | Actualiza `WorkItem`; no modifica los registros históricos de `Task`. |

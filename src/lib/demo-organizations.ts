@@ -182,7 +182,6 @@ export async function provisionDemoOrganization(input: DemoProvisioningInput): P
       return { active: true as const, temporaryPassword: "", trialEndsAt: state?.trialEndsAt ?? trialEndsAt, requestId };
     }
     await tx.organization.upsert({ where: { id: organizationId }, update: { name, slug, kind: "DEMO", status: "PROVISIONING" }, create: { id: organizationId, name, slug, kind: "DEMO", status: "PROVISIONING", timeZone: "America/Mexico_City", defaultCurrency: "MXN" } });
-    const existingOwner = await tx.user.findUnique({ where: { id: ownerUserId }, select: { passwordHash: true } });
     await tx.user.upsert({ where: { id: ownerUserId }, update: { email: ownerEmail, name: ownerName, role: "ADMIN", platformRole: "NONE", active: true, mustChangePassword: true, passwordHash: hashPassword(password), temporaryPasswordExpiresAt: new Date(now.getTime() + 86_400_000) }, create: { id: ownerUserId, email: ownerEmail, name: ownerName, passwordHash: hashPassword(password), role: "ADMIN", platformRole: "NONE", active: true, mustChangePassword: true, temporaryPasswordExpiresAt: new Date(now.getTime() + 86_400_000) } });
     await tx.organizationMembership.upsert({ where: { userId: ownerUserId }, update: { organizationId, role: "OWNER", active: true }, create: { organizationId, userId: ownerUserId, role: "OWNER", active: true } });
     // The DEMO plan is platform configuration, installed by a versioned

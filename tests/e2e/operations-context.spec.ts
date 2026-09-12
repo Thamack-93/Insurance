@@ -3,6 +3,21 @@ import { authenticatePageAsAdmin, cleanupPolicyFixture, getTestDb, seedPolicyFix
 
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
 
+function businessDateKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Etc/GMT+6",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function businessDateAfter(days: number) {
+  return businessDateKey(new Date(Date.now() + days * 24 * 60 * 60 * 1000));
+}
+
 test.describe("operation queue context", () => {
   test("resolves legacy renewal context and links to the policy", async ({ page }) => {
     const db = getTestDb();
@@ -213,6 +228,43 @@ test.describe("operation queue context", () => {
 
       await expect(page.getByRole("link", { name: fixture.policyNumber, exact: true })).toHaveCount(0);
       await expect(page.getByText("No hay renovaciones pendientes.", { exact: true })).toBeVisible();
+    } finally {
+      await cleanupPolicyFixture(fixture);
+    }
+  });
+
+  test("schedules and reschedules one manual renewal follow-up from the board", async ({ page }) => {
+    const db = getTestDb();
+    const fixture = await seedPolicyFixture("RENEWAL-MANUAL-FOLLOWUP");
+    const sourceId = `policy:${fixture.policyId}:renewal-manual-followup`;
+
+    try {
+      await authenticatePageAsAdmin(page);
+      await page.goto("/operations?view=renewal-board");
+
+      const card = page.locator("li").filter({ hasText: fixture.policyNumber }).first();
+      await expect(card).toBeVisible();
+      await card.getByRole("button", { name: `Seguimiento de ${fixture.policyNumber}` }).click();
+      await page.getByRole("menuitem", { name: "En 3 días", exact: true }).click();
+
+      await expect(card.getByText(/Seguimiento ·/)).toBeVisible();
+      const first = await db.workItem.findUnique({ where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId } } });
+      expect(first?.status).toBe("OPEN");
+      expect(first?.policyId).toBe(fixture.policyId);
+      expect(businessDateKey(first!.dueDate!)).toBe(businessDateAfter(3));
+
+      await card.getByRole("button", { name: `Seguimiento de ${fixture.policyNumber}` }).click();
+      await page.getByRole("menuitem", { name: "Otra fecha", exact: true }).click();
+      const customDate = businessDateAfter(5);
+      await page.getByLabel("Fecha de seguimiento").fill(customDate);
+      await page.getByLabel("Nota opcional").fill("Llamar después de la junta");
+      await page.getByRole("button", { name: "Guardar seguimiento", exact: true }).click();
+
+      await expect(card.getByText(/Seguimiento ·/)).toBeVisible();
+      const rows = await db.workItem.findMany({ where: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId } });
+      expect(rows).toHaveLength(1);
+      expect(businessDateKey(rows[0].dueDate!)).toBe(customDate);
+      expect(rows[0].notes).toBe("Llamar después de la junta");
     } finally {
       await cleanupPolicyFixture(fixture);
     }

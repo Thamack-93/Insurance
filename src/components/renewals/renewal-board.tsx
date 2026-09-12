@@ -4,14 +4,25 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { RenewalBoardFilters as BoardFilters } from "@/components/renewals/renewal-board-filters";
 import { RenewalStageMenu } from "@/components/renewals/renewal-stage-menu";
+import { RenewalFollowUpMenu } from "@/components/renewals/renewal-follow-up-menu";
 import { RenewalWhatsAppAssistant } from "@/components/renewals/renewal-whatsapp-assistant";
 import { formatDate } from "@/lib/dates";
+import { formatBusinessDateInput } from "@/lib/business-dates";
 import { formatCurrency } from "@/lib/money";
 import { getRenewalStageTone, policyTypeLabel, renewalStageLabel } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { RenewalBoardCard, RenewalBoardColumn, RenewalBoardData } from "@/lib/renewal-board";
 import type { RenewalBoardFilters } from "@/lib/renewal-board.logic";
 import { isTerminalRenewalStage } from "@/lib/renewal-board.logic";
+import { isOverdue } from "@/lib/dates";
+
+function compactFollowUpDate(date: Date) {
+  return new Intl.DateTimeFormat("es-MX", {
+    day: "numeric",
+    month: "short",
+    timeZone: "Etc/GMT+6",
+  }).format(date).replace(".", "");
+}
 
 const stageAccent: Record<string, string> = {
   PENDING: "bg-muted-foreground/40",
@@ -90,6 +101,12 @@ function RenewalCard({ card }: { card: RenewalBoardCard }) {
       </dl>
 
       <div className="mt-3 space-y-2">
+        {card.manualFollowUp ? (
+          <p className={cn("flex items-center justify-end gap-1.5 text-xs", isOverdue(card.manualFollowUp.dueDate) ? "text-destructive" : "text-muted-foreground")}>
+            <CalendarClock className="size-3.5" aria-hidden="true" />
+            <span>{isOverdue(card.manualFollowUp.dueDate) ? "Seguimiento vencido" : "Seguimiento"} · {compactFollowUpDate(card.manualFollowUp.dueDate)}</span>
+          </p>
+        ) : null}
         {card.renewedToPolicyId || captureHref ? (
           <div className="flex justify-end">
             {card.renewedToPolicyId ? (
@@ -102,6 +119,12 @@ function RenewalCard({ card }: { card: RenewalBoardCard }) {
         {!isTerminalRenewalStage(card.stage) ? (
           <div className="flex items-center justify-end gap-2">
             <RenewalWhatsAppAssistant policyId={card.policyId} clientName={card.clientName} stage={card.stage} />
+            <RenewalFollowUpMenu
+              policyId={card.policyId}
+              policyNumber={card.policyNumber}
+              currentDueDate={card.manualFollowUp ? formatBusinessDateInput(card.manualFollowUp.dueDate) : null}
+              currentNotes={card.manualFollowUp?.notes ?? null}
+            />
             <RenewalStageMenu policyId={card.policyId} policyNumber={card.policyNumber} stage={card.stage} captureHref={captureHref} />
           </div>
         ) : null}

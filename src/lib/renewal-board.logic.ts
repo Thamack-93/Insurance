@@ -28,6 +28,10 @@ export function isTerminalRenewalStage(stage: RenewalStage) {
   return (TERMINAL_RENEWAL_STAGES as readonly string[]).includes(stage);
 }
 
+export function canScheduleRenewalManualFollowUp(stage: RenewalStage) {
+  return !isTerminalRenewalStage(stage);
+}
+
 /**
  * La columna de una tarjeta no es sólo la etapa guardada: los dos desenlaces
  * ya tienen una fuente de verdad anterior al tablero y ésa manda.
@@ -177,8 +181,25 @@ export function renewalFollowUpDedupeKey(policyId: string, stage: RenewalStage, 
  */
 export const RENEWAL_FOLLOWUP_SOURCE_SUFFIX = ":renewal-followup";
 
+/** Identidad estable del siguiente seguimiento elegido por el operador. */
+export const RENEWAL_MANUAL_FOLLOWUP_SOURCE_SUFFIX = ":renewal-manual-followup";
+
 export function renewalFollowUpWorkItemSourceId(policyId: string) {
   return `policy:${policyId}${RENEWAL_FOLLOWUP_SOURCE_SUFFIX}`;
+}
+
+export function renewalManualFollowUpWorkItemSourceId(policyId: string) {
+  return `policy:${policyId}${RENEWAL_MANUAL_FOLLOWUP_SOURCE_SUFFIX}`;
+}
+
+export type RenewalFollowUpShortcut = "tomorrow" | "three-days" | "one-week";
+
+export function renewalFollowUpShortcutDate(
+  shortcut: RenewalFollowUpShortcut,
+  today: Date = businessToday(),
+) {
+  const days = shortcut === "tomorrow" ? 1 : shortcut === "three-days" ? 3 : 7;
+  return businessAddDays(today, days);
 }
 
 export function buildRenewalFollowUpMessage(input: {
