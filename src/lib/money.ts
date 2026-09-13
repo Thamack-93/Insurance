@@ -31,3 +31,30 @@ export function formatCurrency(amount: unknown, currency?: string) {
     }).format(toNumber(amount));
   }
 }
+
+/**
+ * Detail-safe money formatting. Dashboard cards intentionally use the compact
+ * whole-unit formatter above, while financial records must retain cents.
+ */
+export function formatCurrencyExact(amount: unknown, currency?: string) {
+  const resolvedCurrency = (currency ?? getDefaultCurrency() ?? DEFAULT_CURRENCY)
+    .toString()
+    .trim()
+    .toUpperCase();
+
+  try {
+    return new Intl.NumberFormat("es-MX", {
+      style: "currency",
+      currency: resolvedCurrency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(toNumber(amount));
+  } catch {
+    return new Intl.NumberFormat("es-MX", {
+      style: "currency",
+      currency: DEFAULT_CURRENCY,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(toNumber(amount));
+  }
+}

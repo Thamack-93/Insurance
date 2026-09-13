@@ -62,6 +62,12 @@ jobs:
       - name: Check Server Action authorization
         run: npm run check:server-actions
 
+      - name: Secret scan
+        run: npm run check:secrets
+
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Check activity-log tenant scope
         run: npm run check:activity-log-scope
 

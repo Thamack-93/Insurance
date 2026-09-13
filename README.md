@@ -165,3 +165,15 @@ npm run db:check-drift
 
 - `docs/DEPLOYMENT_VERCEL.md`
 - `docs/tenant-context.md`
+- `docs/client-portal-design.md`
+- `docs/pdf-evaluation-set.md`
+- `docs/operational-measurements.md`
+- `docs/operational-hardening.md`
+
+Los totales operativos usan consultas tenant-scoped y los tableros excluyen
+recibos pagados/cancelados y pólizas inactivas. Las fechas y montos de detalle
+conservan precisión decimal; los trabajos diarios de seguimientos se ejecutan
+en `/api/jobs/operational-followups` con `CRON_SECRET` y límite de tres
+organizaciones concurrentes. `/api/health` solo indica liveness; `/api/ready`
+requiere el credential de monitorización en producción y expone únicamente
+estado sanitizado de configuración y base de datos.

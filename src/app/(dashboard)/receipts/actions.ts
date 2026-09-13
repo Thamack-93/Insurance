@@ -21,12 +21,23 @@ import {
   prepareWhatsAppReceiptReminderForContext,
 } from "@/lib/whatsapp-reminder-service";
 import type { WhatsAppPhoneSource } from "@/lib/whatsapp-reminder";
+import { recordCollectionFollowUp, type CollectionFollowUpInput } from "@/lib/collection-followups";
+import { closeCollectionFollowUp } from "@/lib/collection-followups";
 
 const ALLOWED_PAYMENT_METHODS = ["TRANSFER", "CASH", "CARD", "CHECK", "OTHER"] as const;
 type AllowedPaymentMethod = (typeof ALLOWED_PAYMENT_METHODS)[number];
 
 function isAllowedPaymentMethod(value: string): value is AllowedPaymentMethod {
   return (ALLOWED_PAYMENT_METHODS as readonly string[]).includes(value);
+}
+
+export async function recordReceiptCollectionFollowUp(input: Omit<CollectionFollowUpInput, "promisedPaymentDate" | "nextContactDate"> & { promisedPaymentDate?: string; nextContactDate?: string }): Promise<MutationResult> {
+  const parseDate = (value?: string) => value ? parseDateInput(value) : null;
+  return recordCollectionFollowUp({
+    ...input,
+    promisedPaymentDate: parseDate(input.promisedPaymentDate),
+    nextContactDate: parseDate(input.nextContactDate),
+  });
 }
 
 async function normalizeReceiptInput(values: ReceiptFormValues, context: OrganizationContext, db: Prisma.TransactionClient) {
@@ -218,6 +229,7 @@ export async function cancelReceipt(id: string): Promise<MutationResult> {
       },
     });
 
+      await closeCollectionFollowUp(updatedReceipt.id, tx, "CANCELLED", context.userId, context.organizationId);
       await writeActivityLog({ organizationId: context.organizationId, entityType: "Receipt", entityId: updatedReceipt.id, action: "RECEIPT_CANCEL", oldValue: existingReceipt, newValue: updatedReceipt, userId: context.userId, db: tx });
       return { existingReceipt, updatedReceipt, alreadyCancelled: false };
     });

@@ -6,7 +6,7 @@ import { logError } from "@/lib/logger";
 import type { WorkItemStatus } from "@/lib/domain-values";
 import { withTenantOrganization } from "@/lib/tenant-dal";
 
-export type WorkItemSourceType = "Task" | "WorkItem" | "Renewal" | "Notification";
+export type WorkItemSourceType = "Task" | "WorkItem" | "Renewal" | "Notification" | "Collection" | "Claim";
 
 export type WorkItemSyncInput = {
   organizationId: string;
@@ -37,6 +37,8 @@ export type WorkItemSyncInput = {
   closedDate?: Date | null;
   readAt?: Date | null;
   notes?: string | null;
+  metadataJson?: string | null;
+  assignedToId?: string | null;
   createdById?: string | null;
   updatedById?: string | null;
 };
@@ -87,6 +89,8 @@ export async function upsertWorkItemFromSource(input: WorkItemSyncInput, client?
     closedDate: normalizeNullableDate(input.closedDate),
     readAt: normalizeNullableDate(input.readAt),
     notes: normalizeNullableText(input.notes),
+    metadataJson: normalizeNullableText(input.metadataJson),
+    assignedToId: normalizeNullableText(input.assignedToId),
     createdById: normalizeNullableText(input.createdById),
     updatedById: normalizeNullableText(input.updatedById),
   };
@@ -115,6 +119,8 @@ export async function upsertWorkItemFromSource(input: WorkItemSyncInput, client?
     ...(input.closedDate == null ? {} : { closedDate: input.closedDate }),
     ...(input.readAt == null ? {} : { readAt: input.readAt }),
     ...(input.notes === undefined ? {} : { notes: normalizeNullableText(input.notes) }),
+    ...(input.metadataJson === undefined ? {} : { metadataJson: normalizeNullableText(input.metadataJson) }),
+    ...(input.assignedToId === undefined ? {} : { assignedToId: normalizeNullableText(input.assignedToId) }),
     ...(input.updatedById === undefined ? {} : { updatedById: normalizeNullableText(input.updatedById) }),
   };
 

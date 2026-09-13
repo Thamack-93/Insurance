@@ -185,6 +185,18 @@ async function queryWorkItems(filters: WorkQueueFilters, db: WorkQueueDb) {
     : resolvedItems.slice(start, start + filters.limit);
 }
 
+export type PaginatedWorkQueueResult = { items: WorkQueueItem[]; totalCount: number };
+
+async function queryWorkItemsPage(filters: WorkQueueFilters, db: WorkQueueDb): Promise<PaginatedWorkQueueResult> {
+  const where = buildWhere(filters);
+  const items = await db.workItem.findMany({ where: { ...where, organizationId: filters.organizationId }, select: workQueueSelect, orderBy: buildOrderBy(filters) });
+  const resolvedItems = await resolveLegacyRenewalRelations(items, filters, db);
+  resolvedItems.sort(compareWorkQueueItems);
+  const start = filters.skip ?? 0;
+  const end = filters.limit === undefined ? undefined : start + filters.limit;
+  return { items: resolvedItems.slice(start, end), totalCount: resolvedItems.length };
+}
+
 export async function getWorkItems(filters: WorkQueueFilters, client?: WorkQueueDb) {
   if (client) return queryWorkItems(filters, client);
 
@@ -199,6 +211,16 @@ export async function getWorkItems(filters: WorkQueueFilters, client?: WorkQueue
   const context = await requireOrganizationContext();
   if (context.organizationId !== filters.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
   return withTenantTransaction(context, (tx) => queryWorkItems(filters, tx));
+}
+
+/** Stable list contract for new queue surfaces; pagination remains explicit. */
+export async function getWorkItemsPage(filters: WorkQueueFilters, client?: WorkQueueDb): Promise<PaginatedWorkQueueResult> {
+  if (client) return queryWorkItemsPage(filters, client);
+  if (process.env.NODE_ENV === "test") return queryWorkItemsPage(filters, (await import("@/lib/db")).getDb());
+  const { requireOrganizationContext, withTenantTransaction } = await import("@/lib/organization-context");
+  const context = await requireOrganizationContext();
+  if (context.organizationId !== filters.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  return withTenantTransaction(context, (tx) => queryWorkItemsPage(filters, tx));
 }
 
 /**

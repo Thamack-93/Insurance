@@ -15,6 +15,7 @@ import {
   withTenantTransaction,
 } from "@/lib/organization-context";
 import { withTenantOrganization } from "@/lib/tenant-dal";
+import { OptimisticConcurrencyError } from "@/lib/optimistic-concurrency";
 
 type CommissionScope = {
   organizationId: string;
@@ -148,6 +149,7 @@ export async function updateCommissionStatus(
   commissionId: string,
   status: CommissionStatus,
   actualAmount?: number,
+  expectedVersion?: number,
 ): Promise<MutationResult> {
   try {
     const context = await requireOrganizationContext();
@@ -170,16 +172,16 @@ export async function updateCommissionStatus(
     const updateData: Prisma.CommissionUpdateInput = {
       status,
       updatedAt: new Date(),
-      ...(actualAmount && status === "PAID"
+      ...(actualAmount !== undefined && status === "PAID"
         ? { actualAmount, paidDate: new Date() }
         : {}),
     };
 
     const updated = await tx.commission.updateMany({
-      where: { id: commissionId, ...commissionOperationalWhere(portfolioOwnerId, context.organizationId) },
-      data: updateData,
+      where: { id: commissionId, ...commissionOperationalWhere(portfolioOwnerId, context.organizationId), ...(expectedVersion === undefined ? {} : { version: expectedVersion }) },
+      data: { ...updateData, version: { increment: 1 } },
     });
-    if (updated.count !== 1) return errorResult("La comisión no existe o fue eliminada.");
+    if (updated.count !== 1) throw new OptimisticConcurrencyError("La comisión", expectedVersion ?? commission.version);
 
     // Log activity
     await writeActivityLog({

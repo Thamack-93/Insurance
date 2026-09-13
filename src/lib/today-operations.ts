@@ -2,7 +2,11 @@ import type { getTodayData } from "@/lib/dashboard-queries";
 import { daysSince, formatDate, formatRelativeDate } from "@/lib/dates";
 import { getWorkItemHref } from "@/lib/work-item-navigation";
 
-export type TodayData = Awaited<ReturnType<typeof getTodayData>>;
+type TodayDataResult = Awaited<ReturnType<typeof getTodayData>>;
+export type TodayData = Omit<TodayDataResult, "dueTodayWorkItems"> & {
+  /** Optional for compatibility with callers that provide pre-split fixtures. */
+  dueTodayWorkItems?: TodayDataResult["dueTodayWorkItems"];
+};
 
 export type SemanticTone = "critical" | "warning" | "success" | "information" | "ai" | "neutral";
 
@@ -18,7 +22,7 @@ export type OperationalMetricModel = {
 
 export type FocusItemModel = {
   id: string;
-  kind: "overdue-receipt" | "due-today-receipt" | "overdue-work-item" | "renewal";
+  kind: "overdue-receipt" | "due-today-receipt" | "overdue-work-item" | "due-today-work-item" | "renewal";
   tone: SemanticTone;
   category: string;
   title: string;
@@ -64,7 +68,15 @@ function compareByDateAndId(a: { dueDate?: Date | null; endDate?: Date | null; i
 }
 
 export function buildFocusItems(data: TodayData): FocusItemModel[] {
-  const overdueReceipts = [...data.overduePayments].sort(compareByDateAndId).map((receipt) => ({
+  const workItemReceiptIds = new Set([
+    ...(data.overdueWorkItems ?? []).map((item) => item.receiptId),
+    ...(data.dueTodayWorkItems ?? []).map((item) => item.receiptId),
+  ].filter((id): id is string => Boolean(id)));
+  const workItemPolicyIds = new Set([
+    ...(data.overdueWorkItems ?? []).map((item) => item.policyId),
+    ...(data.dueTodayWorkItems ?? []).map((item) => item.policyId),
+  ].filter((id): id is string => Boolean(id)));
+  const overdueReceipts = [...data.overduePayments].filter((receipt) => !workItemReceiptIds.has(receipt.id)).sort(compareByDateAndId).map((receipt) => ({
     id: `receipt-overdue-${receipt.id}`,
     kind: "overdue-receipt" as const,
     tone: "critical" as const,
@@ -80,7 +92,7 @@ export function buildFocusItems(data: TodayData): FocusItemModel[] {
     detailsLabel: "Ver recibo",
   }));
 
-  const dueTodayReceipts = [...data.paymentsDueToday].sort(compareByDateAndId).map((receipt) => ({
+  const dueTodayReceipts = [...data.paymentsDueToday].filter((receipt) => !workItemReceiptIds.has(receipt.id)).sort(compareByDateAndId).map((receipt) => ({
     id: `receipt-today-${receipt.id}`,
     kind: "due-today-receipt" as const,
     tone: "warning" as const,
@@ -100,9 +112,9 @@ export function buildFocusItems(data: TodayData): FocusItemModel[] {
     id: `work-item-${workItem.id}`,
     kind: "overdue-work-item" as const,
     tone: "critical" as const,
-    category: "Pendiente atrasado",
+    category: workItem.sourceType === "Claim" ? "Seguimiento de siniestro" : "Pendiente atrasado",
     title: workItem.title,
-    context: workItem.client?.fullName ?? workItem.folio,
+    context: workItem.client?.fullName ?? workItem.folio ?? "Sin relación",
     dueText: workItem.dueDate
       ? `Fecha límite: ${formatDate(workItem.dueDate)} · Vencido ${formatRelativeDate(workItem.dueDate)}`
       : `Inició hace ${daysSince(workItem.startDate)} días`,
@@ -110,7 +122,19 @@ export function buildFocusItems(data: TodayData): FocusItemModel[] {
     actionLabel: workItem.sourceType === "Renewal" ? "Ver póliza" : "Abrir pendiente",
   }));
 
-  const renewals = [...data.urgentRenewals].sort(compareByDateAndId).map((policy) => ({
+  const dueTodayWorkItems = [...(data.dueTodayWorkItems ?? [])].sort(compareByDateAndId).map((workItem) => ({
+    id: `work-item-today-${workItem.id}`,
+    kind: "due-today-work-item" as const,
+    tone: "warning" as const,
+    category: workItem.sourceType === "Claim" ? "Seguimiento de siniestro" : "Pendiente para hoy",
+    title: workItem.title,
+    context: workItem.client?.fullName ?? workItem.folio ?? "Sin relación",
+    dueText: workItem.dueDate ? `Fecha límite: ${formatDate(workItem.dueDate)} · Vence hoy` : "Vence hoy",
+    href: getWorkItemHref(workItem),
+    actionLabel: workItem.sourceType === "Renewal" ? "Ver póliza" : "Abrir pendiente",
+  }));
+
+  const renewals = [...data.urgentRenewals].filter((policy) => !workItemPolicyIds.has(policy.id)).sort(compareByDateAndId).map((policy) => ({
     id: `renewal-${policy.id}`,
     kind: "renewal" as const,
     tone: "success" as const,
@@ -122,7 +146,19 @@ export function buildFocusItems(data: TodayData): FocusItemModel[] {
     actionLabel: "Ver póliza",
   }));
 
-  return [...overdueReceipts, ...dueTodayReceipts, ...overdueWorkItems, ...renewals].slice(0, 5);
+  const groups: Array<{ key: "receipts" | "tasks" | "renewals" | "claims"; items: FocusItemModel[] }> = [
+    { key: "receipts", items: [...overdueReceipts, ...dueTodayReceipts] },
+    { key: "tasks", items: [...overdueWorkItems, ...dueTodayWorkItems].filter((item) => !/claim/i.test(item.category)) },
+    { key: "renewals", items: renewals },
+    { key: "claims", items: [...overdueWorkItems, ...dueTodayWorkItems].filter((item) => /claim/i.test(item.category)) },
+  ];
+  const leaders = groups.flatMap((group) => group.items.slice(0, 1));
+  const remainder = groups.flatMap((group) => group.items.slice(1)).sort((a, b) => {
+    const aCritical = a.tone === "critical" ? 0 : a.tone === "warning" ? 1 : 2;
+    const bCritical = b.tone === "critical" ? 0 : b.tone === "warning" ? 1 : 2;
+    return aCritical - bCritical || a.id.localeCompare(b.id);
+  });
+  return [...leaders, ...remainder].slice(0, 5);
 }
 
 export function buildTodayOperationsModel(
@@ -142,8 +178,9 @@ export function buildTodayOperationsModel(
   const renewals = count(data.urgentRenewals);
   const overdueWork = count(data.overdueWorkItems, 8);
   const commissions = count(data.commissionsToReview, 8);
-  const actionCount = data.overduePayments.length + data.paymentsDueToday.length + data.overdueWorkItems.length + data.urgentRenewals.length;
-  const actionLabel = data.overduePayments.length >= 8 || data.overdueWorkItems.length >= 8 ? `al menos ${actionCount}` : actionCount;
+  const dueTodayWorkItems = data.dueTodayWorkItems ?? [];
+  const actionCount = data.overduePayments.length + data.paymentsDueToday.length + data.overdueWorkItems.length + dueTodayWorkItems.length + data.urgentRenewals.length;
+  const actionLabel = data.overduePayments.length >= 8 || data.overdueWorkItems.length >= 8 || dueTodayWorkItems.length >= 8 ? `al menos ${actionCount}` : actionCount;
 
   return {
     greeting: getTimeGreeting(businessHour, options.name),

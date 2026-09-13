@@ -165,7 +165,59 @@ export async function deleteClaim(id: string): Promise<MutationResult> {
 }
 
 type ChecklistInput = { claimId: string };
-type ChecklistStatusInput = ChecklistInput & { itemId: string; status: ClaimChecklistStatusValue; expectedUpdatedAt?: string };
+type ChecklistStatusInput = ChecklistInput & { itemId: string; status: ClaimChecklistStatusValue; expectedUpdatedAt?: string; expectedVersion?: number };
+
+/** Assigns the optional claim owner/deadline with an optimistic version check. */
+export async function updateClaimFollowUp(input: { claimId: string; assignedToId?: string | null; dueDate?: string | null; expectedVersion: number }): Promise<MutationResult> {
+  try {
+    const context = await requireOrganizationContext();
+    if (context.membershipRole === "AGENT" && input.assignedToId && input.assignedToId !== context.userId) return errorResult("No puedes asignar un siniestro fuera de tu usuario.");
+    const claim = await withTenantTransaction(context, async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const existing = await tx.claim.findFirst({ where: { id: input.claimId, ...claimOperationalWhere(context.membershipRole === "AGENT" ? context.userId : undefined, context.organizationId) }, select: { id: true, clientId: true, version: true, assignedToId: true, dueDate: true } });
+      if (!existing) throw new Error("CLAIM_NOT_FOUND");
+      if (input.assignedToId) {
+        const member = await tx.organizationMembership.findFirst({ where: { organizationId: context.organizationId, userId: input.assignedToId, active: true }, select: { id: true } });
+        if (!member) throw new Error("CLAIM_OWNER_INVALID");
+      }
+      const updated = await tx.claim.updateMany({ where: { id: input.claimId, organizationId: context.organizationId, version: input.expectedVersion }, data: { assignedToId: input.assignedToId ?? null, dueDate: input.dueDate ? new Date(input.dueDate) : null, updatedById: context.userId, version: { increment: 1 } } });
+      if (updated.count !== 1) throw new Error("CLAIM_VERSION_CONFLICT");
+      await writeActivityLog({ organizationId: context.organizationId, action: "UPDATE_CLAIM_FOLLOWUP", entityType: "Claim", entityId: input.claimId, oldValue: { assignedToId: existing.assignedToId, dueDate: existing.dueDate }, newValue: { assignedToId: input.assignedToId ?? null, dueDate: input.dueDate ?? null }, userId: context.userId, db: tx });
+      return { id: existing.id, clientId: existing.clientId };
+    });
+    revalidatePaths([`/claims/${claim.id}`, "/claims", "/operations", "/today"]);
+    return successResult(claim.id, `/claims/${claim.id}`, "Seguimiento del siniestro actualizado.");
+  } catch (error) {
+    logError("claims.updateClaimFollowUp", error, { claimId: input.claimId });
+    return errorResult(error instanceof Error && error.message === "CLAIM_VERSION_CONFLICT" ? "El siniestro cambió; revisa los valores guardados antes de volver a guardar." : "No se pudo actualizar el seguimiento.");
+  }
+}
+
+export async function updateClaimRequirementFollowUp(input: { claimId: string; itemId: string; assignedToId?: string | null; dueDate?: string | null; expectedVersion: number }): Promise<MutationResult> {
+  try {
+    const context = await requireOrganizationContext();
+    const result = await withTenantTransaction(context, async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
+      const claim = await tx.claim.findFirst({ where: { id: input.claimId, ...claimOperationalWhere(context.membershipRole === "AGENT" ? context.userId : undefined, context.organizationId) }, select: { id: true } });
+      if (!claim) throw new Error("CLAIM_NOT_FOUND");
+      const current = await tx.claimChecklistItem.findFirst({ where: { id: input.itemId, claimId: input.claimId, organizationId: context.organizationId }, select: { id: true, version: true } });
+      if (!current) throw new Error("REQUIREMENT_NOT_FOUND");
+      if (input.assignedToId) {
+        const member = await tx.organizationMembership.findFirst({ where: { organizationId: context.organizationId, userId: input.assignedToId, active: true }, select: { id: true } });
+        if (!member) throw new Error("CLAIM_OWNER_INVALID");
+      }
+      const updated = await tx.claimChecklistItem.updateMany({ where: { id: input.itemId, claimId: input.claimId, organizationId: context.organizationId, version: input.expectedVersion }, data: { assignedToId: input.assignedToId ?? null, dueDate: input.dueDate ? new Date(input.dueDate) : null, version: { increment: 1 } } });
+      if (updated.count !== 1) throw new Error("CLAIM_VERSION_CONFLICT");
+      await writeActivityLog({ organizationId: context.organizationId, action: "UPDATE_CLAIM_REQUIREMENT_FOLLOWUP", entityType: "Claim", entityId: input.claimId, newValue: { itemId: input.itemId, assignedToId: input.assignedToId ?? null, dueDate: input.dueDate ?? null }, userId: context.userId, db: tx });
+      return current;
+    });
+    revalidatePaths([`/claims/${input.claimId}`, "/claims", "/operations", "/today"]);
+    return successResult(result.id, `/claims/${input.claimId}`, "Seguimiento del requisito actualizado.");
+  } catch (error) {
+    logError("claims.updateClaimRequirementFollowUp", error, { claimId: input.claimId, itemId: input.itemId });
+    return errorResult(error instanceof Error && error.message === "CLAIM_VERSION_CONFLICT" ? "El requisito cambió; revisa los valores guardados antes de volver a guardar." : "No se pudo actualizar el seguimiento del requisito.");
+  }
+}
 
 async function findWritableClaim(tx: Prisma.TransactionClient, claimId: string, organizationId: string, portfolioOwnerId?: string) {
   return tx.claim.findFirst({ where: { id: claimId, ...claimOperationalWhere(portfolioOwnerId, organizationId) }, select: { id: true, status: true } });
@@ -205,8 +257,11 @@ export async function updateClaimRequirementStatus(input: ChecklistStatusInput):
       const current = await tx.claimChecklistItem.findFirst({ where: { id: input.itemId, claimId: input.claimId, organizationId: context.organizationId } });
       if (!current) throw new Error("REQUIREMENT_NOT_FOUND");
       if (input.expectedUpdatedAt && current.updatedAt.toISOString() !== input.expectedUpdatedAt) throw new Error("STALE_REQUIREMENT");
+      if (input.expectedVersion !== undefined && current.version !== input.expectedVersion) throw new Error("STALE_REQUIREMENT");
       if (current.status === input.status) return current;
-      const updated = await tx.claimChecklistItem.update({ where: { id: current.id }, data: { status: input.status, ...checklistTimestamps(input.status, new Date()) } });
+      const updatedResult = await tx.claimChecklistItem.updateMany({ where: { id: current.id, organizationId: context.organizationId, ...(input.expectedVersion === undefined ? {} : { version: input.expectedVersion }) }, data: { status: input.status, ...checklistTimestamps(input.status, new Date()), version: { increment: 1 } } });
+      if (updatedResult.count !== 1) throw new Error("STALE_REQUIREMENT");
+      const updated = await tx.claimChecklistItem.findUniqueOrThrow({ where: { id: current.id } });
       await writeActivityLog({ organizationId: context.organizationId, action: "UPDATE_CLAIM_REQUIREMENT", entityType: "Claim", entityId: input.claimId, oldValue: { requirementCode: current.requirementCode, label: current.label, status: current.status }, newValue: { requirementCode: updated.requirementCode, label: updated.label, status: updated.status }, userId: context.userId, db: tx });
       return updated;
     });

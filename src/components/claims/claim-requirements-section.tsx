@@ -19,6 +19,7 @@ type Requirement = {
   receivedAt: string | null;
   waivedAt: string | null;
   updatedAt: string;
+  version: number;
   documentId: string | null;
 };
 
@@ -70,7 +71,7 @@ export function ClaimRequirementsSection({ claimId, claimStatus, items, document
                 <div className="min-w-0"><p className="font-medium">{item.label}</p><p className="text-xs text-muted-foreground">{date ? `${CLAIM_CHECKLIST_STATUS_LABELS[item.status]} · ${formatDate(new Date(date))}` : CLAIM_CHECKLIST_STATUS_LABELS[item.status]}</p>{item.documentId ? <p className="text-xs text-muted-foreground">Documento: {documents.find((doc) => doc.id === item.documentId)?.fileName ?? "Vinculado"}</p> : null}</div>
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusBadge status={item.status} />
-                  {!terminal ? <select aria-label={`Estado de ${item.label}`} value={item.status} disabled={pending} onChange={(event) => run(() => updateClaimRequirementStatus({ claimId, itemId: item.id, status: event.target.value as ClaimChecklistStatusValue, expectedUpdatedAt: item.updatedAt }))} className="h-9 rounded-md border bg-background px-2 text-sm">{CLAIM_CHECKLIST_STATUSES.map((status) => <option key={status} value={status}>{CLAIM_CHECKLIST_STATUS_LABELS[status]}</option>)}</select> : null}
+                  {!terminal ? <select aria-label={`Estado de ${item.label}`} value={item.status} disabled={pending} onChange={(event) => run(() => updateClaimRequirementStatus({ claimId, itemId: item.id, status: event.target.value as ClaimChecklistStatusValue, expectedUpdatedAt: item.updatedAt, expectedVersion: item.version }))} className="h-9 rounded-md border bg-background px-2 text-sm">{CLAIM_CHECKLIST_STATUSES.map((status) => <option key={status} value={status}>{CLAIM_CHECKLIST_STATUS_LABELS[status]}</option>)}</select> : null}
                   {!terminal && item.status === "RECEIVED" && documents.length > 0 ? <select aria-label={`Documento de ${item.label}`} value={item.documentId ?? ""} disabled={pending} onChange={(event) => run(() => setClaimRequirementDocument({ claimId, itemId: item.id, documentId: event.target.value || null, expectedUpdatedAt: item.updatedAt }))} className="h-9 max-w-48 rounded-md border bg-background px-2 text-sm"><option value="">Sin documento</option>{documents.map((doc) => <option key={doc.id} value={doc.id}>{doc.fileName}</option>)}</select> : null}
                   {!terminal && item.requirementCode.startsWith("CUSTOM:") ? <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => { if (window.confirm(`¿Eliminar el requisito "${item.label}"?`)) run(() => deleteClaimRequirement({ claimId, itemId: item.id, expectedUpdatedAt: item.updatedAt })); }}>Eliminar</Button> : null}
                 </div>

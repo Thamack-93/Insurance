@@ -22,6 +22,10 @@
       "schedule": "30 13 * * *"
     },
     {
+      "path": "/api/jobs/operational-followups",
+      "schedule": "0 14 * * *"
+    },
+    {
       "path": "/api/jobs/demo-retention",
       "schedule": "0 3 * * *"
     }

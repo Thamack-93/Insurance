@@ -1,7 +1,7 @@
 import { subMonths } from "date-fns";
 import { today } from "@/lib/dates";
 import { bucketCommissionsByMonth, bucketDatesByMonth, MONTHLY_COMMISSION_STATUSES, pctChange } from "@/lib/dashboard.logic";
-import { BUSINESS_TIME_ZONE, businessAddDays, businessEndOfMonth, businessStartOfMonth } from "@/lib/business-dates";
+import { BUSINESS_TIME_ZONE, businessAddDays, businessEndOfMonth, businessStartOfMonth, getBusinessDateParts } from "@/lib/business-dates";
 import { toNumber } from "@/lib/money";
 import { detectRisks } from "@/lib/risk-engine";
 import { DASHBOARD_LIST_LIMIT } from "@/lib/constants";
@@ -92,18 +92,16 @@ export async function getDashboardData() {
       }),
     ]),
     db.receipt.findMany({
-      where: { ...receiptWhere, dueDate: { lte: in60 }, status: { notIn: ["CANCELLED"] } },
+      where: { ...receiptWhere, dueDate: { lte: in60 }, status: { in: ["PENDING", "OVERDUE"] } },
       include: { client: true, insurer: true, policy: true },
       orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }],
       take: DASHBOARD_LIST_LIMIT,
     }),
-    // Lightweight chart query — only the field we need, capped separately so the
-    // urgent list size doesn't silently undercount the weekly chart.
+    // Chart source is complete; the urgent list preview is capped independently.
     db.receipt.findMany({
-      where: { ...receiptWhere, dueDate: { lte: in60 }, status: { notIn: ["CANCELLED"] } },
+      where: { ...receiptWhere, dueDate: { lte: in60 }, status: { in: ["PENDING", "OVERDUE"] } },
       select: { dueDate: true, id: true },
       orderBy: [{ dueDate: "asc" }, { id: "asc" }],
-      take: 500,
     }),
     db.policy.groupBy({
       by: ["insurerId"],
@@ -112,7 +110,7 @@ export async function getDashboardData() {
     }),
     db.policy.groupBy({
       by: ["policyType"],
-      where: policyWhere,
+      where: { ...policyWhere, status: "ACTIVE" },
       _count: { policyType: true },
     }),
     db.commission.findMany({
@@ -246,6 +244,7 @@ export async function getTodayData() {
     paymentsDue7,
     urgentRenewals,
     overdueWorkItems,
+    dueTodayWorkItems,
     clientsToContact,
     commissionsToReview,
     recentActivity,
@@ -272,6 +271,15 @@ export async function getTodayData() {
     getWorkItems({
       workItemTypes: ["TASK"],
       statuses: OPEN_WORK_ITEM_STATUSES,
+      to: businessAddDays(now, -1),
+      limit: 8,
+      portfolioOwnerId: scope.portfolioOwnerId,
+      organizationId: scope.organizationId,
+    }, db),
+    getWorkItems({
+      workItemTypes: ["TASK"],
+      statuses: OPEN_WORK_ITEM_STATUSES,
+      from: now,
       to: now,
       limit: 8,
       portfolioOwnerId: scope.portfolioOwnerId,
@@ -329,6 +337,7 @@ export async function getTodayData() {
     paymentsDue7,
     urgentRenewals,
     overdueWorkItems: overdueWorkItemRows,
+    dueTodayWorkItems,
     clientsToContact,
     commissionsToReview,
     criticalRisks: risks.filter((risk) => risk.severity === "CRITICAL").slice(0, 6),
@@ -339,16 +348,17 @@ export async function getTodayData() {
 
 function groupDatesByWeek<T extends Record<string, unknown>>(items: T[], field: keyof T) {
   const buckets = new Map<string, number>();
-  const formatter = new Intl.DateTimeFormat("es-MX", {
-    month: "short",
-    day: "numeric",
-    timeZone: BUSINESS_TIME_ZONE,
-  });
 
   for (const item of items) {
     const date = item[field] as Date | null;
     if (!date) continue;
-    const label = formatter.format(date);
+    const parts = getBusinessDateParts(date, BUSINESS_TIME_ZONE);
+    const day = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+    const mondayOffset = (day.getUTCDay() + 6) % 7;
+    const monday = new Date(day.getTime() - mondayOffset * 86_400_000);
+    const sunday = new Date(monday.getTime() + 6 * 86_400_000);
+    const labelFormatter = new Intl.DateTimeFormat("es-MX", { month: "short", day: "numeric", timeZone: BUSINESS_TIME_ZONE });
+    const label = `${labelFormatter.format(monday)}–${labelFormatter.format(sunday)}`;
     buckets.set(label, (buckets.get(label) ?? 0) + 1);
   }
 
@@ -494,37 +504,31 @@ export async function getTodayDashboardData() {
       where: { ...policyWhere, startDate: { gte: trendStart } },
       select: { startDate: true },
       orderBy: [{ startDate: "asc" }, { id: "asc" }],
-      take: 5000,
     }),
     db.policy.findMany({
       where: { ...policyWhere, createdAt: { gte: trendStart } },
       select: { createdAt: true },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      take: 5000,
     }),
     db.policy.findMany({
       where: { ...policyWhere, status: "ACTIVE", endDate: { gte: trendStart } },
       select: { endDate: true },
       orderBy: [{ endDate: "asc" }, { id: "asc" }],
-      take: 5000,
     }),
     db.receipt.findMany({
       where: { ...receiptWhere, periodStartDate: { gte: trendStart }, status: { notIn: ["CANCELLED"] } },
       select: { periodStartDate: true },
       orderBy: [{ periodStartDate: "asc" }, { id: "asc" }],
-      take: 5000,
     }),
     db.receipt.findMany({
       where: { ...receiptWhere, createdAt: { gte: trendStart }, status: { notIn: ["CANCELLED"] } },
       select: { createdAt: true, amount: true },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      take: 5000,
     }),
     db.commission.findMany({
       where: { ...commissionWhere, expectedDate: { gte: trendStart }, status: commissionMonthStatuses },
       select: { expectedDate: true, expectedAmount: true, actualAmount: true },
       orderBy: [{ expectedDate: "asc" }, { id: "asc" }],
-      take: 2000,
     }),
     db.policy.groupBy({ by: ["status"], where: policyWhere, _count: { status: true } }),
     db.policy.findMany({

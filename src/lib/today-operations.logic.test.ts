@@ -80,9 +80,9 @@ describe("today operations presentation logic", () => {
 
     expect(buildFocusItems(data).map((item) => item.id)).toEqual([
       "receipt-overdue-a",
+      "work-item-task",
       "receipt-overdue-b",
       "receipt-today-today",
-      "work-item-task",
     ]);
 
     const overdueReceipt = buildFocusItems(data).find((item) => item.id === "receipt-overdue-a");

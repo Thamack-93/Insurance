@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, BadgeCheck, CalendarClock, FileText, History, Pencil, ShieldCheck } from "@/components/icons";
 import { DeleteClaimButton } from "@/components/claims/delete-claim-button";
 import { ClaimRequirementsSection } from "@/components/claims/claim-requirements-section";
+import { ClaimFollowUpPanel } from "@/components/claims/claim-follow-up-panel";
 import { PageHeader } from "@/components/layout/page-header";
 import { NoraContextButton } from "@/components/assistant/nora-session-provider";
 import { AuditByline } from "@/components/audit/audit-byline";
@@ -43,13 +44,14 @@ export default async function ClaimDetailPage({ params, searchParams }: { params
     notFound();
   }
 
-  const [relatedClaims, activity] = await Promise.all([
+  const [relatedClaims, activity, owners] = await Promise.all([
     db.claim.findMany({
       where: { ...claimScope, policyId: claim.policyId, id: { not: id } },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 5,
     }),
     getActivityForEntity("Claim", id, 20, scope.organizationId, db),
+    db.organizationMembership.findMany({ where: { organizationId: scope.organizationId, active: true, user: { active: true } }, select: { user: { select: { id: true, name: true } } }, orderBy: { user: { name: "asc" } } }),
   ]);
 
   const isClosed = claim.status === "RESOLVED" || claim.status === "CANCELLED";
@@ -83,6 +85,8 @@ export default async function ClaimDetailPage({ params, searchParams }: { params
         />
 
         <AuditByline createdById={claim.createdById} updatedById={claim.updatedById} />
+
+        {!isClosed ? <ClaimFollowUpPanel claimId={claim.id} version={claim.version} assignedToId={claim.assignedToId} dueDate={claim.dueDate} owners={owners.map((membership) => membership.user)} /> : null}
 
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
@@ -219,6 +223,7 @@ export default async function ClaimDetailPage({ params, searchParams }: { params
             receivedAt: item.receivedAt?.toISOString() ?? null,
             waivedAt: item.waivedAt?.toISOString() ?? null,
             updatedAt: item.updatedAt.toISOString(),
+            version: item.version,
             documentId: item.documentId,
           }))}
           documents={claim.documents.map((document) => ({ id: document.id, fileName: document.fileName }))}

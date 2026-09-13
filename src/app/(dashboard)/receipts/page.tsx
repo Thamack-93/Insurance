@@ -36,6 +36,7 @@ import {
   readReceiptListFilters,
 } from "@/lib/list-filters";
 import { withTenantOrganization } from "@/lib/tenant-dal";
+import { SavedQueueControls } from "@/components/queues/saved-queue-controls";
 
 const PAGE_SIZE = 25;
 
@@ -176,6 +177,7 @@ export default async function ReceiptsPage({
 
   return (
     <div className="space-y-6">
+      <SavedQueueControls route="receipts" config={{ route: "receipts", search: query ?? "", filters: { status: statusFilter ?? "", tab: initialTab }, sort: sortKey ?? "", dateWindow: "30d", version: 1 }} />
       <PageHeader
         eyebrow="Finanzas"
         title="Recibos y pagos"

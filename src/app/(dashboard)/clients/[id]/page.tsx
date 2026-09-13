@@ -19,7 +19,7 @@ import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { clientOperationalWhere, claimOperationalWhere, quoteOperationalWhere, documentOperationalWhere } from "@/lib/portfolio-access";
 import { formatDate } from "@/lib/dates";
 import { policyTypeLabel, statusLabel } from "@/lib/status";
-import { formatCurrency, toNumber } from "@/lib/money";
+import { formatCurrency, formatCurrencyExact, toNumber } from "@/lib/money";
 import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { calculateAge, formatBirthdayDate } from "@/lib/birthday-reminders";
 import { normalizeReturnTo } from "@/lib/return-to";
@@ -55,7 +55,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
     notFound();
   }
 
-  const [policies, receipts, workItems, claims, quotes, documents, referidos, activity] = await Promise.all([
+  const [policies, receipts, workItems, claims, quotes, documents, referidos, activity, exactPolicyStats, exactReceiptCount, exactDocumentCount] = await Promise.all([
     db.policy.findMany({
       where: { clientId: id, organizationId: scope.organizationId, client: { organizationId: scope.organizationId } },
       include: { insurer: true },
@@ -109,17 +109,26 @@ export default async function ClientDetailPage({ params, searchParams }: { param
       take: 10,
     }),
     getActivityForEntity("Client", id, 20, scope.organizationId, db),
+    db.policy.aggregate({
+      where: { clientId: id, organizationId: scope.organizationId, status: "ACTIVE" },
+      _count: { _all: true },
+      _sum: { premiumAmount: true },
+    }),
+    db.receipt.count({
+      where: { clientId: id, organizationId: scope.organizationId, status: { notIn: ["PAID", "CANCELLED"] } },
+    }),
+    db.document.count({
+      where: { clientId: id, organizationId: scope.organizationId },
+    }),
   ]);
 
-  const activePolicies = policies.filter((policy) => policy.status === "ACTIVE");
-  const openReceipts = receipts.filter((receipt) => receipt.status !== "PAID" && receipt.status !== "CANCELLED");
   const openWorkItemCount = await countWorkItems({
     workItemTypes: ["TASK"],
     statuses: OPEN_WORK_ITEM_STATUSES,
     clientId: id,
     organizationId: scope.organizationId,
   }, db);
-  const activePremium = activePolicies.reduce((sum, policy) => sum + toNumber(policy.premiumAmount), 0);
+  const activePremium = toNumber(exactPolicyStats._sum.premiumAmount);
 
   return (
     <div className="flex flex-col gap-6">
@@ -154,14 +163,14 @@ export default async function ClientDetailPage({ params, searchParams }: { param
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
             title="Pólizas activas"
-            value={activePolicies.length}
-            description={formatCurrency(activePremium)}
+            value={exactPolicyStats._count._all}
+            description={formatCurrencyExact(activePremium)}
             icon={ShieldCheck}
             tone="emerald"
           />
           <MetricCard
             title="Recibos abiertos"
-            value={openReceipts.length}
+            value={exactReceiptCount}
             description="Pendientes de cobro, vencidos o en seguimiento."
             icon={ClipboardList}
             tone="amber"
@@ -175,7 +184,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
           />
           <MetricCard
             title="Documentos"
-            value={documents.length}
+            value={exactDocumentCount}
             description="Expediente local vinculado al cliente."
             icon={FileText}
             tone="rose"

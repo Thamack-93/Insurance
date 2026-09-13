@@ -28,6 +28,8 @@ import { normalizeReturnTo } from "@/lib/return-to";
 import { QualitasPaymentLinkDialog } from "@/components/receipts/qualitas-payment-link-dialog";
 import { isQualitasClientRecipientEnabled, isQualitasInsurerName, isQualitasPaymentLinkEnabled } from "@/lib/qualitas-payment-link";
 import { WhatsAppReminderButton } from "@/components/receipts/whatsapp-reminder-button";
+import { CollectionFollowUpPanel } from "@/components/receipts/collection-follow-up-panel";
+import { recordReceiptCollectionFollowUp } from "@/app/(dashboard)/receipts/actions";
 
 export default async function ReceiptDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
@@ -304,6 +306,10 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
             </div>
           </SectionCard>
         </section>
+
+        {receipt.status === "PENDING" || receipt.status === "OVERDUE" ? (
+          <CollectionFollowUpPanel receiptId={receipt.id} action={(input) => recordReceiptCollectionFollowUp({ ...input, receiptId: receipt.id })} />
+        ) : null}
 
         <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
           <SectionCard title="Comisiones" description="Ingreso esperado y cobrado derivado de este recibo.">

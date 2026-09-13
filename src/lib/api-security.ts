@@ -6,6 +6,8 @@ export type ApiSecurityClass = "public-health" | "authenticated" | "admin" | "cr
 
 export const API_SECURITY_MANIFEST = {
   "/api/health": "public-health",
+  "/api/ready": "public-health",
+  "/api/jobs/status": "admin",
   "/api/auth/logout": "authenticated",
   "/api/assistant": "authenticated",
   "/api/assistant/actions/confirm": "authenticated",
@@ -14,6 +16,7 @@ export const API_SECURITY_MANIFEST = {
   "/api/backups/artifacts/[artifactId]/download": "admin",
   "/api/backups/[filename]/download": "admin",
   "/api/commissions/stats": "authenticated",
+  "/api/commissions/statements/import": "authenticated",
   "/api/commissions/[id]/status": "authenticated",
   "/api/documents/upload": "authenticated",
   "/api/documents/[id]/download": "authenticated",
@@ -25,6 +28,7 @@ export const API_SECURITY_MANIFEST = {
   "/api/jobs/telegram-digest": "cron-secret",
   "/api/jobs/telegram-birthdays": "cron-secret",
   "/api/jobs/renewal-followups": "cron-secret",
+  "/api/jobs/operational-followups": "cron-secret",
   "/api/jobs/demo-retention": "cron-secret",
   "/api/nora/policy-pdf/upload": "authenticated",
   "/api/nora/policy-pdf/analyze": "authenticated",

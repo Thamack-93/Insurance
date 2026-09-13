@@ -28,6 +28,7 @@ import { workItemTypeLabel } from "@/lib/ui-labels";
 import { appendReturnTo } from "@/lib/return-to";
 import { buildCanonicalHref } from "@/lib/navigation-redirects";
 import { withTenantTransaction } from "@/lib/organization-context";
+import { SavedQueueControls } from "@/components/queues/saved-queue-controls";
 
 type OperationsView = "all" | "pending" | "renewals" | "renewal-board" | "claims";
 
@@ -152,10 +153,11 @@ export default async function OperationsPage({
   const query = view === "pending" || view === "renewals" || view === "claims" ? readTableParam(params, "q")?.trim() : undefined;
   const priority = view === "pending" ? readAllowedTableParam(params, "priority", PRIORITIES) : undefined;
   const workItemType = view === "pending" ? readAllowedTableParam(params, "workItemType", WORK_ITEM_TYPES) : undefined;
+  const renewalWindow = view === "renewals" ? readAllowedTableParam(params, "window", ["30d", "60d", "90d"] as const) ?? "30d" : "30d";
   const scope = await requireOrganizationPortfolioReadScope();
   const today = businessToday();
   const nextSeven = businessAddDays(today, 7);
-  const nextThirty = businessAddDays(today, 30);
+  const nextRenewalDate = businessAddDays(today, Number(renewalWindow.slice(0, -1)));
 
   const boardFilters = readRenewalBoardFilters(params);
   const [board, boardOwners] =
@@ -191,7 +193,7 @@ export default async function OperationsPage({
       limit: view === "pending" ? undefined : 100,
     }) : Promise.resolve([]),
     view === "all" || view === "renewals" ? loadEligibleRenewalPolicies({
-      endDate: { lte: nextThirty },
+      endDate: { lte: nextRenewalDate },
       ...(query && view === "renewals" ? {
         OR: [
           { policyNumber: { contains: query } },
@@ -302,6 +304,7 @@ export default async function OperationsPage({
         }
       />
       <LocalNavigation items={localItems} label="Vistas de operación" />
+      <SavedQueueControls route={view === "renewal-board" ? "renewal-board" : "operations"} config={{ route: view === "renewal-board" ? "renewal-board" : "operations", search: query ?? "", filters: { view, priority: priority ?? "", workItemType: workItemType ?? "", renewalWindow }, dateWindow: renewalWindow as "30d" | "60d" | "90d", version: 1 }} />
 
       {view === "all" ? (
         <>

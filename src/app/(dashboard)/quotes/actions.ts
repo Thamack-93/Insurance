@@ -11,6 +11,8 @@ import {
   successResult,
   type MutationResult,
 } from "@/lib/mutation-utils";
+import { OptimisticConcurrencyError } from "@/lib/optimistic-concurrency";
+import { createQuoteComparison, selectComparisonQuote } from "@/lib/quote-comparisons";
 
 function normalizeQuoteInput(values: QuoteFormValues) {
   return {
@@ -54,7 +56,7 @@ export async function createQuote(values: QuoteFormValues): Promise<MutationResu
   }
 }
 
-export async function updateQuote(id: string, values: QuoteFormValues): Promise<MutationResult> {
+export async function updateQuote(id: string, values: QuoteFormValues, expectedVersion?: number): Promise<MutationResult> {
   try {
     const context = await requireOrganizationContext();
     const quote = await withTenantTransaction(context, async (tx) => {
@@ -64,7 +66,9 @@ export async function updateQuote(id: string, values: QuoteFormValues): Promise<
       const insurer = values.insurerId ? await tx.insurer.findFirst({ where: { id: values.insurerId, organizationId: context.organizationId }, select: { id: true } }) : true;
       if (!existing) throw new Error("QUOTE_NOT_FOUND");
       if (!client || !insurer) throw new Error("TENANT_RELATION_MISMATCH");
-      const updated = await tx.quote.update({ where: { id }, data: { ...normalizeQuoteInput(values), updatedById: context.userId } });
+      const updatedResult = await tx.quote.updateMany({ where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}), ...(expectedVersion === undefined ? {} : { version: expectedVersion }) }, data: { ...normalizeQuoteInput(values), updatedById: context.userId, version: { increment: 1 } } });
+      if (updatedResult.count !== 1) throw new OptimisticConcurrencyError("La cotización", expectedVersion ?? existing.version);
+      const updated = await tx.quote.findUniqueOrThrow({ where: { id } });
       await writeActivityLog({ organizationId: context.organizationId, action: "UPDATE_QUOTE", entityType: "Quote", entityId: updated.id, oldValue: { id: existing.id.slice(0, 8) }, newValue: { id: updated.id.slice(0, 8) }, userId: context.userId, db: tx });
       return updated;
     });
@@ -108,6 +112,28 @@ export async function deleteQuote(id: string): Promise<MutationResult> {
   } catch (error) {
     logError("quotes.deleteQuote", error, { id });
     return errorResult("No se pudo eliminar la cotización. Intenta de nuevo.");
+  }
+}
+
+export async function createAutoQuoteComparison(input: { clientId: string; quoteIds: string[]; terms?: Record<string, import("@/lib/quote-comparisons").AutoQuoteTerms> }): Promise<MutationResult> {
+  try {
+    const comparison = await createQuoteComparison({ ...input, policyType: "AUTO" });
+    revalidatePaths(["/quotes", `/clients/${input.clientId}`]);
+    return successResult(comparison.id, `/quotes/comparisons/${comparison.id}`, "Comparación creada; revisa los términos antes de seleccionar.");
+  } catch (error) {
+    logError("quotes.createAutoQuoteComparison", error);
+    return errorResult("No se pudo crear la comparación.");
+  }
+}
+
+export async function selectAutoQuote(input: { comparisonId: string; quoteId: string; expectedVersion: number; reason: string }): Promise<MutationResult> {
+  try {
+    await selectComparisonQuote(input);
+    revalidatePaths(["/quotes", `/quotes/comparisons/${input.comparisonId}`]);
+    return successResult(input.comparisonId, `/quotes/comparisons/${input.comparisonId}`, "Cotización seleccionada y registrada.");
+  } catch (error) {
+    logError("quotes.selectAutoQuote", error);
+    return errorResult("La comparación cambió; revisa los valores guardados antes de volver a seleccionar.");
   }
 }
 

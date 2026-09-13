@@ -9,6 +9,7 @@ import {
   type ReceiptReconciliationResult,
 } from "@/lib/receipt-reconciliation";
 import { isBusinessDateOverdue } from "@/lib/business-dates";
+import { closeCollectionFollowUp } from "@/lib/collection-followups";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -274,6 +275,7 @@ export async function recordPayment(input: RecordPaymentInput, client?: DbClient
     });
 
     const reconciliation = await reconcileReceiptById(input.organizationId, receipt.id, input.actorId, tx);
+    await closeCollectionFollowUp(receipt.id, tx as Prisma.TransactionClient, "PAYMENT", input.actorId, input.organizationId);
     return { payment, receipt, reconciliation };
   };
 

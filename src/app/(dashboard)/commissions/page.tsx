@@ -18,7 +18,8 @@ import { withTenantTransaction } from "@/lib/organization-context";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { commissionOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { buildTableHref, readTablePage, readTableSort } from "@/lib/table-query";
-import { compareCommissionStatusDesc, compareDateAsc } from "@/lib/sorting";
+import { CommissionImportForm } from "@/components/commissions/commission-import-form";
+import { SavedQueueControls } from "@/components/queues/saved-queue-controls";
 
 export default async function CommissionsPage({
   searchParams,
@@ -73,6 +74,8 @@ export default async function CommissionsPage({
         where: openWhere,
         include: { client: true, insurer: true, policy: true, receipt: true },
         orderBy: sortKey ? orderBy : [{ expectedDate: "asc" }, { id: "asc" }],
+        skip: (page - 1) * DEFAULT_PAGE_SIZE,
+        take: DEFAULT_PAGE_SIZE,
       }),
       paidCommissions: await db.commission.findMany({
         where: { ...commissionOperationalWhere(scope.portfolioOwnerId, scope.organizationId), status: "PAID" },
@@ -84,16 +87,6 @@ export default async function CommissionsPage({
   ]);
   const { openCount, openCommissions, paidCommissions } = directCommissionData;
 
-  const orderedOpenCommissions = [...openCommissions].sort((left, right) => (
-    compareCommissionStatusDesc(left.status, right.status) ||
-    compareDateAsc(left.expectedDate, right.expectedDate) ||
-    right.createdAt.getTime() - left.createdAt.getTime() ||
-    left.id.localeCompare(right.id)
-  ));
-  const pagedOpenCommissions = sortKey && sortKey !== "status"
-    ? openCommissions.slice((page - 1) * DEFAULT_PAGE_SIZE, page * DEFAULT_PAGE_SIZE)
-    : orderedOpenCommissions.slice((page - 1) * DEFAULT_PAGE_SIZE, page * DEFAULT_PAGE_SIZE);
-
   const ratio = stats.totalExpected ? Math.round((stats.totalActual / stats.totalExpected) * 100) : 0;
   type CommissionRow = (typeof openCommissions)[number];
   type CommissionWithRelations = CommissionRow & {
@@ -104,25 +97,19 @@ export default async function CommissionsPage({
   };
   const hasRelations = (commission: CommissionRow): commission is CommissionWithRelations =>
     Boolean(commission.policy && commission.client && commission.insurer && commission.receipt);
-  const safeOpenCommissions = pagedOpenCommissions.filter(hasRelations);
+  const safeOpenCommissions = openCommissions.filter(hasRelations);
   const safePaidCommissions = paidCommissions.filter(hasRelations);
   const paidCount = stats.statusBreakdown.find(({ status }) => status === "PAID")?.count ?? 0;
 
   return (
     <div className="flex flex-col gap-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
+        <SavedQueueControls route="commissions" config={{ route: "commissions", search: query, filters: {}, sort: sortKey ?? "", dateWindow: "30d", version: 1 }} />
         <PageHeader
           eyebrow="Finanzas"
           title="Comisiones y bonos"
           description="Seguimiento de comisiones esperadas, cobradas y vencidas. Los bonos se incorporarán cuando existan datos reales."
-          actions={
-            <Button asChild>
-              <Link href="/reports">
-                Reportes
-                <ArrowRight className="ml-2 size-4" />
-              </Link>
-            </Button>
-          }
+          actions={<div className="flex flex-wrap items-center gap-2"><CommissionImportForm /><Button asChild><Link href="/reports">Reportes<ArrowRight className="ml-2 size-4" /></Link></Button></div>}
         />
 
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">

@@ -35,6 +35,20 @@ export const notificationEventCatalog = [
     defaultEnabled: true,
     defaultMinPriority: "LOW",
   },
+  {
+    eventType: "CLAIM_FOLLOWUP",
+    title: "Seguimiento de siniestros",
+    description: "Avisa sobre requisitos o fechas de siniestros vencidos.",
+    defaultEnabled: true,
+    defaultMinPriority: "MEDIUM",
+  },
+  {
+    eventType: "COLLECTION_FOLLOWUP",
+    title: "Seguimiento de cobranza",
+    description: "Avisa sobre promesas de pago y contactos pendientes.",
+    defaultEnabled: true,
+    defaultMinPriority: "MEDIUM",
+  },
 ] as const;
 
 export type NotificationEventType = (typeof notificationEventCatalog)[number]["eventType"];

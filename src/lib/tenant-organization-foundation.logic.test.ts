@@ -30,7 +30,8 @@ describe("tenant organization transition foundation", () => {
     const migration = fs.readFileSync(path.join(process.cwd(), "prisma/migrations/20260803000000_organization_transition/migration.sql"), "utf8");
     const additiveMigration = fs.readFileSync(path.join(process.cwd(), "prisma/migrations/20260813000000_nora_hybrid_agent/migration.sql"), "utf8");
     const knowledgeMigration = fs.readFileSync(path.join(process.cwd(), "prisma/migrations/20260817000000_knowledge_base/migration.sql"), "utf8");
-    const allGuardSql = `${migration}\n${additiveMigration}\n${knowledgeMigration}`;
+    const operationalMigration = fs.readFileSync(path.join(process.cwd(), "prisma/migrations/20260913000000_operational_followups_and_review_models/migration.sql"), "utf8");
+    const allGuardSql = `${migration}\n${additiveMigration}\n${knowledgeMigration}\n${operationalMigration}`;
     expect(migration).toContain("org_legacy_singleton_0001");
     expect(migration).toContain("Organization_transition_singleton_idx");
     expect(migration).toContain("policydesk_assign_singleton_organization");

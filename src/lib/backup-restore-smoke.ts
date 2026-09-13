@@ -29,6 +29,11 @@ const TABLE_CHECKS = [
   ["notificationchannel_table_readable", "NotificationChannel"],
   ["notificationpreference_table_readable", "NotificationPreference"],
   ["notificationevent_table_readable", "NotificationEvent"],
+  ["commissionstatement_table_readable", "CommissionStatement"],
+  ["commissionstatementrow_table_readable", "CommissionStatementRow"],
+  ["commissioncorrection_table_readable", "CommissionCorrection"],
+  ["quotecomparison_table_readable", "QuoteComparison"],
+  ["quotecomparisonitem_table_readable", "QuoteComparisonItem"],
 ] as const;
 
 function requiredCheckNames() {

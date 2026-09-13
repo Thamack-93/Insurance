@@ -1,0 +1,48 @@
+name: PolicyDesk external monitoring
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  availability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check liveness
+        env:
+          APP_URL: ${{ vars.POLICYDESK_MONITOR_URL }}
+          MONITOR_TOKEN: ${{ secrets.POLICYDESK_MONITOR_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$APP_URL"
+          curl --fail --silent --show-error --max-time 10 \
+            -H "Authorization: Bearer $MONITOR_TOKEN" \
+            "$APP_URL/api/health" >/tmp/policydesk-health.json
+      - name: Check readiness
+        env:
+          APP_URL: ${{ vars.POLICYDESK_MONITOR_URL }}
+          MONITOR_TOKEN: ${{ secrets.POLICYDESK_MONITOR_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 10 \
+            -H "Authorization: Bearer $MONITOR_TOKEN" \
+            "$APP_URL/api/ready" >/tmp/policydesk-ready.json
+      - name: Notify monitor failure
+        if: ${{ failure() }}
+        env:
+          ALERT_WEBHOOK: ${{ secrets.POLICYDESK_MONITOR_ALERT_WEBHOOK }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ALERT_WEBHOOK" ]; then
+            echo "Monitoring failed; no alert webhook configured." >&2
+            exit 0
+          fi
+          curl --fail --silent --show-error --max-time 10 \
+            -H 'content-type: application/json' \
+            --data '{"text":"PolicyDesk external monitoring failed. Inspect the GitHub Actions run."}' \
+            "$ALERT_WEBHOOK"

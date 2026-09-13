@@ -131,15 +131,15 @@ enum RenewalStage {
 /// Cycle 1 transition singleton. The PostgreSQL migration owns the temporary
 /// trigger/index implementation; these models expose the additive data shape.
 model Organization {
-  id              String   @id
+  id              String    @id
   name            String
-  slug            String   @unique
-  kind            String   @default("CUSTOMER")
-  status          String   @default("ACTIVE")
-  timeZone        String   @default("Etc/GMT+6")
-  defaultCurrency String   @default("MXN")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @default(now()) @updatedAt
+  slug            String    @unique
+  kind            String    @default("CUSTOMER")
+  status          String    @default("ACTIVE")
+  timeZone        String    @default("Etc/GMT+6")
+  defaultCurrency String    @default("MXN")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @default(now()) @updatedAt
   activatedAt     DateTime?
 
   memberships                 OrganizationMembership[]
@@ -179,6 +179,9 @@ model Organization {
   knowledgeSources            KnowledgeSource[]
   knowledgeChunks             KnowledgeChunk[]
   alerts                      Alert[]
+  commissionStatements        CommissionStatement[]
+  commissionCorrections       CommissionCorrection[]
+  quoteComparisons            QuoteComparison[]
   securityEventAggregates     SecurityEventAggregate[]
   platformAuditTargets        PlatformAuditLog[]           @relation("PlatformAuditTargetOrganization")
   backupArtifacts             BackupArtifact[]
@@ -189,6 +192,8 @@ model Organization {
   settings                    OrganizationSetting[]
   demoState                   DemoOrganizationState?
   demoUploadArtifacts         DemoUploadArtifact[]
+  commissionStatementRows     CommissionStatementRow[]
+  quoteComparisonItems        QuoteComparisonItem[]
 
   @@index([status])
   @@index([kind])
@@ -248,6 +253,7 @@ model User {
   reversedPayments                    Payment[]                    @relation("PaymentReversedBy")
   createdClaims                       Claim[]                      @relation("ClaimCreatedBy")
   updatedClaims                       Claim[]                      @relation("ClaimUpdatedBy")
+  assignedClaims                      Claim[]                      @relation("ClaimAssignedTo")
   createdQuotes                       Quote[]                      @relation("QuoteCreatedBy")
   updatedQuotes                       Quote[]                      @relation("QuoteUpdatedBy")
   createdTasks                        Task[]                       @relation("TaskCreatedBy")
@@ -255,6 +261,7 @@ model User {
   createdWorkItems                    WorkItem[]                   @relation("WorkItemCreatedBy")
   updatedWorkItems                    WorkItem[]                   @relation("WorkItemUpdatedBy")
   assignedWorkItems                   WorkItem[]                   @relation("WorkItemAssignedTo")
+  assignedClaimChecklistItems         ClaimChecklistItem[]         @relation("ClaimChecklistAssignedTo")
   createdDocuments                    Document[]                   @relation("DocumentCreatedBy")
   updatedDocuments                    Document[]                   @relation("DocumentUpdatedBy")
   notificationChannels                NotificationChannel[]        @relation("NotificationChannelUser")
@@ -269,6 +276,10 @@ model User {
   mergedRenewalSuggestions            PolicyRenewalSuggestion[]    @relation("PolicyRenewalSuggestionMergedBy")
   createdLedgerImportBatches          LedgerImportBatch[]          @relation("LedgerImportBatchCreatedBy")
   approvedLedgerImportBatches         LedgerImportBatch[]          @relation("LedgerImportBatchApprovedBy")
+  createdCommissionStatements         CommissionStatement[]        @relation("CommissionStatementCreatedBy")
+  approvedCommissionStatements        CommissionStatement[]        @relation("CommissionStatementApprovedBy")
+  performedCommissionCorrections      CommissionCorrection[]       @relation("CommissionCorrectionActor")
+  createdQuoteComparisons             QuoteComparison[]            @relation("QuoteComparisonCreatedBy")
   reviewedLedgerImportIssues          LedgerImportIssue[]          @relation("LedgerImportIssueReviewedBy")
   mergedLedgerImportIssues            LedgerImportIssue[]          @relation("LedgerImportIssueMergedBy")
   performedLedgerImportActions        LedgerImportAction[]         @relation("LedgerImportActionPerformedBy")
@@ -359,21 +370,21 @@ model BillingCharge {
 model Client {
   organizationId         String
   organization           Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id                     String        @id @default(cuid())
+  id                     String       @id @default(cuid())
   fullName               String
-  type                   String        @default("PERSON")
+  type                   String       @default("PERSON")
   email                  String?
   phone                  String?
   secondaryPhone         String?
   rfc                    String?
   address                String?
-  birthDate              DateTime?     @db.Date
+  birthDate              DateTime?    @db.Date
   preferredContactMethod String?
   referidorId            String?
   notes                  String?
-  status                 EntityStatus  @default(ACTIVE)
-  createdAt              DateTime      @default(now())
-  updatedAt              DateTime      @updatedAt
+  status                 EntityStatus @default(ACTIVE)
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
   createdById            String?
   updatedById            String?
   portfolioOwnerId       String?
@@ -390,6 +401,7 @@ model Client {
   tasks              Task[]
   claims             Claim[]
   quotes             Quote[]
+  quoteComparisons   QuoteComparison[]
   documents          Document[]
   workItems          WorkItem[]
   notificationEvents NotificationEvent[]
@@ -428,7 +440,7 @@ model PlatformAuditLog {
 model Insurer {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   name           String
   portalUrl      String?
   agentPortalUrl String?
@@ -436,9 +448,9 @@ model Insurer {
   contactEmail   String?
   contactPhone   String?
   notes          String?
-  status         EntityStatus  @default(ACTIVE)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  status         EntityStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   policies    Policy[]
   receipts    Receipt[]
@@ -456,32 +468,32 @@ model Insurer {
 model Policy {
   organizationId      String
   organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id                  String        @id @default(cuid())
+  id                  String       @id @default(cuid())
   policyNumber        String
   clientId            String
   insurerId           String
   policyType          String
-  status              PolicyStatus  @default(ACTIVE)
+  status              PolicyStatus @default(ACTIVE)
   startDate           DateTime
   endDate             DateTime
   premiumAmount       Decimal
-  currency            String        @default("MXN")
+  currency            String       @default("MXN")
   paymentFrequency    String
   paymentPlan         String?
   insuredObject       String?
   beneficiaryInfo     String?
   notes               String?
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
   createdById         String?
   updatedById         String?
   familyRootId        String?
   renewedFromPolicyId String?
-  isMultiYearContract Boolean       @default(false)
+  isMultiYearContract Boolean      @default(false)
   cancellationReason  String?
   cancellationBatchId String?
   cancelledAt         DateTime?
-  renewalStage        RenewalStage  @default(PENDING)
+  renewalStage        RenewalStage @default(PENDING)
   renewalStageAt      DateTime?
   renewalStageById    String?
 
@@ -528,7 +540,7 @@ model Policy {
 
 model Receipt {
   organizationId           String
-  organization             Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organization             Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                       String        @id @default(cuid())
   receiptNumber            String
   /// Numeric suffix used only for stable human ordering; the displayed
@@ -592,7 +604,7 @@ model Receipt {
 
 model PolicyEndorsement {
   organizationId    String
-  organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organization      Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                String            @id @default(cuid())
   endorsementNumber String
   policyId          String
@@ -629,7 +641,7 @@ model PolicyEndorsement {
 
 model Payment {
   organizationId    String
-  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organization      Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id                String        @id @default(cuid())
   receiptId         String
   policyId          String
@@ -671,7 +683,7 @@ model Payment {
 
 model Commission {
   organizationId String
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String           @id @default(cuid())
   policyId       String
   receiptId      String?
@@ -686,11 +698,14 @@ model Commission {
   notes          String?
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
+  version        Int              @default(1)
 
-  policy  Policy   @relation(fields: [policyId], references: [id], onDelete: Cascade)
-  receipt Receipt? @relation(fields: [receiptId], references: [id], onDelete: SetNull)
-  client  Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  insurer Insurer  @relation(fields: [insurerId], references: [id], onDelete: Restrict)
+  policy        Policy                   @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  receipt       Receipt?                 @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  client        Client                   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  insurer       Insurer                  @relation(fields: [insurerId], references: [id], onDelete: Restrict)
+  statementRows CommissionStatementRow[]
+  corrections   CommissionCorrection[]
 
   @@index([policyId])
   @@index([receiptId])
@@ -704,7 +719,7 @@ model Commission {
 model Task {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   folio          String
   clientId       String?
   policyId       String?
@@ -712,15 +727,16 @@ model Task {
   receiptId      String?
   title          String
   description    String?
-  taskType       String        @default("GENERAL")
-  status         TaskStatus    @default(OPEN)
-  priority       String        @default("MEDIUM")
-  startDate      DateTime      @default(now())
+  taskType       String       @default("GENERAL")
+  status         TaskStatus   @default(OPEN)
+  priority       String       @default("MEDIUM")
+  startDate      DateTime     @default(now())
   dueDate        DateTime?
   closedDate     DateTime?
   notes          String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  version        Int          @default(1)
   createdById    String?
   updatedById    String?
 
@@ -747,7 +763,7 @@ model Task {
 
 model WorkItem {
   organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id             String         @id @default(cuid())
   sourceType     String?
   sourceId       String?
@@ -778,6 +794,8 @@ model WorkItem {
   createdById    String?
   updatedById    String?
   assignedToId   String?
+  version        Int            @default(1)
+  metadataJson   String?
 
   client             Client?             @relation(fields: [clientId], references: [id], onDelete: SetNull)
   policy             Policy?             @relation(fields: [policyId], references: [id], onDelete: SetNull)
@@ -810,30 +828,34 @@ model WorkItem {
 model Claim {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   folio          String
   clientId       String
   policyId       String
   insurerId      String
   claimType      String
   description    String?
-  status         ClaimStatus   @default(OPEN)
+  status         ClaimStatus  @default(OPEN)
   incidentDate   DateTime
   reportedDate   DateTime
   closedDate     DateTime?
   amountClaimed  Decimal?
   amountPaid     Decimal?
   notes          String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
   createdById    String?
   updatedById    String?
+  assignedToId   String?
+  dueDate        DateTime?
+  version        Int          @default(1)
 
   client         Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)
   policy         Policy               @relation(fields: [policyId], references: [id], onDelete: Cascade)
   insurer        Insurer              @relation(fields: [insurerId], references: [id], onDelete: Restrict)
   createdBy      User?                @relation("ClaimCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   updatedBy      User?                @relation("ClaimUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  assignedTo     User?                @relation("ClaimAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
   documents      Document[]
   checklistItems ClaimChecklistItem[]
 
@@ -845,11 +867,12 @@ model Claim {
   @@index([createdById])
   @@index([updatedById])
   @@index([organizationId])
+  @@index([assignedToId, dueDate])
 }
 
 model ClaimChecklistItem {
   organizationId  String
-  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organization    Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   id              String               @id @default(cuid())
   claimId         String
   documentId      String?
@@ -861,40 +884,47 @@ model ClaimChecklistItem {
   waivedAt        DateTime?
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
+  assignedToId    String?
+  dueDate         DateTime?
+  version         Int                  @default(1)
 
-  claim    Claim     @relation(fields: [claimId], references: [id], onDelete: Cascade)
-  document Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  claim      Claim     @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  document   Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  assignedTo User?     @relation("ClaimChecklistAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
 
   @@unique([claimId, requirementCode])
   @@index([claimId])
   @@index([documentId])
   @@index([status])
   @@index([organizationId])
+  @@index([assignedToId, dueDate])
 }
 
 model Quote {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   clientId       String
   insurerId      String?
   policyType     String
-  status         QuoteStatus   @default(REQUESTED)
+  status         QuoteStatus  @default(REQUESTED)
   requestedDate  DateTime
   sentDate       DateTime?
   validUntil     DateTime?
   quotedAmount   Decimal?
   notes          String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
   createdById    String?
   updatedById    String?
+  version        Int          @default(1)
 
-  client    Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  insurer   Insurer?   @relation(fields: [insurerId], references: [id], onDelete: SetNull)
-  createdBy User?      @relation("QuoteCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy User?      @relation("QuoteUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-  documents Document[]
+  client          Client                @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  insurer         Insurer?              @relation(fields: [insurerId], references: [id], onDelete: SetNull)
+  createdBy       User?                 @relation("QuoteCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy       User?                 @relation("QuoteUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  documents       Document[]
+  comparisonItems QuoteComparisonItem[]
 
   @@index([clientId])
   @@index([insurerId])
@@ -909,7 +939,7 @@ model Quote {
 model Document {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   clientId       String?
   policyId       String?
   endorsementId  String?
@@ -917,14 +947,16 @@ model Document {
   taskId         String?
   claimId        String?
   quoteId        String?
-  documentType   String        @default("OTHER")
+  documentType   String       @default("OTHER")
   fileName       String
   filePath       String
   mimeType       String
-  uploadedAt     DateTime      @default(now())
+  uploadedAt     DateTime     @default(now())
   notes          String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  version        Int          @default(1)
+  metadataJson   String?
   createdById    String?
   updatedById    String?
 
@@ -1133,23 +1165,23 @@ model Session {
 /// DEMO-only lifecycle state. A single row exists for each DEMO organization;
 /// users, memberships, subscription and capabilities survive resets.
 model DemoOrganizationState {
-  organizationId  String    @id
-  seedVersion     String
-  trialEndsAt     DateTime
-  realDataResetAt DateTime?
-  lastResetAt     DateTime?
-  resetStatus     String    @default("IDLE")
-  resetPhase      String    @default("IDLE")
-  resetAttemptId  String?   @unique
-  resetRequestId  String?
-  resetStartedAt  DateTime?
-  resetHeartbeatAt DateTime?
+  organizationId      String    @id
+  seedVersion         String
+  trialEndsAt         DateTime
+  realDataResetAt     DateTime?
+  lastResetAt         DateTime?
+  resetStatus         String    @default("IDLE")
+  resetPhase          String    @default("IDLE")
+  resetAttemptId      String?   @unique
+  resetRequestId      String?
+  resetStartedAt      DateTime?
+  resetHeartbeatAt    DateTime?
   resetLeaseExpiresAt DateTime?
-  resetAttempts   Int       @default(0)
-  resetFailure    String?
-  dataVersion     Int       @default(1)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  resetAttempts       Int       @default(0)
+  resetFailure        String?
+  dataVersion         Int       @default(1)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
@@ -1160,27 +1192,27 @@ model DemoOrganizationState {
 
 /// Private Blob provenance and purge ledger for DEMO uploads.
 model DemoUploadArtifact {
-  id             String    @id @default(cuid())
-  organizationId String
-  userId         String
-  blobPath       String    @unique
-  kind           String    @default("POLICY_DOCUMENT")
-  uploadedAt     DateTime  @default(now())
-  purgeAfterAt   DateTime
-  expiresAt      DateTime
-  deletedAt      DateTime?
-  lastPurgeAt    DateTime?
+  id                    String    @id @default(cuid())
+  organizationId        String
+  userId                String
+  blobPath              String    @unique
+  kind                  String    @default("POLICY_DOCUMENT")
+  uploadedAt            DateTime  @default(now())
+  purgeAfterAt          DateTime
+  expiresAt             DateTime
+  deletedAt             DateTime?
+  lastPurgeAt           DateTime?
   blobDeleteConfirmedAt DateTime?
-  purgeBreachAt  DateTime?
-  dataVersion    Int       @default(1)
-  status         String    @default("ACTIVE")
-  sizeBytes      Int?
-  sha256         String?
-  detectedMimeType String?
-  validationStatus String   @default("ACCEPTED")
-  validatedAt    DateTime?
-  purgeAttempts  Int       @default(0)
-  lastPurgeFailureCode String?
+  purgeBreachAt         DateTime?
+  dataVersion           Int       @default(1)
+  status                String    @default("ACTIVE")
+  sizeBytes             Int?
+  sha256                String?
+  detectedMimeType      String?
+  validationStatus      String    @default("ACCEPTED")
+  validatedAt           DateTime?
+  purgeAttempts         Int       @default(0)
+  lastPurgeFailureCode  String?
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1265,13 +1297,13 @@ model OrganizationRestoreRun {
 model ActivityLog {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   entityType     String
   entityId       String
   action         String
   oldValue       String?
   newValue       String?
-  createdAt      DateTime      @default(now())
+  createdAt      DateTime     @default(now())
   userId         String
 
   @@index([entityType, entityId])
@@ -1285,7 +1317,7 @@ model ActivityLog {
 model AssistantActionDraft {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   userId         String
   title          String
   summary        String
@@ -1295,12 +1327,12 @@ model AssistantActionDraft {
   targetLabel    String?
   payloadJson    String
   resultJson     String?
-  status         String        @default("PENDING")
+  status         String       @default("PENDING")
   expiresAt      DateTime
   confirmedAt    DateTime?
   cancelledAt    DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   user User @relation("AssistantActionDraftUser", fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1333,14 +1365,14 @@ model NotificationChannel {
 model NotificationPreference {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   userId         String
   eventType      String
   channelType    String
-  enabled        Boolean       @default(true)
-  minPriority    String        @default("MEDIUM")
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  enabled        Boolean      @default(true)
+  minPriority    String       @default("MEDIUM")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   user User @relation("NotificationPreferenceUser", fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1354,11 +1386,11 @@ model NotificationPreference {
 model NotificationEvent {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   type           String
   title          String
   body           String
-  priority       String        @default("MEDIUM")
+  priority       String       @default("MEDIUM")
   userId         String
   workItemId     String?
   clientId       String?
@@ -1366,11 +1398,11 @@ model NotificationEvent {
   receiptId      String?
   dedupeKey      String?
   channelType    String
-  status         String        @default("PENDING")
+  status         String       @default("PENDING")
   sentAt         DateTime?
   error          String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   user     User      @relation("NotificationEventUser", fields: [userId], references: [id], onDelete: Cascade)
   workItem WorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
@@ -1394,13 +1426,13 @@ model NotificationEvent {
 model PolicyInsuredParty {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   policyId       String
   fullName       String
-  isPrimary      Boolean       @default(false)
+  isPrimary      Boolean      @default(false)
   sourceLabel    String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   policy Policy @relation(fields: [policyId], references: [id], onDelete: Cascade)
 
@@ -1414,14 +1446,14 @@ model PolicyInsuredParty {
 model PolicyInsuredAsset {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   policyId       String
   assetType      String
   description    String
   serialNumber   String?
-  isPrimary      Boolean       @default(false)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  isPrimary      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   policy Policy @relation(fields: [policyId], references: [id], onDelete: Cascade)
 
@@ -1436,12 +1468,12 @@ model PolicyInsuredAsset {
 model TelegramLinkToken {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   userId         String
-  tokenHash      String        @unique
+  tokenHash      String       @unique
   expiresAt      DateTime
   usedAt         DateTime?
-  createdAt      DateTime      @default(now())
+  createdAt      DateTime     @default(now())
 
   user User @relation("TelegramLinkTokenUser", fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1454,19 +1486,19 @@ model TelegramLinkToken {
 model LedgerImportBatch {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   sourceCsvName  String
   sourceCsvHash  String
   sourcePaidName String
   sourcePaidHash String
-  status         String        @default("PREVIEW")
+  status         String       @default("PREVIEW")
   summaryJson    String?
   createdById    String?
   approvedById   String?
   approvedAt     DateTime?
   appliedAt      DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   createdBy  User?                @relation("LedgerImportBatchCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   approvedBy User?                @relation("LedgerImportBatchApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
@@ -1484,7 +1516,7 @@ model LedgerImportBatch {
 model LedgerImportRow {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   batchId        String
   sourceType     String
   rowNumber      Int
@@ -1492,12 +1524,12 @@ model LedgerImportRow {
   rawJson        String
   normalizedJson String?
   action         String
-  status         String        @default("PENDING")
+  status         String       @default("PENDING")
   policyId       String?
   receiptId      String?
   paymentId      String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   batch   LedgerImportBatch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
   actions LedgerImportAction[]
@@ -1516,13 +1548,13 @@ model LedgerImportRow {
 model LedgerImportAction {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   batchId        String
   rowId          String?
   actionType     String
   payloadJson    String?
   performedById  String?
-  createdAt      DateTime      @default(now())
+  createdAt      DateTime     @default(now())
 
   batch       LedgerImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
   row         LedgerImportRow?  @relation(fields: [rowId], references: [id], onDelete: SetNull)
@@ -1539,12 +1571,12 @@ model LedgerImportAction {
 model LedgerImportIssue {
   organizationId     String
   organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id                 String        @id @default(cuid())
+  id                 String       @id @default(cuid())
   batchId            String
   rowId              String?
   issueType          String
   severity           String
-  status             String        @default("OPEN")
+  status             String       @default("OPEN")
   message            String
   detailsJson        String?
   suppressedByRuleId String?
@@ -1554,8 +1586,8 @@ model LedgerImportIssue {
   reviewedAt         DateTime?
   reviewedById       String?
   resolutionNote     String?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
   batch            LedgerImportBatch           @relation(fields: [batchId], references: [id], onDelete: Cascade)
   row              LedgerImportRow?            @relation(fields: [rowId], references: [id], onDelete: SetNull)
@@ -1581,17 +1613,17 @@ model LedgerImportIssue {
 model TelegramDraft {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   userId         String
   channelId      String?
   type           String
-  status         String        @default("COLLECTING")
+  status         String       @default("COLLECTING")
   payloadJson    String
   expiresAt      DateTime
   confirmedAt    DateTime?
   cancelledAt    DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   user    User                 @relation("TelegramDraftUser", fields: [userId], references: [id], onDelete: Cascade)
   channel NotificationChannel? @relation("TelegramDraftChannel", fields: [channelId], references: [id], onDelete: SetNull)
@@ -1608,15 +1640,15 @@ model TelegramDraft {
 model MaintenanceRun {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   type           String
-  status         String        @default("PENDING")
+  status         String       @default("PENDING")
   summaryJson    String?
-  startedAt      DateTime      @default(now())
+  startedAt      DateTime     @default(now())
   completedAt    DateTime?
   createdById    String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   createdBy                   User?                        @relation("MaintenanceRunCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   receiptReconciliationIssues ReceiptReconciliationIssue[]
@@ -1632,12 +1664,12 @@ model MaintenanceRun {
 model ReceiptReconciliationIssue {
   organizationId     String
   organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id                 String        @id @default(cuid())
+  id                 String       @id @default(cuid())
   maintenanceRunId   String?
   receiptId          String?
   policyId           String?
   reason             String
-  status             String        @default("OPEN")
+  status             String       @default("OPEN")
   detailsJson        String?
   expectedAmount     Decimal?
   paidAmount         Decimal?
@@ -1648,8 +1680,8 @@ model ReceiptReconciliationIssue {
   reviewedAt         DateTime?
   reviewedById       String?
   resolutionNote     String?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
   maintenanceRun   MaintenanceRun?              @relation(fields: [maintenanceRunId], references: [id], onDelete: SetNull)
   receipt          Receipt?                     @relation(fields: [receiptId], references: [id], onDelete: SetNull)
@@ -1676,11 +1708,11 @@ model ReceiptReconciliationIssue {
 model PolicyRenewalSuggestion {
   organizationId     String
   organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id                 String        @id @default(cuid())
+  id                 String       @id @default(cuid())
   maintenanceRunId   String?
   sourcePolicyId     String
   targetPolicyId     String?
-  status             String        @default("PENDING")
+  status             String       @default("PENDING")
   confidence         Decimal?
   reason             String?
   suppressedByRuleId String?
@@ -1690,8 +1722,8 @@ model PolicyRenewalSuggestion {
   reviewedAt         DateTime?
   reviewedById       String?
   resolutionNote     String?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
   maintenanceRun   MaintenanceRun?             @relation(fields: [maintenanceRunId], references: [id], onDelete: SetNull)
   sourcePolicy     Policy                      @relation("PolicyRenewalSuggestionSource", fields: [sourcePolicyId], references: [id], onDelete: Cascade)
@@ -1719,18 +1751,18 @@ model PolicyRenewalSuggestion {
 model DataQualitySuppressionRule {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   category       String
   issueCode      String
   criteriaJson   String
-  active         Boolean       @default(true)
+  active         Boolean      @default(true)
   reason         String?
   expiresAt      DateTime?
   createdById    String?
   reviewedAt     DateTime?
   reviewedById   String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   createdBy          User?                        @relation("DataQualitySuppressionRuleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   reviewedBy         User?                        @relation("DataQualitySuppressionRuleReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
@@ -1751,12 +1783,12 @@ model DataQualitySuppressionRule {
 model AssistantReport {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   kind           String
   themeKey       String
   themeLabel     String
-  status         String        @default("COLLECTING")
-  version        Int           @default(1)
+  status         String       @default("COLLECTING")
+  version        Int          @default(1)
   parentReportId String?
   title          String
   summary        String
@@ -1764,16 +1796,16 @@ model AssistantReport {
   plan           String
   evidenceJson   String
   detailsJson    String
-  signalCount    Int           @default(0)
-  severity       String        @default("MEDIUM")
+  signalCount    Int          @default(0)
+  severity       String       @default("MEDIUM")
   firstSignalAt  DateTime
   lastSignalAt   DateTime
   openedAt       DateTime?
   resolvedAt     DateTime?
   archivedAt     DateTime?
   deletedAt      DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   parentReport AssistantReport?        @relation("AssistantReportChildren", fields: [parentReportId], references: [id], onDelete: SetNull)
   childReports AssistantReport[]       @relation("AssistantReportChildren")
@@ -1793,14 +1825,14 @@ model AssistantReport {
 model AssistantReportSignal {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   reportId       String
   signalKind     String
   source         String
   title          String
   inputJson      String
   outputJson     String
-  createdAt      DateTime      @default(now())
+  createdAt      DateTime     @default(now())
 
   report AssistantReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
@@ -1814,16 +1846,16 @@ model AssistantReportSignal {
 model AssistantAiRun {
   organizationId       String
   organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id                   String        @id @default(cuid())
+  id                   String       @id @default(cuid())
   userId               String
   userRole             String
   operation            String
   tier                 String
   requestedModel       String
   finalModel           String?
-  status               String        @default("RUNNING")
-  attemptCount         Int           @default(0)
-  fallbackCount        Int           @default(0)
+  status               String       @default("RUNNING")
+  attemptCount         Int          @default(0)
+  fallbackCount        Int          @default(0)
   fallbackReason       String?
   reportId             String?
   errorCode            String?
@@ -1836,8 +1868,8 @@ model AssistantAiRun {
   responsePreview      String?
   estimatedCostUsd     Decimal?
   durationMs           Int?
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
 
   user     User                 @relation("AssistantAiRunUser", fields: [userId], references: [id], onDelete: Cascade)
   report   AssistantReport?     @relation(fields: [reportId], references: [id], onDelete: SetNull)
@@ -1858,13 +1890,13 @@ model AssistantAiRun {
 model AssistantAiAttempt {
   organizationId       String
   organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id                   String        @id @default(cuid())
+  id                   String       @id @default(cuid())
   runId                String
   attemptNumber        Int
   tier                 String
   requestedModel       String
   finalModel           String?
-  status               String        @default("STARTED")
+  status               String       @default("STARTED")
   fallbackReason       String?
   provider             String?
   errorCode            String?
@@ -1877,8 +1909,8 @@ model AssistantAiAttempt {
   providerMetadataJson String?
   durationMs           Int?
   estimatedCostUsd     Decimal?
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
 
   run AssistantAiRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
@@ -1895,7 +1927,7 @@ model AssistantAiAttempt {
 model Alert {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   alertType      String
   severity       String
   title          String
@@ -1908,10 +1940,10 @@ model Alert {
   clientId       String?
   policyId       String?
   receiptId      String?
-  status         AlertStatus   @default(OPEN)
+  status         AlertStatus  @default(OPEN)
   readAt         DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   client    Client?    @relation(fields: [clientId], references: [id], onDelete: Cascade)
   policy    Policy?    @relation(fields: [policyId], references: [id], onDelete: Cascade)
@@ -1957,4 +1989,139 @@ model TelegramWebhookUpdate {
   receivedAt DateTime @default(now())
 
   @@index([receivedAt])
+}
+
+/// Reviewed insurer statement imported for commission reconciliation.
+model CommissionStatement {
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  id             String       @id @default(cuid())
+  sourceFileName String
+  sourceFilePath String?
+  mimeType       String
+  sourceHash     String
+  periodStart    DateTime?
+  periodEnd      DateTime?
+  status         String       @default("REVIEW")
+  summaryJson    String?
+  version        Int          @default(1)
+  createdById    String?
+  approvedById   String?
+  approvedAt     DateTime?
+  appliedAt      DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  createdBy  User?                    @relation("CommissionStatementCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  approvedBy User?                    @relation("CommissionStatementApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  rows       CommissionStatementRow[]
+
+  @@unique([organizationId, sourceHash])
+  @@index([organizationId, status])
+  @@index([organizationId])
+  @@index([createdAt])
+}
+
+model CommissionStatementRow {
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  id                String       @id @default(cuid())
+  statementId       String
+  sourceRowKey      String
+  sourcePage        Int?
+  rawJson           String
+  normalizedJson    String?
+  policyNumber      String?
+  receiptNumber     String?
+  currency          String?
+  amount            Decimal?
+  paymentDate       DateTime?
+  status            String       @default("REVIEW")
+  matchReason       String?
+  discrepancyReason String?
+  commissionId      String?
+  version           Int          @default(1)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  statement  CommissionStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  commission Commission?         @relation(fields: [commissionId], references: [id], onDelete: SetNull)
+  corrections CommissionCorrection[]
+
+  @@unique([statementId, sourceRowKey])
+  @@index([organizationId, status])
+  @@index([organizationId])
+  @@index([commissionId])
+  @@index([policyNumber])
+  @@index([receiptNumber])
+}
+
+/// Immutable administrator correction linked to an original commission application.
+model CommissionCorrection {
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  id                String @id @default(cuid())
+  commissionId      String
+  statementRowId    String?
+  actorId           String
+  reason            String
+  priorValuesJson   String
+  currentValuesJson String
+  evidenceJson      String?
+  version           Int @default(1)
+  createdAt         DateTime @default(now())
+
+  commission   Commission             @relation(fields: [commissionId], references: [id], onDelete: Restrict)
+  statementRow CommissionStatementRow? @relation(fields: [statementRowId], references: [id], onDelete: SetNull)
+  actor        User                   @relation("CommissionCorrectionActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, commissionId])
+  @@index([organizationId, createdAt])
+  @@index([statementRowId])
+}
+
+/// A reviewed set of alternative quotes for one client and product line.
+model QuoteComparison {
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  id              String       @id @default(cuid())
+  clientId        String
+  policyType      String
+  status          String       @default("DRAFT")
+  selectedQuoteId String?
+  selectedAt      DateTime?
+  selectionReason String?
+  version         Int          @default(1)
+  createdById     String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  client    Client                @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdBy User?                 @relation("QuoteComparisonCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  items     QuoteComparisonItem[]
+
+  @@index([organizationId, clientId])
+  @@index([organizationId])
+  @@index([status])
+}
+
+model QuoteComparisonItem {
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  id               String       @id @default(cuid())
+  comparisonId     String
+  quoteId          String
+  termsJson        String?
+  sourceDocumentId String?
+  reviewStatus     String       @default("REVIEW")
+  version          Int          @default(1)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  comparison QuoteComparison @relation(fields: [comparisonId], references: [id], onDelete: Cascade)
+  quote      Quote           @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@unique([comparisonId, quoteId])
+  @@index([organizationId])
+  @@index([quoteId])
 }
