@@ -393,6 +393,13 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Validate sanitized production environment contract
+        env:
+          RELEASE_ENVIRONMENT: production
+        run: |
+          mkdir -p artifacts/production-verification
+          npm run --silent check:production-platform-env -- --profile=verification --json \
+            > artifacts/production-verification/environment.json
       - name: Run sanitized read-only verifier
         id: verify
         shell: bash
@@ -409,7 +416,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: release-certification-production-${{ github.run_attempt }}
-          path: artifacts/production-verification/production.json
+          path: artifacts/production-verification
           if-no-files-found: error
           retention-days: 30
       - name: Fail certification unless Production verifier is PASS

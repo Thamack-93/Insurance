@@ -281,6 +281,16 @@ export async function reconcileBackupCatalog() {
   const physicalPathnames = new Set(entries.map((entry) => entry.pathname));
   const catalog = await getAllBackupArtifacts();
   for (const artifact of catalog) {
+    // A previously blocked reservation with no corresponding blob is a
+    // terminal invalid artifact after manual reconciliation. Keep the row and
+    // its audit history, but stop counting it as an active blocking incident.
+    // A VERIFIED artifact that disappears remains BLOCKED so the verifier
+    // cannot silently downgrade a previously healthy backup.
+    if (artifact.status === "BLOCKED" && !physicalPathnames.has(artifact.pathname)) {
+      await updateBackupArtifactStatus(artifact.id, "INVALID");
+      invalid += 1;
+      continue;
+    }
     if (artifact.status === "VERIFIED" && !physicalPathnames.has(artifact.pathname)) {
       await updateBackupArtifactStatus(artifact.id, "BLOCKED");
       blocked += 1;

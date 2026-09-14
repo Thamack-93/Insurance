@@ -38,7 +38,7 @@
     "db:sync-work-items": "tsx scripts/backfill-work-items.ts",
     "clean:cache": "node --import tsx scripts/clean-cache.ts cache",
     "clean:artifacts": "node --import tsx scripts/clean-cache.ts artifacts",
-    "check:production-platform-env": "node scripts/check-production-platform-env.mjs",
+    "check:production-platform-env": "node --import tsx scripts/check-production-platform-env.ts",
     "validate-data": "tsx scripts/validate-data-quality.ts",
     "report:birthday-coverage": "tsx scripts/report-birthday-coverage.ts",
     "import:approved-birthdays": "tsx scripts/import-approved-birthdays.ts",

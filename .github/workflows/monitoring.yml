@@ -20,8 +20,14 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$APP_URL"
-          curl --fail --silent --show-error --max-time 10 \
-            "$APP_URL/api/health" >/tmp/policydesk-health.json
+          status="$(curl --silent --show-error --max-time 10 \
+            --output /tmp/policydesk-health.json --write-out '%{http_code}' \
+            "$APP_URL/api/health" || true)"
+          printf '%s' "$status" >/tmp/policydesk-health.status
+          case "$status" in
+            2[0-9][0-9]) ;;
+            *) echo "Liveness failed with HTTP $status" >&2; exit 1 ;;
+          esac
       - name: Check readiness
         env:
           APP_URL: ${{ vars.POLICYDESK_MONITOR_URL || 'https://policypete.vercel.app' }}
@@ -29,17 +35,29 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$MONITOR_TOKEN"
-          curl --fail --silent --show-error --max-time 10 \
+          status="$(curl --silent --show-error --max-time 10 \
+            --output /tmp/policydesk-ready.json --write-out '%{http_code}' \
             -H "Authorization: Bearer $MONITOR_TOKEN" \
-            "$APP_URL/api/ready" >/tmp/policydesk-ready.json
+            "$APP_URL/api/ready" || true)"
+          printf '%s' "$status" >/tmp/policydesk-ready.status
+          case "$status" in
+            2[0-9][0-9]) ;;
+            *) echo "Readiness failed with HTTP $status" >&2; exit 1 ;;
+          esac
       - name: Notify monitor failure
         if: ${{ failure() }}
         env:
           ALERT_WEBHOOK: ${{ secrets.POLICYDESK_MONITOR_ALERT_WEBHOOK }}
         run: |
           set -euo pipefail
+          {
+            echo "### PolicyDesk external monitoring failed"
+            echo "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "- /api/health HTTP: $(cat /tmp/policydesk-health.status 2>/dev/null || echo not-run)"
+            echo "- /api/ready HTTP: $(cat /tmp/policydesk-ready.status 2>/dev/null || echo not-run)"
+          } >> "$GITHUB_STEP_SUMMARY"
           if [ -z "$ALERT_WEBHOOK" ]; then
-            echo "Monitoring failed; no alert webhook configured." >&2
+            echo "Monitoring failed; GitHub Actions is the configured alert channel and no external webhook is configured." >&2
             exit 0
           fi
           curl --fail --silent --show-error --max-time 10 \

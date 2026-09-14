@@ -9,6 +9,12 @@ const updateBackupArtifactStatus = vi.hoisted(() => vi.fn());
 const upsertBackupArtifact = vi.hoisted(() => vi.fn());
 const getPlatformBackupArtifacts = vi.hoisted(() => vi.fn());
 const getOrganizationBackupArtifacts = vi.hoisted(() => vi.fn());
+const listBackups = vi.hoisted(() => vi.fn());
+const listRekeyedBackups = vi.hoisted(() => vi.fn());
+const listEmergencyBackups = vi.hoisted(() => vi.fn());
+const listOrganizationBackups = vi.hoisted(() => vi.fn());
+const getAllBackupArtifacts = vi.hoisted(() => vi.fn());
+const getBackupArtifactByPathname = vi.hoisted(() => vi.fn());
 const markBackupArtifactsPruned = vi.hoisted(() => vi.fn());
 
 vi.mock("server-only", () => ({}));
@@ -19,10 +25,10 @@ vi.mock("@/lib/backup", () => ({
   createOrganizationDatabaseBackup,
   deleteStoredBackup,
   verifyStoredBackup,
-  listBackups: vi.fn(),
-  listRekeyedBackups: vi.fn(),
-  listEmergencyBackups: vi.fn(),
-  listOrganizationBackups: vi.fn(),
+  listBackups,
+  listRekeyedBackups,
+  listEmergencyBackups,
+  listOrganizationBackups,
   GLOBAL_BACKUP_RETENTION_DAYS: 30,
 }));
 vi.mock("@/lib/backup-catalog", () => ({
@@ -32,12 +38,12 @@ vi.mock("@/lib/backup-catalog", () => ({
   getPlatformBackupArtifacts,
   getOrganizationBackupArtifacts,
   markBackupArtifactsPruned,
-  getAllBackupArtifacts: vi.fn(),
-  getBackupArtifactByPathname: vi.fn(),
+  getAllBackupArtifacts,
+  getBackupArtifactByPathname,
 }));
 vi.mock("@/lib/db", () => ({ getDb: vi.fn() }));
 
-import { createAndCatalogBackup } from "./backup-orchestrator";
+import { createAndCatalogBackup, reconcileBackupCatalog } from "./backup-orchestrator";
 
 const target = { filename: "policydesk-20260825T000000000Z-aaaaaaaaaaaa-kv-v2.ndjson.gz.enc", pathname: "database-backups/policydesk-20260825T000000000Z-aaaaaaaaaaaa-kv-v2.ndjson.gz.enc" };
 const manifest = {
@@ -57,6 +63,12 @@ describe("createAndCatalogBackup", () => {
     markBackupArtifactsPruned.mockResolvedValue(0);
     getPlatformBackupArtifacts.mockResolvedValue([]);
     getOrganizationBackupArtifacts.mockResolvedValue([]);
+    listBackups.mockResolvedValue([]);
+    listRekeyedBackups.mockResolvedValue([]);
+    listEmergencyBackups.mockResolvedValue([]);
+    listOrganizationBackups.mockResolvedValue([]);
+    getAllBackupArtifacts.mockResolvedValue([]);
+    getBackupArtifactByPathname.mockResolvedValue(null);
     createDatabaseBackup.mockResolvedValue({ ...target, size: 10, createdAt: new Date("2026-08-25T05:00:00.000Z"), manifestAvailable: true, manifest, pruned: [] });
   });
 
@@ -118,5 +130,20 @@ describe("createAndCatalogBackup", () => {
 
     await expect(createAndCatalogBackup({ scope: "ORGANIZATION", organizationId: "org-1", target: tenantTarget })).rejects.toThrow("otra organización");
     expect(updateBackupArtifactStatus).toHaveBeenCalledWith("artifact-1", "BLOCKED");
+  });
+
+  it("downgrades missing blocked reservations to INVALID while preserving the catalog row", async () => {
+    const db = await import("@/lib/db");
+    vi.mocked(db.getDb).mockReturnValue({
+      organization: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never);
+    getAllBackupArtifacts.mockResolvedValue([
+      { id: "stale", pathname: "database-backups/missing", status: "BLOCKED" },
+    ]);
+
+    const result = await reconcileBackupCatalog();
+
+    expect(updateBackupArtifactStatus).toHaveBeenCalledWith("stale", "INVALID");
+    expect(result).toMatchObject({ verified: 0, invalid: 1, blocked: 0 });
   });
 });
