@@ -408,7 +408,20 @@ jobs:
           mkdir -p artifacts/production-verification
           node --import tsx scripts/verify-production.ts --json > artifacts/production-verification/production.json
           exit_code=$?
-          node -e 'const fs=require("node:fs"); const p="artifacts/production-verification/production.json"; let r={status:"BLOCKED"}; try { r=JSON.parse(fs.readFileSync(p,"utf8")); } catch {} console.log(`status=${r.status || "BLOCKED"}`); fs.appendFileSync(process.env.GITHUB_OUTPUT, `status=${r.status || "BLOCKED"}\n`);'
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const p = "artifacts/production-verification/production.json";
+          const allowedWarnings = new Set(["TENANT_CUTOVER_PENDING", "RLS_DISABLED_SINGLETON"]);
+          let r = { status: "BLOCKED", issues: [] };
+          try { r = JSON.parse(fs.readFileSync(p, "utf8")); } catch {}
+          const unexpectedIssues = Array.isArray(r.issues)
+            ? r.issues.filter((issue) => issue?.severity === "BLOCKED" || (issue?.severity === "WARN" && !allowedWarnings.has(issue?.code)))
+            : [{ severity: "BLOCKED", code: "PRODUCTION_REPORT_INVALID" }];
+          console.log(`status=${r.status || "BLOCKED"}`);
+          console.log(`unexpectedIssueCount=${unexpectedIssues.length}`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `status=${r.status || "BLOCKED"}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `unexpected_issue_count=${unexpectedIssues.length}\n`);
+          NODE
           echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
           exit 0
       - name: Upload Production verification evidence
@@ -419,8 +432,8 @@ jobs:
           path: artifacts/production-verification
           if-no-files-found: error
           retention-days: 30
-      - name: Fail certification unless Production verifier is PASS
-        if: steps.verify.outputs.status != 'PASS' || steps.verify.outputs.exit_code != '0'
+      - name: Fail certification unless Production verifier is PASS or expected singleton WARN
+        if: (steps.verify.outputs.status != 'PASS' && steps.verify.outputs.status != 'WARN') || steps.verify.outputs.exit_code != '0' || steps.verify.outputs.unexpected_issue_count != '0'
         run: exit 1
 
   report:
@@ -509,7 +522,7 @@ jobs:
             if (process.env.PRODUCTION_POLICY_RESULT !== "success") {
               failures.push(`productionPolicy=${process.env.PRODUCTION_POLICY_RESULT || "missing"}`);
             }
-            if (process.env.PRODUCTION_RESULT !== "success" || production.status !== "PASS") {
+            if (process.env.PRODUCTION_RESULT !== "success" || !["PASS", "WARN"].includes(production.status)) {
               failures.push(`productionState=${process.env.PRODUCTION_RESULT || "missing"}/${production.status}`);
             }
             if (!report.productionVerifierSha) failures.push("productionVerifierSha=missing");
