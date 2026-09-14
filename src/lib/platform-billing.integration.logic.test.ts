@@ -129,7 +129,7 @@ describe.skipIf(!enabled)("platform billing disposable PostgreSQL integration", 
 
       const subscriptionRows = await db.organizationSubscription.findMany({ where: { organizationId: BILLING_ORGANIZATION_ID }, select: { status: true, monthlyAmountMinor: true, currency: true, startedAt: true, endsAt: true } });
       const chargeRows = await db.billingCharge.findMany({ where: { organizationId: BILLING_ORGANIZATION_ID }, select: { status: true, amountMinor: true, currency: true, paidAt: true } });
-      const [metric] = buildMonthlyBillingMetrics([new Date("2026-08-01T00:00:00.000Z")], subscriptionRows, chargeRows);
+      const [metric] = buildMonthlyBillingMetrics([new Date("2026-09-01T00:00:00.000Z")], subscriptionRows, chargeRows);
       expect(metric?.mrrByCurrency).toEqual({ MXN: 5000 });
       expect(metric?.cashByCurrency.MXN).toBeGreaterThanOrEqual(5000);
 
