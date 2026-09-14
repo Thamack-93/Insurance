@@ -8,7 +8,7 @@ import { CalendarClock, ChevronDown } from "@/components/icons";
 import { ConfirmDialog } from "@/components/drawers/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { businessToday, formatBusinessDateInput } from "@/lib/business-dates";
@@ -77,13 +77,15 @@ export function RenewalFollowUpMenu({ policyId, policyNumber, currentDueDate, cu
           <ChevronDown className="size-3.5" aria-hidden="true" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
-          <DropdownMenuLabel>{currentDueDate ? "Reprogramar" : "Programar"}</DropdownMenuLabel>
-          {shortcutLabels.map((shortcut) => (
-            <DropdownMenuItem key={shortcut.value} onSelect={() => chooseShortcut(shortcut.value)}>
-              {shortcut.label}
-            </DropdownMenuItem>
-          ))}
-          <DropdownMenuItem onSelect={openCustomDate}>Otra fecha</DropdownMenuItem>
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>{currentDueDate ? "Reprogramar" : "Programar"}</DropdownMenuLabel>
+            {shortcutLabels.map((shortcut) => (
+              <DropdownMenuItem key={shortcut.value} onSelect={() => chooseShortcut(shortcut.value)}>
+                {shortcut.label}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuItem onSelect={openCustomDate}>Otra fecha</DropdownMenuItem>
+          </DropdownMenuGroup>
           {currentDueDate ? (
             <>
               <DropdownMenuSeparator />

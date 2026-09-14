@@ -8,6 +8,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -159,20 +160,22 @@ export function TableToolbar({
               <Columns3 className="mr-2 size-4" /> Columnas
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuLabel>Columnas visibles</DropdownMenuLabel>
-              {columns.map((column) => (
-                <DropdownMenuCheckboxItem
-                  key={column.index}
-                  checked={!hiddenColumns.includes(column.index)}
-                  onCheckedChange={(checked) => {
-                    setHiddenColumns((current) => checked
-                      ? current.filter((index) => index !== column.index)
-                      : [...current, column.index]);
-                  }}
-                >
-                  {column.label}
-                </DropdownMenuCheckboxItem>
-              ))}
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Columnas visibles</DropdownMenuLabel>
+                {columns.map((column) => (
+                  <DropdownMenuCheckboxItem
+                    key={column.index}
+                    checked={!hiddenColumns.includes(column.index)}
+                    onCheckedChange={(checked) => {
+                      setHiddenColumns((current) => checked
+                        ? current.filter((index) => index !== column.index)
+                        : [...current, column.index]);
+                    }}
+                  >
+                    {column.label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
         <Button type="button" variant="outline" size="sm" onClick={cycleDensity} title={`Densidad: ${density}`}>

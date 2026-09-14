@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
@@ -106,15 +107,17 @@ export function ExportMenu({ dataset, paramKeys, label = "Exportar" }: ExportMen
         {label}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel>Descargar resultado completo</DropdownMenuLabel>
-        <DropdownMenuItem onClick={() => void download("csv")} disabled={isPending}>
-          <FileText className="mr-2 size-4" />
-          CSV
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => void download("xlsx")} disabled={isPending}>
-          <FileSpreadsheet className="mr-2 size-4" />
-          Excel (.xlsx)
-        </DropdownMenuItem>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Descargar resultado completo</DropdownMenuLabel>
+          <DropdownMenuItem onClick={() => void download("csv")} disabled={isPending}>
+            <FileText className="mr-2 size-4" />
+            CSV
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void download("xlsx")} disabled={isPending}>
+            <FileSpreadsheet className="mr-2 size-4" />
+            Excel (.xlsx)
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
