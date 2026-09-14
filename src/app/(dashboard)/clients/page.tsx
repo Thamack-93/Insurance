@@ -10,6 +10,7 @@ import { ClientsListTable } from "@/components/clients/clients-list-table";
 import { EmptyState } from "@/components/empty-states/empty-state";
 import { TableEmptyState } from "@/components/tables/table-empty-state";
 import { TableToolbar } from "@/components/tables/table-toolbar";
+import { StatusFilterButtons } from "@/components/tables/status-filter-buttons";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { entityStatusOptions } from "@/lib/domain-options";
 import { buildTableHref } from "@/lib/table-query";
@@ -57,6 +58,7 @@ export default async function ClientsPage({
     filteredCount,
     pagedClients,
     topPortfolio,
+    statusCounts,
   ] = await Promise.all([
     db.client.count({ where: { ...portfolioWhere, status: "ACTIVE" } }),
     db.client.count({ where: { ...portfolioWhere, type: "COMPANY" } }),
@@ -78,6 +80,11 @@ export default async function ClientsPage({
         policies: { where: { status: "ACTIVE" }, select: { premiumAmount: true } },
       },
       take: 50,
+    }),
+    db.client.groupBy({
+      by: ["status"],
+      where: buildClientListWhere({ ...filters, status: undefined }, scope.portfolioOwnerId, scope.organizationId),
+      _count: { _all: true },
     }),
   ]);
 
@@ -165,33 +172,37 @@ export default async function ClientsPage({
 
         <SectionCard
           title="Directorio"
-          description="Listado completo con búsqueda y paginación."
-          action={
-            <TableToolbar
-              searchPlaceholder="Buscar por nombre, correo, teléfono o RFC..."
-              resultCount={filteredCount}
-              totalCount={totalCount}
-              resultNoun={["cliente", "clientes"]}
-              exportDataset="clients"
-              filters={[
-                {
-                  key: "type",
-                  label: "Tipo",
-                  options: [
-                    { value: "PERSON", label: "Persona" },
-                    { value: "COMPANY", label: "Empresa" },
-                  ],
-                },
-                {
-                  key: "status",
-                  label: "Estado",
-                  allValue: "ALL",
-                  options: [{ value: "ALL", label: "Todos" }, ...entityStatusOptions],
-                },
-              ]}
-            />
-          }
+          description="Por defecto muestra clientes activos; usa Todos para consultar el directorio completo."
         >
+          <div className="border-b border-border/70 px-4 py-3">
+            <div className="flex flex-col items-stretch gap-3">
+              <StatusFilterButtons
+                selectedValue={statusFilter ?? "ALL"}
+                options={entityStatusOptions.map((option) => ({
+                  ...option,
+                  count: statusCounts.find((entry) => entry.status === option.value)?._count._all ?? 0,
+                }))}
+                allLabel="Todos"
+              />
+              <TableToolbar
+                searchPlaceholder="Buscar por nombre, correo, teléfono o RFC..."
+                resultCount={filteredCount}
+                totalCount={totalCount}
+                resultNoun={["cliente", "clientes"]}
+                exportDataset="clients"
+                filters={[
+                  {
+                    key: "type",
+                    label: "Tipo",
+                    options: [
+                      { value: "PERSON", label: "Persona" },
+                      { value: "COMPANY", label: "Empresa" },
+                    ],
+                  },
+                ]}
+              />
+            </div>
+          </div>
           {filteredCount === 0 ? (
             <TableEmptyState
               icon={Users2}

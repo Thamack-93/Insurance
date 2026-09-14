@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { EmptyState } from "@/components/empty-states/empty-state";
 import { Pagination } from "@/components/lists/pagination";
 import { TableToolbar } from "@/components/tables/table-toolbar";
+import { StatusFilterButtons } from "@/components/tables/status-filter-buttons";
 import { SortableTableHead } from "@/components/tables/sortable-table-head";
 import { businessAddDays } from "@/lib/business-dates";
 import { daysUntil, formatDate, today } from "@/lib/dates";
@@ -18,7 +19,8 @@ import { policyTypeLabel } from "@/lib/status";
 import { policyStatusOptions, policyTypeOptions } from "@/lib/domain-options";
 import { policyOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
-import { buildTableHref, readAllowedTableParam, readTablePage, readTableSort } from "@/lib/table-query";
+import { buildTableHref } from "@/lib/table-query";
+import { readPolicyListFilters } from "@/lib/list-filters";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { policyNavigation } from "@/lib/navigation";
 import { withTenantOrganization } from "@/lib/tenant-dal";
@@ -31,15 +33,8 @@ export default async function PoliciesPage({
   searchParams?: Promise<{ q?: string; page?: string; sort?: string; dir?: string; status?: string; type?: string }>;
 }) {
   const params = (await searchParams) ?? {};
-  const query = (params.q ?? "").trim().slice(0, 100);
-  const page = readTablePage(params);
-  const statusFilter = readAllowedTableParam(
-    params,
-    "status",
-    policyStatusOptions.map((option) => option.value),
-  );
-  const typeFilter = readAllowedTableParam(params, "type", policyTypeOptions.map((option) => option.value));
-  const { sortKey, direction } = readTableSort(params);
+  const filters = readPolicyListFilters(params);
+  const { query, page, status: statusFilter, type: typeFilter, sortKey, direction } = filters;
 
   const scope = await requireOrganizationPortfolioReadScope();
   return withTenantOrganization(scope.organizationId, async (db) => {
@@ -64,11 +59,10 @@ export default async function PoliciesPage({
     db,
   );
 
-  const where: Prisma.PolicyWhereInput = query
+  const baseWhere: Prisma.PolicyWhereInput = query
     ? {
         AND: [
           portfolioWhere,
-          ...(statusFilter ? [{ status: statusFilter as Prisma.PolicyWhereInput["status"] }] : []),
           ...(typeFilter ? [{ policyType: typeFilter }] : []),
           {
             OR: [
@@ -81,9 +75,11 @@ export default async function PoliciesPage({
       }
     : {
         ...portfolioWhere,
-        ...(statusFilter ? { status: statusFilter as Prisma.PolicyWhereInput["status"] } : {}),
         ...(typeFilter ? { policyType: typeFilter } : {}),
       };
+  const where: Prisma.PolicyWhereInput = statusFilter
+    ? { AND: [baseWhere, { status: statusFilter as Prisma.PolicyWhereInput["status"] }] }
+    : baseWhere;
 
   const orderBy =
     sortKey === "policyNumber"
@@ -110,6 +106,7 @@ export default async function PoliciesPage({
     filteredCount,
     pagedPolicies,
     pendingPolicies,
+    statusCounts,
   ] = await Promise.all([
     db.policy.count({ where: { ...portfolioWhere, status: "ACTIVE" } }),
     db.policy.count({ where: { ...portfolioWhere, status: "PENDING" } }),
@@ -133,6 +130,11 @@ export default async function PoliciesPage({
       include: { client: true, insurer: true },
       orderBy: [{ endDate: "asc" }, { id: "asc" }],
       take: 10,
+    }),
+    db.policy.groupBy({
+      by: ["status"],
+      where: baseWhere,
+      _count: { _all: true },
     }),
   ]);
 
@@ -214,26 +216,25 @@ export default async function PoliciesPage({
           description={
             statusFilter === "EXPIRED"
               ? "Vigencias terminadas para consulta histórica; esto no indica por sí solo que una renovación haya quedado sin resolver."
-              : "Búsqueda y paginación sobre todas las pólizas."
-          }
-          action={
-            <TableToolbar
-              searchPlaceholder="Buscar por número, cliente o aseguradora..."
-              filters={[
-                {
-                  key: "status",
-                  label: "Estado",
-                  options: policyStatusOptions,
-                },
-                {
-                  key: "type",
-                  label: "Tipo",
-                  options: policyTypeOptions,
-                },
-              ]}
-            />
+              : "Por defecto muestra pólizas activas; usa Todos para consultar el inventario completo."
           }
         >
+          <div className="border-b border-border/70 px-4 py-3">
+            <div className="flex flex-col items-stretch gap-3">
+              <StatusFilterButtons
+                selectedValue={statusFilter ?? "ALL"}
+                options={policyStatusOptions.map((option) => ({
+                  ...option,
+                  count: statusCounts.find((entry) => entry.status === option.value)?._count._all ?? 0,
+                }))}
+              />
+              <TableToolbar
+                searchPlaceholder="Buscar por número, cliente o aseguradora..."
+                filters={[{ key: "type", label: "Tipo", options: policyTypeOptions }]}
+                tableControls={false}
+              />
+            </div>
+          </div>
           {filteredCount === 0 ? (
             query ? (
               <div className="p-4">

@@ -34,7 +34,7 @@ export default async function QuotesPage({
   const filters = readQuoteListFilters(params);
   const { query, page, sortKey, direction } = filters;
   const statusFilter = filters.status;
-  const isFiltered = Boolean(query || statusFilter);
+  const isFiltered = Boolean(query || statusFilter || filters.allStatuses);
   const scope = await requireOrganizationPortfolioReadScope();
   const quoteScope = quoteOperationalWhere(scope.portfolioOwnerId, scope.organizationId);
   const clearFiltersHref = buildTableHref("/quotes", params, {
@@ -153,18 +153,25 @@ export default async function QuotesPage({
 
         <SectionCard
           title="Cotizaciones"
-          description="Listado completo de propuestas."
-          action={
+          description="Por defecto muestra cotizaciones operativas; usa Estado > Todas para consultar el historial completo."
+        >
+          <div className="border-b border-border/70 px-4 py-3">
             <TableToolbar
               searchPlaceholder="Buscar por cliente, tipo, aseguradora, prima o fecha..."
               resultCount={filteredCount}
               totalCount={totalCount}
               resultNoun={["cotización", "cotizaciones"]}
               exportDataset="quotes"
-              filters={[{ key: "status", label: "Estado", options: quoteStatusOptions }]}
+              filters={[
+                {
+                  key: "status",
+                  label: "Estado",
+                  placeholder: "Operativas",
+                  options: [{ value: "ALL", label: "Todas" }, ...quoteStatusOptions],
+                },
+              ]}
             />
-          }
-        >
+          </div>
           {filteredCount === 0 ? (
             <TableEmptyState
               icon={Calculator}
@@ -203,7 +210,7 @@ export default async function QuotesPage({
                 total={filteredCount}
                 searchParams={{
                   q: query,
-                  status: statusFilter ?? undefined,
+                  status: filters.allStatuses ? "ALL" : statusFilter ?? undefined,
                   sort: sortKey ?? undefined,
                   dir: direction ?? undefined,
                 }}

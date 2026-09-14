@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { TableToolbar } from "@/components/tables/table-toolbar";
+import { StatusFilterButtons } from "@/components/tables/status-filter-buttons";
 import { DocumentDropZone } from "@/components/documents/document-drop-zone";
 import { DocumentList } from "@/components/documents/document-list";
 import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
@@ -32,7 +33,10 @@ import { withTenantOrganization } from "@/lib/tenant-dal";
 export default async function ClientDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
   const query = (await searchParams) ?? {};
-  const policyStatus = readAllowedTableParam(query, "policyStatus", POLICY_STATUSES);
+  const rawPolicyStatus = typeof query.policyStatus === "string" ? query.policyStatus : undefined;
+  const policyStatus = rawPolicyStatus === "ALL"
+    ? undefined
+    : readAllowedTableParam(query, "policyStatus", POLICY_STATUSES) ?? "ACTIVE";
   const policyQuery = typeof query.q === "string" ? query.q.trim().slice(0, 100) : undefined;
   const returnTo = normalizeReturnTo(typeof query.returnTo === "string" ? query.returnTo : undefined, "/clients");
   const scope = await requireOrganizationPortfolioReadScope();
@@ -304,14 +308,23 @@ export default async function ClientDetailPage({ params, searchParams }: { param
 
           <SectionCard title="Pólizas" description="Cartera completa del cliente. Filtra por estado; la lista ya no se recorta silenciosamente a 10 registros.">
             <div className="border-b border-border/70 px-4 py-3">
-              <TableToolbar
-                searchPlaceholder="Buscar en pólizas..."
-                filters={[{ key: "policyStatus", label: "Estado", options: policyStatusOptions }]}
-                tableControls={false}
-                resultCount={policies.length}
-                totalCount={totalPolicyCount}
-                resultNoun={["póliza", "pólizas"]}
-              />
+              <div className="space-y-3">
+                <StatusFilterButtons
+                  paramKey="policyStatus"
+                  selectedValue={policyStatus ?? "ALL"}
+                  options={policyStatusOptions.map((option) => ({
+                    ...option,
+                    count: policyStatusCounts.find((entry) => entry.status === option.value)?._count._all ?? 0,
+                  }))}
+                />
+                <TableToolbar
+                  searchPlaceholder="Buscar en pólizas..."
+                  tableControls={false}
+                  resultCount={policies.length}
+                  totalCount={totalPolicyCount}
+                  resultNoun={["póliza", "pólizas"]}
+                />
+              </div>
               <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 <span>{totalPolicyCount} en total</span>
                 {policyStatusOptions.map((option) => {

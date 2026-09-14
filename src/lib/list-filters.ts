@@ -122,9 +122,10 @@ export type PolicyListFilters = ListFilters & {
 };
 
 export function readPolicyListFilters(params: TableSearchParams): PolicyListFilters {
+  const rawStatus = readTableParam(params, "status");
   return {
     ...readBaseFilters(params),
-    status: readAllowedTableParam(params, "status", POLICY_STATUSES),
+    status: rawStatus === "ALL" ? undefined : readAllowedTableParam(params, "status", POLICY_STATUSES) ?? "ACTIVE",
     type: readAllowedTableParam(params, "type", POLICY_TYPES),
   };
 }
@@ -186,12 +187,16 @@ export function buildPolicyListOrderBy({ sortKey, direction }: PolicyListFilters
 
 export type QuoteListFilters = ListFilters & {
   status?: (typeof QUOTE_STATUSES)[number];
+  /** True only when the user explicitly asks to include terminal quotes. */
+  allStatuses?: boolean;
 };
 
 export function readQuoteListFilters(params: TableSearchParams): QuoteListFilters {
+  const rawStatus = readTableParam(params, "status");
   return {
     ...readBaseFilters(params),
-    status: readAllowedTableParam(params, "status", QUOTE_STATUSES),
+    status: rawStatus === "ALL" ? undefined : readAllowedTableParam(params, "status", QUOTE_STATUSES),
+    allStatuses: rawStatus === "ALL",
   };
 }
 
@@ -203,7 +208,11 @@ export function buildQuoteListWhere(
   const { parsedQuery } = filters;
   const base: Prisma.QuoteWhereInput = {
     ...quoteOperationalWhere(portfolioOwnerId, organizationId),
-    ...(filters.status ? { status: filters.status } : {}),
+    ...(filters.status
+      ? { status: filters.status }
+      : filters.allStatuses
+        ? {}
+        : { status: { notIn: ["EXPIRED", "CANCELLED", "REJECTED"] } }),
   };
 
   if (!parsedQuery.raw) return base;

@@ -4,6 +4,9 @@ vi.mock("server-only", () => ({}));
 
 import {
   buildClientListOrderBy,
+  buildQuoteListWhere,
+  readPolicyListFilters,
+  readQuoteListFilters,
   buildReceiptListOrderBy,
   readClientListFilters,
 } from "@/lib/list-filters";
@@ -15,6 +18,21 @@ describe("list filter defaults", () => {
     expect(readClientListFilters({ status: "ARCHIVED" }).status).toBe("ARCHIVED");
     expect(readClientListFilters({ status: "ALL" }).status).toBeUndefined();
     expect(buildClientListOrderBy(readClientListFilters({}))).toEqual([{ fullName: "asc" }, { id: "asc" }]);
+  });
+
+  it("shows active policies by default and makes all explicit", () => {
+    expect(readPolicyListFilters({}).status).toBe("ACTIVE");
+    expect(readPolicyListFilters({ status: "ALL" }).status).toBeUndefined();
+    expect(readPolicyListFilters({ status: "EXPIRED" }).status).toBe("EXPIRED");
+  });
+
+  it("shows operational quotes by default and makes terminal history explicit", () => {
+    expect(readQuoteListFilters({}).allStatuses).toBe(false);
+    expect(readQuoteListFilters({ status: "ALL" }).allStatuses).toBe(true);
+    expect(buildQuoteListWhere(readQuoteListFilters({}), undefined, "org-a").status).toEqual({
+      notIn: ["EXPIRED", "CANCELLED", "REJECTED"],
+    });
+    expect(buildQuoteListWhere(readQuoteListFilters({ status: "ALL" }), undefined, "org-a").status).toBeUndefined();
   });
 
   it("uses the numeric receipt sequence before the visible number", () => {
