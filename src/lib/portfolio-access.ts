@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { Prisma } from "@/generated/prisma/client";
-import { AuthError } from "@/lib/auth";
+import { AuthError, requireOrganizationContextOrRedirect } from "@/lib/auth";
 import { requireOrganizationContext, type OrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 
 export type PortfolioReadScope = {
@@ -12,8 +12,7 @@ export type PortfolioReadScope = {
   membershipRole: string;
 };
 
-export async function requireOrganizationPortfolioReadScope(): Promise<PortfolioReadScope & { context: OrganizationContext }> {
-  const context = await requireOrganizationContext();
+function portfolioReadScope(context: OrganizationContext): PortfolioReadScope & { context: OrganizationContext } {
   return {
     id: context.userId,
     role: context.membershipRole,
@@ -22,6 +21,19 @@ export async function requireOrganizationPortfolioReadScope(): Promise<Portfolio
     membershipRole: context.membershipRole,
     context,
   };
+}
+
+export async function requireOrganizationPortfolioReadScope(): Promise<PortfolioReadScope & { context: OrganizationContext }> {
+  return portfolioReadScope(await requireOrganizationContext());
+}
+
+/**
+ * Page-oriented variant for read routes. Expected tenant/session failures
+ * must use the canonical navigation destinations instead of reaching a
+ * generic route error boundary.
+ */
+export async function requireOrganizationPortfolioReadScopeOrRedirect(): Promise<PortfolioReadScope & { context: OrganizationContext }> {
+  return portfolioReadScope(await requireOrganizationContextOrRedirect());
 }
 
 export function clientPortfolioWhere(userId: string): Prisma.ClientWhereInput {

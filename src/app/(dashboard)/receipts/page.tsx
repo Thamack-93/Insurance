@@ -22,7 +22,7 @@ import {
   paymentOperationalWhere,
   receiptOperationalWhere,
   receiptPortfolioWhere,
-  requireOrganizationPortfolioReadScope,
+  requireOrganizationPortfolioReadScopeOrRedirect,
 } from "@/lib/portfolio-access";
 import { buildTableHref } from "@/lib/table-query";
 import { paymentMethodLabel, dataQualityReasonLabel } from "@/lib/ui-labels";
@@ -37,6 +37,8 @@ import {
 } from "@/lib/list-filters";
 import { withTenantOrganization } from "@/lib/tenant-dal";
 import { SavedQueueControls } from "@/components/queues/saved-queue-controls";
+import { logError } from "@/lib/logger";
+import { isReceiptQualitasEnabled, resolveReceiptAuxiliary } from "@/lib/receipts-page";
 
 const PAGE_SIZE = 25;
 
@@ -52,10 +54,7 @@ export default async function ReceiptsPage({
   const statusFilter = filters.status;
   const isFiltered = Boolean(query || statusFilter);
 
-  const scope = await requireOrganizationPortfolioReadScope();
-  return withTenantOrganization(scope.organizationId, async (db) => {
-  const agentContact = await db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } });
-  const qualitasCapability = await resolveOrganizationCapability(scope.organizationId, "QUALITAS", db);
+  const scope = await requireOrganizationPortfolioReadScopeOrRedirect();
   const now = today();
   const monthStart = businessStartOfMonth(now);
   const clearFiltersHref = buildTableHref("/receipts", params, {
@@ -76,68 +75,79 @@ export default async function ReceiptsPage({
 
   const orderBy = buildReceiptListOrderBy(filters);
 
-  const [
+  type ReceiptPageCore = Awaited<ReturnType<typeof loadReceiptPageCore>>;
+  let core: ReceiptPageCore;
+  try {
+    core = await loadReceiptPageCore({
+      organizationId: scope.organizationId,
+      baseWhere,
+      where,
+      now,
+      orderBy,
+      page,
+    });
+  } catch (error) {
+    logError("receipts.page.core", error, { organizationId: scope.organizationId });
+    throw error;
+  }
+
+  const [agentContactResult, qualitasCapabilityResult, paidThisMonthResult, paymentHistoryResult, reviewIssuesResult] =
+    await Promise.allSettled([
+      withTenantOrganization(scope.organizationId, (db) =>
+        db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } }),
+      ),
+      withTenantOrganization(scope.organizationId, (db) =>
+        resolveOrganizationCapability(scope.organizationId, "QUALITAS", db),
+      ),
+      withTenantOrganization(scope.organizationId, (db) =>
+        db.receipt.findMany({
+          where: { ...scopedReceiptWhere, status: "PAID", paidDate: { gte: monthStart } },
+          include: { client: true, policy: true, insurer: true, endorsement: true },
+          orderBy: [{ paidDate: "desc" }, { id: "desc" }],
+        }),
+      ),
+      withTenantOrganization(scope.organizationId, (db) =>
+        db.payment.findMany({
+          where: { ...scopedPaymentWhere, status: "POSTED" },
+          include: {
+            receipt: { select: { id: true, receiptNumber: true, dueDate: true, endorsement: { select: { id: true, endorsementNumber: true } } } },
+            client: { select: { id: true, fullName: true } },
+            policy: { select: { id: true, policyNumber: true } },
+          },
+          orderBy: [{ paidDate: "desc" }, { id: "desc" }],
+          take: 50,
+        }),
+      ),
+      withTenantOrganization(scope.organizationId, (db) =>
+        db.receiptReconciliationIssue.findMany({
+          where: { ...scopedReceiptIssueWhere, status: "OPEN" },
+          include: {
+            receipt: { include: { payments: { where: { status: "POSTED" } }, client: true } },
+            policy: true,
+          },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: 100,
+        }),
+      ),
+    ]);
+
+  const reportAuxiliaryFailure = (group: string) => (reason: unknown) => {
+    logError(`receipts.page.${group}`, reason, { organizationId: scope.organizationId });
+  };
+  const agentContact = resolveReceiptAuxiliary(agentContactResult, null, reportAuxiliaryFailure("agent-contact"));
+  const qualitasCapability = resolveReceiptAuxiliary(qualitasCapabilityResult, null, reportAuxiliaryFailure("qualitas-capability"));
+  const paidThisMonth = resolveReceiptAuxiliary(paidThisMonthResult, [], reportAuxiliaryFailure("paid-this-month"));
+  const paymentHistory = resolveReceiptAuxiliary(paymentHistoryResult, [], reportAuxiliaryFailure("payment-history"));
+  const reviewIssues = resolveReceiptAuxiliary(reviewIssuesResult, [], reportAuxiliaryFailure("review-issues"));
+  const {
     openCount,
     overdueCount,
-    paidThisMonth,
     outstandingAgg,
     overdueAgg,
     totalOpenCount,
     filteredCount,
     pagedReceipts,
-    paymentHistory,
-    reviewIssues,
-  ] = await Promise.all([
-    db.receipt.count({ where: baseWhere }),
-    db.receipt.count({ where: { ...baseWhere, dueDate: { lt: now } } }),
-    db.receipt.findMany({
-      where: { ...scopedReceiptWhere, status: "PAID", paidDate: { gte: monthStart } },
-      include: { client: true, policy: true, insurer: true, endorsement: true },
-      orderBy: [{ paidDate: "desc" }, { id: "desc" }],
-    }),
-    db.receipt.aggregate({ _sum: { amount: true }, where: baseWhere }),
-    db.receipt.aggregate({
-      _sum: { amount: true },
-      where: { ...baseWhere, dueDate: { lt: now } },
-    }),
-    db.receipt.count({ where: baseWhere }),
-    db.receipt.count({ where }),
-    db.receipt.findMany({
-      where,
-      include: {
-        client: true,
-        policy: true,
-        insurer: true,
-        endorsement: true,
-        _count: { select: { payments: { where: { status: "POSTED" } } } },
-      },
-      orderBy,
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-    }),
-    db.payment.findMany({
-      where: { ...scopedPaymentWhere, status: "POSTED" },
-      include: {
-        receipt: { select: { id: true, receiptNumber: true, dueDate: true, endorsement: { select: { id: true, endorsementNumber: true } } } },
-        client: { select: { id: true, fullName: true } },
-        policy: { select: { id: true, policyNumber: true } },
-      },
-      orderBy: [{ paidDate: "desc" }, { id: "desc" }],
-      take: 50,
-    }),
-    db.receiptReconciliationIssue.findMany({
-      where: {
-        ...scopedReceiptIssueWhere,
-        status: "OPEN",
-      },
-      include: {
-        receipt: { include: { payments: { where: { status: "POSTED" } }, client: true } },
-        policy: true,
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 100,
-    }),
-  ]);
+  } = core;
 
   const outstandingAmount = toNumber(outstandingAgg._sum.amount);
   const overdueAmount = toNumber(overdueAgg._sum.amount);
@@ -168,7 +178,7 @@ export default async function ReceiptsPage({
       clientPhone: receipt.client.phone,
       agentEmail: scope.context.userEmail,
       agentPhone: agentContact?.phone ?? null,
-      qualitasEnabled: qualitasCapability.enabled && isQualitasPaymentLinkEnabled(),
+      qualitasEnabled: isReceiptQualitasEnabled(qualitasCapability, isQualitasPaymentLinkEnabled()),
       qualitasClientRecipientEnabled: isQualitasClientRecipientEnabled(),
       qualitasEligible: isQualitasInsurerName(receipt.insurer.name),
     }));
@@ -604,5 +614,39 @@ export default async function ReceiptsPage({
       </UrlTabs>
     </div>
   );
+}
+
+async function loadReceiptPageCore(input: {
+  organizationId: string;
+  baseWhere: Prisma.ReceiptWhereInput;
+  where: Prisma.ReceiptWhereInput;
+  now: Date;
+  orderBy: Prisma.ReceiptOrderByWithRelationInput[];
+  page: number;
+}) {
+  const { organizationId, baseWhere, where, now, orderBy, page } = input;
+  return withTenantOrganization(organizationId, async (db) => {
+    const [openCount, overdueCount, outstandingAgg, overdueAgg, totalOpenCount, filteredCount, pagedReceipts] = await Promise.all([
+      db.receipt.count({ where: baseWhere }),
+      db.receipt.count({ where: { ...baseWhere, dueDate: { lt: now } } }),
+      db.receipt.aggregate({ _sum: { amount: true }, where: baseWhere }),
+      db.receipt.aggregate({ _sum: { amount: true }, where: { ...baseWhere, dueDate: { lt: now } } }),
+      db.receipt.count({ where: baseWhere }),
+      db.receipt.count({ where }),
+      db.receipt.findMany({
+        where,
+        include: {
+          client: true,
+          policy: true,
+          insurer: true,
+          endorsement: true,
+          _count: { select: { payments: { where: { status: "POSTED" } } } },
+        },
+        orderBy,
+        skip: (page - 1) * PAGE_SIZE,
+        take: PAGE_SIZE,
+      }),
+    ]);
+    return { openCount, overdueCount, outstandingAgg, overdueAgg, totalOpenCount, filteredCount, pagedReceipts };
   });
 }
