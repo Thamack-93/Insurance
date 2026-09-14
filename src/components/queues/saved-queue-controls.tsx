@@ -47,7 +47,7 @@ export function SavedQueueControls({ route, config }: { route: SavedQueue["route
   return <div className="flex flex-wrap items-center gap-2" aria-label="Colas guardadas">
     <Bookmark className="size-4 text-muted-foreground" aria-hidden="true" />
     <Select value={selected} onValueChange={(value) => setSelected(value ?? "")} disabled={pending}>
-      <SelectTrigger className="w-48"><SelectValue placeholder="Colas guardadas" /></SelectTrigger>
+      <SelectTrigger className="w-48" aria-label="Colas guardadas"><SelectValue placeholder="Colas guardadas" /></SelectTrigger>
       <SelectContent>{queues.map((queue) => <SelectItem key={queue.id} value={queue.id}>{queue.name}</SelectItem>)}</SelectContent>
     </Select>
     <Button type="button" variant="outline" size="sm" onClick={open} disabled={pending || !selected}>Abrir</Button>
