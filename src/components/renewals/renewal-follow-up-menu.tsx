@@ -82,16 +82,16 @@ export function RenewalFollowUpMenu({ policyId, policyNumber, currentDueDate, cu
           <DropdownMenuGroup>
             <DropdownMenuLabel>{currentDueDate ? "Reprogramar" : "Programar"}</DropdownMenuLabel>
             {shortcutLabels.map((shortcut) => (
-              <DropdownMenuItem key={shortcut.value} onSelect={() => chooseShortcut(shortcut.value)}>
+              <DropdownMenuItem key={shortcut.value} onClick={() => chooseShortcut(shortcut.value)}>
                 {shortcut.label}
               </DropdownMenuItem>
             ))}
-            <DropdownMenuItem onSelect={openCustomDate}>Otra fecha</DropdownMenuItem>
+            <DropdownMenuItem onClick={openCustomDate}>Otra fecha</DropdownMenuItem>
           </DropdownMenuGroup>
           {currentDueDate ? (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onSelect={() => setClearOpen(true)}>
+              <DropdownMenuItem variant="destructive" onClick={() => setClearOpen(true)}>
                 Quitar seguimiento
               </DropdownMenuItem>
             </>
