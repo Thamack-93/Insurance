@@ -15,20 +15,22 @@ jobs:
     steps:
       - name: Check liveness
         env:
-          APP_URL: ${{ vars.POLICYDESK_MONITOR_URL }}
-          MONITOR_TOKEN: ${{ secrets.POLICYDESK_MONITOR_TOKEN }}
+          APP_URL: ${{ vars.POLICYDESK_MONITOR_URL || 'https://policypete.vercel.app' }}
         run: |
           set -euo pipefail
           test -n "$APP_URL"
           curl --fail --silent --show-error --max-time 10 \
-            -H "Authorization: Bearer $MONITOR_TOKEN" \
             "$APP_URL/api/health" >/tmp/policydesk-health.json
       - name: Check readiness
         env:
-          APP_URL: ${{ vars.POLICYDESK_MONITOR_URL }}
-          MONITOR_TOKEN: ${{ secrets.POLICYDESK_MONITOR_TOKEN }}
+          APP_URL: ${{ vars.POLICYDESK_MONITOR_URL || 'https://policypete.vercel.app' }}
+          MONITOR_TOKEN: ${{ secrets.POLICYDESK_MONITOR_TOKEN || '' }}
         run: |
           set -euo pipefail
+          if [ -z "$MONITOR_TOKEN" ]; then
+            echo "::warning::POLICYDESK_MONITOR_TOKEN is not configured; protected readiness check skipped."
+            exit 0
+          fi
           curl --fail --silent --show-error --max-time 10 \
             -H "Authorization: Bearer $MONITOR_TOKEN" \
             "$APP_URL/api/ready" >/tmp/policydesk-ready.json

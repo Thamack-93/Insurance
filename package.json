@@ -12,6 +12,7 @@
     "db:generate": "node -e \"require('node:fs').rmSync('src/generated/prisma',{recursive:true,force:true})\" && prisma generate && node scripts/ensure-prisma-generated-package.mjs",
     "db:migrate": "prisma migrate dev",
     "db:migrate:singleton-ci": "node scripts/migrate-singleton-ci.mjs",
+    "db:migrate:singleton-production": "node scripts/migrate-singleton-production.mjs",
     "db:check-drift": "node scripts/check-prisma-drift.mjs",
     "backfill:organizations": "node --import tsx scripts/backfill-organizations.ts",
     "configure:pedro-organization": "node --import tsx scripts/configure-pedro-organization.ts",

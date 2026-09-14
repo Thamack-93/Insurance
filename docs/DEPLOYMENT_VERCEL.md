@@ -85,6 +85,14 @@ El build de Vercel no ejecuta migraciones. Cuando un cambio incluya una migraci�
 4. Confirmar `prisma migrate status`, drift cero y los audits aplicables.
 5. Integrar a `main`; Vercel realizará el despliegue normal.
 
+Mientras Production siga en modo singleton, la migración de cutover
+`20260831010000_multi_tenant_rls_cutover` permanece excluida de ese flujo. Para
+aplicar migraciones aditivas posteriores usa una conexión directa y el runner
+explícito `PRODUCTION_SINGLETON_MIGRATION=1 npm run
+db:migrate:singleton-production`. Ese runner no elimina la barrera singleton ni
+activa RLS; el cutover solo se ejecuta mediante su procedimiento de
+mantenimiento y certificación separado.
+
 No guardar una conexión administrativa en Vercel y no ejecutar migraciones desde
 `postinstall`, el build, el startup de la aplicación ni un Preview automático.
 
