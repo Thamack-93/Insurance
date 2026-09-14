@@ -27,7 +27,7 @@ const allowedModels = new Set([
   "PolicyRenewalSuggestion", "Quote", "Receipt", "ReceiptReconciliationIssue", "Task", "WorkItem",
 ]);
 const allowedDefaultModels = new Set(["DemoOrganizationState", "OrganizationCapability", "OrganizationSetting", "PlatformRuntimeState", "UserPreference"]);
-const allowedIndexModels = new Set(["DemoOrganizationState", "DemoUploadArtifact", "OrganizationCapability"]);
+const allowedIndexModels = new Set(["CommissionCorrection", "DemoOrganizationState", "DemoUploadArtifact", "OrganizationCapability"]);
 
 let currentModel = null;
 const unexpected = [];

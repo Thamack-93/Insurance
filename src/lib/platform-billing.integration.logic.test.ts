@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { Pool } from "pg";
 import { buildMonthlyBillingMetrics } from "@/lib/platform-billing.logic";
@@ -36,6 +37,11 @@ async function migrate(url: string) {
   // The disposable application suite exercises singleton behavior. The
   // final RLS cutover and its extension are applied only by the dedicated
   // two-organization job under an explicit maintenance window.
+  const target = new URL(url);
+  const database = decodeURIComponent(target.pathname.replace(/^\//, "").split("?")[0]);
+  const fingerprint = createHash("sha256")
+    .update(`local-postgres:${process.env.TENANT_ISOLATION_RUN_ID}:${database}:${target.hostname}`)
+    .digest("hex");
   await execFileAsync("node", ["scripts/migrate-singleton-ci.mjs"], {
     cwd: process.cwd(),
     env: {
@@ -46,6 +52,8 @@ async function migrate(url: string) {
       NODE_ENV: "test",
       CI: "true",
       GITHUB_ACTIONS: "true",
+      TENANT_ISOLATION_DB_NAME: database,
+      TENANT_ISOLATION_FINGERPRINT: fingerprint,
     },
     maxBuffer: 4 * 1024 * 1024,
   });
@@ -73,7 +81,7 @@ describe.skipIf(!enabled)("platform billing disposable PostgreSQL integration", 
   it("enforces authorization, idempotency, lifecycle and metrics", async () => {
     const adminUrl = process.env.RESTORE_INTEGRATION_ADMIN_URL ?? process.env.DATABASE_URL;
     if (!adminUrl) throw new Error("RESTORE_INTEGRATION_ADMIN_URL or DATABASE_URL is required.");
-    const name = `billing_${process.pid}_${Date.now()}`.replace(/[^0-9_]/g, "").toLowerCase();
+    const name = `policydesk_tenant_test_billing_${process.pid}_${Date.now()}`.replace(/[^0-9_]/g, "").toLowerCase();
     const url = databaseUrl(adminUrl, name);
     try {
       await createDatabase(adminUrl, name);
