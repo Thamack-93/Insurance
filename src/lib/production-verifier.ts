@@ -41,6 +41,7 @@ export type ProductionVerificationReport = {
 
 const MIGRATIONS_TABLE = "_prisma_migrations";
 const TENANT_CUTOVER_MIGRATION = "20260831010000_multi_tenant_rls_cutover";
+const TENANT_CUTOVER_EXTENSION_MIGRATION = "20260914000000_extend_rls_operational_models";
 const CURRENT_SUBSCRIPTION_STATUSES = ["TRIAL", "ACTIVE", "PAST_DUE"];
 const EXPECTED_BILLING_SUBSCRIPTION_STATUSES = ["TRIAL", "ACTIVE", "PAST_DUE", "CANCELED"];
 const EXPECTED_BILLING_CHARGE_STATUSES = ["PENDING", "PAID", "VOID", "REFUNDED"];
@@ -87,8 +88,11 @@ async function verifyMigrations(client: PoolClient, issues: VerificationIssue[],
     const applied = new Set(rows.filter((row) => row.finished_at && !row.rolled_back_at).map((row) => row.migration_name));
     const pending = expected.filter((name) => !applied.has(name));
     const pendingCutover = pending.filter((name) => name === TENANT_CUTOVER_MIGRATION);
+    const singletonDeferredExtension = mode === "single-org"
+      && pending.includes(TENANT_CUTOVER_MIGRATION)
+      && pending.includes(TENANT_CUTOVER_EXTENSION_MIGRATION);
     const blockingPending = mode === "single-org"
-      ? pending.filter((name) => name !== TENANT_CUTOVER_MIGRATION)
+      ? pending.filter((name) => name !== TENANT_CUTOVER_MIGRATION && !(singletonDeferredExtension && name === TENANT_CUTOVER_EXTENSION_MIGRATION))
       : pending;
     const unknown = rows.filter((row) => !expected.includes(row.migration_name)).map((row) => row.migration_name);
     // A singleton production database may retain a rolled-back attempt for the
@@ -103,7 +107,7 @@ async function verifyMigrations(client: PoolClient, issues: VerificationIssue[],
       .map((row) => row.migration_name);
     const duplicateNames = [...new Set(rows.map((row) => row.migration_name).filter((name, index, all) => all.indexOf(name) !== index))];
     if (blockingPending.length) issues.push(issue("MIGRATIONS_PENDING", "BLOCKED", `Production no tiene aplicadas ${blockingPending.length} migraciones del repositorio.`));
-    if (pendingCutover.length && mode === "single-org") issues.push(issue("TENANT_CUTOVER_PENDING", "WARN", "La migración RLS final permanece pendiente mientras Production sigue en singleton; debe aplicarse durante la ventana de mantenimiento."));
+    if (pendingCutover.length && mode === "single-org") issues.push(issue("TENANT_CUTOVER_PENDING", "WARN", "La migración RLS final y sus extensiones permanecen pendientes mientras Production sigue en singleton; deben aplicarse durante la ventana de mantenimiento."));
     if (unknown.length) issues.push(issue("MIGRATIONS_UNKNOWN", "BLOCKED", `Production contiene ${unknown.length} migraciones ausentes del repositorio.`));
     if (incomplete.length) issues.push(issue("MIGRATIONS_INCOMPLETE", "BLOCKED", `Production contiene ${incomplete.length} migraciones fallidas o incompletas.`));
     if (duplicateNames.length) issues.push(issue("MIGRATIONS_DUPLICATE", "BLOCKED", `Production contiene ${duplicateNames.length} migraciones duplicadas.`));
