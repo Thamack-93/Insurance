@@ -33,9 +33,20 @@ function databaseUrl(adminUrl: string, database: string) {
 }
 
 async function migrate(url: string) {
-  await execFileAsync("npx", ["prisma", "migrate", "deploy"], {
+  // The disposable application suite exercises singleton behavior. The
+  // final RLS cutover and its extension are applied only by the dedicated
+  // two-organization job under an explicit maintenance window.
+  await execFileAsync("node", ["scripts/migrate-singleton-ci.mjs"], {
     cwd: process.cwd(),
-    env: { ...process.env, DATABASE_URL: url, DATABASE_URL_UNPOOLED: "", NODE_ENV: "test" },
+    env: {
+      ...process.env,
+      DATABASE_ADMIN_URL: url,
+      DATABASE_URL: url,
+      DATABASE_URL_UNPOOLED: "",
+      NODE_ENV: "test",
+      CI: "true",
+      GITHUB_ACTIONS: "true",
+    },
     maxBuffer: 4 * 1024 * 1024,
   });
 }

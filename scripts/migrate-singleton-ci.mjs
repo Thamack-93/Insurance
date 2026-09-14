@@ -14,7 +14,10 @@ const certificationDatabaseUrl = process.env.DATABASE_ADMIN_URL?.trim() || proce
 if (!certificationDatabaseUrl) throw new Error("SINGLETON_CI_MIGRATION_REQUIRES_DATABASE_URL");
 assertDisposableCertificationTarget(certificationDatabaseUrl);
 const repositoryRoot = process.cwd();
-const cutoverMigration = "20260831010000_multi_tenant_rls_cutover";
+const skippedMigrations = new Set([
+  "20260831010000_multi_tenant_rls_cutover",
+  "20260914000000_extend_rls_operational_models",
+]);
 const sourceMigrations = path.join(repositoryRoot, "prisma", "migrations");
 // Keep the temporary config under the repository so its @prisma/config import
 // resolves through the repository's node_modules in GitHub Actions.
@@ -26,7 +29,9 @@ try {
   const tempConfig = path.join(tempRoot, "prisma.config.ts");
   await cp(path.join(repositoryRoot, "prisma", "schema.prisma"), tempSchema);
   await cp(sourceMigrations, tempMigrations, { recursive: true });
-  await rm(path.join(tempMigrations, cutoverMigration), { recursive: true, force: true });
+  for (const migration of skippedMigrations) {
+    await rm(path.join(tempMigrations, migration), { recursive: true, force: true });
+  }
 
   await writeFile(
     tempConfig,
