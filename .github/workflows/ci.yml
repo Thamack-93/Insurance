@@ -67,7 +67,6 @@ jobs:
 
       - name: Production dependency audit
         id: production-dependency-audit
-        continue-on-error: true
         run: |
           set -o pipefail
           mkdir -p artifacts/security

@@ -394,8 +394,9 @@ async function verifyDatabaseRole(client: PoolClient, mode: ProductionTenantMode
       ? process.env.PRODUCTION_READONLY_ROLE?.trim()
       : process.env.TENANT_RLS_APP_ROLE?.trim();
     if (!row) issues.push(issue("RUNTIME_ROLE_MISSING", "BLOCKED", "No se pudo resolver current_user en pg_roles."));
-    if (row?.rolsuper || row?.rolbypassrls) issues.push(issue("RUNTIME_ROLE_BYPASSES_RLS", "BLOCKED", "El runtime verifier usa un rol superusuario o BYPASSRLS."));
-    if (row && !row.rolcanlogin) issues.push(issue("RUNTIME_ROLE_CANNOT_LOGIN", "BLOCKED", "El rol runtime no puede iniciar sesión con DATABASE_URL."));
+    const enforceRuntimeRole = mode === "multi-org";
+    if (usingReadOnlyVerifier && (row?.rolsuper || row?.rolbypassrls)) issues.push(issue("RUNTIME_ROLE_BYPASSES_RLS", "BLOCKED", "El runtime verifier usa un rol superusuario o BYPASSRLS."));
+    if (usingReadOnlyVerifier && row && !row.rolcanlogin) issues.push(issue("RUNTIME_ROLE_CANNOT_LOGIN", "BLOCKED", "El rol runtime no puede iniciar sesión con DATABASE_URL."));
     if (expected && row?.current_user !== expected) issues.push(issue("RUNTIME_ROLE_UNEXPECTED", "BLOCKED", `current_user no coincide con el rol esperado ${expected}.`));
     if (!expected && mode === "multi-org") issues.push(issue("RUNTIME_ROLE_NOT_DECLARED", "BLOCKED", usingReadOnlyVerifier ? "PRODUCTION_READONLY_ROLE es obligatorio cuando se usa PRODUCTION_READONLY_DATABASE_URL." : "TENANT_RLS_APP_ROLE es obligatorio en modo multi-org."));
     if (usingReadOnlyVerifier && !process.env.TENANT_RLS_APP_ROLE?.trim() && mode === "multi-org") issues.push(issue("RUNTIME_ROLE_NOT_DECLARED", "BLOCKED", "TENANT_RLS_APP_ROLE también es obligatorio para verificar los grants del runtime."));
@@ -422,7 +423,9 @@ async function verifyDatabaseRole(client: PoolClient, mode: ProductionTenantMode
         issues.push(issue("READONLY_ROLE_CAN_EXECUTE_SECURITY_DEFINER", "BLOCKED", `El rol verifier puede ejecutar ${readOnlySecurityDefiners} funciones SECURITY DEFINER.`));
       }
     }
-    const owners = await queryCount(client, `SELECT count(*)::text AS count FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = ANY($1::text[]) AND pg_get_userbyid(c.relowner) = current_user`, [PROTECTED_TENANT_TABLES]);
+    const owners = usingReadOnlyVerifier || enforceRuntimeRole
+      ? await queryCount(client, `SELECT count(*)::text AS count FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = ANY($1::text[]) AND pg_get_userbyid(c.relowner) = current_user`, [PROTECTED_TENANT_TABLES])
+      : 0;
     if (owners > 0) issues.push(issue("RUNTIME_ROLE_OWNS_PROTECTED_TABLE", "BLOCKED", "El rol runtime no puede ser dueño de tablas protegidas."));
     const securityDefiner = await client.query<{ owner: string | null; canLogin: boolean | null; bypassRls: boolean | null; config: string[] | null }>(`
       SELECT pg_get_userbyid(p.proowner) AS owner, r.rolcanlogin AS "canLogin", r.rolbypassrls AS "bypassRls", p.proconfig AS config
@@ -435,20 +438,22 @@ async function verifyDatabaseRole(client: PoolClient, mode: ProductionTenantMode
     `);
     const aggregateOwner = securityDefiner.rows[0];
     const expectedAggregateOwner = process.env.TENANT_RLS_PLATFORM_OWNER_ROLE?.trim() || "policydesk_platform_owner";
-    if (!aggregateOwner) issues.push(issue("SECURITY_DEFINER_MISSING", "BLOCKED", "Falta el aggregate SECURITY DEFINER de platform."));
+    if (mode === "multi-org" && !aggregateOwner) issues.push(issue("SECURITY_DEFINER_MISSING", "BLOCKED", "Falta el aggregate SECURITY DEFINER de platform."));
     else {
-      if (aggregateOwner.owner !== expectedAggregateOwner) issues.push(issue("SECURITY_DEFINER_OWNER_UNEXPECTED", "BLOCKED", `El aggregate SECURITY DEFINER debe pertenecer a ${expectedAggregateOwner}.`));
-      if (aggregateOwner.canLogin) issues.push(issue("SECURITY_DEFINER_OWNER_LOGIN", "BLOCKED", "El dueño del aggregate SECURITY DEFINER no puede iniciar sesión."));
-      if (!aggregateOwner.bypassRls) issues.push(issue("SECURITY_DEFINER_OWNER_RLS", "BLOCKED", "El dueño del aggregate SECURITY DEFINER debe poder leer agregados fuera de un tenant."));
-      if (!aggregateOwner.config?.some((entry) => entry === "search_path=pg_catalog, public")) {
-        issues.push(issue("SECURITY_DEFINER_SEARCH_PATH_UNSAFE", "BLOCKED", "El aggregate SECURITY DEFINER debe fijar search_path=pg_catalog, public."));
+      if (mode === "multi-org" && aggregateOwner) {
+        if (aggregateOwner.owner !== expectedAggregateOwner) issues.push(issue("SECURITY_DEFINER_OWNER_UNEXPECTED", "BLOCKED", `El aggregate SECURITY DEFINER debe pertenecer a ${expectedAggregateOwner}.`));
+        if (aggregateOwner.canLogin) issues.push(issue("SECURITY_DEFINER_OWNER_LOGIN", "BLOCKED", "El dueño del aggregate SECURITY DEFINER no puede iniciar sesión."));
+        if (!aggregateOwner.bypassRls) issues.push(issue("SECURITY_DEFINER_OWNER_RLS", "BLOCKED", "El dueño del aggregate SECURITY DEFINER debe poder leer agregados fuera de un tenant."));
+        if (!aggregateOwner.config?.some((entry) => entry === "search_path=pg_catalog, public")) {
+          issues.push(issue("SECURITY_DEFINER_SEARCH_PATH_UNSAFE", "BLOCKED", "El aggregate SECURITY DEFINER debe fijar search_path=pg_catalog, public."));
+        }
       }
     }
     let missingRuntimePrivileges = 0;
     let unexpectedRuntimePrivileges = 0;
     let platformRuntimeStateCanWrite = false;
     const runtimeRole = process.env.TENANT_RLS_APP_ROLE?.trim() || expected;
-    if (runtimeRole) {
+    if (runtimeRole && enforceRuntimeRole) {
       missingRuntimePrivileges = await queryCount(client, `
         SELECT count(*)::text FROM unnest($2::text[]) AS tables(table_name)
          WHERE NOT has_table_privilege($1, format('public.%I', table_name), 'SELECT')
