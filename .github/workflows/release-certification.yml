@@ -226,7 +226,7 @@ jobs:
           dropdb -h 127.0.0.1 -U postgres --if-exists "$TENANT_ISOLATION_DB_NAME"
 
   disposable-application:
-    name: DISPOSABLE POSTGRESQL / APPLICATION API E2E BILLING RESTORE
+    name: DISPOSABLE POSTGRESQL / APPLICATION INTEGRATION AND E2E
     needs: resolve-ref
     runs-on: ubuntu-latest
     timeout-minutes: 50
@@ -534,6 +534,7 @@ jobs:
           console.log("Release certification aggregate PASS");
           NODE
       - name: Upload sanitized release evidence
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: release-certification-${{ github.run_attempt }}

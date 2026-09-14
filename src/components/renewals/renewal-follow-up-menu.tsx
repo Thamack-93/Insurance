@@ -50,9 +50,7 @@ export function RenewalFollowUpMenu({ policyId, policyNumber, currentDueDate, cu
       }
       toast.success(result.message);
       setCustomOpen(false);
-      // A replace forces the server component tree to be read again after the
-      // transaction has committed, while preserving the current board URL.
-      router.replace(window.location.href);
+      router.refresh();
     });
   }
 

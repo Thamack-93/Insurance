@@ -245,13 +245,17 @@ test.describe("operation queue context", () => {
       const card = page.locator("li").filter({ hasText: fixture.policyNumber }).first();
       await expect(card).toBeVisible();
       await card.getByRole("button", { name: `Seguimiento de ${fixture.policyNumber}` }).click();
+      const shortcutDate = businessDateAfter(3);
       await page.getByRole("menuitem", { name: "En 3 días", exact: true }).click();
 
-      await expect(card.getByText(/Seguimiento ·/)).toBeVisible();
-      const first = await db.workItem.findUnique({ where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId } } });
-      expect(first?.status).toBe("OPEN");
-      expect(first?.policyId).toBe(fixture.policyId);
-      expect(businessDateKey(first!.dueDate!)).toBe(businessDateAfter(3));
+      await expect(page.locator(".cn-toast").filter({ hasText: "Seguimiento programado." })).toBeVisible({ timeout: 10_000 });
+      await expect.poll(async () => {
+        const item = await db.workItem.findUnique({ where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId } } });
+        return item
+          ? { status: item.status, policyId: item.policyId, dueDate: businessDateKey(item.dueDate!), notes: item.notes }
+          : null;
+      }, { timeout: 10_000 }).toEqual({ status: "OPEN", policyId: fixture.policyId, dueDate: shortcutDate, notes: null });
+      await expect(card.getByText(/Seguimiento ·/)).toBeVisible({ timeout: 10_000 });
 
       await card.getByRole("button", { name: `Seguimiento de ${fixture.policyNumber}` }).click();
       await page.getByRole("menuitem", { name: "Otra fecha", exact: true }).click();
@@ -260,11 +264,14 @@ test.describe("operation queue context", () => {
       await page.getByLabel("Nota opcional").fill("Llamar después de la junta");
       await page.getByRole("button", { name: "Guardar seguimiento", exact: true }).click();
 
-      await expect(card.getByText(/Seguimiento ·/)).toBeVisible();
-      const rows = await db.workItem.findMany({ where: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId } });
-      expect(rows).toHaveLength(1);
-      expect(businessDateKey(rows[0].dueDate!)).toBe(customDate);
-      expect(rows[0].notes).toBe("Llamar después de la junta");
+      await expect(page.locator(".cn-toast").filter({ hasText: "Seguimiento reprogramado." })).toBeVisible({ timeout: 10_000 });
+      await expect.poll(async () => {
+        const rows = await db.workItem.findMany({ where: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId } });
+        return rows.length === 1
+          ? { count: rows.length, dueDate: businessDateKey(rows[0].dueDate!), notes: rows[0].notes, policyId: rows[0].policyId }
+          : { count: rows.length };
+      }, { timeout: 10_000 }).toEqual({ count: 1, dueDate: customDate, notes: "Llamar después de la junta", policyId: fixture.policyId });
+      await expect(card.getByText(/Seguimiento ·/)).toBeVisible({ timeout: 10_000 });
     } finally {
       await cleanupPolicyFixture(fixture);
     }

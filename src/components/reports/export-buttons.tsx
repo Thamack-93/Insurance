@@ -86,14 +86,14 @@ export function ExportButtons({ exports }: { exports: ExportData[] }) {
         {isExporting ? "Exportando..." : "Exportar"}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuItem onSelect={exportToExcel} disabled={isExporting}>
+        <DropdownMenuItem onClick={exportToExcel} disabled={isExporting}>
           <FileSpreadsheet className="mr-2 size-4" />
           Descargar Excel (.xlsx)
         </DropdownMenuItem>
         {exports.map((exp) => (
           <DropdownMenuItem
             key={exp.name}
-            onSelect={() => exportSingleCSV(exp)}
+            onClick={() => exportSingleCSV(exp)}
             disabled={isExporting || exp.data.length === 0}
           >
             <FileText className="mr-2 size-4" />
