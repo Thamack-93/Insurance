@@ -81,7 +81,7 @@ describe.skipIf(!enabled)("platform billing disposable PostgreSQL integration", 
   it("enforces authorization, idempotency, lifecycle and metrics", async () => {
     const adminUrl = process.env.RESTORE_INTEGRATION_ADMIN_URL ?? process.env.DATABASE_URL;
     if (!adminUrl) throw new Error("RESTORE_INTEGRATION_ADMIN_URL or DATABASE_URL is required.");
-    const name = `policydesk_tenant_test_billing_${process.pid}_${Date.now()}`.replace(/[^0-9_]/g, "").toLowerCase();
+    const name = `policydesk_tenant_test_billing_${process.pid}_${Date.now()}`.replace(/[^a-z0-9_]/gi, "").toLowerCase();
     const url = databaseUrl(adminUrl, name);
     try {
       await createDatabase(adminUrl, name);
