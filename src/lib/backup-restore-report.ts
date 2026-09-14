@@ -9,6 +9,7 @@ export type RestoreDrillReport = {
   drillVersion: 1;
   backupFilename: string;
   backupCreatedAt: string | null;
+  backupPayloadSha256: string | null;
   keyVersion: string | null;
   manifestHash: string | null;
   sanitizedTargetFingerprint: string | null;
@@ -22,6 +23,10 @@ export type RestoreDrillReport = {
   domainChecks: unknown;
   workItemAudit: unknown;
   restoreIntegrity: unknown;
+  databaseRecovery: unknown;
+  fileRecovery: unknown;
+  completeRecovery: boolean | null;
+  branchCleanup: unknown;
   applicationReads: unknown;
   playwrightSmoke: unknown;
   fixtureLifecycle: unknown;
@@ -47,14 +52,17 @@ export function createEmptyDrillReport(input: {
   backupFilename: string;
   startedAt: string;
   backupCreatedAt?: string | null;
+  backupPayloadSha256?: string | null;
   keyVersion?: string | null;
   manifestHash?: string | null;
   targetFingerprint?: string | null;
+  branchName?: string | null;
 }): RestoreDrillReport {
   return {
     drillVersion: 1,
     backupFilename: input.backupFilename,
     backupCreatedAt: input.backupCreatedAt ?? null,
+    backupPayloadSha256: input.backupPayloadSha256 ?? null,
     keyVersion: input.keyVersion ?? null,
     manifestHash: input.manifestHash ?? null,
     sanitizedTargetFingerprint: input.targetFingerprint ?? null,
@@ -68,6 +76,14 @@ export function createEmptyDrillReport(input: {
     domainChecks: null,
     workItemAudit: null,
     restoreIntegrity: null,
+    databaseRecovery: null,
+    fileRecovery: null,
+    completeRecovery: null,
+    branchCleanup: {
+      required: true,
+      status: "PENDING_OPERATOR_REVIEW",
+      branchName: input.branchName ?? null,
+    },
     applicationReads: null,
     playwrightSmoke: null,
     fixtureLifecycle: null,

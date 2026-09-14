@@ -36,10 +36,13 @@ incluyendo sus variantes pooler/directas. Nunca uses una URL de producción.
 
 ## Elegir el backup
 
-Selecciona un archivo reciente que el panel admin pueda verificar. La verificación
-comprueba el manifiesto, tamaño, SHA-256, formato, clave y autenticación AES-GCM.
-Eso es un preflight, no evidencia suficiente de recuperación: el drill debe pasar
-conteos, FK, invariantes de pagos/pólizas/WorkItem y lecturas de aplicación.
+Selecciona un artifact global `VERIFIED` de menos de siete días que el panel admin
+pueda verificar. El CLI comprueba el estado y scope del artifact en la base origen,
+que el manifiesto declare `PLATFORM` y `EXCLUDE_DEMO`, y que archivo y manifiesto
+estén disponibles en el store privado. La verificación también comprueba tamaño,
+SHA-256, formato, clave y autenticación AES-GCM. Eso es un preflight, no evidencia
+suficiente de recuperación: el drill debe pasar conteos, FK, invariantes de
+pagos/pólizas/WorkItem y lecturas de aplicación.
 
 ## Ejecución
 
@@ -60,8 +63,12 @@ usó el fallback), valida antes del commit y escribe un JSON en
 `artifacts/restore-drills/`. El reporte incluye `triggerMode`. Un fallo revierte
 toda la transacción.
 
-Después del commit el propio drill reconecta al target, ejecuta las lecturas
-mínimas, `check:legacy-workitem-refs -- --read-only` y `db:check-drift`. No
+Después del commit el propio drill reconecta al target, valida las referencias
+de documentos y evidencia de comisiones en el store privado, ejecuta las lecturas
+mínimas, `check:legacy-workitem-refs -- --read-only` y `db:check-drift`. Una
+referencia `blob:` se descarga en streaming y se compara con su hash/size
+registrados cuando existen. Una referencia sin archivo, sin hash histórico o con
+ruta local queda como `PENDING` y no permite declarar recuperación completa. No
 ejecutes el auditor apuntando a `DATABASE_URL` de producción durante este
 procedimiento.
 
@@ -106,6 +113,8 @@ header/manifiesto y nunca imprime su valor.
 - [ ] Confirmar conteos de tabla y total.
 - [ ] Confirmar cero huérfanos FK.
 - [ ] Confirmar invariantes de Payment, Policy, Receipt, Notification y WorkItem.
+- [ ] Confirmar referencias de Document y evidencia de CommissionStatement; comprobar disponibilidad, tamaño y hash cuando exista evidencia de origen.
+- [ ] Confirmar `completeRecovery=true` y `fileRecovery.status=PASS`.
 - [ ] Abrir PolicyDesk contra el target y recorrer pantallas críticas si procede.
 - [ ] Confirmar que la fuente no cambió.
 - [ ] Registrar duración/RTO.

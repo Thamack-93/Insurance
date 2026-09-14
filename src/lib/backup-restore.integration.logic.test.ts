@@ -6,6 +6,7 @@ import { Pool } from "pg";
 import { createBackupManifest, encryptBackupPayload } from "@/lib/backup-logic";
 import { restoreVerifiedBackup } from "@/lib/backup-restore";
 import { runBackupRestoreDrill } from "@/lib/backup-restore-drill";
+import { validateRestoredFiles } from "@/lib/backup-restore-files";
 import { runRestoreApplicationReads } from "@/lib/backup-restore-smoke";
 import { createEmptyDrillReport, writeRestoreDrillReport } from "@/lib/backup-restore-report";
 import { BOOTSTRAP_ORGANIZATION_ID, PROTECTED_TENANT_TABLES } from "@/lib/tenant-organization-foundation";
@@ -217,6 +218,7 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
         dependencies: {
           applyMigrations: async () => ({ ok: true, synthetic: true }),
           restore: async () => restored,
+          fileValidation: validateRestoredFiles,
           applicationReads: runRestoreApplicationReads,
           workItemAudit: async () => ({ status: "PASS", synthetic: true }),
           migrationDrift: async () => ({ ok: true, synthetic: true }),
@@ -224,6 +226,8 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
         },
       });
       expect(orchestrationReport.finalStatus).toBe("PASS");
+      expect(orchestrationReport.fileRecovery).toMatchObject({ status: "PASS", complete: true });
+      expect(orchestrationReport.completeRecovery).toBe(true);
       expect(orchestrationReport.applicationReads).toMatchObject({ ok: true });
       const guardPool = new Pool({ connectionString: targetUrl, max: 1 });
       const guardClient = await guardPool.connect();
@@ -250,6 +254,7 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
         backupFilename: valid.manifest.payload.filename,
         startedAt: valid.manifest.createdAt,
         backupCreatedAt: valid.manifest.createdAt,
+        backupPayloadSha256: valid.manifest.payload.sha256,
         keyVersion: valid.manifest.encryption.keyVersion,
         manifestHash: valid.manifest.manifestSha256,
         targetFingerprint: "integration-disposable",
@@ -269,6 +274,9 @@ describe.skipIf(!enabled)("disposable PostgreSQL backup restore", () => {
         domainChecks: restored.domainChecks,
         sequences: restored.sequences,
       };
+      report.databaseRecovery = report.restoreIntegrity;
+      report.fileRecovery = orchestrationReport.fileRecovery;
+      report.completeRecovery = orchestrationReport.completeRecovery;
       report.applicationReads = orchestrationReport.applicationReads;
       report.workItemAudit = orchestrationReport.workItemAudit;
       report.migrationResult = orchestrationReport.migrationResult;

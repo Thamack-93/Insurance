@@ -22,6 +22,9 @@ import {
   writeRestoreDrillReport,
 } from "../src/lib/backup-restore-report.ts";
 import { assertTemporaryNeonRestoreTarget } from "../src/lib/backup-restore-guards.ts";
+import { validateRestoredFiles } from "../src/lib/backup-restore-files.ts";
+import { assertRestorableGlobalBackup } from "../src/lib/backup-restore-preflight.ts";
+import { getBackupArtifactByPathname } from "../src/lib/backup-catalog.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -270,6 +273,12 @@ async function main() {
     if (!verification.valid) throw new RestoreStageError("backup-verification", verification.reason, undefined, "BACKUP_VERIFICATION_FAILED");
     const verifiedManifest = verification.manifest;
     manifest = verifiedManifest;
+    try {
+      const catalogEntry = await getBackupArtifactByPathname(verifiedManifest.payload.pathname);
+      assertRestorableGlobalBackup({ manifest: verifiedManifest, catalogEntry });
+    } catch (error) {
+      throw new RestoreStageError("backup-verification", "El backup no cumple los requisitos para un restore global.", error, "BACKUP_VERIFICATION_FAILED");
+    }
     let plaintext: Buffer;
     try {
       const download = await getBackupDownload(filename);
@@ -292,17 +301,20 @@ async function main() {
         preflight: () => checkRestoreTargetConnection(targetUrl),
         applyMigrations: () => applyCurrentMigrations(targetUrl),
         restore: () => restoreVerifiedBackup({ targetDatabaseUrl: targetUrl, plaintext, manifest: verifiedManifest }),
+        fileValidation: validateRestoredFiles,
         workItemAudit: () => runLegacyAudit(targetUrl),
         migrationDrift: () => checkTargetMigrationDrift(targetUrl),
         appSmoke: () => runAppSmoke(targetUrl),
         writeReport: async (currentReport) => {
           currentReport.sanitizedTargetFingerprint ??= targetFingerprint(targetUrl);
           currentReport.backupCreatedAt ??= verifiedManifest.createdAt;
+          currentReport.backupPayloadSha256 ??= verifiedManifest.payload.sha256;
           currentReport.keyVersion ??= verifiedManifest.encryption.keyVersion;
           currentReport.manifestHash ??= verifiedManifest.manifestSha256;
           return writeRestoreDrillReport(currentReport);
         },
       },
+      branchName: target.branchName,
     });
     if (report.finalStatus === "PASS") console.log(`Restore drill PASS. Reporte: artifacts/restore-drills/`);
     else {
@@ -314,6 +326,7 @@ async function main() {
       backupFilename: filename,
       startedAt: startedAt.toISOString(),
       backupCreatedAt: manifest?.createdAt ?? null,
+      backupPayloadSha256: manifest?.payload.sha256 ?? null,
       keyVersion: manifest?.encryption.keyVersion ?? null,
       manifestHash: manifest?.manifestSha256 ?? null,
       targetFingerprint: targetUrl ? targetFingerprint(targetUrl) : null,

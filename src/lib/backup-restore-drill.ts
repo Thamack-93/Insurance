@@ -2,6 +2,7 @@ import type { BackupManifest } from "@/lib/backup-logic";
 import type { RestoreFailureCode } from "@/lib/backup-restore-errors";
 import { RestoreStageError, type RestoreResult } from "@/lib/backup-restore";
 import { runRestoreApplicationReads, type RestoreApplicationReadResult } from "@/lib/backup-restore-smoke";
+import type { RestoredFileValidation } from "@/lib/backup-restore-files";
 import {
   createEmptyDrillReport,
   sanitizeRestoreDrillError,
@@ -40,6 +41,7 @@ export type RestoreDrillDependencies = {
   applyMigrations: () => Promise<unknown>;
   restore: () => Promise<RestoreResult>;
   applicationReads?: (targetDatabaseUrl: string) => Promise<RestoreApplicationReadResult>;
+  fileValidation?: (targetDatabaseUrl: string) => Promise<RestoredFileValidation>;
   workItemAudit: () => Promise<{ status?: string; [key: string]: unknown }>;
   migrationDrift: () => Promise<unknown>;
   appSmoke?: () => Promise<{
@@ -56,6 +58,7 @@ export type RestoreDrillExecutionInput = {
   startedAt?: Date;
   appSmokeEnabled: boolean;
   dependencies: RestoreDrillDependencies;
+  branchName?: string | null;
 };
 
 export async function runBackupRestoreDrill(input: RestoreDrillExecutionInput) {
@@ -64,7 +67,9 @@ export async function runBackupRestoreDrill(input: RestoreDrillExecutionInput) {
     backupFilename: input.backupFilename,
     startedAt: startedAt.toISOString(),
     backupCreatedAt: input.manifest.createdAt,
+    backupPayloadSha256: input.manifest.payload.sha256,
     keyVersion: input.manifest.encryption.keyVersion,
+    branchName: input.branchName,
   });
   let stage: DrillStage = "preflight";
 
@@ -82,10 +87,25 @@ export async function runBackupRestoreDrill(input: RestoreDrillExecutionInput) {
       domainChecks: restored.domainChecks,
       sequences: restored.sequences,
     };
+    report.databaseRecovery = report.restoreIntegrity;
     report.tableCounts = restored.tableCounts.tables;
     report.totalRows = restored.tableCounts.totalRows;
     report.fkChecks = restored.foreignKeys;
     report.domainChecks = restored.domainChecks;
+
+    if (input.dependencies.fileValidation) {
+      let fileRecovery: RestoredFileValidation;
+      try {
+        fileRecovery = await input.dependencies.fileValidation(input.targetDatabaseUrl);
+      } catch (error) {
+        throw new RestoreDrillOrchestrationError(sanitizeRestoreDrillError(error), "FILE_RECOVERY_FAILED");
+      }
+      report.fileRecovery = fileRecovery;
+      report.completeRecovery = fileRecovery.complete;
+      if (!fileRecovery.complete) {
+        throw new RestoreDrillOrchestrationError("La recuperación de archivos y evidencia no está completa.", "FILE_RECOVERY_FAILED");
+      }
+    }
 
     stage = "post-commit-smoke";
     let applicationReads: RestoreApplicationReadResult;
