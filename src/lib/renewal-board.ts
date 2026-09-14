@@ -67,6 +67,18 @@ export type RenewalBoardColumn = {
   premiumTotalCurrency: string | null;
 };
 
+export type RenewalBoardExcludedPolicy = {
+  policyId: string;
+  policyNumber: string;
+  clientId: string;
+  clientName: string;
+  insurerName: string;
+  status: string;
+  endDate: Date;
+  latestReceiptStatus: string | null;
+  reason: "OUTSIDE_WINDOW" | "INACTIVE" | "CANCELLED_RECEIPT" | "NOT_ELIGIBLE";
+};
+
 export type RenewalBoardData = {
   columns: RenewalBoardColumn[];
   /** Todas las tarjetas del tablero, sin recortar por columna. */
@@ -74,6 +86,8 @@ export type RenewalBoardData = {
   total: number;
   stalledCount: number;
   truncated: boolean;
+  /** Registros relacionados con la búsqueda que no son accionables en esta ventana. */
+  excludedPolicies: RenewalBoardExcludedPolicy[];
   error?: string;
 };
 
@@ -91,6 +105,17 @@ function ownerWhere(owner?: string): Prisma.PolicyWhereInput {
   if (!owner) return {};
   if (owner === UNASSIGNED_OWNER_VALUE) return { client: { portfolioOwnerId: null } };
   return { client: { portfolioOwnerId: owner } };
+}
+
+function searchWhere(query?: string): Prisma.PolicyWhereInput {
+  if (!query) return {};
+  return {
+    OR: [
+      { policyNumber: { contains: query } },
+      { client: { fullName: { contains: query } } },
+      { insurer: { name: { contains: query } } },
+    ],
+  };
 }
 
 /**
@@ -115,6 +140,7 @@ export function buildRenewalBoardWhere(
       { organizationId },
       portfolioOwnerId ? { client: { portfolioOwnerId } } : {},
       ownerWhere(filters.owner),
+      searchWhere(filters.query),
       { endDate: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } },
       {
         OR: [
@@ -189,13 +215,29 @@ export async function loadRenewalBoard(
   const today = businessToday();
 
   try {
-    const { policies, manualFollowUps } = await withTenantOrganization(organizationId, async (db) => {
+    const { policies, manualFollowUps, relatedPolicies } = await withTenantOrganization(organizationId, async (db) => {
       const policies = await db.policy.findMany({
         where: buildRenewalBoardWhere(filters, portfolioOwnerId, organizationId, today),
         include: renewalBoardInclude,
         orderBy: [{ endDate: "asc" }, { id: "asc" }],
         take: RENEWAL_BOARD_LIMIT + 1,
       });
+
+      const relatedPolicies = filters.query
+        ? await db.policy.findMany({
+            where: {
+              AND: [
+                { organizationId },
+                portfolioOwnerId ? { client: { portfolioOwnerId } } : {},
+                ownerWhere(filters.owner),
+                searchWhere(filters.query),
+              ],
+            },
+            include: renewalBoardInclude,
+            orderBy: [{ endDate: "asc" }, { id: "asc" }],
+            take: 200,
+          })
+        : [];
 
       const visiblePolicyIds = policies.slice(0, RENEWAL_BOARD_LIMIT).map((policy) => policy.id);
       const manualFollowUps = visiblePolicyIds.length
@@ -211,7 +253,7 @@ export async function loadRenewalBoard(
           })
         : [];
 
-      return { policies, manualFollowUps };
+      return { policies, manualFollowUps, relatedPolicies };
     });
 
     const manualPolicyIdBySourceId = new Map(
@@ -231,6 +273,35 @@ export async function loadRenewalBoard(
       const card = toRenewalBoardCard(policy, today);
       if (card) cards.push({ ...card, manualFollowUp: manualFollowUpByPolicyId.get(card.policyId) ?? null });
     }
+
+    const cardIds = new Set(cards.map((card) => card.policyId));
+    const range = renewalWindowRange(filters.window, today);
+    // The related query is intentionally kept separate from the actionable
+    // window query. This makes a search useful for diagnosis without turning
+    // future, cancelled or otherwise ineligible policies into work items.
+    const diagnosticPolicies: RenewalBoardExcludedPolicy[] = relatedPolicies.flatMap((policy) => {
+      if (cardIds.has(policy.id)) return [];
+      const latestReceiptStatus = getLatestReceiptStatus(policy.receipts);
+      const inWindow = (!range.from || policy.endDate >= range.from) && (!range.to || policy.endDate <= range.to);
+      const reason: RenewalBoardExcludedPolicy["reason"] = policy.status !== "ACTIVE"
+        ? "INACTIVE"
+        : latestReceiptStatus === "CANCELLED"
+          ? "CANCELLED_RECEIPT"
+          : !inWindow
+            ? "OUTSIDE_WINDOW"
+            : "NOT_ELIGIBLE";
+      return [{
+        policyId: policy.id,
+        policyNumber: policy.policyNumber,
+        clientId: policy.clientId,
+        clientName: policy.client.fullName,
+        insurerName: policy.insurer.name,
+        status: policy.status,
+        endDate: policy.endDate,
+        latestReceiptStatus,
+        reason,
+      }];
+    });
 
     const columns: RenewalBoardColumn[] = RENEWAL_STAGES.map((stage) => {
       const stageCards = cards.filter((card) => card.stage === stage);
@@ -253,6 +324,7 @@ export async function loadRenewalBoard(
       total: cards.length,
       stalledCount: cards.filter((card) => card.stall.stalled).length,
       truncated,
+      excludedPolicies: diagnosticPolicies,
     };
   } catch (error) {
     logError("renewal-board.loadRenewalBoard", error, { errorCode: "RENEWAL_BOARD_LOAD_FAILED", window: filters.window });
@@ -268,6 +340,7 @@ export async function loadRenewalBoard(
       total: 0,
       stalledCount: 0,
       truncated: false,
+      excludedPolicies: [],
       error: "RENEWAL_BOARD_LOAD_FAILED",
     };
   }

@@ -67,6 +67,12 @@ describe("renewal-board.logic — filtros de la URL", () => {
     expect(readRenewalBoardFilters({}).owner).toBeUndefined();
   });
 
+  it("lee la búsqueda del tablero y la acota", () => {
+    expect(readRenewalBoardFilters({ q: " Pedro Juan " }).query).toBe("Pedro Juan");
+    expect(readRenewalBoardFilters({ q: "  " }).query).toBeUndefined();
+    expect(readRenewalBoardFilters({ q: "x".repeat(120) }).query).toHaveLength(100);
+  });
+
   it("incluye las vencidas en las ventanas numéricas y las aísla en 'overdue'", () => {
     const upTo30 = renewalWindowRange("30", today);
     expect(upTo30.from).toBeUndefined();

@@ -13,12 +13,16 @@ import { PriorityBadge, StatusBadge } from "@/components/badges/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { TableToolbar } from "@/components/tables/table-toolbar";
 import { DocumentDropZone } from "@/components/documents/document-drop-zone";
 import { DocumentList } from "@/components/documents/document-list";
 import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { clientOperationalWhere, claimOperationalWhere, quoteOperationalWhere, documentOperationalWhere } from "@/lib/portfolio-access";
 import { formatDate } from "@/lib/dates";
 import { policyTypeLabel, statusLabel } from "@/lib/status";
+import { policyStatusOptions } from "@/lib/domain-options";
+import { POLICY_STATUSES } from "@/lib/domain-values";
+import { readAllowedTableParam } from "@/lib/table-query";
 import { formatCurrency, formatCurrencyExact, toNumber } from "@/lib/money";
 import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { calculateAge, formatBirthdayDate } from "@/lib/birthday-reminders";
@@ -28,6 +32,8 @@ import { withTenantOrganization } from "@/lib/tenant-dal";
 export default async function ClientDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
   const query = (await searchParams) ?? {};
+  const policyStatus = readAllowedTableParam(query, "policyStatus", POLICY_STATUSES);
+  const policyQuery = typeof query.q === "string" ? query.q.trim().slice(0, 100) : undefined;
   const returnTo = normalizeReturnTo(typeof query.returnTo === "string" ? query.returnTo : undefined, "/clients");
   const scope = await requireOrganizationPortfolioReadScope();
   const isAdmin = scope.membershipRole !== "AGENT";
@@ -55,12 +61,26 @@ export default async function ClientDetailPage({ params, searchParams }: { param
     notFound();
   }
 
-  const [policies, receipts, workItems, claims, quotes, documents, referidos, activity, exactPolicyStats, exactReceiptCount, exactDocumentCount] = await Promise.all([
+  const policyWhere = {
+    clientId: id,
+    organizationId: scope.organizationId,
+    client: { organizationId: scope.organizationId },
+    ...(policyStatus ? { status: policyStatus } : {}),
+    ...(policyQuery
+      ? {
+          OR: [
+            { policyNumber: { contains: policyQuery } },
+            { insurer: { name: { contains: policyQuery } } },
+          ],
+        }
+      : {}),
+  };
+
+  const [policies, receipts, workItems, claims, quotes, documents, referidos, activity, exactPolicyStats, exactReceiptCount, exactDocumentCount, policyStatusCounts, totalPolicyCount] = await Promise.all([
     db.policy.findMany({
-      where: { clientId: id, organizationId: scope.organizationId, client: { organizationId: scope.organizationId } },
+      where: policyWhere,
       include: { insurer: true },
       orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }, { id: "asc" }],
-      take: 10,
     }),
     db.receipt.findMany({
       where: { clientId: id, organizationId: scope.organizationId, client: { organizationId: scope.organizationId } },
@@ -119,6 +139,14 @@ export default async function ClientDetailPage({ params, searchParams }: { param
     }),
     db.document.count({
       where: { clientId: id, organizationId: scope.organizationId },
+    }),
+    db.policy.groupBy({
+      by: ["status"],
+      where: { clientId: id, organizationId: scope.organizationId, client: { organizationId: scope.organizationId } },
+      _count: { _all: true },
+    }),
+    db.policy.count({
+      where: { clientId: id, organizationId: scope.organizationId, client: { organizationId: scope.organizationId } },
     }),
   ]);
 
@@ -274,42 +302,71 @@ export default async function ClientDetailPage({ params, searchParams }: { param
             </div>
           </SectionCard>
 
-          <SectionCard title="Pólizas" description="Cartera de este cliente, de la más viva a la más cercana.">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/40">
-                  <TableHead>Póliza</TableHead>
-                  <TableHead>Aseguradora</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Renovación</TableHead>
-                  <TableHead className="text-right">Prima</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {policies.map((policy) => (
-                  <TableRow key={policy.id}>
-                    <TableCell>
-                      <Link href={`/policies/${policy.id}`} className="font-medium text-foreground hover:text-primary">
-                        {policy.policyNumber}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{policy.insurer.name}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="rounded-full">
-                        {policyTypeLabel(policy.policyType)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{policy.endDate ? formatDate(policy.endDate) : "Sin fecha"}</TableCell>
-                    <TableCell className="text-right font-medium">{formatCurrency(policy.premiumAmount, policy.currency)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+          <SectionCard title="Pólizas" description="Cartera completa del cliente. Filtra por estado; la lista ya no se recorta silenciosamente a 10 registros.">
+            <div className="border-b border-border/70 px-4 py-3">
+              <TableToolbar
+                searchPlaceholder="Buscar en pólizas..."
+                filters={[{ key: "policyStatus", label: "Estado", options: policyStatusOptions }]}
+                tableControls={false}
+                resultCount={policies.length}
+                totalCount={totalPolicyCount}
+                resultNoun={["póliza", "pólizas"]}
+              />
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span>{totalPolicyCount} en total</span>
+                {policyStatusOptions.map((option) => {
+                  const count = policyStatusCounts.find((entry) => entry.status === option.value)?._count._all ?? 0;
+                  return <span key={option.value}>{option.label}: {count}</span>;
+                })}
+              </div>
+            </div>
+            <div className="max-h-[30rem] overflow-auto">
+              <div className="min-w-[760px]">
+                <Table>
+                  <TableHeader className="sticky top-0 z-10 bg-card">
+                    <TableRow className="bg-muted/40">
+                      <TableHead>Póliza</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead>Aseguradora</TableHead>
+                      <TableHead>Tipo</TableHead>
+                      <TableHead>Renovación</TableHead>
+                      <TableHead className="text-right">Prima</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {policies.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+                          No hay pólizas con este filtro.
+                        </TableCell>
+                      </TableRow>
+                    ) : policies.map((policy) => (
+                      <TableRow key={policy.id}>
+                        <TableCell>
+                          <Link href={`/policies/${policy.id}`} className="font-medium text-foreground hover:text-primary">
+                            {policy.policyNumber}
+                          </Link>
+                        </TableCell>
+                        <TableCell><StatusBadge status={policy.status} entity="policy" /></TableCell>
+                        <TableCell>{policy.insurer.name}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="rounded-full">
+                            {policyTypeLabel(policy.policyType)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{policy.endDate ? formatDate(policy.endDate) : "Sin fecha"}</TableCell>
+                        <TableCell className="text-right font-medium">{formatCurrency(policy.premiumAmount, policy.currency)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
           </SectionCard>
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-          <SectionCard title="Recibos" description="Cobranza histórica y pendientes.">
+          <SectionCard title="Recibos" description="Últimos 10 movimientos; el enlace abre el historial completo." action={<Link href={`/receipts?q=${encodeURIComponent(client.fullName)}`} className="text-sm font-medium text-primary hover:underline">Ver todos</Link>}>
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40">
@@ -338,7 +395,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
             </Table>
           </SectionCard>
 
-          <SectionCard title="Tareas" description="Pendientes que cuelgan del cliente.">
+          <SectionCard title="Tareas" description="Últimos 10 pendientes; el enlace abre la cola completa." action={<Link href={`/operations?view=pending&q=${encodeURIComponent(client.fullName)}`} className="text-sm font-medium text-primary hover:underline">Ver todas</Link>}>
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40">
@@ -369,7 +426,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
-          <SectionCard title="Siniestros" description="Casos abiertos o resueltos vinculados al cliente.">
+          <SectionCard title="Siniestros" description="Últimos 5 casos; el enlace abre todos los siniestros del cliente." action={<Link href={`/operations?view=claims&q=${encodeURIComponent(client.fullName)}`} className="text-sm font-medium text-primary hover:underline">Ver todos</Link>}>
             <div className="divide-y divide-stone-200/80">
               {claims.length === 0 ? (
                 <div className="px-4 py-6 text-sm text-muted-foreground">No hay siniestros para este cliente todavía.</div>
@@ -391,7 +448,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
           </SectionCard>
 
           <div className="grid gap-6 lg:grid-cols-2">
-            <SectionCard title="Cotizaciones" description="Expediente comercial.">
+            <SectionCard title="Cotizaciones" description="Últimas 5 cotizaciones; el enlace abre el expediente comercial completo." action={<Link href={`/quotes?q=${encodeURIComponent(client.fullName)}`} className="text-sm font-medium text-primary hover:underline">Ver todas</Link>}>
               <div className="divide-y divide-stone-200/80">
                 {quotes.length === 0 ? (
                   <div className="px-4 py-6 text-sm text-muted-foreground">Sin cotizaciones registradas.</div>
@@ -413,7 +470,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
               </div>
             </SectionCard>
 
-            <SectionCard title="Documentos" description="Archivo local del cliente.">
+            <SectionCard title="Documentos" description="Últimos 20 documentos; el enlace abre el archivo completo." action={<Link href={`/documents?q=${encodeURIComponent(client.fullName)}`} className="text-sm font-medium text-primary hover:underline">Ver todos</Link>}>
               <div className="space-y-4 p-4">
                 <DocumentDropZone
                   associations={{ clientId: id }}

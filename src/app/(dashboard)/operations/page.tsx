@@ -150,7 +150,7 @@ export default async function OperationsPage({
   const params = (await searchParams) ?? {};
   const view = readView(typeof params.view === "string" ? params.view : undefined);
   const page = readTablePage(params);
-  const query = view === "pending" || view === "renewals" || view === "claims" ? readTableParam(params, "q")?.trim() : undefined;
+  const query = view === "pending" || view === "renewals" || view === "claims" || view === "renewal-board" ? readTableParam(params, "q")?.trim() : undefined;
   const priority = view === "pending" ? readAllowedTableParam(params, "priority", PRIORITIES) : undefined;
   const workItemType = view === "pending" ? readAllowedTableParam(params, "workItemType", WORK_ITEM_TYPES) : undefined;
   const renewalWindow = view === "renewals" ? readAllowedTableParam(params, "window", ["30d", "60d", "90d"] as const) ?? "30d" : "30d";
@@ -178,6 +178,7 @@ export default async function OperationsPage({
           { claimType: { contains: query } },
           { client: { fullName: { contains: query } } },
           { policy: { policyNumber: { contains: query } } },
+          { insurer: { name: { contains: query } } },
         ],
       }] : []),
     ],
@@ -323,7 +324,7 @@ export default async function OperationsPage({
           <div className="grid gap-4 lg:grid-cols-2">
             <WorkItemColumn title="Requieren atención" count={overdue.length + dueToday.length} items={[...overdue, ...dueToday].slice(0, 8)} tone="text-destructive" viewAllHref="/operations?view=pending" returnTo={returnTo} />
             <Card size="sm" className="gap-0 py-0">
-              <CardHeader className="border-b py-3"><CardTitle>Renovaciones pendientes</CardTitle></CardHeader>
+              <CardHeader className="border-b py-3"><CardTitle className="flex items-center justify-between gap-3"><span>Renovaciones pendientes</span><Link href="/operations?view=renewals" className="text-xs font-medium text-primary hover:underline">Ver las {renewalCount}</Link></CardTitle></CardHeader>
               <CardContent className="px-0">
                 {renewals.slice(0, 8).map((policy) => (
                   <div key={policy.id} className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b px-4 py-2.5 last:border-b-0">

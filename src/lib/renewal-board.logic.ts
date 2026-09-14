@@ -73,13 +73,17 @@ export type RenewalBoardFilters = {
   window: RenewalBoardWindow;
   /** Id del responsable, o `unassigned` para las carteras sin dueño. */
   owner?: string;
+  /** Busca por cliente, número de póliza o aseguradora. */
+  query?: string;
 };
 
 export function readRenewalBoardFilters(params: TableSearchParams): RenewalBoardFilters {
   const owner = readTableParam(params, "owner")?.trim();
+  const query = readTableParam(params, "q")?.trim();
   return {
     window: readAllowedTableParam(params, "window", RENEWAL_BOARD_WINDOWS) ?? DEFAULT_RENEWAL_BOARD_WINDOW,
     owner: owner ? owner.slice(0, 40) : undefined,
+    query: query ? query.slice(0, 100) : undefined,
   };
 }
 

@@ -606,7 +606,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
         ) : null}
 
         <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-          <SectionCard title="Pagos" description="Pagos reales vinculados a la póliza.">
+          <SectionCard title="Pagos" description="Últimos 10 pagos; el acumulado refleja toda la póliza." action={<Link href={`/receipts?tab=historico&q=${encodeURIComponent(policy.policyNumber)}`} className="text-sm font-medium text-primary hover:underline">Ver historial</Link>}>
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40">
@@ -633,7 +633,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
           </SectionCard>
 
           <div className="grid gap-6 lg:grid-cols-2">
-            <SectionCard title="Comisiones" description="Cobro esperado de la póliza.">
+            <SectionCard title="Comisiones" description="Últimas 10 comisiones; el enlace abre la cola completa." action={<Link href={`/commissions?q=${encodeURIComponent(policy.policyNumber)}`} className="text-sm font-medium text-primary hover:underline">Ver todas</Link>}>
               <div className="divide-y divide-stone-200/80">
                 {commissions.map((commission) => (
                   <div key={commission.id} className="px-4 py-4">
@@ -650,7 +650,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
               </div>
             </SectionCard>
 
-            <SectionCard title="Tareas" description="Flujo operativo abierto sobre la póliza.">
+            <SectionCard title="Tareas" description="Últimos 10 pendientes; el enlace abre la cola completa." action={<Link href={`/operations?view=pending&q=${encodeURIComponent(policy.policyNumber)}`} className="text-sm font-medium text-primary hover:underline">Ver todas</Link>}>
               <div className="divide-y divide-stone-200/80">
                 {workItems.map((task) => (
                   <div key={task.id} className="px-4 py-4">
@@ -672,7 +672,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
           </div>
         </section>
 
-        <SectionCard title="Documentos" description="Archivos asociados a esta póliza.">
+        <SectionCard title="Documentos" description="Últimos 10 documentos; el enlace abre el archivo completo." action={<Link href={`/documents?q=${encodeURIComponent(policy.policyNumber)}`} className="text-sm font-medium text-primary hover:underline">Ver todos</Link>}>
           <div className="space-y-4 p-4">
             <DocumentDropZone
               associations={{ policyId: id, clientId: policy.clientId }}

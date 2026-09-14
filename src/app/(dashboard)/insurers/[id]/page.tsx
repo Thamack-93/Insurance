@@ -225,7 +225,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-          <SectionCard title="Siniestros" description="Registro de reclamaciones con esta aseguradora.">
+          <SectionCard title="Siniestros" description="Últimos 5 casos; el enlace abre todos los siniestros de esta aseguradora." action={<Link href={`/operations?view=claims&q=${encodeURIComponent(insurer.name)}`} className="text-sm font-medium text-primary hover:underline">Ver todos</Link>}>
             {claims.length === 0 ? (
               <div className="px-4 py-6 text-sm text-muted-foreground">
                 No hay siniestros registrados.
@@ -257,7 +257,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
             )}
           </SectionCard>
 
-          <SectionCard title="Comisiones" description="Ingresos esperados y cobrados.">
+          <SectionCard title="Comisiones" description="Últimas 5 comisiones abiertas; el enlace abre la cola completa de comisiones abiertas." action={<Link href={`/commissions?q=${encodeURIComponent(insurer.name)}`} className="text-sm font-medium text-primary hover:underline">Ver abiertas</Link>}>
             {commissions.length === 0 ? (
               <div className="px-4 py-6 text-sm text-muted-foreground">
                 No hay comisiones registradas.

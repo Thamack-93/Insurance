@@ -3,6 +3,7 @@
 import { useId } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ListSearch } from "@/components/lists/list-search";
 import { buildTableHref } from "@/lib/table-query";
 import {
   RENEWAL_BOARD_WINDOWS,
@@ -88,6 +89,7 @@ export function RenewalBoardFilters({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+      <ListSearch placeholder="Buscar cliente, póliza o aseguradora..." className="min-w-64 md:max-w-sm" />
       <BoardSelect
         label="Vencimiento"
         filterKey="window"

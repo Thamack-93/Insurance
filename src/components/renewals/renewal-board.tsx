@@ -9,12 +9,13 @@ import { RenewalWhatsAppAssistant } from "@/components/renewals/renewal-whatsapp
 import { formatDate } from "@/lib/dates";
 import { formatBusinessDateInput } from "@/lib/business-dates";
 import { formatCurrency } from "@/lib/money";
-import { getRenewalStageTone, policyTypeLabel, renewalStageLabel } from "@/lib/status";
+import { getRenewalStageTone, policyTypeLabel, renewalStageLabel, statusLabel } from "@/lib/status";
 import { cn } from "@/lib/utils";
-import type { RenewalBoardCard, RenewalBoardColumn, RenewalBoardData } from "@/lib/renewal-board";
+import type { RenewalBoardCard, RenewalBoardColumn, RenewalBoardData, RenewalBoardExcludedPolicy } from "@/lib/renewal-board";
 import type { RenewalBoardFilters } from "@/lib/renewal-board.logic";
 import { isTerminalRenewalStage } from "@/lib/renewal-board.logic";
 import { isOverdue } from "@/lib/dates";
+import { StatusBadge } from "@/components/badges/status-badge";
 
 function compactFollowUpDate(date: Date) {
   return new Intl.DateTimeFormat("es-MX", {
@@ -117,7 +118,7 @@ function RenewalCard({ card }: { card: RenewalBoardCard }) {
           </div>
         ) : null}
         {!isTerminalRenewalStage(card.stage) ? (
-          <div className="flex items-center justify-end gap-2">
+          <div className="flex flex-wrap items-center justify-start gap-2">
             <RenewalWhatsAppAssistant policyId={card.policyId} clientName={card.clientName} stage={card.stage} />
             <RenewalFollowUpMenu
               policyId={card.policyId}
@@ -130,6 +131,51 @@ function RenewalCard({ card }: { card: RenewalBoardCard }) {
         ) : null}
       </div>
     </li>
+  );
+}
+
+function excludedReasonLabel(policy: RenewalBoardExcludedPolicy) {
+  if (policy.reason === "INACTIVE") return `Estado: ${statusLabel(policy.status, "policy")}`;
+  if (policy.reason === "CANCELLED_RECEIPT") return "Último recibo cancelado";
+  if (policy.reason === "OUTSIDE_WINDOW") return "Fuera de la ventana seleccionada";
+  return "No elegible para renovación";
+}
+
+function ExcludedPolicies({ policies }: { policies: RenewalBoardExcludedPolicy[] }) {
+  if (!policies.length) return null;
+
+  return (
+    <section className="rounded-xl bg-card ring-1 ring-border">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border px-4 py-3">
+        <div>
+          <h3 className="font-medium">Relacionadas, fuera del tablero accionable</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Se muestran para explicar por qué una póliza encontrada no aparece como renovación trabajable.
+          </p>
+        </div>
+        <Badge variant="outline" className="rounded-full">{policies.length}</Badge>
+      </div>
+      <div className="max-h-72 overflow-auto">
+        <ul className="divide-y divide-border">
+          {policies.map((policy) => (
+            <li key={policy.policyId} className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link href={`/policies/${policy.policyId}`} className="font-mono font-medium hover:underline">
+                    {policy.policyNumber}
+                  </Link>
+                  <StatusBadge status={policy.status} entity="policy" className="px-2 py-0.5 text-[11px]" />
+                </div>
+                <p className="mt-1 truncate text-sm text-muted-foreground">
+                  {policy.clientName} · {policy.insurerName} · vence {formatDate(policy.endDate)}
+                </p>
+              </div>
+              <span className="text-xs font-medium text-muted-foreground sm:text-right">{excludedReasonLabel(policy)}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
   );
 }
 
@@ -203,6 +249,8 @@ export function RenewalBoard({
           por partes.
         </p>
       ) : null}
+
+      <ExcludedPolicies policies={board.excludedPolicies} />
 
       {board.total === 0 ? (
         <p className="rounded-xl bg-card px-4 py-12 text-center text-muted-foreground ring-1 ring-border">
