@@ -40,4 +40,23 @@ describe("global restore preflight", () => {
     expect(() => assertRestorableGlobalBackup({ manifest, catalogEntry, now: new Date("2026-09-21T12:00:01.000Z") })).toThrow(/siete días/);
     expect(() => assertRestorableGlobalBackup({ manifest: { ...manifest, demoExclusion: undefined }, catalogEntry })).toThrow(/EXCLUDE_DEMO/);
   });
+
+  it("accepts a legacy format-1 global manifest without an explicit scope", () => {
+    const legacyManifest = { ...manifest };
+    delete legacyManifest.scope;
+    expect(assertRestorableGlobalBackup({
+      manifest: legacyManifest,
+      catalogEntry,
+      now: new Date("2026-09-14T12:00:00.000Z"),
+    })).toMatchObject({ ok: true });
+  });
+
+  it("still rejects a missing scope on a non-format-1 manifest", () => {
+    const missingScope = { ...manifest };
+    delete missingScope.scope;
+    expect(() => assertRestorableGlobalBackup({
+      manifest: { ...missingScope, version: 2 } as unknown as BackupManifest,
+      catalogEntry,
+    })).toThrow(/scope PLATFORM/);
+  });
 });

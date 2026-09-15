@@ -24,7 +24,11 @@ export function assertRestorableGlobalBackup(input: {
   if (catalogEntry.pathname !== manifest.payload.pathname) {
     throw new Error("El artifact y el manifiesto no apuntan al mismo payload.");
   }
-  if (manifest.scope !== "PLATFORM") {
+  // Format-1 global manifests created before scope was written omit the
+  // optional field. The catalog is authoritative for their platform scope;
+  // new manifests always include scope: PLATFORM.
+  const legacyGlobalManifest = manifest.version === 1 && manifest.scope === undefined;
+  if (manifest.scope !== "PLATFORM" && !legacyGlobalManifest) {
     throw new Error("El manifiesto no declara scope PLATFORM.");
   }
   if (manifest.demoExclusion?.policy !== "EXCLUDE_DEMO") {

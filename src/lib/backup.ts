@@ -679,6 +679,7 @@ export async function createDatabaseBackup(
   const manifest = createBackupManifest({
     format: BACKUP_FORMAT,
     version: BACKUP_FORMAT_VERSION,
+    scope: "PLATFORM",
     createdAt: now.toISOString(),
     completedAt: new Date().toISOString(),
     payload: {
