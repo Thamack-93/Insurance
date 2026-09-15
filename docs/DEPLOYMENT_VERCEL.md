@@ -90,8 +90,13 @@ Mientras Production siga en modo singleton, la migración de cutover
 aplicar migraciones aditivas posteriores usa una conexión directa y el runner
 explícito `PRODUCTION_SINGLETON_MIGRATION=1 npm run
 db:migrate:singleton-production`. Ese runner no elimina la barrera singleton ni
-activa RLS; el cutover solo se ejecuta mediante su procedimiento de
-mantenimiento y certificación separado.
+activa RLS. En particular, `20260915000000_currency_rates_and_workitem_priority`
+es la parte aditiva que puede instalarse en singleton, mientras que
+`20260914000000_extend_rls_operational_models` y
+`20260915010000_currency_rates_rls_cutover` quedan pendientes para ejecutarse
+únicamente durante el procedimiento de cutover con `MAINTENANCE`, roles
+restringidos y certificación tenant. El cutover solo se ejecuta mediante su
+procedimiento de mantenimiento y certificación separado.
 
 No guardar una conexión administrativa en Vercel y no ejecutar migraciones desde
 `postinstall`, el build, el startup de la aplicación ni un Preview automático.

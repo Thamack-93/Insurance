@@ -18,7 +18,11 @@ if (/pooler/i.test(parsed.hostname) || parsed.searchParams.has("pgbouncer")) {
 
 const repositoryRoot = process.cwd();
 const sourceMigrations = path.join(repositoryRoot, "prisma", "migrations");
-const cutoverMigration = "20260831010000_multi_tenant_rls_cutover";
+const skippedMigrations = [
+  "20260831010000_multi_tenant_rls_cutover",
+  "20260914000000_extend_rls_operational_models",
+  "20260915010000_currency_rates_rls_cutover",
+];
 const tempRoot = await mkdtemp(path.join(repositoryRoot, ".prisma-singleton-production-migrations-"));
 
 try {
@@ -27,7 +31,9 @@ try {
   const tempConfig = path.join(tempRoot, "prisma.config.ts");
   await cp(path.join(repositoryRoot, "prisma", "schema.prisma"), tempSchema);
   await cp(sourceMigrations, tempMigrations, { recursive: true });
-  await rm(path.join(tempMigrations, cutoverMigration), { recursive: true, force: true });
+  for (const migration of skippedMigrations) {
+    await rm(path.join(tempMigrations, migration), { recursive: true, force: true });
+  }
   await writeFile(
     tempConfig,
     `import { defineConfig } from "@prisma/config";

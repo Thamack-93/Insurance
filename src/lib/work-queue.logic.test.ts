@@ -4,7 +4,7 @@ const getDb = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", () => ({ getDb }));
 
-import { getWorkItems } from "@/lib/work-queue";
+import { getWorkItems, getWorkItemsPage } from "@/lib/work-queue";
 
 function legacyRenewal() {
   return {
@@ -53,7 +53,7 @@ function currentRenewal() {
 
 describe("work queue legacy renewal context", () => {
   const db = {
-    workItem: { findMany: vi.fn() },
+    workItem: { count: vi.fn(), findMany: vi.fn() },
     policy: { findMany: vi.fn() },
   };
 
@@ -173,5 +173,18 @@ describe("work queue legacy renewal context", () => {
     const items = await getWorkItems({ limit: 2, organizationId: "org-a" });
 
     expect(items.map((item) => item.priority)).toEqual(["HIGH", "LOW"]);
+  });
+
+  it("paginates in PostgreSQL and returns the database count", async () => {
+    db.workItem.count.mockResolvedValue(100);
+    db.workItem.findMany.mockResolvedValue([currentRenewal()]);
+    db.policy.findMany.mockResolvedValue([]);
+
+    const result = await getWorkItemsPage({ organizationId: "org-a", limit: 50, skip: 50 });
+
+    expect(result.totalCount).toBe(100);
+    expect(result.items).toHaveLength(1);
+    expect(db.workItem.count).toHaveBeenCalledWith(expect.objectContaining({ where: { organizationId: "org-a" } }));
+    expect(db.workItem.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 50, skip: 50 }));
   });
 });

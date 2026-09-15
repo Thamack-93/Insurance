@@ -17,7 +17,6 @@ export const TENANT_DAL_DOMAINS = [
       "src/lib/search.ts",
       "src/lib/activity-log.ts",
       "src/lib/export-datasets.ts",
-      "src/lib/reports.ts",
       "src/app/(dashboard)/dashboard/",
       "src/app/(dashboard)/reports/",
       "src/app/(dashboard)/activity/",

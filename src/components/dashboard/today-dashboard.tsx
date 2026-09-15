@@ -50,18 +50,19 @@ const alertIconMap: Record<string, LucideIcon> = {
 };
 
 function Sparkline({ data }: { data: number[] }) {
+  const gradientId = `sparkGradient-${useId().replace(/:/g, "")}`;
   const points = data.map((value, index) => ({ index, value }));
   return (
     <div className="h-9 w-24" aria-hidden>
       <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }} debounce={1}>
         <AreaChart accessibilityLayer={false} data={points} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
           <defs>
-            <linearGradient id="sparkGradient" x1="0" x2="0" y1="0" y2="1">
+            <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
               <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.3} />
               <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0.02} />
             </linearGradient>
           </defs>
-          <Area type="monotone" dataKey="value" stroke="var(--chart-1)" strokeWidth={1.75} fill="url(#sparkGradient)" isAnimationActive={false} />
+          <Area type="monotone" dataKey="value" stroke="var(--chart-1)" strokeWidth={1.75} fill={`url(#${gradientId})`} isAnimationActive={false} />
         </AreaChart>
       </ResponsiveContainer>
     </div>
@@ -73,7 +74,9 @@ function MetricCard({ metricKey, data, prevMonthLabel }: { metricKey: keyof Dash
   const Icon = config.icon;
   const positive = data.delta >= 0;
   const DeltaIcon = positive ? ArrowUpRight : ArrowDownRight;
-  const formatted = config.format === "currency" ? formatCurrency(data.value, "MXN") : data.value.toLocaleString("es-MX");
+  const currency = "currency" in data ? data.currency : undefined;
+  const money = "money" in data ? data.money : undefined;
+  const formatted = config.format === "currency" ? formatCurrency(data.value, currency) : data.value.toLocaleString("es-MX");
 
   return (
     <div className="rounded-xl border bg-card p-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)]">
@@ -84,6 +87,7 @@ function MetricCard({ metricKey, data, prevMonthLabel }: { metricKey: keyof Dash
         </span>
       </div>
       <p className="mt-1 text-[26px] font-semibold tracking-tight text-foreground">{formatted}</p>
+      {config.format === "currency" && money?.missingCurrencies.length ? <p className="mt-1 text-[11px] text-warning">Sin tasa: {money.missingCurrencies.join(", ")}</p> : null}
       <div className="mt-2 flex items-end justify-between gap-3">
         <p className={cn("flex items-center gap-0.5 text-xs font-medium", positive ? "text-success" : "text-critical")}>
           <DeltaIcon className="size-3.5" aria-hidden />

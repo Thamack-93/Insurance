@@ -9,6 +9,9 @@ import { getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
 import { requireOrganizationContext } from "@/lib/organization-context";
 import { OnboardingPanel } from "@/components/settings/onboarding-panel";
 import { getOrganizationBackupStatus } from "@/lib/organization-backup-status";
+import { getCurrencyRates } from "@/lib/currency-rate-actions";
+import { CurrencyRatesPanel } from "@/components/settings/currency-rates-panel";
+import { deleteCurrencyRate, saveCurrencyRate } from "./currency-actions";
 
 export const maxDuration = 300;
 
@@ -24,9 +27,10 @@ export default async function SettingsPage() {
   const organization = await requireOrganizationContext();
   const isTenantAdmin = organization.membershipRole === "OWNER" || organization.membershipRole === "ADMIN";
   const aiStatus = getAssistantAiConnectionStatus();
-  const [onboarding, ownerBackupStatus] = await Promise.all([
+  const [onboarding, ownerBackupStatus, currencyRates] = await Promise.all([
     getOnboardingStatus(),
     organization.membershipRole === "OWNER" ? getOrganizationBackupStatus() : Promise.resolve(null),
+    isTenantAdmin ? getCurrencyRates() : Promise.resolve([]),
   ]);
 
   return (
@@ -141,6 +145,20 @@ export default async function SettingsPage() {
         </section>
 
         <OnboardingPanel initialDismissed={onboarding.dismissed} />
+
+        {isTenantAdmin ? (
+          <CurrencyRatesPanel
+            rates={currencyRates.map((rate) => ({
+              id: rate.id,
+              fromCurrency: rate.fromCurrency,
+              toCurrency: rate.toCurrency,
+              effectiveDate: rate.effectiveDate.toISOString().slice(0, 10),
+              rateToMxn: rate.rateToMxn.toString(),
+            }))}
+            saveRate={saveCurrencyRate}
+            deleteRate={deleteCurrencyRate}
+          />
+        ) : null}
 
         {ownerBackupStatus ? (
           <Card>

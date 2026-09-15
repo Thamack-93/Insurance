@@ -6,7 +6,7 @@ const requireOrganizationPortfolioReadScope = vi.hoisted(() => vi.fn());
 const receiptOperationalWhere = vi.hoisted(() => vi.fn());
 const policyOperationalWhere = vi.hoisted(() => vi.fn());
 const commissionOperationalWhere = vi.hoisted(() => vi.fn());
-const getWorkItems = vi.hoisted(() => vi.fn());
+const getWorkItemsPage = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", () => ({ getDb }));
 vi.mock("@/lib/auth", () => ({
@@ -28,7 +28,7 @@ vi.mock("@/lib/business-dates", () => ({
   formatBusinessDateInput: (date: Date) => date.toISOString().slice(0, 10),
 }));
 vi.mock("@/lib/work-queue", () => ({
-  getWorkItems,
+  getWorkItemsPage,
   OPEN_WORK_ITEM_STATUSES: ["OPEN", "IN_PROGRESS"],
 }));
 
@@ -36,9 +36,10 @@ import { GET } from "@/app/api/nora/reports/route";
 
 const scope = { id: "agent-1", role: "AGENT", portfolioOwnerId: "agent-1", organizationId: "org-a" };
 const db = {
-  receipt: { findMany: vi.fn() },
-  policy: { findMany: vi.fn() },
-  commission: { findMany: vi.fn() },
+  receipt: { count: vi.fn(), findMany: vi.fn() },
+  policy: { count: vi.fn(), findMany: vi.fn() },
+  commission: { count: vi.fn(), findMany: vi.fn() },
+  currencyRate: { findMany: vi.fn() },
 };
 
 function requestFor(type: string, params = "") {
@@ -54,9 +55,13 @@ describe("Nora report authorization scope", () => {
     policyOperationalWhere.mockImplementation((ownerId?: string) => ({ policyScope: ownerId ?? "admin" }));
     commissionOperationalWhere.mockImplementation((ownerId?: string) => ({ commissionScope: ownerId ?? "admin" }));
     db.receipt.findMany.mockResolvedValue([]);
+    db.receipt.count.mockResolvedValue(0);
     db.policy.findMany.mockResolvedValue([]);
+    db.policy.count.mockResolvedValue(0);
     db.commission.findMany.mockResolvedValue([]);
-    getWorkItems.mockResolvedValue([]);
+    db.commission.count.mockResolvedValue(0);
+    db.currencyRate.findMany.mockResolvedValue([]);
+    getWorkItemsPage.mockResolvedValue({ items: [], totalCount: 0 });
   });
 
   it("scopes overdue collections to the authenticated agent portfolio", async () => {
@@ -96,7 +101,7 @@ describe("Nora report authorization scope", () => {
     expect(db.commission.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ commissionScope: "agent-1" }) }),
     );
-    expect(getWorkItems).toHaveBeenCalledWith(
+    expect(getWorkItemsPage).toHaveBeenCalledWith(
       expect.objectContaining({ portfolioOwnerId: "agent-1", priorities: ["URGENT"] }),
     );
   });

@@ -10,7 +10,7 @@ export const BACKFILL_LOCK_KEY = "policydesk-organization-backfill";
  * trigger; global tables are deliberately outside the singleton boundary.
  */
 export const PROTECTED_TENANT_TABLES = [
-  "Client", "Insurer", "Policy", "Receipt", "PolicyEndorsement", "Payment", "Commission", "Task", "WorkItem", "Claim", "ClaimChecklistItem", "Quote", "Document", "ActivityLog", "AssistantActionDraft", "NotificationPreference", "NotificationEvent", "PolicyInsuredParty", "PolicyInsuredAsset", "TelegramLinkToken", "LedgerImportBatch", "LedgerImportRow", "LedgerImportAction", "LedgerImportIssue", "TelegramDraft", "MaintenanceRun", "ReceiptReconciliationIssue", "PolicyRenewalSuggestion", "DataQualitySuppressionRule", "AssistantReport", "AssistantReportSignal", "AssistantAiRun", "AssistantAiAttempt", "KnowledgeSource", "KnowledgeChunk", "Alert", "CommissionStatement", "CommissionStatementRow", "CommissionCorrection", "QuoteComparison", "QuoteComparisonItem",
+  "Client", "Insurer", "Policy", "Receipt", "PolicyEndorsement", "Payment", "Commission", "Task", "WorkItem", "Claim", "ClaimChecklistItem", "Quote", "Document", "ActivityLog", "AssistantActionDraft", "NotificationPreference", "NotificationEvent", "PolicyInsuredParty", "PolicyInsuredAsset", "TelegramLinkToken", "LedgerImportBatch", "LedgerImportRow", "LedgerImportAction", "LedgerImportIssue", "TelegramDraft", "MaintenanceRun", "ReceiptReconciliationIssue", "PolicyRenewalSuggestion", "DataQualitySuppressionRule", "AssistantReport", "AssistantReportSignal", "AssistantAiRun", "AssistantAiAttempt", "KnowledgeSource", "KnowledgeChunk", "Alert", "CommissionStatement", "CommissionStatementRow", "CommissionCorrection", "QuoteComparison", "QuoteComparisonItem", "CurrencyRate",
 ] as const;
 
 /**

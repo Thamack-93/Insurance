@@ -17,6 +17,7 @@ const repositoryRoot = process.cwd();
 const skippedMigrations = new Set([
   "20260831010000_multi_tenant_rls_cutover",
   "20260914000000_extend_rls_operational_models",
+  "20260915010000_currency_rates_rls_cutover",
 ]);
 const sourceMigrations = path.join(repositoryRoot, "prisma", "migrations");
 // Keep the temporary config under the repository so its @prisma/config import
