@@ -676,10 +676,19 @@ export async function createDatabaseBackup(
     multipart: true,
   });
 
+  // Global backups contain database rows only. Mark packages with document or
+  // commission evidence references as DATABASE_ONLY so restore drills do not
+  // pretend that binary files are included in the encrypted payload.
+  const fileReferenceRows = stats.tables
+    .filter((table) => table.name === "Document" || table.name === "CommissionStatement")
+    .reduce((total, table) => total + table.rowCount, 0);
+  const capability = fileReferenceRows > 0 ? "DATABASE_ONLY" as const : "COMPLETE" as const;
+
   const manifest = createBackupManifest({
     format: BACKUP_FORMAT,
     version: BACKUP_FORMAT_VERSION,
     scope: "PLATFORM",
+    capability,
     createdAt: now.toISOString(),
     completedAt: new Date().toISOString(),
     payload: {

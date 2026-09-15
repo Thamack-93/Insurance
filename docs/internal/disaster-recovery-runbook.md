@@ -61,7 +61,10 @@ restaura todas las tablas exportadas excepto `_prisma_migrations`, vuelve
 `session_replication_role` a `origin` (o reestablece los triggers normales si se
 usó el fallback), valida antes del commit y escribe un JSON en
 `artifacts/restore-drills/`. El reporte incluye `triggerMode`. Un fallo revierte
-toda la transacción.
+toda la transacción. Para un artifact `DATABASE_ONLY`, `fileRecovery` se
+registra como comprobación informativa y no bloquea el PASS de la recuperación
+de base; la recuperación completa de archivos solo se exige cuando el manifiesto
+declara `COMPLETE`.
 
 Después del commit el propio drill reconecta al target, valida las referencias
 de documentos y evidencia de comisiones en el store privado, ejecuta las lecturas
@@ -114,7 +117,8 @@ header/manifiesto y nunca imprime su valor.
 - [ ] Confirmar cero huérfanos FK.
 - [ ] Confirmar invariantes de Payment, Policy, Receipt, Notification y WorkItem.
 - [ ] Confirmar referencias de Document y evidencia de CommissionStatement; comprobar disponibilidad, tamaño y hash cuando exista evidencia de origen.
-- [ ] Confirmar `completeRecovery=true` y `fileRecovery.status=PASS`.
+- [ ] Si el paquete es `COMPLETE`, confirmar `completeRecovery=true` y `fileRecovery.status=PASS`.
+- [ ] Si el paquete es `DATABASE_ONLY`, confirmar `databaseRecovery.ok=true` y registrar `fileRecovery` como informativo.
 - [ ] Abrir PolicyDesk contra el target y recorrer pantallas críticas si procede.
 - [ ] Confirmar que la fuente no cambió.
 - [ ] Registrar duración/RTO.

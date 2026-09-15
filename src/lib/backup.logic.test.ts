@@ -82,6 +82,22 @@ describe("backup manifest", () => {
     });
   });
 
+  it("rejects an unknown capability before restore classification", () => {
+    const manifest = createBackupManifest({
+      format: "policydesk-postgres-ndjson",
+      version: 1,
+      capability: "NOT_A_CAPABILITY" as never,
+      createdAt: "2026-07-04T10:00:00.000Z",
+      completedAt: "2026-07-04T10:00:01.000Z",
+      payload: { filename: "backup.ndjson.gz.enc", pathname: "database-backups/backup.ndjson.gz.enc", size: 1, sha256: "a".repeat(64) },
+      encryption: { algorithm: "AES-256-GCM", keyVersion: "v1", iv: IV.toString("base64"), authTagBytes: 16 },
+      compression: "gzip",
+      tables: [{ schema: "public", name: "User", rowCount: 0 }],
+      totals: { tables: 1, rows: 0 },
+    });
+    expect(verifyBackupManifest(manifest)).toMatchObject({ valid: false, reason: expect.stringContaining("capacidad") });
+  });
+
   it("requires tenant attribution and dependencies for v2", () => {
     const manifest = createBackupManifest({
       format: "policydesk-postgres-ndjson",

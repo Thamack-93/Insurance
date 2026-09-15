@@ -59,6 +59,8 @@ export type RestoreDrillExecutionInput = {
   appSmokeEnabled: boolean;
   dependencies: RestoreDrillDependencies;
   branchName?: string | null;
+  /** Database-only packages report file probes without blocking the drill. */
+  fileRecoveryRequired?: boolean;
 };
 
 export async function runBackupRestoreDrill(input: RestoreDrillExecutionInput) {
@@ -72,6 +74,7 @@ export async function runBackupRestoreDrill(input: RestoreDrillExecutionInput) {
     branchName: input.branchName,
   });
   let stage: DrillStage = "preflight";
+  const fileRecoveryRequired = input.fileRecoveryRequired ?? input.manifest.capability !== "DATABASE_ONLY";
 
   try {
     if (input.dependencies.preflight) await input.dependencies.preflight();
@@ -101,8 +104,9 @@ export async function runBackupRestoreDrill(input: RestoreDrillExecutionInput) {
         throw new RestoreDrillOrchestrationError(sanitizeRestoreDrillError(error), "FILE_RECOVERY_FAILED");
       }
       report.fileRecovery = fileRecovery;
-      report.completeRecovery = fileRecovery.complete;
-      if (!fileRecovery.complete) {
+      report.fileRecoveryRequired = fileRecoveryRequired;
+      report.completeRecovery = fileRecoveryRequired ? fileRecovery.complete : null;
+      if (fileRecoveryRequired && !fileRecovery.complete) {
         throw new RestoreDrillOrchestrationError("La recuperación de archivos y evidencia no está completa.", "FILE_RECOVERY_FAILED");
       }
     }

@@ -25,6 +25,7 @@ export type RestoreDrillReport = {
   restoreIntegrity: unknown;
   databaseRecovery: unknown;
   fileRecovery: unknown;
+  fileRecoveryRequired: boolean | null;
   completeRecovery: boolean | null;
   branchCleanup: unknown;
   applicationReads: unknown;
@@ -78,6 +79,7 @@ export function createEmptyDrillReport(input: {
     restoreIntegrity: null,
     databaseRecovery: null,
     fileRecovery: null,
+    fileRecoveryRequired: null,
     completeRecovery: null,
     branchCleanup: {
       required: true,

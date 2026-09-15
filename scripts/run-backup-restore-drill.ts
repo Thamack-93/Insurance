@@ -273,9 +273,11 @@ async function main() {
     if (!verification.valid) throw new RestoreStageError("backup-verification", verification.reason, undefined, "BACKUP_VERIFICATION_FAILED");
     const verifiedManifest = verification.manifest;
     manifest = verifiedManifest;
+    let fileRecoveryRequired = true;
     try {
       const catalogEntry = await getBackupArtifactByPathname(verifiedManifest.payload.pathname);
-      assertRestorableGlobalBackup({ manifest: verifiedManifest, catalogEntry });
+      const preflight = assertRestorableGlobalBackup({ manifest: verifiedManifest, catalogEntry });
+      fileRecoveryRequired = preflight.capability === "COMPLETE";
     } catch (error) {
       throw new RestoreStageError("backup-verification", "El backup no cumple los requisitos para un restore global.", error, "BACKUP_VERIFICATION_FAILED");
     }
@@ -297,6 +299,7 @@ async function main() {
       targetDatabaseUrl: targetUrl,
       manifest: verifiedManifest,
       appSmokeEnabled: process.env.RESTORE_DRILL_APP_SMOKE === "1",
+      fileRecoveryRequired,
       dependencies: {
         preflight: () => checkRestoreTargetConnection(targetUrl),
         applyMigrations: () => applyCurrentMigrations(targetUrl),

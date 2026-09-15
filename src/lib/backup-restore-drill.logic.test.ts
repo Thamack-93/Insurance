@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { BackupManifest } from "@/lib/backup-logic";
 import { runBackupRestoreDrill } from "@/lib/backup-restore-drill";
 
 const manifest = {
@@ -12,7 +13,7 @@ const manifest = {
   tables: [],
   totals: { tables: 0, rows: 0 },
   manifestSha256: "b".repeat(64),
-} as never;
+} as unknown as BackupManifest;
 
 const restored = {
   targetFingerprint: "target-fingerprint",
@@ -79,6 +80,38 @@ describe("backup restore drill orchestration", () => {
     expect(report.failureCode).toBe("APPLICATION_READ_FAILED");
     expect(report.sanitizedError).not.toContain("secret");
     expect(reports).toHaveLength(1);
+  });
+
+  it("does not block a database-only drill when file references are pending", async () => {
+    const { dependencies } = deps({
+      fileValidation: async () => ({
+        status: "PENDING",
+        complete: false,
+        referenceCount: 8,
+        blobReferenceCount: 0,
+        verifiedCount: 0,
+        availableWithoutHashCount: 0,
+        missingCount: 0,
+        unreadableCount: 0,
+        sizeMismatchCount: 0,
+        hashMismatchCount: 0,
+        untrackedReferenceCount: 8,
+        metadataOnlyCount: 0,
+        documentReferenceCount: 8,
+        commissionEvidenceReferenceCount: 0,
+      }),
+    });
+    const report = await runBackupRestoreDrill({
+      backupFilename: "fixture.ndjson.gz.enc",
+      targetDatabaseUrl: "postgresql://target/db",
+      manifest: { ...manifest, capability: "DATABASE_ONLY" },
+      appSmokeEnabled: false,
+      dependencies,
+    });
+    expect(report.finalStatus).toBe("PASS");
+    expect(report.fileRecovery).toMatchObject({ status: "PENDING", complete: false });
+    expect(report.fileRecoveryRequired).toBe(false);
+    expect(report.completeRecovery).toBeNull();
   });
 
   it("does not report success when fixture cleanup fails", async () => {

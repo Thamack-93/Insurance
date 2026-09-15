@@ -22,6 +22,7 @@ const catalogEntry = {
   scope: "PLATFORM",
   organizationId: null,
   pathname: manifest.payload.pathname,
+  capability: "DATABASE_ONLY" as const,
 };
 
 describe("global restore preflight", () => {
@@ -30,7 +31,7 @@ describe("global restore preflight", () => {
       manifest,
       catalogEntry,
       now: new Date("2026-09-14T12:00:00.000Z"),
-    })).toMatchObject({ ok: true, ageMs: 172800000 });
+    })).toMatchObject({ ok: true, ageMs: 172800000, capability: "DATABASE_ONLY" });
   });
 
   it("rejects non-verified, tenant, stale and non-excluding backups", () => {

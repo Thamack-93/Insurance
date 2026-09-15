@@ -284,6 +284,9 @@ export function verifyBackupManifest(value: unknown):
   ) {
     return { valid: false, reason: "El manifiesto no tiene el formato esperado." };
   }
+  if (manifest.capability !== undefined && manifest.capability !== "COMPLETE" && manifest.capability !== "DATABASE_ONLY") {
+    return { valid: false, reason: "La capacidad del backup no es válida." };
+  }
   if (manifest.version === TENANT_BACKUP_FORMAT_VERSION) {
     if (manifest.scope !== "ORGANIZATION" || !manifest.organization?.id) {
       return { valid: false, reason: "El manifiesto tenant no identifica su organización." };

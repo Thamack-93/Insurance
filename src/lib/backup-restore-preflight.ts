@@ -1,4 +1,4 @@
-import type { BackupManifest } from "@/lib/backup-logic";
+import type { BackupCapability, BackupManifest } from "@/lib/backup-logic";
 
 export const GLOBAL_RESTORE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -7,6 +7,7 @@ export type RestoreBackupCatalogEntry = {
   scope: string;
   organizationId: string | null;
   pathname: string;
+  capability?: BackupCapability;
 };
 
 export function assertRestorableGlobalBackup(input: {
@@ -40,5 +41,12 @@ export function assertRestorableGlobalBackup(input: {
   const maxAgeMs = input.maxAgeMs ?? GLOBAL_RESTORE_MAX_AGE_MS;
   if (createdAt > now) throw new Error("El backup tiene una fecha futura y no puede certificarse.");
   if (now - createdAt > maxAgeMs) throw new Error("El backup global tiene más de siete días.");
-  return { ok: true as const, createdAt: new Date(createdAt).toISOString(), ageMs: now - createdAt };
+  return {
+    ok: true as const,
+    createdAt: new Date(createdAt).toISOString(),
+    ageMs: now - createdAt,
+    // Legacy format-1 manifests may omit capability; the catalog is the
+    // authoritative source for those artifacts and defaults conservatively.
+    capability: manifest.capability ?? catalogEntry.capability ?? "DATABASE_ONLY",
+  };
 }
