@@ -101,7 +101,30 @@ export async function runBackupRestoreDrill(input: RestoreDrillExecutionInput) {
       try {
         fileRecovery = await input.dependencies.fileValidation(input.targetDatabaseUrl);
       } catch (error) {
-        throw new RestoreDrillOrchestrationError(sanitizeRestoreDrillError(error), "FILE_RECOVERY_FAILED");
+        const validationError = sanitizeRestoreDrillError(error);
+        if (fileRecoveryRequired) {
+          throw new RestoreDrillOrchestrationError(validationError, "FILE_RECOVERY_FAILED");
+        }
+        // DATABASE_ONLY packages still record that the best-effort file probe
+        // was unavailable, but a blob/database probe cannot invalidate the
+        // database recovery result.
+        fileRecovery = {
+          status: "PENDING",
+          complete: false,
+          referenceCount: 0,
+          blobReferenceCount: 0,
+          verifiedCount: 0,
+          availableWithoutHashCount: 0,
+          missingCount: 0,
+          unreadableCount: 0,
+          sizeMismatchCount: 0,
+          hashMismatchCount: 0,
+          untrackedReferenceCount: 0,
+          metadataOnlyCount: 0,
+          documentReferenceCount: 0,
+          commissionEvidenceReferenceCount: 0,
+          validationError,
+        };
       }
       report.fileRecovery = fileRecovery;
       report.fileRecoveryRequired = fileRecoveryRequired;

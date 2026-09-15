@@ -33,6 +33,7 @@ export type RestoredFileValidation = {
   metadataOnlyCount: number;
   documentReferenceCount: number;
   commissionEvidenceReferenceCount: number;
+  validationError?: string;
 };
 
 type Probe = (path: string) => Promise<RestoredFileProbe>;

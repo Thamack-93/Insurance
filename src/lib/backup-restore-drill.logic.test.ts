@@ -114,6 +114,25 @@ describe("backup restore drill orchestration", () => {
     expect(report.completeRecovery).toBeNull();
   });
 
+  it("keeps a database-only drill non-blocking when the file probe is unavailable", async () => {
+    const { dependencies } = deps({
+      fileValidation: async () => {
+        throw new Error("blob provider unavailable");
+      },
+    });
+    const report = await runBackupRestoreDrill({
+      backupFilename: "fixture.ndjson.gz.enc",
+      targetDatabaseUrl: "postgresql://target/db",
+      manifest: { ...manifest, capability: "DATABASE_ONLY" },
+      appSmokeEnabled: false,
+      dependencies,
+    });
+    expect(report.finalStatus).toBe("PASS");
+    expect(report.fileRecovery).toMatchObject({ status: "PENDING", validationError: "blob provider unavailable" });
+    expect(report.fileRecoveryRequired).toBe(false);
+    expect(report.completeRecovery).toBeNull();
+  });
+
   it("does not report success when fixture cleanup fails", async () => {
     const { dependencies } = deps({
       appSmoke: async () => ({
