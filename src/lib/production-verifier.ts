@@ -42,6 +42,12 @@ export type ProductionVerificationReport = {
 const MIGRATIONS_TABLE = "_prisma_migrations";
 const TENANT_CUTOVER_MIGRATION = "20260831010000_multi_tenant_rls_cutover";
 const TENANT_CUTOVER_EXTENSION_MIGRATION = "20260914000000_extend_rls_operational_models";
+const TENANT_CUTOVER_CURRENCY_MIGRATION = "20260915010000_currency_rates_rls_cutover";
+const SINGLETON_DEFERRED_MIGRATIONS = new Set([
+  TENANT_CUTOVER_MIGRATION,
+  TENANT_CUTOVER_EXTENSION_MIGRATION,
+  TENANT_CUTOVER_CURRENCY_MIGRATION,
+]);
 const CURRENT_SUBSCRIPTION_STATUSES = ["TRIAL", "ACTIVE", "PAST_DUE"];
 const EXPECTED_BILLING_SUBSCRIPTION_STATUSES = ["TRIAL", "ACTIVE", "PAST_DUE", "CANCELED"];
 const EXPECTED_BILLING_CHARGE_STATUSES = ["PENDING", "PAID", "VOID", "REFUNDED"];
@@ -87,12 +93,9 @@ async function verifyMigrations(client: PoolClient, issues: VerificationIssue[],
     const rows = result.rows;
     const applied = new Set(rows.filter((row) => row.finished_at && !row.rolled_back_at).map((row) => row.migration_name));
     const pending = expected.filter((name) => !applied.has(name));
-    const pendingCutover = pending.filter((name) => name === TENANT_CUTOVER_MIGRATION);
-    const singletonDeferredExtension = mode === "single-org"
-      && pending.includes(TENANT_CUTOVER_MIGRATION)
-      && pending.includes(TENANT_CUTOVER_EXTENSION_MIGRATION);
+    const pendingCutover = pending.filter((name) => SINGLETON_DEFERRED_MIGRATIONS.has(name));
     const blockingPending = mode === "single-org"
-      ? pending.filter((name) => name !== TENANT_CUTOVER_MIGRATION && !(singletonDeferredExtension && name === TENANT_CUTOVER_EXTENSION_MIGRATION))
+      ? pending.filter((name) => !SINGLETON_DEFERRED_MIGRATIONS.has(name))
       : pending;
     const unknown = rows.filter((row) => !expected.includes(row.migration_name)).map((row) => row.migration_name);
     // A singleton production database may retain a rolled-back attempt for the
@@ -101,7 +104,7 @@ async function verifyMigrations(client: PoolClient, issues: VerificationIssue[],
     // migration while the barrier remains active.
     const incomplete = rows
       .filter((row) => {
-        const toleratedSingletonCutoverRollback = mode === "single-org" && row.migration_name === TENANT_CUTOVER_MIGRATION && row.rolled_back_at;
+        const toleratedSingletonCutoverRollback = mode === "single-org" && SINGLETON_DEFERRED_MIGRATIONS.has(row.migration_name) && row.rolled_back_at;
         return !toleratedSingletonCutoverRollback && (!row.finished_at || row.rolled_back_at || row.applied_steps_count < 0);
       })
       .map((row) => row.migration_name);
@@ -117,7 +120,7 @@ async function verifyMigrations(client: PoolClient, issues: VerificationIssue[],
       appliedMigrationCount: applied.size,
       pendingMigrationCount: pending.length,
       blockingPendingMigrationCount: blockingPending.length,
-      pendingCutoverMigration: pendingCutover.length === 1,
+      pendingCutoverMigration: pendingCutover.length > 0,
       unknownMigrationCount: unknown.length,
       incompleteMigrationCount: incomplete.length,
       duplicateMigrationCount: duplicateNames.length,
