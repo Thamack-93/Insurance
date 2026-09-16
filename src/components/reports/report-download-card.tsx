@@ -154,7 +154,7 @@ export function ReportDownloadCard({ definition }: { definition: ReportDownloadD
           {preview ? (
             <>
               <p className="mt-3 text-2xl font-semibold tracking-tight">{preview.returnedCount}</p>
-              <p className="text-xs text-muted-foreground">de {preview.totalCount} registros; se muestra una página de 100</p>
+              <p className="text-xs text-muted-foreground">registros listos para descargar; de {preview.totalCount} totales, se muestra una página de 100</p>
               {preview.nextCursor || previousCursors.length ? (
                 <div className="mt-4 flex items-center gap-2">
                   <Button type="button" variant="outline" size="sm" disabled={busy !== null || previousCursors.length === 0} onClick={() => goToPage(previousCursors.at(-1), true)}>Anterior</Button>
