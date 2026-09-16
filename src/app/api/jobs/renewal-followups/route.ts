@@ -36,13 +36,25 @@ export async function GET(request: NextRequest) {
   if (!rateLimit.allowed) return rateLimitResponse(rateLimit, "Este job ya fue ejecutado recientemente.");
 
   try {
+    const startedAt = Date.now();
     const organizations = await getDb().organization.findMany({
       where: { status: "ACTIVE" },
       select: { id: true },
     });
-    const summaries = await Promise.all(
-      organizations.map(({ id }) => runRenewalFollowUpScan(id)),
-    );
+    const summaries: Array<Awaited<ReturnType<typeof runRenewalFollowUpScan>>> = [];
+    const failures: Array<{ organizationId: string; error: string }> = [];
+    for (let index = 0; index < organizations.length; index += 3) {
+      const batch = await Promise.allSettled(
+        organizations.slice(index, index + 3).map(async ({ id }) => ({
+          id,
+          summary: await runRenewalFollowUpScan(id),
+        })),
+      );
+      for (const [batchIndex, result] of batch.entries()) {
+        if (result.status === "fulfilled") summaries.push(result.value.summary);
+        else failures.push({ organizationId: organizations[index + batchIndex]?.id ?? "unknown", error: String(result.reason) });
+      }
+    }
     const summary = summaries.reduce(
       (total, item) => ({
         scanned: total.scanned + item.scanned,
@@ -53,7 +65,16 @@ export async function GET(request: NextRequest) {
       }),
       { scanned: 0, stalled: 0, workItemsUpserted: 0, workItemsClosed: 0, notificationsCreated: 0 },
     );
-    return NextResponse.json({ ok: true, organizations: organizations.length, ...summary }, { status: 200 });
+    return NextResponse.json({
+      ok: failures.length === 0,
+      organizations: summaries.length,
+      rowsProcessed: summary.scanned,
+      partialErrors: failures.length,
+      retries: 0,
+      durationMs: Date.now() - startedAt,
+      failures,
+      ...summary,
+    }, { status: failures.length === 0 ? 200 : 207 });
   } catch (error) {
     logError("api.jobs.renewal-followups", error);
     return NextResponse.json({ ok: false }, { status: 500 });

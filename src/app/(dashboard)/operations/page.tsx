@@ -13,7 +13,7 @@ import { formatDate } from "@/lib/dates";
 import { policyTypeLabel } from "@/lib/status";
 import { claimOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
-import { getWorkItems, OPEN_WORK_ITEM_STATUSES, type WorkQueueItem } from "@/lib/work-queue";
+import { getWorkItems, getWorkItemsPage, OPEN_WORK_ITEM_STATUSES, type WorkQueueItem } from "@/lib/work-queue";
 import { buildOperationalWorkItemPresentation, type OperationalRenewalState } from "@/lib/operations-presentation";
 import { readAllowedTableParam, readTablePage, readTableParam } from "@/lib/table-query";
 import { cn } from "@/lib/utils";
@@ -41,6 +41,7 @@ const localItems = [
 ];
 
 const RENEWAL_PAGE_SIZE = 25;
+const WORK_ITEM_PAGE_SIZE = 50;
 
 function readView(value?: string): OperationsView {
   return value === "pending" || value === "renewals" || value === "renewal-board" || value === "claims"
@@ -183,16 +184,23 @@ export default async function OperationsPage({
       }] : []),
     ],
   };
-  const [workItems, renewalPolicies, claimData] = await Promise.all([
-    view === "all" || view === "pending" ? getWorkItems({
+  const [workItems, workItemsPage, renewalPolicies, claimData] = await Promise.all([
+    view === "all" ? getWorkItems({
       organizationId: scope.organizationId,
       statuses: OPEN_WORK_ITEM_STATUSES,
       portfolioOwnerId: scope.portfolioOwnerId,
-      query: view === "pending" ? query : undefined,
+      limit: 100,
+    }) : Promise.resolve([]),
+    view === "pending" ? getWorkItemsPage({
+      organizationId: scope.organizationId,
+      statuses: OPEN_WORK_ITEM_STATUSES,
+      portfolioOwnerId: scope.portfolioOwnerId,
+      query,
       priorities: priority ? [priority] : undefined,
       workItemTypes: workItemType ? [workItemType] : undefined,
-      limit: view === "pending" ? undefined : 100,
-    }) : Promise.resolve([]),
+      limit: WORK_ITEM_PAGE_SIZE,
+      skip: (page - 1) * WORK_ITEM_PAGE_SIZE,
+    }) : Promise.resolve(null),
     view === "all" || view === "renewals" ? loadEligibleRenewalPolicies({
       endDate: { lte: nextRenewalDate },
       ...(query && view === "renewals" ? {
@@ -214,6 +222,8 @@ export default async function OperationsPage({
       claimTotal: await db.claim.count({ where: claimWhere }),
     })),
   ]);
+  const visibleWorkItems = workItemsPage?.items ?? workItems;
+  const workItemsTotal = workItemsPage?.totalCount ?? workItems.length;
   const { claims, claimTotal } = claimData;
   const checklistCounts = view === "claims" && claims.length > 0
     ? await withTenantTransaction(scope.context, async (db) => db.claimChecklistItem.groupBy({
@@ -229,10 +239,10 @@ export default async function OperationsPage({
     if (row.status === "MISSING" || row.status === "REQUESTED") pendingByClaim.set(row.claimId, (pendingByClaim.get(row.claimId) ?? 0) + row._count._all);
   }
 
-  const overdue = workItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate) < today);
-  const dueToday = workItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate).getTime() === today.getTime());
-  const upcoming = workItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate) > today && businessStartOfDay(item.dueDate) <= nextSeven);
-  const unscheduled = workItems.filter((item) => !item.dueDate || businessStartOfDay(item.dueDate) > nextSeven);
+  const overdue = visibleWorkItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate) < today);
+  const dueToday = visibleWorkItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate).getTime() === today.getTime());
+  const upcoming = visibleWorkItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate) > today && businessStartOfDay(item.dueDate) <= nextSeven);
+  const unscheduled = visibleWorkItems.filter((item) => !item.dueDate || businessStartOfDay(item.dueDate) > nextSeven);
   const renewalCount = renewalPolicies.length;
   const overdueRenewalCount = renewalPolicies.filter((policy) => businessStartOfDay(policy.endDate) < today).length;
   const upcomingRenewalCount = renewalPolicies.filter((policy) => businessStartOfDay(policy.endDate) >= today).length;
@@ -268,6 +278,7 @@ export default async function OperationsPage({
   ];
   const renewalSearchParams = { view: "renewals", q: query };
   const claimSearchParams = { view: "claims", q: query };
+  const pendingSearchParams = { view: "pending", q: query, priority, workItemType };
   const returnTo = buildCanonicalHref("/operations", params);
 
   return (
@@ -349,7 +360,7 @@ export default async function OperationsPage({
               { key: "priority", label: "Prioridad", options: PRIORITIES.map((value) => ({ value, label: value === "LOW" ? "Baja" : value === "MEDIUM" ? "Media" : value === "HIGH" ? "Alta" : "Urgente" })) },
               { key: "workItemType", label: "Tipo", options: pendingFilterOptions },
             ]}
-            resultCount={workItems.length}
+            resultCount={workItemsTotal}
             resultNoun={["pendiente", "pendientes"]}
           />
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -358,6 +369,7 @@ export default async function OperationsPage({
             <WorkItemColumn title="Próximos 7 días" count={upcoming.length} items={upcoming} tone="text-blue-700 dark:text-blue-300" returnTo={returnTo} />
             <WorkItemColumn title="Por hacer" count={unscheduled.length} items={unscheduled} tone="text-foreground" returnTo={returnTo} />
           </div>
+          <Pagination page={page} pageSize={WORK_ITEM_PAGE_SIZE} total={workItemsTotal} basePath="/operations" searchParams={pendingSearchParams} />
         </div>
       ) : null}
 

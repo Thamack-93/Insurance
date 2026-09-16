@@ -3,6 +3,7 @@ import { today } from "@/lib/dates";
 import { bucketCommissionsByMonth, bucketDatesByMonth, MONTHLY_COMMISSION_STATUSES, pctChange } from "@/lib/dashboard.logic";
 import { BUSINESS_TIME_ZONE, businessAddDays, businessEndOfMonth, businessStartOfMonth, getBusinessDateParts } from "@/lib/business-dates";
 import { toNumber } from "@/lib/money";
+import { convertMoneyValue, loadCurrencyRates, summarizeMoney } from "@/lib/currency-rates";
 import { detectRisks } from "@/lib/risk-engine";
 import { DASHBOARD_LIST_LIMIT } from "@/lib/constants";
 import { OPEN_WORK_ITEM_STATUSES, countWorkItems, getWorkItems } from "@/lib/work-queue";
@@ -45,7 +46,8 @@ export async function getDashboardData() {
     upcomingRenewalPolicies,
     openWorkItems,
     urgentWorkItems,
-    commissionsAggregateParts,
+    commissionsReceivableRows,
+    ratesForDashboard,
     upcomingReceipts,
     upcomingReceiptsForChart,
     insurerDistributionRows,
@@ -78,19 +80,16 @@ export async function getDashboardData() {
       portfolioOwnerId: scope.portfolioOwnerId,
       organizationId: scope.organizationId,
     }, db),
-    // Per-row fallback: actualAmount when set, otherwise expectedAmount.
-    // We split into two aggregates to reproduce SUM(COALESCE(actualAmount, expectedAmount))
-    // without scanning every row in JS.
-    Promise.all([
-      db.commission.aggregate({
-        where: { ...commissionWhere, status: { in: ["EXPECTED", "PENDING", "OVERDUE"] }, actualAmount: { not: null } },
-        _sum: { actualAmount: true },
-      }),
-      db.commission.aggregate({
-        where: { ...commissionWhere, status: { in: ["EXPECTED", "PENDING", "OVERDUE"] }, actualAmount: null },
-        _sum: { expectedAmount: true },
-      }),
-    ]),
+    db.commission.findMany({
+      where: { ...commissionWhere, status: { in: ["EXPECTED", "PENDING", "OVERDUE"] } },
+      select: {
+        expectedAmount: true,
+        actualAmount: true,
+        expectedDate: true,
+        policy: { select: { currency: true } },
+      },
+    }),
+    loadCurrencyRates(db, scope.organizationId, now),
     db.receipt.findMany({
       where: { ...receiptWhere, dueDate: { lte: in60 }, status: { in: ["PENDING", "OVERDUE"] } },
       include: { client: true, insurer: true, policy: true },
@@ -141,9 +140,17 @@ export async function getDashboardData() {
       : [],
   );
 
-  const [actualSumAgg, expectedFallbackAgg] = commissionsAggregateParts;
-  const commissionsReceivable =
-    toNumber(actualSumAgg._sum.actualAmount) + toNumber(expectedFallbackAgg._sum.expectedAmount);
+  const commissionsReceivableMoney = summarizeMoney(
+    commissionsReceivableRows.map((row) => convertMoneyValue(
+      row.actualAmount ?? row.expectedAmount,
+      row.policy.currency,
+      row.expectedDate,
+      ratesForDashboard,
+    )),
+  );
+  const commissionsReceivable = commissionsReceivableMoney.totalMxn === null
+    ? null
+    : toNumber(commissionsReceivableMoney.totalMxn);
 
   const urgentPayments = upcomingReceipts
     .filter((receipt) => receipt.status !== "PAID" && receipt.dueDate <= in7)
@@ -158,6 +165,7 @@ export async function getDashboardData() {
       openWorkItems,
       urgentWorkItems,
       commissionsReceivable,
+      commissionsReceivableMoney,
       risksDetected: risks.length,
       securityAlerts,
     },
@@ -450,12 +458,12 @@ export async function getTodayDashboardData() {
     renewalsMonth,
     renewalsPrevMonth,
     upcomingRenewalPolicies,
-    pendingMonthAgg,
-    pendingPrevMonthAgg,
-    commissionMonthActual,
-    commissionMonthExpected,
-    commissionPrevActual,
-    commissionPrevExpected,
+    pendingMonthRows,
+    pendingPrevMonthRows,
+    commissionMonthActualRows,
+    commissionMonthExpectedRows,
+    commissionPrevActualRows,
+    commissionPrevExpectedRows,
     policiesForTrends,
     policiesForCaptureTrends,
     renewalsForTrends,
@@ -467,6 +475,7 @@ export async function getTodayDashboardData() {
     overdueReceiptsCount,
     overdueRenewalPolicies,
     openTasksCount,
+    ratesForDashboard,
   ] = await Promise.all([
     db.policy.count({ where: { ...policyWhere, status: "ACTIVE" } }),
     db.policy.count({ where: { ...policyWhere, startDate: { gte: monthStart, lte: monthEnd } } }),
@@ -476,29 +485,29 @@ export async function getTodayDashboardData() {
       where: { ...policyWhere, status: "ACTIVE", endDate: { gte: prevMonthStart, lte: prevMonthEnd } },
     }),
     upcomingRenewalPoliciesPromise,
-    db.receipt.aggregate({
+    db.receipt.findMany({
       where: { ...receiptWhere, dueDate: { gte: monthStart, lte: monthEnd }, status: { in: ["PENDING", "OVERDUE"] } },
-      _sum: { amount: true },
+      select: { amount: true, currency: true, dueDate: true },
     }),
-    db.receipt.aggregate({
+    db.receipt.findMany({
       where: { ...receiptWhere, dueDate: { gte: prevMonthStart, lte: prevMonthEnd }, status: { in: ["PENDING", "OVERDUE"] } },
-      _sum: { amount: true },
+      select: { amount: true, currency: true, dueDate: true },
     }),
-    db.commission.aggregate({
+    db.commission.findMany({
       where: { ...commissionWhere, expectedDate: { gte: monthStart, lte: monthEnd }, status: commissionMonthStatuses, actualAmount: { not: null } },
-      _sum: { actualAmount: true },
+      select: { expectedDate: true, expectedAmount: true, actualAmount: true, policy: { select: { currency: true } } },
     }),
-    db.commission.aggregate({
+    db.commission.findMany({
       where: { ...commissionWhere, expectedDate: { gte: monthStart, lte: monthEnd }, status: commissionMonthStatuses, actualAmount: null },
-      _sum: { expectedAmount: true },
+      select: { expectedDate: true, expectedAmount: true, actualAmount: true, policy: { select: { currency: true } } },
     }),
-    db.commission.aggregate({
+    db.commission.findMany({
       where: { ...commissionWhere, expectedDate: { gte: prevMonthStart, lte: prevMonthEnd }, status: commissionMonthStatuses, actualAmount: { not: null } },
-      _sum: { actualAmount: true },
+      select: { expectedDate: true, expectedAmount: true, actualAmount: true, policy: { select: { currency: true } } },
     }),
-    db.commission.aggregate({
+    db.commission.findMany({
       where: { ...commissionWhere, expectedDate: { gte: prevMonthStart, lte: prevMonthEnd }, status: commissionMonthStatuses, actualAmount: null },
-      _sum: { expectedAmount: true },
+      select: { expectedDate: true, expectedAmount: true, actualAmount: true, policy: { select: { currency: true } } },
     }),
     db.policy.findMany({
       where: { ...policyWhere, startDate: { gte: trendStart } },
@@ -522,12 +531,12 @@ export async function getTodayDashboardData() {
     }),
     db.receipt.findMany({
       where: { ...receiptWhere, createdAt: { gte: trendStart }, status: { notIn: ["CANCELLED"] } },
-      select: { createdAt: true, amount: true },
+      select: { createdAt: true, amount: true, currency: true },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     }),
     db.commission.findMany({
       where: { ...commissionWhere, expectedDate: { gte: trendStart }, status: commissionMonthStatuses },
-      select: { expectedDate: true, expectedAmount: true, actualAmount: true },
+      select: { expectedDate: true, expectedAmount: true, actualAmount: true, policy: { select: { currency: true } } },
       orderBy: [{ expectedDate: "asc" }, { id: "asc" }],
     }),
     db.policy.groupBy({ by: ["status"], where: policyWhere, _count: { status: true } }),
@@ -545,6 +554,7 @@ export async function getTodayDashboardData() {
       portfolioOwnerId: scope.portfolioOwnerId,
       organizationId: scope.organizationId,
     }, db),
+    loadCurrencyRates(db, scope.organizationId, monthEnd),
   ]);
 
   const months = lastSixMonths(now);
@@ -564,19 +574,29 @@ export async function getTodayDashboardData() {
   for (const receipt of receiptsForCaptureTrends) {
     const bucket = monthIndex.get(monthKeyFormatter.format(receipt.createdAt));
     if (bucket !== undefined) {
-      pendingByMonth[bucket] += toNumber(receipt.amount);
+      pendingByMonth[bucket] += toNumber(convertMoneyValue(receipt.amount, receipt.currency, receipt.createdAt, ratesForDashboard).amountMxn);
       capturedReceiptsPerMonth[bucket] += 1;
     }
   }
 
-  const commissionsSpark = bucketCommissionsByMonth(commissionsForTrends, months.map((month) => month.key));
+  const commissionsSpark = bucketCommissionsByMonth(
+    commissionsForTrends.map((row) => {
+      const money = convertMoneyValue(row.actualAmount ?? row.expectedAmount, row.policy.currency, row.expectedDate, ratesForDashboard);
+      return { expectedDate: row.expectedDate, expectedAmount: money.amountMxn ?? 0, actualAmount: null };
+    }),
+    months.map((month) => month.key),
+  );
 
-  const pendingMonth = toNumber(pendingMonthAgg._sum.amount);
-  const pendingPrevMonth = toNumber(pendingPrevMonthAgg._sum.amount);
-  const commissionsMonth =
-    toNumber(commissionMonthActual._sum.actualAmount) + toNumber(commissionMonthExpected._sum.expectedAmount);
-  const commissionsPrevMonth =
-    toNumber(commissionPrevActual._sum.actualAmount) + toNumber(commissionPrevExpected._sum.expectedAmount);
+  const pendingMonthMoney = summarizeMoney(pendingMonthRows.map((row) => convertMoneyValue(row.amount, row.currency, row.dueDate, ratesForDashboard)));
+  const pendingPrevMonthMoney = summarizeMoney(pendingPrevMonthRows.map((row) => convertMoneyValue(row.amount, row.currency, row.dueDate, ratesForDashboard)));
+  const commissionsMonthRows = [...commissionMonthActualRows, ...commissionMonthExpectedRows];
+  const commissionsPrevMonthRows = [...commissionPrevActualRows, ...commissionPrevExpectedRows];
+  const commissionsMonthMoney = summarizeMoney(commissionsMonthRows.map((row) => convertMoneyValue(row.actualAmount ?? row.expectedAmount, row.policy.currency, row.expectedDate, ratesForDashboard)));
+  const commissionsPrevMonthMoney = summarizeMoney(commissionsPrevMonthRows.map((row) => convertMoneyValue(row.actualAmount ?? row.expectedAmount, row.policy.currency, row.expectedDate, ratesForDashboard)));
+  const pendingMonth = toNumber(pendingMonthMoney.totalMxn);
+  const pendingPrevMonth = toNumber(pendingPrevMonthMoney.totalMxn);
+  const commissionsMonth = toNumber(commissionsMonthMoney.totalMxn);
+  const commissionsPrevMonth = toNumber(commissionsPrevMonthMoney.totalMxn);
 
   return {
     metrics: {
@@ -592,11 +612,15 @@ export async function getTodayDashboardData() {
       },
       pendingReceipts: {
         value: pendingMonth,
+        currency: "MXN",
+        money: pendingMonthMoney,
         delta: pctChange(pendingMonth, pendingPrevMonth),
         spark: pendingByMonth,
       },
       commissions: {
         value: commissionsMonth,
+        currency: "MXN",
+        money: commissionsMonthMoney,
         delta: pctChange(commissionsMonth, commissionsPrevMonth),
         spark: commissionsSpark,
       },

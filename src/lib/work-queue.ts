@@ -52,6 +52,7 @@ export const workQueueSelect = {
   taskType: true,
   status: true,
   priority: true,
+  priorityRank: true,
   severity: true,
   folio: true,
   title: true,
@@ -175,6 +176,10 @@ async function queryWorkItems(filters: WorkQueueFilters, db: WorkQueueDb) {
     where: { ...where, organizationId: filters.organizationId },
     select: workQueueSelect,
     orderBy: buildOrderBy(filters),
+    ...(filters.limit === undefined ? {} : {
+      take: Math.max(1, Math.min(filters.limit, 100)),
+      ...(filters.skip ? { skip: Math.max(0, filters.skip) } : {}),
+    }),
   });
 
   const resolvedItems = await resolveLegacyRenewalRelations(items, filters, db);
@@ -189,12 +194,20 @@ export type PaginatedWorkQueueResult = { items: WorkQueueItem[]; totalCount: num
 
 async function queryWorkItemsPage(filters: WorkQueueFilters, db: WorkQueueDb): Promise<PaginatedWorkQueueResult> {
   const where = buildWhere(filters);
-  const items = await db.workItem.findMany({ where: { ...where, organizationId: filters.organizationId }, select: workQueueSelect, orderBy: buildOrderBy(filters) });
+  const limit = Math.max(1, Math.min(filters.limit ?? 50, 100));
+  const [totalCount, items] = await Promise.all([
+    db.workItem.count({ where: { ...where, organizationId: filters.organizationId } }),
+    db.workItem.findMany({
+      where: { ...where, organizationId: filters.organizationId },
+      select: workQueueSelect,
+      orderBy: buildOrderBy(filters),
+      take: limit,
+      ...(filters.skip ? { skip: Math.max(0, filters.skip) } : {}),
+    }),
+  ]);
   const resolvedItems = await resolveLegacyRenewalRelations(items, filters, db);
   resolvedItems.sort(compareWorkQueueItems);
-  const start = filters.skip ?? 0;
-  const end = filters.limit === undefined ? undefined : start + filters.limit;
-  return { items: resolvedItems.slice(start, end), totalCount: resolvedItems.length };
+  return { items: resolvedItems.slice(0, limit), totalCount };
 }
 
 export async function getWorkItems(filters: WorkQueueFilters, client?: WorkQueueDb) {
@@ -342,7 +355,15 @@ async function resolveLegacyRenewalRelations(
 }
 
 export async function countWorkItems(filters: WorkQueueFilters, client?: WorkQueueDb) {
-  return (await getWorkItems(filters, client)).length;
+  const query = (db: WorkQueueDb) => db.workItem.count({
+    where: { ...buildWhere(filters), organizationId: filters.organizationId },
+  });
+  if (client) return query(client);
+  if (process.env.NODE_ENV === "test") return query((await import("@/lib/db")).getDb());
+  const { requireOrganizationContext, withTenantTransaction } = await import("@/lib/organization-context");
+  const context = await requireOrganizationContext();
+  if (context.organizationId !== filters.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  return withTenantTransaction(context, query);
 }
 
 function buildWhere(filters: WorkQueueFilters): Prisma.WorkItemWhereInput {
@@ -423,10 +444,13 @@ function buildWhere(filters: WorkQueueFilters): Prisma.WorkItemWhereInput {
 }
 
 function buildOrderBy(filters: WorkQueueFilters): Prisma.WorkItemOrderByWithRelationInput[] {
-  // Priority is persisted as text, so PostgreSQL would sort LOW before HIGH.
-  // Apply the semantic rank after legacy renewal relations are resolved.
   void filters;
-  return [{ dueDate: "asc" }, { createdAt: "desc" }, { id: "asc" }];
+  return [
+    { priorityRank: "desc" },
+    { dueDate: { sort: "asc", nulls: "last" } },
+    { createdAt: "desc" },
+    { id: "asc" },
+  ];
 }
 
 function compareWorkQueueItems(left: WorkQueueItem, right: WorkQueueItem) {

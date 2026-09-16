@@ -190,6 +190,7 @@ model Organization {
   billingCharges              BillingCharge[]
   capabilities                OrganizationCapability[]
   settings                    OrganizationSetting[]
+  currencyRates               CurrencyRate[]
   demoState                   DemoOrganizationState?
   demoUploadArtifacts         DemoUploadArtifact[]
   commissionStatementRows     CommissionStatementRow[]
@@ -536,6 +537,8 @@ model Policy {
   @@index([organizationId])
   @@index([renewalStageById])
   @@index([renewalStage, endDate])
+  @@index([organizationId, status, endDate])
+  @@index([organizationId, status, insurerId])
 }
 
 model Receipt {
@@ -600,6 +603,7 @@ model Receipt {
   @@index([updatedById])
   @@index([cancellationBatchId])
   @@index([organizationId])
+  @@index([organizationId, status, dueDate])
 }
 
 model PolicyEndorsement {
@@ -714,6 +718,7 @@ model Commission {
   @@index([status])
   @@index([expectedDate])
   @@index([organizationId])
+  @@index([organizationId, status, expectedDate])
 }
 
 model Task {
@@ -774,6 +779,7 @@ model WorkItem {
   taskType       String?
   status         WorkItemStatus @default(OPEN)
   priority       String         @default("MEDIUM")
+  priorityRank   Int            @default(20)
   severity       String?
   folio          String?
   title          String
@@ -823,6 +829,7 @@ model WorkItem {
   @@index([updatedById])
   @@index([assignedToId])
   @@index([organizationId])
+  @@index([organizationId, status, priorityRank, dueDate, createdAt, id])
 }
 
 model Claim {
@@ -1123,6 +1130,24 @@ model OrganizationSetting {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, key])
+  @@index([organizationId])
+}
+
+/// Manual organization-scoped exchange rates used to render comparable MXN
+/// summaries without changing the original transaction amount or currency.
+model CurrencyRate {
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  fromCurrency   String       @db.VarChar(3)
+  toCurrency     String       @default("MXN") @db.VarChar(3)
+  effectiveDate  DateTime     @db.Date
+  rateToMxn      Decimal      @db.Decimal(18, 8)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, fromCurrency, toCurrency, effectiveDate])
+  @@index([organizationId, fromCurrency, toCurrency, effectiveDate])
   @@index([organizationId])
 }
 

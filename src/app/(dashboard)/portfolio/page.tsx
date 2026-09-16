@@ -16,6 +16,7 @@ import { SortableTableHead } from "@/components/tables/sortable-table-head";
 import { withTenantTransaction } from "@/lib/organization-context";
 import { daysUntil, formatDate, today } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
+import { convertMoneyValue, loadCurrencyRates, summarizeMoney } from "@/lib/currency-rates";
 import { policyTypeLabel } from "@/lib/status";
 import { policyTypeOptions } from "@/lib/domain-options";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
@@ -100,10 +101,12 @@ export default async function PortfolioPage({
       skip: (page - 1) * DEFAULT_PAGE_SIZE,
       take: DEFAULT_PAGE_SIZE,
     }),
-    db.policy.aggregate({
+    db.policy.groupBy({
+      by: ["currency"],
       where: activePolicyWhere,
       _sum: { premiumAmount: true },
     }),
+    loadCurrencyRates(db, scope.organizationId, now),
     db.policy.count({ where: activePolicyWhere }),
     db.client.count({
       where: {
@@ -151,7 +154,8 @@ export default async function PortfolioPage({
   const [
     activeCount,
     pagedPolicies,
-    portfolioAgg,
+    portfolioCurrencyRows,
+    portfolioRates,
     activePolicyCount,
     activeClientCount,
     activeInsurerCount,
@@ -175,7 +179,13 @@ export default async function PortfolioPage({
     value: toNumber(row._sum.premiumAmount),
   }));
 
-  const portfolioValue = toNumber(portfolioAgg._sum.premiumAmount);
+  const portfolioMoney = summarizeMoney(portfolioCurrencyRows.map((row) => convertMoneyValue(
+    row._sum.premiumAmount,
+    row.currency,
+    now,
+    portfolioRates,
+  )));
+  const portfolioValue = portfolioMoney.totalMxn === null ? null : toNumber(portfolioMoney.totalMxn);
   const insurerIds = insurerDistribution.map((row) => row.insurerId);
   const insurerNames = insurerIds.length
     ? new Map(
@@ -238,8 +248,10 @@ export default async function PortfolioPage({
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
             title="Cartera activa"
-            value={formatCurrency(portfolioValue)}
-            description={`${activePolicyCount} pólizas activas en ${activeInsurerCount} aseguradoras`}
+            value={portfolioValue === null ? "Sin tasa" : formatCurrency(portfolioValue, "MXN")}
+            description={portfolioMoney.missingCurrencies.length
+              ? `MXN · Sin tasa: ${portfolioMoney.missingCurrencies.join(", ")}`
+              : `${activePolicyCount} pólizas activas en ${activeInsurerCount} aseguradoras`}
             icon={ShieldCheck}
             tone="emerald"
           />
@@ -379,7 +391,7 @@ export default async function PortfolioPage({
         </SectionCard>
 
         <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-          <SectionCard title="Concentración por aseguradora" description="Valor activo por partner.">
+          <SectionCard title="Concentración por aseguradora" description="Valor activo en moneda original; la tarjeta superior muestra el total MXN convertido.">
             {activeByInsurer.length === 0 ? (
               <div className="p-4">
                 <EmptyState
@@ -416,7 +428,7 @@ export default async function PortfolioPage({
 
           <SectionCard
             title="Clientes con mayor exposición"
-            description="Top 10 por prima activa acumulada."
+            description="Top 10 por prima activa acumulada en moneda original."
           >
             {topClientsByExposure.length === 0 ? (
               <div className="p-4">

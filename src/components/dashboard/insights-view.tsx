@@ -27,7 +27,16 @@ export async function InsightsView() {
         <KpiCard title="Recibos vencidos" value={data.kpis.overduePayments} description="Requieren atención" href="/receipts?tab=cobrar&due=overdue" icon={AlertTriangle} tone="red" />
         <KpiCard title="Renovaciones" value={data.kpis.renewals60} description="Siguientes 60 días" href="/operations?view=renewals" icon={CalendarClock} tone="amber" />
         <KpiCard title="Pendientes abiertos" value={data.kpis.openWorkItems} description="Trabajo operativo" href="/operations?view=pending" icon={CheckSquare} tone="slate" />
-        <KpiCard title="Comisiones por cobrar" value={formatCurrency(data.kpis.commissionsReceivable)} description="Esperadas o pendientes" href="/commissions" icon={CircleDollarSign} tone="green" />
+        <KpiCard
+          title="Comisiones por cobrar"
+          value={data.kpis.commissionsReceivable === null ? "Sin tasa" : formatCurrency(data.kpis.commissionsReceivable, "MXN")}
+          description={data.kpis.commissionsReceivableMoney.missingCurrencies.length
+            ? `MXN · Sin tasa: ${data.kpis.commissionsReceivableMoney.missingCurrencies.join(", ")}`
+            : "MXN · Esperadas o pendientes"}
+          href="/commissions"
+          icon={CircleDollarSign}
+          tone="green"
+        />
       </StatGrid>
       <div className="grid gap-4 xl:grid-cols-2">
         <ChartCard title="Vencimientos por semana" description="Recibos abiertos por fecha de vencimiento."><DuePaymentsChart data={data.charts.dueByWeek} /></ChartCard>
