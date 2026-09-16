@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 const checkDistributedRateLimit = vi.hoisted(() => vi.fn());
 const writeActivityLog = vi.hoisted(() => vi.fn());
+const recordPayment = vi.hoisted(() => vi.fn());
 const provider = vi.hoisted(() => ({
   isQualitasInsurerName: vi.fn(() => true),
   isQualitasPaymentLinkEnabled: vi.fn(() => true),
@@ -26,6 +27,7 @@ const provider = vi.hoisted(() => ({
 const db = vi.hoisted(() => ({
   notificationChannel: { findFirst: vi.fn() },
   organizationMembership: { findFirst: vi.fn(), findMany: vi.fn() },
+  receipt: { findFirst: vi.fn(), findMany: vi.fn() },
   policy: { findFirst: vi.fn() },
   telegramDraft: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   $transaction: vi.fn(),
@@ -37,6 +39,7 @@ vi.mock("@/lib/request-guards", () => ({
   securityFingerprint: (value: string) => `fingerprint:${value}`,
 }));
 vi.mock("@/lib/activity-log", () => ({ writeActivityLog }));
+vi.mock("@/lib/payment-service", () => ({ recordPayment }));
 vi.mock("@/lib/organization-context", () => ({
   assertOrganizationContextInTransaction: vi.fn(async () => {}),
   withSystemOrganizationTransaction: vi.fn(async (_organizationId: string, _reason: string, callback: (tx: typeof db) => unknown) => callback(db)),
@@ -103,6 +106,48 @@ function message(text: string) {
   };
 }
 
+function paymentDraft(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "payment-draft-1",
+    organizationId: "org-1",
+    userId: "user-1",
+    channelId: "channel-1",
+    type: "PAYMENT_CAPTURE",
+    status: "COLLECTING",
+    payloadJson: JSON.stringify({
+      type: "PAYMENT_CAPTURE",
+      payment: {
+        step: "ready",
+        policyNumber: "940448838",
+        receiptNumber: "6",
+        paidDate: "2026-09-16",
+        paymentMethod: "TRANSFER",
+        amount: 100,
+        reference: null,
+        ...overrides,
+      },
+    }),
+    expiresAt: new Date(Date.now() + 60_000),
+  };
+}
+
+const paymentReceipt = {
+  id: "receipt-1",
+  organizationId: "org-1",
+  receiptNumber: "6",
+  policyId: "policy-1",
+  clientId: "client-1",
+  insurerId: "insurer-1",
+  amount: 100,
+  currency: "MXN",
+  status: "PENDING",
+  client: { fullName: "Cliente Uno" },
+  policy: { policyNumber: "940448838" },
+  insurer: { name: "Aseguradora" },
+  endorsement: null,
+  payments: [],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.QUALITAS_PAYMENT_LINK_CLIENT_RECIPIENT_ENABLED = "true";
@@ -110,12 +155,15 @@ beforeEach(() => {
   db.organizationMembership.findFirst.mockResolvedValue({ organizationId: "org-1" });
   db.organizationMembership.findMany.mockResolvedValue([membership]);
   db.policy.findFirst.mockResolvedValue(policy);
+  db.receipt.findFirst.mockResolvedValue(paymentReceipt);
+  db.receipt.findMany.mockResolvedValue([]);
   db.telegramDraft.findFirst.mockResolvedValue(null);
   db.telegramDraft.create.mockResolvedValue(draftWith({ step: "policyNumber" }));
   db.telegramDraft.update.mockResolvedValue({});
   db.telegramDraft.updateMany.mockResolvedValue({ count: 0 });
   db.$transaction.mockImplementation(async (callback: (transaction: typeof db) => unknown) => callback(db));
   provider.requestQualitasPaymentLink.mockResolvedValue({ outcome: "SUCCESS", reason: "SUCCESS_CODE_0" });
+  recordPayment.mockReset();
   checkDistributedRateLimit.mockResolvedValue({ allowed: true, remaining: 10, retryAfterMs: 0, backend: "local" });
 });
 
@@ -500,5 +548,28 @@ describe("Telegram Quálitas payment-link flow", () => {
 
     expect(result.replyText).toMatch(/ya fue procesada|está siendo procesada/i);
     expect(provider.requestQualitasPaymentLink).not.toHaveBeenCalled();
+  });
+});
+
+describe("Telegram payment capture confirmation", () => {
+  it("blocks a manual draft when the receipt already has a posted payment", async () => {
+    db.receipt.findFirst.mockResolvedValue({ ...paymentReceipt, payments: [{ id: "payment-1" }] });
+
+    const result = await processTelegramWebhookUpdate(message("/pago 940448838 6 hoy TRANSFER"));
+
+    expect(result.replyText).toContain("ya tiene un pago registrado");
+    expect(db.telegramDraft.create).not.toHaveBeenCalled();
+    expect(recordPayment).not.toHaveBeenCalled();
+  });
+
+  it("explains an existing-payment conflict during confirmation without duplicating the payment", async () => {
+    db.telegramDraft.findFirst.mockResolvedValue(paymentDraft());
+    recordPayment.mockRejectedValue(new Error("No se permiten abonos: este recibo ya tiene un pago registrado."));
+
+    const result = await processTelegramWebhookUpdate(message("/confirmar"));
+
+    expect(result.replyText).toContain("ya tiene un pago registrado");
+    expect(result.replyText).toContain("No se aplicó otro pago");
+    expect(recordPayment).toHaveBeenCalledTimes(1);
   });
 });

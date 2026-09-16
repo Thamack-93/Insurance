@@ -1164,6 +1164,7 @@ async function getUserLinkedReceiptByPolicyAndNumber(
       policy: { select: { policyNumber: true } },
       insurer: { select: { name: true } },
       endorsement: { select: { endorsementNumber: true } },
+      payments: { where: { status: "POSTED" }, select: { id: true } },
     },
   });
 
@@ -1183,11 +1184,48 @@ async function getUserLinkedReceiptByPolicyAndNumber(
       policy: { select: { policyNumber: true } },
       insurer: { select: { name: true } },
       endorsement: { select: { endorsementNumber: true } },
+      payments: { where: { status: "POSTED" }, select: { id: true } },
     },
     take: 2,
   });
 
   return fuzzy.length === 1 ? fuzzy[0] : null;
+}
+
+function telegramPaymentConfirmationErrorCode(error: unknown) {
+  const prismaCode = error && typeof error === "object" && "code" in error
+    ? String((error as { code?: unknown }).code ?? "")
+    : "";
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (prismaCode === "P2002" || /ya fue registrado|ya tiene un pago registrado|no se permiten abonos/i.test(message)) {
+    return "ALREADY_PAID" as const;
+  }
+  if (/recibo ya no está disponible|recibo no existe|recibo.*eliminado/i.test(message)) {
+    return "RECEIPT_UNAVAILABLE" as const;
+  }
+  if (/recibo cancelado/i.test(message)) {
+    return "RECEIPT_CANCELLED" as const;
+  }
+  if (/ORGANIZATION_ACCESS_DENIED|ORGANIZATION_CONTEXT|pertenece a tu cartera|no pertenece a/i.test(message)) {
+    return "ACCESS_DENIED" as const;
+  }
+  return "UNEXPECTED" as const;
+}
+
+function buildTelegramPaymentConfirmationError(error: unknown) {
+  switch (telegramPaymentConfirmationErrorCode(error)) {
+    case "ALREADY_PAID":
+      return "Este recibo ya tiene un pago registrado. No se aplicó otro pago; revisa el recibo en PolicyDesk.";
+    case "RECEIPT_UNAVAILABLE":
+      return "El recibo ya no está disponible para tu cartera o cambió de estado. No se aplicó ningún pago.";
+    case "RECEIPT_CANCELLED":
+      return "El recibo está cancelado y no admite pagos. No se aplicó ningún pago.";
+    case "ACCESS_DENIED":
+      return "Ya no tienes autorización para registrar este recibo. No se aplicó ningún pago.";
+    default:
+      return "No se pudo confirmar el pago. No se aplicó ningún pago; cancela el borrador y vuelve a intentarlo desde el recibo.";
+  }
 }
 
 async function persistTelegramDraftState(input: {
@@ -2258,6 +2296,13 @@ async function createTelegramPaymentDraft(input: {
     return {
       ok: false as const,
       replyText: "No encontré un recibo único para esa póliza y ese número. Revisa los datos e inténtalo de nuevo.",
+    };
+  }
+
+  if (parsed.state.step === "ready" && readyReceipt && readyReceipt.payments.length > 0) {
+    return {
+      ok: false as const,
+      replyText: "Este recibo ya tiene un pago registrado. No se puede aplicar otro pago desde Telegram; revisa el recibo en PolicyDesk.",
     };
   }
 
@@ -3870,6 +3915,24 @@ async function confirmTelegramDraft(input: {
         replyText: "No encontré un recibo único para esa póliza y ese número.",
       };
     }
+    if (receipt.payments.length > 0) {
+      return {
+        ok: false as const,
+        replyText: "Este recibo ya tiene un pago registrado. No se aplicó otro pago; revisa el recibo en PolicyDesk.",
+      };
+    }
+    if (receipt.status === "CANCELLED") {
+      return {
+        ok: false as const,
+        replyText: "El recibo está cancelado y no admite pagos. No se aplicó ningún pago.",
+      };
+    }
+    if (receipt.status !== "PENDING" && receipt.status !== "OVERDUE") {
+      return {
+        ok: false as const,
+        replyText: "El recibo ya no está disponible para registrar el pago. No se aplicó ningún pago.",
+      };
+    }
 
     try {
       await runDbTransaction(db, async (tx) => {
@@ -3908,10 +3971,13 @@ async function confirmTelegramDraft(input: {
         replyText: buildTelegramDraftConfirmedMessage("Pago"),
       };
     } catch (error) {
-      logError("telegram.confirmPaymentDraft", error, { chatId: input.chatId, draftId: draft.id });
+      logError("telegram.confirmPaymentDraft", error, {
+        draftRef: securityFingerprint(draft.id),
+        errorCode: telegramPaymentConfirmationErrorCode(error),
+      });
       return {
         ok: false as const,
-        replyText: "No se pudo confirmar el pago del borrador.",
+        replyText: buildTelegramPaymentConfirmationError(error),
       };
     }
   }
@@ -4141,6 +4207,18 @@ async function continueTelegramDraftFromMessage(input: {
           handled: true as const,
           chatId: input.chatId,
           replyText: "No encontré un recibo único para esa póliza y ese número. Revisa los datos o usa /cancelar para empezar de nuevo.",
+        };
+      }
+
+      if (receipt.payments.length > 0) {
+        await db.telegramDraft.update({
+          where: { id: draft.id, organizationId: draft.organizationId! },
+          data: { status: "CANCELLED", cancelledAt: new Date() },
+        });
+        return {
+          handled: true as const,
+          chatId: input.chatId,
+          replyText: "Este recibo ya tiene un pago registrado. No se creó un pago adicional; revisa el recibo en PolicyDesk.",
         };
       }
 
