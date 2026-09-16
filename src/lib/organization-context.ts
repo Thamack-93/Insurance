@@ -289,6 +289,10 @@ export async function withSystemOrganizationTransaction<T>(
   if (!reason.trim()) throw new AuthError("SYSTEM_TENANT_REASON_REQUIRED", 400);
   const db = getDb();
   return db.$transaction(async (tx) => {
+    // System tenant workflows can write activity inside the same transaction.
+    // Register this client so writeActivityLog does not open a second
+    // membership-backed transaction from a webhook or background job.
+    tenantTransactionRegistry.add(tx);
     const rows = await tx.$queryRaw<Array<{ id: string; status: string; kind: string }>>(Prisma.sql`
       SELECT "id", "status", "kind"
         FROM "Organization"
