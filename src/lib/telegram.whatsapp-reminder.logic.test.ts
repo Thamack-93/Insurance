@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const checkDistributedRateLimit = vi.hoisted(() => vi.fn());
+const isTenantTransactionClient = vi.hoisted(() => vi.fn(() => false));
 const writeActivityLog = vi.hoisted(() => vi.fn());
 const assertOrganizationContextInTransaction = vi.hoisted(() => vi.fn());
 const withSystemOrganizationTransaction = vi.hoisted(() => vi.fn());
@@ -21,7 +22,7 @@ vi.mock("@/lib/request-guards", () => ({
   securityFingerprint: (value: string) => `fingerprint:${value}`,
 }));
 vi.mock("@/lib/activity-log", () => ({ writeActivityLog }));
-vi.mock("@/lib/organization-context", () => ({ assertOrganizationContextInTransaction, withSystemOrganizationTransaction }));
+vi.mock("@/lib/organization-context", () => ({ assertOrganizationContextInTransaction, isTenantTransactionClient, withSystemOrganizationTransaction }));
 
 import { processTelegramWebhookUpdate } from "./telegram";
 

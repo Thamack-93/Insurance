@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const checkDistributedRateLimit = vi.hoisted(() => vi.fn());
+const isTenantTransactionClient = vi.hoisted(() => vi.fn(() => false));
 const writeActivityLog = vi.hoisted(() => vi.fn());
 const recordPayment = vi.hoisted(() => vi.fn());
 const provider = vi.hoisted(() => ({
@@ -42,6 +43,7 @@ vi.mock("@/lib/activity-log", () => ({ writeActivityLog }));
 vi.mock("@/lib/payment-service", () => ({ recordPayment }));
 vi.mock("@/lib/organization-context", () => ({
   assertOrganizationContextInTransaction: vi.fn(async () => {}),
+  isTenantTransactionClient,
   withSystemOrganizationTransaction: vi.fn(async (_organizationId: string, _reason: string, callback: (tx: typeof db) => unknown) => callback(db)),
 }));
 vi.mock("@/lib/organization-capabilities", () => ({
@@ -150,6 +152,7 @@ const paymentReceipt = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  isTenantTransactionClient.mockReturnValue(false);
   process.env.QUALITAS_PAYMENT_LINK_CLIENT_RECIPIENT_ENABLED = "true";
   db.notificationChannel.findFirst.mockResolvedValue(channel);
   db.organizationMembership.findFirst.mockResolvedValue({ organizationId: "org-1" });
@@ -552,6 +555,18 @@ describe("Telegram Quálitas payment-link flow", () => {
 });
 
 describe("Telegram payment capture confirmation", () => {
+  it("reuses the existing webhook transaction instead of nesting Prisma transactions", async () => {
+    isTenantTransactionClient.mockReturnValue(true);
+    db.telegramDraft.findFirst.mockResolvedValue(paymentDraft());
+    recordPayment.mockResolvedValue({ payment: { id: "payment-1" } });
+
+    const result = await processTelegramWebhookUpdate(message("/confirmar"));
+
+    expect(result.replyText).toContain("Pago confirmado.");
+    expect(recordPayment).toHaveBeenCalledTimes(1);
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
   it("blocks a manual draft when the receipt already has a posted payment", async () => {
     db.receipt.findFirst.mockResolvedValue({ ...paymentReceipt, payments: [{ id: "payment-1" }] });
 

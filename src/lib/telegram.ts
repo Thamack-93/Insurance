@@ -7,6 +7,7 @@ import { formatCurrency, toNumber } from "@/lib/money";
 import { writeActivityLog } from "@/lib/activity-log";
 import {
   assertOrganizationContextInTransaction,
+  isTenantTransactionClient,
   requireOrganizationContext,
   type OrganizationContext,
   type TenantDb,
@@ -97,6 +98,7 @@ import { getTelegramPlatformDb, runTelegramTenantDb } from "@/lib/telegram-platf
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
 function runDbTransaction<T>(db: DbClient, callback: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  if (isTenantTransactionClient(db)) return callback(db);
   const transaction = (db as PrismaClient).$transaction;
   return typeof transaction === "function" ? transaction.call(db, callback) as Promise<T> : callback(db as Prisma.TransactionClient);
 }
