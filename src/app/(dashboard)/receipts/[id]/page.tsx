@@ -18,6 +18,8 @@ import { DeletePaymentButton } from "@/components/payments/delete-payment-button
 import { QuickPaymentDialog } from "@/components/payments/quick-payment-dialog";
 import { withTenantTransaction } from "@/lib/organization-context";
 import { receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
+import { loadRequiredReceiptDetail, RECEIPT_DETAIL_AUXILIARY_GROUPS, resolveReceiptDetailAuxiliary } from "@/lib/receipt-detail";
+import { logError } from "@/lib/logger";
 import { daysUntil, formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { getReceiptOriginLabel } from "@/lib/receipt-context";
@@ -38,27 +40,43 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
   const returnTo = normalizeReturnTo(typeof query.returnTo === "string" ? query.returnTo : undefined, "/receipts");
   const scope = await requireOrganizationPortfolioReadScope();
   const isAdmin = scope.membershipRole !== "AGENT";
-  const data = await withTenantTransaction(scope.context, async (db) => {
-    const agentContact = await db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } });
-    const receipt = await db.receipt.findFirst({
+  const receipt = await loadRequiredReceiptDetail(
+    () => withTenantTransaction(scope.context, (db) => db.receipt.findFirst({
       where: { id, ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
-      include: { client: true, policy: true, insurer: true, document: true, endorsement: true },
-    });
-    if (!receipt) return { receipt: null, agentContact, payments: [], commissions: [], documents: [], relatedReceipts: [], activity: [] };
-    const [payments, commissions, documents, relatedReceipts, activity] = await Promise.all([
-      db.payment.findMany({ where: { receiptId: id, organizationId: scope.organizationId }, orderBy: [{ paidDate: "desc" }, { id: "desc" }] }),
-      db.commission.findMany({ where: { receiptId: id, organizationId: scope.organizationId }, include: { insurer: true }, orderBy: [{ expectedDate: "desc" }, { id: "desc" }] }),
-      db.document.findMany({ where: { receiptId: id, organizationId: scope.organizationId }, orderBy: [{ uploadedAt: "desc" }, { id: "desc" }] }),
-      db.receipt.findMany({ where: { policyId: receipt.policyId, organizationId: scope.organizationId, id: { not: id } }, include: { endorsement: true }, orderBy: [{ dueDate: "desc" }, { receiptSequence: { sort: "desc", nulls: "last" } }, { receiptNumber: "desc" }, { id: "desc" }], take: 5 }),
-      getActivityForEntity("Receipt", id, 20, scope.organizationId, db),
-    ]);
-    return { receipt, agentContact, payments, commissions, documents, relatedReceipts, activity };
-  });
-  const { receipt, agentContact, payments, commissions, documents, relatedReceipts, activity } = data;
+      include: { client: true, policy: true, insurer: true, endorsement: true },
+    })),
+    (error) => logError("receipt.detail.core", error, { organizationId: scope.organizationId, receiptId: id }),
+  );
 
   if (!receipt) {
     notFound();
   }
+
+  // Each auxiliary read gets its own tenant transaction. A failed PostgreSQL
+  // statement can abort its transaction, so allSettled inside one shared
+  // transaction would not reliably isolate failures.
+  const [agentContactResult, organizationResult, paymentsResult, commissionsResult, documentsResult, relatedReceiptsResult, activityResult] = await Promise.allSettled([
+    withTenantTransaction(scope.context, (db) => db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } })),
+    withTenantTransaction(scope.context, (db) => db.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } })),
+    withTenantTransaction(scope.context, (db) => db.payment.findMany({ where: { receiptId: id, organizationId: scope.organizationId }, orderBy: [{ paidDate: "desc" }, { id: "desc" }] })),
+    withTenantTransaction(scope.context, (db) => db.commission.findMany({ where: { receiptId: id, organizationId: scope.organizationId }, include: { insurer: true }, orderBy: [{ expectedDate: "desc" }, { id: "desc" }] })),
+    withTenantTransaction(scope.context, (db) => db.document.findMany({ where: { receiptId: id, organizationId: scope.organizationId }, orderBy: [{ uploadedAt: "desc" }, { id: "desc" }] })),
+    withTenantTransaction(scope.context, (db) => db.receipt.findMany({ where: { policyId: receipt.policyId, organizationId: scope.organizationId, id: { not: id } }, include: { endorsement: true }, orderBy: [{ dueDate: "desc" }, { receiptSequence: { sort: "desc", nulls: "last" } }, { receiptNumber: "desc" }, { id: "desc" }], take: 5 })),
+    withTenantTransaction(scope.context, (db) => getActivityForEntity("Receipt", id, 20, scope.organizationId, db)),
+  ]);
+  const reportAuxiliaryFailure = (group: (typeof RECEIPT_DETAIL_AUXILIARY_GROUPS)[number], error: unknown) => {
+    logError(`receipt.detail.${group}`, error, { organizationId: scope.organizationId, receiptId: id });
+  };
+  const agentContact = resolveReceiptDetailAuxiliary("agent-contact", agentContactResult, null, reportAuxiliaryFailure);
+  const organization = resolveReceiptDetailAuxiliary("organization-kind", organizationResult, null, reportAuxiliaryFailure);
+  const payments = resolveReceiptDetailAuxiliary("payments", paymentsResult, [], reportAuxiliaryFailure);
+  const commissions = resolveReceiptDetailAuxiliary("commissions", commissionsResult, [], reportAuxiliaryFailure);
+  const documents = resolveReceiptDetailAuxiliary("documents", documentsResult, [], reportAuxiliaryFailure);
+  const relatedReceipts = resolveReceiptDetailAuxiliary("related-receipts", relatedReceiptsResult, [], reportAuxiliaryFailure);
+  const activity = resolveReceiptDetailAuxiliary("activity", activityResult, [], reportAuxiliaryFailure);
+  // If organization metadata cannot be read, fail closed into the safer DEMO
+  // preview behavior rather than accidentally enabling real outbound actions.
+  const isDemo = organization === null || organization.kind === "DEMO";
 
   const postedPayments = payments.filter((payment) => payment.status === "POSTED");
   const paidAmount = postedPayments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
@@ -92,7 +110,7 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
                   initialOpen={quickPaymentRequested}
                 />
               ) : null}
-              {receipt.status === "PENDING" || receipt.status === "OVERDUE" ? (
+              {(receipt.status === "PENDING" || receipt.status === "OVERDUE") && !isDemo ? (
                 <WhatsAppReminderButton receiptId={receipt.id} />
               ) : null}
               {(receipt.status === "PENDING" || receipt.status === "OVERDUE") && isQualitasInsurerName(receipt.insurer.name) ? (

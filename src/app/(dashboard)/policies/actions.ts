@@ -11,6 +11,7 @@ import { assertClientOrganizationAccess, assertPolicyOrganizationAccess } from "
 import { assertOrganizationContextInTransaction, requireOrganizationContext, type OrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { buildPolicyDeleteBlockedMessage } from "@/lib/policy-delete";
+import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
 
 function normalizePolicyInput(values: PolicyFormValues) {
   return {
@@ -147,6 +148,34 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
       });
 
       if (renewalSource) {
+        const receipts = await syncAutoCaptureReceipts(tx, {
+          organizationId: context.organizationId,
+          policyId: createdPolicy.id,
+          clientId: createdPolicy.clientId,
+          insurerId: createdPolicy.insurerId,
+          userId,
+          draft: {
+            startDate: parsed.data.startDate,
+            endDate: parsed.data.endDate,
+            paymentFrequency: normalized.paymentFrequency,
+            premiumAmount: normalized.premiumAmount,
+            currency: normalized.currency,
+            sourcePolicyNumber: renewalSource.policyNumber,
+          },
+        });
+
+        for (const result of receipts) {
+          await writeActivityLog({
+            entityType: "Receipt",
+            entityId: result.receipt.id,
+            action: result.created ? "RECEIPT_CREATE_POLICY_RENEWAL" : "RECEIPT_UPDATE_POLICY_RENEWAL",
+            newValue: result.receipt,
+            organizationId: context.organizationId,
+            userId,
+            db: tx,
+          });
+        }
+
         await tx.policy.update({
           where: { id: renewalSource.id, organizationId: context.organizationId },
           data: {
@@ -174,6 +203,7 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
 
     revalidatePaths([
       "/policies",
+      "/receipts",
       `/policies/${policy.id}`,
       `/clients/${policy.clientId}`,
       "/dashboard",

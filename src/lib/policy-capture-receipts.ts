@@ -11,7 +11,7 @@ export type AutoCaptureReceiptInput = {
   policyId: string;
   clientId: string;
   insurerId: string;
-  draft: PolicyPdfCaptureDraft;
+  draft: PolicyReceiptScheduleDraft | PolicyPdfCaptureDraft;
   userId: string;
   receiptNumber?: string;
   receiptPlan?: Array<{
@@ -19,6 +19,17 @@ export type AutoCaptureReceiptInput = {
     amount: number;
   }>;
   receiptEvidence?: PolicyPdfCaptureReceiptEvidence | null;
+};
+
+export type PolicyReceiptScheduleDraft = {
+  startDate: string;
+  endDate: string;
+  paymentFrequency: string;
+  premiumAmount: number;
+  currency: string;
+  sourcePolicyNumber?: string | null;
+  requestNumber?: string | null;
+  issueDate?: string | null;
 };
 
 export type AutoCaptureReceiptPayload = {
@@ -60,7 +71,9 @@ type AutoCaptureReceiptTerm = {
   currency: string;
 };
 
-function buildAutoCaptureReceiptNotes(draft: PolicyPdfCaptureDraft) {
+function buildAutoCaptureReceiptNotes(
+  draft: Pick<PolicyReceiptScheduleDraft, "sourcePolicyNumber" | "requestNumber" | "issueDate">,
+) {
   const parts = [
     "Generado automaticamente desde captura de poliza.",
     draft.sourcePolicyNumber ? `Renueva ${draft.sourcePolicyNumber}` : null,

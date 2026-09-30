@@ -101,6 +101,58 @@ describe("policy-capture-receipts", () => {
     expect(payloads[1]?.amount).toBeCloseTo(5546.67);
   });
 
+  it.each([
+    ["SINGLE", 1],
+    ["ANNUAL", 1],
+    ["MONTHLY", 12],
+    ["QUARTERLY", 4],
+    ["SEMIANNUAL", 2],
+  ])("builds a complete %s receipt schedule", (paymentFrequency, expectedCount) => {
+    const startDate = "2026-09-29";
+    const endDate = "2027-09-29";
+    const payloads = buildAutoCaptureReceiptPayloads({
+      organizationId: "org-test",
+      policyId: "policy-renewal",
+      clientId: "client-1",
+      insurerId: "insurer-1",
+      userId: "user-1",
+      draft: {
+        policyNumber: "P-RENEWAL",
+        clientName: "Cliente Demo",
+        clientType: "PERSON",
+        clientEmail: null,
+        clientPhone: null,
+        clientAddress: null,
+        clientRfc: null,
+        insurerName: "Aseguradora Demo",
+        policyType: "AUTO",
+        serialNumber: null,
+        startDate,
+        endDate,
+        issueDate: null,
+        paymentFrequency,
+        paymentPlan: "Contado",
+        premiumAmount: 1200,
+        currency: "MXN",
+        requestNumber: null,
+        insuredObject: null,
+        beneficiaryInfo: null,
+        notes: null,
+        sourcePolicyNumber: "P-OLD",
+      },
+    });
+
+    expect(payloads).toHaveLength(expectedCount);
+    expect(payloads.reduce((sum, payload) => sum + payload.amount, 0)).toBe(1200);
+    expect(payloads[0]?.periodStartDate.toISOString()).toBe("2026-09-29T06:00:00.000Z");
+    expect(payloads.at(-1)?.periodEndDate.toISOString()).toBe("2027-09-29T06:00:00.000Z");
+    for (const [index, payload] of payloads.entries()) {
+      expect(payload.receiptNumber).toBe(String(index + 1));
+      expect(payload.dueDate).toEqual(payload.periodStartDate);
+      if (index > 0) expect(payload.periodStartDate).toEqual(payloads[index - 1]?.periodEndDate);
+    }
+  });
+
   it("honors custom amounts provided per receipt", () => {
     const payloads = buildAutoCaptureReceiptPayloads({
       organizationId: "org-test",
