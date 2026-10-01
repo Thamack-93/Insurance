@@ -2,6 +2,7 @@ import { normalize } from "@/lib/search-utils";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { normalizeCaptureIdentity, scoreCaptureIdentity } from "@/lib/policy-pdf-capture.shared";
 import { requireOrganizationContext, withTenantTransaction, type TenantDb } from "@/lib/organization-context";
+import { getPolicyObjectDescription, policyObjectSearchTerms } from "@/lib/policy-identity";
 
 export type PolicyCaptureSearchKind = "client" | "insurer" | "policy";
 
@@ -28,6 +29,7 @@ export type PolicyCaptureSearchItem = {
     startDate?: string | null;
     endDate?: string | null;
     serialNumber?: string | null;
+    insuredObject?: string | null;
     status?: string | null;
   };
 };
@@ -222,6 +224,7 @@ async function searchPolicies(
             { notes: { contains: query, mode: "insensitive" } },
             { client: { is: { fullName: { contains: query, mode: "insensitive" } } } },
             { insurer: { is: { name: { contains: query, mode: "insensitive" } } } },
+            ...policyObjectSearchTerms(query),
             { insuredAssets: { some: { serialNumber: { contains: query, mode: "insensitive" } } } },
           ],
         }
@@ -238,6 +241,7 @@ async function searchPolicies(
       policyNumber: true,
       policyType: true,
       status: true,
+      insuredObject: true,
       startDate: true,
       endDate: true,
       updatedAt: true,
@@ -253,9 +257,11 @@ async function searchPolicies(
       },
       insuredAssets: {
         select: {
+          description: true,
+          isPrimary: true,
           serialNumber: true,
         },
-        take: 1,
+        orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
       },
     },
     orderBy: needle ? [{ endDate: "desc" }, { startDate: "desc" }, { updatedAt: "desc" }] : [{ endDate: "desc" }, { startDate: "desc" }],
@@ -268,6 +274,7 @@ async function searchPolicies(
     description: buildRecentSearchValue([
       policy.client.fullName,
       policy.insurer.name,
+      getPolicyObjectDescription(policy),
       `${policy.startDate.toISOString().slice(0, 10)} · ${policy.endDate.toISOString().slice(0, 10)}`,
       policy.insuredAssets[0]?.serialNumber ? `Serie ${policy.insuredAssets[0].serialNumber}` : null,
       policy.status,
@@ -276,6 +283,8 @@ async function searchPolicies(
       policy.policyNumber,
       policy.client.fullName,
       policy.insurer.name,
+      policy.insuredObject,
+      ...policy.insuredAssets.map((asset) => asset.description),
       policy.insuredAssets[0]?.serialNumber,
       policy.policyType,
       policy.status,
@@ -292,6 +301,7 @@ async function searchPolicies(
       startDate: policy.startDate.toISOString().slice(0, 10),
       endDate: policy.endDate.toISOString().slice(0, 10),
       serialNumber: policy.insuredAssets[0]?.serialNumber ?? null,
+      insuredObject: getPolicyObjectDescription(policy),
       status: policy.status,
     },
   }));

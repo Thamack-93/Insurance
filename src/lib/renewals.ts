@@ -38,6 +38,8 @@ type RenewalPolicyRecord = {
   endDate: Date;
   policyNumber: string;
   policyType: string;
+  insuredObject: string | null;
+  insuredAssets?: Array<{ description: string; isPrimary: boolean }>;
   premiumAmount: unknown;
   currency: string;
   client: { fullName: string; email: string | null };
@@ -90,6 +92,7 @@ export async function loadEligibleRenewalPolicies(
   portfolioOwnerId?: string,
   organizationId?: string,
   client?: TenantDb,
+  includePolicyIdentity = false,
 ): Promise<RenewalPolicyRecord[]> {
   await connection();
   const context = await requireOrganizationContext();
@@ -99,7 +102,7 @@ export async function loadEligibleRenewalPolicies(
   const effectiveOrganizationId = context.organizationId;
 
   if (!client) {
-    return withTenantTransaction(context, (tx) => loadEligibleRenewalPolicies(additionalWhere, portfolioOwnerId, effectiveOrganizationId, tx));
+    return withTenantTransaction(context, (tx) => loadEligibleRenewalPolicies(additionalWhere, portfolioOwnerId, effectiveOrganizationId, tx, includePolicyIdentity));
   }
 
   const policies = await client.policy.findMany({
@@ -121,6 +124,12 @@ export async function loadEligibleRenewalPolicies(
           contactPhone: true,
         },
       },
+      ...(includePolicyIdentity ? {
+        insuredAssets: {
+          select: { description: true, isPrimary: true },
+          orderBy: [{ isPrimary: "desc" as const }, { createdAt: "asc" as const }],
+        },
+      } : {}),
       ...LATEST_RENEWAL_RECEIPT_INCLUDE,
     },
     orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }, { id: "asc" }],

@@ -10,6 +10,7 @@ import { formatCurrency } from "@/lib/money";
 import { policyTypeLabel, statusLabel } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "@/components/badges/status-badge";
+import { PolicyIdentity } from "@/components/policies/policy-identity";
 import { Button } from "@/components/ui/button";
 import { ChartEmptyState } from "@/components/charts/chart-empty";
 import { ChartFrame } from "@/components/charts/chart-frame";
@@ -349,7 +350,7 @@ export function RecentPoliciesTable({ policies }: { policies: TodayDashboardData
                 <tr key={policy.id} className="border-b last:border-b-0 hover:bg-muted/50">
                   <td className="px-4 py-3 align-middle">
                     <Link href={`/policies/${policy.id}`} className="font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                      {policy.policyNumber}
+                      <PolicyIdentity policyNumber={policy.policyNumber} policy={policy} />
                     </Link>
                   </td>
                   <td className="max-w-[180px] truncate px-2 py-3 align-middle">{policy.clientName}</td>

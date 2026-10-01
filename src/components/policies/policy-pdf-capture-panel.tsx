@@ -474,7 +474,7 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
       setFieldConfidence((current) => ({ ...current, insurerName: "high" }));
     } else {
       setSelectedSourcePolicyId(item.id);
-      setSelectedSourcePolicyLabel(item.label);
+      setSelectedSourcePolicyLabel([item.label, item.meta?.insuredObject].filter(Boolean).join(" · "));
       setShowInlineClient(false);
       updateDraft({
         sourcePolicyNumber: item.meta?.policyNumber ?? item.label,

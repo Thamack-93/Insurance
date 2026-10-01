@@ -2,6 +2,7 @@ import { createWorkItem } from "@/app/(dashboard)/tasks/actions";
 import { WorkItemForm } from "@/components/forms/task-form";
 import { createWorkItemDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
+import { getPolicyOptionLabel } from "@/lib/policy-identity";
 import { withTenantTransaction } from "@/lib/organization-context";
 import { clientOperationalWhere, policyOperationalWhere, receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
@@ -16,7 +17,12 @@ export default async function NewWorkItemPage() {
     db.policy.findMany({
       where: { status: { not: "CANCELLED" }, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       orderBy: { policyNumber: "asc" },
-      select: { id: true, policyNumber: true },
+      select: {
+        id: true,
+        policyNumber: true,
+        insuredObject: true,
+        insuredAssets: { select: { description: true, isPrimary: true } },
+      },
     }),
     db.insurer.findMany({
       where: { status: { not: "ARCHIVED" }, organizationId: scope.organizationId },
@@ -46,7 +52,7 @@ export default async function NewWorkItemPage() {
           cancelHref="/tasks"
           defaultValues={createWorkItemDefaults()}
           clientOptions={clients.map((client) => ({ value: client.id, label: client.fullName }))}
-          policyOptions={policies.map((policy) => ({ value: policy.id, label: policy.policyNumber }))}
+          policyOptions={policies.map((policy) => ({ value: policy.id, label: getPolicyOptionLabel(policy) }))}
           insurerOptions={insurers.map((insurer) => ({ value: insurer.id, label: insurer.name }))}
           receiptOptions={receipts.map((receipt) => ({ value: receipt.id, label: receipt.receiptNumber }))}
           submitAction={createWorkItem}

@@ -29,6 +29,8 @@ import {
 } from "@/lib/portfolio-access";
 import { getInsurerHref } from "@/lib/insurer-navigation";
 import { buildTableHref, readAllowedTableParam, readTablePage, readTableParam, readTableSort } from "@/lib/table-query";
+import { policyObjectSearchTerms } from "@/lib/policy-identity";
+import { PolicyIdentity } from "@/components/policies/policy-identity";
 
 export default async function PortfolioPage({
   searchParams,
@@ -74,6 +76,7 @@ export default async function PortfolioPage({
             { policyNumber: { contains: query } },
             { client: { fullName: { contains: query } } },
             { insurer: { name: { contains: query } } },
+            ...policyObjectSearchTerms(query),
           ],
       }
       : {}),
@@ -96,7 +99,11 @@ export default async function PortfolioPage({
     db.policy.count({ where }),
     db.policy.findMany({
       where,
-      include: { client: true, insurer: true },
+      include: {
+        client: true,
+        insurer: true,
+        insuredAssets: { select: { description: true, isPrimary: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+      },
       orderBy,
       skip: (page - 1) * DEFAULT_PAGE_SIZE,
       take: DEFAULT_PAGE_SIZE,
@@ -283,7 +290,7 @@ export default async function PortfolioPage({
           description="Ordenadas por prima. Listado paginado con búsqueda."
           action={
             <TableToolbar
-              searchPlaceholder="Buscar por póliza, cliente o aseguradora..."
+              searchPlaceholder="Buscar por póliza, objeto asegurado, cliente o aseguradora..."
               filters={[
                 {
                   key: "type",
@@ -339,7 +346,7 @@ export default async function PortfolioPage({
                     <TableRow key={policy.id}>
                       <TableCell>
                         <Link href={`/policies/${policy.id}`} className="font-medium text-foreground hover:text-primary">
-                          {policy.policyNumber}
+                          <PolicyIdentity policyNumber={policy.policyNumber} policy={policy} />
                         </Link>
                       </TableCell>
                       <TableCell>

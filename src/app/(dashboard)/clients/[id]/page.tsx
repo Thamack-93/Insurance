@@ -29,6 +29,8 @@ import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/wor
 import { calculateAge, formatBirthdayDate } from "@/lib/birthday-reminders";
 import { normalizeReturnTo } from "@/lib/return-to";
 import { withTenantOrganization } from "@/lib/tenant-dal";
+import { policyObjectSearchTerms } from "@/lib/policy-identity";
+import { PolicyIdentity } from "@/components/policies/policy-identity";
 
 export default async function ClientDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
@@ -75,6 +77,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
           OR: [
             { policyNumber: { contains: policyQuery } },
             { insurer: { name: { contains: policyQuery } } },
+            ...policyObjectSearchTerms(policyQuery),
           ],
         }
       : {}),
@@ -83,7 +86,10 @@ export default async function ClientDetailPage({ params, searchParams }: { param
   const [policies, receipts, workItems, claims, quotes, documents, referidos, activity, exactPolicyStats, exactReceiptCount, exactDocumentCount, policyStatusCounts, totalPolicyCount] = await Promise.all([
     db.policy.findMany({
       where: policyWhere,
-      include: { insurer: true },
+      include: {
+        insurer: true,
+        insuredAssets: { select: { description: true, isPrimary: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+      },
       orderBy: [{ endDate: "asc" }, { policyNumber: "asc" }, { id: "asc" }],
     }),
     db.receipt.findMany({
@@ -357,7 +363,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
                       <TableRow key={policy.id}>
                         <TableCell>
                           <Link href={`/policies/${policy.id}`} className="font-medium text-foreground hover:text-primary">
-                            {policy.policyNumber}
+                            <PolicyIdentity policyNumber={policy.policyNumber} policy={policy} />
                           </Link>
                         </TableCell>
                         <TableCell><StatusBadge status={policy.status} entity="policy" /></TableCell>

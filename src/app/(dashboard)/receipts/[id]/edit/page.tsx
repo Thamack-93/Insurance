@@ -7,6 +7,7 @@ import { CancelReceiptOnlyButton } from "@/components/receipts/cancel-receipt-bu
 import { withTenantTransaction } from "@/lib/organization-context";
 import { formatDateInput } from "@/lib/form-utils";
 import type { ReceiptFormValues } from "@/lib/validations";
+import { getPolicyOptionLabel } from "@/lib/policy-identity";
 import { policyOperationalWhere, receiptOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function EditReceiptPage({ params }: { params: Promise<{ id: string }> }) {
@@ -17,12 +18,15 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
       where: { id, ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: {
         client: true,
-        policy: true,
+        policy: { include: { insuredAssets: { select: { description: true, isPrimary: true } } } },
         insurer: true,
         endorsement: {
           include: {
             policy: {
-              include: { client: true },
+              include: {
+                client: true,
+                insuredAssets: { select: { description: true, isPrimary: true } },
+              },
             },
           },
         },
@@ -30,7 +34,14 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
     });
     if (!receipt) return { receipt: null, policies: [] };
     const policies = receipt.endorsement
-      ? [{ id: receipt.policyId, policyNumber: receipt.policy.policyNumber, currency: receipt.policy.currency, client: { fullName: receipt.client.fullName } }]
+      ? [{
+          id: receipt.policyId,
+          policyNumber: receipt.policy.policyNumber,
+          insuredObject: receipt.policy.insuredObject,
+          insuredAssets: receipt.policy.insuredAssets,
+          currency: receipt.policy.currency,
+          client: { fullName: receipt.client.fullName },
+        }]
       : await db.policy.findMany({
           where: { status: { not: "CANCELLED" }, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
           include: { client: true },
@@ -82,7 +93,7 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
           })}
           policyOptions={policies.map((policy) => ({
             value: policy.id,
-            label: `${policy.policyNumber} · ${policy.client.fullName}`,
+            label: getPolicyOptionLabel(policy, [policy.client.fullName]),
           }))}
           endorsementOptions={endorsementOptions}
           submitAction={updateReceipt.bind(null, receipt.id)}

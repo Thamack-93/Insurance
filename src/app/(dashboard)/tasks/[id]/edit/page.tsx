@@ -8,6 +8,7 @@ import { formatDateInput } from "@/lib/form-utils";
 import { findWorkItemByRouteId } from "@/lib/work-item-resolvers";
 import type { WorkItemFormValues } from "@/lib/validations";
 import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
+import { getPolicyOptionLabel } from "@/lib/policy-identity";
 
 export default async function EditWorkItemPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -22,7 +23,12 @@ export default async function EditWorkItemPage({ params }: { params: Promise<{ i
     db.policy.findMany({
       where: { organizationId: scope.organizationId, ...(scope.portfolioOwnerId ? { client: { portfolioOwnerId: scope.portfolioOwnerId } } : {}), status: { not: "CANCELLED" } },
       orderBy: { policyNumber: "asc" },
-      select: { id: true, policyNumber: true },
+      select: {
+        id: true,
+        policyNumber: true,
+        insuredObject: true,
+        insuredAssets: { select: { description: true, isPrimary: true } },
+      },
     }),
     db.insurer.findMany({
       where: { organizationId: scope.organizationId, status: { not: "ARCHIVED" } },
@@ -69,7 +75,7 @@ export default async function EditWorkItemPage({ params }: { params: Promise<{ i
             notes: workItem.notes ?? "",
           })}
           clientOptions={clients.map((client) => ({ value: client.id, label: client.fullName }))}
-          policyOptions={policies.map((policy) => ({ value: policy.id, label: policy.policyNumber }))}
+          policyOptions={policies.map((policy) => ({ value: policy.id, label: getPolicyOptionLabel(policy) }))}
           insurerOptions={insurers.map((insurer) => ({ value: insurer.id, label: insurer.name }))}
           receiptOptions={receipts.map((receipt) => ({ value: receipt.id, label: receipt.receiptNumber }))}
           submitAction={updateWorkItem.bind(null, workItem.sourceId ?? workItem.id)}

@@ -542,7 +542,11 @@ export async function getTodayDashboardData() {
     db.policy.groupBy({ by: ["status"], where: policyWhere, _count: { status: true } }),
     db.policy.findMany({
       where: policyWhere,
-      include: { client: { select: { fullName: true } }, insurer: { select: { name: true } } },
+      include: {
+        client: { select: { fullName: true } },
+        insurer: { select: { name: true } },
+        insuredAssets: { select: { description: true, isPrimary: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+      },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 6,
     }),
@@ -641,6 +645,8 @@ export async function getTodayDashboardData() {
     recentPolicies: recentPolicies.map((policy) => ({
       id: policy.id,
       policyNumber: policy.policyNumber,
+      insuredObject: policy.insuredObject,
+      insuredAssets: policy.insuredAssets,
       clientName: policy.client.fullName,
       insurerName: policy.insurer.name,
       policyType: policy.policyType,

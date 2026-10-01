@@ -14,6 +14,7 @@ import { formatDate } from "@/lib/dates";
 import { formatCurrency, toNumber } from "@/lib/money";
 import { policyTypeLabel } from "@/lib/status";
 import { DeleteInsurerButton } from "@/components/insurers/delete-insurer-button";
+import { PolicyIdentity } from "@/components/policies/policy-identity";
 import { requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import {
   claimOperationalWhere,
@@ -36,7 +37,10 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
   const [policies, claims, commissions, activity] = await Promise.all([
     db.policy.findMany({
       where: { insurerId: id, ...policyOperationalWhere(undefined, context.organizationId) },
-      include: { client: true },
+      include: {
+        client: true,
+        insuredAssets: { select: { description: true, isPrimary: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+      },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     }),
     db.claim.findMany({
@@ -198,7 +202,7 @@ export default async function InsurerDetailPage({ params }: { params: Promise<{ 
                           href={`/policies/${policy.id}`}
                           className="font-medium text-foreground hover:text-primary"
                         >
-                          {policy.policyNumber}
+                          <PolicyIdentity policyNumber={policy.policyNumber} policy={policy} />
                         </Link>
                       </TableCell>
                       <TableCell>{policy.client.fullName}</TableCell>

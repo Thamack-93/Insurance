@@ -21,6 +21,7 @@ export type GlobalSearchResult = {
   title: string;
   subtitle?: string;
   details?: string[];
+  policyObjectDescription?: string;
   parentLabel?: string;
   href: string;
   match?: SearchMatch;
@@ -291,6 +292,7 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
     insuredObject: string | null;
     insuredPartiesText: string | null;
     insuredAssetsText: string | null;
+    insuredAssetsDescriptionText: string | null;
     notes: string | null;
     clientId: string;
     clientName: string | null;
@@ -359,7 +361,12 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
                 SELECT string_agg(COALESCE("serialNumber", "description"), ' | ')
                 FROM "PolicyInsuredAsset"
                 WHERE "PolicyInsuredAsset"."policyId" = "Policy"."id"
-              ) AS "insuredAssetsText"`,
+              ) AS "insuredAssetsText",
+              (
+                SELECT string_agg("description", ' | ')
+                FROM "PolicyInsuredAsset"
+                WHERE "PolicyInsuredAsset"."policyId" = "Policy"."id"
+              ) AS "insuredAssetsDescriptionText"`,
             Prisma.sql`EXISTS (
               SELECT 1
               FROM "Client"
@@ -500,6 +507,7 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
         p.insuredPartiesText,
         p.insuredAssetsText,
       ]),
+      policyObjectDescription: p.insuredObject?.trim() || p.insuredAssetsDescriptionText?.trim() || undefined,
       href: `/policies/${p.id}`,
       match,
     });

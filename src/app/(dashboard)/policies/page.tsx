@@ -24,6 +24,8 @@ import { readPolicyListFilters } from "@/lib/list-filters";
 import { LocalNavigation } from "@/components/layout/local-navigation";
 import { policyNavigation } from "@/lib/navigation";
 import { withTenantOrganization } from "@/lib/tenant-dal";
+import { policyObjectSearchTerms } from "@/lib/policy-identity";
+import { PolicyIdentity } from "@/components/policies/policy-identity";
 
 const PAGE_SIZE = 25;
 
@@ -57,6 +59,7 @@ export default async function PoliciesPage({
     scope.portfolioOwnerId,
     scope.organizationId,
     db,
+    true,
   );
 
   const baseWhere: Prisma.PolicyWhereInput = query
@@ -69,6 +72,7 @@ export default async function PoliciesPage({
               { policyNumber: { contains: query } },
               { client: { fullName: { contains: query } } },
               { insurer: { name: { contains: query } } },
+              ...policyObjectSearchTerms(query),
             ],
           },
         ],
@@ -120,14 +124,22 @@ export default async function PoliciesPage({
     db.policy.count({ where }),
     db.policy.findMany({
       where,
-      include: { client: true, insurer: true },
+      include: {
+        client: true,
+        insurer: true,
+        insuredAssets: { select: { description: true, isPrimary: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+      },
       orderBy,
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
     db.policy.findMany({
       where: { ...portfolioWhere, status: "PENDING" },
-      include: { client: true, insurer: true },
+      include: {
+        client: true,
+        insurer: true,
+        insuredAssets: { select: { description: true, isPrimary: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+      },
       orderBy: [{ endDate: "asc" }, { id: "asc" }],
       take: 10,
     }),
@@ -229,7 +241,7 @@ export default async function PoliciesPage({
                 }))}
               />
               <TableToolbar
-                searchPlaceholder="Buscar por número, cliente o aseguradora..."
+                searchPlaceholder="Buscar por póliza, objeto asegurado, cliente o aseguradora..."
                 filters={[{ key: "type", label: "Tipo", options: policyTypeOptions }]}
                 tableControls={false}
               />
@@ -293,7 +305,7 @@ export default async function PoliciesPage({
                           href={`/policies/${policy.id}`}
                           className="font-medium text-foreground hover:text-primary"
                         >
-                          {policy.policyNumber}
+                          <PolicyIdentity policyNumber={policy.policyNumber} policy={policy} />
                         </Link>
                       </TableCell>
                       <TableCell>
@@ -366,7 +378,7 @@ export default async function PoliciesPage({
                       href={`/policies/${policy.id}`}
                       className="font-medium text-foreground hover:text-primary"
                     >
-                      {policy.policyNumber}
+                      <PolicyIdentity policyNumber={policy.policyNumber} policy={policy} />
                     </Link>
                     <p className="mt-1 truncate text-sm text-muted-foreground">
                       {policy.client.fullName} · {policy.insurer.name}

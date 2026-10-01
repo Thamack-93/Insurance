@@ -16,6 +16,7 @@ import type { RenewalBoardFilters } from "@/lib/renewal-board.logic";
 import { isTerminalRenewalStage } from "@/lib/renewal-board.logic";
 import { isOverdue } from "@/lib/dates";
 import { StatusBadge } from "@/components/badges/status-badge";
+import { getPolicyObjectDescription } from "@/lib/policy-identity";
 
 function compactFollowUpDate(date: Date) {
   return new Intl.DateTimeFormat("es-MX", {
@@ -80,6 +81,9 @@ function RenewalCard({ card }: { card: RenewalBoardCard }) {
         </Link>
         {" · "}
         {policyTypeLabel(card.policyType)}
+      </p>
+      <p className="mt-1 truncate text-xs text-muted-foreground" title={getPolicyObjectDescription(card)}>
+        {getPolicyObjectDescription(card)}
       </p>
 
       <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
@@ -166,6 +170,9 @@ function ExcludedPolicies({ policies }: { policies: RenewalBoardExcludedPolicy[]
                   </Link>
                   <StatusBadge status={policy.status} entity="policy" className="px-2 py-0.5 text-[11px]" />
                 </div>
+                <p className="mt-1 truncate text-xs text-muted-foreground" title={getPolicyObjectDescription(policy)}>
+                  {getPolicyObjectDescription(policy)}
+                </p>
                 <p className="mt-1 truncate text-sm text-muted-foreground">
                   {policy.clientName} · {policy.insurerName} · vence {formatDate(policy.endDate)}
                 </p>

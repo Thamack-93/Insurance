@@ -3,6 +3,7 @@ import { ClaimForm } from "@/components/forms/claim-form";
 import { createClaimDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { withTenantOrganization } from "@/lib/tenant-dal";
+import { getPolicyOptionLabel } from "@/lib/policy-identity";
 import {
   clientOperationalWhere,
   policyOperationalWhere,
@@ -27,7 +28,12 @@ export default async function NewClaimPage() {
         status: { not: "CANCELLED" },
       },
       orderBy: { policyNumber: "asc" },
-      select: { id: true, policyNumber: true },
+      select: {
+        id: true,
+        policyNumber: true,
+        insuredObject: true,
+        insuredAssets: { select: { description: true, isPrimary: true } },
+      },
     }),
     db.insurer.findMany({
       where: { status: { not: "ARCHIVED" } },
@@ -37,7 +43,7 @@ export default async function NewClaimPage() {
   ]);
 
   const clientOptions = clients.map((c) => ({ value: c.id, label: c.fullName }));
-  const policyOptions = policies.map((p) => ({ value: p.id, label: p.policyNumber }));
+  const policyOptions = policies.map((policy) => ({ value: policy.id, label: getPolicyOptionLabel(policy) }));
   const insurerOptions = insurers.map((i) => ({ value: i.id, label: i.name }));
 
   return (

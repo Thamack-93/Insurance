@@ -34,7 +34,7 @@ function toSourcePolicy(result: GlobalSearchResult): PolicyRenewalSource {
     currency: "MXN",
     paymentFrequency: "ANNUAL",
     paymentPlan: null,
-    insuredObject: null,
+    insuredObject: result.policyObjectDescription ?? null,
     beneficiaryInfo: null,
     notes: null,
   };
@@ -88,6 +88,11 @@ export function PolicyRenewalSelector({
             <p className="text-sm text-muted-foreground">
               {pickedPolicy?.clientName ?? "Sin cliente"} · {pickedPolicy?.insurerName ?? "Sin aseguradora"}
             </p>
+            {pickedPolicy?.insuredObject ? (
+              <p className="truncate text-xs text-muted-foreground" title={pickedPolicy.insuredObject}>
+                {pickedPolicy.insuredObject}
+              </p>
+            ) : null}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">Busca la póliza anterior que esta vigencia renueva.</p>
@@ -112,10 +117,10 @@ export function PolicyRenewalSelector({
         onOpenChange={setOpen}
         title="Seleccionar póliza renovada"
         description="Busca la póliza anterior para enlazar esta nueva vigencia."
-        placeholder="Póliza, cliente, aseguradora..."
+        placeholder="Póliza, objeto asegurado, cliente, aseguradora..."
         sourceLabel={selectedLabel ?? "Sin vínculo"}
         initialQuery={pickedPolicy?.policyNumber ?? ""}
-        suggestions={pickedPolicy ? [pickedPolicy.policyNumber, pickedPolicy.clientName, pickedPolicy.insurerName] : []}
+        suggestions={pickedPolicy ? [pickedPolicy.policyNumber, pickedPolicy.insuredObject, pickedPolicy.clientName, pickedPolicy.insurerName].filter((value): value is string => Boolean(value)) : []}
         searchScope={searchScope}
         onSelect={async (result) => {
           const nextPolicy = toSourcePolicy(result);

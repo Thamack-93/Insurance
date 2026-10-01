@@ -20,6 +20,7 @@ import {
 import { withTenantOrganization } from "@/lib/tenant-dal";
 import { withSystemOrganizationTransaction } from "@/lib/organization-context";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
+import { policyObjectSearchTerms } from "@/lib/policy-identity";
 
 /**
  * Máximo de pólizas que el tablero carga de una sola vez. Con la ventana más
@@ -33,6 +34,8 @@ export type RenewalBoardCard = {
   policyId: string;
   policyNumber: string;
   policyType: string;
+  insuredObject: string | null;
+  insuredAssets: Array<{ description: string; isPrimary: boolean }>;
   clientId: string;
   clientName: string;
   insurerId: string;
@@ -70,6 +73,8 @@ export type RenewalBoardColumn = {
 export type RenewalBoardExcludedPolicy = {
   policyId: string;
   policyNumber: string;
+  insuredObject: string | null;
+  insuredAssets: Array<{ description: string; isPrimary: boolean }>;
   clientId: string;
   clientName: string;
   insurerName: string;
@@ -91,7 +96,7 @@ export type RenewalBoardData = {
   error?: string;
 };
 
-const renewalBoardInclude = {
+const renewalBoardBaseInclude = {
   client: {
     select: { id: true, fullName: true, portfolioOwnerId: true, portfolioOwner: { select: { name: true } } },
   },
@@ -99,6 +104,14 @@ const renewalBoardInclude = {
   renewals: { select: { id: true }, orderBy: [{ createdAt: "desc" as const }, { id: "desc" as const }], take: 1 },
   sourceRenewalSuggestions: { where: { status: "DECLINED" }, select: { id: true }, take: 1 },
   ...LATEST_RENEWAL_RECEIPT_INCLUDE,
+} satisfies Prisma.PolicyInclude;
+
+const renewalBoardInclude = {
+  ...renewalBoardBaseInclude,
+  insuredAssets: {
+    select: { description: true, isPrimary: true },
+    orderBy: [{ isPrimary: "desc" as const }, { createdAt: "asc" as const }],
+  },
 } satisfies Prisma.PolicyInclude;
 
 function ownerWhere(owner?: string): Prisma.PolicyWhereInput {
@@ -114,6 +127,7 @@ function searchWhere(query?: string): Prisma.PolicyWhereInput {
       { policyNumber: { contains: query } },
       { client: { fullName: { contains: query } } },
       { insurer: { name: { contains: query } } },
+      ...policyObjectSearchTerms(query),
     ],
   };
 }
@@ -154,7 +168,7 @@ export function buildRenewalBoardWhere(
   };
 }
 
-type RenewalBoardPolicy = Prisma.PolicyGetPayload<{ include: typeof renewalBoardInclude }>;
+type RenewalBoardPolicy = Prisma.PolicyGetPayload<{ include: typeof renewalBoardBaseInclude }>;
 
 /**
  * Convierte una póliza en tarjeta. Devuelve `null` cuando la póliza ya no es
@@ -177,12 +191,17 @@ function toRenewalBoardCard(policy: RenewalBoardPolicy, today: Date): RenewalBoa
   if (!eligible && !isTerminalRenewalStage(stage)) return null;
 
   const daysUntilRenewal = daysBetweenBusinessDates(policy.endDate, today);
+  const insuredAssets = (policy as RenewalBoardPolicy & {
+    insuredAssets?: Array<{ description: string; isPrimary: boolean }>;
+  }).insuredAssets ?? [];
 
   return {
     organizationId: policy.organizationId!,
     policyId: policy.id,
     policyNumber: policy.policyNumber,
     policyType: policy.policyType,
+    insuredObject: policy.insuredObject,
+    insuredAssets,
     clientId: policy.clientId,
     clientName: policy.client.fullName,
     insurerId: policy.insurerId,
@@ -293,6 +312,8 @@ export async function loadRenewalBoard(
       return [{
         policyId: policy.id,
         policyNumber: policy.policyNumber,
+        insuredObject: policy.insuredObject,
+        insuredAssets: policy.insuredAssets,
         clientId: policy.clientId,
         clientName: policy.client.fullName,
         insurerName: policy.insurer.name,
@@ -380,7 +401,7 @@ export async function forEachRenewalCandidate(
   for (;;) {
     const policies = await db.policy.findMany({
       where: { ...ACTIVE_RENEWAL_POLICY_WHERE, organizationId },
-      include: renewalBoardInclude,
+      include: renewalBoardBaseInclude,
       orderBy: [{ endDate: "asc" }, { id: "asc" }],
       take: RENEWAL_SCAN_PAGE_SIZE,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),

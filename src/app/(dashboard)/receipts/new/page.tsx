@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { withTenantTransaction } from "@/lib/organization-context";
 import { formatDate } from "@/lib/dates";
 import { formatDateInput } from "@/lib/form-utils";
+import { getPolicyOptionLabel } from "@/lib/policy-identity";
 import {
   endorsementOperationalWhere,
   policyOperationalWhere,
@@ -24,13 +25,19 @@ export default async function NewReceiptPage({
   const [policies, selectedPolicy, selectedEndorsement] = await withTenantTransaction(scope.context, (db) => Promise.all([
     db.policy.findMany({
       where: { status: { not: "CANCELLED" }, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
-      include: { client: true },
+      include: {
+        client: true,
+        insuredAssets: { select: { description: true, isPrimary: true } },
+      },
       orderBy: { policyNumber: "asc" },
     }),
     policyId
       ? db.policy.findFirst({
           where: { id: policyId, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
-          include: { client: true },
+          include: {
+            client: true,
+            insuredAssets: { select: { description: true, isPrimary: true } },
+          },
         })
       : Promise.resolve(null),
     endorsementId
@@ -38,7 +45,10 @@ export default async function NewReceiptPage({
           where: { id: endorsementId, ...endorsementOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
           include: {
             policy: {
-              include: { client: true },
+              include: {
+                client: true,
+                insuredAssets: { select: { description: true, isPrimary: true } },
+              },
             },
           },
         })
@@ -50,12 +60,12 @@ export default async function NewReceiptPage({
     ? [
         {
           value: contextPolicy.id,
-          label: `${contextPolicy.policyNumber} · ${contextPolicy.client.fullName}`,
+          label: getPolicyOptionLabel(contextPolicy, [contextPolicy.client.fullName]),
         },
       ]
     : policies.map((policy) => ({
         value: policy.id,
-        label: `${policy.policyNumber} · ${policy.client.fullName}`,
+        label: getPolicyOptionLabel(policy, [policy.client.fullName]),
       }));
   const endorsementOptions =
     selectedEndorsement && selectedEndorsement.policyId === contextPolicy?.id

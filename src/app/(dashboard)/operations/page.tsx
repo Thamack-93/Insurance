@@ -13,6 +13,8 @@ import { formatDate } from "@/lib/dates";
 import { policyTypeLabel } from "@/lib/status";
 import { claimOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
+import { getPolicyObjectDescription, policyObjectSearchTerms } from "@/lib/policy-identity";
+import { PolicyIdentity } from "@/components/policies/policy-identity";
 import { getWorkItems, getWorkItemsPage, OPEN_WORK_ITEM_STATUSES, type WorkQueueItem } from "@/lib/work-queue";
 import { buildOperationalWorkItemPresentation, type OperationalRenewalState } from "@/lib/operations-presentation";
 import { readAllowedTableParam, readTablePage, readTableParam } from "@/lib/table-query";
@@ -208,9 +210,10 @@ export default async function OperationsPage({
           { policyNumber: { contains: query } },
           { client: { fullName: { contains: query } } },
           { insurer: { name: { contains: query } } },
+          ...policyObjectSearchTerms(query),
         ],
       } : {}),
-    }, scope.portfolioOwnerId, scope.organizationId) : Promise.resolve([]),
+    }, scope.portfolioOwnerId, scope.organizationId, undefined, true) : Promise.resolve([]),
     withTenantTransaction(scope.context, async (db) => ({
       claims: await db.claim.findMany({
         where: claimWhere,
@@ -342,6 +345,7 @@ export default async function OperationsPage({
                     <Link href={appendReturnTo(`/policies/${policy.id}`, returnTo)} className="min-w-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                       <p className="truncate text-sm font-medium">{policy.client.fullName}</p>
                       <p className="truncate font-mono text-xs text-muted-foreground">{policy.policyNumber} · {policy.insurer.name}</p>
+                      <p className="truncate text-xs text-muted-foreground" title={getPolicyObjectDescription(policy)}>{getPolicyObjectDescription(policy)}</p>
                     </Link>
                     <span className="text-xs font-medium text-warning-foreground">{formatBusinessDateRelative(policy.endDate)}</span>
                   </div>
@@ -382,7 +386,7 @@ export default async function OperationsPage({
           <Card className="gap-0 py-0">
             <CardHeader className="border-b py-4"><CardTitle className="flex items-center gap-2"><CalendarClock className="size-4" />Renovaciones pendientes</CardTitle></CardHeader>
             <CardContent className="px-0">
-              <div className="border-b px-4 py-3"><TableToolbar searchPlaceholder="Buscar póliza, cliente o aseguradora..." tableControls={false} /></div>
+              <div className="border-b px-4 py-3"><TableToolbar searchPlaceholder="Buscar póliza, objeto asegurado, cliente o aseguradora..." tableControls={false} /></div>
               {renewalCount > 0 && renewals.length > 0 ? (
                 <Table>
                   <TableHeader>
@@ -391,7 +395,7 @@ export default async function OperationsPage({
                   <TableBody>
                     {renewals.map((policy) => (
                       <TableRow key={policy.id}>
-                        <TableCell><Link href={appendReturnTo(`/policies/${policy.id}`, returnTo)} className="font-mono font-medium text-primary hover:underline">{policy.policyNumber}</Link></TableCell>
+                        <TableCell><Link href={appendReturnTo(`/policies/${policy.id}`, returnTo)} className="font-mono hover:underline"><PolicyIdentity policyNumber={policy.policyNumber} policy={policy} /></Link></TableCell>
                         <TableCell>{policy.client.fullName}</TableCell>
                         <TableCell>{policy.insurer.name}</TableCell>
                         <TableCell><span className="font-mono text-xs">{formatDate(policy.endDate)}</span><span className="ml-2 text-xs text-amber-700 dark:text-amber-300">{formatBusinessDateRelative(policy.endDate)}</span></TableCell>
