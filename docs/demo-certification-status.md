@@ -1,18 +1,21 @@
 # Cierre de certificación de demos externas
 
 Estado: **NOT READY FOR EXTERNAL DEMO ACCESS**.
+Registro de verificación local: `2026-10-01`.
 
 ## Candidato
 
-Base de release integrada: `origin/main` en `09418e0d25f531f12cab6dd25d4599b2df925f34`.
-Rama candidata local: `codex/demo-release`, derivada de esa base. El commit de
-código `3036171c55c0d9d3ecf872063879976733935f8a` pasó los gates locales, pero
-no es un SHA certificable en Neon: las ramas creadas para él heredaron datos
-de `main`. La topbar ahora muestra persistentemente el indicador DEMO y el
-mensaje contractual de bloqueo; el spec móvil comprueba ambos. Fijar el SHA
-final con `git rev-parse HEAD` después del commit local y volver a ejecutar los
-gates antes de cualquier certificación. No se ha publicado el candidato ni
-escrito Production.
+Base de integración actual: `main` en
+`1ab53d0a589b30d47f82df763ef50b9cfc3444c2` (identificación de pólizas por
+objeto asegurado). El candidato DEMO original `97a45cd6218550eb68766f47c56400f6f0f31fd9`
+se integró sobre esa base en el merge `2506c1a2e179f70e75d1154f8c7cd0a80a2a6cd7`.
+El arreglo de fixture/reset y la prueba autenticada de API quedaron en
+`e8cf8da` (`fix: stabilize synthetic demo certification`). El SHA previo
+`3036171c55c0d9d3ecf872063879976733935f8a` no es certificable en Neon: las
+ramas creadas para él heredaron datos de `main`. La topbar mantiene el badge
+DEMO y el mensaje contractual de bloqueo; el spec móvil los comprueba. Integrar
+el código no autoriza acceso externo: la certificación de recuperación y CI
+remoto siguen pendientes.
 
 ## Diseño implementado
 
@@ -37,23 +40,62 @@ escrito Production.
 
 ## Validación local renovada
 
-Suite unitaria renovada: 650 PASS, 11 omitidas porque requieren PostgreSQL
-desechable. Lint, typecheck, build, scopes de lectura/escritura (42 modelos),
-DAL estricto (110 módulos), seguridad API (37 rutas), Server Actions,
-ActivityLog, secrets y `git diff --check`: PASS. Las pruebas API/browser y la
-certificación Neon deben ejecutarse contra el SHA fijado después de este cambio;
-la validación local no es evidencia remota.
-El spec `tests/api/demo-certification.spec.ts` quedó añadido explícitamente al
-job `disposable-tenant`, donde existe el fixture requerido y
-`TENANT_ISOLATION_E2E=1`; ahora también comprueba el mensaje DEMO exacto en
-móvil. Sigue pendiente de ejecución CI en el SHA publicado.
+Verificación aislada posterior al SHA exacto
+`97a45cd6218550eb68766f47c56400f6f0f31fd9`: `npm ci --offline` PASS (1,088
+paquetes, auditoría npm sin vulnerabilidades); Prisma generate, lint, typecheck,
+build, scopes de lectura/escritura (42 modelos), DAL estricto (108 módulos),
+seguridad API (37 rutas), Server Actions, ActivityLog, secrets (926 archivos),
+metadata, navegación, Quálitas, límite recibos/pagos y `git diff --check`:
+PASS. Unitarias: 650 PASS, 11 omitidas por requerir PostgreSQL desechable.
+Las pruebas API/browser no se ejecutaron localmente. El spec
+`tests/api/demo-certification.spec.ts` está cableado al job `disposable-tenant`
+con `TENANT_ISOLATION_E2E=1` y comprueba en móvil el badge y el mensaje DEMO;
+sigue pendiente de CI remoto sobre el árbol integrado. Esta verificación local
+no sustituye la certificación Neon ni el backup/restore remoto.
 
 ## Certificación y release
 
-### Bloqueo de procedencia de datos
+### Fuente sintética Neon verificada
 
-No certificar ni escribir en ninguna rama Neon hasta aprobar una fuente sin
-datos reales. Las consultas agregadas de solo lectura confirmaron:
+El 2026-10-01 el usuario autorizó un proyecto temporal Neon Free y Blob privado
+exclusivos del drill. Las comprobaciones de solo lectura confirmaron:
+
+- Proyecto `policydesk-certification-20261001`
+  (`morning-block-38616998`), en `aws-us-east-1`; rama vacía `main`
+  (`br-odd-sound-b7js2mbk`).
+- Fuente `cert-stage3-97a45cd6218550eb68766f47c56400f6f0f31fd9`
+  (`br-super-bird-b7b8dz8x`) y destino
+  `restore-cert-stage3-97a45cd6218550eb68766f47c56400f6f0f31fd9`
+  (`br-proud-cloud-b7b2nxc8`), ambos `ready`, hijos directos de ese `main`
+  con el mismo parent LSN `0/1B9D098`.
+- La base `policydesk_cert_97a45cd` existe en ambas ramas. `table-sizes`
+  devolvió cero tablas de usuario en las dos; no hay evidencia de fixture,
+  migraciones, backup o restore en ellas. Por tanto, la procedencia quedó
+  validada para el drill, pero todavía no hay certificación de recuperación.
+- El coordinador reportó un Blob privado `store_dYfsJwqceS3nQGOI` sin archivos
+  y desconectado; ese dato no se verificó con una lectura independiente aquí.
+
+Las dos ramas Neon actuales se nombraron para el SHA anterior `97a45cd`. El
+árbol integrado ahora tiene el commit de código `e8cf8da`; esas ramas siguen
+vacías y no cuentan como destino certificado para este nuevo SHA. Para certificar
+`e8cf8da` se necesita una pareja de ramas identificada con el SHA completo y la
+aprobación explícita del destino antes de cualquier restore.
+
+Sigue pendiente usar un runner GitHub-hosted con credenciales
+limitadas a este proyecto/Blob y a estas dos ramas. No se ha leído ni transferido
+ningún secreto de este proyecto. La clave de cifrado debe generarse dentro del
+job para una sola ejecución y no conservarse. No usar la clave de Production,
+no modificar sus variables y no ejecutar migraciones, fixture, backup o restore
+hasta que el destino y el alcance de esos secretos estén autorizados. No se
+guardarán credenciales en la Mac ni en archivos del workspace.
+
+El repositorio es privado. Si la cuenta GitHub usa Free, los secretos de
+entorno no están disponibles para repos privados. Los secretos de repositorio
+son una alternativa, pero cualquier workflow del repositorio que los referencie
+podría usarlos; ese alcance más amplio tiene que quedar aprobado antes de
+configurar el runner.
+
+Las fuentes históricas siguientes siguen siendo inválidas y no deben usarse:
 
 - `main` tiene 1 organización, 47 clientes y 262 pólizas; cero emails
   `example.invalid`, cero pólizas DEMO/SYNTHETIC y ningún marcador.
@@ -69,21 +111,17 @@ datos reales. Las consultas agregadas de solo lectura confirmaron:
   clientes ni pólizas, pero conserva 3 usuarios (uno fuera de dominios de
   fixture) y un esquema anterior. Tampoco es una fuente limpia certificada.
 
-Se requiere que el operador identifique una base/branch aprobada y demuestre
-que no contiene datos reales, o que autorice crear un proyecto Neon temporal
-vacío.
+### Flujo pendiente tras aprobar la inyección de secretos
 
-### Flujo pendiente tras aprobar la fuente
+Tras aprobar el alcance de secretos y ramas, provisionar la pareja Neon vacía
+para el SHA integrado, aplicar migraciones, fixture sintético, roles y cutover
+temporal en la fuente, y ejecutar RLS/concurrencia, auditoría y drift. Preparar
+el destino aislado y recuperar el artifact VERIFIED. `RESTORE_DRILL_APP_SMOKE=0`
+sigue apagado.
 
-Crear nuevas ramas `cert-stage3-<SHA completo>` y
-`restore-cert-stage3-<SHA completo>` desde esa fuente, nunca desde `main`;
-aplicar migraciones, fixture sintético, roles y cutover temporal, y ejecutar
-RLS/concurrencia, auditoría y drift. Preparar el destino aislado y recuperar
-el artifact VERIFIED. `RESTORE_DRILL_APP_SMOKE=0` sigue apagado.
-
-Tras completar Neon: publicar solo con autorización y ejecutar
-`release-certification.yml` sobre el SHA, con `verify_production=false`.
-Antes de escrituras productivas, presentar certificado, backup recuperable,
+Tras completar Neon y CI remoto sobre el SHA integrado, actualizar este estado
+antes de habilitar cualquier acceso DEMO externo. No ejecutar el verificador de
+Production como parte del drill. Antes de escrituras productivas, presentar certificado, backup recuperable,
 RPO observado, ventana y recuperación para aprobación explícita. Después del
 cutover aprobado: verificador de solo lectura y smoke autenticado, provisión
 DEMO temporal y flag apagado. Credenciales solo para prospecto y destinatario
@@ -94,5 +132,20 @@ identificados. Eliminar ramas/artefactos requiere una operación separada.
 Intentos anteriores de enviar credenciales owner a Vercel Preview fueron
 rechazados antes de backup/restore. Ese flujo se retiró y no es evidencia.
 El runner y el baseline RLS previos están preservados fuera del candidato.
-Las ramas Neon no certificables se conservan sin cambios y sin borrarlas.
-Production permanece intacto.
+Las ramas Neon no certificables se conservan sin cambios y sin borrarlas. No se
+crearon ni modificaron datos, tenants o usuarios DEMO en Production. El push a
+`main` puede iniciar el despliegue habitual de Vercel; su resultado no está
+verificado en este informe.
+
+## Verificación del checkout compartido
+
+En el checkout compartido el 2026-10-01 pasaron `npm run typecheck`, ESLint de
+los cuatro archivos DEMO modificados y `npm run test:unit` (**654 PASS, 11
+SKIP**). Los omitidos requieren PostgreSQL desechable. También pasaron los
+scopes tenant de lectura y escritura (42 modelos), DAL estricto (110 módulos),
+seguridad API (37 rutas), Server Actions, ActivityLog y secrets (926 archivos).
+Se comparó el contenido de todos los archivos rastreados y coincide con el
+árbol de código del commit `e8cf8da`. La verificación aislada previa de
+`97a45cd` reportó 108 módulos DAL; el checkout compartido e integrado cuenta
+110. Estas son validaciones locales, no CI remoto y no certifican RLS real ni
+backup/restore.
