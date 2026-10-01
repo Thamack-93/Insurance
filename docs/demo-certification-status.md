@@ -5,12 +5,14 @@ Estado: **NOT READY FOR EXTERNAL DEMO ACCESS**.
 ## Candidato
 
 Base de release integrada: `origin/main` en `09418e0d25f531f12cab6dd25d4599b2df925f34`.
-Rama local: `codex/demo-certification-close`. El commit de código
-`3036171c55c0d9d3ecf872063879976733935f8a` pasó los gates locales, pero no es
-un SHA certificable en Neon: las ramas creadas para él heredaron datos de
-`main`. Esta actualización cambia el árbol; obtener el nuevo SHA de `HEAD`
-antes de cualquier certificación. No se ha publicado el candidato ni escrito
-Production.
+Rama candidata local: `codex/demo-release`, derivada de esa base. El commit de
+código `3036171c55c0d9d3ecf872063879976733935f8a` pasó los gates locales, pero
+no es un SHA certificable en Neon: las ramas creadas para él heredaron datos
+de `main`. La topbar ahora muestra persistentemente el indicador DEMO y el
+mensaje contractual de bloqueo; el spec móvil comprueba ambos. Fijar el SHA
+final con `git rev-parse HEAD` después del commit local y volver a ejecutar los
+gates antes de cualquier certificación. No se ha publicado el candidato ni
+escrito Production.
 
 ## Diseño implementado
 
@@ -30,18 +32,21 @@ Production.
 - DEMO se recupera con seed, reset idempotente y revocación. Nora y proveedores
   permanecen bloqueados; WhatsApp es vista previa local; uploads reales se
   rechazan.
+- En todas las rutas del dashboard DEMO, la cabecera fija mantiene visible el
+  badge y `Esta acción está deshabilitada en la organización de demostración.`
 
 ## Validación local renovada
 
 Suite unitaria renovada: 650 PASS, 11 omitidas porque requieren PostgreSQL
 desechable. Lint, typecheck, build, scopes de lectura/escritura (42 modelos),
-DAL estricto (108 módulos), seguridad API (37 rutas), Server Actions,
+DAL estricto (110 módulos), seguridad API (37 rutas), Server Actions,
 ActivityLog, secrets y `git diff --check`: PASS. Las pruebas API/browser y la
-certificación Neon deben ejecutarse contra el SHA fijado; la validación local
-no es evidencia remota.
+certificación Neon deben ejecutarse contra el SHA fijado después de este cambio;
+la validación local no es evidencia remota.
 El spec `tests/api/demo-certification.spec.ts` quedó añadido explícitamente al
 job `disposable-tenant`, donde existe el fixture requerido y
-`TENANT_ISOLATION_E2E=1`; sigue pendiente de ejecución CI en el SHA publicado.
+`TENANT_ISOLATION_E2E=1`; ahora también comprueba el mensaje DEMO exacto en
+móvil. Sigue pendiente de ejecución CI en el SHA publicado.
 
 ## Certificación y release
 
