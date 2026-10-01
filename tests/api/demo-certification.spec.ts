@@ -30,7 +30,9 @@ test("CUSTOMER search, export and direct document ID stay inside its tenant", as
 });
 
 test("DEMO blocks Nora and real document uploads", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
   await login(page, "demo-owner@policydesk.local");
+  await expect(page.getByLabel("Organización de demostración")).toBeVisible();
   const origin = new URL(page.url()).origin;
   const nora = await page.request.post("/api/assistant", { data: {}, headers: { Origin: origin } });
   expect(nora.status()).toBe(403);

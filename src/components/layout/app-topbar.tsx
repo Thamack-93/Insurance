@@ -71,7 +71,7 @@ export function AppTopbar({
               {membershipRole ? <span className="ml-1.5">· {membershipRole === "AGENT" ? "Agente" : "Administrador"}</span> : null}
             </div>
           ) : null}
-          {isDemo ? <span className="hidden rounded-md border border-cyan-300 bg-cyan-50 px-2.5 py-1 text-xs font-semibold text-cyan-800 dark:border-cyan-800 dark:bg-cyan-950/30 dark:text-cyan-200 sm:inline">Demo</span> : null}
+          {isDemo ? <span aria-label="Organización de demostración" title="Organización de demostración" className="inline-flex shrink-0 rounded-md border border-cyan-300 bg-cyan-50 px-1.5 py-1 text-[10px] font-semibold text-cyan-800 dark:border-cyan-800 dark:bg-cyan-950/30 dark:text-cyan-200 sm:px-2.5 sm:text-xs">Demo</span> : null}
           <ThemeToggle initialTheme={initialTheme} />
           {hasOrganizationContext && !isDemo ? (
             <button
