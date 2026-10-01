@@ -39,6 +39,9 @@ DAL estricto (108 módulos), seguridad API (37 rutas), Server Actions,
 ActivityLog, secrets y `git diff --check`: PASS. Las pruebas API/browser y la
 certificación Neon deben ejecutarse contra el SHA fijado; la validación local
 no es evidencia remota.
+El spec `tests/api/demo-certification.spec.ts` quedó añadido explícitamente al
+job `disposable-tenant`, donde existe el fixture requerido y
+`TENANT_ISOLATION_E2E=1`; sigue pendiente de ejecución CI en el SHA publicado.
 
 ## Certificación y release
 
