@@ -55,6 +55,8 @@ const MIGRATION_FILES = new Set([
   "scripts/backfill-business-dates.ts",
   "scripts/reconcile-insured-clients.ts",
   "scripts/assign-existing-portfolio.ts",
+  // This fixture is guarded to run only against an explicitly disposable DB.
+  "scripts/setup-tenant-isolation-fixture.ts",
   "tests/e2e/data-quality-renewals.spec.ts",
 ]);
 
