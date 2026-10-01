@@ -53,9 +53,10 @@ autorizada de plataforma.
 
 ## Certificación remota de backup y restore
 
-Las organizaciones DEMO están excluidas de los respaldos. El drill usa el
-fixture CUSTOMER totalmente sintético, sin documentos, de la rama
-Neon `cert-stage3-<SHA completo>`. Se restaura en una rama independiente
+Las organizaciones DEMO están excluidas de los respaldos. El drill generará
+un fixture CUSTOMER sintético, sin documentos, únicamente después de aprobar
+una fuente Neon sin datos reales. No se debe clonar `main` como origen de
+certificación. Se restaura en una rama independiente
 `restore-cert-stage3-<SHA completo>`. Los casos incluyen pagos POSTED y
 REVERSED, cancelaciones, renovación y WorkItems canónicos/legacy.
 

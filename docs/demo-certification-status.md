@@ -5,9 +5,12 @@ Estado: **NOT READY FOR EXTERNAL DEMO ACCESS**.
 ## Candidato
 
 Base de release integrada: `origin/main` en `09418e0d25f531f12cab6dd25d4599b2df925f34`.
-Rama local: `codex/demo-certification-close`. SHA final y evidencia de
-ejecución se completan tras el commit. Todo cambio posterior requiere un SHA
-y certificación nuevos. No se ha publicado el candidato ni escrito Production.
+Rama local: `codex/demo-certification-close`. El commit de código
+`3036171c55c0d9d3ecf872063879976733935f8a` pasó los gates locales, pero no es
+un SHA certificable en Neon: las ramas creadas para él heredaron datos de
+`main`. Esta actualización cambia el árbol; obtener el nuevo SHA de `HEAD`
+antes de cualquier certificación. No se ha publicado el candidato ni escrito
+Production.
 
 ## Diseño implementado
 
@@ -39,12 +42,36 @@ no es evidencia remota.
 
 ## Certificación y release
 
-Proyecto Neon: `bitter-frost-67704350`. Crear desde main las ramas
-`cert-stage3-<SHA completo>` y `restore-cert-stage3-<SHA completo>`.
-Aplicar migraciones aditivas, fixture, roles, cutover temporal y pruebas
-RLS/concurrencia, audit y drift en la fuente. Preparar el destino con esquema,
-dependencias, rol runtime y marcador propios; modificar los datos sintéticos
-y recuperar el artifact VERIFIED. `RESTORE_DRILL_APP_SMOKE=0` sigue apagado.
+### Bloqueo de procedencia de datos
+
+No certificar ni escribir en ninguna rama Neon hasta aprobar una fuente sin
+datos reales. Las consultas agregadas de solo lectura confirmaron:
+
+- `main` tiene 1 organización, 47 clientes y 262 pólizas; cero emails
+  `example.invalid`, cero pólizas DEMO/SYNTHETIC y ningún marcador.
+- `cert-stage3-3036171...` (`br-super-meadow-apswlgqg`) y
+  `restore-cert-stage3-3036171...` (`br-steep-firefly-apqz3iko`) se crearon
+  desde `main`. No se modificaron; quedan preservadas, pero no son evidencia
+  y no deben usarse para fixture, backup ni restore.
+- La histórica `cert-stage3-2026091801a0adb4` tiene CUSTOMER con 2 clientes y
+  2 pólizas sin marcas sintéticas; DEMO con 26 clientes/21 pólizas (25 emails
+  sintéticos y 20 pólizas DEMO); LEGACY con 48/262 y un WorkItem con referencia
+  canónica de Policy inválida. No está aprobada como origen.
+- La histórica `cert-stage3-2026091801a0adb3` no tiene organizaciones,
+  clientes ni pólizas, pero conserva 3 usuarios (uno fuera de dominios de
+  fixture) y un esquema anterior. Tampoco es una fuente limpia certificada.
+
+Se requiere que el operador identifique una base/branch aprobada y demuestre
+que no contiene datos reales, o que autorice crear un proyecto Neon temporal
+vacío.
+
+### Flujo pendiente tras aprobar la fuente
+
+Crear nuevas ramas `cert-stage3-<SHA completo>` y
+`restore-cert-stage3-<SHA completo>` desde esa fuente, nunca desde `main`;
+aplicar migraciones, fixture sintético, roles y cutover temporal, y ejecutar
+RLS/concurrencia, auditoría y drift. Preparar el destino aislado y recuperar
+el artifact VERIFIED. `RESTORE_DRILL_APP_SMOKE=0` sigue apagado.
 
 Tras completar Neon: publicar solo con autorización y ejecutar
 `release-certification.yml` sobre el SHA, con `verify_production=false`.
@@ -59,4 +86,5 @@ identificados. Eliminar ramas/artefactos requiere una operación separada.
 Intentos anteriores de enviar credenciales owner a Vercel Preview fueron
 rechazados antes de backup/restore. Ese flujo se retiró y no es evidencia.
 El runner y el baseline RLS previos están preservados fuera del candidato.
+Las ramas Neon no certificables se conservan sin cambios y sin borrarlas.
 Production permanece intacto.
