@@ -284,6 +284,7 @@ export async function withSystemOrganizationTransaction<T>(
   organizationId: string,
   reason: string,
   callback: (tx: Prisma.TransactionClient) => Promise<T>,
+  transactionOptions: { maxWait?: number; timeout?: number } = {},
 ): Promise<T> {
   if (!organizationId.trim()) throw new AuthError("ORGANIZATION_CONTEXT_REQUIRED", 400);
   if (!reason.trim()) throw new AuthError("SYSTEM_TENANT_REASON_REQUIRED", 400);
@@ -317,7 +318,7 @@ export async function withSystemOrganizationTransaction<T>(
     }
     await tx.$executeRaw(Prisma.sql`SELECT set_config('app.organization_id', ${organizationId}, true)`);
     return callback(tx);
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, ...transactionOptions });
 }
 
 export const withSystemTenantTransaction = withSystemOrganizationTransaction;

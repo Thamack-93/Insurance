@@ -342,7 +342,17 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
         return { organizationId, requestId, dryRun: true, counts, artifactCount };
       }
       if (state.resetStatus === "RESETTING") {
-        if (!state.resetLeaseExpiresAt || state.resetLeaseExpiresAt > new Date()) throw new Error("DEMO_RESET_ALREADY_RUNNING");
+        // Compare the timestamp without time zone in PostgreSQL. Parsing this
+        // value into a JavaScript Date shifts it when the runner's TZ is not
+        // UTC, which can make an expired lease appear live for hours.
+        const lease = await tx.$queryRaw<Array<{ expired: boolean }>>(Prisma.sql`
+          SELECT ("resetLeaseExpiresAt" IS NULL OR
+            "resetLeaseExpiresAt" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')) AS expired
+            FROM "DemoOrganizationState"
+           WHERE "organizationId" = ${organizationId}
+           FOR UPDATE
+        `);
+        if (!lease[0]?.expired) throw new Error("DEMO_RESET_ALREADY_RUNNING");
         await tx.demoOrganizationState.update({ where: { organizationId }, data: { resetStatus: "FAILED", resetPhase: "RECOVERING", resetFailure: "DEMO_RESET_LEASE_EXPIRED", resetAttemptId: null, resetLeaseExpiresAt: null, resetHeartbeatAt: new Date() } });
         await tx.organization.updateMany({ where: { id: organizationId, kind: "DEMO" }, data: { status: "SUSPENDED" } });
         await tx.platformAuditLog.create({ data: { targetOrganizationId: organizationId, action: "DEMO_RESET_STALE_RECOVERED", reason: "reset lease expired before completion" } });
@@ -434,7 +444,7 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
       if (reactivated.count !== 1) throw new Error("DEMO_RESET_STATE_CHANGED");
       await tx.platformAuditLog.create({ data: { requestId, actorUserId: actorUserId === SYSTEM_USER_ID ? null : actorUserId, targetOrganizationId: organizationId, action: "DEMO_ORGANIZATION_RESET", reason, metadataJson: JSON.stringify(seedCounts) } });
       return { organizationId, requestId, dryRun: false, counts: seedCounts };
-    });
+    }, { maxWait: 15_000, timeout: 120_000 });
   } catch (error) {
     if (resetStarted) {
       try {

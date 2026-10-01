@@ -226,7 +226,10 @@ async function main() {
         create: { organizationId: orgA.id, userId: "tenant-admin-a", role: "OWNER", active: true },
       });
     }
-    for (const [orgId, suffix, ownerId] of [[orgA.id, "A", "tenant-agent-a"], [orgB.id, "B", "tenant-agent-b"], [orgDemo.id, "C", "tenant-demo-agent"]] as const) {
+    // The DEMO organization gets only the versioned demo baseline below. A
+    // generic overlap row here would skew its exact seed counts and make the
+    // deterministic fixture fail before RLS certification begins.
+    for (const [orgId, suffix, ownerId] of [[orgA.id, "A", "tenant-agent-a"], [orgB.id, "B", "tenant-agent-b"]] as const) {
       // Reruns on an already cutover branch must satisfy the same tenant
       // context that the application uses under forced RLS.
       await tx.$executeRaw`SELECT set_config('app.organization_id', ${orgId}, true)`;

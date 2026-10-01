@@ -14,19 +14,28 @@ async function login(page: Page, email: string) {
 
 test("CUSTOMER search, export and direct document ID stay inside its tenant", async ({ page }) => {
   await login(page, "tenant-owner-b@policydesk.local");
-  const search = await page.request.get("/api/search?q=Overlap&scope=all");
-  expect(search.status()).toBe(200);
-  const results = JSON.stringify(await search.json());
+  const search = await page.evaluate(async () => {
+    const response = await fetch("/api/search?q=Overlap&scope=all");
+    return { status: response.status, body: await response.text() };
+  });
+  expect(search.status).toBe(200);
+  const results = search.body;
   expect(results).toContain("tenant-client-b");
   expect(results).not.toContain("tenant-client-a");
   expect(results).not.toContain("tenant-client-c");
-  const exported = await page.request.get("/api/export/clients?format=csv");
-  expect(exported.status()).toBe(200);
-  const content = await exported.text();
+  const exported = await page.evaluate(async () => {
+    const response = await fetch("/api/export/clients?format=csv");
+    return { status: response.status, body: await response.text() };
+  });
+  expect(exported.status).toBe(200);
+  const content = exported.body;
   expect(content).toContain("Pedro Client Private");
   expect(content).not.toContain("tenant-client-a");
-  const foreignDocument = await page.request.get("/api/documents/org_demo_broker_0001:demo:document:001/download");
-  expect(foreignDocument.status()).toBe(404);
+  const foreignDocument = await page.evaluate(async () => {
+    const response = await fetch("/api/documents/org_demo_broker_0001:demo:document:001/download");
+    return response.status;
+  });
+  expect(foreignDocument).toBe(404);
 });
 
 test("DEMO blocks Nora and real document uploads", async ({ page }) => {
@@ -34,12 +43,19 @@ test("DEMO blocks Nora and real document uploads", async ({ page }) => {
   await login(page, "demo-owner@policydesk.local");
   await expect(page.getByLabel("Organización de demostración")).toBeVisible();
   await expect(page.getByText("Esta acción está deshabilitada en la organización de demostración.", { exact: true })).toBeVisible();
-  const origin = new URL(page.url()).origin;
-  const nora = await page.request.post("/api/assistant", { data: {}, headers: { Origin: origin } });
-  expect(nora.status()).toBe(403);
-  const upload = await page.request.post("/api/documents/upload", {
-    headers: { Origin: origin },
-    multipart: { documentType: "POLICY", clientId: "tenant-client-c", file: { name: "real.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\nnot a complete PDF") } },
+  const result = await page.evaluate(async () => {
+    const nora = await fetch("/api/assistant", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const form = new FormData();
+    form.set("documentType", "POLICY");
+    form.set("clientId", "tenant-client-c");
+    form.set("file", new File(["%PDF-1.4\nnot a complete PDF"], "real.pdf", { type: "application/pdf" }));
+    const upload = await fetch("/api/documents/upload", { method: "POST", body: form });
+    return { nora: nora.status, upload: upload.status };
   });
-  expect(upload.status()).toBe(403);
+  expect(result.nora).toBe(403);
+  expect(result.upload).toBe(403);
 });
