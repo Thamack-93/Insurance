@@ -7,6 +7,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
 import { assertOrganizationContextInTransaction, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { extractPdfTextFromBytes } from "@/lib/pdf-text-extraction";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 
 export type CommissionDraftRow = { rowKey: string; policyNumber?: string; receiptNumber?: string; currency?: string; amount?: number; paymentDate?: string; sourcePage?: number; raw: Record<string, unknown>; warnings: string[] };
 
@@ -48,6 +49,7 @@ function parsePdfText(textContent: string): CommissionDraftRow[] {
 export async function createCommissionStatement(input: { fileName: string; mimeType: string; buffer: Buffer; periodStart?: Date; periodEnd?: Date }) {
   const context = await requireOrganizationContext();
   if (!(["OWNER", "ADMIN"] as string[]).includes(context.membershipRole)) throw new Error("COMMISSION_IMPORT_FORBIDDEN");
+  if (!(await resolveOrganizationCapability(context.organizationId, "IMPORTS")).enabled) throw new Error("IMPORTS_CAPABILITY_DISABLED");
   const hash = createHash("sha256").update(input.buffer).digest("hex");
   let rows: CommissionDraftRow[] = [];
   let extractionError: string | null = null;
@@ -77,6 +79,7 @@ export async function createCommissionStatement(input: { fileName: string; mimeT
 export async function applyCommissionStatementRow(rowId: string, expectedVersion: number, reason?: string) {
   const context = await requireOrganizationContext();
   if (!(["OWNER", "ADMIN"] as string[]).includes(context.membershipRole)) throw new Error("COMMISSION_APPLY_FORBIDDEN");
+  if (!(await resolveOrganizationCapability(context.organizationId, "IMPORTS")).enabled) throw new Error("IMPORTS_CAPABILITY_DISABLED");
   return withTenantTransaction(context, async (tx) => {
     await assertOrganizationContextInTransaction(tx, context);
     const row = await tx.commissionStatementRow.findFirst({ where: { id: rowId, organizationId: context.organizationId }, include: { commission: true, statement: true } });
@@ -99,6 +102,7 @@ export async function correctCommissionApplication(input: {
 }) {
   const context = await requireOrganizationContext();
   if (!( ["OWNER", "ADMIN"] as string[]).includes(context.membershipRole)) throw new Error("COMMISSION_CORRECTION_FORBIDDEN");
+  if (!(await resolveOrganizationCapability(context.organizationId, "IMPORTS")).enabled) throw new Error("IMPORTS_CAPABILITY_DISABLED");
   const reason = input.reason.trim().slice(0, 500);
   if (!reason) throw new Error("COMMISSION_CORRECTION_REASON_REQUIRED");
   return withTenantTransaction(context, async (tx) => {

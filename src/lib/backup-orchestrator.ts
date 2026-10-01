@@ -29,6 +29,7 @@ import {
 import { selectBackupRetention } from "@/lib/backup-logic";
 import { getDb } from "@/lib/db";
 import { logError } from "@/lib/logger";
+import { assertRemoteTenantBackupTarget } from "../../scripts/tenant-certification-target.mjs";
 import type { BackupVerification } from "@/lib/backup";
 
 const POST_UPLOAD_VERIFY_DELAYS_MS = [0, 500, 1_500, 3_000] as const;
@@ -44,6 +45,8 @@ export type CreateAndCatalogBackupInput = {
   now?: Date;
   target?: BackupTarget;
   emergency?: boolean;
+  /** Preserve existing shared Blob objects during an isolated certification drill. */
+  skipPrune?: boolean;
 };
 
 function assertVerificationScope(
@@ -156,6 +159,13 @@ export async function createAndCatalogBackup(input: CreateAndCatalogBackupInput)
   if (input.scope === "ORGANIZATION" && !input.organizationId) {
     throw new Error("organizationId is required for an organization backup.");
   }
+  if (input.skipPrune) {
+    if (input.scope !== "ORGANIZATION" || !process.env.DATABASE_ADMIN_URL || !process.env.DATABASE_URL) {
+      throw new Error("BACKUP_PRUNE_SKIP_REQUIRES_DISPOSABLE_REMOTE_NEON_BRANCH");
+    }
+    try { assertRemoteTenantBackupTarget(process.env.DATABASE_ADMIN_URL, process.env.DATABASE_URL); }
+    catch { throw new Error("BACKUP_PRUNE_SKIP_REQUIRES_DISPOSABLE_REMOTE_NEON_BRANCH"); }
+  }
   const target = input.target ?? (
     input.scope === "PLATFORM"
       ? buildManualPlatformBackupTarget(now, input.emergency)
@@ -223,7 +233,9 @@ export async function createAndCatalogBackup(input: CreateAndCatalogBackupInput)
       capability: verification.manifest.capability,
       manifest: verification.manifest,
     });
-    backup.pruned = input.emergency ? [] : await pruneVerifiedBackups(input.scope, input.organizationId, now);
+    backup.pruned = input.emergency || input.skipPrune
+      ? []
+      : await pruneVerifiedBackups(input.scope, input.organizationId, now);
     return backup;
   } catch (error) {
     await deleteStoredBackup(target.pathname).catch(() => undefined);

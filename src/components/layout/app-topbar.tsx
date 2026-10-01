@@ -16,6 +16,7 @@ export function AppTopbar({
   isSuperAdmin = false,
   hasOrganizationContext = false,
   organizationName,
+  isDemo = false,
   membershipRole,
   unreadNotificationCount,
   notifications,
@@ -26,6 +27,7 @@ export function AppTopbar({
   isSuperAdmin?: boolean;
   hasOrganizationContext?: boolean;
   organizationName?: string;
+  isDemo?: boolean;
   membershipRole?: string;
   unreadNotificationCount: number;
   notifications: BellNotification[];
@@ -69,8 +71,9 @@ export function AppTopbar({
               {membershipRole ? <span className="ml-1.5">· {membershipRole === "AGENT" ? "Agente" : "Administrador"}</span> : null}
             </div>
           ) : null}
+          {isDemo ? <span className="hidden rounded-md border border-cyan-300 bg-cyan-50 px-2.5 py-1 text-xs font-semibold text-cyan-800 dark:border-cyan-800 dark:bg-cyan-950/30 dark:text-cyan-200 sm:inline">Demo</span> : null}
           <ThemeToggle initialTheme={initialTheme} />
-          {hasOrganizationContext ? (
+          {hasOrganizationContext && !isDemo ? (
             <button
               type="button"
               onClick={() => openNora()}

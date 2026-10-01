@@ -17,12 +17,14 @@ import { prepareWhatsAppReceiptReminder } from "@/app/(dashboard)/receipts/actio
 import { isSafeWhatsAppUrl } from "@/lib/whatsapp";
 import { cn } from "@/lib/utils";
 
-export function WhatsAppReminderButton({ receiptId, className }: { receiptId: string; className?: string }) {
+export function WhatsAppReminderButton({ receiptId, className, demoPreview }: { receiptId: string; className?: string; demoPreview?: { clientName: string; receiptNumber: string; policyNumber: string } }) {
   const [captureOpen, setCaptureOpen] = useState(false);
   const [capturedPhone, setCapturedPhone] = useState("");
   const [captureError, setCaptureError] = useState<string | null>(null);
   const [preparedUrl, setPreparedUrl] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewMessage, setPreviewMessage] = useState<string | null>(null);
 
   function openPreparedWhatsApp(url: string) {
     setCaptureOpen(false);
@@ -71,7 +73,14 @@ export function WhatsAppReminderButton({ receiptId, className }: { receiptId: st
         size="sm"
         variant="outline"
         className={cn("h-8 gap-1 px-3 text-xs", className)}
-        onClick={() => prepare()}
+        onClick={() => {
+          if (demoPreview) {
+            setPreviewMessage(`Hola ${demoPreview.clientName}, te compartimos un recordatorio de demostración sobre el recibo ${demoPreview.receiptNumber} de la póliza ${demoPreview.policyNumber}. No se envió ningún mensaje.`);
+            setPreviewOpen(true);
+            return;
+          }
+          prepare();
+        }}
         disabled={isPending}
         aria-label="Avisar por WhatsApp"
       >
@@ -134,6 +143,16 @@ export function WhatsAppReminderButton({ receiptId, className }: { receiptId: st
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Vista previa de WhatsApp</DialogTitle>
+            <DialogDescription>Solo texto sintético local. No se abre WhatsApp ni se envía o comparte información.</DialogDescription>
+          </DialogHeader>
+          {previewMessage ? <p className="whitespace-pre-wrap rounded-md bg-muted p-3 text-sm" role="status">{previewMessage}</p> : null}
+          <DialogFooter><Button type="button" variant="outline" onClick={() => setPreviewOpen(false)}>Cerrar</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </>

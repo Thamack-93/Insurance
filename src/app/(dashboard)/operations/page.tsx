@@ -156,6 +156,9 @@ export default async function OperationsPage({
   const workItemType = view === "pending" ? readAllowedTableParam(params, "workItemType", WORK_ITEM_TYPES) : undefined;
   const renewalWindow = view === "renewals" ? readAllowedTableParam(params, "window", ["30d", "60d", "90d"] as const) ?? "30d" : "30d";
   const scope = await requireOrganizationPortfolioReadScope();
+  const organizationKind = view === "renewal-board"
+    ? await withTenantTransaction(scope.context, (tx) => tx.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } }))
+    : null;
   const today = businessToday();
   const nextSeven = businessAddDays(today, 7);
   const nextRenewalDate = businessAddDays(today, Number(renewalWindow.slice(0, -1)));
@@ -429,6 +432,7 @@ export default async function OperationsPage({
           filters={boardFilters}
           owners={boardOwners}
           canFilterByOwner={!scope.portfolioOwnerId}
+          isDemo={organizationKind?.kind === "DEMO"}
         />
       ) : null}
 

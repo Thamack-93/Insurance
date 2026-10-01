@@ -55,6 +55,9 @@ export default async function ReceiptsPage({
   const isFiltered = Boolean(query || statusFilter);
 
   const scope = await requireOrganizationPortfolioReadScopeOrRedirect();
+  const organizationKind = await withTenantOrganization(scope.organizationId, (db) =>
+    db.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } }),
+  );
   const now = today();
   const monthStart = businessStartOfMonth(now);
   const clearFiltersHref = buildTableHref("/receipts", params, {
@@ -302,7 +305,7 @@ export default async function ReceiptsPage({
               </div>
             ) : (
               <div className="px-3 py-3">
-                <CollectableReceipts receipts={collectableRows} returnTo={returnTo} />
+                <CollectableReceipts receipts={collectableRows} returnTo={returnTo} isDemo={organizationKind?.kind === "DEMO"} />
                 <Pagination
                   page={page}
                   pageSize={PAGE_SIZE}

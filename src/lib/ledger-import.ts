@@ -8,6 +8,7 @@ import { toNumber } from "@/lib/money";
 import { PaymentConflictError, recordPayment } from "@/lib/payment-service";
 import { writeActivityLog } from "@/lib/activity-log";
 import { findMatchingSuppressionRule } from "@/lib/data-quality-rules";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -832,6 +833,7 @@ export async function createLedgerImportPreview(input: {
     return withTenantTransaction(context, (tx) => createLedgerImportPreview({ ...input, db: tx }));
   }
   const db = input.db;
+  if (!(await resolveOrganizationCapability(input.organizationId, "IMPORTS", db)).enabled) throw new Error("IMPORTS_CAPABILITY_DISABLED");
   const policyRows = readLedgerRows(input.csvName, input.csvBuffer);
   const paidRows = readPaidRows(input.paidName, input.paidBuffer);
   const csvHash = hashContent(input.csvBuffer);
@@ -1363,6 +1365,7 @@ export async function applyLedgerImportBatch(input: {
     return withTenantTransaction(context, (tx) => applyLedgerImportBatch({ ...input, db: tx }));
   }
   const db = input.db;
+  if (!(await resolveOrganizationCapability(input.organizationId, "IMPORTS", db)).enabled) throw new Error("IMPORTS_CAPABILITY_DISABLED");
   const now = new Date();
   const batch = await db.ledgerImportBatch.findFirst({
     where: { id: input.batchId, organizationId: input.organizationId },

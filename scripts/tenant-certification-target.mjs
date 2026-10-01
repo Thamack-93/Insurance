@@ -24,13 +24,13 @@ export function certificationFingerprint({ mode, runId, database, host, branchId
   return createHash("sha256").update(source).digest("hex");
 }
 
-/** @param {string} connectionString @param {Record<string, string | undefined>} env */
-export function assertDisposableCertificationTarget(connectionString, env = process.env) {
+/** @param {string} connectionString @param {Record<string, string | undefined>} env @param {"source" | "restore"} purpose */
+export function assertDisposableCertificationTarget(connectionString, env = process.env, purpose = "source") {
+  if (env.VERCEL === "1" || env.VERCEL_ENV === "production" || env.VERCEL_ENV === "preview") {
+    throw new Error("TENANT_CERTIFICATION_REFUSES_VERCEL_ENVIRONMENT");
+  }
   if (env.NODE_ENV !== "test" || env.TENANT_ISOLATION_TEST_DB !== "1" || env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB !== "1") {
     throw new Error("TENANT_CERTIFICATION_REQUIRES_DISPOSABLE_TEST_GUARDS");
-  }
-  if (env.VERCEL_ENV === "production" || env.VERCEL_ENV === "preview") {
-    throw new Error("TENANT_CERTIFICATION_REFUSES_VERCEL_ENVIRONMENT");
   }
 
   const target = new URL(connectionString);
@@ -63,7 +63,11 @@ export function assertDisposableCertificationTarget(connectionString, env = proc
   const configuredHost = canonicalNeonHost(required(env, "TENANT_ISOLATION_NEON_HOST"));
   const canonicalHost = canonicalNeonHost(host);
   if (!/^br-[a-z0-9-]+$/.test(branchId)) throw new Error("TENANT_CERTIFICATION_BRANCH_ID_INVALID");
-  if (!/^cert-stage3-[0-9a-f]{7,40}$/.test(branchName)) throw new Error("TENANT_CERTIFICATION_BRANCH_NAME_INVALID");
+  const prefix = purpose === "restore" ? "restore-cert-stage3-" : "cert-stage3-";
+  if (!new RegExp(`^${prefix}[0-9a-f]{7,40}$`).test(branchName)) throw new Error("TENANT_CERTIFICATION_BRANCH_NAME_INVALID");
+  if (env.CERTIFICATION_CANDIDATE_SHA && branchName !== `${prefix}${env.CERTIFICATION_CANDIDATE_SHA}`) {
+    throw new Error("TENANT_CERTIFICATION_CANDIDATE_SHA_MISMATCH");
+  }
   if (!canonicalHost.endsWith(".neon.tech") || canonicalHost !== configuredHost) {
     throw new Error("TENANT_CERTIFICATION_NEON_HOST_MISMATCH");
   }
@@ -77,4 +81,22 @@ export function assertDisposableCertificationTarget(connectionString, env = proc
   });
   if (configuredFingerprint !== expectedFingerprint) throw new Error("TENANT_CERTIFICATION_FINGERPRINT_MISMATCH");
   return { mode: "neon", runId, database: expectedDatabase, host: canonicalHost, branchId, branchName, fingerprint: expectedFingerprint };
+}
+
+/** A no-prune tenant backup is allowed only when both URLs resolve to the
+ * same explicitly fingerprinted remote Neon certification branch. */
+/** @param {string} adminUrl @param {string} runtimeUrl @param {Record<string, string | undefined>} [env] */
+export function assertRemoteTenantBackupTarget(adminUrl, runtimeUrl, env = process.env) {
+  if (env.ALLOW_OPERATOR_BACKUP !== "1") throw new Error("ALLOW_OPERATOR_BACKUP_REQUIRED");
+  if (env.TENANT_CERTIFICATION_REMOTE_BRANCH !== "1") throw new Error("TENANT_CERTIFICATION_REMOTE_BRANCH_NOT_AUTHORIZED");
+  const admin = assertDisposableCertificationTarget(adminUrl, env);
+  const runtime = assertDisposableCertificationTarget(runtimeUrl, env);
+  if (admin.mode !== "neon" || runtime.mode !== "neon") throw new Error("TENANT_BACKUP_REQUIRES_REMOTE_NEON_BRANCH");
+  if (admin.fingerprint !== runtime.fingerprint) throw new Error("TENANT_BACKUP_RUNTIME_DATABASE_MISMATCH");
+  if (/-pooler/i.test(new URL(adminUrl).hostname) || new URL(adminUrl).searchParams.has("pgbouncer")) {
+    throw new Error("BACKUP_REQUIRES_DIRECT_DATABASE_URL");
+  }
+  if (!/-pooler\./i.test(new URL(runtimeUrl).hostname)) throw new Error("BACKUP_REQUIRES_POOLED_RUNTIME_URL");
+  if (new URL(runtimeUrl).username !== "policydesk_app") throw new Error("BACKUP_REQUIRES_RESTRICTED_RUNTIME_ROLE");
+  return admin;
 }

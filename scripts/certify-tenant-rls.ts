@@ -118,11 +118,7 @@ async function main() {
   const certificationEnv = await provisionReadOnlyCredential(adminUrl, runtimeEnv);
   await runNpm("test:tenant-rls", certificationEnv);
   await runNpm("db:check-drift", certificationEnv);
-  await runNpm("verify:production", {
-    ...certificationEnv,
-    PRODUCTION_EXPECTED_TENANT_MODE: "multi-org",
-    ENABLE_TENANT_RLS_CUTOVER: "1",
-  });
+  await runNpm("check:multi-org-audit", certificationEnv);
   console.log(JSON.stringify({ ok: true, appRole: certificationEnv.TENANT_RLS_APP_ROLE, readOnlyRole: certificationEnv.PRODUCTION_READONLY_ROLE, organizations: [certificationEnv.TENANT_RLS_ORG_A, certificationEnv.TENANT_RLS_ORG_B], migrationExecutor: "prisma" }));
 }
 

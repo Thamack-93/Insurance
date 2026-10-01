@@ -24,6 +24,32 @@ type DownloadableDocument = {
   task: { createdById: string | null; client: { portfolioOwnerId: string | null } | null } | null;
 };
 
+function syntheticDemoPdf() {
+  const stream = "BT /F1 18 Tf 72 720 Td (PolicyDesk - Documento sintetico DEMO) Tj 0 -32 Td /F1 11 Tf (Este archivo no contiene datos reales.) Tj ET\n";
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}endstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const startXref = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n `).join("\n")}\ntrailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${startXref}\n%%EOF`;
+  return pdf;
+}
+
+const SYNTHETIC_DEMO_PDF = syntheticDemoPdf();
+
+function isSyntheticDemoPath(filePath: string, organizationId: string) {
+  return filePath.startsWith(`demo://${organizationId}/`);
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -96,6 +122,7 @@ export async function GET(
     const demoArtifactIsAccessible = await withTenantTransaction(context, async (tx) => {
       const organization = await tx.organization.findUnique({ where: { id: context.organizationId }, select: { kind: true } });
       if (organization?.kind !== "DEMO") return true;
+      if (isSyntheticDemoPath(document.filePath, context.organizationId)) return true;
       if (!document.filePath.startsWith("blob:")) return false;
       const artifact = await tx.demoUploadArtifact.findFirst({
         where: { organizationId: context.organizationId, blobPath: document.filePath, status: "ACTIVE", expiresAt: { gt: new Date() } },
@@ -125,8 +152,20 @@ export async function GET(
       return new NextResponse(blob.stream, { status: 200, headers });
     }
 
+    if (isSyntheticDemoPath(document.filePath, context.organizationId)) {
+      return new NextResponse(SYNTHETIC_DEMO_PDF, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `${disposition}; filename="${safeFileName}"`,
+          "Content-Length": Buffer.byteLength(SYNTHETIC_DEMO_PDF).toString(),
+          "Cache-Control": "private, no-store",
+        },
+      });
+    }
+
     if (document.filePath.startsWith("demo://")) {
-      return NextResponse.json({ error: "Este documento DEMO es sólo metadata." }, { status: 410 });
+      return NextResponse.json({ error: "La ruta sintética no pertenece a esta organización." }, { status: 404 });
     }
 
     // Keep the bounded legacy reader during the Blob migration so existing

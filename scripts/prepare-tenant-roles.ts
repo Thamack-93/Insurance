@@ -53,29 +53,35 @@ async function main() {
       throw new Error("TENANT_ROLE_PREP_REQUIRES_ADMIN_CONNECTION");
     }
 
-    const appExists = await client.query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AS exists", [appRole]);
-    if (appExists.rows[0]?.exists) {
-      await client.query(`ALTER ROLE ${identifier(appRole)} LOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT`);
-    } else {
+    const appState = await client.query<{ rolsuper: boolean; rolbypassrls: boolean; rolcanlogin: boolean; rolinherit: boolean }>(
+      "SELECT rolsuper, rolbypassrls, rolcanlogin, rolinherit FROM pg_roles WHERE rolname = $1", [appRole],
+    );
+    if (!appState.rowCount) {
       await client.query(`CREATE ROLE ${identifier(appRole)} LOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT`);
+    } else if (appState.rows[0].rolsuper || appState.rows[0].rolbypassrls || !appState.rows[0].rolcanlogin || appState.rows[0].rolinherit) {
+      await client.query(`ALTER ROLE ${identifier(appRole)} LOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT`);
     }
 
-    const ownerExists = await client.query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AS exists", [ownerRole]);
-    if (ownerExists.rows[0]?.exists) {
-      await client.query(`ALTER ROLE ${identifier(ownerRole)} NOLOGIN NOSUPERUSER BYPASSRLS NOINHERIT`);
-    } else {
+    const ownerState = await client.query<{ rolsuper: boolean; rolbypassrls: boolean; rolcanlogin: boolean; rolinherit: boolean }>(
+      "SELECT rolsuper, rolbypassrls, rolcanlogin, rolinherit FROM pg_roles WHERE rolname = $1", [ownerRole],
+    );
+    if (!ownerState.rowCount) {
       await client.query(`CREATE ROLE ${identifier(ownerRole)} NOLOGIN NOSUPERUSER BYPASSRLS NOINHERIT`);
+    } else if (ownerState.rows[0].rolsuper || !ownerState.rows[0].rolbypassrls || ownerState.rows[0].rolcanlogin || ownerState.rows[0].rolinherit) {
+      await client.query(`ALTER ROLE ${identifier(ownerRole)} NOLOGIN NOSUPERUSER BYPASSRLS NOINHERIT`);
     }
     // Managed Neon owners are intentionally not superusers. Explicit SET-role
     // membership is required so the direct administrative connection can
     // transfer ownership of the narrowly scoped SECURITY DEFINER function.
     await client.query(`GRANT ${identifier(ownerRole)} TO ${identifier(administrativeRole)}`);
 
-    const readOnlyExists = await client.query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AS exists", [readOnlyRole]);
-    if (readOnlyExists.rows[0]?.exists) {
-      await client.query(`ALTER ROLE ${identifier(readOnlyRole)} LOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT`);
-    } else {
+    const readOnlyState = await client.query<{ rolsuper: boolean; rolbypassrls: boolean; rolcanlogin: boolean; rolinherit: boolean }>(
+      "SELECT rolsuper, rolbypassrls, rolcanlogin, rolinherit FROM pg_roles WHERE rolname = $1", [readOnlyRole],
+    );
+    if (!readOnlyState.rowCount) {
       await client.query(`CREATE ROLE ${identifier(readOnlyRole)} LOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT`);
+    } else if (readOnlyState.rows[0].rolsuper || readOnlyState.rows[0].rolbypassrls || !readOnlyState.rows[0].rolcanlogin || readOnlyState.rows[0].rolinherit) {
+      await client.query(`ALTER ROLE ${identifier(readOnlyRole)} LOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT`);
     }
 
     const roles = await client.query<{ rolname: string; rolsuper: boolean; rolbypassrls: boolean; rolcanlogin: boolean; rolinherit: boolean }>(

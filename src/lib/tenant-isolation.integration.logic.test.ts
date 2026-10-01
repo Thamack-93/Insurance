@@ -6,6 +6,19 @@ vi.mock("server-only", () => ({}));
 
 import { getPlatformOrganizationDetail, getPlatformOverview } from "@/lib/platform-dashboard";
 import { recordPayment } from "@/lib/payment-service";
+import { assertOrganizationContextInTransaction, type OrganizationContext } from "@/lib/organization-context";
+
+async function contextFor(db: PrismaClient, userId: string): Promise<OrganizationContext> {
+  const membership = await db.organizationMembership.findUnique({ where: { userId }, include: { user: true, organization: true } });
+  if (!membership || !membership.active || !membership.user.active || membership.organization.status !== "ACTIVE") throw new Error("TENANT_INTEGRATION_FIXTURE_CONTEXT_INVALID");
+  return {
+    userId: membership.userId, userEmail: membership.user.email, userName: membership.user.name,
+    userRole: membership.user.role, platformRole: membership.user.platformRole,
+    organizationId: membership.organizationId, organizationName: membership.organization.name,
+    organizationSlug: membership.organization.slug, organizationStatus: membership.organization.status,
+    membershipId: membership.id, membershipRole: membership.role as OrganizationContext["membershipRole"],
+  };
+}
 
 const enabled = process.env.TENANT_ISOLATION_TEST_DB === "1" && process.env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB === "1";
 const describeDisposable = enabled ? describe : describe.skip;
@@ -34,9 +47,18 @@ describeDisposable("tenant isolation disposable fixture", () => {
       expect(superadmin?.email).toBe("tenant-platform-admin@policydesk.local");
       expect(superadmin?.platformRole).toBe("SUPERADMIN");
       expect(superadmin?.organizationMemberships).toHaveLength(0);
-      const clients = await db.client.findMany({ where: { id: { in: ["tenant-client-a", "tenant-client-b"] } }, select: { id: true, organizationId: true } });
-      expect(new Set(clients.map((client) => client.organizationId))).toEqual(new Set(["org_legacy_singleton_0001", "org_pedro_gomez_0001"]));
-      expect((await db.client.findUnique({ where: { id: "tenant-client-pedro" } }))?.organizationId).toBe("org_pedro_gomez_0001");
+      const contextA = await contextFor(db, "tenant-admin-a");
+      const contextB = await contextFor(db, "tenant-pedro-gomez");
+      const clientsA = await db.$transaction(async (tx) => {
+        await assertOrganizationContextInTransaction(tx, contextA, ["OWNER"]);
+        return tx.client.findMany({ where: { id: { in: ["tenant-client-a", "tenant-client-b"] } }, select: { id: true, organizationId: true } });
+      });
+      const clientsB = await db.$transaction(async (tx) => {
+        await assertOrganizationContextInTransaction(tx, contextB, ["OWNER"]);
+        return tx.client.findMany({ where: { id: { in: ["tenant-client-a", "tenant-client-b", "tenant-client-pedro"] } }, select: { id: true, organizationId: true } });
+      });
+      expect(clientsA).toEqual([expect.objectContaining({ id: "tenant-client-a", organizationId: "org_legacy_singleton_0001" })]);
+      expect(clientsB).toEqual([expect.objectContaining({ id: "tenant-client-pedro", organizationId: "org_pedro_gomez_0001" })]);
     } finally {
       await db.$disconnect();
     }
@@ -47,32 +69,26 @@ describeDisposable("tenant isolation disposable fixture", () => {
     if (!connectionString) throw new Error("DATABASE_URL is required");
     const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
     try {
-      const foreignUpdate = await db.client.updateMany({
-        where: { id: "tenant-client-b", organizationId: "org_legacy_singleton_0001", portfolioOwnerId: "tenant-agent-a" },
-        data: { notes: "must not cross tenant" },
+      const contextA = await contextFor(db, "tenant-admin-a");
+      await db.$transaction(async (tx) => {
+        await assertOrganizationContextInTransaction(tx, contextA, ["OWNER"]);
+        const foreignUpdate = await tx.client.updateMany({
+          where: { id: "tenant-client-b", organizationId: "org_legacy_singleton_0001", portfolioOwnerId: "tenant-agent-a" },
+          data: { notes: "must not cross tenant" },
+        });
+        expect(foreignUpdate.count).toBe(0);
+        const foreignOwnerUpdate = await tx.client.updateMany({
+          where: { id: "tenant-client-a", organizationId: "org_legacy_singleton_0001", portfolioOwnerId: "tenant-agent-b" },
+          data: { notes: "must not cross portfolio" },
+        });
+        expect(foreignOwnerUpdate.count).toBe(0);
+        const created = await tx.client.create({ data: {
+          id: "tenant-client-a-created", organizationId: contextA.organizationId, fullName: "Created only in A",
+          type: "PERSON", status: "ACTIVE", portfolioOwnerId: "tenant-agent-a", createdById: "tenant-admin-a", updatedById: "tenant-admin-a",
+        } });
+        expect(created.organizationId).toBe(contextA.organizationId);
+        await tx.client.delete({ where: { id: created.id } });
       });
-      expect(foreignUpdate.count).toBe(0);
-
-      const foreignOwnerUpdate = await db.client.updateMany({
-        where: { id: "tenant-client-a", organizationId: "org_legacy_singleton_0001", portfolioOwnerId: "tenant-agent-b" },
-        data: { notes: "must not cross portfolio" },
-      });
-      expect(foreignOwnerUpdate.count).toBe(0);
-
-      const created = await db.client.create({
-        data: {
-          id: "tenant-client-a-created",
-          organizationId: "org_legacy_singleton_0001",
-          fullName: "Created only in A",
-          type: "PERSON",
-          status: "ACTIVE",
-          portfolioOwnerId: "tenant-agent-a",
-          createdById: "tenant-admin-a",
-          updatedById: "tenant-admin-a",
-        },
-      });
-      expect(created.organizationId).toBe("org_legacy_singleton_0001");
-      await db.client.delete({ where: { id: created.id } });
     } finally {
       await db.$disconnect();
     }
@@ -81,7 +97,8 @@ describeDisposable("tenant isolation disposable fixture", () => {
   it("keeps the master panel aggregates and activity tenant-scoped", async () => {
     const overview = await getPlatformOverview({});
     expect(overview.summary.organizations).toBe(3);
-    expect(overview.summary.activeUsers).toBe(7);
+    const activeMemberships = await new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) }).organizationMembership.findMany({ where: { active: true, user: { active: true } }, select: { userId: true } });
+    expect(overview.summary.activeUsers).toBe(new Set(activeMemberships.map(({ userId }) => userId)).size);
     expect(overview.organizations.map((organization) => organization.id)).toEqual(["org_pedro_gomez_0001", "org_demo_broker_0001", "org_legacy_singleton_0001"]);
 
     const pedro = await getPlatformOrganizationDetail("org_pedro_gomez_0001");
@@ -116,14 +133,23 @@ describeDisposable("tenant isolation disposable fixture", () => {
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) throw new Error("DATABASE_URL is required");
     const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
-    const ids = ["tenant-payment-evidence-a", "tenant-payment-evidence-b"];
+    const contextA = await contextFor(db, "tenant-admin-a");
+    const contextB = await contextFor(db, "tenant-pedro-gomez");
     try {
-      await db.payment.deleteMany({ where: { id: { in: ids } } });
-      await db.payment.create({ data: { id: ids[0], organizationId: "org_legacy_singleton_0001", receiptId: "tenant-receipt-a", policyId: "tenant-policy-a", clientId: "tenant-client-a", amount: 1000, currency: "MXN", paidDate: new Date("2026-06-30"), paymentMethod: "TEST", sourceEvidenceKey: "overlap-evidence" } });
-      await db.payment.create({ data: { id: ids[1], organizationId: "org_pedro_gomez_0001", receiptId: "tenant-receipt-b", policyId: "tenant-policy-b", clientId: "tenant-client-b", amount: 1000, currency: "MXN", paidDate: new Date("2026-06-30"), paymentMethod: "TEST", sourceEvidenceKey: "overlap-evidence" } });
-      await expect(db.payment.create({ data: { organizationId: "org_legacy_singleton_0001", receiptId: "tenant-receipt-a", policyId: "tenant-policy-a", clientId: "tenant-client-a", amount: 1000, currency: "MXN", paidDate: new Date("2026-07-01"), paymentMethod: "TEST", sourceEvidenceKey: "overlap-evidence" } })).rejects.toMatchObject({ code: "P2002" });
+      let reachedDuplicate = false;
+      await expect(db.$transaction(async (tx) => {
+        await assertOrganizationContextInTransaction(tx, contextA, ["OWNER"]);
+        await tx.payment.upsert({ where: { id: "tenant-payment-evidence-a" }, update: { sourceEvidenceKey: "overlap-evidence" }, create: { id: "tenant-payment-evidence-a", organizationId: contextA.organizationId, receiptId: "tenant-receipt-a", policyId: "tenant-policy-a", clientId: "tenant-client-a", amount: 1000, currency: "MXN", paidDate: new Date("2026-06-30"), paymentMethod: "TEST", sourceEvidenceKey: "overlap-evidence" } });
+        await assertOrganizationContextInTransaction(tx, contextB, ["OWNER"]);
+        await tx.payment.upsert({ where: { id: "tenant-payment-evidence-b" }, update: { sourceEvidenceKey: "overlap-evidence" }, create: { id: "tenant-payment-evidence-b", organizationId: contextB.organizationId, receiptId: "tenant-receipt-b", policyId: "tenant-policy-b", clientId: "tenant-client-b", amount: 1000, currency: "MXN", paidDate: new Date("2026-06-30"), paymentMethod: "TEST", sourceEvidenceKey: "overlap-evidence" } });
+        await assertOrganizationContextInTransaction(tx, contextA, ["OWNER"]);
+        reachedDuplicate = true;
+        await tx.payment.create({ data: { organizationId: contextA.organizationId, receiptId: "tenant-receipt-a", policyId: "tenant-policy-a", clientId: "tenant-client-a", amount: 1000, currency: "MXN", paidDate: new Date("2026-07-01"), paymentMethod: "TEST", sourceEvidenceKey: "overlap-evidence" } });
+      })).rejects.toMatchObject({ code: "P2002" });
+      expect(reachedDuplicate).toBe(true);
     } finally {
-      await db.payment.deleteMany({ where: { id: { in: ids } } });
+      await db.$transaction(async (tx) => { await assertOrganizationContextInTransaction(tx, contextA, ["OWNER"]); await tx.payment.deleteMany({ where: { id: "tenant-payment-evidence-a", organizationId: contextA.organizationId } }); });
+      await db.$transaction(async (tx) => { await assertOrganizationContextInTransaction(tx, contextB, ["OWNER"]); await tx.payment.deleteMany({ where: { id: "tenant-payment-evidence-b", organizationId: contextB.organizationId } }); });
       await db.$disconnect();
     }
   });
@@ -133,8 +159,13 @@ describeDisposable("tenant isolation disposable fixture", () => {
     if (!connectionString) throw new Error("DATABASE_URL is required");
     const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
     try {
-      await expect(recordPayment({ organizationId: "org_legacy_singleton_0001", receiptId: "tenant-receipt-b", amount: 1000, paidDate: new Date("2026-06-30"), paymentMethod: "TEST", sourceEvidenceKey: "cross-org-payment-must-fail", actorId: "tenant-admin-a" }, db)).rejects.toThrow("El recibo no existe o fue eliminado.");
-      expect(await db.payment.count({ where: { sourceEvidenceKey: "cross-org-payment-must-fail" } })).toBe(0);
+      const contextA = await contextFor(db, "tenant-admin-a");
+      await expect(db.$transaction(async (tx) => {
+        await assertOrganizationContextInTransaction(tx, contextA, ["OWNER"]);
+        return recordPayment({ organizationId: contextA.organizationId, receiptId: "tenant-receipt-b", amount: 1000, paidDate: new Date("2026-06-30"), paymentMethod: "TEST", sourceEvidenceKey: "cross-org-payment-must-fail", actorId: contextA.userId }, tx);
+      })).rejects.toThrow("El recibo no existe o fue eliminado.");
+      const visible = await db.$transaction(async (tx) => { await assertOrganizationContextInTransaction(tx, contextA, ["OWNER"]); return tx.payment.count({ where: { sourceEvidenceKey: "cross-org-payment-must-fail", organizationId: contextA.organizationId } }); });
+      expect(visible).toBe(0);
     } finally {
       await db.$disconnect();
     }

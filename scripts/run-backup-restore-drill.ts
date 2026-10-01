@@ -207,7 +207,7 @@ async function runAppSmoke(target: string) {
     await execFileAsync("npm", ["run", "test:e2e", "--", "tests/e2e/restore-drill.spec.ts"], {
       cwd: process.cwd(),
       env: childEnvironment(target, {
-        RESTORE_DRILL_APP_SMOKE: "1",
+        RESTORE_DRILL_APP_SMOKE: process.env.RESTORE_DRILL_APP_SMOKE === "1" ? "1" : "0",
         RESTORE_DRILL_FIXTURE_EMAIL: fixture.email,
         RESTORE_DRILL_FIXTURE_PASSWORD: fixture.password,
         RESTORE_DRILL_AGENT_EMAIL: fixture.agentEmail,

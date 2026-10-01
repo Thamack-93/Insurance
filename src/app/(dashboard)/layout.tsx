@@ -96,6 +96,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
                 isSuperAdmin={user.platformRole === "SUPERADMIN"}
                 hasOrganizationContext={Boolean(organization)}
                 organizationName={organization?.organizationName}
+                isDemo={organizationKind?.kind === "DEMO"}
                 membershipRole={organization?.membershipRole}
                 userMenu={<UserMenu />}
                 unreadNotificationCount={unreadNotificationCount}

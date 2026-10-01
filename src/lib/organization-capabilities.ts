@@ -15,8 +15,28 @@ export type ResolvedOrganizationCapability = {
   capability: OrganizationCapabilityKey;
   enabled: boolean;
   limitValue: number | null;
-  reason: "GLOBAL_UNCERTIFIED" | "ORG_SUSPENDED" | "PLAN_DISABLED" | "ORG_OVERRIDE" | "PLAN";
+  reason: "GLOBAL_UNCERTIFIED" | "ORG_SUSPENDED" | "PLAN_DISABLED" | "ORG_OVERRIDE" | "PLAN" | "DEMO_RESTRICTED";
 };
+
+/**
+ * DEMO tenants keep the complete internal workflow, but provider-facing
+ * integrations remain an invariant of the tenant kind. This is deliberately
+ * enforced after reading the organization from the same transaction used by
+ * the caller, so a permissive platform flag or capability row cannot reopen
+ * an external side effect.
+ */
+const DEMO_RESTRICTED_CAPABILITIES = new Set<OrganizationCapabilityKey>([
+  "NORA",
+  "IMPORTS",
+  "EMAIL",
+  "TELEGRAM",
+  "WHATSAPP",
+  "QUALITAS",
+]);
+
+export function isDemoExternalCapability(capability: OrganizationCapabilityKey) {
+  return DEMO_RESTRICTED_CAPABILITIES.has(capability);
+}
 
 type CapabilityOrganization = {
   id: string;
@@ -161,6 +181,9 @@ async function resolveCapabilityWithClient(
   if (!organization) throw new Error("ORGANIZATION_NOT_FOUND");
   if (organization.status !== "ACTIVE") {
     return { organizationId, capability, enabled: false, limitValue: null, reason: "ORG_SUSPENDED" };
+  }
+  if (organization.kind === "DEMO" && isDemoExternalCapability(capability)) {
+    return { organizationId, capability, enabled: false, limitValue: null, reason: "DEMO_RESTRICTED" };
   }
   const plan = organization.billingSubscriptions?.[0]?.plan;
   const subscription = organization.billingSubscriptions?.[0];
