@@ -9,6 +9,7 @@ import { getLatestReceiptStatus, LATEST_RENEWAL_RECEIPT_INCLUDE } from "@/lib/re
 import { isRenewalWhatsAppEligible, buildRenewalQuoteShareMessage, buildRenewalWhatsAppContactMessage, WHATSAPP_RENEWAL_CONTACT_TEMPLATE, WHATSAPP_RENEWAL_QUOTE_TEMPLATE } from "@/lib/renewal-whatsapp";
 import { buildWhatsAppUrl, type WhatsAppPhoneSource } from "@/lib/whatsapp";
 import { resolveClientWhatsAppPhone } from "@/lib/whatsapp-client-phone";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 type Handoff = "NATIVE_SHARE" | "WHATSAPP_FALLBACK";
@@ -80,6 +81,7 @@ export async function prepareRenewalWhatsAppContactForContext(input: {
   const run = async (tx: Prisma.TransactionClient) => {
     await assertOrganizationContextInTransaction(tx, input.context);
     assertWhatsAppEnabled();
+    if (!(await resolveOrganizationCapability(input.context.organizationId, "WHATSAPP", tx)).enabled) throw new Error("WHATSAPP_CAPABILITY_DISABLED");
     const { policy, stage } = await loadEligibleRenewal(tx, input.context, input.policyId);
     const selection = await resolveClientWhatsAppPhone({
       tx,
@@ -117,6 +119,7 @@ export async function prepareRenewalQuoteShareForContext(input: {
   const run = async (tx: Prisma.TransactionClient) => {
     await assertOrganizationContextInTransaction(tx, input.context);
     assertWhatsAppEnabled();
+    if (!(await resolveOrganizationCapability(input.context.organizationId, "WHATSAPP", tx)).enabled) throw new Error("WHATSAPP_CAPABILITY_DISABLED");
     const { policy, stage } = await loadEligibleRenewal(tx, input.context, input.policyId);
     const message = buildRenewalQuoteShareMessage({ clientName: policy.client.fullName, policyNumber: policy.policyNumber, insurerName: policy.insurer.name, endDate: policy.endDate });
 

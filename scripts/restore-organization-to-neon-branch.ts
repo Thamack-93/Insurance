@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getBackupDownload, verifyStoredBackup } from "../src/lib/backup.ts";
@@ -7,6 +8,7 @@ import { createOrganizationRestoreRun, finishOrganizationRestoreRun, getBackupAr
 import { applyCurrentMigrations, checkRestoreTargetConnection } from "../src/lib/backup-restore.ts";
 import { assertTemporaryNeonRestoreTarget } from "../src/lib/backup-restore-guards.ts";
 import { restoreOrganizationBackup } from "../src/lib/organization-backup-restore.ts";
+import { assertRestoreCertificationConnections, certifyOrganizationRestore, verifyRestoreMarker } from "../src/lib/organization-restore-certification.ts";
 
 async function readStream(stream: ReadableStream<Uint8Array>) {
   const chunks: Buffer[] = [];
@@ -72,8 +74,15 @@ async function main() {
     targetDatabaseUrl: process.env.RESTORE_DATABASE_URL,
     branchName: process.env.RESTORE_NEON_BRANCH,
     allowRestore: process.env.ALLOW_TEMPORARY_NEON_RESTORE,
-    forbiddenDatabaseUrls: [process.env.DIRECT_URL, process.env.DATABASE_URL_DIRECT, process.env.DATABASE_URL_POOLER, process.env.POOLER_URL, process.env.PRISMA_DIRECT_URL],
+    forbiddenDatabaseUrls: [process.env.DATABASE_ADMIN_URL, process.env.DIRECT_URL, process.env.DATABASE_URL_DIRECT, process.env.DATABASE_URL_POOLER, process.env.POOLER_URL, process.env.PRISMA_DIRECT_URL],
   });
+  const candidateSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  if (candidateSha !== process.env.CERTIFICATION_CANDIDATE_SHA) throw new Error("RESTORE_CANDIDATE_SHA_MISMATCH");
+  const runtimeUrl = process.env.RESTORE_RUNTIME_DATABASE_URL?.trim();
+  if (!runtimeUrl) throw new Error("RESTORE_RUNTIME_DATABASE_URL_REQUIRED");
+  const identities = assertRestoreCertificationConnections(target.source.toString(), target.target.toString(), runtimeUrl);
+  await verifyRestoreMarker(process.env.DATABASE_ADMIN_URL ?? "", identities.source);
+  await verifyRestoreMarker(target.target.toString(), identities.target);
   const artifact = await getBackupArtifact(artifactId);
   if (!artifact) throw new Error("No existe el artifactId solicitado.");
   if (artifact.status !== "VERIFIED") throw new Error("Solo puede restaurarse un artefacto VERIFIED.");
@@ -90,6 +99,12 @@ async function main() {
     targetFingerprint: fingerprint(target.target.toString()),
   });
 
+  const report: Record<string, unknown> = {
+    restoreVersion: 2, status: apply ? "APPLYING" : "PREVIEW", candidateSha,
+    organizationId, artifactId, runId: run.id, source: identities.source, target: identities.target,
+    startedAt: new Date().toISOString(), transactionCommitted: false,
+    appSmokeEnabled: process.env.RESTORE_DRILL_APP_SMOKE === "1",
+  };
   try {
     const verification = await verifyStoredBackup(artifact.filename, artifact.pathname);
     if (!verification.valid) throw new Error(`Backup inválido: ${verification.reason}`);
@@ -102,24 +117,19 @@ async function main() {
 
     await checkRestoreTargetConnection(target.target.toString());
     const migrationResult = await applyCurrentMigrations(target.target.toString());
-    const startedAt = new Date().toISOString();
-    const report: Record<string, unknown> = {
-      restoreVersion: 1,
-      status: apply ? "APPLYING" : "PREVIEW",
-      organizationId,
-      artifactId,
-      runId: run.id,
+    Object.assign(report, {
       artifactSha256: verification.manifest.payload.sha256,
       manifestSha256: verification.manifest.manifestSha256,
       targetFingerprint: fingerprint(target.target.toString()),
       branch: target.branchName,
-      startedAt,
       migrationResult,
-    };
+    });
     if (apply) {
       const result = await restoreOrganizationBackup({ targetDatabaseUrl: target.target.toString(), organizationId, plaintext, manifest: verification.manifest });
-      report.status = "PASS";
       report.result = result;
+      report.transactionCommitted = true;
+      report.certification = await certifyOrganizationRestore({ adminUrl: target.target.toString(), runtimeUrl, organizationId, tables: result.tables });
+      report.status = "PASS";
     } else {
       report.preview = { formatVersion: verification.manifest.version, scope: verification.manifest.scope ?? artifact.scope, capability: verification.manifest.capability ?? artifact.capability, tables: verification.manifest.tables.length, rows: verification.manifest.totals.rows };
     }
@@ -127,7 +137,12 @@ async function main() {
     const reportPath = await writeReport(report);
     const reportFingerprint = createHash("sha256").update(JSON.stringify(report)).digest("hex");
     const certificatePath = apply ? await writeCertificate(reportPath, {
-        certificateVersion: 1,
+        certificateVersion: 2,
+        status: "PASS",
+        candidateSha,
+        source: identities.source,
+        target: identities.target,
+        certification: report.certification,
         organizationId,
         artifactId,
         payloadSha256: verification.manifest.payload.sha256,
@@ -138,6 +153,14 @@ async function main() {
     await finishOrganizationRestoreRun({ id: run.id, status: report.status as "PASS" | "PREVIEW", stage: "complete", reportFingerprint });
     console.log(`${apply ? "Restore" : "Preview"} ${report.status}: ${reportPath}${certificatePath ? `\nCertificate: ${certificatePath}` : ""}`);
   } catch (error) {
+    report.status = "FAIL";
+    report.completedAt = new Date().toISOString();
+    report.failureCode = error instanceof Error ? (error as { code?: string }).code ?? error.name : "RESTORE_FAILED";
+    // A post-commit failure cannot undo committed data: record FAIL and leave
+    // the disposable branch isolated. Never issue a PASS certificate here.
+    const reportPath = await writeReport(report);
+    await writeCertificate(reportPath, { certificateVersion: 2, status: "FAIL", candidateSha, organizationId, artifactId, source: identities.source, target: identities.target, transactionCommitted: report.transactionCommitted, failureCode: report.failureCode });
+    console.error(`Restore FAIL: ${reportPath}`);
     await finishOrganizationRestoreRun({ id: run.id, status: "FAIL", stage: "restore", failureCode: error instanceof Error ? error.name : "RESTORE_FAILED" }).catch(() => undefined);
     throw error;
   }

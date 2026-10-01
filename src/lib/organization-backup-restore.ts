@@ -224,6 +224,15 @@ export async function restoreOrganizationBackup(input: {
   assertOrganizationId(input.organizationId);
   const { parseBackupRecords } = await import("@/lib/backup-restore-validation");
   const parsed = parseBackupRecords(input.plaintext);
+  const manifestCounts = new Map(input.manifest.tables.map(table => [`${table.schema}.${table.name}`, table.rowCount]));
+  if (manifestCounts.size !== input.manifest.tables.length || manifestCounts.size !== parsed.tables.size) throw new RestoreIntegrityError("Las tablas del manifiesto y payload no coinciden.", "COUNT_MISMATCH");
+  let payloadTotal = 0;
+  for (const [key] of parsed.tables) {
+    const rows = parsed.rows.get(key)?.length ?? 0;
+    if (manifestCounts.get(key) !== rows || parsed.tableEnds.get(key) !== rows) throw new RestoreIntegrityError(`Conteo de manifiesto/payload inválido en ${key}.`, "COUNT_MISMATCH");
+    payloadTotal += rows;
+  }
+  if (payloadTotal !== parsed.declaredTotalRows || payloadTotal !== input.manifest.totals.rows) throw new RestoreIntegrityError("El total del manifiesto y payload no coincide.", "COUNT_MISMATCH");
   const pool = new Pool({ connectionString: input.targetDatabaseUrl, max: 1, application_name: "policydesk-organization-restore" });
   const client = await pool.connect();
   let transactionStarted = false;
@@ -264,12 +273,23 @@ export async function restoreOrganizationBackup(input: {
     await deleteTenantRows(client, input.organizationId, ordered);
     await insertTenantRows(client, input.organizationId, ordered, parsed);
     await restoreCyclicReferences(client, input.organizationId, ordered, parsed);
+    const tableCounts: Array<{ table: string; rows: number; backup: number; manifest: number }> = [];
+    for (const table of ordered) {
+      const backupCount = parsed.rows.get(tableKey(table))?.length ?? 0;
+      const manifestCount = manifestCounts.get(tableKey(table));
+      const result = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM ${tableReference(table.schema, table.name)} WHERE "organizationId" = $1`, [input.organizationId]);
+      const restoredCount = Number(result.rows[0]?.count);
+      if (manifestCount !== backupCount || restoredCount !== backupCount) {
+        throw new RestoreIntegrityError(`El conteo tenant restaurado no coincide en ${table.name}.`, "COUNT_MISMATCH");
+      }
+      tableCounts.push({ table: table.name, rows: restoredCount, backup: backupCount, manifest: manifestCount });
+    }
     const foreignKeys = await validateForeignKeys(client);
     const domainChecks = await validateDomainInvariants(client);
     const sequences = await synchronizeSequences(client);
     await client.query("COMMIT");
     transactionStarted = false;
-    return { mode, foreignKeys, domainChecks, sequences, tables: tables.map((table) => ({ table: table.name, rows: parsed.rows.get(tableKey(table))?.length ?? 0 })) };
+    return { mode, foreignKeys, domainChecks, sequences, tables: tableCounts };
   } catch (error) {
     if (transactionStarted) await client.query("ROLLBACK").catch(() => undefined);
     throw error;

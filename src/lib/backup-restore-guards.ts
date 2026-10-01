@@ -13,7 +13,7 @@ function parsePostgresUrl(value: string, label: string) {
   } catch {
     throw new Error(`${label} no es una URL válida.`);
   }
-  if (!/^postgres(ql):$/.test(url.protocol)) {
+  if (!/^postgres(ql)?:$/.test(url.protocol)) {
     throw new Error(`${label} debe apuntar a Postgres.`);
   }
   return url;
@@ -56,6 +56,9 @@ export function assertTemporaryNeonRestoreTarget(input: RestoreTargetInput) {
   ];
   if (forbiddenEndpoints.some((endpoint) => isSameNeonEndpoint(endpoint, target))) {
     throw new Error("La restauración no puede apuntar al endpoint de la base actual ni a sus variantes de Neon.");
+  }
+  if (/-pooler\./i.test(target.hostname) || target.searchParams.has("pgbouncer")) {
+    throw new Error("RESTORE_REQUIRES_DIRECT_ADMIN_CONNECTION");
   }
   return { source, target, branchName };
 }

@@ -458,6 +458,9 @@ export async function validateDomainInvariants(client: PoolClient): Promise<Doma
   add("workitem_partial_source_reference", await count(client, `SELECT count(*)::text AS count FROM "WorkItem" WHERE ("sourceType" IS NULL) <> ("sourceId" IS NULL)`));
   add("workitem_duplicate_legacy_task", await count(client, `SELECT count(*)::text AS count FROM (SELECT "sourceId" FROM "WorkItem" WHERE "sourceType" = 'Task' GROUP BY "sourceId" HAVING count(*) > 1) duplicates`));
   add("workitem_missing_legacy_task", await count(client, `SELECT count(*)::text AS count FROM "WorkItem" work_item LEFT JOIN "Task" task ON task.id = work_item."sourceId" WHERE work_item."sourceType" = 'Task' AND task.id IS NULL`));
+  for (const entity of ["Client", "Policy", "Receipt", "Task", "Claim", "Quote", "Insurer", "Document"]) {
+    add(`workitem_invalid_canonical_${entity.toLowerCase()}`, await count(client, `SELECT count(*)::text AS count FROM "WorkItem" wi LEFT JOIN "${entity}" entity ON entity.id = wi."entityId" AND entity."organizationId" = wi."organizationId" WHERE wi."entityType" = $1 AND entity.id IS NULL`, [entity]));
+  }
   add("workitem_missing_client_reference", await count(client, `SELECT count(*)::text AS count FROM "WorkItem" work_item LEFT JOIN "Client" row ON row.id = work_item."clientId" WHERE work_item."clientId" IS NOT NULL AND row.id IS NULL`));
   add("workitem_missing_policy_reference", await count(client, `SELECT count(*)::text AS count FROM "WorkItem" work_item LEFT JOIN "Policy" row ON row.id = work_item."policyId" WHERE work_item."policyId" IS NOT NULL AND row.id IS NULL`));
   add("workitem_missing_insurer_reference", await count(client, `SELECT count(*)::text AS count FROM "WorkItem" work_item LEFT JOIN "Insurer" row ON row.id = work_item."insurerId" WHERE work_item."insurerId" IS NOT NULL AND row.id IS NULL`));

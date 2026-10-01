@@ -20,12 +20,16 @@ type RequestState = { id: number; intent: Intent; mobile: boolean; popup: Window
 export function RenewalWhatsAppAssistant({
   policyId,
   clientName,
+  policyNumber,
   stage,
+  isDemo = false,
   className,
 }: {
   policyId: string;
   clientName: string;
+  policyNumber: string;
   stage: RenewalStage;
+  isDemo?: boolean;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -158,6 +162,10 @@ export function RenewalWhatsAppAssistant({
   }
 
   function prepareContact(phone?: string) {
+    if (isDemo) {
+      setMessage(`Hola ${clientName}, te contactamos para revisar la renovación de la póliza ${policyNumber}. Esta es una vista previa de demostración; no se envió ningún mensaje.`);
+      return;
+    }
     const request = beginRequest("CONTACT", mobileDevice, false);
     startTransition(async () => {
       showResult(await prepareRenewalWhatsAppContact({ policyId, ...(phone ? { capturedPhone: phone } : {}) }), request);
@@ -165,6 +173,10 @@ export function RenewalWhatsAppAssistant({
   }
 
   function prepareQuote(handoff: Handoff, phone?: string) {
+    if (isDemo) {
+      setMessage(`Hola ${clientName}, estamos revisando opciones para la renovación de la póliza ${policyNumber}. Esta es una vista previa de demostración; no se compartió ninguna cotización.`);
+      return;
+    }
     const request = beginRequest("QUOTE", mobileDevice, !mobileDevice);
     startTransition(async () => {
       showResult(await prepareRenewalQuoteShare({ policyId, handoff, ...(phone ? { capturedPhone: phone } : {}) }), request);
@@ -245,17 +257,25 @@ export function RenewalWhatsAppAssistant({
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>WhatsApp de renovación</DialogTitle>
-            <DialogDescription>Prepara un contacto manual para {clientName}. PolicyDesk no envía mensajes ni adjunta archivos automáticamente.</DialogDescription>
+            <DialogDescription>{isDemo ? "Vista previa local: no se abre WhatsApp, no se comparte un PDF y no se envía nada." : `Prepara un contacto manual para ${clientName}. PolicyDesk no envía mensajes ni adjunta archivos automáticamente.`}</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-2 sm:grid-cols-2">
+          {!isDemo ? <div className="grid gap-2 sm:grid-cols-2">
             <Button type="button" variant={intent === "CONTACT" ? "default" : "outline"} className="h-auto min-h-20 justify-start gap-2 whitespace-normal text-left" onClick={() => changeIntent("CONTACT")}>
               <MessageSquare className="size-5" /> <span><span className="block font-medium">Contactar al cliente</span><span className="block text-xs opacity-80">Abrir WhatsApp con mensaje editable</span></span>
             </Button>
             <Button type="button" variant={intent === "QUOTE" ? "default" : "outline"} className="h-auto min-h-20 justify-start gap-2 whitespace-normal text-left" onClick={() => changeIntent("QUOTE")}>
               <Share2 className="size-5" /> <span><span className="block font-medium">Compartir cotización</span><span className="block text-xs opacity-80">{mobileDevice ? "Elegir un PDF de este dispositivo" : "Abrir WhatsApp y adjuntar el PDF"}</span></span>
             </Button>
-          </div>
-          {intent === "CONTACT" ? (
+          </div> : null}
+          {isDemo ? (
+            <div className="space-y-3 rounded-lg border bg-muted/30 p-3 text-sm">
+              <p>La demostración solo genera texto local con datos sintéticos. No solicita teléfonos ni permite adjuntar documentos.</p>
+              <Button type="button" onClick={() => intent === "CONTACT" ? prepareContact() : prepareQuote("WHATSAPP_FALLBACK")}>
+                Ver vista previa
+              </Button>
+              {message ? <p className="whitespace-pre-wrap rounded-md bg-background p-3 text-xs" role="status">{message}</p> : null}
+            </div>
+          ) : intent === "CONTACT" ? (
             <div className="rounded-lg border bg-muted/30 p-3 text-sm"><p>Se usará el teléfono principal y después el secundario. Si falta, te pediremos capturarlo.</p><Button type="button" className="mt-3" onClick={() => prepareContact()} disabled={isPending}>{isPending ? "Preparando..." : "Abrir WhatsApp"}</Button></div>
           ) : mobileDevice ? (
             <div className="space-y-3 rounded-lg border bg-muted/30 p-3 text-sm">

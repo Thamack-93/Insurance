@@ -16,6 +16,7 @@ export function AppTopbar({
   isSuperAdmin = false,
   hasOrganizationContext = false,
   organizationName,
+  isDemo = false,
   membershipRole,
   unreadNotificationCount,
   notifications,
@@ -26,6 +27,7 @@ export function AppTopbar({
   isSuperAdmin?: boolean;
   hasOrganizationContext?: boolean;
   organizationName?: string;
+  isDemo?: boolean;
   membershipRole?: string;
   unreadNotificationCount: number;
   notifications: BellNotification[];
@@ -69,8 +71,9 @@ export function AppTopbar({
               {membershipRole ? <span className="ml-1.5">· {membershipRole === "AGENT" ? "Agente" : "Administrador"}</span> : null}
             </div>
           ) : null}
+          {isDemo ? <span aria-label="Organización de demostración" title="Organización de demostración" className="inline-flex shrink-0 rounded-md border border-cyan-300 bg-cyan-50 px-1.5 py-1 text-[10px] font-semibold text-cyan-800 dark:border-cyan-800 dark:bg-cyan-950/30 dark:text-cyan-200 sm:px-2.5 sm:text-xs">Demo</span> : null}
           <ThemeToggle initialTheme={initialTheme} />
-          {hasOrganizationContext ? (
+          {hasOrganizationContext && !isDemo ? (
             <button
               type="button"
               onClick={() => openNora()}
@@ -85,6 +88,14 @@ export function AppTopbar({
           {userMenu}
         </div>
       </div>
+      {isDemo ? (
+        <div
+          role="status"
+          className="border-t border-amber-300/60 bg-amber-50 px-4 py-2 text-center text-xs font-medium text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100 sm:text-sm"
+        >
+          Esta acción está deshabilitada en la organización de demostración.
+        </div>
+      ) : null}
     </header>
   );
 }

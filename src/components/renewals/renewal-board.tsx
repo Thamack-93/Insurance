@@ -50,7 +50,7 @@ function daysLabel(days: number) {
   return `Faltan ${days} ${days === 1 ? "día" : "días"}`;
 }
 
-function RenewalCard({ card }: { card: RenewalBoardCard }) {
+function RenewalCard({ card, isDemo }: { card: RenewalBoardCard; isDemo: boolean }) {
   const closed = isTerminalRenewalStage(card.stage);
   const overdue = !closed && card.daysUntilRenewal < 0;
   const captureHref = card.canCapture ? `/policies/new?renewalFrom=${card.policyId}` : undefined;
@@ -123,7 +123,7 @@ function RenewalCard({ card }: { card: RenewalBoardCard }) {
         ) : null}
         {!isTerminalRenewalStage(card.stage) ? (
           <div className="flex flex-wrap items-center justify-start gap-2">
-            <RenewalWhatsAppAssistant policyId={card.policyId} clientName={card.clientName} stage={card.stage} />
+            <RenewalWhatsAppAssistant policyId={card.policyId} policyNumber={card.policyNumber} clientName={card.clientName} stage={card.stage} isDemo={isDemo} />
             <RenewalFollowUpMenu
               policyId={card.policyId}
               policyNumber={card.policyNumber}
@@ -186,7 +186,7 @@ function ExcludedPolicies({ policies }: { policies: RenewalBoardExcludedPolicy[]
   );
 }
 
-function BoardColumn({ column }: { column: RenewalBoardColumn }) {
+function BoardColumn({ column, isDemo }: { column: RenewalBoardColumn; isDemo: boolean }) {
   return (
     <section
       aria-label={`${renewalStageLabel(column.stage)}: ${column.count} renovaciones`}
@@ -218,7 +218,7 @@ function BoardColumn({ column }: { column: RenewalBoardColumn }) {
         <>
           <ul className="flex flex-col gap-2 p-2">
             {column.cards.map((card) => (
-              <RenewalCard key={card.policyId} card={card} />
+              <RenewalCard key={card.policyId} card={card} isDemo={isDemo} />
             ))}
           </ul>
         </>
@@ -234,11 +234,13 @@ export function RenewalBoard({
   filters,
   owners,
   canFilterByOwner,
+  isDemo,
 }: {
   board: RenewalBoardData;
   filters: RenewalBoardFilters;
   owners: { id: string; name: string }[];
   canFilterByOwner: boolean;
+  isDemo: boolean;
 }) {
   return (
     <div className="space-y-4">
@@ -269,7 +271,7 @@ export function RenewalBoard({
         // nombres de los clientes.
         <div className="flex min-w-0 snap-x gap-3 overflow-x-auto pb-2">
           {board.columns.map((column) => (
-            <BoardColumn key={column.stage} column={column} />
+          <BoardColumn key={column.stage} column={column} isDemo={isDemo} />
           ))}
         </div>
       )}

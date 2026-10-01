@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertDisposableCertificationTarget,
+  assertRemoteTenantBackupTarget,
   canonicalNeonHost,
   certificationFingerprint,
 } from "../../scripts/tenant-certification-target.mjs";
@@ -45,6 +46,45 @@ describe("tenant certification target guard", () => {
     expect(canonicalNeonHost("ep-certification-pooler.c-7.us-east-1.aws.neon.tech")).toBe(host);
   });
 
+  it("rejects Vercel Preview even with all disposable guards enabled", () => {
+    const runId = "candidate-run";
+    const database = "neondb";
+    const branchId = "br-test-candidate";
+    const branchName = "cert-stage3-aabbccdd";
+    const host = "ep-certification.c-7.us-east-1.aws.neon.tech";
+    const env = {
+      ...baseEnv,
+      NODE_ENV: "production",
+      VERCEL: "1",
+      VERCEL_ENV: "preview",
+      TENANT_CERTIFICATION_REMOTE_BRANCH: "1",
+      TENANT_ISOLATION_REMOTE_BRANCH: "1",
+      TENANT_ISOLATION_RUN_ID: runId,
+      TENANT_ISOLATION_DB_NAME: database,
+      TENANT_ISOLATION_FINGERPRINT: certificationFingerprint({ mode: "neon", runId, database, host, branchId, branchName }),
+      TENANT_ISOLATION_BRANCH_ID: branchId,
+      TENANT_ISOLATION_BRANCH_NAME: branchName,
+      TENANT_ISOLATION_NEON_HOST: host,
+    };
+    expect(() => assertDisposableCertificationTarget(`postgresql://owner:test@${host}/${database}`, env))
+      .toThrow("TENANT_CERTIFICATION_REFUSES_VERCEL_ENVIRONMENT");
+  });
+
+  it("rejects every other Vercel Preview branch for remote tenant certification", () => {
+    const env = {
+      ...baseEnv,
+      NODE_ENV: "production",
+      VERCEL: "1",
+      VERCEL_ENV: "preview",
+      TENANT_CERTIFICATION_REMOTE_BRANCH: "1",
+      TENANT_ISOLATION_REMOTE_BRANCH: "1",
+      TENANT_ISOLATION_BRANCH_ID: "br-unapproved-temporary",
+      TENANT_ISOLATION_BRANCH_NAME: "cert-stage3-aabbccdd",
+    };
+    expect(() => assertDisposableCertificationTarget("postgresql://owner:test@ep-other.c-7.us-east-1.aws.neon.tech/neondb", env))
+      .toThrow("TENANT_CERTIFICATION_REFUSES_VERCEL_ENVIRONMENT");
+  });
+
   it("rejects a remote target without its exact fingerprint or branch name", () => {
     const env = {
       ...baseEnv,
@@ -57,5 +97,57 @@ describe("tenant certification target guard", () => {
       TENANT_ISOLATION_NEON_HOST: "ep-production.c-7.us-east-1.aws.neon.tech",
     };
     expect(() => assertDisposableCertificationTarget("postgresql://owner:test@ep-production.c-7.us-east-1.aws.neon.tech/neondb", env)).toThrow("TENANT_CERTIFICATION_BRANCH_NAME_INVALID");
+  });
+
+  it("allows backup only when direct admin and pooled runtime URLs fingerprint to the same disposable branch", () => {
+    const runId = "9d1a963";
+    const database = "neondb";
+    const branchId = "br-soft-recipe-apz29q8a";
+    const branchName = "cert-stage3-9d1a963";
+    const host = "ep-certification.c-7.us-east-1.aws.neon.tech";
+    const fingerprint = certificationFingerprint({ mode: "neon", runId, database, host, branchId, branchName });
+    const env = {
+      ...baseEnv,
+      ALLOW_OPERATOR_BACKUP: "1",
+      TENANT_CERTIFICATION_REMOTE_BRANCH: "1",
+      TENANT_ISOLATION_REMOTE_BRANCH: "1",
+      TENANT_ISOLATION_RUN_ID: runId,
+      TENANT_ISOLATION_DB_NAME: database,
+      TENANT_ISOLATION_FINGERPRINT: fingerprint,
+      TENANT_ISOLATION_BRANCH_ID: branchId,
+      TENANT_ISOLATION_BRANCH_NAME: branchName,
+      TENANT_ISOLATION_NEON_HOST: host,
+    };
+    const adminUrl = `postgresql://owner:test@${host}/${database}`;
+    const runtimeUrl = `postgresql://policydesk_app:test@ep-certification-pooler.c-7.us-east-1.aws.neon.tech/${database}`;
+    expect(assertRemoteTenantBackupTarget(adminUrl, runtimeUrl, env)).toMatchObject({ mode: "neon", branchId, fingerprint });
+    expect(() => assertRemoteTenantBackupTarget(adminUrl, runtimeUrl.replace("-pooler", ""), env)).toThrow("BACKUP_REQUIRES_POOLED_RUNTIME_URL");
+    expect(() => assertRemoteTenantBackupTarget(adminUrl, runtimeUrl.replace("policydesk_app", "owner"), env)).toThrow("BACKUP_REQUIRES_RESTRICTED_RUNTIME_ROLE");
+    expect(() => assertRemoteTenantBackupTarget(adminUrl, runtimeUrl, { ...env, CERTIFICATION_CANDIDATE_SHA: "ff".repeat(20) })).toThrow("TENANT_CERTIFICATION_CANDIDATE_SHA_MISMATCH");
+  });
+
+  it("rejects production and incorrectly pooled administrative backup connections", () => {
+    const runId = "9d1a963";
+    const database = "neondb";
+    const branchId = "br-soft-recipe-apz29q8a";
+    const branchName = "cert-stage3-9d1a963";
+    const host = "ep-certification.c-7.us-east-1.aws.neon.tech";
+    const env = {
+      ...baseEnv,
+      ALLOW_OPERATOR_BACKUP: "1",
+      TENANT_CERTIFICATION_REMOTE_BRANCH: "1",
+      TENANT_ISOLATION_REMOTE_BRANCH: "1",
+      TENANT_ISOLATION_RUN_ID: runId,
+      TENANT_ISOLATION_DB_NAME: database,
+      TENANT_ISOLATION_FINGERPRINT: certificationFingerprint({ mode: "neon", runId, database, host, branchId, branchName }),
+      TENANT_ISOLATION_BRANCH_ID: branchId,
+      TENANT_ISOLATION_BRANCH_NAME: branchName,
+      TENANT_ISOLATION_NEON_HOST: host,
+    };
+    const runtimeUrl = `postgresql://app:test@ep-certification-pooler.c-7.us-east-1.aws.neon.tech/${database}`;
+    expect(() => assertRemoteTenantBackupTarget(`postgresql://owner:test@ep-production.c-7.us-east-1.aws.neon.tech/${database}`, runtimeUrl, env))
+      .toThrow("TENANT_CERTIFICATION_NEON_HOST_MISMATCH");
+    expect(() => assertRemoteTenantBackupTarget(`postgresql://owner:test@ep-certification-pooler.c-7.us-east-1.aws.neon.tech/${database}`, runtimeUrl, env))
+      .toThrow("BACKUP_REQUIRES_DIRECT_DATABASE_URL");
   });
 });

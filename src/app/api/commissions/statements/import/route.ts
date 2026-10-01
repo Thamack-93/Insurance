@@ -17,6 +17,6 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof AuthError) return NextResponse.json({ ok: false, error: error.message }, { status: error.status });
     const code = error instanceof Error ? error.message : "IMPORT_FAILED";
-    return NextResponse.json({ ok: false, error: code === "COMMISSION_STATEMENT_DUPLICATE" ? "Este archivo ya fue importado." : "No se pudo importar el estado de comisiones." }, { status: code === "COMMISSION_IMPORT_FORBIDDEN" ? 403 : 400 });
+    return NextResponse.json({ ok: false, error: code === "COMMISSION_STATEMENT_DUPLICATE" ? "Este archivo ya fue importado." : code === "IMPORTS_CAPABILITY_DISABLED" ? "Las importaciones están deshabilitadas en la organización de demostración." : "No se pudo importar el estado de comisiones." }, { status: code === "COMMISSION_IMPORT_FORBIDDEN" || code === "IMPORTS_CAPABILITY_DISABLED" ? 403 : 400 });
   }
 }

@@ -47,7 +47,7 @@ export type CollectableReceipt = {
   qualitasEligible?: boolean;
 };
 
-export function CollectableReceipts({ receipts, returnTo }: { receipts: CollectableReceipt[]; returnTo?: string }) {
+export function CollectableReceipts({ receipts, returnTo, isDemo = false }: { receipts: CollectableReceipt[]; returnTo?: string; isDemo?: boolean }) {
   if (receipts.length === 0) return null;
 
   return (
@@ -56,7 +56,7 @@ export function CollectableReceipts({ receipts, returnTo }: { receipts: Collecta
         <BulkToolbar receipts={receipts} />
         <div className="divide-y divide-border/70">
           {receipts.map((receipt) => (
-            <ReceiptRow key={receipt.id} receipt={receipt} returnTo={returnTo} />
+            <ReceiptRow key={receipt.id} receipt={receipt} returnTo={returnTo} isDemo={isDemo} />
           ))}
         </div>
       </div>
@@ -152,7 +152,7 @@ function BulkToolbar({ receipts }: { receipts: CollectableReceipt[] }) {
   );
 }
 
-function ReceiptRow({ receipt, returnTo }: { receipt: CollectableReceipt; returnTo?: string }) {
+function ReceiptRow({ receipt, returnTo, isDemo }: { receipt: CollectableReceipt; returnTo?: string; isDemo: boolean }) {
   const { selectedItems, toggleItem } = useBulkActions();
   const isSelected = selectedItems.has(receipt.id);
   const due = parseBusinessDateInput(receipt.dueDate);
@@ -225,7 +225,7 @@ function ReceiptRow({ receipt, returnTo }: { receipt: CollectableReceipt; return
             }}
           />
           {receipt.status === "PENDING" || receipt.status === "OVERDUE" ? (
-            <WhatsAppReminderButton receiptId={receipt.id} className="w-full xl:w-auto" />
+            <WhatsAppReminderButton receiptId={receipt.id} className="w-full xl:w-auto" demoPreview={isDemo ? { clientName: receipt.client.fullName, receiptNumber: receipt.receiptNumber, policyNumber: receipt.policy.policyNumber } : undefined} />
           ) : null}
           {receipt.qualitasEligible ? (
             <QualitasPaymentLinkDialog

@@ -6,12 +6,13 @@ import { Prisma } from "@/generated/prisma/client";
 import { AuthError, hashPassword, requireSuperAdmin } from "@/lib/auth";
 import { withSystemOrganizationTransaction } from "@/lib/organization-context";
 import { acquireDistributedLock } from "@/lib/request-guards";
-import { seedDemoBaseline, DEMO_SEED_VERSION } from "@/lib/demo-seed";
+import { seedDemoBaseline, validateDemoBaseline, DEMO_SEED_VERSION } from "@/lib/demo-seed";
 import { SYSTEM_USER_ID } from "@/lib/tenant-organization-foundation";
 import { NORA_CAPTURE_HANDOFF_PREFIX } from "@/lib/nora-capture-handoff-storage.shared";
 import { NORA_POLICY_PDF_PREFIX } from "@/lib/nora-pdf-storage.shared";
 
-const DEMO_CAPABILITIES = ["NORA", "IMPORTS", "EXPORTS", "DOCUMENTS", "TELEGRAM", "WHATSAPP", "QUALITAS"] as const;
+const DEMO_CAPABILITIES = ["NORA", "IMPORTS", "EXPORTS", "DOCUMENTS", "EMAIL", "TELEGRAM", "WHATSAPP", "QUALITAS"] as const;
+const DEMO_ENABLED_CAPABILITIES = new Set(["EXPORTS", "DOCUMENTS"]);
 
 function deterministicId(prefix: string, value: string) {
   return `${prefix}_${createHash("sha256").update(value).digest("hex").slice(0, 24)}`;
@@ -178,6 +179,10 @@ export async function provisionDemoOrganization(input: DemoProvisioningInput): P
     if (existing && existing.kind !== "DEMO") throw new Error("DEMO_ID_COLLIDES_WITH_NON_DEMO_ORGANIZATION");
     if (existing && (existing.slug !== slug || existing.name !== name)) throw new Error("DEMO_ID_ALREADY_PROVISIONED_DIFFERENT_INPUT");
     if (existing?.status === "ACTIVE") {
+      for (const key of DEMO_CAPABILITIES) {
+        const enabled = DEMO_ENABLED_CAPABILITIES.has(key);
+        await tx.organizationCapability.upsert({ where: { organizationId_key: { organizationId, key } }, update: { enabled, limitValue: null, source: "DEMO_DEFAULT" }, create: { organizationId, key, enabled, limitValue: null, source: "DEMO_DEFAULT" } });
+      }
       const state = await tx.demoOrganizationState.findUnique({ where: { organizationId }, select: { trialEndsAt: true } });
       return { active: true as const, temporaryPassword: "", trialEndsAt: state?.trialEndsAt ?? trialEndsAt, requestId };
     }
@@ -191,7 +196,8 @@ export async function provisionDemoOrganization(input: DemoProvisioningInput): P
     if (!plan?.active) throw new Error("DEMO_PLAN_MISSING");
     await tx.organizationSubscription.upsert({ where: { requestId: `demo-subscription:${organizationId}` }, update: { organizationId, planId: plan.id, status: "TRIAL", endsAt: trialEndsAt, monthlyAmountMinor: 0, currency: "USD" }, create: { requestId: `demo-subscription:${organizationId}`, organizationId, planId: plan.id, status: "TRIAL", endsAt: trialEndsAt, monthlyAmountMinor: 0, currency: "USD" } });
     for (const key of DEMO_CAPABILITIES) {
-      await tx.organizationCapability.upsert({ where: { organizationId_key: { organizationId, key } }, update: { enabled: key !== "QUALITAS", limitValue: key === "NORA" ? 4 : key === "DOCUMENTS" ? 5 : null, source: "DEMO_DEFAULT" }, create: { organizationId, key, enabled: key !== "QUALITAS", limitValue: key === "NORA" ? 4 : key === "DOCUMENTS" ? 5 : null, source: "DEMO_DEFAULT" } });
+      const enabled = DEMO_ENABLED_CAPABILITIES.has(key);
+      await tx.organizationCapability.upsert({ where: { organizationId_key: { organizationId, key } }, update: { enabled, limitValue: null, source: "DEMO_DEFAULT" }, create: { organizationId, key, enabled, limitValue: null, source: "DEMO_DEFAULT" } });
     }
     const existingState = await tx.demoOrganizationState.findUnique({ where: { organizationId }, select: { trialEndsAt: true } });
     const effectiveTrialEndsAt = existingState?.trialEndsAt ?? trialEndsAt;
@@ -218,10 +224,9 @@ export async function provisionDemoOrganization(input: DemoProvisioningInput): P
           if (!existingUser) credentials.push({ email, password: userPassword, name: requestedUser.name });
         }
         await seedDemoBaseline(tx, organizationId, ownerUserId);
-        const [clientCount, policyCount] = await Promise.all([tx.client.count({ where: { organizationId } }), tx.policy.count({ where: { organizationId } })]);
-        if (clientCount < 3 || policyCount < 4) throw new Error("DEMO_SEED_VALIDATION_FAILED");
+        const seedCounts = await validateDemoBaseline(tx, organizationId);
         await tx.organization.update({ where: { id: organizationId }, data: { status: "ACTIVE" } });
-        await tx.platformAuditLog.create({ data: { requestId: setup.requestId ?? deterministicId("request", `${organizationId}:provision`), actorUserId: actor.id, targetOrganizationId: organizationId, targetUserId: ownerUserId, action: "DEMO_ORGANIZATION_PROVISIONED", reason: "sales-assisted demo provisioning", metadataJson: JSON.stringify({ seedVersion: DEMO_SEED_VERSION, clientCount, policyCount }) } });
+        await tx.platformAuditLog.create({ data: { requestId: setup.requestId ?? deterministicId("request", `${organizationId}:provision`), actorUserId: actor.id, targetOrganizationId: organizationId, targetUserId: ownerUserId, action: "DEMO_ORGANIZATION_PROVISIONED", reason: "sales-assisted demo provisioning", metadataJson: JSON.stringify({ seedVersion: DEMO_SEED_VERSION, ...seedCounts }) } });
         return { organizationId, ownerUserId, ownerEmail, temporaryPassword: setup.temporaryPassword, credentials, trialEndsAt: setup.trialEndsAt, seedVersion: DEMO_SEED_VERSION };
       });
     } catch (error) {
@@ -249,11 +254,16 @@ async function deleteDemoTenantRows(tx: Prisma.TransactionClient, organizationId
   await tx.claimChecklistItem.deleteMany({ where: { organizationId } });
   await tx.claim.deleteMany({ where: { organizationId } });
   await tx.payment.deleteMany({ where: { organizationId } });
+  await tx.commissionCorrection.deleteMany({ where: { organizationId } });
+  await tx.commissionStatementRow.deleteMany({ where: { organizationId } });
+  await tx.commissionStatement.deleteMany({ where: { organizationId } });
   await tx.commission.deleteMany({ where: { organizationId } });
   await tx.receipt.deleteMany({ where: { organizationId } });
   await tx.policyEndorsement.deleteMany({ where: { organizationId } });
   await tx.policy.deleteMany({ where: { organizationId } });
   await tx.task.deleteMany({ where: { organizationId } });
+  await tx.quoteComparisonItem.deleteMany({ where: { organizationId } });
+  await tx.quoteComparison.deleteMany({ where: { organizationId } });
   await tx.quote.deleteMany({ where: { organizationId } });
   await tx.document.deleteMany({ where: { organizationId } });
   await tx.client.deleteMany({ where: { organizationId } });
@@ -324,6 +334,13 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
       if (!organization || organization.kind !== "DEMO") throw new Error("DEMO_RESET_REQUIRES_DEMO_ORGANIZATION");
       let state = await tx.demoOrganizationState.findUnique({ where: { organizationId } });
       if (!state) throw new Error("DEMO_STATE_MISSING");
+      // Preview is strictly read-only, including when an old reset lease has
+      // expired. Recovery belongs exclusively to an actual reset request.
+      if (dryRun) {
+        const counts = { clients: await tx.client.count({ where: { organizationId } }), policies: await tx.policy.count({ where: { organizationId } }) };
+        const artifactCount = await tx.demoUploadArtifact.count({ where: { organizationId, status: "ACTIVE" } });
+        return { organizationId, requestId, dryRun: true, counts, artifactCount };
+      }
       if (state.resetStatus === "RESETTING") {
         if (!state.resetLeaseExpiresAt || state.resetLeaseExpiresAt > new Date()) throw new Error("DEMO_RESET_ALREADY_RUNNING");
         await tx.demoOrganizationState.update({ where: { organizationId }, data: { resetStatus: "FAILED", resetPhase: "RECOVERING", resetFailure: "DEMO_RESET_LEASE_EXPIRED", resetAttemptId: null, resetLeaseExpiresAt: null, resetHeartbeatAt: new Date() } });
@@ -334,10 +351,6 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
       const counts = { clients: await tx.client.count({ where: { organizationId } }), policies: await tx.policy.count({ where: { organizationId } }) };
       if (!dryRun && state.resetRequestId === requestId && state.resetStatus === "IDLE" && state.lastResetAt) {
         return { organizationId, requestId, dryRun: false, replayed: true, counts };
-      }
-      if (dryRun) {
-        await tx.platformAuditLog.create({ data: { requestId, actorUserId: actorUserId === SYSTEM_USER_ID ? null : actorUserId, targetOrganizationId: organizationId, action: "DEMO_ORGANIZATION_RESET_DRY_RUN", reason, metadataJson: JSON.stringify(counts) } });
-        return { organizationId, requestId, dryRun: true, counts };
       }
       await tx.organization.update({ where: { id: organizationId }, data: { status: "RESETTING" } });
       // Advance the fencing version at reset start. If the lease expires and
@@ -407,8 +420,7 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
       const owner = await tx.organizationMembership.findFirst({ where: { organizationId, role: "OWNER", active: true }, select: { userId: true } });
       if (!owner) throw new Error("DEMO_OWNER_MISSING");
       await seedDemoBaseline(tx, organizationId, owner.userId);
-      const [clientCount, policyCount] = await Promise.all([tx.client.count({ where: { organizationId } }), tx.policy.count({ where: { organizationId } })]);
-      if (clientCount < 3 || policyCount < 4) throw new Error("DEMO_RESET_VALIDATION_FAILED");
+      const seedCounts = await validateDemoBaseline(tx, organizationId);
       if (!(await lock.renew())) {
         throw new Error("DEMO_RESET_LOCK_EXPIRED");
       }
@@ -420,8 +432,8 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
       if (fencedState.count !== 1) throw new Error("DEMO_RESET_FENCING_FAILED");
       const reactivated = await tx.organization.updateMany({ where: { id: organizationId, status: "RESETTING" }, data: { status: trialExpired ? "SUSPENDED" : "ACTIVE" } });
       if (reactivated.count !== 1) throw new Error("DEMO_RESET_STATE_CHANGED");
-      await tx.platformAuditLog.create({ data: { requestId, actorUserId: actorUserId === SYSTEM_USER_ID ? null : actorUserId, targetOrganizationId: organizationId, action: "DEMO_ORGANIZATION_RESET", reason, metadataJson: JSON.stringify({ clientCount, policyCount }) } });
-      return { organizationId, requestId, dryRun: false, counts: { clients: clientCount, policies: policyCount } };
+      await tx.platformAuditLog.create({ data: { requestId, actorUserId: actorUserId === SYSTEM_USER_ID ? null : actorUserId, targetOrganizationId: organizationId, action: "DEMO_ORGANIZATION_RESET", reason, metadataJson: JSON.stringify(seedCounts) } });
+      return { organizationId, requestId, dryRun: false, counts: seedCounts };
     });
   } catch (error) {
     if (resetStarted) {
@@ -459,6 +471,16 @@ export async function resetDemoOrganizationForSystem(organizationId: string, req
   const cleanRequestId = requestId.trim();
   if (!cleanRequestId || cleanRequestId.length > 128) throw new Error("DEMO_REQUEST_ID_INVALID");
   return performDemoReset(organizationId, cleanRequestId, false, SYSTEM_USER_ID, "scheduled seven-day real-data purge");
+}
+
+/** Explicit operator CLI entry point. It never accepts a tenant kind from the
+ * caller; the reset transaction verifies DEMO classification before writing. */
+export async function resetDemoOrganizationForCli(organizationId: string, requestId: string, dryRun = false, reason = "operator CLI demo reset") {
+  const cleanOrganizationId = organizationId.trim();
+  if (!cleanOrganizationId || cleanOrganizationId.length > 160) throw new Error("DEMO_ORGANIZATION_ID_REQUIRED");
+  const cleanRequestId = requestId.trim();
+  if (!cleanRequestId || cleanRequestId.length > 128) throw new Error("DEMO_REQUEST_ID_INVALID");
+  return performDemoReset(cleanOrganizationId, cleanRequestId, dryRun, SYSTEM_USER_ID, reason.trim().slice(0, 500) || "operator CLI demo reset");
 }
 
 export async function extendDemoTrial(organizationId: string, days: number, reason: string) {

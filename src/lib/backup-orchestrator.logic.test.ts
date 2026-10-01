@@ -56,6 +56,7 @@ const manifest = {
 describe("createAndCatalogBackup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
     reserveBackupArtifact.mockResolvedValue({ id: "artifact-1", status: "CREATING" });
     deleteStoredBackup.mockResolvedValue(undefined);
     updateBackupArtifactStatus.mockResolvedValue(undefined);
@@ -121,6 +122,94 @@ describe("createAndCatalogBackup", () => {
     expect(deleteStoredBackup).toHaveBeenCalledWith("database-backups/old");
     expect(markBackupArtifactsPruned).toHaveBeenCalledWith(["database-backups/old"]);
     expect(result.pruned).toEqual(["database-backups/old"]);
+  });
+
+  it("rejects retention bypass outside a disposable remote certification branch", async () => {
+    await expect(createAndCatalogBackup({ scope: "ORGANIZATION", organizationId: "org-demo", target, skipPrune: true }))
+      .rejects.toThrow("BACKUP_PRUNE_SKIP_REQUIRES_DISPOSABLE_REMOTE_NEON_BRANCH");
+    expect(reserveBackupArtifact).not.toHaveBeenCalled();
+  });
+
+  it("preserves shared Blob backups during an explicitly guarded remote tenant drill", async () => {
+    const host = "ep-certification.c-7.us-east-1.aws.neon.tech";
+    const runId = "9d1a963";
+    const branchId = "br-soft-recipe-apz29q8a";
+    const branchName = "cert-stage3-9d1a963";
+    vi.stubEnv("ALLOW_OPERATOR_BACKUP", "1");
+    vi.stubEnv("TENANT_CERTIFICATION_REMOTE_BRANCH", "1");
+    vi.stubEnv("TENANT_CERTIFICATION_REMOTE_BRANCH", "1");
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("TENANT_ISOLATION_TEST_DB", "1");
+    vi.stubEnv("PLAYWRIGHT_ENFORCE_DISPOSABLE_DB", "1");
+    vi.stubEnv("TENANT_ISOLATION_REMOTE_BRANCH", "1");
+    vi.stubEnv("TENANT_ISOLATION_BRANCH_NAME", branchName);
+    vi.stubEnv("TENANT_ISOLATION_BRANCH_ID", branchId);
+    vi.stubEnv("TENANT_ISOLATION_RUN_ID", runId);
+    vi.stubEnv("TENANT_ISOLATION_DB_NAME", "neondb");
+    vi.stubEnv("TENANT_ISOLATION_NEON_HOST", host);
+    const { certificationFingerprint } = await import("../../scripts/tenant-certification-target.mjs");
+    vi.stubEnv("TENANT_ISOLATION_FINGERPRINT", certificationFingerprint({ mode: "neon", runId, database: "neondb", host, branchId, branchName }));
+    vi.stubEnv("DATABASE_ADMIN_URL", `postgresql://owner:fake@${host}/neondb`);
+    vi.stubEnv("DATABASE_URL", `postgresql://policydesk_app:fake@ep-certification-pooler.c-7.us-east-1.aws.neon.tech/neondb`);
+    const tenantTarget = { filename: "tenant", pathname: "organization-backups/org-demo/tenant" };
+    const tenantManifest = { ...manifest, scope: "ORGANIZATION", organization: { id: "org-demo" } };
+    verifyStoredBackup
+      .mockResolvedValueOnce({ valid: false, filename: tenantTarget.filename, reason: "missing" })
+      .mockResolvedValueOnce({ valid: true, filename: tenantTarget.filename, size: 10, sha256: "a".repeat(64), manifest: tenantManifest });
+    createOrganizationDatabaseBackup.mockResolvedValue({
+      ...tenantTarget,
+      size: 10,
+      createdAt: new Date("2026-08-25T05:00:00.000Z"),
+      manifestAvailable: true,
+      scope: "ORGANIZATION",
+      organizationId: "org-demo",
+      manifest: tenantManifest,
+      pruned: [],
+    });
+
+    const result = await createAndCatalogBackup({ scope: "ORGANIZATION", organizationId: "org-demo", target: tenantTarget, skipPrune: true });
+
+    expect(result.pruned).toEqual([]);
+    expect(getOrganizationBackupArtifacts).not.toHaveBeenCalled();
+    expect(deleteStoredBackup).toHaveBeenCalledTimes(1);
+    expect(deleteStoredBackup).toHaveBeenCalledWith(tenantTarget.pathname);
+    expect(deleteStoredBackup).not.toHaveBeenCalledWith(expect.stringMatching(/^organization-backups\/org-demo\/(?!tenant)/));
+  });
+
+  it("rejects Preview instead of bypassing retention guards", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("TENANT_CERTIFICATION_REMOTE_BRANCH", "1");
+    vi.stubEnv("ALLOW_OPERATOR_BACKUP", "1");
+    vi.stubEnv("TENANT_ISOLATION_REMOTE_BRANCH", "1");
+    vi.stubEnv("TENANT_ISOLATION_BRANCH_ID", "br-test-candidate");
+    vi.stubEnv("TENANT_ISOLATION_BRANCH_NAME", "cert-stage3-aabbccdd");
+    vi.stubEnv("TENANT_ISOLATION_RUN_ID", "candidate-run");
+    vi.stubEnv("TENANT_ISOLATION_DB_NAME", "neondb");
+    vi.stubEnv("TENANT_ISOLATION_NEON_HOST", "ep-certification.c-7.us-east-1.aws.neon.tech");
+    vi.stubEnv("TENANT_ISOLATION_FINGERPRINT", "synthetic-fingerprint");
+    vi.stubEnv("DATABASE_ADMIN_URL", `postgresql://owner:fake@ep-certification.c-7.us-east-1.aws.neon.tech/neondb`);
+    vi.stubEnv("DATABASE_URL", `postgresql://policydesk_app:fake@ep-certification-pooler.c-7.us-east-1.aws.neon.tech/neondb`);
+    const tenantTarget = { filename: "tenant", pathname: "organization-backups/org_pedro_gomez_0001/tenant" };
+    const tenantManifest = { ...manifest, scope: "ORGANIZATION", organization: { id: "org_pedro_gomez_0001" } };
+    verifyStoredBackup
+      .mockResolvedValueOnce({ valid: false, filename: tenantTarget.filename, reason: "missing" })
+      .mockResolvedValueOnce({ valid: true, filename: tenantTarget.filename, size: 10, sha256: "a".repeat(64), manifest: tenantManifest });
+    createOrganizationDatabaseBackup.mockResolvedValue({
+      ...tenantTarget,
+      size: 10,
+      createdAt: new Date("2026-08-25T05:00:00.000Z"),
+      manifestAvailable: true,
+      scope: "ORGANIZATION",
+      organizationId: "org_pedro_gomez_0001",
+      manifest: tenantManifest,
+      pruned: [],
+    });
+
+    await expect(createAndCatalogBackup({ scope: "ORGANIZATION", organizationId: "org_pedro_gomez_0001", target: tenantTarget, skipPrune: true }))
+      .rejects.toThrow("BACKUP_PRUNE_SKIP_REQUIRES_DISPOSABLE_REMOTE_NEON_BRANCH");
+    expect(reserveBackupArtifact).not.toHaveBeenCalled();
   });
 
   it("rejects a tenant manifest attributed to another organization", async () => {

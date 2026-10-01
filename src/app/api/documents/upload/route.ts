@@ -295,8 +295,8 @@ export async function POST(request: NextRequest) {
     if (!documentsCapability.enabled) return NextResponse.json({ error: "Los documentos no están habilitados para esta organización." }, { status: 403 });
     const organization = await withTenantTransaction(context, async (tx) => tx.organization.findUnique({ where: { id: context.organizationId }, select: { kind: true } }));
     const demoUpload = organization?.kind === "DEMO";
-    if (demoUpload && formData.get("uploadConsent") !== "1") {
-      return NextResponse.json({ error: "Confirma tu autorización, el procesamiento por proveedores de IA aprobados, la retención del original por 48 horas y el riesgo de que no hay antivirus externo por archivo." }, { status: 400 });
+    if (demoUpload) {
+      return NextResponse.json({ error: "Las cargas de documentos están deshabilitadas en la organización de demostración. Usa los documentos sintéticos incluidos." }, { status: 403 });
     }
     try {
       await assertDocumentUploadOwnership(validatedData, context);
