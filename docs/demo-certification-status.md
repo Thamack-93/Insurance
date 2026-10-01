@@ -13,9 +13,9 @@ El arreglo de fixture/reset y la prueba autenticada de API quedaron en
 `e8cf8da` (`fix: stabilize synthetic demo certification`). El SHA previo
 `3036171c55c0d9d3ecf872063879976733935f8a` no es certificable en Neon: las
 ramas creadas para él heredaron datos de `main`. La topbar mantiene el badge
-DEMO y el mensaje contractual de bloqueo; el spec móvil los comprueba. Integrar
-el código no autoriza acceso externo: la certificación de recuperación y CI
-remoto siguen pendientes.
+DEMO y el mensaje contractual de bloqueo; el spec móvil los comprueba. El cierre
+se publicó en `main` como `9250bda`; el ajuste del gate de CI quedó en
+`492fab2`. Integrar el código no autoriza acceso externo.
 
 ## Diseño implementado
 
@@ -50,8 +50,24 @@ PASS. Unitarias: 650 PASS, 11 omitidas por requerir PostgreSQL desechable.
 Las pruebas API/browser no se ejecutaron localmente. El spec
 `tests/api/demo-certification.spec.ts` está cableado al job `disposable-tenant`
 con `TENANT_ISOLATION_E2E=1` y comprueba en móvil el badge y el mensaje DEMO;
-sigue pendiente de CI remoto sobre el árbol integrado. Esta verificación local
-no sustituye la certificación Neon ni el backup/restore remoto.
+sigue pendiente de ejecutarse en el job de aislamiento tenant. Esta verificación
+local no sustituye la certificación Neon ni el backup/restore remoto.
+
+## CI y estado de plataforma
+
+El push inicial `9250bda` falló en el escáner estático de compatibilidad
+`Task -> WorkItem`, que clasificaba como escritura runtime una fila sintética
+creada por `scripts/setup-tenant-isolation-fixture.ts`. El fixture exige una
+base desechable; `492fab2` lo clasificó explícitamente como script de fixture.
+La ejecución CI #384 en `492fab2` terminó **success**: el job `quality` pasó.
+Los jobs `tenant-isolation` y `application` se omitieron por ser un evento
+`push`; la configuración los reserva para `workflow_dispatch` o `pull_request`.
+Por eso aún falta la prueba remota RLS/API/browser.
+
+El status Vercel de GitHub figura como **failure**. La conexión disponible de
+Vercel respondió 403 al listar deployments; no pudimos confirmar si existe un
+deployment fallido o si falla únicamente la integración de permisos. Production
+no se considera verificado.
 
 ## Certificación y release
 
@@ -70,10 +86,16 @@ exclusivos del drill. Las comprobaciones de solo lectura confirmaron:
   con el mismo parent LSN `0/1B9D098`.
 - La base `policydesk_cert_97a45cd` existe en ambas ramas. `table-sizes`
   devolvió cero tablas de usuario en las dos; no hay evidencia de fixture,
-  migraciones, backup o restore en ellas. Por tanto, la procedencia quedó
-  validada para el drill, pero todavía no hay certificación de recuperación.
+  migraciones, backup o restore en ellas. La base parte vacía, pero estas ramas
+  llevan el SHA anterior `97a45cd` en el nombre y no certifican `492fab2`.
+  Todavía no hay certificación de recuperación.
 - El coordinador reportó un Blob privado `store_dYfsJwqceS3nQGOI` sin archivos
   y desconectado; ese dato no se verificó con una lectura independiente aquí.
+- Los endpoints Neon observados tienen `disabled=false` y estado `idle`, con
+  `suspended_at` registrado. Es compute en reposo/auto-suspend, no un proyecto
+  deshabilitado ni una prueba de haber alcanzado el límite de proyectos. El
+  recurso temporal se provisionó sin conectar variables a Vercel
+  (`--no-connect --no-env-pull`).
 
 Las dos ramas Neon actuales se nombraron para el SHA anterior `97a45cd`. El
 árbol integrado ahora tiene el commit de código `e8cf8da`; esas ramas siguen
@@ -119,9 +141,11 @@ temporal en la fuente, y ejecutar RLS/concurrencia, auditoría y drift. Preparar
 el destino aislado y recuperar el artifact VERIFIED. `RESTORE_DRILL_APP_SMOKE=0`
 sigue apagado.
 
-Tras completar Neon y CI remoto sobre el SHA integrado, actualizar este estado
-antes de habilitar cualquier acceso DEMO externo. No ejecutar el verificador de
-Production como parte del drill. Antes de escrituras productivas, presentar certificado, backup recuperable,
+La calidad CI pasó en `492fab2`; siguen pendientes CI RLS/API/browser y el
+backup/restore remoto sobre el SHA integrado. Completar esos pasos y actualizar
+este estado antes de habilitar cualquier acceso DEMO externo. No ejecutar el
+verificador de Production como parte del drill. Antes de escrituras productivas,
+presentar certificado, backup recuperable,
 RPO observado, ventana y recuperación para aprobación explícita. Después del
 cutover aprobado: verificador de solo lectura y smoke autenticado, provisión
 DEMO temporal y flag apagado. Credenciales solo para prospecto y destinatario
