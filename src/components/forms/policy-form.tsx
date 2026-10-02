@@ -266,7 +266,7 @@ export function PolicyForm({
             </FormGrid>
 
             <FormField label={selectedPolicyType === "VIDA" ? "Beneficiarios anteriores" : "Beneficiarios / notas de beneficiarios"} htmlFor="beneficiaryInfo" error={errors.beneficiaryInfo?.message}>
-              <Textarea id="beneficiaryInfo" rows={3} {...register("beneficiaryInfo")} readOnly />
+              <Textarea id="beneficiaryInfo" rows={3} {...register("beneficiaryInfo")} readOnly={selectedPolicyType === "VIDA" || selectedPolicyType === "FIANZAS"} />
             </FormField>
 
             <FormField label="Notas" htmlFor="notes" error={errors.notes?.message}>

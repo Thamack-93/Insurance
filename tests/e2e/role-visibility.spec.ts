@@ -83,7 +83,9 @@ test.describe("role visibility smoke tests", () => {
       await insurerLink.click();
       await expect(page).toHaveURL(new RegExp(`/portfolio\\?insurerId=${encodeURIComponent(fixture.insurerId)}`));
       await expect(page.getByRole("link", { name: fixture.clientName, exact: true }).first()).toBeVisible();
-      await expect(page.getByRole("link", { name: fixture.policyNumber, exact: true }).first()).toBeVisible();
+      const policyLink = page.getByRole("link", { name: new RegExp(fixture.policyNumber) }).first();
+      await expect(policyLink).toBeVisible();
+      await expect(policyLink).toHaveAttribute("href", new RegExp(`^/policies/${fixture.policyId}(?:\\?.*)?$`));
     } finally {
       await cleanupPolicyFixture(fixture);
     }

@@ -5,6 +5,7 @@ import {
   emptyPolicyRiskDetails,
   getPolicyRiskDetailEntries,
   policyRiskDetailsSchema,
+  policyInsuredObjectForSave,
   projectPolicyRiskRelations,
   riskDetailsFromExisting,
   summarizePolicyRiskDetails,
@@ -91,5 +92,22 @@ describe("policy risk details", () => {
     const ambiguousAuto = riskDetailsFromExisting("AUTO", null, raw);
     expect(ambiguousAuto?.sourceText).toBe(raw);
     expect(ambiguousAuto?.policyType === "AUTO" && ambiguousAuto.data.vehicles[0].make).toBe("");
+  });
+
+  it("keeps the legacy description when a saved risk envelope has no structured summary", () => {
+    const raw = "Una casa en zona centro";
+    const details = riskDetailsFromExisting("HOGAR", null, raw);
+    expect(policyInsuredObjectForSave(details, raw)).toBe(raw);
+    expect(policyInsuredObjectForSave({ ...details!, sourceText: raw }, null)).toBe(raw);
+  });
+
+  it("uses the structured summary when it contains data and falls back for an empty envelope", () => {
+    const empty = emptyPolicyRiskDetails("AUTO");
+    expect(policyInsuredObjectForSave(empty, "Descripción anterior")).toBe("Descripción anterior");
+    const populated = {
+      ...empty,
+      data: { vehicles: [{ make: "Mazda", model: "CX5", year: "2024", version: "Touring", vin: "", plates: "" }] },
+    };
+    expect(policyInsuredObjectForSave(populated, "Descripción anterior")).toBe("Mazda CX5 2024 Touring");
   });
 });

@@ -13,6 +13,20 @@ const platformBillingMutationsEnabled = vi.hoisted(() => vi.fn());
 const revalidatePath = vi.hoisted(() => vi.fn());
 const BILLING_ORGANIZATION_ID = "org_legacy_singleton_0001";
 
+function billingPeriodDates(date = new Date()) {
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth();
+  const start = new Date(Date.UTC(year, month, 1));
+  const end = new Date(Date.UTC(year, month + 1, 0));
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
+    metricMonth: start,
+    nextStart: new Date(Date.UTC(year, month + 1, 1)).toISOString().slice(0, 10),
+    nextEnd: new Date(Date.UTC(year, month + 2, 0)).toISOString().slice(0, 10),
+  };
+}
+
 const TestAuthError = vi.hoisted(() => class TestAuthError extends Error {});
 
 vi.mock("next/cache", () => ({ revalidatePath }));
@@ -113,23 +127,24 @@ describe.skipIf(!enabled)("platform billing disposable PostgreSQL integration", 
       if (!replacement.ok) throw new Error(replacement.error);
 
       const db = getDb();
+      const billingPeriod = billingPeriodDates();
       expect(await db.organizationSubscription.count({ where: { organizationId: BILLING_ORGANIZATION_ID, status: { in: ["TRIAL", "ACTIVE", "PAST_DUE"] } } })).toBe(1);
       expect(await db.organizationSubscription.count({ where: { organizationId: BILLING_ORGANIZATION_ID, status: "CANCELED" } })).toBe(1);
 
-      const paid = await recordPlatformChargeAction({ requestId: "billing-charge-1", organizationId: BILLING_ORGANIZATION_ID, subscriptionId: replacement.id, periodStart: "2026-08-01", periodEnd: "2026-08-31", amountMinor: "5000", currency: "MXN", status: "PAID", reason: "Cargo mensual autorizado" });
+      const paid = await recordPlatformChargeAction({ requestId: "billing-charge-1", organizationId: BILLING_ORGANIZATION_ID, subscriptionId: replacement.id, periodStart: billingPeriod.start, periodEnd: billingPeriod.end, amountMinor: "5000", currency: "MXN", status: "PAID", reason: "Cargo mensual autorizado" });
       expect(paid.ok).toBe(true);
       if (!paid.ok) throw new Error(paid.error);
-      const pending = await recordPlatformChargeAction({ requestId: "billing-charge-2", organizationId: BILLING_ORGANIZATION_ID, periodStart: "2026-09-01", periodEnd: "2026-09-30", amountMinor: "5000", currency: "MXN", status: "PENDING", reason: "Cargo futuro autorizado" });
+      const pending = await recordPlatformChargeAction({ requestId: "billing-charge-2", organizationId: BILLING_ORGANIZATION_ID, periodStart: billingPeriod.nextStart, periodEnd: billingPeriod.nextEnd, amountMinor: "5000", currency: "MXN", status: "PENDING", reason: "Cargo futuro autorizado" });
       expect(pending.ok).toBe(true);
       if (!pending.ok) throw new Error(pending.error);
       const voided = await transitionPlatformChargeAction({ requestId: "billing-charge-transition-1", chargeId: pending.id, status: "VOID", reason: "Anulación manual autorizada" });
       expect(voided).toMatchObject({ ok: true, id: pending.id });
-      const mismatch = await recordPlatformChargeAction({ requestId: "billing-charge-mismatch", organizationId: BILLING_ORGANIZATION_ID, subscriptionId: replacement.id, periodStart: "2026-08-01", periodEnd: "2026-08-31", amountMinor: "5000", currency: "USD", status: "PENDING", reason: "Moneda incompatible" });
+      const mismatch = await recordPlatformChargeAction({ requestId: "billing-charge-mismatch", organizationId: BILLING_ORGANIZATION_ID, subscriptionId: replacement.id, periodStart: billingPeriod.start, periodEnd: billingPeriod.end, amountMinor: "5000", currency: "USD", status: "PENDING", reason: "Moneda incompatible" });
       expect(mismatch).toEqual({ ok: false, error: "POLICYDESK_BILLING_CURRENCY_MISMATCH" });
 
       const subscriptionRows = await db.organizationSubscription.findMany({ where: { organizationId: BILLING_ORGANIZATION_ID }, select: { status: true, monthlyAmountMinor: true, currency: true, startedAt: true, endsAt: true } });
       const chargeRows = await db.billingCharge.findMany({ where: { organizationId: BILLING_ORGANIZATION_ID }, select: { status: true, amountMinor: true, currency: true, paidAt: true } });
-      const [metric] = buildMonthlyBillingMetrics([new Date("2026-09-01T00:00:00.000Z")], subscriptionRows, chargeRows);
+      const [metric] = buildMonthlyBillingMetrics([billingPeriod.metricMonth], subscriptionRows, chargeRows);
       expect(metric?.mrrByCurrency).toEqual({ MXN: 5000 });
       expect(metric?.cashByCurrency.MXN).toBeGreaterThanOrEqual(5000);
 

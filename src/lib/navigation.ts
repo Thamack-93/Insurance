@@ -80,6 +80,7 @@ const breadcrumbLabels: Record<string, string> = {
   documents: "Documentos",
   "centro-operativo": "Centro Operativo",
   "due-payments": "Recibos",
+  insights: "Insights operativos",
   insurers: "Aseguradoras",
   notifications: "Notificaciones",
   operations: "Operación",
@@ -194,10 +195,12 @@ export const policyNavigation: LocalNavigationItem[] = [
 export const todayNavigation: LocalNavigationItem[] = [
   { label: "Mi día", href: "/today", excludeQueryKeys: ["view"] },
   { label: "Insights", href: "/today?view=insights" },
+  { label: "Alertas operativas", href: "/reports/insights" },
 ];
 
 export const reportsNavigation: LocalNavigationItem[] = [
   { label: "Reportes", href: "/reports", excludeQueryKeys: ["view"] },
+  { label: "Insights operativos", href: "/reports/insights" },
   { label: "Cartera", href: "/portfolio" },
   { label: "Cobranza", href: "/reports?view=collections" },
   { label: "Renovaciones", href: "/reports?view=renewals" },

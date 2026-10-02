@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Pagination } from "@/components/lists/pagination";
-import { businessAddDays, businessStartOfDay, businessToday, formatBusinessDateRelative } from "@/lib/business-dates";
+import { businessAddDays, businessStartOfDay, businessToday, formatBusinessDateInput, formatBusinessDateRelative } from "@/lib/business-dates";
 import { formatDate } from "@/lib/dates";
 import { policyTypeLabel } from "@/lib/status";
 import { claimOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 import { getWorkItemHref } from "@/lib/work-item-navigation";
 import { RenewalBoard } from "@/components/renewals/renewal-board";
 import { getRenewalBoardOwners, loadRenewalBoard } from "@/lib/renewal-board";
-import { readRenewalBoardFilters } from "@/lib/renewal-board.logic";
+import { readRenewalBoardFilters, renewalManualFollowUpWorkItemSourceId } from "@/lib/renewal-board.logic";
 import { Badge } from "@/components/ui/badge";
 import { TableToolbar } from "@/components/tables/table-toolbar";
 import { PRIORITIES, WORK_ITEM_TYPES } from "@/lib/domain-values";
@@ -31,6 +31,7 @@ import { appendReturnTo } from "@/lib/return-to";
 import { buildCanonicalHref } from "@/lib/navigation-redirects";
 import { withTenantTransaction } from "@/lib/organization-context";
 import { SavedQueueControls } from "@/components/queues/saved-queue-controls";
+import { RenewalFollowUpMenu } from "@/components/renewals/renewal-follow-up-menu";
 
 type OperationsView = "all" | "pending" | "renewals" | "renewal-board" | "claims";
 
@@ -92,8 +93,12 @@ function WorkItemRow({ item, returnTo }: { item: WorkQueueItem; returnTo?: strin
     : "Seguimiento pendiente";
   const actionLabel = item.policy && presentation.isRenewal ? "Abrir póliza" : "Abrir pendiente";
   const stateLabel = presentation.state ? operationalStateLabels[presentation.state] : null;
+  const isManualRenewalFollowUp = Boolean(
+    item.policyId && item.sourceType === "Renewal" && item.sourceId === renewalManualFollowUpWorkItemSourceId(item.policyId),
+  );
+  const canEditFromOperations = !isManualRenewalFollowUp && (item.sourceType === "WorkItem" || item.sourceType === "Task" || item.sourceType === null);
   return (
-    <li className="border-b px-4 py-3 last:border-b-0">
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 border-b px-4 py-3 last:border-b-0">
       <Link
         href={href}
         aria-label={`${actionLabel}: ${title}`}
@@ -120,6 +125,22 @@ function WorkItemRow({ item, returnTo }: { item: WorkQueueItem; returnTo?: strin
           <PriorityBadge priority={item.priority} className="px-2 py-0.5 text-[11px]" />
         </div>
       </Link>
+      {isManualRenewalFollowUp && item.policy ? (
+        <RenewalFollowUpMenu
+          policyId={item.policyId ?? ""}
+          policyNumber={item.policy.policyNumber}
+          currentDueDate={item.dueDate ? formatBusinessDateInput(item.dueDate) : null}
+          currentNotes={item.notes}
+        />
+      ) : canEditFromOperations ? (
+        <Link
+          href={appendReturnTo(`/tasks/${item.sourceId ?? item.id}/edit`, returnTo)}
+          className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-9 px-2 text-xs")}
+          aria-label={`Editar pendiente: ${title}`}
+        >
+          Editar
+        </Link>
+      ) : null}
     </li>
   );
 }

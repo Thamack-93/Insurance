@@ -51,11 +51,11 @@ describeDisposable("tenant isolation disposable fixture", () => {
       const contextB = await contextFor(db, "tenant-pedro-gomez");
       const clientsA = await db.$transaction(async (tx) => {
         await assertOrganizationContextInTransaction(tx, contextA, ["OWNER"]);
-        return tx.client.findMany({ where: { id: { in: ["tenant-client-a", "tenant-client-b"] } }, select: { id: true, organizationId: true } });
+        return tx.client.findMany({ where: { organizationId: contextA.organizationId, id: { in: ["tenant-client-a", "tenant-client-b"] } }, select: { id: true, organizationId: true } });
       });
       const clientsB = await db.$transaction(async (tx) => {
         await assertOrganizationContextInTransaction(tx, contextB, ["OWNER"]);
-        return tx.client.findMany({ where: { id: { in: ["tenant-client-a", "tenant-client-b", "tenant-client-pedro"] } }, select: { id: true, organizationId: true } });
+        return tx.client.findMany({ where: { organizationId: contextB.organizationId, id: { in: ["tenant-client-a", "tenant-client-b", "tenant-client-pedro"] } }, select: { id: true, organizationId: true } });
       });
       expect(clientsA).toEqual([expect.objectContaining({ id: "tenant-client-a", organizationId: "org_legacy_singleton_0001" })]);
       expect(clientsB).toEqual([expect.objectContaining({ id: "tenant-client-pedro", organizationId: "org_pedro_gomez_0001" })]);

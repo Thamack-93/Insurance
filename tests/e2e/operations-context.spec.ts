@@ -185,12 +185,16 @@ test.describe("operation queue context", () => {
 
       await riskLink.click();
       await expect(page).toHaveURL(/\/operations\?view=renewals$/);
-      await expect(page.getByRole("link", { name: fixture.policyNumber, exact: true })).toBeVisible();
+      const activePolicyLink = page.getByRole("link", { name: new RegExp(fixture.policyNumber) });
+      await expect(activePolicyLink).toBeVisible();
+      await expect(activePolicyLink).toHaveAttribute("href", new RegExp(`^/policies/${fixture.policyId}(?:\\?.*)?$`));
       await expect(page.getByText("Renovaciones vencidas sin resolver", { exact: true })).toBeVisible();
 
       await db.policy.update({ where: { id: fixture.policyId }, data: { status: "EXPIRED" } });
       await page.goto("/policies?status=EXPIRED");
-      await expect(page.getByRole("link", { name: fixture.policyNumber, exact: true })).toBeVisible();
+      const expiredPolicyLink = page.getByRole("link", { name: new RegExp(fixture.policyNumber) });
+      await expect(expiredPolicyLink).toBeVisible();
+      await expect(expiredPolicyLink).toHaveAttribute("href", `/policies/${fixture.policyId}`);
       await expect(page.getByRole("link", { name: "Vigencias terminadas", exact: true })).toBeVisible();
       await expect(page.getByRole("columnheader", { name: "Fin de vigencia" })).toBeVisible();
       await expect(page.getByRole("cell", { name: /Terminó:/ }).first()).toBeVisible();
@@ -226,7 +230,7 @@ test.describe("operation queue context", () => {
       await authenticatePageAsAdmin(page);
       await page.goto("/operations?view=renewals");
 
-      await expect(page.getByRole("link", { name: fixture.policyNumber, exact: true })).toHaveCount(0);
+      await expect(page.getByRole("link", { name: new RegExp(fixture.policyNumber) })).toHaveCount(0);
       await expect(page.getByText("No hay renovaciones pendientes.", { exact: true })).toBeVisible();
     } finally {
       await cleanupPolicyFixture(fixture);
@@ -272,6 +276,59 @@ test.describe("operation queue context", () => {
           : { count: rows.length };
       }, { timeout: 10_000 }).toEqual({ count: 1, dueDate: customDate, notes: "Llamar después de la junta", policyId: fixture.policyId });
       await expect(card.getByText(/Seguimiento ·/)).toBeVisible({ timeout: 10_000 });
+
+      await card.getByRole("button", { name: `Seguimiento de ${fixture.policyNumber}` }).click();
+      await page.getByRole("menuitem", { name: "Quitar seguimiento", exact: true }).click();
+      const confirmDialog = page.getByRole("alertdialog").filter({ hasText: `Quitar seguimiento de ${fixture.policyNumber}` });
+      await confirmDialog.getByRole("button", { name: "Quitar seguimiento", exact: true }).click();
+      await expect(page.locator(".cn-toast").filter({ hasText: "Seguimiento eliminado." })).toBeVisible({ timeout: 10_000 });
+      await expect.poll(async () => {
+        const item = await db.workItem.findUnique({ where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId } } });
+        return item ? { status: item.status, dueDate: businessDateKey(item.dueDate!) } : null;
+      }, { timeout: 10_000 }).toEqual({ status: "CANCELLED", dueDate: customDate });
+    } finally {
+      await cleanupPolicyFixture(fixture);
+    }
+  });
+
+  test("edits and cancels an ordinary WorkItem from Operations without changing its identity", async ({ page }) => {
+    const db = getTestDb();
+    const fixture = await seedPolicyFixture("OPERATIONS-EDIT-WORKITEM");
+    const sourceId = `e2e-ordinary-work-item-${Date.now()}`;
+    const title = `Pendiente ordinario ${Date.now()}`;
+
+    try {
+      await db.workItem.create({
+        data: {
+          organizationId: TEST_ORGANIZATION_ID,
+          sourceType: "WorkItem",
+          sourceId,
+          workItemType: "TASK",
+          taskType: "GENERAL",
+          status: "OPEN",
+          priority: "MEDIUM",
+          title,
+          entityType: "WorkItem",
+          entityId: sourceId,
+          clientId: fixture.clientId,
+          policyId: fixture.policyId,
+          insurerId: fixture.insurerId,
+          dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        },
+      });
+
+      await authenticatePageAsAdmin(page);
+      await page.goto("/operations?view=pending");
+      await page.getByRole("link", { name: `Editar pendiente: ${title}` }).click();
+      await expect(page).toHaveURL(new RegExp(`/tasks/${sourceId}/edit$`));
+      await page.getByRole("combobox").nth(1).click();
+      await page.getByRole("option", { name: "Cancelado", exact: true }).click();
+      await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
+
+      await expect.poll(async () => {
+        const item = await db.workItem.findUnique({ where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "WorkItem", sourceId } } });
+        return item ? { status: item.status, sourceType: item.sourceType, sourceId: item.sourceId, title: item.title } : null;
+      }, { timeout: 10_000 }).toEqual({ status: "CANCELLED", sourceType: "WorkItem", sourceId, title });
     } finally {
       await cleanupPolicyFixture(fixture);
     }

@@ -12,11 +12,12 @@ import { assertOrganizationContextInTransaction, requireOrganizationContext, typ
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { buildPolicyDeleteBlockedMessage } from "@/lib/policy-delete";
 import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
-import { hasPolicyRiskData, policyRiskDetailsSchema, projectPolicyRiskRelations, summarizePolicyRiskDetails } from "@/lib/policy-risk-details";
+import { closeRenewalFollowUp, closeRenewalManualFollowUp } from "@/lib/renewal-followups";
+import { hasPolicyRiskData, policyInsuredObjectForSave, policyRiskDetailsSchema } from "@/lib/policy-risk-details";
+import { syncPolicyRiskRelations } from "@/lib/policy-risk-relations";
 
 function normalizePolicyInput(values: PolicyFormValues) {
   const parsedRiskDetails = policyRiskDetailsSchema.safeParse(values.riskDetails);
-  const riskSummary = parsedRiskDetails.success ? summarizePolicyRiskDetails(parsedRiskDetails.data) : null;
   return {
     policyNumber: values.policyNumber.trim(),
     clientId: values.clientId,
@@ -29,7 +30,7 @@ function normalizePolicyInput(values: PolicyFormValues) {
     currency: values.currency,
     paymentFrequency: values.paymentFrequency,
     paymentPlan: normalizeOptionalText(values.paymentPlan),
-    insuredObject: normalizeOptionalText(riskSummary ?? values.insuredObject),
+    insuredObject: normalizeOptionalText(policyInsuredObjectForSave(parsedRiskDetails.success ? parsedRiskDetails.data : null, values.insuredObject)),
     riskDetails: parsedRiskDetails.success && hasPolicyRiskData(parsedRiskDetails.data) ? parsedRiskDetails.data as Prisma.InputJsonValue : Prisma.DbNull,
     riskDetailsReviewRequired: parsedRiskDetails.success && hasPolicyRiskData(parsedRiskDetails.data) ? false : undefined,
     beneficiaryInfo: normalizeOptionalText(values.beneficiaryInfo),
@@ -38,26 +39,19 @@ function normalizePolicyInput(values: PolicyFormValues) {
   };
 }
 
-async function syncPolicyRiskRelations(
-  tx: Prisma.TransactionClient,
-  organizationId: string,
-  policyId: string,
-  riskDetails: unknown,
-) {
-  if (!policyRiskDetailsSchema.safeParse(riskDetails).success) return;
-  const projected = projectPolicyRiskRelations(riskDetails);
-  const policyType = policyRiskDetailsSchema.parse(riskDetails).policyType;
-  if (["AUTO", "HOGAR", "DANOS", "EMPRESARIAL"].includes(policyType)) {
-    await tx.policyInsuredAsset.deleteMany({ where: { organizationId, policyId } });
-  }
-  if (["GMM", "VIDA", "ACCIDENTES"].includes(policyType)) {
-    await tx.policyInsuredParty.deleteMany({ where: { organizationId, policyId } });
-  }
-  if (projected.assets.length) {
-    await tx.policyInsuredAsset.createMany({ data: projected.assets.map((asset) => ({ ...asset, organizationId, policyId })) });
-  }
-  if (projected.insuredParties.length) {
-    await tx.policyInsuredParty.createMany({ data: projected.insuredParties.map((party) => ({ ...party, organizationId, policyId })) });
+async function closeRenewalWorkItems(tx: Prisma.TransactionClient, organizationId: string, policyId: string, userId: string) {
+  await closeRenewalFollowUp(organizationId, policyId, userId, tx);
+  const manualFollowUp = await closeRenewalManualFollowUp(organizationId, policyId, userId, tx);
+  if (manualFollowUp) {
+    await writeActivityLog({
+      entityType: "Policy",
+      entityId: policyId,
+      action: "RENEWAL_FOLLOWUP_CLOSED_TERMINAL",
+      newValue: { status: "RENEWED" },
+      organizationId,
+      userId,
+      db: tx,
+    });
   }
 }
 
@@ -174,7 +168,7 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
           updatedById: userId,
         },
       });
-      await syncPolicyRiskRelations(tx, context.organizationId, createdPolicy.id, normalized.riskDetails);
+      await syncPolicyRiskRelations(tx, context.organizationId, createdPolicy.id, parsed.data.riskDetails);
 
       if (renewalSource) {
         const receipts = await syncAutoCaptureReceipts(tx, {
@@ -212,6 +206,7 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
             updatedById: userId,
           },
         });
+        await closeRenewalWorkItems(tx, context.organizationId, renewalSource.id, userId);
       }
 
       await writeActivityLog({
@@ -239,6 +234,9 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
       "/today",
       "/portfolio",
       "/renewals",
+      "/operations",
+      "/tasks",
+      "/activity",
       "/risks",
       "/data-quality",
     ]);
@@ -314,7 +312,7 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
           updatedById: userId,
         },
       });
-      await syncPolicyRiskRelations(tx, context.organizationId, id, normalized.riskDetails);
+      await syncPolicyRiskRelations(tx, context.organizationId, id, parsed.data.riskDetails);
 
       if (renewalChanged) {
         if (previousRenewedFromPolicyId) {
@@ -340,6 +338,7 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
               updatedById: userId,
             },
           });
+          await closeRenewalWorkItems(tx, context.organizationId, nextRenewalSource.id, userId);
         } else {
           await tx.policy.update({
             where: { id, organizationId: context.organizationId },
@@ -385,6 +384,9 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
       "/today",
       "/portfolio",
       "/renewals",
+      "/operations",
+      "/tasks",
+      "/activity",
       "/risks",
       "/data-quality",
     ]);

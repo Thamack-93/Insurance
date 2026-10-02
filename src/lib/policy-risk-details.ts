@@ -82,6 +82,19 @@ export function summarizePolicyRiskDetails(value: unknown): string | null {
   }
 }
 
+/**
+ * Keeps the historical free-text description when structured fields are empty
+ * or the legacy value could not be converted confidently.
+ */
+export function policyInsuredObjectForSave(value: unknown, fallback: string | null | undefined): string | null {
+  const summary = summarizePolicyRiskDetails(value)?.trim();
+  if (summary) return summary;
+
+  const parsed = policyRiskDetailsSchema.safeParse(value);
+  const sourceText = parsed.success ? parsed.data.sourceText?.trim() : "";
+  return sourceText || fallback?.trim() || null;
+}
+
 export function hasPolicyRiskData(value: unknown): boolean {
   const parsed = policyRiskDetailsSchema.safeParse(value);
   if (!parsed.success) return false;

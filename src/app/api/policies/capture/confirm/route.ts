@@ -11,6 +11,7 @@ import { assertClientOrganizationAccess, assertPolicyOrganizationAccess } from "
 import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { inferClientType, type PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
 import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
+import { closeRenewalFollowUp, closeRenewalManualFollowUp } from "@/lib/renewal-followups";
 import { Prisma } from "@/generated/prisma/client";
 import { convertLegacyPolicyDescription, hasPolicyRiskData, policyRiskDetailsSchema, projectPolicyRiskRelations, riskDetailsFromExisting, summarizePolicyRiskDetails } from "@/lib/policy-risk-details";
 import { revalidatePaths } from "@/lib/mutation-utils";
@@ -403,6 +404,19 @@ export async function POST(request: NextRequest) {
           data: { status: "RENEWED", updatedById: context.userId },
         });
       }
+      await closeRenewalFollowUp(context.organizationId, sourcePolicy.id, context.userId, tx);
+      const manualFollowUp = await closeRenewalManualFollowUp(context.organizationId, sourcePolicy.id, context.userId, tx);
+      if (manualFollowUp) {
+        await writeActivityLog({
+          organizationId: context.organizationId,
+          entityType: "Policy",
+          entityId: sourcePolicy.id,
+          action: "RENEWAL_FOLLOWUP_CLOSED_TERMINAL",
+          newValue: { status: "RENEWED" },
+          userId: context.userId,
+          db: tx,
+        });
+      }
 
       await writeActivityLog({
         organizationId: context.organizationId,
@@ -449,6 +463,9 @@ export async function POST(request: NextRequest) {
       "/today",
       "/portfolio",
       "/renewals",
+      "/operations",
+      "/tasks",
+      "/activity",
       "/risks",
       "/data-quality",
     ]);
