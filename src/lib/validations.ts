@@ -14,6 +14,7 @@ import {
   TASK_STATUSES,
   TASK_TYPES,
 } from "@/lib/domain-values";
+import { policyRiskDetailsSchema } from "@/lib/policy-risk-details";
 
 const optionalText = z.string().max(4000).optional().or(z.literal(""));
 const optionalEmail = z.string().email("Email invalido.").optional().or(z.literal(""));
@@ -82,6 +83,7 @@ export const policySchema = z
     paymentFrequency: z.enum(PAYMENT_FREQUENCIES),
     paymentPlan: optionalText,
     insuredObject: optionalText,
+    riskDetails: policyRiskDetailsSchema.optional(),
     beneficiaryInfo: optionalText,
     notes: optionalText,
     renewedFromPolicyId: z.string().trim().optional().or(z.literal("")),
@@ -93,6 +95,13 @@ export const policySchema = z
   .refine((values) => daysBetweenDateInputs(values.startDate, values.endDate) <= 366, {
     message: "La vigencia no puede superar 366 días. Divide contratos multianuales por anualidades.",
     path: ["endDate"],
+  })
+  .superRefine((values, context) => {
+    if (values.riskDetails === undefined || values.riskDetails === null) return;
+    const parsed = policyRiskDetailsSchema.safeParse(values.riskDetails);
+    if (!parsed.success || parsed.data.policyType !== values.policyType) {
+      context.addIssue({ code: "custom", path: ["riskDetails"], message: "Revisa que los datos del riesgo correspondan al ramo seleccionado." });
+    }
   });
 
 export const receiptSchema = z

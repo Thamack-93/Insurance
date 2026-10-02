@@ -4,7 +4,7 @@ import { writeActivityLog } from "@/lib/activity-log";
 import { AuthError } from "@/lib/auth";
 import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
 import { resolvePolicyFamilyRootId } from "@/lib/policy-families";
-import type { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import { policySchema, type PolicyFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { assertClientOrganizationAccess, assertPolicyOrganizationAccess } from "@/lib/portfolio-access";
@@ -12,8 +12,11 @@ import { assertOrganizationContextInTransaction, requireOrganizationContext, typ
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
 import { buildPolicyDeleteBlockedMessage } from "@/lib/policy-delete";
 import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
+import { hasPolicyRiskData, policyRiskDetailsSchema, projectPolicyRiskRelations, summarizePolicyRiskDetails } from "@/lib/policy-risk-details";
 
 function normalizePolicyInput(values: PolicyFormValues) {
+  const parsedRiskDetails = policyRiskDetailsSchema.safeParse(values.riskDetails);
+  const riskSummary = parsedRiskDetails.success ? summarizePolicyRiskDetails(parsedRiskDetails.data) : null;
   return {
     policyNumber: values.policyNumber.trim(),
     clientId: values.clientId,
@@ -26,11 +29,36 @@ function normalizePolicyInput(values: PolicyFormValues) {
     currency: values.currency,
     paymentFrequency: values.paymentFrequency,
     paymentPlan: normalizeOptionalText(values.paymentPlan),
-    insuredObject: normalizeOptionalText(values.insuredObject),
+    insuredObject: normalizeOptionalText(riskSummary ?? values.insuredObject),
+    riskDetails: parsedRiskDetails.success && hasPolicyRiskData(parsedRiskDetails.data) ? parsedRiskDetails.data as Prisma.InputJsonValue : Prisma.DbNull,
+    riskDetailsReviewRequired: parsedRiskDetails.success && hasPolicyRiskData(parsedRiskDetails.data) ? false : undefined,
     beneficiaryInfo: normalizeOptionalText(values.beneficiaryInfo),
     notes: normalizeOptionalText(values.notes),
     renewedFromPolicyId: optionalRelationId(values.renewedFromPolicyId),
   };
+}
+
+async function syncPolicyRiskRelations(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  policyId: string,
+  riskDetails: unknown,
+) {
+  if (!policyRiskDetailsSchema.safeParse(riskDetails).success) return;
+  const projected = projectPolicyRiskRelations(riskDetails);
+  const policyType = policyRiskDetailsSchema.parse(riskDetails).policyType;
+  if (["AUTO", "HOGAR", "DANOS", "EMPRESARIAL"].includes(policyType)) {
+    await tx.policyInsuredAsset.deleteMany({ where: { organizationId, policyId } });
+  }
+  if (["GMM", "VIDA", "ACCIDENTES"].includes(policyType)) {
+    await tx.policyInsuredParty.deleteMany({ where: { organizationId, policyId } });
+  }
+  if (projected.assets.length) {
+    await tx.policyInsuredAsset.createMany({ data: projected.assets.map((asset) => ({ ...asset, organizationId, policyId })) });
+  }
+  if (projected.insuredParties.length) {
+    await tx.policyInsuredParty.createMany({ data: projected.insuredParties.map((party) => ({ ...party, organizationId, policyId })) });
+  }
 }
 
 type RenewalPolicyRecord = {
@@ -146,6 +174,7 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
           updatedById: userId,
         },
       });
+      await syncPolicyRiskRelations(tx, context.organizationId, createdPolicy.id, normalized.riskDetails);
 
       if (renewalSource) {
         const receipts = await syncAutoCaptureReceipts(tx, {
@@ -285,6 +314,7 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
           updatedById: userId,
         },
       });
+      await syncPolicyRiskRelations(tx, context.organizationId, id, normalized.riskDetails);
 
       if (renewalChanged) {
         if (previousRenewedFromPolicyId) {

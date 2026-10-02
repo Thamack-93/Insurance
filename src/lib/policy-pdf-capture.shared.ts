@@ -1,5 +1,6 @@
 import { addMonths } from "date-fns";
 import type { SelectOption } from "@/lib/domain-options";
+import { convertLegacyPolicyDescription, type PolicyRiskDetails } from "@/lib/policy-risk-details";
 
 export type PolicyPdfCaptureDraft = {
   policyNumber: string;
@@ -22,6 +23,7 @@ export type PolicyPdfCaptureDraft = {
   currency: string;
   requestNumber: string | null;
   insuredObject: string | null;
+  riskDetails?: PolicyRiskDetails | null;
   beneficiaryInfo: string | null;
   notes: string | null;
   sourcePolicyNumber: string | null;
@@ -1338,6 +1340,7 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
       ? null
       : extractInlineValue(lines, ["Objeto asegurado", "Bien asegurado"]) ??
         (policyType === "AUTO" ? parseAutoInsuredObject(lines) : null);
+  const riskDetails = convertLegacyPolicyDescription(policyType, insuredObject, serialNumber).riskDetails;
   const beneficiaryCandidate = extractInlineValue(lines, ["Beneficiarios", "Beneficiario"]);
   const beneficiaryInfo =
     beneficiaryCandidate && beneficiaryCandidate.length <= 180 && !/^[\W_]+$/.test(beneficiaryCandidate) && !/^(en nuestra|nuestra|coberturas|condiciones|pol[ií]za|seguros)/i.test(beneficiaryCandidate)
@@ -1368,6 +1371,7 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
     currency: "MXN",
     requestNumber,
     insuredObject,
+    riskDetails,
     beneficiaryInfo,
     notes,
     sourcePolicyNumber: parseSourcePolicyNumber(lines, fullText, policyNumber),

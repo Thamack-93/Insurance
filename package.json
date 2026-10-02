@@ -15,6 +15,7 @@
     "db:migrate:singleton-production": "node scripts/migrate-singleton-production.mjs",
     "db:check-drift": "node scripts/check-prisma-drift.mjs",
     "backfill:organizations": "node --import tsx scripts/backfill-organizations.ts",
+    "backfill:policy-risk-details": "node --import tsx scripts/backfill-policy-risk-details.ts",
     "configure:pedro-organization": "node --import tsx scripts/configure-pedro-organization.ts",
     "backups:attribute-legacy": "node --import tsx scripts/attribute-legacy-backups.ts",
     "check:tenant-backfill": "node --import tsx scripts/check-tenant-backfill.ts",

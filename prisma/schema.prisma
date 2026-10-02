@@ -467,36 +467,38 @@ model Insurer {
 }
 
 model Policy {
-  organizationId      String
-  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id                  String       @id @default(cuid())
-  policyNumber        String
-  clientId            String
-  insurerId           String
-  policyType          String
-  status              PolicyStatus @default(ACTIVE)
-  startDate           DateTime
-  endDate             DateTime
-  premiumAmount       Decimal
-  currency            String       @default("MXN")
-  paymentFrequency    String
-  paymentPlan         String?
-  insuredObject       String?
-  beneficiaryInfo     String?
-  notes               String?
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
-  createdById         String?
-  updatedById         String?
-  familyRootId        String?
-  renewedFromPolicyId String?
-  isMultiYearContract Boolean      @default(false)
-  cancellationReason  String?
-  cancellationBatchId String?
-  cancelledAt         DateTime?
-  renewalStage        RenewalStage @default(PENDING)
-  renewalStageAt      DateTime?
-  renewalStageById    String?
+  organizationId            String
+  organization              Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  id                        String       @id @default(cuid())
+  policyNumber              String
+  clientId                  String
+  insurerId                 String
+  policyType                String
+  status                    PolicyStatus @default(ACTIVE)
+  startDate                 DateTime
+  endDate                   DateTime
+  premiumAmount             Decimal
+  currency                  String       @default("MXN")
+  paymentFrequency          String
+  paymentPlan               String?
+  insuredObject             String?
+  riskDetails               Json?
+  riskDetailsReviewRequired Boolean      @default(false)
+  beneficiaryInfo           String?
+  notes                     String?
+  createdAt                 DateTime     @default(now())
+  updatedAt                 DateTime     @updatedAt
+  createdById               String?
+  updatedById               String?
+  familyRootId              String?
+  renewedFromPolicyId       String?
+  isMultiYearContract       Boolean      @default(false)
+  cancellationReason        String?
+  cancellationBatchId       String?
+  cancelledAt               DateTime?
+  renewalStage              RenewalStage @default(PENDING)
+  renewalStageAt            DateTime?
+  renewalStageById          String?
 
   renewalStageBy              User?                        @relation("PolicyRenewalStageBy", fields: [renewalStageById], references: [id], onDelete: SetNull)
   client                      Client                       @relation(fields: [clientId], references: [id], onDelete: Cascade)
@@ -539,6 +541,7 @@ model Policy {
   @@index([renewalStage, endDate])
   @@index([organizationId, status, endDate])
   @@index([organizationId, status, insurerId])
+  @@index([organizationId, riskDetailsReviewRequired])
 }
 
 model Receipt {

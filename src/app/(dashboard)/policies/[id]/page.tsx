@@ -25,6 +25,7 @@ import { getPolicyFamilyPolicies } from "@/lib/policy-families";
 import { policyTypeLabel } from "@/lib/status";
 import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { normalizeReturnTo } from "@/lib/return-to";
+import { getPolicyRiskDetailEntries } from "@/lib/policy-risk-details";
 
 const frequencyLabels: Record<string, string> = {
   MONTHLY: "Mensual",
@@ -388,6 +389,19 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
                   </div>
                 </div>
               </SectionCard>
+              {getPolicyRiskDetailEntries(policy.riskDetails).length || policy.riskDetailsReviewRequired ? (
+                <SectionCard title="Datos específicos del riesgo">
+                  <div className="space-y-3 px-4 py-3 text-sm">
+                    {policy.riskDetailsReviewRequired ? <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">La descripción histórica requiere revisión manual. Se conserva el texto original.</p> : null}
+                    {getPolicyRiskDetailEntries(policy.riskDetails).map((entry) => (
+                      <div key={`${entry.label}-${entry.value}`} className="grid gap-1 sm:grid-cols-[minmax(10rem,0.7fr)_1fr]">
+                        <p className="text-muted-foreground">{entry.label}</p>
+                        <p className="break-words font-medium text-foreground">{entry.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                </SectionCard>
+              ) : null}
               <SectionCard title="Asegurados y activos">
                 <div className="space-y-4 px-4 py-3 text-sm">
                   <div>
