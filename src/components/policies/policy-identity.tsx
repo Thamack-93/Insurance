@@ -14,7 +14,7 @@ export function PolicyIdentity({
   return (
     <span className={`block min-w-0 ${className}`}>
       <span className="block truncate font-medium text-foreground">{policyNumber}</span>
-      <span className="block max-w-64 truncate text-xs font-normal text-muted-foreground" title={description}>
+      <span className="block max-w-64 truncate font-sans text-xs font-normal text-muted-foreground" title={description}>
         {description}
       </span>
     </span>

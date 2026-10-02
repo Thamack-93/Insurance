@@ -233,8 +233,13 @@ export function PolicyForm({
                 <Input id="paymentPlan" {...register("paymentPlan")} />
               </FormField>
 
-              <FormField label="Objeto asegurado" htmlFor="insuredObject" error={errors.insuredObject?.message}>
-                <Input id="insuredObject" {...register("insuredObject")} />
+              <FormField
+                label="Objeto asegurado"
+                htmlFor="insuredObject"
+                error={errors.insuredObject?.message}
+                hint="En autos, incluye marca, modelo, año y versión; en otros ramos, describe el bien o su ubicación."
+              >
+                <Input id="insuredObject" placeholder="Descripción breve del bien asegurado" {...register("insuredObject")} />
               </FormField>
             </FormGrid>
 

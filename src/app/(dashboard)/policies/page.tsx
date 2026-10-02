@@ -157,8 +157,8 @@ export default async function PoliciesPage({
   const portfolioValue = toNumber(portfolioAgg._sum.premiumAmount ?? 0);
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
+    <div className="flex min-w-0 flex-col gap-6">
+      <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-6">
         <PageHeader
           eyebrow="CRM"
           title="Pólizas"
@@ -225,6 +225,7 @@ export default async function PoliciesPage({
 
         <SectionCard
           title="Inventario"
+          className="min-w-0"
           description={
             statusFilter === "EXPIRED"
               ? "Vigencias terminadas para consulta histórica; esto no indica por sí solo que una renovación haya quedado sin resolver."

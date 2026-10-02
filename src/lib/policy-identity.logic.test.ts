@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getPolicyObjectDescription, getPolicyOptionLabel, policyObjectSearchTerms } from "@/lib/policy-identity";
+import { cleanPolicyObjectDescription, getPolicyObjectDescription, getPolicyOptionLabel, policyObjectSearchTerms } from "@/lib/policy-identity";
 
 describe("getPolicyObjectDescription", () => {
   it("prefers the generic insured object when present", () => {
@@ -18,6 +18,17 @@ describe("getPolicyObjectDescription", () => {
     })).toBe("Camión de reparto y 1 más");
   });
 
+  it("cleans registry-style vehicle text and removes non-descriptive fragments", () => {
+    expect(cleanPolicyObjectDescription("BUICK, ENCORE, 2016, LEATHERETTE N 5"))
+      .toBe("Buick Encore · 2016 · Leatherette N 5");
+    expect(cleanPolicyObjectDescription("MAZDA, CX7, 2009, GRAND TOURING 4X · Modelo 2009 · Serie 1G123"))
+      .toBe("Mazda CX7 · 2009 · Grand Touring 4X · Serie 1G123");
+    expect(getPolicyObjectDescription({
+      insuredObject: "NO ESPECIFICADA, NO ESPECIFICADA, ...",
+      insuredAssets: [{ description: "MAZDA, CX7, 2009, GRAND TOURING 4X", isPrimary: true }],
+    })).toBe("Mazda CX7 · 2009 · Grand Touring 4X");
+  });
+
   it("omits duplicate descriptions and reports when no description exists", () => {
     expect(getPolicyObjectDescription({
       insuredAssets: [
@@ -25,6 +36,8 @@ describe("getPolicyObjectDescription", () => {
         { description: " equipo MÉDICO " },
       ],
     })).toBe("Equipo médico");
+    expect(getPolicyObjectDescription({ insuredObject: "NO ESPECIFICADA, NO ESPECIFICADO" }))
+      .toBe("Sin objeto asegurado descrito");
     expect(getPolicyObjectDescription({ insuredObject: "  ", insuredAssets: [] })).toBe("Sin objeto asegurado descrito");
   });
 
