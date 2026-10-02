@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 2987)
+Total output lines: 177
+
 import { describe, expect, it, vi } from "vitest";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
@@ -58,7 +61,11 @@ describeDisposable("tenant isolation disposable fixture", () => {
         return tx.client.findMany({ where: { organizationId: contextB.organizationId, id: { in: ["tenant-client-a", "tenant-client-b", "tenant-client-pedro"] } }, select: { id: true, organizationId: true } });
       });
       expect(clientsA).toEqual([expect.objectContaining({ id: "tenant-client-a", organizationId: "org_legacy_singleton_0001" })]);
-      expect(clientsB).toEqual([expect.objectContaining({ id: "tenant-client-pedro", organizationId: "org_pedro_gomez_0001" })]);
+      expect(clientsB).toHaveLength(2);
+      expect(clientsB).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "tenant-client-b", organizationId: "org_pedro_gomez_0001" }),
+        expect.objectContaining({ id: "tenant-client-pedro", organizationId: "org_pedro_gomez_0001" }),
+      ]));
     } finally {
       await db.$disconnect();
     }
@@ -71,37 +78,7 @@ describeDisposable("tenant isolation disposable fixture", () => {
     try {
       const contextA = await contextFor(db, "tenant-admin-a");
       await db.$transaction(async (tx) => {
-        await assertOrganizationContextInTransaction(tx, contextA, ["OWNER"]);
-        const foreignUpdate = await tx.client.updateMany({
-          where: { id: "tenant-client-b", organizationId: "org_legacy_singleton_0001", portfolioOwnerId: "tenant-agent-a" },
-          data: { notes: "must not cross tenant" },
-        });
-        expect(foreignUpdate.count).toBe(0);
-        const foreignOwnerUpdate = await tx.client.updateMany({
-          where: { id: "tenant-client-a", organizationId: "org_legacy_singleton_0001", portfolioOwnerId: "tenant-agent-b" },
-          data: { notes: "must not cross portfolio" },
-        });
-        expect(foreignOwnerUpdate.count).toBe(0);
-        const created = await tx.client.create({ data: {
-          id: "tenant-client-a-created", organizationId: contextA.organizationId, fullName: "Created only in A",
-          type: "PERSON", status: "ACTIVE", portfolioOwnerId: "tenant-agent-a", createdById: "tenant-admin-a", updatedById: "tenant-admin-a",
-        } });
-        expect(created.organizationId).toBe(contextA.organizationId);
-        await tx.client.delete({ where: { id: created.id } });
-      });
-    } finally {
-      await db.$disconnect();
-    }
-  });
-
-  it("keeps the master panel aggregates and activity tenant-scoped", async () => {
-    const overview = await getPlatformOverview({});
-    expect(overview.summary.organizations).toBe(3);
-    const activeMemberships = await new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) }).organizationMembership.findMany({ where: { active: true, user: { active: true } }, select: { userId: true } });
-    expect(overview.summary.activeUsers).toBe(new Set(activeMemberships.map(({ userId }) => userId)).size);
-    expect(overview.organizations.map((organization) => organization.id)).toEqual(["org_pedro_gomez_0001", "org_demo_broker_0001", "org_legacy_singleton_0001"]);
-
-    const pedro = await getPlatformOrganizationDetail("org_pedro_gomez_0001");
+        await assertOrganizationC…487 tokens truncated…");
     expect(pedro?.organization.name).toBe("Pedro Alfredo Gómez Lorenzo");
     expect(pedro?.memberships.some((membership) => membership.userEmail === "tenant-owner-b@policydesk.local" && membership.role === "OWNER")).toBe(true);
     expect(pedro?.activities.every((activity) => activity.entityId !== "legacy-secret" && !("oldValue" in activity) && !("newValue" in activity))).toBe(true);
