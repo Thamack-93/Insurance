@@ -6,6 +6,7 @@ import {
   getTestDb,
   seedPolicyFixture,
 } from "../helpers/db";
+import { captureServerAction } from "../helpers/capture-server-action";
 
 test.describe("administración de usuarios", () => {
   test("elimina una cuenta inactiva y conserva su cartera operativa", async ({ page }) => {
@@ -32,7 +33,8 @@ test.describe("administración de usuarios", () => {
       await row.getByTitle("Eliminar usuario").click();
       await page.getByLabel("Reasignar cartera").click();
       await page.getByRole("option", { name: new RegExp(replacementEmail) }).click();
-      await page.getByRole("button", { name: "Eliminar usuario", exact: true }).click();
+      const action = await captureServerAction(page, () => page.getByRole("button", { name: "Eliminar usuario", exact: true }).click());
+      console.log("User deletion server action:", action);
       await expect(row).toHaveCount(0);
 
       await expect

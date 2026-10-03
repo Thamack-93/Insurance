@@ -7,6 +7,7 @@ import {
   authenticatePageAsAdmin,
   type SeededReceipt,
 } from "../helpers/db";
+import { captureServerAction } from "../helpers/capture-server-action";
 
 test.describe("Quick payment dialog (/receipts cobrar tab)", () => {
   let seeded: SeededReceipt | undefined;
@@ -49,7 +50,8 @@ test.describe("Quick payment dialog (/receipts cobrar tab)", () => {
     await expect(page.getByText(currentSeeded.receiptNumber).first()).toBeVisible();
 
     // Confirm payment — primary button starts with "Pagar " followed by the formatted amount.
-    await page.getByRole("button", { name: /^pagar\s/i }).click();
+    const action = await captureServerAction(page, () => page.getByRole("button", { name: /^pagar\s/i }).click());
+    console.log("Quick payment server action:", action);
 
     // Dialog closes after success.
     await expect(page.getByRole("dialog")).toBeHidden({ timeout: 10_000 });

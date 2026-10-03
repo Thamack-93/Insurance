@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { authenticatePageAsAdmin, cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../helpers/db";
+import { captureServerAction } from "../helpers/capture-server-action";
 
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
 
@@ -19,7 +20,8 @@ test.describe("structured policy risk details", () => {
       await page.goto(`/policies/${fixture.policyId}/edit`);
       await expect(page.locator("#insuredObject")).toHaveValue(raw);
       await page.getByLabel("Notas", { exact: true }).fill("Cambio ajeno a la descripción histórica");
-      await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
+      const action = await captureServerAction(page, () => page.getByRole("button", { name: "Guardar cambios", exact: true }).click());
+      console.log("Policy legacy edit server action:", action);
       await expect.poll(async () => {
         const policy = await db.policy.findUnique({ where: { id: fixture.policyId }, select: { insuredObject: true, notes: true } });
         return policy ? { insuredObject: policy.insuredObject, notes: policy.notes } : null;
@@ -67,7 +69,8 @@ test.describe("structured policy risk details", () => {
       const beneficiaryNotes = page.getByLabel("Beneficiarios / notas de beneficiarios", { exact: true });
       await expect(beneficiaryNotes).toBeEditable();
       await beneficiaryNotes.fill("Notas de beneficiario para GMM");
-      await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
+      const action = await captureServerAction(page, () => page.getByRole("button", { name: "Guardar cambios", exact: true }).click());
+      console.log("Policy risk change server action:", action);
       await expect.poll(async () => {
         const [policy, assets, parties] = await Promise.all([
           db.policy.findUnique({ where: { id: fixture.policyId }, select: { policyType: true, insuredObject: true, beneficiaryInfo: true } }),

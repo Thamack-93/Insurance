@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { authenticatePageAsAdmin, cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../helpers/db";
 import { expectMutationSuccessToast } from "../helpers/assert-mutation-toast";
+import { captureServerAction } from "../helpers/capture-server-action";
 
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
 
@@ -322,9 +323,10 @@ test.describe("operation queue context", () => {
       await page.goto("/operations?view=pending");
       await page.getByRole("link", { name: `Editar pendiente: ${title}` }).click();
       await expect(page).toHaveURL((url) => url.pathname === `/tasks/${sourceId}/edit`);
-      await page.getByRole("combobox", { name: "Estado", exact: true }).click();
+      await page.getByLabel("Estado", { exact: true }).click();
       await page.getByRole("option", { name: "Cancelado", exact: true }).click();
-      await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
+      const action = await captureServerAction(page, () => page.getByRole("button", { name: "Guardar cambios", exact: true }).click());
+      console.log("WorkItem update server action:", action);
 
       await expect.poll(async () => {
         const item = await db.workItem.findUnique({ where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "WorkItem", sourceId } } });

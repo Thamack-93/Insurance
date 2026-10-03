@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { authenticatePageAsAdmin, cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../helpers/db";
+import { captureServerAction } from "../helpers/capture-server-action";
 
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
 
@@ -51,7 +52,8 @@ test("creating a linked renewal closes both source follow-ups in the policy tran
     await authenticatePageAsAdmin(page);
     await page.goto(`/policies/new?renewalFrom=${fixture.policyId}`);
     await page.locator("#policyNumber").fill(renewedPolicyNumber);
-    await page.getByRole("button", { name: "Crear póliza", exact: true }).click();
+    const action = await captureServerAction(page, () => page.getByRole("button", { name: "Crear póliza", exact: true }).click());
+    console.log("Policy renewal server action:", action);
     await expect.poll(async () => {
       const [source, automatic, manual] = await Promise.all([
         db.policy.findUnique({ where: { id: fixture.policyId }, select: { status: true } }),
