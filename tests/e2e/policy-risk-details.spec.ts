@@ -20,6 +20,7 @@ test.describe("structured policy risk details", () => {
       await expect(page.locator("#insuredObject")).toHaveValue(raw);
       await page.getByLabel("Notas", { exact: true }).fill("Cambio ajeno a la descripción histórica");
       await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
+      await expect(page.locator(".cn-toast").first()).toContainText(/p[oó]liza actualizada/i, { timeout: 10_000 });
 
       await expect.poll(async () => {
         const policy = await db.policy.findUnique({ where: { id: fixture.policyId }, select: { insuredObject: true, notes: true } });
@@ -69,6 +70,7 @@ test.describe("structured policy risk details", () => {
       await expect(beneficiaryNotes).toBeEditable();
       await beneficiaryNotes.fill("Notas de beneficiario para GMM");
       await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
+      await expect(page.locator(".cn-toast").first()).toContainText(/p[oó]liza actualizada/i, { timeout: 10_000 });
 
       await expect.poll(async () => {
         const [policy, assets, parties] = await Promise.all([

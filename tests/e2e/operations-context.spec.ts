@@ -320,7 +320,7 @@ test.describe("operation queue context", () => {
       await authenticatePageAsAdmin(page);
       await page.goto("/operations?view=pending");
       await page.getByRole("link", { name: `Editar pendiente: ${title}` }).click();
-      await expect(page).toHaveURL(new RegExp(`/tasks/${sourceId}/edit$`));
+      await expect(page).toHaveURL((url) => url.pathname === `/tasks/${sourceId}/edit`);
       await page.getByRole("combobox").nth(1).click();
       await page.getByRole("option", { name: "Cancelado", exact: true }).click();
       await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();

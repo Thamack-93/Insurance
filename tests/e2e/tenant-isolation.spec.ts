@@ -195,8 +195,8 @@ test("demo broker account stays inside synthetic demo data", async ({ page }) =>
   await page.getByLabel("Contraseña").fill("tenant-fixture-password");
   await page.getByRole("button", { name: "Iniciar sesión" }).click();
   await expect(page).toHaveURL(/\/today$/);
-  await page.goto("/clients/tenant-client-c");
-  await expect(page.getByText("Overlap Client").first()).toBeVisible();
+  await page.goto("/clients/org_demo_broker_0001:demo:client:001");
+  await expect(page.getByText("DEMO Ana López").first()).toBeVisible();
   await page.goto("/clients/tenant-client-pedro");
   await expect(page.getByText("Pedro Client Private").first()).not.toBeVisible();
 });

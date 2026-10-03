@@ -52,6 +52,7 @@ test("creating a linked renewal closes both source follow-ups in the policy tran
     await page.goto(`/policies/new?renewalFrom=${fixture.policyId}`);
     await page.locator("#policyNumber").fill(renewedPolicyNumber);
     await page.getByRole("button", { name: "Crear póliza", exact: true }).click();
+    await expect(page.locator(".cn-toast").first()).toContainText(/p[oó]liza creada/i, { timeout: 10_000 });
 
     await expect.poll(async () => {
       const [source, automatic, manual] = await Promise.all([
