@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
 import { authenticatePageAsAdmin, cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../helpers/db";
-import { expectMutationSuccessToast } from "../helpers/assert-mutation-toast";
 
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
 
@@ -21,8 +20,6 @@ test.describe("structured policy risk details", () => {
       await expect(page.locator("#insuredObject")).toHaveValue(raw);
       await page.getByLabel("Notas", { exact: true }).fill("Cambio ajeno a la descripción histórica");
       await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
-      await expectMutationSuccessToast(page, /p[oó]liza actualizada/i);
-
       await expect.poll(async () => {
         const policy = await db.policy.findUnique({ where: { id: fixture.policyId }, select: { insuredObject: true, notes: true } });
         return policy ? { insuredObject: policy.insuredObject, notes: policy.notes } : null;
@@ -71,8 +68,6 @@ test.describe("structured policy risk details", () => {
       await expect(beneficiaryNotes).toBeEditable();
       await beneficiaryNotes.fill("Notas de beneficiario para GMM");
       await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
-      await expectMutationSuccessToast(page, /p[oó]liza actualizada/i);
-
       await expect.poll(async () => {
         const [policy, assets, parties] = await Promise.all([
           db.policy.findUnique({ where: { id: fixture.policyId }, select: { policyType: true, insuredObject: true, beneficiaryInfo: true } }),

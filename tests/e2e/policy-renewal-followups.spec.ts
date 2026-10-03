@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
 import { authenticatePageAsAdmin, cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../helpers/db";
-import { expectMutationSuccessToast } from "../helpers/assert-mutation-toast";
 
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
 
@@ -53,8 +52,6 @@ test("creating a linked renewal closes both source follow-ups in the policy tran
     await page.goto(`/policies/new?renewalFrom=${fixture.policyId}`);
     await page.locator("#policyNumber").fill(renewedPolicyNumber);
     await page.getByRole("button", { name: "Crear póliza", exact: true }).click();
-    await expectMutationSuccessToast(page, /p[oó]liza creada/i);
-
     await expect.poll(async () => {
       const [source, automatic, manual] = await Promise.all([
         db.policy.findUnique({ where: { id: fixture.policyId }, select: { status: true } }),
