@@ -18,7 +18,7 @@ test.describe("Renewals Page (/renewals)", () => {
 
   test("displays renewal statistics", async ({ page }) => {
     await authenticatePageAsAdmin(page);
-    await page.goto("/renewals");
+    await page.goto("/operations?view=renewals");
 
     // Wait for page to load
     await expect(page.getByRole("heading", { name: "Renovaciones", exact: true })).toBeVisible();

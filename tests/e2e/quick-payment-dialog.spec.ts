@@ -7,6 +7,7 @@ import {
   authenticatePageAsAdmin,
   type SeededReceipt,
 } from "../helpers/db";
+import { expectMutationSuccessToast } from "../helpers/assert-mutation-toast";
 
 test.describe("Quick payment dialog (/receipts cobrar tab)", () => {
   let seeded: SeededReceipt | undefined;
@@ -52,7 +53,7 @@ test.describe("Quick payment dialog (/receipts cobrar tab)", () => {
     await page.getByRole("button", { name: /^pagar\s/i }).click();
 
     // Sonner toast appears with the success message.
-    await expect(page.locator(".cn-toast")).toContainText(/pago registrado exitosamente/i, { timeout: 10_000 });
+    await expectMutationSuccessToast(page, /pago registrado exitosamente/i);
 
     // Dialog closes after success.
     await expect(page.getByRole("dialog")).toBeHidden({ timeout: 10_000 });

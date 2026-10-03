@@ -22,7 +22,8 @@ test.describe("authenticated rendering health", () => {
       for (const path of ["/today", "/assistant", "/operations", `/policies/${fixture.policyId}`]) {
         errors.length = 0;
         await page.goto(path);
-        await page.waitForLoadState("networkidle");
+        await page.waitForLoadState("load");
+        await expect(page.locator("main")).toBeVisible();
         expect(errors, `Hydration errors on ${path}`).toEqual([]);
       }
     } finally {

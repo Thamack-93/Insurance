@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { authenticatePageAsAdmin, cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../helpers/db";
+import { expectMutationSuccessToast } from "../helpers/assert-mutation-toast";
 
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
 
@@ -252,7 +253,7 @@ test.describe("operation queue context", () => {
       const shortcutDate = businessDateAfter(3);
       await page.getByRole("menuitem", { name: "En 3 días", exact: true }).click();
 
-      await expect(page.locator(".cn-toast").filter({ hasText: "Seguimiento programado." })).toBeVisible({ timeout: 10_000 });
+      await expectMutationSuccessToast(page, "Seguimiento programado.");
       await expect.poll(async () => {
         const item = await db.workItem.findUnique({ where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId } } });
         return item
@@ -268,7 +269,7 @@ test.describe("operation queue context", () => {
       await page.getByLabel("Nota opcional").fill("Llamar después de la junta");
       await page.getByRole("button", { name: "Guardar seguimiento", exact: true }).click();
 
-      await expect(page.locator(".cn-toast").filter({ hasText: "Seguimiento reprogramado." })).toBeVisible({ timeout: 10_000 });
+      await expectMutationSuccessToast(page, "Seguimiento reprogramado.");
       await expect.poll(async () => {
         const rows = await db.workItem.findMany({ where: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId } });
         return rows.length === 1
@@ -281,7 +282,7 @@ test.describe("operation queue context", () => {
       await page.getByRole("menuitem", { name: "Quitar seguimiento", exact: true }).click();
       const confirmDialog = page.getByRole("alertdialog").filter({ hasText: `Quitar seguimiento de ${fixture.policyNumber}` });
       await confirmDialog.getByRole("button", { name: "Quitar seguimiento", exact: true }).click();
-      await expect(page.locator(".cn-toast").filter({ hasText: "Seguimiento eliminado." })).toBeVisible({ timeout: 10_000 });
+      await expectMutationSuccessToast(page, "Seguimiento eliminado.");
       await expect.poll(async () => {
         const item = await db.workItem.findUnique({ where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId } } });
         return item ? { status: item.status, dueDate: businessDateKey(item.dueDate!) } : null;
@@ -321,7 +322,7 @@ test.describe("operation queue context", () => {
       await page.goto("/operations?view=pending");
       await page.getByRole("link", { name: `Editar pendiente: ${title}` }).click();
       await expect(page).toHaveURL((url) => url.pathname === `/tasks/${sourceId}/edit`);
-      await page.getByRole("combobox").nth(1).click();
+      await page.getByRole("combobox", { name: "Estado", exact: true }).click();
       await page.getByRole("option", { name: "Cancelado", exact: true }).click();
       await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
 
