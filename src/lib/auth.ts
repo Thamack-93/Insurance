@@ -130,7 +130,7 @@ export async function getCurrentUserIdOrSystem(): Promise<string> {
  * Returns the live, active user from the database. Throws AuthError if the
  * session is missing or the user is no longer active.
  */
-export async function requireUser() {
+export const requireUser = cache(async function requireUser() {
   const session = await getSession();
   if (!session) throw new AuthError("Necesitas iniciar sesión.", 401);
   const db = getDb();
@@ -139,7 +139,7 @@ export async function requireUser() {
     throw new AuthError("Tu cuenta está deshabilitada.", 401);
   }
   return user;
-}
+});
 
 /**
  * Like requireUser() but also enforces ADMIN role. Throws AuthError(403) when

@@ -36,16 +36,14 @@ async function getSafeDashboardShellData(organization: OrganizationContext | nul
   const tenantDataPromise = organization
     ? withTenantTransaction(organization, async (db) => {
         const organizationId = organization.organizationId;
-        const [organizationRecord, unreadNotificationCount, recentNotifications, organizationSettings] = await Promise.all([
-          db.organization.findUnique({ where: { id: organizationId }, select: { kind: true } }),
-          db.alert.count({ where: { organizationId, readAt: null, status: { not: "RESOLVED" } } }),
-          db.alert.findMany({
+        const organizationRecord = await db.organization.findUnique({ where: { id: organizationId }, select: { kind: true } });
+        const unreadNotificationCount = await db.alert.count({ where: { organizationId, readAt: null, status: { not: "RESOLVED" } } });
+        const recentNotifications = await db.alert.findMany({
             where: { organizationId, status: { not: "RESOLVED" } },
             orderBy: [{ createdAt: "desc" }, { id: "desc" }],
             take: 10,
-          }),
-          db.organizationSetting.findMany({ where: { organizationId }, select: { key: true, value: true } }),
-        ]);
+          });
+        const organizationSettings = await db.organizationSetting.findMany({ where: { organizationId }, select: { key: true, value: true } });
         return {
           organizationKind: organizationRecord?.kind ?? null,
           tenantSettingsSnapshot: { organizationId, settings: organizationSettings },

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import { getDb } from "@/lib/db";
 import { AuthError, clearSessionCookie, getSession, requireUser, setSessionCookie } from "@/lib/auth";
 import { writeActivityLog } from "@/lib/activity-log";
@@ -90,7 +91,7 @@ export async function getOrganizationOptions(): Promise<OrganizationOption[]> {
   return state.options;
 }
 
-export async function resolveOrganizationContext(): Promise<OrganizationContextResolution> {
+export const resolveOrganizationContext = cache(async function resolveOrganizationContext(): Promise<OrganizationContextResolution> {
   const session = await getSession();
   if (!session) return { status: "unauthenticated" };
 
@@ -113,7 +114,7 @@ export async function resolveOrganizationContext(): Promise<OrganizationContextR
   const selected = options.find((option) => option.id === session.organizationId);
   if (!selected) return { status: "stale-selection", options };
   return buildContext(user, selected.id);
-}
+});
 
 async function buildContext(user: Awaited<ReturnType<typeof requireUser>>, organizationId: string): Promise<OrganizationContextResolution> {
   const db = getDb();
