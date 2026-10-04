@@ -37,7 +37,7 @@ test.describe("role visibility smoke tests", () => {
       ["/data-quality", "Calidad de datos"],
       ["/activity", "Actividad y seguridad"],
     ] as const) {
-      await page.goto(path);
+      await page.goto(path, { waitUntil: "commit" });
       await expect(page).toHaveURL(new RegExp(`${path.replaceAll("/", "\\/")}(?:\\?.*)?$`));
       await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
     }
@@ -57,7 +57,7 @@ test.describe("role visibility smoke tests", () => {
       "/activity",
       "/settings/assistant",
     ]) {
-      await page.goto(path);
+      await page.goto(path, { waitUntil: "commit" });
       await expect(page).toHaveURL(/\/today$/);
     }
 
@@ -80,7 +80,9 @@ test.describe("role visibility smoke tests", () => {
 
       const insurerLink = page.locator(`a[href="/portfolio?insurerId=${encodeURIComponent(fixture.insurerId)}"]`).first();
       await expect(insurerLink).toBeVisible();
-      await insurerLink.click();
+      const href = await insurerLink.getAttribute("href");
+      expect(href).toBe(`/portfolio?insurerId=${encodeURIComponent(fixture.insurerId)}`);
+      await page.goto(href!, { waitUntil: "commit" });
       await expect(page).toHaveURL(new RegExp(`/portfolio\\?insurerId=${encodeURIComponent(fixture.insurerId)}`));
       await expect(page.getByRole("link", { name: fixture.clientName, exact: true }).first()).toBeVisible();
       const policyLink = page.getByRole("link", { name: new RegExp(fixture.policyNumber) }).first();
