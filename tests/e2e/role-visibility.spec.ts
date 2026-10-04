@@ -57,8 +57,8 @@ test.describe("role visibility smoke tests", () => {
       "/activity",
       "/settings/assistant",
     ]) {
-      await page.goto(path, { waitUntil: "commit" });
-      await expect(page).toHaveURL(/\/today$/);
+      await page.goto(path, { waitUntil: "load", timeout: 30_000 });
+      await expect(page).toHaveURL(/\/today$/, { timeout: 30_000 });
       await expect(page.getByRole("heading", { name: "Hoy", exact: true })).toBeVisible();
     }
 

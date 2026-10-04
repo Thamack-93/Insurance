@@ -12,10 +12,11 @@ import {
   clientOperationalWhere,
   policyOperationalWhere,
   receiptOperationalWhere,
+  type PortfolioReadScope,
   requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
-import { withTenantOrganization } from "@/lib/tenant-dal";
+import { withTenantOrganization, type TenantDb } from "@/lib/tenant-dal";
 
 export async function getDashboardData() {
   const scope = await requireOrganizationPortfolioReadScope();
@@ -206,23 +207,25 @@ export type OnboardingStatus = {
 
 export async function getOnboardingStatus(): Promise<OnboardingStatus> {
   const scope = await requireOrganizationPortfolioReadScope();
-  return withTenantOrganization(scope.organizationId, async (db) => {
-    const [insurers, clients, policies, receipts, dismissedRow] = await Promise.all([
+  return withTenantOrganization(scope.organizationId, (db) => getOnboardingStatusFromDb(scope, db));
+}
+
+export async function getOnboardingStatusFromDb(scope: PortfolioReadScope, db: TenantDb): Promise<OnboardingStatus> {
+  const [insurers, clients, policies, receipts, dismissedRow] = await Promise.all([
     db.insurer.count({ where: { organizationId: scope.organizationId } }),
     db.client.count({ where: clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId) }),
     db.policy.count({ where: policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) }),
     db.receipt.count({ where: receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) }),
     db.organizationSetting.findUnique({ where: { organizationId_key: { organizationId: scope.organizationId, key: "onboardingDismissed" } } }),
   ]);
-    return {
+  return {
     insurers,
     clients,
     policies,
     receipts,
     dismissed: dismissedRow?.value === "true",
     complete: insurers > 0 && clients > 0 && policies > 0 && receipts > 0,
-    };
-  });
+  };
 }
 
 export async function getTodayData() {
