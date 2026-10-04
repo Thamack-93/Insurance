@@ -78,7 +78,7 @@ export default async function ReceiptsPage({
   const pageDataPromise = withTenantOrganization(scope.organizationId, async (db) => {
     const [organizationKind, core] = await Promise.all([
       db.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } }),
-      loadReceiptPageCore(db, { baseWhere, where, now, orderBy, page }),
+      loadReceiptPageCore(db, scope.organizationId, { baseWhere, where, now, orderBy, page }),
     ]);
     const [agentContactResult, qualitasCapabilityResult, paidThisMonthResult, paymentHistoryResult, reviewIssuesResult] =
       await Promise.allSettled([
@@ -614,7 +614,7 @@ export default async function ReceiptsPage({
   );
 }
 
-async function loadReceiptPageCore(db: TenantDb, input: {
+async function loadReceiptPageCore(db: TenantDb, organizationId: string, input: {
   baseWhere: Prisma.ReceiptWhereInput;
   where: Prisma.ReceiptWhereInput;
   now: Date;
@@ -623,14 +623,14 @@ async function loadReceiptPageCore(db: TenantDb, input: {
 }) {
   const { baseWhere, where, now, orderBy, page } = input;
   const [openCount, overdueCount, outstandingAgg, overdueAgg, totalOpenCount, filteredCount, pagedReceipts] = await Promise.all([
-      db.receipt.count({ where: baseWhere }),
-      db.receipt.count({ where: { ...baseWhere, dueDate: { lt: now } } }),
-      db.receipt.aggregate({ _sum: { amount: true }, where: baseWhere }),
-      db.receipt.aggregate({ _sum: { amount: true }, where: { ...baseWhere, dueDate: { lt: now } } }),
-      db.receipt.count({ where: baseWhere }),
-      db.receipt.count({ where }),
+      db.receipt.count({ where: { ...baseWhere, organizationId } }),
+      db.receipt.count({ where: { ...baseWhere, organizationId, dueDate: { lt: now } } }),
+      db.receipt.aggregate({ _sum: { amount: true }, where: { ...baseWhere, organizationId } }),
+      db.receipt.aggregate({ _sum: { amount: true }, where: { ...baseWhere, organizationId, dueDate: { lt: now } } }),
+      db.receipt.count({ where: { ...baseWhere, organizationId } }),
+      db.receipt.count({ where: { ...where, organizationId } }),
       db.receipt.findMany({
-        where,
+        where: { ...where, organizationId },
         include: {
           client: true,
           policy: true,
