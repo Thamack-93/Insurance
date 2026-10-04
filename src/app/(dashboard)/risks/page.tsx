@@ -117,10 +117,10 @@ export default async function RisksPage({
   const query = (params.q ?? "").trim().toLowerCase();
 
   const organizationId = organizationContext.organizationId;
-  const [risks, openNotifications] = await withTenantTransaction(organizationContext, async (db) => Promise.all([
-    detectRisks(undefined, organizationId, db),
+  const risks = await detectRisks(undefined, organizationId);
+  const openNotifications = await withTenantTransaction(organizationContext, (db) =>
     db.alert.findMany({ where: { organizationId, status: "OPEN" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] }),
-  ]));
+  );
   const clientScores = await getClientDataQualityScores(organizationId);
   const policyScores = await getPolicyDataQualityScores(organizationId);
 

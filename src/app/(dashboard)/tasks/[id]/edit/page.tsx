@@ -13,14 +13,14 @@ import { getPolicyOptionLabel } from "@/lib/policy-identity";
 export default async function EditWorkItemPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const scope = await requireOrganizationPortfolioReadScope();
-  const [workItem, clients, policies, insurers, receipts] = await withTenantTransaction(scope.context, (db) => Promise.all([
-    findWorkItemByRouteId(id, scope.organizationId, db, scope.portfolioOwnerId),
-    db.client.findMany({
+  const [workItem, clients, policies, insurers, receipts] = await withTenantTransaction(scope.context, async (db) => {
+    const workItem = await findWorkItemByRouteId(id, scope.organizationId, db, scope.portfolioOwnerId);
+    const clients = await db.client.findMany({
       where: { organizationId: scope.organizationId, ...(scope.portfolioOwnerId ? { portfolioOwnerId: scope.portfolioOwnerId } : {}), status: { not: "ARCHIVED" } },
       orderBy: { fullName: "asc" },
       select: { id: true, fullName: true },
-    }),
-    db.policy.findMany({
+    });
+    const policies = await db.policy.findMany({
       where: { organizationId: scope.organizationId, ...(scope.portfolioOwnerId ? { client: { portfolioOwnerId: scope.portfolioOwnerId } } : {}), status: { not: "CANCELLED" } },
       orderBy: { policyNumber: "asc" },
       select: {
@@ -29,18 +29,19 @@ export default async function EditWorkItemPage({ params }: { params: Promise<{ i
         insuredObject: true,
         insuredAssets: { select: { description: true, isPrimary: true } },
       },
-    }),
-    db.insurer.findMany({
+    });
+    const insurers = await db.insurer.findMany({
       where: { organizationId: scope.organizationId, status: { not: "ARCHIVED" } },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
-    }),
-    db.receipt.findMany({
+    });
+    const receipts = await db.receipt.findMany({
       where: { organizationId: scope.organizationId, ...(scope.portfolioOwnerId ? { client: { portfolioOwnerId: scope.portfolioOwnerId } } : {}), status: { not: "CANCELLED" } },
       orderBy: { dueDate: "asc" },
       select: { id: true, receiptNumber: true },
-    }),
-  ]));
+    });
+    return [workItem, clients, policies, insurers, receipts] as const;
+  });
 
   if (!workItem) {
     notFound();
