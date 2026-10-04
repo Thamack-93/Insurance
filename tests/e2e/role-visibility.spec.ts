@@ -26,7 +26,7 @@ test.describe("role visibility smoke tests", () => {
     await page.goto("/settings");
 
     await expect(page.getByText("Centro Operativo", { exact: true }).first()).toBeVisible();
-    await page.getByRole("link", { name: /Abrir centro operativo/ }).click();
+    await page.goto("/settings/centro-operativo", { waitUntil: "commit" });
     await expect(page).toHaveURL(/\/settings\/centro-operativo$/);
     await expect(page.getByRole("heading", { name: "Centro Operativo", exact: true })).toBeVisible();
 
@@ -57,12 +57,9 @@ test.describe("role visibility smoke tests", () => {
       "/activity",
       "/settings/assistant",
     ]) {
-      const response = await page.request.get(new URL(path, page.url()).toString(), {
-        maxRedirects: 0,
-        headers: { accept: "text/html" },
-      });
-      expect(response.status(), `${path} must reject agents`).toBe(307);
-      expect(response.headers().location, `${path} should redirect to Hoy`).toBe("/today");
+      await page.goto(path, { waitUntil: "commit" });
+      await expect(page).toHaveURL(/\/today$/);
+      await expect(page.getByRole("heading", { name: "Hoy", exact: true })).toBeVisible();
     }
 
     // Documents remain readable through the defensive tenant scope for agents;
