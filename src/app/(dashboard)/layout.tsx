@@ -11,7 +11,6 @@ import { getSettings } from "@/lib/settings";
 import type { Settings } from "@/lib/settings";
 import { RuntimeSettingsHydrator } from "@/components/settings/runtime-settings-hydrator";
 import type { NotificationRecord } from "@/lib/notifications";
-import type { NotificationRecord } from "@/lib/notifications";
 import { requireUserOrRedirect } from "@/lib/auth";
 import { THEME_COOKIE } from "@/lib/settings-runtime";
 import { NoraSessionProvider } from "@/components/assistant/nora-session-provider";
@@ -112,7 +111,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
                 isSuperAdmin={user.platformRole === "SUPERADMIN"}
                 hasOrganizationContext={Boolean(organization)}
                 organizationName={organization?.organizationName}
-                isDemo={organizationKind?.kind === "DEMO"}
+                isDemo={organizationKind === "DEMO"}
                 membershipRole={organization?.membershipRole}
                 userMenu={<UserMenu />}
                 unreadNotificationCount={unreadNotificationCount}
