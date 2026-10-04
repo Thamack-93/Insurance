@@ -10,12 +10,12 @@ import { ShortcutsHelp } from "@/components/shortcuts/shortcuts-help";
 import { getSettings } from "@/lib/settings";
 import type { Settings } from "@/lib/settings";
 import { RuntimeSettingsHydrator } from "@/components/settings/runtime-settings-hydrator";
-import { getUnreadNotificationCount, getRecentNotifications } from "@/lib/notifications";
+import type { NotificationRecord } from "@/lib/notifications";
 import type { NotificationRecord } from "@/lib/notifications";
 import { requireUserOrRedirect } from "@/lib/auth";
 import { THEME_COOKIE } from "@/lib/settings-runtime";
 import { NoraSessionProvider } from "@/components/assistant/nora-session-provider";
-import { resolveOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
+import { resolveOrganizationContext, withTenantTransaction, type OrganizationContext } from "@/lib/organization-context";
 
 const fallbackSettings: Settings = {
   firmName: "PG",
@@ -33,19 +33,36 @@ const fallbackSettings: Settings = {
   retentionDays: 30,
 };
 
-async function getSafeDashboardShellData(organizationId?: string) {
-  const [settingsResult, unreadResult, notificationsResult] = await Promise.allSettled([
-    getSettings(),
-    organizationId ? getUnreadNotificationCount(organizationId) : Promise.resolve(0),
-    organizationId ? getRecentNotifications(10, organizationId) : Promise.resolve([] as NotificationRecord[]),
-  ]);
+async function getSafeDashboardShellData(organization: OrganizationContext | null) {
+  const tenantDataPromise = organization
+    ? withTenantTransaction(organization, async (db) => {
+        const organizationId = organization.organizationId;
+        const [organizationRecord, unreadNotificationCount, recentNotifications] = await Promise.all([
+          db.organization.findUnique({ where: { id: organizationId }, select: { kind: true } }),
+          db.alert.count({ where: { organizationId, readAt: null, status: { not: "RESOLVED" } } }),
+          db.alert.findMany({
+            where: { organizationId, status: { not: "RESOLVED" } },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            take: 10,
+          }),
+        ]);
+        return {
+          organizationKind: organizationRecord?.kind ?? null,
+          unreadNotificationCount,
+          recentNotifications: recentNotifications as NotificationRecord[],
+        };
+      })
+    : Promise.resolve({ organizationKind: null, unreadNotificationCount: 0, recentNotifications: [] as NotificationRecord[] });
+
+  const [settingsResult, tenantDataResult] = await Promise.allSettled([getSettings(), tenantDataPromise]);
+  const tenantData = tenantDataResult.status === "fulfilled"
+    ? tenantDataResult.value
+    : { organizationKind: null, unreadNotificationCount: 0, recentNotifications: [] as NotificationRecord[] };
 
   return {
     settings: settingsResult.status === "fulfilled" ? settingsResult.value : fallbackSettings,
-    unreadNotificationCount: unreadResult.status === "fulfilled" ? unreadResult.value : 0,
-    recentNotifications:
-      notificationsResult.status === "fulfilled" ? notificationsResult.value : ([] as NotificationRecord[]),
-    notificationsUnavailable: unreadResult.status === "rejected" || notificationsResult.status === "rejected",
+    ...tenantData,
+    notificationsUnavailable: tenantDataResult.status === "rejected",
   };
 }
 
@@ -57,7 +74,6 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   const user = await requireUserOrRedirect();
   const organizationResolution = await resolveOrganizationContext();
   const organization = organizationResolution.status === "ready" ? organizationResolution.context : null;
-  const organizationKind = organization ? await withTenantTransaction(organization, (tx) => tx.organization.findUnique({ where: { id: organization.organizationId }, select: { kind: true } })) : null;
   const isTenantAdmin = Boolean(organization && organization.membershipRole !== "AGENT");
   // Mirrors the root layout: the theme is known server-side from the cookie, so
   // the theme toggle can render its destination label without a hydration gap.
@@ -65,7 +81,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   const initialTheme = themeCookie === "dark" ? "dark" : "light";
   // Load settings once per request: hydrates the server runtime cache and
   // is forwarded to the client so format helpers stay consistent on both sides.
-  const { settings, unreadNotificationCount, recentNotifications, notificationsUnavailable } = await getSafeDashboardShellData(organization?.organizationId);
+  const { settings, organizationKind, unreadNotificationCount, recentNotifications, notificationsUnavailable } = await getSafeDashboardShellData(organization);
   const bellNotifications = recentNotifications.map((notification) => ({
     id: notification.id,
     alertType: notification.alertType,
@@ -79,7 +95,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   }));
   return (
     <SearchProvider>
-      <NoraSessionProvider userId={user.id} organizationId={organization?.organizationId ?? ""} demoMode={organizationKind?.kind === "DEMO"}>
+      <NoraSessionProvider userId={user.id} organizationId={organization?.organizationId ?? ""} demoMode={organizationKind === "DEMO"}>
         <RuntimeSettingsHydrator settings={settings} />
         <div className="min-h-screen">
           <a

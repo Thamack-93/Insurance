@@ -324,7 +324,9 @@ test.describe("operation queue context", () => {
       await page.goto("/operations?view=pending");
       await page.getByRole("link", { name: `Editar pendiente: ${title}` }).click();
       await expect(page).toHaveURL((url) => url.pathname === `/tasks/${sourceId}/edit`);
-      await page.getByLabel("Estado", { exact: true }).click();
+      const statusControl = page.getByRole("combobox").nth(1);
+      await expect(statusControl).toHaveAccessibleName("Estado");
+      await statusControl.click();
       await page.getByRole("option", { name: "Cancelado", exact: true }).click();
       const action = await captureServerAction(page, () => page.getByRole("button", { name: "Guardar cambios", exact: true }).click());
       console.log("WorkItem update server action:", action);
