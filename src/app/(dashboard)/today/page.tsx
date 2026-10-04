@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { ArrowUpRight, FileSignature, FileUp, Plus, ReceiptText } from "@/components/icons";
 import { getSession } from "@/lib/auth";
-import { getOnboardingStatus, getTodayData } from "@/lib/dashboard-queries";
+import { getOnboardingStatusFromDb, getTodayDataFromDb } from "@/lib/dashboard-queries";
+import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
+import { withTenantTransaction } from "@/lib/tenant-dal";
 import { formatDate, formatRelativeDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { buildTodayOperationsModel } from "@/lib/today-operations";
@@ -36,7 +38,18 @@ export default async function TodayPage({ searchParams }: { searchParams?: Promi
     );
   }
 
-  const [data, session, onboarding] = await Promise.all([getTodayData(), getSession(), getOnboardingStatus()]);
+  const scope = await requireOrganizationPortfolioReadScope();
+  const [todayData, session] = await Promise.all([
+    withTenantTransaction(scope.context, async (db) => {
+      const [data, onboarding] = await Promise.all([
+        getTodayDataFromDb(scope, db),
+        getOnboardingStatusFromDb(scope, db),
+      ]);
+      return { data, onboarding };
+    }),
+    getSession(),
+  ]);
+  const { data, onboarding } = todayData;
   const model = buildTodayOperationsModel(data, { name: session?.name });
 
   return (

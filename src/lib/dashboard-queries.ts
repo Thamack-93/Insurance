@@ -230,7 +230,10 @@ export async function getOnboardingStatusFromDb(scope: PortfolioReadScope, db: T
 
 export async function getTodayData() {
   const scope = await requireOrganizationPortfolioReadScope();
-  return withTenantOrganization(scope.organizationId, async (db) => {
+  return withTenantOrganization(scope.organizationId, (db) => getTodayDataFromDb(scope, db));
+}
+
+export async function getTodayDataFromDb(scope: PortfolioReadScope, db: TenantDb) {
   const now = today();
   const tomorrow = businessAddDays(now, 1);
   const in7 = businessAddDays(now, 7);
@@ -262,18 +265,18 @@ export async function getTodayData() {
     risks,
   ] = await Promise.all([
     db.receipt.findMany({
-      where: { ...receiptWhere, dueDate: { gte: now, lt: tomorrow }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { organizationId: scope.organizationId, ...receiptWhere, dueDate: { gte: now, lt: tomorrow }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
       orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }],
     }),
     db.receipt.findMany({
-      where: { ...receiptWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { organizationId: scope.organizationId, ...receiptWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
       orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }],
       take: 8,
     }),
     db.receipt.findMany({
-      where: { ...receiptWhere, dueDate: { gte: tomorrow, lte: in7 }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { organizationId: scope.organizationId, ...receiptWhere, dueDate: { gte: tomorrow, lte: in7 }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
       orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }],
       take: 8,
@@ -308,6 +311,7 @@ export async function getTodayData() {
     }),
     db.commission.findMany({
       where: {
+        organizationId: scope.organizationId,
         ...commissionWhere,
         expectedDate: { lte: in30 },
         status: { in: ["EXPECTED", "PENDING", "OVERDUE"] },
@@ -354,7 +358,6 @@ export async function getTodayData() {
     criticalRisks: risks.filter((risk) => risk.severity === "CRITICAL").slice(0, 6),
     recentActivity,
   };
-  });
 }
 
 function groupDatesByWeek<T extends Record<string, unknown>>(items: T[], field: keyof T) {
