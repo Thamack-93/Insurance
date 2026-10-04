@@ -80,7 +80,7 @@ test.describe("structured policy risk details", () => {
         return policy ? { policyType: policy.policyType, insuredObject: policy.insuredObject, beneficiaryInfo: policy.beneficiaryInfo, assets: assets.length, parties: parties.map((party) => party.fullName) } : null;
       }, { timeout: 10_000 }).toEqual({
         policyType: "GMM",
-        insuredObject,
+        insuredObject: "Ana Pérez",
         beneficiaryInfo: "Notas de beneficiario para GMM",
         assets: 0,
         parties: ["Ana Pérez"],

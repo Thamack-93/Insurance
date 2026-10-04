@@ -310,6 +310,7 @@ test.describe("operation queue context", () => {
           status: "OPEN",
           priority: "MEDIUM",
           title,
+          startDate: new Date(),
           entityType: "WorkItem",
           entityId: sourceId,
           clientId: fixture.clientId,

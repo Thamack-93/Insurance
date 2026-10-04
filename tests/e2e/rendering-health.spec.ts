@@ -23,7 +23,7 @@ test.describe("authenticated rendering health", () => {
         errors.length = 0;
         await page.goto(path);
         await page.waitForLoadState("load");
-        await expect(page.locator("main")).toBeVisible();
+        await expect(page.locator("main").first()).toBeVisible();
         expect(errors, `Hydration errors on ${path}`).toEqual([]);
       }
     } finally {

@@ -8,9 +8,8 @@ export async function captureServerAction(page: Page, submit: () => Promise<void
   );
   await submit();
   const response = await responsePromise;
-  const body = await response.text().catch(() => "<response body unavailable>");
   return {
     status: response.status(),
-    body: body.replace(/\s+/g, " ").slice(0, 1000),
+    contentType: response.headers()["content-type"] ?? null,
   };
 }
