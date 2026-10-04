@@ -79,6 +79,7 @@ export async function detectRisks(portfolioOwnerId: string | undefined, organiza
   ] = await Promise.all([
     db.dataQualitySuppressionRule.findMany({
       where: {
+        organizationId,
         active: true,
         OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
       },
@@ -201,11 +202,13 @@ export async function detectRisks(portfolioOwnerId: string | undefined, organiza
 
   const duplicateReceiptCandidates = duplicateReceiptKeys.length
     ? await db.receipt.findMany({
-        where: {
+      where: {
+          AND: [receiptScope, {
           OR: duplicateReceiptKeys.map((row) => ({
             policyId: row.policyId,
             receiptNumber: row.receiptNumber,
           })),
+          }],
         },
         select: {
           id: true,

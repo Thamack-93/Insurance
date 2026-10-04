@@ -114,6 +114,11 @@ export default async function DataQualityPage({
   const { sortKey, direction } = readTableSort(params);
   const previewBatchId = typeof params.ledgerBatch === "string" ? params.ledgerBatch : null;
   const portfolioOwnerId = undefined;
+  const loadHealth = initialTab === "salud";
+  const loadVigencias = initialTab === "vigencias";
+  const loadPagos = initialTab === "pagos";
+  const loadRenovaciones = initialTab === "renovaciones";
+  const loadLedger = initialTab === "ledger";
   const [
     clientScores,
     policyScores,
@@ -125,17 +130,21 @@ export default async function DataQualityPage({
     ledgerReviewIssues,
     renewalFollowUps,
   ] = await Promise.all([
-    getClientDataQualityScores(organizationContext.organizationId, portfolioOwnerId),
-    getPolicyDataQualityScores(organizationContext.organizationId, portfolioOwnerId),
-    getOperationalDataHealthSummary(organizationContext.organizationId, portfolioOwnerId),
-    getLatestMaintenanceRun("POLICY_VIGENCY_AUDIT", organizationContext.organizationId),
-    getLatestMaintenanceRun("PAYMENT_RECONCILIATION_AUDIT", organizationContext.organizationId),
-    getReceiptReviewIssues(organizationContext.organizationId, portfolioOwnerId),
-    getRenewalReviewSuggestions(organizationContext.organizationId, portfolioOwnerId),
-    getLedgerReviewIssues(organizationContext.organizationId),
-    getUpcomingRenewals(30, portfolioOwnerId),
+    loadHealth ? getClientDataQualityScores(organizationContext.organizationId, portfolioOwnerId) : Promise.resolve([]),
+    loadHealth ? getPolicyDataQualityScores(organizationContext.organizationId, portfolioOwnerId) : Promise.resolve([]),
+    loadHealth ? getOperationalDataHealthSummary(organizationContext.organizationId, portfolioOwnerId) : Promise.resolve({
+      clientsWithoutPortfolioOwner: 0, activeDemoUsers: 0, demoUsers: [], brokerDemoPresent: false,
+      overdueOpenReceipts: 0, overdueOpenReceiptsOwned: 0, globalSearchOk: false, globalSearchResultCount: 0,
+      insuredOnlyClientsWithoutPolicies: 0,
+    }),
+    loadVigencias ? getLatestMaintenanceRun("POLICY_VIGENCY_AUDIT", organizationContext.organizationId) : Promise.resolve(null),
+    loadPagos ? getLatestMaintenanceRun("PAYMENT_RECONCILIATION_AUDIT", organizationContext.organizationId) : Promise.resolve(null),
+    loadPagos ? getReceiptReviewIssues(organizationContext.organizationId, portfolioOwnerId) : Promise.resolve([]),
+    loadRenovaciones ? getRenewalReviewSuggestions(organizationContext.organizationId, portfolioOwnerId) : Promise.resolve([]),
+    loadLedger ? getLedgerReviewIssues(organizationContext.organizationId) : Promise.resolve([]),
+    loadHealth || loadRenovaciones ? getUpcomingRenewals(30, portfolioOwnerId, organizationContext.organizationId) : Promise.resolve([]),
   ]);
-  const previewData = await withTenantTransaction(organizationContext, async (db) => {
+  const previewData = loadLedger ? await withTenantTransaction(organizationContext, async (db) => {
     const previewBatch = previewBatchId
       ? await db.ledgerImportBatch.findFirst({
         where: { id: previewBatchId, organizationId: organizationContext.organizationId },
@@ -160,7 +169,7 @@ export default async function DataQualityPage({
       ? await db.ledgerImportRow.groupBy({ by: ["status"], where: { batchId: previewBatch.id }, _count: { status: true } })
       : [];
     return { previewBatch, previewRowCounts };
-  });
+  }) : { previewBatch: null, previewRowCounts: [] };
   const { previewBatch, previewRowCounts } = previewData;
   const previewSummary = (() => {
     if (!previewBatch?.summaryJson) return null;
