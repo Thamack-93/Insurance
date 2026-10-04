@@ -57,8 +57,12 @@ test.describe("role visibility smoke tests", () => {
       "/activity",
       "/settings/assistant",
     ]) {
-      await page.goto(path, { waitUntil: "commit" });
-      await expect(page).toHaveURL(/\/today$/);
+      const response = await page.request.get(new URL(path, page.url()).toString(), {
+        maxRedirects: 0,
+        headers: { accept: "text/html" },
+      });
+      expect(response.status(), `${path} must reject agents`).toBe(307);
+      expect(response.headers().location, `${path} should redirect to Hoy`).toBe("/today");
     }
 
     // Documents remain readable through the defensive tenant scope for agents;
