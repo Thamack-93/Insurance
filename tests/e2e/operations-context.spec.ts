@@ -323,7 +323,7 @@ test.describe("operation queue context", () => {
       await authenticatePageAsAdmin(page);
       await page.goto("/operations?view=pending");
       await expect(page.getByRole("link", { name: `Editar pendiente: ${title}` })).toBeVisible();
-      await page.goto(`/tasks/${sourceId}/edit?returnTo=${encodeURIComponent("/operations?view=pending")}`, { waitUntil: "commit" });
+      await page.goto(`/tasks/${sourceId}/edit?returnTo=${encodeURIComponent("/operations?view=pending")}`, { waitUntil: "load" });
       await expect(page).toHaveURL(new RegExp(`/tasks/${sourceId}/edit(?:\\?.*)?$`));
       await expect(page.getByText("Edición de pendiente", { exact: true })).toBeVisible();
       const statusControl = page.locator('[aria-label="Estado"]');

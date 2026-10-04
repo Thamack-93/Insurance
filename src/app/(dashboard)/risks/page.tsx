@@ -116,12 +116,13 @@ export default async function RisksPage({
   const issueCodeFilter = params.issueCode;
   const query = (params.q ?? "").trim().toLowerCase();
 
-  const [risks, openNotifications, clientScores, policyScores] = await Promise.all([
-    detectRisks(undefined, organizationContext.organizationId),
-    withTenantTransaction(organizationContext, (db) => db.alert.findMany({ where: { organizationId: organizationContext.organizationId, status: "OPEN" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] })),
-    getClientDataQualityScores(organizationContext.organizationId),
-    getPolicyDataQualityScores(organizationContext.organizationId),
-  ]);
+  const organizationId = organizationContext.organizationId;
+  const [risks, openNotifications] = await withTenantTransaction(organizationContext, async (db) => Promise.all([
+    detectRisks(undefined, organizationId, db),
+    db.alert.findMany({ where: { organizationId, status: "OPEN" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] }),
+  ]));
+  const clientScores = await getClientDataQualityScores(organizationId);
+  const policyScores = await getPolicyDataQualityScores(organizationId);
 
   const matchesQuery = (...values: Array<string | null | undefined>) =>
     !query || values.some((value) => value?.toLowerCase().includes(query));

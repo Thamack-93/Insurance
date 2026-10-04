@@ -59,7 +59,7 @@ test.describe("role visibility smoke tests", () => {
     ]) {
       await page.goto(path, { waitUntil: "load", timeout: 30_000 });
       await expect(page).toHaveURL(/\/today$/, { timeout: 30_000 });
-      await expect(page.getByRole("heading", { name: "Hoy", exact: true })).toBeVisible();
+      await expect(page.getByRole("navigation", { name: "Vistas de Hoy" })).toBeVisible();
     }
 
     // Documents remain readable through the defensive tenant scope for agents;
