@@ -6,8 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import Link from "next/link";
 import { getOnboardingStatusFromDb } from "@/lib/dashboard-queries";
 import { getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
-import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
-import { withTenantTransaction } from "@/lib/organization-context";
+import { portfolioReadScope } from "@/lib/portfolio-access";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { OnboardingPanel } from "@/components/settings/onboarding-panel";
 import { getOrganizationBackupStatus } from "@/lib/organization-backup-status";
 import { CurrencyRatesPanel } from "@/components/settings/currency-rates-panel";
@@ -24,8 +24,8 @@ function formatDateTime(value: string) {
 }
 
 export default async function SettingsPage() {
-  const scope = await requireOrganizationPortfolioReadScope();
-  const organization = scope.context;
+  const organization = await requireOrganizationContext();
+  const scope = portfolioReadScope(organization);
   const isTenantAdmin = organization.membershipRole === "OWNER" || organization.membershipRole === "ADMIN";
   const aiStatus = getAssistantAiConnectionStatus();
   const [tenantSettings, ownerBackupStatus] = await Promise.all([

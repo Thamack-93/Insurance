@@ -12,7 +12,7 @@ export type PortfolioReadScope = {
   membershipRole: string;
 };
 
-function portfolioReadScope(context: OrganizationContext): PortfolioReadScope & { context: OrganizationContext } {
+export function portfolioReadScope(context: OrganizationContext): PortfolioReadScope & { context: OrganizationContext } {
   return {
     id: context.userId,
     role: context.membershipRole,
