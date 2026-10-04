@@ -38,6 +38,10 @@ export async function findWorkItemByRouteId(
           sourceId: id,
         },
         {
+          sourceType: "WorkItem",
+          sourceId: id,
+        },
+        {
           id,
         },
       ],

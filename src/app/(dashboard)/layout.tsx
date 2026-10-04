@@ -36,7 +36,7 @@ async function getSafeDashboardShellData(organization: OrganizationContext | nul
   const tenantDataPromise = organization
     ? withTenantTransaction(organization, async (db) => {
         const organizationId = organization.organizationId;
-        const [organizationRecord, unreadNotificationCount, recentNotifications] = await Promise.all([
+        const [organizationRecord, unreadNotificationCount, recentNotifications, organizationSettings] = await Promise.all([
           db.organization.findUnique({ where: { id: organizationId }, select: { kind: true } }),
           db.alert.count({ where: { organizationId, readAt: null, status: { not: "RESOLVED" } } }),
           db.alert.findMany({
@@ -44,19 +44,24 @@ async function getSafeDashboardShellData(organization: OrganizationContext | nul
             orderBy: [{ createdAt: "desc" }, { id: "desc" }],
             take: 10,
           }),
+          db.organizationSetting.findMany({ where: { organizationId }, select: { key: true, value: true } }),
         ]);
         return {
           organizationKind: organizationRecord?.kind ?? null,
+          tenantSettingsSnapshot: { organizationId, settings: organizationSettings },
           unreadNotificationCount,
           recentNotifications: recentNotifications as NotificationRecord[],
         };
       })
-    : Promise.resolve({ organizationKind: null, unreadNotificationCount: 0, recentNotifications: [] as NotificationRecord[] });
+    : Promise.resolve({ organizationKind: null, tenantSettingsSnapshot: null, unreadNotificationCount: 0, recentNotifications: [] as NotificationRecord[] });
 
-  const [settingsResult, tenantDataResult] = await Promise.allSettled([getSettings(), tenantDataPromise]);
+  const settingsPromise = organization
+    ? tenantDataPromise.then((tenantData) => getSettings({ organizationContext: organization, tenantSettingsSnapshot: tenantData.tenantSettingsSnapshot ?? undefined }))
+    : getSettings();
+  const [settingsResult, tenantDataResult] = await Promise.allSettled([settingsPromise, tenantDataPromise]);
   const tenantData = tenantDataResult.status === "fulfilled"
     ? tenantDataResult.value
-    : { organizationKind: null, unreadNotificationCount: 0, recentNotifications: [] as NotificationRecord[] };
+    : { organizationKind: null, tenantSettingsSnapshot: null, unreadNotificationCount: 0, recentNotifications: [] as NotificationRecord[] };
 
   return {
     settings: settingsResult.status === "fulfilled" ? settingsResult.value : fallbackSettings,
