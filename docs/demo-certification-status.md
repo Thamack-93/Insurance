@@ -9,14 +9,14 @@
 
 ## SHA de código desplegado
 
-- SHA verificado al 2026-10-05: `132ada7c40d160d7ffeb0c7a242b48574d975d12` (merge PR #78). Este es el SHA del candidato de código certificado/desplegado en esta revisión; no implica que la rama `main` conserve ese SHA después de integrar documentación u otros commits.
-- Release Certification #38 [terminó SUCCESS](https://github.com/Thamack-93/Insurance/actions/runs/37337535025) sobre ese SHA: quality, tenant isolation/RLS, integración, API y E2E pasaron. El verificador productivo fue omitido.
-- Vercel Production: `READY` con el mismo SHA; deployment `dpl_2pyGvbzqQbKH9Pyy2xR6ez2rE9ms`, alias `policypete.vercel.app`.
+- Candidato de aplicación certificado: `132ada7c40d160d7ffeb0c7a242b48574d975d12` (Release Certification #38). Último merge de código verificado: `af608c709d5300a62fad0b1bfbb7a97f53561316` (PR #80; CLI read-only de backfill). La Production actual está READY para el merge SHA en `dpl_94n8Tnj5RfyN5P541NfCDxsG4ZYf`; este CLI no cambia el comportamiento runtime de la aplicación.
+- Release Certification #38 [terminó SUCCESS](https://github.com/Thamack-93/Insurance/actions/runs/37337535025) sobre el candidato `132ada7c`: quality, tenant isolation/RLS, integración, API y E2E pasaron. CI #37346061761 pasó sobre el head exacto de PR #80, incluyendo la integración read-only/RLS con PostgreSQL desechable.
+- Vercel Production: `READY` para el merge `af608c709d5300a62fad0b1bfbb7a97f53561316`; deployment `dpl_94n8Tnj5RfyN5P541NfCDxsG4ZYf`, alias `policypete.vercel.app`.
 - Revisión autenticada de solo lectura: `/reports/insights`, Operations (tablero de renovaciones) y el editor de WorkItem cargaron en Production. No se guardaron cambios. Las señales de renovación de Production deben revisarse con el equipo de operación antes de usarlas como métricas de DEMO.
 
-## DEMO simplificada
+## Preview read-only de backfill\n\nEl CLI requiere `POLICY_RISK_BACKFILL_READONLY_DATABASE_URL` con el rol `policydesk_readonly`, no privilegiado y sin permisos de escritura. La integración CI #37346061761 comprobó que ve los registros del tenant bajo RLS. No se ha conectado a Production ni se ha producido el manifiesto; no sustituye la revisión del backfill o el permiso de aplicación.\n\n## DEMO simplificada
 
-La implementación prevista sigue siendo una organización sintética, un usuario temporal y el seed existente en la URL actual. No se ha creado ni entregado la cuenta DEMO y el flag de provisión sigue pendiente de cierre. Después del cutover aprobado se comprobarán login, cambio de contraseña, restricciones, reset, revocación y escritorio/móvil.
+PR #80 ya publica el CLI `--production-preview` para generar una propuesta de backfill en una conexión estrictamente read-only y con RLS de organización; falta habilitar la conexión dedicada y revisar un manifiesto real. La implementación DEMO prevista sigue siendo una organización sintética, un usuario temporal y el seed existente en la URL actual. No se ha creado ni entregado la cuenta DEMO y el flag de provisión sigue pendiente de cierre. Después del cutover aprobado se comprobarán login, cambio de contraseña, restricciones, reset, revocación y escritorio/móvil.
 
 ## Restore remoto Neon
 
