@@ -99,9 +99,8 @@ function WorkItemRow({ item, returnTo }: { item: WorkQueueItem; returnTo?: strin
   const canEditFromOperations = !isManualRenewalFollowUp && (item.sourceType === "WorkItem" || item.sourceType === "Task" || item.sourceType === null);
   return (
     <li className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 border-b px-4 py-3 last:border-b-0">
-      <Link
+      <a
         href={href}
-        prefetch={false}
         aria-label={`${actionLabel}: ${title}`}
         className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
@@ -125,7 +124,7 @@ function WorkItemRow({ item, returnTo }: { item: WorkQueueItem; returnTo?: strin
           ) : null}
           <PriorityBadge priority={item.priority} className="px-2 py-0.5 text-[11px]" />
         </div>
-      </Link>
+      </a>
       {isManualRenewalFollowUp && item.policy ? (
         <RenewalFollowUpMenu
           policyId={item.policyId ?? ""}
@@ -134,14 +133,13 @@ function WorkItemRow({ item, returnTo }: { item: WorkQueueItem; returnTo?: strin
           currentNotes={item.notes}
         />
       ) : canEditFromOperations ? (
-        <Link
+        <a
           href={appendReturnTo(`/tasks/${item.sourceId ?? item.id}/edit`, returnTo)}
-          prefetch={false}
           className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-9 px-2 text-xs")}
           aria-label={`Editar pendiente: ${title}`}
         >
           Editar
-        </Link>
+        </a>
       ) : null}
     </li>
   );
