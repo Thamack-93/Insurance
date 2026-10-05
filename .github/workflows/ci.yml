@@ -360,6 +360,9 @@ jobs:
       - name: Backup restore integration against disposable PostgreSQL
         run: npm run test:unit -- src/lib/backup-restore.integration.logic.test.ts
 
+      - name: Policy risk backfill integration against disposable PostgreSQL
+        run: node --import tsx scripts/test-policy-risk-backfill.integration.ts
+
       - name: Build production application
         run: npm run build
 
