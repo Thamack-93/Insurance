@@ -6,7 +6,7 @@
 
 | Chat | Thread | Entrega transferida |
 | --- | --- | --- |
-| Coordina los chats del proyecto | 01a0f61d-4183-7480-b783-b034e027858a | Coordinación y goal completo |
+| Coordina los chats del proyecto | 01a0f61d-4183-7480-b783-b034e027858a | Coordinación y Goal activo; pendientes transferidos |
 | Add vehicle descriptions to policies | 01a0f5e6-2b9f-72c1-90d7-6df71043b287 | Cotejo documental y backfill por organización |
 | Audit Demo organization support | 01a0f587-a833-7f81-a2ff-110a3f089bdd | Soporte de una organización DEMO y revisión productiva |
 | Audit PolicyDesk demo sandbox | 01a0adb3-f260-76d0-8acc-4dac70465893 | Restore temporal Neon y aislamiento |
