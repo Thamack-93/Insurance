@@ -11,7 +11,7 @@
 | Audit Demo organization support | 01a0f587-a833-7f81-a2ff-110a3f089bdd | Soporte de una organización DEMO y revisión productiva |
 | Audit PolicyDesk demo sandbox | 01a0adb3-f260-76d0-8acc-4dac70465893 | Restore temporal Neon y aislamiento |
 | Certify PolicyDesk demo access | 01a0c49b-0147-79c3-9b14-57063e8f8c2f | Certificación de cuenta DEMO privada |
-| Corrige seguimiento de renovaciones | 01a0fe42-c8bf-7223-9665-154d196f7665 | Renovaciones y pendientes operativos |
+| Corrige seguimiento de renovaciones | 01a0fe42-c8bf-7223-9601-1b8a3cd7a4e1 | Renovaciones y pendientes operativos |
 
 ## Evidencia actual
 
@@ -30,15 +30,15 @@
 | Renovaciones y Operations | Alta/vinculación cierra seguimientos en transacción; reprogramar/quitar seguimientos y editar/cancelar tareas preservando identidad y permisos | Implementado; Release Certification #38 pasa en SHA integrado y el flujo de renovación cargó en Production en revisión autenticada de solo lectura. |
 | Operational Insights | Cuatro grupos, filtros, agrupación, paginación, aislamiento y enlaces a acciones existentes | Implementado; la ruta autenticada cargó en Production en revisión de solo lectura. |
 | CI / Vercel | Certificación exacta de quality, API, browser, aislamiento/RLS y restore desechable; deployment Production listo en el mismo SHA | CI Release Certification #38 SUCCESS en `132ada7`; Vercel Production READY en el mismo SHA. El verificador productivo del workflow se omitió; la inspección manual fue de solo lectura y limitada a las rutas anotadas arriba. |
-| Restore remoto Neon | Fuente sintética; fixture/backup sintéticos; restore CLI en rama temporal; conteos, FK, ciclos Payment, cancelación/renovación Policy/Receipt, Notifications, WorkItems, secuencias, lecturas, aislamiento y drift; `RESTORE_DRILL_APP_SMOKE=0` | Pareja temporal presente en `policydesk-certification-20261001`: `cert-stage3-132ada7c40d160d7ffeb0c7a242b48574d975d12` → `restore-cert-stage3-132ada7c40d160d7ffeb0c7a242b48574d975d12`. Parent de ambas: `main` del proyecto de certificación. Vencen 2026-10-12; 9/10 ramas ocupadas. Falta validar procedencia sintética y preparar runner aislado; sin migraciones, fixture, backup ni restore. |
+| Restore remoto Neon | Fuente sintética; fixture/backup sintéticos; restore CLI en rama temporal; conteos, FK, ciclos Payment, cancelación/renovación Policy/Receipt, Notifications, WorkItems, secuencias, lecturas, aislamiento y drift; `RESTORE_DRILL_APP_SMOKE=0` | Pareja temporal presente en `policydesk-certification-20261001`: `cert-stage3-132ada7c40d160d7ffeb0c7a242b48574d975d12` → `restore-cert-stage3-132ada7c40d160d7ffeb0c7a242b48574d975d12`. Parent de ambas: `main` del proyecto de certificación. Vencen 2026-10-12; 9/10 ramas ocupadas. Falta preparar la fuente con el fixture CUSTOMER sintético y el runner aislado; no se han aplicado migraciones, fixture, backup ni restore. |
 | DEMO privada | Tras cutover aprobado: una org sintética, un usuario temporal, login/cambio de contraseña, restricciones, reset, revocación, escritorio/móvil y cierre del flag de provisión | No lista; no provisionar ni compartir credenciales. |
 | Cutover y recuperación | Evidencia, destino temporal compatible, responsables y pasos comprobados; aprobación explícita antes de Production | No aprobado. No cambiar la base o variables productivas ni reconectar la aplicación. |
 
 ## Próximas acciones
 
-1. Confirmar que el parent `main` del proyecto de certificación no contiene datos reales; preparar el fixture y backup con datos sintéticos solamente.
-2. Revisar el alcance del runner remoto. Inyectar secretos temporales solo al paso necesario y limitarlos al proyecto/Blob del drill; no usar secretos ni backup de Production.
-3. Ejecutar restore en la pareja ya creada y revisar el reporte PASS con todas las invariantes.
+1. Preparar la rama fuente temporal con migraciones, tenant fixture restringido y seed sintético CUSTOMER; confirmar que no carga datos reales.
+2. Revisar el alcance del runner remoto. Inyectar secretos temporales solo al paso necesario y limitarlos a las ramas Neon y Blob privado del drill; no usar secretos ni backup de Production.
+3. Crear el backup de la organización sintética con `backup:create:organization` y restaurarlo por CLI en la rama destino temporal. Revisar el PASS con todas las invariantes.
 4. Presentar evidencia y recuperación concreta antes de solicitar aprobación del cutover.
 5. Tras aprobación, probar aislamiento productivo y solo entonces provisionar la DEMO privada.
 6. Revisar la matriz documental y ejecutar el proceso de backfill por organización de manera independiente.
@@ -49,8 +49,8 @@
 - Responsable: el coordinador reúne evidencia; el operador con acceso a Neon/Vercel ejecuta las operaciones; el usuario aprueba cualquier reconexión de la aplicación productiva.
 - Destino del drill: la rama temporal `restore-cert-stage3-132ada7c40d160d7ffeb0c7a242b48574d975d12` en el proyecto de certificación. Registrar branch ID, parent, SHA y huella sanitizada. Nunca restaurar en Production.
 - Ante fallo: mantener mantenimiento, pausar/drenar jobs de negocio, registrar SHA e instante y preservar intacta la rama fuente.
-- Usar únicamente una copia cifrada generada con datos sintéticos y clave exclusiva del drill. No exponer backup real ni clave de Production al runner.
-- Restaurar solo por CLI a la rama destino identificada. Pasar URL admin directa solo al paso migración/restore y URL de lectura restringida solo a las validaciones que la necesiten.
+- Usar únicamente un backup de la organización CUSTOMER sintética y una clave exclusiva del drill. DEMO está excluida de backups globales. No exponer backup real ni clave de Production al runner.
+- Restaurar solo por CLI a la rama destino identificada. Pasar URL admin directa solo al paso migración/restore y URL pooled restringida solo a las validaciones que la necesiten.
 - Exigir conteos, FKs públicas, ciclos Payment POSTED/REVERSED, cancelación/renovación Policy/Receipt, referencias Notification, WorkItem canónicas y heredadas, secuencias, lecturas, aislamiento tenant y Prisma drift. Mantener `RESTORE_DRILL_APP_SMOKE=0`.
 - Si falla una invariante: marcar FAIL, mantener la aplicación cerrada y no reconectar Production. Si pasa, presentar reporte sanitizado, rama destino, huella, proyecto/entorno Vercel, SHA y comandos de verificación.
 - Solo después de aprobación explícita, el operador puede cambiar las variables autorizadas del runtime/admin hacia un destino compatible, desplegar el SHA revisado y validar health, recorridos autenticados, aislamiento y jobs. Conservar la rama anterior durante la ventana acordada.
