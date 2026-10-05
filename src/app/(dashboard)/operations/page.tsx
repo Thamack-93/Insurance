@@ -238,16 +238,18 @@ export default async function OperationsPage({
         ],
       } : {}),
     }, scope.portfolioOwnerId, scope.organizationId, undefined, true) : Promise.resolve([]),
-    withTenantTransaction(scope.context, async (db) => ({
-      claims: await db.claim.findMany({
-        where: claimWhere,
-        select: { id: true, folio: true, claimType: true, status: true, incidentDate: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } },
-        orderBy: [{ reportedDate: "desc" }, { id: "asc" }],
-        take: view === "claims" ? 25 : 50,
-        skip: view === "claims" ? (page - 1) * 25 : 0,
-      }),
-      claimTotal: await db.claim.count({ where: claimWhere }),
-    })),
+    view === "claims"
+      ? withTenantTransaction(scope.context, async (db) => ({
+          claims: await db.claim.findMany({
+            where: claimWhere,
+            select: { id: true, folio: true, claimType: true, status: true, incidentDate: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } },
+            orderBy: [{ reportedDate: "desc" }, { id: "asc" }],
+            take: 25,
+            skip: (page - 1) * 25,
+          }),
+          claimTotal: await db.claim.count({ where: claimWhere }),
+        }))
+      : Promise.resolve({ claims: [], claimTotal: 0 }),
   ]);
   const visibleWorkItems = workItemsPage?.items ?? workItems;
   const workItemsTotal = workItemsPage?.totalCount ?? workItems.length;
