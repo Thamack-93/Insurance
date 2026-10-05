@@ -1,58 +1,70 @@
 # Insurance closure tracker
 
-Última actualización: 2026-10-05. Inventario consolidado para este chat y los chats fuente.
+Última actualización: 2026-10-05. Inventario consolidado para este chat y los chats fuente. Evidencia de código y operaciones separada; no declarar DEMO lista hasta pasar los gates de corte y acceso.
 
-## Alcance y chats fuente
+## Chats fuente
 
 | Chat | Thread | Entrega transferida |
 | --- | --- | --- |
-| Coordina los chats del proyecto | 01a0f61d-4183-7480-b783-b034e027858a | Coordinación y Goal activo; pendientes transferidos |
-| Add vehicle descriptions to policies | 01a0f5e6-2b9f-72c1-90d7-6df71043b287 | Cotejo documental y backfill por organización |
-| Audit Demo organization support | 01a0f587-a833-7f81-a2ff-110a3f089bdd | Soporte de una organización DEMO y revisión productiva |
+| Coordina los chats del proyecto | 01a0f61d-4183-7480-b783-b034e027858a | Coordinación e inventario común |
+| Add vehicle descriptions to policies | 01a0f5e6-2b9f-72c1-90d7-6df71043b287 | Identificación de pólizas y cotejo documental |
+| Audit Demo organization support | 01a0f587-a833-7f81-a2ff-110a3f089bdd | Capacidades y aislamiento DEMO |
 | Audit PolicyDesk demo sandbox | 01a0adb3-f260-76d0-8acc-4dac70465893 | Restore temporal Neon y aislamiento |
-| Certify PolicyDesk demo access | 01a0c49b-0147-79c3-9b14-57063e8f8c2f | Certificación de cuenta DEMO privada |
-| Corrige seguimiento de renovaciones | 01a0fe42-c8bf-7223-9601-1b8a3cd7a4e1 | Renovaciones y pendientes operativos |
+| Certify PolicyDesk demo access | 01a0c49b-0147-79c3-9b14-57063e8f8c2f | Certificación de acceso DEMO |
+| Corrige seguimiento de renovaciones | 01a0fe42-c8bf-7223-9601-1b8a3cd7a4e1 | Renovaciones y pendientes operativos; chat archivado |
 
-## Evidencia actual
+Los otros cuatro chats permanecen abiertos hasta cerrar los entregables transferidos.
 
-- PR #73 (campos de riesgo, seguimiento e Insights), PR #74 (tarjetas de renovación), PR #76 (E2E de renovaciones/PDF), PR #78 (backfill auditable) y PR #80 (preview read-only del backfill) están integrados.
-- Candidato de aplicación certificado: `132ada7c40d160d7ffeb0c7a242b48574d975d12` (Release Certification #38). Último merge de código verificado: `af608c709d5300a62fad0b1bfbb7a97f53561316` (PR #80, herramienta CLI de preview read-only; no altera el comportamiento runtime de la aplicación).
-- Release Certification #38 [terminó SUCCESS](https://github.com/Thamack-93/Insurance/actions/runs/37337535025) en el SHA integrado exacto: quality, tenant/RLS, integración de aplicación, API, E2E y reporte sanitizado pasaron. El verificador de estado productivo fue omitido.
-- Vercel Production está `READY` para `af608c709d5300a62fad0b1bfbb7a97f53561316`, deployment `dpl_94n8Tnj5RfyN5P541NfCDxsG4ZYf`, alias `policypete.vercel.app`. El certificado #38 sigue referido al SHA candidato `132ada7c`.
-- En revisión autenticada de solo lectura cargaron Insights, el tablero de renovaciones de Operations y el editor WorkItem. No se guardaron datos. Las señales de Production son métricas operativas, no resultados sintéticos de DEMO.
-- No hay cuenta DEMO externa creada ni conversaciones fuente archivadas.
+## Estado verificado
 
-## Pendientes y criterios de cierre
+- PR #73 (campos estructurados por ramo), #78 (reporte auditable de backfill) y #80 (preview read-only) están integrados.
+- Vercel Production: `READY`, SHA `cfd223e90ff4a37f2ba493bad36b6625569c82d3`, deployment `dpl_GLhVWH8GCPbwumRpCmDesoRtGTT7`, alias `policypete.vercel.app`.
+- GitHub Actions run #463 terminó `SUCCESS` en PR #82: quality, tenant-isolation y application. Application incluyó restore/backfill integration en PostgreSQL desechable, build, API y E2E; tenant-isolation pasó migraciones, fixture de dos organizaciones, RLS y Chromium E2E con rol restringido. La base desechable se eliminó.
+- La certificación local previa del snapshot exacto `cfd223e` pasó build, 16 tests tenant, RLS (42 tablas, 27 checks de contexto, 24 workers), drift, auditoría multi-org y 11 tests API/browser. Es evidencia complementaria, no reemplazo de CI.
+- Insights autenticado cargó en Production: 121 renovaciones, 1 señal de cobranza, 0 siniestros y 4 de trabajo. La primera página incluye renovaciones vencidas desde 2024/2025. Es backlog operativo que requiere revisión humana; no se modificaron registros.
 
-| Tema | Criterio de cierre | Estado |
-| --- | --- | --- |
-| Campos por ramo y backfill | Convertir por organización; conservar texto fuente; revisar ambiguos; reportar lotes auditables, repetibles y sin duplicados; validar PDF, renovación y edición asistida | Release Certification #38 pasa el backfill en PostgreSQL desechable. La matriz documental del chat de pólizas cubre 263 pólizas; registra 67 sin descripción de bien y 13 casos en su segunda pasada: 3 resueltos documentalmente y 10 aún parciales/pendientes. Esa matriz no es el manifiesto de conversión por organización. PR #80 agrega `--production-preview`: exige conexión separada del rol `policydesk_readonly`, comprueba que sea no privilegiado y sin permisos de escritura, y fija el contexto RLS de la organización en una transacción `REPEATABLE READ, READ ONLY`. La integración CI lo verificó con PostgreSQL desechable; el CI completo #37346061761 y Vercel Preview pasaron. Aún no se configuró esa conexión ni se generó/revisó un manifiesto desde Production. No aplicar cambios en Production sin checkpoint y permiso específico. |
-| Renovaciones y Operations | Alta/vinculación cierra seguimientos en transacción; reprogramar/quitar seguimientos y editar/cancelar tareas preservando identidad y permisos | Implementado; Release Certification #38 pasa en SHA integrado y el flujo de renovación cargó en Production en revisión autenticada de solo lectura. |
-| Operational Insights | Cuatro grupos, filtros, agrupación, paginación, aislamiento y enlaces a acciones existentes | Implementado; la ruta autenticada cargó en Production en revisión de solo lectura. |
-| CI / Vercel | Certificación exacta de quality, API, browser, aislamiento/RLS y restore desechable; deployment Production listo en el mismo SHA | Release Certification #38 SUCCESS en `132ada7c40d160d7ffeb0c7a242b48574d975d12`; CI #37346061761 (quality, tenant-isolation, application/API/E2E) pasó en el head de PR #80 `f3444f3a65cb75c58ffb5aaf1a9f2a53d1a225ff`; Vercel Production READY en merge `af608c7`. El verificador productivo del workflow se omitió; la inspección manual fue de solo lectura y limitada a las rutas anotadas. |
-| Restore remoto Neon | Fuente sintética de procedencia aprobada; fixture/backup; restore CLI temporal; conteos, FK, ciclos Payment, cancelación/renovación Policy/Receipt, Notifications, WorkItems, secuencias, lecturas, aislamiento y drift; `RESTORE_DRILL_APP_SMOKE=0` | **Pendiente.** El par hallado para `132ada7` nace de `main` del proyecto `policydesk-certification-20261001`; se rechaza como evidencia porque el runbook prohíbe usar/clonar `main` y una vista sin tablas no demuestra toda la procedencia. No ejecutar migración, fixture, backup ni restore en ese par. Vence el 2026-10-12; el proyecto estaba en 9/10 slots. Se necesita una fuente vacía aprobada y un par temporal nuevo para el SHA exacto. |
-| DEMO privada | Tras cutover aprobado: una org sintética, un usuario temporal, login/cambio de contraseña, restricciones, reset, revocación, escritorio/móvil y cierre del flag de provisión | No lista; no provisionar ni compartir credenciales. |
-| Cutover y recuperación | Evidencia, destino temporal compatible, responsables y pasos comprobados; aprobación explícita antes de Production | No aprobado. No cambiar la base o variables productivas ni reconectar la aplicación. |
+## Pendientes y aceptación
 
-## Próximas acciones
+| Tema | Estado y criterio de cierre |
+| --- | --- |
+| Campos por ramo | Código y migración aditiva integrados y desplegados. Campos nuevos visibles; no afirmar que los datos históricos ya fueron convertidos. |
+| Backfill de pólizas | Preview read-only integrado. Falta una conexión Production dedicada `policydesk_readonly`, generar y revisar el manifiesto por organización y luego ejecutar lotes auditables, repetibles y sin duplicados con aprobación del reporte. No se aplicó backfill. |
+| Cotejo documental | La auditoría local de 10 casos residuales no encontró documentos nuevos: 0/10 cerrables por nueva evidencia. Hay una carátula de sucesora que no acredita la póliza previa y otras coincidencias no exactas. No copiar coberturas o vigencias; solicitar fuente primaria y revisión humana. |
+| Renovaciones / Operations | Código integrado y desplegado; flujos de seguimiento disponibles. La cartera de Insights aún necesita triage humano. |
+| Operational Insights | Implementado y visible en Production; cuatro grupos, filtros y enlaces autenticados comprobados. Las señales visibles cambian con los datos y requieren atención operativa. |
+| CI y despliegue | Run #463 SUCCESS y Production READY en el SHA indicado. No hacer cambios de aplicación sin nueva certificación exact-SHA. |
+| Restore remoto | Pendiente. Requiere validar artefacto, branch destino y PASS del restore CLI con conteos, FK, ciclos Payment, cancelación/renovación Policy/Receipt, Notifications, WorkItems, secuencias, lecturas de aplicación y Prisma drift. Mantener `RESTORE_DRILL_APP_SMOKE=0`. |
+| DEMO privada | No se ha creado ni entregado usuario externo. Requiere cutover aprobado, aislamiento, login/cambio de contraseña, límites, reset/revocación y verificación escritorio/móvil. |
+| Cutover | No aprobado ni realizado. Presentar evidencia y procedimiento concreto de recuperación antes de solicitar aprobación explícita. |
 
-1. Aprobar una fuente de procedencia vacía que no clone la rama `main`; el par actual queda intacto y fuera del drill. Revisar cómo obtener un nuevo par temporal sin exceder el límite de ramas.
-2. Revisar el alcance del runner remoto antes de configurar credenciales. La inyección temporal debe limitarse al recurso Neon y Blob privado del drill; no usar secretos ni backup de Production.
-3. Solo entonces aplicar migraciones, tenant fixture restringido y seed CUSTOMER sintético; crear el backup por organización y restaurarlo por CLI. Revisar el PASS con todas las invariantes.
-4. Presentar evidencia y recuperación concreta antes de solicitar aprobación del cutover.
-5. Tras aprobación, probar aislamiento productivo y solo entonces provisionar la DEMO privada.
-6. Revisar la matriz documental y ejecutar el proceso de backfill por organización de manera independiente.
-7. Archivar cada chat fuente solo después de cotejar su entrega y adjuntar evidencia de cierre.
+### Backfill: fuente documental
 
-## Procedimiento de recuperación a presentar antes del cutover
+La revisión local del inventario no encontró archivos de póliza nuevos después del corte de la auditoría. De los 10 casos residuales, ninguno se puede cerrar solo con los artefactos nuevos disponibles. Coincidencias por nombre o números parecidos no identifican una póliza; hace falta una carátula/vigencia exacta y revisión humana. No se consultó Production durante esta revisión documental.
 
-- Responsable: el coordinador reúne evidencia; el operador con acceso a Neon/Vercel ejecuta las operaciones; el usuario aprueba cualquier reconexión de la aplicación productiva.
-- Destino del drill: **pendiente de reasignar**. La rama temporal que deriva de `main` no es válida y no se debe usar. Antes de ejecutar, registrar branch ID, parent aprobado, SHA y huella sanitizada. Nunca restaurar en Production.
-- Ante fallo: mantener mantenimiento, pausar/drenar jobs de negocio, registrar SHA e instante y preservar intacta la rama fuente.
-- Usar únicamente un backup de una organización CUSTOMER sintética y una clave exclusiva del drill después de validar la fuente. DEMO está excluida de backups globales. No exponer backup real ni clave de Production al runner.
-- Restaurar solo por CLI a la rama destino identificada. Pasar URL admin directa solo al paso migración/restore y URL pooled restringida solo a las validaciones que la necesiten.
-- Exigir conteos, FKs públicas, ciclos Payment POSTED/REVERSED, cancelación/renovación Policy/Receipt, referencias Notification, WorkItem canónicas y heredadas, secuencias, lecturas, aislamiento tenant y Prisma drift. Mantener `RESTORE_DRILL_APP_SMOKE=0`.
-- Si falla una invariante: marcar FAIL, mantener la aplicación cerrada y no reconectar Production. Si pasa, presentar reporte sanitizado, rama destino, huella, proyecto/entorno Vercel, SHA y comandos de verificación.
-- Solo después de aprobación explícita, el operador puede cambiar las variables autorizadas del runtime/admin hacia un destino compatible, desplegar el SHA revisado y validar health, recorridos autenticados, aislamiento y jobs. Conservar la rama anterior durante la ventana acordada.
+### Neon: procedencia y límites
 
-Este procedimiento describe una recuperación preparada, no un rollback automático. Tras un cutover multi-org no reconectar la aplicación singleton anterior: recuperar y certificar un destino compatible con multi-org.
+No confundir estos proyectos:
+
+- `policydesk-certification-20261001`: el par antiguo de ramas de certificación fue rechazado por su procedencia. No usarlo.
+- `policydesk-insurance-drill-20261005`: proyecto temporal dedicado. `main` aparece vacío; la fuente `cert-stage3-132ada7c...` desciende de esa `main` y contiene marcador de fixture y migraciones esperadas. Se observaron dos filas BackupArtifact para una organización, tamaños 0 y 7003 bytes. El tamaño y metadatos no prueban que el backup sea íntegro ni recuperable.
+- El destino `restore-drill-132ada7c-20261005` deriva de la fuente, expiraba el 2026-10-06 a las 14:17:58 según la consola local y aparecía Idle; la vista de tablas no permitió confirmar su estado vacío. Inspeccionar su estado actual antes de reutilizarlo.
+- GitHub confirma que `132ada7c` está 22 commits detrás de Production `cfd223e`; esos cambios solo tocan documentos, CLI de backfill y pruebas de backfill. No cambian schema, migraciones ni código de backup/restore. El fixture podría reutilizarse si la procedencia/artefacto se valida y el destino pasa las comprobaciones con el código candidato.
+- La contraseña del rol temporal de la rama hija se expuso en una salida anterior. Rotarla manualmente en Neon antes de conectar; no compartir la nueva clave. No se ha realizado restore remoto.
+- La CLI Neon no está instalada en este host; un intento aislado con npm falló por resolución DNS. No usar variables compartidas Production/Preview ni secretos productivos.
+
+### Procedimiento previo a un cutover
+
+1. Verificar que el recurso es el proyecto de drill, la rama destino deriva de la fuente autorizada y contiene únicamente fixture sintético.
+2. Rotar la credencial temporal expuesta; limitar cualquier credencial posterior al proyecto y recursos del drill. Revisar el alcance del runner antes de inyectarla.
+3. Restaurar solo por CLI en una rama Neon temporal. Mantener intacta la fuente y `RESTORE_DRILL_APP_SMOKE=0`.
+4. Exigir PASS del validador completo: conteos, FK, invariantes PolicyDesk/Payment, referencias Notification/WorkItem, secuencias, lecturas de aplicación, aislamiento y Prisma drift. Si falla, registrar FAIL y no conectar Production.
+5. Presentar SHA, informe sanitizado, rama origen/destino y procedimiento de recuperación. El rollback a una rama temporal no equivale a rollback automático de Production.
+6. Esperar aprobación explícita antes de cambiar variables productivas o hacer cutover. Tras aprobación, verificar clientes actuales y aislamiento; solo entonces provisionar una organización y usuario DEMO sintéticos.
+7. Probar login/cambio de contraseña, límites, documentos sintéticos, reset, revocación y escritorio/móvil. Cerrar el flag de provisión y observar un ciclo de jobs antes de declarar `READY FOR EXTERNAL DEMO ACCESS`.
+
+## Estados finales
+
+- `READY FOR DAILY USE`: mejoras desplegadas, recorridos autenticados verificados y triage/backfill operativo acordado.
+- `READY FOR EXTERNAL DEMO ACCESS`: restore/isolation/cutover aprobado; DEMO sintética y sus restricciones verificadas.
+
+Ambos son independientes. Hoy Production tiene las mejoras desplegadas y la CI pasa, pero el manifiesto/backfill, triage documental, restore remoto y aceptación DEMO siguen pendientes. No archivar un chat fuente hasta cotejar su entrega con esta lista y adjuntar evidencia de cierre.
