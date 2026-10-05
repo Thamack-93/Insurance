@@ -95,16 +95,28 @@ async function main() {
     assert.equal((converted.riskDetails as { sourceText?: unknown }).sourceText, SOURCE_TEXT);
     assert.equal((converted.riskDetails as { policyType?: unknown }).policyType, "AUTO");
 
+    const assetsAfterApply = await db.policyInsuredAsset.findMany({
+      where: { organizationId: ORGANIZATION_ID, policyId: fixture.policyId },
+      orderBy: [{ description: "asc" }],
+      select: { assetType: true, description: true, serialNumber: true },
+    });
+    assert.equal(assetsAfterApply.length, 2);
+    assert.deepEqual(
+      assetsAfterApply.map((asset) => asset.description).sort(),
+      ["Toyota Corolla 2020 LE", "Toyota Corolla, descripción histórica"].sort(),
+    );
+    assert.ok(assetsAfterApply.every((asset) => asset.assetType === "AUTO" && asset.serialNumber === VIN));
+
     const secondApply = runBackfill(true);
     assert.equal(secondApply.mode, "apply");
     assert.equal(secondApply.errors, 0);
 
-    const assets = await db.policyInsuredAsset.findMany({
+    const assetsAfterRepeat = await db.policyInsuredAsset.findMany({
       where: { organizationId: ORGANIZATION_ID, policyId: fixture.policyId },
-      select: { serialNumber: true },
+      orderBy: [{ description: "asc" }],
+      select: { assetType: true, description: true, serialNumber: true },
     });
-    assert.equal(assets.length, 1);
-    assert.equal(assets[0]?.serialNumber, VIN);
+    assert.deepEqual(assetsAfterRepeat, assetsAfterApply);
   } finally {
     await cleanupPolicyFixture(fixture);
   }
