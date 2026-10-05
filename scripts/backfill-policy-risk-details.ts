@@ -89,7 +89,7 @@ function planPolicy(policy: {
   };
 }
 
-async function scanAll(prisma: PrismaClient, organizationId: string) {
+async function scanAll(prisma: Pick<PrismaClient, "policy">, organizationId: string) {
   const candidates: PolicyRiskBackfillManifestRow[] = [];
   let cursor: string | undefined;
   for (;;) {
@@ -113,6 +113,56 @@ async function scanAll(prisma: PrismaClient, organizationId: string) {
     if (page.length < PAGE_SIZE) break;
   }
   return candidates;
+}
+
+async function assertProductionPreviewRole(tx: Prisma.TransactionClient, connectionString: string) {
+  const url = new URL(connectionString);
+  const expectedRole = process.env.POLICY_RISK_BACKFILL_READONLY_ROLE?.trim();
+  if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") throw new Error("POLICY_RISK_BACKFILL_PREVIEW_REQUIRES_POSTGRES");
+  if (!expectedRole || expectedRole !== "policydesk_readonly" || decodeURIComponent(url.username) !== expectedRole) {
+    throw new Error("POLICY_RISK_BACKFILL_PREVIEW_REQUIRES_CANONICAL_READONLY_ROLE");
+  }
+  if (process.env.VERCEL === "1" || process.env.VERCEL_ENV === "production" || process.env.VERCEL_ENV === "preview") {
+    throw new Error("POLICY_RISK_BACKFILL_PREVIEW_REFUSES_VERCEL_ENVIRONMENT");
+  }
+
+  const session = await tx.$queryRaw<Array<{ currentRole: string; transactionReadOnly: string; superuser: boolean; bypassRls: boolean; canLogin: boolean; inherits: boolean }>>(Prisma.sql`
+    SELECT current_user AS "currentRole",
+      current_setting('transaction_read_only') AS "transactionReadOnly",
+      role.rolsuper AS "superuser",
+      role.rolbypassrls AS "bypassRls",
+      role.rolcanlogin AS "canLogin",
+      role.rolinherit AS "inherits"
+    FROM pg_roles role WHERE role.rolname = current_user
+  `);
+  const identity = session[0];
+  if (!identity || identity.currentRole !== expectedRole || identity.transactionReadOnly !== "on" || identity.superuser || identity.bypassRls || !identity.canLogin || identity.inherits) {
+    throw new Error("POLICY_RISK_BACKFILL_PREVIEW_SESSION_NOT_READONLY");
+  }
+  const writePrivileges = await tx.$queryRaw<Array<{ tableName: string; privilege: string }>>(Prisma.sql`
+    SELECT c.relname AS "tableName", privilege.privilege AS "privilege"
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    CROSS JOIN (VALUES ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS privilege(privilege)
+    WHERE n.nspname = 'public'
+      AND c.relname IN ('Organization', 'Policy', 'PolicyInsuredAsset', 'PolicyInsuredParty')
+      AND has_table_privilege(current_user, c.oid, privilege.privilege)
+  `);
+  if (writePrivileges.length) throw new Error("POLICY_RISK_BACKFILL_PREVIEW_ROLE_HAS_WRITE_PRIVILEGES");
+}
+
+async function scanProductionReadOnly(prisma: PrismaClient, organizationId: string, connectionString: string) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+    await assertProductionPreviewRole(tx, connectionString);
+    const tenantContext = await tx.$queryRaw<Array<{ organizationId: string }>>(Prisma.sql`
+      SELECT set_config('app.organization_id', ${organizationId}, true) AS "organizationId"
+    `);
+    if (tenantContext[0]?.organizationId !== organizationId) throw new Error("POLICY_RISK_BACKFILL_PREVIEW_TENANT_CONTEXT_FAILED");
+    const organization = await tx.organization.findUnique({ where: { id: organizationId }, select: { id: true } });
+    if (!organization) throw new Error("POLICY_RISK_BACKFILL_PREVIEW_ORGANIZATION_NOT_VISIBLE");
+    return scanAll(tx, organizationId);
+  });
 }
 
 async function writePrivateManifest(file: string, manifest: unknown) {
@@ -148,6 +198,9 @@ async function readReviewedManifest(file: string): Promise<PolicyRiskBackfillMan
 async function main() {
   const organizationId = arg("organization-id")?.trim();
   if (!organizationId) throw new Error("Indica una organización explícita con --organization-id=ID.");
+  const productionPreview = process.argv.includes("--production-preview");
+  const apply = process.argv.includes("--apply");
+  if (productionPreview && apply) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_PREVIEW_IS_READ_ONLY");
   if (process.argv.includes("--print-reviewed-digest")) {
     const reviewedFile = arg("reviewed-report");
     const reviewer = arg("reviewed-by")?.trim();
@@ -160,20 +213,21 @@ async function main() {
     process.stdout.write(`${JSON.stringify({ reviewedManifestSha256: policyRiskBackfillReviewedHash(manifest) })}\n`);
     return;
   }
-  if (process.env.NODE_ENV !== "test" || process.env.TENANT_ISOLATION_TEST_DB !== "1" || process.env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB !== "1") {
+  if (!productionPreview && (process.env.NODE_ENV !== "test" || process.env.TENANT_ISOLATION_TEST_DB !== "1" || process.env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB !== "1")) {
     throw new Error("La conversión requiere NODE_ENV=test, TENANT_ISOLATION_TEST_DB=1 y PLAYWRIGHT_ENFORCE_DISPOSABLE_DB=1.");
   }
-  const connectionString = process.env.DATABASE_URL?.trim();
-  if (!connectionString) throw new Error("DATABASE_URL es obligatorio para la base desechable.");
-  assertDisposableCertificationTarget(connectionString, process.env, "source");
+  const connectionString = (productionPreview ? process.env.POLICY_RISK_BACKFILL_READONLY_DATABASE_URL : process.env.DATABASE_URL)?.trim();
+  if (!connectionString) throw new Error(productionPreview ? "POLICY_RISK_BACKFILL_READONLY_DATABASE_URL_REQUIRED" : "DATABASE_URL es obligatorio para la base desechable.");
+  if (!productionPreview) assertDisposableCertificationTarget(connectionString, process.env, "source");
 
-  const apply = process.argv.includes("--apply");
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
   try {
     const sha = candidateSha();
     const processor = await processorSha256();
     if (!apply) {
-      const candidates = await scanAll(prisma, organizationId);
+      const candidates = productionPreview
+        ? await scanProductionReadOnly(prisma, organizationId, connectionString)
+        : await scanAll(prisma, organizationId);
       const manifest: PolicyRiskBackfillManifest = {
         schemaVersion: POLICY_RISK_BACKFILL_MANIFEST_VERSION,
         processorVersion: POLICY_RISK_BACKFILL_PROCESSOR_VERSION,
@@ -194,7 +248,7 @@ async function main() {
       const review = candidates.filter((row) => row.classification === "REVIEW").length;
       const converted = candidates.filter((row) => row.classification === "CONVERTED").length;
       const empty = candidates.filter((row) => row.classification === "EMPTY").length;
-      process.stdout.write(`${JSON.stringify({ mode: "dry-run", organizationId, runId: manifest.runId, candidateSha: sha, scanned: candidates.length, converted, review, empty, manifestSha256: manifest.contentSha256, reportFile: reportPath }, null, 2)}\n`);
+      process.stdout.write(`${JSON.stringify({ mode: productionPreview ? "production-read-only-preview" : "dry-run", readOnly: productionPreview, organizationId, runId: manifest.runId, candidateSha: sha, scanned: candidates.length, converted, review, empty, manifestSha256: manifest.contentSha256, reportFile: reportPath }, null, 2)}\n`);
       return;
     }
 

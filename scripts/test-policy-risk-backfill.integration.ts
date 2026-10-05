@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync, statSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,7 +13,8 @@ const SOURCE_TEXT = "Toyota, Corolla, 2020, LE";
 const VIN = "2T1BURHE0LC123456";
 
 type BackfillReport = {
-  mode: "dry-run" | "apply";
+  mode: "dry-run" | "production-read-only-preview" | "apply";
+  readOnly?: boolean;
   organizationId: string;
   reportFile?: string;
   resultFile?: string;
@@ -28,7 +29,7 @@ type BackfillReport = {
   alreadyApplied?: number;
 };
 
-type RunBackfillOptions = { apply?: boolean; printReviewedDigest?: boolean; reportFile: string; manifestSha256?: string; previewSha256?: string; reviewer?: string; batchSize?: number; failAfterAppliedBatches?: number; failWithinBatchAfterAppliedRows?: number; mutatePolicyBeforeBatch?: string };
+type RunBackfillOptions = { apply?: boolean; productionPreview?: boolean; readonlyDatabaseUrl?: string; printReviewedDigest?: boolean; reportFile: string; manifestSha256?: string; previewSha256?: string; reviewer?: string; batchSize?: number; failAfterAppliedBatches?: number; failWithinBatchAfterAppliedRows?: number; mutatePolicyBeforeBatch?: string };
 
 function runBackfill(options: RunBackfillOptions & { printReviewedDigest: true }): { reviewedManifestSha256: string };
 function runBackfill(options: RunBackfillOptions & { printReviewedDigest?: false | undefined }): BackfillReport;
@@ -38,6 +39,7 @@ function runBackfill(options: RunBackfillOptions): BackfillReport | { reviewedMa
     "tsx",
     "scripts/backfill-policy-risk-details.ts",
     `--organization-id=${ORGANIZATION_ID}`,
+    ...(options.productionPreview ? ["--production-preview"] : []),
     ...(options.printReviewedDigest ? ["--print-reviewed-digest", `--reviewed-report=${options.reportFile}`, `--reviewed-by=${options.reviewer}`, `--preview-sha256=${options.previewSha256}`] : options.apply ? ["--apply", `--reviewed-report=${options.reportFile}`, `--reviewed-by=${options.reviewer}`, `--manifest-sha256=${options.manifestSha256}`, `--batch-size=${options.batchSize ?? 50}`, "--confirm-apply=APPLY_POLICY_RISK_BACKFILL"] : [`--report-file=${options.reportFile}`]),
   ];
   const stdout = execFileSync(process.execPath, args, {
@@ -48,6 +50,10 @@ function runBackfill(options: RunBackfillOptions): BackfillReport | { reviewedMa
       NODE_ENV: "test",
       TENANT_ISOLATION_TEST_DB: "1",
       PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1",
+      ...(options.productionPreview ? {
+        POLICY_RISK_BACKFILL_READONLY_DATABASE_URL: options.readonlyDatabaseUrl,
+        POLICY_RISK_BACKFILL_READONLY_ROLE: "policydesk_readonly",
+      } : {}),
       ...(options.failAfterAppliedBatches ? { POLICY_RISK_BACKFILL_TEST_FAIL_AFTER_APPLIED_BATCHES: String(options.failAfterAppliedBatches) } : {}),
       ...(options.failWithinBatchAfterAppliedRows ? { POLICY_RISK_BACKFILL_TEST_FAIL_WITHIN_BATCH_AFTER_APPLIED_ROWS: String(options.failWithinBatchAfterAppliedRows) } : {}),
       ...(options.mutatePolicyBeforeBatch ? { POLICY_RISK_BACKFILL_TEST_MUTATE_POLICY_ID_BEFORE_BATCH: options.mutatePolicyBeforeBatch } : {}),
@@ -66,10 +72,22 @@ async function main() {
     throw new Error("POLICY_RISK_BACKFILL_INTEGRATION_REQUIRES_DISPOSABLE_POSTGRES");
   }
 
+  const readOnlyApplyAttempt = spawnSync(process.execPath, [
+    "--import", "tsx", "scripts/backfill-policy-risk-details.ts",
+    `--organization-id=${ORGANIZATION_ID}`, "--production-preview", "--apply",
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: { ...process.env, POLICY_RISK_BACKFILL_READONLY_DATABASE_URL: "", POLICY_RISK_BACKFILL_READONLY_ROLE: "" },
+  });
+  assert.equal(readOnlyApplyAttempt.status, 1);
+  assert.match(readOnlyApplyAttempt.stderr, /POLICY_RISK_BACKFILL_PRODUCTION_PREVIEW_IS_READ_ONLY/);
+
   const db = getTestDb();
   let fixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
   let ambiguousFixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
   let partyFixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
+  let readonlyRoleCreated = false;
   let reportFile: string | null = null;
   const reportFiles: string[] = [];
   const resultFiles: string[] = [];
@@ -107,6 +125,26 @@ async function main() {
     const legacyParty = await db.policyInsuredParty.create({
       data: { organizationId: ORGANIZATION_ID, policyId: insuredPartyFixture.policyId, fullName: "Backfill Insured Person", isPrimary: false, sourceLabel: "Legacy import" },
     });
+
+    const existingReadonlyRole = await db.$queryRaw<Array<{ exists: boolean }>>(Prisma.sql`SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'policydesk_readonly') AS "exists"`);
+    if (existingReadonlyRole[0]?.exists) throw new Error("POLICY_RISK_BACKFILL_TEST_READONLY_ROLE_ALREADY_EXISTS");
+    const readonlyPassword = randomUUID().replaceAll("-", "");
+    await db.$executeRawUnsafe(`CREATE ROLE policydesk_readonly LOGIN NOINHERIT NOBYPASSRLS PASSWORD '${readonlyPassword}'`);
+    readonlyRoleCreated = true;
+    await db.$executeRawUnsafe('GRANT USAGE ON SCHEMA public TO policydesk_readonly');
+    await db.$executeRawUnsafe('GRANT SELECT ON TABLE "Organization", "Policy", "PolicyInsuredAsset", "PolicyInsuredParty" TO policydesk_readonly');
+    const readonlyUrl = new URL(process.env.DATABASE_URL!);
+    readonlyUrl.username = "policydesk_readonly";
+    readonlyUrl.password = readonlyPassword;
+    const readonlyReportFile = temporaryReportPath();
+    reportFiles.push(readonlyReportFile);
+    const productionPreview = runBackfill({ productionPreview: true, readonlyDatabaseUrl: readonlyUrl.toString(), reportFile: readonlyReportFile });
+    assert.equal(productionPreview.mode, "production-read-only-preview");
+    assert.equal(productionPreview.readOnly, true);
+    const readonlyManifest = JSON.parse(readFileSync(productionPreview.reportFile!, "utf8")) as PolicyRiskBackfillManifest;
+    assert.ok(readonlyManifest.candidates.some((row) => row.policyId === backfillFixture.policyId));
+    assert.ok(readonlyManifest.candidates.some((row) => row.policyId === reviewFixture.policyId));
+    assert.ok(readonlyManifest.candidates.some((row) => row.policyId === insuredPartyFixture.policyId));
 
     reportFile = temporaryReportPath();
     reportFiles.push(reportFile);
@@ -315,6 +353,10 @@ async function main() {
     for (const file of reportFiles) rmSync(file, { force: true });
     for (const file of resultFiles) rmSync(file, { force: true });
     await Promise.allSettled([fixture, ambiguousFixture, partyFixture].filter((item): item is NonNullable<typeof item> => item !== null).map(cleanupPolicyFixture));
+    if (readonlyRoleCreated) {
+      await db.$executeRawUnsafe('DROP OWNED BY policydesk_readonly');
+      await db.$executeRawUnsafe('DROP ROLE policydesk_readonly');
+    }
   }
 }
 

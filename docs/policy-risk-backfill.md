@@ -54,7 +54,25 @@ and writes a private per-policy outcome report alongside the manifest. It also
 records run counts and the manifest digest in `MaintenanceRun`. A changed
 candidate, processor, organization, or source row stops before writes.
 
-This command intentionally refuses Production and Vercel environments. A
-Production conversion still needs its own authorized operator path, reviewed
-per-organization preview, batch plan, and recovery checkpoint; the rehearsal
-does not authorize or perform that operation.
+## Optional read-only Production preview
+
+The Production preview is a separate, read-only mode. Supply a dedicated
+`policydesk_readonly` connection through `POLICY_RISK_BACKFILL_READONLY_DATABASE_URL`
+and set `POLICY_RISK_BACKFILL_READONLY_ROLE=policydesk_readonly`. Do not reuse
+`DATABASE_URL` or an owner/application credential. Keep the manifest path
+private and outside the repository.
+
+```sh
+npm run backfill:policy-risk-details -- \
+  --production-preview --organization-id=ORG_ID \
+  --report-file=/private/tmp/policy-risk-backfill-preview.json
+```
+
+The mode starts one `REPEATABLE READ, READ ONLY` transaction, checks the actual
+PostgreSQL role, verifies it has no write privileges on the organization and
+policy tables it reads, and scopes every query to the explicit organization ID.
+It fails if the organization is not visible through the configured role. The
+mode rejects `--apply`; apply remains restricted to the disposable rehearsal
+guards above. It does not create a Production conversion run or change any
+row. Review the manifest and its source text privately before planning any
+separate, approved Production apply and recovery checkpoint.
