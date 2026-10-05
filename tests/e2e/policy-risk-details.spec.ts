@@ -4,6 +4,29 @@ import { captureServerAction } from "../helpers/capture-server-action";
 
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
 
+function createSyntheticPdf(text: string) {
+  const pdfText = text.replace(/[()\\]/g, "\\$&");
+  const stream = `BT /F1 12 Tf 20 100 Td (${pdfText}) Tj ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xrefOffset = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets.slice(1)) pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return Buffer.from(pdf, "ascii");
+}
+
 test.describe("structured policy risk details", () => {
   test("preserves ambiguous legacy insuredObject when saving an unrelated edit", async ({ page }) => {
     const db = getTestDb();
@@ -133,7 +156,7 @@ test.describe("structured policy risk details", () => {
     }
   });
 
-  test("persists structured risk details when confirming a PDF renewal capture", async ({ page }) => {
+  test("persists edited structured risk details through the PDF capture UI", async ({ page }) => {
     const db = getTestDb();
     const fixture = await seedPolicyFixture("POLICY-RISK-PDF-CONFIRM");
     const vin = "2T1BURHE0LC123456";
@@ -154,53 +177,80 @@ test.describe("structured policy risk details", () => {
         sourceText: "Toyota, Corolla, 2020, LE",
         data: { vehicles: [{ make: "Toyota", model: "Corolla", year: "2020", version: "LE", vin, plates: "ABC-123" }] },
       };
-      const payload = {
-        clientId: fixture.clientId,
-        insurerId: fixture.insurerId,
-        sourcePolicyId: fixture.policyId,
-        draft: {
-          policyNumber: `${fixture.policyNumber}-REN`,
-          clientName: fixture.clientName,
-          clientType: "PERSON",
-          clientEmail: null,
-          clientPhone: null,
-          clientAddress: null,
-          clientRfc: null,
-          clientBirthDate: null,
-          insurerName: fixture.insurerName,
-          policyType: "AUTO",
-          startDate: renewalStartDate,
-          endDate: renewalEndDate,
-          issueDate: null,
-          paymentFrequency: "ANNUAL",
-          paymentPlan: null,
-          premiumAmount: 1234.56,
-          currency: "MXN",
-          requestNumber: "CAPTURE-TEST",
-          insuredObject: "Toyota Corolla 2020 LE",
-          riskDetails,
-          beneficiaryInfo: null,
-          notes: null,
-          sourcePolicyNumber: source.policyNumber,
-          serialNumber: vin,
-        },
+      const draft = {
+        policyNumber: `${fixture.policyNumber}-REN`,
+        clientName: fixture.clientName,
+        clientType: "PERSON",
+        clientEmail: null,
+        clientPhone: null,
+        clientAddress: null,
+        clientRfc: null,
+        clientBirthDate: null,
+        insurerName: fixture.insurerName,
+        policyType: "AUTO",
+        startDate: renewalStartDate,
+        endDate: renewalEndDate,
+        issueDate: null,
+        paymentFrequency: "ANNUAL",
+        paymentPlan: null,
+        premiumAmount: 1234.56,
+        currency: "MXN",
+        requestNumber: "CAPTURE-TEST",
+        insuredObject: "Toyota Corolla 2020 LE",
+        riskDetails,
+        beneficiaryInfo: null,
+        notes: null,
+        sourcePolicyNumber: source.policyNumber,
+        serialNumber: vin,
       };
 
       await authenticatePageAsAdmin(page);
-      await page.goto(`/policies/${fixture.policyId}/edit`);
-      const result = await page.evaluate(async (requestBody) => {
-        const response = await fetch("/api/policies/capture/confirm", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody),
+      await page.route("**/api/nora/policy-pdf/analyze", async (route) => {
+        const request = route.request().postDataJSON() as { text?: string };
+        expect(request.text).toContain("SYNTHETIC POLICY DOCUMENT");
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: true,
+            preview: {
+              draft,
+              suggestions: { clientId: fixture.clientId, insurerId: fixture.insurerId, sourcePolicyId: fixture.policyId },
+              receiptPlan: [],
+              clientOptions: [],
+              insurerOptions: [],
+              sourcePolicyOptions: [],
+              fieldConfidence: {
+                policyNumber: "high", clientName: "high", clientType: "high", clientEmail: "high", clientPhone: "high",
+                clientAddress: "high", clientRfc: "high", clientBirthDate: "high", insurerName: "high", policyType: "high",
+                serialNumber: "high", startDate: "high", endDate: "high", issueDate: "high", paymentFrequency: "high",
+                premiumAmount: "high", sourcePolicyNumber: "high",
+              },
+              confidence: { client: true, insurer: true, sourcePolicy: true },
+              warnings: [],
+              aiReview: null,
+              provenance: { requestedMode: "local", extractionSource: "local", reviewSource: "none", aiRunIds: [], trackingStatus: "recorded", aiAttempted: false },
+            },
+            pdfReference: null,
+          }),
         });
-        return { status: response.status, body: await response.json() as { success?: boolean; policyId?: string; error?: string } };
-      }, payload);
+      });
+      await page.goto("/policies/capture");
+      await page.locator("#pdf-file").setInputFiles({
+        name: "synthetic-policy.pdf",
+        mimeType: "application/pdf",
+        buffer: createSyntheticPdf("SYNTHETIC POLICY DOCUMENT"),
+      });
+      await page.getByRole("button", { name: "Analizar PDF", exact: true }).click();
+      await expect(page.locator("#risk-AUTO-vehicles-0-make")).toHaveValue("Toyota");
+      await page.locator("#risk-AUTO-vehicles-0-make").fill("Honda");
+      await page.locator("#risk-AUTO-vehicles-0-model").fill("Civic");
+      await expect(page.getByRole("button", { name: "Crear póliza y marcar como renovada" })).toBeEnabled();
+      await page.getByRole("button", { name: "Crear póliza y marcar como renovada" }).click();
+      await expect(page).toHaveURL(new RegExp(`/policies/.+`));
 
-      expect(result.status, result.body.error).toBe(200);
-      expect(result.body.success).toBe(true);
-      expect(result.body.policyId).toBeTruthy();
-      capturedPolicyId = result.body.policyId ?? null;
+      const url = new URL(page.url());
+      capturedPolicyId = url.pathname.split("/").pop() ?? null;
+      expect(capturedPolicyId).toBeTruthy();
 
       const [sourceAfter, renewedPolicy, assets] = await Promise.all([
         db.policy.findUnique({ where: { id: fixture.policyId }, select: { status: true } }),
@@ -210,11 +260,11 @@ test.describe("structured policy risk details", () => {
       expect(sourceAfter?.status).toBe("RENEWED");
       expect(renewedPolicy).toMatchObject({
         renewedFromPolicyId: fixture.policyId,
-        insuredObject: "Toyota Corolla 2020 LE Placas ABC-123 Serie 2T1BURHE0LC123456",
+        insuredObject: "Honda Civic 2020 LE Placas ABC-123 Serie 2T1BURHE0LC123456",
         riskDetails: {
           policyType: "AUTO",
           sourceText: "Toyota, Corolla, 2020, LE",
-          data: { vehicles: [{ make: "Toyota", model: "Corolla", year: "2020", version: "LE", vin, plates: "ABC-123" }] },
+          data: { vehicles: [{ make: "Honda", model: "Civic", year: "2020", version: "LE", vin, plates: "ABC-123" }] },
         },
       });
       expect(assets).toEqual([{ assetType: "AUTO", serialNumber: vin }]);
