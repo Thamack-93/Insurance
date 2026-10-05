@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { Prisma } from "../src/generated/prisma/client.ts";
 import { cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../tests/helpers/db.ts";
 
@@ -10,21 +14,26 @@ const VIN = "2T1BURHE0LC123456";
 type BackfillReport = {
   mode: "dry-run" | "apply";
   organizationId: string;
+  reportFile?: string;
+  resultFile?: string;
+  manifestSha256?: string;
+  runId?: string;
   scanned: number;
   converted: number;
   review: number;
   empty: number;
-  errors: number;
+  alreadyApplied?: number;
 };
 
-function runBackfill(apply = false): BackfillReport {
-  const stdout = execFileSync(process.execPath, [
+function runBackfill(options: { apply?: boolean; reportFile: string; manifestSha256?: string; reviewer?: string } ): BackfillReport {
+  const args = [
     "--import",
     "tsx",
     "scripts/backfill-policy-risk-details.ts",
     `--organization-id=${ORGANIZATION_ID}`,
-    ...(apply ? ["--apply"] : []),
-  ], {
+    ...(options.apply ? ["--apply", `--reviewed-report=${options.reportFile}`, `--reviewed-by=${options.reviewer}`, `--manifest-sha256=${options.manifestSha256}`, "--confirm-apply=APPLY_POLICY_RISK_BACKFILL"] : [`--report-file=${options.reportFile}`]),
+  ];
+  const stdout = execFileSync(process.execPath, args, {
     cwd: process.cwd(),
     encoding: "utf8",
     env: {
@@ -36,6 +45,10 @@ function runBackfill(apply = false): BackfillReport {
     maxBuffer: 1024 * 1024,
   });
   return JSON.parse(stdout) as BackfillReport;
+}
+
+function temporaryReportPath() {
+  return path.join(tmpdir(), `policy-risk-backfill-${randomUUID()}.json`);
 }
 
 async function main() {
@@ -65,12 +78,23 @@ async function main() {
       },
     });
 
-    const preview = runBackfill();
+    const reportFile = temporaryReportPath();
+    const preview = runBackfill({ reportFile });
     assert.equal(preview.mode, "dry-run");
     assert.equal(preview.organizationId, ORGANIZATION_ID);
     assert.ok(preview.scanned >= 1);
     assert.ok(preview.converted >= 1);
-    assert.equal(preview.errors, 0);
+    assert.ok(preview.manifestSha256);
+    assert.equal(preview.reportFile, reportFile);
+    const manifest = JSON.parse(readFileSync(reportFile, "utf8")) as {
+      candidates: Array<{ policyId: string; classification: string; source: { insuredObject: string | null } }>;
+      reviewedBy: string | null;
+      reviewedAt: string | null;
+    };
+    assert.equal(preview.review, manifest.candidates.filter((row) => row.classification === "REVIEW").length);
+    const fixtureCandidate = manifest.candidates.find((row) => row.policyId === fixture.policyId);
+    assert.ok(fixtureCandidate);
+    assert.equal(fixtureCandidate.source.insuredObject, SOURCE_TEXT);
 
     const unchanged = await db.policy.findUniqueOrThrow({
       where: { id: fixture.policyId },
@@ -80,10 +104,16 @@ async function main() {
     assert.equal(unchanged.riskDetails, null);
     assert.equal(unchanged.riskDetailsReviewRequired, false);
 
-    const applied = runBackfill(true);
+    manifest.reviewedBy = "integration-reviewer";
+    manifest.reviewedAt = new Date().toISOString();
+    writeFileSync(reportFile, `${JSON.stringify(manifest, null, 2)}\n`);
+    const applied = runBackfill({ apply: true, reportFile, manifestSha256: preview.manifestSha256, reviewer: "integration-reviewer" });
     assert.equal(applied.mode, "apply");
     assert.ok(applied.converted >= 1);
-    assert.equal(applied.errors, 0);
+    assert.ok(applied.runId);
+    assert.ok(applied.resultFile);
+    const resultReport = JSON.parse(readFileSync(applied.resultFile, "utf8")) as { outcomes: Array<{ policyId: string; outcome: string }> };
+    assert.ok(resultReport.outcomes.some((row) => row.policyId === fixture.policyId && row.outcome === "APPLIED"));
 
     const converted = await db.policy.findUniqueOrThrow({
       where: { id: fixture.policyId },
@@ -107,9 +137,17 @@ async function main() {
     );
     assert.ok(assetsAfterApply.every((asset) => asset.assetType === "AUTO" && asset.serialNumber === VIN));
 
-    const secondApply = runBackfill(true);
-    assert.equal(secondApply.mode, "apply");
-    assert.equal(secondApply.errors, 0);
+    const resumed = runBackfill({ apply: true, reportFile, manifestSha256: preview.manifestSha256, reviewer: "integration-reviewer" });
+    assert.equal(resumed.mode, "apply");
+    assert.ok((resumed.alreadyApplied ?? 0) >= 1);
+    assert.ok(resumed.resultFile);
+    const resumeReport = JSON.parse(readFileSync(resumed.resultFile, "utf8")) as { outcomes: Array<{ policyId: string; outcome: string }> };
+    assert.ok(resumeReport.outcomes.some((row) => row.policyId === fixture.policyId && row.outcome === "ALREADY_APPLIED"));
+
+    const secondReportPath = temporaryReportPath();
+    const secondPreview = runBackfill({ reportFile: secondReportPath });
+    assert.equal(secondPreview.mode, "dry-run");
+    assert.equal(secondPreview.scanned, 0);
 
     const assetsAfterRepeat = await db.policyInsuredAsset.findMany({
       where: { organizationId: ORGANIZATION_ID, policyId: fixture.policyId },
