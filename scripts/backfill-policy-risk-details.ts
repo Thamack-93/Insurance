@@ -89,7 +89,7 @@ function planPolicy(policy: {
   };
 }
 
-async function scanAll(prisma: PrismaClient, organizationId: string) {
+async function scanAll(prisma: Pick<PrismaClient, "policy">, organizationId: string) {
   const candidates: PolicyRiskBackfillManifestRow[] = [];
   let cursor: string | undefined;
   for (;;) {
