@@ -4,6 +4,7 @@ import {
   POLICY_RISK_BACKFILL_MANIFEST_VERSION,
   POLICY_RISK_BACKFILL_PROCESSOR_VERSION,
   policyRiskBackfillManifestContentHash,
+  policyRiskBackfillReviewedHash,
   type PolicyRiskBackfillManifest,
 } from "@/lib/policy-risk-backfill-manifest";
 
@@ -51,6 +52,20 @@ describe("policy risk backfill reviewed manifest", () => {
     value.candidates[0].proposed.riskDetails = { version: 1, tampered: true };
     expect(() => assertReviewedPolicyRiskBackfillManifest(value, { organizationId: "org-1", candidateSha: "abc123", processorSha256: "processor-1" }))
       .toThrow("POLICY_RISK_BACKFILL_MANIFEST_CONTENT_HASH_MISMATCH");
+  });
+
+  it("binds the final confirmation to every review decision and reviewer attribution", () => {
+    const value = manifest();
+    value.candidates[0].decision = "ACCEPT";
+    const acceptedHash = policyRiskBackfillReviewedHash(value);
+    value.candidates[0].decision = "DEFER";
+    expect(policyRiskBackfillReviewedHash(value)).not.toBe(acceptedHash);
+    value.candidates[0].decision = "ACCEPT";
+    value.reviewedBy = "another-reviewer@example.test";
+    expect(policyRiskBackfillReviewedHash(value)).not.toBe(acceptedHash);
+    value.reviewedBy = "reviewer@example.test";
+    value.reviewedAt = "2026-10-05T12:31:00.000Z";
+    expect(policyRiskBackfillReviewedHash(value)).not.toBe(acceptedHash);
   });
 
   it("rejects another organization or candidate SHA", () => {

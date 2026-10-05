@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { policyRiskBackfillReviewedHash, type PolicyRiskBackfillManifest } from "../src/lib/policy-risk-backfill-manifest.ts";
 import { Prisma } from "../src/generated/prisma/client.ts";
 import { cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../tests/helpers/db.ts";
 
@@ -27,13 +28,17 @@ type BackfillReport = {
   alreadyApplied?: number;
 };
 
-function runBackfill(options: { apply?: boolean; reportFile: string; manifestSha256?: string; reviewer?: string } ): BackfillReport {
+type RunBackfillOptions = { apply?: boolean; printReviewedDigest?: boolean; reportFile: string; manifestSha256?: string; previewSha256?: string; reviewer?: string; batchSize?: number; failAfterAppliedBatches?: number; failWithinBatchAfterAppliedRows?: number };
+
+function runBackfill(options: RunBackfillOptions & { printReviewedDigest: true }): { reviewedManifestSha256: string };
+function runBackfill(options: RunBackfillOptions & { printReviewedDigest?: false | undefined }): BackfillReport;
+function runBackfill(options: RunBackfillOptions): BackfillReport | { reviewedManifestSha256: string } {
   const args = [
     "--import",
     "tsx",
     "scripts/backfill-policy-risk-details.ts",
     `--organization-id=${ORGANIZATION_ID}`,
-    ...(options.apply ? ["--apply", `--reviewed-report=${options.reportFile}`, `--reviewed-by=${options.reviewer}`, `--manifest-sha256=${options.manifestSha256}`, "--confirm-apply=APPLY_POLICY_RISK_BACKFILL"] : [`--report-file=${options.reportFile}`]),
+    ...(options.printReviewedDigest ? ["--print-reviewed-digest", `--reviewed-report=${options.reportFile}`, `--reviewed-by=${options.reviewer}`, `--preview-sha256=${options.previewSha256}`] : options.apply ? ["--apply", `--reviewed-report=${options.reportFile}`, `--reviewed-by=${options.reviewer}`, `--manifest-sha256=${options.manifestSha256}`, `--batch-size=${options.batchSize ?? 50}`, "--confirm-apply=APPLY_POLICY_RISK_BACKFILL"] : [`--report-file=${options.reportFile}`]),
   ];
   const stdout = execFileSync(process.execPath, args, {
     cwd: process.cwd(),
@@ -43,6 +48,8 @@ function runBackfill(options: { apply?: boolean; reportFile: string; manifestSha
       NODE_ENV: "test",
       TENANT_ISOLATION_TEST_DB: "1",
       PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1",
+      ...(options.failAfterAppliedBatches ? { POLICY_RISK_BACKFILL_TEST_FAIL_AFTER_APPLIED_BATCHES: String(options.failAfterAppliedBatches) } : {}),
+      ...(options.failWithinBatchAfterAppliedRows ? { POLICY_RISK_BACKFILL_TEST_FAIL_WITHIN_BATCH_AFTER_APPLIED_ROWS: String(options.failWithinBatchAfterAppliedRows) } : {}),
     },
     maxBuffer: 1024 * 1024,
   });
@@ -59,14 +66,17 @@ async function main() {
   }
 
   const db = getTestDb();
-  const fixture = await seedPolicyFixture("POLICY-RISK-BACKFILL");
-  const ambiguousFixture = await seedPolicyFixture("POLICY-RISK-REVIEW");
+  let fixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
+  let ambiguousFixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
   let reportFile: string | null = null;
+  const reportFiles: string[] = [];
   const resultFiles: string[] = [];
   const maintenanceRunIds: string[] = [];
   try {
+    const backfillFixture = fixture = await seedPolicyFixture("POLICY-RISK-BACKFILL");
+    const reviewFixture = ambiguousFixture = await seedPolicyFixture("POLICY-RISK-REVIEW");
     await db.policy.update({
-      where: { id: fixture.policyId },
+      where: { id: backfillFixture.policyId },
       data: {
         insuredObject: SOURCE_TEXT,
         riskDetails: Prisma.DbNull,
@@ -76,7 +86,7 @@ async function main() {
     await db.policyInsuredAsset.create({
       data: {
         organizationId: ORGANIZATION_ID,
-        policyId: fixture.policyId,
+        policyId: backfillFixture.policyId,
         assetType: "AUTO",
         description: "Toyota Corolla, descripción histórica",
         serialNumber: VIN,
@@ -84,11 +94,12 @@ async function main() {
       },
     });
     await db.policy.update({
-      where: { id: ambiguousFixture.policyId },
+      where: { id: reviewFixture.policyId },
       data: { insuredObject: "Texto libre que requiere revisión", riskDetails: Prisma.DbNull, riskDetailsReviewRequired: false },
     });
 
     reportFile = temporaryReportPath();
+    reportFiles.push(reportFile);
     const preview = runBackfill({ reportFile });
     assert.equal(preview.mode, "dry-run");
     assert.equal(preview.organizationId, ORGANIZATION_ID);
@@ -97,44 +108,97 @@ async function main() {
     assert.ok(preview.manifestSha256);
     assert.equal(preview.reportFile, reportFile);
     assert.equal(statSync(reportFile).mode & 0o777, 0o600);
-    const manifest = JSON.parse(readFileSync(reportFile, "utf8")) as {
-      candidates: Array<{ policyId: string; classification: string; decision: "ACCEPT" | "DEFER" | null; source: { insuredObject: string | null } }>;
-      reviewedBy: string | null;
-      reviewedAt: string | null;
-    };
+    const manifest = JSON.parse(readFileSync(reportFile, "utf8")) as PolicyRiskBackfillManifest;
     assert.equal(preview.review, 1);
     assert.equal(preview.review, manifest.candidates.filter((row) => row.classification === "REVIEW").length);
-    const fixtureCandidate = manifest.candidates.find((row) => row.policyId === fixture.policyId);
+    const fixtureCandidate = manifest.candidates.find((row) => row.policyId === backfillFixture.policyId);
     assert.ok(fixtureCandidate);
     assert.equal(fixtureCandidate.source.insuredObject, SOURCE_TEXT);
-    const ambiguousCandidate = manifest.candidates.find((row) => row.policyId === ambiguousFixture.policyId);
+    const ambiguousCandidate = manifest.candidates.find((row) => row.policyId === reviewFixture.policyId);
     assert.ok(ambiguousCandidate);
     assert.equal(ambiguousCandidate.classification, "REVIEW");
     assert.equal(ambiguousCandidate.source.insuredObject, "Texto libre que requiere revisión");
 
     const unchanged = await db.policy.findUniqueOrThrow({
-      where: { id: fixture.policyId },
+      where: { id: backfillFixture.policyId },
       select: { insuredObject: true, riskDetails: true, riskDetailsReviewRequired: true },
     });
     assert.equal(unchanged.insuredObject, SOURCE_TEXT);
     assert.equal(unchanged.riskDetails, null);
     assert.equal(unchanged.riskDetailsReviewRequired, false);
+    const assetsBeforeApply = await db.policyInsuredAsset.findMany({ where: { organizationId: ORGANIZATION_ID, policyId: backfillFixture.policyId }, orderBy: { id: "asc" }, select: { id: true, description: true, serialNumber: true } });
 
     manifest.reviewedBy = "integration-reviewer";
     manifest.reviewedAt = new Date().toISOString();
     writeFileSync(reportFile, `${JSON.stringify(manifest, null, 2)}\n`);
+    const incompleteReviewedDigest = policyRiskBackfillReviewedHash(manifest);
     assert.throws(
-      () => runBackfill({ apply: true, reportFile: reportFile as string, manifestSha256: preview.manifestSha256, reviewer: "integration-reviewer" }),
-      (error: unknown) => error instanceof Error && String((error as NodeJS.ErrnoException & { stderr?: Buffer }).stderr ?? error).includes(`POLICY_RISK_BACKFILL_REVIEW_DECISION_REQUIRED:${ambiguousFixture.policyId}`),
+      () => runBackfill({ apply: true, reportFile: reportFile as string, manifestSha256: incompleteReviewedDigest, reviewer: "integration-reviewer", batchSize: 1 }),
+      (error: unknown) => error instanceof Error && String((error as NodeJS.ErrnoException & { stderr?: Buffer }).stderr ?? error).includes(`POLICY_RISK_BACKFILL_REVIEW_DECISION_REQUIRED:${reviewFixture.policyId}`),
     );
-    const stillAmbiguous = await db.policy.findUniqueOrThrow({ where: { id: ambiguousFixture.policyId }, select: { insuredObject: true, riskDetails: true, riskDetailsReviewRequired: true } });
+    const stillAmbiguous = await db.policy.findUniqueOrThrow({ where: { id: reviewFixture.policyId }, select: { insuredObject: true, riskDetails: true, riskDetailsReviewRequired: true } });
     assert.equal(stillAmbiguous.insuredObject, "Texto libre que requiere revisión");
     assert.equal(stillAmbiguous.riskDetails, null);
     assert.equal(stillAmbiguous.riskDetailsReviewRequired, false);
 
     ambiguousCandidate.decision = "DEFER";
     writeFileSync(reportFile, `${JSON.stringify(manifest, null, 2)}\n`);
-    const applied = runBackfill({ apply: true, reportFile, manifestSha256: preview.manifestSha256, reviewer: "integration-reviewer" });
+    const reviewedDigestAfterDecision = runBackfill({ printReviewedDigest: true, reportFile, previewSha256: preview.manifestSha256, reviewer: "integration-reviewer" });
+    assert.ok("reviewedManifestSha256" in reviewedDigestAfterDecision);
+    assert.notEqual(incompleteReviewedDigest, reviewedDigestAfterDecision.reviewedManifestSha256);
+    assert.throws(
+      () => runBackfill({ apply: true, reportFile: reportFile as string, manifestSha256: incompleteReviewedDigest, reviewer: "integration-reviewer", batchSize: 1 }),
+      (error: unknown) => error instanceof Error && String((error as NodeJS.ErrnoException & { stderr?: Buffer }).stderr ?? error).includes("POLICY_RISK_BACKFILL_REVIEWED_DIGEST_MISMATCH"),
+    );
+
+    assert.throws(
+      () => runBackfill({ apply: true, reportFile: reportFile as string, manifestSha256: reviewedDigestAfterDecision.reviewedManifestSha256, reviewer: "integration-reviewer", batchSize: 1, failWithinBatchAfterAppliedRows: 1 }),
+      (error: unknown) => error instanceof Error && String((error as NodeJS.ErrnoException & { stderr?: Buffer }).stderr ?? error).includes("POLICY_RISK_BACKFILL_TEST_ROLLBACK_WITHIN_BATCH"),
+    );
+    const rollbackRun = await db.maintenanceRun.findFirst({
+      where: { organizationId: ORGANIZATION_ID, type: "POLICY_RISK_BACKFILL", summaryJson: { contains: "POLICY_RISK_BACKFILL_TEST_ROLLBACK_WITHIN_BATCH" } },
+      select: { id: true, status: true, summaryJson: true },
+    });
+    assert.ok(rollbackRun);
+    maintenanceRunIds.push(rollbackRun.id);
+    assert.equal(rollbackRun.status, "FAILED");
+    const rollbackSummary = JSON.parse(rollbackRun.summaryJson ?? "{}") as { applied?: number };
+    assert.equal(rollbackSummary.applied, 0);
+    const rollbackResultFile = `${reportFile}.${rollbackRun.id}.results.json`;
+    assert.ok(existsSync(rollbackResultFile));
+    resultFiles.push(rollbackResultFile);
+    const rollbackReport = JSON.parse(readFileSync(rollbackResultFile, "utf8")) as { applied: number; outcomes: Array<{ outcome: string }> };
+    assert.equal(rollbackReport.applied, 0);
+    assert.ok(!rollbackReport.outcomes.some((row) => row.outcome === "APPLIED"));
+    const afterRollback = await db.policy.findUniqueOrThrow({ where: { id: backfillFixture.policyId }, select: { insuredObject: true, riskDetails: true } });
+    assert.equal(afterRollback.insuredObject, SOURCE_TEXT);
+    assert.equal(afterRollback.riskDetails, null);
+    const assetsAfterRollback = await db.policyInsuredAsset.findMany({ where: { organizationId: ORGANIZATION_ID, policyId: backfillFixture.policyId }, orderBy: { id: "asc" }, select: { id: true, description: true, serialNumber: true } });
+    assert.deepEqual(assetsAfterRollback, assetsBeforeApply);
+
+    assert.throws(
+      () => runBackfill({ apply: true, reportFile: reportFile as string, manifestSha256: reviewedDigestAfterDecision.reviewedManifestSha256, reviewer: "integration-reviewer", batchSize: 1, failAfterAppliedBatches: 1 }),
+      (error: unknown) => error instanceof Error && String((error as NodeJS.ErrnoException & { stderr?: Buffer }).stderr ?? error).includes("POLICY_RISK_BACKFILL_TEST_INTERRUPTED_AFTER_COMMIT"),
+    );
+    const failedRun = await db.maintenanceRun.findFirst({
+      where: { organizationId: ORGANIZATION_ID, type: "POLICY_RISK_BACKFILL", summaryJson: { contains: "POLICY_RISK_BACKFILL_TEST_INTERRUPTED_AFTER_COMMIT" } },
+      select: { id: true, status: true, summaryJson: true },
+    });
+    assert.ok(failedRun);
+    maintenanceRunIds.push(failedRun.id);
+    assert.equal(failedRun.status, "FAILED");
+    const failedSummary = JSON.parse(failedRun.summaryJson ?? "{}") as { applied?: number };
+    assert.ok((failedSummary.applied ?? 0) >= 1);
+    const failedResultFile = `${reportFile}.${failedRun.id}.results.json`;
+    assert.ok(existsSync(failedResultFile));
+    resultFiles.push(failedResultFile);
+    const failedReport = JSON.parse(readFileSync(failedResultFile, "utf8")) as { applied: number; status: string; outcomes: Array<{ outcome: string }> };
+    assert.equal(failedReport.status, "FAILED");
+    assert.ok(failedReport.applied >= 1);
+    assert.ok(failedReport.outcomes.some((row) => row.outcome === "APPLIED"));
+
+    const applied = runBackfill({ apply: true, reportFile, manifestSha256: reviewedDigestAfterDecision.reviewedManifestSha256, reviewer: "integration-reviewer", batchSize: 1 });
+    assert.ok("mode" in applied);
     assert.equal(applied.mode, "apply");
     assert.ok(applied.converted >= 1);
     assert.ok(applied.runId);
@@ -143,11 +207,11 @@ async function main() {
     assert.ok(applied.resultFile);
     resultFiles.push(applied.resultFile);
     const resultReport = JSON.parse(readFileSync(applied.resultFile, "utf8")) as { outcomes: Array<{ policyId: string; outcome: string }> };
-    assert.ok(resultReport.outcomes.some((row) => row.policyId === fixture.policyId && row.outcome === "APPLIED"));
-    assert.ok(resultReport.outcomes.some((row) => row.policyId === ambiguousFixture.policyId && row.outcome === "DEFERRED"));
+    assert.ok(resultReport.outcomes.some((row) => row.policyId === backfillFixture.policyId && row.outcome === "APPLIED"));
+    assert.ok(resultReport.outcomes.some((row) => row.policyId === reviewFixture.policyId && row.outcome === "DEFERRED"));
 
     const converted = await db.policy.findUniqueOrThrow({
-      where: { id: fixture.policyId },
+      where: { id: backfillFixture.policyId },
       select: { insuredObject: true, riskDetails: true, riskDetailsReviewRequired: true },
     });
     assert.equal(converted.insuredObject, `Toyota Corolla 2020 LE Serie ${VIN}`);
@@ -157,7 +221,7 @@ async function main() {
     assert.equal((converted.riskDetails as { policyType?: unknown }).policyType, "AUTO");
 
     const assetsAfterApply = await db.policyInsuredAsset.findMany({
-      where: { organizationId: ORGANIZATION_ID, policyId: fixture.policyId },
+      where: { organizationId: ORGANIZATION_ID, policyId: backfillFixture.policyId },
       orderBy: [{ description: "asc" }],
       select: { assetType: true, description: true, serialNumber: true },
     });
@@ -167,38 +231,39 @@ async function main() {
       ["Toyota Corolla 2020 LE", "Toyota Corolla, descripción histórica"].sort(),
     );
     assert.ok(assetsAfterApply.every((asset) => asset.assetType === "AUTO" && asset.serialNumber === VIN));
-    const deferred = await db.policy.findUniqueOrThrow({ where: { id: ambiguousFixture.policyId }, select: { insuredObject: true, riskDetails: true, riskDetailsReviewRequired: true } });
+    const deferred = await db.policy.findUniqueOrThrow({ where: { id: reviewFixture.policyId }, select: { insuredObject: true, riskDetails: true, riskDetailsReviewRequired: true } });
     assert.equal(deferred.insuredObject, "Texto libre que requiere revisión");
     assert.equal(deferred.riskDetails, null);
     assert.equal(deferred.riskDetailsReviewRequired, false);
 
-    const resumed = runBackfill({ apply: true, reportFile, manifestSha256: preview.manifestSha256, reviewer: "integration-reviewer" });
+    const resumed = runBackfill({ apply: true, reportFile, manifestSha256: reviewedDigestAfterDecision.reviewedManifestSha256, reviewer: "integration-reviewer", batchSize: 1 });
+    assert.ok("mode" in resumed);
     assert.equal(resumed.mode, "apply");
     assert.ok((resumed.alreadyApplied ?? 0) >= 1);
     assert.ok(resumed.resultFile);
     if (resumed.maintenanceRunId) maintenanceRunIds.push(resumed.maintenanceRunId);
     resultFiles.push(resumed.resultFile);
     const resumeReport = JSON.parse(readFileSync(resumed.resultFile, "utf8")) as { outcomes: Array<{ policyId: string; outcome: string }> };
-    assert.ok(resumeReport.outcomes.some((row) => row.policyId === fixture.policyId && row.outcome === "ALREADY_APPLIED"));
+    assert.ok(resumeReport.outcomes.some((row) => row.policyId === backfillFixture.policyId && row.outcome === "ALREADY_APPLIED"));
 
     const secondReportPath = temporaryReportPath();
+    reportFiles.push(secondReportPath);
     const secondPreview = runBackfill({ reportFile: secondReportPath });
     assert.equal(secondPreview.mode, "dry-run");
     assert.equal(secondPreview.scanned, 1);
     assert.equal(secondPreview.review, 1);
 
     const assetsAfterRepeat = await db.policyInsuredAsset.findMany({
-      where: { organizationId: ORGANIZATION_ID, policyId: fixture.policyId },
+      where: { organizationId: ORGANIZATION_ID, policyId: backfillFixture.policyId },
       orderBy: [{ description: "asc" }],
       select: { assetType: true, description: true, serialNumber: true },
     });
     assert.deepEqual(assetsAfterRepeat, assetsAfterApply);
   } finally {
     if (maintenanceRunIds.length) await db.maintenanceRun.deleteMany({ where: { id: { in: maintenanceRunIds } } });
-    if (reportFile) rmSync(reportFile, { force: true });
+    for (const file of reportFiles) rmSync(file, { force: true });
     for (const file of resultFiles) rmSync(file, { force: true });
-    await cleanupPolicyFixture(fixture);
-    await cleanupPolicyFixture(ambiguousFixture);
+    await Promise.allSettled([fixture, ambiguousFixture].filter((item): item is NonNullable<typeof item> => item !== null).map(cleanupPolicyFixture));
   }
 }
 

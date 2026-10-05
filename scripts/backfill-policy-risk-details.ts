@@ -14,6 +14,7 @@ import {
   POLICY_RISK_BACKFILL_PROCESSOR_VERSION,
   policyRiskBackfillInputHash,
   policyRiskBackfillManifestContentHash,
+  policyRiskBackfillReviewedHash,
   type PolicyRiskBackfillManifest,
   type PolicyRiskBackfillManifestRow,
 } from "../src/lib/policy-risk-backfill-manifest.ts";
@@ -147,6 +148,18 @@ async function readReviewedManifest(file: string): Promise<PolicyRiskBackfillMan
 async function main() {
   const organizationId = arg("organization-id")?.trim();
   if (!organizationId) throw new Error("Indica una organización explícita con --organization-id=ID.");
+  if (process.argv.includes("--print-reviewed-digest")) {
+    const reviewedFile = arg("reviewed-report");
+    const reviewer = arg("reviewed-by")?.trim();
+    const previewSha = arg("preview-sha256")?.trim();
+    if (!reviewedFile || !reviewer || !previewSha) throw new Error("REVIEW_DIGEST_REQUIRES_REPORT_REVIEWER_AND_PREVIEW_SHA");
+    const manifest = await readReviewedManifest(reviewedFile);
+    if (manifest.contentSha256 !== previewSha) throw new Error("POLICY_RISK_BACKFILL_MANIFEST_DIGEST_MISMATCH");
+    if (manifest.reviewedBy?.trim() !== reviewer || !manifest.reviewedAt) throw new Error("POLICY_RISK_BACKFILL_REVIEWER_MISMATCH");
+    assertReviewedPolicyRiskBackfillManifest(manifest, { organizationId, candidateSha: candidateSha(), processorSha256: await processorSha256() });
+    process.stdout.write(`${JSON.stringify({ reviewedManifestSha256: policyRiskBackfillReviewedHash(manifest) })}\n`);
+    return;
+  }
   if (process.env.NODE_ENV !== "test" || process.env.TENANT_ISOLATION_TEST_DB !== "1" || process.env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB !== "1") {
     throw new Error("La conversión requiere NODE_ENV=test, TENANT_ISOLATION_TEST_DB=1 y PLAYWRIGHT_ENFORCE_DISPOSABLE_DB=1.");
   }
@@ -192,7 +205,7 @@ async function main() {
       throw new Error(`APPLY_REQUIRES_--reviewed-report, --reviewed-by, --manifest-sha256, and --confirm-apply=${APPLY_CONFIRMATION}`);
     }
     const manifest = await readReviewedManifest(reviewedFile);
-    if (manifest.contentSha256 !== expectedManifestSha) throw new Error("POLICY_RISK_BACKFILL_MANIFEST_DIGEST_MISMATCH");
+    if (policyRiskBackfillReviewedHash(manifest) !== expectedManifestSha) throw new Error("POLICY_RISK_BACKFILL_REVIEWED_DIGEST_MISMATCH");
     if (manifest.reviewedBy?.trim() !== reviewer || !manifest.reviewedAt) throw new Error("POLICY_RISK_BACKFILL_REVIEWER_MISMATCH");
     assertReviewedPolicyRiskBackfillManifest(manifest, { organizationId, candidateSha: sha, processorSha256: processor });
 
@@ -244,34 +257,67 @@ async function main() {
     let empty = 0;
     let applied = 0;
     let alreadyAppliedCount = 0;
+    let committedAppliedBatches = 0;
     const outcomes: Array<{ policyId: string; policyNumber: string; inputHash: string; outcome: "APPLIED" | "ALREADY_APPLIED" | "DEFERRED" | "EMPTY" }> = [];
     const resultFile = `${reviewedFile}.${run.id}.results.json`;
     try {
       for (let offset = 0; offset < manifest.candidates.length; offset += requestedBatchSize) {
         const batch = manifest.candidates.slice(offset, offset + requestedBatchSize);
         const batchOutcomes: typeof outcomes = [];
+        const batchCounts = { converted: 0, deferred: 0, empty: 0, applied: 0, alreadyApplied: 0 };
         await prisma.$transaction(async (tx) => {
           for (const row of batch) {
             if (!currentIds.has(row.policyId)) {
-              alreadyAppliedCount += 1;
+              batchCounts.alreadyApplied += 1;
               batchOutcomes.push({ policyId: row.policyId, policyNumber: row.policyNumber, inputHash: row.inputHash, outcome: "ALREADY_APPLIED" });
               continue;
             }
             if (row.classification === "EMPTY") {
-              empty += 1;
+              batchCounts.empty += 1;
               batchOutcomes.push({ policyId: row.policyId, policyNumber: row.policyNumber, inputHash: row.inputHash, outcome: "EMPTY" });
               continue;
             }
             if (row.classification === "REVIEW" && row.decision === "DEFER") {
-              deferred += 1;
+              batchCounts.deferred += 1;
               batchOutcomes.push({ policyId: row.policyId, policyNumber: row.policyNumber, inputHash: row.inputHash, outcome: "DEFERRED" });
               continue;
             }
             const approvedReview = row.classification === "REVIEW";
             if (approvedReview && !hasPolicyRiskData(row.proposed.riskDetails)) {
-              deferred += 1;
+              batchCounts.deferred += 1;
               batchOutcomes.push({ policyId: row.policyId, policyNumber: row.policyNumber, inputHash: row.inputHash, outcome: "DEFERRED" });
               continue;
+            }
+            const lockedPolicy = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+              SELECT "id" FROM "Policy"
+              WHERE "id" = ${row.policyId} AND "organizationId" = ${organizationId} AND "riskDetails" IS NULL
+              FOR UPDATE
+            `);
+            if (!lockedPolicy.length) throw new Error(`POLICY_RISK_BACKFILL_WRITE_CONFLICT:${row.policyId}`);
+            await tx.$queryRaw(Prisma.sql`
+              SELECT "id" FROM "PolicyInsuredAsset"
+              WHERE "organizationId" = ${organizationId} AND "policyId" = ${row.policyId}
+              ORDER BY "id" FOR UPDATE
+            `);
+            await tx.$queryRaw(Prisma.sql`
+              SELECT "id" FROM "PolicyInsuredParty"
+              WHERE "organizationId" = ${organizationId} AND "policyId" = ${row.policyId}
+              ORDER BY "id" FOR UPDATE
+            `);
+            const freshPolicy = await tx.policy.findFirst({
+              where: { id: row.policyId, organizationId, riskDetails: { equals: Prisma.DbNull } },
+              select: {
+                id: true,
+                policyNumber: true,
+                policyType: true,
+                insuredObject: true,
+                beneficiaryInfo: true,
+                insuredAssets: { select: { description: true, serialNumber: true, isPrimary: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+                insuredParties: { select: { fullName: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+              },
+            });
+            if (!freshPolicy || planPolicy(freshPolicy).inputHash !== row.inputHash) {
+              throw new Error(`POLICY_RISK_BACKFILL_STALE_INPUT:${row.policyId}`);
             }
             const updated = await tx.policy.updateMany({
               where: { id: row.policyId, organizationId, riskDetails: { equals: Prisma.DbNull } },
@@ -288,12 +334,28 @@ async function main() {
             if (row.proposed.insuredParties.length) {
               await tx.policyInsuredParty.createMany({ data: row.proposed.insuredParties.map((party) => ({ ...party, organizationId, policyId: row.policyId })), skipDuplicates: true });
             }
-            converted += 1;
-            applied += 1;
+            batchCounts.converted += 1;
+            batchCounts.applied += 1;
             batchOutcomes.push({ policyId: row.policyId, policyNumber: row.policyNumber, inputHash: row.inputHash, outcome: "APPLIED" });
+            const failInsideBatchAfter = Number(process.env.POLICY_RISK_BACKFILL_TEST_FAIL_WITHIN_BATCH_AFTER_APPLIED_ROWS ?? "0");
+            if (process.env.NODE_ENV === "test" && failInsideBatchAfter > 0 && batchCounts.applied === failInsideBatchAfter) {
+              throw new Error("POLICY_RISK_BACKFILL_TEST_ROLLBACK_WITHIN_BATCH");
+            }
           }
         });
+        converted += batchCounts.converted;
+        deferred += batchCounts.deferred;
+        empty += batchCounts.empty;
+        applied += batchCounts.applied;
+        alreadyAppliedCount += batchCounts.alreadyApplied;
         outcomes.push(...batchOutcomes);
+        if (batchCounts.applied > 0) {
+          committedAppliedBatches += 1;
+          const failAfter = Number(process.env.POLICY_RISK_BACKFILL_TEST_FAIL_AFTER_APPLIED_BATCHES ?? "0");
+          if (process.env.NODE_ENV === "test" && failAfter > 0 && committedAppliedBatches === failAfter) {
+            throw new Error("POLICY_RISK_BACKFILL_TEST_INTERRUPTED_AFTER_COMMIT");
+          }
+        }
       }
       const summary = { runId: manifest.runId, candidateSha: sha, reviewer, scanned: manifest.scanned, converted, deferred, empty, applied, alreadyApplied: alreadyAppliedCount };
       await prisma.maintenanceRun.update({ where: { id: run.id }, data: { status: deferred ? "REVIEW_REQUIRED" : "COMPLETED", completedAt: new Date(), summaryJson: JSON.stringify(summary) } });

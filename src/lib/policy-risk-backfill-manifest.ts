@@ -80,6 +80,15 @@ export function policyRiskBackfillManifestContentHash(manifest: PolicyRiskBackfi
   return createHash("sha256").update(stable(immutable)).digest("hex");
 }
 
+export function policyRiskBackfillReviewedHash(manifest: PolicyRiskBackfillManifest): string {
+  return createHash("sha256").update(stable({
+    contentSha256: manifest.contentSha256,
+    reviewedBy: manifest.reviewedBy?.trim() ?? null,
+    reviewedAt: manifest.reviewedAt,
+    decisions: manifest.candidates.map((row) => ({ policyId: row.policyId, decision: row.decision })),
+  })).digest("hex");
+}
+
 export function assertReviewedPolicyRiskBackfillManifest(
   manifest: PolicyRiskBackfillManifest,
   expected: { organizationId: string; candidateSha: string; processorSha256: string },
