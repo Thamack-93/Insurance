@@ -155,6 +155,10 @@ async function scanProductionReadOnly(prisma: PrismaClient, organizationId: stri
   return prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
     await assertProductionPreviewRole(tx, connectionString);
+    const tenantContext = await tx.$queryRaw<Array<{ organizationId: string }>>(Prisma.sql`
+      SELECT set_config('app.organization_id', ${organizationId}, true) AS "organizationId"
+    `);
+    if (tenantContext[0]?.organizationId !== organizationId) throw new Error("POLICY_RISK_BACKFILL_PREVIEW_TENANT_CONTEXT_FAILED");
     const organization = await tx.organization.findUnique({ where: { id: organizationId }, select: { id: true } });
     if (!organization) throw new Error("POLICY_RISK_BACKFILL_PREVIEW_ORGANIZATION_NOT_VISIBLE");
     return scanAll(tx, organizationId);
@@ -215,6 +219,7 @@ async function main() {
   const connectionString = (productionPreview ? process.env.POLICY_RISK_BACKFILL_READONLY_DATABASE_URL : process.env.DATABASE_URL)?.trim();
   if (!connectionString) throw new Error(productionPreview ? "POLICY_RISK_BACKFILL_READONLY_DATABASE_URL_REQUIRED" : "DATABASE_URL es obligatorio para la base desechable.");
   if (!productionPreview) assertDisposableCertificationTarget(connectionString, process.env, "source");
+
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
   try {
     const sha = candidateSha();
