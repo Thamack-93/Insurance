@@ -245,12 +245,16 @@ test.describe("structured policy risk details", () => {
       await page.locator("#risk-AUTO-vehicles-0-make").fill("Honda");
       await page.locator("#risk-AUTO-vehicles-0-model").fill("Civic");
       await expect(page.getByRole("button", { name: "Crear póliza y marcar como renovada" })).toBeEnabled();
+      const confirmResponsePromise = page.waitForResponse((response) =>
+        response.url().endsWith("/api/policies/capture/confirm") && response.request().method() === "POST",
+      );
       await page.getByRole("button", { name: "Crear póliza y marcar como renovada" }).click();
-      await expect(page).toHaveURL(new RegExp(`/policies/.+`));
-
-      const url = new URL(page.url());
-      capturedPolicyId = url.pathname.split("/").pop() ?? null;
+      const confirmResponse = await confirmResponsePromise;
+      const confirmBody = await confirmResponse.json() as { redirectTo?: string; error?: string };
+      expect(confirmResponse.ok(), confirmBody.error).toBe(true);
+      capturedPolicyId = confirmBody.redirectTo ? new URL(confirmBody.redirectTo, page.url()).pathname.split("/").pop() ?? null : null;
       expect(capturedPolicyId).toBeTruthy();
+      await expect(page).toHaveURL(new RegExp(`/policies/${capturedPolicyId}$`));
 
       const [sourceAfter, renewedPolicy, assets] = await Promise.all([
         db.policy.findUnique({ where: { id: fixture.policyId }, select: { status: true } }),
@@ -269,6 +273,10 @@ test.describe("structured policy risk details", () => {
       });
       expect(assets).toEqual([{ assetType: "AUTO", serialNumber: vin }]);
     } finally {
+      const policyIds = [fixture.policyId, capturedPolicyId].filter((id): id is string => Boolean(id));
+      await db.activityLog.deleteMany({
+        where: { organizationId: TEST_ORGANIZATION_ID, entityType: "Policy", entityId: { in: policyIds } },
+      });
       if (capturedPolicyId) {
         await db.payment.deleteMany({ where: { policyId: capturedPolicyId } });
         await db.commission.deleteMany({ where: { policyId: capturedPolicyId } });
