@@ -297,6 +297,8 @@ jobs:
           printf 'TENANT_ISOLATION_FINGERPRINT=%s\n' "$fingerprint" >> "$GITHUB_ENV"
       - name: Apply singleton migrations
         run: npm run db:migrate:singleton-ci
+      - name: Policy risk backfill disposable integration
+        run: node --import tsx scripts/test-policy-risk-backfill.integration.ts
       - name: Tenant guards and transition integration
         run: |
           npm run check:tenant-guards
