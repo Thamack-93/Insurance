@@ -20,7 +20,7 @@
 - Release Certification #38 [terminó SUCCESS](https://github.com/Thamack-93/Insurance/actions/runs/37337535025) en el SHA integrado exacto: quality, tenant/RLS, integración de aplicación, API, E2E y reporte sanitizado pasaron. El verificador de estado productivo fue omitido.
 - Vercel Production actual está `READY` para `cfd223e90ff4a37f2ba493bad36b6625569c82d3` ([deployment](https://vercel.com/thamack-93s-projects/policydesk/GLhVWH8GCPbwumRpCmDesoRtGTT7)), alias `policypete.vercel.app`. Ese commit solo actualizó estos dos documentos después del merge de código PR #80 `af608c709d5300a62fad0b1bfbb7a97f53561316`; el candidato de aplicación certificado sigue siendo `132ada7c`.
 - Revisión autenticada de Production en modo solo lectura: `/reports/insights` cargó con los cuatro grupos y paginación. La instantánea mostró 121 registros de Renovaciones, 1 de Cobranza, 0 de Siniestros y 4 de Trabajo. No se guardaron datos; son métricas operativas reales, no datos sintéticos de DEMO.
-- No hay cuenta DEMO externa creada ni conversaciones fuente archivadas.
+- No hay cuenta DEMO externa creada. El chat `Corrige seguimiento de renovaciones` se archivó tras transferir el cierre y comprobar implementación, Release Certification #38 y el flujo en Production. Los otros chats fuente siguen abiertos porque conservan pendientes de backfill, restore y DEMO.
 
 ## Pendientes y criterios de cierre
 
