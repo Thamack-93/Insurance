@@ -101,6 +101,7 @@ function WorkItemRow({ item, returnTo }: { item: WorkQueueItem; returnTo?: strin
     <li className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 border-b px-4 py-3 last:border-b-0">
       <Link
         href={href}
+        prefetch={false}
         aria-label={`${actionLabel}: ${title}`}
         className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
@@ -135,6 +136,7 @@ function WorkItemRow({ item, returnTo }: { item: WorkQueueItem; returnTo?: strin
       ) : canEditFromOperations ? (
         <Link
           href={appendReturnTo(`/tasks/${item.sourceId ?? item.id}/edit`, returnTo)}
+          prefetch={false}
           className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-9 px-2 text-xs")}
           aria-label={`Editar pendiente: ${title}`}
         >
