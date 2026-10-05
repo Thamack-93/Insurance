@@ -38,7 +38,6 @@ export function SidebarNav({
               const link = (
                 <Link
                   href={item.href}
-                  prefetch={false}
                   onClick={onNavigate}
                   aria-current={active ? "page" : undefined}
                   aria-label={collapsed ? item.label : undefined}

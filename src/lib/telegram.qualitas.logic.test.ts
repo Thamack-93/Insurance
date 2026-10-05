@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 const checkDistributedRateLimit = vi.hoisted(() => vi.fn());
 const isTenantTransactionClient = vi.hoisted(() => vi.fn(() => false));
+const globalSearch = vi.hoisted(() => vi.fn());
 const writeActivityLog = vi.hoisted(() => vi.fn());
 const recordPayment = vi.hoisted(() => vi.fn());
 const provider = vi.hoisted(() => ({
@@ -41,6 +42,7 @@ vi.mock("@/lib/request-guards", () => ({
 }));
 vi.mock("@/lib/activity-log", () => ({ writeActivityLog }));
 vi.mock("@/lib/payment-service", () => ({ recordPayment }));
+vi.mock("@/lib/search", () => ({ globalSearch }));
 vi.mock("@/lib/organization-context", () => ({
   assertOrganizationContextInTransaction: vi.fn(async () => {}),
   isTenantTransactionClient,
@@ -57,7 +59,7 @@ vi.mock("@/lib/organization-capabilities", () => ({
 }));
 vi.mock("@/lib/qualitas-payment-link", () => provider);
 
-import { processTelegramWebhookUpdate } from "./telegram";
+import { buildTelegramSearchReply, processTelegramWebhookUpdate } from "./telegram";
 
 const channel = {
   id: "channel-1",
@@ -157,6 +159,7 @@ beforeEach(() => {
   db.notificationChannel.findFirst.mockResolvedValue(channel);
   db.organizationMembership.findFirst.mockResolvedValue({ organizationId: "org-1" });
   db.organizationMembership.findMany.mockResolvedValue([membership]);
+  globalSearch.mockResolvedValue([{ id: "work-1", type: "workItem", title: "Pendiente", href: "/tasks/work-1" }]);
   db.policy.findFirst.mockResolvedValue(policy);
   db.receipt.findFirst.mockResolvedValue(paymentReceipt);
   db.receipt.findMany.mockResolvedValue([]);
@@ -171,6 +174,16 @@ beforeEach(() => {
 });
 
 describe("Telegram Quálitas payment-link flow", () => {
+  it("passes an existing tenant transaction through Telegram search", async () => {
+    const transaction = { organizationMembership: { findFirst: vi.fn().mockResolvedValue({ organizationId: "org-1" }) } };
+    isTenantTransactionClient.mockReturnValue(true);
+
+    const reply = await buildTelegramSearchReply("user-1", "pendiente", transaction as never);
+
+    expect(reply).toContain("Pendiente");
+    expect(globalSearch).toHaveBeenCalledWith("pendiente", "user-1", "org-1", transaction);
+  });
+
   it("keeps client delivery disabled unless the rollout gate is explicitly enabled", async () => {
     process.env.QUALITAS_PAYMENT_LINK_CLIENT_RECIPIENT_ENABLED = "false";
 

@@ -99,7 +99,7 @@ function WorkItemRow({ item, returnTo }: { item: WorkQueueItem; returnTo?: strin
   const canEditFromOperations = !isManualRenewalFollowUp && (item.sourceType === "WorkItem" || item.sourceType === "Task" || item.sourceType === null);
   return (
     <li className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 border-b px-4 py-3 last:border-b-0">
-      <a
+      <Link
         href={href}
         aria-label={`${actionLabel}: ${title}`}
         className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -124,7 +124,7 @@ function WorkItemRow({ item, returnTo }: { item: WorkQueueItem; returnTo?: strin
           ) : null}
           <PriorityBadge priority={item.priority} className="px-2 py-0.5 text-[11px]" />
         </div>
-      </a>
+      </Link>
       {isManualRenewalFollowUp && item.policy ? (
         <RenewalFollowUpMenu
           policyId={item.policyId ?? ""}
@@ -133,13 +133,13 @@ function WorkItemRow({ item, returnTo }: { item: WorkQueueItem; returnTo?: strin
           currentNotes={item.notes}
         />
       ) : canEditFromOperations ? (
-        <a
+        <Link
           href={appendReturnTo(`/tasks/${item.sourceId ?? item.id}/edit`, returnTo)}
           className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-9 px-2 text-xs")}
           aria-label={`Editar pendiente: ${title}`}
         >
           Editar
-        </a>
+        </Link>
       ) : null}
     </li>
   );
@@ -238,18 +238,16 @@ export default async function OperationsPage({
         ],
       } : {}),
     }, scope.portfolioOwnerId, scope.organizationId, undefined, true) : Promise.resolve([]),
-    view === "claims"
-      ? withTenantTransaction(scope.context, async (db) => ({
-          claims: await db.claim.findMany({
-            where: claimWhere,
-            select: { id: true, folio: true, claimType: true, status: true, incidentDate: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } },
-            orderBy: [{ reportedDate: "desc" }, { id: "asc" }],
-            take: 25,
-            skip: (page - 1) * 25,
-          }),
-          claimTotal: await db.claim.count({ where: claimWhere }),
-        }))
-      : Promise.resolve({ claims: [], claimTotal: 0 }),
+    withTenantTransaction(scope.context, async (db) => ({
+      claims: await db.claim.findMany({
+        where: claimWhere,
+        select: { id: true, folio: true, claimType: true, status: true, incidentDate: true, client: { select: { fullName: true } }, policy: { select: { policyNumber: true } } },
+        orderBy: [{ reportedDate: "desc" }, { id: "asc" }],
+        take: view === "claims" ? 25 : 50,
+        skip: view === "claims" ? (page - 1) * 25 : 0,
+      }),
+      claimTotal: await db.claim.count({ where: claimWhere }),
+    })),
   ]);
   const visibleWorkItems = workItemsPage?.items ?? workItems;
   const workItemsTotal = workItemsPage?.totalCount ?? workItems.length;
