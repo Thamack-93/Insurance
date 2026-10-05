@@ -102,6 +102,7 @@ export const TENANT_DAL_DOMAINS = [
 export const TENANT_DAL_GLOBAL_MODULES = [
   "src/lib/auth.ts",
   "src/lib/db.ts",
+  "src/lib/organization-context.ts",
   "src/lib/backup.ts",
   "src/lib/backup-restore.ts",
   "src/lib/platform-dashboard.ts",

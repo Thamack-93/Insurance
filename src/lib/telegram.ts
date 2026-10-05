@@ -2015,7 +2015,7 @@ export async function buildTelegramSearchReply(userId: string, query: string, cl
   }
 
   const organizationId = await requireActiveTelegramOrganization(userId, db);
-  const transactionClient = typeof (db as PrismaClient).$transaction === "function" ? undefined : db as TenantDb;
+  const transactionClient = isTenantTransactionClient(db) ? db as TenantDb : undefined;
   const results = await globalSearch(normalized, userId, organizationId, transactionClient);
   if (results.length === 0) {
     return `No encontré resultados para "${normalized}".`;

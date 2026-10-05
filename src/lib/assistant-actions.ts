@@ -349,6 +349,7 @@ function toPolicyFormValues(policy: {
   paymentFrequency: string;
   paymentPlan: string | null;
   insuredObject: string | null;
+  riskDetails?: unknown;
   beneficiaryInfo: string | null;
   notes: string | null;
   renewedFromPolicyId: string | null;
@@ -366,6 +367,7 @@ function toPolicyFormValues(policy: {
     paymentFrequency: policy.paymentFrequency,
     paymentPlan: policy.paymentPlan ?? "",
     insuredObject: policy.insuredObject ?? "",
+    ...(policy.riskDetails ? { riskDetails: policy.riskDetails } : {}),
     beneficiaryInfo: policy.beneficiaryInfo ?? "",
     notes: policy.notes ?? "",
     renewedFromPolicyId: policy.renewedFromPolicyId ?? "",
@@ -654,6 +656,7 @@ async function buildPolicyDraft(plan: AssistantMutationPlan, user: AssistantUser
         paymentFrequency: true,
         paymentPlan: true,
         insuredObject: true,
+        riskDetails: true,
         beneficiaryInfo: true,
         notes: true,
         renewedFromPolicyId: true,

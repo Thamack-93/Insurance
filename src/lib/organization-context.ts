@@ -1,9 +1,10 @@
 import "server-only";
 
+import { cache } from "react";
 import { getDb } from "@/lib/db";
 import { AuthError, clearSessionCookie, getSession, requireUser, setSessionCookie } from "@/lib/auth";
 import { writeActivityLog } from "@/lib/activity-log";
-import { Prisma } from "@/generated/prisma/client";
+import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 
 // Prisma's interactive transaction proxy does not expose a stable runtime
 // type that helpers can use to distinguish it from the root client. Keep a
@@ -18,6 +19,10 @@ const tenantTransactionRegistry =
 
 export function isTenantTransactionClient(value: unknown): value is Prisma.TransactionClient {
   return typeof value === "object" && value !== null && tenantTransactionRegistry.has(value);
+}
+
+export function isApplicationPrismaClient(value: unknown): value is PrismaClient {
+  return value === getDb();
 }
 
 export const ORGANIZATION_ROLES = ["OWNER", "ADMIN", "AGENT"] as const;
@@ -90,7 +95,7 @@ export async function getOrganizationOptions(): Promise<OrganizationOption[]> {
   return state.options;
 }
 
-export async function resolveOrganizationContext(): Promise<OrganizationContextResolution> {
+export const resolveOrganizationContext = cache(async function resolveOrganizationContext(): Promise<OrganizationContextResolution> {
   const session = await getSession();
   if (!session) return { status: "unauthenticated" };
 
@@ -113,7 +118,7 @@ export async function resolveOrganizationContext(): Promise<OrganizationContextR
   const selected = options.find((option) => option.id === session.organizationId);
   if (!selected) return { status: "stale-selection", options };
   return buildContext(user, selected.id);
-}
+});
 
 async function buildContext(user: Awaited<ReturnType<typeof requireUser>>, organizationId: string): Promise<OrganizationContextResolution> {
   const db = getDb();
@@ -258,8 +263,8 @@ export async function withOrganizationTransaction<T>(
   return db.$transaction(async (tx) => {
     tenantTransactionRegistry.add(tx);
     await tx.$executeRaw(Prisma.sql`SELECT set_config('app.organization_id', ${context.organizationId}, true)`);
-    // Read transactions still revalidate the live tenant boundary, but do
-    // not serialize every concurrent page query behind the same membership
+    // Read transactions still revalidate the live tenant boundary, but
+    // do not serialize every concurrent page query behind the same membership
     // row. Mutations call assertOrganizationContextInTransaction explicitly
     // and retain the strong row locks required for the write boundary.
     await validateOrganizationContextInTransaction(tx, context, ORGANIZATION_ROLES, false);

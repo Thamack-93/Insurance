@@ -40,6 +40,9 @@ import {
 import type { PolicyCaptureSearchItem, PolicyCaptureSearchKind } from "@/lib/policy-capture-search";
 import { deletePolicyCaptureHandoffRemote, loadPolicyCaptureHandoff, persistPolicyCaptureHandoff, restorePolicyCaptureHandoff, savePolicyCaptureHandoff, clearPolicyCaptureHandoff } from "@/lib/nora-browser-session";
 import { PolicyPdfFilePicker } from "@/components/policies/policy-pdf-file-picker";
+import { PolicyRiskDetailsFields } from "@/components/forms/policy-risk-details-fields";
+import { emptyPolicyRiskDetails } from "@/lib/policy-risk-details";
+import type { PolicyType } from "@/lib/domain-values";
 
 type PreviewResponse = {
   success?: boolean;
@@ -1215,7 +1218,7 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
                     <ControlledSelect
                       value={draft.policyType}
                       onValueChange={(value) => {
-                        updateDraft({ policyType: value });
+                        updateDraft({ policyType: value, riskDetails: emptyPolicyRiskDetails(value as PolicyType) });
                         markFieldConfidence("policyType");
                       }}
                       options={policyTypeOptions}
@@ -1566,11 +1569,11 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
 
               <Section title="Contenido" description="Datos complementarios que también se copiarán a la póliza nueva.">
                 <div className="grid gap-4 md:grid-cols-2">
-                  <Field label="Objeto asegurado" confidence="medium">
+                  <Field label="Descripción original del riesgo" confidence="medium">
                     <Textarea
                       rows={3}
                       value={draft.insuredObject ?? ""}
-                      onChange={(event) => updateDraft({ insuredObject: event.target.value || null })}
+                      readOnly
                       className="max-h-32 overflow-y-auto"
                     />
                   </Field>
@@ -1579,6 +1582,7 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
                       rows={3}
                       value={draft.beneficiaryInfo ?? ""}
                       onChange={(event) => updateDraft({ beneficiaryInfo: event.target.value || null })}
+                      readOnly={draft.policyType === "VIDA"}
                       className="max-h-28 overflow-y-auto"
                     />
                   </Field>
@@ -1591,6 +1595,11 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
                     />
                   </Field>
                 </div>
+                <PolicyRiskDetailsFields
+                  policyType={draft.policyType as PolicyType}
+                  value={draft.riskDetails ?? emptyPolicyRiskDetails(draft.policyType as PolicyType)}
+                  onChange={(riskDetails) => updateDraft({ riskDetails })}
+                />
               </Section>
             </CardContent>
           </Card>

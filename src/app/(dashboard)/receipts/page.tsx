@@ -35,7 +35,7 @@ import {
   buildReceiptListWhere,
   readReceiptListFilters,
 } from "@/lib/list-filters";
-import { withTenantOrganization } from "@/lib/tenant-dal";
+import { withTenantOrganization, type TenantDb } from "@/lib/tenant-dal";
 import { SavedQueueControls } from "@/components/queues/saved-queue-controls";
 import { logError } from "@/lib/logger";
 import { isReceiptQualitasEnabled, resolveReceiptAuxiliary } from "@/lib/receipts-page";
@@ -55,9 +55,6 @@ export default async function ReceiptsPage({
   const isFiltered = Boolean(query || statusFilter);
 
   const scope = await requireOrganizationPortfolioReadScopeOrRedirect();
-  const organizationKind = await withTenantOrganization(scope.organizationId, (db) =>
-    db.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } }),
-  );
   const now = today();
   const monthStart = businessStartOfMonth(now);
   const clearFiltersHref = buildTableHref("/receipts", params, {
@@ -78,38 +75,20 @@ export default async function ReceiptsPage({
 
   const orderBy = buildReceiptListOrderBy(filters);
 
-  type ReceiptPageCore = Awaited<ReturnType<typeof loadReceiptPageCore>>;
-  let core: ReceiptPageCore;
-  try {
-    core = await loadReceiptPageCore({
-      organizationId: scope.organizationId,
-      baseWhere,
-      where,
-      now,
-      orderBy,
-      page,
-    });
-  } catch (error) {
-    logError("receipts.page.core", error, { organizationId: scope.organizationId });
-    throw error;
-  }
-
-  const [agentContactResult, qualitasCapabilityResult, paidThisMonthResult, paymentHistoryResult, reviewIssuesResult] =
-    await Promise.allSettled([
-      withTenantOrganization(scope.organizationId, (db) =>
+  const pageDataPromise = withTenantOrganization(scope.organizationId, async (db) => {
+    const [organizationKind, core] = await Promise.all([
+      db.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } }),
+      loadReceiptPageCore(db, scope.organizationId, { baseWhere, where, now, orderBy, page }),
+    ]);
+    const [agentContactResult, qualitasCapabilityResult, paidThisMonthResult, paymentHistoryResult, reviewIssuesResult] =
+      await Promise.allSettled([
         db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } }),
-      ),
-      withTenantOrganization(scope.organizationId, (db) =>
         resolveOrganizationCapability(scope.organizationId, "QUALITAS", db),
-      ),
-      withTenantOrganization(scope.organizationId, (db) =>
         db.receipt.findMany({
           where: { ...scopedReceiptWhere, status: "PAID", paidDate: { gte: monthStart } },
           include: { client: true, policy: true, insurer: true, endorsement: true },
           orderBy: [{ paidDate: "desc" }, { id: "desc" }],
         }),
-      ),
-      withTenantOrganization(scope.organizationId, (db) =>
         db.payment.findMany({
           where: { ...scopedPaymentWhere, status: "POSTED" },
           include: {
@@ -120,8 +99,6 @@ export default async function ReceiptsPage({
           orderBy: [{ paidDate: "desc" }, { id: "desc" }],
           take: 50,
         }),
-      ),
-      withTenantOrganization(scope.organizationId, (db) =>
         db.receiptReconciliationIssue.findMany({
           where: { ...scopedReceiptIssueWhere, status: "OPEN" },
           include: {
@@ -131,8 +108,26 @@ export default async function ReceiptsPage({
           orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           take: 100,
         }),
-      ),
-    ]);
+      ]);
+
+    return {
+      organizationKind,
+      core,
+      agentContactResult,
+      qualitasCapabilityResult,
+      paidThisMonthResult,
+      paymentHistoryResult,
+      reviewIssuesResult,
+    };
+  });
+  let pageData: Awaited<typeof pageDataPromise>;
+  try {
+    pageData = await pageDataPromise;
+  } catch (error) {
+    logError("receipts.page.data", error, { organizationId: scope.organizationId });
+    throw error;
+  }
+  const { organizationKind, core, agentContactResult, qualitasCapabilityResult, paidThisMonthResult, paymentHistoryResult, reviewIssuesResult } = pageData;
 
   const reportAuxiliaryFailure = (group: string) => (reason: unknown) => {
     logError(`receipts.page.${group}`, reason, { organizationId: scope.organizationId });
@@ -619,25 +614,23 @@ export default async function ReceiptsPage({
   );
 }
 
-async function loadReceiptPageCore(input: {
-  organizationId: string;
+async function loadReceiptPageCore(db: TenantDb, organizationId: string, input: {
   baseWhere: Prisma.ReceiptWhereInput;
   where: Prisma.ReceiptWhereInput;
   now: Date;
   orderBy: Prisma.ReceiptOrderByWithRelationInput[];
   page: number;
 }) {
-  const { organizationId, baseWhere, where, now, orderBy, page } = input;
-  return withTenantOrganization(organizationId, async (db) => {
-    const [openCount, overdueCount, outstandingAgg, overdueAgg, totalOpenCount, filteredCount, pagedReceipts] = await Promise.all([
-      db.receipt.count({ where: baseWhere }),
-      db.receipt.count({ where: { ...baseWhere, dueDate: { lt: now } } }),
-      db.receipt.aggregate({ _sum: { amount: true }, where: baseWhere }),
-      db.receipt.aggregate({ _sum: { amount: true }, where: { ...baseWhere, dueDate: { lt: now } } }),
-      db.receipt.count({ where: baseWhere }),
-      db.receipt.count({ where }),
+  const { baseWhere, where, now, orderBy, page } = input;
+  const [openCount, overdueCount, outstandingAgg, overdueAgg, totalOpenCount, filteredCount, pagedReceipts] = await Promise.all([
+      db.receipt.count({ where: { ...baseWhere, organizationId } }),
+      db.receipt.count({ where: { ...baseWhere, organizationId, dueDate: { lt: now } } }),
+      db.receipt.aggregate({ _sum: { amount: true }, where: { ...baseWhere, organizationId } }),
+      db.receipt.aggregate({ _sum: { amount: true }, where: { ...baseWhere, organizationId, dueDate: { lt: now } } }),
+      db.receipt.count({ where: { ...baseWhere, organizationId } }),
+      db.receipt.count({ where: { ...where, organizationId } }),
       db.receipt.findMany({
-        where,
+        where: { ...where, organizationId },
         include: {
           client: true,
           policy: true,
@@ -649,7 +642,6 @@ async function loadReceiptPageCore(input: {
         skip: (page - 1) * PAGE_SIZE,
         take: PAGE_SIZE,
       }),
-    ]);
-    return { openCount, overdueCount, outstandingAgg, overdueAgg, totalOpenCount, filteredCount, pagedReceipts };
-  });
+  ]);
+  return { openCount, overdueCount, outstandingAgg, overdueAgg, totalOpenCount, filteredCount, pagedReceipts };
 }

@@ -12,10 +12,11 @@ import {
   clientOperationalWhere,
   policyOperationalWhere,
   receiptOperationalWhere,
+  type PortfolioReadScope,
   requireOrganizationPortfolioReadScope,
 } from "@/lib/portfolio-access";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
-import { withTenantOrganization } from "@/lib/tenant-dal";
+import { withTenantOrganization, type TenantDb } from "@/lib/tenant-dal";
 
 export async function getDashboardData() {
   const scope = await requireOrganizationPortfolioReadScope();
@@ -206,28 +207,33 @@ export type OnboardingStatus = {
 
 export async function getOnboardingStatus(): Promise<OnboardingStatus> {
   const scope = await requireOrganizationPortfolioReadScope();
-  return withTenantOrganization(scope.organizationId, async (db) => {
-    const [insurers, clients, policies, receipts, dismissedRow] = await Promise.all([
+  return withTenantOrganization(scope.organizationId, (db) => getOnboardingStatusFromDb(scope, db));
+}
+
+export async function getOnboardingStatusFromDb(scope: PortfolioReadScope, db: TenantDb): Promise<OnboardingStatus> {
+  const [insurers, clients, policies, receipts, dismissedRow] = await Promise.all([
     db.insurer.count({ where: { organizationId: scope.organizationId } }),
     db.client.count({ where: clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId) }),
     db.policy.count({ where: policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) }),
     db.receipt.count({ where: receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) }),
     db.organizationSetting.findUnique({ where: { organizationId_key: { organizationId: scope.organizationId, key: "onboardingDismissed" } } }),
   ]);
-    return {
+  return {
     insurers,
     clients,
     policies,
     receipts,
     dismissed: dismissedRow?.value === "true",
     complete: insurers > 0 && clients > 0 && policies > 0 && receipts > 0,
-    };
-  });
+  };
 }
 
 export async function getTodayData() {
   const scope = await requireOrganizationPortfolioReadScope();
-  return withTenantOrganization(scope.organizationId, async (db) => {
+  return withTenantOrganization(scope.organizationId, (db) => getTodayDataFromDb(scope, db));
+}
+
+export async function getTodayDataFromDb(scope: PortfolioReadScope, db: TenantDb) {
   const now = today();
   const tomorrow = businessAddDays(now, 1);
   const in7 = businessAddDays(now, 7);
@@ -259,18 +265,18 @@ export async function getTodayData() {
     risks,
   ] = await Promise.all([
     db.receipt.findMany({
-      where: { ...receiptWhere, dueDate: { gte: now, lt: tomorrow }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { organizationId: scope.organizationId, ...receiptWhere, dueDate: { gte: now, lt: tomorrow }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
       orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }],
     }),
     db.receipt.findMany({
-      where: { ...receiptWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { organizationId: scope.organizationId, ...receiptWhere, dueDate: { lt: now }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
       orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }],
       take: 8,
     }),
     db.receipt.findMany({
-      where: { ...receiptWhere, dueDate: { gte: tomorrow, lte: in7 }, status: { notIn: ["PAID", "CANCELLED"] } },
+      where: { organizationId: scope.organizationId, ...receiptWhere, dueDate: { gte: tomorrow, lte: in7 }, status: { notIn: ["PAID", "CANCELLED"] } },
       include: { client: true, policy: true, insurer: true },
       orderBy: [{ dueDate: "asc" }, { receiptSequence: { sort: "asc", nulls: "last" } }, { receiptNumber: "asc" }, { id: "asc" }],
       take: 8,
@@ -305,6 +311,7 @@ export async function getTodayData() {
     }),
     db.commission.findMany({
       where: {
+        organizationId: scope.organizationId,
         ...commissionWhere,
         expectedDate: { lte: in30 },
         status: { in: ["EXPECTED", "PENDING", "OVERDUE"] },
@@ -351,7 +358,6 @@ export async function getTodayData() {
     criticalRisks: risks.filter((risk) => risk.severity === "CRITICAL").slice(0, 6),
     recentActivity,
   };
-  });
 }
 
 function groupDatesByWeek<T extends Record<string, unknown>>(items: T[], field: keyof T) {

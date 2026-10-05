@@ -1,6 +1,6 @@
 import type { PrismaClient, Prisma } from "@/generated/prisma/client";
 import { workItemPortfolioWhere } from "@/lib/portfolio-access";
-import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
+import { isApplicationPrismaClient, isTenantTransactionClient, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 
 type WorkItemResolverDb = PrismaClient | Prisma.TransactionClient;
 
@@ -21,12 +21,24 @@ export async function findWorkItemByRouteId(
   client?: WorkItemResolverDb,
   portfolioOwnerId?: string,
 ): Promise<WorkItemResolverRecord | null> {
-  if (!client || typeof (client as PrismaClient).$transaction === "function") {
-    const context = await requireOrganizationContext();
-    if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
-    return withTenantTransaction(context, (tx) => findWorkItemByRouteId(id, organizationId, tx, portfolioOwnerId));
+  if (client && isTenantTransactionClient(client)) {
+    return findWorkItemByRouteIdInTransaction(id, organizationId, client, portfolioOwnerId);
   }
-  const db = client as Prisma.TransactionClient;
+  if (client && !isApplicationPrismaClient(client)) throw new Error("TENANT_TRANSACTION_REQUIRED");
+
+  const context = await requireOrganizationContext();
+  if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  return withTenantTransaction(context, (tx) =>
+    findWorkItemByRouteIdInTransaction(id, organizationId, tx, portfolioOwnerId),
+  );
+}
+
+async function findWorkItemByRouteIdInTransaction(
+  id: string,
+  organizationId: string,
+  db: Prisma.TransactionClient,
+  portfolioOwnerId?: string,
+): Promise<WorkItemResolverRecord | null> {
 
   return db.workItem.findFirst({
     where: {
@@ -35,6 +47,10 @@ export async function findWorkItemByRouteId(
       OR: [
         {
           sourceType: "Task",
+          sourceId: id,
+        },
+        {
+          sourceType: "WorkItem",
           sourceId: id,
         },
         {

@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import {
@@ -19,6 +19,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { PolicyRenewalSelector } from "@/components/policies/policy-renewal-selector";
+import { PolicyRiskDetailsFields } from "@/components/forms/policy-risk-details-fields";
+import { emptyPolicyRiskDetails } from "@/lib/policy-risk-details";
 import {
   ControlledSelect,
   FormActions,
@@ -40,6 +42,7 @@ type PolicyFormProps = {
   showRenewalLink?: boolean;
   renewalSearchScope?: "portfolio" | "all";
   submitAction: (values: PolicyFormValues) => Promise<MutationResult>;
+  riskDetailsNeedsReview?: boolean;
 };
 
 export function PolicyForm({
@@ -54,6 +57,7 @@ export function PolicyForm({
   showRenewalLink = false,
   renewalSearchScope = "portfolio",
   submitAction,
+  riskDetailsNeedsReview = false,
 }: PolicyFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -68,6 +72,7 @@ export function PolicyForm({
     resolver: zodResolver(policySchema) as never,
     defaultValues,
   });
+  const selectedPolicyType = useWatch({ control, name: "policyType" });
   const [renewedFromPolicyId, setRenewedFromPolicyId] = useState(defaultValues.renewedFromPolicyId ?? "");
 
   async function onSubmit(values: PolicyFormValues) {
@@ -96,6 +101,11 @@ export function PolicyForm({
         <FormErrorBanner message={errors.root?.message} />
 
         <form className="space-y-6" onSubmit={handleSubmit(onSubmit)}>
+          {riskDetailsNeedsReview ? (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+              La descripción histórica se conservó porque no se pudo separar con confianza. Completa los campos del ramo y guarda para registrar los datos estructurados.
+            </div>
+          ) : null}
           <FormSection title="Identidad de póliza" description="Relaciones y clasificación principal.">
             <FormGrid>
               <FormField label="Número de póliza" htmlFor="policyNumber" error={errors.policyNumber?.message}>
@@ -139,7 +149,12 @@ export function PolicyForm({
                   render={({ field }) => (
                     <ControlledSelect
                       value={field.value}
-                      onValueChange={field.onChange}
+                      onValueChange={(value) => {
+                        field.onChange(value);
+                        if (value !== field.value) {
+                          setValue("riskDetails", emptyPolicyRiskDetails(value as PolicyFormValues["policyType"]), { shouldDirty: true, shouldValidate: true });
+                        }
+                      }}
                       options={policyTypeOptions}
                       placeholder="Selecciona un tipo"
                     />
@@ -227,6 +242,14 @@ export function PolicyForm({
             </FormSection>
           ) : null}
 
+          <Controller
+            name="riskDetails"
+            control={control}
+            render={({ field }) => (
+              <PolicyRiskDetailsFields policyType={selectedPolicyType} value={field.value} onChange={field.onChange} />
+            )}
+          />
+
           <FormSection title="Detalle comercial" description="Información útil para asesoría y renovación.">
             <FormGrid>
               <FormField label="Plan de pago" htmlFor="paymentPlan" error={errors.paymentPlan?.message}>
@@ -234,17 +257,16 @@ export function PolicyForm({
               </FormField>
 
               <FormField
-                label="Objeto asegurado"
+                label="Descripción anterior"
                 htmlFor="insuredObject"
-                error={errors.insuredObject?.message}
-                hint="En autos, incluye marca, modelo, año y versión; en otros ramos, describe el bien o su ubicación."
+                hint="Se conserva para proteger la información histórica. Los datos estructurados generan la descripción actual."
               >
-                <Input id="insuredObject" placeholder="Descripción breve del bien asegurado" {...register("insuredObject")} />
+                <Input id="insuredObject" {...register("insuredObject")} readOnly />
               </FormField>
             </FormGrid>
 
-            <FormField label="Beneficiarios" htmlFor="beneficiaryInfo" error={errors.beneficiaryInfo?.message}>
-              <Textarea id="beneficiaryInfo" rows={4} {...register("beneficiaryInfo")} />
+            <FormField label={selectedPolicyType === "VIDA" ? "Beneficiarios anteriores" : "Beneficiarios / notas de beneficiarios"} htmlFor="beneficiaryInfo" error={errors.beneficiaryInfo?.message}>
+              <Textarea id="beneficiaryInfo" rows={3} {...register("beneficiaryInfo")} readOnly={selectedPolicyType === "VIDA" || selectedPolicyType === "FIANZAS"} />
             </FormField>
 
             <FormField label="Notas" htmlFor="notes" error={errors.notes?.message}>

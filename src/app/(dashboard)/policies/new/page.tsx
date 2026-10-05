@@ -8,6 +8,7 @@ import { buildRenewalPolicyDefaults, type PolicyRenewalSource } from "@/lib/poli
 import { clientOperationalWhere, policyOperationalWhere } from "@/lib/portfolio-access";
 import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import type { PolicyFormValues } from "@/lib/validations";
+import { riskDetailsFromExisting } from "@/lib/policy-risk-details";
 
 type TelegramDraftAiReview = {
   summary: string;
@@ -126,6 +127,8 @@ export default async function NewPolicyPage({
       include: {
         client: { select: { id: true, fullName: true } },
         insurer: { select: { id: true, name: true } },
+        insuredAssets: { select: { description: true, serialNumber: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+        insuredParties: { select: { fullName: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
       },
     }));
 
@@ -146,6 +149,7 @@ export default async function NewPolicyPage({
           paymentFrequency: source.paymentFrequency as PolicyRenewalSource["paymentFrequency"],
           paymentPlan: source.paymentPlan,
           insuredObject: source.insuredObject,
+          riskDetails: riskDetailsFromExisting(source.policyType, source.riskDetails, source.insuredObject, source.insuredAssets, source.insuredParties, source.beneficiaryInfo),
           beneficiaryInfo: source.beneficiaryInfo,
           notes: source.notes,
         };

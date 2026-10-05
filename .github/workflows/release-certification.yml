@@ -177,13 +177,6 @@ jobs:
           printf 'TENANT_ISOLATION_FINGERPRINT=%s\n' "$fingerprint" >> "$GITHUB_ENV"
       - name: Create protected two-organization fixture
         run: npm run test:tenant-fixture
-      - name: Enter maintenance before RLS cutover
-        shell: bash
-        run: |
-          set -euo pipefail
-          export PGPASSWORD=postgres
-          psql -h 127.0.0.1 -U postgres -d "$TENANT_ISOLATION_DB_NAME" -v ON_ERROR_STOP=1 \
-            -c 'UPDATE "PlatformRuntimeState" SET "writeMode" = '\''MAINTENANCE'\'', "reason" = '\''release tenant certification'\'', "updatedAt" = now() WHERE "id" = 1;'
       - name: Tenant and knowledge isolation tests
         run: npm run test:unit -- src/lib/organization-context.logic.test.ts src/lib/organization-context-resolution.logic.test.ts src/lib/tenant-isolation.integration.logic.test.ts src/lib/nora-context.logic.test.ts
       - name: Tenant inventory audit after multi-org fixture
@@ -192,6 +185,13 @@ jobs:
         run: npm run build
       - name: Install Playwright browser
         run: npx playwright install chromium
+      - name: Enter maintenance before RLS cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGPASSWORD=postgres
+          psql -h 127.0.0.1 -U postgres -d "$TENANT_ISOLATION_DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'UPDATE "PlatformRuntimeState" SET "writeMode" = '\''MAINTENANCE'\'', "reason" = '\''release tenant certification'\'', "updatedAt" = now() WHERE "id" = 1;'
       - name: Apply versioned RLS cutover as the only schema executor
         run: ENABLE_TENANT_RLS_CUTOVER=1 npm run cutover:multi-org
       - name: Provision restricted runtime credential after RLS

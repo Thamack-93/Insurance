@@ -1,11 +1,24 @@
 import "server-only";
 
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
-import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
+import { isApplicationPrismaClient, isTenantTransactionClient, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 
 export type DataQualityRuleCategory = "PAYMENTS" | "RENOVATIONS" | "LEDGER" | "RISKS";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
+
+async function withSuppressionRuleTransaction<T>(
+  organizationId: string,
+  client: DbClient | undefined,
+  callback: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  if (client && isTenantTransactionClient(client)) return callback(client);
+  if (client && !isApplicationPrismaClient(client)) throw new Error("TENANT_TRANSACTION_REQUIRED");
+
+  const context = await requireOrganizationContext();
+  if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+  return withTenantTransaction(context, callback);
+}
 
 export type SuppressionCriteria = Record<string, string>;
 
@@ -48,12 +61,7 @@ export function matchesSuppressionCriteria(criteriaJson: string, fields: Record<
 }
 
 export async function getActiveSuppressionRules(organizationId: string, client?: DbClient): Promise<SuppressionRuleSnapshot[]> {
-  if (!client || typeof (client as PrismaClient).$transaction === "function") {
-    const context = await requireOrganizationContext();
-    if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
-    return withTenantTransaction(context, (tx) => getActiveSuppressionRules(organizationId, tx));
-  }
-  const db = client as Prisma.TransactionClient;
+  return withSuppressionRuleTransaction(organizationId, client, async (db) => {
   const rules = await db.dataQualitySuppressionRule.findMany({
     where: {
       organizationId,
@@ -74,6 +82,7 @@ export async function getActiveSuppressionRules(organizationId: string, client?:
     createdAt: rule.createdAt,
     updatedAt: rule.updatedAt,
   }));
+  });
 }
 
 export async function findMatchingSuppressionRule(
@@ -85,12 +94,7 @@ export async function findMatchingSuppressionRule(
   organizationId: string,
   client?: DbClient,
 ): Promise<SuppressionRuleSnapshot | null> {
-  if (!client || typeof (client as PrismaClient).$transaction === "function") {
-    const context = await requireOrganizationContext();
-    if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
-    return withTenantTransaction(context, (tx) => findMatchingSuppressionRule(input, organizationId, tx));
-  }
-  const db = client as Prisma.TransactionClient;
+  return withSuppressionRuleTransaction(organizationId, client, async (db) => {
   const rules = await db.dataQualitySuppressionRule.findMany({
     where: {
       organizationId,
@@ -116,6 +120,7 @@ export async function findMatchingSuppressionRule(
     createdAt: match.createdAt,
     updatedAt: match.updatedAt,
   };
+  });
 }
 
 export async function upsertSuppressionRule(
@@ -130,13 +135,8 @@ export async function upsertSuppressionRule(
   },
   client?: DbClient,
 ): Promise<SuppressionRuleSnapshot> {
-  if (!client || typeof (client as PrismaClient).$transaction === "function") {
-    const context = await requireOrganizationContext();
-    if (context.organizationId !== input.organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
-    return withTenantTransaction(context, (tx) => upsertSuppressionRule(input, tx));
-  }
+  return withSuppressionRuleTransaction(input.organizationId, client, async (db) => {
   const criteriaJson = stringifySuppressionCriteria(input.criteria);
-  const db = client as Prisma.TransactionClient;
   const rule = await db.dataQualitySuppressionRule.upsert({
     where: {
       organizationId_category_issueCode_criteriaJson: {
@@ -178,15 +178,11 @@ export async function upsertSuppressionRule(
     createdAt: rule.createdAt,
     updatedAt: rule.updatedAt,
   };
+  });
 }
 
 export async function deactivateSuppressionRule(ruleId: string, organizationId: string, actorId: string, client?: DbClient): Promise<SuppressionRuleSnapshot> {
-  if (!client || typeof (client as PrismaClient).$transaction === "function") {
-    const context = await requireOrganizationContext();
-    if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
-    return withTenantTransaction(context, (tx) => deactivateSuppressionRule(ruleId, organizationId, actorId, tx));
-  }
-  const db = client as Prisma.TransactionClient;
+  return withSuppressionRuleTransaction(organizationId, client, async (db) => {
   const rule = await db.dataQualitySuppressionRule.findFirstOrThrow({
     where: { id: ruleId, organizationId },
   });
@@ -210,4 +206,5 @@ export async function deactivateSuppressionRule(ruleId: string, organizationId: 
     createdAt: rule.createdAt,
     updatedAt: rule.updatedAt,
   } satisfies SuppressionRuleSnapshot;
+  });
 }

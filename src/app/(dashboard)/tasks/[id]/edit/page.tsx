@@ -13,34 +13,68 @@ import { getPolicyOptionLabel } from "@/lib/policy-identity";
 export default async function EditWorkItemPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const scope = await requireOrganizationPortfolioReadScope();
-  const [workItem, clients, policies, insurers, receipts] = await withTenantTransaction(scope.context, (db) => Promise.all([
-    findWorkItemByRouteId(id, scope.organizationId, db, scope.portfolioOwnerId),
-    db.client.findMany({
+  const [workItem, clients, policies, insurers, receipts] = await withTenantTransaction(scope.context, async (db) => {
+    const workItem = await findWorkItemByRouteId(id, scope.organizationId, db, scope.portfolioOwnerId);
+    const clients = await db.client.findMany({
       where: { organizationId: scope.organizationId, ...(scope.portfolioOwnerId ? { portfolioOwnerId: scope.portfolioOwnerId } : {}), status: { not: "ARCHIVED" } },
       orderBy: { fullName: "asc" },
+      take: 100,
       select: { id: true, fullName: true },
-    }),
-    db.policy.findMany({
+    });
+    const policies = await db.policy.findMany({
       where: { organizationId: scope.organizationId, ...(scope.portfolioOwnerId ? { client: { portfolioOwnerId: scope.portfolioOwnerId } } : {}), status: { not: "CANCELLED" } },
       orderBy: { policyNumber: "asc" },
+      take: 100,
       select: {
         id: true,
         policyNumber: true,
         insuredObject: true,
         insuredAssets: { select: { description: true, isPrimary: true } },
       },
-    }),
-    db.insurer.findMany({
+    });
+    const insurers = await db.insurer.findMany({
       where: { organizationId: scope.organizationId, status: { not: "ARCHIVED" } },
       orderBy: { name: "asc" },
+      take: 100,
       select: { id: true, name: true },
-    }),
-    db.receipt.findMany({
+    });
+    const receipts = await db.receipt.findMany({
       where: { organizationId: scope.organizationId, ...(scope.portfolioOwnerId ? { client: { portfolioOwnerId: scope.portfolioOwnerId } } : {}), status: { not: "CANCELLED" } },
       orderBy: { dueDate: "asc" },
+      take: 100,
       select: { id: true, receiptNumber: true },
-    }),
-  ]));
+    });
+
+    if (workItem?.clientId && !clients.some((client) => client.id === workItem.clientId)) {
+      const selectedClient = await db.client.findFirst({
+        where: { id: workItem.clientId, organizationId: scope.organizationId, ...(scope.portfolioOwnerId ? { portfolioOwnerId: scope.portfolioOwnerId } : {}) },
+        select: { id: true, fullName: true },
+      });
+      if (selectedClient) clients.push(selectedClient);
+    }
+    if (workItem?.policyId && !policies.some((policy) => policy.id === workItem.policyId)) {
+      const selectedPolicy = await db.policy.findFirst({
+        where: { id: workItem.policyId, organizationId: scope.organizationId, ...(scope.portfolioOwnerId ? { client: { portfolioOwnerId: scope.portfolioOwnerId } } : {}) },
+        select: { id: true, policyNumber: true, insuredObject: true, insuredAssets: { select: { description: true, isPrimary: true } } },
+      });
+      if (selectedPolicy) policies.push(selectedPolicy);
+    }
+    if (workItem?.insurerId && !insurers.some((insurer) => insurer.id === workItem.insurerId)) {
+      const selectedInsurer = await db.insurer.findFirst({
+        where: { id: workItem.insurerId, organizationId: scope.organizationId },
+        select: { id: true, name: true },
+      });
+      if (selectedInsurer) insurers.push(selectedInsurer);
+    }
+    if (workItem?.receiptId && !receipts.some((receipt) => receipt.id === workItem.receiptId)) {
+      const selectedReceipt = await db.receipt.findFirst({
+        where: { id: workItem.receiptId, organizationId: scope.organizationId, ...(scope.portfolioOwnerId ? { client: { portfolioOwnerId: scope.portfolioOwnerId } } : {}) },
+        select: { id: true, receiptNumber: true },
+      });
+      if (selectedReceipt) receipts.push(selectedReceipt);
+    }
+    return [workItem, clients, policies, insurers, receipts] as const;
+  });
 
   if (!workItem) {
     notFound();

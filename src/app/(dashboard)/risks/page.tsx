@@ -116,11 +116,10 @@ export default async function RisksPage({
   const issueCodeFilter = params.issueCode;
   const query = (params.q ?? "").trim().toLowerCase();
 
-  const [risks, openNotifications, clientScores, policyScores] = await Promise.all([
-    detectRisks(undefined, organizationContext.organizationId),
-    withTenantTransaction(organizationContext, (db) => db.alert.findMany({ where: { organizationId: organizationContext.organizationId, status: "OPEN" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] })),
-    getClientDataQualityScores(organizationContext.organizationId),
-    getPolicyDataQualityScores(organizationContext.organizationId),
+  const organizationId = organizationContext.organizationId;
+  const [risks, openNotifications] = await Promise.all([
+    detectRisks(undefined, organizationId),
+    withTenantTransaction(organizationContext, (db) => db.alert.count({ where: { organizationId, status: "OPEN" } })),
   ]);
 
   const matchesQuery = (...values: Array<string | null | undefined>) =>
@@ -134,6 +133,22 @@ export default async function RisksPage({
     if (alertTypeFilter && risk.alertType !== alertTypeFilter) return false;
     return true;
   });
+  const visibleRisks = filteredRisks.slice(0, 12);
+  const completionTab = initialTab === "completitud";
+  const visibleClientIds = [...new Set(visibleRisks
+    .filter((risk) => risk.alertType === "CLIENT_MISSING_CONTACT" || risk.alertType === "CLIENT_WITHOUT_ACTIVE_POLICY")
+    .map((risk) => risk.entityId))];
+  const visiblePolicyIds = [...new Set(visibleRisks
+    .filter((risk) => risk.alertType === "RENEWAL_WITHOUT_WORK_ITEM")
+    .map((risk) => risk.entityId))];
+  const [clientScores, policyScores] = await Promise.all([
+    completionTab
+      ? getClientDataQualityScores(organizationId)
+      : visibleClientIds.length ? getClientDataQualityScores(organizationId, undefined, visibleClientIds) : Promise.resolve([]),
+    completionTab
+      ? getPolicyDataQualityScores(organizationId)
+      : visiblePolicyIds.length ? getPolicyDataQualityScores(organizationId, undefined, visiblePolicyIds) : Promise.resolve([]),
+  ]);
 
   const critical = filteredRisks.filter((risk) => risk.severity === "CRITICAL");
   const warnings = filteredRisks.filter((risk) => risk.severity === "WARNING");
@@ -180,10 +195,10 @@ export default async function RisksPage({
     ),
   );
 
-  const allIssues = [
+  const allIssues = completionTab ? [
     ...clientScores.flatMap((c) => c.issues.map((i) => ({ ...i, entity: c.cliente }))),
     ...policyScores.flatMap((p) => p.issues.map((i) => ({ ...i, entity: p.poliza }))),
-  ];
+  ] : [];
   const issueCounts = allIssues.reduce<Record<string, { count: number; label: string }>>((acc, issue) => {
     if (!acc[issue.code]) acc[issue.code] = { count: 0, label: issue.etiqueta };
     acc[issue.code].count += 1;
@@ -225,24 +240,10 @@ export default async function RisksPage({
         <MetricCard title="Advertencias" value={warnings.length} description="Mejora operativa." icon={BadgeInfo} tone="amber" />
         <MetricCard
           title="Notificaciones abiertas"
-          value={openNotifications.length}
+          value={openNotifications}
           description={`${info.length} señales informativas`}
           icon={ShieldAlert}
           tone="emerald"
-        />
-        <MetricCard
-          title="Puntuación de clientes"
-          value={avgClientScore}
-          description={`Promedio de ${clientScores.length}`}
-          icon={Users}
-          tone={avgClientScore >= 75 ? "emerald" : avgClientScore >= 50 ? "amber" : "rose"}
-        />
-        <MetricCard
-          title="Puntuación de pólizas"
-          value={avgPolicyScore}
-          description={`Promedio de ${policyScores.length}`}
-          icon={FolderKanban}
-          tone={avgPolicyScore >= 75 ? "emerald" : avgPolicyScore >= 50 ? "amber" : "rose"}
         />
       </section>
 
@@ -265,7 +266,7 @@ export default async function RisksPage({
                 </div>
               ) : (
                 <div className="divide-y divide-stone-200/80">
-                  {filteredRisks.slice(0, 12).map((risk) => {
+                  {visibleRisks.map((risk) => {
                     const renewalPolicy = risk.alertType === "RENEWAL_WITHOUT_WORK_ITEM" ? policyScoreById.get(risk.entityId) : null;
 
                     return (
@@ -393,6 +394,20 @@ export default async function RisksPage({
           )}
           <TableToolbar searchPlaceholder="Buscar cliente, póliza o hallazgo de calidad..." />
           <section className="grid gap-3 md:grid-cols-2">
+            <MetricCard
+              title="Puntuación de clientes"
+              value={avgClientScore}
+              description={`Promedio de ${clientScores.length}`}
+              icon={Users}
+              tone={avgClientScore >= 75 ? "emerald" : avgClientScore >= 50 ? "amber" : "rose"}
+            />
+            <MetricCard
+              title="Puntuación de pólizas"
+              value={avgPolicyScore}
+              description={`Promedio de ${policyScores.length}`}
+              icon={FolderKanban}
+              tone={avgPolicyScore >= 75 ? "emerald" : avgPolicyScore >= 50 ? "amber" : "rose"}
+            />
             <MetricCard
               title="Críticos"
               value={clientCritical + policyCritical}

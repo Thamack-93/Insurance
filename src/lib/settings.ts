@@ -8,6 +8,7 @@ import { logError } from "@/lib/logger";
 import { setRuntimeSettings, THEME_COOKIE } from "@/lib/settings-runtime";
 import { AuthError, requireSuperAdmin, requireUser } from "@/lib/auth";
 import { assertOrganizationContextInTransaction, requireOrganizationContext, requireOrganizationRole, withTenantTransaction } from "@/lib/organization-context";
+import type { OrganizationContext } from "@/lib/organization-context";
 
 export type Settings = {
   firmName: string;
@@ -41,15 +42,25 @@ const defaultSettings: Settings = {
   retentionDays: 30,
 };
 
-export async function getSettings(): Promise<Settings> {
+export async function getSettings(options: {
+  organizationContext?: OrganizationContext;
+  tenantSettingsSnapshot?: { organizationId: string; settings: Array<{ key: string; value: string }> };
+} = {}): Promise<Settings> {
   const user = await requireUser();
-  const context = await requireOrganizationContext();
+  const context = options.organizationContext ?? await requireOrganizationContext();
+  if (context.userId !== user.id) throw new AuthError("ORGANIZATION_CONTEXT_MISMATCH", 403);
   const db = getDb();
   
   try {
+    const snapshot = options.tenantSettingsSnapshot;
+    if (snapshot && snapshot.organizationId !== context.organizationId) {
+      throw new AuthError("ORGANIZATION_CONTEXT_MISMATCH", 403);
+    }
     // Get all settings from database
     const [organizationSettings, platformSettings, userTheme] = await Promise.all([
-      withTenantTransaction(context, (tx) => tx.organizationSetting.findMany({ where: { organizationId: context.organizationId } })),
+      snapshot
+        ? Promise.resolve(snapshot.settings)
+        : withTenantTransaction(context, (tx) => tx.organizationSetting.findMany({ where: { organizationId: context.organizationId } })),
       db.systemSetting.findMany({ where: { key: { not: { startsWith: "theme:" } } } }),
       db.userPreference.findUnique({ where: { userId_key: { userId: user.id, key: "theme" } }, select: { value: true } }),
     ]);

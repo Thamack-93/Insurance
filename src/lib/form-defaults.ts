@@ -11,6 +11,7 @@ import type {
 import { NO_REFERIDOR_VALUE } from "@/lib/constants";
 import { businessAddDays, businessToday } from "@/lib/business-dates";
 import { formatDateInput } from "@/lib/form-utils";
+import { emptyPolicyRiskDetails } from "@/lib/policy-risk-details";
 
 export function createClientDefaults(values?: Partial<ClientFormValues>): ClientFormValues {
   return {
@@ -46,6 +47,7 @@ export function createPolicyDefaults(values?: Partial<PolicyFormValues>): Policy
     paymentFrequency: values?.paymentFrequency ?? "ANNUAL",
     paymentPlan: values?.paymentPlan ?? "",
     insuredObject: values?.insuredObject ?? "",
+    riskDetails: values?.riskDetails ?? emptyPolicyRiskDetails(values?.policyType ?? "AUTO"),
     beneficiaryInfo: values?.beneficiaryInfo ?? "",
     notes: values?.notes ?? "",
     renewedFromPolicyId: values?.renewedFromPolicyId ?? "",

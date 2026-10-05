@@ -7,6 +7,7 @@ import { withTenantTransaction } from "@/lib/organization-context";
 import { formatDateInput } from "@/lib/form-utils";
 import type { PolicyRenewalSource } from "@/lib/policy-renewal";
 import type { PolicyFormValues } from "@/lib/validations";
+import { riskDetailsFromExisting } from "@/lib/policy-risk-details";
 import { clientOperationalWhere, policyOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function EditPolicyPage({ params }: { params: Promise<{ id: string }> }) {
@@ -17,6 +18,8 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
     db.policy.findFirst({
       where: { id, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: {
+        insuredAssets: { select: { description: true, serialNumber: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+        insuredParties: { select: { fullName: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
         renewedFrom: {
           select: {
             id: true,
@@ -82,6 +85,7 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
             paymentFrequency: policy.paymentFrequency as PolicyFormValues["paymentFrequency"],
             paymentPlan: policy.paymentPlan ?? "",
             insuredObject: policy.insuredObject ?? "",
+            riskDetails: riskDetailsFromExisting(policy.policyType, policy.riskDetails, policy.insuredObject, policy.insuredAssets, policy.insuredParties, policy.beneficiaryInfo) ?? undefined,
             beneficiaryInfo: policy.beneficiaryInfo ?? "",
             notes: policy.notes ?? "",
             renewedFromPolicyId: policy.renewedFromPolicyId ?? "",
@@ -111,6 +115,7 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
               : null
           }
           showRenewalLink={isAdmin}
+          riskDetailsNeedsReview={policy.riskDetailsReviewRequired}
           submitAction={updatePolicy.bind(null, policy.id)}
         />
       </div>

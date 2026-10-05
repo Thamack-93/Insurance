@@ -1,4 +1,5 @@
 import type { PolicyFormValues } from "@/lib/validations";
+import type { PolicyRiskDetails } from "@/lib/policy-risk-details";
 
 export type PolicyRenewalSource = {
   id: string;
@@ -15,6 +16,7 @@ export type PolicyRenewalSource = {
   paymentFrequency: PolicyFormValues["paymentFrequency"];
   paymentPlan: string | null;
   insuredObject: string | null;
+  riskDetails?: PolicyRiskDetails | null;
   beneficiaryInfo: string | null;
   notes: string | null;
 };
@@ -42,6 +44,7 @@ export function buildRenewalPolicyDefaults(source: PolicyRenewalSource): Partial
     paymentFrequency: source.paymentFrequency,
     paymentPlan: source.paymentPlan ?? "",
     insuredObject: source.insuredObject ?? "",
+    riskDetails: source.riskDetails ?? undefined,
     beneficiaryInfo: source.beneficiaryInfo ?? "",
     notes: source.notes ?? "",
     renewedFromPolicyId: source.id,

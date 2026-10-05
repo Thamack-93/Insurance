@@ -520,11 +520,11 @@ export async function getLedgerReviewIssues(organizationId: string): Promise<Led
   });
 }
 
-export async function getClientDataQualityScores(organizationId: string, portfolioOwnerId?: string) {
+export async function getClientDataQualityScores(organizationId: string, portfolioOwnerId?: string, clientIds?: string[]) {
   return withQualityTenant(organizationId, async (db) => {
   const suppressionRules = await loadRiskSuppressionRules(organizationId, db);
   const clients = await db.client.findMany({
-    where: { ...clientOperationalWhere(portfolioOwnerId, organizationId), status: "ACTIVE" },
+    where: { ...clientOperationalWhere(portfolioOwnerId, organizationId), status: "ACTIVE", ...(clientIds ? { id: { in: clientIds } } : {}) },
     select: {
       id: true,
       fullName: true,
@@ -650,11 +650,11 @@ export async function getClientDataQualityScores(organizationId: string, portfol
   });
 }
 
-export async function getPolicyDataQualityScores(organizationId: string, portfolioOwnerId?: string) {
+export async function getPolicyDataQualityScores(organizationId: string, portfolioOwnerId?: string, policyIds?: string[]) {
   return withQualityTenant(organizationId, async (db) => {
   const suppressionRules = await loadRiskSuppressionRules(organizationId, db);
   const policies = await db.policy.findMany({
-    where: policyOperationalWhere(portfolioOwnerId, organizationId),
+    where: { ...policyOperationalWhere(portfolioOwnerId, organizationId), ...(policyIds ? { id: { in: policyIds } } : {}) },
     select: {
       id: true,
       policyNumber: true,

@@ -4,12 +4,12 @@ import { BellRing, Bot, Database, ArrowRight, KeyRound, Users } from "@/componen
 import { Wrench } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
-import { getOnboardingStatus } from "@/lib/dashboard-queries";
+import { getOnboardingStatusFromDb } from "@/lib/dashboard-queries";
 import { getAssistantAiConnectionStatus } from "@/lib/assistant-ai";
-import { requireOrganizationContext } from "@/lib/organization-context";
+import { portfolioReadScope } from "@/lib/portfolio-access";
+import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { OnboardingPanel } from "@/components/settings/onboarding-panel";
 import { getOrganizationBackupStatus } from "@/lib/organization-backup-status";
-import { getCurrencyRates } from "@/lib/currency-rate-actions";
 import { CurrencyRatesPanel } from "@/components/settings/currency-rates-panel";
 import { deleteCurrencyRate, saveCurrencyRate } from "./currency-actions";
 
@@ -25,13 +25,26 @@ function formatDateTime(value: string) {
 
 export default async function SettingsPage() {
   const organization = await requireOrganizationContext();
+  const scope = portfolioReadScope(organization);
   const isTenantAdmin = organization.membershipRole === "OWNER" || organization.membershipRole === "ADMIN";
   const aiStatus = getAssistantAiConnectionStatus();
-  const [onboarding, ownerBackupStatus, currencyRates] = await Promise.all([
-    getOnboardingStatus(),
+  const [tenantSettings, ownerBackupStatus] = await Promise.all([
+    withTenantTransaction(organization, async (db) => {
+      const [onboarding, currencyRates] = await Promise.all([
+        getOnboardingStatusFromDb(scope, db),
+        isTenantAdmin
+          ? db.currencyRate.findMany({
+              where: { organizationId: scope.organizationId },
+              orderBy: [{ fromCurrency: "asc" }, { effectiveDate: "desc" }],
+              select: { id: true, fromCurrency: true, toCurrency: true, effectiveDate: true, rateToMxn: true },
+            })
+          : Promise.resolve([]),
+      ]);
+      return { onboarding, currencyRates };
+    }),
     organization.membershipRole === "OWNER" ? getOrganizationBackupStatus() : Promise.resolve(null),
-    isTenantAdmin ? getCurrencyRates() : Promise.resolve([]),
   ]);
+  const { onboarding, currencyRates } = tenantSettings;
 
   return (
     <div className="flex flex-col gap-6">

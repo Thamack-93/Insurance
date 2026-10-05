@@ -11,6 +11,9 @@ import { assertClientOrganizationAccess, assertPolicyOrganizationAccess } from "
 import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { inferClientType, type PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
 import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
+import { closeRenewalFollowUp, closeRenewalManualFollowUp } from "@/lib/renewal-followups";
+import { Prisma } from "@/generated/prisma/client";
+import { convertLegacyPolicyDescription, hasPolicyRiskData, policyRiskDetailsSchema, projectPolicyRiskRelations, riskDetailsFromExisting, summarizePolicyRiskDetails } from "@/lib/policy-risk-details";
 import { revalidatePaths } from "@/lib/mutation-utils";
 import {
   recordSecurityAccessDenied,
@@ -41,6 +44,7 @@ const confirmSchema = z.object({
     currency: z.string().min(1),
     requestNumber: z.string().nullable().optional(),
     insuredObject: z.string().nullable().optional(),
+    riskDetails: z.unknown().optional(),
     beneficiaryInfo: z.string().nullable().optional(),
     notes: z.string().nullable().optional(),
     sourcePolicyNumber: z.string().nullable().optional(),
@@ -60,6 +64,7 @@ const confirmSchema = z.object({
 });
 
 function normalizeDraft(draft: z.infer<typeof confirmSchema>["draft"]): PolicyPdfCaptureDraft {
+  const parsedRiskDetails = policyRiskDetailsSchema.safeParse(draft.riskDetails);
   return {
     policyNumber: draft.policyNumber.trim(),
     clientName: draft.clientName.trim(),
@@ -80,6 +85,7 @@ function normalizeDraft(draft: z.infer<typeof confirmSchema>["draft"]): PolicyPd
     currency: draft.currency.trim().toUpperCase(),
     requestNumber: draft.requestNumber?.trim() || null,
     insuredObject: draft.insuredObject?.trim() || null,
+    riskDetails: parsedRiskDetails.success ? parsedRiskDetails.data : null,
     beneficiaryInfo: draft.beneficiaryInfo?.trim() || null,
     notes: draft.notes?.trim() || null,
     sourcePolicyNumber: draft.sourcePolicyNumber?.trim() || null,
@@ -198,6 +204,11 @@ export async function POST(request: NextRequest) {
         clientId: true,
         insurerId: true,
         policyType: true,
+        insuredObject: true,
+        beneficiaryInfo: true,
+        riskDetails: true,
+        insuredAssets: { select: { description: true, serialNumber: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+        insuredParties: { select: { fullName: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
       },
     }));
 
@@ -247,6 +258,23 @@ export async function POST(request: NextRequest) {
         ...draft,
         sourcePolicyNumber: draft.sourcePolicyNumber ?? sourcePolicy.policyNumber,
       } satisfies PolicyPdfCaptureDraft;
+      const parsedRisk = riskDetailsFromExisting(
+        captureDraft.policyType,
+        captureDraft.riskDetails,
+        captureDraft.insuredObject,
+        [],
+        [],
+        captureDraft.beneficiaryInfo,
+      ) ?? convertLegacyPolicyDescription(captureDraft.policyType, captureDraft.insuredObject, captureDraft.serialNumber).riskDetails;
+      const sourceRiskCandidate = sourcePolicy.policyType === captureDraft.policyType
+        ? riskDetailsFromExisting(sourcePolicy.policyType, sourcePolicy.riskDetails, sourcePolicy.insuredObject, sourcePolicy.insuredAssets, sourcePolicy.insuredParties, sourcePolicy.beneficiaryInfo)
+        : null;
+      const riskDetails = parsedRisk && hasPolicyRiskData(parsedRisk)
+        ? parsedRisk
+        : sourceRiskCandidate && hasPolicyRiskData(sourceRiskCandidate)
+          ? sourceRiskCandidate
+          : null;
+      const riskSummary = summarizePolicyRiskDetails(riskDetails);
       const notes = buildCaptureNotes(captureDraft, existingTarget?.notes ?? null);
 
       const selectedClient = await tx.client.findFirst({
@@ -298,7 +326,9 @@ export async function POST(request: NextRequest) {
         currency: captureDraft.currency,
         paymentFrequency: captureDraft.paymentFrequency,
         paymentPlan: captureDraft.paymentPlan,
-        insuredObject: captureDraft.insuredObject,
+        insuredObject: riskSummary ?? captureDraft.insuredObject,
+        riskDetails: riskDetails ? riskDetails as Prisma.InputJsonValue : Prisma.DbNull,
+        riskDetailsReviewRequired: !riskDetails && Boolean(captureDraft.insuredObject?.trim()),
         beneficiaryInfo: captureDraft.beneficiaryInfo,
         notes,
         familyRootId,
@@ -321,17 +351,19 @@ export async function POST(request: NextRequest) {
 
       await tx.policyInsuredParty.deleteMany({ where: { organizationId: context.organizationId, policyId: targetPolicy.id } });
       await tx.policyInsuredAsset.deleteMany({ where: { organizationId: context.organizationId, policyId: targetPolicy.id } });
-      await tx.policyInsuredParty.create({
-        data: {
-          organizationId: context.organizationId,
-          policyId: targetPolicy.id,
-          fullName: captureDraft.clientName,
-          isPrimary: true,
-          sourceLabel: "Captura PDF",
-        },
+      const riskRelations = projectPolicyRiskRelations(riskDetails);
+      const insuredParties = riskRelations.insuredParties.length
+        ? riskRelations.insuredParties
+        : [{ fullName: captureDraft.clientName, isPrimary: true, sourceLabel: "Captura PDF" }];
+      await tx.policyInsuredParty.createMany({
+        data: insuredParties.map((party) => ({ ...party, organizationId: context.organizationId, policyId: targetPolicy.id })),
       });
 
-      if (captureDraft.policyType === "AUTO" && captureDraft.serialNumber) {
+      if (riskRelations.assets.length) {
+        await tx.policyInsuredAsset.createMany({
+          data: riskRelations.assets.map((asset) => ({ ...asset, organizationId: context.organizationId, policyId: targetPolicy.id })),
+        });
+      } else if (captureDraft.policyType === "AUTO" && captureDraft.serialNumber) {
         await tx.policyInsuredAsset.create({
           data: {
             organizationId: context.organizationId,
@@ -370,6 +402,19 @@ export async function POST(request: NextRequest) {
         await tx.policy.update({
           where: { id: sourcePolicy.id, organizationId: context.organizationId },
           data: { status: "RENEWED", updatedById: context.userId },
+        });
+      }
+      await closeRenewalFollowUp(context.organizationId, sourcePolicy.id, context.userId, tx);
+      const manualFollowUp = await closeRenewalManualFollowUp(context.organizationId, sourcePolicy.id, context.userId, tx);
+      if (manualFollowUp) {
+        await writeActivityLog({
+          organizationId: context.organizationId,
+          entityType: "Policy",
+          entityId: sourcePolicy.id,
+          action: "RENEWAL_FOLLOWUP_CLOSED_TERMINAL",
+          newValue: { status: "RENEWED" },
+          userId: context.userId,
+          db: tx,
         });
       }
 
@@ -418,6 +463,9 @@ export async function POST(request: NextRequest) {
       "/today",
       "/portfolio",
       "/renewals",
+      "/operations",
+      "/tasks",
+      "/activity",
       "/risks",
       "/data-quality",
     ]);
