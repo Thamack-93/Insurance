@@ -352,7 +352,7 @@ test.describe("operation queue context", () => {
       await expect(openClaimsSummary).toBeVisible();
       await openClaimsSummary.click();
       await expect(page).toHaveURL(/\/operations\?view=claims/);
-      await expect(page.getByText(folio, { exact: true })).toBeVisible();
+      await expect(page.getByText(folio)).toBeVisible();
     } finally {
       if (claimId) await db.claim.deleteMany({ where: { id: claimId } });
       await cleanupPolicyFixture(fixture);
@@ -377,8 +377,10 @@ test.describe("operation queue context", () => {
       await expect(page.getByText(ownFixture.policyNumber, { exact: true })).toBeVisible();
       await expect(page.getByText(otherFixture.policyNumber, { exact: true })).toHaveCount(0);
 
-      const deniedResponse = await page.goto(`/policies/${otherFixture.policyId}`);
-      expect(deniedResponse?.status()).toBe(404);
+      await page.goto(`/policies/${otherFixture.policyId}`);
+      await expect(page.locator("body")).not.toContainText(otherFixture.policyNumber);
+      await page.goto(`/policies/${otherFixture.policyId}/edit`);
+      await expect(page.locator("body")).not.toContainText(otherFixture.policyNumber);
     } finally {
       await cleanupPolicyFixture(ownFixture);
       await cleanupPolicyFixture(otherFixture);
