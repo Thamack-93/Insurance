@@ -44,6 +44,7 @@ export function AppSidebar({ isAdmin, isSuperAdmin = false }: { isAdmin: boolean
           <div className="flex items-center justify-between gap-2">
             <Link
               href="/today"
+              prefetch={false}
               aria-label="PolicyDesk, ir a Hoy"
               className={cn(
                 "flex min-h-11 items-center gap-3 rounded-md px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
@@ -121,6 +122,7 @@ function SidebarUtilityLink({
   const link = (
     <Link
       href={href}
+      prefetch={false}
       aria-label={collapsed ? label : undefined}
       className={cn(
         "flex min-h-11 items-center gap-3 rounded-md px-3 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
