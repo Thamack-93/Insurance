@@ -29,7 +29,7 @@ Los otros cuatro chats permanecen abiertos hasta cerrar los entregables transfer
 | --- | --- |
 | Campos por ramo | Código y migración aditiva integrados y desplegados. Campos nuevos visibles; no afirmar que los datos históricos ya fueron convertidos. |
 | Backfill de pólizas | Preview read-only integrado. Falta una conexión Production dedicada `policydesk_readonly`, generar y revisar el manifiesto por organización y luego ejecutar lotes auditables, repetibles y sin duplicados con aprobación del reporte. No se aplicó backfill. |
-| Cotejo documental | La matriz de segunda pasada contiene 13 casos: 4 resueltos documentalmente y 9 parciales/pendientes. Un caso antes incompleto ahora cuenta con documento primario exacto; el documento no confirma que se haya pagado. En seis casos de accidentes, los roles fueron confirmados por el usuario, pero las vigencias y coberturas siguen sin respaldo documental. No copiar datos de otras pólizas. |
+| Cotejo documental | La matriz de segunda pasada contiene 13 casos: 4 resueltos documentalmente y 9 parciales/pendientes. Un caso antes incompleto ahora cuenta con documento primario exacto; ese documento no confirma el pago. En seis casos de accidentes, los roles fueron confirmados por el usuario, pero las vigencias y coberturas siguen sin respaldo documental. Una consulta autenticada y de solo lectura en Production revisó otros tres registros de auto: devolvió datos de vigencia y pagos, pero uno presenta conflicto entre recibo cancelado y pago registrado. Esto no aporta la descripción del vehículo ni resuelve el backfill; los detalles identificables permanecen solo en el informe local. |
 | Renovaciones / Operations | Código integrado y desplegado; flujos de seguimiento disponibles. La cartera de Insights aún necesita triage humano. |
 | Operational Insights | Implementado y visible en Production; cuatro grupos, filtros y enlaces autenticados comprobados. Las señales visibles cambian con los datos y requieren atención operativa. |
 | CI y despliegue | Run #464 SUCCESS en el head documental `b8d16e5`; Production READY en el merge documental `1613560`, con código de aplicación `cfd223e`. No hacer cambios de aplicación sin nueva certificación exact-SHA. |
@@ -39,7 +39,7 @@ Los otros cuatro chats permanecen abiertos hasta cerrar los entregables transfer
 
 ### Backfill: fuente documental
 
-La nueva fuente documental permite resolver un caso que constaba como incompleto. En la matriz quedan 4 resueltos y 9 parciales/pendientes de 13. El documento acredita datos de vigencia/cobertura, pero no el pago. Las seis confirmaciones directas del usuario sobre los roles de contratante y asegurado no sustituyen los documentos faltantes de vigencia y cobertura. No se consultó Production ni se aplicó backfill.
+La nueva fuente documental permite resolver un caso que constaba como incompleto. En la matriz quedan 4 resueltos y 9 parciales/pendientes de 13. El documento acredita datos de vigencia/cobertura, pero no el pago. Las seis confirmaciones directas del usuario sobre los roles de contratante y asegurado no sustituyen los documentos faltantes de vigencia y cobertura. Una lectura autenticada y acotada de tres registros de auto en Production comprobó vigencias y pagos; uno requiere conciliación por discrepancia entre el recibo y el movimiento de pago. No se modificaron datos ni se aplicó backfill. Los identificadores y cifras de esos registros están solo en el informe local.
 
 ### Neon: procedencia y límites
 
