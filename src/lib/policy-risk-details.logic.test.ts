@@ -94,6 +94,12 @@ describe("policy risk details", () => {
     expect(ambiguousAuto?.policyType === "AUTO" && ambiguousAuto.data.vehicles[0].make).toBe("");
   });
 
+  it("marks unlabeled OTRO legacy text for review instead of inventing a category", () => {
+    const result = convertLegacyPolicyDescription("OTRO", "Texto libre sin etiquetas ni campos identificables");
+
+    expect(result).toMatchObject({ status: "REVIEW", riskDetails: null });
+  });
+
   it("keeps the legacy description when a saved risk envelope has no structured summary", () => {
     const raw = "Una casa en zona centro";
     const details = riskDetailsFromExisting("HOGAR", null, raw);

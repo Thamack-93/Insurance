@@ -252,7 +252,7 @@ export function convertLegacyPolicyDescription(policyType: string, description: 
     } else if (policyType === "RESPONSABILIDAD_CIVIL") {
       data = { activity: get("actividad", "giro"), territory: get("territorio", "territorio de cobertura"), coverageLimit: get("limite", "limite de cobertura"), operations: get("operaciones", "operaciones cubiertas") };
     } else if (policyType === "OTRO") {
-      data = { category: get("categoria", "tipo") || policyType, attributes: [...values.entries()].map(([label, value]) => ({ label, value })) };
+      data = { category: get("categoria", "tipo"), attributes: [...values.entries()].map(([label, value]) => ({ label, value })) };
     }
     if (data) {
       const parsed = policyRiskDetailsSchema.safeParse({ version: 1, policyType, sourceText: source, data });

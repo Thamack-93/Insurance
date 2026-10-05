@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { authenticatePageAsAdmin, cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../helpers/db";
+import { authenticatePageAsAdmin, authenticatePageAsAgent, cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../helpers/db";
 import { expectMutationSuccessToast } from "../helpers/assert-mutation-toast";
 import { captureServerAction } from "../helpers/capture-server-action";
 
@@ -239,57 +239,149 @@ test.describe("operation queue context", () => {
     }
   });
 
-  test("schedules and reschedules one manual renewal follow-up from the board", async ({ page }) => {
+  test("schedules, reschedules, and clears a manual renewal follow-up from its Operations row", async ({ page }) => {
     const db = getTestDb();
     const fixture = await seedPolicyFixture("RENEWAL-MANUAL-FOLLOWUP");
-    const sourceId = `policy:${fixture.policyId}:renewal-manual-followup`;
+    const manualSourceId = `policy:${fixture.policyId}:renewal-manual-followup`;
+    const automaticSourceId = `policy:${fixture.policyId}:renewal-followup`;
+    const automaticDueDate = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
 
     try {
+      await db.policy.update({ where: { id: fixture.policyId }, data: { endDate: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000) } });
+      const automaticReminder = await db.workItem.create({
+        data: {
+          organizationId: TEST_ORGANIZATION_ID,
+          sourceType: "Renewal",
+          sourceId: automaticSourceId,
+          workItemType: "TASK",
+          taskType: "RENEWAL",
+          status: "OPEN",
+          priority: "HIGH",
+          title: `Renovación: ${fixture.policyNumber}`,
+          entityType: "POLICY",
+          entityId: fixture.policyId,
+          clientId: fixture.clientId,
+          policyId: fixture.policyId,
+          insurerId: fixture.insurerId,
+          startDate: new Date(),
+          dueDate: automaticDueDate,
+        },
+        select: { id: true },
+      });
+
       await authenticatePageAsAdmin(page);
       await page.goto("/operations?view=renewal-board");
 
       const card = page.locator("li").filter({ hasText: fixture.policyNumber }).first();
       await expect(card).toBeVisible();
       await card.getByRole("button", { name: `Seguimiento de ${fixture.policyNumber}` }).click();
-      const shortcutDate = businessDateAfter(3);
+      const scheduledDate = businessDateAfter(3);
       await page.getByRole("menuitem", { name: "En 3 días", exact: true }).click();
-
       await expectMutationSuccessToast(page, "Seguimiento programado.");
-      await expect.poll(async () => {
-        const item = await db.workItem.findUnique({ where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId } } });
-        return item
-          ? { status: item.status, policyId: item.policyId, dueDate: businessDateKey(item.dueDate!), notes: item.notes }
-          : null;
-      }, { timeout: 10_000 }).toEqual({ status: "OPEN", policyId: fixture.policyId, dueDate: shortcutDate, notes: null });
-      await expect(card.getByText(/Seguimiento ·/)).toBeVisible({ timeout: 10_000 });
 
-      await card.getByRole("button", { name: `Seguimiento de ${fixture.policyNumber}` }).click();
+      const scheduledItem = await db.workItem.findUniqueOrThrow({
+        where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId: manualSourceId } },
+        select: { id: true, status: true, dueDate: true, notes: true, policyId: true },
+      });
+      const manualWorkItemId = scheduledItem.id;
+      expect({ status: scheduledItem.status, dueDate: businessDateKey(scheduledItem.dueDate!), notes: scheduledItem.notes, policyId: scheduledItem.policyId })
+        .toEqual({ status: "OPEN", dueDate: scheduledDate, notes: null, policyId: fixture.policyId });
+
+      await page.goto("/operations?view=pending");
+      const rowFollowUpMenu = page.getByRole("button", { name: `Seguimiento de ${fixture.policyNumber}` });
+      await expect(rowFollowUpMenu).toBeVisible();
+      await rowFollowUpMenu.click();
       await page.getByRole("menuitem", { name: "Otra fecha", exact: true }).click();
-      const customDate = businessDateAfter(5);
-      await page.getByLabel("Fecha de seguimiento").fill(customDate);
+      const rescheduledDate = businessDateAfter(5);
+      await page.getByLabel("Fecha de seguimiento").fill(rescheduledDate);
       await page.getByLabel("Nota opcional").fill("Llamar después de la junta");
       await page.getByRole("button", { name: "Guardar seguimiento", exact: true }).click();
-
       await expectMutationSuccessToast(page, "Seguimiento reprogramado.");
-      await expect.poll(async () => {
-        const rows = await db.workItem.findMany({ where: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId } });
-        return rows.length === 1
-          ? { count: rows.length, dueDate: businessDateKey(rows[0].dueDate!), notes: rows[0].notes, policyId: rows[0].policyId }
-          : { count: rows.length };
-      }, { timeout: 10_000 }).toEqual({ count: 1, dueDate: customDate, notes: "Llamar después de la junta", policyId: fixture.policyId });
-      await expect(card.getByText(/Seguimiento ·/)).toBeVisible({ timeout: 10_000 });
 
-      await card.getByRole("button", { name: `Seguimiento de ${fixture.policyNumber}` }).click();
+      await expect.poll(async () => {
+        const item = await db.workItem.findUnique({ where: { id: manualWorkItemId }, select: { id: true, status: true, dueDate: true, notes: true, policyId: true } });
+        return item && { id: item.id, status: item.status, dueDate: businessDateKey(item.dueDate!), notes: item.notes, policyId: item.policyId };
+      }, { timeout: 10_000 }).toEqual({ id: manualWorkItemId, status: "OPEN", dueDate: rescheduledDate, notes: "Llamar después de la junta", policyId: fixture.policyId });
+
+      await rowFollowUpMenu.click();
       await page.getByRole("menuitem", { name: "Quitar seguimiento", exact: true }).click();
       const confirmDialog = page.getByRole("alertdialog").filter({ hasText: `Quitar seguimiento de ${fixture.policyNumber}` });
       await confirmDialog.getByRole("button", { name: "Quitar seguimiento", exact: true }).click();
       await expectMutationSuccessToast(page, "Seguimiento eliminado.");
       await expect.poll(async () => {
-        const item = await db.workItem.findUnique({ where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId } } });
-        return item ? { status: item.status, dueDate: businessDateKey(item.dueDate!) } : null;
-      }, { timeout: 10_000 }).toEqual({ status: "CANCELLED", dueDate: customDate });
+        const [manual, automatic] = await Promise.all([
+          db.workItem.findUnique({ where: { id: manualWorkItemId }, select: { id: true, status: true, dueDate: true, notes: true } }),
+          db.workItem.findUnique({ where: { id: automaticReminder.id }, select: { id: true, status: true } }),
+        ]);
+        return { manual: manual && { id: manual.id, status: manual.status, dueDate: businessDateKey(manual.dueDate!), notes: manual.notes }, automatic };
+      }, { timeout: 10_000 }).toEqual({
+        manual: { id: manualWorkItemId, status: "CANCELLED", dueDate: rescheduledDate, notes: "Llamar después de la junta" },
+        automatic: { id: automaticReminder.id, status: "OPEN" },
+      });
     } finally {
       await cleanupPolicyFixture(fixture);
+    }
+  });
+
+  test("keeps open claims visible in the Operations all view", async ({ page }) => {
+    const db = getTestDb();
+    const fixture = await seedPolicyFixture("OPERATIONS-ALL-CLAIM");
+    const folio = `E2E-OPS-CLAIM-${Date.now()}`;
+    let claimId: string | null = null;
+
+    try {
+      const claim = await db.claim.create({
+        data: {
+          organizationId: TEST_ORGANIZATION_ID,
+          folio,
+          clientId: fixture.clientId,
+          policyId: fixture.policyId,
+          insurerId: fixture.insurerId,
+          claimType: "AUTO",
+          status: "OPEN",
+          incidentDate: new Date(),
+          reportedDate: new Date(),
+        },
+        select: { id: true },
+      });
+      claimId = claim.id;
+
+      await authenticatePageAsAdmin(page);
+      await page.goto("/operations");
+      const openClaimsSummary = page.getByRole("link", { name: /Siniestros abiertos\s+\d+/ });
+      await expect(openClaimsSummary).toBeVisible();
+      await openClaimsSummary.click();
+      await expect(page).toHaveURL(/\/operations\?view=claims/);
+      await expect(page.getByText(folio, { exact: true })).toBeVisible();
+    } finally {
+      if (claimId) await db.claim.deleteMany({ where: { id: claimId } });
+      await cleanupPolicyFixture(fixture);
+    }
+  });
+
+  test("limits an agent's renewal board and policy access to the agent portfolio", async ({ page }) => {
+    const db = getTestDb();
+    const ownFixture = await seedPolicyFixture("OPERATIONS-AGENT-OWN");
+    const otherFixture = await seedPolicyFixture("OPERATIONS-AGENT-OTHER");
+
+    try {
+      const agent = await db.user.findUniqueOrThrow({ where: { email: "ci-agent@policydesk.local" }, select: { id: true } });
+      await Promise.all([
+        db.client.update({ where: { id: ownFixture.clientId }, data: { portfolioOwnerId: agent.id } }),
+        db.policy.update({ where: { id: ownFixture.policyId }, data: { endDate: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000) } }),
+        db.policy.update({ where: { id: otherFixture.policyId }, data: { endDate: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000) } }),
+      ]);
+
+      await authenticatePageAsAgent(page);
+      await page.goto("/operations?view=renewal-board");
+      await expect(page.getByText(ownFixture.policyNumber, { exact: true })).toBeVisible();
+      await expect(page.getByText(otherFixture.policyNumber, { exact: true })).toHaveCount(0);
+
+      const deniedResponse = await page.goto(`/policies/${otherFixture.policyId}`);
+      expect(deniedResponse?.status()).toBe(404);
+    } finally {
+      await cleanupPolicyFixture(ownFixture);
+      await cleanupPolicyFixture(otherFixture);
     }
   });
 

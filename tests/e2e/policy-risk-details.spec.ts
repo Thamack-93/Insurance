@@ -9,23 +9,38 @@ test.describe("structured policy risk details", () => {
     const db = getTestDb();
     const fixture = await seedPolicyFixture("POLICY-RISK-LEGACY-TEXT");
     const raw = "Unidad comercial descrita en póliza histórica sin formato confiable";
+    const legacyAsset = {
+      organizationId: TEST_ORGANIZATION_ID,
+      policyId: fixture.policyId,
+      assetType: "AUTO",
+      description: "Unidad comercial con descripcion historica sin formato confiable",
+      serialNumber: "LEGACY-VIN-001",
+      isPrimary: true,
+    } as const;
 
     try {
       await db.policy.update({
         where: { id: fixture.policyId },
         data: { insuredObject: raw, riskDetails: undefined, riskDetailsReviewRequired: true },
       });
+      await db.policyInsuredAsset.create({ data: legacyAsset });
 
       await authenticatePageAsAdmin(page);
       await page.goto(`/policies/${fixture.policyId}/edit`);
       await expect(page.locator("#insuredObject")).toHaveValue(raw);
       await page.getByLabel("Notas", { exact: true }).fill("Cambio ajeno a la descripción histórica");
-      const action = await captureServerAction(page, () => page.getByRole("button", { name: "Guardar cambios", exact: true }).click());
-      console.log("Policy legacy edit server action:", action);
+      await captureServerAction(page, () => page.getByRole("button", { name: "Guardar cambios", exact: true }).click());
       await expect.poll(async () => {
-        const policy = await db.policy.findUnique({ where: { id: fixture.policyId }, select: { insuredObject: true, notes: true } });
-        return policy ? { insuredObject: policy.insuredObject, notes: policy.notes } : null;
-      }, { timeout: 10_000 }).toEqual({ insuredObject: raw, notes: "Cambio ajeno a la descripción histórica" });
+        const [policy, assets] = await Promise.all([
+          db.policy.findUnique({ where: { id: fixture.policyId }, select: { insuredObject: true, notes: true } }),
+          db.policyInsuredAsset.findMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId } }),
+        ]);
+        return policy ? { insuredObject: policy.insuredObject, notes: policy.notes, assets } : null;
+      }, { timeout: 10_000 }).toMatchObject({
+        insuredObject: raw,
+        notes: "Cambio ajeno a la descripción histórica",
+        assets: [{ description: legacyAsset.description, serialNumber: legacyAsset.serialNumber, assetType: legacyAsset.assetType }],
+      });
     } finally {
       await cleanupPolicyFixture(fixture);
     }

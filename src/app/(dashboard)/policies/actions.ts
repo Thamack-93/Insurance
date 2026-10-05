@@ -312,7 +312,14 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
           updatedById: userId,
         },
       });
-      await syncPolicyRiskRelations(tx, context.organizationId, id, parsed.data.riskDetails);
+      const submittedRiskDetails = policyRiskDetailsSchema.safeParse(parsed.data.riskDetails);
+      if (submittedRiskDetails.success && (
+        hasPolicyRiskData(submittedRiskDetails.data) ||
+        submittedRiskDetails.data.policyType !== previousPolicy.policyType ||
+        hasPolicyRiskData(previousPolicy.riskDetails)
+      )) {
+        await syncPolicyRiskRelations(tx, context.organizationId, id, submittedRiskDetails.data);
+      }
 
       if (renewalChanged) {
         if (previousRenewedFromPolicyId) {
