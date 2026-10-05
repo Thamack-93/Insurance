@@ -117,9 +117,7 @@ function WorkItemRow({ item, returnTo }: { item: WorkQueueItem; returnTo?: strin
               <ArrowRight className="size-3.5" aria-hidden />
             </span>
           </div>
-        </Link>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             {stateLabel && presentation.state ? (
               <Badge variant="outline" className={`rounded-full px-2 py-0.5 text-[11px] ${operationalStateClasses[presentation.state]}`}>
                 {stateLabel}
@@ -127,6 +125,8 @@ function WorkItemRow({ item, returnTo }: { item: WorkQueueItem; returnTo?: strin
             ) : null}
             <PriorityBadge priority={item.priority} className="px-2 py-0.5 text-[11px]" />
           </div>
+        </Link>
+        <div className="flex flex-wrap items-center justify-between gap-2">
           {isManualRenewalFollowUp && item.policy ? (
             <RenewalFollowUpMenu
               policyId={item.policyId ?? ""}
