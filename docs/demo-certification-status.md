@@ -24,7 +24,7 @@ En el proyecto separado `policydesk-certification-20261001` (`morning-block-3861
 
 **Este par queda rechazado como evidencia de certificación y no debe usarse:** el runbook prohíbe clonar `main` como fuente, y la observación anterior de que no aparecían tablas no prueba por sí sola la procedencia completa del estado de datos. No ejecutar migraciones, fixture, backup ni restore en esas dos ramas. Mantenerlas intactas.
 
-El siguiente par debe originarse en una fuente cuyo estado vacío y procedencia estén aprobados explícitamente, sin depender de la rama `main` del proyecto de certificación; ligarlo al SHA exacto que se vaya a certificar. El proyecto estaba a 9/10 ramas, por lo que no hay espacio para otra pareja allí. No crear un proyecto nuevo ni expandir secretos/permisos hasta revisar el alcance y autorización específicos.
+El siguiente par debe originarse en una fuente cuyo estado vacío y procedencia estén aprobados explícitamente, sin depender de la rama `main` del proyecto de certificación; ligarlo al SHA exacto que se vaya a certificar. Antes del drill, hacer checkout de ese SHA inmutable y verificar que `git rev-parse HEAD` coincida con `CERTIFICATION_CANDIDATE_SHA` y el identificador de ambas ramas. El proyecto estaba a 9/10 ramas, por lo que no hay espacio para otra pareja allí. No crear un proyecto nuevo ni expandir secretos/permisos hasta revisar el alcance y autorización específicos.
 
 No se ha ejecutado backup/restore remoto. **No usar backups ni claves de Production.** Mantener `RESTORE_DRILL_APP_SMOKE=0`.
 
