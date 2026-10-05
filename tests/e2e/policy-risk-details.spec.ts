@@ -210,7 +210,7 @@ test.describe("structured policy risk details", () => {
       expect(sourceAfter?.status).toBe("RENEWED");
       expect(renewedPolicy).toMatchObject({
         renewedFromPolicyId: fixture.policyId,
-        insuredObject: "Toyota Corolla 2020 LE ABC-123 Serie 2T1BURHE0LC123456",
+        insuredObject: "Toyota Corolla 2020 LE Placas ABC-123 Serie 2T1BURHE0LC123456",
         riskDetails: {
           policyType: "AUTO",
           sourceText: "Toyota, Corolla, 2020, LE",
