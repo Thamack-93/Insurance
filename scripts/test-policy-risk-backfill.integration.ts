@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync, statSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -65,6 +65,17 @@ async function main() {
   if (process.env.NODE_ENV !== "test" || process.env.TENANT_ISOLATION_TEST_DB !== "1" || process.env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB !== "1") {
     throw new Error("POLICY_RISK_BACKFILL_INTEGRATION_REQUIRES_DISPOSABLE_POSTGRES");
   }
+
+  const readOnlyApplyAttempt = spawnSync(process.execPath, [
+    "--import", "tsx", "scripts/backfill-policy-risk-details.ts",
+    `--organization-id=${ORGANIZATION_ID}`, "--production-preview", "--apply",
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: { ...process.env, POLICY_RISK_BACKFILL_READONLY_DATABASE_URL: "", POLICY_RISK_BACKFILL_READONLY_ROLE: "" },
+  });
+  assert.equal(readOnlyApplyAttempt.status, 1);
+  assert.match(readOnlyApplyAttempt.stderr, /POLICY_RISK_BACKFILL_PRODUCTION_PREVIEW_IS_READ_ONLY/);
 
   const db = getTestDb();
   let fixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
