@@ -256,20 +256,34 @@ export async function withOrganizationTransaction<T>(
   callback: (tx: Prisma.TransactionClient) => Promise<T>,
 ): Promise<T> {
   const db = getDb();
-  return db.$transaction(async (tx) => {
-    tenantTransactionRegistry.add(tx);
-    await tx.$executeRaw(Prisma.sql`SELECT set_config('app.organization_id', ${context.organizationId}, true)`);
-    // Read transactions still revalidate the live tenant boundary, but do
-    // not serialize every concurrent page query behind the same membership
-    // row. Mutations call assertOrganizationContextInTransaction explicitly
-    // and retain the strong row locks required for the write boundary.
-    await validateOrganizationContextInTransaction(tx, context, ORGANIZATION_ROLES, false);
-    return callback(tx);
-  }, {
-    isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
-    maxWait: 10_000,
-    timeout: 15_000,
-  });
+  const callsite = new Error("tenant transaction caller").stack;
+  try {
+    return await db.$transaction(async (tx) => {
+      tenantTransactionRegistry.add(tx);
+      await tx.$executeRaw(Prisma.sql`SELECT set_config('app.organization_id', ${context.organizationId}, true)`);
+      // Read transactions still revalidate the live tenant boundary, but
+      // do not serialize every concurrent page query behind the same membership
+      // row. Mutations call assertOrganizationContextInTransaction explicitly
+      // and retain the strong row locks required for the write boundary.
+      await validateOrganizationContextInTransaction(tx, context, ORGANIZATION_ROLES, false);
+      return callback(tx);
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+      maxWait: 10_000,
+      timeout: 15_000,
+    });
+  } catch (error) {
+    if (
+      process.env.NODE_ENV === "test"
+      && typeof error === "object"
+      && error !== null
+      && "code" in error
+      && error.code === "P2028"
+    ) {
+      console.error("[tenant transaction P2028 caller]", callsite);
+    }
+    throw error;
+  }
 }
 
 /** Public naming from the multi-tenant DAL contract. */
