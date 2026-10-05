@@ -208,6 +208,7 @@ async function main() {
     if (policyRiskBackfillReviewedHash(manifest) !== expectedManifestSha) throw new Error("POLICY_RISK_BACKFILL_REVIEWED_DIGEST_MISMATCH");
     if (manifest.reviewedBy?.trim() !== reviewer || !manifest.reviewedAt) throw new Error("POLICY_RISK_BACKFILL_REVIEWER_MISMATCH");
     assertReviewedPolicyRiskBackfillManifest(manifest, { organizationId, candidateSha: sha, processorSha256: processor });
+    const reviewedManifestSha256 = expectedManifestSha;
 
     const current = await scanAll(prisma, organizationId);
     const expectedById = new Map(manifest.candidates.map((row) => [row.policyId, row]));
@@ -340,7 +341,13 @@ async function main() {
               await tx.policyInsuredAsset.createMany({ data: row.proposed.assets.map((asset) => ({ ...asset, organizationId, policyId: row.policyId })), skipDuplicates: true });
             }
             if (row.proposed.insuredParties.length) {
-              await tx.policyInsuredParty.createMany({ data: row.proposed.insuredParties.map((party) => ({ ...party, organizationId, policyId: row.policyId })), skipDuplicates: true });
+              for (const party of row.proposed.insuredParties) {
+                await tx.policyInsuredParty.upsert({
+                  where: { policyId_fullName: { policyId: row.policyId, fullName: party.fullName } },
+                  create: { ...party, organizationId, policyId: row.policyId },
+                  update: { isPrimary: party.isPrimary, sourceLabel: party.sourceLabel },
+                });
+              }
             }
             batchCounts.converted += 1;
             batchCounts.applied += 1;
@@ -365,13 +372,14 @@ async function main() {
           }
         }
       }
-      const summary = { runId: manifest.runId, candidateSha: sha, reviewer, scanned: manifest.scanned, converted, deferred, empty, applied, alreadyApplied: alreadyAppliedCount };
+      const summary = { runId: manifest.runId, candidateSha: sha, reviewer, reviewedManifestSha256, scanned: manifest.scanned, converted, deferred, empty, applied, alreadyApplied: alreadyAppliedCount };
       await prisma.maintenanceRun.update({ where: { id: run.id }, data: { status: deferred ? "REVIEW_REQUIRED" : "COMPLETED", completedAt: new Date(), summaryJson: JSON.stringify(summary) } });
       await writePrivateManifest(resultFile, { ...summary, organizationId, manifestSha256: manifest.contentSha256, maintenanceRunId: run.id, status: deferred ? "REVIEW_REQUIRED" : "COMPLETED", outcomes });
       process.stdout.write(`${JSON.stringify({ mode: "apply", organizationId, ...summary, maintenanceRunId: run.id, resultFile }, null, 2)}\n`);
     } catch (error) {
-      await prisma.maintenanceRun.update({ where: { id: run.id }, data: { status: "FAILED", completedAt: new Date(), summaryJson: JSON.stringify({ runId: manifest.runId, candidateSha: sha, reviewer, scanned: manifest.scanned, converted, deferred, empty, applied, alreadyApplied: alreadyAppliedCount, errorCode: error instanceof Error ? error.message.split(":")[0] : "UNKNOWN" }) } });
-      await writePrivateManifest(resultFile, { organizationId, manifestSha256: manifest.contentSha256, maintenanceRunId: run.id, status: "FAILED", converted, deferred, empty, applied, alreadyApplied: alreadyAppliedCount, errorCode: error instanceof Error ? error.message.split(":")[0] : "UNKNOWN", outcomes });
+      const errorCode = error instanceof Error ? error.message.split(":")[0] : "UNKNOWN";
+      await prisma.maintenanceRun.update({ where: { id: run.id }, data: { status: "FAILED", completedAt: new Date(), summaryJson: JSON.stringify({ runId: manifest.runId, candidateSha: sha, reviewer, reviewedManifestSha256, scanned: manifest.scanned, converted, deferred, empty, applied, alreadyApplied: alreadyAppliedCount, errorCode }) } });
+      await writePrivateManifest(resultFile, { organizationId, manifestSha256: manifest.contentSha256, reviewedManifestSha256, maintenanceRunId: run.id, status: "FAILED", converted, deferred, empty, applied, alreadyApplied: alreadyAppliedCount, errorCode, outcomes });
       throw error;
     }
   } finally {

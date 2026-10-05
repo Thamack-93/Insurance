@@ -69,6 +69,7 @@ async function main() {
   const db = getTestDb();
   let fixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
   let ambiguousFixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
+  let partyFixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
   let reportFile: string | null = null;
   const reportFiles: string[] = [];
   const resultFiles: string[] = [];
@@ -76,6 +77,7 @@ async function main() {
   try {
     const backfillFixture = fixture = await seedPolicyFixture("POLICY-RISK-BACKFILL");
     const reviewFixture = ambiguousFixture = await seedPolicyFixture("POLICY-RISK-REVIEW");
+    const insuredPartyFixture = partyFixture = await seedPolicyFixture("POLICY-RISK-PARTY");
     await db.policy.update({
       where: { id: backfillFixture.policyId },
       data: {
@@ -97,6 +99,13 @@ async function main() {
     await db.policy.update({
       where: { id: reviewFixture.policyId },
       data: { insuredObject: "Texto libre que requiere revisión", riskDetails: Prisma.DbNull, riskDetailsReviewRequired: false },
+    });
+    await db.policy.update({
+      where: { id: insuredPartyFixture.policyId },
+      data: { policyType: "VIDA", beneficiaryInfo: null, riskDetails: Prisma.DbNull, riskDetailsReviewRequired: false },
+    });
+    const legacyParty = await db.policyInsuredParty.create({
+      data: { organizationId: ORGANIZATION_ID, policyId: insuredPartyFixture.policyId, fullName: "Backfill Insured Person", isPrimary: false, sourceLabel: "Legacy import" },
     });
 
     reportFile = temporaryReportPath();
@@ -182,8 +191,9 @@ async function main() {
     assert.ok(rollbackRun);
     maintenanceRunIds.push(rollbackRun.id);
     assert.equal(rollbackRun.status, "FAILED");
-    const rollbackSummary = JSON.parse(rollbackRun.summaryJson ?? "{}") as { applied?: number };
+    const rollbackSummary = JSON.parse(rollbackRun.summaryJson ?? "{}") as { applied?: number; reviewedManifestSha256?: string };
     assert.equal(rollbackSummary.applied, 0);
+    assert.equal(rollbackSummary.reviewedManifestSha256, reviewedDigestAfterDecision.reviewedManifestSha256);
     const rollbackResultFile = `${reportFile}.${rollbackRun.id}.results.json`;
     assert.ok(existsSync(rollbackResultFile));
     resultFiles.push(rollbackResultFile);
@@ -207,8 +217,9 @@ async function main() {
     assert.ok(failedRun);
     maintenanceRunIds.push(failedRun.id);
     assert.equal(failedRun.status, "FAILED");
-    const failedSummary = JSON.parse(failedRun.summaryJson ?? "{}") as { applied?: number };
+    const failedSummary = JSON.parse(failedRun.summaryJson ?? "{}") as { applied?: number; reviewedManifestSha256?: string };
     assert.ok((failedSummary.applied ?? 0) >= 1);
+    assert.equal(failedSummary.reviewedManifestSha256, reviewedDigestAfterDecision.reviewedManifestSha256);
     const failedResultFile = `${reportFile}.${failedRun.id}.results.json`;
     assert.ok(existsSync(failedResultFile));
     resultFiles.push(failedResultFile);
@@ -220,16 +231,21 @@ async function main() {
     const applied = runBackfill({ apply: true, reportFile, manifestSha256: reviewedDigestAfterDecision.reviewedManifestSha256, reviewer: "integration-reviewer", batchSize: 1 });
     assert.ok("mode" in applied);
     assert.equal(applied.mode, "apply");
-    assert.equal(applied.converted, 0);
+    assert.ok(applied.converted <= 1);
     assert.ok((applied.alreadyApplied ?? 0) >= 1);
     assert.ok(applied.runId);
     assert.equal(applied.deferred, 1);
     if (applied.maintenanceRunId) maintenanceRunIds.push(applied.maintenanceRunId);
     assert.ok(applied.resultFile);
     resultFiles.push(applied.resultFile);
+    assert.ok(applied.maintenanceRunId);
+    const completedRun = await db.maintenanceRun.findUniqueOrThrow({ where: { id: applied.maintenanceRunId }, select: { summaryJson: true } });
+    const completedSummary = JSON.parse(completedRun.summaryJson ?? "{}") as { reviewedManifestSha256?: string };
+    assert.equal(completedSummary.reviewedManifestSha256, reviewedDigestAfterDecision.reviewedManifestSha256);
     const resultReport = JSON.parse(readFileSync(applied.resultFile, "utf8")) as { outcomes: Array<{ policyId: string; outcome: string }> };
-    assert.ok(resultReport.outcomes.some((row) => row.policyId === backfillFixture.policyId && row.outcome === "ALREADY_APPLIED"));
+    assert.ok(resultReport.outcomes.some((row) => row.policyId === backfillFixture.policyId && ["APPLIED", "ALREADY_APPLIED"].includes(row.outcome)));
     assert.ok(resultReport.outcomes.some((row) => row.policyId === reviewFixture.policyId && row.outcome === "DEFERRED"));
+    assert.ok(resultReport.outcomes.some((row) => row.policyId === insuredPartyFixture.policyId && ["APPLIED", "ALREADY_APPLIED"].includes(row.outcome)));
 
     const converted = await db.policy.findUniqueOrThrow({
       where: { id: backfillFixture.policyId },
@@ -252,6 +268,8 @@ async function main() {
       ["Toyota Corolla 2020 LE", "Toyota Corolla, descripción histórica"].sort(),
     );
     assert.ok(assetsAfterApply.every((asset) => asset.assetType === "AUTO" && asset.serialNumber === VIN));
+    const reconciledParty = await db.policyInsuredParty.findUniqueOrThrow({ where: { id: legacyParty.id }, select: { fullName: true, isPrimary: true, sourceLabel: true } });
+    assert.deepEqual(reconciledParty, { fullName: "Backfill Insured Person", isPrimary: true, sourceLabel: "Datos estructurados de póliza" });
     const deferred = await db.policy.findUniqueOrThrow({ where: { id: reviewFixture.policyId }, select: { insuredObject: true, riskDetails: true, riskDetailsReviewRequired: true } });
     assert.equal(deferred.insuredObject, "Texto libre que requiere revisión");
     assert.equal(deferred.riskDetails, null);
@@ -266,6 +284,18 @@ async function main() {
     resultFiles.push(resumed.resultFile);
     const resumeReport = JSON.parse(readFileSync(resumed.resultFile, "utf8")) as { outcomes: Array<{ policyId: string; outcome: string }> };
     assert.ok(resumeReport.outcomes.some((row) => row.policyId === backfillFixture.policyId && row.outcome === "ALREADY_APPLIED"));
+    assert.ok(resumeReport.outcomes.some((row) => row.policyId === insuredPartyFixture.policyId && row.outcome === "ALREADY_APPLIED"));
+    const preservedExtraParty = await db.policyInsuredParty.create({
+      data: { organizationId: ORGANIZATION_ID, policyId: insuredPartyFixture.policyId, fullName: "Unrelated Existing Party", isPrimary: false, sourceLabel: "Operator-maintained" },
+    });
+    const partyResume = runBackfill({ apply: true, reportFile, manifestSha256: reviewedDigestAfterDecision.reviewedManifestSha256, reviewer: "integration-reviewer", batchSize: 1 });
+    assert.ok("mode" in partyResume);
+    assert.equal(partyResume.mode, "apply");
+    assert.ok(partyResume.resultFile);
+    if (partyResume.maintenanceRunId) maintenanceRunIds.push(partyResume.maintenanceRunId);
+    resultFiles.push(partyResume.resultFile);
+    const extraPartyAfterResume = await db.policyInsuredParty.findUniqueOrThrow({ where: { id: preservedExtraParty.id }, select: { fullName: true, isPrimary: true, sourceLabel: true } });
+    assert.deepEqual(extraPartyAfterResume, { fullName: "Unrelated Existing Party", isPrimary: false, sourceLabel: "Operator-maintained" });
 
     const secondReportPath = temporaryReportPath();
     reportFiles.push(secondReportPath);
@@ -284,7 +314,7 @@ async function main() {
     if (maintenanceRunIds.length) await db.maintenanceRun.deleteMany({ where: { id: { in: maintenanceRunIds } } });
     for (const file of reportFiles) rmSync(file, { force: true });
     for (const file of resultFiles) rmSync(file, { force: true });
-    await Promise.allSettled([fixture, ambiguousFixture].filter((item): item is NonNullable<typeof item> => item !== null).map(cleanupPolicyFixture));
+    await Promise.allSettled([fixture, ambiguousFixture, partyFixture].filter((item): item is NonNullable<typeof item> => item !== null).map(cleanupPolicyFixture));
   }
 }
 
