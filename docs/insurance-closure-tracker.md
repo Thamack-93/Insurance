@@ -38,9 +38,22 @@
 1. Terminar la matriz documental de la cartera contra los documentos fuente y revisarla antes de cualquier escritura.
 2. Obtener aprobación específica para configurar un entorno temporal de GitHub Actions con Blob privado y credenciales limitadas a ramas Neon de certificación; generar una clave exclusiva dentro del runner.
 3. Rehacer el par de ramas temporales para SHA 6e3bcc5, ejecutar el restore y documentar evidencia completa. El restore CI desechable no sustituye este drill.
-4. Preparar y presentar el checkpoint de cutover con procedimiento de recuperación. Esperar aprobación explícita antes de tocar Production.
+4. Preparar y presentar el checkpoint de cutover con el procedimiento siguiente. Esperar aprobación explícita antes de tocar Production.
 5. Después del cutover autorizado, provisionar una sola organización DEMO y un usuario temporal; verificar aislamiento, login, reset, revocación y apagar el flag.
 6. Declarar por separado READY FOR DAILY USE y READY FOR EXTERNAL DEMO ACCESS solo cuando cada criterio tenga evidencia.
+
+## Procedimiento de recuperación para presentar antes del cutover
+
+- Responsable: el coordinador organiza el drill y presenta evidencia; el operador con acceso Neon/Vercel ejecuta los comandos; el usuario aprueba cualquier reconexión de la app productiva.
+- Destino: una rama Neon temporal, nueva y vacía, vinculada al SHA candidato y al proyecto de certificación autorizado. Registrar branch ID, base, parent y huella de conexión. Nunca usar la rama Production como destino de restore.
+- Si falla un cutover: mantener mantenimiento, pausar/drenar jobs de negocio, registrar SHA e instante del incidente y preservar intacta la rama original.
+- Usar un backup compatible con el SHA y un fixture sintético CUSTOMER. Mantener el archivo cifrado y su clave de Production fuera del runner; generar dentro del runner únicamente la clave exclusiva del drill.
+- Restaurar solo mediante CLI en la rama temporal identificada. Pasar la URL admin directa solo a migración/restore y la URL pooled restringida solo a validación runtime de lectura.
+- Exigir conteos, FKs públicos, ciclo Payment POSTED/REVERSED, cancelación/renovación Policy/Receipt, referencias de Notification, referencias WorkItem canónicas y heredadas, secuencias, lecturas de aplicación, aislamiento tenant y Prisma drift. Mantener RESTORE_DRILL_APP_SMOKE=0.
+- Si falla cualquier invariant: marcar FAIL, mantener la app cerrada y no reconectar Production. Si pasa, presentar el reporte, rama destino, huella sanitizada, proyecto/entorno Vercel, SHA y comandos de verificación.
+- Solo después de aprobación explícita, el operador puede cambiar las variables autorizadas de runtime/admin a la rama recuperada, desplegar el SHA revisado y validar health, lecturas/escrituras autenticadas, aislamiento y jobs. Conservar la rama anterior durante la ventana de recuperación.
+
+Este procedimiento es una recuperación preparada, no un rollback automático de Production. Tras un cutover multi-org no reconectar la aplicación singleton anterior; recuperar y certificar un destino compatible con multi-org.
 
 ## Regla de archivo
 
