@@ -239,6 +239,14 @@ async function main() {
       if (!detailsMatch || !summaryMatch || !assetsMatch || !partiesMatch) throw new Error(`POLICY_RISK_BACKFILL_PARTIAL_APPLY_CONFLICT:${row.policyId}`);
     }
 
+    const mutatePolicyBeforeBatch = process.env.POLICY_RISK_BACKFILL_TEST_MUTATE_POLICY_ID_BEFORE_BATCH;
+    if (process.env.NODE_ENV === "test" && mutatePolicyBeforeBatch) {
+      await prisma.policy.updateMany({
+        where: { id: mutatePolicyBeforeBatch, organizationId, riskDetails: { equals: Prisma.DbNull } },
+        data: { insuredObject: "Concurrent source edit injected by disposable integration test" },
+      });
+    }
+
     const requestedBatchSize = Number(arg("batch-size") ?? "50");
     if (!Number.isInteger(requestedBatchSize) || requestedBatchSize < 1 || requestedBatchSize > MAX_BATCH_SIZE) {
       throw new Error(`POLICY_RISK_BACKFILL_BATCH_SIZE_MUST_BE_1_TO_${MAX_BATCH_SIZE}`);

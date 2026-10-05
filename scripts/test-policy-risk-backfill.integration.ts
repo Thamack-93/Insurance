@@ -28,7 +28,7 @@ type BackfillReport = {
   alreadyApplied?: number;
 };
 
-type RunBackfillOptions = { apply?: boolean; printReviewedDigest?: boolean; reportFile: string; manifestSha256?: string; previewSha256?: string; reviewer?: string; batchSize?: number; failAfterAppliedBatches?: number; failWithinBatchAfterAppliedRows?: number };
+type RunBackfillOptions = { apply?: boolean; printReviewedDigest?: boolean; reportFile: string; manifestSha256?: string; previewSha256?: string; reviewer?: string; batchSize?: number; failAfterAppliedBatches?: number; failWithinBatchAfterAppliedRows?: number; mutatePolicyBeforeBatch?: string };
 
 function runBackfill(options: RunBackfillOptions & { printReviewedDigest: true }): { reviewedManifestSha256: string };
 function runBackfill(options: RunBackfillOptions & { printReviewedDigest?: false | undefined }): BackfillReport;
@@ -50,6 +50,7 @@ function runBackfill(options: RunBackfillOptions): BackfillReport | { reviewedMa
       PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1",
       ...(options.failAfterAppliedBatches ? { POLICY_RISK_BACKFILL_TEST_FAIL_AFTER_APPLIED_BATCHES: String(options.failAfterAppliedBatches) } : {}),
       ...(options.failWithinBatchAfterAppliedRows ? { POLICY_RISK_BACKFILL_TEST_FAIL_WITHIN_BATCH_AFTER_APPLIED_ROWS: String(options.failWithinBatchAfterAppliedRows) } : {}),
+      ...(options.mutatePolicyBeforeBatch ? { POLICY_RISK_BACKFILL_TEST_MUTATE_POLICY_ID_BEFORE_BATCH: options.mutatePolicyBeforeBatch } : {}),
     },
     maxBuffer: 1024 * 1024,
   });
@@ -152,6 +153,25 @@ async function main() {
     );
 
     assert.throws(
+      () => runBackfill({ apply: true, reportFile: reportFile as string, manifestSha256: reviewedDigestAfterDecision.reviewedManifestSha256, reviewer: "integration-reviewer", batchSize: 1, mutatePolicyBeforeBatch: backfillFixture.policyId }),
+      (error: unknown) => error instanceof Error && String((error as NodeJS.ErrnoException & { stderr?: Buffer }).stderr ?? error).includes(`POLICY_RISK_BACKFILL_STALE_INPUT:${backfillFixture.policyId}`),
+    );
+    const staleInputRun = await db.maintenanceRun.findFirst({
+      where: { organizationId: ORGANIZATION_ID, type: "POLICY_RISK_BACKFILL", summaryJson: { contains: "POLICY_RISK_BACKFILL_STALE_INPUT" } },
+      select: { id: true, status: true, summaryJson: true },
+    });
+    assert.ok(staleInputRun);
+    maintenanceRunIds.push(staleInputRun.id);
+    assert.equal(staleInputRun.status, "FAILED");
+    const staleInputReportFile = `${reportFile}.${staleInputRun.id}.results.json`;
+    assert.ok(existsSync(staleInputReportFile));
+    resultFiles.push(staleInputReportFile);
+    const staleInputReport = JSON.parse(readFileSync(staleInputReportFile, "utf8")) as { applied: number; outcomes: Array<{ outcome: string }> };
+    assert.equal(staleInputReport.applied, 0);
+    assert.ok(!staleInputReport.outcomes.some((row) => row.outcome === "APPLIED"));
+    await db.policy.update({ where: { id: backfillFixture.policyId }, data: { insuredObject: SOURCE_TEXT } });
+
+    assert.throws(
       () => runBackfill({ apply: true, reportFile: reportFile as string, manifestSha256: reviewedDigestAfterDecision.reviewedManifestSha256, reviewer: "integration-reviewer", batchSize: 1, failWithinBatchAfterAppliedRows: 1 }),
       (error: unknown) => error instanceof Error && String((error as NodeJS.ErrnoException & { stderr?: Buffer }).stderr ?? error).includes("POLICY_RISK_BACKFILL_TEST_ROLLBACK_WITHIN_BATCH"),
     );
@@ -200,14 +220,15 @@ async function main() {
     const applied = runBackfill({ apply: true, reportFile, manifestSha256: reviewedDigestAfterDecision.reviewedManifestSha256, reviewer: "integration-reviewer", batchSize: 1 });
     assert.ok("mode" in applied);
     assert.equal(applied.mode, "apply");
-    assert.ok(applied.converted >= 1);
+    assert.equal(applied.converted, 0);
+    assert.ok((applied.alreadyApplied ?? 0) >= 1);
     assert.ok(applied.runId);
     assert.equal(applied.deferred, 1);
     if (applied.maintenanceRunId) maintenanceRunIds.push(applied.maintenanceRunId);
     assert.ok(applied.resultFile);
     resultFiles.push(applied.resultFile);
     const resultReport = JSON.parse(readFileSync(applied.resultFile, "utf8")) as { outcomes: Array<{ policyId: string; outcome: string }> };
-    assert.ok(resultReport.outcomes.some((row) => row.policyId === backfillFixture.policyId && row.outcome === "APPLIED"));
+    assert.ok(resultReport.outcomes.some((row) => row.policyId === backfillFixture.policyId && row.outcome === "ALREADY_APPLIED"));
     assert.ok(resultReport.outcomes.some((row) => row.policyId === reviewFixture.policyId && row.outcome === "DEFERRED"));
 
     const converted = await db.policy.findUniqueOrThrow({
