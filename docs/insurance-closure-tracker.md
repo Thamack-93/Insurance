@@ -11,25 +11,25 @@
 | Audit Demo organization support | 01a0f587-a833-7f81-a2ff-110a3f089bdd | Soporte de una organización DEMO y revisión productiva |
 | Audit PolicyDesk demo sandbox | 01a0adb3-f260-76d0-8acc-4dac70465893 | Restore temporal Neon y aislamiento |
 | Certify PolicyDesk demo access | 01a0c49b-0147-79c3-9b14-57063e8f8c2f | Certificación de cuenta DEMO privada |
-| Corrige seguimiento de renovaciones | 01a0fe42-c8bf-7223-9601-1b8a3cd7a4e1 | Renovaciones y pendientes operativos |
+| Corrige seguimiento de renovaciones | 01a0fe42-c8bf-7223-9665-154d196f7665 | Renovaciones y pendientes operativos |
 
 ## Evidencia actual
 
 - PR #73 (campos de riesgo), PR #74 (tarjetas de renovación), PR #76 (E2E de renovaciones/PDF) y PR #78 (backfill auditable) están integrados.
 - `main` actual: `132ada7c40d160d7ffeb0c7a242b48574d975d12`.
-- PR #78 tuvo quality, tenant-isolation y application exitosos en su head `707fa0ba...`; en el merge SHA se verificó quality. No hay certificación completa exacta de Release Certification para el SHA integrado.
+- Release Certification #38 [terminó SUCCESS](https://github.com/Thamack-93/Insurance/actions/runs/37337535025) en el SHA integrado exacto: quality, tenant/RLS, integración de aplicación, API, E2E y reporte sanitizado pasaron. El verificador de estado productivo fue omitido.
 - Vercel Production está `READY` con el mismo SHA en `dpl_2pyGvbzqQbKH9Pyy2xR6ez2rE9ms`, alias `policypete.vercel.app`.
-- En revisión autenticada de solo lectura cargaron Insights, tablero de renovaciones de Operations y el editor WorkItem. No se guardaron datos. El conteo de señales de Production es operativo y no se debe presentar como resultado sintético de DEMO.
+- En revisión autenticada de solo lectura cargaron Insights, el tablero de renovaciones de Operations y el editor WorkItem. No se guardaron datos. Las señales de Production son métricas operativas, no resultados sintéticos de DEMO.
 - No hay cuenta DEMO externa creada ni conversaciones fuente archivadas.
 
 ## Pendientes y criterios de cierre
 
 | Tema | Criterio de cierre | Estado |
 | --- | --- | --- |
-| Campos por ramo y backfill | Convertir por organización; conservar texto fuente; revisar ambiguos; reportar lotes auditables, repetibles y sin duplicados; validar PDF, renovación y edición asistida | Código integrado y prueba desechable en CI. Falta cotejo documental y reporte por organización revisado. No aplicar en Production sin checkpoint/permiso específico. |
-| Renovaciones y Operations | Alta/vinculación cierra seguimientos en transacción; reprogramar/quitar seguimientos y editar/cancelar tareas preservando identidad y permisos | Implementado y cubierto por pruebas integradas/E2E del candidato anterior. Confirmar en la certificación completa del SHA final antes de declarar cerrado. |
-| Operational Insights | Cuatro grupos, filtros, agrupación, paginación, aislamiento y enlaces a acciones existentes | Implementado; ruta autenticada cargó en Production en revisión de solo lectura. |
-| CI / Vercel | Certificación exacta de quality, API, browser, aislamiento/ RLS y restore; deployment Production listo en el mismo SHA | Production READY en `132ada7`. Falta Release Certification completa exacta del merge SHA. |
+| Campos por ramo y backfill | Convertir por organización; conservar texto fuente; revisar ambiguos; reportar lotes auditables, repetibles y sin duplicados; validar PDF, renovación y edición asistida | Código y prueba de backfill desechable pasan en Release Certification #38. Falta cotejo documental y reporte por organización revisado. No aplicar en Production sin checkpoint/permiso específico. |
+| Renovaciones y Operations | Alta/vinculación cierra seguimientos en transacción; reprogramar/quitar seguimientos y editar/cancelar tareas preservando identidad y permisos | Implementado; Release Certification #38 pasa en SHA integrado y el flujo de renovación cargó en Production en revisión autenticada de solo lectura. |
+| Operational Insights | Cuatro grupos, filtros, agrupación, paginación, aislamiento y enlaces a acciones existentes | Implementado; la ruta autenticada cargó en Production en revisión de solo lectura. |
+| CI / Vercel | Certificación exacta de quality, API, browser, aislamiento/RLS y restore desechable; deployment Production listo en el mismo SHA | CI Release Certification #38 SUCCESS en `132ada7`; Vercel Production READY en el mismo SHA. El verificador productivo del workflow se omitió; la inspección manual fue de solo lectura y limitada a las rutas anotadas arriba. |
 | Restore remoto Neon | Fuente sintética; fixture/backup sintéticos; restore CLI en rama temporal; conteos, FK, ciclos Payment, cancelación/renovación Policy/Receipt, Notifications, WorkItems, secuencias, lecturas, aislamiento y drift; `RESTORE_DRILL_APP_SMOKE=0` | Pareja temporal presente en `policydesk-certification-20261001`: `cert-stage3-132ada7c40d160d7ffeb0c7a242b48574d975d12` → `restore-cert-stage3-132ada7c40d160d7ffeb0c7a242b48574d975d12`. Parent de ambas: `main` del proyecto de certificación. Vencen 2026-10-12; 9/10 ramas ocupadas. Falta validar procedencia sintética y preparar runner aislado; sin migraciones, fixture, backup ni restore. |
 | DEMO privada | Tras cutover aprobado: una org sintética, un usuario temporal, login/cambio de contraseña, restricciones, reset, revocación, escritorio/móvil y cierre del flag de provisión | No lista; no provisionar ni compartir credenciales. |
 | Cutover y recuperación | Evidencia, destino temporal compatible, responsables y pasos comprobados; aprobación explícita antes de Production | No aprobado. No cambiar la base o variables productivas ni reconectar la aplicación. |
