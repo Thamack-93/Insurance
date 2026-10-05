@@ -4,7 +4,7 @@ import { cache } from "react";
 import { getDb } from "@/lib/db";
 import { AuthError, clearSessionCookie, getSession, requireUser, setSessionCookie } from "@/lib/auth";
 import { writeActivityLog } from "@/lib/activity-log";
-import { Prisma } from "@/generated/prisma/client";
+import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 
 // Prisma's interactive transaction proxy does not expose a stable runtime
 // type that helpers can use to distinguish it from the root client. Keep a
@@ -19,6 +19,10 @@ const tenantTransactionRegistry =
 
 export function isTenantTransactionClient(value: unknown): value is Prisma.TransactionClient {
   return typeof value === "object" && value !== null && tenantTransactionRegistry.has(value);
+}
+
+export function isApplicationPrismaClient(value: unknown): value is PrismaClient {
+  return value === getDb();
 }
 
 export const ORGANIZATION_ROLES = ["OWNER", "ADMIN", "AGENT"] as const;

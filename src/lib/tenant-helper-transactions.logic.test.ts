@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const registeredTransactions = vi.hoisted(() => new WeakSet<object>());
+const rootClient = vi.hoisted(() => ({ $transaction: vi.fn() }));
 const requireOrganizationContext = vi.hoisted(() => vi.fn());
 const withTenantTransaction = vi.hoisted(() => vi.fn());
 const getDb = vi.hoisted(() => vi.fn());
@@ -14,6 +15,7 @@ const suppressionUpdateMany = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", () => ({ getDb }));
 vi.mock("@/lib/organization-context", () => ({
+  isApplicationPrismaClient: (client: unknown) => client === rootClient,
   isTenantTransactionClient: (client: unknown) => typeof client === "object" && client !== null && registeredTransactions.has(client),
   requireOrganizationContext,
   withTenantTransaction,
@@ -65,8 +67,6 @@ describe("tenant helper transaction reuse", () => {
     suppressionFindFirstOrThrow.mockReset().mockResolvedValue(rule);
     suppressionUpdateMany.mockReset().mockResolvedValue({ count: 1 });
   });
-
-  const rootClient = { $transaction: vi.fn() };
 
   it("queries a WorkItem in the supplied Prisma transaction without opening another", async () => {
     const tx = makeTransaction();

@@ -1,8 +1,7 @@
 import "server-only";
 
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
-import { isTenantTransactionClient, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
+import { isApplicationPrismaClient, isTenantTransactionClient, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 
 export type DataQualityRuleCategory = "PAYMENTS" | "RENOVATIONS" | "LEDGER" | "RISKS";
 
@@ -14,7 +13,7 @@ async function withSuppressionRuleTransaction<T>(
   callback: (tx: Prisma.TransactionClient) => Promise<T>,
 ): Promise<T> {
   if (client && isTenantTransactionClient(client)) return callback(client);
-  if (client && client !== getDb()) throw new Error("TENANT_TRANSACTION_REQUIRED");
+  if (client && !isApplicationPrismaClient(client)) throw new Error("TENANT_TRANSACTION_REQUIRED");
 
   const context = await requireOrganizationContext();
   if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
