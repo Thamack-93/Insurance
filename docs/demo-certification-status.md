@@ -5,12 +5,12 @@
 ## Estado actual
 
 - **READY FOR DAILY USE:** pendiente. Falta completar y revisar el reporte por organización del backfill; no se ha aplicado la conversión productiva.
-- **READY FOR EXTERNAL DEMO ACCESS:** no listo. Aún faltan un restore remoto que pruebe datos sintéticos en el SHA actual, el checkpoint de cutover, la aprobación productiva, el aislamiento multi-org en Production y la aceptación del usuario temporal.
+- **READY FOR EXTERNAL DEMO ACCESS:** no listo. Aún faltan un restore remoto con datos sintéticos, el checkpoint de cutover, la aprobación productiva, el aislamiento multi-org en Production y la aceptación del usuario temporal.
 
 ## Candidato desplegado
 
 - `main`: `132ada7c40d160d7ffeb0c7a242b48574d975d12` (merge PR #78).
-- PR #78: sus checks de quality, tenant-isolation y application pasaron en el head `707fa0ba...`; en el merge SHA se verificó quality. No hay certificación completa exacta de Release Certification para `132ada7`.
+- Release Certification #38 [terminó SUCCESS](https://github.com/Thamack-93/Insurance/actions/runs/37337535025) sobre ese SHA: quality, tenant isolation/RLS, integración, API y E2E pasaron. El verificador productivo fue omitido.
 - Vercel Production: `READY` con el mismo SHA; deployment `dpl_2pyGvbzqQbKH9Pyy2xR6ez2rE9ms`, alias `policypete.vercel.app`.
 - Revisión autenticada de solo lectura: `/reports/insights`, Operations (tablero de renovaciones) y el editor de WorkItem cargaron en Production. No se guardaron cambios. Las señales de renovación de Production deben revisarse con el equipo de operación antes de usarlas como métricas de DEMO.
 
