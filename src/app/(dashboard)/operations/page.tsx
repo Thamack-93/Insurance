@@ -98,49 +98,53 @@ function WorkItemRow({ item, returnTo }: { item: WorkQueueItem; returnTo?: strin
   );
   const canEditFromOperations = !isManualRenewalFollowUp && (item.sourceType === "WorkItem" || item.sourceType === "Task" || item.sourceType === null);
   return (
-    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 border-b px-4 py-3 last:border-b-0">
-      <Link
-        href={href}
-        aria-label={`${actionLabel}: ${title}`}
-        className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <div className="min-w-0">
-          <p className="break-words text-sm font-medium">{title}</p>
-          <p className="mt-0.5 break-words text-xs text-muted-foreground">Cliente: {clientLabel} · {policyType} · Aseguradora: {insurerLabel}</p>
-          <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-            {renewalDateLabel ? `${renewalDateLabel} · ` : ""}
-            {followUpLabel}
-          </p>
-          <span className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary">
-            {actionLabel}
-            <ArrowRight className="size-3.5" aria-hidden />
-          </span>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-2">
-          {stateLabel && presentation.state ? (
-            <Badge variant="outline" className={`rounded-full px-2 py-0.5 text-[11px] ${operationalStateClasses[presentation.state]}`}>
-              {stateLabel}
-            </Badge>
-          ) : null}
-          <PriorityBadge priority={item.priority} className="px-2 py-0.5 text-[11px]" />
-        </div>
-      </Link>
-      {isManualRenewalFollowUp && item.policy ? (
-        <RenewalFollowUpMenu
-          policyId={item.policyId ?? ""}
-          policyNumber={item.policy.policyNumber}
-          currentDueDate={item.dueDate ? formatBusinessDateInput(item.dueDate) : null}
-          currentNotes={item.notes}
-        />
-      ) : canEditFromOperations ? (
+    <li className="border-b px-4 py-3 last:border-b-0">
+      <div className="grid gap-2">
         <Link
-          href={appendReturnTo(`/tasks/${item.sourceId ?? item.id}/edit`, returnTo)}
-          className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-9 px-2 text-xs")}
-          aria-label={`Editar pendiente: ${title}`}
+          href={href}
+          aria-label={`${actionLabel}: ${title}`}
+          className="block min-w-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          Editar
+          <div className="min-w-0">
+            <p className="break-words text-sm font-medium">{title}</p>
+            <p className="mt-0.5 break-words text-xs text-muted-foreground">Cliente: {clientLabel} · {policyType} · Aseguradora: {insurerLabel}</p>
+            <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+              {renewalDateLabel ? `${renewalDateLabel} · ` : ""}
+              {followUpLabel}
+            </p>
+            <span className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary">
+              {actionLabel}
+              <ArrowRight className="size-3.5" aria-hidden />
+            </span>
+          </div>
         </Link>
-      ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {stateLabel && presentation.state ? (
+              <Badge variant="outline" className={`rounded-full px-2 py-0.5 text-[11px] ${operationalStateClasses[presentation.state]}`}>
+                {stateLabel}
+              </Badge>
+            ) : null}
+            <PriorityBadge priority={item.priority} className="px-2 py-0.5 text-[11px]" />
+          </div>
+          {isManualRenewalFollowUp && item.policy ? (
+            <RenewalFollowUpMenu
+              policyId={item.policyId ?? ""}
+              policyNumber={item.policy.policyNumber}
+              currentDueDate={item.dueDate ? formatBusinessDateInput(item.dueDate) : null}
+              currentNotes={item.notes}
+            />
+          ) : canEditFromOperations ? (
+            <Link
+              href={appendReturnTo(`/tasks/${item.sourceId ?? item.id}/edit`, returnTo)}
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-9 px-2 text-xs")}
+              aria-label={`Editar pendiente: ${title}`}
+            >
+              Editar
+            </Link>
+          ) : null}
+        </div>
+      </div>
     </li>
   );
 }
