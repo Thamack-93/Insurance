@@ -7,6 +7,14 @@ export type OperationalInsightGroupFilter = OperationalInsightGroup | "all";
 
 export const OPERATIONAL_INSIGHT_PAGE_SIZE = 25;
 
+export function selectOperationalInsightCandidatePage<T extends { recordKey: string | null }>(rows: T[]) {
+  const candidates = rows.filter((row): row is T & { recordKey: string } => row.recordKey !== null);
+  return {
+    rows: candidates.slice(0, OPERATIONAL_INSIGHT_PAGE_SIZE),
+    hasNext: candidates.length > OPERATIONAL_INSIGHT_PAGE_SIZE,
+  };
+}
+
 export type OperationalInsightSignal = {
   id: string;
   group: OperationalInsightGroup;

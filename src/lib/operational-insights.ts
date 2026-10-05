@@ -1,5 +1,7 @@
 import "server-only";
 
+import { Prisma } from "@/generated/prisma/client";
+
 import { businessAddDays, businessEndOfDay, businessStartOfDay, businessToday, daysBetweenBusinessDates, formatBusinessDate } from "@/lib/business-dates";
 import {
   claimOperationalWhere,
@@ -19,7 +21,7 @@ import {
   groupOperationalInsightSignals,
   getOutstandingReceiptBalance,
   isPromiseSignalDue,
-  paginateOperationalInsightRecords,
+  selectOperationalInsightCandidatePage,
   type OperationalInsightGroupFilter,
   type OperationalInsightSignal,
 } from "@/lib/operational-insights.logic";
@@ -33,14 +35,191 @@ export type OperationalInsightsResult = {
   today: Date;
   group: OperationalInsightGroupFilter;
   page: number;
-  records: ReturnType<typeof paginateOperationalInsightRecords>["records"];
+  records: ReturnType<typeof groupOperationalInsightSignals>;
   hasPrevious: boolean;
   hasNext: boolean;
   counts: Record<(typeof OPERATIONAL_INSIGHT_GROUPS)[number], { value: number; more: boolean }>;
 };
 
-function getPageWindow(page: number) {
-  return Math.min(MAX_PAGE * OPERATIONAL_INSIGHT_PAGE_SIZE + 1, page * OPERATIONAL_INSIGHT_PAGE_SIZE + 1);
+type InsightCandidate = {
+  recordKey: string | null;
+  recordDate: Date | null;
+  renewalsCount: bigint;
+  collectionsCount: bigint;
+  claimsCount: bigint;
+  workCount: bigint;
+};
+
+function readCount(value: bigint | number | null | undefined) {
+  return Number(value ?? 0);
+}
+
+async function readInsightCandidates(
+  db: { $queryRaw<T>(query: Prisma.Sql): Promise<T> },
+  input: {
+    organizationId: string;
+    portfolioOwnerId?: string;
+    group: OperationalInsightGroupFilter;
+    page: number;
+    todayStart: Date;
+    todayEnd: Date;
+    in30Days: Date;
+    sevenDaysAgoEnd: Date;
+    fiveDaysAgoEnd: Date;
+  },
+) {
+  const offset = (input.page - 1) * OPERATIONAL_INSIGHT_PAGE_SIZE;
+  return db.$queryRaw<InsightCandidate[]>(Prisma.sql`
+    WITH
+    renewal_signals AS (
+      SELECT p."id" AS "policyId", p."endDate" AS "signalDate", 'renewals'::text AS "groupName"
+      FROM "Policy" p
+      JOIN "Client" c ON c."id" = p."clientId" AND c."organizationId" = ${input.organizationId}
+      WHERE p."organizationId" = ${input.organizationId}
+        AND (${input.portfolioOwnerId ?? null}::text IS NULL OR c."portfolioOwnerId" = ${input.portfolioOwnerId ?? null})
+        AND p."status" IN ('ACTIVE', 'EXPIRED') AND p."renewalStage" NOT IN ('WON', 'LOST')
+        AND NOT EXISTS (SELECT 1 FROM "Policy" child WHERE child."organizationId" = p."organizationId" AND child."renewedFromPolicyId" = p."id")
+        AND p."endDate" < ${input.todayStart}
+      UNION ALL
+      SELECT p."id", p."endDate", 'renewals'::text
+      FROM "Policy" p
+      JOIN "Client" c ON c."id" = p."clientId" AND c."organizationId" = ${input.organizationId}
+      WHERE p."organizationId" = ${input.organizationId}
+        AND (${input.portfolioOwnerId ?? null}::text IS NULL OR c."portfolioOwnerId" = ${input.portfolioOwnerId ?? null})
+        AND p."status" = 'ACTIVE' AND p."renewalStage" = 'PENDING' AND p."renewalStageAt" IS NULL
+        AND NOT EXISTS (SELECT 1 FROM "Policy" child WHERE child."organizationId" = p."organizationId" AND child."renewedFromPolicyId" = p."id")
+        AND p."endDate" >= ${input.todayStart} AND p."endDate" <= ${input.in30Days}
+      UNION ALL
+      SELECT p."id", p."renewalStageAt", 'renewals'::text
+      FROM "Policy" p
+      JOIN "Client" c ON c."id" = p."clientId" AND c."organizationId" = ${input.organizationId}
+      WHERE p."organizationId" = ${input.organizationId}
+        AND (${input.portfolioOwnerId ?? null}::text IS NULL OR c."portfolioOwnerId" = ${input.portfolioOwnerId ?? null})
+        AND p."status" IN ('ACTIVE', 'EXPIRED') AND p."renewalStage" = 'PENDING'
+        AND p."renewalStageAt" <= ${input.sevenDaysAgoEnd}
+        AND NOT EXISTS (SELECT 1 FROM "Policy" child WHERE child."organizationId" = p."organizationId" AND child."renewedFromPolicyId" = p."id")
+      UNION ALL
+      SELECT p."id", p."renewalStageAt", 'renewals'::text
+      FROM "Policy" p
+      JOIN "Client" c ON c."id" = p."clientId" AND c."organizationId" = ${input.organizationId}
+      WHERE p."organizationId" = ${input.organizationId}
+        AND (${input.portfolioOwnerId ?? null}::text IS NULL OR c."portfolioOwnerId" = ${input.portfolioOwnerId ?? null})
+        AND p."status" IN ('ACTIVE', 'EXPIRED') AND p."renewalStage" IN ('CONTACTED', 'QUOTED')
+        AND p."renewalStageAt" <= ${input.fiveDaysAgoEnd}
+        AND NOT EXISTS (SELECT 1 FROM "Policy" child WHERE child."organizationId" = p."organizationId" AND child."renewedFromPolicyId" = p."id")
+    ),
+    posted_totals AS (
+      SELECT pay."receiptId", SUM(pay."amount") AS "paidAmount", MIN(pay."paidDate") AS "firstPaidAt"
+      FROM "Payment" pay
+      WHERE pay."organizationId" = ${input.organizationId} AND pay."status" = 'POSTED'
+      GROUP BY pay."receiptId"
+    ),
+    overdue_receipts AS (
+      SELECT r."id" AS "receiptId", r."dueDate" AS "signalDate", 'collections'::text AS "groupName"
+      FROM "Receipt" r
+      JOIN "Client" c ON c."id" = r."clientId" AND c."organizationId" = ${input.organizationId}
+      LEFT JOIN posted_totals pt ON pt."receiptId" = r."id"
+      WHERE r."organizationId" = ${input.organizationId}
+        AND (${input.portfolioOwnerId ?? null}::text IS NULL OR c."portfolioOwnerId" = ${input.portfolioOwnerId ?? null})
+        AND r."status" IN ('PENDING', 'OVERDUE') AND r."dueDate" < ${input.todayStart}
+        AND GREATEST(0::numeric, r."amount" - COALESCE(pt."paidAmount", 0)) > 0
+        AND NOT (COALESCE(pt."paidAmount", 0) > 0 AND ABS(COALESCE(pt."paidAmount", 0) - r."amount") <= 5)
+    ),
+    collection_json AS (
+      SELECT wi."id", wi."receiptId", wi."dueDate", wi."clientId", wi."metadataJson",
+        CASE WHEN wi."metadataJson" IS JSON OBJECT THEN wi."metadataJson"::jsonb ELSE '{}'::jsonb END AS metadata
+      FROM "WorkItem" wi
+      LEFT JOIN "Client" c ON c."id" = wi."clientId" AND c."organizationId" = ${input.organizationId}
+      WHERE wi."organizationId" = ${input.organizationId}
+        AND (${input.portfolioOwnerId ?? null}::text IS NULL OR c."portfolioOwnerId" = ${input.portfolioOwnerId ?? null} OR (wi."clientId" IS NULL AND wi."assignedToId" = ${input.portfolioOwnerId ?? null}))
+        AND wi."sourceType" = 'Collection' AND wi."status" IN ('OPEN', 'IN_PROGRESS', 'WAITING_CLIENT')
+        AND wi."dueDate" <= ${input.todayEnd} AND wi."metadataJson" LIKE '%PROMISED_PAYMENT%' AND wi."receiptId" IS NOT NULL
+    ),
+    collection_promises AS (
+      SELECT r."id" AS "receiptId", CASE
+          WHEN jsonb_typeof(cj.metadata->'promisedPaymentDate') = 'string'
+            AND (cj.metadata->>'promisedPaymentDate') ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$'
+            AND pg_input_is_valid(cj.metadata->>'promisedPaymentDate', 'timestamp with time zone')
+          THEN (cj.metadata->>'promisedPaymentDate')::timestamptz ELSE NULL END AS "signalDate"
+      FROM collection_json cj
+      JOIN "Receipt" r ON r."id" = cj."receiptId" AND r."organizationId" = ${input.organizationId}
+      JOIN "Client" c ON c."id" = r."clientId" AND c."organizationId" = ${input.organizationId}
+      LEFT JOIN posted_totals pt ON pt."receiptId" = r."id"
+      WHERE cj.metadata->>'outcome' = 'PROMISED_PAYMENT'
+        AND (${input.portfolioOwnerId ?? null}::text IS NULL OR c."portfolioOwnerId" = ${input.portfolioOwnerId ?? null})
+        AND GREATEST(0::numeric, r."amount" - COALESCE(pt."paidAmount", 0)) > 0
+        AND NOT (COALESCE(pt."paidAmount", 0) > 0 AND ABS(COALESCE(pt."paidAmount", 0) - r."amount") <= 5)
+        AND (pt."firstPaidAt" IS NULL OR pt."firstPaidAt" > CASE
+          WHEN jsonb_typeof(cj.metadata->'promisedPaymentDate') = 'string'
+            AND (cj.metadata->>'promisedPaymentDate') ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$'
+            AND pg_input_is_valid(cj.metadata->>'promisedPaymentDate', 'timestamp with time zone')
+          THEN (cj.metadata->>'promisedPaymentDate')::timestamptz ELSE NULL END)
+        AND CASE
+          WHEN jsonb_typeof(cj.metadata->'promisedPaymentDate') = 'string'
+            AND (cj.metadata->>'promisedPaymentDate') ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$'
+            AND pg_input_is_valid(cj.metadata->>'promisedPaymentDate', 'timestamp with time zone')
+          THEN ((cj.metadata->>'promisedPaymentDate')::timestamptz AT TIME ZONE 'Etc/GMT+6')::date <= (${input.todayStart}::timestamptz AT TIME ZONE 'Etc/GMT+6')::date
+          ELSE false END
+    ),
+    claim_signals AS (
+      SELECT cl."id" AS "claimId", cl."updatedAt" AS "signalDate", 'claims'::text AS "groupName"
+      FROM "Claim" cl
+      JOIN "Client" c ON c."id" = cl."clientId" AND c."organizationId" = ${input.organizationId}
+      WHERE cl."organizationId" = ${input.organizationId}
+        AND (${input.portfolioOwnerId ?? null}::text IS NULL OR c."portfolioOwnerId" = ${input.portfolioOwnerId ?? null})
+        AND cl."status" IN ('WAITING_CLIENT', 'WAITING_INSURER') AND cl."updatedAt" <= ${input.sevenDaysAgoEnd}
+      UNION ALL
+      SELECT cl."id", COALESCE(item."dueDate", item."updatedAt"), 'claims'::text
+      FROM "ClaimChecklistItem" item
+      JOIN "Claim" cl ON cl."id" = item."claimId" AND cl."organizationId" = ${input.organizationId}
+      JOIN "Client" c ON c."id" = cl."clientId" AND c."organizationId" = ${input.organizationId}
+      WHERE item."organizationId" = ${input.organizationId} AND cl."status" NOT IN ('RESOLVED', 'CANCELLED')
+        AND (${input.portfolioOwnerId ?? null}::text IS NULL OR c."portfolioOwnerId" = ${input.portfolioOwnerId ?? null})
+        AND item."status" IN ('MISSING', 'REQUESTED')
+        AND (item."dueDate" < ${input.todayStart} OR item."updatedAt" <= ${input.sevenDaysAgoEnd})
+    ),
+    work_signals AS (
+      SELECT CASE WHEN wi."policyId" IS NOT NULL THEN 'Policy:' || wi."policyId"
+                  WHEN wi."receiptId" IS NOT NULL THEN 'Receipt:' || wi."receiptId"
+                  WHEN LOWER(wi."entityType") = 'claim' THEN 'Claim:' || wi."entityId"
+                  ELSE 'WorkItem:' || wi."id" END AS "recordKey",
+        COALESCE(wi."dueDate", wi."updatedAt") AS "signalDate", 'work'::text AS "groupName"
+      FROM "WorkItem" wi
+      LEFT JOIN "Client" c ON c."id" = wi."clientId" AND c."organizationId" = ${input.organizationId}
+      WHERE wi."organizationId" = ${input.organizationId}
+        AND (${input.portfolioOwnerId ?? null}::text IS NULL OR c."portfolioOwnerId" = ${input.portfolioOwnerId ?? null} OR (wi."clientId" IS NULL AND wi."assignedToId" = ${input.portfolioOwnerId ?? null}))
+        AND wi."status" IN ('OPEN', 'IN_PROGRESS', 'WAITING_CLIENT', 'WAITING_INSURER', 'WAITING_DOCUMENT', 'SENT')
+        AND (wi."dueDate" < ${input.todayStart} OR wi."priority" IN ('HIGH', 'URGENT'))
+    ),
+    all_signals AS (
+      SELECT 'Policy:' || "policyId" AS "recordKey", "signalDate", "groupName" FROM renewal_signals
+      UNION ALL SELECT 'Receipt:' || "receiptId", "signalDate", "groupName" FROM overdue_receipts
+      UNION ALL SELECT 'Receipt:' || "receiptId", "signalDate", 'collections' FROM collection_promises WHERE "signalDate" IS NOT NULL
+      UNION ALL SELECT 'Claim:' || "claimId", "signalDate", "groupName" FROM claim_signals
+      UNION ALL SELECT "recordKey", "signalDate", "groupName" FROM work_signals
+    ),
+    grouped AS (
+      SELECT "recordKey", MIN("signalDate") AS "recordDate", ARRAY_AGG(DISTINCT "groupName") AS "groups"
+      FROM all_signals GROUP BY "recordKey"
+    ),
+    totals AS (
+      SELECT
+        COUNT(*) FILTER (WHERE 'renewals' = ANY("groups")) AS "renewalsCount",
+        COUNT(*) FILTER (WHERE 'collections' = ANY("groups")) AS "collectionsCount",
+        COUNT(*) FILTER (WHERE 'claims' = ANY("groups")) AS "claimsCount",
+        COUNT(*) FILTER (WHERE 'work' = ANY("groups")) AS "workCount"
+      FROM grouped
+    ),
+    page_rows AS (
+      SELECT g."recordKey", g."recordDate" FROM grouped g
+      WHERE ${input.group} = 'all' OR ${input.group} = ANY(g."groups")
+      ORDER BY g."recordDate" ASC, g."recordKey" ASC
+      LIMIT ${OPERATIONAL_INSIGHT_PAGE_SIZE + 1} OFFSET ${offset}
+    )
+    SELECT page_rows."recordKey", page_rows."recordDate", totals.*
+    FROM totals LEFT JOIN page_rows ON true
+    ORDER BY page_rows."recordDate" ASC NULLS LAST, page_rows."recordKey" ASC NULLS LAST
+  `);
 }
 
 export async function getOperationalInsights(input: {
@@ -55,13 +234,51 @@ export async function getOperationalInsights(input: {
   const sevenDaysAgo = businessAddDays(today, -7);
   const fiveDaysAgo = businessAddDays(today, -5);
   const page = Math.min(MAX_PAGE, Math.max(1, input.page));
-  const take = getPageWindow(page);
 
   return withTenantOrganization(scope.organizationId, async (db) => {
+    const candidates = await readInsightCandidates(db, {
+      organizationId: scope.organizationId,
+      portfolioOwnerId: scope.portfolioOwnerId,
+      group: input.group,
+      page,
+      todayStart,
+      todayEnd,
+      in30Days,
+      sevenDaysAgoEnd: businessEndOfDay(sevenDaysAgo),
+      fiveDaysAgoEnd: businessEndOfDay(fiveDaysAgo),
+    });
+    const selected = selectOperationalInsightCandidatePage(candidates);
+    const firstPage = selected.rows;
+    const recordKeys = firstPage.flatMap((candidate) => candidate.recordKey ? [candidate.recordKey] : []);
+    const policyIds = recordKeys.filter((key) => key.startsWith("Policy:")).map((key) => key.slice("Policy:".length));
+    const receiptIds = recordKeys.filter((key) => key.startsWith("Receipt:")).map((key) => key.slice("Receipt:".length));
+    const claimIds = recordKeys.filter((key) => key.startsWith("Claim:")).map((key) => key.slice("Claim:".length));
+    const workItemIds = recordKeys.filter((key) => key.startsWith("WorkItem:")).map((key) => key.slice("WorkItem:".length));
+    const candidateCounts = candidates[0];
+    const counts = Object.fromEntries(OPERATIONAL_INSIGHT_GROUPS.map((group) => [
+      group,
+      {
+        value: readCount(candidateCounts?.[`${group}Count` as keyof InsightCandidate] as bigint | number | undefined),
+        more: false,
+      },
+    ])) as OperationalInsightsResult["counts"];
+    if (recordKeys.length === 0) {
+      return {
+        today,
+        group: input.group,
+        page,
+        records: [],
+        hasPrevious: page > 1,
+        hasNext: false,
+        counts,
+      };
+    }
+
     const [policies, overdueReceipts, collectionPromises, claims, workItems] = await Promise.all([
-      db.policy.findMany({
+      policyIds.length ? db.policy.findMany({
         where: {
           AND: [
+            { id: { in: policyIds } },
             policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
             { status: { in: ["ACTIVE", "EXPIRED"] } },
             { renewalStage: { notIn: [...TERMINAL_RENEWAL_STAGES] } },
@@ -87,10 +304,10 @@ export async function getOperationalInsights(input: {
           insurer: { select: { name: true } },
         },
         orderBy: [{ endDate: "asc" }, { id: "asc" }],
-        take,
-      }),
-      db.receipt.findMany({
+      }) : Promise.resolve([]),
+      receiptIds.length ? db.receipt.findMany({
         where: {
+          id: { in: receiptIds },
           ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
           status: { in: ["PENDING", "OVERDUE"] },
           dueDate: { lt: todayStart },
@@ -107,11 +324,11 @@ export async function getOperationalInsights(input: {
           payments: { where: { status: "POSTED" }, select: { amount: true } },
         },
         orderBy: [{ dueDate: "asc" }, { id: "asc" }],
-        take,
-      }),
-      db.workItem.findMany({
+      }) : Promise.resolve([]),
+      receiptIds.length ? db.workItem.findMany({
         where: {
           AND: [
+            { receiptId: { in: receiptIds } },
             workItemOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
             { sourceType: "Collection", status: { in: [...COLLECTION_WORK_ITEM_STATUSES] } },
             { dueDate: { lte: todayEnd } },
@@ -147,11 +364,11 @@ export async function getOperationalInsights(input: {
           },
         },
         orderBy: [{ dueDate: "asc" }, { id: "asc" }],
-        take,
-      }),
-      db.claim.findMany({
+      }) : Promise.resolve([]),
+      claimIds.length ? db.claim.findMany({
         where: {
           AND: [
+            { id: { in: claimIds } },
             claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
             { status: { notIn: ["RESOLVED", "CANCELLED"] } },
             {
@@ -194,11 +411,18 @@ export async function getOperationalInsights(input: {
           },
         },
         orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
-        take,
-      }),
-      db.workItem.findMany({
+      }) : Promise.resolve([]),
+      (policyIds.length || receiptIds.length || claimIds.length || workItemIds.length) ? db.workItem.findMany({
         where: {
           AND: [
+            {
+              OR: [
+                ...(policyIds.length ? [{ policyId: { in: policyIds } }] : []),
+                ...(receiptIds.length ? [{ policyId: null, receiptId: { in: receiptIds } }] : []),
+                ...(claimIds.length ? [{ policyId: null, receiptId: null, entityType: { equals: "claim", mode: "insensitive" as const }, entityId: { in: claimIds } }] : []),
+                ...(workItemIds.length ? [{ id: { in: workItemIds }, policyId: null, receiptId: null, entityType: { not: "claim" } }] : []),
+              ],
+            },
             workItemOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
             { status: { in: [...OPEN_WORK_ITEM_STATUSES] } },
             { OR: [{ dueDate: { lt: todayStart } }, { priority: { in: ["HIGH", "URGENT"] } }] },
@@ -224,8 +448,7 @@ export async function getOperationalInsights(input: {
           policy: { select: { policyNumber: true } },
         },
         orderBy: [{ dueDate: { sort: "asc", nulls: "last" } }, { priorityRank: "desc" }, { id: "asc" }],
-        take,
-      }),
+      }) : Promise.resolve([]),
     ]);
 
     const signals: OperationalInsightSignal[] = [];
@@ -329,32 +552,19 @@ export async function getOperationalInsights(input: {
       });
     }
 
-    const records = groupOperationalInsightSignals(signals);
-    const groupCapped = {
-      renewals: policies.length === take,
-      collections: overdueReceipts.length === take || collectionPromises.length === take,
-      claims: claims.length === take,
-      work: workItems.length === take,
-    };
-    const counts = Object.fromEntries(OPERATIONAL_INSIGHT_GROUPS.map((group) => [
-      group,
-      {
-        value: records.filter((record) => record.groups.includes(group)).length,
-        more: groupCapped[group],
-      },
-    ])) as OperationalInsightsResult["counts"];
-    const hasMoreCandidates = input.group === "all"
-      ? Object.values(groupCapped).some(Boolean)
-      : groupCapped[input.group];
-    const paginated = paginateOperationalInsightRecords(records, input.group, page, hasMoreCandidates);
+    const hydratedByKey = new Map(groupOperationalInsightSignals(signals).map((record) => [record.id, record]));
+    const records = recordKeys.flatMap((recordKey) => {
+      const record = hydratedByKey.get(recordKey);
+      return record ? [record] : [];
+    });
 
     return {
       today,
       group: input.group,
       page,
-      records: paginated.records,
-      hasPrevious: paginated.hasPrevious,
-      hasNext: page < MAX_PAGE && paginated.hasNext,
+      records,
+      hasPrevious: page > 1,
+      hasNext: page < MAX_PAGE && selected.hasNext,
       counts,
     };
   });

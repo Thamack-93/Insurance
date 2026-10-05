@@ -6,6 +6,7 @@ import {
   paginateOperationalInsightRecords,
   readOperationalInsightGroup,
   readOperationalInsightPage,
+  selectOperationalInsightCandidatePage,
   type OperationalInsightSignal,
 } from "@/lib/operational-insights.logic";
 
@@ -50,6 +51,20 @@ describe("operational insights presentation logic", () => {
     expect(all.hasNext).toBe(true);
   });
 
+  it("keeps the database's global date order and uses the extra row only as a next-page marker", () => {
+    const orderedRows = Array.from({ length: 26 }, (_, index) => ({
+      recordKey: `Receipt:${index}`,
+      recordDate: new Date(Date.UTC(2026, 9, 1, 0, index)),
+    }));
+    const page = selectOperationalInsightCandidatePage(orderedRows);
+
+    expect(page.rows).toHaveLength(25);
+    expect(page.rows.map(({ recordKey }) => recordKey)).toEqual(orderedRows.slice(0, 25).map(({ recordKey }) => recordKey));
+    expect(page.hasNext).toBe(true);
+    expect(selectOperationalInsightCandidatePage(orderedRows.slice(0, 25)).hasNext).toBe(false);
+    expect(selectOperationalInsightCandidatePage([{ recordKey: null, recordDate: null }]).rows).toEqual([]);
+  });
+
   it("reads safe group and page parameters", () => {
     expect(readOperationalInsightGroup(["claims", "work"])).toBe("claims");
     expect(readOperationalInsightGroup("invalid")).toBe("all");
@@ -70,6 +85,12 @@ describe("operational insights presentation logic", () => {
       postedPaymentDates: [],
     })).toBe("promise-broken");
     expect(isPromiseSignalDue({ metadataJson: "{invalid", today, postedPaymentDates: [] })).toBeNull();
+    expect(isPromiseSignalDue({ metadataJson: "[]", today, postedPaymentDates: [] })).toBeNull();
+    expect(isPromiseSignalDue({
+      metadataJson: JSON.stringify({ outcome: "PROMISED_PAYMENT", promisedPaymentDate: "2026-13-40T00:00:00.000Z" }),
+      today,
+      postedPaymentDates: [],
+    })).toBeNull();
   });
 
   it("respects the receipt detail close tolerance when identifying outstanding balance", () => {
