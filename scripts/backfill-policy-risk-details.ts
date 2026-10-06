@@ -26,6 +26,8 @@ const MAX_PRODUCTION_BATCH_SIZE = 50;
 const APPLY_CONFIRMATION = "APPLY_POLICY_RISK_BACKFILL";
 const PRODUCTION_APPLY_CONFIRMATION = "APPLY_POLICY_RISK_BACKFILL_TO_PRODUCTION";
 const PRODUCTION_APPLY_ROLE = "policydesk_backfill";
+const TEST_READONLY_ROLE_PATTERN = /^policydesk_readonly_test_[a-f0-9]{8}$/;
+const TEST_WRITER_ROLE_PATTERN = /^policydesk_backfill_test_[a-f0-9]{8}$/;
 
 function arg(name: string) {
   const prefix = `--${name}=`;
@@ -124,7 +126,10 @@ async function assertProductionPreviewRole(tx: Prisma.TransactionClient, connect
   const expectedDatabase = process.env.POLICY_RISK_BACKFILL_PRODUCTION_DATABASE?.trim();
   const expectedHost = process.env.POLICY_RISK_BACKFILL_PRODUCTION_HOST?.trim().toLowerCase();
   if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") throw new Error("POLICY_RISK_BACKFILL_PREVIEW_REQUIRES_POSTGRES");
-  if (!expectedRole || expectedRole !== "policydesk_readonly" || decodeURIComponent(url.username) !== expectedRole) {
+  const allowedReadonlyRole = process.env.NODE_ENV === "test"
+    ? Boolean(expectedRole && TEST_READONLY_ROLE_PATTERN.test(expectedRole))
+    : expectedRole === "policydesk_readonly";
+  if (!expectedRole || !allowedReadonlyRole || decodeURIComponent(url.username) !== expectedRole) {
     throw new Error("POLICY_RISK_BACKFILL_PREVIEW_REQUIRES_CANONICAL_READONLY_ROLE");
   }
   if (!expectedDatabase || decodeURIComponent(url.pathname.replace(/^\//, "").split("?")[0]) !== expectedDatabase || !expectedHost || url.hostname.toLowerCase() !== expectedHost) {
@@ -210,7 +215,7 @@ type ProductionApplyTarget = {
   prisma: PrismaClient;
   host: string;
   database: string;
-  role: typeof PRODUCTION_APPLY_ROLE;
+  role: string;
 };
 
 function createProductionApplyTarget(connectionString: string): ProductionApplyTarget {
@@ -222,7 +227,10 @@ function createProductionApplyTarget(connectionString: string): ProductionApplyT
   const actualDatabase = decodeURIComponent(url.pathname.replace(/^\//, "").split("?")[0]);
   const actualHost = url.hostname.toLowerCase();
   if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REQUIRES_POSTGRES");
-  if (expectedRole !== PRODUCTION_APPLY_ROLE || actualRole !== PRODUCTION_APPLY_ROLE) {
+  const allowedWriterRole = process.env.NODE_ENV === "test"
+    ? Boolean(expectedRole && TEST_WRITER_ROLE_PATTERN.test(expectedRole))
+    : expectedRole === PRODUCTION_APPLY_ROLE;
+  if (!expectedRole || !allowedWriterRole || actualRole !== expectedRole) {
     throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REQUIRES_CANONICAL_WRITER_ROLE");
   }
   if (!expectedDatabase || actualDatabase !== expectedDatabase) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_DATABASE_MISMATCH");
@@ -250,7 +258,7 @@ function createProductionApplyTarget(connectionString: string): ProductionApplyT
     prisma: new PrismaClient({ adapter: new PrismaPg({ connectionString }) }),
     host: actualHost,
     database: actualDatabase,
-    role: PRODUCTION_APPLY_ROLE,
+    role: expectedRole,
   };
 }
 

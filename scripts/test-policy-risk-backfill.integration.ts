@@ -64,7 +64,7 @@ type BackfillReport = {
   alreadyApplied?: number;
 };
 
-type RunBackfillOptions = { apply?: boolean; productionApply?: boolean; productionPreview?: boolean; readonlyDatabaseUrl?: string; writerDatabaseUrl?: string; productionHost?: string; productionDatabase?: string; batchSize?: number; printReviewedDigest?: boolean; reportFile: string; manifestSha256?: string; previewSha256?: string; reviewer?: string; failAfterAppliedBatches?: number; failWithinBatchAfterAppliedRows?: number; mutatePolicyBeforeBatch?: string };
+type RunBackfillOptions = { apply?: boolean; productionApply?: boolean; productionPreview?: boolean; readonlyDatabaseUrl?: string; writerDatabaseUrl?: string; readonlyRole?: string; writerRole?: string; productionHost?: string; productionDatabase?: string; batchSize?: number; printReviewedDigest?: boolean; reportFile: string; manifestSha256?: string; previewSha256?: string; reviewer?: string; failAfterAppliedBatches?: number; failWithinBatchAfterAppliedRows?: number; mutatePolicyBeforeBatch?: string };
 
 function runBackfill(options: RunBackfillOptions & { printReviewedDigest: true }): { reviewedManifestSha256: string };
 function runBackfill(options: RunBackfillOptions & { printReviewedDigest?: false | undefined }): BackfillReport;
@@ -87,13 +87,13 @@ function runBackfill(options: RunBackfillOptions): BackfillReport | { reviewedMa
       PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1",
       ...(options.productionPreview ? {
         POLICY_RISK_BACKFILL_READONLY_DATABASE_URL: options.readonlyDatabaseUrl,
-        POLICY_RISK_BACKFILL_READONLY_ROLE: "policydesk_readonly",
+        POLICY_RISK_BACKFILL_READONLY_ROLE: options.readonlyRole,
         POLICY_RISK_BACKFILL_PRODUCTION_HOST: options.productionHost,
         POLICY_RISK_BACKFILL_PRODUCTION_DATABASE: options.productionDatabase,
       } : {}),
       ...(options.productionApply ? {
         POLICY_RISK_BACKFILL_PRODUCTION_APPLY_DATABASE_URL: options.writerDatabaseUrl,
-        POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE: "policydesk_backfill",
+        POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE: options.writerRole,
         POLICY_RISK_BACKFILL_PRODUCTION_HOST: options.productionHost,
         POLICY_RISK_BACKFILL_PRODUCTION_DATABASE: options.productionDatabase,
       } : {}),
@@ -142,6 +142,11 @@ async function main() {
   const db = process.env.POLICY_RISK_BACKFILL_TEST_RLS_ENABLED === "1"
     ? createTenantScopedTestClient(rawDb)
     : rawDb;
+  // PostgreSQL roles are cluster-scoped, so fixed fixture names collide with
+  // the tenant-isolation job's other disposable database fixtures.
+  const roleSuffix = randomUUID().replaceAll("-", "").slice(0, 8);
+  const readonlyRoleName = `policydesk_readonly_test_${roleSuffix}`;
+  const writerRoleName = `policydesk_backfill_test_${roleSuffix}`;
   let fixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
   let ambiguousFixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
   let partyFixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
@@ -190,45 +195,45 @@ async function main() {
       data: { organizationId: ORGANIZATION_ID, policyId: insuredPartyFixture.policyId, fullName: "Backfill Insured Person", isPrimary: false, sourceLabel: "Legacy import" },
     });
 
-    const existingReadonlyRole = await db.$queryRaw<Array<{ exists: boolean }>>(Prisma.sql`SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'policydesk_readonly') AS "exists"`);
+    const existingReadonlyRole = await db.$queryRaw<Array<{ exists: boolean }>>(Prisma.sql`SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ${readonlyRoleName}) AS "exists"`);
     if (existingReadonlyRole[0]?.exists) throw new Error("POLICY_RISK_BACKFILL_TEST_READONLY_ROLE_ALREADY_EXISTS");
     const readonlyPassword = randomUUID().replaceAll("-", "");
-    await db.$executeRawUnsafe(`CREATE ROLE policydesk_readonly LOGIN NOINHERIT NOBYPASSRLS PASSWORD '${readonlyPassword}'`);
+    await db.$executeRawUnsafe(`CREATE ROLE ${readonlyRoleName} LOGIN NOINHERIT NOBYPASSRLS PASSWORD '${readonlyPassword}'`);
     readonlyRoleCreated = true;
-    await db.$executeRawUnsafe('GRANT USAGE ON SCHEMA public TO policydesk_readonly');
-    await db.$executeRawUnsafe('GRANT SELECT ON TABLE "Organization", "Policy", "PolicyInsuredAsset", "PolicyInsuredParty" TO policydesk_readonly');
+    await db.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO ${readonlyRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ON TABLE "Organization", "Policy", "PolicyInsuredAsset", "PolicyInsuredParty" TO ${readonlyRoleName}`);
     const readonlyUrl = new URL(process.env.DATABASE_URL!);
-    readonlyUrl.username = "policydesk_readonly";
+    readonlyUrl.username = readonlyRoleName;
     readonlyUrl.password = readonlyPassword;
     const writerPassword = randomUUID().replaceAll("-", "");
-    const existingWriterRole = await db.$queryRaw<Array<{ exists: boolean }>>(Prisma.sql`SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'policydesk_backfill') AS "exists"`);
+    const existingWriterRole = await db.$queryRaw<Array<{ exists: boolean }>>(Prisma.sql`SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ${writerRoleName}) AS "exists"`);
     if (existingWriterRole[0]?.exists) throw new Error("POLICY_RISK_BACKFILL_TEST_WRITER_ROLE_ALREADY_EXISTS");
-    await db.$executeRawUnsafe(`CREATE ROLE policydesk_backfill LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '${writerPassword}'`);
+    await db.$executeRawUnsafe(`CREATE ROLE ${writerRoleName} LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '${writerPassword}'`);
     writerRoleCreated = true;
-    await db.$executeRawUnsafe('GRANT USAGE ON SCHEMA public TO policydesk_backfill');
-    await db.$executeRawUnsafe('GRANT SELECT ("id", "status") ON TABLE "Organization" TO policydesk_backfill');
-    await db.$executeRawUnsafe('GRANT UPDATE ("updatedAt") ON TABLE "Organization" TO policydesk_backfill');
-    await db.$executeRawUnsafe('GRANT SELECT ("id", "organizationId", "userId", "role", "active") ON TABLE "OrganizationMembership" TO policydesk_backfill');
-    await db.$executeRawUnsafe('GRANT UPDATE ("updatedAt") ON TABLE "OrganizationMembership" TO policydesk_backfill');
-    await db.$executeRawUnsafe('GRANT SELECT ("id", "email", "active") ON TABLE "User" TO policydesk_backfill');
-    await db.$executeRawUnsafe('GRANT UPDATE ("updatedAt") ON TABLE "User" TO policydesk_backfill');
-    await db.$executeRawUnsafe('GRANT SELECT ("id", "organizationId", "policyNumber", "policyType", "insuredObject", "beneficiaryInfo", "riskDetails") ON TABLE "Policy" TO policydesk_backfill');
-    await db.$executeRawUnsafe('GRANT UPDATE ("riskDetails", "insuredObject", "riskDetailsReviewRequired", "updatedAt") ON TABLE "Policy" TO policydesk_backfill');
-    await db.$executeRawUnsafe('GRANT SELECT ("id", "organizationId", "policyId", "assetType", "description", "serialNumber", "isPrimary", "createdAt") ON TABLE "PolicyInsuredAsset" TO policydesk_backfill');
-    await db.$executeRawUnsafe('GRANT INSERT ("id", "organizationId", "policyId", "assetType", "description", "serialNumber", "isPrimary", "updatedAt") ON TABLE "PolicyInsuredAsset" TO policydesk_backfill');
-    await db.$executeRawUnsafe('GRANT SELECT ("id", "organizationId", "policyId", "fullName", "isPrimary", "sourceLabel", "createdAt") ON TABLE "PolicyInsuredParty" TO policydesk_backfill');
-    await db.$executeRawUnsafe('GRANT INSERT ("id", "organizationId", "policyId", "fullName", "isPrimary", "sourceLabel", "updatedAt") ON TABLE "PolicyInsuredParty" TO policydesk_backfill');
-    await db.$executeRawUnsafe('GRANT SELECT ("id") ON TABLE "MaintenanceRun" TO policydesk_backfill');
-    await db.$executeRawUnsafe('GRANT INSERT ("id", "organizationId", "type", "status", "summaryJson", "updatedAt") ON TABLE "MaintenanceRun" TO policydesk_backfill');
-    await db.$executeRawUnsafe('GRANT UPDATE ("status", "completedAt", "summaryJson", "updatedAt") ON TABLE "MaintenanceRun" TO policydesk_backfill');
+    await db.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id", "status") ON TABLE "Organization" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT UPDATE ("updatedAt") ON TABLE "Organization" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId", "userId", "role", "active") ON TABLE "OrganizationMembership" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT UPDATE ("updatedAt") ON TABLE "OrganizationMembership" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id", "email", "active") ON TABLE "User" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT UPDATE ("updatedAt") ON TABLE "User" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId", "policyNumber", "policyType", "insuredObject", "beneficiaryInfo", "riskDetails") ON TABLE "Policy" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT UPDATE ("riskDetails", "insuredObject", "riskDetailsReviewRequired", "updatedAt") ON TABLE "Policy" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId", "policyId", "assetType", "description", "serialNumber", "isPrimary", "createdAt") ON TABLE "PolicyInsuredAsset" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT INSERT ("id", "organizationId", "policyId", "assetType", "description", "serialNumber", "isPrimary", "updatedAt") ON TABLE "PolicyInsuredAsset" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId", "policyId", "fullName", "isPrimary", "sourceLabel", "createdAt") ON TABLE "PolicyInsuredParty" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT INSERT ("id", "organizationId", "policyId", "fullName", "isPrimary", "sourceLabel", "updatedAt") ON TABLE "PolicyInsuredParty" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id") ON TABLE "MaintenanceRun" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT INSERT ("id", "organizationId", "type", "status", "summaryJson", "updatedAt") ON TABLE "MaintenanceRun" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT UPDATE ("status", "completedAt", "summaryJson", "updatedAt") ON TABLE "MaintenanceRun" TO ${writerRoleName}`);
     const writerUrl = new URL(process.env.DATABASE_URL!);
-    writerUrl.username = "policydesk_backfill";
+    writerUrl.username = writerRoleName;
     writerUrl.password = writerPassword;
     const productionHost = readonlyUrl.hostname.toLowerCase();
     const productionDatabase = decodeURIComponent(readonlyUrl.pathname.replace(/^\//, "").split("?")[0]);
     const readonlyReportFile = temporaryReportPath();
     reportFiles.push(readonlyReportFile);
-    const productionPreview = runBackfill({ productionPreview: true, readonlyDatabaseUrl: readonlyUrl.toString(), productionHost, productionDatabase, reportFile: readonlyReportFile });
+    const productionPreview = runBackfill({ productionPreview: true, readonlyDatabaseUrl: readonlyUrl.toString(), readonlyRole: readonlyRoleName, productionHost, productionDatabase, reportFile: readonlyReportFile });
     assert.equal(productionPreview.mode, "production-read-only-preview");
     assert.equal(productionPreview.readOnly, true);
     const readonlyManifest = JSON.parse(readFileSync(productionPreview.reportFile!, "utf8")) as PolicyRiskBackfillManifest;
@@ -496,6 +501,7 @@ async function main() {
     const writerPreview = runBackfill({
       productionPreview: true,
       readonlyDatabaseUrl: readonlyUrl.toString(),
+      readonlyRole: readonlyRoleName,
       productionHost,
       productionDatabase,
       reportFile: writerPreviewFile,
@@ -581,6 +587,7 @@ async function main() {
         apply: true,
         productionApply: true,
         writerDatabaseUrl: writerUrl.toString(),
+        writerRole: writerRoleName,
         productionHost: overrides.productionHost ?? productionHost,
         productionDatabase: overrides.productionDatabase ?? productionDatabase,
         reportFile: overrides.reportFile ?? writerPreview.reportFile!,
@@ -620,12 +627,12 @@ async function main() {
       manifestSha256: foreignTargetDigest.reviewedManifestSha256,
     });
 
-    await db.$executeRawUnsafe('GRANT DELETE ON TABLE "Policy" TO policydesk_backfill');
+    await db.$executeRawUnsafe(`GRANT DELETE ON TABLE "Policy" TO ${writerRoleName}`);
     assertWriterRejected("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE_HAS_TABLE_LEVEL_PRIVILEGES");
-    await db.$executeRawUnsafe('REVOKE DELETE ON TABLE "Policy" FROM policydesk_backfill');
-    await db.$executeRawUnsafe("ALTER ROLE policydesk_backfill BYPASSRLS");
+    await db.$executeRawUnsafe(`REVOKE DELETE ON TABLE "Policy" FROM ${writerRoleName}`);
+    await db.$executeRawUnsafe(`ALTER ROLE ${writerRoleName} BYPASSRLS`);
     assertWriterRejected("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE_NOT_RESTRICTED");
-    await db.$executeRawUnsafe("ALTER ROLE policydesk_backfill NOBYPASSRLS");
+    await db.$executeRawUnsafe(`ALTER ROLE ${writerRoleName} NOBYPASSRLS`);
 
     const productionFixtureBefore = await db.policy.findUniqueOrThrow({ where: { id: productionBackfillFixture.policyId }, select: { insuredObject: true, riskDetails: true } });
     assert.equal(productionFixtureBefore.insuredObject, SOURCE_TEXT);
@@ -636,6 +643,7 @@ async function main() {
         apply: true,
         productionApply: true,
         writerDatabaseUrl: writerUrl.toString(),
+        writerRole: writerRoleName,
         productionHost,
         productionDatabase,
         reportFile: writerPreview.reportFile!,
@@ -663,6 +671,7 @@ async function main() {
         apply: true,
         productionApply: true,
         writerDatabaseUrl: writerUrl.toString(),
+        writerRole: writerRoleName,
         productionHost,
         productionDatabase,
         reportFile: writerPreview.reportFile!,
@@ -690,6 +699,7 @@ async function main() {
       apply: true,
       productionApply: true,
       writerDatabaseUrl: writerUrl.toString(),
+      writerRole: writerRoleName,
       productionHost,
       productionDatabase,
       reportFile: writerPreview.reportFile!,
@@ -705,10 +715,10 @@ async function main() {
     const writerAuditRun = await db.maintenanceRun.findUniqueOrThrow({ where: { id: writerResume.maintenanceRunId }, select: { summaryJson: true } });
     const writerAudit = JSON.parse(writerAuditRun.summaryJson ?? "{}") as { mode?: string; writerRole?: string; endpointHost?: string; database?: string; batchSize?: number };
     assert.equal(writerAudit.mode, "production-apply");
-    assert.equal(writerAudit.writerRole, "policydesk_backfill");
+    assert.equal(writerAudit.writerRole, writerRoleName);
     assert.equal(writerAudit.endpointHost, productionHost);
     assert.equal(writerAudit.database, productionDatabase);
-    assert.equal(writerAudit.batchSize, 1);
+    assert.equal(writerAudit.batchSize, 50);
     assert.ok(writerResume.resultFile);
     resultFiles.push(writerResume.resultFile);
     const writerResumeReport = JSON.parse(readFileSync(writerResume.resultFile, "utf8")) as { outcomes: Array<{ policyId: string; outcome: string }> };
@@ -780,16 +790,16 @@ async function main() {
     }
     if (secondOrganizationId) await attemptCleanup("second-organization", () => db.organization.deleteMany({ where: { id: secondOrganizationId! } }));
     if (readonlyRoleCreated) {
-      await attemptCleanup("readonly-role-grants", () => db.$executeRawUnsafe("REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM policydesk_readonly"));
-      await attemptCleanup("readonly-role-schema-grant", () => db.$executeRawUnsafe("REVOKE ALL PRIVILEGES ON SCHEMA public FROM policydesk_readonly"));
-      await attemptCleanup("readonly-role-owned-privileges", () => db.$executeRawUnsafe("DROP OWNED BY policydesk_readonly"));
-      await attemptCleanup("readonly-role-drop", () => db.$executeRawUnsafe("DROP ROLE policydesk_readonly"));
+      await attemptCleanup("readonly-role-grants", () => db.$executeRawUnsafe(`REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM ${readonlyRoleName}`));
+      await attemptCleanup("readonly-role-schema-grant", () => db.$executeRawUnsafe(`REVOKE ALL PRIVILEGES ON SCHEMA public FROM ${readonlyRoleName}`));
+      await attemptCleanup("readonly-role-owned-privileges", () => db.$executeRawUnsafe(`DROP OWNED BY ${readonlyRoleName}`));
+      await attemptCleanup("readonly-role-drop", () => db.$executeRawUnsafe(`DROP ROLE ${readonlyRoleName}`));
     }
     if (writerRoleCreated) {
-      await attemptCleanup("writer-role-grants", () => db.$executeRawUnsafe("REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM policydesk_backfill"));
-      await attemptCleanup("writer-role-schema-grant", () => db.$executeRawUnsafe("REVOKE ALL PRIVILEGES ON SCHEMA public FROM policydesk_backfill"));
-      await attemptCleanup("writer-role-owned-privileges", () => db.$executeRawUnsafe("DROP OWNED BY policydesk_backfill"));
-      await attemptCleanup("writer-role-drop", () => db.$executeRawUnsafe("DROP ROLE policydesk_backfill"));
+      await attemptCleanup("writer-role-grants", () => db.$executeRawUnsafe(`REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM ${writerRoleName}`));
+      await attemptCleanup("writer-role-schema-grant", () => db.$executeRawUnsafe(`REVOKE ALL PRIVILEGES ON SCHEMA public FROM ${writerRoleName}`));
+      await attemptCleanup("writer-role-owned-privileges", () => db.$executeRawUnsafe(`DROP OWNED BY ${writerRoleName}`));
+      await attemptCleanup("writer-role-drop", () => db.$executeRawUnsafe(`DROP ROLE ${writerRoleName}`));
     }
     await attemptCleanup("database-disconnect", () => db.$disconnect());
     if (cleanupFailures.length) throw new Error(`POLICY_RISK_BACKFILL_TEST_CLEANUP_FAILED\n${cleanupFailures.join("\n")}`);
