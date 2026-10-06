@@ -137,7 +137,7 @@ test("a failed follow-up close rolls back linked policy creation and source rene
     await page.locator("#policyNumber").fill(renewedPolicyNumber);
     const action = await captureServerAction(page, () => page.getByRole("button", { name: "Crear póliza", exact: true }).click());
     expect(action.status).toBeLessThan(500);
-    await expect(page.getByText("E2E_RENEWAL_FOLLOWUP_CLOSE_FAILED")).toBeVisible();
+    await expect(page.locator("#main-content").getByText("E2E_RENEWAL_FOLLOWUP_CLOSE_FAILED")).toBeVisible();
 
     await expect.poll(async () => {
       const [source, renewed, automatic, manual] = await Promise.all([
