@@ -1,7 +1,19 @@
 import { expect, test } from "@playwright/test";
+import type { Prisma } from "../../src/generated/prisma/client.ts";
 import { authenticatePageAsAdmin, authenticatePageAsAgent, cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../helpers/db";
 
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
+
+async function withTestOrganization<T>(
+  callback: (tx: Prisma.TransactionClient) => Promise<T>,
+  organizationId = TEST_ORGANIZATION_ID,
+): Promise<T> {
+  const db = getTestDb();
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('app.organization_id', ${organizationId}, true)`;
+    return callback(tx);
+  });
+}
 
 test("filters a renewal signal, links to its policy, and removes it after the renewal advances", async ({ page }) => {
   const db = getTestDb();
@@ -125,46 +137,54 @@ test("renders the baseline dashboard and group filters", async ({ page }) => {
 
 test("keeps results inside the organization and agent portfolio in the protected multi-org fixture", async ({ page }) => {
   test.skip(process.env.TENANT_ISOLATION_E2E !== "1", "Requires the protected disposable multi-organization fixture.");
-  const db = getTestDb();
-  const policyA = await db.policy.findUniqueOrThrow({ where: { id: "tenant-policy-a" }, select: { id: true, endDate: true, renewalStage: true, renewalStageAt: true } });
-  const policyB = await db.policy.findUniqueOrThrow({ where: { id: "tenant-policy-b" }, select: { id: true, endDate: true, renewalStage: true, renewalStageAt: true } });
+  const original = {
+    policyA: await withTestOrganization((tx) => tx.policy.findUniqueOrThrow({ where: { id: "tenant-policy-a" }, select: { id: true, endDate: true, renewalStage: true, renewalStageAt: true } })),
+    policyB: await withTestOrganization((tx) => tx.policy.findUniqueOrThrow({ where: { id: "tenant-policy-b" }, select: { id: true, endDate: true, renewalStage: true, renewalStageAt: true } }), "org_pedro_gomez_0001"),
+  };
+  const { policyA, policyB } = original;
   const portfolioOnlyClientId = `insights-admin-portfolio-${Date.now()}`;
   const portfolioOnlyPolicyId = `${portfolioOnlyClientId}-policy`;
   const soon = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
 
   try {
-    await db.policy.updateMany({
-      where: { id: { in: [policyA.id, policyB.id] } },
+    await withTestOrganization(async (tx) => {
+      await tx.policy.update({
+        where: { id: policyA.id },
+        data: { endDate: soon, renewalStage: "PENDING", renewalStageAt: null },
+      });
+      const insurerA = await tx.insurer.findUniqueOrThrow({ where: { id: "tenant-insurer-a" }, select: { id: true } });
+      const adminClient = await tx.client.create({
+        data: {
+          id: portfolioOnlyClientId,
+          organizationId: TEST_ORGANIZATION_ID,
+          fullName: "Insights Admin Portfolio Only",
+          type: "PERSON",
+          status: "ACTIVE",
+          portfolioOwnerId: "tenant-admin-a",
+        },
+      });
+      await tx.policy.create({
+        data: {
+          id: portfolioOnlyPolicyId,
+          organizationId: TEST_ORGANIZATION_ID,
+          policyNumber: "INSIGHTS-ADMIN-ONLY",
+          clientId: adminClient.id,
+          insurerId: insurerA.id,
+          policyType: "AUTO",
+          status: "ACTIVE",
+          startDate: new Date(),
+          endDate: soon,
+          premiumAmount: 1000,
+          currency: "MXN",
+          paymentFrequency: "ANNUAL",
+          renewalStage: "PENDING",
+        },
+      });
+    });
+    await withTestOrganization((tx) => tx.policy.update({
+      where: { id: policyB.id },
       data: { endDate: soon, renewalStage: "PENDING", renewalStageAt: null },
-    });
-    const insurerA = await db.insurer.findUniqueOrThrow({ where: { id: "tenant-insurer-a" }, select: { id: true } });
-    const adminClient = await db.client.create({
-      data: {
-        id: portfolioOnlyClientId,
-        organizationId: TEST_ORGANIZATION_ID,
-        fullName: "Insights Admin Portfolio Only",
-        type: "PERSON",
-        status: "ACTIVE",
-        portfolioOwnerId: "tenant-admin-a",
-      },
-    });
-    await db.policy.create({
-      data: {
-        id: portfolioOnlyPolicyId,
-        organizationId: TEST_ORGANIZATION_ID,
-        policyNumber: "INSIGHTS-ADMIN-ONLY",
-        clientId: adminClient.id,
-        insurerId: insurerA.id,
-        policyType: "AUTO",
-        status: "ACTIVE",
-        startDate: new Date(),
-        endDate: soon,
-        premiumAmount: 1000,
-        currency: "MXN",
-        paymentFrequency: "ANNUAL",
-        renewalStage: "PENDING",
-      },
-    });
+    }), "org_pedro_gomez_0001");
 
     await page.goto("/login");
     await page.getByLabel("Correo electrónico").fill("tenant-admin-a@policydesk.local");
@@ -186,9 +206,14 @@ test("keeps results inside the organization and agent portfolio in the protected
     await expect(page.getByText("INSIGHTS-ADMIN-ONLY", { exact: false })).toHaveCount(0);
     await expect(page.getByText("OVERLAP-B", { exact: false })).toHaveCount(0);
   } finally {
-    await db.policy.deleteMany({ where: { id: portfolioOnlyPolicyId } });
-    await db.client.deleteMany({ where: { id: portfolioOnlyClientId } });
-    await db.policy.update({ where: { id: policyA.id }, data: { endDate: policyA.endDate, renewalStage: policyA.renewalStage, renewalStageAt: policyA.renewalStageAt } });
-    await db.policy.update({ where: { id: policyB.id }, data: { endDate: policyB.endDate, renewalStage: policyB.renewalStage, renewalStageAt: policyB.renewalStageAt } });
+    await withTestOrganization(async (tx) => {
+      await tx.policy.deleteMany({ where: { id: portfolioOnlyPolicyId } });
+      await tx.client.deleteMany({ where: { id: portfolioOnlyClientId } });
+      await tx.policy.update({ where: { id: policyA.id }, data: { endDate: policyA.endDate, renewalStage: policyA.renewalStage, renewalStageAt: policyA.renewalStageAt } });
+    });
+    await withTestOrganization((tx) => tx.policy.update({
+      where: { id: policyB.id },
+      data: { endDate: policyB.endDate, renewalStage: policyB.renewalStage, renewalStageAt: policyB.renewalStageAt },
+    }), "org_pedro_gomez_0001");
   }
 });
