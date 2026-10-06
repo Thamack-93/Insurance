@@ -2,39 +2,40 @@
 
 Última revisión: 2026-10-05.
 
+El inventario y la evidencia operativa vigentes están en [insurance-closure-tracker.md](insurance-closure-tracker.md). Ese tracker es la fuente canónica para los chats fuente, el backfill, el restore y los gates de DEMO.
+
 ## Estado actual
 
-- **READY FOR DAILY USE:** pendiente. Falta completar y revisar el reporte por organización del backfill; no se ha aplicado la conversión productiva.
-- **READY FOR EXTERNAL DEMO ACCESS:** no listo. Aún faltan un restore remoto con datos sintéticos, el checkpoint de cutover, la aprobación productiva, el aislamiento multi-org en Production y la aceptación del usuario temporal.
+- **READY FOR DAILY USE: pendiente.** El código de campos por ramo, renovaciones e Insights está integrado y desplegado; falta generar y revisar el manifiesto del backfill por organización, acordar el triage de los casos documentales y ejecutar el backfill aprobado.
+- **READY FOR EXTERNAL DEMO ACCESS: pendiente.** No se ha ejecutado un restore remoto validado, no hay checkpoint aprobado de cutover y no se ha provisionado ni aceptado el usuario DEMO.
 
-## SHA de código desplegado
+## Aplicación, CI y Production
 
-- Candidato de aplicación certificado: `132ada7c40d160d7ffeb0c7a242b48574d975d12` (Release Certification #38). Último merge de código verificado: `af608c709d5300a62fad0b1bfbb7a97f53561316` (PR #80; CLI read-only de backfill). La Production actual está READY para el merge SHA en `dpl_94n8Tnj5RfyN5P541NfCDxsG4ZYf`; este CLI no cambia el comportamiento runtime de la aplicación.
-- Release Certification #38 [terminó SUCCESS](https://github.com/Thamack-93/Insurance/actions/runs/37337535025) sobre el candidato `132ada7c`: quality, tenant isolation/RLS, integración, API y E2E pasaron. CI #37346061761 pasó sobre el head exacto de PR #80, incluyendo la integración read-only/RLS con PostgreSQL desechable.
-- Vercel Production: `READY` para el merge `af608c709d5300a62fad0b1bfbb7a97f53561316`; deployment `dpl_94n8Tnj5RfyN5P541NfCDxsG4ZYf`, alias `policypete.vercel.app`.
-- Revisión autenticada de solo lectura: `/reports/insights`, Operations (tablero de renovaciones) y el editor de WorkItem cargaron en Production. No se guardaron cambios. Las señales de renovación de Production deben revisarse con el equipo de operación antes de usarlas como métricas de DEMO.
+- El código de aplicación actualmente registrado en Production es `cfd223e90ff4a37f2ba493bad36b6625569c82d3`, en el alias `policypete.vercel.app`.
+- El deployment documental más reciente que registra el tracker es `1613560ca61a6a284a319a4533bbc6471c7dcb12`, estado `READY`. Un deployment documental no cambia el SHA de aplicación.
+- GitHub Actions Release Certification #464 terminó `SUCCESS` en el head documental `b8d16e5` de PR #82. Pasaron quality, tenant-isolation y application, incluidos PostgreSQL desechable, RLS, API, Chromium E2E y restore/backfill integration. Esta evidencia corresponde al SHA exacto del run; exige nueva certificación exact-SHA ante futuros cambios de aplicación.
+- La revisión autenticada de solo lectura confirmó que Insights, el tablero de renovaciones y el editor WorkItem cargan en Production. Se observaron señales de renovación antiguas que requieren triage operativo; no se modificaron registros.
 
-## Preview read-only de backfill\n\nEl CLI requiere `POLICY_RISK_BACKFILL_READONLY_DATABASE_URL` con el rol `policydesk_readonly`, no privilegiado y sin permisos de escritura. La integración CI #37346061761 comprobó que ve los registros del tenant bajo RLS. No se ha conectado a Production ni se ha producido el manifiesto; no sustituye la revisión del backfill o el permiso de aplicación.\n\n## DEMO simplificada
+## Backfill de pólizas
 
-PR #80 ya publica el CLI `--production-preview` para generar una propuesta de backfill en una conexión estrictamente read-only y con RLS de organización; falta habilitar la conexión dedicada y revisar un manifiesto real. La implementación DEMO prevista sigue siendo una organización sintética, un usuario temporal y el seed existente en la URL actual. No se ha creado ni entregado la cuenta DEMO y el flag de provisión sigue pendiente de cierre. Después del cutover aprobado se comprobarán login, cambio de contraseña, restricciones, reset, revocación y escritorio/móvil.
+- PR #73, #78 y #80 están integrados. El CLI de preview read-only está implementado y su integración con RLS pasó en PostgreSQL desechable.
+- No se ha conectado a Production, generado ni revisado el manifiesto, ni aplicado la conversión.
+- Cierre: configurar una conexión dedicada de lectura `policydesk_readonly`, producir el reporte por organización, revisar los ambiguos y aprobar el plan de lotes antes de convertir. Conservar `riskDetails.sourceText`, permitir repetición sin duplicados y auditar cada lote.
+- El cotejo documental queda como lo detalla el tracker. Sus datos identificables permanecen fuera de GitHub.
 
-## Restore remoto Neon
+## DEMO y recuperación Neon
 
-En el proyecto separado `policydesk-certification-20261001` (`morning-block-38616998`) se encontraron estas ramas para `132ada7`: `cert-stage3-132ada7c40d160d7ffeb0c7a242b48574d975d12` y `restore-cert-stage3-132ada7c40d160d7ffeb0c7a242b48574d975d12`. Ambas nacen de la rama `main` del proyecto y expiran el 2026-10-12. Neon mostraba 9 de 10 slots ocupados al revisarlas.
+- La opción de menor alcance sigue siendo una organización sintética y un usuario temporal usando el seed existente en la URL actual. La cuenta todavía no existe y no se han entregado credenciales.
+- El proyecto dedicado de drill registrado por el tracker es `policydesk-insurance-drill-20261005`. Su fuente candidata y destino temporal requieren reinspección antes de usarse: confirmar procedencia sintética, que el destino esté vacío y vigente, el artefacto de backup, y el SHA candidato exacto.
+- No usar el proyecto/par de ramas antiguo que el tracker marca como rechazado. La contraseña de una credencial temporal quedó expuesta anteriormente: el operador debe rotarla en Neon antes de volver a conectar; no registrar ni compartir la nueva clave.
+- Ejecutar solo mediante el restore CLI en una rama temporal autorizada, con `RESTORE_DRILL_APP_SMOKE=0` y credenciales limitadas al drill. Exigir el PASS completo descrito en el tracker; los metadatos o el tamaño del backup no bastan.
+- Antes de cualquier cutover, presentar el SHA, el reporte de restore y el procedimiento concreto de recuperación. Esperar aprobación explícita antes de tocar Production. Después, validar aislamiento y clientes actuales; solo entonces provisionar una DEMO sintética, comprobar login, cambio de contraseña, restricciones, reset, revocación y escritorio/móvil, cerrar el flag de provisión y observar un ciclo de jobs.
 
-**Este par queda rechazado como evidencia de certificación y no debe usarse:** el runbook prohíbe clonar `main` como fuente, y la observación anterior de que no aparecían tablas no prueba por sí sola la procedencia completa del estado de datos. No ejecutar migraciones, fixture, backup ni restore en esas dos ramas. Mantenerlas intactas.
+## Criterios de cierre
 
-El siguiente par debe originarse en una fuente cuyo estado vacío y procedencia estén aprobados explícitamente, sin depender de la rama `main` del proyecto de certificación; ligarlo al SHA exacto que se vaya a certificar. Antes del drill, hacer checkout de ese SHA inmutable y verificar que `git rev-parse HEAD` coincida con `CERTIFICATION_CANDIDATE_SHA` y el identificador de ambas ramas. El proyecto estaba a 9/10 ramas, por lo que no hay espacio para otra pareja allí. No crear un proyecto nuevo ni expandir secretos/permisos hasta revisar el alcance y autorización específicos.
+Los dos resultados son independientes:
 
-No se ha ejecutado backup/restore remoto. **No usar backups ni claves de Production.** Mantener `RESTORE_DRILL_APP_SMOKE=0`.
+- **READY FOR DAILY USE:** backfill revisado y resuelto, cambios productivos verificados y triage operativo acordado.
+- **READY FOR EXTERNAL DEMO ACCESS:** restore remoto PASS, aislamiento/cutover aprobado, usuario DEMO sintético y sus restricciones comprobados.
 
-## Siguiente secuencia
-
-1. Conseguir una fuente Neon con procedencia vacía aprobada; rechazar el par ligado a `main`, y preparar un par temporal para el SHA exacto.
-2. Revisar el job remoto y su aislamiento antes de inyectar secretos temporales.
-3. Solo después de aprobar la fuente y el runner, ejecutar restore CLI al destino autorizado ligado al SHA exacto; exigir todos los conteos, FK, invariantes, secuencias, lecturas, aislamiento y drift.
-4. Presentar reporte y procedimiento de recuperación; solicitar aprobación antes de tocar Production.
-5. Tras aprobación, realizar cutover y verificar aislamiento antes de provisionar una organización DEMO y un usuario temporal.
-6. Completar y revisar el reporte del backfill; mantener su aceptación independiente del acceso DEMO.
-
-El restore local/deshechable de CI y el despliegue Production no sustituyen estas puertas. No archivar chats fuente hasta transferir y cerrar su entrega con evidencia. Fuente del inventario: [insurance-closure-tracker.md](insurance-closure-tracker.md).
+No archivar chats fuente hasta cotejar cada entrega con el tracker y adjuntar su evidencia de cierre.
