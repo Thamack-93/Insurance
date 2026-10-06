@@ -659,6 +659,21 @@ async function main() {
     assertWriterRejected("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE_NOT_RESTRICTED");
     await db.$executeRawUnsafe(`ALTER ROLE ${writerRoleName} NOBYPASSRLS`);
 
+    await db.$executeRawUnsafe(`
+      ALTER POLICY policydesk_tenant_context ON "PolicyInsuredAsset"
+      USING ("organizationId"::character(1) = nullif(current_setting('app.organization_id', true), '')::character(1))
+      WITH CHECK ("organizationId"::character(1) = nullif(current_setting('app.organization_id', true), '')::character(1))
+    `);
+    try {
+      assertWriterRejected("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_TENANT_POLICY_MISMATCH");
+    } finally {
+      await db.$executeRawUnsafe(`
+        ALTER POLICY policydesk_tenant_context ON "PolicyInsuredAsset"
+        USING ("organizationId" = nullif(current_setting('app.organization_id', true), ''))
+        WITH CHECK ("organizationId" = nullif(current_setting('app.organization_id', true), ''))
+      `);
+    }
+
     const productionFixtureBefore = await db.policy.findUniqueOrThrow({ where: { id: productionBackfillFixture.policyId }, select: { insuredObject: true, riskDetails: true } });
     assert.equal(productionFixtureBefore.insuredObject, SOURCE_TEXT);
     assert.equal(productionFixtureBefore.riskDetails, null);
@@ -680,10 +695,18 @@ async function main() {
       (error: unknown) => error instanceof Error && String((error as NodeJS.ErrnoException & { stderr?: Buffer }).stderr ?? error).includes("POLICY_RISK_BACKFILL_TEST_ROLLBACK_WITHIN_BATCH"),
     );
     const writerRollbackRun = await db.maintenanceRun.findFirst({
-      where: { organizationId: ORGANIZATION_ID, type: "POLICY_RISK_BACKFILL", summaryJson: { contains: "POLICY_RISK_BACKFILL_TEST_ROLLBACK_WITHIN_BATCH" } },
-      select: { id: true },
+      where: {
+        organizationId: ORGANIZATION_ID,
+        type: "POLICY_RISK_BACKFILL",
+        summaryJson: { contains: "POLICY_RISK_BACKFILL_TEST_ROLLBACK_WITHIN_BATCH" },
+        AND: { summaryJson: { contains: writerRoleName } },
+      },
+      select: { id: true, summaryJson: true },
     });
     assert.ok(writerRollbackRun);
+    const writerRollbackSummary = JSON.parse(writerRollbackRun.summaryJson ?? "{}") as { mode?: string; writerRole?: string };
+    assert.equal(writerRollbackSummary.mode, "production-apply");
+    assert.equal(writerRollbackSummary.writerRole, writerRoleName);
     maintenanceRunIds.push(writerRollbackRun.id);
     const writerRollbackResult = `${writerPreview.reportFile}.${writerRollbackRun.id}.results.json`;
     assert.ok(existsSync(writerRollbackResult));
@@ -708,10 +731,18 @@ async function main() {
       (error: unknown) => error instanceof Error && String((error as NodeJS.ErrnoException & { stderr?: Buffer }).stderr ?? error).includes("POLICY_RISK_BACKFILL_TEST_INTERRUPTED_AFTER_COMMIT"),
     );
     const writerInterruptedRun = await db.maintenanceRun.findFirst({
-      where: { organizationId: ORGANIZATION_ID, type: "POLICY_RISK_BACKFILL", summaryJson: { contains: "POLICY_RISK_BACKFILL_TEST_INTERRUPTED_AFTER_COMMIT" } },
-      select: { id: true },
+      where: {
+        organizationId: ORGANIZATION_ID,
+        type: "POLICY_RISK_BACKFILL",
+        summaryJson: { contains: "POLICY_RISK_BACKFILL_TEST_INTERRUPTED_AFTER_COMMIT" },
+        AND: { summaryJson: { contains: writerRoleName } },
+      },
+      select: { id: true, summaryJson: true },
     });
     assert.ok(writerInterruptedRun);
+    const writerInterruptedSummary = JSON.parse(writerInterruptedRun.summaryJson ?? "{}") as { mode?: string; writerRole?: string };
+    assert.equal(writerInterruptedSummary.mode, "production-apply");
+    assert.equal(writerInterruptedSummary.writerRole, writerRoleName);
     maintenanceRunIds.push(writerInterruptedRun.id);
     const writerInterruptedResult = `${writerPreview.reportFile}.${writerInterruptedRun.id}.results.json`;
     assert.ok(existsSync(writerInterruptedResult));

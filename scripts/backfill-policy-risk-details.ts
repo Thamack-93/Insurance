@@ -264,15 +264,79 @@ function createProductionApplyTarget(connectionString: string): ProductionApplyT
   };
 }
 
-function normalizeTenantPolicyExpression(expression: string | null) {
-  return (expression ?? "")
-    .toLowerCase()
-    .replace(/"/g, "")
-    .replace(/::[a-z_ ]+/g, "")
-    .replace(/[\s()]/g, "");
+function stripRedundantOuterParentheses(expression: string) {
+  let normalized = expression.trim();
+  while (normalized.startsWith("(") && normalized.endsWith(")")) {
+    let depth = 0;
+    let singleQuoted = false;
+    let doubleQuoted = false;
+    let enclosesWholeExpression = true;
+    for (let index = 0; index < normalized.length; index += 1) {
+      const character = normalized[index];
+      if (character === "'" && !doubleQuoted) {
+        if (singleQuoted && normalized[index + 1] === "'") {
+          index += 1;
+          continue;
+        }
+        singleQuoted = !singleQuoted;
+      } else if (character === '\"' && !singleQuoted) {
+        if (doubleQuoted && normalized[index + 1] === '\"') {
+          index += 1;
+          continue;
+        }
+        doubleQuoted = !doubleQuoted;
+      } else if (!singleQuoted && !doubleQuoted && character === "(") {
+        depth += 1;
+      } else if (!singleQuoted && !doubleQuoted && character === ")") {
+        depth -= 1;
+        if (depth === 0 && index < normalized.length - 1) {
+          enclosesWholeExpression = false;
+          break;
+        }
+      }
+    }
+    if (!enclosesWholeExpression || depth !== 0 || singleQuoted || doubleQuoted) break;
+    normalized = normalized.slice(1, -1).trim();
+  }
+  return normalized;
 }
 
-const EXPECTED_TENANT_POLICY = "organizationid=nullif(current_setting('app.organization_id',true),'')";
+function normalizeTenantPolicyExpression(expression: string | null) {
+  const source = stripRedundantOuterParentheses(expression ?? "")
+    .replace(/'app\.organization_id'::text/gi, "'app.organization_id'")
+    .replace(/''::text/gi, "''");
+  let normalized = "";
+  let singleQuoted = false;
+  let doubleQuoted = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === "'" && !doubleQuoted) {
+      normalized += character;
+      if (singleQuoted && source[index + 1] === "'") {
+        normalized += source[index + 1];
+        index += 1;
+      } else {
+        singleQuoted = !singleQuoted;
+      }
+      continue;
+    }
+    if (character === '\"' && !singleQuoted) {
+      normalized += character;
+      if (doubleQuoted && source[index + 1] === '\"') {
+        normalized += source[index + 1];
+        index += 1;
+      } else {
+        doubleQuoted = !doubleQuoted;
+      }
+      continue;
+    }
+    if (!singleQuoted && !doubleQuoted && /\s/.test(character)) continue;
+    normalized += !singleQuoted && !doubleQuoted ? character.toLowerCase() : character;
+  }
+  return normalized;
+}
+
+const EXPECTED_TENANT_POLICY = '"organizationId" = nullif(current_setting(\'app.organization_id\', true), \'\')';
 const NORMALIZED_EXPECTED_TENANT_POLICY = normalizeTenantPolicyExpression(EXPECTED_TENANT_POLICY);
 
 async function assertProductionApplyRole(tx: Prisma.TransactionClient, target: ProductionApplyTarget) {
