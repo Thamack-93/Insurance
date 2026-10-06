@@ -448,6 +448,22 @@ async function withProductionApplyTransaction<T>(
   }, { maxWait: 10_000, timeout: 30_000 });
 }
 
+async function withDisposableApplyTransaction<T>(
+  prisma: PrismaClient,
+  organizationId: string,
+  work: (tx: Prisma.TransactionClient) => Promise<T>,
+) {
+  return prisma.$transaction(async (tx) => {
+    const tenantContext = await tx.$queryRaw<Array<{ organizationId: string }>>(Prisma.sql`
+      SELECT set_config('app.organization_id', ${organizationId}, true) AS "organizationId"
+    `);
+    if (tenantContext[0]?.organizationId !== organizationId) {
+      throw new Error("POLICY_RISK_BACKFILL_DISPOSABLE_APPLY_TENANT_CONTEXT_FAILED");
+    }
+    return work(tx);
+  });
+}
+
 async function writePrivateManifest(file: string, manifest: unknown) {
   const resolved = path.resolve(file);
   if (!path.isAbsolute(file)) throw new Error("POLICY_RISK_BACKFILL_REPORT_PATH_MUST_BE_ABSOLUTE");
@@ -650,7 +666,7 @@ async function main() {
     });
     const run = productionTarget
       ? await withProductionApplyTransaction(productionTarget, organizationId, reviewer, createRun)
-      : await createRun(prisma);
+      : await withDisposableApplyTransaction(prisma, organizationId, createRun);
     let converted = 0;
     let deferred = 0;
     let empty = 0;
@@ -661,7 +677,7 @@ async function main() {
     const resultFile = `${reviewedFile}.${run.id}.results.json`;
     const updateRun = async (data: Prisma.MaintenanceRunUpdateInput) => productionTarget
       ? withProductionApplyTransaction(productionTarget, organizationId, reviewer, (tx) => tx.maintenanceRun.update({ where: { id: run.id, organizationId }, data, select: { id: true } }))
-      : prisma.maintenanceRun.update({ where: { id: run.id, organizationId }, data, select: { id: true } });
+      : withDisposableApplyTransaction(prisma, organizationId, (tx) => tx.maintenanceRun.update({ where: { id: run.id, organizationId }, data, select: { id: true } }));
     try {
       for (let offset = 0; offset < manifest.candidates.length; offset += requestedBatchSize) {
         const batch = manifest.candidates.slice(offset, offset + requestedBatchSize);
@@ -746,7 +762,7 @@ async function main() {
           }
         };
         if (productionTarget) await withProductionApplyTransaction(productionTarget, organizationId, reviewer, applyBatch);
-        else await prisma.$transaction(applyBatch);
+        else await withDisposableApplyTransaction(prisma, organizationId, applyBatch);
         converted += batchCounts.converted;
         deferred += batchCounts.deferred;
         empty += batchCounts.empty;
