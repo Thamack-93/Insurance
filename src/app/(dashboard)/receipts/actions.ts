@@ -386,7 +386,7 @@ export type RequestQualitasPaymentLinkInput = {
 };
 
 export type RequestQualitasPaymentLinkResult =
-  | { ok: true; id: string; redirectTo: string; message: string; outcome: string; destination: string }
+  | { ok: true; id: string; redirectTo: string; message: string; outcome: string; destination: string; auditStatus: "RECORDED" | "PENDING" }
   | { ok: false; error: string };
 
 export async function requestQualitasPaymentLink(
@@ -415,6 +415,7 @@ export async function requestQualitasPaymentLink(
       message: result.message,
       outcome: result.outcome,
       destination: result.destination,
+      auditStatus: result.auditStatus,
     };
   } catch (error) {
     if (error instanceof AuthError) return { ok: false, error: error.message };

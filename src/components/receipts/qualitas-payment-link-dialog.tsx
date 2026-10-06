@@ -69,7 +69,8 @@ export function QualitasPaymentLinkDialog({ receipt, agent, clientRecipientEnabl
         toast.error(result.error);
         return;
       }
-      if (result.outcome === "SUCCESS") toast.success(result.message);
+      if (result.auditStatus === "PENDING") toast.warning(result.message);
+      else if (result.outcome === "SUCCESS") toast.success(result.message);
       else if (result.outcome === "UNCERTAIN_POST_SUBMISSION" || result.outcome === "ALREADY_IN_PROGRESS") toast.warning(result.message);
       else toast.error(result.message);
       setOpen(false);
