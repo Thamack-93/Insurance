@@ -71,6 +71,7 @@ test("Operational Insights enforces organization and agent portfolio scope after
     await expect(page.getByText("INSIGHTS-ADMIN-ONLY", { exact: false })).toBeVisible();
     await expect(page.getByText("OVERLAP-B", { exact: false })).toHaveCount(0);
 
+    await page.context().clearCookies();
     await page.goto("/login");
     await page.getByLabel("Correo electrónico").fill("tenant-agent-a@policydesk.local");
     await page.getByLabel("Contraseña").fill("tenant-fixture-password");
