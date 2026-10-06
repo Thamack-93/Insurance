@@ -273,6 +273,7 @@ function normalizeTenantPolicyExpression(expression: string | null) {
 }
 
 const EXPECTED_TENANT_POLICY = "organizationid=nullif(current_setting('app.organization_id',true),'')";
+const NORMALIZED_EXPECTED_TENANT_POLICY = normalizeTenantPolicyExpression(EXPECTED_TENANT_POLICY);
 
 async function assertProductionApplyRole(tx: Prisma.TransactionClient, target: ProductionApplyTarget) {
   const identityRows = await tx.$queryRaw<Array<{
@@ -411,20 +412,23 @@ async function assertProductionApplyRole(tx: Prisma.TransactionClient, target: P
   `);
   const policyMismatch = policyRows.length !== 4 || policyRows.some((policy) =>
     policy.policyName !== "policydesk_tenant_context" || policy.command !== "*" || !policy.permissive || policy.roles !== "{0}" ||
-    normalizeTenantPolicyExpression(policy.usingExpression) !== EXPECTED_TENANT_POLICY ||
-    normalizeTenantPolicyExpression(policy.checkExpression) !== EXPECTED_TENANT_POLICY
+    normalizeTenantPolicyExpression(policy.usingExpression) !== NORMALIZED_EXPECTED_TENANT_POLICY ||
+    normalizeTenantPolicyExpression(policy.checkExpression) !== NORMALIZED_EXPECTED_TENANT_POLICY
   );
   if (policyMismatch) {
-    const diagnostics = policyRows.map((policy) => ({
-      tableName: policy.tableName,
-      policyName: policy.policyName,
-      command: policy.command,
-      permissive: policy.permissive,
-      roles: policy.roles,
-      usingExpression: normalizeTenantPolicyExpression(policy.usingExpression),
-      checkExpression: normalizeTenantPolicyExpression(policy.checkExpression),
-    }));
-    throw new Error(`POLICY_RISK_BACKFILL_PRODUCTION_APPLY_TENANT_POLICY_MISMATCH:${JSON.stringify({ count: policyRows.length, diagnostics })}`);
+    if (process.env.NODE_ENV === "test") {
+      const diagnostics = policyRows.map((policy) => ({
+        tableName: policy.tableName,
+        policyName: policy.policyName,
+        command: policy.command,
+        permissive: policy.permissive,
+        roles: policy.roles,
+        usingExpression: normalizeTenantPolicyExpression(policy.usingExpression),
+        checkExpression: normalizeTenantPolicyExpression(policy.checkExpression),
+      }));
+      throw new Error(`POLICY_RISK_BACKFILL_PRODUCTION_APPLY_TENANT_POLICY_MISMATCH:${JSON.stringify({ count: policyRows.length, diagnostics })}`);
+    }
+    throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_TENANT_POLICY_MISMATCH");
   }
 }
 
