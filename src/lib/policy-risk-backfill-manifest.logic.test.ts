@@ -15,6 +15,7 @@ function manifest(): PolicyRiskBackfillManifest {
     processorSha256: "processor-1",
     runId: "run-1",
     createdAt: "2026-10-05T12:00:00.000Z",
+    sourceMode: "DISPOSABLE_DRY_RUN",
     organizationId: "org-1",
     candidateSha: "abc123",
     scanned: 1,
@@ -50,6 +51,13 @@ describe("policy risk backfill reviewed manifest", () => {
     const value = manifest();
     value.candidates[0].decision = "ACCEPT";
     value.candidates[0].proposed.riskDetails = { version: 1, tampered: true };
+    expect(() => assertReviewedPolicyRiskBackfillManifest(value, { organizationId: "org-1", candidateSha: "abc123", processorSha256: "processor-1" }))
+      .toThrow("POLICY_RISK_BACKFILL_MANIFEST_CONTENT_HASH_MISMATCH");
+  });
+
+  it("binds the manifest digest to its source mode", () => {
+    const value = manifest();
+    value.sourceMode = "PRODUCTION_READ_ONLY_PREVIEW";
     expect(() => assertReviewedPolicyRiskBackfillManifest(value, { organizationId: "org-1", candidateSha: "abc123", processorSha256: "processor-1" }))
       .toThrow("POLICY_RISK_BACKFILL_MANIFEST_CONTENT_HASH_MISMATCH");
   });

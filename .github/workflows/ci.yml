@@ -220,6 +220,8 @@ jobs:
             -c 'UPDATE "PlatformRuntimeState" SET "writeMode" = '\''MAINTENANCE'\'', "reason" = '\''tenant isolation certification'\'', "updatedAt" = now() WHERE "id" = 1;'
       - name: Apply committed RLS cutover on disposable PostgreSQL
         run: ENABLE_TENANT_RLS_CUTOVER=1 npm run cutover:multi-org
+      - name: Policy risk writer apply under forced RLS on disposable PostgreSQL
+        run: POLICY_RISK_BACKFILL_TEST_RLS_ENABLED=1 node --import tsx scripts/test-policy-risk-backfill.integration.ts
       - name: Provision restricted runtime credential for post-RLS browser smoke
         shell: bash
         run: |

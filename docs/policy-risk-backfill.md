@@ -49,10 +49,13 @@ NODE_ENV=test TENANT_ISOLATION_TEST_DB=1 PLAYWRIGHT_ENFORCE_DISPOSABLE_DB=1 \
 
 The apply is organization-scoped, checks current source hashes again while
 locking each policy and its source relations, uses bounded transactions, is
-safe to resume from the same reviewed manifest,
-and writes a private per-policy outcome report alongside the manifest. It also
-records run counts and the manifest digest in `MaintenanceRun`. A changed
-candidate, processor, organization, or source row stops before writes.
+safe to resume from the same reviewed manifest, and writes a private per-policy
+outcome report alongside the manifest. It also records run counts and the
+manifest digest in `MaintenanceRun`. A changed candidate, processor,
+organization, or source row stops before writes. Batches commit independently;
+there is no global rollback after earlier batches commit. Recovery is to rerun
+the exact reviewed manifest, which validates already-applied rows and resumes
+without duplicating relations.
 
 ## Optional read-only Production preview
 
@@ -72,7 +75,26 @@ The mode starts one `REPEATABLE READ, READ ONLY` transaction, checks the actual
 PostgreSQL role, verifies it has no write privileges on the organization and
 policy tables it reads, and scopes every query to the explicit organization ID.
 It fails if the organization is not visible through the configured role. The
-mode rejects `--apply`; apply remains restricted to the disposable rehearsal
-guards above. It does not create a Production conversion run or change any
-row. Review the manifest and its source text privately before planning any
-separate, approved Production apply and recovery checkpoint.
+mode rejects `--apply`; it does not create a Production conversion run or
+change any row. The manifest is marked
+`PRODUCTION_READ_ONLY_PREVIEW` and cannot be used by the disposable apply path.
+
+## Production apply capability status
+
+The CLI has a separate `--production-apply` path, but it is blocked by default
+unless `POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ENABLED=1` is explicitly set.
+This switch is a final operational gate, not evidence that the procedure is
+certified. Production apply requires a manifest produced by the matching
+Production read-only preview, its reviewed digest, the ordinary apply
+confirmation, a second Production-specific confirmation, a fixed
+`policydesk_backfill` login role, exact expected host and database bindings,
+and batches no larger than 50. It rejects Vercel execution, non-Production
+environments, non-`verify-full` TLS, role memberships, object ownership,
+table-level grants, excess column/sequence/schema privileges, and RLS policies
+that differ from the exact tenant `USING` and `WITH CHECK` predicates.
+
+Do not set the feature gate or run Production apply until the disposable
+PostgreSQL integration suite has exercised writer-role acceptance and rejection,
+RLS isolation, rollback, and exact-manifest resume on this candidate SHA, and a
+separate reviewer has approved the final security diff. No Production apply has
+been run as part of this implementation.

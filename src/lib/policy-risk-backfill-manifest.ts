@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 
-export const POLICY_RISK_BACKFILL_MANIFEST_VERSION = 1 as const;
-export const POLICY_RISK_BACKFILL_PROCESSOR_VERSION = "2026-10-05.1" as const;
+export const POLICY_RISK_BACKFILL_MANIFEST_VERSION = 2 as const;
+export const POLICY_RISK_BACKFILL_PROCESSOR_VERSION = "2026-10-05.2" as const;
+
+export type PolicyRiskBackfillSourceMode = "DISPOSABLE_DRY_RUN" | "PRODUCTION_READ_ONLY_PREVIEW";
 
 export type PolicyRiskBackfillDecision = "ACCEPT" | "DEFER";
 export type PolicyRiskBackfillClassification = "CONVERTED" | "REVIEW" | "EMPTY";
@@ -17,7 +19,7 @@ export type PolicyRiskBackfillManifestRow = {
     insuredObject: string | null;
     beneficiaryInfo: string | null;
     assets: Array<{ description: string; serialNumber: string | null; isPrimary: boolean }>;
-    insuredParties: Array<{ fullName: string }>;
+    insuredParties: Array<{ fullName: string; isPrimary: boolean; sourceLabel: string | null }>;
   };
   proposed: {
     riskDetails: unknown;
@@ -34,6 +36,7 @@ export type PolicyRiskBackfillManifest = {
   processorSha256: string;
   runId: string;
   createdAt: string;
+  sourceMode: PolicyRiskBackfillSourceMode;
   organizationId: string;
   candidateSha: string;
   scanned: number;
@@ -63,6 +66,7 @@ export function policyRiskBackfillManifestContentHash(manifest: PolicyRiskBackfi
     processorSha256: manifest.processorSha256,
     runId: manifest.runId,
     createdAt: manifest.createdAt,
+    sourceMode: manifest.sourceMode,
     organizationId: manifest.organizationId,
     candidateSha: manifest.candidateSha,
     scanned: manifest.scanned,
@@ -95,6 +99,7 @@ export function assertReviewedPolicyRiskBackfillManifest(
 ): void {
   if (manifest.schemaVersion !== POLICY_RISK_BACKFILL_MANIFEST_VERSION) throw new Error("POLICY_RISK_BACKFILL_MANIFEST_VERSION_MISMATCH");
   if (manifest.processorVersion !== POLICY_RISK_BACKFILL_PROCESSOR_VERSION) throw new Error("POLICY_RISK_BACKFILL_PROCESSOR_VERSION_MISMATCH");
+  if (manifest.sourceMode !== "DISPOSABLE_DRY_RUN" && manifest.sourceMode !== "PRODUCTION_READ_ONLY_PREVIEW") throw new Error("POLICY_RISK_BACKFILL_SOURCE_MODE_INVALID");
   if (manifest.processorSha256 !== expected.processorSha256) throw new Error("POLICY_RISK_BACKFILL_PROCESSOR_SHA_MISMATCH");
   if (manifest.organizationId !== expected.organizationId) throw new Error("POLICY_RISK_BACKFILL_ORGANIZATION_MISMATCH");
   if (manifest.candidateSha !== expected.candidateSha) throw new Error("POLICY_RISK_BACKFILL_CANDIDATE_SHA_MISMATCH");
