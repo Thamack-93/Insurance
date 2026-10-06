@@ -71,6 +71,7 @@ function isPrepared(value: QualitasPreparedPaymentLink | QualitasPaymentLinkResu
   return "transportReady" in value;
 }
 function outcomeMessage(outcome: QualitasPaymentLinkOutcome, reason: QualitasPaymentLinkReason) {
+  if (reason === "AUTHORIZATION_RECHECK_FAILED") return "No se pudo volver a validar la autorización; no se envió la liga. Actualiza la sesión antes de intentarlo de nuevo.";
   if (outcome === "SUCCESS") return "La solicitud fue enviada a Quálitas.";
   if (outcome === "ALREADY_IN_PROGRESS" || reason === "DUPLICATE_LINK_99991") {
     return "Quálitas indica que ya existe una liga de pago en proceso para esta póliza.";
@@ -271,22 +272,52 @@ export async function requestQualitasPaymentLinkForReceipt(
 
   let providerResult: QualitasPaymentLinkResult;
   let finalSubmissionStarted = false;
+  let finalSubmissionAuthorizationRejected = false;
+  let releaseFinalSubmissionLock: (() => void) | undefined;
+  let finalSubmissionLock: Promise<void> | undefined;
   try {
     const requestOptions = {
       traceId: correlationId,
       correlationId,
-      onFinalSubmissionStarted: () => {
-        finalSubmissionStarted = true;
-        safeQualitasInfo("[qualitas.payment_link.provider]", {
-          event: "qualitas.payment_link.provider",
-          correlationId,
-          organizationId: liveContext.organizationId,
-          policyId: attempt.policyId,
-          step: "final_submission",
-          phase: "started",
-          finalSubmission: true,
-          timestamp: new Date().toISOString(),
+      onFinalSubmissionStarted: async () => {
+        let resolveAuthorized!: () => void;
+        let rejectAuthorized!: (error: unknown) => void;
+        const authorizationReady = new Promise<void>((resolve, reject) => {
+          resolveAuthorized = resolve;
+          rejectAuthorized = reject;
         });
+        finalSubmissionLock = withQualitasTenantTransaction(liveContext, async () => {
+          finalSubmissionStarted = true;
+          safeQualitasInfo("[qualitas.payment_link.provider]", {
+            event: "qualitas.payment_link.provider",
+            correlationId,
+            organizationId: liveContext.organizationId,
+            policyId: attempt.policyId,
+            step: "final_submission",
+            phase: "started",
+            finalSubmission: true,
+            timestamp: new Date().toISOString(),
+          });
+          resolveAuthorized();
+          await new Promise<void>((resolve) => {
+            releaseFinalSubmissionLock = resolve;
+          });
+        });
+        void finalSubmissionLock.catch(rejectAuthorized);
+        try {
+          await authorizationReady;
+        } catch (error) {
+          finalSubmissionAuthorizationRejected = true;
+          throw error;
+        }
+      },
+      onFinalSubmissionFinished: async () => {
+        releaseFinalSubmissionLock?.();
+        try {
+          await finalSubmissionLock;
+        } catch {
+          // Provider responses remain authoritative if transaction cleanup fails.
+        }
       },
       onEvent: (event: QualitasProviderEvent) => {
         safeQualitasInfo("[qualitas.payment_link.provider]", {
@@ -313,9 +344,11 @@ export async function requestQualitasPaymentLinkForReceipt(
       ? await requestQualitasPaymentLink(prepared, requestOptions)
       : prepared;
   } catch {
-    providerResult = finalSubmissionStarted
-      ? { outcome: "UNCERTAIN_POST_SUBMISSION", reason: "FINAL_RESPONSE_UNRECOGNIZED" }
-      : { outcome: "PROVIDER_UNAVAILABLE", reason: "NETWORK_ERROR" };
+    providerResult = finalSubmissionAuthorizationRejected
+      ? { outcome: "PROVIDER_UNAVAILABLE", reason: "AUTHORIZATION_RECHECK_FAILED" }
+      : finalSubmissionStarted
+        ? { outcome: "UNCERTAIN_POST_SUBMISSION", reason: "FINAL_RESPONSE_UNRECOGNIZED" }
+        : { outcome: "PROVIDER_UNAVAILABLE", reason: "NETWORK_ERROR" };
   }
   logQualitasRequestEvent({
     event: "provider_result",

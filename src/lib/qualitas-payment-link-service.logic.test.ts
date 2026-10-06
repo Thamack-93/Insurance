@@ -7,6 +7,9 @@ const db = vi.hoisted(() => ({
   user: { findFirst: vi.fn() },
   $transaction: vi.fn(),
 }));
+const tenant = vi.hoisted(() => ({
+  assertOrganizationContextInTransaction: vi.fn(async () => {}),
+}));
 const provider = vi.hoisted(() => ({
   isQualitasClientRecipientEnabled: vi.fn(() => true),
   isQualitasInsurerName: vi.fn((value: string) => /qualitas/i.test(value)),
@@ -16,9 +19,12 @@ const provider = vi.hoisted(() => ({
   normalizeQualitasEmail: vi.fn((value: string | null | undefined) => value?.includes("@") ? value.trim().toLowerCase() : null),
   normalizeQualitasPhone: vi.fn((value: string | null | undefined) => value?.replace(/\D/g, "") || null),
   prepareQualitasPaymentLink: vi.fn(async () => ({ transportReady: true })),
-  requestQualitasPaymentLink: vi.fn(async (_prepared?: unknown, _options?: { onFinalSubmissionStarted?: () => void }) => {
-    void _prepared;
-    void _options;
+  requestQualitasPaymentLink: vi.fn(async (_prepared?: unknown, options?: {
+    onFinalSubmissionStarted?: () => Promise<void> | void;
+    onFinalSubmissionFinished?: () => Promise<void> | void;
+  }) => {
+    await options?.onFinalSubmissionStarted?.();
+    await options?.onFinalSubmissionFinished?.();
     return { outcome: "SUCCESS", reason: "SUCCESS_CODE_0" };
   }),
 }));
@@ -26,7 +32,7 @@ const writeActivityLog = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", () => ({ getDb: () => db }));
 vi.mock("@/lib/activity-log", () => ({ writeActivityLog }));
-vi.mock("@/lib/organization-context", () => ({ assertOrganizationContextInTransaction: vi.fn(async () => {}) }));
+vi.mock("@/lib/organization-context", () => tenant);
 vi.mock("@/lib/organization-capabilities", () => ({
   resolveOrganizationCapability: vi.fn(async (organizationId: string, capability: string) => ({
     organizationId,
@@ -56,6 +62,7 @@ const receipt = {
 describe("qualitas payment link service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    tenant.assertOrganizationContextInTransaction.mockResolvedValue(undefined);
     db.receipt.findFirst.mockResolvedValue(receipt);
     db.user.findFirst.mockResolvedValue({ id: "user-1", email: "agent@example.com", phone: "5550109999" });
     db.$transaction.mockImplementation(async (callback: (tx: typeof db) => unknown) => callback(db));
@@ -127,9 +134,67 @@ describe("qualitas payment link service", () => {
     expect(JSON.stringify(writeActivityLog.mock.calls)).not.toContain("5550109999");
   });
 
+  it("holds tenant authorization through final submission and blocks a revoked context", async () => {
+    let authorizationLockHeld = false;
+    let providerPostReached = false;
+    tenant.assertOrganizationContextInTransaction.mockImplementation(async () => {
+      authorizationLockHeld = true;
+    });
+    db.$transaction.mockImplementation(async (callback: (tx: typeof db) => unknown) => {
+      try {
+        return await callback(db);
+      } finally {
+        authorizationLockHeld = false;
+      }
+    });
+    provider.requestQualitasPaymentLink.mockImplementationOnce(async (_prepared?: unknown, options?: {
+      onFinalSubmissionStarted?: () => Promise<void> | void;
+      onFinalSubmissionFinished?: () => Promise<void> | void;
+    }) => {
+      await options?.onFinalSubmissionStarted?.();
+      expect(authorizationLockHeld).toBe(true);
+      providerPostReached = true;
+      await options?.onFinalSubmissionFinished?.();
+      expect(authorizationLockHeld).toBe(false);
+      return { outcome: "SUCCESS", reason: "SUCCESS_CODE_0" };
+    });
+
+    const result = await requestQualitasPaymentLinkForReceipt({ receiptId: "receipt-1", recipientType: "AGENT", deliveryChannel: "WHATSAPP", context });
+
+    expect(result).toMatchObject({ ok: true, outcome: "SUCCESS", auditStatus: "RECORDED" });
+    expect(tenant.assertOrganizationContextInTransaction).toHaveBeenCalledTimes(3);
+    expect(providerPostReached).toBe(true);
+
+    tenant.assertOrganizationContextInTransaction
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("MEMBERSHIP_SUSPENDED"));
+    let blockedPostReached = false;
+    provider.requestQualitasPaymentLink.mockImplementationOnce(async (_prepared?: unknown, options?: {
+      onFinalSubmissionStarted?: () => Promise<void> | void;
+    }) => {
+      await options?.onFinalSubmissionStarted?.();
+      blockedPostReached = true;
+      return { outcome: "SUCCESS", reason: "SUCCESS_CODE_0" };
+    });
+
+    const rejected = await requestQualitasPaymentLinkForReceipt({ receiptId: "receipt-1", recipientType: "AGENT", deliveryChannel: "WHATSAPP", context });
+
+    expect(rejected).toMatchObject({ ok: true, outcome: "PROVIDER_UNAVAILABLE", reason: "AUTHORIZATION_RECHECK_FAILED" });
+    expect(rejected).toMatchObject({ message: expect.stringContaining("no se envió la liga") });
+    expect(blockedPostReached).toBe(false);
+    expect(writeActivityLog.mock.calls.at(-1)?.[0]).toMatchObject({
+      action: "QUALITAS_PAYMENT_LINK_REQUESTED",
+      newValue: expect.objectContaining({ result: "FAILED", reason: "AUTHORIZATION_RECHECK_FAILED" }),
+    });
+  });
+
   it("classifies a thrown response after final submission as uncertain", async () => {
-    provider.requestQualitasPaymentLink.mockImplementationOnce(async (_prepared?: unknown, options?: { onFinalSubmissionStarted?: () => void }) => {
-      options?.onFinalSubmissionStarted?.();
+    provider.requestQualitasPaymentLink.mockImplementationOnce(async (_prepared?: unknown, options?: {
+      onFinalSubmissionStarted?: () => Promise<void> | void;
+      onFinalSubmissionFinished?: () => Promise<void> | void;
+    }) => {
+      await options?.onFinalSubmissionStarted?.();
+      await options?.onFinalSubmissionFinished?.();
       throw new Error("response lost after POST");
     });
 
