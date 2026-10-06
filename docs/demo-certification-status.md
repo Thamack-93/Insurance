@@ -12,8 +12,8 @@ El inventario y la evidencia operativa vigentes están en [insurance-closure-tra
 ## Aplicación, CI y Production
 
 - El código de aplicación actualmente registrado en Production es `cfd223e90ff4a37f2ba493bad36b6625569c82d3`, en el alias `policypete.vercel.app`.
-- Vercel Production está `READY` en SHA `df20aa241fd9ecadac397339c629146bad37a55a` (deployment `dpl_4i9iZbHXZ85YxH2uZ41FBU33aLix`), verificado contra la API de Vercel el 2026-10-05. Es un merge documental; no cambia el SHA de aplicación.
-- GitHub Actions Release Certification #464 terminó `SUCCESS` en el head documental `b8d16e5` de PR #82. Pasaron quality, tenant-isolation y application, incluidos PostgreSQL desechable, RLS, API, Chromium E2E y restore/backfill integration. Esta evidencia corresponde al SHA exacto del run; exige nueva certificación exact-SHA ante futuros cambios de aplicación.
+- El deployment de Vercel Production tras fusionar PR #85 está `READY` en SHA documental `7293583faf26fd5c1c9e0e66d0e7fd1867dca4aa` (deployment `dpl_HP5yeVkFdnahSvRAfxpWR7jMYfVc`), verificado contra la API de Vercel. PR #85 fue solo documentación; el SHA de aplicación sigue en `cfd223e90ff4a37f2ba493bad36b6625569c82d3`.
+- GitHub Actions Release Certification #464 terminó `SUCCESS` en el head documental `b8d16e5` de PR #82. Pasaron quality, tenant-isolation y application, incluidos PostgreSQL desechable, RLS, API, Chromium E2E y restore/backfill integration. Esta evidencia corresponde al SHA exacto del run; exige nueva certificación exact-SHA ante futuros cambios de aplicación. CI #474 también pasó sus tres jobs en el head exacto `6765e6d` de PR #85, un cambio documental; su [run](https://github.com/Thamack-93/Insurance/actions/runs/37393802145) no sustituye la certificación exact-SHA ante cambios de aplicación.
 - La revisión autenticada de solo lectura confirmó que Insights, el tablero de renovaciones y el editor WorkItem cargan en Production. Se observaron señales de renovación antiguas que requieren triage operativo; no se modificaron registros.
 
 ## Backfill de pólizas
