@@ -221,10 +221,12 @@ async function main() {
     await db.$executeRawUnsafe(`GRANT UPDATE ("riskDetails", "insuredObject", "riskDetailsReviewRequired", "updatedAt") ON TABLE "Policy" TO ${writerRoleName}`);
     await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId", "policyId", "assetType", "description", "serialNumber", "isPrimary", "createdAt", "updatedAt") ON TABLE "PolicyInsuredAsset" TO ${writerRoleName}`);
     await db.$executeRawUnsafe(`GRANT INSERT ("id", "organizationId", "policyId", "assetType", "description", "serialNumber", "isPrimary", "createdAt", "updatedAt") ON TABLE "PolicyInsuredAsset" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT UPDATE ("updatedAt") ON TABLE "PolicyInsuredAsset" TO ${writerRoleName}`);
     await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId", "policyId", "fullName", "isPrimary", "sourceLabel", "createdAt", "updatedAt") ON TABLE "PolicyInsuredParty" TO ${writerRoleName}`);
     await db.$executeRawUnsafe(`GRANT INSERT ("id", "organizationId", "policyId", "fullName", "isPrimary", "sourceLabel", "createdAt", "updatedAt") ON TABLE "PolicyInsuredParty" TO ${writerRoleName}`);
-    await db.$executeRawUnsafe(`GRANT SELECT ("id") ON TABLE "MaintenanceRun" TO ${writerRoleName}`);
-    await db.$executeRawUnsafe(`GRANT INSERT ("id", "organizationId", "type", "status", "summaryJson", "updatedAt") ON TABLE "MaintenanceRun" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT UPDATE ("updatedAt") ON TABLE "PolicyInsuredParty" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId") ON TABLE "MaintenanceRun" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT INSERT ("id", "organizationId", "type", "status", "summaryJson", "createdAt", "startedAt", "updatedAt") ON TABLE "MaintenanceRun" TO ${writerRoleName}`);
     await db.$executeRawUnsafe(`GRANT UPDATE ("status", "completedAt", "summaryJson", "updatedAt") ON TABLE "MaintenanceRun" TO ${writerRoleName}`);
     const writerUrl = new URL(process.env.DATABASE_URL!);
     writerUrl.username = writerRoleName;
@@ -601,17 +603,18 @@ async function main() {
     assertWriterRejected("POLICY_RISK_BACKFILL_PRODUCTION_HOST_MISMATCH", { productionHost: "wrong.invalid" });
     assertWriterRejected("POLICY_RISK_BACKFILL_PRODUCTION_DATABASE_MISMATCH", { productionDatabase: `${productionDatabase}_wrong` });
     assertWriterRejected("POLICY_RISK_BACKFILL_BATCH_SIZE_MUST_BE_1_TO_50", { batchSize: 51 });
-    const disposableReviewManifest = JSON.parse(readFileSync(reportFile, "utf8")) as PolicyRiskBackfillManifest;
-    disposableReviewManifest.reviewedBy = "ci-admin@policydesk.local";
-    disposableReviewManifest.reviewedAt = new Date().toISOString();
     const disposableReviewReport = temporaryReportPath();
     reportFiles.push(disposableReviewReport);
-    writeFileSync(disposableReviewReport, `${JSON.stringify(disposableReviewManifest, null, 2)}\n`, { mode: 0o600 });
+    const disposablePreview = runBackfill({ reportFile: disposableReviewReport });
+    const disposableReviewManifest = JSON.parse(readFileSync(disposableReviewReport, "utf8")) as PolicyRiskBackfillManifest;
+    disposableReviewManifest.reviewedBy = "ci-admin@policydesk.local";
+    disposableReviewManifest.reviewedAt = new Date().toISOString();
+    writeFileSync(disposableReviewReport, `${JSON.stringify(disposableReviewManifest, null, 2)}\n`);
     chmodSync(disposableReviewReport, 0o600);
     const disposableReviewedDigest = runBackfill({
       printReviewedDigest: true,
       reportFile: disposableReviewReport,
-      previewSha256: preview.manifestSha256,
+      previewSha256: disposablePreview.manifestSha256,
       reviewer: "ci-admin@policydesk.local",
     });
     assert.ok("reviewedManifestSha256" in disposableReviewedDigest);
@@ -628,7 +631,7 @@ async function main() {
       contentSha256: "",
     };
     foreignTargetManifest.contentSha256 = policyRiskBackfillManifestContentHash(foreignTargetManifest);
-    writeFileSync(foreignTargetReport, `${JSON.stringify(foreignTargetManifest, null, 2)}\n`);
+    writeFileSync(foreignTargetReport, `${JSON.stringify(foreignTargetManifest, null, 2)}\n`, { mode: 0o600 });
     const foreignTargetDigest = runBackfill({
       printReviewedDigest: true,
       reportFile: foreignTargetReport,
