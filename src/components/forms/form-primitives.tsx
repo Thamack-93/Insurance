@@ -35,7 +35,6 @@ export function FormGrid({
 
 type FormFieldContextValue = {
   fieldId: string;
-  label: string;
   describedBy?: string;
   hasError: boolean;
   required: boolean;
@@ -87,7 +86,7 @@ export function FormField({
   });
 
   return (
-    <FormFieldContext.Provider value={{ fieldId, label, describedBy, hasError, required: isRequired }}>
+    <FormFieldContext.Provider value={{ fieldId, describedBy, hasError, required: isRequired }}>
       <div className={cn("space-y-2", className)}>
         <Label htmlFor={fieldId}>
           {label}
@@ -157,6 +156,7 @@ export function ControlledSelect({
   className,
   id,
   autoFocus,
+  disabled,
   "aria-invalid": ariaInvalid,
   "aria-describedby": ariaDescribedBy,
   "aria-required": ariaRequired,
@@ -169,6 +169,7 @@ export function ControlledSelect({
   className?: string;
   id?: string;
   autoFocus?: boolean;
+  disabled?: boolean;
   "aria-invalid"?: boolean;
   "aria-describedby"?: string;
   "aria-required"?: boolean;
@@ -185,10 +186,11 @@ export function ControlledSelect({
       <SelectTrigger
         id={triggerId}
         autoFocus={autoFocus}
+        disabled={disabled}
         aria-invalid={invalid || undefined}
         aria-describedby={describedBy}
         aria-required={required || undefined}
-        aria-label={ariaLabel ?? field?.label}
+        aria-label={ariaLabel}
         className={cn("h-10 w-full rounded-xl bg-card", className)}
       >
         <SelectValue placeholder={placeholder ?? "Selecciona una opción"}>

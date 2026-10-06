@@ -14,6 +14,10 @@ test("tenant admin cannot open a different organization's client", async ({ page
   await expect(page.getByText("Overlap Client").first()).toBeVisible();
   await page.goto("/clients/tenant-client-b");
   await expect(page.getByText("Overlap Client").first()).not.toBeVisible();
+
+  const relationOptions = await page.request.get("/api/work-items/relation-options?clientId=tenant-client-b");
+  expect(relationOptions.status()).toBe(403);
+  await expect(relationOptions.json()).resolves.toMatchObject({ error: "No tienes acceso a este cliente." });
 });
 
 test("separate browser contexts remain isolated in organizations A and B", async ({ browser }) => {

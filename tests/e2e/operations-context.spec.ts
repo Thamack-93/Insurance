@@ -21,6 +21,151 @@ function businessDateAfter(days: number) {
 }
 
 test.describe("operation queue context", () => {
+  test("filters pending relationships by selected client and policy", async ({ page }) => {
+    const db = getTestDb();
+    const first = await seedPolicyFixture("TASK-RELATION-FIRST");
+    const second = await seedPolicyFixture("TASK-RELATION-SECOND");
+    const now = new Date();
+    const firstReceiptNumber = `TASK-REL-R1-${Date.now()}`;
+    const alternateReceiptNumber = `TASK-REL-RA-${Date.now()}`;
+    const secondReceiptNumber = `TASK-REL-R2-${Date.now()}`;
+    const alternatePolicyNumber = `TEST-POL-ALT-${Date.now()}`;
+    let alternatePolicyId: string | null = null;
+
+    try {
+      const alternatePolicy = await db.policy.create({
+        data: {
+          organizationId: TEST_ORGANIZATION_ID,
+          policyNumber: alternatePolicyNumber,
+          clientId: first.clientId,
+          insurerId: first.insurerId,
+          policyType: "AUTO",
+          status: "ACTIVE",
+          paymentFrequency: "ANNUAL",
+          startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+          endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          premiumAmount: 2345.67,
+          currency: "MXN",
+        },
+      });
+      alternatePolicyId = alternatePolicy.id;
+
+      await db.receipt.createMany({
+        data: [
+          {
+            organizationId: TEST_ORGANIZATION_ID,
+            receiptNumber: firstReceiptNumber,
+            policyId: first.policyId,
+            clientId: first.clientId,
+            insurerId: first.insurerId,
+            periodStartDate: now,
+            periodEndDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+            dueDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+            amount: 1000,
+            currency: "MXN",
+            status: "PENDING",
+          },
+          {
+            organizationId: TEST_ORGANIZATION_ID,
+            receiptNumber: alternateReceiptNumber,
+            policyId: alternatePolicy.id,
+            clientId: first.clientId,
+            insurerId: first.insurerId,
+            periodStartDate: now,
+            periodEndDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+            dueDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+            amount: 1500,
+            currency: "MXN",
+            status: "PENDING",
+          },
+          {
+            organizationId: TEST_ORGANIZATION_ID,
+            receiptNumber: secondReceiptNumber,
+            policyId: second.policyId,
+            clientId: second.clientId,
+            insurerId: second.insurerId,
+            periodStartDate: now,
+            periodEndDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+            dueDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+            amount: 2000,
+            currency: "MXN",
+            status: "PENDING",
+          },
+        ],
+      });
+      const firstReceipt = await db.receipt.findFirst({ where: { receiptNumber: firstReceiptNumber }, select: { id: true } });
+      const editWorkItemId = `e2e-task-relations-${Date.now()}`;
+      await db.workItem.create({
+        data: {
+          organizationId: TEST_ORGANIZATION_ID,
+          id: editWorkItemId,
+          sourceType: "Task",
+          sourceId: editWorkItemId,
+          workItemType: "TASK",
+          taskType: "GENERAL",
+          status: "OPEN",
+          priority: "MEDIUM",
+          title: "Pending relationship edit fixture",
+          entityType: "WorkItem",
+          entityId: editWorkItemId,
+          clientId: first.clientId,
+          policyId: first.policyId,
+          insurerId: first.insurerId,
+          receiptId: firstReceipt!.id,
+        },
+      });
+
+      await authenticatePageAsAdmin(page);
+      await page.goto("/tasks/new");
+
+      const clientSelect = page.getByLabel("Cliente");
+      const policySelect = page.getByLabel("Póliza");
+      const receiptSelect = page.getByLabel("Recibo");
+      await expect(policySelect).toBeDisabled();
+      await expect(receiptSelect).toBeDisabled();
+
+      await clientSelect.click();
+      await page.getByRole("option", { name: first.clientName, exact: true }).click();
+      await policySelect.click();
+      await expect(page.getByRole("option", { name: new RegExp(first.policyNumber) })).toHaveCount(1);
+      await expect(page.getByRole("option", { name: new RegExp(alternatePolicyNumber) })).toHaveCount(1);
+      await expect(page.getByRole("option", { name: new RegExp(second.policyNumber) })).toHaveCount(0);
+      await page.getByRole("option", { name: new RegExp(first.policyNumber) }).click();
+
+      await receiptSelect.click();
+      await expect(page.getByRole("option", { name: firstReceiptNumber, exact: true })).toHaveCount(1);
+      await expect(page.getByRole("option", { name: alternateReceiptNumber, exact: true })).toHaveCount(0);
+      await expect(page.getByRole("option", { name: secondReceiptNumber, exact: true })).toHaveCount(0);
+      await page.getByRole("option", { name: firstReceiptNumber, exact: true }).click();
+
+      await policySelect.click();
+      await page.getByRole("option", { name: new RegExp(alternatePolicyNumber) }).click();
+      await expect(receiptSelect).toBeEnabled();
+      await expect(receiptSelect).toContainText("Sin recibo");
+      await receiptSelect.click();
+      await expect(page.getByRole("option", { name: alternateReceiptNumber, exact: true })).toHaveCount(1);
+      await expect(page.getByRole("option", { name: firstReceiptNumber, exact: true })).toHaveCount(0);
+      await page.keyboard.press("Escape");
+
+      await clientSelect.click();
+      await page.getByRole("option", { name: second.clientName, exact: true }).click();
+      await expect(policySelect).toContainText("Sin póliza");
+      await expect(receiptSelect).toBeDisabled();
+      await policySelect.click();
+      await expect(page.getByRole("option", { name: new RegExp(second.policyNumber) })).toHaveCount(1);
+      await expect(page.getByRole("option", { name: new RegExp(first.policyNumber) })).toHaveCount(0);
+
+      await page.goto(`/tasks/${editWorkItemId}/edit`);
+      await expect(page.getByLabel("Cliente")).toContainText(first.clientName);
+      await expect(page.getByLabel("Póliza")).toContainText(new RegExp(first.policyNumber));
+      await expect(page.getByLabel("Recibo")).toContainText(firstReceiptNumber);
+    } finally {
+      if (alternatePolicyId) await db.policy.delete({ where: { id: alternatePolicyId } }).catch(() => undefined);
+      await cleanupPolicyFixture(first);
+      await cleanupPolicyFixture(second);
+    }
+  });
+
   test("resolves legacy renewal context and links to the policy", async ({ page }) => {
     const db = getTestDb();
     const fixture = await seedPolicyFixture("OPERATIONS");

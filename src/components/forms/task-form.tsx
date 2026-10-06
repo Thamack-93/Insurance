@@ -1,8 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
-import { Controller, useForm } from "react-hook-form";
+import { useEffect, useState, useTransition } from "react";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import {
@@ -32,11 +32,17 @@ type WorkItemFormProps = {
   cancelHref: string;
   defaultValues: WorkItemFormValues;
   clientOptions: SelectOption[];
-  policyOptions: SelectOption[];
   insurerOptions: SelectOption[];
-  receiptOptions: SelectOption[];
   submitAction: (values: WorkItemFormValues) => Promise<MutationResult>;
 };
+
+type RelationOptionsResponse = {
+  policies: SelectOption[];
+  receipts: SelectOption[];
+};
+
+type LoadedPolicyOptions = { clientId: string; options: SelectOption[] };
+type LoadedReceiptOptions = { policyId: string; options: SelectOption[] };
 
 export function WorkItemForm({
   title,
@@ -45,9 +51,7 @@ export function WorkItemForm({
   cancelHref,
   defaultValues,
   clientOptions,
-  policyOptions,
   insurerOptions,
-  receiptOptions,
   submitAction,
 }: WorkItemFormProps) {
   const router = useRouter();
@@ -56,12 +60,96 @@ export function WorkItemForm({
     register,
     control,
     handleSubmit,
+    setValue,
     setError,
     formState: { errors },
   } = useForm<WorkItemFormValues>({
     resolver: zodResolver(workItemSchema) as never,
     defaultValues,
   });
+  const clientId = useWatch({ control, name: "clientId" }) || "";
+  const policyId = useWatch({ control, name: "policyId" }) || "";
+  const initialClientId = defaultValues.clientId || "";
+  const initialPolicyId = defaultValues.policyId || "";
+  const initialReceiptId = defaultValues.receiptId || "";
+  const [loadedPolicyOptions, setLoadedPolicyOptions] = useState<LoadedPolicyOptions>({ clientId: "", options: [] });
+  const [loadedReceiptOptions, setLoadedReceiptOptions] = useState<LoadedReceiptOptions>({ policyId: "", options: [] });
+  const policyOptions = loadedPolicyOptions.clientId === clientId ? loadedPolicyOptions.options : [];
+  const receiptOptions = loadedReceiptOptions.policyId === policyId ? loadedReceiptOptions.options : [];
+  const loadingPolicyOptions = Boolean(clientId) && loadedPolicyOptions.clientId !== clientId;
+  const loadingReceiptOptions = Boolean(policyId) && loadedReceiptOptions.policyId !== policyId;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+
+    if (!clientId) {
+      return () => {
+        active = false;
+        controller.abort();
+      };
+    }
+
+    const params = new URLSearchParams();
+    params.set("clientId", clientId);
+    if (initialClientId === clientId && initialPolicyId) params.set("selectedPolicyId", initialPolicyId);
+
+    fetch(`/api/work-items/relation-options?${params.toString()}`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("No se pudieron cargar las relaciones.");
+        return response.json() as Promise<RelationOptionsResponse>;
+      })
+      .then((options) => {
+        if (!active) return;
+        setLoadedPolicyOptions({ clientId, options: Array.isArray(options.policies) ? options.policies : [] });
+      })
+      .catch((error: unknown) => {
+        if (active && !(error instanceof DOMException && error.name === "AbortError")) {
+          setLoadedPolicyOptions({ clientId, options: [] });
+          toast.error("No se pudieron cargar las pólizas de este cliente.");
+        }
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [clientId, initialClientId, initialPolicyId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+
+    if (!policyId) {
+      return () => {
+        active = false;
+        controller.abort();
+      };
+    }
+
+    const params = new URLSearchParams({ policyId });
+    if (initialPolicyId === policyId && initialReceiptId) params.set("selectedReceiptId", initialReceiptId);
+    fetch(`/api/work-items/relation-options?${params.toString()}`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("No se pudieron cargar los recibos relacionados.");
+        return response.json() as Promise<RelationOptionsResponse>;
+      })
+      .then((options) => {
+        if (!active) return;
+        setLoadedReceiptOptions({ policyId, options: Array.isArray(options.receipts) ? options.receipts : [] });
+      })
+      .catch((error: unknown) => {
+        if (active && !(error instanceof DOMException && error.name === "AbortError")) {
+          setLoadedReceiptOptions({ policyId, options: [] });
+          toast.error("No se pudieron cargar los recibos de esta póliza.");
+        }
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [initialPolicyId, initialReceiptId, policyId]);
 
   async function onSubmit(values: WorkItemFormValues) {
     startTransition(async () => {
@@ -163,7 +251,12 @@ export function WorkItemForm({
                   render={({ field }) => (
                     <ControlledSelect
                       value={field.value || ""}
-                      onValueChange={(value) => field.onChange(value ?? "")}
+                      onValueChange={(value) => {
+                        const nextClientId = value ?? "";
+                        setValue("policyId", "", { shouldDirty: true, shouldValidate: true });
+                        setValue("receiptId", "", { shouldDirty: true, shouldValidate: true });
+                        field.onChange(nextClientId);
+                      }}
                       options={clientOptions}
                       placeholder="Sin cliente"
                     />
@@ -178,9 +271,17 @@ export function WorkItemForm({
                   render={({ field }) => (
                     <ControlledSelect
                       value={field.value || ""}
-                      onValueChange={(value) => field.onChange(value ?? "")}
+                      onValueChange={(value) => {
+                        setValue("receiptId", "", { shouldDirty: true, shouldValidate: true });
+                        field.onChange(value ?? "");
+                      }}
                       options={policyOptions}
-                      placeholder="Sin póliza"
+                      placeholder={
+                        !clientId ? "Selecciona un cliente primero"
+                          : loadingPolicyOptions ? "Cargando pólizas..."
+                            : "Sin póliza"
+                      }
+                      disabled={!clientId || loadingPolicyOptions}
                     />
                   )}
                 />
@@ -214,7 +315,12 @@ export function WorkItemForm({
                       value={field.value || ""}
                       onValueChange={(value) => field.onChange(value ?? "")}
                       options={receiptOptions}
-                      placeholder="Sin recibo"
+                      placeholder={
+                        !policyId ? "Selecciona una póliza primero"
+                          : loadingReceiptOptions ? "Cargando recibos..."
+                            : "Sin recibo"
+                      }
+                      disabled={!policyId || loadingReceiptOptions}
                     />
                   )}
                 />
