@@ -578,8 +578,8 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
       setSelectedClientLabel(nextPreview.draft.clientName);
       setSelectedInsurerId(nextPreview.suggestions.insurerId ?? "");
       setSelectedInsurerLabel(nextPreview.draft.insurerName);
-      setSelectedSourcePolicyId(nextPreview.suggestions.sourcePolicyId ?? "");
-      setSelectedSourcePolicyLabel(nextPreview.suggestions.sourcePolicyId ? nextPreview.draft.sourcePolicyNumber ?? "" : "");
+      setSelectedSourcePolicyId("");
+      setSelectedSourcePolicyLabel("");
       setShowInlineClient(!nextPreview.suggestions.clientId);
       toast.success("PDF analizado. Revisa la propuesta y confirma.");
     } catch (analysisError) {
@@ -1630,8 +1630,40 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Póliza origen</p>
                   <p className="mt-1 text-sm font-semibold">{selectedSourcePolicyLabel || draft.sourcePolicyNumber || "Sin sugerencia exacta"}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {selectedSourcePolicyId ? "Seleccionada manualmente o por match exacto." : "Se permitirá confirmar sin origen; la póliza quedará marcada para revisión."}
+                    {selectedSourcePolicyId ? "Vínculo confirmado para esta captura." : "Las coincidencias son sugerencias; elige una para confirmar el vínculo."}
                   </p>
+                  {preview?.sourcePolicyOptions?.length ? (
+                    <div className="mt-3 space-y-2">
+                      {preview.sourcePolicyOptions.map((candidate) => (
+                        <div key={candidate.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-background/80 p-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{candidate.policyNumber} · {candidate.clientName} · {candidate.insurerName}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {candidate.matchReason || "Coincidencia de renovación"} · vigencia {candidate.startDate} a {candidate.endDate}
+                              {candidate.serialNumber ? ` · serie ${candidate.serialNumber}` : ""}
+                            </p>
+                          </div>
+                          {selectedSourcePolicyId === candidate.id ? (
+                            <Badge variant="outline" className="rounded-full">Vínculo confirmado</Badge>
+                          ) : (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="rounded-full"
+                              onClick={() => {
+                                setSelectedSourcePolicyId(candidate.id);
+                                setSelectedSourcePolicyLabel(candidate.label);
+                              }}
+                              disabled={isConfirming}
+                            >
+                              Vincular esta póliza
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="mt-3">
                     <Button type="button" variant="outline" className="rounded-full" onClick={() => openLookup("policy")}>
                       <Search className="mr-2 size-4" />

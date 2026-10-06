@@ -62,8 +62,9 @@ export async function GET(request: NextRequest) {
         workItemsUpserted: total.workItemsUpserted + item.workItemsUpserted,
         workItemsClosed: total.workItemsClosed + item.workItemsClosed,
         notificationsCreated: total.notificationsCreated + item.notificationsCreated,
+        serialSuggestionsCreated: total.serialSuggestionsCreated + item.serialSuggestionsCreated,
       }),
-      { scanned: 0, stalled: 0, workItemsUpserted: 0, workItemsClosed: 0, notificationsCreated: 0 },
+      { scanned: 0, stalled: 0, workItemsUpserted: 0, workItemsClosed: 0, notificationsCreated: 0, serialSuggestionsCreated: 0 },
     );
     return NextResponse.json({
       ok: failures.length === 0,

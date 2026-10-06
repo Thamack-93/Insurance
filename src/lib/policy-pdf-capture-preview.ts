@@ -18,6 +18,8 @@ import {
 } from "@/lib/policy-pdf-capture.shared";
 import type { AssistantUser } from "@/lib/assistant-types";
 import { buildPolicyNumberSearchVariants } from "@/lib/policy-number";
+import { findSerialRenewalCandidatesForTarget } from "@/lib/policy-renewal-match";
+import { normalizePolicySerial } from "@/lib/policy-renewal-match.logic";
 import { clientOperationalWhere, policyOperationalWhere } from "@/lib/portfolio-access";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
@@ -81,7 +83,7 @@ async function buildSourcePolicyCandidates(
 
       const matchReason = exactNumber
         ? "Número de póliza origen"
-        : policy.insuredAssets[0]?.serialNumber === draft.serialNumber
+        : policy.insuredAssets.some((asset) => normalizePolicySerial(asset.serialNumber) === normalizePolicySerial(draft.serialNumber))
           ? "Serie y cliente"
           : "Cliente y vigencia";
       const option: PolicyCaptureSourceOption = {
@@ -111,40 +113,31 @@ async function buildSourcePolicyCandidates(
   }
 
   if (draft.serialNumber && draft.policyType === "AUTO") {
-    const serialPolicies = await db.policy.findMany({
-      where: {
-        ...policyOperationalWhere(portfolioOwnerId, organizationId),
-        policyType: "AUTO",
-        status: { in: ["ACTIVE", "EXPIRED", "RENEWED"] },
-        ...(targetStartDate ? { endDate: { lt: targetStartDate } } : {}),
-        insuredAssets: {
-          some: {
-            serialNumber: draft.serialNumber,
-          },
-        },
-      },
-      orderBy: [{ endDate: "desc" }, { startDate: "desc" }, { updatedAt: "desc" }],
-      select: {
-        id: true,
-        policyNumber: true,
-        startDate: true,
-        endDate: true,
-        status: true,
-        clientId: true,
-        insurerId: true,
-        client: { select: { id: true, fullName: true } },
-        insurer: { select: { id: true, name: true } },
-        insuredAssets: {
-          where: { serialNumber: draft.serialNumber },
-          select: {
-            serialNumber: true,
-          },
-          take: 1,
-        },
-      },
-      take: 25,
-    });
-    addRows(serialPolicies as SourceRow[], 8_000, false);
+    const serialCandidates = targetStartDate && clientId
+      ? await findSerialRenewalCandidatesForTarget(db, organizationId, {
+          clientId,
+          policyType: "AUTO",
+          startDate: targetStartDate,
+          serialNumbers: [draft.serialNumber],
+        }, portfolioOwnerId)
+      : [];
+    for (const candidate of serialCandidates) {
+      const option: PolicyCaptureSourceOption = {
+        id: candidate.id,
+        value: candidate.id,
+        label: [candidate.policyNumber, candidate.status, candidate.endDate.toISOString().slice(0, 10), candidate.clientName, candidate.insurerName, `Serie ${candidate.serialNumber}`].join(" · "),
+        policyNumber: candidate.policyNumber,
+        startDate: candidate.startDate.toISOString().slice(0, 10),
+        endDate: candidate.endDate.toISOString().slice(0, 10),
+        status: candidate.status,
+        serialNumber: candidate.serialNumber,
+        clientName: candidate.clientName,
+        insurerName: candidate.insurerName,
+        matchReason: candidate.reason,
+      };
+      const rank = 8_000 + candidate.confidence * 100 + candidate.endDate.getTime() / 1e12;
+      ranked.set(candidate.id, { option, rank, exactNumber: false });
+    }
   }
 
   if (exactNumberVariants.length > 0) {

@@ -54,6 +54,16 @@ export type RenewalBoardCard = {
   canCapture: boolean;
   /** Póliza de renovación ya creada, para conservar la trazabilidad. */
   renewedToPolicyId: string | null;
+  serialRenewalSuggestions: Array<{
+    id: string;
+    targetPolicyId: string;
+    targetPolicyNumber: string;
+    targetInsurerName: string;
+    targetStartDate: Date;
+    targetSerialNumbers: string[];
+    confidence: number | null;
+    reason: string | null;
+  }>;
   manualFollowUp?: {
     id: string;
     dueDate: Date;
@@ -102,7 +112,29 @@ const renewalBoardBaseInclude = {
   },
   insurer: { select: { name: true } },
   renewals: { select: { id: true }, orderBy: [{ createdAt: "desc" as const }, { id: "desc" as const }], take: 1 },
-  sourceRenewalSuggestions: { where: { status: "DECLINED" }, select: { id: true }, take: 1 },
+  sourceRenewalSuggestions: {
+    where: {
+      OR: [
+        { status: "DECLINED" },
+        { status: "PENDING", reason: { startsWith: "Misma serie/VIN" } },
+      ],
+    },
+    select: {
+      id: true,
+      status: true,
+      confidence: true,
+      reason: true,
+      targetPolicy: {
+        select: {
+          id: true,
+          policyNumber: true,
+          startDate: true,
+          insurer: { select: { name: true } },
+          insuredAssets: { select: { serialNumber: true } },
+        },
+      },
+    },
+  },
   ...LATEST_RENEWAL_RECEIPT_INCLUDE,
 } satisfies Prisma.PolicyInclude;
 
@@ -161,7 +193,10 @@ export function buildRenewalBoardWhere(
           ACTIVE_RENEWAL_POLICY_WHERE,
           { status: "RENEWED" },
           { renewalStage: { in: ["WON", "LOST"] } },
-          { sourceRenewalSuggestions: { some: { status: "DECLINED" } } },
+          { sourceRenewalSuggestions: { some: { OR: [
+            { status: "DECLINED" },
+            { status: "PENDING", reason: { startsWith: "Misma serie/VIN" } },
+          ] } } },
         ],
       },
     ],
@@ -176,7 +211,21 @@ type RenewalBoardPolicy = Prisma.PolicyGetPayload<{ include: typeof renewalBoard
  * cuando no tiene nada que hacer en el tablero.
  */
 function toRenewalBoardCard(policy: RenewalBoardPolicy, today: Date): RenewalBoardCard | null {
-  const hasDeclinedSuggestion = policy.sourceRenewalSuggestions.length > 0;
+  const pendingSuggestions = policy.sourceRenewalSuggestions.flatMap((suggestion) =>
+    suggestion.status === "PENDING" && suggestion.reason?.startsWith("Misma serie/VIN") && suggestion.targetPolicy
+      ? [{
+          id: suggestion.id,
+          targetPolicyId: suggestion.targetPolicy.id,
+          targetPolicyNumber: suggestion.targetPolicy.policyNumber,
+          targetInsurerName: suggestion.targetPolicy.insurer.name,
+          targetStartDate: suggestion.targetPolicy.startDate,
+          targetSerialNumbers: suggestion.targetPolicy.insuredAssets.map((asset) => asset.serialNumber).filter((value): value is string => Boolean(value)),
+          confidence: suggestion.confidence === null ? null : Number(suggestion.confidence),
+          reason: suggestion.reason,
+        }]
+      : [],
+  );
+  const hasDeclinedSuggestion = policy.sourceRenewalSuggestions.some((suggestion) => suggestion.status === "DECLINED");
   const stage = resolveRenewalStage({
     policyStatus: policy.status,
     renewalStage: policy.renewalStage,
@@ -187,7 +236,7 @@ function toRenewalBoardCard(policy: RenewalBoardPolicy, today: Date): RenewalBoa
     policy.status,
     policy.endDate,
     getLatestReceiptStatus(policy.receipts),
-  );
+  ) || pendingSuggestions.length > 0;
   if (!eligible && !isTerminalRenewalStage(stage)) return null;
 
   const daysUntilRenewal = daysBetweenBusinessDates(policy.endDate, today);
@@ -223,6 +272,7 @@ function toRenewalBoardCard(policy: RenewalBoardPolicy, today: Date): RenewalBoa
     }),
     canCapture: policy.status !== "RENEWED" && policy.renewals.length === 0,
     renewedToPolicyId: policy.renewals[0]?.id ?? null,
+    serialRenewalSuggestions: pendingSuggestions,
   };
 }
 

@@ -10,6 +10,7 @@ import { upsertWorkItemFromSource } from "@/lib/work-items";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { forEachRenewalCandidate, type RenewalBoardCard } from "@/lib/renewal-board";
 import { withSystemOrganizationTransaction } from "@/lib/organization-context";
+import { syncSerialRenewalSuggestionsForPortfolio } from "@/lib/policy-renewal-match";
 import {
   buildRenewalFollowUpMessage,
   businessWeekKey,
@@ -42,6 +43,7 @@ export type RenewalFollowUpSummary = {
   workItemsUpserted: number;
   workItemsClosed: number;
   notificationsCreated: number;
+  serialSuggestionsCreated: number;
 };
 
 /**
@@ -226,11 +228,13 @@ export async function runRenewalFollowUpScan(
     workItemsUpserted: 0,
     workItemsClosed: 0,
     notificationsCreated: 0,
+    serialSuggestionsCreated: 0,
   };
 
   try {
     await withSystemOrganizationTransaction(organizationId, "renewal follow-up", async (tx) => {
       const weekKey = businessWeekKey(now);
+      summary.serialSuggestionsCreated = await syncSerialRenewalSuggestionsForPortfolio(tx, organizationId);
 
     // Sin alcance de cartera y sin ventana de vencimiento: el job corre para
     // toda la casa y cada aviso se dirige al responsable de la póliza.

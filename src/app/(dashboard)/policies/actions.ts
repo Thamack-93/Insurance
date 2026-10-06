@@ -15,6 +15,7 @@ import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
 import { closeRenewalFollowUp, closeRenewalManualFollowUp } from "@/lib/renewal-followups";
 import { hasPolicyRiskData, policyInsuredObjectForSave, policyRiskDetailsSchema } from "@/lib/policy-risk-details";
 import { syncPolicyRiskRelations } from "@/lib/policy-risk-relations";
+import { findSerialRenewalCandidatesForTarget, syncSerialRenewalSuggestionsForTarget } from "@/lib/policy-renewal-match";
 
 function normalizePolicyInput(values: PolicyFormValues) {
   const parsedRiskDetails = policyRiskDetailsSchema.safeParse(values.riskDetails);
@@ -63,6 +64,43 @@ type RenewalPolicyRecord = {
   familyRootId: string | null;
   status: string;
 };
+
+export async function findPolicyRenewalCandidates(input: {
+  clientId: string;
+  policyType: string;
+  startDate: string;
+  serialNumbers: string[];
+}) {
+  try {
+    const clientId = input?.clientId?.trim();
+    const startDate = parseDateInput(input?.startDate ?? "");
+    const serialNumbers = Array.isArray(input?.serialNumbers)
+      ? input.serialNumbers.filter((serial): serial is string => typeof serial === "string" && serial.trim().length > 0).slice(0, 20)
+      : [];
+    if (!clientId || !startDate || Number.isNaN(startDate.getTime()) || input.policyType !== "AUTO" || serialNumbers.length === 0) return [];
+
+    const context = await requireOrganizationContext();
+    return await withTenantTransaction(context, async (tx) => {
+      const client = await tx.client.findFirst({
+        where: {
+          id: clientId,
+          organizationId: context.organizationId,
+          ...(context.membershipRole === "AGENT" ? { portfolioOwnerId: context.userId } : {}),
+        },
+        select: { id: true },
+      });
+      if (!client) return [];
+      return findSerialRenewalCandidatesForTarget(tx, context.organizationId, {
+        clientId,
+        policyType: input.policyType,
+        startDate,
+        serialNumbers,
+      }, context.membershipRole === "AGENT" ? context.userId : undefined);
+    });
+  } catch {
+    return [];
+  }
+}
 
 async function assertPolicyRelationsInTransaction(
   tx: Prisma.TransactionClient,
@@ -126,8 +164,8 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
     if (renewalSourceId && !renewalSource) {
       return errorResult("La póliza que se va a renovar ya no existe.");
     }
-    if (renewalSource && (renewalSource.clientId !== normalized.clientId || renewalSource.insurerId !== normalized.insurerId)) {
-      return errorResult("La póliza renovada debe pertenecer al mismo cliente y aseguradora.");
+    if (renewalSource && renewalSource.clientId !== normalized.clientId) {
+      return errorResult("La póliza origen debe pertenecer al mismo cliente.");
     }
 
     const familyRootId = await resolvePolicyFamilyRootId({
@@ -169,6 +207,7 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
         },
       });
       await syncPolicyRiskRelations(tx, context.organizationId, createdPolicy.id, parsed.data.riskDetails);
+      if (!renewalSource) await syncSerialRenewalSuggestionsForTarget(tx, context.organizationId, createdPolicy.id);
 
       const receipts = await syncAutoCaptureReceipts(tx, {
         organizationId: context.organizationId,
@@ -298,8 +337,8 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
       if (!nextRenewalSource) {
         return errorResult("La póliza origen ya no existe.");
       }
-      if (nextRenewalSource.clientId !== normalized.clientId || nextRenewalSource.insurerId !== normalized.insurerId) {
-        return errorResult("La póliza destino debe pertenecer al mismo cliente y aseguradora.");
+      if (nextRenewalSource.clientId !== normalized.clientId) {
+        return errorResult("La póliza origen debe pertenecer al mismo cliente.");
       }
     }
 
