@@ -117,19 +117,6 @@ async function main() {
   assert.match(readOnlyApplyAttempt.stderr, /POLICY_RISK_BACKFILL_PRODUCTION_PREVIEW_IS_READ_ONLY/);
 
   const db = getTestDb();
-  const rlsTestEnabled = process.env.POLICY_RISK_BACKFILL_TEST_RLS_ENABLED === "1";
-  let disposableRoleTenantContextConfigured = false;
-  if (rlsTestEnabled) {
-    // This job is explicitly disposable. Keep the legacy auth fixture and
-    // its User-to-membership trigger under the same tenant context after RLS
-    // is forced; production/app credentials never receive this role setting.
-    await db.$executeRawUnsafe(`ALTER ROLE CURRENT_USER SET "app.organization_id" TO '${ORGANIZATION_ID}'`);
-    disposableRoleTenantContextConfigured = true;
-    // Role defaults apply at connection startup, so recycle Prisma's pool
-    // before seeding helpers that issue their own root-client queries.
-    await db.$disconnect();
-    await db.$connect();
-  }
   let fixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
   let ambiguousFixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
   let partyFixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
@@ -751,11 +738,6 @@ async function main() {
       await attemptCleanup("writer-role-schema-grant", () => db.$executeRawUnsafe("REVOKE ALL PRIVILEGES ON SCHEMA public FROM policydesk_backfill"));
       await attemptCleanup("writer-role-owned-privileges", () => db.$executeRawUnsafe("DROP OWNED BY policydesk_backfill"));
       await attemptCleanup("writer-role-drop", () => db.$executeRawUnsafe("DROP ROLE policydesk_backfill"));
-    }
-    if (disposableRoleTenantContextConfigured) {
-      await attemptCleanup("reset-disposable-role-tenant-context", async () => {
-        await db.$executeRawUnsafe('ALTER ROLE CURRENT_USER RESET "app.organization_id"');
-      });
     }
     await attemptCleanup("database-disconnect", () => db.$disconnect());
     if (cleanupFailures.length) throw new Error(`POLICY_RISK_BACKFILL_TEST_CLEANUP_FAILED\n${cleanupFailures.join("\n")}`);

@@ -156,59 +156,65 @@ async function ensureAuthFixture(): Promise<AuthFixture> {
   if (!authFixturePromise) {
     authFixturePromise = (async () => {
       const db = getTestDb();
-      await db.organization.update({ where: { id: "org_legacy_singleton_0001" }, data: { status: "ACTIVE" } });
-      const admin = await db.user.upsert({
-        where: { email: TEST_ADMIN_EMAIL },
-        update: {
-          name: TEST_ADMIN_NAME,
-          active: true,
-          role: "ADMIN",
-        },
-        create: {
-          email: TEST_ADMIN_EMAIL,
-          name: TEST_ADMIN_NAME,
-          passwordHash: hashTestPassword("ci-admin-password"),
-          role: "ADMIN",
-          active: true,
-        },
-      });
+      return db.$transaction(async (tx) => {
+        // The User-to-membership trigger writes a protected tenant row. Seed
+        // and verify that auth fixture inside its explicit singleton context
+        // so forced-RLS tests exercise the same fail-closed policy as runtime.
+        await tx.$queryRaw`SELECT set_config('app.organization_id', ${TEST_ORGANIZATION_ID}, true)`;
+        await tx.organization.update({ where: { id: TEST_ORGANIZATION_ID }, data: { status: "ACTIVE" } });
+        const admin = await tx.user.upsert({
+          where: { email: TEST_ADMIN_EMAIL },
+          update: {
+            name: TEST_ADMIN_NAME,
+            active: true,
+            role: "ADMIN",
+          },
+          create: {
+            email: TEST_ADMIN_EMAIL,
+            name: TEST_ADMIN_NAME,
+            passwordHash: hashTestPassword("ci-admin-password"),
+            role: "ADMIN",
+            active: true,
+          },
+        });
 
-      await db.user.upsert({
-        where: { email: TEST_AGENT_EMAIL },
-        update: {
-          name: TEST_AGENT_NAME,
-          active: true,
-          role: "AGENT",
-        },
-        create: {
-          email: TEST_AGENT_EMAIL,
-          name: TEST_AGENT_NAME,
-          passwordHash: hashTestPassword("ci-agent-password"),
-          role: "AGENT",
-          active: true,
-        },
-      });
+        await tx.user.upsert({
+          where: { email: TEST_AGENT_EMAIL },
+          update: {
+            name: TEST_AGENT_NAME,
+            active: true,
+            role: "AGENT",
+          },
+          create: {
+            email: TEST_AGENT_EMAIL,
+            name: TEST_AGENT_NAME,
+            passwordHash: hashTestPassword("ci-agent-password"),
+            role: "AGENT",
+            active: true,
+          },
+        });
 
-      const agent = await db.user.findUniqueOrThrow({ where: { email: TEST_AGENT_EMAIL } });
-      const memberships = await db.organizationMembership.findMany({
-        where: {
-          organizationId: "org_legacy_singleton_0001",
-          userId: { in: [admin.id, agent.id] },
-          active: true,
-        },
-        select: { userId: true, role: true },
-      });
-      const membershipByUserId = new Map(memberships.map((membership) => [membership.userId, membership.role]));
-      const adminMembershipRole = membershipByUserId.get(admin.id);
-      const agentMembershipRole = membershipByUserId.get(agent.id);
-      if (
-        (adminMembershipRole !== "ADMIN" && adminMembershipRole !== "OWNER") ||
-        agentMembershipRole !== "AGENT"
-      ) {
-        throw new Error("Cycle 1 User-to-membership synchronization did not create the expected test memberships.");
-      }
+        const agent = await tx.user.findUniqueOrThrow({ where: { email: TEST_AGENT_EMAIL } });
+        const memberships = await tx.organizationMembership.findMany({
+          where: {
+            organizationId: TEST_ORGANIZATION_ID,
+            userId: { in: [admin.id, agent.id] },
+            active: true,
+          },
+          select: { userId: true, role: true },
+        });
+        const membershipByUserId = new Map(memberships.map((membership) => [membership.userId, membership.role]));
+        const adminMembershipRole = membershipByUserId.get(admin.id);
+        const agentMembershipRole = membershipByUserId.get(agent.id);
+        if (
+          (adminMembershipRole !== "ADMIN" && adminMembershipRole !== "OWNER") ||
+          agentMembershipRole !== "AGENT"
+        ) {
+          throw new Error("Cycle 1 User-to-membership synchronization did not create the expected test memberships.");
+        }
 
-      return { adminId: admin.id };
+        return { adminId: admin.id };
+      });
     })();
   }
 
