@@ -607,6 +607,9 @@ async function main() {
     reportFiles.push(disposableReviewReport);
     const disposablePreview = runBackfill({ reportFile: disposableReviewReport });
     const disposableReviewManifest = JSON.parse(readFileSync(disposableReviewReport, "utf8")) as PolicyRiskBackfillManifest;
+    for (const candidate of disposableReviewManifest.candidates) {
+      if (candidate.classification === "REVIEW") candidate.decision = "DEFER";
+    }
     disposableReviewManifest.reviewedBy = "ci-admin@policydesk.local";
     disposableReviewManifest.reviewedAt = new Date().toISOString();
     writeFileSync(disposableReviewReport, `${JSON.stringify(disposableReviewManifest, null, 2)}\n`);
