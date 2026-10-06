@@ -137,3 +137,11 @@ El flag de producción permanece `QUALITAS_PAYMENT_LINK_ENABLED=false`. No ejecu
   paralelos y cualquier reanudación automática tras `STARTED`.
 - **Sólo pruebas:** fixtures estáticos y pruebas Vitest cubren parser/builders; el script
   `check:qualitas-flow` sólo ejecuta el GET live opt-in y acotado.
+
+## Consulta de recibos domiciliados
+
+La consulta de recibos es un flujo aparte de la solicitud de liga. Usa la búsqueda de póliza y, si hace falta, solo la navegación GET observada a `pago-tdc`; nunca envía datos de contacto ni ejecuta el POST `envia-link-pago`. El parser solo acepta filas visibles con columnas identificables de recibo y vencimiento. Cambio de página, challenge, timeout o fechas sin correspondencia local produce `INCONCLUSIVE` y no modifica recibos.
+
+En PolicyDesk, **Consultar portal** compara el próximo vencimiento Quálitas con recibos locales abiertos. Solo propone el primer recibo como probablemente pagado cuando la siguiente fecha del portal coincide exactamente con la segunda fecha local. El usuario debe confirmarlo para registrar el pago con método `DOMICILIATED` y fecha de consulta. Ese método se rechaza para frecuencias `ANNUAL` y `SINGLE`; no cambia la frecuencia de la póliza.
+
+La revisión diaria requiere `QUALITAS_RECEIPT_MONITOR_ENABLED=1`, capacidad Quálitas habilitada y selección explícita en la póliza. La selección solo puede activarse después de una consulta manual concluyente en las últimas 24 horas. El barrido existente `/api/jobs/operational-followups` genera una alerta deduplicada; nunca crea pagos. Estas banderas permanecen apagadas por defecto y las tres pólizas deben validarse manualmente antes de activar la revisión diaria.

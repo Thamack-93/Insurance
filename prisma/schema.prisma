@@ -481,6 +481,7 @@ model Policy {
   currency                  String       @default("MXN")
   paymentFrequency          String
   paymentPlan               String?
+  qualitasReceiptMonitorEnabled Boolean      @default(false)
   insuredObject             String?
   riskDetails               Json?
   riskDetailsReviewRequired Boolean      @default(false)
@@ -541,6 +542,7 @@ model Policy {
   @@index([renewalStage, endDate])
   @@index([organizationId, status, endDate])
   @@index([organizationId, status, insurerId])
+  @@index([organizationId, qualitasReceiptMonitorEnabled, status])
   @@index([organizationId, riskDetailsReviewRequired])
 }
 

@@ -26,6 +26,9 @@ import { policyTypeLabel } from "@/lib/status";
 import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { normalizeReturnTo } from "@/lib/return-to";
 import { getPolicyRiskDetailEntries } from "@/lib/policy-risk-details";
+import { isQualitasInsurerName } from "@/lib/qualitas-payment-link";
+import { QualitasReceiptMonitorPanel } from "@/components/policies/qualitas-receipt-monitor-panel";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 
 const frequencyLabels: Record<string, string> = {
   MONTHLY: "Mensual",
@@ -215,6 +218,9 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
     organizationId: scope.organizationId,
   }, db);
   const paymentsTotal = payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
+  const qualitasMonitorAvailable = isQualitasInsurerName(policy.insurer.name)
+    && process.env.QUALITAS_RECEIPT_MONITOR_ENABLED?.trim() === "1"
+    && (await resolveOrganizationCapability(scope.organizationId, "QUALITAS", db)).enabled;
 
   return (
     <div className="flex flex-col gap-6">
@@ -443,6 +449,14 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
               {policy.notes ? <p className="text-sm text-muted-foreground">{policy.notes}</p> : null}
             </div>
           </SectionCard>
+
+          {isQualitasInsurerName(policy.insurer.name) && policy.status === "ACTIVE" && !["ANNUAL", "SINGLE"].includes(policy.paymentFrequency) ? (
+            <QualitasReceiptMonitorPanel
+              policyId={policy.id}
+              monitorEnabled={policy.qualitasReceiptMonitorEnabled}
+              featureEnabled={qualitasMonitorAvailable}
+            />
+          ) : null}
 
           <SectionCard
             title="Recibos de la póliza"

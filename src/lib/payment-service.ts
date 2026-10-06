@@ -10,6 +10,7 @@ import {
 } from "@/lib/receipt-reconciliation";
 import { isBusinessDateOverdue } from "@/lib/business-dates";
 import { closeCollectionFollowUp } from "@/lib/collection-followups";
+import { supportsDomiciliatedPaymentMethod } from "@/lib/payment-frequency";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -200,6 +201,10 @@ export async function recordPayment(input: RecordPaymentInput, client?: DbClient
 
     if (receipt.status === "CANCELLED") {
       throw new Error("No puedes aplicar pagos a un recibo cancelado.");
+    }
+
+    if (input.paymentMethod === "DOMICILIATED" && !supportsDomiciliatedPaymentMethod(receipt.policy.paymentFrequency)) {
+      throw new Error("El método domiciliado solo aplica a pólizas con recibos fraccionados.");
     }
 
     if (receipt.payments.length > 0) {
