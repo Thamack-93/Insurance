@@ -630,9 +630,12 @@ async function main() {
 
     const mutatePolicyBeforeBatch = process.env.POLICY_RISK_BACKFILL_TEST_MUTATE_POLICY_ID_BEFORE_BATCH;
     if (!productionTarget && process.env.NODE_ENV === "test" && mutatePolicyBeforeBatch) {
-      await prisma.policy.updateMany({
-        where: { id: mutatePolicyBeforeBatch, organizationId, riskDetails: { equals: Prisma.DbNull } },
-        data: { insuredObject: "Concurrent source edit injected by disposable integration test" },
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw(Prisma.sql`SELECT set_config('app.organization_id', ${organizationId}, true)`);
+        await tx.policy.updateMany({
+          where: { id: mutatePolicyBeforeBatch, organizationId, riskDetails: { equals: Prisma.DbNull } },
+          data: { insuredObject: "Concurrent source edit injected by disposable integration test" },
+        });
       });
     }
 
