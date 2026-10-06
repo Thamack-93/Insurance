@@ -18,7 +18,8 @@ test("filters a renewal signal, links to its policy, and removes it after the re
 
     await expect(page.getByRole("heading", { name: "Insights operativos", exact: true })).toBeVisible();
     await expect(page.getByRole("region", { name: "Resumen de señales operativas" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Renovaciones", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(page.locator('[aria-label="Filtrar señales por grupo"]').getByRole("link", { name: "Renovaciones", exact: true }))
+      .toHaveAttribute("aria-current", "page");
     await expect(page.getByText(fixture.clientName, { exact: true })).toBeVisible();
     await expect(page.getByText("Renovación sin iniciar", { exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: fixture.clientName, exact: true })).toHaveAttribute("href", `/policies/${fixture.policyId}`);
