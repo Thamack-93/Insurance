@@ -195,6 +195,37 @@ async function ensureAuthFixture(): Promise<AuthFixture> {
         });
 
         const agent = await tx.user.findUniqueOrThrow({ where: { email: TEST_AGENT_EMAIL } });
+        // Cycle 2A deliberately removes the Cycle 1 synchronization trigger.
+        // Create these disposable test memberships explicitly so the same
+        // auth fixture works both before and after the RLS cutover.
+        const adminMembership = await tx.organizationMembership.findUnique({
+          where: { organizationId_userId: { organizationId: TEST_ORGANIZATION_ID, userId: admin.id } },
+          select: { role: true },
+        });
+        if (!adminMembership) {
+          await tx.organizationMembership.create({
+            data: { id: `om_${admin.id}`, organizationId: TEST_ORGANIZATION_ID, userId: admin.id, role: "ADMIN", active: true },
+          });
+        } else if (adminMembership.role !== "OWNER") {
+          await tx.organizationMembership.update({
+            where: { organizationId_userId: { organizationId: TEST_ORGANIZATION_ID, userId: admin.id } },
+            data: { role: "ADMIN", active: true },
+          });
+        }
+        const agentMembership = await tx.organizationMembership.findUnique({
+          where: { organizationId_userId: { organizationId: TEST_ORGANIZATION_ID, userId: agent.id } },
+          select: { role: true },
+        });
+        if (!agentMembership) {
+          await tx.organizationMembership.create({
+            data: { id: `om_${agent.id}`, organizationId: TEST_ORGANIZATION_ID, userId: agent.id, role: "AGENT", active: true },
+          });
+        } else {
+          await tx.organizationMembership.update({
+            where: { organizationId_userId: { organizationId: TEST_ORGANIZATION_ID, userId: agent.id } },
+            data: { role: "AGENT", active: true },
+          });
+        }
         const memberships = await tx.organizationMembership.findMany({
           where: {
             organizationId: TEST_ORGANIZATION_ID,
@@ -210,7 +241,7 @@ async function ensureAuthFixture(): Promise<AuthFixture> {
           (adminMembershipRole !== "ADMIN" && adminMembershipRole !== "OWNER") ||
           agentMembershipRole !== "AGENT"
         ) {
-          throw new Error("Cycle 1 User-to-membership synchronization did not create the expected test memberships.");
+          throw new Error("Disposable auth fixture did not create the expected tenant memberships.");
         }
 
         return { adminId: admin.id };
