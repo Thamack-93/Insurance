@@ -118,9 +118,9 @@ test.describe("operation queue context", () => {
       await authenticatePageAsAdmin(page);
       await page.goto("/tasks/new");
 
-      const clientSelect = page.getByLabel("Cliente");
-      const policySelect = page.getByLabel("Póliza");
-      const receiptSelect = page.getByLabel("Recibo");
+      const clientSelect = page.getByRole("combobox", { name: "Cliente", exact: true });
+      const policySelect = page.getByRole("combobox", { name: "Póliza", exact: true });
+      const receiptSelect = page.getByRole("combobox", { name: "Recibo", exact: true });
       await expect(policySelect).toBeDisabled();
       await expect(receiptSelect).toBeDisabled();
 
@@ -156,9 +156,9 @@ test.describe("operation queue context", () => {
       await expect(page.getByRole("option", { name: new RegExp(first.policyNumber) })).toHaveCount(0);
 
       await page.goto(`/tasks/${editWorkItemId}/edit`);
-      await expect(page.getByLabel("Cliente")).toContainText(first.clientName);
-      await expect(page.getByLabel("Póliza")).toContainText(new RegExp(first.policyNumber));
-      await expect(page.getByLabel("Recibo")).toContainText(firstReceiptNumber);
+      await expect(page.getByRole("combobox", { name: "Cliente", exact: true })).toContainText(first.clientName);
+      await expect(page.getByRole("combobox", { name: "Póliza", exact: true })).toContainText(new RegExp(first.policyNumber));
+      await expect(page.getByRole("combobox", { name: "Recibo", exact: true })).toContainText(firstReceiptNumber);
     } finally {
       if (alternatePolicyId) await db.policy.delete({ where: { id: alternatePolicyId } }).catch(() => undefined);
       await cleanupPolicyFixture(first);
