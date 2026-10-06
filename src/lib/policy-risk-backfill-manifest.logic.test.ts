@@ -16,6 +16,7 @@ function manifest(): PolicyRiskBackfillManifest {
     runId: "run-1",
     createdAt: "2026-10-05T12:00:00.000Z",
     sourceMode: "DISPOSABLE_DRY_RUN",
+    sourceTarget: null,
     organizationId: "org-1",
     candidateSha: "abc123",
     scanned: 1,
@@ -58,6 +59,19 @@ describe("policy risk backfill reviewed manifest", () => {
   it("binds the manifest digest to its source mode", () => {
     const value = manifest();
     value.sourceMode = "PRODUCTION_READ_ONLY_PREVIEW";
+    value.sourceTarget = { host: "db.example.neon.tech", database: "policydesk" };
+    expect(() => assertReviewedPolicyRiskBackfillManifest(value, { organizationId: "org-1", candidateSha: "abc123", processorSha256: "processor-1" }))
+      .toThrow("POLICY_RISK_BACKFILL_MANIFEST_CONTENT_HASH_MISMATCH");
+  });
+
+  it("binds a Production preview to its canonical host and database", () => {
+    const value = manifest();
+    value.sourceMode = "PRODUCTION_READ_ONLY_PREVIEW";
+    value.sourceTarget = { host: "db.example.neon.tech", database: "policydesk" };
+    value.contentSha256 = policyRiskBackfillManifestContentHash(value);
+    value.candidates[0].decision = "ACCEPT";
+    expect(() => assertReviewedPolicyRiskBackfillManifest(value, { organizationId: "org-1", candidateSha: "abc123", processorSha256: "processor-1" })).not.toThrow();
+    value.sourceTarget.database = "other-db";
     expect(() => assertReviewedPolicyRiskBackfillManifest(value, { organizationId: "org-1", candidateSha: "abc123", processorSha256: "processor-1" }))
       .toThrow("POLICY_RISK_BACKFILL_MANIFEST_CONTENT_HASH_MISMATCH");
   });

@@ -175,6 +175,18 @@ async function scanProductionReadOnly(prisma: PrismaClient, organizationId: stri
 }
 
 const PRODUCTION_APPLY_COLUMN_PRIVILEGES = new Map<string, Map<string, Set<string>>>([
+  ["Organization", new Map([
+    ["SELECT", new Set(["id", "status"])],
+    ["UPDATE", new Set(["updatedAt"])],
+  ])],
+  ["OrganizationMembership", new Map([
+    ["SELECT", new Set(["id", "organizationId", "userId", "role", "active"])],
+    ["UPDATE", new Set(["updatedAt"])],
+  ])],
+  ["User", new Map([
+    ["SELECT", new Set(["id", "email", "active"])],
+    ["UPDATE", new Set(["updatedAt"])],
+  ])],
   ["Policy", new Map([
     ["SELECT", new Set(["id", "organizationId", "policyNumber", "policyType", "insuredObject", "beneficiaryInfo", "riskDetails"])],
     ["UPDATE", new Set(["riskDetails", "insuredObject", "riskDetailsReviewRequired", "updatedAt"])],
@@ -307,7 +319,7 @@ async function assertProductionApplyRole(tx: Prisma.TransactionClient, target: P
     FROM pg_class relation
     JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
     WHERE namespace.nspname = 'public'
-      AND relation.relname = ANY(ARRAY['Policy', 'PolicyInsuredAsset', 'PolicyInsuredParty', 'MaintenanceRun'])
+      AND relation.relname = ANY(ARRAY['Organization', 'OrganizationMembership', 'User', 'Policy', 'PolicyInsuredAsset', 'PolicyInsuredParty', 'MaintenanceRun'])
       AND pg_catalog.pg_get_userbyid(relation.relowner) = current_user
   `);
   if (ownership.length) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE_OWNS_PROTECTED_OBJECTS");
@@ -373,7 +385,7 @@ async function assertProductionApplyRole(tx: Prisma.TransactionClient, target: P
     JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
     WHERE namespace.nspname = 'public' AND relation.relname IN ('Policy', 'PolicyInsuredAsset', 'PolicyInsuredParty', 'MaintenanceRun')
   `);
-  if (rlsRows.length !== PRODUCTION_APPLY_COLUMN_PRIVILEGES.size || rlsRows.some((row) => !row.enabled || !row.forced)) {
+  if (rlsRows.length !== 4 || rlsRows.some((row) => !row.enabled || !row.forced)) {
     throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_RLS_NOT_FORCED");
   }
 
@@ -387,7 +399,7 @@ async function assertProductionApplyRole(tx: Prisma.TransactionClient, target: P
     JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
     WHERE namespace.nspname = 'public' AND relation.relname IN ('Policy', 'PolicyInsuredAsset', 'PolicyInsuredParty', 'MaintenanceRun')
   `);
-  if (policyRows.length !== PRODUCTION_APPLY_COLUMN_PRIVILEGES.size || policyRows.some((policy) =>
+  if (policyRows.length !== 4 || policyRows.some((policy) =>
     policy.policyName !== "policydesk_tenant_context" || policy.command !== "*" || !policy.permissive || policy.roles !== "{0}" ||
     normalizeTenantPolicyExpression(policy.usingExpression) !== EXPECTED_TENANT_POLICY ||
     normalizeTenantPolicyExpression(policy.checkExpression) !== EXPECTED_TENANT_POLICY
@@ -399,6 +411,7 @@ async function assertProductionApplyRole(tx: Prisma.TransactionClient, target: P
 async function withProductionApplyTransaction<T>(
   target: ProductionApplyTarget,
   organizationId: string,
+  reviewer: string,
   work: (tx: Prisma.TransactionClient) => Promise<T>,
 ) {
   return target.prisma.$transaction(async (tx) => {
@@ -407,8 +420,24 @@ async function withProductionApplyTransaction<T>(
     `);
     if (tenantContext[0]?.organizationId !== organizationId) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_TENANT_CONTEXT_FAILED");
     await assertProductionApplyRole(tx, target);
+    const authorization = await tx.$queryRaw<Array<{ organizationId: string }>>(Prisma.sql`
+      SELECT organization.id AS "organizationId"
+      FROM "Organization" organization
+      JOIN "OrganizationMembership" membership ON membership."organizationId" = organization.id
+      JOIN "User" actor ON actor.id = membership."userId"
+      WHERE organization.id = ${organizationId}
+        AND organization.status = 'ACTIVE'
+        AND membership.active
+        AND membership.role IN ('OWNER', 'ADMIN')
+        AND actor.active
+        AND lower(actor.email) = lower(${reviewer})
+      FOR UPDATE OF organization, membership, actor
+    `);
+    if (authorization[0]?.organizationId !== organizationId) {
+      throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REVIEWER_NOT_ACTIVE_ORGANIZATION_ADMIN");
+    }
     return work(tx);
-  });
+  }, { maxWait: 10_000, timeout: 30_000 });
 }
 
 async function writePrivateManifest(file: string, manifest: unknown) {
@@ -505,6 +534,10 @@ async function main() {
         runId: randomUUID(),
         createdAt: new Date().toISOString(),
         sourceMode: productionPreview ? "PRODUCTION_READ_ONLY_PREVIEW" : "DISPOSABLE_DRY_RUN",
+        sourceTarget: productionPreview ? {
+          host: new URL(connectionString).hostname.toLowerCase(),
+          database: decodeURIComponent(new URL(connectionString).pathname.replace(/^\//, "").split("?")[0]),
+        } : null,
         organizationId,
         candidateSha: sha,
         scanned: candidates.length,
@@ -537,6 +570,9 @@ async function main() {
     if (manifest.reviewedBy?.trim() !== reviewer || !manifest.reviewedAt) throw new Error("POLICY_RISK_BACKFILL_REVIEWER_MISMATCH");
     assertReviewedPolicyRiskBackfillManifest(manifest, { organizationId, candidateSha: sha, processorSha256: processor });
     if (productionApply && manifest.sourceMode !== "PRODUCTION_READ_ONLY_PREVIEW") throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REQUIRES_PRODUCTION_PREVIEW_MANIFEST");
+    if (productionApply && (!productionTarget || manifest.sourceTarget?.host !== productionTarget.host || manifest.sourceTarget.database !== productionTarget.database)) {
+      throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_PREVIEW_TARGET_MISMATCH");
+    }
     if (!productionApply && manifest.sourceMode !== "DISPOSABLE_DRY_RUN") throw new Error("POLICY_RISK_BACKFILL_DISPOSABLE_APPLY_REQUIRES_DISPOSABLE_MANIFEST");
     const reviewedManifestSha256 = expectedManifestSha;
 
@@ -547,7 +583,7 @@ async function main() {
     }
 
     const current = productionTarget
-      ? await withProductionApplyTransaction(productionTarget, organizationId, (tx) => scanAll(tx, organizationId))
+      ? await withProductionApplyTransaction(productionTarget, organizationId, reviewer, (tx) => scanAll(tx, organizationId))
       : await scanAll(prisma, organizationId);
     const expectedById = new Map(manifest.candidates.map((row) => [row.policyId, row]));
     for (const row of current) {
@@ -569,7 +605,7 @@ async function main() {
       })
       : [];
     const alreadyApplied = productionTarget
-      ? await withProductionApplyTransaction(productionTarget, organizationId, loadAlreadyApplied)
+      ? await withProductionApplyTransaction(productionTarget, organizationId, reviewer, loadAlreadyApplied)
       : await loadAlreadyApplied(prisma);
     const appliedById = new Map(alreadyApplied.map((row) => [row.id, row]));
     for (const row of alreadyAppliedRows) {
@@ -602,7 +638,7 @@ async function main() {
       select: { id: true },
     });
     const run = productionTarget
-      ? await withProductionApplyTransaction(productionTarget, organizationId, createRun)
+      ? await withProductionApplyTransaction(productionTarget, organizationId, reviewer, createRun)
       : await createRun(prisma);
     let converted = 0;
     let deferred = 0;
@@ -613,7 +649,7 @@ async function main() {
     const outcomes: Array<{ policyId: string; policyNumber: string; inputHash: string; outcome: "APPLIED" | "ALREADY_APPLIED" | "DEFERRED" | "EMPTY" }> = [];
     const resultFile = `${reviewedFile}.${run.id}.results.json`;
     const updateRun = async (data: Prisma.MaintenanceRunUpdateInput) => productionTarget
-      ? withProductionApplyTransaction(productionTarget, organizationId, (tx) => tx.maintenanceRun.update({ where: { id: run.id, organizationId }, data, select: { id: true } }))
+      ? withProductionApplyTransaction(productionTarget, organizationId, reviewer, (tx) => tx.maintenanceRun.update({ where: { id: run.id, organizationId }, data, select: { id: true } }))
       : prisma.maintenanceRun.update({ where: { id: run.id, organizationId }, data, select: { id: true } });
     try {
       for (let offset = 0; offset < manifest.candidates.length; offset += requestedBatchSize) {
@@ -698,7 +734,7 @@ async function main() {
             }
           }
         };
-        if (productionTarget) await withProductionApplyTransaction(productionTarget, organizationId, applyBatch);
+        if (productionTarget) await withProductionApplyTransaction(productionTarget, organizationId, reviewer, applyBatch);
         else await prisma.$transaction(applyBatch);
         converted += batchCounts.converted;
         deferred += batchCounts.deferred;

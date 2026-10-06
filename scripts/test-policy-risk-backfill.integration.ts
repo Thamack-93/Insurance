@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { policyRiskBackfillReviewedHash, type PolicyRiskBackfillManifest } from "../src/lib/policy-risk-backfill-manifest.ts";
+import { policyRiskBackfillManifestContentHash, policyRiskBackfillReviewedHash, type PolicyRiskBackfillManifest } from "../src/lib/policy-risk-backfill-manifest.ts";
 import { Prisma, PrismaClient } from "../src/generated/prisma/client.ts";
 import { cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../tests/helpers/db.ts";
 import { assertDisposableCertificationTarget } from "./tenant-certification-target.mjs";
@@ -23,6 +23,28 @@ async function withOrganizationContext<T>(
     await tx.$queryRaw(Prisma.sql`SELECT set_config('app.organization_id', ${organizationId}, true)`);
     return work(tx);
   });
+}
+
+function createTenantScopedTestClient(db: PrismaClient): PrismaClient {
+  return new Proxy(db, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target) as unknown;
+      if (typeof property !== "string" || property.startsWith("$") || property === "organization") {
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      if (!value || typeof value !== "object") return value;
+      return new Proxy(value, {
+        get(delegate, operation) {
+          const method = Reflect.get(delegate, operation, delegate) as unknown;
+          if (typeof method !== "function") return method;
+          return (...args: unknown[]) => withOrganizationContext(target, ORGANIZATION_ID, async (tx) => {
+            const transactionDelegate = Reflect.get(tx, property, tx) as Record<PropertyKey, (...operationArgs: unknown[]) => Promise<unknown>>;
+            return transactionDelegate[operation](...args);
+          });
+        },
+      });
+    },
+  }) as PrismaClient;
 }
 
 type BackfillReport = {
@@ -116,7 +138,10 @@ async function main() {
   assert.equal(readOnlyApplyAttempt.status, 1);
   assert.match(readOnlyApplyAttempt.stderr, /POLICY_RISK_BACKFILL_PRODUCTION_PREVIEW_IS_READ_ONLY/);
 
-  const db = getTestDb();
+  const rawDb = getTestDb();
+  const db = process.env.POLICY_RISK_BACKFILL_TEST_RLS_ENABLED === "1"
+    ? createTenantScopedTestClient(rawDb)
+    : rawDb;
   let fixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
   let ambiguousFixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
   let partyFixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
@@ -181,6 +206,12 @@ async function main() {
     await db.$executeRawUnsafe(`CREATE ROLE policydesk_backfill LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '${writerPassword}'`);
     writerRoleCreated = true;
     await db.$executeRawUnsafe('GRANT USAGE ON SCHEMA public TO policydesk_backfill');
+    await db.$executeRawUnsafe('GRANT SELECT ("id", "status") ON TABLE "Organization" TO policydesk_backfill');
+    await db.$executeRawUnsafe('GRANT UPDATE ("updatedAt") ON TABLE "Organization" TO policydesk_backfill');
+    await db.$executeRawUnsafe('GRANT SELECT ("id", "organizationId", "userId", "role", "active") ON TABLE "OrganizationMembership" TO policydesk_backfill');
+    await db.$executeRawUnsafe('GRANT UPDATE ("updatedAt") ON TABLE "OrganizationMembership" TO policydesk_backfill');
+    await db.$executeRawUnsafe('GRANT SELECT ("id", "email", "active") ON TABLE "User" TO policydesk_backfill');
+    await db.$executeRawUnsafe('GRANT UPDATE ("updatedAt") ON TABLE "User" TO policydesk_backfill');
     await db.$executeRawUnsafe('GRANT SELECT ("id", "organizationId", "policyNumber", "policyType", "insuredObject", "beneficiaryInfo", "riskDetails") ON TABLE "Policy" TO policydesk_backfill');
     await db.$executeRawUnsafe('GRANT UPDATE ("riskDetails", "insuredObject", "riskDetailsReviewRequired", "updatedAt") ON TABLE "Policy" TO policydesk_backfill');
     await db.$executeRawUnsafe('GRANT SELECT ("id", "organizationId", "policyId", "assetType", "description", "serialNumber", "isPrimary", "createdAt") ON TABLE "PolicyInsuredAsset" TO policydesk_backfill');
@@ -475,14 +506,14 @@ async function main() {
     assert.ok(writerManifest.candidates.some((row) => row.policyId === productionBackfillFixture.policyId));
     assert.ok(writerManifest.candidates.every((row) => row.policyId !== secondPolicy.id), "organization A preview must exclude organization B candidates");
     for (const row of writerManifest.candidates) if (row.classification === "REVIEW") row.decision = "DEFER";
-    writerManifest.reviewedBy = "integration-production-reviewer";
+    writerManifest.reviewedBy = "ci-admin@policydesk.local";
     writerManifest.reviewedAt = new Date().toISOString();
     writeFileSync(writerPreview.reportFile!, `${JSON.stringify(writerManifest, null, 2)}\n`);
     const writerReviewedDigest = runBackfill({
       printReviewedDigest: true,
       reportFile: writerPreview.reportFile!,
       previewSha256: writerPreview.manifestSha256,
-      reviewer: "integration-production-reviewer",
+      reviewer: "ci-admin@policydesk.local",
     });
     assert.ok("reviewedManifestSha256" in writerReviewedDigest);
 
@@ -554,7 +585,7 @@ async function main() {
         productionDatabase: overrides.productionDatabase ?? productionDatabase,
         reportFile: overrides.reportFile ?? writerPreview.reportFile!,
         manifestSha256: overrides.manifestSha256 ?? writerReviewedDigest.reviewedManifestSha256,
-        reviewer: overrides.reviewer ?? "integration-production-reviewer",
+        reviewer: overrides.reviewer ?? "ci-admin@policydesk.local",
         batchSize: overrides.batchSize ?? 1,
         printReviewedDigest: false,
       }),
@@ -566,6 +597,27 @@ async function main() {
     assertWriterRejected("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REQUIRES_PRODUCTION_PREVIEW_MANIFEST", {
       reportFile,
       manifestSha256: reviewedDigestAfterDecision.reviewedManifestSha256,
+    });
+
+    const foreignTargetReport = temporaryReportPath();
+    reportFiles.push(foreignTargetReport);
+    const foreignTargetManifest: PolicyRiskBackfillManifest = {
+      ...writerManifest,
+      sourceTarget: { host: productionHost, database: `${productionDatabase}-other` },
+      contentSha256: "",
+    };
+    foreignTargetManifest.contentSha256 = policyRiskBackfillManifestContentHash(foreignTargetManifest);
+    writeFileSync(foreignTargetReport, `${JSON.stringify(foreignTargetManifest, null, 2)}\n`);
+    const foreignTargetDigest = runBackfill({
+      printReviewedDigest: true,
+      reportFile: foreignTargetReport,
+      previewSha256: foreignTargetManifest.contentSha256,
+      reviewer: "ci-admin@policydesk.local",
+    });
+    assert.ok("reviewedManifestSha256" in foreignTargetDigest);
+    assertWriterRejected("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_PREVIEW_TARGET_MISMATCH", {
+      reportFile: foreignTargetReport,
+      manifestSha256: foreignTargetDigest.reviewedManifestSha256,
     });
 
     await db.$executeRawUnsafe('GRANT DELETE ON TABLE "Policy" TO policydesk_backfill');
@@ -588,7 +640,7 @@ async function main() {
         productionDatabase,
         reportFile: writerPreview.reportFile!,
         manifestSha256: writerReviewedDigest.reviewedManifestSha256,
-        reviewer: "integration-production-reviewer",
+        reviewer: "ci-admin@policydesk.local",
         batchSize: 1,
         failWithinBatchAfterAppliedRows: 1,
       }),
@@ -615,7 +667,7 @@ async function main() {
         productionDatabase,
         reportFile: writerPreview.reportFile!,
         manifestSha256: writerReviewedDigest.reviewedManifestSha256,
-        reviewer: "integration-production-reviewer",
+        reviewer: "ci-admin@policydesk.local",
         batchSize: 1,
         failAfterAppliedBatches: 1,
       }),
@@ -642,8 +694,8 @@ async function main() {
       productionDatabase,
       reportFile: writerPreview.reportFile!,
       manifestSha256: writerReviewedDigest.reviewedManifestSha256,
-      reviewer: "integration-production-reviewer",
-      batchSize: 1,
+      reviewer: "ci-admin@policydesk.local",
+      batchSize: 50,
     });
     assert.ok("mode" in writerResume);
     assert.equal(writerResume.mode, "apply");

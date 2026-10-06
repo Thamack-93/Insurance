@@ -55,7 +55,8 @@ manifest digest in `MaintenanceRun`. A changed candidate, processor,
 organization, or source row stops before writes. Batches commit independently;
 there is no global rollback after earlier batches commit. Recovery is to rerun
 the exact reviewed manifest, which validates already-applied rows and resumes
-without duplicating relations.
+without duplicating relations. Each production batch transaction has a 10 second
+connection wait limit and a 30 second execution timeout.
 
 ## Optional read-only Production preview
 
@@ -70,6 +71,15 @@ npm run backfill:policy-risk-details -- \
   --production-preview --organization-id=ORG_ID \
   --report-file=/private/tmp/policy-risk-backfill-preview.json
 ```
+
+Set these environment variables for the preview process so it can validate
+and bind the target identity into the immutable manifest digest:
+`POLICY_RISK_BACKFILL_PRODUCTION_HOST` (canonical database host),
+`POLICY_RISK_BACKFILL_PRODUCTION_DATABASE` (database name),
+`POLICY_RISK_BACKFILL_READONLY_DATABASE_URL`, and
+`POLICY_RISK_BACKFILL_READONLY_ROLE=policydesk_readonly`. The apply process
+must target the exact same host and database recorded in that reviewed
+manifest.
 
 The mode starts one `REPEATABLE READ, READ ONLY` transaction, checks the actual
 PostgreSQL role, verifies it has no write privileges on the organization and
@@ -88,7 +98,9 @@ certified. Production apply requires a manifest produced by the matching
 Production read-only preview, its reviewed digest, the ordinary apply
 confirmation, a second Production-specific confirmation, a fixed
 `policydesk_backfill` login role, exact expected host and database bindings,
-and batches no larger than 50. It rejects Vercel execution, non-Production
+and batches no larger than 50. `--reviewed-by` must be the email of an active
+`OWNER` or `ADMIN` member of the selected organization. Every write transaction
+locks and revalidates that user, membership, and organization. It rejects Vercel execution, non-Production
 environments, non-`verify-full` TLS, role memberships, object ownership,
 table-level grants, excess column/sequence/schema privileges, and RLS policies
 that differ from the exact tenant `USING` and `WITH CHECK` predicates.
