@@ -400,7 +400,7 @@ async function assertProductionApplyRole(tx: Prisma.TransactionClient, target: P
   }
 
   const policyRows = await tx.$queryRaw<Array<{ tableName: string; policyName: string; command: string; permissive: boolean; roles: string; usingExpression: string | null; checkExpression: string | null }>>(Prisma.sql`
-    SELECT relation.relname AS "tableName", policy.polname AS "policyName", policy.polcmd AS "command",
+    SELECT relation.relname AS "tableName", policy.polname AS "policyName", policy.polcmd::text AS "command",
       policy.polpermissive AS "permissive", policy.polroles::text AS "roles",
       pg_get_expr(policy.polqual, policy.polrelid) AS "usingExpression",
       pg_get_expr(policy.polwithcheck, policy.polrelid) AS "checkExpression"
