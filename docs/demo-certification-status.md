@@ -12,7 +12,7 @@ El inventario y la evidencia operativa vigentes están en [insurance-closure-tra
 ## Aplicación, CI y Production
 
 - El código de aplicación actualmente registrado en Production es `cfd223e90ff4a37f2ba493bad36b6625569c82d3`, en el alias `policypete.vercel.app`.
-- El deployment documental más reciente que registra el tracker es `1613560ca61a6a284a319a4533bbc6471c7dcb12`, estado `READY`. Un deployment documental no cambia el SHA de aplicación.
+- Vercel Production está `READY` en SHA `df20aa241fd9ecadac397339c629146bad37a55a` (deployment `dpl_4i9iZbHXZ85YxH2uZ41FBU33aLix`), verificado contra la API de Vercel el 2026-10-05. Es un merge documental; no cambia el SHA de aplicación.
 - GitHub Actions Release Certification #464 terminó `SUCCESS` en el head documental `b8d16e5` de PR #82. Pasaron quality, tenant-isolation y application, incluidos PostgreSQL desechable, RLS, API, Chromium E2E y restore/backfill integration. Esta evidencia corresponde al SHA exacto del run; exige nueva certificación exact-SHA ante futuros cambios de aplicación.
 - La revisión autenticada de solo lectura confirmó que Insights, el tablero de renovaciones y el editor WorkItem cargan en Production. Se observaron señales de renovación antiguas que requieren triage operativo; no se modificaron registros.
 
