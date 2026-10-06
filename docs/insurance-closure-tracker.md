@@ -18,7 +18,7 @@ Los otros cuatro chats permanecen abiertos hasta cerrar los entregables transfer
 ## Estado verificado
 
 - PR #73 (campos estructurados por ramo), #78 (reporte auditable de backfill) y #80 (preview read-only) están integrados.
-- Vercel Production: el último deployment documental está `READY` en SHA `1613560ca61a6a284a319a4533bbc6471c7dcb12`; el código de aplicación sigue en `cfd223e90ff4a37f2ba493bad36b6625569c82d3`, alias `policypete.vercel.app`.
+- Vercel Production: deployment actual `READY` en SHA `df20aa241fd9ecadac397339c629146bad37a55a` (deployment `dpl_4i9iZbHXZ85YxH2uZ41FBU33aLix`); el código de aplicación sigue en `cfd223e90ff4a37f2ba493bad36b6625569c82d3`, alias `policypete.vercel.app`. El cambio de `df20aa` fue documental.
 - GitHub Actions run #464 terminó `SUCCESS` en el head `b8d16e5` de PR #82: quality, tenant-isolation y application. Application incluyó restore/backfill integration en PostgreSQL desechable, build, API y E2E; tenant-isolation pasó migraciones, fixture de dos organizaciones, RLS y Chromium E2E con rol restringido. La base desechable se eliminó.
 - La certificación local previa del snapshot exacto `cfd223e` pasó build, 16 tests tenant, RLS (42 tablas, 27 checks de contexto, 24 workers), drift, auditoría multi-org y 11 tests API/browser. Es evidencia complementaria, no reemplazo de CI.
 - Insights autenticado cargó en Production: 121 renovaciones, 1 señal de cobranza, 0 siniestros y 4 de trabajo. La primera página incluye renovaciones vencidas desde 2024/2025. Es backlog operativo que requiere revisión humana; no se modificaron registros.
