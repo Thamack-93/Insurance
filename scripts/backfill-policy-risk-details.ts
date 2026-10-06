@@ -613,8 +613,8 @@ async function main() {
     const outcomes: Array<{ policyId: string; policyNumber: string; inputHash: string; outcome: "APPLIED" | "ALREADY_APPLIED" | "DEFERRED" | "EMPTY" }> = [];
     const resultFile = `${reviewedFile}.${run.id}.results.json`;
     const updateRun = async (data: Prisma.MaintenanceRunUpdateInput) => productionTarget
-      ? withProductionApplyTransaction(productionTarget, organizationId, (tx) => tx.maintenanceRun.update({ where: { id: run.id }, data, select: { id: true } }))
-      : prisma.maintenanceRun.update({ where: { id: run.id }, data, select: { id: true } });
+      ? withProductionApplyTransaction(productionTarget, organizationId, (tx) => tx.maintenanceRun.update({ where: { id: run.id, organizationId }, data, select: { id: true } }))
+      : prisma.maintenanceRun.update({ where: { id: run.id, organizationId }, data, select: { id: true } });
     try {
       for (let offset = 0; offset < manifest.candidates.length; offset += requestedBatchSize) {
         const batch = manifest.candidates.slice(offset, offset + requestedBatchSize);

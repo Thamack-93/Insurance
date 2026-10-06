@@ -692,7 +692,7 @@ async function main() {
         cleanupFailures.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
       }
     };
-    if (maintenanceRunIds.length) await attemptCleanup("maintenance-runs", () => db.maintenanceRun.deleteMany({ where: { id: { in: maintenanceRunIds } } }));
+    if (maintenanceRunIds.length) await attemptCleanup("maintenance-runs", () => db.maintenanceRun.deleteMany({ where: { organizationId: ORGANIZATION_ID, id: { in: maintenanceRunIds } } }));
     for (const file of reportFiles) await attemptCleanup(`manifest:${path.basename(file)}`, () => rmSync(file, { force: true }));
     for (const file of resultFiles) await attemptCleanup(`result:${path.basename(file)}`, () => rmSync(file, { force: true }));
     for (const item of [fixture, ambiguousFixture, partyFixture, productionFixture]) {
@@ -701,10 +701,10 @@ async function main() {
     if (secondOrganizationPolicyId) {
       await attemptCleanup("second-org-assets", () => db.policyInsuredAsset.deleteMany({ where: { organizationId: secondOrganizationId!, policyId: secondOrganizationPolicyId! } }));
       await attemptCleanup("second-org-parties", () => db.policyInsuredParty.deleteMany({ where: { organizationId: secondOrganizationId!, policyId: secondOrganizationPolicyId! } }));
-      await attemptCleanup("second-org-policy", () => db.policy.deleteMany({ where: { id: secondOrganizationPolicyId! } }));
+      await attemptCleanup("second-org-policy", () => db.policy.deleteMany({ where: { id: secondOrganizationPolicyId!, organizationId: secondOrganizationId! } }));
     }
-    if (secondOrganizationClientId) await attemptCleanup("second-org-client", () => db.client.deleteMany({ where: { id: secondOrganizationClientId! } }));
-    if (secondOrganizationInsurerId) await attemptCleanup("second-org-insurer", () => db.insurer.deleteMany({ where: { id: secondOrganizationInsurerId! } }));
+    if (secondOrganizationClientId) await attemptCleanup("second-org-client", () => db.client.deleteMany({ where: { id: secondOrganizationClientId!, organizationId: secondOrganizationId! } }));
+    if (secondOrganizationInsurerId) await attemptCleanup("second-org-insurer", () => db.insurer.deleteMany({ where: { id: secondOrganizationInsurerId!, organizationId: secondOrganizationId! } }));
     if (secondOrganizationId) await attemptCleanup("second-organization", () => db.organization.deleteMany({ where: { id: secondOrganizationId! } }));
     if (readonlyRoleCreated) {
       await attemptCleanup("readonly-role-grants", () => db.$executeRawUnsafe("REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM policydesk_readonly"));
