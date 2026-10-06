@@ -110,3 +110,18 @@ PostgreSQL integration suite has exercised writer-role acceptance and rejection,
 RLS isolation, rollback, and exact-manifest resume on this candidate SHA, and a
 separate reviewer has approved the final security diff. No Production apply has
 been run as part of this implementation.
+
+The writer role uses these exact column privileges; keep its database grants
+and the CLI allowlist aligned. `UPDATE(updatedAt)` on the locked tenant rows
+permits `SELECT ... FOR UPDATE` while the data columns remain read-only. The
+timestamps on `MaintenanceRun` are required by Prisma inserts.
+
+| Table | SELECT | INSERT | UPDATE |
+| --- | --- | --- | --- |
+| `Organization` | `id, status` | — | `updatedAt` |
+| `OrganizationMembership` | `id, organizationId, userId, role, active` | — | `updatedAt` |
+| `User` | `id, email, active` | — | `updatedAt` |
+| `Policy` | `id, organizationId, policyNumber, policyType, insuredObject, beneficiaryInfo, riskDetails` | — | `riskDetails, insuredObject, riskDetailsReviewRequired, updatedAt` |
+| `PolicyInsuredAsset` | `id, organizationId, policyId, assetType, description, serialNumber, isPrimary, createdAt, updatedAt` | same as SELECT | `updatedAt` |
+| `PolicyInsuredParty` | `id, organizationId, policyId, fullName, isPrimary, sourceLabel, createdAt, updatedAt` | same as SELECT | `updatedAt` |
+| `MaintenanceRun` | `id, organizationId` | `id, organizationId, type, status, summaryJson, createdAt, startedAt, updatedAt` | `status, completedAt, summaryJson, updatedAt` |
