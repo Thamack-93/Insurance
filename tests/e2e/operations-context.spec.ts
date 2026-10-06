@@ -392,7 +392,6 @@ test.describe("operation queue context", () => {
     const fixture = await seedPolicyFixture("OPERATIONS-EDIT-WORKITEM");
     const sourceId = `e2e-ordinary-work-item-${Date.now()}`;
     const title = `Pendiente ordinario ${Date.now()}`;
-    const updatedTitle = `${title} actualizado`;
 
     try {
       const created = await db.workItem.create({
@@ -422,7 +421,9 @@ test.describe("operation queue context", () => {
       await page.goto(`/tasks/${sourceId}/edit?returnTo=${encodeURIComponent("/operations?view=pending")}`, { waitUntil: "load" });
       await expect(page).toHaveURL(new RegExp(`/tasks/${sourceId}/edit(?:\\?.*)?$`));
       await expect(page.getByText("Edición de pendiente", { exact: true })).toBeVisible();
-      await page.getByLabel("Título").fill(updatedTitle);
+      const priorityControl = page.locator('[aria-label="Prioridad"]');
+      await priorityControl.click();
+      await page.getByRole("option", { name: "Alta", exact: true }).click();
       const statusControl = page.locator('[aria-label="Estado"]');
       await expect(statusControl).toBeVisible();
       await statusControl.click();
@@ -432,8 +433,8 @@ test.describe("operation queue context", () => {
 
       await expect.poll(async () => {
         const item = await db.workItem.findUnique({ where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "WorkItem", sourceId } } });
-        return item ? { id: item.id, organizationId: item.organizationId, status: item.status, sourceType: item.sourceType, sourceId: item.sourceId, title: item.title } : null;
-      }, { timeout: 10_000 }).toEqual({ id: created.id, organizationId: TEST_ORGANIZATION_ID, status: "CANCELLED", sourceType: "WorkItem", sourceId, title: updatedTitle });
+        return item ? { id: item.id, organizationId: item.organizationId, status: item.status, sourceType: item.sourceType, sourceId: item.sourceId, priority: item.priority, title: item.title } : null;
+      }, { timeout: 10_000 }).toEqual({ id: created.id, organizationId: TEST_ORGANIZATION_ID, status: "CANCELLED", sourceType: "WorkItem", sourceId, priority: "HIGH", title });
       await expect(db.workItem.count({ where: { organizationId: TEST_ORGANIZATION_ID, sourceType: "WorkItem", sourceId } })).resolves.toBe(1);
     } finally {
       await cleanupPolicyFixture(fixture);
