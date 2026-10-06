@@ -164,6 +164,7 @@ export const PAYMENT_METHOD_LABELS: Record<string, string> = {
   CASH: "Efectivo",
   CHECK: "Cheque",
   CARD: "Tarjeta de crédito/débito",
+  DOMICILIATED: "Domiciliado",
   OTHER: "Otro",
 };
 

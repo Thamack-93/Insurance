@@ -10,6 +10,7 @@ import {
   qualitasRequestShapeSignature,
   prepareQualitasPaymentLink,
   requestQualitasPaymentLink,
+  lookupQualitasPendingReceipts,
   type QualitasHttpTransport,
   type QualitasFormField,
   type QualitasPreparedPaymentLink,
@@ -17,7 +18,9 @@ import {
 import {
   QUALITAS_FINAL_RESPONSE_FIXTURES,
   QUALITAS_NATIVE_REQUEST_FIXTURES,
+  QUALITAS_RECEIPT_MONITOR_FIXTURES,
 } from "./qualitas-native-fixtures";
+import { compareQualitasNextReceipt } from "./qualitas-receipt-monitor-logic";
 
 const policyAction = "https://www.qualitas.com.mx/web/qmx/pago-de-poliza?p_p_id=pagopoliza_WAR_PagoPolizaportlet&p_p_lifecycle=1&p_p_state=normal&p_p_mode=view&_pagopoliza_WAR_PagoPolizaportlet_myaction=consulta-datos&p_auth=redacted";
 const paymentPageUrl = "https://www.qualitas.com.mx/web/qmx/pago-de-poliza/-/user-pago/pago-tdc";
@@ -81,6 +84,36 @@ describe("qualitas-payment-link provider", () => {
 
     expect(prepared).toMatchObject({ transportReady: true, request: { policyNumber: "0940454748" } });
     expect((calls[1].init?.body as URLSearchParams).get("numPoliza")).toBe("0940454748");
+  });
+
+  it("reads only the next pending receipt date and never submits a payment link", async () => {
+    const { transport, calls } = sequenceTransport([
+      response(initialHtml, 200, { "set-cookie": "JSESSIONID=read-only-session; Path=/" }),
+      response(paymentPageHtml),
+      response(QUALITAS_RECEIPT_MONITOR_FIXTURES.NEXT_RECEIPT_TABLE),
+    ]);
+    const result = await lookupQualitasPendingReceipts("0000000000", { transport });
+    expect(result).toEqual({ outcome: "OK", nextDueDate: "2026-11-12" });
+    expect(calls).toHaveLength(3);
+    expect(calls.map(({ init }) => init?.method ?? "GET")).toEqual(["GET", "POST", "GET"]);
+    expect(calls.some(({ url }) => new URL(url).searchParams.get("_pagopoliza_WAR_PagoPolizaportlet_myaction") === "envia-link-pago")).toBe(false);
+  });
+
+  it("fails closed for changed portal tables, challenges, and provider timeouts", async () => {
+    const changed = sequenceTransport([response(initialHtml), response(QUALITAS_RECEIPT_MONITOR_FIXTURES.CHANGED_FLOW)]);
+    await expect(lookupQualitasPendingReceipts("0000000000", { transport: changed.transport })).resolves.toEqual({ outcome: "INCONCLUSIVE", reason: "FLOW_CHANGED" });
+    const challenge = sequenceTransport([response(initialHtml), response(QUALITAS_RECEIPT_MONITOR_FIXTURES.CHALLENGE)]);
+    await expect(lookupQualitasPendingReceipts("0000000000", { transport: challenge.transport })).resolves.toEqual({ outcome: "INCONCLUSIVE", reason: "CHALLENGE" });
+    let timeoutCall = 0;
+    const timeoutTransport: QualitasHttpTransport = vi.fn(async (_input, init) => {
+      timeoutCall += 1;
+      if (timeoutCall === 1) return response(initialHtml);
+      if (timeoutCall === 2) return response(paymentPageHtml);
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("request aborted by timeout")), { once: true });
+      });
+    });
+    await expect(lookupQualitasPendingReceipts("0000000000", { transport: timeoutTransport, timeoutMs: 5 })).resolves.toEqual({ outcome: "INCONCLUSIVE", reason: "PROVIDER_UNAVAILABLE" });
   });
 
   it("discovers the session flow and sends the final urlencoded request", async () => {
@@ -564,5 +597,24 @@ describe("qualitas-payment-link provider", () => {
       .toBe(QUALITAS_NATIVE_REQUEST_FIXTURES.EMAIL.signature);
     expect(qualitasRequestShapeSignature(QUALITAS_NATIVE_REQUEST_FIXTURES.WHATSAPP.fields, "WHATSAPP"))
       .toBe(QUALITAS_NATIVE_REQUEST_FIXTURES.WHATSAPP.signature);
+  });
+});
+
+describe("Qualitas receipt monitor comparison", () => {
+  const receipts = [
+    { id: "receipt-1", dueDate: "2026-10-12", status: "PENDING" },
+    { id: "receipt-2", dueDate: "2026-11-12", status: "PENDING" },
+  ];
+
+  it("shows the current local receipt as still pending when dates match", () => {
+    expect(compareQualitasNextReceipt("2026-10-12", receipts)).toMatchObject({ status: "PENDING", targetReceiptId: "receipt-1" });
+  });
+
+  it("proposes the older receipt only when the portal matches the next local installment", () => {
+    expect(compareQualitasNextReceipt("2026-11-12", receipts)).toMatchObject({ status: "LIKELY_ADVANCED", targetReceiptId: "receipt-1" });
+  });
+
+  it("does not infer payment when the portal date has no exact next local match", () => {
+    expect(compareQualitasNextReceipt("2026-12-12", receipts)).toMatchObject({ status: "INCONCLUSIVE" });
   });
 });

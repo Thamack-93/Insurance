@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { inferClearPaymentFrequency } from "./payment-frequency";
+import { inferClearPaymentFrequency, supportsDomiciliatedPaymentMethod } from "./payment-frequency";
 
 describe("payment-frequency", () => {
+  it("allows domiciliado only for non-annual installment frequencies", () => {
+    expect(supportsDomiciliatedPaymentMethod("MONTHLY")).toBe(true);
+    expect(supportsDomiciliatedPaymentMethod("SEMIANNUAL")).toBe(true);
+    expect(supportsDomiciliatedPaymentMethod("ANNUAL")).toBe(false);
+    expect(supportsDomiciliatedPaymentMethod("SINGLE")).toBe(false);
+  });
   it("normalizes a clear semianual SINGLE policy with two contiguous receipts", () => {
     const result = inferClearPaymentFrequency(
       {

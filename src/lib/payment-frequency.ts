@@ -21,6 +21,10 @@ export type PaymentFrequencyInference = {
   receiptCount: number;
 };
 
+export function supportsDomiciliatedPaymentMethod(paymentFrequency: string) {
+  return !["ANNUAL", "SINGLE"].includes(paymentFrequency.trim().toUpperCase());
+}
+
 function dateKey(date: Date) {
   return date.toISOString().slice(0, 10);
 }

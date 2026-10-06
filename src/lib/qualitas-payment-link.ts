@@ -56,6 +56,10 @@ export type QualitasDeliveryRequest = {
 
 export type QualitasPaymentLinkDeliveryMethod = "EMAIL" | "WHATSAPP";
 
+export type QualitasReceiptLookupResult =
+  | { outcome: "OK"; nextDueDate: string }
+  | { outcome: "INCONCLUSIVE"; reason: "INVALID_INPUT" | "FLOW_CHANGED" | "PROVIDER_UNAVAILABLE" | "CHALLENGE" | "RECEIPT_DATE_NOT_FOUND" };
+
 export type QualitasPreparedPaymentLink = {
   request: QualitasDeliveryRequest;
   transportReady: true;
@@ -406,6 +410,13 @@ function textContent(node: DefaultTreeAdapterTypes.Node): string {
   return node.childNodes.map((child) => textContent(child)).join("");
 }
 
+function visibleNodeTextContent(node: DefaultTreeAdapterTypes.Node): string {
+  if (node.nodeName === "#text") return (node as DefaultTreeAdapterTypes.TextNode).value;
+  if ("tagName" in node && isHiddenHtmlElement(node as DefaultTreeAdapterTypes.Element)) return "";
+  if (!("childNodes" in node)) return "";
+  return node.childNodes.map(visibleNodeTextContent).join(" ").replace(/\s+/g, " ").trim();
+}
+
 function collectFormFields(form: string, options: { includeSubmitters?: boolean } = {}): QualitasFormField[] {
   const fields: QualitasFormField[] = [];
   const document = parse(form);
@@ -540,6 +551,70 @@ function visibleHtmlText(value: string) {
   const output: string[] = [];
   collectVisibleHtmlText(parse(value), output);
   return output.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function parseQualitasDate(value: string): string | null {
+  const match = value.trim().match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (match) {
+    const day = Number(match[1]);
+    const month = Number(match[2]);
+    const year = Number(match[3]);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+    return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+  const iso = value.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (!iso) return null;
+  return parseQualitasDate(`${iso[3]}/${iso[2]}/${iso[1]}`);
+}
+
+function tableCells(row: DefaultTreeAdapterTypes.Element) {
+  return row.childNodes
+    .filter((node): node is DefaultTreeAdapterTypes.Element => "tagName" in node)
+    .filter((node) => ["td", "th"].includes(node.tagName.toLowerCase()));
+}
+
+function collectQualitasPendingReceiptDates(html: string): string[] {
+  const document = parse(html);
+  const dates = new Set<string>();
+  function visit(node: DefaultTreeAdapterTypes.Node) {
+    if ("tagName" in node) {
+      const element = node as DefaultTreeAdapterTypes.Element;
+      if (element.tagName.toLowerCase() === "table") {
+        const rows: DefaultTreeAdapterTypes.Element[] = [];
+        function collectRows(current: DefaultTreeAdapterTypes.Node) {
+          if ("tagName" in current && (current as DefaultTreeAdapterTypes.Element).tagName.toLowerCase() === "tr") {
+            rows.push(current as DefaultTreeAdapterTypes.Element);
+            return;
+          }
+          if ("childNodes" in current) current.childNodes.forEach(collectRows);
+        }
+        collectRows(element);
+        const headerRow = rows.find((row) => tableCells(row).some((cell) => cell.tagName.toLowerCase() === "th"));
+        const headerCells = headerRow ? tableCells(headerRow).filter((cell) => cell.tagName.toLowerCase() === "th") : [];
+        const headers = headerCells.map((cell) => visibleNodeTextContent(cell).normalize("NFKC").toLowerCase().trim());
+        const receiptColumn = headers.findIndex((header) => /recibo|parcialidad|n[uú]m(?:ero)?/.test(header));
+        const dueDateColumn = headers.findIndex((header) => /venc|l[ií]mite|fecha\s+de\s+pago/.test(header));
+        if (receiptColumn >= 0 && dueDateColumn >= 0 && rows.length > 1) {
+          for (const row of rows) {
+            const cells = tableCells(row).filter((cell) => cell.tagName.toLowerCase() === "td");
+            const receiptLabel = cells[receiptColumn] ? visibleNodeTextContent(cells[receiptColumn]).trim() : "";
+            const dueText = cells[dueDateColumn] ? visibleNodeTextContent(cells[dueDateColumn]).trim() : "";
+            const dueDate = parseQualitasDate(dueText);
+            if (receiptLabel && dueDate) dates.add(dueDate);
+          }
+        }
+      }
+    }
+    if ("childNodes" in node) node.childNodes.forEach(visit);
+  }
+  visit(document);
+  return [...dates].sort();
+}
+
+function looksLikeQualitasChallenge(html: string) {
+  const text = visibleHtmlText(html).normalize("NFKC").toLowerCase();
+  return /captcha|access denied|verify you are human|verifica que eres humano|actividad inusual|incapsula incident id/.test(text);
 }
 
 function collectJsonSignalText(value: unknown, output: string[]) {
@@ -1111,6 +1186,80 @@ export async function prepareQualitasPaymentLink(
     resumeWsUrl,
     refererUrl: contactPage.finalUrl,
   };
+}
+
+/** Read-only receipt lookup. It performs the portal's policy query and follows
+ * the observed Pagar ahora GET navigation, but it never submits contact data or
+ * the final payment-link request. */
+export async function lookupQualitasPendingReceipts(
+  policyNumberInput: string,
+  options: QualitasRequestOptions = {},
+): Promise<QualitasReceiptLookupResult> {
+  const policyNumber = normalizeQualitasPolicyNumber(policyNumberInput);
+  if (!policyNumber) return { outcome: "INCONCLUSIVE", reason: "INVALID_INPUT" };
+  const cookieJar = new Map<string, string>();
+  const initial = await requestWithSession({
+    url: QUALITAS_PAYMENT_LINK_ENTRYPOINT,
+    init: { method: "GET", headers: { Accept: "text/html" } },
+    cookieJar,
+    options,
+    finalSubmission: false,
+    step: "entrypoint",
+  });
+  if (initial.bodyText && looksLikeQualitasChallenge(initial.bodyText)) return { outcome: "INCONCLUSIVE", reason: "CHALLENGE" };
+  if (!initial.bodyText) return { outcome: "INCONCLUSIVE", reason: "PROVIDER_UNAVAILABLE" };
+
+  const policyForm = findFormContaining(initial.bodyText, "numPoliza");
+  if (!policyForm || formMethod(policyForm) !== "POST") return { outcome: "INCONCLUSIVE", reason: "FLOW_CHANGED" };
+  const policyAction = formAction(policyForm, initial.finalUrl);
+  if (!policyAction || !isAllowedQualitasUrl(policyAction)) return { outcome: "INCONCLUSIVE", reason: "FLOW_CHANGED" };
+  const body = new URLSearchParams(
+    setFormField(collectFormFields(policyForm), "numPoliza", policyNumber).map((field): [string, string] => [field.name, field.value]),
+  );
+  const policyResponse = await requestWithSession({
+    url: policyAction,
+    init: {
+      method: "POST",
+      headers: {
+        Accept: "text/html",
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        Origin: new URL(policyAction).origin,
+        Referer: initial.finalUrl,
+      },
+      body,
+    },
+    cookieJar,
+    options,
+    finalSubmission: false,
+    step: "policy_lookup",
+  });
+  if (policyResponse.bodyText && looksLikeQualitasChallenge(policyResponse.bodyText)) return { outcome: "INCONCLUSIVE", reason: "CHALLENGE" };
+  if (!policyResponse.bodyText) return { outcome: "INCONCLUSIVE", reason: "PROVIDER_UNAVAILABLE" };
+
+  let receiptPage = policyResponse.bodyText;
+  let dates = collectQualitasPendingReceiptDates(receiptPage);
+  if (dates.length === 0) {
+    const navigation = findPagarAhoraRequest(policyResponse.bodyText, policyResponse.finalUrl);
+    // Only the observed same-host GET navigation is permitted in this
+    // read-only flow. A changed POST form is treated as inconclusive.
+    if (!navigation || navigation.method !== "GET" || !isAllowedQualitasUrl(navigation.url)) {
+      return { outcome: "INCONCLUSIVE", reason: "FLOW_CHANGED" };
+    }
+    const paymentPage = await requestWithSession({
+      url: navigation.url,
+      init: { method: "GET", headers: { Accept: "text/html", Referer: policyResponse.finalUrl } },
+      cookieJar,
+      options,
+      finalSubmission: false,
+      step: "pagar_ahora",
+    });
+    if (paymentPage.bodyText && looksLikeQualitasChallenge(paymentPage.bodyText)) return { outcome: "INCONCLUSIVE", reason: "CHALLENGE" };
+    if (!paymentPage.bodyText) return { outcome: "INCONCLUSIVE", reason: "PROVIDER_UNAVAILABLE" };
+    receiptPage = paymentPage.bodyText;
+    dates = collectQualitasPendingReceiptDates(receiptPage);
+  }
+  if (dates.length === 0) return { outcome: "INCONCLUSIVE", reason: "RECEIPT_DATE_NOT_FOUND" };
+  return { outcome: "OK", nextDueDate: dates[0] };
 }
 
 export async function requestQualitasPaymentLink(
