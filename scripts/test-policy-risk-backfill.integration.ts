@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, statSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync, chmodSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -607,6 +607,7 @@ async function main() {
     const disposableReviewReport = temporaryReportPath();
     reportFiles.push(disposableReviewReport);
     writeFileSync(disposableReviewReport, `${JSON.stringify(disposableReviewManifest, null, 2)}\n`, { mode: 0o600 });
+    chmodSync(disposableReviewReport, 0o600);
     const disposableReviewedDigest = runBackfill({
       printReviewedDigest: true,
       reportFile: disposableReviewReport,
