@@ -633,6 +633,11 @@ async function main() {
       sourceTarget: { host: productionHost, database: `${productionDatabase}-other` },
       contentSha256: "",
     };
+    for (const candidate of foreignTargetManifest.candidates) {
+      if (candidate.classification === "REVIEW") candidate.decision = "DEFER";
+    }
+    foreignTargetManifest.reviewedBy = "ci-admin@policydesk.local";
+    foreignTargetManifest.reviewedAt = new Date().toISOString();
     foreignTargetManifest.contentSha256 = policyRiskBackfillManifestContentHash(foreignTargetManifest);
     writeFileSync(foreignTargetReport, `${JSON.stringify(foreignTargetManifest, null, 2)}\n`, { mode: 0o600 });
     const foreignTargetDigest = runBackfill({
