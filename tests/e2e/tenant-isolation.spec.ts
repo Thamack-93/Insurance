@@ -1,7 +1,97 @@
 import { expect, test } from "@playwright/test";
+import type { Prisma } from "../../src/generated/prisma/client.ts";
+import { getTestDb } from "../helpers/db";
 
 const enabled = process.env.TENANT_ISOLATION_E2E === "1";
+const ORGANIZATION_A = "org_legacy_singleton_0001";
+const ORGANIZATION_B = "org_pedro_gomez_0001";
 test.skip(!enabled, "Tenant isolation E2E requires the protected disposable fixture.");
+
+async function withTestOrganization<T>(organizationId: string, callback: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  return getTestDb().$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('app.organization_id', ${organizationId}, true)`;
+    return callback(tx);
+  });
+}
+
+test("Operational Insights enforces organization and agent portfolio scope after RLS cutover", async ({ page }) => {
+  const original = {
+    policyA: await withTestOrganization(ORGANIZATION_A, (tx) => tx.policy.findUniqueOrThrow({ where: { id: "tenant-policy-a" }, select: { id: true, endDate: true, renewalStage: true, renewalStageAt: true } })),
+    policyB: await withTestOrganization(ORGANIZATION_B, (tx) => tx.policy.findUniqueOrThrow({ where: { id: "tenant-policy-b" }, select: { id: true, endDate: true, renewalStage: true, renewalStageAt: true } })),
+  };
+  const { policyA, policyB } = original;
+  const portfolioOnlyClientId = `insights-admin-portfolio-${Date.now()}`;
+  const portfolioOnlyPolicyId = `${portfolioOnlyClientId}-policy`;
+  const soon = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+
+  try {
+    await withTestOrganization(ORGANIZATION_A, async (tx) => {
+      await tx.policy.update({ where: { id: policyA.id }, data: { endDate: soon, renewalStage: "PENDING", renewalStageAt: null } });
+      const insurer = await tx.insurer.findUniqueOrThrow({ where: { id: "tenant-insurer-a" }, select: { id: true } });
+      const adminClient = await tx.client.create({
+        data: {
+          id: portfolioOnlyClientId,
+          organizationId: ORGANIZATION_A,
+          fullName: "Insights Admin Portfolio Only",
+          type: "PERSON",
+          status: "ACTIVE",
+          portfolioOwnerId: "tenant-admin-a",
+        },
+      });
+      await tx.policy.create({
+        data: {
+          id: portfolioOnlyPolicyId,
+          organizationId: ORGANIZATION_A,
+          policyNumber: "INSIGHTS-ADMIN-ONLY",
+          clientId: adminClient.id,
+          insurerId: insurer.id,
+          policyType: "AUTO",
+          status: "ACTIVE",
+          startDate: new Date(),
+          endDate: soon,
+          premiumAmount: 1000,
+          currency: "MXN",
+          paymentFrequency: "ANNUAL",
+          renewalStage: "PENDING",
+        },
+      });
+    });
+    await withTestOrganization(ORGANIZATION_B, (tx) => tx.policy.update({
+      where: { id: policyB.id },
+      data: { endDate: soon, renewalStage: "PENDING", renewalStageAt: null },
+    }));
+
+    await page.goto("/login");
+    await page.getByLabel("Correo electrónico").fill("tenant-admin-a@policydesk.local");
+    await page.getByLabel("Contraseña").fill("tenant-fixture-password");
+    await page.getByRole("button", { name: "Iniciar sesión" }).click();
+    await expect(page).toHaveURL(/\/today$/, { timeout: 30_000 });
+    await page.goto("/reports/insights?group=renewals");
+    await expect(page.getByText("OVERLAP-A", { exact: false })).toBeVisible();
+    await expect(page.getByText("INSIGHTS-ADMIN-ONLY", { exact: false })).toBeVisible();
+    await expect(page.getByText("OVERLAP-B", { exact: false })).toHaveCount(0);
+
+    await page.goto("/login");
+    await page.getByLabel("Correo electrónico").fill("tenant-agent-a@policydesk.local");
+    await page.getByLabel("Contraseña").fill("tenant-fixture-password");
+    await page.getByRole("button", { name: "Iniciar sesión" }).click();
+    await expect(page).toHaveURL(/\/today$/, { timeout: 30_000 });
+    await page.goto("/reports/insights?group=renewals");
+    await expect(page.getByText("OVERLAP-A", { exact: false })).toBeVisible();
+    await expect(page.getByText("INSIGHTS-ADMIN-ONLY", { exact: false })).toHaveCount(0);
+    await expect(page.getByText("OVERLAP-B", { exact: false })).toHaveCount(0);
+  } finally {
+    await withTestOrganization(ORGANIZATION_A, async (tx) => {
+      await tx.policy.deleteMany({ where: { id: portfolioOnlyPolicyId } });
+      await tx.client.deleteMany({ where: { id: portfolioOnlyClientId } });
+      await tx.policy.update({ where: { id: policyA.id }, data: { endDate: policyA.endDate, renewalStage: policyA.renewalStage, renewalStageAt: policyA.renewalStageAt } });
+    });
+    await withTestOrganization(ORGANIZATION_B, (tx) => tx.policy.update({
+      where: { id: policyB.id },
+      data: { endDate: policyB.endDate, renewalStage: policyB.renewalStage, renewalStageAt: policyB.renewalStageAt },
+    }));
+  }
+});
 
 test("tenant admin cannot open a different organization's client", async ({ page }) => {
   await page.goto("/login");
