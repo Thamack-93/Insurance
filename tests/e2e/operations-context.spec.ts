@@ -394,7 +394,7 @@ test.describe("operation queue context", () => {
     const title = `Pendiente ordinario ${Date.now()}`;
 
     try {
-      await db.workItem.create({
+      const created = await db.workItem.create({
         data: {
           organizationId: TEST_ORGANIZATION_ID,
           sourceType: "WorkItem",
@@ -412,6 +412,7 @@ test.describe("operation queue context", () => {
           insurerId: fixture.insurerId,
           dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
+        select: { id: true },
       });
 
       await authenticatePageAsAdmin(page);
@@ -420,6 +421,9 @@ test.describe("operation queue context", () => {
       await page.goto(`/tasks/${sourceId}/edit?returnTo=${encodeURIComponent("/operations?view=pending")}`, { waitUntil: "load" });
       await expect(page).toHaveURL(new RegExp(`/tasks/${sourceId}/edit(?:\\?.*)?$`));
       await expect(page.getByText("Edición de pendiente", { exact: true })).toBeVisible();
+      const priorityControl = page.locator('[aria-label="Prioridad"]');
+      await priorityControl.click();
+      await page.getByRole("option", { name: "Alta", exact: true }).click();
       const statusControl = page.locator('[aria-label="Estado"]');
       await expect(statusControl).toBeVisible();
       await statusControl.click();
@@ -429,8 +433,51 @@ test.describe("operation queue context", () => {
 
       await expect.poll(async () => {
         const item = await db.workItem.findUnique({ where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "WorkItem", sourceId } } });
-        return item ? { status: item.status, sourceType: item.sourceType, sourceId: item.sourceId, title: item.title } : null;
-      }, { timeout: 10_000 }).toEqual({ status: "CANCELLED", sourceType: "WorkItem", sourceId, title });
+        return item ? { id: item.id, organizationId: item.organizationId, status: item.status, sourceType: item.sourceType, sourceId: item.sourceId, priority: item.priority, title: item.title } : null;
+      }, { timeout: 10_000 }).toEqual({ id: created.id, organizationId: TEST_ORGANIZATION_ID, status: "CANCELLED", sourceType: "WorkItem", sourceId, priority: "HIGH", title });
+      await expect(db.workItem.count({ where: { organizationId: TEST_ORGANIZATION_ID, sourceType: "WorkItem", sourceId } })).resolves.toBe(1);
+    } finally {
+      await cleanupPolicyFixture(fixture);
+    }
+  });
+
+  test("an agent cannot open or edit an ordinary WorkItem outside their portfolio", async ({ page }) => {
+    const db = getTestDb();
+    const fixture = await seedPolicyFixture("OPERATIONS-AGENT-WORKITEM-SCOPE");
+    const sourceId = `e2e-agent-denied-work-item-${Date.now()}`;
+    const title = `Pendiente fuera de cartera ${Date.now()}`;
+
+    try {
+      const workItem = await db.workItem.create({
+        data: {
+          organizationId: TEST_ORGANIZATION_ID,
+          sourceType: "WorkItem",
+          sourceId,
+          workItemType: "TASK",
+          taskType: "GENERAL",
+          status: "OPEN",
+          priority: "MEDIUM",
+          title,
+          entityType: "WorkItem",
+          entityId: sourceId,
+          clientId: fixture.clientId,
+          policyId: fixture.policyId,
+          insurerId: fixture.insurerId,
+        },
+        select: { id: true },
+      });
+
+      await authenticatePageAsAgent(page);
+      await page.goto(`/tasks/${sourceId}/edit`);
+      await expect(page.getByText("Edición de pendiente", { exact: true })).toHaveCount(0);
+      await expect(page.locator("body")).not.toContainText(title);
+      await page.goto("/operations?view=pending");
+      await expect(page.getByRole("link", { name: `Editar pendiente: ${title}` })).toHaveCount(0);
+
+      await expect.poll(async () => {
+        const current = await db.workItem.findUnique({ where: { id: workItem.id }, select: { id: true, organizationId: true, status: true, title: true } });
+        return current;
+      }).toEqual({ id: workItem.id, organizationId: TEST_ORGANIZATION_ID, status: "OPEN", title });
     } finally {
       await cleanupPolicyFixture(fixture);
     }
