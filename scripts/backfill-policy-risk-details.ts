@@ -409,12 +409,22 @@ async function assertProductionApplyRole(tx: Prisma.TransactionClient, target: P
     JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
     WHERE namespace.nspname = 'public' AND relation.relname IN ('Policy', 'PolicyInsuredAsset', 'PolicyInsuredParty', 'MaintenanceRun')
   `);
-  if (policyRows.length !== 4 || policyRows.some((policy) =>
+  const policyMismatch = policyRows.length !== 4 || policyRows.some((policy) =>
     policy.policyName !== "policydesk_tenant_context" || policy.command !== "*" || !policy.permissive || policy.roles !== "{0}" ||
     normalizeTenantPolicyExpression(policy.usingExpression) !== EXPECTED_TENANT_POLICY ||
     normalizeTenantPolicyExpression(policy.checkExpression) !== EXPECTED_TENANT_POLICY
-  )) {
-    throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_TENANT_POLICY_MISMATCH");
+  );
+  if (policyMismatch) {
+    const diagnostics = policyRows.map((policy) => ({
+      tableName: policy.tableName,
+      policyName: policy.policyName,
+      command: policy.command,
+      permissive: policy.permissive,
+      roles: policy.roles,
+      usingExpression: normalizeTenantPolicyExpression(policy.usingExpression),
+      checkExpression: normalizeTenantPolicyExpression(policy.checkExpression),
+    }));
+    throw new Error(`POLICY_RISK_BACKFILL_PRODUCTION_APPLY_TENANT_POLICY_MISMATCH:${JSON.stringify({ count: policyRows.length, diagnostics })}`);
   }
 }
 
