@@ -14,6 +14,17 @@ const ORGANIZATION_ID = "org_legacy_singleton_0001";
 const SOURCE_TEXT = "Toyota, Corolla, 2020, LE";
 const VIN = "2T1BURHE0LC123456";
 
+async function withOrganizationContext<T>(
+  db: PrismaClient,
+  organizationId: string,
+  work: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw(Prisma.sql`SELECT set_config('app.organization_id', ${organizationId}, true)`);
+    return work(tx);
+  });
+}
+
 type BackfillReport = {
   mode: "dry-run" | "production-read-only-preview" | "apply";
   readOnly?: boolean;
@@ -106,6 +117,19 @@ async function main() {
   assert.match(readOnlyApplyAttempt.stderr, /POLICY_RISK_BACKFILL_PRODUCTION_PREVIEW_IS_READ_ONLY/);
 
   const db = getTestDb();
+  const rlsTestEnabled = process.env.POLICY_RISK_BACKFILL_TEST_RLS_ENABLED === "1";
+  let disposableRoleTenantContextConfigured = false;
+  if (rlsTestEnabled) {
+    // This job is explicitly disposable. Keep the legacy auth fixture and
+    // its User-to-membership trigger under the same tenant context after RLS
+    // is forced; production/app credentials never receive this role setting.
+    await db.$executeRawUnsafe(`ALTER ROLE CURRENT_USER SET "app.organization_id" TO '${ORGANIZATION_ID}'`);
+    disposableRoleTenantContextConfigured = true;
+    // Role defaults apply at connection startup, so recycle Prisma's pool
+    // before seeding helpers that issue their own root-client queries.
+    await db.$disconnect();
+    await db.$connect();
+  }
   let fixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
   let ambiguousFixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
   let partyFixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
@@ -405,40 +429,44 @@ async function main() {
       select: { id: true },
     });
     secondOrganizationId = secondOrganization.id;
-    const secondInsurer = await db.insurer.create({
-      data: { organizationId: secondOrganization.id, name: `Policy Risk Backfill Insurer ${randomUUID()}`, status: "ACTIVE" },
-      select: { id: true },
+    const secondFixture = await withOrganizationContext(db, secondOrganization.id, async (tx) => {
+      const insurer = await tx.insurer.create({
+        data: { organizationId: secondOrganization.id, name: `Policy Risk Backfill Insurer ${randomUUID()}`, status: "ACTIVE" },
+        select: { id: true },
+      });
+      const client = await tx.client.create({
+        data: { organizationId: secondOrganization.id, fullName: "Second Organization Private Client", type: "PERSON", status: "ACTIVE" },
+        select: { id: true },
+      });
+      const policy = await tx.policy.create({
+        data: {
+          organizationId: secondOrganization.id,
+          policyNumber: `POLICY-BACKFILL-ORG-B-${randomUUID()}`,
+          clientId: client.id,
+          insurerId: insurer.id,
+          policyType: "AUTO",
+          status: "ACTIVE",
+          paymentFrequency: "ANNUAL",
+          startDate: new Date("2026-01-01T00:00:00.000Z"),
+          endDate: new Date("2027-01-01T00:00:00.000Z"),
+          premiumAmount: 1500,
+          currency: "MXN",
+          insuredObject: "Second organization original text",
+        },
+        select: { id: true },
+      });
+      await tx.policyInsuredAsset.create({
+        data: { organizationId: secondOrganization.id, policyId: policy.id, assetType: "AUTO", description: "Second organization private asset", serialNumber: "ORG-B-PRIVATE-VIN", isPrimary: true },
+      });
+      await tx.policyInsuredParty.create({
+        data: { organizationId: secondOrganization.id, policyId: policy.id, fullName: "Second Organization Private Insured", isPrimary: true, sourceLabel: "RLS test fixture" },
+      });
+      return { insurer, client, policy };
     });
-    secondOrganizationInsurerId = secondInsurer.id;
-    const secondClient = await db.client.create({
-      data: { organizationId: secondOrganization.id, fullName: "Second Organization Private Client", type: "PERSON", status: "ACTIVE" },
-      select: { id: true },
-    });
-    secondOrganizationClientId = secondClient.id;
-    const secondPolicy = await db.policy.create({
-      data: {
-        organizationId: secondOrganization.id,
-        policyNumber: `POLICY-BACKFILL-ORG-B-${randomUUID()}`,
-        clientId: secondClient.id,
-        insurerId: secondInsurer.id,
-        policyType: "AUTO",
-        status: "ACTIVE",
-        paymentFrequency: "ANNUAL",
-        startDate: new Date("2026-01-01T00:00:00.000Z"),
-        endDate: new Date("2027-01-01T00:00:00.000Z"),
-        premiumAmount: 1500,
-        currency: "MXN",
-        insuredObject: "Second organization original text",
-      },
-      select: { id: true },
-    });
-    secondOrganizationPolicyId = secondPolicy.id;
-    await db.policyInsuredAsset.create({
-      data: { organizationId: secondOrganization.id, policyId: secondPolicy.id, assetType: "AUTO", description: "Second organization private asset", serialNumber: "ORG-B-PRIVATE-VIN", isPrimary: true },
-    });
-    await db.policyInsuredParty.create({
-      data: { organizationId: secondOrganization.id, policyId: secondPolicy.id, fullName: "Second Organization Private Insured", isPrimary: true, sourceLabel: "RLS test fixture" },
-    });
+    secondOrganizationInsurerId = secondFixture.insurer.id;
+    secondOrganizationClientId = secondFixture.client.id;
+    secondOrganizationPolicyId = secondFixture.policy.id;
+    const secondPolicy = secondFixture.policy;
 
     const productionBackfillFixture = productionFixture = await seedPolicyFixture("POLICY-RISK-PRODUCTION-WRITER");
     await db.policy.update({
@@ -651,23 +679,25 @@ async function main() {
     assert.ok(writerCompleted.riskDetails && typeof writerCompleted.riskDetails === "object");
     assert.equal((writerCompleted.riskDetails as { sourceText?: unknown }).sourceText, SOURCE_TEXT);
     assert.equal(writerCompleted.insuredObject, `Toyota Corolla 2020 LE Serie ${VIN}`);
-    const secondTenantUnchanged = await db.policy.findUniqueOrThrow({
-      where: { id: secondPolicy.id },
-      select: { organizationId: true, insuredObject: true, riskDetails: true },
-    });
-    assert.equal(secondTenantUnchanged.organizationId, secondOrganization.id);
-    assert.equal(secondTenantUnchanged.insuredObject, "Second organization original text");
-    assert.equal(secondTenantUnchanged.riskDetails, null);
-    const secondTenantAssets = await db.policyInsuredAsset.findMany({
-      where: { organizationId: secondOrganization.id, policyId: secondPolicy.id },
-      select: { description: true, serialNumber: true, isPrimary: true },
-    });
-    assert.deepEqual(secondTenantAssets, [{ description: "Second organization private asset", serialNumber: "ORG-B-PRIVATE-VIN", isPrimary: true }]);
-    const secondTenantParties = await db.policyInsuredParty.findMany({
-      where: { organizationId: secondOrganization.id, policyId: secondPolicy.id },
-      select: { fullName: true, isPrimary: true, sourceLabel: true },
-    });
-    assert.deepEqual(secondTenantParties, [{ fullName: "Second Organization Private Insured", isPrimary: true, sourceLabel: "RLS test fixture" }]);
+    const secondTenantState = await withOrganizationContext(db, secondOrganization.id, async (tx) => ({
+      policy: await tx.policy.findUniqueOrThrow({
+        where: { id: secondPolicy.id },
+        select: { organizationId: true, insuredObject: true, riskDetails: true },
+      }),
+      assets: await tx.policyInsuredAsset.findMany({
+        where: { organizationId: secondOrganization.id, policyId: secondPolicy.id },
+        select: { description: true, serialNumber: true, isPrimary: true },
+      }),
+      parties: await tx.policyInsuredParty.findMany({
+        where: { organizationId: secondOrganization.id, policyId: secondPolicy.id },
+        select: { fullName: true, isPrimary: true, sourceLabel: true },
+      }),
+    }));
+    assert.equal(secondTenantState.policy.organizationId, secondOrganization.id);
+    assert.equal(secondTenantState.policy.insuredObject, "Second organization original text");
+    assert.equal(secondTenantState.policy.riskDetails, null);
+    assert.deepEqual(secondTenantState.assets, [{ description: "Second organization private asset", serialNumber: "ORG-B-PRIVATE-VIN", isPrimary: true }]);
+    assert.deepEqual(secondTenantState.parties, [{ fullName: "Second Organization Private Insured", isPrimary: true, sourceLabel: "RLS test fixture" }]);
     }
 
     const secondReportPath = temporaryReportPath();
@@ -698,13 +728,17 @@ async function main() {
     for (const item of [fixture, ambiguousFixture, partyFixture, productionFixture]) {
       if (item) await attemptCleanup(`policy-fixture:${item.policyId}`, () => cleanupPolicyFixture(item));
     }
-    if (secondOrganizationPolicyId) {
-      await attemptCleanup("second-org-assets", () => db.policyInsuredAsset.deleteMany({ where: { organizationId: secondOrganizationId!, policyId: secondOrganizationPolicyId! } }));
-      await attemptCleanup("second-org-parties", () => db.policyInsuredParty.deleteMany({ where: { organizationId: secondOrganizationId!, policyId: secondOrganizationPolicyId! } }));
-      await attemptCleanup("second-org-policy", () => db.policy.deleteMany({ where: { id: secondOrganizationPolicyId!, organizationId: secondOrganizationId! } }));
+    if (secondOrganizationId) {
+      await attemptCleanup("second-org-tenant-rows", () => withOrganizationContext(db, secondOrganizationId!, async (tx) => {
+        if (secondOrganizationPolicyId) {
+          await tx.policyInsuredAsset.deleteMany({ where: { organizationId: secondOrganizationId!, policyId: secondOrganizationPolicyId! } });
+          await tx.policyInsuredParty.deleteMany({ where: { organizationId: secondOrganizationId!, policyId: secondOrganizationPolicyId! } });
+          await tx.policy.deleteMany({ where: { id: secondOrganizationPolicyId!, organizationId: secondOrganizationId! } });
+        }
+        if (secondOrganizationClientId) await tx.client.deleteMany({ where: { id: secondOrganizationClientId!, organizationId: secondOrganizationId! } });
+        if (secondOrganizationInsurerId) await tx.insurer.deleteMany({ where: { id: secondOrganizationInsurerId!, organizationId: secondOrganizationId! } });
+      }));
     }
-    if (secondOrganizationClientId) await attemptCleanup("second-org-client", () => db.client.deleteMany({ where: { id: secondOrganizationClientId!, organizationId: secondOrganizationId! } }));
-    if (secondOrganizationInsurerId) await attemptCleanup("second-org-insurer", () => db.insurer.deleteMany({ where: { id: secondOrganizationInsurerId!, organizationId: secondOrganizationId! } }));
     if (secondOrganizationId) await attemptCleanup("second-organization", () => db.organization.deleteMany({ where: { id: secondOrganizationId! } }));
     if (readonlyRoleCreated) {
       await attemptCleanup("readonly-role-grants", () => db.$executeRawUnsafe("REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM policydesk_readonly"));
@@ -717,6 +751,11 @@ async function main() {
       await attemptCleanup("writer-role-schema-grant", () => db.$executeRawUnsafe("REVOKE ALL PRIVILEGES ON SCHEMA public FROM policydesk_backfill"));
       await attemptCleanup("writer-role-owned-privileges", () => db.$executeRawUnsafe("DROP OWNED BY policydesk_backfill"));
       await attemptCleanup("writer-role-drop", () => db.$executeRawUnsafe("DROP ROLE policydesk_backfill"));
+    }
+    if (disposableRoleTenantContextConfigured) {
+      await attemptCleanup("reset-disposable-role-tenant-context", async () => {
+        await db.$executeRawUnsafe('ALTER ROLE CURRENT_USER RESET "app.organization_id"');
+      });
     }
     await attemptCleanup("database-disconnect", () => db.$disconnect());
     if (cleanupFailures.length) throw new Error(`POLICY_RISK_BACKFILL_TEST_CLEANUP_FAILED\n${cleanupFailures.join("\n")}`);
