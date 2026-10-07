@@ -142,15 +142,20 @@ export async function confirmQualitasDetectedPayment(observationId: string, cont
     const snapshot = await getPolicyCheckSnapshot(tx, { policyId: observation.entityId, organizationId: context.organizationId, userId: context.userId });
     if (!snapshot) throw new Error("QUALITAS_POLICY_NOT_AVAILABLE");
     const receipt = snapshot.receipts.find((item) => item.id === parsed.targetReceiptId);
-    // The user explicitly confirms the observation. Revalidating the entire
-    // local receipt schedule here can reject a valid confirmation when other
-    // open receipts change; recordPayment remains the authority for duplicate,
-    // amount, method, and current receipt-state checks.
+    // The user explicitly confirms the observation. For a normal installment
+    // advance, make sure the exact receipt snapshot still matches. When the
+    // portal explicitly says the policy is already paid, the same open receipt
+    // may have had its local due date or amount corrected since the lookup. In
+    // that case the stable receipt ID plus the fresh manual confirmation is the
+    // evidence; use the receipt's current amount. recordPayment remains the
+    // authority for duplicates, amount validity, method, and receipt state.
     const targetDateUnchanged = Boolean(receipt && (!parsed.localDueDate || dateKey(receipt.dueDate) === parsed.localDueDate));
     const targetAmountUnchanged = Boolean(receipt && (parsed.targetReceiptAmount === undefined || receipt.amount === parsed.targetReceiptAmount));
-    const portalAdvancedPastTarget = parsed.status === "PORTAL_PAID"
-      || Boolean(receipt && parsed.portalDueDate && parsed.portalDueDate > dateKey(receipt.dueDate));
-    if (!receipt || !targetDateUnchanged || !targetAmountUnchanged || !portalAdvancedPastTarget) {
+    const portalAdvancedPastTarget = Boolean(receipt && parsed.portalDueDate && parsed.portalDueDate > dateKey(receipt.dueDate));
+    if (!receipt) {
+      throw new Error("QUALITAS_RECEIPT_STATE_CHANGED");
+    }
+    if (parsed.status !== "PORTAL_PAID" && (!targetDateUnchanged || !targetAmountUnchanged || !portalAdvancedPastTarget)) {
       throw new Error("QUALITAS_RECEIPT_STATE_CHANGED");
     }
     const paymentMethod = supportsDomiciliatedPaymentMethod(snapshot.paymentFrequency) ? "DOMICILIATED" : "OTHER";
