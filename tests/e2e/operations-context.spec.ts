@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { authenticatePageAsAdmin, authenticatePageAsAgent, cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../helpers/db";
 import { expectMutationSuccessToast } from "../helpers/assert-mutation-toast";
+import { expectMutationSuccessToast } from "../helpers/assert-mutation-toast";
 import { captureServerAction } from "../helpers/capture-server-action";
 
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
@@ -496,6 +497,7 @@ test.describe("operation queue context", () => {
       await card.getByRole("button", { name: `Seguimiento de ${fixture.policyNumber}` }).click();
       const scheduledDate = businessDateAfter(3);
       await page.getByRole("menuitem", { name: "En 3 días", exact: true }).click();
+      await expectMutationSuccessToast(page, "Seguimiento programado.");
       await expect.poll(async () => {
         const item = await db.workItem.findUnique({
           where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId: manualSourceId } },
