@@ -137,7 +137,7 @@ describeDisposable("Operational Insights disposable PostgreSQL integration", () 
       await db.organization.findUniqueOrThrow({ where: { id: ORGANIZATION_B } });
       const visible = await seedPromise({ organizationId: ORGANIZATION_A, portfolioOwnerId: "tenant-agent-a", suffix: `OWN-${suffix}` });
       const otherPortfolio = await seedPromise({ organizationId: ORGANIZATION_A, portfolioOwnerId: "tenant-admin-a", suffix: `OTHER-${suffix}` });
-      const otherOrganization = await seedPromise({ organizationId: ORGANIZATION_B, portfolioOwnerId: "tenant-owner-b", suffix: `ORG-B-${suffix}` });
+      const otherOrganization = await seedPromise({ organizationId: ORGANIZATION_B, portfolioOwnerId: "tenant-pedro-gomez", suffix: `ORG-B-${suffix}` });
       contextState.current = context;
 
       const first = await getOperationalInsights({ group: "collections", page: 1 });
