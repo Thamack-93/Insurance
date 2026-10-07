@@ -28,10 +28,15 @@ test.describe("Renewals Page (/renewals)", () => {
       const boardViewport = page.locator("[data-renewal-board-viewport]");
       await expect(stageNavigation).toBeVisible();
       await expect(boardViewport).toBeVisible();
+      await expect(page.getByRole("button", { name: "Ver siguientes etapas" })).toBeVisible();
+      await expect(page.getByText(/\d+ renovaciones en el tablero/)).toHaveCount(0);
+      await expect(page.getByText(/Arrastra el fondo vacío para recorrer el tablero/)).toHaveCount(0);
       const pendingCard = page.locator("#renewal-stage-PENDING li").filter({ hasText: fixture.policyNumber });
       await expect(pendingCard).toBeVisible();
       await expect(pendingCard.getByRole("button", { name: /Mover la renovación/ })).toHaveCount(0);
 
+      await page.getByRole("button", { name: "Ver siguientes etapas" }).click();
+      await expect(page.locator("#renewal-stage-LOST")).toBeInViewport();
       await stageNavigation.getByRole("button", { name: /Cotizado/ }).click();
       const quotedColumn = page.locator("#renewal-stage-QUOTED");
       await expect(quotedColumn).toBeInViewport();
