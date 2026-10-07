@@ -33,6 +33,7 @@ export const QUALITAS_PAYMENT_LINK_REASONS = [
   "QUALITAS_UNAVAILABLE",
   "RATE_LIMITED",
   "TIMEOUT_BEFORE_SUBMISSION",
+  "AUTHORIZATION_RECHECK_FAILED",
   "RESPONSE_TOO_LARGE",
   "NETWORK_ERROR",
   "INVALID_INPUT",
@@ -127,6 +128,7 @@ export type QualitasRequestOptions = {
   correlationId?: string;
   onEvent?: (event: QualitasProviderEvent) => void;
   onFinalSubmissionStarted?: () => Promise<void> | void;
+  onFinalSubmissionFinished?: () => Promise<void> | void;
 };
 
 const QUALITAS_HOST = "www.qualitas.com.mx";
@@ -846,6 +848,7 @@ async function requestWithSession(input: {
   let finalSubmissionClaimAttempted = false;
 
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
+    let followingRedirect = false;
     const startedAt = Date.now();
     const method = (init.method ?? "GET").toUpperCase();
     if (!isAllowedQualitasUrl(url)) {
@@ -923,6 +926,7 @@ async function requestWithSession(input: {
         const preserveBody = response.status === 307 || response.status === 308;
         init = preserveBody ? init : { ...init, method: "GET", body: undefined };
         url = nextUrl;
+        followingRedirect = true;
         continue;
       }
       const bodyText = await readBoundedResponseText(response, maxResponseBytes);
@@ -979,6 +983,9 @@ async function requestWithSession(input: {
       return { finalUrl: url, redirectCount: redirect, networkError: true };
     } finally {
       clearTimeout(timer);
+      if (input.finalSubmission && finalSubmissionStarted && !followingRedirect) {
+        await input.options.onFinalSubmissionFinished?.();
+      }
     }
   }
 

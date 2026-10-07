@@ -158,11 +158,17 @@ describe("qualitas-payment-link provider", () => {
       response("Código: 0 Mensaje: Se genero link de pago."),
     ]);
     const started = vi.fn();
+    const finished = vi.fn(() => expect(calls).toHaveLength(3));
     const prepared = await prepareForFinal(transport);
-    const result = await requestQualitasPaymentLink(prepared, { transport, onFinalSubmissionStarted: started });
+    const result = await requestQualitasPaymentLink(prepared, {
+      transport,
+      onFinalSubmissionStarted: started,
+      onFinalSubmissionFinished: finished,
+    });
 
     expect(result.outcome).toBe("SUCCESS");
     expect(started).toHaveBeenCalledTimes(1);
+    expect(finished).toHaveBeenCalledTimes(1);
     expect(calls).toHaveLength(3);
   });
 
