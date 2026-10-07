@@ -74,6 +74,12 @@ export type PolicyQualityScore = {
   issues: DataQualityIssue[];
 };
 
+export function listActivePoliciesWithoutReceipts(policies: PolicyQualityScore[]) {
+  return policies.filter((policy) =>
+    policy.status === "ACTIVE" && policy.issues.some((issue) => issue.code === "POLICY_WITHOUT_RECEIPTS"),
+  );
+}
+
 export type OperationalDataHealthSummary = {
   clientsWithoutPortfolioOwner: number;
   activeDemoUsers: number;

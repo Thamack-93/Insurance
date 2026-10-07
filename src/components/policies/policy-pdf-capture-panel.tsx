@@ -212,8 +212,8 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
   const file = files[0] ?? null;
 
   const receiptPlan = useMemo(
-    () => (draft ? mergePolicyPdfCaptureReceiptPlan(draft, receiptPlanOverrides) : []),
-    [draft, receiptPlanOverrides],
+    () => (draft ? mergePolicyPdfCaptureReceiptPlan(draft, receiptPlanOverrides, preview?.receiptEvidence) : []),
+    [draft, receiptPlanOverrides, preview?.receiptEvidence],
   );
 
   useEffect(() => {

@@ -17,7 +17,39 @@ vi.mock("@/lib/db", () => {
   };
 });
 
-import { getClientDataQualityScores } from "./data-quality";
+import { getClientDataQualityScores, listActivePoliciesWithoutReceipts } from "./data-quality";
+
+describe("active policies without receipts audit", () => {
+  it("lists only active policies with the no-receipts issue", () => {
+    const basePolicy = {
+      poliza: "P-1",
+      clienteId: "client-1",
+      cliente: "Cliente",
+      aseguradora: "Aseguradora",
+      endDate: new Date("2027-01-01T00:00:00Z"),
+      premiumAmount: 1000,
+      paymentFrequency: "ANNUAL",
+      insuredObject: null,
+      notes: null,
+      score: 80,
+      nivel: "Bueno" as const,
+      completitud: 80,
+    };
+    const noReceiptsIssue = {
+      code: "POLICY_WITHOUT_RECEIPTS",
+      etiqueta: "Sin recibos",
+      descripcion: "La póliza no tiene recibos registrados.",
+      penalizacion: 20,
+    };
+    const policies = [
+      { ...basePolicy, polizaId: "active-empty", status: "ACTIVE", issues: [noReceiptsIssue] },
+      { ...basePolicy, polizaId: "active-has-receipt", status: "ACTIVE", issues: [] },
+      { ...basePolicy, polizaId: "renewed-empty", status: "RENEWED", issues: [noReceiptsIssue] },
+    ];
+
+    expect(listActivePoliciesWithoutReceipts(policies).map((policy) => policy.polizaId)).toEqual(["active-empty"]);
+  });
+});
 
 describe("data-quality client scoring", () => {
   beforeEach(() => {

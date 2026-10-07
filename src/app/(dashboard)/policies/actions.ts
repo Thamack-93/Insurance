@@ -170,35 +170,37 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
       });
       await syncPolicyRiskRelations(tx, context.organizationId, createdPolicy.id, parsed.data.riskDetails);
 
-      if (renewalSource) {
-        const receipts = await syncAutoCaptureReceipts(tx, {
+      const receipts = await syncAutoCaptureReceipts(tx, {
+        organizationId: context.organizationId,
+        policyId: createdPolicy.id,
+        clientId: createdPolicy.clientId,
+        insurerId: createdPolicy.insurerId,
+        userId,
+        draft: {
+          startDate: parsed.data.startDate,
+          endDate: parsed.data.endDate,
+          paymentFrequency: normalized.paymentFrequency,
+          premiumAmount: normalized.premiumAmount,
+          currency: normalized.currency,
+          sourcePolicyNumber: renewalSource?.policyNumber ?? null,
+        },
+      });
+
+      for (const result of receipts) {
+        await writeActivityLog({
+          entityType: "Receipt",
+          entityId: result.receipt.id,
+          action: renewalSource
+            ? result.created ? "RECEIPT_CREATE_POLICY_RENEWAL" : "RECEIPT_UPDATE_POLICY_RENEWAL"
+            : result.created ? "RECEIPT_CREATE_POLICY" : "RECEIPT_UPDATE_POLICY",
+          newValue: result.receipt,
           organizationId: context.organizationId,
-          policyId: createdPolicy.id,
-          clientId: createdPolicy.clientId,
-          insurerId: createdPolicy.insurerId,
           userId,
-          draft: {
-            startDate: parsed.data.startDate,
-            endDate: parsed.data.endDate,
-            paymentFrequency: normalized.paymentFrequency,
-            premiumAmount: normalized.premiumAmount,
-            currency: normalized.currency,
-            sourcePolicyNumber: renewalSource.policyNumber,
-          },
+          db: tx,
         });
+      }
 
-        for (const result of receipts) {
-          await writeActivityLog({
-            entityType: "Receipt",
-            entityId: result.receipt.id,
-            action: result.created ? "RECEIPT_CREATE_POLICY_RENEWAL" : "RECEIPT_UPDATE_POLICY_RENEWAL",
-            newValue: result.receipt,
-            organizationId: context.organizationId,
-            userId,
-            db: tx,
-          });
-        }
-
+      if (renewalSource) {
         await tx.policy.update({
           where: { id: renewalSource.id, organizationId: context.organizationId },
           data: {

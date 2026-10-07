@@ -61,6 +61,18 @@ const confirmSchema = z.object({
       }),
     )
     .optional(),
+  receiptEvidence: z.object({
+    policyNumber: z.string().nullable(),
+    receiptControlNumber: z.string().nullable(),
+    dueDate: z.string().nullable(),
+    periodLabel: z.string().nullable(),
+    amountDue: z.number().nullable(),
+    depositAmount: z.number().nullable(),
+    currency: z.string(),
+    paymentMethod: z.string().nullable(),
+    paymentConfirmed: z.literal(false),
+    warnings: z.array(z.string()),
+  }).nullable().optional(),
 });
 
 function normalizeDraft(draft: z.infer<typeof confirmSchema>["draft"]): PolicyPdfCaptureDraft {
@@ -384,6 +396,7 @@ export async function POST(request: NextRequest) {
         draft: captureDraft,
         userId: context.userId,
         receiptPlan: payload.receiptPlan,
+        receiptEvidence: payload.receiptEvidence ?? null,
       });
 
       for (const autoReceiptResult of autoReceiptResults) {
