@@ -7,7 +7,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { formatCurrency } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
 import { BadgeCheck } from "lucide-react";
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { checkQualitasReceipt, confirmQualitasReceiptPayment, configureQualitasReceiptMonitor } from "@/app/(dashboard)/policies/qualitas-actions";
 
 type CheckResult = Extract<Awaited<ReturnType<typeof checkQualitasReceipt>>, { ok: true }>["result"];
@@ -18,19 +17,25 @@ export function QualitasReceiptMonitorPanel({
   monitorEnabled,
   featureEnabled,
   triggerMode = "button",
+  open: controlledOpen,
+  onOpenChange,
 }: {
   policyId: string;
   policyNumber?: string;
   monitorEnabled: boolean;
   featureEnabled: boolean;
-  triggerMode?: "button" | "menu-item";
+  triggerMode?: "button" | "controlled";
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const router = useRouter();
   const [enabled, setEnabled] = useState(monitorEnabled);
   const [result, setResult] = useState<CheckResult | null>(null);
   const [message, setMessage] = useState("");
   const [pending, startTransition] = useTransition();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = onOpenChange ?? setInternalOpen;
   const canEnableMonitor = result?.status === "PENDING" || result?.status === "LIKELY_ADVANCED";
 
   if (!featureEnabled) return null;
@@ -70,10 +75,12 @@ export function QualitasReceiptMonitorPanel({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={triggerMode === "menu-item" ? <DropdownMenuItem className="gap-2" /> : <Button type="button" size="sm" variant="outline" className="rounded-full whitespace-nowrap" />}>
-        <BadgeCheck className="size-4" />
-        Verificar pago{policyNumber ? ` · ${policyNumber}` : ""}
-      </DialogTrigger>
+      {triggerMode === "button" ? (
+        <DialogTrigger render={<Button type="button" size="sm" variant="outline" className="rounded-full whitespace-nowrap" />}>
+          <BadgeCheck className="size-4" />
+          Verificar pago{policyNumber ? ` · ${policyNumber}` : ""}
+        </DialogTrigger>
+      ) : null}
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Recibos domiciliados Quálitas{policyNumber ? ` · ${policyNumber}` : ""}</DialogTitle>

@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
-import { BadgeCheck, ChevronDown } from "lucide-react";
+import { BadgeCheck, ChevronDown, Link2, MessageSquare } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -24,8 +24,8 @@ import { bulkMarkReceiptsPaid } from "@/app/(dashboard)/receipts/actions";
 import { appendReturnTo } from "@/lib/return-to";
 import { QualitasPaymentLinkDialog } from "@/components/receipts/qualitas-payment-link-dialog";
 import { QualitasReceiptMonitorPanel } from "@/components/policies/qualitas-receipt-monitor-panel";
-import { WhatsAppReminderButton } from "@/components/receipts/whatsapp-reminder-button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { WhatsAppReminderButton, type WhatsAppReminderHandle } from "@/components/receipts/whatsapp-reminder-button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 export type CollectableReceipt = {
   id: string;
@@ -157,6 +157,9 @@ function BulkToolbar({ receipts }: { receipts: CollectableReceipt[] }) {
 
 function ReceiptRow({ receipt, returnTo, isDemo, qualitasMonitorFeatureEnabled }: { receipt: CollectableReceipt; returnTo?: string; isDemo: boolean; qualitasMonitorFeatureEnabled: boolean }) {
   const { selectedItems, toggleItem } = useBulkActions();
+  const whatsappRef = useRef<WhatsAppReminderHandle>(null);
+  const [dialogAction, setDialogAction] = useState<"qualitas-payment" | "qualitas-monitor" | null>(null);
+  const [whatsAppPending, setWhatsAppPending] = useState(false);
   const isSelected = selectedItems.has(receipt.id);
   const due = parseBusinessDateInput(receipt.dueDate);
   const overdue = isOverdue(due);
@@ -235,38 +238,22 @@ function ReceiptRow({ receipt, returnTo, isDemo, qualitasMonitorFeatureEnabled }
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-48">
                 {receipt.status === "PENDING" || receipt.status === "OVERDUE" ? (
-                  <WhatsAppReminderButton
-                    receiptId={receipt.id}
-                    triggerMode="menu-item"
-                    demoPreview={isDemo ? { clientName: receipt.client.fullName, receiptNumber: receipt.receiptNumber, policyNumber: receipt.policy.policyNumber } : undefined}
-                  />
+                  <DropdownMenuItem onClick={() => whatsappRef.current?.trigger()} disabled={whatsAppPending}>
+                    <MessageSquare className="size-4" />
+                    {whatsAppPending ? "Preparando WhatsApp…" : "Avisar por WhatsApp"}
+                  </DropdownMenuItem>
                 ) : null}
                 {receipt.qualitasEligible && receipt.qualitasEnabled ? (
-                  <QualitasPaymentLinkDialog
-                    receipt={{
-                      id: receipt.id,
-                      receiptNumber: receipt.receiptNumber,
-                      dueDate: receipt.dueDate,
-                      amount: receipt.amount,
-                      currency: receipt.currency,
-                      client: { fullName: receipt.client.fullName, email: receipt.clientEmail, phone: receipt.clientPhone },
-                      policy: { policyNumber: receipt.policy.policyNumber },
-                      insurer: { name: receipt.insurer.name },
-                    }}
-                    agent={{ email: receipt.agentEmail ?? null, phone: receipt.agentPhone ?? null }}
-                    enabled={Boolean(receipt.qualitasEnabled)}
-                    clientRecipientEnabled={Boolean(receipt.qualitasClientRecipientEnabled)}
-                    triggerMode="menu-item"
-                  />
+                  <DropdownMenuItem onClick={() => setDialogAction("qualitas-payment")}>
+                    <Link2 className="size-4" />
+                    Liga de pago Quálitas
+                  </DropdownMenuItem>
                 ) : null}
                 {receipt.qualitasMonitorEligible && qualitasMonitorFeatureEnabled ? (
-                  <QualitasReceiptMonitorPanel
-                    policyId={receipt.policy.id}
-                    policyNumber={receipt.policy.policyNumber}
-                    monitorEnabled={receipt.policy.qualitasReceiptMonitorEnabled}
-                    featureEnabled={qualitasMonitorFeatureEnabled}
-                    triggerMode="menu-item"
-                  />
+                  <DropdownMenuItem onClick={() => setDialogAction("qualitas-monitor")}>
+                    <BadgeCheck className="size-4" />
+                    Verificar pago
+                  </DropdownMenuItem>
                 ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
@@ -281,6 +268,46 @@ function ReceiptRow({ receipt, returnTo, isDemo, qualitasMonitorFeatureEnabled }
           ) : null}
         </div>
       </div>
+      {receipt.status === "PENDING" || receipt.status === "OVERDUE" ? (
+        <WhatsAppReminderButton
+          ref={whatsappRef}
+          receiptId={receipt.id}
+          showTrigger={false}
+          onPendingChange={setWhatsAppPending}
+          demoPreview={isDemo ? { clientName: receipt.client.fullName, receiptNumber: receipt.receiptNumber, policyNumber: receipt.policy.policyNumber } : undefined}
+        />
+      ) : null}
+      {receipt.qualitasEligible && receipt.qualitasEnabled ? (
+        <QualitasPaymentLinkDialog
+          receipt={{
+            id: receipt.id,
+            receiptNumber: receipt.receiptNumber,
+            dueDate: receipt.dueDate,
+            amount: receipt.amount,
+            currency: receipt.currency,
+            client: { fullName: receipt.client.fullName, email: receipt.clientEmail, phone: receipt.clientPhone },
+            policy: { policyNumber: receipt.policy.policyNumber },
+            insurer: { name: receipt.insurer.name },
+          }}
+          agent={{ email: receipt.agentEmail ?? null, phone: receipt.agentPhone ?? null }}
+          enabled={Boolean(receipt.qualitasEnabled)}
+          clientRecipientEnabled={Boolean(receipt.qualitasClientRecipientEnabled)}
+          triggerMode="controlled"
+          open={dialogAction === "qualitas-payment"}
+          onOpenChange={(open) => setDialogAction(open ? "qualitas-payment" : null)}
+        />
+      ) : null}
+      {receipt.qualitasMonitorEligible && qualitasMonitorFeatureEnabled ? (
+        <QualitasReceiptMonitorPanel
+          policyId={receipt.policy.id}
+          policyNumber={receipt.policy.policyNumber}
+          monitorEnabled={receipt.policy.qualitasReceiptMonitorEnabled}
+          featureEnabled={qualitasMonitorFeatureEnabled}
+          triggerMode="controlled"
+          open={dialogAction === "qualitas-monitor"}
+          onOpenChange={(open) => setDialogAction(open ? "qualitas-monitor" : null)}
+        />
+      ) : null}
     </div>
   );
 }

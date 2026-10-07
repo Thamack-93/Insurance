@@ -174,7 +174,7 @@ export default async function ReceiptsPage({
         paymentFrequency: receipt.policy.paymentFrequency,
         qualitasReceiptMonitorEnabled: receipt.policy.qualitasReceiptMonitorEnabled,
       },
-      insurer: { name: receipt.insurer.name },
+      insurer: { name: receipt.policy.insurer.name },
       endorsement: receipt.endorsement
         ? { endorsementNumber: receipt.endorsement.endorsementNumber, reference: receipt.endorsement.reference }
         : undefined,
@@ -186,9 +186,9 @@ export default async function ReceiptsPage({
       agentPhone: agentContact?.phone ?? null,
       qualitasEnabled: isReceiptQualitasEnabled(qualitasCapability, isQualitasPaymentLinkEnabled()),
       qualitasClientRecipientEnabled: isQualitasClientRecipientEnabled(),
-      qualitasEligible: isQualitasInsurerName(receipt.insurer.name),
+      qualitasEligible: isQualitasInsurerName(receipt.policy.insurer.name),
       qualitasMonitorEligible:
-        isQualitasInsurerName(receipt.insurer.name) &&
+        isQualitasInsurerName(receipt.policy.insurer.name) &&
         receipt.policy.status === "ACTIVE" &&
         !["ANNUAL", "SINGLE"].includes(receipt.policy.paymentFrequency.trim().toUpperCase()),
     }));
@@ -650,7 +650,7 @@ async function loadReceiptPageCore(db: TenantDb, organizationId: string, input: 
         where: { ...where, organizationId },
         include: {
           client: true,
-          policy: true,
+          policy: { include: { insurer: true } },
           insurer: true,
           endorsement: true,
           _count: { select: { payments: { where: { status: "POSTED" } } } },
