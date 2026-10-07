@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getRenewalStartGapDays, matchSerialRenewal, normalizePolicySerial } from "@/lib/policy-renewal-match.logic";
+import { canReactivateStaleSerialSuggestion, getRenewalStartGapDays, matchSerialRenewal, normalizePolicySerial, STALE_SERIAL_SUGGESTION_NOTE } from "@/lib/policy-renewal-match.logic";
 
 const date = (value: string) => new Date(`${value}T12:00:00.000Z`);
 
@@ -25,5 +25,11 @@ describe("serial renewal matching", () => {
 
   it("calculates the date gap by calendar day", () => {
     expect(getRenewalStartGapDays(date("2026-10-13"), date("2026-10-20"))).toBe(7);
+  });
+
+  it("reopens only suggestions dismissed because their serial match became stale", () => {
+    expect(canReactivateStaleSerialSuggestion("DISMISSED", STALE_SERIAL_SUGGESTION_NOTE)).toBe(true);
+    expect(canReactivateStaleSerialSuggestion("DISMISSED", "Sugerencia de coincidencia por serie descartada.")).toBe(false);
+    expect(canReactivateStaleSerialSuggestion("ACCEPTED", STALE_SERIAL_SUGGESTION_NOTE)).toBe(false);
   });
 });

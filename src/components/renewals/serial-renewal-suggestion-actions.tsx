@@ -19,9 +19,10 @@ export function SerialRenewalSuggestionActions({
   const [pending, startTransition] = useTransition();
 
   const accept = () => startTransition(async () => {
-    const result = await linkRenewalToPolicy(sourcePolicyId, targetPolicyId);
+    const result = await linkRenewalToPolicy(sourcePolicyId, targetPolicyId, undefined, suggestionId);
     if (!result.ok) {
       toast.error(result.error);
+      router.refresh();
       return;
     }
     toast.success(result.message);

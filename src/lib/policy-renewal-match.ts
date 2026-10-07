@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { addDays } from "date-fns";
-import { matchSerialRenewal, type SerialRenewalMatch } from "@/lib/policy-renewal-match.logic";
+import { canReactivateStaleSerialSuggestion, matchSerialRenewal, STALE_SERIAL_SUGGESTION_NOTE, type SerialRenewalMatch } from "@/lib/policy-renewal-match.logic";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -143,9 +143,10 @@ export async function syncSerialRenewalSuggestionsForTarget(
           targetPolicyId: target.id,
         },
       },
-      select: { id: true, status: true },
+      select: { id: true, status: true, resolutionNote: true },
     });
-    if (existing && existing.status !== "PENDING") continue;
+    const canReactivate = existing ? canReactivateStaleSerialSuggestion(existing.status, existing.resolutionNote) : false;
+    if (existing && existing.status !== "PENDING" && !canReactivate) continue;
 
     await db.policyRenewalSuggestion.upsert({
       where: {
@@ -159,6 +160,7 @@ export async function syncSerialRenewalSuggestionsForTarget(
         confidence: candidate.confidence,
         reason: candidate.reason,
         status: "PENDING",
+        ...(canReactivate ? { reviewedAt: null, reviewedById: null, resolutionNote: null } : {}),
       },
       create: {
         organizationId,
@@ -235,7 +237,7 @@ export async function syncSerialRenewalSuggestionsForPortfolio(
       targetPolicyId: { in: targetIds },
       reason: { startsWith: "Misma serie/VIN" },
     },
-    select: { id: true, sourcePolicyId: true, targetPolicyId: true, status: true },
+    select: { id: true, sourcePolicyId: true, targetPolicyId: true, status: true, resolutionNote: true },
   });
   const existingByPair = new Map(existingSuggestions.map((suggestion) => [
     `${suggestion.sourcePolicyId}:${suggestion.targetPolicyId}`,
@@ -252,6 +254,7 @@ export async function syncSerialRenewalSuggestionsForPortfolio(
     reason: string;
     status: "PENDING";
   }> = [];
+  const toReactivate: Array<{ id: string; confidence: number; reason: string }> = [];
   for (const target of targets) {
     candidateTargetIds.add(target.id);
     const targetSerialNumbers = target.insuredAssets.map((asset) => asset.serialNumber);
@@ -264,7 +267,13 @@ export async function syncSerialRenewalSuggestionsForPortfolio(
       if (!match) continue;
       const pairKey = `${source.id}:${target.id}`;
       desiredPairs.add(pairKey);
-      if (existingByPair.has(pairKey)) continue;
+      const existing = existingByPair.get(pairKey);
+      if (existing) {
+        if (canReactivateStaleSerialSuggestion(existing.status, existing.resolutionNote)) {
+          toReactivate.push({ id: existing.id, confidence: match.confidence, reason: match.reason });
+        }
+        continue;
+      }
       toCreate.push({
         organizationId,
         sourcePolicyId: source.id,
@@ -288,12 +297,25 @@ export async function syncSerialRenewalSuggestionsForPortfolio(
       data: {
         status: "DISMISSED",
         reviewedAt: new Date(),
-        resolutionNote: "La coincidencia por serie ya no cumple los criterios actuales.",
+        resolutionNote: STALE_SERIAL_SUGGESTION_NOTE,
+      },
+    });
+  }
+  for (const suggestion of toReactivate) {
+    await db.policyRenewalSuggestion.updateMany({
+      where: { organizationId, id: suggestion.id, status: "DISMISSED", resolutionNote: STALE_SERIAL_SUGGESTION_NOTE },
+      data: {
+        confidence: suggestion.confidence,
+        reason: suggestion.reason,
+        status: "PENDING",
+        reviewedAt: null,
+        reviewedById: null,
+        resolutionNote: null,
       },
     });
   }
   if (toCreate.length) {
     await db.policyRenewalSuggestion.createMany({ data: toCreate, skipDuplicates: true });
   }
-  return toCreate.length;
+  return toCreate.length + toReactivate.length;
 }

@@ -8,6 +8,7 @@ import { assertOrganizationContextInTransaction, requireOrganizationContext, wit
 import { canScheduleRenewalManualFollowUp, isRenewalStage, isTerminalRenewalStage, renewalManualFollowUpWorkItemSourceId, resolveRenewalStage } from "@/lib/renewal-board.logic";
 import { closeRenewalFollowUp, closeRenewalManualFollowUp, upsertRenewalManualFollowUp } from "@/lib/renewal-followups";
 import { syncSerialRenewalSuggestionsForPortfolio } from "@/lib/policy-renewal-match";
+import { matchSerialRenewal } from "@/lib/policy-renewal-match.logic";
 import { renewalStageLabel } from "@/lib/status";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import {
@@ -464,7 +465,7 @@ export async function setRenewalStage(policyId: string, stage: string): Promise<
   }
 }
 
-export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId: string, client?: Prisma.TransactionClient): Promise<MutationResult> {
+export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId: string, client?: Prisma.TransactionClient, serialSuggestionId?: string): Promise<MutationResult> {
   try {
     if (sourcePolicyId === targetPolicyId) {
       return errorResult("La póliza origen y la destino no pueden ser la misma.");
@@ -510,6 +511,9 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
     if (sourcePolicy.clientId !== targetPolicy.clientId) {
       return errorResult("La póliza destino debe pertenecer al mismo cliente.");
     }
+    if (sourcePolicy.insurerId !== targetPolicy.insurerId && !serialSuggestionId) {
+      return errorResult("Para cambiar de aseguradora, confirma una sugerencia vigente por serie/VIN.");
+    }
     if (sourcePolicy.status === "RENEWED" || sourcePolicy.renewals.length > 0) {
       return errorResult("La póliza origen ya tiene una renovación vinculada.");
     }
@@ -523,6 +527,78 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
 
     const persist = async (tx: Prisma.TransactionClient) => {
       await assertOrganizationContextInTransaction(tx, context);
+      const [currentSource, currentTarget] = await Promise.all([
+        tx.policy.findFirst({
+          where: renewalMutationPolicyWhere(context, sourcePolicy.id),
+          select: {
+            id: true,
+            policyNumber: true,
+            clientId: true,
+            insurerId: true,
+            familyRootId: true,
+            status: true,
+            endDate: true,
+            policyType: true,
+            insuredAssets: { select: { serialNumber: true } },
+            renewals: { select: { id: true }, take: 1 },
+          },
+        }),
+        tx.policy.findFirst({
+          where: renewalMutationPolicyWhere(context, targetPolicy.id),
+          select: {
+            id: true,
+            policyNumber: true,
+            clientId: true,
+            insurerId: true,
+            familyRootId: true,
+            status: true,
+            startDate: true,
+            policyType: true,
+            insuredAssets: { select: { serialNumber: true } },
+            renewedFromPolicyId: true,
+          },
+        }),
+      ]);
+      if (!currentSource || !currentTarget) return errorResult("Una de las pólizas ya no está disponible.");
+      if (currentSource.clientId !== currentTarget.clientId) return errorResult("La póliza destino debe pertenecer al mismo cliente.");
+      if (currentSource.status === "RENEWED" || currentSource.renewals.length > 0) {
+        return errorResult("La póliza origen ya tiene una renovación vinculada.");
+      }
+      if (currentTarget.renewedFromPolicyId && currentTarget.renewedFromPolicyId !== currentSource.id) {
+        return errorResult("La póliza destino ya está vinculada con otra póliza origen.");
+      }
+      if (currentSource.insurerId !== currentTarget.insurerId) {
+        if (!serialSuggestionId) return errorResult("Para cambiar de aseguradora, confirma una sugerencia vigente por serie/VIN.");
+        const suggestion = await tx.policyRenewalSuggestion.findFirst({
+          where: {
+            id: serialSuggestionId,
+            organizationId: context.organizationId,
+            sourcePolicyId: currentSource.id,
+            targetPolicyId: currentTarget.id,
+            status: "PENDING",
+            reason: { startsWith: "Misma serie/VIN" },
+          },
+          select: { id: true },
+        });
+        const match = matchSerialRenewal(
+          { clientId: currentSource.clientId, policyType: currentSource.policyType, endDate: currentSource.endDate, serialNumbers: currentSource.insuredAssets.map((asset) => asset.serialNumber) },
+          { clientId: currentTarget.clientId, policyType: currentTarget.policyType, startDate: currentTarget.startDate, serialNumbers: currentTarget.insuredAssets.map((asset) => asset.serialNumber) },
+        );
+        if (!suggestion || !match) return errorResult("La sugerencia ya no está vigente; actualiza la búsqueda por serie/VIN.");
+      } else if (serialSuggestionId) {
+        const suggestion = await tx.policyRenewalSuggestion.findFirst({
+          where: {
+            id: serialSuggestionId,
+            organizationId: context.organizationId,
+            sourcePolicyId: currentSource.id,
+            targetPolicyId: currentTarget.id,
+            status: "PENDING",
+            reason: { startsWith: "Misma serie/VIN" },
+          },
+          select: { id: true },
+        });
+        if (!suggestion) return errorResult("La sugerencia ya no está disponible.");
+      }
       const workItem = await tx.workItem.findFirst({
         where: {
           organizationId: context.organizationId,
@@ -651,9 +727,10 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
         userId,
         db: tx,
       });
+      return successResult(targetPolicy.id, `/policies/${targetPolicy.id}`, "Renovación vinculada.");
     };
-    if (client) await persist(client);
-    else await withTenantTransaction(context, persist);
+    const result = client ? await persist(client) : await withTenantTransaction(context, persist);
+    if (!result.ok) return result;
 
     revalidatePaths([
       "/operations",
@@ -668,7 +745,7 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
       `/policies/${targetPolicy.id}`,
     ]);
 
-    return successResult(targetPolicy.id, `/policies/${targetPolicy.id}`, "Renovación vinculada.");
+    return result;
   } catch (error) {
     return errorResult(error instanceof Error ? error.message : "No se pudo vincular la renovación.");
   }

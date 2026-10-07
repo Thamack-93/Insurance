@@ -15,8 +15,13 @@ export type SerialRenewalMatch = {
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+export const STALE_SERIAL_SUGGESTION_NOTE = "La coincidencia por serie ya no cumple los criterios actuales.";
 export const RENEWAL_MATCH_EARLIEST_START_GAP_DAYS = -30;
 export const RENEWAL_MATCH_LATEST_START_GAP_DAYS = 45;
+
+export function canReactivateStaleSerialSuggestion(status: string, resolutionNote: string | null | undefined) {
+  return status === "DISMISSED" && resolutionNote === STALE_SERIAL_SUGGESTION_NOTE;
+}
 
 export function normalizePolicySerial(value: string | null | undefined) {
   return (value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
