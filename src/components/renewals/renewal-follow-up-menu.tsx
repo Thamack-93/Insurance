@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { clearRenewalManualFollowUp, scheduleRenewalManualFollowUp } from "@/app/(dashboard)/renewals/actions";
@@ -29,8 +29,7 @@ const shortcutLabels: Array<{ value: RenewalFollowUpShortcut; label: string }> =
 
 export function RenewalFollowUpMenu({ policyId, policyNumber, currentDueDate, currentNotes }: RenewalFollowUpMenuProps) {
   const router = useRouter();
-  const [pending, setPending] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
   const [customOpen, setCustomOpen] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
   const [customDate, setCustomDate] = useState(currentDueDate ?? formatBusinessDateInput(renewalFollowUpShortcutDate("tomorrow")));
@@ -42,26 +41,21 @@ export function RenewalFollowUpMenu({ policyId, policyNumber, currentDueDate, cu
     setCustomOpen(true);
   }
 
-  async function save(dueDate: string, nextNotes: string) {
-    if (pending) return;
-    setPending(true);
-    try {
+  function save(dueDate: string, nextNotes: string) {
+    startTransition(async () => {
       const result = await scheduleRenewalManualFollowUp({ policyId, dueDate, notes: nextNotes });
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
       toast.success(result.message);
-      setMenuOpen(false);
       setCustomOpen(false);
       router.refresh();
-    } finally {
-      setPending(false);
-    }
+    });
   }
 
   function chooseShortcut(shortcut: RenewalFollowUpShortcut) {
-    void save(formatBusinessDateInput(renewalFollowUpShortcutDate(shortcut, businessToday())), currentNotes ?? "");
+    save(formatBusinessDateInput(renewalFollowUpShortcutDate(shortcut, businessToday())), currentNotes ?? "");
   }
 
   async function clear() {
@@ -76,7 +70,7 @@ export function RenewalFollowUpMenu({ policyId, policyNumber, currentDueDate, cu
 
   return (
     <>
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <DropdownMenu>
         <DropdownMenuTrigger render={<Button type="button" variant="outline" size="sm" disabled={pending} aria-label={`Seguimiento de ${policyNumber}`} />}>
           <CalendarClock className="size-3.5" aria-hidden="true" />
           Seguimiento
@@ -86,7 +80,7 @@ export function RenewalFollowUpMenu({ policyId, policyNumber, currentDueDate, cu
           <DropdownMenuGroup>
             <DropdownMenuLabel>{currentDueDate ? "Reprogramar" : "Programar"}</DropdownMenuLabel>
             {shortcutLabels.map((shortcut) => (
-              <DropdownMenuItem key={shortcut.value} closeOnClick={false} onClick={() => chooseShortcut(shortcut.value)}>
+              <DropdownMenuItem key={shortcut.value} onClick={() => chooseShortcut(shortcut.value)}>
                 {shortcut.label}
               </DropdownMenuItem>
             ))}
