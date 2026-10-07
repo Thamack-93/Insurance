@@ -139,16 +139,14 @@ export async function confirmQualitasDetectedPayment(observationId: string, cont
     const snapshot = await getPolicyCheckSnapshot(tx, { policyId: observation.entityId, organizationId: context.organizationId, userId: context.userId });
     if (!snapshot) throw new Error("QUALITAS_POLICY_NOT_AVAILABLE");
     const receipt = snapshot.receipts.find((item) => item.id === parsed.targetReceiptId);
-    // Use the same normalized date ordering as the original portal comparison.
-    // Database ordering can differ when receipts have different times on the
-    // same calendar day, which otherwise rejects a valid confirmation.
-    const currentComparison = compareQualitasNextReceipt(parsed.portalDueDate, snapshot.receipts);
-    const targetStillMatchesPortalComparison = currentComparison.status === "LIKELY_ADVANCED"
-      && currentComparison.targetReceiptId === parsed.targetReceiptId;
+    // The user explicitly confirms the observation. Revalidating the entire
+    // local receipt schedule here can reject a valid confirmation when other
+    // open receipts change; recordPayment remains the authority for duplicate,
+    // amount, method, and current receipt-state checks.
     const targetDateUnchanged = Boolean(receipt && (!parsed.localDueDate || dateKey(receipt.dueDate) === parsed.localDueDate));
     const targetAmountUnchanged = Boolean(receipt && (parsed.targetReceiptAmount === undefined || receipt.amount === parsed.targetReceiptAmount));
     const portalAdvancedPastTarget = Boolean(receipt && parsed.portalDueDate > dateKey(receipt.dueDate));
-    if (!receipt || !targetStillMatchesPortalComparison || !targetDateUnchanged || !targetAmountUnchanged || !portalAdvancedPastTarget) {
+    if (!receipt || !targetDateUnchanged || !targetAmountUnchanged || !portalAdvancedPastTarget) {
       throw new Error("QUALITAS_RECEIPT_STATE_CHANGED");
     }
     const result = await recordPayment({
