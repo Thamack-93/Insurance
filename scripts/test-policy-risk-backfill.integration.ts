@@ -834,7 +834,7 @@ async function main() {
 
     const secondReportPath = temporaryReportPath();
     reportFiles.push(secondReportPath);
-    const secondPreview = runBackfill({ reportFile: secondReportPath });
+    const secondPreview = runBackfill({ reportFile: secondReportPath, policyNumbers: [reviewFixture.policyNumber] });
     assert.equal(secondPreview.mode, "dry-run");
     const secondManifest = JSON.parse(readFileSync(secondReportPath, "utf8")) as PolicyRiskBackfillManifest;
     assert.equal(
