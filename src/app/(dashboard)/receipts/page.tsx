@@ -189,8 +189,7 @@ export default async function ReceiptsPage({
       qualitasEligible: isQualitasInsurerName(receipt.policy.insurer.name),
       qualitasMonitorEligible:
         isQualitasInsurerName(receipt.policy.insurer.name) &&
-        receipt.policy.status === "ACTIVE" &&
-        !["ANNUAL", "SINGLE"].includes(receipt.policy.paymentFrequency.trim().toUpperCase()),
+        receipt.policy.status === "ACTIVE",
     }));
 
   const safePaymentHistory = paymentHistory.filter((payment) => payment.receipt && payment.client && payment.policy);

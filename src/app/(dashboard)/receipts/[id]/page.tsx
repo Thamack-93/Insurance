@@ -274,6 +274,7 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
                       <TableHead>Monto</TableHead>
                       <TableHead>Método</TableHead>
                       <TableHead>Referencia</TableHead>
+                      <TableHead>Estado</TableHead>
                       <TableHead className="text-right">Acciones</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -288,18 +289,23 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
                       <TableCell className="font-mono text-xs">
                         {payment.reference ?? "—"}
                       </TableCell>
+                      <TableCell>
+                        {payment.status === "REVERSED" ? <Badge variant="outline">Revertido</Badge> : null}
+                      </TableCell>
                       <TableCell className="text-right">
-                        <DeletePaymentButton
-                          id={payment.id}
-                          receiptId={receipt.id}
-                          receiptNumber={receipt.receiptNumber}
-                          paidDate={payment.paidDate}
-                          amount={toNumber(payment.amount)}
-                          currency={payment.currency}
-                          paymentMethod={payment.paymentMethod}
-                          triggerLabel="Eliminar"
-                          triggerClassName="h-7 bg-card/70 px-2.5 text-xs text-destructive hover:text-destructive"
-                        />
+                        {payment.status === "POSTED" ? (
+                          <DeletePaymentButton
+                            id={payment.id}
+                            receiptId={receipt.id}
+                            receiptNumber={receipt.receiptNumber}
+                            paidDate={payment.paidDate}
+                            amount={toNumber(payment.amount)}
+                            currency={payment.currency}
+                            paymentMethod={payment.paymentMethod}
+                            triggerLabel="Eliminar"
+                            triggerClassName="h-7 bg-card/70 px-2.5 text-xs text-destructive hover:text-destructive"
+                          />
+                        ) : null}
                       </TableCell>
                     </TableRow>
                   ))}
