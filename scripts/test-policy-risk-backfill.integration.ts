@@ -523,7 +523,9 @@ async function main() {
     assert.equal(writerManifest.sourceMode, "PRODUCTION_READ_ONLY_PREVIEW");
     assert.ok(writerManifest.candidates.some((row) => row.policyId === productionBackfillFixture.policyId));
     assert.ok(writerManifest.candidates.every((row) => row.policyId !== secondPolicy.id), "organization A preview must exclude organization B candidates");
-    for (const row of writerManifest.candidates) if (row.classification === "REVIEW") row.decision = "DEFER";
+    for (const row of writerManifest.candidates) {
+      row.decision = row.policyId === productionBackfillFixture.policyId ? "ACCEPT" : "DEFER";
+    }
     writerManifest.reviewedBy = "ci-admin@policydesk.local";
     writerManifest.reviewedAt = new Date().toISOString();
     writeFileSync(writerPreview.reportFile!, `${JSON.stringify(writerManifest, null, 2)}\n`);
