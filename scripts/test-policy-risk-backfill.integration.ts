@@ -524,7 +524,9 @@ async function main() {
     assert.ok(writerManifest.candidates.some((row) => row.policyId === productionBackfillFixture.policyId));
     assert.ok(writerManifest.candidates.every((row) => row.policyId !== secondPolicy.id), "organization A preview must exclude organization B candidates");
     for (const row of writerManifest.candidates) {
-      row.decision = row.policyId === productionBackfillFixture.policyId ? "ACCEPT" : "DEFER";
+      if (row.classification === "REVIEW") {
+        row.decision = row.policyId === productionBackfillFixture.policyId ? "ACCEPT" : "DEFER";
+      }
     }
     writerManifest.reviewedBy = "ci-admin@policydesk.local";
     writerManifest.reviewedAt = new Date().toISOString();
