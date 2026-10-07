@@ -81,16 +81,15 @@ export async function checkQualitasReceiptStatus(policyId: string, context: Orga
   // writes below are the sanitized audit observation; receipt state is untouched.
   const lookup = await lookupQualitasPendingReceipts(initial.policyNumber, { traceId: "qualitas-receipt-monitor" });
   const portalDueDate = lookup.outcome === "OK" ? lookup.nextDueDate : null;
-  const comparison = compareQualitasNextReceipt(portalDueDate, initial.receipts);
   const checkedAt = new Date();
   return withTenantTransaction(context, async (tx) => {
     await assertOrganizationContextInTransaction(tx, context);
     const current = await getPolicyCheckSnapshot(tx, { policyId, organizationId: context.organizationId, userId: context.userId });
     if (!current) throw new Error("QUALITAS_POLICY_NOT_AVAILABLE");
-    const target = comparison.targetReceiptId ? current.receipts.find((receipt) => receipt.id === comparison.targetReceiptId) : undefined;
-    const currentComparison = target
-      ? compareQualitasNextReceipt(portalDueDate, current.receipts)
-      : { status: "INCONCLUSIVE" as const, portalDueDate };
+    const currentComparison = compareQualitasNextReceipt(portalDueDate, current.receipts);
+    const target = currentComparison.targetReceiptId
+      ? current.receipts.find((receipt) => receipt.id === currentComparison.targetReceiptId)
+      : undefined;
     const checked = await writeActivityLog({
       organizationId: context.organizationId,
       entityType: "Policy",
@@ -101,6 +100,7 @@ export async function checkQualitasReceiptStatus(policyId: string, context: Orga
         reason: lookup.outcome === "OK" ? undefined : lookup.reason,
         targetReceiptId: target?.id,
         localDueDate: target ? dateKey(target.dueDate) : undefined,
+        targetReceiptAmount: target?.amount,
         portalDueDate,
         checkedAt: checkedAt.toISOString(),
       },
@@ -133,17 +133,19 @@ export async function confirmQualitasDetectedPayment(observationId: string, cont
       select: { id: true, entityId: true, createdAt: true, newValue: true },
     });
     if (!observation || Date.now() - observation.createdAt.getTime() > 24 * 60 * 60 * 1000) throw new Error("QUALITAS_OBSERVATION_EXPIRED");
-    let parsed: { status?: string; targetReceiptId?: string; portalDueDate?: string } = {};
+    let parsed: { status?: string; targetReceiptId?: string; localDueDate?: string; targetReceiptAmount?: number; portalDueDate?: string } = {};
     try { parsed = JSON.parse(observation.newValue ?? "{}"); } catch { throw new Error("QUALITAS_OBSERVATION_INVALID"); }
     if (parsed.status !== "LIKELY_ADVANCED" || !parsed.targetReceiptId || !parsed.portalDueDate) throw new Error("QUALITAS_OBSERVATION_NOT_CONFIRMABLE");
     const snapshot = await getPolicyCheckSnapshot(tx, { policyId: observation.entityId, organizationId: context.organizationId, userId: context.userId });
     if (!snapshot) throw new Error("QUALITAS_POLICY_NOT_AVAILABLE");
-    const currentComparison = compareQualitasNextReceipt(parsed.portalDueDate, snapshot.receipts);
-    if (currentComparison.status !== "LIKELY_ADVANCED" || currentComparison.targetReceiptId !== parsed.targetReceiptId) {
+    const receipt = snapshot.receipts.find((item) => item.id === parsed.targetReceiptId);
+    const targetIsStillFirstOpenReceipt = snapshot.receipts[0]?.id === parsed.targetReceiptId;
+    const targetDateUnchanged = Boolean(receipt && (!parsed.localDueDate || dateKey(receipt.dueDate) === parsed.localDueDate));
+    const targetAmountUnchanged = Boolean(receipt && (parsed.targetReceiptAmount === undefined || receipt.amount === parsed.targetReceiptAmount));
+    const portalAdvancedPastTarget = Boolean(receipt && parsed.portalDueDate > dateKey(receipt.dueDate));
+    if (!receipt || !targetIsStillFirstOpenReceipt || !targetDateUnchanged || !targetAmountUnchanged || !portalAdvancedPastTarget) {
       throw new Error("QUALITAS_RECEIPT_STATE_CHANGED");
     }
-    const receipt = snapshot.receipts.find((item) => item.id === parsed.targetReceiptId);
-    if (!receipt) throw new Error("QUALITAS_RECEIPT_STATE_CHANGED");
     const result = await recordPayment({
       organizationId: context.organizationId,
       receiptId: receipt.id,

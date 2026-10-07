@@ -66,7 +66,7 @@ export function QualitasReceiptMonitorPanel({
     if (!result?.observationId) return;
     startTransition(async () => {
       const response = await confirmQualitasReceiptPayment(result.observationId);
-      if (!response.ok) { setMessage(response.error); return; }
+      if (!response.ok) { setResult(null); setMessage(response.error); return; }
       setMessage(response.message);
       setResult(null);
       router.refresh();
