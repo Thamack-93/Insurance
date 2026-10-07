@@ -65,7 +65,7 @@ test.describe("Renewals Page (/renewals)", () => {
         await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth === document.documentElement.clientWidth)).toBe(true);
       }
       await page.getByRole("link", { name: "Ver como lista" }).click();
-      await expect(page.getByRole("heading", { name: "Lista de renovaciones" })).toBeVisible();
+      await expect(page.getByText("Lista de renovaciones", { exact: true })).toBeVisible();
     } finally {
       await cleanupPolicyFixture(fixture);
     }

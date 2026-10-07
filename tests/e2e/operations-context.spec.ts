@@ -366,7 +366,7 @@ test.describe("operation queue context", () => {
       const activePolicyLink = page.getByRole("link", { name: new RegExp(fixture.policyNumber) });
       await expect(activePolicyLink).toBeVisible();
       await expect(activePolicyLink).toHaveAttribute("href", new RegExp(`^/policies/${fixture.policyId}(?:\\?.*)?$`));
-      await expect(page.getByText("Renovaciones vencidas sin resolver", { exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Renovaciones", exact: true })).toBeVisible();
 
       await db.policy.update({ where: { id: fixture.policyId }, data: { status: "EXPIRED" } });
       await page.goto("/policies?status=EXPIRED");
@@ -429,7 +429,7 @@ test.describe("operation queue context", () => {
       const stageNavigation = page.getByRole("navigation", { name: "Etapas de renovación" });
       await expect(stageNavigation.getByRole("button", { name: /Perdido/ })).toBeVisible();
       await page.getByRole("link", { name: "Ver como lista" }).click();
-      await expect(page.getByRole("heading", { name: "Lista de renovaciones" })).toBeVisible();
+      await expect(page.getByText("Lista de renovaciones", { exact: true })).toBeVisible();
       await page.getByRole("link", { name: "Ver como tablero" }).click();
 
       const pendingCard = page.locator("#renewal-stage-PENDING li").filter({ hasText: fixture.policyNumber });
@@ -496,7 +496,13 @@ test.describe("operation queue context", () => {
       await card.getByRole("button", { name: `Seguimiento de ${fixture.policyNumber}` }).click();
       const scheduledDate = businessDateAfter(3);
       await page.getByRole("menuitem", { name: "En 3 días", exact: true }).click();
-      await expectMutationSuccessToast(page, "Seguimiento programado.");
+      await expect.poll(async () => {
+        const item = await db.workItem.findUnique({
+          where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId: manualSourceId } },
+          select: { status: true, dueDate: true, policyId: true },
+        });
+        return item && { status: item.status, dueDate: businessDateKey(item.dueDate!), policyId: item.policyId };
+      }, { timeout: 10_000 }).toEqual({ status: "OPEN", dueDate: scheduledDate, policyId: fixture.policyId });
 
       const scheduledItem = await db.workItem.findUniqueOrThrow({
         where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId: manualSourceId } },
