@@ -7,16 +7,11 @@ import { assertOrganizationContextInTransaction, withSystemOrganizationTransacti
 import { writeActivityLog } from "@/lib/activity-log";
 import { isQualitasInsurerName, lookupQualitasPendingReceipts } from "@/lib/qualitas-payment-link";
 import { compareQualitasNextReceipt, type QualitasMonitorComparison, type QualitasMonitorReceipt } from "@/lib/qualitas-receipt-monitor-logic";
+import { supportsDomiciliatedPaymentMethod } from "@/lib/payment-frequency";
 import { recordPayment } from "@/lib/payment-service";
-
-const DISALLOWED_FREQUENCIES = new Set(["ANNUAL", "SINGLE"]);
 
 export function isQualitasReceiptMonitorEnabled() {
   return process.env.QUALITAS_RECEIPT_MONITOR_ENABLED?.trim() === "1";
-}
-
-function eligibleFrequency(value: string) {
-  return !DISALLOWED_FREQUENCIES.has(value.trim().toUpperCase());
 }
 
 function dateKey(value: Date | string) {
@@ -25,6 +20,7 @@ function dateKey(value: Date | string) {
 
 type PolicyCheckSnapshot = {
   policyNumber: string;
+  paymentFrequency: string;
   receipts: Array<QualitasMonitorReceipt & { receiptNumber: string; amount: number; currency: string }>;
 };
 
@@ -40,7 +36,7 @@ async function getPolicyCheckSnapshot(
     },
     include: { insurer: { select: { name: true } }, client: { select: { id: true, fullName: true } } },
   });
-  if (!policy || !isQualitasInsurerName(policy.insurer.name) || policy.status !== "ACTIVE" || !eligibleFrequency(policy.paymentFrequency)) return null;
+  if (!policy || !isQualitasInsurerName(policy.insurer.name) || policy.status !== "ACTIVE") return null;
   if (input.onlyEnabled && !policy.qualitasReceiptMonitorEnabled) return null;
   const receipts = await tx.receipt.findMany({
     where: { organizationId: input.organizationId, policyId: policy.id, status: { notIn: ["PAID", "CANCELLED"] } },
@@ -49,6 +45,7 @@ async function getPolicyCheckSnapshot(
   });
   return {
     policyNumber: policy.policyNumber,
+    paymentFrequency: policy.paymentFrequency,
     receipts: receipts.map((receipt) => ({ ...receipt, amount: Number(receipt.amount) })),
   };
 }
@@ -59,10 +56,11 @@ async function hasQualitasCapability(organizationId: string, tx: Prisma.Transact
 }
 
 export type ManualQualitasReceiptCheck = {
-  status: QualitasMonitorComparison["status"];
+  status: QualitasMonitorComparison["status"] | "PORTAL_PAID";
   observationId: string;
   checkedAt: string;
   portalDueDate: string | null;
+  paymentMethod: "DOMICILIATED" | "OTHER";
   targetReceipt: null | { id: string; receiptNumber: string; dueDate: string; amount: number; currency: string };
   reason?: string;
 };
@@ -86,9 +84,13 @@ export async function checkQualitasReceiptStatus(policyId: string, context: Orga
     await assertOrganizationContextInTransaction(tx, context);
     const current = await getPolicyCheckSnapshot(tx, { policyId, organizationId: context.organizationId, userId: context.userId });
     if (!current) throw new Error("QUALITAS_POLICY_NOT_AVAILABLE");
-    const currentComparison = compareQualitasNextReceipt(portalDueDate, current.receipts);
-    const target = currentComparison.targetReceiptId
-      ? current.receipts.find((receipt) => receipt.id === currentComparison.targetReceiptId)
+    const currentComparison = lookup.outcome === "ALREADY_PAID"
+      ? null
+      : compareQualitasNextReceipt(portalDueDate, current.receipts);
+    const resultStatus = lookup.outcome === "ALREADY_PAID" ? "PORTAL_PAID" : currentComparison?.status ?? "INCONCLUSIVE";
+    const targetReceiptId = lookup.outcome === "ALREADY_PAID" ? current.receipts[0]?.id : currentComparison?.targetReceiptId;
+    const target = targetReceiptId
+      ? current.receipts.find((receipt) => receipt.id === targetReceiptId)
       : undefined;
     const checked = await writeActivityLog({
       organizationId: context.organizationId,
@@ -96,8 +98,8 @@ export async function checkQualitasReceiptStatus(policyId: string, context: Orga
       entityId: policyId,
       action: "QUALITAS_RECEIPT_CHECKED",
       newValue: {
-        status: lookup.outcome === "OK" ? currentComparison.status : "INCONCLUSIVE",
-        reason: lookup.outcome === "OK" ? undefined : lookup.reason,
+        status: resultStatus,
+        reason: lookup.outcome === "INCONCLUSIVE" ? lookup.reason : undefined,
         targetReceiptId: target?.id,
         localDueDate: target ? dateKey(target.dueDate) : undefined,
         targetReceiptAmount: target?.amount,
@@ -108,10 +110,11 @@ export async function checkQualitasReceiptStatus(policyId: string, context: Orga
       db: tx,
     });
     return {
-      status: lookup.outcome === "OK" ? currentComparison.status : "INCONCLUSIVE",
+      status: resultStatus,
       observationId: checked.id,
       checkedAt: checkedAt.toISOString(),
       portalDueDate,
+      paymentMethod: supportsDomiciliatedPaymentMethod(current.paymentFrequency) ? "DOMICILIATED" : "OTHER",
       targetReceipt: target ? {
         id: target.id,
         receiptNumber: target.receiptNumber,
@@ -119,7 +122,7 @@ export async function checkQualitasReceiptStatus(policyId: string, context: Orga
         amount: target.amount,
         currency: target.currency,
       } : null,
-      reason: lookup.outcome === "OK" ? undefined : lookup.reason,
+      reason: lookup.outcome === "INCONCLUSIVE" ? lookup.reason : undefined,
     };
   });
 }
@@ -135,7 +138,7 @@ export async function confirmQualitasDetectedPayment(observationId: string, cont
     if (!observation || Date.now() - observation.createdAt.getTime() > 24 * 60 * 60 * 1000) throw new Error("QUALITAS_OBSERVATION_EXPIRED");
     let parsed: { status?: string; targetReceiptId?: string; localDueDate?: string; targetReceiptAmount?: number; portalDueDate?: string } = {};
     try { parsed = JSON.parse(observation.newValue ?? "{}"); } catch { throw new Error("QUALITAS_OBSERVATION_INVALID"); }
-    if (parsed.status !== "LIKELY_ADVANCED" || !parsed.targetReceiptId || !parsed.portalDueDate) throw new Error("QUALITAS_OBSERVATION_NOT_CONFIRMABLE");
+    if (!(["LIKELY_ADVANCED", "PORTAL_PAID"] as string[]).includes(parsed.status ?? "") || !parsed.targetReceiptId) throw new Error("QUALITAS_OBSERVATION_NOT_CONFIRMABLE");
     const snapshot = await getPolicyCheckSnapshot(tx, { policyId: observation.entityId, organizationId: context.organizationId, userId: context.userId });
     if (!snapshot) throw new Error("QUALITAS_POLICY_NOT_AVAILABLE");
     const receipt = snapshot.receipts.find((item) => item.id === parsed.targetReceiptId);
@@ -145,17 +148,22 @@ export async function confirmQualitasDetectedPayment(observationId: string, cont
     // amount, method, and current receipt-state checks.
     const targetDateUnchanged = Boolean(receipt && (!parsed.localDueDate || dateKey(receipt.dueDate) === parsed.localDueDate));
     const targetAmountUnchanged = Boolean(receipt && (parsed.targetReceiptAmount === undefined || receipt.amount === parsed.targetReceiptAmount));
-    const portalAdvancedPastTarget = Boolean(receipt && parsed.portalDueDate > dateKey(receipt.dueDate));
+    const portalAdvancedPastTarget = parsed.status === "PORTAL_PAID"
+      || Boolean(receipt && parsed.portalDueDate && parsed.portalDueDate > dateKey(receipt.dueDate));
     if (!receipt || !targetDateUnchanged || !targetAmountUnchanged || !portalAdvancedPastTarget) {
       throw new Error("QUALITAS_RECEIPT_STATE_CHANGED");
     }
+    const paymentMethod = supportsDomiciliatedPaymentMethod(snapshot.paymentFrequency) ? "DOMICILIATED" : "OTHER";
+    const paymentEvidence = parsed.status === "PORTAL_PAID"
+      ? "Quálitas indicó que la póliza ya está pagada"
+      : `Quálitas mostró el siguiente vencimiento ${parsed.portalDueDate}`;
     const result = await recordPayment({
       organizationId: context.organizationId,
       receiptId: receipt.id,
       amount: receipt.amount,
       paidDate: observation.createdAt,
-      paymentMethod: "DOMICILIATED",
-      notes: `Confirmado manualmente con base en consulta Quálitas del ${observation.createdAt.toISOString()}; el portal mostró el siguiente recibo con vencimiento ${parsed.portalDueDate}.`,
+      paymentMethod,
+      notes: `Confirmado manualmente con base en consulta Quálitas del ${observation.createdAt.toISOString()}; ${paymentEvidence}.`,
       sourceEvidenceKey: `qualitas-receipt-monitor:${observation.id}`,
       actorId: context.userId,
     }, tx);
@@ -184,12 +192,11 @@ export async function setQualitasReceiptMonitor(policyId: string, enabled: boole
       let parsedCheck: { status?: string; targetReceiptId?: string; portalDueDate?: string } = {};
       try { parsedCheck = JSON.parse(recentCheck?.newValue ?? "{}"); } catch { /* fail closed */ }
       const currentCheck = parsedCheck.portalDueDate ? compareQualitasNextReceipt(parsedCheck.portalDueDate, snapshot.receipts) : null;
-      if (
-        !["PENDING", "LIKELY_ADVANCED"].includes(parsedCheck.status ?? "") ||
-        !currentCheck ||
-        currentCheck.status !== parsedCheck.status ||
-        currentCheck.targetReceiptId !== parsedCheck.targetReceiptId
-      ) throw new Error("QUALITAS_MANUAL_VALIDATION_REQUIRED");
+      const validPortalPaidCheck = parsedCheck.status === "PORTAL_PAID"
+        && Boolean(parsedCheck.targetReceiptId && snapshot.receipts.some((receipt) => receipt.id === parsedCheck.targetReceiptId));
+      const validDateCheck = ["PENDING", "LIKELY_ADVANCED"].includes(parsedCheck.status ?? "")
+        && Boolean(currentCheck && currentCheck.status === parsedCheck.status && currentCheck.targetReceiptId === parsedCheck.targetReceiptId);
+      if (!validPortalPaidCheck && !validDateCheck) throw new Error("QUALITAS_MANUAL_VALIDATION_REQUIRED");
     }
     await tx.policy.update({
       where: { id: policyId, organizationId: context.organizationId },
@@ -216,7 +223,7 @@ export async function runQualitasReceiptMonitorScan(organizationId: string): Pro
   const policies = await withSystemOrganizationTransaction(organizationId, "qualitas receipt monitor", async (tx) => {
     if (!(await hasQualitasCapability(organizationId, tx))) return [];
     const rows = await tx.policy.findMany({
-      where: { organizationId, qualitasReceiptMonitorEnabled: true, status: "ACTIVE", paymentFrequency: { notIn: [...DISALLOWED_FREQUENCIES] } },
+      where: { organizationId, qualitasReceiptMonitorEnabled: true, status: "ACTIVE" },
       include: { insurer: { select: { name: true } } },
       orderBy: [{ id: "asc" }],
     });
@@ -238,16 +245,19 @@ export async function runQualitasReceiptMonitorScan(organizationId: string): Pro
       summary.inconclusive += 1;
       continue;
     }
-    if (lookup.outcome !== "OK") { summary.inconclusive += 1; continue; }
-    const comparison = compareQualitasNextReceipt(lookup.nextDueDate, receipts);
-    if (comparison.status === "INCONCLUSIVE") { summary.inconclusive += 1; continue; }
-    if (comparison.status === "PENDING") continue;
+    const comparison = lookup.outcome === "OK" ? compareQualitasNextReceipt(lookup.nextDueDate, receipts) : null;
+    const alreadyPaid = lookup.outcome === "ALREADY_PAID";
+    if (!alreadyPaid && lookup.outcome !== "OK") { summary.inconclusive += 1; continue; }
+    if (!alreadyPaid && comparison?.status === "INCONCLUSIVE") { summary.inconclusive += 1; continue; }
+    if (!alreadyPaid && comparison?.status === "PENDING") continue;
+    if (!alreadyPaid && comparison?.status !== "LIKELY_ADVANCED") { summary.inconclusive += 1; continue; }
     summary.advanced += 1;
     await withSystemOrganizationTransaction(organizationId, "qualitas receipt monitor", async (tx) => {
       const current = await getPolicyCheckSnapshot(tx, { policyId: policy.id, organizationId, onlyEnabled: true });
-      const currentComparison = current ? compareQualitasNextReceipt(lookup.nextDueDate, current.receipts) : null;
-      if (!current || currentComparison?.status !== "LIKELY_ADVANCED") return;
-      const receipt = current.receipts.find((item) => item.id === currentComparison.targetReceiptId);
+      const currentComparison = current && lookup.outcome === "OK" ? compareQualitasNextReceipt(lookup.nextDueDate, current.receipts) : null;
+      if (!current || (!alreadyPaid && currentComparison?.status !== "LIKELY_ADVANCED")) return;
+      const targetReceiptId = alreadyPaid ? current.receipts[0]?.id : currentComparison?.targetReceiptId;
+      const receipt = targetReceiptId ? current.receipts.find((item) => item.id === targetReceiptId) : undefined;
       if (!receipt) return;
       const existingAlert = await tx.alert.findFirst({
         where: { organizationId, receiptId: receipt.id, alertType: "QUALITAS_RECEIPT_ADVANCED" },
@@ -258,7 +268,9 @@ export async function runQualitasReceiptMonitorScan(organizationId: string): Pro
         organizationId,
         type: "QUALITAS_RECEIPT_ADVANCED",
         title: `Revisa el recibo ${receipt.receiptNumber} de Quálitas`,
-        body: `El portal ya muestra el siguiente recibo (${lookup.nextDueDate}). Confirma el cargo domiciliado y registra el pago si corresponde.`,
+        body: alreadyPaid
+          ? "Quálitas indicó que la póliza ya está pagada. Verifica el cargo y registra el recibo si corresponde."
+          : `El portal ya muestra el siguiente recibo (${lookup.outcome === "OK" ? lookup.nextDueDate : ""}). Confirma el cargo y registra el pago si corresponde.`,
         severity: "WARNING",
         entityType: "Receipt",
         entityId: receipt.id,
@@ -269,7 +281,7 @@ export async function runQualitasReceiptMonitorScan(organizationId: string): Pro
         entityType: "Receipt",
         entityId: receipt.id,
         action: "QUALITAS_RECEIPT_ADVANCED_ALERTED",
-        newValue: { localDueDate: currentComparison.localDueDate, portalDueDate: lookup.nextDueDate, alertId: alert?.id ?? null },
+        newValue: { status: alreadyPaid ? "PORTAL_PAID" : "LIKELY_ADVANCED", localDueDate: currentComparison?.localDueDate, portalDueDate: lookup.outcome === "OK" ? lookup.nextDueDate : null, alertId: alert?.id ?? null },
         db: tx,
       });
     });

@@ -59,6 +59,7 @@ export type QualitasPaymentLinkDeliveryMethod = "EMAIL" | "WHATSAPP";
 
 export type QualitasReceiptLookupResult =
   | { outcome: "OK"; nextDueDate: string }
+  | { outcome: "ALREADY_PAID" }
   | { outcome: "INCONCLUSIVE"; reason: "INVALID_INPUT" | "FLOW_CHANGED" | "PROVIDER_UNAVAILABLE" | "CHALLENGE" | "RECEIPT_DATE_NOT_FOUND" };
 
 export type QualitasPreparedPaymentLink = {
@@ -612,6 +613,16 @@ function collectQualitasPendingReceiptDates(html: string): string[] {
   }
   visit(document);
   return [...dates].sort();
+}
+
+function hasExplicitQualitasPaidMessage(html: string) {
+  const text = visibleHtmlText(html)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  return /\b(?:poliza|recibo)\b.{0,160}\b(?:(?:ya\s+)?(?:(?:se\s+encuentra|esta|fue|ha\s+sido)\s+)?pagad[oa]s?|pagad[oa]s?\s+(?:en\s+su\s+totalidad|completamente))\b/.test(text)
+    || /\b(?:no\s+(?:hay|existen|tiene)\s+(?:recibos?\s+)?(?:pendientes?|por\s+pagar)|sin\s+(?:recibos?\s+)?pendientes?)\b/.test(text);
 }
 
 function looksLikeQualitasChallenge(html: string) {
@@ -1242,6 +1253,7 @@ export async function lookupQualitasPendingReceipts(
   });
   if (policyResponse.bodyText && looksLikeQualitasChallenge(policyResponse.bodyText)) return { outcome: "INCONCLUSIVE", reason: "CHALLENGE" };
   if (!policyResponse.bodyText) return { outcome: "INCONCLUSIVE", reason: "PROVIDER_UNAVAILABLE" };
+  if (hasExplicitQualitasPaidMessage(policyResponse.bodyText)) return { outcome: "ALREADY_PAID" };
 
   let receiptPage = policyResponse.bodyText;
   let dates = collectQualitasPendingReceiptDates(receiptPage);
@@ -1263,6 +1275,7 @@ export async function lookupQualitasPendingReceipts(
     if (paymentPage.bodyText && looksLikeQualitasChallenge(paymentPage.bodyText)) return { outcome: "INCONCLUSIVE", reason: "CHALLENGE" };
     if (!paymentPage.bodyText) return { outcome: "INCONCLUSIVE", reason: "PROVIDER_UNAVAILABLE" };
     receiptPage = paymentPage.bodyText;
+    if (hasExplicitQualitasPaidMessage(receiptPage)) return { outcome: "ALREADY_PAID" };
     dates = collectQualitasPendingReceiptDates(receiptPage);
   }
   if (dates.length === 0) return { outcome: "INCONCLUSIVE", reason: "RECEIPT_DATE_NOT_FOUND" };

@@ -36,7 +36,7 @@ export function QualitasReceiptMonitorPanel({
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
   const setOpen = onOpenChange ?? setInternalOpen;
-  const canEnableMonitor = result?.status === "PENDING" || result?.status === "LIKELY_ADVANCED";
+  const canEnableMonitor = result?.status === "PENDING" || result?.status === "LIKELY_ADVANCED" || result?.status === "PORTAL_PAID";
 
   if (!featureEnabled) return null;
 
@@ -48,6 +48,7 @@ export function QualitasReceiptMonitorPanel({
       setResult(response.result);
       if (response.result.status === "PENDING") setMessage("Quálitas todavía muestra el recibo local como pendiente.");
       else if (response.result.status === "LIKELY_ADVANCED") setMessage("Quálitas ya muestra la siguiente parcialidad. El recibo anterior probablemente se pagó.");
+      else if (response.result.status === "PORTAL_PAID") setMessage("Quálitas indica que la póliza ya está pagada. Confirma el recibo local si corresponde.");
       else setMessage("No se pudo confirmar el estado con suficiente certeza. El recibo no cambió.");
     });
   }
@@ -97,10 +98,11 @@ export function QualitasReceiptMonitorPanel({
             <div className="rounded-xl border bg-muted/30 p-3 text-sm">
               <p className="font-medium">Recibo {result.targetReceipt.receiptNumber} · vence {formatDate(result.targetReceipt.dueDate)}</p>
               <p className="text-muted-foreground">{formatCurrency(result.targetReceipt.amount, result.targetReceipt.currency)} · Consulta {formatDate(result.checkedAt)}</p>
+              {result.status === "PORTAL_PAID" ? <p className="text-muted-foreground">Quálitas reportó la póliza como pagada.</p> : null}
               {result.portalDueDate ? <p className="text-muted-foreground">Siguiente vencimiento visto en Quálitas: {formatDate(result.portalDueDate)}</p> : null}
-              {result.status === "LIKELY_ADVANCED" ? (
+              {["LIKELY_ADVANCED", "PORTAL_PAID"].includes(result.status) ? (
                 <Button type="button" className="mt-3" onClick={confirmPayment} disabled={pending}>
-                  Confirmar y registrar como Domiciliado
+                  {result.paymentMethod === "DOMICILIATED" ? "Confirmar y registrar como Domiciliado" : "Confirmar y registrar pago"}
                 </Button>
               ) : null}
             </div>
