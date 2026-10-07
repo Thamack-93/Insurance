@@ -230,6 +230,7 @@ export async function recordPayment(input: RecordPaymentInput, client?: DbClient
       where: {
         organizationId: input.organizationId,
         receiptId: input.receiptId,
+        status: "POSTED",
         amount: input.amount,
         paidDate: input.paidDate,
         reference,
