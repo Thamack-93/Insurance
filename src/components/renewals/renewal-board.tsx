@@ -1,5 +1,4 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
 import { AlertTriangle, CalendarClock } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -232,21 +231,16 @@ export function RenewalBoard({
   owners,
   canFilterByOwner,
   isDemo,
-  savedViews,
 }: {
   board: RenewalBoardData;
   filters: RenewalBoardFilters;
   owners: { id: string; name: string }[];
   canFilterByOwner: boolean;
   isDemo: boolean;
-  savedViews?: ReactNode;
 }) {
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <BoardFilters filters={filters} owners={owners} canFilterByOwner={canFilterByOwner} />
-        {savedViews}
-      </div>
+      <BoardFilters filters={filters} owners={owners} canFilterByOwner={canFilterByOwner} />
 
       {board.total > 0 ? <RenewalBoardStageNavigation columns={board.columns} /> : null}
 

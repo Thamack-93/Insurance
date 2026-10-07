@@ -45,7 +45,6 @@ const localItems = [
 
 const RENEWAL_PAGE_SIZE = 25;
 const WORK_ITEM_PAGE_SIZE = 50;
-const RENEWAL_SAVED_QUEUE_ROUTES = ["renewal-board", "operations"] as const;
 
 function readView(value?: string): OperationsView {
   if (value === "renewal-board") return "renewals";
@@ -334,22 +333,14 @@ export default async function OperationsPage({
   const claimSearchParams = { view: "claims", q: query };
   const pendingSearchParams = { view: "pending", q: query, priority, workItemType };
   const returnTo = buildCanonicalHref("/operations", params);
-  const savedQueueRoute = view === "renewals" ? "renewal-board" : "operations";
   const savedQueueConfig = {
-    route: savedQueueRoute,
+    route: "operations",
     search: query ?? "",
-    filters: view === "renewals"
-      ? { view: "renewal-board", mode: renewalMode, window: boardFilters.window, owner: boardFilters.owner ?? "" }
-      : { view, priority: priority ?? "", workItemType: workItemType ?? "" },
+    filters: { view, priority: priority ?? "", workItemType: workItemType ?? "" },
     version: 1,
   };
-  const savedQueueControls = (
-    <SavedQueueControls
-      route={savedQueueRoute}
-      loadRoutes={view === "renewals" ? RENEWAL_SAVED_QUEUE_ROUTES : undefined}
-      config={savedQueueConfig}
-      compact={view === "renewals"}
-    />
+  const savedQueueControls = view === "renewals" ? null : (
+    <SavedQueueControls route="operations" config={savedQueueConfig} />
   );
 
   return (
@@ -377,7 +368,7 @@ export default async function OperationsPage({
         }
       />
       <LocalNavigation items={localItems} label="Vistas de operación" />
-      {view === "renewals" ? null : savedQueueControls}
+      {savedQueueControls}
 
       {view === "all" ? (
         <>
@@ -437,14 +428,11 @@ export default async function OperationsPage({
 
       {view === "renewals" && renewalMode === "list" ? (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <RenewalBoardFilters
-              filters={boardFilters}
-              owners={boardOwners}
-              canFilterByOwner={!scope.portfolioOwnerId}
-            />
-            {savedQueueControls}
-          </div>
+          <RenewalBoardFilters
+            filters={boardFilters}
+            owners={boardOwners}
+            canFilterByOwner={!scope.portfolioOwnerId}
+          />
           <Card className="gap-0 py-0">
             <CardHeader className="border-b py-4"><CardTitle className="flex items-center gap-2"><CalendarClock className="size-4" />Lista de renovaciones</CardTitle></CardHeader>
             <CardContent className="px-0">
@@ -495,7 +483,6 @@ export default async function OperationsPage({
           owners={boardOwners}
           canFilterByOwner={!scope.portfolioOwnerId}
           isDemo={organizationKind?.kind === "DEMO"}
-          savedViews={savedQueueControls}
         />
       ) : null}
 
