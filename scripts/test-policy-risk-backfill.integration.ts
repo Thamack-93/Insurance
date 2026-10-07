@@ -762,7 +762,14 @@ async function main() {
     assert.ok(existsSync(writerInterruptedResult));
     resultFiles.push(writerInterruptedResult);
     const writerInterruptedReport = JSON.parse(readFileSync(writerInterruptedResult, "utf8")) as { applied: number; outcomes: Array<{ outcome: string }> };
-    assert.equal(writerInterruptedReport.applied, 1);
+    assert.equal(
+      writerInterruptedReport.applied,
+      1,
+      JSON.stringify({
+        writerInterruptedReport,
+        writerCandidates: writerManifest.candidates.map(({ policyId, policyNumber, classification, decision }) => ({ policyId, policyNumber, classification, decision })),
+      }),
+    );
     assert.ok(writerInterruptedReport.outcomes.some((row) => row.outcome === "APPLIED"));
 
     const writerResume = runBackfill({
@@ -823,7 +830,12 @@ async function main() {
     reportFiles.push(secondReportPath);
     const secondPreview = runBackfill({ reportFile: secondReportPath });
     assert.equal(secondPreview.mode, "dry-run");
-    assert.equal(secondPreview.scanned, 1);
+    const secondManifest = JSON.parse(readFileSync(secondReportPath, "utf8")) as PolicyRiskBackfillManifest;
+    assert.equal(
+      secondPreview.scanned,
+      1,
+      JSON.stringify({ scanned: secondPreview.scanned, candidates: secondManifest.candidates.map(({ policyId, policyNumber, classification, decision }) => ({ policyId, policyNumber, classification, decision })) }),
+    );
     assert.equal(secondPreview.review, 1);
 
     const assetsAfterRepeat = await db.policyInsuredAsset.findMany({
