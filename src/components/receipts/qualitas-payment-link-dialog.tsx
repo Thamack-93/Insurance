@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { Link2 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { formatCurrency } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
 import { requestQualitasPaymentLink } from "@/app/(dashboard)/receipts/actions";
@@ -29,7 +28,9 @@ type Props = {
   clientRecipientEnabled: boolean;
   enabled: boolean;
   className?: string;
-  triggerMode?: "button" | "menu-item";
+  triggerMode?: "button" | "controlled";
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 function maskedEmail(value: string) {
@@ -41,8 +42,10 @@ function maskedPhone(value: string) {
   return `••••••${value.replace(/\D/g, "").slice(-4)}`;
 }
 
-export function QualitasPaymentLinkDialog({ receipt, agent, clientRecipientEnabled, enabled, className, triggerMode = "button" }: Props) {
-  const [open, setOpen] = useState(false);
+export function QualitasPaymentLinkDialog({ receipt, agent, clientRecipientEnabled, enabled, className, triggerMode = "button", open: controlledOpen, onOpenChange }: Props) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = onOpenChange ?? setInternalOpen;
   const [recipient, setRecipient] = useState<Recipient | null>(null);
   const [channel, setChannel] = useState<Channel | null>(null);
   const [pending, startTransition] = useTransition();
@@ -82,10 +85,12 @@ export function QualitasPaymentLinkDialog({ receipt, agent, clientRecipientEnabl
 
   return (
     <Dialog open={open} onOpenChange={(next) => { setOpen(next); if (!next) reset(); }}>
-      <DialogTrigger render={triggerMode === "menu-item" ? <DropdownMenuItem className="gap-2" /> : <Button size="sm" variant="outline" className={cn("h-8 gap-1 px-3 text-xs", className)} />}>
-        <Link2 className="size-4" />
-        Liga de pago Quálitas
-      </DialogTrigger>
+      {triggerMode === "button" ? (
+        <DialogTrigger render={<Button size="sm" variant="outline" className={cn("h-8 gap-1 px-3 text-xs", className)} />}>
+          <Link2 className="size-4" />
+          Liga de pago Quálitas
+        </DialogTrigger>
+      ) : null}
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Solicitar liga de pago Quálitas</DialogTitle>
