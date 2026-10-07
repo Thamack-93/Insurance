@@ -30,6 +30,7 @@ const shortcutLabels: Array<{ value: RenewalFollowUpShortcut; label: string }> =
 export function RenewalFollowUpMenu({ policyId, policyNumber, currentDueDate, currentNotes }: RenewalFollowUpMenuProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [menuOpen, setMenuOpen] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
   const [customDate, setCustomDate] = useState(currentDueDate ?? formatBusinessDateInput(renewalFollowUpShortcutDate("tomorrow")));
@@ -49,6 +50,7 @@ export function RenewalFollowUpMenu({ policyId, policyNumber, currentDueDate, cu
         return;
       }
       toast.success(result.message);
+      setMenuOpen(false);
       setCustomOpen(false);
       router.refresh();
     });
@@ -70,7 +72,7 @@ export function RenewalFollowUpMenu({ policyId, policyNumber, currentDueDate, cu
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger render={<Button type="button" variant="outline" size="sm" disabled={pending} aria-label={`Seguimiento de ${policyNumber}`} />}>
           <CalendarClock className="size-3.5" aria-hidden="true" />
           Seguimiento
@@ -80,7 +82,7 @@ export function RenewalFollowUpMenu({ policyId, policyNumber, currentDueDate, cu
           <DropdownMenuGroup>
             <DropdownMenuLabel>{currentDueDate ? "Reprogramar" : "Programar"}</DropdownMenuLabel>
             {shortcutLabels.map((shortcut) => (
-              <DropdownMenuItem key={shortcut.value} onClick={() => chooseShortcut(shortcut.value)}>
+              <DropdownMenuItem key={shortcut.value} closeOnClick={false} onClick={() => chooseShortcut(shortcut.value)}>
                 {shortcut.label}
               </DropdownMenuItem>
             ))}
