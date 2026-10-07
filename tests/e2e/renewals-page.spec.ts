@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
-import { authenticatePageAsAdmin, getTestDb, cleanupRecentRenewalWorkItems } from "../helpers/db";
+import { authenticatePageAsAdmin, getTestDb, cleanupRecentRenewalWorkItems, cleanupPolicyFixture, seedPolicyFixture } from "../helpers/db";
 
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
-import { addDays, addYears } from "date-fns";
+import { addDays } from "date-fns";
 
 test.describe("Renewals Page (/renewals)", () => {
   let policyId = "";
@@ -16,19 +16,24 @@ test.describe("Renewals Page (/renewals)", () => {
     }
   });
 
-  test("displays renewal statistics", async ({ page }) => {
-    await authenticatePageAsAdmin(page);
-    await page.goto("/operations?view=renewals");
+  test("displays the renewal board and its stage navigation by default", async ({ page }) => {
+    const fixture = await seedPolicyFixture("RENEWAL-BOARD-DEFAULT");
+    try {
+      await getTestDb().policy.update({ where: { id: fixture.policyId }, data: { endDate: addDays(new Date(), 20) } });
+      await authenticatePageAsAdmin(page);
+      await page.goto("/operations?view=renewals");
 
-    // Wait for page to load
-    await expect(page.getByRole("heading", { name: "Renovaciones", exact: true })).toBeVisible();
-
-    // Check for metric cards
-    await expect(page.getByText("Vencidas").first()).toBeVisible();
-    await expect(page.getByText("Próximos 30 días").first()).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Renovaciones", exact: true })).toBeVisible();
+      await expect(page.getByRole("navigation", { name: "Etapas de renovación" })).toBeVisible();
+      await expect(page.getByRole("button", { name: /Perdido/ })).toBeVisible();
+      await page.getByRole("button", { name: "Ver como lista" }).click();
+      await expect(page.getByRole("heading", { name: "Lista de renovaciones" })).toBeVisible();
+    } finally {
+      await cleanupPolicyFixture(fixture);
+    }
   });
 
-  test("shows urgent renewals", async ({ page }) => {
+  test("legacy /renewals route opens the unified renewal board", async ({ page }) => {
     startedAt = Date.now();
     const db = getTestDb();
 
@@ -51,7 +56,7 @@ test.describe("Renewals Page (/renewals)", () => {
         status: "ACTIVE",
         paymentFrequency: "ANNUAL",
         startDate: new Date(),
-        endDate: addYears(new Date(), 1),
+        endDate: addDays(new Date(), 20),
         premiumAmount: 1000,
         currency: "MXN",
       },
@@ -61,8 +66,9 @@ test.describe("Renewals Page (/renewals)", () => {
     await authenticatePageAsAdmin(page);
     await page.goto("/renewals");
 
-    // Check for urgent renewals section
-    await expect(page.getByText("Renovaciones urgentes", { exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/operations\?view=renewals$/);
+    await expect(page.getByRole("navigation", { name: "Etapas de renovación" })).toBeVisible();
+    await expect(page.locator("#renewal-stage-PENDING")).toContainText(policy.policyNumber);
   });
 
   test("allows filtering renewals", async ({ page }) => {
@@ -86,7 +92,7 @@ test.describe("Renewals Page (/renewals)", () => {
         status: "ACTIVE",
         paymentFrequency: "ANNUAL",
         startDate: new Date(),
-        endDate: addYears(new Date(), 1),
+        endDate: addDays(new Date(), 20),
         premiumAmount: 1000,
         currency: "MXN",
       },
@@ -94,7 +100,7 @@ test.describe("Renewals Page (/renewals)", () => {
     policyId = policy.id;
 
     await authenticatePageAsAdmin(page);
-    await page.goto("/renewals");
+    await page.goto("/renewals?mode=list");
 
     // Search input should be visible
     const searchInput = page.getByPlaceholder(/buscar/i);
@@ -127,7 +133,7 @@ test.describe("Renewals Page (/renewals)", () => {
         status: "ACTIVE",
         paymentFrequency: "ANNUAL",
         startDate: new Date(),
-        endDate: addDays(new Date(), 1),
+        endDate: addDays(new Date(), 20),
         premiumAmount: 1000,
         currency: "MXN",
       },
@@ -135,7 +141,7 @@ test.describe("Renewals Page (/renewals)", () => {
     policyId = policy.id;
 
     await authenticatePageAsAdmin(page);
-    await page.goto("/renewals");
+    await page.goto("/renewals?mode=list");
 
     const row = page.locator("tr", { hasText: policyNumber });
     await expect(row.getByRole("link", { name: "Renovar" })).toBeVisible();

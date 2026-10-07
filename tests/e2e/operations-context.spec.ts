@@ -375,10 +375,49 @@ test.describe("operation queue context", () => {
       });
 
       await authenticatePageAsAdmin(page);
-      await page.goto("/operations?view=renewals");
+      await page.goto("/operations?view=renewals&mode=list");
 
       await expect(page.getByRole("link", { name: new RegExp(fixture.policyNumber) })).toHaveCount(0);
       await expect(page.getByText("No hay renovaciones pendientes.", { exact: true })).toBeVisible();
+    } finally {
+      await cleanupPolicyFixture(fixture);
+    }
+  });
+
+  test("unifies renewal views and confirms drag-and-drop into Lost", async ({ page }) => {
+    const fixture = await seedPolicyFixture("RENEWAL-BOARD-DRAG");
+
+    try {
+      await getTestDb().policy.update({
+        where: { id: fixture.policyId },
+        data: { endDate: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000) },
+      });
+      await authenticatePageAsAdmin(page);
+      await page.goto("/operations?view=renewals");
+
+      const stageNavigation = page.getByRole("navigation", { name: "Etapas de renovación" });
+      await expect(stageNavigation.getByRole("button", { name: /Perdido/ })).toBeVisible();
+      await page.getByRole("button", { name: "Ver como lista" }).click();
+      await expect(page.getByRole("heading", { name: "Lista de renovaciones" })).toBeVisible();
+      await page.getByRole("button", { name: "Ver como tablero" }).click();
+
+      const pendingCard = page.locator("#renewal-stage-PENDING li").filter({ hasText: fixture.policyNumber });
+      await expect(pendingCard).toBeVisible();
+      await pendingCard.locator("[data-renewal-drag-handle]").dragTo(page.locator("#renewal-stage-CONTACTED"));
+      await expectMutationSuccessToast(page, "Renovación movida a Contactado.");
+
+      const contactedCard = page.locator("#renewal-stage-CONTACTED li").filter({ hasText: fixture.policyNumber });
+      await expect(contactedCard).toBeVisible();
+      await contactedCard.locator("[data-renewal-drag-handle]").dragTo(page.locator("#renewal-stage-LOST"));
+      const confirmation = page.getByRole("alertdialog");
+      await expect(confirmation).toContainText("Se marcará como no continuada");
+      await confirmation.getByRole("button", { name: "Cancelar" }).click();
+      await expect(contactedCard).toBeVisible();
+
+      await contactedCard.locator("[data-renewal-drag-handle]").dragTo(page.locator("#renewal-stage-LOST"));
+      await page.getByRole("alertdialog").getByRole("button", { name: "Cerrar renovación" }).click();
+      await expectMutationSuccessToast(page, "no renovada");
+      await expect(page.locator("#renewal-stage-LOST li").filter({ hasText: fixture.policyNumber })).toBeVisible();
     } finally {
       await cleanupPolicyFixture(fixture);
     }

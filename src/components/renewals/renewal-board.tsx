@@ -6,6 +6,7 @@ import { RenewalBoardFilters as BoardFilters } from "@/components/renewals/renew
 import { RenewalStageMenu } from "@/components/renewals/renewal-stage-menu";
 import { RenewalFollowUpMenu } from "@/components/renewals/renewal-follow-up-menu";
 import { RenewalWhatsAppAssistant } from "@/components/renewals/renewal-whatsapp-assistant";
+import { DraggableRenewalCard, RenewalBoardStageNavigation, RenewalDropColumn } from "@/components/renewals/renewal-board-interactions";
 import { formatDate } from "@/lib/dates";
 import { formatBusinessDateInput } from "@/lib/business-dates";
 import { formatCurrency } from "@/lib/money";
@@ -50,14 +51,14 @@ function daysLabel(days: number) {
   return `Faltan ${days} ${days === 1 ? "día" : "días"}`;
 }
 
-function RenewalCard({ card, isDemo }: { card: RenewalBoardCard; isDemo: boolean }) {
+function RenewalCard({ card, isDemo, isDraggable }: { card: RenewalBoardCard; isDemo: boolean; isDraggable: boolean }) {
   const closed = isTerminalRenewalStage(card.stage);
   const overdue = !closed && card.daysUntilRenewal < 0;
   const captureHref = card.canCapture ? `/policies/new?renewalFrom=${card.policyId}` : undefined;
 
   return (
-    <li className="rounded-xl bg-card p-3 ring-1 ring-border shadow-[0_1px_2px_rgb(0_0_0/0.04)]">
-      <div className="flex items-start justify-between gap-2">
+    <div className="rounded-xl bg-card p-3 ring-1 ring-border shadow-[0_1px_2px_rgb(0_0_0/0.04)]">
+      <div className={cn("flex items-start justify-between gap-2", isDraggable && "pl-8")}>
         <Link
           href={`/clients/${card.clientId}`}
           className="min-w-0 rounded-sm font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -134,7 +135,7 @@ function RenewalCard({ card, isDemo }: { card: RenewalBoardCard; isDemo: boolean
           </div>
         ) : null}
       </div>
-    </li>
+    </div>
   );
 }
 
@@ -188,10 +189,7 @@ function ExcludedPolicies({ policies }: { policies: RenewalBoardExcludedPolicy[]
 
 function BoardColumn({ column, isDemo }: { column: RenewalBoardColumn; isDemo: boolean }) {
   return (
-    <section
-      aria-label={`${renewalStageLabel(column.stage)}: ${column.count} renovaciones`}
-      className="flex w-72 shrink-0 snap-start flex-col self-start rounded-xl bg-muted/40 ring-1 ring-border"
-    >
+    <RenewalDropColumn stage={column.stage} count={column.count}>
       <header className="flex items-start justify-between gap-2 border-b border-border px-3 py-2.5">
         <div className="min-w-0">
           <h3 className="flex items-center gap-2 font-medium">
@@ -215,17 +213,17 @@ function BoardColumn({ column, isDemo }: { column: RenewalBoardColumn; isDemo: b
       </header>
 
       {column.cards.length ? (
-        <>
-          <ul className="flex flex-col gap-2 p-2">
-            {column.cards.map((card) => (
-              <RenewalCard key={card.policyId} card={card} isDemo={isDemo} />
-            ))}
-          </ul>
-        </>
+        <ul className="flex flex-col gap-2 p-2">
+          {column.cards.map((card) => (
+            <DraggableRenewalCard key={card.policyId} policyId={card.policyId} policyNumber={card.policyNumber} stage={card.stage}>
+              <RenewalCard card={card} isDemo={isDemo} isDraggable={card.stage !== "WON" && card.stage !== "LOST"} />
+            </DraggableRenewalCard>
+          ))}
+        </ul>
       ) : (
         <p className="px-3 py-8 text-center text-sm text-muted-foreground">Sin renovaciones en esta etapa.</p>
       )}
-    </section>
+    </RenewalDropColumn>
   );
 }
 
@@ -252,6 +250,8 @@ export function RenewalBoard({
         </p>
       </div>
 
+      {board.total > 0 ? <RenewalBoardStageNavigation columns={board.columns} /> : null}
+
       {board.truncated ? (
         <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-900/60">
           Hay más renovaciones de las que el tablero puede mostrar de una vez. Filtra por ventana o responsable para trabajarlas
@@ -269,9 +269,9 @@ export function RenewalBoard({
         // Un tablero siempre se desplaza en horizontal: cinco columnas legibles
         // no caben en una pantalla angosta, y comprimirlas en rejilla parte los
         // nombres de los clientes.
-        <div className="flex min-w-0 snap-x gap-3 overflow-x-auto pb-2">
+        <div className="flex min-w-0 snap-x gap-3 overflow-x-auto pb-3">
           {board.columns.map((column) => (
-          <BoardColumn key={column.stage} column={column} isDemo={isDemo} />
+            <BoardColumn key={column.stage} column={column} isDemo={isDemo} />
           ))}
         </div>
       )}

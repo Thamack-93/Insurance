@@ -10,14 +10,29 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { listSavedQueueAction, saveSavedQueueAction, deleteSavedQueueAction } from "@/app/(dashboard)/saved-queues-actions";
 import type { SavedQueue } from "@/lib/saved-queues";
 
-export function SavedQueueControls({ route, config }: { route: SavedQueue["route"]; config: unknown }) {
+export function SavedQueueControls({
+  route,
+  config,
+  loadRoutes,
+}: {
+  route: SavedQueue["route"];
+  config: unknown;
+  loadRoutes?: readonly SavedQueue["route"][];
+}) {
   const [queues, setQueues] = useState<SavedQueue[]>([]);
   const [selected, setSelected] = useState("");
   const [name, setName] = useState("");
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
-  useEffect(() => { startTransition(async () => setQueues(await listSavedQueueAction(route))); }, [route]);
+  useEffect(() => {
+    startTransition(async () => {
+      const routes = loadRoutes ?? [route];
+      const groups = await Promise.all(routes.map((savedRoute) => listSavedQueueAction(savedRoute)));
+      const combined = groups.flat();
+      setQueues(loadRoutes ? combined.filter((queue) => queue.route === "renewal-board" || queue.filters.view === "renewals") : combined);
+    });
+  }, [route, loadRoutes]);
 
   function save() {
     if (!name.trim()) return;
@@ -35,6 +50,7 @@ export function SavedQueueControls({ route, config }: { route: SavedQueue["route
     for (const [key, value] of Object.entries(queue.filters ?? {})) if (value) params.set(key, value);
     if (queue.sort) params.set("sort", queue.sort);
     if (queue.dateWindow && queue.route === "operations") params.set("window", queue.dateWindow);
+    if (queue.route === "operations" && params.get("view") === "renewals" && !params.has("mode")) params.set("mode", "list");
     if (queue.route === "renewal-board") params.set("view", "renewal-board");
     router.push(`/${queue.route === "renewal-board" ? "operations" : queue.route}${params.toString() ? `?${params}` : ""}`);
   }

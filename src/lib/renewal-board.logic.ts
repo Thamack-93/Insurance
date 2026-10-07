@@ -14,7 +14,7 @@ import {
   parseBusinessDateInput,
 } from "@/lib/business-dates";
 import { RENEWAL_STAGES, TERMINAL_RENEWAL_STAGES, type RenewalStage } from "@/lib/domain-values";
-import { readAllowedTableParam, readTableParam, type TableSearchParams } from "@/lib/table-query";
+import { readTableParam, type TableSearchParams } from "@/lib/table-query";
 
 export type { RenewalStage };
 export { RENEWAL_STAGES };
@@ -80,8 +80,12 @@ export type RenewalBoardFilters = {
 export function readRenewalBoardFilters(params: TableSearchParams): RenewalBoardFilters {
   const owner = readTableParam(params, "owner")?.trim();
   const query = readTableParam(params, "q")?.trim();
+  const rawWindow = readTableParam(params, "window");
+  const legacyWindow = rawWindow === "30d" || rawWindow === "60d" || rawWindow === "90d"
+    ? rawWindow.slice(0, -1)
+    : rawWindow;
   return {
-    window: readAllowedTableParam(params, "window", RENEWAL_BOARD_WINDOWS) ?? DEFAULT_RENEWAL_BOARD_WINDOW,
+    window: RENEWAL_BOARD_WINDOWS.find((value) => value === legacyWindow) ?? DEFAULT_RENEWAL_BOARD_WINDOW,
     owner: owner ? owner.slice(0, 40) : undefined,
     query: query ? query.slice(0, 100) : undefined,
   };
