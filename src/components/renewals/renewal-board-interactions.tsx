@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useRef, useState, useTransition, type PointerEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { GripVertical } from "lucide-react";
+import { ChevronRight, GripVertical } from "lucide-react";
 import { setRenewalStage } from "@/app/(dashboard)/renewals/actions";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -167,10 +167,30 @@ export function RenewalBoardScrollArea({ children }: { children: ReactNode }) {
   const autoScrollDirection = useRef(0);
   const autoScrollFrame = useRef<number | null>(null);
   const [isPanning, setIsPanning] = useState(false);
+  const [canScrollForward, setCanScrollForward] = useState(false);
   const { session, refreshDropTarget } = useRenewalDragContext();
 
   useEffect(() => () => {
     if (autoScrollFrame.current !== null) cancelAnimationFrame(autoScrollFrame.current);
+  }, []);
+
+  useEffect(() => {
+    const element = viewport.current;
+    if (!element) return;
+
+    const updateScrollState = () => {
+      setCanScrollForward(element.scrollLeft + element.clientWidth < element.scrollWidth - 4);
+    };
+
+    element.addEventListener("scroll", updateScrollState, { passive: true });
+    const resizeObserver = new ResizeObserver(updateScrollState);
+    resizeObserver.observe(element);
+    if (element.firstElementChild) resizeObserver.observe(element.firstElementChild);
+
+    return () => {
+      element.removeEventListener("scroll", updateScrollState);
+      resizeObserver.disconnect();
+    };
   }, []);
 
   function stopAutoScroll() {
@@ -244,22 +264,44 @@ export function RenewalBoardScrollArea({ children }: { children: ReactNode }) {
     }
   }
 
+  function scrollForward() {
+    const element = viewport.current;
+    if (!element) return;
+    element.scrollBy({ left: Math.max(240, element.clientWidth * 0.75), behavior: "smooth" });
+  }
+
   return (
-    <div
-      ref={viewport}
-      data-renewal-board-viewport
-      role="region"
-      aria-label="Tablero desplazable horizontalmente. Arrastra el fondo vacío para recorrerlo."
-      onPointerDown={startPan}
-      onPointerMove={movePan}
-      onPointerUp={finishPan}
-      onPointerCancel={finishPan}
-      className={cn(
-        "min-w-0 touch-pan-y overflow-x-auto overscroll-x-contain pb-3 [scrollbar-width:thin]",
-        isPanning ? "cursor-grabbing" : "cursor-grab",
-      )}
-    >
-      <div className="flex w-max items-start gap-3">{children}</div>
+    <div className="relative min-w-0">
+      <div
+        ref={viewport}
+        data-renewal-board-viewport
+        role="region"
+        aria-label="Tablero de renovaciones"
+        onPointerDown={startPan}
+        onPointerMove={movePan}
+        onPointerUp={finishPan}
+        onPointerCancel={finishPan}
+        className={cn(
+          "min-w-0 touch-pan-y overflow-x-auto overscroll-x-contain pb-3 [scrollbar-width:thin]",
+          isPanning ? "cursor-grabbing" : "cursor-grab",
+        )}
+      >
+        <div className="flex w-max items-start gap-3">{children}</div>
+      </div>
+      {canScrollForward ? (
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-10 flex items-center bg-gradient-to-l from-background via-background/90 to-transparent pb-3 pl-8 pr-1">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-label="Ver siguientes etapas"
+            className="pointer-events-auto size-10 rounded-full shadow-md"
+            onClick={scrollForward}
+          >
+            <ChevronRight aria-hidden="true" />
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -280,7 +322,7 @@ export function DraggableRenewalCard({
         <span
           data-renewal-drag-handle
           onPointerDown={(event) => beginDrag(event, { policyId, policyNumber, stage })}
-          title="Arrastra esta tarjeta a otra etapa"
+          title="Arrastra para mover"
           aria-hidden="true"
           className="absolute left-2 top-2 z-10 inline-flex size-7 touch-none select-none items-center justify-center rounded-md text-muted-foreground/70 cursor-grab hover:bg-muted hover:text-foreground active:cursor-grabbing"
         >
@@ -331,23 +373,21 @@ export function RenewalBoardStageNavigation({
   }
 
   return (
-    <div className="sticky top-2 z-20 rounded-xl border border-border/80 bg-background/95 p-2 shadow-sm backdrop-blur">
-      <nav aria-label="Etapas de renovación" className="flex flex-wrap gap-2">
+    <div className="sticky top-2 z-20 bg-background/95 py-1 backdrop-blur">
+      <nav aria-label="Etapas de renovación" className="flex flex-wrap items-center gap-1 border-b border-border/70 pb-2">
         {columns.map(({ stage, count }) => (
           <button
             key={stage}
             type="button"
+            aria-controls={`renewal-stage-${stage}`}
             onClick={() => jumpTo(stage)}
-            className="inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {renewalStageLabel(stage)}
             <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-[11px] text-foreground">{count}</span>
           </button>
         ))}
       </nav>
-      <p className="px-3 pt-1 text-[11px] text-muted-foreground">
-        Arrastra el fondo vacío para recorrer el tablero. Arrastra las tarjetas desde el asa para cambiar de etapa.
-      </p>
     </div>
   );
 }

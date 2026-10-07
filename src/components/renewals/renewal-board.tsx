@@ -240,13 +240,7 @@ export function RenewalBoard({
 }) {
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-        <BoardFilters filters={filters} owners={owners} canFilterByOwner={canFilterByOwner} />
-        <p className="text-sm text-muted-foreground" role="status">
-          {board.total} {board.total === 1 ? "renovación" : "renovaciones"} en el tablero
-          {board.stalledCount > 0 ? ` · ${board.stalledCount} sin avance` : ""}
-        </p>
-      </div>
+      <BoardFilters filters={filters} owners={owners} canFilterByOwner={canFilterByOwner} />
 
       {board.total > 0 ? <RenewalBoardStageNavigation columns={board.columns} /> : null}
 
