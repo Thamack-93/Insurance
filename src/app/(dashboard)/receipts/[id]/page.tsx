@@ -326,7 +326,7 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
         </section>
 
         {receipt.status === "PENDING" || receipt.status === "OVERDUE" ? (
-          <CollectionFollowUpPanel receiptId={receipt.id} action={(input) => recordReceiptCollectionFollowUp({ ...input, receiptId: receipt.id })} />
+          <CollectionFollowUpPanel receiptId={receipt.id} action={recordReceiptCollectionFollowUp} />
         ) : null}
 
         <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
