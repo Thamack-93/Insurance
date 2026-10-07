@@ -64,7 +64,7 @@ type BackfillReport = {
   alreadyApplied?: number;
 };
 
-type RunBackfillOptions = { apply?: boolean; productionApply?: boolean; productionPreview?: boolean; readonlyDatabaseUrl?: string; writerDatabaseUrl?: string; readonlyRole?: string; writerRole?: string; productionHost?: string; productionDatabase?: string; batchSize?: number; printReviewedDigest?: boolean; reportFile: string; manifestSha256?: string; previewSha256?: string; reviewer?: string; failAfterAppliedBatches?: number; failWithinBatchAfterAppliedRows?: number; mutatePolicyBeforeBatch?: string };
+type RunBackfillOptions = { apply?: boolean; productionApply?: boolean; productionPreview?: boolean; policyNumbers?: string[]; readonlyDatabaseUrl?: string; writerDatabaseUrl?: string; readonlyRole?: string; writerRole?: string; productionHost?: string; productionDatabase?: string; batchSize?: number; printReviewedDigest?: boolean; reportFile: string; manifestSha256?: string; previewSha256?: string; reviewer?: string; failAfterAppliedBatches?: number; failWithinBatchAfterAppliedRows?: number; mutatePolicyBeforeBatch?: string };
 
 function runBackfill(options: RunBackfillOptions & { printReviewedDigest: true }): { reviewedManifestSha256: string };
 function runBackfill(options: RunBackfillOptions & { printReviewedDigest?: false | undefined }): BackfillReport;
@@ -74,6 +74,7 @@ function runBackfill(options: RunBackfillOptions): BackfillReport | { reviewedMa
     "tsx",
     "scripts/backfill-policy-risk-details.ts",
     `--organization-id=${ORGANIZATION_ID}`,
+    ...(options.policyNumbers?.length ? [`--policy-numbers=${options.policyNumbers.join(",")}`] : []),
     ...(options.productionPreview ? ["--production-preview"] : []),
     ...(options.printReviewedDigest ? ["--print-reviewed-digest", `--reviewed-report=${options.reportFile}`, `--reviewed-by=${options.reviewer}`, `--preview-sha256=${options.previewSha256}`] : options.apply ? ["--apply", ...(options.productionApply ? ["--production-apply", "--confirm-production-apply=APPLY_POLICY_RISK_BACKFILL_TO_PRODUCTION"] : []), `--reviewed-report=${options.reportFile}`, `--reviewed-by=${options.reviewer}`, `--manifest-sha256=${options.manifestSha256}`, `--batch-size=${options.batchSize ?? 50}`, "--confirm-apply=APPLY_POLICY_RISK_BACKFILL"] : [`--report-file=${options.reportFile}`]),
   ];
@@ -516,12 +517,13 @@ async function main() {
       readonlyRole: readonlyRoleName,
       productionHost,
       productionDatabase,
+      policyNumbers: [productionBackfillFixture.policyNumber],
       reportFile: writerPreviewFile,
     });
     assert.equal(writerPreview.mode, "production-read-only-preview");
     const writerManifest = JSON.parse(readFileSync(writerPreview.reportFile!, "utf8")) as PolicyRiskBackfillManifest;
     assert.equal(writerManifest.sourceMode, "PRODUCTION_READ_ONLY_PREVIEW");
-    assert.ok(writerManifest.candidates.some((row) => row.policyId === productionBackfillFixture.policyId));
+    assert.deepEqual(writerManifest.candidates.map((row) => row.policyId), [productionBackfillFixture.policyId]);
     assert.ok(writerManifest.candidates.every((row) => row.policyId !== secondPolicy.id), "organization A preview must exclude organization B candidates");
     for (const row of writerManifest.candidates) {
       if (row.classification === "REVIEW") {
@@ -604,6 +606,7 @@ async function main() {
         productionApply: true,
         writerDatabaseUrl: writerUrl.toString(),
         writerRole: writerRoleName,
+        policyNumbers: overrides.policyNumbers ?? [productionBackfillFixture.policyNumber],
         productionHost: overrides.productionHost ?? productionHost,
         productionDatabase: overrides.productionDatabase ?? productionDatabase,
         reportFile: overrides.reportFile ?? writerPreview.reportFile!,
@@ -698,6 +701,7 @@ async function main() {
         productionApply: true,
         writerDatabaseUrl: writerUrl.toString(),
         writerRole: writerRoleName,
+        policyNumbers: [productionBackfillFixture.policyNumber],
         productionHost,
         productionDatabase,
         reportFile: writerPreview.reportFile!,
@@ -734,6 +738,7 @@ async function main() {
         productionApply: true,
         writerDatabaseUrl: writerUrl.toString(),
         writerRole: writerRoleName,
+        policyNumbers: [productionBackfillFixture.policyNumber],
         productionHost,
         productionDatabase,
         reportFile: writerPreview.reportFile!,
@@ -777,6 +782,7 @@ async function main() {
       productionApply: true,
       writerDatabaseUrl: writerUrl.toString(),
       writerRole: writerRoleName,
+      policyNumbers: [productionBackfillFixture.policyNumber],
       productionHost,
       productionDatabase,
       reportFile: writerPreview.reportFile!,
