@@ -24,8 +24,41 @@ test.describe("Renewals Page (/renewals)", () => {
       await page.goto("/operations?view=renewals");
 
       await expect(page.getByRole("heading", { name: "Renovaciones", exact: true })).toBeVisible();
-      await expect(page.getByRole("navigation", { name: "Etapas de renovación" })).toBeVisible();
-      await expect(page.getByRole("button", { name: /Perdido/ })).toBeVisible();
+      const stageNavigation = page.getByRole("navigation", { name: "Etapas de renovación" });
+      const boardViewport = page.locator("[data-renewal-board-viewport]");
+      await expect(stageNavigation).toBeVisible();
+      await expect(boardViewport).toBeVisible();
+      const pendingCard = page.locator("#renewal-stage-PENDING li").filter({ hasText: fixture.policyNumber });
+      await expect(pendingCard).toBeVisible();
+      await expect(pendingCard.getByRole("button", { name: /Mover la renovación/ })).toHaveCount(0);
+
+      await stageNavigation.getByRole("button", { name: /Cotizado/ }).click();
+      const quotedColumn = page.locator("#renewal-stage-QUOTED");
+      await expect(quotedColumn).toBeInViewport();
+      await page.waitForTimeout(350);
+
+      const beforePan = await boardViewport.evaluate((element) => element.scrollLeft);
+      const columnBounds = await quotedColumn.boundingBox();
+      if (!columnBounds) throw new Error("Cotizado column is not measurable.");
+      const panX = columnBounds.x + columnBounds.width / 2;
+      const panY = columnBounds.y + Math.min(columnBounds.height / 2, 50);
+      await page.mouse.move(panX, panY);
+      await page.mouse.down();
+      await page.mouse.move(panX - 160, panY, { steps: 6 });
+      await page.mouse.up();
+      await expect.poll(() => boardViewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(beforePan + 30);
+
+      await stageNavigation.getByRole("button", { name: /Perdido/ }).click();
+      await expect(page.locator("#renewal-stage-LOST")).toBeInViewport();
+      await stageNavigation.getByRole("button", { name: /Perdido/ }).focus();
+      await page.keyboard.press("Enter");
+      await expect(page.locator("#renewal-stage-LOST")).toBeInViewport();
+      for (const width of [390, 900, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        await expect(boardViewport).toBeVisible();
+        await expect(stageNavigation.getByRole("button", { name: /Perdido/ })).toBeVisible();
+        await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth === document.documentElement.clientWidth)).toBe(true);
+      }
       await page.getByRole("button", { name: "Ver como lista" }).click();
       await expect(page.getByRole("heading", { name: "Lista de renovaciones" })).toBeVisible();
     } finally {

@@ -1,9 +1,40 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { authenticatePageAsAdmin, authenticatePageAsAgent, cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../helpers/db";
 import { expectMutationSuccessToast } from "../helpers/assert-mutation-toast";
 import { captureServerAction } from "../helpers/capture-server-action";
 
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
+
+async function dragRenewalCardToStage(page: Page, handle: Locator, stage: Locator) {
+  const viewport = page.locator("[data-renewal-board-viewport]");
+  await handle.scrollIntoViewIfNeeded();
+  const handleBounds = await handle.boundingBox();
+  const viewportBounds = await viewport.boundingBox();
+  if (!handleBounds || !viewportBounds) throw new Error("Renewal drag target is not measurable.");
+
+  const startX = handleBounds.x + handleBounds.width / 2;
+  const startY = handleBounds.y + handleBounds.height / 2;
+  const viewportRight = viewportBounds.x + viewportBounds.width;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+
+  const initialStageBounds = await stage.boundingBox();
+  if (!initialStageBounds || initialStageBounds.x + initialStageBounds.width > viewportRight || initialStageBounds.x < viewportBounds.x) {
+    const edgeX = viewportRight - 8;
+    await page.mouse.move(edgeX, Math.min(Math.max(startY, viewportBounds.y + 24), viewportBounds.y + viewportBounds.height - 24), { steps: 8 });
+    await expect.poll(async () => {
+      const bounds = await stage.boundingBox();
+      return Boolean(bounds && bounds.x < viewportRight && bounds.x + bounds.width > viewportBounds.x);
+    }).toBe(true);
+  }
+
+  const stageBounds = await stage.boundingBox();
+  if (!stageBounds) throw new Error("Renewal stage is not measurable after scrolling.");
+  const dropX = Math.min(viewportRight - 8, Math.max(viewportBounds.x + 8, stageBounds.x + stageBounds.width / 2));
+  const dropY = Math.min(viewportBounds.y + viewportBounds.height - 8, Math.max(viewportBounds.y + 8, stageBounds.y + Math.min(64, stageBounds.height / 2)));
+  await page.mouse.move(dropX, dropY, { steps: 8 });
+  await page.mouse.up();
+}
 
 function businessDateKey(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -403,18 +434,22 @@ test.describe("operation queue context", () => {
 
       const pendingCard = page.locator("#renewal-stage-PENDING li").filter({ hasText: fixture.policyNumber });
       await expect(pendingCard).toBeVisible();
-      await pendingCard.locator("[data-renewal-drag-handle]").dragTo(page.locator("#renewal-stage-CONTACTED"));
+      await dragRenewalCardToStage(page, pendingCard.locator("[data-renewal-drag-handle]"), page.locator("#renewal-stage-WON"));
+      await expect(page.getByText("Para marcarla como renovada, captura primero la póliza nueva desde la tarjeta.", { exact: true })).toBeVisible();
+      await expect(pendingCard).toBeVisible();
+
+      await dragRenewalCardToStage(page, pendingCard.locator("[data-renewal-drag-handle]"), page.locator("#renewal-stage-CONTACTED"));
       await expectMutationSuccessToast(page, "Renovación movida a Contactado.");
 
       const contactedCard = page.locator("#renewal-stage-CONTACTED li").filter({ hasText: fixture.policyNumber });
       await expect(contactedCard).toBeVisible();
-      await contactedCard.locator("[data-renewal-drag-handle]").dragTo(page.locator("#renewal-stage-LOST"));
+      await dragRenewalCardToStage(page, contactedCard.locator("[data-renewal-drag-handle]"), page.locator("#renewal-stage-LOST"));
       const confirmation = page.getByRole("alertdialog");
       await expect(confirmation).toContainText("Se marcará como no continuada");
       await confirmation.getByRole("button", { name: "Cancelar" }).click();
       await expect(contactedCard).toBeVisible();
 
-      await contactedCard.locator("[data-renewal-drag-handle]").dragTo(page.locator("#renewal-stage-LOST"));
+      await dragRenewalCardToStage(page, contactedCard.locator("[data-renewal-drag-handle]"), page.locator("#renewal-stage-LOST"));
       await page.getByRole("alertdialog").getByRole("button", { name: "Cerrar renovación" }).click();
       await expectMutationSuccessToast(page, "no renovada");
       await expect(page.locator("#renewal-stage-LOST li").filter({ hasText: fixture.policyNumber })).toBeVisible();

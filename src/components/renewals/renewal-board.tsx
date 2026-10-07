@@ -3,10 +3,9 @@ import { AlertTriangle, CalendarClock } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { RenewalBoardFilters as BoardFilters } from "@/components/renewals/renewal-board-filters";
-import { RenewalStageMenu } from "@/components/renewals/renewal-stage-menu";
 import { RenewalFollowUpMenu } from "@/components/renewals/renewal-follow-up-menu";
 import { RenewalWhatsAppAssistant } from "@/components/renewals/renewal-whatsapp-assistant";
-import { DraggableRenewalCard, RenewalBoardStageNavigation, RenewalDropColumn } from "@/components/renewals/renewal-board-interactions";
+import { DraggableRenewalCard, RenewalBoardInteractions, RenewalBoardScrollArea, RenewalBoardStageNavigation, RenewalDropColumn } from "@/components/renewals/renewal-board-interactions";
 import { formatDate } from "@/lib/dates";
 import { formatBusinessDateInput } from "@/lib/business-dates";
 import { formatCurrency } from "@/lib/money";
@@ -57,7 +56,7 @@ function RenewalCard({ card, isDemo, isDraggable }: { card: RenewalBoardCard; is
   const captureHref = card.canCapture ? `/policies/new?renewalFrom=${card.policyId}` : undefined;
 
   return (
-    <div className="rounded-xl bg-card p-3 ring-1 ring-border shadow-[0_1px_2px_rgb(0_0_0/0.04)]">
+    <div className="cursor-default rounded-xl bg-card p-3 ring-1 ring-border shadow-[0_1px_2px_rgb(0_0_0/0.04)]">
       <div className={cn("flex items-start justify-between gap-2", isDraggable && "pl-8")}>
         <Link
           href={`/clients/${card.clientId}`}
@@ -131,7 +130,6 @@ function RenewalCard({ card, isDemo, isDraggable }: { card: RenewalBoardCard; is
               currentDueDate={card.manualFollowUp ? formatBusinessDateInput(card.manualFollowUp.dueDate) : null}
               currentNotes={card.manualFollowUp?.notes ?? null}
             />
-            <RenewalStageMenu policyId={card.policyId} policyNumber={card.policyNumber} stage={card.stage} captureHref={captureHref} />
           </div>
         ) : null}
       </div>
@@ -266,14 +264,13 @@ export function RenewalBoard({
           No hay renovaciones en esta ventana. Prueba con un rango más amplio.
         </p>
       ) : (
-        // Un tablero siempre se desplaza en horizontal: cinco columnas legibles
-        // no caben en una pantalla angosta, y comprimirlas en rejilla parte los
-        // nombres de los clientes.
-        <div className="flex min-w-0 snap-x gap-3 overflow-x-auto pb-3">
-          {board.columns.map((column) => (
-            <BoardColumn key={column.stage} column={column} isDemo={isDemo} />
-          ))}
-        </div>
+        <RenewalBoardInteractions>
+          <RenewalBoardScrollArea>
+            {board.columns.map((column) => (
+              <BoardColumn key={column.stage} column={column} isDemo={isDemo} />
+            ))}
+          </RenewalBoardScrollArea>
+        </RenewalBoardInteractions>
       )}
     </div>
   );
