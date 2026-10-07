@@ -34,6 +34,17 @@ function arg(name: string) {
   return process.argv.find((value) => value.startsWith(prefix))?.slice(prefix.length) ?? null;
 }
 
+function selectedPolicyNumbers() {
+  const value = arg("policy-numbers");
+  if (value === null) return null;
+  const raw = value.split(",");
+  const policyNumbers = raw.map((item) => item.trim()).filter(Boolean);
+  if (!policyNumbers.length || policyNumbers.length !== raw.length || new Set(policyNumbers).size !== policyNumbers.length || policyNumbers.length > MAX_PRODUCTION_BATCH_SIZE) {
+    throw new Error("POLICY_RISK_BACKFILL_POLICY_NUMBER_SCOPE_INVALID");
+  }
+  return policyNumbers;
+}
+
 function candidateSha() {
   try {
     return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
@@ -94,12 +105,12 @@ function planPolicy(policy: {
   };
 }
 
-async function scanAll(prisma: Pick<PrismaClient, "policy">, organizationId: string) {
+async function scanAll(prisma: Pick<PrismaClient, "policy">, organizationId: string, policyNumbers: string[] | null = null) {
   const candidates: PolicyRiskBackfillManifestRow[] = [];
   let cursor: string | undefined;
   for (;;) {
     const page = await prisma.policy.findMany({
-      where: { organizationId, riskDetails: { equals: Prisma.DbNull }, ...(cursor ? { id: { gt: cursor } } : {}) },
+      where: { organizationId, riskDetails: { equals: Prisma.DbNull }, ...(policyNumbers ? { policyNumber: { in: policyNumbers } } : {}), ...(cursor ? { id: { gt: cursor } } : {}) },
       select: {
         id: true,
         policyNumber: true,
@@ -165,7 +176,7 @@ async function assertProductionPreviewRole(tx: Prisma.TransactionClient, connect
   if (writePrivileges.length) throw new Error("POLICY_RISK_BACKFILL_PREVIEW_ROLE_HAS_WRITE_PRIVILEGES");
 }
 
-async function scanProductionReadOnly(prisma: PrismaClient, organizationId: string, connectionString: string) {
+async function scanProductionReadOnly(prisma: PrismaClient, organizationId: string, connectionString: string, policyNumbers: string[] | null) {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
     await assertProductionPreviewRole(tx, connectionString);
@@ -175,7 +186,7 @@ async function scanProductionReadOnly(prisma: PrismaClient, organizationId: stri
     if (tenantContext[0]?.organizationId !== organizationId) throw new Error("POLICY_RISK_BACKFILL_PREVIEW_TENANT_CONTEXT_FAILED");
     const organization = await tx.organization.findUnique({ where: { id: organizationId }, select: { id: true } });
     if (!organization) throw new Error("POLICY_RISK_BACKFILL_PREVIEW_ORGANIZATION_NOT_VISIBLE");
-    return scanAll(tx, organizationId);
+    return scanAll(tx, organizationId, policyNumbers);
   });
 }
 
@@ -580,6 +591,8 @@ async function main() {
   const productionPreview = process.argv.includes("--production-preview");
   const productionApply = process.argv.includes("--production-apply");
   const apply = process.argv.includes("--apply");
+  const policyNumbers = selectedPolicyNumbers();
+  if (productionApply && !policyNumbers?.length) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_POLICY_NUMBER_SCOPE_REQUIRED");
   if (productionPreview && apply) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_PREVIEW_IS_READ_ONLY");
   if (productionPreview && productionApply) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_MODES_ARE_EXCLUSIVE");
   if (productionApply && !apply) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REQUIRES_APPLY");
@@ -629,8 +642,8 @@ async function main() {
     const processor = await processorSha256();
     if (!apply) {
       const candidates = productionPreview
-        ? await scanProductionReadOnly(prisma, organizationId, connectionString)
-        : await scanAll(prisma, organizationId);
+        ? await scanProductionReadOnly(prisma, organizationId, connectionString, policyNumbers)
+        : await scanAll(prisma, organizationId, policyNumbers);
       const manifest: PolicyRiskBackfillManifest = {
         schemaVersion: POLICY_RISK_BACKFILL_MANIFEST_VERSION,
         processorVersion: POLICY_RISK_BACKFILL_PROCESSOR_VERSION,
@@ -687,8 +700,8 @@ async function main() {
     }
 
     const current = productionTarget
-      ? await withProductionApplyTransaction(productionTarget, organizationId, reviewer, (tx) => scanAll(tx, organizationId))
-      : await scanAll(prisma, organizationId);
+      ? await withProductionApplyTransaction(productionTarget, organizationId, reviewer, (tx) => scanAll(tx, organizationId, policyNumbers))
+      : await scanAll(prisma, organizationId, policyNumbers);
     const expectedById = new Map(manifest.candidates.map((row) => [row.policyId, row]));
     for (const row of current) {
       const expected = expectedById.get(row.policyId);
