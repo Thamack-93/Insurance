@@ -428,9 +428,9 @@ test.describe("operation queue context", () => {
 
       const stageNavigation = page.getByRole("navigation", { name: "Etapas de renovación" });
       await expect(stageNavigation.getByRole("button", { name: /Perdido/ })).toBeVisible();
-      await page.getByRole("button", { name: "Ver como lista" }).click();
+      await page.getByRole("link", { name: "Ver como lista" }).click();
       await expect(page.getByRole("heading", { name: "Lista de renovaciones" })).toBeVisible();
-      await page.getByRole("button", { name: "Ver como tablero" }).click();
+      await page.getByRole("link", { name: "Ver como tablero" }).click();
 
       const pendingCard = page.locator("#renewal-stage-PENDING li").filter({ hasText: fixture.policyNumber });
       await expect(pendingCard).toBeVisible();

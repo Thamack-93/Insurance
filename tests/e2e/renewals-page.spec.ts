@@ -64,7 +64,7 @@ test.describe("Renewals Page (/renewals)", () => {
         await expect(stageNavigation.getByRole("button", { name: /Perdido/ })).toBeVisible();
         await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth === document.documentElement.clientWidth)).toBe(true);
       }
-      await page.getByRole("button", { name: "Ver como lista" }).click();
+      await page.getByRole("link", { name: "Ver como lista" }).click();
       await expect(page.getByRole("heading", { name: "Lista de renovaciones" })).toBeVisible();
     } finally {
       await cleanupPolicyFixture(fixture);
