@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { clearRenewalManualFollowUp, scheduleRenewalManualFollowUp } from "@/app/(dashboard)/renewals/actions";
@@ -29,7 +29,7 @@ const shortcutLabels: Array<{ value: RenewalFollowUpShortcut; label: string }> =
 
 export function RenewalFollowUpMenu({ policyId, policyNumber, currentDueDate, currentNotes }: RenewalFollowUpMenuProps) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [pending, setPending] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
@@ -42,8 +42,10 @@ export function RenewalFollowUpMenu({ policyId, policyNumber, currentDueDate, cu
     setCustomOpen(true);
   }
 
-  function save(dueDate: string, nextNotes: string) {
-    startTransition(async () => {
+  async function save(dueDate: string, nextNotes: string) {
+    if (pending) return;
+    setPending(true);
+    try {
       const result = await scheduleRenewalManualFollowUp({ policyId, dueDate, notes: nextNotes });
       if (!result.ok) {
         toast.error(result.error);
@@ -53,11 +55,13 @@ export function RenewalFollowUpMenu({ policyId, policyNumber, currentDueDate, cu
       setMenuOpen(false);
       setCustomOpen(false);
       router.refresh();
-    });
+    } finally {
+      setPending(false);
+    }
   }
 
   function chooseShortcut(shortcut: RenewalFollowUpShortcut) {
-    save(formatBusinessDateInput(renewalFollowUpShortcutDate(shortcut, businessToday())), currentNotes ?? "");
+    void save(formatBusinessDateInput(renewalFollowUpShortcutDate(shortcut, businessToday())), currentNotes ?? "");
   }
 
   async function clear() {
