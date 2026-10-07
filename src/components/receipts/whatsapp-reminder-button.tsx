@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useImperativeHandle, useState, useTransition, type FormEvent } from "react";
+import { forwardRef, useImperativeHandle, useRef, useState, useTransition, type FormEvent } from "react";
 import { MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -24,10 +24,11 @@ type WhatsAppReminderButtonProps = {
   className?: string;
   demoPreview?: { clientName: string; receiptNumber: string; policyNumber: string };
   showTrigger?: boolean;
+  onPendingChange?: (pending: boolean) => void;
 };
 
 export const WhatsAppReminderButton = forwardRef<WhatsAppReminderHandle, WhatsAppReminderButtonProps>(function WhatsAppReminderButton(
-  { receiptId, className, demoPreview, showTrigger = true },
+  { receiptId, className, demoPreview, showTrigger = true, onPendingChange },
   ref,
 ) {
   const [captureOpen, setCaptureOpen] = useState(false);
@@ -37,6 +38,7 @@ export const WhatsAppReminderButton = forwardRef<WhatsAppReminderHandle, WhatsAp
   const [isPending, startTransition] = useTransition();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewMessage, setPreviewMessage] = useState<string | null>(null);
+  const pendingRef = useRef(false);
 
   function openPreparedWhatsApp(url: string, popup: Window | null) {
     setCaptureOpen(false);
@@ -55,34 +57,47 @@ export const WhatsAppReminderButton = forwardRef<WhatsAppReminderHandle, WhatsAp
   }
 
   function prepare(phone?: string, popup: Window | null = null) {
+    if (pendingRef.current) {
+      popup?.close();
+      return;
+    }
+    pendingRef.current = true;
+    onPendingChange?.(true);
     startTransition(async () => {
-      const result = await prepareWhatsAppReceiptReminder({
-        receiptId,
-        ...(phone ? { capturedPhone: phone } : {}),
-      });
+      try {
+        const result = await prepareWhatsAppReceiptReminder({
+          receiptId,
+          ...(phone ? { capturedPhone: phone } : {}),
+        });
 
-      if (!result.ok) {
-        popup?.close();
-        if (phone) setCaptureError(result.error);
-        else toast.error(result.error);
-        return;
+        if (!result.ok) {
+          popup?.close();
+          if (phone) setCaptureError(result.error);
+          else toast.error(result.error);
+          return;
+        }
+
+        if (result.outcome === "CAPTURE_PHONE") {
+          popup?.close();
+          setCaptureError(null);
+          setCaptureOpen(true);
+          return;
+        }
+
+        openPreparedWhatsApp(result.url, popup);
+      } finally {
+        pendingRef.current = false;
+        onPendingChange?.(false);
       }
-
-      if (result.outcome === "CAPTURE_PHONE") {
-        popup?.close();
-        setCaptureError(null);
-        setCaptureOpen(true);
-        return;
-      }
-
-      openPreparedWhatsApp(result.url, popup);
     });
   }
 
   function handleCaptureSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setCaptureError(null);
-    prepare(capturedPhone);
+    const popup = window.open("about:blank", "_blank");
+    if (popup) popup.opener = null;
+    prepare(capturedPhone, popup);
   }
 
   function handleTrigger() {

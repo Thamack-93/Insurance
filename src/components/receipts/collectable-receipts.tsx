@@ -159,6 +159,7 @@ function ReceiptRow({ receipt, returnTo, isDemo, qualitasMonitorFeatureEnabled }
   const { selectedItems, toggleItem } = useBulkActions();
   const whatsappRef = useRef<WhatsAppReminderHandle>(null);
   const [dialogAction, setDialogAction] = useState<"qualitas-payment" | "qualitas-monitor" | null>(null);
+  const [whatsAppPending, setWhatsAppPending] = useState(false);
   const isSelected = selectedItems.has(receipt.id);
   const due = parseBusinessDateInput(receipt.dueDate);
   const overdue = isOverdue(due);
@@ -237,9 +238,9 @@ function ReceiptRow({ receipt, returnTo, isDemo, qualitasMonitorFeatureEnabled }
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-48">
                 {receipt.status === "PENDING" || receipt.status === "OVERDUE" ? (
-                  <DropdownMenuItem onClick={() => whatsappRef.current?.trigger()}>
+                  <DropdownMenuItem onClick={() => whatsappRef.current?.trigger()} disabled={whatsAppPending}>
                     <MessageSquare className="size-4" />
-                    Avisar por WhatsApp
+                    {whatsAppPending ? "Preparando WhatsApp…" : "Avisar por WhatsApp"}
                   </DropdownMenuItem>
                 ) : null}
                 {receipt.qualitasEligible && receipt.qualitasEnabled ? (
@@ -272,6 +273,7 @@ function ReceiptRow({ receipt, returnTo, isDemo, qualitasMonitorFeatureEnabled }
           ref={whatsappRef}
           receiptId={receipt.id}
           showTrigger={false}
+          onPendingChange={setWhatsAppPending}
           demoPreview={isDemo ? { clientName: receipt.client.fullName, receiptNumber: receipt.receiptNumber, policyNumber: receipt.policy.policyNumber } : undefined}
         />
       ) : null}
