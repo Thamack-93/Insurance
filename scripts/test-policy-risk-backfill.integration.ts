@@ -498,6 +498,16 @@ async function main() {
       where: { id: productionBackfillFixture.policyId },
       data: { insuredObject: SOURCE_TEXT, riskDetails: Prisma.DbNull, riskDetailsReviewRequired: false },
     });
+    await db.policyInsuredAsset.create({
+      data: {
+        organizationId: ORGANIZATION_ID,
+        policyId: productionBackfillFixture.policyId,
+        assetType: "AUTO",
+        description: "Toyota Corolla, descripción histórica",
+        serialNumber: VIN,
+        isPrimary: true,
+      },
+    });
     const writerPreviewFile = temporaryReportPath();
     reportFiles.push(writerPreviewFile);
     const writerPreview = runBackfill({
