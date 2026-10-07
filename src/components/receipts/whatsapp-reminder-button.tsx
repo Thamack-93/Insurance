@@ -12,12 +12,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { prepareWhatsAppReceiptReminder } from "@/app/(dashboard)/receipts/actions";
 import { isSafeWhatsAppUrl } from "@/lib/whatsapp";
 import { cn } from "@/lib/utils";
 
-export function WhatsAppReminderButton({ receiptId, className, demoPreview }: { receiptId: string; className?: string; demoPreview?: { clientName: string; receiptNumber: string; policyNumber: string } }) {
+export function WhatsAppReminderButton({ receiptId, className, demoPreview, triggerMode = "button" }: { receiptId: string; className?: string; demoPreview?: { clientName: string; receiptNumber: string; policyNumber: string }; triggerMode?: "button" | "menu-item" }) {
   const [captureOpen, setCaptureOpen] = useState(false);
   const [capturedPhone, setCapturedPhone] = useState("");
   const [captureError, setCaptureError] = useState<string | null>(null);
@@ -66,27 +67,36 @@ export function WhatsAppReminderButton({ receiptId, className, demoPreview }: { 
     prepare(capturedPhone);
   }
 
+  function handleTrigger() {
+    if (demoPreview) {
+      setPreviewMessage(`Hola ${demoPreview.clientName}, te compartimos un recordatorio de demostración sobre el recibo ${demoPreview.receiptNumber} de la póliza ${demoPreview.policyNumber}. No se envió ningún mensaje.`);
+      setPreviewOpen(true);
+      return;
+    }
+    prepare();
+  }
+
   return (
     <>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className={cn("h-8 gap-1 px-3 text-xs", className)}
-        onClick={() => {
-          if (demoPreview) {
-            setPreviewMessage(`Hola ${demoPreview.clientName}, te compartimos un recordatorio de demostración sobre el recibo ${demoPreview.receiptNumber} de la póliza ${demoPreview.policyNumber}. No se envió ningún mensaje.`);
-            setPreviewOpen(true);
-            return;
-          }
-          prepare();
-        }}
-        disabled={isPending}
-        aria-label="Avisar por WhatsApp"
-      >
-        <MessageSquare className="size-3.5" />
-        {isPending ? "Preparando..." : "Avisar por WhatsApp"}
-      </Button>
+      {triggerMode === "menu-item" ? (
+        <DropdownMenuItem onClick={handleTrigger} disabled={isPending}>
+          <MessageSquare className="size-4" />
+          {isPending ? "Preparando WhatsApp…" : "Avisar por WhatsApp"}
+        </DropdownMenuItem>
+      ) : (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className={cn("h-8 gap-1 px-3 text-xs", className)}
+          onClick={handleTrigger}
+          disabled={isPending}
+          aria-label="Avisar por WhatsApp"
+        >
+          <MessageSquare className="size-3.5" />
+          {isPending ? "Preparando..." : "Avisar por WhatsApp"}
+        </Button>
+      )}
 
       {preparedUrl ? (
         <a

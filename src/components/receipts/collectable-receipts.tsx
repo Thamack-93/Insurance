@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
-import { BadgeCheck } from "lucide-react";
+import { BadgeCheck, ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -23,7 +23,9 @@ import { parseBusinessDateInput } from "@/lib/business-dates";
 import { bulkMarkReceiptsPaid } from "@/app/(dashboard)/receipts/actions";
 import { appendReturnTo } from "@/lib/return-to";
 import { QualitasPaymentLinkDialog } from "@/components/receipts/qualitas-payment-link-dialog";
+import { QualitasReceiptMonitorPanel } from "@/components/policies/qualitas-receipt-monitor-panel";
 import { WhatsAppReminderButton } from "@/components/receipts/whatsapp-reminder-button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 export type CollectableReceipt = {
   id: string;
@@ -34,7 +36,7 @@ export type CollectableReceipt = {
   currency: string;
   status: string;
   client: { fullName: string };
-  policy: { policyNumber: string; status: string };
+  policy: { id: string; policyNumber: string; status: string; paymentFrequency: string; qualitasReceiptMonitorEnabled: boolean };
   insurer: { name: string };
   endorsement?: { endorsementNumber: string; reference?: string | null };
   paymentCount: number;
@@ -45,9 +47,10 @@ export type CollectableReceipt = {
   qualitasEnabled?: boolean;
   qualitasClientRecipientEnabled?: boolean;
   qualitasEligible?: boolean;
+  qualitasMonitorEligible?: boolean;
 };
 
-export function CollectableReceipts({ receipts, returnTo, isDemo = false }: { receipts: CollectableReceipt[]; returnTo?: string; isDemo?: boolean }) {
+export function CollectableReceipts({ receipts, returnTo, isDemo = false, qualitasMonitorFeatureEnabled }: { receipts: CollectableReceipt[]; returnTo?: string; isDemo?: boolean; qualitasMonitorFeatureEnabled: boolean }) {
   if (receipts.length === 0) return null;
 
   return (
@@ -56,7 +59,7 @@ export function CollectableReceipts({ receipts, returnTo, isDemo = false }: { re
         <BulkToolbar receipts={receipts} />
         <div className="divide-y divide-border/70">
           {receipts.map((receipt) => (
-            <ReceiptRow key={receipt.id} receipt={receipt} returnTo={returnTo} isDemo={isDemo} />
+            <ReceiptRow key={receipt.id} receipt={receipt} returnTo={returnTo} isDemo={isDemo} qualitasMonitorFeatureEnabled={qualitasMonitorFeatureEnabled} />
           ))}
         </div>
       </div>
@@ -152,7 +155,7 @@ function BulkToolbar({ receipts }: { receipts: CollectableReceipt[] }) {
   );
 }
 
-function ReceiptRow({ receipt, returnTo, isDemo }: { receipt: CollectableReceipt; returnTo?: string; isDemo: boolean }) {
+function ReceiptRow({ receipt, returnTo, isDemo, qualitasMonitorFeatureEnabled }: { receipt: CollectableReceipt; returnTo?: string; isDemo: boolean; qualitasMonitorFeatureEnabled: boolean }) {
   const { selectedItems, toggleItem } = useBulkActions();
   const isSelected = selectedItems.has(receipt.id);
   const due = parseBusinessDateInput(receipt.dueDate);
@@ -201,7 +204,7 @@ function ReceiptRow({ receipt, returnTo, isDemo }: { receipt: CollectableReceipt
           <p className="mt-1 text-xs text-muted-foreground">Vence {formatDate(due)}</p>
         </div>
       </div>
-      <div className="flex flex-col gap-3 border-t border-border/60 pt-3 xl:min-w-[25rem] xl:border-t-0 xl:pt-0">
+      <div className="flex flex-col gap-2 border-t border-border/60 pt-3 xl:min-w-[26rem] xl:border-t-0 xl:pt-0">
         <div className="flex items-baseline justify-between gap-3 xl:justify-end">
           <span className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Monto</span>
           <div className="text-right">
@@ -209,9 +212,9 @@ function ReceiptRow({ receipt, returnTo, isDemo }: { receipt: CollectableReceipt
             <p className="text-xs text-muted-foreground">{receipt.currency}</p>
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:flex xl:flex-wrap xl:justify-end">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <QuickPaymentDialog
-            className="w-full xl:w-auto"
+            className="h-8 px-3 text-xs"
             receipt={{
               id: receipt.id,
               receiptNumber: receipt.receiptNumber,
@@ -224,33 +227,56 @@ function ReceiptRow({ receipt, returnTo, isDemo }: { receipt: CollectableReceipt
               endorsement: receipt.endorsement,
             }}
           />
-          {receipt.status === "PENDING" || receipt.status === "OVERDUE" ? (
-            <WhatsAppReminderButton receiptId={receipt.id} className="w-full xl:w-auto" demoPreview={isDemo ? { clientName: receipt.client.fullName, receiptNumber: receipt.receiptNumber, policyNumber: receipt.policy.policyNumber } : undefined} />
-          ) : null}
-          {receipt.qualitasEligible ? (
-            <QualitasPaymentLinkDialog
-              receipt={{
-                id: receipt.id,
-                receiptNumber: receipt.receiptNumber,
-                dueDate: receipt.dueDate,
-                amount: receipt.amount,
-                currency: receipt.currency,
-                client: { fullName: receipt.client.fullName, email: receipt.clientEmail, phone: receipt.clientPhone },
-                policy: { policyNumber: receipt.policy.policyNumber },
-                insurer: { name: receipt.insurer.name },
-              }}
-              agent={{ email: receipt.agentEmail ?? null, phone: receipt.agentPhone ?? null }}
-              enabled={Boolean(receipt.qualitasEnabled)}
-              clientRecipientEnabled={Boolean(receipt.qualitasClientRecipientEnabled)}
-              className="w-full xl:w-auto"
-            />
+          {((receipt.status === "PENDING" || receipt.status === "OVERDUE") || (receipt.qualitasEligible && receipt.qualitasEnabled) || (receipt.qualitasMonitorEligible && qualitasMonitorFeatureEnabled)) ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button type="button" size="sm" variant="outline" className="h-8 gap-1 px-3 text-xs" />}>
+                Acciones
+                <ChevronDown className="size-3.5" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-48">
+                {receipt.status === "PENDING" || receipt.status === "OVERDUE" ? (
+                  <WhatsAppReminderButton
+                    receiptId={receipt.id}
+                    triggerMode="menu-item"
+                    demoPreview={isDemo ? { clientName: receipt.client.fullName, receiptNumber: receipt.receiptNumber, policyNumber: receipt.policy.policyNumber } : undefined}
+                  />
+                ) : null}
+                {receipt.qualitasEligible && receipt.qualitasEnabled ? (
+                  <QualitasPaymentLinkDialog
+                    receipt={{
+                      id: receipt.id,
+                      receiptNumber: receipt.receiptNumber,
+                      dueDate: receipt.dueDate,
+                      amount: receipt.amount,
+                      currency: receipt.currency,
+                      client: { fullName: receipt.client.fullName, email: receipt.clientEmail, phone: receipt.clientPhone },
+                      policy: { policyNumber: receipt.policy.policyNumber },
+                      insurer: { name: receipt.insurer.name },
+                    }}
+                    agent={{ email: receipt.agentEmail ?? null, phone: receipt.agentPhone ?? null }}
+                    enabled={Boolean(receipt.qualitasEnabled)}
+                    clientRecipientEnabled={Boolean(receipt.qualitasClientRecipientEnabled)}
+                    triggerMode="menu-item"
+                  />
+                ) : null}
+                {receipt.qualitasMonitorEligible && qualitasMonitorFeatureEnabled ? (
+                  <QualitasReceiptMonitorPanel
+                    policyId={receipt.policy.id}
+                    policyNumber={receipt.policy.policyNumber}
+                    monitorEnabled={receipt.policy.qualitasReceiptMonitorEnabled}
+                    featureEnabled={qualitasMonitorFeatureEnabled}
+                    triggerMode="menu-item"
+                  />
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
           ) : null}
           {receipt.status !== "CANCELLED" && receipt.paymentCount === 0 ? (
             <CancelReceiptButton
               id={receipt.id}
               receiptNumber={receipt.receiptNumber}
               triggerLabel="Cancelar"
-              triggerClassName="h-8 w-full bg-card/70 px-3 text-xs xl:w-auto"
+              triggerClassName="h-8 bg-card/70 px-3 text-xs"
             />
           ) : null}
         </div>
