@@ -88,8 +88,8 @@ export function RenewalBoardFilters({
   canFilterByOwner: boolean;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-      <ListSearch placeholder="Buscar cliente, póliza o aseguradora..." className="min-w-64 md:max-w-sm" />
+    <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-3 lg:flex-nowrap">
+      <ListSearch placeholder="Buscar cliente, póliza o aseguradora..." className="min-w-64 flex-1 md:max-w-sm" />
       <BoardSelect
         label="Vencimiento"
         filterKey="window"
