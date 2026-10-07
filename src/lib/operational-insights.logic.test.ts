@@ -73,23 +73,29 @@ describe("operational insights presentation logic", () => {
     expect(readOperationalInsightPage("nope")).toBe(1);
   });
 
-  it("uses the collection flow promise date and posted payment timestamp", () => {
+  it("uses the collection promise date and keeps partial payment balances actionable", () => {
     const today = new Date("2026-10-02T18:00:00.000Z");
     const metadataJson = JSON.stringify({ outcome: "PROMISED_PAYMENT", promisedPaymentDate: "2026-10-02T06:00:00.000Z" });
-    expect(isPromiseSignalDue({ metadataJson, today, postedPaymentDates: [] })).toBe("promise-today");
-    expect(isPromiseSignalDue({ metadataJson, today, postedPaymentDates: [new Date("2026-10-02T06:00:00.000Z")] })).toBeNull();
-    expect(isPromiseSignalDue({ metadataJson, today, postedPaymentDates: [new Date("2026-10-02T12:00:00.000Z")] })).toBe("promise-today");
+    const dueInput = { metadataJson, today, receiptAmount: 100 };
+    expect(isPromiseSignalDue({ ...dueInput, postedPaymentAmounts: [] })).toBe("promise-today");
+    expect(isPromiseSignalDue({ ...dueInput, postedPaymentAmounts: [40] })).toBe("promise-today");
+    expect(isPromiseSignalDue({ ...dueInput, postedPaymentAmounts: [95] })).toBeNull();
     expect(isPromiseSignalDue({
+      ...dueInput,
       metadataJson: JSON.stringify({ outcome: "PROMISED_PAYMENT", promisedPaymentDate: "2026-10-01T06:00:00.000Z" }),
-      today,
-      postedPaymentDates: [],
+      postedPaymentAmounts: [50],
     })).toBe("promise-broken");
-    expect(isPromiseSignalDue({ metadataJson: "{invalid", today, postedPaymentDates: [] })).toBeNull();
-    expect(isPromiseSignalDue({ metadataJson: "[]", today, postedPaymentDates: [] })).toBeNull();
     expect(isPromiseSignalDue({
+      ...dueInput,
+      metadataJson: JSON.stringify({ outcome: "PROMISED_PAYMENT", promisedPaymentDate: "2026-10-01T06:00:00.000Z" }),
+      postedPaymentAmounts: [],
+    })).toBe("promise-broken");
+    expect(isPromiseSignalDue({ ...dueInput, metadataJson: "{invalid", postedPaymentAmounts: [] })).toBeNull();
+    expect(isPromiseSignalDue({ ...dueInput, metadataJson: "[]", postedPaymentAmounts: [] })).toBeNull();
+    expect(isPromiseSignalDue({
+      ...dueInput,
       metadataJson: JSON.stringify({ outcome: "PROMISED_PAYMENT", promisedPaymentDate: "2026-13-40T00:00:00.000Z" }),
-      today,
-      postedPaymentDates: [],
+      postedPaymentAmounts: [],
     })).toBeNull();
   });
 
