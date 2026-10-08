@@ -13,7 +13,7 @@ describe("temporary Neon restore guard", () => {
     const result = assertTemporaryNeonRestoreTarget({
       sourceDatabaseUrl: source,
       targetDatabaseUrl: target,
-      branchName: "restore-2026-07-04",
+      branchName: `restore-cert-stage3-${sha}`,
       allowRestore: allow, candidateSha: sha,
     });
     expect(result.target.hostname).toContain("ep-restore");
@@ -24,7 +24,7 @@ describe("temporary Neon restore guard", () => {
       assertTemporaryNeonRestoreTarget({
         sourceDatabaseUrl: source,
         targetDatabaseUrl: source,
-        branchName: "restore-test",
+        branchName: `restore-cert-stage3-${sha}`,
         allowRestore: allow, candidateSha: sha,
       }),
     ).toThrow("base actual");
@@ -32,9 +32,16 @@ describe("temporary Neon restore guard", () => {
       assertTemporaryNeonRestoreTarget({
         sourceDatabaseUrl: source,
         targetDatabaseUrl: target,
-        branchName: "restore-test",
+        branchName: `restore-cert-stage3-${sha}`,
       }),
     ).toThrow("ALLOW_TEMPORARY_NEON_RESTORE");
+  });
+
+  it("requires the SHA-bound restore certification branch and rejects Vercel", () => {
+    expect(() => assertTemporaryNeonRestoreTarget({ sourceDatabaseUrl: source, targetDatabaseUrl: target, branchName: `restore-cert-stage3-${sha}` , allowRestore: allow })).toThrow("CERTIFICATION_CANDIDATE_SHA_REQUIRED");
+    expect(() => assertTemporaryNeonRestoreTarget({ sourceDatabaseUrl: source, targetDatabaseUrl: target, branchName: `restore-cert-stage3-${sha}`, allowRestore: allow, candidateSha: sha, actualHead: "b".repeat(40) })).toThrow("RESTORE_CANDIDATE_SHA_MISMATCH");
+    expect(() => assertTemporaryNeonRestoreTarget({ sourceDatabaseUrl: source, targetDatabaseUrl: target, branchName: "restore-other", allowRestore: allow, candidateSha: sha })).toThrow("RESTORE_NEON_BRANCH_CANDIDATE_MISMATCH");
+    expect(() => assertTemporaryNeonRestoreTarget({ sourceDatabaseUrl: source, targetDatabaseUrl: target, branchName: `restore-cert-stage3-${sha}`, allowRestore: allow, candidateSha: sha, vercelEnv: "preview" })).toThrow("TENANT_CERTIFICATION_REFUSES_VERCEL_ENVIRONMENT");
   });
 
   it("rejects pooler and direct URLs for the same Neon endpoint", () => {
@@ -42,7 +49,7 @@ describe("temporary Neon restore guard", () => {
       assertTemporaryNeonRestoreTarget({
         sourceDatabaseUrl: sourcePooler,
         targetDatabaseUrl: source,
-        branchName: "restore-validation",
+        branchName: `restore-cert-stage3-${sha}`,
         allowRestore: allow, candidateSha: sha,
       }),
     ).toThrow("base actual");
@@ -53,7 +60,7 @@ describe("temporary Neon restore guard", () => {
       assertTemporaryNeonRestoreTarget({
         sourceDatabaseUrl: source,
         targetDatabaseUrl: sourcePooler,
-        branchName: "restore-validation",
+        branchName: `restore-cert-stage3-${sha}`,
         allowRestore: allow, candidateSha: sha,
         forbiddenDatabaseUrls: [source, sourcePooler],
       }),

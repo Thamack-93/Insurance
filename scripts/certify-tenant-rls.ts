@@ -121,8 +121,8 @@ async function main() {
   required("TENANT_RLS_ORG_A");
   required("TENANT_RLS_ORG_B");
 
-  await ensureCertificationMarker(adminUrl, target);
   if (env.TENANT_CERTIFICATION_PURPOSE === "restore") await runNpm("db:migrate:singleton-ci", env);
+  await ensureCertificationMarker(adminUrl, target);
   await runNpm("test:tenant-fixture", env);
   await runNpm("maintenance:enter", env);
   await runNpm("cutover:multi-org", { ...env, ENABLE_TENANT_RLS_CUTOVER: "1" });

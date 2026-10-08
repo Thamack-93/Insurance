@@ -19,7 +19,7 @@ schema o un incidente de integridad.
 - Una rama temporal Neon ya provisionada por el operador; el código no crea,
   promueve ni elimina ramas.
 - `DATABASE_URL` de la base fuente y `RESTORE_DATABASE_URL` del target temporal.
-- `RESTORE_NEON_BRANCH` con prefijo permitido `restore-`, `preview-` o `temp-`.
+- `RESTORE_NEON_BRANCH=restore-cert-stage3-<SHA-completo>`, idéntica a `CERTIFICATION_CANDIDATE_SHA`; este flujo rechaza otros nombres y cualquier entorno Vercel/Production/Preview.
 - `ALLOW_TEMPORARY_NEON_RESTORE=true`.
 - `CERTIFICATION_CANDIDATE_SHA` con los 40 caracteres hexadecimales de `git rev-parse HEAD`; cada entrypoint destructivo de restore verifica esta unión exacta y falla ante SHA ausente, mal formado o stale.
 - Si el rol administrado de Neon no permite `session_replication_role`, añade
@@ -52,7 +52,7 @@ guardar URLs completas. Ejecuta:
 
 ```bash
 RESTORE_DATABASE_URL=... \
-RESTORE_NEON_BRANCH=restore-2026-07-30 \
+RESTORE_NEON_BRANCH=restore-cert-stage3-<SHA-completo> \
 ALLOW_TEMPORARY_NEON_RESTORE=true \
 npm run drill:backup:temp-neon -- <backup-filename.ndjson.gz.enc>
 ```

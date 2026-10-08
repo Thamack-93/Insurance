@@ -6,6 +6,8 @@ export type RestoreTargetInput = {
   branchName?: string;
   allowRestore?: string;
   candidateSha?: string;
+  vercel?: string;
+  vercelEnv?: string;
   actualHead?: string;
   forbiddenDatabaseUrls?: Array<string | undefined>;
 };
@@ -37,11 +39,17 @@ function isSameNeonEndpoint(left: URL, right: URL) {
 }
 
 export function assertTemporaryNeonRestoreTarget(input: RestoreTargetInput) {
-  assertRestorePurposeGuard({ ALLOW_TEMPORARY_NEON_RESTORE: input.allowRestore, CERTIFICATION_CANDIDATE_SHA: input.candidateSha }, input.actualHead);
+  const candidateSha = assertRestorePurposeGuard({
+    ALLOW_TEMPORARY_NEON_RESTORE: input.allowRestore,
+    CERTIFICATION_CANDIDATE_SHA: input.candidateSha,
+    VERCEL: input.vercel,
+    VERCEL_ENV: input.vercelEnv,
+  }, input.actualHead);
   const branchName = input.branchName?.trim() ?? "";
   if (!/^(restore|preview|temp)-[a-z0-9._-]+$/i.test(branchName)) {
     throw new Error("RESTORE_NEON_BRANCH debe identificar una rama restore-, preview- o temp-.");
   }
+  if (branchName !== `restore-cert-stage3-${candidateSha}`) throw new Error("RESTORE_NEON_BRANCH_CANDIDATE_MISMATCH");
   if (!input.sourceDatabaseUrl?.trim() || !input.targetDatabaseUrl?.trim()) {
     throw new Error("DATABASE_URL y RESTORE_DATABASE_URL son obligatorias.");
   }

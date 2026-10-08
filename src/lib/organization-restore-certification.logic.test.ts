@@ -68,8 +68,8 @@ describe("restore post-commit certification", () => {
   it("compares every target organization row and every persisted value in the three recovery tables", () => {
     const make = (table: string, data: Record<string, unknown>) => ({ type: "row" as const, schema: "public", table, data });
     const policy = { id: "p1", organizationId: "org-test", insuredObject: "synthetic", riskDetails: { sourceText: "retained" }, premiumAmount: 10 };
-    const party = { id: "party1", organizationId: "org-test", policyId: "p1", fullName: "Synthetic", sourceLabel: "FIXTURE" };
-    const asset = { id: "asset1", organizationId: "org-test", policyId: "p1", serialNumber: "SYN-1", description: "Car" };
+    const party = { id: "party1", organizationId: "org-test", policyId: "p1", fullName: "Synthetic Recovery Named Insured", sourceLabel: "FIXTURE" };
+    const asset = { id: "asset1", organizationId: "org-test", policyId: "p1", serialNumber: "SYNTHETIC-VIN-0001", description: "Synthetic recovery vehicle 2022" };
     const parsedBackup = { rows: new Map([
       ["public.Policy", [make("Policy", policy)]],
       ["public.PolicyInsuredParty", [make("PolicyInsuredParty", party)]],
@@ -80,6 +80,10 @@ describe("restore post-commit certification", () => {
     expect(() => assertOrganizationRestoreValues(parsedBackup, "org-test", { Policy: [{ ...policy, premiumAmount: 99 }], PolicyInsuredParty: [party], PolicyInsuredAsset: [asset] })).toThrow("RESTORE_VALUE_PRESERVATION_FAILED:Policy:p1:premiumAmount");
     expect(() => assertOrganizationRestoreValues(parsedBackup, "org-test", { Policy: [policy, { ...policy, id: "p2" }], PolicyInsuredParty: [party], PolicyInsuredAsset: [asset] })).toThrow("RESTORE_VALUE_ROWSET_MISMATCH:Policy");
     expect(() => assertRestoreAcceptanceFixtures({ rows: new Map() } as ParsedBackup, "org-test")).toThrow("RESTORE_ACCEPTANCE_FIXTURE_MISSING");
+    const incompleteParty = { rows: new Map([["public.Policy", [make("Policy", policy)]], ["public.PolicyInsuredParty", [make("PolicyInsuredParty", { ...party, fullName: "Real customer" })]], ["public.PolicyInsuredAsset", [make("PolicyInsuredAsset", asset)]]]) } as ParsedBackup;
+    expect(() => assertRestoreAcceptanceFixtures(incompleteParty, "org-test")).toThrow("RESTORE_ACCEPTANCE_FIXTURE_INCOMPLETE:PolicyInsuredParty");
+    const incompleteAsset = { rows: new Map([["public.Policy", [make("Policy", policy)]], ["public.PolicyInsuredParty", [make("PolicyInsuredParty", party)]], ["public.PolicyInsuredAsset", [make("PolicyInsuredAsset", { ...asset, serialNumber: "REAL-VIN" })]]]) } as ParsedBackup;
+    expect(() => assertRestoreAcceptanceFixtures(incompleteAsset, "org-test")).toThrow("RESTORE_ACCEPTANCE_FIXTURE_INCOMPLETE:PolicyInsuredAsset");
   });
   it("rejects runtime count or application read mismatches", async () => {
     await expect(certifyOrganizationRestore({ ...input, tables: [{ table: "Client", rows: 1 }] })).rejects.toThrow("RESTORE_RUNTIME_COUNT");

@@ -55,8 +55,10 @@ export function assertRestoreAcceptanceFixtures(parsed: ParsedBackup, organizati
     if (!row) throw new Error(`RESTORE_ACCEPTANCE_FIXTURE_MISSING:${table}:${id}`);
     if (table === "Policy") {
       const sourceText = (row.riskDetails as { sourceText?: unknown } | null)?.sourceText;
-      if (typeof row.insuredObject !== "string" || typeof sourceText !== "string" || !sourceText.trim()) throw new Error("RESTORE_ACCEPTANCE_FIXTURE_INCOMPLETE:Policy");
+      if (typeof row.insuredObject !== "string" || !row.insuredObject.trim() || typeof sourceText !== "string" || !sourceText.trim()) throw new Error("RESTORE_ACCEPTANCE_FIXTURE_INCOMPLETE:Policy");
     }
+    if (table === "PolicyInsuredParty" && row.fullName !== "Synthetic Recovery Named Insured") throw new Error("RESTORE_ACCEPTANCE_FIXTURE_INCOMPLETE:PolicyInsuredParty");
+    if (table === "PolicyInsuredAsset" && (row.serialNumber !== "SYNTHETIC-VIN-0001" || row.description !== "Synthetic recovery vehicle 2022")) throw new Error("RESTORE_ACCEPTANCE_FIXTURE_INCOMPLETE:PolicyInsuredAsset");
   }
 }
 export function assertOrganizationRestoreValues(parsed: ParsedBackup, organizationId: string, actual: Record<string, Array<Record<string, unknown>>>) {

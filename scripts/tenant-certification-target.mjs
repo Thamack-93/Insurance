@@ -18,6 +18,7 @@ export function canonicalNeonHost(hostname) {
 /** Bind destructive restore-purpose commands to the exact checked-out candidate. */
 export function assertRestorePurposeGuard(env = process.env, actualHead = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()) {
   if (env.ALLOW_TEMPORARY_NEON_RESTORE !== "true") throw new Error("ALLOW_TEMPORARY_NEON_RESTORE_REQUIRED");
+  if (env.VERCEL === "1" || env.VERCEL_ENV === "production" || env.VERCEL_ENV === "preview") throw new Error("TENANT_CERTIFICATION_REFUSES_VERCEL_ENVIRONMENT");
   const sha = env.CERTIFICATION_CANDIDATE_SHA?.trim() ?? "";
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("CERTIFICATION_CANDIDATE_SHA_REQUIRED");
   if (actualHead !== sha) throw new Error("RESTORE_CANDIDATE_SHA_MISMATCH");

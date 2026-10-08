@@ -76,6 +76,8 @@ async function main() {
     branchName: process.env.RESTORE_NEON_BRANCH,
     allowRestore: process.env.ALLOW_TEMPORARY_NEON_RESTORE,
       candidateSha: process.env.CERTIFICATION_CANDIDATE_SHA,
+      vercel: process.env.VERCEL,
+      vercelEnv: process.env.VERCEL_ENV,
     forbiddenDatabaseUrls: [process.env.DATABASE_ADMIN_URL, process.env.DIRECT_URL, process.env.DATABASE_URL_DIRECT, process.env.DATABASE_URL_POOLER, process.env.POOLER_URL, process.env.PRISMA_DIRECT_URL],
   });
   const candidateSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
