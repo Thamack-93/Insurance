@@ -56,6 +56,9 @@ jobs:
       - name: Check tenant DAL inventory
         run: npm run check:tenant-dal:strict
 
+      - name: Check scheduled jobs honor maintenance gate
+        run: npm run check:cron-maintenance-gates
+
       - name: Check API security manifest
         run: npm run check:api-security
 

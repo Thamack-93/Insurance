@@ -4,9 +4,9 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Pool } from "pg";
 import { assertMaintenanceOrCutoverTarget } from "./cutover-target.mjs";
+import { MULTI_ORG_TRANSITION_LOCK } from "../src/lib/tenant-cutover-lock.ts";
 
 const execFileAsync = promisify(execFile);
-export const MULTI_ORG_TRANSITION_LOCK = "policydesk-multi-org-transition-v3";
 const CUTOVER_LOCK = MULTI_ORG_TRANSITION_LOCK;
 
 function directDatabaseUrl() {

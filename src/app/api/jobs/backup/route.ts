@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { runBackupJob } from "@/lib/backup-job";
 import { logError } from "@/lib/logger";
-import { acquirePostgresAdvisoryLock } from "@/lib/postgres-advisory-lock";
+import { withPlatformCronAdmission } from "@/lib/platform-cron-admission";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,21 +22,15 @@ async function handleBackupRequest(request: Request) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const lock = await acquirePostgresAdvisoryLock("policydesk:backup-job");
-  if (!lock.acquired) {
-    return lock.backend === "unavailable"
-      ? NextResponse.json({ ok: false, error: "El control de ejecución no está disponible." }, { status: 503 })
-      : NextResponse.json({ ok: false, error: "Ya existe un backup en ejecución." }, { status: 409 });
-  }
-  try {
-    const result = await runBackupJob();
-    return NextResponse.json(result, { status: result.ok ? 200 : 500 });
-  } catch (error) {
-    logError("api.jobs.backup", error);
-    return NextResponse.json({ ok: false, error: "Backup failed" }, { status: 500 });
-  } finally {
-    await lock.release();
-  }
+  return withPlatformCronAdmission(async () => {
+    try {
+      const result = await runBackupJob();
+      return NextResponse.json(result, { status: result.ok ? 200 : 500 });
+    } catch (error) {
+      logError("api.jobs.backup", error);
+      return NextResponse.json({ ok: false, error: "Backup failed" }, { status: 500 });
+    }
+  }, "policydesk:backup-job");
 }
 
 export async function POST(request: Request) {

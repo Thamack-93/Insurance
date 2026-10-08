@@ -2,6 +2,7 @@ import "dotenv/config";
 
 import { Pool } from "pg";
 import { PROTECTED_TENANT_TABLES } from "../src/lib/tenant-organization-foundation.ts";
+import { MULTI_ORG_TRANSITION_LOCK } from "../src/lib/tenant-cutover-lock.ts";
 import { assertDisposableCertificationTarget, canonicalNeonHost, certificationPurpose } from "./tenant-certification-target.mjs";
 
 function requireDisposableEnv() {
@@ -39,10 +40,11 @@ async function main() {
   if (connectionUser(adminUrl) === appRole) throw new Error("RLS_ADMIN_CONNECTION_MUST_NOT_USE_APP_ROLE");
   if (adminTarget.pathname !== runtimeTarget.pathname) throw new Error("RLS_ADMIN_AND_RUNTIME_TARGET_MISMATCH");
 
-  const admin = new Pool({ connectionString: adminUrl, max: 1, application_name: "policydesk-tenant-rls-admin-certification" });
+  const admin = new Pool({ connectionString: adminUrl, max: 3, application_name: "policydesk-tenant-rls-admin-certification" });
   const runtime = new Pool({ connectionString: runtimeUrl, max: 4, application_name: "policydesk-tenant-rls-runtime-certification" });
   const adminClient = await admin.connect();
   try {
+    await assertCronAdmissionDrain(runtime, admin);
     const role = await adminClient.query<{ rolname: string; rolsuper: boolean; rolbypassrls: boolean; rolcanlogin: boolean }>(
       "SELECT rolname, rolsuper, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = $1", [appRole],
     );
@@ -208,6 +210,48 @@ async function main() {
     adminClient.release();
     await runtime.end();
     await admin.end();
+  }
+}
+
+async function assertCronAdmissionDrain(runtime: Pool, admin: Pool) {
+  const job = await runtime.connect();
+  const maintenance = await admin.connect();
+  let jobTransactionOpen = false;
+  let exclusiveHeld = false;
+  try {
+    await job.query("BEGIN");
+    jobTransactionOpen = true;
+    const lock = await job.query<{ acquired: boolean }>(
+      "SELECT pg_try_advisory_xact_lock_shared(hashtext($1)) AS acquired",
+      [MULTI_ORG_TRANSITION_LOCK],
+    );
+    if (lock.rows[0]?.acquired !== true) throw new Error("CRON_RUNTIME_SHARED_LOCK_NOT_ACQUIRED");
+    let maintenanceAcquired = false;
+    const conflict = await maintenance.query<{ acquired: boolean }>(
+      "SELECT pg_try_advisory_lock(hashtext($1)) AS acquired",
+      [MULTI_ORG_TRANSITION_LOCK],
+    );
+    if (conflict.rows[0]?.acquired === true) {
+      await maintenance.query("SELECT pg_advisory_unlock(hashtext($1))", [MULTI_ORG_TRANSITION_LOCK]);
+      throw new Error("CRON_ADMISSION_DRAIN_DID_NOT_WAIT_FOR_ACTIVE_JOB");
+    }
+    const waiting = maintenance
+      .query("SELECT pg_advisory_lock(hashtext($1))", [MULTI_ORG_TRANSITION_LOCK])
+      .then(() => { maintenanceAcquired = true; });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    if (maintenanceAcquired) throw new Error("CRON_ADMISSION_DRAIN_DID_NOT_WAIT_FOR_ACTIVE_JOB");
+
+    await job.query("COMMIT");
+    jobTransactionOpen = false;
+    await waiting;
+    exclusiveHeld = true;
+    if (!maintenanceAcquired) throw new Error("CRON_ADMISSION_DRAIN_LOCK_NOT_ACQUIRED");
+    console.log(JSON.stringify({ ok: true, cronAdmissionDrain: "PASS", runtimeRole: "restricted", lock: "transaction-scoped" }));
+  } finally {
+    if (jobTransactionOpen) await job.query("ROLLBACK").catch(() => undefined);
+    if (exclusiveHeld) await maintenance.query("SELECT pg_advisory_unlock(hashtext($1))", [MULTI_ORG_TRANSITION_LOCK]).catch(() => undefined);
+    job.release();
+    maintenance.release();
   }
 }
 

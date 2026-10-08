@@ -69,15 +69,28 @@ Run the local guard regression with `npm run test:cutover-target`.
    `check:tenant-write-scope`, route/action inventories, inventory/backfill
    checks), browser E2E, and the encrypted backup restore drill on a temporary
    branch.
-5. Stop tenant mutations and scheduled business jobs, drain writes, and set
-   `PlatformRuntimeState.writeMode = 'MAINTENANCE'` with the administrative
-   connection.
+5. Stop tenant mutations at the maintenance boundary, drain scheduled work,
+   and verify that active database transactions finish. Every Vercel cron route
+   passes `withPlatformCronAdmission`: it holds a shared transaction-level
+   PostgreSQL advisory lock on the restricted pooled runtime connection for
+   the entire job, checks that `PlatformRuntimeState.writeMode` is exactly
+   `OPEN`, and fails closed with 503 if the state is missing or cannot be read.
+   The backup and nonpayment jobs also take their job-specific exclusive
+   transaction lock on that same runtime transaction. `npm run
+   maintenance:enter` takes the matching exclusive lock through the direct
+   operator connection, with a 90-second acquisition limit, waits for admitted
+   jobs, sets `MAINTENANCE`, then requires three consecutive empty
+   active-transaction checks (up to 90 seconds). A timeout leaves the platform
+   in maintenance and aborts the cutover; inspect and drain the remaining
+   transaction before continuing.
 6. Run `ENABLE_TENANT_RLS_CUTOVER=1 npm run cutover:multi-org`. The wrapper
    invokes `npm run prepare:tenant-roles` over `DATABASE_ADMIN_URL` before
-   applying the committed `20260831010000_multi_tenant_rls_cutover` migration;
-   role DDL is deliberately not embedded in Prisma's transactional migrations.
-   The migration refuses to run while the write mode is `OPEN` and leaves the
-   platform in maintenance mode.
+   applying all pending versioned migrations in order, including
+   `20260831010000_multi_tenant_rls_cutover`,
+   `20260914000000_extend_rls_operational_models`, and
+   `20260915010000_currency_rates_rls_cutover`; role DDL is deliberately not
+   embedded in Prisma's transactional migrations. The migration refuses to run
+   while the write mode is `OPEN` and leaves the platform in maintenance mode.
 7. Switch and verify the pooled runtime credential. Run
    `npm run verify:production` with `PRODUCTION_EXPECTED_TENANT_MODE=multi-org`
    and set `ENABLE_TENANT_RLS_CUTOVER=1` in the runtime deployment so platform
