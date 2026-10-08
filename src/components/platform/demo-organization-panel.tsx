@@ -36,14 +36,13 @@ export function DemoOrganizationPanel({ initialOrganizations, enabled }: { initi
   const [credentials, setCredentials] = useState<Array<{ email: string; password: string; name: string }>>([]);
   const [resetReason, setResetReason] = useState("Solicitud de reinicio del prospecto");
   const [days, setDays] = useState("30");
-  const [requestedUsers, setRequestedUsers] = useState("1");
 
   const organizations = useMemo(() => initialOrganizations, [initialOrganizations]);
 
   function provision(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     startTransition(async () => {
-      const result = await provisionDemoOrganizationAction({ requestId: crypto.randomUUID(), name, slug, ownerName, requestedUsers: Number(requestedUsers) });
+      const result = await provisionDemoOrganizationAction({ requestId: crypto.randomUUID(), name, slug, ownerName, requestedUsers: 1 });
       if (!result.ok) {
         toast.error(result.error);
         return;
@@ -53,7 +52,6 @@ export function DemoOrganizationPanel({ initialOrganizations, enabled }: { initi
       setName("");
       setSlug("");
       setOwnerName("");
-      setRequestedUsers("1");
       router.refresh();
     });
   }
@@ -109,12 +107,11 @@ export function DemoOrganizationPanel({ initialOrganizations, enabled }: { initi
         {!enabled ? <Badge variant="outline" className="w-fit border-amber-300 text-amber-800 dark:text-amber-200">Provisionamiento deshabilitado</Badge> : <Badge variant="outline" className="w-fit border-emerald-300 text-emerald-800 dark:text-emerald-200">Controles habilitados</Badge>}
       </div>
 
-      <form onSubmit={provision} className="grid gap-3 rounded-lg border bg-background p-4 sm:grid-cols-4">
+      <form onSubmit={provision} className="grid gap-3 rounded-lg border bg-background p-4 sm:grid-cols-3">
         <div className="space-y-1 sm:col-span-2"><Label htmlFor="demo-name">Prospecto / organización</Label><Input id="demo-name" value={name} onChange={(event) => setName(event.target.value)} required maxLength={160} disabled={!enabled || pending} /></div>
         <div className="space-y-1"><Label htmlFor="demo-slug">Slug</Label><Input id="demo-slug" value={slug} onChange={(event) => setSlug(event.target.value)} placeholder="auto" maxLength={48} disabled={!enabled || pending} /></div>
         <div className="space-y-1"><Label htmlFor="demo-owner">Propietario</Label><Input id="demo-owner" value={ownerName} onChange={(event) => setOwnerName(event.target.value)} required maxLength={160} disabled={!enabled || pending} /></div>
-        <div className="space-y-1"><Label htmlFor="demo-users">Usuarios (incluye propietario)</Label><Input id="demo-users" type="number" min={1} max={5} value={requestedUsers} onChange={(event) => setRequestedUsers(event.target.value)} disabled={!enabled || pending} /></div>
-        <div className="sm:col-span-4"><Button type="submit" disabled={!enabled || pending}><UserPlus className="mr-2 size-4" />{pending ? "Provisionando…" : "Provisionar DEMO"}</Button></div>
+        <div className="sm:col-span-3"><p className="mb-3 text-xs text-muted-foreground">Cada prospecto recibe una organización y una cuenta temporal.</p><Button type="submit" disabled={!enabled || pending}><UserPlus className="mr-2 size-4" />{pending ? "Provisionando…" : "Provisionar DEMO"}</Button></div>
       </form>
 
       {credentials.length > 0 ? <div className="flex flex-col gap-3 rounded-lg border border-emerald-300 bg-emerald-50 p-4 text-sm text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/25 dark:text-emerald-100"><div><p className="font-semibold">Credenciales temporales — copiar ahora</p><p className="text-xs opacity-80">Solo se muestran una vez. Entrégalas fuera de banda y solicita el cambio en el primer acceso.</p></div><div className="space-y-1">{credentials.map((credential) => <code key={credential.email} className="block rounded bg-background/80 px-3 py-2 font-mono text-xs">{credential.name}: {credential.email} / {credential.password}</code>)}</div><Button type="button" variant="outline" className="w-fit" onClick={() => void copyCredentials()}><Copy className="mr-2 size-4" />Copiar todas</Button></div> : null}

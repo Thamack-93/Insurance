@@ -197,7 +197,6 @@ async function main() {
       { id: "tenant-agent-b", email: "tenant-agent-b@policydesk.local", name: "Tenant Agent B", role: "AGENT", org: orgB.id, membershipRole: "AGENT" },
       { id: PEDRO_USER_ID, email: "tenant-owner-b@policydesk.local", name: "Tenant Owner B", role: "ADMIN", org: orgB.id, membershipRole: "OWNER" },
       { id: "tenant-demo-owner", email: "demo-owner@policydesk.local", name: "Demo Owner", role: "ADMIN", org: orgDemo.id, membershipRole: "OWNER" },
-      { id: "tenant-demo-agent", email: "demo-agent@policydesk.local", name: "Demo Agent", role: "AGENT", org: orgDemo.id, membershipRole: "AGENT" },
       { id: PLATFORM_USER_ID, email: "tenant-platform-admin@policydesk.local", name: "Tenant Platform Admin", role: "ADMIN", org: null, membershipRole: null },
     ] as const;
     // The organization transition trigger validates the owner invariant on
@@ -220,6 +219,10 @@ async function main() {
         });
       }
     }
+    // Older versions of this disposable fixture had a second DEMO account.
+    // Remove that fixture-owned membership so rerunning certification on the
+    // same disposable database still proves the one-account contract.
+    await tx.organizationMembership.deleteMany({ where: { organizationId: orgDemo.id, userId: "tenant-demo-agent" } });
     const activeLegacyOwners = await tx.organizationMembership.count({
       where: { organizationId: orgA.id, role: "OWNER", active: true, user: { active: true } },
     });

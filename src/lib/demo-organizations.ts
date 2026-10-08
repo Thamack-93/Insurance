@@ -36,8 +36,8 @@ export type DemoProvisioningInput = {
   name: string;
   slug?: string;
   ownerName: string;
-  /** Number of users including the owner, or explicit additional-user names. */
-  requestedUsers?: number | Array<{ name: string }>;
+  /** The external sales-assisted DEMO uses exactly one owner account. */
+  requestedUsers?: number;
   requestId?: string;
 };
 export type DemoCredential = { email: string; password: string; name: string };
@@ -155,16 +155,8 @@ export async function provisionDemoOrganization(input: DemoProvisioningInput): P
   const ownerUserId = deterministicId("usr_demo", `${slug}:owner`);
   const ownerEmail = `${slug}.owner@policydesk.local`;
   const password = temporaryPassword();
-  let requestedUsers: Array<{ name: string }>;
-  if (Array.isArray(input.requestedUsers)) {
-    if (input.requestedUsers.length > 4) throw new Error("DEMO_USER_LIMIT_EXCEEDED");
-    requestedUsers = input.requestedUsers.map((user) => ({ name: String(user?.name ?? "").trim() || "DEMO User" }));
-    if (requestedUsers.some((user) => user.name.length > 160)) throw new Error("DEMO_USER_NAME_INVALID");
-  } else {
-    const requestedUserCount = input.requestedUsers === undefined ? 1 : Number(input.requestedUsers);
-    if (!Number.isInteger(requestedUserCount) || requestedUserCount < 1 || requestedUserCount > 5) throw new Error("DEMO_USER_LIMIT_EXCEEDED");
-    requestedUsers = Array.from({ length: requestedUserCount - 1 }, (_, index) => ({ name: `DEMO User ${index + 2}` }));
-  }
+  const requestedUserCount = input.requestedUsers === undefined ? 1 : Number(input.requestedUsers);
+  if (requestedUserCount !== 1) throw new Error("DEMO_SINGLE_USER_REQUIRED");
   const now = new Date();
   const trialEndsAt = new Date(now.getTime() + 30 * 86_400_000);
   // This initial transaction writes only platform/control rows. Synthetic
@@ -178,6 +170,9 @@ export async function provisionDemoOrganization(input: DemoProvisioningInput): P
     const existing = await tx.organization.findUnique({ where: { id: organizationId }, select: { id: true, kind: true, status: true, name: true, slug: true } });
     if (existing && existing.kind !== "DEMO") throw new Error("DEMO_ID_COLLIDES_WITH_NON_DEMO_ORGANIZATION");
     if (existing && (existing.slug !== slug || existing.name !== name)) throw new Error("DEMO_ID_ALREADY_PROVISIONED_DIFFERENT_INPUT");
+    if (existing && await tx.organizationMembership.count({ where: { organizationId } }) > 1) {
+      throw new Error("DEMO_SINGLE_USER_INVARIANT_FAILED");
+    }
     if (existing?.status === "ACTIVE") {
       for (const key of DEMO_CAPABILITIES) {
         const enabled = DEMO_ENABLED_CAPABILITIES.has(key);
@@ -209,20 +204,6 @@ export async function provisionDemoOrganization(input: DemoProvisioningInput): P
     try {
       return await withSystemOrganizationTransaction(organizationId, "demo provision", async (tx) => {
         const credentials: DemoCredential[] = setup.temporaryPassword ? [{ email: ownerEmail, password: setup.temporaryPassword, name: ownerName }] : [];
-        for (const [index, requestedUser] of requestedUsers.entries()) {
-          const userNumber = index + 2;
-          const userId = deterministicId("usr_demo", `${slug}:user:${userNumber}`);
-          const email = `${slug}.user${userNumber}@policydesk.local`;
-          const userPassword = temporaryPassword();
-          const existingUser = await tx.user.findUnique({ where: { id: userId }, select: { passwordHash: true } });
-          await tx.user.upsert({
-            where: { id: userId },
-            update: { email, name: requestedUser.name, role: "AGENT", platformRole: "NONE", active: true, mustChangePassword: true, temporaryPasswordExpiresAt: existingUser ? undefined : new Date(now.getTime() + 86_400_000), ...(existingUser ? {} : { passwordHash: hashPassword(userPassword) }) },
-            create: { id: userId, email, name: requestedUser.name, passwordHash: hashPassword(userPassword), role: "AGENT", platformRole: "NONE", active: true, mustChangePassword: true, temporaryPasswordExpiresAt: new Date(now.getTime() + 86_400_000) },
-          });
-          await tx.organizationMembership.upsert({ where: { userId }, update: { organizationId, role: "AGENT", active: true }, create: { organizationId, userId, role: "AGENT", active: true } });
-          if (!existingUser) credentials.push({ email, password: userPassword, name: requestedUser.name });
-        }
         await seedDemoBaseline(tx, organizationId, ownerUserId);
         const seedCounts = await validateDemoBaseline(tx, organizationId);
         await tx.organization.update({ where: { id: organizationId }, data: { status: "ACTIVE" } });

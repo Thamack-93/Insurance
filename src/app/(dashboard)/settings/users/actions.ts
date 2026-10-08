@@ -58,23 +58,28 @@ async function runUserTenantTransaction<T>(
   return dbModule["getDb"]().$transaction(callback);
 }
 
-export async function listUsers(): Promise<AdminUserRow[]> {
+export async function listUsers(): Promise<{ users: AdminUserRow[]; isDemo: boolean }> {
   const context = await requireOrganizationRole(["OWNER", "ADMIN"]);
   const { withTenantOrganization } = await import("@/lib/tenant-dal");
-  const memberships = await withTenantOrganization(context.organizationId, (db) => db.organizationMembership.findMany({
-    where: { organizationId: context.organizationId, userId: { not: SYSTEM_USER_ID } },
-    orderBy: [{ active: "desc" }, { user: { name: "asc" } }],
-    include: {
-      user: {
-        include: {
-          _count: {
-            select: { portfolioClients: { where: { organizationId: context.organizationId } } },
+  const result = await withTenantOrganization(context.organizationId, async (db) => {
+    const organization = await db.organization.findUnique({ where: { id: context.organizationId }, select: { kind: true } });
+    if (!organization) throw new AuthError("ORGANIZATION_CONTEXT_STALE", 409);
+    const memberships = await db.organizationMembership.findMany({
+      where: { organizationId: context.organizationId, userId: { not: SYSTEM_USER_ID } },
+      orderBy: [{ active: "desc" }, { user: { name: "asc" } }],
+      include: {
+        user: {
+          include: {
+            _count: {
+              select: { portfolioClients: { where: { organizationId: context.organizationId } } },
+            },
           },
         },
       },
-    },
-  }));
-  return memberships.map((membership) => ({
+    });
+    return { isDemo: organization.kind === "DEMO", memberships };
+  });
+  return { isDemo: result.isDemo, users: result.memberships.map((membership) => ({
     id: membership.user.id,
     email: membership.user.email,
     name: membership.user.name,
@@ -83,7 +88,7 @@ export async function listUsers(): Promise<AdminUserRow[]> {
     lastLoginAt: membership.user.lastLoginAt ? membership.user.lastLoginAt.toISOString() : null,
     createdAt: membership.user.createdAt.toISOString(),
     portfolioClients: membership.user._count.portfolioClients,
-  }));
+  })) };
 }
 
 async function countRemainingTenantAdmins(
@@ -132,9 +137,7 @@ export async function inviteUser(input: {
       await assertOrganizationContextInTransaction(tx, context, ["OWNER", "ADMIN"]);
       const organization = await tx.organization.findUnique({ where: { id: context.organizationId }, select: { kind: true } });
       if (organization?.kind === "DEMO") {
-        const members = await tx.organizationMembership.count({ where: { organizationId: context.organizationId, active: true } });
-        if (members >= 5) throw new AuthError("Los demos permiten hasta cinco usuarios activos.", 409);
-        if (!email.endsWith("@policydesk.local")) throw new AuthError("Los usuarios DEMO usan aliases @policydesk.local.", 400);
+        throw new AuthError("La demostración usa una sola cuenta y no admite invitaciones.", 409);
       }
       const existing = await tx.user.findUnique({ where: { email }, select: { id: true } });
       if (existing) throw new AuthError("Ya existe un usuario con ese correo.", 409);

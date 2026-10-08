@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   acquireLock: vi.fn(),
+  requireSuperAdmin: vi.fn(),
   findOrganization: vi.fn(),
   systemTransaction: vi.fn(),
   release: vi.fn(),
@@ -12,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 vi.mock("@vercel/blob", () => ({ list: mocks.blobList, del: mocks.blobDelete }));
-vi.mock("@/lib/auth", () => ({ AuthError: class AuthError extends Error {}, hashPassword: vi.fn(), requireSuperAdmin: vi.fn() }));
+vi.mock("@/lib/auth", () => ({ AuthError: class AuthError extends Error {}, hashPassword: vi.fn(), requireSuperAdmin: mocks.requireSuperAdmin }));
 vi.mock("@/lib/request-guards", () => ({ acquireDistributedLock: mocks.acquireLock }));
 vi.mock("@/lib/organization-context", () => ({ withSystemOrganizationTransaction: mocks.systemTransaction }));
 vi.mock("@/lib/demo-seed", () => ({ DEMO_SEED_VERSION: "demo-test", seedDemoBaseline: vi.fn(), validateDemoBaseline: vi.fn() }));
@@ -20,17 +21,30 @@ vi.mock("@/lib/tenant-organization-foundation", () => ({ SYSTEM_USER_ID: "system
 vi.mock("@/lib/nora-capture-handoff-storage.shared", () => ({ NORA_CAPTURE_HANDOFF_PREFIX: "nora-handoff" }));
 vi.mock("@/lib/nora-pdf-storage.shared", () => ({ NORA_POLICY_PDF_PREFIX: "nora-pdf" }));
 
-import { resetDemoOrganizationForCli } from "./demo-organizations";
+import { provisionDemoOrganization, resetDemoOrganizationForCli } from "./demo-organizations";
 
 describe("DEMO reset target guard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("PLATFORM_ORG_PROVISIONING_ENABLED", "1");
+    mocks.requireSuperAdmin.mockResolvedValue({ id: "platform-admin" });
     mocks.txCalls.length = 0;
     mocks.acquireLock.mockResolvedValue({ acquired: true, release: mocks.release, renew: vi.fn().mockResolvedValue(true) });
     mocks.findOrganization.mockResolvedValue({ id: "customer-org", kind: "CUSTOMER", status: "ACTIVE" });
     mocks.systemTransaction.mockImplementation(async (_organizationId: string, _purpose: string, callback: (tx: unknown) => unknown) =>
       callback({ organization: { findUnique: (...args: unknown[]) => { mocks.txCalls.push("organization.findUnique"); return mocks.findOrganization(...args); } } }),
     );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("rejects provisioning more than the single DEMO owner before acquiring locks or writing", async () => {
+    await expect(provisionDemoOrganization({ name: "Prospect", ownerName: "DEMO Owner", requestedUsers: 2 }))
+      .rejects.toThrow("DEMO_SINGLE_USER_REQUIRED");
+    expect(mocks.acquireLock).not.toHaveBeenCalled();
+    expect(mocks.systemTransaction).not.toHaveBeenCalled();
   });
 
   it("rejects a CUSTOMER before any reset write, blob operation, or tenant-data access", async () => {

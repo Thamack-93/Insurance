@@ -10,7 +10,7 @@ export const metadata = {
 export default async function UsersAdminPage() {
   const context = await requireOrganizationRoleOrRedirect(["OWNER", "ADMIN"]);
 
-  const users = await listUsers();
+  const { users, isDemo } = await listUsers();
 
   return (
     <div className="flex flex-col gap-6">
@@ -18,9 +18,9 @@ export default async function UsersAdminPage() {
         <PageHeader
           eyebrow="Configuración"
           title="Usuarios"
-          description="Invita compañeros, ajusta sus permisos y administra el acceso a la correduría."
+          description={isDemo ? "Esta demostración usa una sola cuenta para el prospecto." : "Invita compañeros, ajusta sus permisos y administra el acceso a la correduría."}
         />
-        <UsersAdminPanel initialUsers={users} currentUserId={context.userId} canResetPasswords={context.membershipRole === "OWNER"} />
+        <UsersAdminPanel initialUsers={users} currentUserId={context.userId} canResetPasswords={context.membershipRole === "OWNER"} isDemo={isDemo} />
       </div>
     </div>
   );
