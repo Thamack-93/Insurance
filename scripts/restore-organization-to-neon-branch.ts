@@ -9,7 +9,7 @@ import { applyCurrentMigrations, checkRestoreTargetConnection } from "../src/lib
 import { assertTemporaryNeonRestoreTarget } from "../src/lib/backup-restore-guards.ts";
 import { restoreOrganizationBackup } from "../src/lib/organization-backup-restore.ts";
 import { parseBackupRecords } from "../src/lib/backup-restore-validation.ts";
-import { assertRestoreCertificationConnections, certifyOrganizationRestore, verifyRestoreMarker } from "../src/lib/organization-restore-certification.ts";
+import { assertRestoreCertificationConnections, assertRestoreAcceptanceFixtures, certifyOrganizationRestore, verifyRestoreMarker } from "../src/lib/organization-restore-certification.ts";
 
 async function readStream(stream: ReadableStream<Uint8Array>) {
   const chunks: Buffer[] = [];
@@ -75,6 +75,7 @@ async function main() {
     targetDatabaseUrl: process.env.RESTORE_DATABASE_URL,
     branchName: process.env.RESTORE_NEON_BRANCH,
     allowRestore: process.env.ALLOW_TEMPORARY_NEON_RESTORE,
+      candidateSha: process.env.CERTIFICATION_CANDIDATE_SHA,
     forbiddenDatabaseUrls: [process.env.DATABASE_ADMIN_URL, process.env.DIRECT_URL, process.env.DATABASE_URL_DIRECT, process.env.DATABASE_URL_POOLER, process.env.POOLER_URL, process.env.PRISMA_DIRECT_URL],
   });
   const candidateSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
@@ -126,10 +127,13 @@ async function main() {
       migrationResult,
     });
     if (apply) {
+      const parsedBackup = parseBackupRecords(plaintext);
+      assertRestoreAcceptanceFixtures(parsedBackup, organizationId);
+      report.acceptanceFixtures = "PASS";
       const result = await restoreOrganizationBackup({ targetDatabaseUrl: target.target.toString(), organizationId, plaintext, manifest: verification.manifest });
       report.result = result;
       report.transactionCommitted = true;
-      report.certification = await certifyOrganizationRestore({ adminUrl: target.target.toString(), runtimeUrl, organizationId, tables: result.tables, parsedBackup: parseBackupRecords(plaintext) });
+      report.certification = await certifyOrganizationRestore({ adminUrl: target.target.toString(), runtimeUrl, organizationId, tables: result.tables, parsedBackup });
       report.status = "PASS";
     } else {
       report.preview = { formatVersion: verification.manifest.version, scope: verification.manifest.scope ?? artifact.scope, capability: verification.manifest.capability ?? artifact.capability, tables: verification.manifest.tables.length, rows: verification.manifest.totals.rows };

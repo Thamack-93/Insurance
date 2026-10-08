@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { certificationFingerprint } from "../../scripts/tenant-certification-target.mjs";
+import { execFileSync } from "node:child_process";
+import { assertPersistedRestoreMarker, certificationFingerprint } from "../../scripts/tenant-certification-target.mjs";
 import type { ParsedBackup } from "./backup-restore-validation";
 import { PROTECTED_TENANT_TABLES } from "./tenant-organization-foundation";
 
@@ -12,12 +13,12 @@ vi.mock("@/generated/prisma/client", () => ({ PrismaClient: class {
 } }));
 vi.mock("@/lib/backup-restore", () => ({ checkTargetMigrationDrift: mocks.drift }));
 vi.mock("../../scripts/check-multi-org-audit", () => ({ auditMultiOrganizationState: mocks.audit }));
-import { assertRestoreCertificationConnections, certifyOrganizationRestore } from "./organization-restore-certification";
+import { assertOrganizationRestoreValues, assertRestoreAcceptanceFixtures, assertRestoreCertificationConnections, certifyOrganizationRestore } from "./organization-restore-certification";
 
-const sha = "a".repeat(40);
+const sha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const sourceHost = "ep-source.c-7.us-east-1.aws.neon.tech";
 const targetHost = "ep-target.c-7.us-east-1.aws.neon.tech";
-const env = { NODE_ENV: "test" as const, VERCEL_ENV: "", TENANT_ISOLATION_TEST_DB: "1", PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1", TENANT_ISOLATION_REMOTE_BRANCH: "1", TENANT_CERTIFICATION_REMOTE_BRANCH: "1", TENANT_CERTIFICATION_PURPOSE: "restore", TENANT_ISOLATION_RUN_ID: "run", TENANT_ISOLATION_DB_NAME: "neondb", CERTIFICATION_CANDIDATE_SHA: sha,
+const env = { NODE_ENV: "test" as const, VERCEL_ENV: "", TENANT_ISOLATION_TEST_DB: "1", PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1", TENANT_ISOLATION_REMOTE_BRANCH: "1", TENANT_CERTIFICATION_REMOTE_BRANCH: "1", TENANT_CERTIFICATION_PURPOSE: "restore", ALLOW_TEMPORARY_NEON_RESTORE: "true", TENANT_ISOLATION_RUN_ID: "run", TENANT_ISOLATION_DB_NAME: "neondb", CERTIFICATION_CANDIDATE_SHA: sha,
   TENANT_ISOLATION_BRANCH_ID: "br-source-test", TENANT_ISOLATION_BRANCH_NAME: `cert-stage3-${sha}`, TENANT_ISOLATION_NEON_HOST: sourceHost,
   TENANT_ISOLATION_FINGERPRINT: certificationFingerprint({ mode: "neon", runId: "run", database: "neondb", host: sourceHost, branchId: "br-source-test", branchName: `cert-stage3-${sha}` }),
   RESTORE_NEON_BRANCH_ID: "br-target-test", RESTORE_NEON_BRANCH: `restore-cert-stage3-${sha}`, RESTORE_NEON_HOST: targetHost,
@@ -29,6 +30,12 @@ const runtime = `postgresql://policydesk_app:fake@${targetHost.replace(".", "-po
 
 describe("restore certification identity", () => {
   it("accepts independently identified SHA-bound source and target", () => { expect(assertRestoreCertificationConnections(source, admin, runtime, env).target.branchId).toBe("br-target-test"); });
+  it("rejects missing, conflicting, or duplicate persisted target markers", () => {
+    const target = { runId: "run", database: "neondb", host: targetHost, fingerprint: env.RESTORE_TARGET_FINGERPRINT };
+    expect(() => assertPersistedRestoreMarker([], target)).toThrow("RESTORE_CERTIFICATION_MARKER_MISMATCH");
+    expect(() => assertPersistedRestoreMarker([{ run_id: "run", database_name: "neondb", host: sourceHost, fingerprint: target.fingerprint }], target)).toThrow("RESTORE_CERTIFICATION_MARKER_MISMATCH");
+    expect(() => assertPersistedRestoreMarker([{ run_id: "run", database_name: "neondb", host: targetHost, fingerprint: target.fingerprint }, { run_id: "other", database_name: "neondb", host: targetHost, fingerprint: target.fingerprint }], target)).toThrow("RESTORE_CERTIFICATION_MARKER_MISMATCH");
+  });
   it("rejects privileged runtime, pooled admin, stale SHA and Preview", () => {
     expect(() => assertRestoreCertificationConnections(source, admin, runtime.replace("policydesk_app", "owner"), env)).toThrow("RESTORE_REQUIRES_POOLED_RESTRICTED_RUNTIME");
     expect(() => assertRestoreCertificationConnections(source, runtime, runtime, env)).toThrow("RESTORE_REQUIRES_DIRECT_ADMIN_CONNECTION");
@@ -44,7 +51,7 @@ describe("restore certification identity", () => {
 });
 
 describe("restore post-commit certification", () => {
-  const input = { adminUrl: admin, runtimeUrl: runtime, organizationId: "org-test", tables: ["Client", "Policy", "Receipt", "Payment", "WorkItem"].map(table => ({ table, rows: 0 })) };
+  const input = { adminUrl: admin, runtimeUrl: runtime, organizationId: "org-test", tables: ["Client", "Policy", "Receipt", "Payment", "WorkItem"].map(table => ({ table, rows: 0 })), parsedBackup: { rows: new Map() } as ParsedBackup };
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.applicationCount.mockResolvedValue(0);
@@ -53,35 +60,26 @@ describe("restore post-commit certification", () => {
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.includes("pg_roles")) return { rows: [{ current_user: "policydesk_app", rolsuper: false, rolbypassrls: false }] };
       if (sql.includes("pg_class")) return { rows: PROTECTED_TENANT_TABLES.map(relname => ({ relname, relrowsecurity: true, relforcerowsecurity: true })) };
+      if (sql.includes('SELECT * FROM "')) return { rows: [] };
       return { rows: [{ count: "0", foreign_count: "0" }] };
     });
   });
   it("returns evidence only after application reads, RLS, audit and drift", async () => { expect(await certifyOrganizationRestore(input)).toMatchObject({ isolation: "PASS", drift: { ok: true } }); expect(mocks.drift).toHaveBeenCalledWith(admin); });
-  it("compares selected restored values to rows parsed from the decrypted backup", async () => {
+  it("compares every target organization row and every persisted value in the three recovery tables", () => {
     const make = (table: string, data: Record<string, unknown>) => ({ type: "row" as const, schema: "public", table, data });
+    const policy = { id: "p1", organizationId: "org-test", insuredObject: "synthetic", riskDetails: { sourceText: "retained" }, premiumAmount: 10 };
+    const party = { id: "party1", organizationId: "org-test", policyId: "p1", fullName: "Synthetic", sourceLabel: "FIXTURE" };
+    const asset = { id: "asset1", organizationId: "org-test", policyId: "p1", serialNumber: "SYN-1", description: "Car" };
     const parsedBackup = { rows: new Map([
-      ["public.Policy", [make("Policy", { id: "tenant-recovery-policy-renewal", insuredObject: "Synthetic Recovery 2022 Serie SYNTHETIC-VIN-0001", riskDetails: { version: 1, policyType: "AUTO", sourceText: "retained source text", data: { vehicles: [{ make: "Synthetic", model: "Recovery", year: "2022", version: "", vin: "SYNTHETIC-VIN-0001", plates: "" }] } } })]],
-      ["public.PolicyInsuredParty", [make("PolicyInsuredParty", { id: "tenant-recovery-insured-party", policyId: "tenant-recovery-policy-renewal", fullName: "Synthetic Recovery Named Insured", isPrimary: true, sourceLabel: "RECOVERY_FIXTURE" })]],
-      ["public.PolicyInsuredAsset", [make("PolicyInsuredAsset", { id: "tenant-recovery-insured-asset", policyId: "tenant-recovery-policy-renewal", assetType: "VEHICLE", description: "Synthetic recovery vehicle 2022", serialNumber: "SYNTHETIC-VIN-0001", isPrimary: true })]],
+      ["public.Policy", [make("Policy", policy)]],
+      ["public.PolicyInsuredParty", [make("PolicyInsuredParty", party)]],
+      ["public.PolicyInsuredAsset", [make("PolicyInsuredAsset", asset)]],
     ]) } as ParsedBackup;
-    mocks.query.mockImplementation(async (sql: string) => {
-      if (sql.includes("pg_roles")) return { rows: [{ current_user: "policydesk_app", rolsuper: false, rolbypassrls: false }] };
-      if (sql.includes("pg_class")) return { rows: PROTECTED_TENANT_TABLES.map(relname => ({ relname, relrowsecurity: true, relforcerowsecurity: true })) };
-      if (sql.includes('SELECT "id", "insuredObject"')) return { rows: [{ id: "tenant-recovery-policy-renewal", insuredObject: "Synthetic Recovery 2022 Serie SYNTHETIC-VIN-0001", riskDetails: { version: 1, policyType: "AUTO", sourceText: "retained source text", data: { vehicles: [{ make: "Synthetic", model: "Recovery", year: "2022", version: "", vin: "SYNTHETIC-VIN-0001", plates: "" }] } } }] };
-      if (sql.includes('SELECT "id", "policyId", "fullName"')) return { rows: [{ id: "tenant-recovery-insured-party", policyId: "tenant-recovery-policy-renewal", fullName: "Synthetic Recovery Named Insured", isPrimary: true, sourceLabel: "RECOVERY_FIXTURE" }] };
-      if (sql.includes('SELECT "id", "policyId", "assetType"')) return { rows: [{ id: "tenant-recovery-insured-asset", policyId: "tenant-recovery-policy-renewal", assetType: "VEHICLE", description: "Synthetic recovery vehicle 2022", serialNumber: "SYNTHETIC-VIN-0001", isPrimary: true }] };
-      return { rows: [{ count: "0", foreign_count: "0" }] };
-    });
-    await expect(certifyOrganizationRestore({ ...input, parsedBackup })).resolves.toMatchObject({ isolation: "PASS" });
-    mocks.query.mockImplementation(async (sql: string) => {
-      if (sql.includes("pg_roles")) return { rows: [{ current_user: "policydesk_app", rolsuper: false, rolbypassrls: false }] };
-      if (sql.includes("pg_class")) return { rows: PROTECTED_TENANT_TABLES.map(relname => ({ relname, relrowsecurity: true, relforcerowsecurity: true })) };
-      if (sql.includes('SELECT "id", "insuredObject"')) return { rows: [{ id: "tenant-recovery-policy-renewal", insuredObject: "changed", riskDetails: { version: 1, policyType: "AUTO", sourceText: "retained source text", data: { vehicles: [{ make: "Synthetic", model: "Recovery", year: "2022", version: "", vin: "SYNTHETIC-VIN-0001", plates: "" }] } } }] };
-      if (sql.includes('SELECT "id", "policyId", "fullName"')) return { rows: [{ id: "tenant-recovery-insured-party", policyId: "tenant-recovery-policy-renewal", fullName: "Synthetic Recovery Named Insured", isPrimary: true, sourceLabel: "RECOVERY_FIXTURE" }] };
-      if (sql.includes('SELECT "id", "policyId", "assetType"')) return { rows: [{ id: "tenant-recovery-insured-asset", policyId: "tenant-recovery-policy-renewal", assetType: "VEHICLE", description: "Synthetic recovery vehicle 2022", serialNumber: "SYNTHETIC-VIN-0001", isPrimary: true }] };
-      return { rows: [{ count: "0", foreign_count: "0" }] };
-    });
-    await expect(certifyOrganizationRestore({ ...input, parsedBackup })).rejects.toThrow("RESTORE_VALUE_PRESERVATION_FAILED:Policy:insuredObject");
+    assertRestoreAcceptanceFixtures(parsedBackup, "org-test");
+    assertOrganizationRestoreValues(parsedBackup, "org-test", { Policy: [policy], PolicyInsuredParty: [party], PolicyInsuredAsset: [asset] });
+    expect(() => assertOrganizationRestoreValues(parsedBackup, "org-test", { Policy: [{ ...policy, premiumAmount: 99 }], PolicyInsuredParty: [party], PolicyInsuredAsset: [asset] })).toThrow("RESTORE_VALUE_PRESERVATION_FAILED:Policy:p1:premiumAmount");
+    expect(() => assertOrganizationRestoreValues(parsedBackup, "org-test", { Policy: [policy, { ...policy, id: "p2" }], PolicyInsuredParty: [party], PolicyInsuredAsset: [asset] })).toThrow("RESTORE_VALUE_ROWSET_MISMATCH:Policy");
+    expect(() => assertRestoreAcceptanceFixtures({ rows: new Map() } as ParsedBackup, "org-test")).toThrow("RESTORE_ACCEPTANCE_FIXTURE_MISSING");
   });
   it("rejects runtime count or application read mismatches", async () => {
     await expect(certifyOrganizationRestore({ ...input, tables: [{ table: "Client", rows: 1 }] })).rejects.toThrow("RESTORE_RUNTIME_COUNT");

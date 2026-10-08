@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
@@ -14,10 +15,20 @@ export function canonicalNeonHost(hostname) {
   return hostname.toLowerCase().replace(/-pooler(?=\.)/, "");
 }
 
+/** Bind destructive restore-purpose commands to the exact checked-out candidate. */
+export function assertRestorePurposeGuard(env = process.env, actualHead = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()) {
+  if (env.ALLOW_TEMPORARY_NEON_RESTORE !== "true") throw new Error("ALLOW_TEMPORARY_NEON_RESTORE_REQUIRED");
+  const sha = env.CERTIFICATION_CANDIDATE_SHA?.trim() ?? "";
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("CERTIFICATION_CANDIDATE_SHA_REQUIRED");
+  if (actualHead !== sha) throw new Error("RESTORE_CANDIDATE_SHA_MISMATCH");
+  return sha;
+}
+
 /** Explicitly opt in to the independently named Stage 3 restore branch. */
 export function certificationPurpose(env = process.env) {
   const purpose = env.TENANT_CERTIFICATION_PURPOSE?.trim() || "source";
   if (purpose !== "source" && purpose !== "restore") throw new Error("TENANT_CERTIFICATION_PURPOSE_INVALID");
+  if (purpose === "restore") assertRestorePurposeGuard(env);
   return purpose;
 }
 
@@ -32,8 +43,9 @@ export function certificationFingerprint({ mode, runId, database, host, branchId
 }
 
 /** @param {string} connectionString @param {Record<string, string | undefined>} env @param {"source" | "restore"} purpose */
-export function assertDisposableCertificationTarget(connectionString, env = process.env, purpose = "source") {
+export function assertDisposableCertificationTarget(connectionString, env = process.env, purpose = "source", actualHead) {
   if (purpose !== "source" && purpose !== "restore") throw new Error("TENANT_CERTIFICATION_PURPOSE_INVALID");
+  if (purpose === "restore") assertRestorePurposeGuard(env, actualHead ?? execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim());
   if (env.VERCEL === "1" || env.VERCEL_ENV === "production" || env.VERCEL_ENV === "preview") {
     throw new Error("TENANT_CERTIFICATION_REFUSES_VERCEL_ENVIRONMENT");
   }

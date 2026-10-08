@@ -21,6 +21,7 @@ schema o un incidente de integridad.
 - `DATABASE_URL` de la base fuente y `RESTORE_DATABASE_URL` del target temporal.
 - `RESTORE_NEON_BRANCH` con prefijo permitido `restore-`, `preview-` o `temp-`.
 - `ALLOW_TEMPORARY_NEON_RESTORE=true`.
+- `CERTIFICATION_CANDIDATE_SHA` con los 40 caracteres hexadecimales de `git rev-parse HEAD`; cada entrypoint destructivo de restore verifica esta unión exacta y falla ante SHA ausente, mal formado o stale.
 - Si el rol administrado de Neon no permite `session_replication_role`, añade
   `ALLOW_NEON_USER_TRIGGER_FALLBACK=1` únicamente para este drill CLI. El fallback
   solo se activa en endpoints `*.neon.tech`, exige que todos los triggers de usuario

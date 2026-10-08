@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertDisposableCertificationTarget,
+  assertRestorePurposeGuard,
   assertRemoteTenantBackupTarget,
   canonicalNeonHost,
   certificationFingerprint,
@@ -57,6 +58,7 @@ describe("tenant certification target guard", () => {
     const env = {
       ...baseEnv,
       TENANT_CERTIFICATION_PURPOSE: "restore",
+      ALLOW_TEMPORARY_NEON_RESTORE: "true",
       TENANT_CERTIFICATION_REMOTE_BRANCH: "1",
       CERTIFICATION_CANDIDATE_SHA: sha,
       TENANT_ISOLATION_REMOTE_BRANCH: "1",
@@ -69,9 +71,12 @@ describe("tenant certification target guard", () => {
     };
     const admin = `postgresql://owner:test@${host}/${database}`;
     const runtime = `postgresql://policydesk_app:test@${host.replace(".", "-pooler.")}/${database}`;
-    expect(assertDisposableCertificationTarget(admin, env, "restore").branchName).toBe(branchName);
-    expect(() => assertDisposableCertificationTarget(admin, { ...env, TENANT_CERTIFICATION_PURPOSE: "source" }, "restore")).toThrow("TENANT_CERTIFICATION_RESTORE_OPT_IN_REQUIRED");
-    expect(() => assertDisposableCertificationTarget(admin, { ...env, TENANT_ISOLATION_BRANCH_NAME: `restore-cert-stage3-${sha.slice(0, 8)}` }, "restore")).toThrow("TENANT_CERTIFICATION_BRANCH_NAME_INVALID");
+    expect(assertDisposableCertificationTarget(admin, env, "restore", sha).branchName).toBe(branchName);
+    expect(() => assertDisposableCertificationTarget(admin, { ...env, TENANT_CERTIFICATION_PURPOSE: "source" }, "restore", sha)).toThrow("TENANT_CERTIFICATION_RESTORE_OPT_IN_REQUIRED");
+    expect(() => assertDisposableCertificationTarget(admin, { ...env, TENANT_ISOLATION_BRANCH_NAME: `restore-cert-stage3-${sha.slice(0, 8)}` }, "restore", sha)).toThrow("TENANT_CERTIFICATION_BRANCH_NAME_INVALID");
+    expect(() => assertRestorePurposeGuard({ CERTIFICATION_CANDIDATE_SHA: sha }, sha)).toThrow("ALLOW_TEMPORARY_NEON_RESTORE_REQUIRED");
+    expect(() => assertRestorePurposeGuard({ ALLOW_TEMPORARY_NEON_RESTORE: "true" }, sha)).toThrow("CERTIFICATION_CANDIDATE_SHA_REQUIRED");
+    expect(() => assertRestorePurposeGuard({ ALLOW_TEMPORARY_NEON_RESTORE: "true", CERTIFICATION_CANDIDATE_SHA: sha }, "b".repeat(40))).toThrow("RESTORE_CANDIDATE_SHA_MISMATCH");
     expect(() => assertRemoteTenantBackupTarget(admin, runtime, { ...env, ALLOW_OPERATOR_BACKUP: "1" })).toThrow("TENANT_CERTIFICATION_BRANCH_NAME_INVALID");
   });
 

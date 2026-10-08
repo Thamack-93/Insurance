@@ -1,9 +1,12 @@
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { assertTemporaryNeonRestoreTarget } from "@/lib/backup-restore-guards";
 
 const source = "postgresql://user:secret@ep-main.us-east-2.aws.neon.tech/app";
 const sourcePooler = "postgresql://user:secret@ep-main-pooler.us-east-2.aws.neon.tech/app";
 const target = "postgresql://user:secret@ep-restore.us-east-2.aws.neon.tech/app";
+const sha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+const allow = "true";
 
 describe("temporary Neon restore guard", () => {
   it("accepts an explicitly authorized separate restore branch", () => {
@@ -11,7 +14,7 @@ describe("temporary Neon restore guard", () => {
       sourceDatabaseUrl: source,
       targetDatabaseUrl: target,
       branchName: "restore-2026-07-04",
-      allowRestore: "true",
+      allowRestore: allow, candidateSha: sha,
     });
     expect(result.target.hostname).toContain("ep-restore");
   });
@@ -22,7 +25,7 @@ describe("temporary Neon restore guard", () => {
         sourceDatabaseUrl: source,
         targetDatabaseUrl: source,
         branchName: "restore-test",
-        allowRestore: "true",
+        allowRestore: allow, candidateSha: sha,
       }),
     ).toThrow("base actual");
     expect(() =>
@@ -40,7 +43,7 @@ describe("temporary Neon restore guard", () => {
         sourceDatabaseUrl: sourcePooler,
         targetDatabaseUrl: source,
         branchName: "restore-validation",
-        allowRestore: "true",
+        allowRestore: allow, candidateSha: sha,
       }),
     ).toThrow("base actual");
   });
@@ -51,7 +54,7 @@ describe("temporary Neon restore guard", () => {
         sourceDatabaseUrl: source,
         targetDatabaseUrl: sourcePooler,
         branchName: "restore-validation",
-        allowRestore: "true",
+        allowRestore: allow, candidateSha: sha,
         forbiddenDatabaseUrls: [source, sourcePooler],
       }),
     ).toThrow("base actual");
@@ -63,7 +66,7 @@ describe("temporary Neon restore guard", () => {
         sourceDatabaseUrl: source,
         targetDatabaseUrl: target,
         branchName: "production",
-        allowRestore: "true",
+        allowRestore: allow, candidateSha: sha,
       }),
     ).toThrow("rama restore-");
     expect(() =>
@@ -71,7 +74,7 @@ describe("temporary Neon restore guard", () => {
         sourceDatabaseUrl: source,
         targetDatabaseUrl: target,
         branchName: "staging",
-        allowRestore: "true",
+        allowRestore: allow, candidateSha: sha,
       }),
     ).toThrow("rama restore-");
     expect(() =>
@@ -79,7 +82,7 @@ describe("temporary Neon restore guard", () => {
         sourceDatabaseUrl: source,
         targetDatabaseUrl: target,
         branchName: "restore_2026-07-30",
-        allowRestore: "true",
+        allowRestore: allow, candidateSha: sha,
       }),
     ).toThrow("rama restore-");
   });

@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Pool } from "pg";
 import { execFileSync } from "node:child_process";
-import { assertDisposableCertificationTarget, certificationFingerprint } from "./tenant-certification-target.mjs";
+import { assertDisposableCertificationTarget, assertPersistedRestoreMarker, certificationFingerprint } from "./tenant-certification-target.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -24,8 +24,12 @@ async function assertEmptyOrResumableTarget(targetUrl: string, target: ReturnTyp
       return;
     }
     const rows = await pool.query<{ run_id: string; database_name: string; host: string; fingerprint: string }>('SELECT run_id, database_name, host, fingerprint FROM "__policydesk_tenant_isolation_run"');
-    if (rows.rows.length !== 1 || rows.rows[0].run_id !== target.runId || rows.rows[0].database_name !== target.database || rows.rows[0].host !== target.host || rows.rows[0].fingerprint !== target.fingerprint) {
-      throw new Error("RESTORE_CERTIFICATION_MARKER_CONFLICT");
+    try { assertPersistedRestoreMarker(rows.rows, target); } catch { throw new Error("RESTORE_CERTIFICATION_MARKER_CONFLICT"); }
+    for (const { table_name } of tables.rows) {
+      if (["__policydesk_tenant_isolation_run", "_prisma_migrations"].includes(table_name)) continue;
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(table_name)) throw new Error("RESTORE_CERTIFICATION_TARGET_CONTENT_UNRECOGNIZED");
+      const count = await pool.query(`SELECT count(*)::text AS count FROM public."${table_name}"`);
+      if (Number(count.rows[0]?.count) !== 0) throw new Error("RESTORE_CERTIFICATION_TARGET_CONTENT_NOT_RESUMABLE");
     }
   } finally { await pool.end(); }
 }
@@ -54,6 +58,12 @@ async function main() {
   };
   const source = assertDisposableCertificationTarget(sourceUrl, sourceEnv, "source");
   if (source.branchName !== `cert-stage3-${sha}`) throw new Error("RESTORE_SOURCE_BRANCH_SHA_MISMATCH");
+  const sourcePool = new Pool({ connectionString: sourceUrl, max: 1, application_name: "policydesk-restore-source-marker-check" });
+  try {
+    const markers = await sourcePool.query<{ run_id: string; database_name: string; host: string; fingerprint: string }>(
+      'SELECT run_id, database_name, host, fingerprint FROM "__policydesk_tenant_isolation_run"');
+    if (markers.rowCount !== 1 || markers.rows[0].run_id !== source.runId || markers.rows[0].database_name !== source.database || markers.rows[0].host !== source.host || markers.rows[0].fingerprint !== source.fingerprint) throw new Error("RESTORE_SOURCE_MARKER_MISMATCH");
+  } finally { await sourcePool.end(); }
 
   const targetUrl = required("RESTORE_DATABASE_ADMIN_URL");
   const targetConnection = new URL(targetUrl);

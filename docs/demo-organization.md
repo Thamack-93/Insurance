@@ -72,6 +72,10 @@ Production se rechazan. Las credenciales se inyectan al proceso desde fuera
 del repo. La clave de cifrado es exclusiva del drill y se conserva con
 permisos restringidos junto a la evidencia, nunca en un informe.
 
+Antes de ejecutar el certifier, el operador debe fijar `CERTIFICATION_CANDIDATE_SHA` al SHA completo y confirmar que coincide exactamente con `git rev-parse HEAD`. Cada entrada destructiva con `TENANT_CERTIFICATION_PURPOSE=restore` exige además `ALLOW_TEMPORARY_NEON_RESTORE=true`; un SHA ausente, mal formado, obsoleto o distinto del checkout detiene el proceso. La preparación acepta solo un destino vacío o el estado reanudable con marker exacto, metadata Prisma y tablas de aplicación vacías. Verifica el marker persistido de la fuente y del destino contra branch, base, host y fingerprint.
+
+En el destino nuevo, el certifier aplica primero únicamente las migraciones singleton seguras; luego prepara los fixtures, entra en maintenance y finalmente ejecuta el cutover tenant/RLS. No se ejecuta el cutover antes de maintenance. La aceptación del restore verifica explícitamente el fixture sintético y compara todas las columnas de todas las filas de `Policy`, `PolicyInsuredParty` y `PolicyInsuredAsset` de la organización contra el backup descifrado.
+
 La ejecución requiere `NODE_ENV=test`, `TENANT_ISOLATION_TEST_DB=1`,
 `PLAYWRIGHT_ENFORCE_DISPOSABLE_DB=1`, `CERTIFICATION_CANDIDATE_SHA`,
 `TENANT_CERTIFICATION_ORGANIZATION_ID`, `TENANT_CERTIFICATION_REMOTE_BRANCH=1`,

@@ -1,8 +1,12 @@
+import { assertRestorePurposeGuard } from "../../scripts/tenant-certification-target.mjs";
+
 export type RestoreTargetInput = {
   sourceDatabaseUrl?: string;
   targetDatabaseUrl?: string;
   branchName?: string;
   allowRestore?: string;
+  candidateSha?: string;
+  actualHead?: string;
   forbiddenDatabaseUrls?: Array<string | undefined>;
 };
 
@@ -33,9 +37,7 @@ function isSameNeonEndpoint(left: URL, right: URL) {
 }
 
 export function assertTemporaryNeonRestoreTarget(input: RestoreTargetInput) {
-  if (input.allowRestore !== "true") {
-    throw new Error("ALLOW_TEMPORARY_NEON_RESTORE=true es obligatorio.");
-  }
+  assertRestorePurposeGuard({ ALLOW_TEMPORARY_NEON_RESTORE: input.allowRestore, CERTIFICATION_CANDIDATE_SHA: input.candidateSha }, input.actualHead);
   const branchName = input.branchName?.trim() ?? "";
   if (!/^(restore|preview|temp)-[a-z0-9._-]+$/i.test(branchName)) {
     throw new Error("RESTORE_NEON_BRANCH debe identificar una rama restore-, preview- o temp-.");
