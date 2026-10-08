@@ -23,6 +23,21 @@ export function assertPersistedRestoreMarker(rows, target) {
   }
 }
 
+/** @param {Array<{migration_name:string,checksum:string,finished_at:Date|string|null,rolled_back_at:Date|string|null}>} rows @param {Map<string,string>} allowedChecksums */
+export function assertResumableRestoreMigrationHistory(rows, allowedChecksums) {
+  const expectedNames = [...allowedChecksums.keys()];
+  const seen = new Set();
+  if (rows.length > expectedNames.length) throw new Error("RESTORE_CERTIFICATION_MIGRATION_NOT_RESUMABLE");
+  for (const [index, row] of rows.entries()) {
+    if (!allowedChecksums.has(row.migration_name)) throw new Error(`RESTORE_CERTIFICATION_MIGRATION_UNKNOWN:${row.migration_name}`);
+    if (seen.has(row.migration_name)) throw new Error(`RESTORE_CERTIFICATION_MIGRATION_DUPLICATE:${row.migration_name}`);
+    seen.add(row.migration_name);
+    if (row.migration_name !== expectedNames[index] || !row.finished_at || row.rolled_back_at || row.checksum !== allowedChecksums.get(row.migration_name)) {
+      throw new Error(`RESTORE_CERTIFICATION_MIGRATION_NOT_RESUMABLE:${row.migration_name}`);
+    }
+  }
+}
+
 /** Bind destructive restore-purpose commands to the exact checked-out candidate.
  * @param {Record<string, string | undefined>} [env]
  * @param {string} [actualHead]

@@ -2,6 +2,7 @@ import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { assertDisposableCertificationTarget, certificationPurpose } from "./tenant-certification-target.mjs";
+import { SINGLETON_CI_SKIPPED_MIGRATIONS } from "./restore-certification-migrations.mjs";
 
 // CI exercises the pre-cutover singleton application in one job.  Keep the
 // production RLS migration in the committed migration history, but apply only
@@ -14,11 +15,6 @@ const certificationDatabaseUrl = process.env.DATABASE_ADMIN_URL?.trim() || proce
 if (!certificationDatabaseUrl) throw new Error("SINGLETON_CI_MIGRATION_REQUIRES_DATABASE_URL");
 assertDisposableCertificationTarget(certificationDatabaseUrl, process.env, certificationPurpose());
 const repositoryRoot = process.cwd();
-const skippedMigrations = new Set([
-  "20260831010000_multi_tenant_rls_cutover",
-  "20260914000000_extend_rls_operational_models",
-  "20260915010000_currency_rates_rls_cutover",
-]);
 const sourceMigrations = path.join(repositoryRoot, "prisma", "migrations");
 // Keep the temporary config under the repository so its @prisma/config import
 // resolves through the repository's node_modules in GitHub Actions.
@@ -30,7 +26,7 @@ try {
   const tempConfig = path.join(tempRoot, "prisma.config.ts");
   await cp(path.join(repositoryRoot, "prisma", "schema.prisma"), tempSchema);
   await cp(sourceMigrations, tempMigrations, { recursive: true });
-  for (const migration of skippedMigrations) {
+  for (const migration of SINGLETON_CI_SKIPPED_MIGRATIONS) {
     await rm(path.join(tempMigrations, migration), { recursive: true, force: true });
   }
 

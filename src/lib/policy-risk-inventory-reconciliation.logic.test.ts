@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { parseVerifiedPolicyRiskInventoryOutcomeReport, reconcilePolicyRiskInventory, type PolicyRiskInventoryInput, type PolicyRiskInventoryOutcomeReport } from "@/lib/policy-risk-inventory-reconciliation";
+import { policyRiskBackfillInputHash } from "@/lib/policy-risk-backfill-manifest";
+import { assertPolicyRiskInventoryOutcomeRun, parseVerifiedPolicyRiskInventoryOutcomeReport, reconcilePolicyRiskInventory, type PolicyRiskInventoryInput, type PolicyRiskInventoryOutcomeReport } from "@/lib/policy-risk-inventory-reconciliation";
+
+const INPUT_HASH = "a".repeat(64);
 
 function policy(overrides: Partial<PolicyRiskInventoryInput> = {}): PolicyRiskInventoryInput {
   return {
@@ -19,8 +22,32 @@ function policy(overrides: Partial<PolicyRiskInventoryInput> = {}): PolicyRiskIn
   };
 }
 
-function report(outcomes: PolicyRiskInventoryOutcomeReport["outcomes"], overrides: Partial<PolicyRiskInventoryOutcomeReport> = {}): PolicyRiskInventoryOutcomeReport {
-  return { organizationId: "org-1", manifestSha256: "manifest-1", outcomes, ...overrides };
+function report(outcomes: Array<Omit<PolicyRiskInventoryOutcomeReport["outcomes"][number], "inputHash"> & { inputHash?: string }>, overrides: Partial<PolicyRiskInventoryOutcomeReport> = {}): PolicyRiskInventoryOutcomeReport {
+  return {
+    organizationId: "org-1",
+    candidateSha: "candidate-1",
+    runId: "apply-run-1",
+    manifestSha256: "manifest-1",
+    reviewedManifestSha256: "reviewed-1",
+    maintenanceRunId: "maintenance-1",
+    status: "COMPLETED",
+    outcomes: outcomes.map((row) => ({ ...row, inputHash: row.inputHash ?? INPUT_HASH })),
+    ...overrides,
+  };
+}
+
+function reconcileLinked(input: {
+  organizationId: string;
+  policies: PolicyRiskInventoryInput[];
+  outcomeReport: PolicyRiskInventoryOutcomeReport;
+  expectedInputHashes?: Record<string, string>;
+}) {
+  return reconcilePolicyRiskInventory({
+    ...input,
+    expectedManifestSha256: "manifest-1",
+    expectedCandidateSha: "candidate-1",
+    expectedInputHashes: input.expectedInputHashes ?? Object.fromEntries(input.outcomeReport.outcomes.map((row) => [row.policyId, row.inputHash])),
+  });
 }
 
 describe("whole policy risk inventory reconciliation", () => {
@@ -33,6 +60,40 @@ describe("whole policy risk inventory reconciliation", () => {
     });
     const tampered = new TextEncoder().encode(new TextDecoder().decode(bytes) + " ");
     expect(() => parseVerifiedPolicyRiskInventoryOutcomeReport(tampered, digest)).toThrow("POLICY_RISK_INVENTORY_OUTCOME_FILE_SHA256_MISMATCH");
+  });
+
+  it("rejects outcomes whose candidate SHA or per-policy input hash does not match", () => {
+    const policies = [policy({ policyId: "p1" })];
+    expect(() => reconcileLinked({ organizationId: "org-1", policies, outcomeReport: report([{ policyId: "p1", outcome: "DEFERRED" }], { candidateSha: "older-candidate" }) })).toThrow("POLICY_RISK_INVENTORY_OUTCOME_CANDIDATE_SHA_MISMATCH");
+    expect(() => reconcileLinked({ organizationId: "org-1", policies, outcomeReport: report([{ policyId: "p1", outcome: "APPLIED" }]), expectedInputHashes: { p1: "b".repeat(64) } })).toThrow("POLICY_RISK_INVENTORY_OUTCOME_INPUT_HASH_MISMATCH");
+  });
+
+  it("binds outcomes to the organization maintenance run and its stored summary hash", () => {
+    const linkedReport = report([{ policyId: "p1", outcome: "APPLIED" }]);
+    const summary = {
+      organizationId: linkedReport.organizationId,
+      candidateSha: linkedReport.candidateSha,
+      runId: linkedReport.runId,
+      manifestSha256: linkedReport.manifestSha256,
+      reviewedManifestSha256: linkedReport.reviewedManifestSha256,
+      outcomesSha256: policyRiskBackfillInputHash(linkedReport.outcomes),
+    };
+    const run = {
+      id: linkedReport.maintenanceRunId,
+      organizationId: linkedReport.organizationId,
+      type: "POLICY_RISK_BACKFILL",
+      status: linkedReport.status,
+      summaryJson: JSON.stringify(summary),
+    };
+    expect(() => assertPolicyRiskInventoryOutcomeRun({ report: linkedReport, run, organizationId: "org-1", expectedCandidateSha: "candidate-1" })).not.toThrow();
+    expect(() => assertPolicyRiskInventoryOutcomeRun({ report: linkedReport, run: { ...run, summaryJson: JSON.stringify({ ...summary, manifestSha256: "different-manifest" }) }, organizationId: "org-1", expectedCandidateSha: "candidate-1" })).toThrow("POLICY_RISK_INVENTORY_OUTCOME_MAINTENANCE_RUN_MISMATCH");
+    const summaryWithoutManifestSha: Record<string, unknown> = { ...summary };
+    delete summaryWithoutManifestSha.manifestSha256;
+    expect(() => assertPolicyRiskInventoryOutcomeRun({ report: linkedReport, run: { ...run, summaryJson: JSON.stringify(summaryWithoutManifestSha) }, organizationId: "org-1", expectedCandidateSha: "candidate-1" })).toThrow("POLICY_RISK_INVENTORY_OUTCOME_MAINTENANCE_RUN_MISMATCH");
+    expect(() => assertPolicyRiskInventoryOutcomeRun({ report: { ...linkedReport, status: "REVIEW_REQUIRED" }, run, organizationId: "org-1", expectedCandidateSha: "candidate-1" })).toThrow("POLICY_RISK_INVENTORY_OUTCOME_MAINTENANCE_RUN_MISMATCH");
+    expect(() => assertPolicyRiskInventoryOutcomeRun({ report: { ...linkedReport, candidateSha: "older-candidate" }, run, organizationId: "org-1", expectedCandidateSha: "candidate-1" })).toThrow("POLICY_RISK_INVENTORY_OUTCOME_CANDIDATE_SHA_MISMATCH");
+    expect(() => assertPolicyRiskInventoryOutcomeRun({ report: { ...linkedReport, outcomes: [{ ...linkedReport.outcomes[0], outcome: "DEFERRED" }] }, run, organizationId: "org-1", expectedCandidateSha: "candidate-1" })).toThrow("POLICY_RISK_INVENTORY_OUTCOME_MAINTENANCE_RUN_MISMATCH");
+    expect(() => assertPolicyRiskInventoryOutcomeRun({ report: linkedReport, run: { ...run, id: "another-run" }, organizationId: "org-1", expectedCandidateSha: "candidate-1" })).toThrow("POLICY_RISK_INVENTORY_OUTCOME_MAINTENANCE_RUN_MISMATCH");
   });
 
   it("accounts for recognized structured data, pending source rows, and missing-source rows", () => {
@@ -72,11 +133,10 @@ describe("whole policy risk inventory reconciliation", () => {
   it("links apply outcomes by policy id and manifest hash, and flags stale null rows", () => {
     const structured = policy({ policyId: "applied", riskDetails: { version: 1, policyType: "AUTO", data: { vehicles: [{ make: "Mazda", model: "3", year: "2022", version: "", vin: "", plates: "" }] } } });
     const deferred = policy({ policyId: "deferred" });
-    const result = reconcilePolicyRiskInventory({
+    const result = reconcileLinked({
       organizationId: "org-1",
       policies: [structured, deferred],
       outcomeReport: report([{ policyId: "applied", outcome: "APPLIED" }, { policyId: "deferred", outcome: "APPLIED" }]),
-      expectedManifestSha256: "manifest-1",
     });
     expect(result.policies.map((row) => [row.disposition, row.reason, row.linkedManifestSha256])).toEqual([
       ["APPLIED", "LINKED_APPLY_OUTCOME_APPLIED", "manifest-1"],
@@ -86,7 +146,7 @@ describe("whole policy risk inventory reconciliation", () => {
 
   it("keeps linked deferred and empty outcomes visible when risk details are already present", () => {
     const structuredRiskDetails = { version: 1, policyType: "AUTO", data: { vehicles: [{ make: "Mazda", model: "3", year: "2022", version: "", vin: "", plates: "" }] } };
-    const result = reconcilePolicyRiskInventory({
+    const result = reconcileLinked({
       organizationId: "org-1",
       policies: [
         policy({ policyId: "deferred", riskDetails: structuredRiskDetails }),
@@ -96,7 +156,6 @@ describe("whole policy risk inventory reconciliation", () => {
         { policyId: "deferred", outcome: "DEFERRED" },
         { policyId: "empty", outcome: "EMPTY" },
       ]),
-      expectedManifestSha256: "manifest-1",
     });
 
     expect(result.policies.map(({ disposition, reason }) => [disposition, reason])).toEqual([
@@ -108,12 +167,12 @@ describe("whole policy risk inventory reconciliation", () => {
 
   it("rejects cross-organization, unlinked, duplicate, and wrong-manifest outcomes", () => {
     const policies = [policy({ policyId: "p1" })];
-    expect(() => reconcilePolicyRiskInventory({ organizationId: "org-1", policies, outcomeReport: report([], { organizationId: "org-2" }), expectedManifestSha256: "manifest-1" })).toThrow("POLICY_RISK_INVENTORY_OUTCOME_ORGANIZATION_MISMATCH");
-    expect(() => reconcilePolicyRiskInventory({ organizationId: "org-1", policies, outcomeReport: report([{ policyId: "other", outcome: "APPLIED" }]), expectedManifestSha256: "manifest-1" })).toThrow("POLICY_RISK_INVENTORY_OUTCOME_POLICY_NOT_IN_ORGANIZATION");
-    expect(() => reconcilePolicyRiskInventory({ organizationId: "org-1", policies, outcomeReport: report([], { manifestSha256: "wrong" }), expectedManifestSha256: "manifest-1" })).toThrow("POLICY_RISK_INVENTORY_OUTCOME_MANIFEST_MISMATCH");
+    expect(() => reconcileLinked({ organizationId: "org-1", policies, outcomeReport: report([], { organizationId: "org-2" }) })).toThrow("POLICY_RISK_INVENTORY_OUTCOME_ORGANIZATION_MISMATCH");
+    expect(() => reconcileLinked({ organizationId: "org-1", policies, outcomeReport: report([{ policyId: "other", outcome: "APPLIED" }]) })).toThrow("POLICY_RISK_INVENTORY_OUTCOME_POLICY_NOT_IN_ORGANIZATION");
+    expect(() => reconcilePolicyRiskInventory({ organizationId: "org-1", policies, outcomeReport: report([], { manifestSha256: "wrong" }), expectedManifestSha256: "manifest-1", expectedCandidateSha: "candidate-1", expectedInputHashes: {} })).toThrow("POLICY_RISK_INVENTORY_OUTCOME_MANIFEST_MISMATCH");
     expect(() => reconcilePolicyRiskInventory({ organizationId: "org-1", policies: [policies[0], policies[0]] })).toThrow("POLICY_RISK_INVENTORY_DUPLICATE_POLICY_ID");
-    expect(() => reconcilePolicyRiskInventory({ organizationId: "org-1", policies, outcomeReport: report([{ policyId: "p1", outcome: "UNKNOWN" } as never]), expectedManifestSha256: "manifest-1" })).toThrow("POLICY_RISK_INVENTORY_OUTCOME_INVALID");
-    expect(() => reconcilePolicyRiskInventory({ organizationId: "org-1", policies, outcomeReport: report([{ policyId: "p1", outcome: "EMPTY" }, { policyId: "p1", outcome: "DEFERRED" }]) as never, expectedManifestSha256: "manifest-1" })).toThrow("POLICY_RISK_INVENTORY_DUPLICATE_OUTCOME_POLICY_ID");
+    expect(() => reconcileLinked({ organizationId: "org-1", policies, outcomeReport: report([{ policyId: "p1", outcome: "UNKNOWN" } as never]) })).toThrow("POLICY_RISK_INVENTORY_OUTCOME_INVALID");
+    expect(() => reconcileLinked({ organizationId: "org-1", policies, outcomeReport: report([{ policyId: "p1", outcome: "EMPTY" }, { policyId: "p1", outcome: "DEFERRED" }]) })).toThrow("POLICY_RISK_INVENTORY_DUPLICATE_OUTCOME_POLICY_ID");
   });
 
   it("reconciles totals independently by policy type, status, and portfolio owner", () => {

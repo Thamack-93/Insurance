@@ -2,9 +2,11 @@ import "dotenv/config";
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import path from "node:path";
 import { Pool } from "pg";
 import { execFileSync } from "node:child_process";
-import { assertDisposableCertificationTarget, assertPersistedRestoreMarker, certificationFingerprint } from "./tenant-certification-target.mjs";
+import { assertDisposableCertificationTarget, assertPersistedRestoreMarker, assertResumableRestoreMigrationHistory, certificationFingerprint } from "./tenant-certification-target.mjs";
+import { readSafeSingletonMigrationChecksums } from "./restore-certification-migrations.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -25,6 +27,13 @@ async function assertEmptyOrResumableTarget(targetUrl: string, target: ReturnTyp
     }
     const rows = await pool.query<{ run_id: string; database_name: string; host: string; fingerprint: string }>('SELECT run_id, database_name, host, fingerprint FROM "__policydesk_tenant_isolation_run"');
     try { assertPersistedRestoreMarker(rows.rows, target); } catch { throw new Error("RESTORE_CERTIFICATION_MARKER_CONFLICT"); }
+    const tableNames = new Set(tables.rows.map(({ table_name }) => table_name));
+    const migrationHistory = tableNames.has("_prisma_migrations")
+      ? await pool.query<{ migration_name: string; checksum: string; finished_at: Date | null; rolled_back_at: Date | null }>(
+        'SELECT migration_name, checksum, finished_at, rolled_back_at FROM "_prisma_migrations" ORDER BY migration_name')
+      : { rows: [] as Array<{ migration_name: string; checksum: string; finished_at: Date | null; rolled_back_at: Date | null }> };
+    const allowedMigrations = await readSafeSingletonMigrationChecksums(path.join(process.cwd(), "prisma", "migrations"));
+    assertResumableRestoreMigrationHistory(migrationHistory.rows, allowedMigrations);
     for (const { table_name } of tables.rows) {
       if (["__policydesk_tenant_isolation_run", "_prisma_migrations"].includes(table_name)) continue;
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(table_name)) throw new Error("RESTORE_CERTIFICATION_TARGET_CONTENT_UNRECOGNIZED");

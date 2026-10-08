@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { assertPersistedRestoreMarker, certificationFingerprint } from "../../scripts/tenant-certification-target.mjs";
+import { assertPersistedRestoreMarker, assertResumableRestoreMigrationHistory, certificationFingerprint } from "../../scripts/tenant-certification-target.mjs";
 import type { ParsedBackup } from "./backup-restore-validation";
 import { PROTECTED_TENANT_TABLES } from "./tenant-organization-foundation";
 
@@ -27,6 +27,25 @@ const env = { NODE_ENV: "test" as const, VERCEL_ENV: "", TENANT_ISOLATION_TEST_D
 const source = `postgresql://policydesk_app:fake@${sourceHost.replace(".", "-pooler.")}/neondb`;
 const admin = `postgresql://owner:fake@${targetHost}/neondb`;
 const runtime = `postgresql://policydesk_app:fake@${targetHost.replace(".", "-pooler.")}/neondb`;
+
+
+describe("restore certification migration resumption", () => {
+  const allowed = new Map([["20260803000000_organization_transition", "a".repeat(64)], ["20261002160000_policy_risk_details", "b".repeat(64)]]);
+  const completed = { migration_name: "20260803000000_organization_transition", checksum: "a".repeat(64), finished_at: new Date("2026-08-03T00:00:00Z"), rolled_back_at: null };
+  it("accepts an empty or completed prefix of the ordered singleton migration snapshot", () => {
+    const nextCompleted = { migration_name: "20261002160000_policy_risk_details", checksum: "b".repeat(64), finished_at: new Date("2026-10-02T00:00:00Z"), rolled_back_at: null };
+    expect(() => assertResumableRestoreMigrationHistory([], allowed)).not.toThrow();
+    expect(() => assertResumableRestoreMigrationHistory([completed], allowed)).not.toThrow();
+    expect(() => assertResumableRestoreMigrationHistory([completed, nextCompleted], allowed)).not.toThrow();
+  });
+  it("rejects failed, incomplete, rolled back, mismatched, duplicate, and unknown history", () => {
+    expect(() => assertResumableRestoreMigrationHistory([{ ...completed, finished_at: null }], allowed)).toThrow("RESTORE_CERTIFICATION_MIGRATION_NOT_RESUMABLE");
+    expect(() => assertResumableRestoreMigrationHistory([{ ...completed, rolled_back_at: new Date() }], allowed)).toThrow("RESTORE_CERTIFICATION_MIGRATION_NOT_RESUMABLE");
+    expect(() => assertResumableRestoreMigrationHistory([{ ...completed, checksum: "c".repeat(64) }], allowed)).toThrow("RESTORE_CERTIFICATION_MIGRATION_NOT_RESUMABLE");
+    expect(() => assertResumableRestoreMigrationHistory([completed, completed], allowed)).toThrow("RESTORE_CERTIFICATION_MIGRATION_DUPLICATE");
+    expect(() => assertResumableRestoreMigrationHistory([{ ...completed, migration_name: "20269999999999_unexpected" }], allowed)).toThrow("RESTORE_CERTIFICATION_MIGRATION_UNKNOWN");
+  });
+});
 
 describe("restore certification identity", () => {
   it("accepts independently identified SHA-bound source and target", () => { expect(assertRestoreCertificationConnections(source, admin, runtime, env).target.branchId).toBe("br-target-test"); });

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { policyRiskBackfillInputHash } from "@/lib/policy-risk-backfill-manifest";
 import { hasPolicyRiskData, policyRiskDetailsSchema } from "@/lib/policy-risk-details";
 
 export type PolicyRiskInventoryInput = {
@@ -17,14 +18,56 @@ export type PolicyRiskInventoryInput = {
 
 export type PolicyRiskInventoryOutcome = {
   policyId: string;
+  inputHash: string;
   outcome: "APPLIED" | "ALREADY_APPLIED" | "DEFERRED" | "EMPTY";
 };
 
 export type PolicyRiskInventoryOutcomeReport = {
   organizationId: string;
+  candidateSha: string;
+  runId: string;
   manifestSha256: string;
+  reviewedManifestSha256: string;
+  maintenanceRunId: string;
+  status: "COMPLETED" | "REVIEW_REQUIRED";
   outcomes: PolicyRiskInventoryOutcome[];
 };
+
+export type PolicyRiskInventoryMaintenanceRun = {
+  id: string;
+  organizationId: string;
+  type: string;
+  status: string;
+  summaryJson: string | null;
+};
+
+export function assertPolicyRiskInventoryOutcomeRun(input: {
+  report: PolicyRiskInventoryOutcomeReport;
+  run: PolicyRiskInventoryMaintenanceRun | null;
+  organizationId: string;
+  expectedCandidateSha: string;
+}) {
+  const { report, run, organizationId, expectedCandidateSha } = input;
+  if (report.organizationId !== organizationId) throw new Error("POLICY_RISK_INVENTORY_OUTCOME_ORGANIZATION_MISMATCH");
+  if (report.candidateSha !== expectedCandidateSha) throw new Error("POLICY_RISK_INVENTORY_OUTCOME_CANDIDATE_SHA_MISMATCH");
+  if (!report.runId || !report.maintenanceRunId || !report.reviewedManifestSha256 || !["COMPLETED", "REVIEW_REQUIRED"].includes(report.status)) {
+    throw new Error("POLICY_RISK_INVENTORY_OUTCOME_RUN_METADATA_INVALID");
+  }
+  if (!run || run.id !== report.maintenanceRunId || run.organizationId !== organizationId || run.type !== "POLICY_RISK_BACKFILL" || run.status !== report.status || !run.summaryJson) {
+    throw new Error("POLICY_RISK_INVENTORY_OUTCOME_MAINTENANCE_RUN_MISMATCH");
+  }
+  let summary: unknown;
+  try {
+    summary = JSON.parse(run.summaryJson);
+  } catch {
+    throw new Error("POLICY_RISK_INVENTORY_OUTCOME_MAINTENANCE_RUN_MISMATCH");
+  }
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) throw new Error("POLICY_RISK_INVENTORY_OUTCOME_MAINTENANCE_RUN_MISMATCH");
+  const values = summary as Record<string, unknown>;
+  if (values.organizationId !== organizationId || values.candidateSha !== expectedCandidateSha || values.runId !== report.runId || values.manifestSha256 !== report.manifestSha256 || values.reviewedManifestSha256 !== report.reviewedManifestSha256 || values.outcomesSha256 !== policyRiskBackfillInputHash(report.outcomes)) {
+    throw new Error("POLICY_RISK_INVENTORY_OUTCOME_MAINTENANCE_RUN_MISMATCH");
+  }
+}
 
 export function parseVerifiedPolicyRiskInventoryOutcomeReport(bytes: Uint8Array, expectedFileSha256: string) {
   const fileSha256 = createHash("sha256").update(bytes).digest("hex");
@@ -39,7 +82,7 @@ export function parseVerifiedPolicyRiskInventoryOutcomeReport(bytes: Uint8Array,
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("POLICY_RISK_INVENTORY_OUTCOME_REPORT_INVALID");
   const report = value as Partial<PolicyRiskInventoryOutcomeReport>;
-  if (!Array.isArray(report.outcomes) || typeof report.organizationId !== "string" || typeof report.manifestSha256 !== "string") {
+  if (!Array.isArray(report.outcomes) || typeof report.organizationId !== "string" || typeof report.candidateSha !== "string" || typeof report.runId !== "string" || typeof report.manifestSha256 !== "string" || typeof report.reviewedManifestSha256 !== "string" || typeof report.maintenanceRunId !== "string" || typeof report.status !== "string") {
     throw new Error("POLICY_RISK_INVENTORY_OUTCOME_REPORT_INVALID");
   }
   return { report: report as PolicyRiskInventoryOutcomeReport, fileSha256 };
@@ -94,16 +137,22 @@ export function reconcilePolicyRiskInventory(input: {
   policies: PolicyRiskInventoryInput[];
   outcomeReport?: PolicyRiskInventoryOutcomeReport;
   expectedManifestSha256?: string;
+  expectedCandidateSha?: string;
+  expectedInputHashes?: Record<string, string>;
 }) {
-  const { organizationId, policies, outcomeReport, expectedManifestSha256 } = input;
+  const { organizationId, policies, outcomeReport, expectedManifestSha256, expectedCandidateSha, expectedInputHashes } = input;
   if (new Set(policies.map((row) => row.policyId)).size !== policies.length) throw new Error("POLICY_RISK_INVENTORY_DUPLICATE_POLICY_ID");
   if (outcomeReport && outcomeReport.organizationId !== organizationId) throw new Error("POLICY_RISK_INVENTORY_OUTCOME_ORGANIZATION_MISMATCH");
   if (outcomeReport && (!expectedManifestSha256 || outcomeReport.manifestSha256 !== expectedManifestSha256)) throw new Error("POLICY_RISK_INVENTORY_OUTCOME_MANIFEST_MISMATCH");
+  if (outcomeReport && (!expectedCandidateSha || outcomeReport.candidateSha !== expectedCandidateSha)) throw new Error("POLICY_RISK_INVENTORY_OUTCOME_CANDIDATE_SHA_MISMATCH");
+  if (outcomeReport && !expectedInputHashes) throw new Error("POLICY_RISK_INVENTORY_OUTCOME_MANIFEST_INPUT_HASHES_REQUIRED");
   const outcomes = outcomeReport?.outcomes ?? [];
-  if (outcomes.some((row) => !row.policyId || !["APPLIED", "ALREADY_APPLIED", "DEFERRED", "EMPTY"].includes(row.outcome))) {
+  if (outcomes.some((row) => !row.policyId || !/^[a-f0-9]{64}$/.test(row.inputHash) || !["APPLIED", "ALREADY_APPLIED", "DEFERRED", "EMPTY"].includes(row.outcome))) {
     throw new Error("POLICY_RISK_INVENTORY_OUTCOME_INVALID");
   }
   if (new Set(outcomes.map((row) => row.policyId)).size !== outcomes.length) throw new Error("POLICY_RISK_INVENTORY_DUPLICATE_OUTCOME_POLICY_ID");
+  if (outcomeReport && outcomes.length !== Object.keys(expectedInputHashes!).length) throw new Error("POLICY_RISK_INVENTORY_OUTCOME_MANIFEST_CANDIDATE_MISMATCH");
+  if (outcomeReport && outcomes.some((row) => expectedInputHashes![row.policyId] !== row.inputHash)) throw new Error("POLICY_RISK_INVENTORY_OUTCOME_INPUT_HASH_MISMATCH");
   const outcomeById = new Map(outcomes.map((row) => [row.policyId, row]));
   if (outcomes.some((row) => !policies.some((policy) => policy.policyId === row.policyId))) throw new Error("POLICY_RISK_INVENTORY_OUTCOME_POLICY_NOT_IN_ORGANIZATION");
 
