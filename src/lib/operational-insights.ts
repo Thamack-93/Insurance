@@ -15,6 +15,7 @@ import { getRenewalStallState } from "@/lib/renewal-board.logic";
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { getWorkItemHref } from "@/lib/work-item-navigation";
 import { formatCurrency } from "@/lib/money";
+import { PAYMENT_CLOSE_TOLERANCE } from "@/lib/receipt-reconciliation";
 import {
   OPERATIONAL_INSIGHT_GROUPS,
   OPERATIONAL_INSIGHT_PAGE_SIZE,
@@ -62,7 +63,6 @@ async function readInsightCandidates(
     group: OperationalInsightGroupFilter;
     page: number;
     todayStart: Date;
-    todayEnd: Date;
     in30Days: Date;
     sevenDaysAgoEnd: Date;
     fiveDaysAgoEnd: Date;
@@ -109,7 +109,7 @@ async function readInsightCandidates(
         AND NOT EXISTS (SELECT 1 FROM "Policy" child WHERE child."organizationId" = p."organizationId" AND child."renewedFromPolicyId" = p."id")
     ),
     posted_totals AS (
-      SELECT pay."receiptId", SUM(pay."amount") AS "paidAmount", MIN(pay."paidDate") AS "firstPaidAt"
+      SELECT pay."receiptId", SUM(pay."amount") AS "paidAmount"
       FROM "Payment" pay
       WHERE pay."organizationId" = ${input.organizationId} AND pay."status" = 'POSTED'
       GROUP BY pay."receiptId"
@@ -123,7 +123,7 @@ async function readInsightCandidates(
         AND (${input.portfolioOwnerId ?? null}::text IS NULL OR c."portfolioOwnerId" = ${input.portfolioOwnerId ?? null})
         AND r."status" IN ('PENDING', 'OVERDUE') AND r."dueDate" < ${input.todayStart}
         AND GREATEST(0::numeric, r."amount" - COALESCE(pt."paidAmount", 0)) > 0
-        AND NOT (COALESCE(pt."paidAmount", 0) > 0 AND ABS(COALESCE(pt."paidAmount", 0) - r."amount") <= 5)
+        AND NOT (COALESCE(pt."paidAmount", 0) > 0 AND ABS(COALESCE(pt."paidAmount", 0) - r."amount") <= ${PAYMENT_CLOSE_TOLERANCE})
     ),
     collection_json AS (
       SELECT wi."id", wi."receiptId", wi."dueDate", wi."clientId", wi."metadataJson",
@@ -133,7 +133,7 @@ async function readInsightCandidates(
       WHERE wi."organizationId" = ${input.organizationId}
         AND (${input.portfolioOwnerId ?? null}::text IS NULL OR c."portfolioOwnerId" = ${input.portfolioOwnerId ?? null} OR (wi."clientId" IS NULL AND wi."assignedToId" = ${input.portfolioOwnerId ?? null}))
         AND wi."sourceType" = 'Collection' AND wi."status" IN ('OPEN', 'IN_PROGRESS', 'WAITING_CLIENT')
-        AND wi."dueDate" <= ${input.todayEnd} AND wi."metadataJson" LIKE '%PROMISED_PAYMENT%' AND wi."receiptId" IS NOT NULL
+        AND wi."metadataJson" LIKE '%PROMISED_PAYMENT%' AND wi."receiptId" IS NOT NULL
     ),
     collection_promises AS (
       SELECT r."id" AS "receiptId", CASE
@@ -148,12 +148,7 @@ async function readInsightCandidates(
       WHERE cj.metadata->>'outcome' = 'PROMISED_PAYMENT'
         AND (${input.portfolioOwnerId ?? null}::text IS NULL OR c."portfolioOwnerId" = ${input.portfolioOwnerId ?? null})
         AND GREATEST(0::numeric, r."amount" - COALESCE(pt."paidAmount", 0)) > 0
-        AND NOT (COALESCE(pt."paidAmount", 0) > 0 AND ABS(COALESCE(pt."paidAmount", 0) - r."amount") <= 5)
-        AND (pt."firstPaidAt" IS NULL OR pt."firstPaidAt" > CASE
-          WHEN jsonb_typeof(cj.metadata->'promisedPaymentDate') = 'string'
-            AND (cj.metadata->>'promisedPaymentDate') ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$'
-            AND pg_input_is_valid(cj.metadata->>'promisedPaymentDate', 'timestamp with time zone')
-          THEN (cj.metadata->>'promisedPaymentDate')::timestamptz ELSE NULL END)
+        AND NOT (COALESCE(pt."paidAmount", 0) > 0 AND ABS(COALESCE(pt."paidAmount", 0) - r."amount") <= ${PAYMENT_CLOSE_TOLERANCE})
         AND CASE
           WHEN jsonb_typeof(cj.metadata->'promisedPaymentDate') = 'string'
             AND (cj.metadata->>'promisedPaymentDate') ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$'
@@ -229,7 +224,6 @@ export async function getOperationalInsights(input: {
   const scope = await requireOrganizationPortfolioReadScope();
   const today = businessToday();
   const todayStart = businessStartOfDay(today);
-  const todayEnd = businessEndOfDay(today);
   const in30Days = businessAddDays(today, 30);
   const sevenDaysAgo = businessAddDays(today, -7);
   const fiveDaysAgo = businessAddDays(today, -5);
@@ -242,7 +236,6 @@ export async function getOperationalInsights(input: {
       group: input.group,
       page,
       todayStart,
-      todayEnd,
       in30Days,
       sevenDaysAgoEnd: businessEndOfDay(sevenDaysAgo),
       fiveDaysAgoEnd: businessEndOfDay(fiveDaysAgo),
@@ -331,7 +324,6 @@ export async function getOperationalInsights(input: {
             { receiptId: { in: receiptIds } },
             workItemOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
             { sourceType: "Collection", status: { in: [...COLLECTION_WORK_ITEM_STATUSES] } },
-            { dueDate: { lte: todayEnd } },
             { metadataJson: { contains: "PROMISED_PAYMENT" } },
             { receiptId: { not: null } },
           ],
@@ -359,7 +351,7 @@ export async function getOperationalInsights(input: {
               amount: true,
               currency: true,
               policy: { select: { id: true, policyNumber: true } },
-              payments: { where: { status: "POSTED" }, select: { paidDate: true, amount: true } },
+              payments: { where: { status: "POSTED" }, select: { amount: true } },
             },
           },
         },
@@ -497,7 +489,8 @@ export async function getOperationalInsights(input: {
       const promiseState = isPromiseSignalDue({
         metadataJson: item.metadataJson,
         today,
-        postedPaymentDates: item.receipt.payments.map((payment) => payment.paidDate),
+        receiptAmount: Number(item.receipt.amount),
+        postedPaymentAmounts: item.receipt.payments.map((payment) => Number(payment.amount)),
       });
       if (!promiseState) continue;
       const metadata = JSON.parse(item.metadataJson ?? "{}") as { promisedPaymentDate?: string };
