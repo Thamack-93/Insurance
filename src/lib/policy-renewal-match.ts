@@ -290,9 +290,10 @@ export async function syncSerialRenewalSuggestionsForPortfolio(
       && candidateTargetIds.has(suggestion.targetPolicyId)
       && !desiredPairs.has(`${suggestion.sourcePolicyId}:${suggestion.targetPolicyId}`))
     .map((suggestion) => suggestion.id);
-  if (staleIds.length) {
+  for (let offset = 0; offset < staleIds.length; offset += 1_000) {
+    const batchIds = staleIds.slice(offset, offset + 1_000);
     await db.policyRenewalSuggestion.updateMany({
-      where: { organizationId, id: { in: staleIds }, status: "PENDING" },
+      where: { organizationId, id: { in: batchIds }, status: "PENDING" },
       data: {
         status: "DISMISSED",
         reviewedAt: new Date(),
@@ -322,8 +323,8 @@ export async function syncSerialRenewalSuggestionsForPortfolio(
       `);
     }
   }
-  if (toCreate.length) {
-    await db.policyRenewalSuggestion.createMany({ data: toCreate, skipDuplicates: true });
+  for (let offset = 0; offset < toCreate.length; offset += 1_000) {
+    await db.policyRenewalSuggestion.createMany({ data: toCreate.slice(offset, offset + 1_000), skipDuplicates: true });
   }
   return toCreate.length + toReactivate.length;
 }

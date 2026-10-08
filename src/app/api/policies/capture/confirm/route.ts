@@ -276,8 +276,9 @@ export async function POST(request: NextRequest) {
         select: { id: true, notes: true, familyRootId: true, renewedFromPolicyId: true },
       });
 
-      if (currentSource?.status === "RENEWED"
-        && !currentSource.renewals.some((renewal) => renewal.id === existingTarget?.id)) {
+      const existingTargetIsRenewal = currentSource?.renewals.some((renewal) => renewal.id === existingTarget?.id) ?? false;
+      const hasOtherRenewal = currentSource?.renewals.some((renewal) => renewal.id !== existingTarget?.id) ?? false;
+      if ((currentSource?.status === "RENEWED" && !existingTargetIsRenewal) || hasOtherRenewal) {
         throw new Error("La póliza origen ya tiene una renovación vinculada.");
       }
 
