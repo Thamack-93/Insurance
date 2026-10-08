@@ -4,6 +4,7 @@ import { logError } from "@/lib/logger";
 import { sendDailyTelegramBirthdays } from "@/lib/telegram";
 import { checkDistributedRateLimit, securityFingerprint } from "@/lib/request-guards";
 import { rateLimitResponse } from "@/lib/api-security";
+import { withPlatformCronAdmission } from "@/lib/platform-cron-admission";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,18 +24,20 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const rateLimit = await checkDistributedRateLimit(`cron:telegram-birthdays:${securityFingerprint("telegram-birthdays")}`, {
-    limit: 2,
-    windowMs: 15 * 60 * 1000,
-    requireDistributed: true,
-  });
-  if (!rateLimit.allowed) return rateLimitResponse(rateLimit, "Este job ya fue ejecutado recientemente.");
+  return withPlatformCronAdmission(async () => {
+    const rateLimit = await checkDistributedRateLimit(`cron:telegram-birthdays:${securityFingerprint("telegram-birthdays")}`, {
+      limit: 2,
+      windowMs: 15 * 60 * 1000,
+      requireDistributed: true,
+    });
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit, "Este job ya fue ejecutado recientemente.");
 
-  try {
-    const telegram = await sendDailyTelegramBirthdays();
-    return NextResponse.json({ ok: true, telegram }, { status: 200 });
-  } catch (error) {
-    logError("api.jobs.telegram-birthdays", error);
-    return NextResponse.json({ ok: false }, { status: 500 });
-  }
+    try {
+      const telegram = await sendDailyTelegramBirthdays();
+      return NextResponse.json({ ok: true, telegram }, { status: 200 });
+    } catch (error) {
+      logError("api.jobs.telegram-birthdays", error);
+      return NextResponse.json({ ok: false }, { status: 500 });
+    }
+  });
 }

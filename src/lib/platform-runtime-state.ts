@@ -20,5 +20,5 @@ export async function setPlatformWriteMode(writeMode: PlatformWriteMode, reason:
 export async function getPlatformWriteMode() {
   const db = getDb();
   const state = await db.platformRuntimeState.findUnique({ where: { id: 1 }, select: { writeMode: true, reason: true, updatedAt: true } });
-  return state ?? { writeMode: "OPEN" as const, reason: null, updatedAt: null };
+  return state;
 }

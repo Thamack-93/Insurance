@@ -2,9 +2,11 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { runDemoRetention } from "@/lib/demo-retention";
 import { acquireDistributedLock } from "@/lib/request-guards";
+import { withPlatformCronAdmission } from "@/lib/platform-cron-admission";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 function hasValidCronSecret(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
@@ -17,15 +19,17 @@ function hasValidCronSecret(request: Request) {
 
 export async function GET(request: Request) {
   if (!hasValidCronSecret(request)) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  const lock = await acquireDistributedLock("demo-retention", 15 * 60_000, true);
-  if (!lock.acquired) return NextResponse.json({ ok: false, error: "Retention job already running." }, { status: 409 });
-  try {
-    return NextResponse.json({ ok: true, ...(await runDemoRetention()) });
-  } catch {
-    return NextResponse.json({ ok: false, error: "Demo retention failed." }, { status: 500 });
-  } finally {
-    await lock.release();
-  }
+  return withPlatformCronAdmission(async () => {
+    const lock = await acquireDistributedLock("demo-retention", 15 * 60_000, true);
+    if (!lock.acquired) return NextResponse.json({ ok: false, error: "Retention job already running." }, { status: 409 });
+    try {
+      return NextResponse.json({ ok: true, ...(await runDemoRetention()) });
+    } catch {
+      return NextResponse.json({ ok: false, error: "Demo retention failed." }, { status: 500 });
+    } finally {
+      await lock.release();
+    }
+  });
 }
 
 export const POST = GET;

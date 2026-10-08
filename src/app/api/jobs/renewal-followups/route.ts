@@ -5,6 +5,7 @@ import { runRenewalFollowUpScan } from "@/lib/renewal-followups";
 import { getDb } from "@/lib/db";
 import { checkDistributedRateLimit, securityFingerprint } from "@/lib/request-guards";
 import { rateLimitResponse } from "@/lib/api-security";
+import { withPlatformCronAdmission } from "@/lib/platform-cron-admission";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,55 +30,57 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const rateLimit = await checkDistributedRateLimit(
-    `cron:renewal-followups:${securityFingerprint("renewal-followups")}`,
-    { limit: 2, windowMs: 15 * 60 * 1000, requireDistributed: true },
-  );
-  if (!rateLimit.allowed) return rateLimitResponse(rateLimit, "Este job ya fue ejecutado recientemente.");
-
-  try {
-    const startedAt = Date.now();
-    const organizations = await getDb().organization.findMany({
-      where: { status: "ACTIVE" },
-      select: { id: true },
-    });
-    const summaries: Array<Awaited<ReturnType<typeof runRenewalFollowUpScan>>> = [];
-    const failures: Array<{ organizationId: string; error: string }> = [];
-    for (let index = 0; index < organizations.length; index += 3) {
-      const batch = await Promise.allSettled(
-        organizations.slice(index, index + 3).map(async ({ id }) => ({
-          id,
-          summary: await runRenewalFollowUpScan(id),
-        })),
-      );
-      for (const [batchIndex, result] of batch.entries()) {
-        if (result.status === "fulfilled") summaries.push(result.value.summary);
-        else failures.push({ organizationId: organizations[index + batchIndex]?.id ?? "unknown", error: String(result.reason) });
-      }
-    }
-    const summary = summaries.reduce(
-      (total, item) => ({
-        scanned: total.scanned + item.scanned,
-        stalled: total.stalled + item.stalled,
-        workItemsUpserted: total.workItemsUpserted + item.workItemsUpserted,
-        workItemsClosed: total.workItemsClosed + item.workItemsClosed,
-        notificationsCreated: total.notificationsCreated + item.notificationsCreated,
-        serialSuggestionsCreated: total.serialSuggestionsCreated + item.serialSuggestionsCreated,
-      }),
-      { scanned: 0, stalled: 0, workItemsUpserted: 0, workItemsClosed: 0, notificationsCreated: 0, serialSuggestionsCreated: 0 },
+  return withPlatformCronAdmission(async () => {
+    const rateLimit = await checkDistributedRateLimit(
+      `cron:renewal-followups:${securityFingerprint("renewal-followups")}`,
+      { limit: 2, windowMs: 15 * 60 * 1000, requireDistributed: true },
     );
-    return NextResponse.json({
-      ok: failures.length === 0,
-      organizations: summaries.length,
-      rowsProcessed: summary.scanned,
-      partialErrors: failures.length,
-      retries: 0,
-      durationMs: Date.now() - startedAt,
-      failures,
-      ...summary,
-    }, { status: failures.length === 0 ? 200 : 207 });
-  } catch (error) {
-    logError("api.jobs.renewal-followups", error);
-    return NextResponse.json({ ok: false }, { status: 500 });
-  }
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit, "Este job ya fue ejecutado recientemente.");
+
+    try {
+      const startedAt = Date.now();
+      const organizations = await getDb().organization.findMany({
+        where: { status: "ACTIVE" },
+        select: { id: true },
+      });
+      const summaries: Array<Awaited<ReturnType<typeof runRenewalFollowUpScan>>> = [];
+      const failures: Array<{ organizationId: string; error: string }> = [];
+      for (let index = 0; index < organizations.length; index += 3) {
+        const batch = await Promise.allSettled(
+          organizations.slice(index, index + 3).map(async ({ id }) => ({
+            id,
+            summary: await runRenewalFollowUpScan(id),
+          })),
+        );
+        for (const [batchIndex, result] of batch.entries()) {
+          if (result.status === "fulfilled") summaries.push(result.value.summary);
+          else failures.push({ organizationId: organizations[index + batchIndex]?.id ?? "unknown", error: String(result.reason) });
+        }
+      }
+      const summary = summaries.reduce(
+        (total, item) => ({
+          scanned: total.scanned + item.scanned,
+          stalled: total.stalled + item.stalled,
+          workItemsUpserted: total.workItemsUpserted + item.workItemsUpserted,
+          workItemsClosed: total.workItemsClosed + item.workItemsClosed,
+          notificationsCreated: total.notificationsCreated + item.notificationsCreated,
+          serialSuggestionsCreated: total.serialSuggestionsCreated + item.serialSuggestionsCreated,
+        }),
+        { scanned: 0, stalled: 0, workItemsUpserted: 0, workItemsClosed: 0, notificationsCreated: 0, serialSuggestionsCreated: 0 },
+      );
+      return NextResponse.json({
+        ok: failures.length === 0,
+        organizations: summaries.length,
+        rowsProcessed: summary.scanned,
+        partialErrors: failures.length,
+        retries: 0,
+        durationMs: Date.now() - startedAt,
+        failures,
+        ...summary,
+      }, { status: failures.length === 0 ? 200 : 207 });
+    } catch (error) {
+      logError("api.jobs.renewal-followups", error);
+      return NextResponse.json({ ok: false }, { status: 500 });
+    }
+  });
 }
