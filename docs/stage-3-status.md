@@ -13,7 +13,8 @@ the production maintenance window are completed.
 - PDF-only validation before Blob persistence or OCR/AI processing for every
   tenant: `%PDF-`/`%%EOF` signature checks, 15 MB and 100-page limits, MIME
   validation, SHA-256 recording, and rejection of active/encrypted/embedded
-  PDF features. DEMO uploads additionally enter the purge/reset ledger.
+  PDF features. The DEMO lifecycle schema supports purging legacy artifacts;
+  current DEMO policy blocks real uploads and permits synthetic downloads only.
 - Opaque tenant-prefixed private Blob paths, no overwrite, `private, no-store`
   downloads, short-lived upload tokens, immediate rejection cleanup, and
   consent text covering authorization, approved AI processing, retention, and

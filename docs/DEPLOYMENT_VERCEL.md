@@ -58,8 +58,9 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
 1. Crear la base de datos hosted.
 2. Crear una rama protegida para preview; no seedear ni resetear la base actual.
 3. Configurar las variables de entorno en Vercel.
-4. Conectar un Blob store privado y configurar `BLOB_READ_WRITE_TOKEN`; DEMO
-   uploads require the private store and are automatically purged after 48 hours.
+4. Conectar un Blob store privado y configurar `BLOB_READ_WRITE_TOKEN` para
+   uploads de clientes. Las organizaciones DEMO solo descargan documentos
+   sintéticos; las cargas reales permanecen bloqueadas.
 5. Mantener los cron diarios en Vercel, todos protegidos por `CRON_SECRET`:
    `/api/jobs/demo-retention` (04:30 UTC) purga Blob, resetea DEMO y suspende
    trials vencidos; `/api/jobs/backup` (05:00 UTC),
@@ -105,8 +106,8 @@ No guardar una conexión administrativa en Vercel y no ejecutar migraciones desd
 
 - La app no debe resetear, truncar ni seedear la base actual.
 - No debe intentar escribir archivos PDF en el filesystem efímero de Vercel.
-- `Document` almacena metadata; el original se guarda en Blob privado y los
-  originales DEMO expiran a las 48 horas.
+- `Document` almacena metadata; los originales de clientes se guardan en Blob
+  privado. Los documentos DEMO son sintéticos y no requieren una carga real.
 - Los backups deben poder crearse, listarse y verificarse solo por admin.
 - Un backup verificado criptográficamente no sustituye un restore drill. El drill sigue siendo CLI-only, hacia una rama temporal explícitamente autorizada y nunca hacia producción.
 

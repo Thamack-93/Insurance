@@ -8,7 +8,9 @@ contiene únicamente datos sintéticos prefijados con `DEMO`.
 
 Un superadministrador habilita temporalmente `PLATFORM_ORG_PROVISIONING_ENABLED=1`
 y usa `/platform/organizations` para provisionar la organización y hasta cinco
-usuarios. Las contraseñas temporales se muestran una sola vez, expiran en 24
+usuarios. Para esta entrega se provisiona una organización y un usuario; esto
+no introduce un límite global de un usuario ni de una organización DEMO. Las
+contraseñas temporales se muestran una sola vez, expiran en 24
 horas y obligan al cambio en el primer acceso. No hay signup público,
 invitaciones ni selector de organizaciones.
 
@@ -36,9 +38,12 @@ cartera DEMO y vuelve a ejecutar el seed determinista. La vista previa no
 modifica filas.
 
 ```sh
-npm run demo:reset -- --organization-id org_demo_x --request-id ticket-123 --dry-run
+npm run demo:reset -- --organization-id org_demo_x --request-id ticket-123 --reason "vista previa de aceptación" --dry-run
 npm run demo:reset -- --organization-id org_demo_x --request-id ticket-124 --reason "reset para nueva demostración"
 ```
+
+Ambas invocaciones requieren `--reason` con entre 8 y 500 caracteres; la
+primera debe incluirlo también aunque sea solo una vista previa.
 
 El reset nunca opera sobre respaldos ni sobre otra organización. Ante un fallo,
 el tenant queda suspendido para revisión operativa.
