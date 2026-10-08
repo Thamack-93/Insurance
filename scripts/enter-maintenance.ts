@@ -1,12 +1,12 @@
 import "dotenv/config";
 
 import { Pool } from "pg";
-import { assertDisposableCertificationTarget } from "./tenant-certification-target.mjs";
+import { assertDisposableCertificationTarget, certificationPurpose } from "./tenant-certification-target.mjs";
 
 async function main() {
   const connectionString = process.env.DATABASE_ADMIN_URL?.trim() || process.env.DATABASE_URL_UNPOOLED?.trim() || process.env.DATABASE_URL?.trim();
   if (!connectionString) throw new Error("DATABASE_ADMIN_URL or DATABASE_URL is required.");
-  if (process.env.TENANT_ISOLATION_TEST_DB === "1") assertDisposableCertificationTarget(connectionString);
+  if (process.env.TENANT_ISOLATION_TEST_DB === "1") assertDisposableCertificationTarget(connectionString, process.env, certificationPurpose());
 
   const pool = new Pool({ connectionString, max: 1, application_name: "policydesk-maintenance-control" });
   const client = await pool.connect();

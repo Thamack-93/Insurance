@@ -8,6 +8,7 @@ import { createOrganizationRestoreRun, finishOrganizationRestoreRun, getBackupAr
 import { applyCurrentMigrations, checkRestoreTargetConnection } from "../src/lib/backup-restore.ts";
 import { assertTemporaryNeonRestoreTarget } from "../src/lib/backup-restore-guards.ts";
 import { restoreOrganizationBackup } from "../src/lib/organization-backup-restore.ts";
+import { parseBackupRecords } from "../src/lib/backup-restore-validation.ts";
 import { assertRestoreCertificationConnections, certifyOrganizationRestore, verifyRestoreMarker } from "../src/lib/organization-restore-certification.ts";
 
 async function readStream(stream: ReadableStream<Uint8Array>) {
@@ -128,7 +129,7 @@ async function main() {
       const result = await restoreOrganizationBackup({ targetDatabaseUrl: target.target.toString(), organizationId, plaintext, manifest: verification.manifest });
       report.result = result;
       report.transactionCommitted = true;
-      report.certification = await certifyOrganizationRestore({ adminUrl: target.target.toString(), runtimeUrl, organizationId, tables: result.tables });
+      report.certification = await certifyOrganizationRestore({ adminUrl: target.target.toString(), runtimeUrl, organizationId, tables: result.tables, parsedBackup: parseBackupRecords(plaintext) });
       report.status = "PASS";
     } else {
       report.preview = { formatVersion: verification.manifest.version, scope: verification.manifest.scope ?? artifact.scope, capability: verification.manifest.capability ?? artifact.capability, tables: verification.manifest.tables.length, rows: verification.manifest.totals.rows };

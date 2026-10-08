@@ -5,6 +5,7 @@ import { PROTECTED_TENANT_TABLES } from "@/lib/tenant-organization-foundation";
 import { auditMultiOrganizationState } from "../../scripts/check-multi-org-audit";
 import { assertDisposableCertificationTarget, canonicalNeonHost } from "../../scripts/tenant-certification-target.mjs";
 import { checkTargetMigrationDrift } from "@/lib/backup-restore";
+import type { ParsedBackup } from "@/lib/backup-restore-validation";
 
 export function assertRestoreCertificationConnections(sourceUrl: string, adminUrl: string, runtimeUrl: string, env = process.env) {
   if (!/^[0-9a-f]{40}$/.test(env.CERTIFICATION_CANDIDATE_SHA ?? "")) throw new Error("CERTIFICATION_CANDIDATE_SHA_REQUIRED");
@@ -38,7 +39,37 @@ export async function verifyRestoreMarker(adminUrl: string, target: ReturnType<t
   } finally { await pool.end(); }
 }
 
-export async function certifyOrganizationRestore(input: { adminUrl: string; runtimeUrl: string; organizationId: string; tables: Array<{ table: string; rows: number }> }) {
+function backupRow(parsed: ParsedBackup, table: string, id: string) {
+  const row = parsed.rows.get(`public.${table}`)?.find((record) => record.data.id === id)?.data;
+  if (!row) throw new Error(`RESTORE_VALUE_SOURCE_ROW_MISSING:${table}:${id}`);
+  return row;
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
+}
+
+function assertRestoredFixtureValues(parsed: ParsedBackup, rows: { Policy: Record<string, unknown>; PolicyInsuredParty: Record<string, unknown>; PolicyInsuredAsset: Record<string, unknown> }) {
+  const policy = backupRow(parsed, "Policy", "tenant-recovery-policy-renewal");
+  const party = backupRow(parsed, "PolicyInsuredParty", "tenant-recovery-insured-party");
+  const asset = backupRow(parsed, "PolicyInsuredAsset", "tenant-recovery-insured-asset");
+  const riskDetails = policy.riskDetails as { sourceText?: unknown } | null;
+  if (typeof riskDetails?.sourceText !== "string" || !riskDetails.sourceText.trim() || typeof policy.insuredObject !== "string") {
+    throw new Error("RESTORE_VALUE_SOURCE_FIXTURE_INCOMPLETE");
+  }
+  const exact = (actual: Record<string, unknown>, expected: Record<string, unknown>, keys: string[], label: string) => {
+    for (const key of keys) if (stableJson(actual[key]) !== stableJson(expected[key])) throw new Error(`RESTORE_VALUE_PRESERVATION_FAILED:${label}:${key}`);
+  };
+  exact(rows.Policy, policy, ["id", "insuredObject", "riskDetails"], "Policy");
+  exact(rows.PolicyInsuredParty, party, ["id", "policyId", "fullName", "isPrimary", "sourceLabel"], "PolicyInsuredParty");
+  exact(rows.PolicyInsuredAsset, asset, ["id", "policyId", "assetType", "description", "serialNumber", "isPrimary"], "PolicyInsuredAsset");
+}
+
+export async function certifyOrganizationRestore(input: { adminUrl: string; runtimeUrl: string; organizationId: string; tables: Array<{ table: string; rows: number }>; parsedBackup?: ParsedBackup }) {
   const pool = new Pool({ connectionString: input.runtimeUrl, max: 1 });
   const client = await pool.connect();
   try {
@@ -79,6 +110,19 @@ export async function certifyOrganizationRestore(input: { adminUrl: string; runt
         return result;
       });
     } finally { await db.$disconnect(); }
+    if (input.parsedBackup) {
+      const ids = ["tenant-recovery-policy-renewal", "tenant-recovery-insured-party", "tenant-recovery-insured-asset"];
+      const valuePool = new Pool({ connectionString: input.adminUrl, max: 1 });
+      try {
+        const [policy, party, asset] = await Promise.all([
+          valuePool.query('SELECT "id", "insuredObject", "riskDetails" FROM "Policy" WHERE "organizationId"=$1 AND "id"=$2', [input.organizationId, ids[0]]),
+          valuePool.query('SELECT "id", "policyId", "fullName", "isPrimary", "sourceLabel" FROM "PolicyInsuredParty" WHERE "organizationId"=$1 AND "id"=$2', [input.organizationId, ids[1]]),
+          valuePool.query('SELECT "id", "policyId", "assetType", "description", "serialNumber", "isPrimary" FROM "PolicyInsuredAsset" WHERE "organizationId"=$1 AND "id"=$2', [input.organizationId, ids[2]]),
+        ]);
+        if (!policy.rows[0] || !party.rows[0] || !asset.rows[0]) throw new Error("RESTORE_VALUE_TARGET_ROW_MISSING");
+        assertRestoredFixtureValues(input.parsedBackup, { Policy: policy.rows[0], PolicyInsuredParty: party.rows[0], PolicyInsuredAsset: asset.rows[0] });
+      } finally { await valuePool.end(); }
+    }
     const admin = new Pool({ connectionString: input.adminUrl, max: 1 });
     const auditor = await admin.connect();
     let audit;

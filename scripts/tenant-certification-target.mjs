@@ -14,6 +14,13 @@ export function canonicalNeonHost(hostname) {
   return hostname.toLowerCase().replace(/-pooler(?=\.)/, "");
 }
 
+/** Explicitly opt in to the independently named Stage 3 restore branch. */
+export function certificationPurpose(env = process.env) {
+  const purpose = env.TENANT_CERTIFICATION_PURPOSE?.trim() || "source";
+  if (purpose !== "source" && purpose !== "restore") throw new Error("TENANT_CERTIFICATION_PURPOSE_INVALID");
+  return purpose;
+}
+
 /**
  * @param {{ mode: "local" | "neon"; runId: string; database: string; host: string; branchId?: string; branchName?: string }} input
  */
@@ -26,6 +33,7 @@ export function certificationFingerprint({ mode, runId, database, host, branchId
 
 /** @param {string} connectionString @param {Record<string, string | undefined>} env @param {"source" | "restore"} purpose */
 export function assertDisposableCertificationTarget(connectionString, env = process.env, purpose = "source") {
+  if (purpose !== "source" && purpose !== "restore") throw new Error("TENANT_CERTIFICATION_PURPOSE_INVALID");
   if (env.VERCEL === "1" || env.VERCEL_ENV === "production" || env.VERCEL_ENV === "preview") {
     throw new Error("TENANT_CERTIFICATION_REFUSES_VERCEL_ENVIRONMENT");
   }
@@ -64,7 +72,9 @@ export function assertDisposableCertificationTarget(connectionString, env = proc
   const canonicalHost = canonicalNeonHost(host);
   if (!/^br-[a-z0-9-]+$/.test(branchId)) throw new Error("TENANT_CERTIFICATION_BRANCH_ID_INVALID");
   const prefix = purpose === "restore" ? "restore-cert-stage3-" : "cert-stage3-";
-  if (!new RegExp(`^${prefix}[0-9a-f]{7,40}$`).test(branchName)) throw new Error("TENANT_CERTIFICATION_BRANCH_NAME_INVALID");
+  const suffix = purpose === "restore" ? "[0-9a-f]{40}" : "[0-9a-f]{7,40}";
+  if (!new RegExp(`^${prefix}${suffix}$`).test(branchName)) throw new Error("TENANT_CERTIFICATION_BRANCH_NAME_INVALID");
+  if (purpose === "restore" && env.TENANT_CERTIFICATION_PURPOSE !== "restore") throw new Error("TENANT_CERTIFICATION_RESTORE_OPT_IN_REQUIRED");
   if (env.CERTIFICATION_CANDIDATE_SHA && branchName !== `${prefix}${env.CERTIFICATION_CANDIDATE_SHA}`) {
     throw new Error("TENANT_CERTIFICATION_CANDIDATE_SHA_MISMATCH");
   }
@@ -89,8 +99,8 @@ export function assertDisposableCertificationTarget(connectionString, env = proc
 export function assertRemoteTenantBackupTarget(adminUrl, runtimeUrl, env = process.env) {
   if (env.ALLOW_OPERATOR_BACKUP !== "1") throw new Error("ALLOW_OPERATOR_BACKUP_REQUIRED");
   if (env.TENANT_CERTIFICATION_REMOTE_BRANCH !== "1") throw new Error("TENANT_CERTIFICATION_REMOTE_BRANCH_NOT_AUTHORIZED");
-  const admin = assertDisposableCertificationTarget(adminUrl, env);
-  const runtime = assertDisposableCertificationTarget(runtimeUrl, env);
+  const admin = assertDisposableCertificationTarget(adminUrl, env, "source");
+  const runtime = assertDisposableCertificationTarget(runtimeUrl, env, "source");
   if (admin.mode !== "neon" || runtime.mode !== "neon") throw new Error("TENANT_BACKUP_REQUIRES_REMOTE_NEON_BRANCH");
   if (admin.fingerprint !== runtime.fingerprint) throw new Error("TENANT_BACKUP_RUNTIME_DATABASE_MISMATCH");
   if (/-pooler/i.test(new URL(adminUrl).hostname) || new URL(adminUrl).searchParams.has("pgbouncer")) {

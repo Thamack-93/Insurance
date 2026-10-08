@@ -1,7 +1,7 @@
 import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { assertDisposableCertificationTarget } from "./tenant-certification-target.mjs";
+import { assertDisposableCertificationTarget, certificationPurpose } from "./tenant-certification-target.mjs";
 
 // CI exercises the pre-cutover singleton application in one job.  Keep the
 // production RLS migration in the committed migration history, but apply only
@@ -12,7 +12,7 @@ if (process.env.CI !== "true" && process.env.GITHUB_ACTIONS !== "true" && proces
 }
 const certificationDatabaseUrl = process.env.DATABASE_ADMIN_URL?.trim() || process.env.DATABASE_URL_UNPOOLED?.trim() || process.env.DATABASE_URL?.trim();
 if (!certificationDatabaseUrl) throw new Error("SINGLETON_CI_MIGRATION_REQUIRES_DATABASE_URL");
-assertDisposableCertificationTarget(certificationDatabaseUrl);
+assertDisposableCertificationTarget(certificationDatabaseUrl, process.env, certificationPurpose());
 const repositoryRoot = process.cwd();
 const skippedMigrations = new Set([
   "20260831010000_multi_tenant_rls_cutover",

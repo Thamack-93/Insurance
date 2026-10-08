@@ -79,7 +79,57 @@ the transaction boundary. The current rollout report still contains legacy
 root-`getDb()` call sites; `check:tenant-dal:strict` must be green (with every
 protected read inside `withTenantTransaction` or an explicitly enumerated
 system tenant transaction) before the final RLS migration is allowed to reach
-production.
+   production.
+
+### Independent restore certification target
+
+The restore target is a separate temporary Neon branch named exactly
+`restore-cert-stage3-<full 40-character candidate SHA>`. It must have its own
+branch ID and endpoint, distinct from the SHA-matched `cert-stage3-<SHA>`
+source. Do not use `main`, a Vercel database, or a source clone containing
+customer tables. The target project's main branch must have zero public tables
+before creating this temporary target; the preparation CLI accepts either an
+empty target or a same-identity marked target for an interrupted-run resume.
+
+After the root operator has created and independently verified that temporary
+target, provide `RESTORE_SOURCE_DATABASE_URL`,
+`RESTORE_SOURCE_NEON_BRANCH`, `RESTORE_SOURCE_NEON_BRANCH_ID`,
+`RESTORE_SOURCE_NEON_HOST`, and `RESTORE_SOURCE_FINGERPRINT`; provide the
+target using `RESTORE_DATABASE_ADMIN_URL`, `RESTORE_NEON_BRANCH`,
+`RESTORE_NEON_BRANCH_ID`, `RESTORE_NEON_HOST`, and
+`RESTORE_TARGET_FINGERPRINT`. Set `TENANT_ISOLATION_RUN_ID`,
+`TENANT_ISOLATION_DB_NAME`, and `TENANT_ISOLATION_REMOTE_BRANCH=1`. These
+identities must name distinct source and target endpoints and use matching
+SHA-256 fingerprints. The CLI also requires
+`NODE_ENV=test`, both disposable-database guards, `ALLOW_TEMPORARY_NEON_RESTORE=true`,
+and the exact current `CERTIFICATION_CANDIDATE_SHA`. Run:
+
+```sh
+npm run prepare:restore-certification -- --prepare-restore-target
+```
+
+Preparation also requires the existing RLS certification inputs: the
+administrative target URL, `TENANT_RLS_APP_ROLE`, its password,
+`TENANT_RLS_READONLY_PASSWORD`, and the two certification organization IDs.
+Keep credentials in the operator's local environment; do not put them in shell
+history or reports.
+
+The command validates that the candidate SHA equals `git rev-parse HEAD`,
+checks source/target separation and target emptiness/marker identity, then
+applies the existing migrations, deterministic tenant fixture, cutover and
+RLS certification to the target. It does not create or promote Neon branches.
+The target fixture includes `org_pedro_gomez_0001` and deterministic recovery
+rows for renewal, cancellation, posted/reversed payment, notifications,
+legacy/canonical WorkItems, risk source text, insured object, insured party and
+insured asset. Restore certification compares the selected restored values to
+the decrypted source backup records as well as validating table counts,
+RLS reads, audit and migration drift. The organization backup command remains
+source-only and cannot be run against this restore-purpose target.
+
+This preparation is not evidence that a restore passed. A separately
+authorized operator must still select the verified source artifact and run the
+existing CLI-only restore drill against this target; archive its exact-SHA
+report and certificate. No Production restore is permitted.
 
 ## DEMO provisioning and reset
 
