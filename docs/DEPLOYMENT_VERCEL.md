@@ -62,8 +62,10 @@ Desplegar PolicyDesk en Vercel Hobby usando Neon Postgres, AI Gateway y Blob pri
    uploads de clientes. Las organizaciones DEMO solo descargan documentos
    sintéticos; las cargas reales permanecen bloqueadas.
 5. Mantener los cron diarios en Vercel, todos protegidos por `CRON_SECRET`:
-   `/api/jobs/demo-retention` (04:30 UTC) purga Blob, resetea DEMO y suspende
-   trials vencidos; `/api/jobs/backup` (05:00 UTC),
+   `/api/jobs/demo-retention` (03:00 UTC) purga los artefactos de carga DEMO
+   vencidos y suspende trials vencidos. El reset completo de una DEMO sigue
+   siendo una acción explícita del operador; el cron no lo ejecuta.
+   `/api/jobs/backup` (05:00 UTC),
    `/api/jobs/nonpayment-cancellation` (06:00 UTC),
    `/api/jobs/renewal-followups` (13:30 UTC), `/api/jobs/telegram-digest`
    (14:00 UTC, 08:00 hora de Ciudad de México) y
