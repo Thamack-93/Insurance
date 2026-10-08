@@ -57,7 +57,7 @@ export function assertMaintenanceOrCutoverTarget(connectionString, env = process
       throw new Error("POLICYDESK_CUTOVER_DISPOSABLE_DATABASE_URL_INVALID");
     }
     const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
-    if (!localHosts.has(target.hostname.toLowerCase())) {
+    if (!localHosts.has(target.hostname.toLowerCase()) && env.TENANT_ISOLATION_REMOTE_BRANCH !== "1") {
       throw new Error("POLICYDESK_CUTOVER_DISPOSABLE_TARGET_MUST_BE_LOCAL");
     }
     return assertDisposableCertificationTarget(connectionString, env, certificationPurpose(env));
