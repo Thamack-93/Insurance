@@ -496,6 +496,7 @@ test.describe("operation queue context", () => {
       await card.getByRole("button", { name: `Seguimiento de ${fixture.policyNumber}` }).click();
       const scheduledDate = businessDateAfter(3);
       await page.getByRole("menuitem", { name: "En 3 días", exact: true }).click();
+      await expectMutationSuccessToast(page, "Seguimiento programado.");
       await expect.poll(async () => {
         const item = await db.workItem.findUnique({
           where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId: manualSourceId } },

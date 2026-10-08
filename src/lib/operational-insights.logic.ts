@@ -1,5 +1,5 @@
 import { formatBusinessDateInput } from "@/lib/business-dates";
-import { isPaidWithinTolerance } from "@/lib/receipt-reconciliation";
+import { isPaidWithinTolerance, PAYMENT_CLOSE_TOLERANCE } from "@/lib/receipt-reconciliation";
 
 export const OPERATIONAL_INSIGHT_GROUPS = ["renewals", "collections", "claims", "work"] as const;
 export type OperationalInsightGroup = (typeof OPERATIONAL_INSIGHT_GROUPS)[number];
@@ -65,14 +65,15 @@ export function parseCollectionMetadata(metadataJson: string | null): Record<str
 export function getOutstandingReceiptBalance(amount: number, postedPaymentAmounts: number[]) {
   if (!Number.isFinite(amount) || postedPaymentAmounts.some((payment) => !Number.isFinite(payment))) return 0;
   const paidAmount = postedPaymentAmounts.reduce((sum, payment) => sum + payment, 0);
-  if (isPaidWithinTolerance(amount, paidAmount)) return 0;
+  if (isPaidWithinTolerance(amount, paidAmount, PAYMENT_CLOSE_TOLERANCE)) return 0;
   return Math.max(0, amount - paidAmount);
 }
 
 export function isPromiseSignalDue(input: {
   metadataJson: string | null;
   today: Date;
-  postedPaymentDates: Date[];
+  receiptAmount: number;
+  postedPaymentAmounts: number[];
 }) {
   const metadata = parseCollectionMetadata(input.metadataJson);
   if (metadata.outcome !== "PROMISED_PAYMENT" || typeof metadata.promisedPaymentDate !== "string") return null;
@@ -80,7 +81,8 @@ export function isPromiseSignalDue(input: {
   if (!Number.isFinite(promisedDate.getTime())) return null;
 
   const promisedDay = formatBusinessDateInput(promisedDate);
-  if (input.postedPaymentDates.some((paidDate) => paidDate.getTime() <= promisedDate.getTime())) return null;
+  const outstandingBalance = getOutstandingReceiptBalance(input.receiptAmount, input.postedPaymentAmounts);
+  if (outstandingBalance <= 0) return null;
   const todayKey = formatBusinessDateInput(input.today);
   if (promisedDay > todayKey) return null;
 
