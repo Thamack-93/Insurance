@@ -22,11 +22,27 @@ import { convertLegacyPolicyDescription, hasPolicyRiskData, projectPolicyRiskRel
 
 const PAGE_SIZE = 200;
 const MAX_BATCH_SIZE = 500;
+const MAX_PRODUCTION_BATCH_SIZE = 50;
 const APPLY_CONFIRMATION = "APPLY_POLICY_RISK_BACKFILL";
+const PRODUCTION_APPLY_CONFIRMATION = "APPLY_POLICY_RISK_BACKFILL_TO_PRODUCTION";
+const PRODUCTION_APPLY_ROLE = "policydesk_backfill";
+const TEST_READONLY_ROLE_PATTERN = /^policydesk_readonly_test_[a-f0-9]{8}$/;
+const TEST_WRITER_ROLE_PATTERN = /^policydesk_backfill_test_[a-f0-9]{8}$/;
 
 function arg(name: string) {
   const prefix = `--${name}=`;
   return process.argv.find((value) => value.startsWith(prefix))?.slice(prefix.length) ?? null;
+}
+
+function selectedPolicyNumbers() {
+  const value = arg("policy-numbers");
+  if (value === null) return null;
+  const raw = value.split(",");
+  const policyNumbers = raw.map((item) => item.trim()).filter(Boolean);
+  if (!policyNumbers.length || policyNumbers.length !== raw.length || new Set(policyNumbers).size !== policyNumbers.length || policyNumbers.length > MAX_PRODUCTION_BATCH_SIZE) {
+    throw new Error("POLICY_RISK_BACKFILL_POLICY_NUMBER_SCOPE_INVALID");
+  }
+  return policyNumbers;
 }
 
 function candidateSha() {
@@ -52,7 +68,7 @@ function planPolicy(policy: {
   insuredObject: string | null;
   beneficiaryInfo: string | null;
   insuredAssets: Array<{ description: string; serialNumber: string | null; isPrimary: boolean }>;
-  insuredParties: Array<{ fullName: string }>;
+  insuredParties: Array<{ fullName: string; isPrimary: boolean; sourceLabel: string | null }>;
 }): PolicyRiskBackfillManifestRow {
   const sourceDescription = policy.insuredObject?.trim() || policy.insuredAssets.map((asset) => asset.description.trim()).filter(Boolean).join("; ") || null;
   const result = convertLegacyPolicyDescription(policy.policyType, sourceDescription, policy.insuredAssets[0]?.serialNumber ?? null, policy.insuredAssets.map((asset) => asset.serialNumber));
@@ -89,12 +105,12 @@ function planPolicy(policy: {
   };
 }
 
-async function scanAll(prisma: Pick<PrismaClient, "policy">, organizationId: string) {
+async function scanAll(prisma: Pick<PrismaClient, "policy">, organizationId: string, policyNumbers: string[] | null = null) {
   const candidates: PolicyRiskBackfillManifestRow[] = [];
   let cursor: string | undefined;
   for (;;) {
     const page = await prisma.policy.findMany({
-      where: { organizationId, riskDetails: { equals: Prisma.DbNull }, ...(cursor ? { id: { gt: cursor } } : {}) },
+      where: { organizationId, riskDetails: { equals: Prisma.DbNull }, ...(policyNumbers ? { policyNumber: { in: policyNumbers } } : {}), ...(cursor ? { id: { gt: cursor } } : {}) },
       select: {
         id: true,
         policyNumber: true,
@@ -102,7 +118,7 @@ async function scanAll(prisma: Pick<PrismaClient, "policy">, organizationId: str
         insuredObject: true,
         beneficiaryInfo: true,
         insuredAssets: { select: { description: true, serialNumber: true, isPrimary: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
-        insuredParties: { select: { fullName: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+        insuredParties: { select: { fullName: true, isPrimary: true, sourceLabel: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
       },
       orderBy: { id: "asc" },
       take: PAGE_SIZE,
@@ -118,16 +134,25 @@ async function scanAll(prisma: Pick<PrismaClient, "policy">, organizationId: str
 async function assertProductionPreviewRole(tx: Prisma.TransactionClient, connectionString: string) {
   const url = new URL(connectionString);
   const expectedRole = process.env.POLICY_RISK_BACKFILL_READONLY_ROLE?.trim();
+  const expectedDatabase = process.env.POLICY_RISK_BACKFILL_PRODUCTION_DATABASE?.trim();
+  const expectedHost = process.env.POLICY_RISK_BACKFILL_PRODUCTION_HOST?.trim().toLowerCase();
   if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") throw new Error("POLICY_RISK_BACKFILL_PREVIEW_REQUIRES_POSTGRES");
-  if (!expectedRole || expectedRole !== "policydesk_readonly" || decodeURIComponent(url.username) !== expectedRole) {
+  const allowedReadonlyRole = process.env.NODE_ENV === "test"
+    ? Boolean(expectedRole && TEST_READONLY_ROLE_PATTERN.test(expectedRole))
+    : expectedRole === "policydesk_readonly";
+  if (!expectedRole || !allowedReadonlyRole || decodeURIComponent(url.username) !== expectedRole) {
     throw new Error("POLICY_RISK_BACKFILL_PREVIEW_REQUIRES_CANONICAL_READONLY_ROLE");
+  }
+  if (!expectedDatabase || decodeURIComponent(url.pathname.replace(/^\//, "").split("?")[0]) !== expectedDatabase || !expectedHost || url.hostname.toLowerCase() !== expectedHost) {
+    throw new Error("POLICY_RISK_BACKFILL_PREVIEW_TARGET_MISMATCH");
   }
   if (process.env.VERCEL === "1" || process.env.VERCEL_ENV === "production" || process.env.VERCEL_ENV === "preview") {
     throw new Error("POLICY_RISK_BACKFILL_PREVIEW_REFUSES_VERCEL_ENVIRONMENT");
   }
 
-  const session = await tx.$queryRaw<Array<{ currentRole: string; transactionReadOnly: string; superuser: boolean; bypassRls: boolean; canLogin: boolean; inherits: boolean }>>(Prisma.sql`
+  const session = await tx.$queryRaw<Array<{ currentRole: string; currentDatabase: string; transactionReadOnly: string; superuser: boolean; bypassRls: boolean; canLogin: boolean; inherits: boolean }>>(Prisma.sql`
     SELECT current_user AS "currentRole",
+      current_database() AS "currentDatabase",
       current_setting('transaction_read_only') AS "transactionReadOnly",
       role.rolsuper AS "superuser",
       role.rolbypassrls AS "bypassRls",
@@ -136,7 +161,7 @@ async function assertProductionPreviewRole(tx: Prisma.TransactionClient, connect
     FROM pg_roles role WHERE role.rolname = current_user
   `);
   const identity = session[0];
-  if (!identity || identity.currentRole !== expectedRole || identity.transactionReadOnly !== "on" || identity.superuser || identity.bypassRls || !identity.canLogin || identity.inherits) {
+  if (!identity || identity.currentRole !== expectedRole || identity.currentDatabase !== expectedDatabase || identity.transactionReadOnly !== "on" || identity.superuser || identity.bypassRls || !identity.canLogin || identity.inherits) {
     throw new Error("POLICY_RISK_BACKFILL_PREVIEW_SESSION_NOT_READONLY");
   }
   const writePrivileges = await tx.$queryRaw<Array<{ tableName: string; privilege: string }>>(Prisma.sql`
@@ -151,7 +176,7 @@ async function assertProductionPreviewRole(tx: Prisma.TransactionClient, connect
   if (writePrivileges.length) throw new Error("POLICY_RISK_BACKFILL_PREVIEW_ROLE_HAS_WRITE_PRIVILEGES");
 }
 
-async function scanProductionReadOnly(prisma: PrismaClient, organizationId: string, connectionString: string) {
+async function scanProductionReadOnly(prisma: PrismaClient, organizationId: string, connectionString: string, policyNumbers: string[] | null) {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
     await assertProductionPreviewRole(tx, connectionString);
@@ -161,7 +186,372 @@ async function scanProductionReadOnly(prisma: PrismaClient, organizationId: stri
     if (tenantContext[0]?.organizationId !== organizationId) throw new Error("POLICY_RISK_BACKFILL_PREVIEW_TENANT_CONTEXT_FAILED");
     const organization = await tx.organization.findUnique({ where: { id: organizationId }, select: { id: true } });
     if (!organization) throw new Error("POLICY_RISK_BACKFILL_PREVIEW_ORGANIZATION_NOT_VISIBLE");
-    return scanAll(tx, organizationId);
+    return scanAll(tx, organizationId, policyNumbers);
+  });
+}
+
+const PRODUCTION_APPLY_COLUMN_PRIVILEGES = new Map<string, Map<string, Set<string>>>([
+  ["Organization", new Map([
+    ["SELECT", new Set(["id", "status"])],
+    ["UPDATE", new Set(["updatedAt"])],
+  ])],
+  ["OrganizationMembership", new Map([
+    ["SELECT", new Set(["id", "organizationId", "userId", "role", "active"])],
+    ["UPDATE", new Set(["updatedAt"])],
+  ])],
+  ["User", new Map([
+    ["SELECT", new Set(["id", "email", "active"])],
+    ["UPDATE", new Set(["updatedAt"])],
+  ])],
+  ["Policy", new Map([
+    ["SELECT", new Set(["id", "organizationId", "policyNumber", "policyType", "insuredObject", "beneficiaryInfo", "riskDetails"])],
+    ["UPDATE", new Set(["riskDetails", "insuredObject", "riskDetailsReviewRequired", "updatedAt"])],
+  ])],
+  ["PolicyInsuredAsset", new Map([
+    ["SELECT", new Set(["id", "organizationId", "policyId", "assetType", "description", "serialNumber", "isPrimary", "createdAt", "updatedAt"])],
+    ["INSERT", new Set(["id", "organizationId", "policyId", "assetType", "description", "serialNumber", "isPrimary", "createdAt", "updatedAt"])],
+    ["UPDATE", new Set(["updatedAt"])],
+  ])],
+  ["PolicyInsuredParty", new Map([
+    ["SELECT", new Set(["id", "organizationId", "policyId", "fullName", "isPrimary", "sourceLabel", "createdAt", "updatedAt"])],
+    ["INSERT", new Set(["id", "organizationId", "policyId", "fullName", "isPrimary", "sourceLabel", "createdAt", "updatedAt"])],
+    ["UPDATE", new Set(["updatedAt"])],
+  ])],
+  ["MaintenanceRun", new Map([
+    ["SELECT", new Set(["id", "organizationId"])],
+    ["INSERT", new Set(["id", "organizationId", "type", "status", "summaryJson", "createdAt", "startedAt", "updatedAt"])],
+    ["UPDATE", new Set(["status", "completedAt", "summaryJson", "updatedAt"])],
+  ])],
+]);
+
+type ProductionApplyTarget = {
+  prisma: PrismaClient;
+  host: string;
+  database: string;
+  role: string;
+};
+
+function createProductionApplyTarget(connectionString: string): ProductionApplyTarget {
+  const url = new URL(connectionString);
+  const expectedRole = process.env.POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE?.trim();
+  const expectedDatabase = process.env.POLICY_RISK_BACKFILL_PRODUCTION_DATABASE?.trim();
+  const expectedHost = process.env.POLICY_RISK_BACKFILL_PRODUCTION_HOST?.trim().toLowerCase();
+  const actualRole = decodeURIComponent(url.username);
+  const actualDatabase = decodeURIComponent(url.pathname.replace(/^\//, "").split("?")[0]);
+  const actualHost = url.hostname.toLowerCase();
+  if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REQUIRES_POSTGRES");
+  const allowedWriterRole = process.env.NODE_ENV === "test"
+    ? Boolean(expectedRole && TEST_WRITER_ROLE_PATTERN.test(expectedRole))
+    : expectedRole === PRODUCTION_APPLY_ROLE;
+  if (!expectedRole || !allowedWriterRole || actualRole !== expectedRole) {
+    throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REQUIRES_CANONICAL_WRITER_ROLE");
+  }
+  if (!expectedDatabase || actualDatabase !== expectedDatabase) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_DATABASE_MISMATCH");
+  if (!expectedHost || actualHost !== expectedHost) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_HOST_MISMATCH");
+  if (process.env.VERCEL === "1" || process.env.VERCEL_ENV === "production" || process.env.VERCEL_ENV === "preview") {
+    throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REFUSES_VERCEL_ENVIRONMENT");
+  }
+
+  if (process.env.NODE_ENV === "test") {
+    assertDisposableCertificationTarget(connectionString, process.env, "source");
+  } else if (!url.hostname.toLowerCase().endsWith(".neon.tech")) {
+    throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REQUIRES_NEON_HOST");
+  }
+  if (process.env.NODE_ENV !== "test" && process.env.NODE_ENV !== "production") {
+    throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REQUIRES_EXPLICIT_NONDEVELOPMENT_MODE");
+  }
+  const sslmode = url.searchParams.get("sslmode")?.toLowerCase();
+  if (process.env.NODE_ENV !== "test" && sslmode !== "verify-full") {
+    throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REQUIRES_TLS_VERIFY_FULL");
+  }
+  if (["host", "hostaddr", "service", "options"].some((parameter) => url.searchParams.has(parameter))) {
+    throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_UNSUPPORTED_CONNECTION_OVERRIDE");
+  }
+  return {
+    prisma: new PrismaClient({ adapter: new PrismaPg({ connectionString }) }),
+    host: actualHost,
+    database: actualDatabase,
+    role: expectedRole,
+  };
+}
+
+function stripRedundantOuterParentheses(expression: string) {
+  let normalized = expression.trim();
+  while (normalized.startsWith("(") && normalized.endsWith(")")) {
+    let depth = 0;
+    let singleQuoted = false;
+    let doubleQuoted = false;
+    let enclosesWholeExpression = true;
+    for (let index = 0; index < normalized.length; index += 1) {
+      const character = normalized[index];
+      if (character === "'" && !doubleQuoted) {
+        if (singleQuoted && normalized[index + 1] === "'") {
+          index += 1;
+          continue;
+        }
+        singleQuoted = !singleQuoted;
+      } else if (character === '\"' && !singleQuoted) {
+        if (doubleQuoted && normalized[index + 1] === '\"') {
+          index += 1;
+          continue;
+        }
+        doubleQuoted = !doubleQuoted;
+      } else if (!singleQuoted && !doubleQuoted && character === "(") {
+        depth += 1;
+      } else if (!singleQuoted && !doubleQuoted && character === ")") {
+        depth -= 1;
+        if (depth === 0 && index < normalized.length - 1) {
+          enclosesWholeExpression = false;
+          break;
+        }
+      }
+    }
+    if (!enclosesWholeExpression || depth !== 0 || singleQuoted || doubleQuoted) break;
+    normalized = normalized.slice(1, -1).trim();
+  }
+  return normalized;
+}
+
+function normalizeTenantPolicyExpression(expression: string | null) {
+  const source = stripRedundantOuterParentheses(expression ?? "")
+    .replace(/'app\.organization_id'::text/gi, "'app.organization_id'")
+    .replace(/''::text/gi, "''");
+  let normalized = "";
+  let singleQuoted = false;
+  let doubleQuoted = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === "'" && !doubleQuoted) {
+      normalized += character;
+      if (singleQuoted && source[index + 1] === "'") {
+        normalized += source[index + 1];
+        index += 1;
+      } else {
+        singleQuoted = !singleQuoted;
+      }
+      continue;
+    }
+    if (character === '\"' && !singleQuoted) {
+      normalized += character;
+      if (doubleQuoted && source[index + 1] === '\"') {
+        normalized += source[index + 1];
+        index += 1;
+      } else {
+        doubleQuoted = !doubleQuoted;
+      }
+      continue;
+    }
+    if (!singleQuoted && !doubleQuoted && /\s/.test(character)) continue;
+    normalized += !singleQuoted && !doubleQuoted ? character.toLowerCase() : character;
+  }
+  return normalized;
+}
+
+const EXPECTED_TENANT_POLICY = '"organizationId" = nullif(current_setting(\'app.organization_id\', true), \'\')';
+const NORMALIZED_EXPECTED_TENANT_POLICY = normalizeTenantPolicyExpression(EXPECTED_TENANT_POLICY);
+
+async function assertProductionApplyRole(tx: Prisma.TransactionClient, target: ProductionApplyTarget) {
+  const identityRows = await tx.$queryRaw<Array<{
+    currentRole: string;
+    currentDatabase: string;
+    transactionReadOnly: string;
+    rowSecurity: string;
+    superuser: boolean;
+    bypassRls: boolean;
+    canLogin: boolean;
+    inherits: boolean;
+    createDatabase: boolean;
+    createRole: boolean;
+    replication: boolean;
+  }>>(Prisma.sql`
+      SELECT current_user AS "currentRole",
+      current_database() AS "currentDatabase",
+      current_setting('transaction_read_only') AS "transactionReadOnly",
+      current_setting('row_security') AS "rowSecurity",
+      role.rolsuper AS "superuser",
+      role.rolbypassrls AS "bypassRls",
+      role.rolcanlogin AS "canLogin",
+      role.rolinherit AS "inherits",
+      role.rolcreatedb AS "createDatabase",
+      role.rolcreaterole AS "createRole",
+      role.rolreplication AS "replication"
+    FROM pg_roles role WHERE role.rolname = current_user
+  `);
+  const identity = identityRows[0];
+  if (!identity || identity.currentRole !== target.role || identity.currentDatabase !== target.database || identity.transactionReadOnly !== "off" || identity.rowSecurity !== "on" || identity.superuser || identity.bypassRls || !identity.canLogin || identity.inherits || identity.createDatabase || identity.createRole || identity.replication) {
+    throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE_NOT_RESTRICTED");
+  }
+
+  const memberships = await tx.$queryRaw<Array<{ roleName: string }>>(Prisma.sql`
+    SELECT parent.rolname AS "roleName"
+    FROM pg_auth_members membership
+    JOIN pg_roles parent ON parent.oid = membership.roleid
+    JOIN pg_roles member ON member.oid = membership.member
+    WHERE member.rolname = current_user
+  `);
+  if (memberships.length) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE_HAS_MEMBERSHIPS");
+
+  const ownership = await tx.$queryRaw<Array<{ objectType: string; objectName: string }>>(Prisma.sql`
+    SELECT 'DATABASE' AS "objectType", current_database() AS "objectName"
+    WHERE has_database_privilege(current_user, current_database(), 'CREATE')
+      OR pg_catalog.pg_get_userbyid((SELECT datdba FROM pg_database WHERE datname = current_database())) = current_user
+    UNION ALL
+    SELECT 'SCHEMA', namespace.nspname
+    FROM pg_namespace namespace
+    WHERE namespace.nspname = 'public'
+      AND pg_catalog.pg_get_userbyid(namespace.nspowner) = current_user
+    UNION ALL
+    SELECT 'TABLE', relation.relname
+    FROM pg_class relation
+    JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname = 'public'
+      AND relation.relname = ANY(ARRAY['Organization', 'OrganizationMembership', 'User', 'Policy', 'PolicyInsuredAsset', 'PolicyInsuredParty', 'MaintenanceRun'])
+      AND pg_catalog.pg_get_userbyid(relation.relowner) = current_user
+  `);
+  if (ownership.length) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE_OWNS_PROTECTED_OBJECTS");
+
+  const columns = await tx.$queryRaw<Array<{ tableName: string; columnName: string; privilege: string }>>(Prisma.sql`
+    SELECT relation.relname AS "tableName", attribute.attname AS "columnName", requested.privilege AS "privilege"
+    FROM pg_class relation
+    JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+    JOIN pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped
+    CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('REFERENCES')) AS requested(privilege)
+    WHERE namespace.nspname = 'public'
+      AND relation.relkind IN ('r', 'p', 'v', 'm', 'f')
+      AND has_column_privilege(current_user, relation.oid, attribute.attnum, requested.privilege)
+  `);
+  for (const column of columns) {
+    if (!PRODUCTION_APPLY_COLUMN_PRIVILEGES.get(column.tableName)?.get(column.privilege)?.has(column.columnName)) {
+      throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE_HAS_EXCESS_COLUMN_PRIVILEGES");
+    }
+  }
+  for (const [tableName, privileges] of PRODUCTION_APPLY_COLUMN_PRIVILEGES) {
+    for (const [privilege, requiredColumns] of privileges) {
+      for (const columnName of requiredColumns) {
+        if (!columns.some((column) => column.tableName === tableName && column.columnName === columnName && column.privilege === privilege)) {
+          throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE_MISSING_REQUIRED_PRIVILEGES");
+        }
+      }
+    }
+  }
+
+  const excessTablePrivileges = await tx.$queryRaw<Array<{ tableName: string; privilege: string }>>(Prisma.sql`
+    SELECT relation.relname AS "tableName", requested.privilege AS "privilege"
+    FROM pg_class relation
+    JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+    CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS requested(privilege)
+    WHERE namespace.nspname = 'public'
+      AND relation.relkind IN ('r', 'p', 'v', 'm', 'f')
+      AND has_table_privilege(current_user, relation.oid, requested.privilege)
+  `);
+  if (excessTablePrivileges.length) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE_HAS_TABLE_LEVEL_PRIVILEGES");
+
+  const sequencePrivileges = await tx.$queryRaw<Array<{ sequenceName: string; privilege: string }>>(Prisma.sql`
+    SELECT sequence.relname AS "sequenceName", requested.privilege AS "privilege"
+    FROM pg_class sequence
+    JOIN pg_namespace namespace ON namespace.oid = sequence.relnamespace
+    CROSS JOIN (VALUES ('USAGE'), ('SELECT'), ('UPDATE')) AS requested(privilege)
+    WHERE namespace.nspname = 'public' AND sequence.relkind = 'S'
+      AND has_sequence_privilege(current_user, sequence.oid, requested.privilege)
+  `);
+  if (sequencePrivileges.length) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE_HAS_SEQUENCE_PRIVILEGES");
+
+  const unsafeSchemas = await tx.$queryRaw<Array<{ schemaName: string }>>(Prisma.sql`
+    SELECT namespace.nspname AS "schemaName"
+    FROM pg_namespace namespace
+    WHERE namespace.nspname NOT LIKE 'pg_%'
+      AND namespace.nspname <> 'information_schema'
+      AND has_schema_privilege(current_user, namespace.oid, 'CREATE')
+  `);
+  if (unsafeSchemas.length) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE_HAS_SCHEMA_CREATE");
+
+  const rlsRows = await tx.$queryRaw<Array<{ tableName: string; enabled: boolean; forced: boolean }>>(Prisma.sql`
+    SELECT relation.relname AS "tableName", relation.relrowsecurity AS "enabled", relation.relforcerowsecurity AS "forced"
+    FROM pg_class relation
+    JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname = 'public' AND relation.relname IN ('Policy', 'PolicyInsuredAsset', 'PolicyInsuredParty', 'MaintenanceRun')
+  `);
+  if (rlsRows.length !== 4 || rlsRows.some((row) => !row.enabled || !row.forced)) {
+    throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_RLS_NOT_FORCED");
+  }
+
+  const policyRows = await tx.$queryRaw<Array<{ tableName: string; policyName: string; command: string; permissive: boolean; roles: string; usingExpression: string | null; checkExpression: string | null }>>(Prisma.sql`
+    SELECT relation.relname AS "tableName", policy.polname AS "policyName", policy.polcmd::text AS "command",
+      policy.polpermissive AS "permissive", policy.polroles::text AS "roles",
+      pg_get_expr(policy.polqual, policy.polrelid) AS "usingExpression",
+      pg_get_expr(policy.polwithcheck, policy.polrelid) AS "checkExpression"
+    FROM pg_policy policy
+    JOIN pg_class relation ON relation.oid = policy.polrelid
+    JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname = 'public' AND relation.relname IN ('Policy', 'PolicyInsuredAsset', 'PolicyInsuredParty', 'MaintenanceRun')
+  `);
+  const policyMismatch = policyRows.length !== 4 || policyRows.some((policy) =>
+    policy.policyName !== "policydesk_tenant_context" || policy.command !== "*" || !policy.permissive || policy.roles !== "{0}" ||
+    normalizeTenantPolicyExpression(policy.usingExpression) !== NORMALIZED_EXPECTED_TENANT_POLICY ||
+    normalizeTenantPolicyExpression(policy.checkExpression) !== NORMALIZED_EXPECTED_TENANT_POLICY
+  );
+  if (policyMismatch) {
+    if (process.env.NODE_ENV === "test") {
+      const diagnostics = policyRows.map((policy) => ({
+        tableName: policy.tableName,
+        policyName: policy.policyName,
+        command: policy.command,
+        permissive: policy.permissive,
+        roles: policy.roles,
+        usingExpression: normalizeTenantPolicyExpression(policy.usingExpression),
+        checkExpression: normalizeTenantPolicyExpression(policy.checkExpression),
+      }));
+      throw new Error(`POLICY_RISK_BACKFILL_PRODUCTION_APPLY_TENANT_POLICY_MISMATCH:${JSON.stringify({ count: policyRows.length, diagnostics })}`);
+    }
+    throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_TENANT_POLICY_MISMATCH");
+  }
+}
+
+async function withProductionApplyTransaction<T>(
+  target: ProductionApplyTarget,
+  organizationId: string,
+  reviewer: string,
+  work: (tx: Prisma.TransactionClient) => Promise<T>,
+) {
+  return target.prisma.$transaction(async (tx) => {
+    const tenantContext = await tx.$queryRaw<Array<{ organizationId: string }>>(Prisma.sql`
+      SELECT set_config('app.organization_id', ${organizationId}, true) AS "organizationId"
+    `);
+    if (tenantContext[0]?.organizationId !== organizationId) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_TENANT_CONTEXT_FAILED");
+    await assertProductionApplyRole(tx, target);
+    const authorization = await tx.$queryRaw<Array<{ organizationId: string }>>(Prisma.sql`
+      SELECT organization.id AS "organizationId"
+      FROM "Organization" organization
+      JOIN "OrganizationMembership" membership ON membership."organizationId" = organization.id
+      JOIN "User" actor ON actor.id = membership."userId"
+      WHERE organization.id = ${organizationId}
+        AND organization.status = 'ACTIVE'
+        AND membership.active
+        AND membership.role IN ('OWNER', 'ADMIN')
+        AND actor.active
+        AND lower(actor.email) = lower(${reviewer})
+      FOR UPDATE OF organization, membership, actor
+    `);
+    if (authorization[0]?.organizationId !== organizationId) {
+      throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REVIEWER_NOT_ACTIVE_ORGANIZATION_ADMIN");
+    }
+    return work(tx);
+  }, { maxWait: 10_000, timeout: 30_000 });
+}
+
+async function withDisposableApplyTransaction<T>(
+  prisma: PrismaClient,
+  organizationId: string,
+  work: (tx: Prisma.TransactionClient) => Promise<T>,
+) {
+  return prisma.$transaction(async (tx) => {
+    const tenantContext = await tx.$queryRaw<Array<{ organizationId: string }>>(Prisma.sql`
+      SELECT set_config('app.organization_id', ${organizationId}, true) AS "organizationId"
+    `);
+    if (tenantContext[0]?.organizationId !== organizationId) {
+      throw new Error("POLICY_RISK_BACKFILL_DISPOSABLE_APPLY_TENANT_CONTEXT_FAILED");
+    }
+    return work(tx);
   });
 }
 
@@ -199,8 +589,20 @@ async function main() {
   const organizationId = arg("organization-id")?.trim();
   if (!organizationId) throw new Error("Indica una organización explícita con --organization-id=ID.");
   const productionPreview = process.argv.includes("--production-preview");
+  const productionApply = process.argv.includes("--production-apply");
   const apply = process.argv.includes("--apply");
+  const policyNumbers = selectedPolicyNumbers();
+  if (productionApply && !policyNumbers?.length) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_POLICY_NUMBER_SCOPE_REQUIRED");
   if (productionPreview && apply) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_PREVIEW_IS_READ_ONLY");
+  if (productionPreview && productionApply) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_MODES_ARE_EXCLUSIVE");
+  if (productionApply && !apply) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REQUIRES_APPLY");
+  if (productionApply && process.env.NODE_ENV !== "test" && process.env.POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ENABLED !== "1") {
+    throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_FEATURE_GATE_REQUIRED");
+  }
+  if (productionApply && arg("confirm-production-apply") !== PRODUCTION_APPLY_CONFIRMATION) {
+    throw new Error(`POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REQUIRES_--confirm-production-apply=${PRODUCTION_APPLY_CONFIRMATION}`);
+  }
+  if (!productionApply && arg("confirm-production-apply")) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_CONFIRMATION_WITHOUT_MODE");
   if (process.argv.includes("--print-reviewed-digest")) {
     const reviewedFile = arg("reviewed-report");
     const reviewer = arg("reviewed-by")?.trim();
@@ -213,27 +615,46 @@ async function main() {
     process.stdout.write(`${JSON.stringify({ reviewedManifestSha256: policyRiskBackfillReviewedHash(manifest) })}\n`);
     return;
   }
-  if (!productionPreview && (process.env.NODE_ENV !== "test" || process.env.TENANT_ISOLATION_TEST_DB !== "1" || process.env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB !== "1")) {
+  if (!productionPreview && !productionApply && (process.env.NODE_ENV !== "test" || process.env.TENANT_ISOLATION_TEST_DB !== "1" || process.env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB !== "1")) {
     throw new Error("La conversión requiere NODE_ENV=test, TENANT_ISOLATION_TEST_DB=1 y PLAYWRIGHT_ENFORCE_DISPOSABLE_DB=1.");
   }
-  const connectionString = (productionPreview ? process.env.POLICY_RISK_BACKFILL_READONLY_DATABASE_URL : process.env.DATABASE_URL)?.trim();
-  if (!connectionString) throw new Error(productionPreview ? "POLICY_RISK_BACKFILL_READONLY_DATABASE_URL_REQUIRED" : "DATABASE_URL es obligatorio para la base desechable.");
-  if (!productionPreview) assertDisposableCertificationTarget(connectionString, process.env, "source");
+  const connectionString = (productionPreview
+    ? process.env.POLICY_RISK_BACKFILL_READONLY_DATABASE_URL
+    : productionApply
+      ? process.env.POLICY_RISK_BACKFILL_PRODUCTION_APPLY_DATABASE_URL
+      : process.env.DATABASE_URL)?.trim();
+  if (!connectionString) {
+    throw new Error(productionPreview
+      ? "POLICY_RISK_BACKFILL_READONLY_DATABASE_URL_REQUIRED"
+      : productionApply
+        ? "POLICY_RISK_BACKFILL_PRODUCTION_APPLY_DATABASE_URL_REQUIRED"
+        : "DATABASE_URL es obligatorio para la base desechable.");
+  }
+  if (productionApply && arg("confirm-apply") !== APPLY_CONFIRMATION) {
+    throw new Error(`APPLY_REQUIRES_--confirm-apply=${APPLY_CONFIRMATION}`);
+  }
+  if (!productionPreview && !productionApply) assertDisposableCertificationTarget(connectionString, process.env, "source");
 
-  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  const productionTarget = productionApply ? createProductionApplyTarget(connectionString) : null;
+  const prisma = productionTarget?.prisma ?? new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
   try {
     const sha = candidateSha();
     const processor = await processorSha256();
     if (!apply) {
       const candidates = productionPreview
-        ? await scanProductionReadOnly(prisma, organizationId, connectionString)
-        : await scanAll(prisma, organizationId);
+        ? await scanProductionReadOnly(prisma, organizationId, connectionString, policyNumbers)
+        : await scanAll(prisma, organizationId, policyNumbers);
       const manifest: PolicyRiskBackfillManifest = {
         schemaVersion: POLICY_RISK_BACKFILL_MANIFEST_VERSION,
         processorVersion: POLICY_RISK_BACKFILL_PROCESSOR_VERSION,
         processorSha256: processor,
         runId: randomUUID(),
         createdAt: new Date().toISOString(),
+        sourceMode: productionPreview ? "PRODUCTION_READ_ONLY_PREVIEW" : "DISPOSABLE_DRY_RUN",
+        sourceTarget: productionPreview ? {
+          host: new URL(connectionString).hostname.toLowerCase(),
+          database: decodeURIComponent(new URL(connectionString).pathname.replace(/^\//, "").split("?")[0]),
+        } : null,
         organizationId,
         candidateSha: sha,
         scanned: candidates.length,
@@ -258,13 +679,29 @@ async function main() {
     if (!reviewedFile || !reviewer || !expectedManifestSha || arg("confirm-apply") !== APPLY_CONFIRMATION) {
       throw new Error(`APPLY_REQUIRES_--reviewed-report, --reviewed-by, --manifest-sha256, and --confirm-apply=${APPLY_CONFIRMATION}`);
     }
+    if (productionApply && arg("confirm-production-apply") !== PRODUCTION_APPLY_CONFIRMATION) {
+      throw new Error(`POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REQUIRES_--confirm-production-apply=${PRODUCTION_APPLY_CONFIRMATION}`);
+    }
     const manifest = await readReviewedManifest(reviewedFile);
     if (policyRiskBackfillReviewedHash(manifest) !== expectedManifestSha) throw new Error("POLICY_RISK_BACKFILL_REVIEWED_DIGEST_MISMATCH");
     if (manifest.reviewedBy?.trim() !== reviewer || !manifest.reviewedAt) throw new Error("POLICY_RISK_BACKFILL_REVIEWER_MISMATCH");
     assertReviewedPolicyRiskBackfillManifest(manifest, { organizationId, candidateSha: sha, processorSha256: processor });
+    if (productionApply && manifest.sourceMode !== "PRODUCTION_READ_ONLY_PREVIEW") throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REQUIRES_PRODUCTION_PREVIEW_MANIFEST");
+    if (productionApply && (!productionTarget || manifest.sourceTarget?.host !== productionTarget.host || manifest.sourceTarget.database !== productionTarget.database)) {
+      throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_PREVIEW_TARGET_MISMATCH");
+    }
+    if (!productionApply && manifest.sourceMode !== "DISPOSABLE_DRY_RUN") throw new Error("POLICY_RISK_BACKFILL_DISPOSABLE_APPLY_REQUIRES_DISPOSABLE_MANIFEST");
     const reviewedManifestSha256 = expectedManifestSha;
 
-    const current = await scanAll(prisma, organizationId);
+    const requestedBatchSize = Number(arg("batch-size") ?? "50");
+    const maximumBatchSize = productionApply ? MAX_PRODUCTION_BATCH_SIZE : MAX_BATCH_SIZE;
+    if (!Number.isInteger(requestedBatchSize) || requestedBatchSize < 1 || requestedBatchSize > maximumBatchSize) {
+      throw new Error(`POLICY_RISK_BACKFILL_BATCH_SIZE_MUST_BE_1_TO_${maximumBatchSize}`);
+    }
+
+    const current = productionTarget
+      ? await withProductionApplyTransaction(productionTarget, organizationId, reviewer, (tx) => scanAll(tx, organizationId, policyNumbers))
+      : await scanAll(prisma, organizationId, policyNumbers);
     const expectedById = new Map(manifest.candidates.map((row) => [row.policyId, row]));
     for (const row of current) {
       const expected = expectedById.get(row.policyId);
@@ -272,8 +709,8 @@ async function main() {
     }
     const currentIds = new Set(current.map((row) => row.policyId));
     const alreadyAppliedRows = manifest.candidates.filter((row) => !currentIds.has(row.policyId));
-    const alreadyApplied = alreadyAppliedRows.length
-      ? await prisma.policy.findMany({
+    const loadAlreadyApplied = async (client: Pick<PrismaClient, "policy">) => alreadyAppliedRows.length
+      ? await client.policy.findMany({
         where: { organizationId, id: { in: alreadyAppliedRows.map((row) => row.policyId) } },
         select: {
           id: true,
@@ -284,37 +721,45 @@ async function main() {
         },
       })
       : [];
+    const alreadyApplied = productionTarget
+      ? await withProductionApplyTransaction(productionTarget, organizationId, reviewer, loadAlreadyApplied)
+      : await loadAlreadyApplied(prisma);
     const appliedById = new Map(alreadyApplied.map((row) => [row.id, row]));
     for (const row of alreadyAppliedRows) {
       const saved = appliedById.get(row.policyId);
       const detailsMatch = saved?.riskDetails != null && policyRiskBackfillInputHash(saved.riskDetails) === policyRiskBackfillInputHash(row.proposed.riskDetails);
       const summaryMatch = !row.proposed.insuredObject || saved?.insuredObject === row.proposed.insuredObject;
       const assetsMatch = row.proposed.assets.every((asset) => saved?.insuredAssets.some((actual) => actual.assetType === asset.assetType && actual.description === asset.description && actual.serialNumber === asset.serialNumber && actual.isPrimary === asset.isPrimary));
-      const partiesMatch = row.proposed.insuredParties.every((party) => saved?.insuredParties.some((actual) => actual.fullName === party.fullName && actual.isPrimary === party.isPrimary && actual.sourceLabel === party.sourceLabel));
+      const partiesMatch = row.proposed.insuredParties.every((party) => {
+        const original = row.source.insuredParties.find((sourceParty) => sourceParty.fullName === party.fullName);
+        return saved?.insuredParties.some((actual) => actual.fullName === party.fullName && actual.isPrimary === (original?.isPrimary ?? party.isPrimary) && actual.sourceLabel === (original?.sourceLabel ?? party.sourceLabel));
+      });
       if (!detailsMatch || !summaryMatch || !assetsMatch || !partiesMatch) throw new Error(`POLICY_RISK_BACKFILL_PARTIAL_APPLY_CONFLICT:${row.policyId}`);
     }
 
     const mutatePolicyBeforeBatch = process.env.POLICY_RISK_BACKFILL_TEST_MUTATE_POLICY_ID_BEFORE_BATCH;
-    if (process.env.NODE_ENV === "test" && mutatePolicyBeforeBatch) {
-      await prisma.policy.updateMany({
-        where: { id: mutatePolicyBeforeBatch, organizationId, riskDetails: { equals: Prisma.DbNull } },
-        data: { insuredObject: "Concurrent source edit injected by disposable integration test" },
+    if (!productionTarget && process.env.NODE_ENV === "test" && mutatePolicyBeforeBatch) {
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw(Prisma.sql`SELECT set_config('app.organization_id', ${organizationId}, true)`);
+        await tx.policy.updateMany({
+          where: { id: mutatePolicyBeforeBatch, organizationId, riskDetails: { equals: Prisma.DbNull } },
+          data: { insuredObject: "Concurrent source edit injected by disposable integration test" },
+        });
       });
     }
 
-    const requestedBatchSize = Number(arg("batch-size") ?? "50");
-    if (!Number.isInteger(requestedBatchSize) || requestedBatchSize < 1 || requestedBatchSize > MAX_BATCH_SIZE) {
-      throw new Error(`POLICY_RISK_BACKFILL_BATCH_SIZE_MUST_BE_1_TO_${MAX_BATCH_SIZE}`);
-    }
-    const run = await prisma.maintenanceRun.create({
+    const createRun = (client: Pick<PrismaClient, "maintenanceRun">) => client.maintenanceRun.create({
       data: {
         organizationId,
         type: "POLICY_RISK_BACKFILL",
         status: "RUNNING",
-        summaryJson: JSON.stringify({ runId: manifest.runId, candidateSha: sha, manifestSha256: createHash("sha256").update(JSON.stringify(manifest)).digest("hex"), reviewer, scanned: manifest.scanned }),
+        summaryJson: JSON.stringify({ mode: productionApply ? "production-apply" : "disposable-apply", organizationId, runId: manifest.runId, candidateSha: sha, manifestSha256: manifest.contentSha256, reviewedManifestSha256, reviewer, writerRole: productionTarget?.role ?? null, endpointHost: productionTarget?.host ?? null, database: productionTarget?.database ?? null, batchSize: requestedBatchSize, scanned: manifest.scanned }),
       },
       select: { id: true },
     });
+    const run = productionTarget
+      ? await withProductionApplyTransaction(productionTarget, organizationId, reviewer, createRun)
+      : await withDisposableApplyTransaction(prisma, organizationId, createRun);
     let converted = 0;
     let deferred = 0;
     let empty = 0;
@@ -323,12 +768,15 @@ async function main() {
     let committedAppliedBatches = 0;
     const outcomes: Array<{ policyId: string; policyNumber: string; inputHash: string; outcome: "APPLIED" | "ALREADY_APPLIED" | "DEFERRED" | "EMPTY" }> = [];
     const resultFile = `${reviewedFile}.${run.id}.results.json`;
+    const updateRun = async (data: Prisma.MaintenanceRunUpdateInput) => productionTarget
+      ? withProductionApplyTransaction(productionTarget, organizationId, reviewer, (tx) => tx.maintenanceRun.update({ where: { id: run.id, organizationId }, data, select: { id: true } }))
+      : withDisposableApplyTransaction(prisma, organizationId, (tx) => tx.maintenanceRun.update({ where: { id: run.id, organizationId }, data, select: { id: true } }));
     try {
       for (let offset = 0; offset < manifest.candidates.length; offset += requestedBatchSize) {
         const batch = manifest.candidates.slice(offset, offset + requestedBatchSize);
         const batchOutcomes: typeof outcomes = [];
         const batchCounts = { converted: 0, deferred: 0, empty: 0, applied: 0, alreadyApplied: 0 };
-        await prisma.$transaction(async (tx) => {
+        const applyBatch = async (tx: Prisma.TransactionClient) => {
           for (const row of batch) {
             if (!currentIds.has(row.policyId)) {
               batchCounts.alreadyApplied += 1;
@@ -376,7 +824,7 @@ async function main() {
                 insuredObject: true,
                 beneficiaryInfo: true,
                 insuredAssets: { select: { description: true, serialNumber: true, isPrimary: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
-                insuredParties: { select: { fullName: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+                insuredParties: { select: { fullName: true, isPrimary: true, sourceLabel: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
               },
             });
             if (!freshPolicy || planPolicy(freshPolicy).inputHash !== row.inputHash) {
@@ -395,13 +843,7 @@ async function main() {
               await tx.policyInsuredAsset.createMany({ data: row.proposed.assets.map((asset) => ({ ...asset, organizationId, policyId: row.policyId })), skipDuplicates: true });
             }
             if (row.proposed.insuredParties.length) {
-              for (const party of row.proposed.insuredParties) {
-                await tx.policyInsuredParty.upsert({
-                  where: { policyId_fullName: { policyId: row.policyId, fullName: party.fullName } },
-                  create: { ...party, organizationId, policyId: row.policyId },
-                  update: { isPrimary: party.isPrimary, sourceLabel: party.sourceLabel },
-                });
-              }
+              await tx.policyInsuredParty.createMany({ data: row.proposed.insuredParties.map((party) => ({ ...party, organizationId, policyId: row.policyId })), skipDuplicates: true });
             }
             batchCounts.converted += 1;
             batchCounts.applied += 1;
@@ -411,7 +853,9 @@ async function main() {
               throw new Error("POLICY_RISK_BACKFILL_TEST_ROLLBACK_WITHIN_BATCH");
             }
           }
-        });
+        };
+        if (productionTarget) await withProductionApplyTransaction(productionTarget, organizationId, reviewer, applyBatch);
+        else await withDisposableApplyTransaction(prisma, organizationId, applyBatch);
         converted += batchCounts.converted;
         deferred += batchCounts.deferred;
         empty += batchCounts.empty;
@@ -426,13 +870,30 @@ async function main() {
           }
         }
       }
-      const summary = { runId: manifest.runId, candidateSha: sha, reviewer, reviewedManifestSha256, scanned: manifest.scanned, converted, deferred, empty, applied, alreadyApplied: alreadyAppliedCount };
-      await prisma.maintenanceRun.update({ where: { id: run.id }, data: { status: deferred ? "REVIEW_REQUIRED" : "COMPLETED", completedAt: new Date(), summaryJson: JSON.stringify(summary) } });
-      await writePrivateManifest(resultFile, { ...summary, organizationId, manifestSha256: manifest.contentSha256, maintenanceRunId: run.id, status: deferred ? "REVIEW_REQUIRED" : "COMPLETED", outcomes });
-      process.stdout.write(`${JSON.stringify({ mode: "apply", organizationId, ...summary, maintenanceRunId: run.id, resultFile }, null, 2)}\n`);
+      const summary = {
+        mode: productionApply ? "production-apply" : "disposable-apply",
+        organizationId,
+        runId: manifest.runId,
+        candidateSha: sha,
+        reviewer,
+        reviewedManifestSha256,
+        writerRole: productionTarget?.role ?? null,
+        endpointHost: productionTarget?.host ?? null,
+        database: productionTarget?.database ?? null,
+        batchSize: requestedBatchSize,
+        scanned: manifest.scanned,
+        converted,
+        deferred,
+        empty,
+        applied,
+        alreadyApplied: alreadyAppliedCount,
+      };
+      await updateRun({ status: deferred ? "REVIEW_REQUIRED" : "COMPLETED", completedAt: new Date(), summaryJson: JSON.stringify(summary) });
+      await writePrivateManifest(resultFile, { ...summary, manifestSha256: manifest.contentSha256, maintenanceRunId: run.id, status: deferred ? "REVIEW_REQUIRED" : "COMPLETED", outcomes });
+      process.stdout.write(`${JSON.stringify({ ...summary, mode: "apply", maintenanceRunId: run.id, resultFile }, null, 2)}\n`);
     } catch (error) {
       const errorCode = error instanceof Error ? error.message.split(":")[0] : "UNKNOWN";
-      await prisma.maintenanceRun.update({ where: { id: run.id }, data: { status: "FAILED", completedAt: new Date(), summaryJson: JSON.stringify({ runId: manifest.runId, candidateSha: sha, reviewer, reviewedManifestSha256, scanned: manifest.scanned, converted, deferred, empty, applied, alreadyApplied: alreadyAppliedCount, errorCode }) } });
+      await updateRun({ status: "FAILED", completedAt: new Date(), summaryJson: JSON.stringify({ mode: productionApply ? "production-apply" : "disposable-apply", organizationId, runId: manifest.runId, candidateSha: sha, reviewer, reviewedManifestSha256, writerRole: productionTarget?.role ?? null, endpointHost: productionTarget?.host ?? null, database: productionTarget?.database ?? null, batchSize: requestedBatchSize, scanned: manifest.scanned, converted, deferred, empty, applied, alreadyApplied: alreadyAppliedCount, errorCode }) });
       await writePrivateManifest(resultFile, { organizationId, manifestSha256: manifest.contentSha256, reviewedManifestSha256, maintenanceRunId: run.id, status: "FAILED", converted, deferred, empty, applied, alreadyApplied: alreadyAppliedCount, errorCode, outcomes });
       throw error;
     }

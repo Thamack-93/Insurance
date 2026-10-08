@@ -156,59 +156,95 @@ async function ensureAuthFixture(): Promise<AuthFixture> {
   if (!authFixturePromise) {
     authFixturePromise = (async () => {
       const db = getTestDb();
-      await db.organization.update({ where: { id: "org_legacy_singleton_0001" }, data: { status: "ACTIVE" } });
-      const admin = await db.user.upsert({
-        where: { email: TEST_ADMIN_EMAIL },
-        update: {
-          name: TEST_ADMIN_NAME,
-          active: true,
-          role: "ADMIN",
-        },
-        create: {
-          email: TEST_ADMIN_EMAIL,
-          name: TEST_ADMIN_NAME,
-          passwordHash: hashTestPassword("ci-admin-password"),
-          role: "ADMIN",
-          active: true,
-        },
-      });
+      return db.$transaction(async (tx) => {
+        // Seed and verify this protected auth fixture inside its explicit
+        // singleton context so forced-RLS tests use the runtime tenant boundary.
+        await tx.$queryRaw`SELECT set_config('app.organization_id', ${TEST_ORGANIZATION_ID}, true)`;
+        await tx.organization.update({ where: { id: TEST_ORGANIZATION_ID }, data: { status: "ACTIVE" } });
+        const admin = await tx.user.upsert({
+          where: { email: TEST_ADMIN_EMAIL },
+          update: {
+            name: TEST_ADMIN_NAME,
+            active: true,
+            role: "ADMIN",
+          },
+          create: {
+            email: TEST_ADMIN_EMAIL,
+            name: TEST_ADMIN_NAME,
+            passwordHash: hashTestPassword("ci-admin-password"),
+            role: "ADMIN",
+            active: true,
+          },
+        });
 
-      await db.user.upsert({
-        where: { email: TEST_AGENT_EMAIL },
-        update: {
-          name: TEST_AGENT_NAME,
-          active: true,
-          role: "AGENT",
-        },
-        create: {
-          email: TEST_AGENT_EMAIL,
-          name: TEST_AGENT_NAME,
-          passwordHash: hashTestPassword("ci-agent-password"),
-          role: "AGENT",
-          active: true,
-        },
-      });
+        await tx.user.upsert({
+          where: { email: TEST_AGENT_EMAIL },
+          update: {
+            name: TEST_AGENT_NAME,
+            active: true,
+            role: "AGENT",
+          },
+          create: {
+            email: TEST_AGENT_EMAIL,
+            name: TEST_AGENT_NAME,
+            passwordHash: hashTestPassword("ci-agent-password"),
+            role: "AGENT",
+            active: true,
+          },
+        });
 
-      const agent = await db.user.findUniqueOrThrow({ where: { email: TEST_AGENT_EMAIL } });
-      const memberships = await db.organizationMembership.findMany({
-        where: {
-          organizationId: "org_legacy_singleton_0001",
-          userId: { in: [admin.id, agent.id] },
-          active: true,
-        },
-        select: { userId: true, role: true },
-      });
-      const membershipByUserId = new Map(memberships.map((membership) => [membership.userId, membership.role]));
-      const adminMembershipRole = membershipByUserId.get(admin.id);
-      const agentMembershipRole = membershipByUserId.get(agent.id);
-      if (
-        (adminMembershipRole !== "ADMIN" && adminMembershipRole !== "OWNER") ||
-        agentMembershipRole !== "AGENT"
-      ) {
-        throw new Error("Cycle 1 User-to-membership synchronization did not create the expected test memberships.");
-      }
+        const agent = await tx.user.findUniqueOrThrow({ where: { email: TEST_AGENT_EMAIL } });
+        // Cycle 2A deliberately removes the Cycle 1 synchronization trigger.
+        // Create these disposable test memberships explicitly so the same
+        // auth fixture works both before and after the RLS cutover.
+        const adminMembership = await tx.organizationMembership.findUnique({
+          where: { organizationId_userId: { organizationId: TEST_ORGANIZATION_ID, userId: admin.id } },
+          select: { role: true },
+        });
+        if (!adminMembership) {
+          await tx.organizationMembership.create({
+            data: { id: `om_${admin.id}`, organizationId: TEST_ORGANIZATION_ID, userId: admin.id, role: "ADMIN", active: true },
+          });
+        } else if (adminMembership.role !== "OWNER") {
+          await tx.organizationMembership.update({
+            where: { organizationId_userId: { organizationId: TEST_ORGANIZATION_ID, userId: admin.id } },
+            data: { role: "ADMIN", active: true },
+          });
+        }
+        const agentMembership = await tx.organizationMembership.findUnique({
+          where: { organizationId_userId: { organizationId: TEST_ORGANIZATION_ID, userId: agent.id } },
+          select: { role: true },
+        });
+        if (!agentMembership) {
+          await tx.organizationMembership.create({
+            data: { id: `om_${agent.id}`, organizationId: TEST_ORGANIZATION_ID, userId: agent.id, role: "AGENT", active: true },
+          });
+        } else {
+          await tx.organizationMembership.update({
+            where: { organizationId_userId: { organizationId: TEST_ORGANIZATION_ID, userId: agent.id } },
+            data: { role: "AGENT", active: true },
+          });
+        }
+        const memberships = await tx.organizationMembership.findMany({
+          where: {
+            organizationId: TEST_ORGANIZATION_ID,
+            userId: { in: [admin.id, agent.id] },
+            active: true,
+          },
+          select: { userId: true, role: true },
+        });
+        const membershipByUserId = new Map(memberships.map((membership) => [membership.userId, membership.role]));
+        const adminMembershipRole = membershipByUserId.get(admin.id);
+        const agentMembershipRole = membershipByUserId.get(agent.id);
+        if (
+          (adminMembershipRole !== "ADMIN" && adminMembershipRole !== "OWNER") ||
+          agentMembershipRole !== "AGENT"
+        ) {
+          throw new Error("Disposable auth fixture did not create the expected tenant memberships.");
+        }
 
-      return { adminId: admin.id };
+        return { adminId: admin.id };
+      });
     })();
   }
 
@@ -239,48 +275,54 @@ export async function seedPolicyFixture(prefix: string): Promise<SeededPolicyFix
   const clientName = `Test Client ${suffix}`;
   const insurerName = `${TEST_INSURER_NAME} ${suffix}`;
   const policyNumber = `TEST-POL-${suffix}`;
-  const insurer = await db.insurer.create({ data: { organizationId: TEST_ORGANIZATION_ID, name: insurerName, status: "ACTIVE" } });
-  const client = await db.client.create({
-    data: {
-      organizationId: TEST_ORGANIZATION_ID,
-      fullName: clientName,
-      email: `${suffix.toLowerCase()}@policydesk.local`,
-      status: "ACTIVE",
-      type: "PERSON",
-      portfolioOwnerId: adminId,
-      createdById: adminId,
-      updatedById: adminId,
-    },
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT set_config('app.organization_id', ${TEST_ORGANIZATION_ID}, true)`;
+    const insurer = await tx.insurer.create({ data: { organizationId: TEST_ORGANIZATION_ID, name: insurerName, status: "ACTIVE" } });
+    const client = await tx.client.create({
+      data: {
+        organizationId: TEST_ORGANIZATION_ID,
+        fullName: clientName,
+        email: `${suffix.toLowerCase()}@policydesk.local`,
+        status: "ACTIVE",
+        type: "PERSON",
+        portfolioOwnerId: adminId,
+        createdById: adminId,
+        updatedById: adminId,
+      },
+    });
+    const policy = await tx.policy.create({
+      data: {
+        organizationId: TEST_ORGANIZATION_ID,
+        policyNumber,
+        clientId: client.id,
+        insurerId: insurer.id,
+        policyType: "AUTO",
+        status: "ACTIVE",
+        paymentFrequency: "ANNUAL",
+        startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+        endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        premiumAmount: 1234.56,
+        currency: "MXN",
+        createdById: adminId,
+        updatedById: adminId,
+      },
+    });
+    return { clientId: client.id, insurerId: insurer.id, policyId: policy.id, clientName, insurerName, policyNumber };
   });
-  const policy = await db.policy.create({
-    data: {
-      organizationId: TEST_ORGANIZATION_ID,
-      policyNumber,
-      clientId: client.id,
-      insurerId: insurer.id,
-      policyType: "AUTO",
-      status: "ACTIVE",
-      paymentFrequency: "ANNUAL",
-      startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-      endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      premiumAmount: 1234.56,
-      currency: "MXN",
-      createdById: adminId,
-      updatedById: adminId,
-    },
-  });
-  return { clientId: client.id, insurerId: insurer.id, policyId: policy.id, clientName, insurerName, policyNumber };
 }
 
 export async function cleanupPolicyFixture(fixture: SeededPolicyFixture): Promise<void> {
   const db = getTestDb();
-  await db.payment.deleteMany({ where: { policyId: fixture.policyId } });
-  await db.commission.deleteMany({ where: { policyId: fixture.policyId } });
-  await db.receipt.deleteMany({ where: { policyId: fixture.policyId } });
-  await db.workItem.deleteMany({ where: { policyId: fixture.policyId } });
-  await db.policy.deleteMany({ where: { id: fixture.policyId } });
-  await db.client.deleteMany({ where: { id: fixture.clientId } });
-  await db.insurer.deleteMany({ where: { id: fixture.insurerId } });
+  await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT set_config('app.organization_id', ${TEST_ORGANIZATION_ID}, true)`;
+    await tx.payment.deleteMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId } });
+    await tx.commission.deleteMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId } });
+    await tx.receipt.deleteMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId } });
+    await tx.workItem.deleteMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId } });
+    await tx.policy.deleteMany({ where: { id: fixture.policyId, organizationId: TEST_ORGANIZATION_ID } });
+    await tx.client.deleteMany({ where: { id: fixture.clientId, organizationId: TEST_ORGANIZATION_ID } });
+    await tx.insurer.deleteMany({ where: { id: fixture.insurerId, organizationId: TEST_ORGANIZATION_ID } });
+  });
 }
 
 /**
