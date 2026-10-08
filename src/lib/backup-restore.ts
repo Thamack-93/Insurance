@@ -181,6 +181,38 @@ async function dropNeonFallbackCyclicForeignKey(client: PoolClient, tables: Back
       `ALTER TABLE ${tableReference("public", expected.table)} DROP CONSTRAINT ${quoteIdentifier(expected.constraint)}`,
     );
     dropped.push({ table: expected.table, constraint: expected.constraint, definition });
+
+    // Tenant cutover adds a composite FK for the same relation. Drop and
+    // restore it alongside the base FK so Neon can order cyclic rows without
+    // losing the organization boundary at commit.
+    const tenantConstraint = `policydesk_${expected.table}_${expected.column.replaceAll('"', "")}_tenant_fkey`;
+    const tenantResult = await client.query<{ definition: string }>(
+      `SELECT pg_get_constraintdef(con.oid) AS definition
+         FROM pg_constraint con
+         JOIN pg_class c ON c.oid = conrelid
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE conname = $1 AND n.nspname = 'public' AND c.relname = $2 AND contype = 'f'`,
+      [tenantConstraint, expected.table],
+    );
+    const tenantDefinition = tenantResult.rows[0]?.definition;
+    if (tenantDefinition) {
+      if (
+        !tenantDefinition.includes('"organizationId"')
+        || !tenantDefinition.includes(expected.column)
+        || !tenantDefinition.includes(expected.parent)
+      ) {
+        throw new RestoreStageError(
+          "preflight",
+          "Las FKs tenant esperadas del target no coinciden con el inventario de restore.",
+          undefined,
+          "TARGET_NOT_AUTHORIZED",
+        );
+      }
+      await client.query(
+        `ALTER TABLE ${tableReference("public", expected.table)} DROP CONSTRAINT ${quoteIdentifier(tenantConstraint)}`,
+      );
+      dropped.push({ table: expected.table, constraint: tenantConstraint, definition: tenantDefinition });
+    }
   }
   return dropped;
 }
