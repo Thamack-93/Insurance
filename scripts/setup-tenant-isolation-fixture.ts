@@ -4,11 +4,11 @@ import type { Prisma } from "../src/generated/prisma/client";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { EXPECTED_TENANT_TRIGGERS } from "../src/lib/tenant-organization-foundation";
 import { DEMO_SEED_VERSION, seedDemoBaseline, validateDemoBaseline } from "../src/lib/demo-seed";
-import { assertDisposableCertificationTarget } from "./tenant-certification-target.mjs";
+import { assertDisposableCertificationTarget, certificationPurpose } from "./tenant-certification-target.mjs";
 
 const connectionString = process.env.DATABASE_URL?.trim();
 if (!connectionString) throw new Error("DATABASE_URL is required.");
-const certificationTarget = assertDisposableCertificationTarget(connectionString);
+const certificationTarget = assertDisposableCertificationTarget(connectionString, process.env, certificationPurpose());
 const runId = certificationTarget.runId;
 const expectedDatabase = certificationTarget.database;
 const configuredFingerprint = certificationTarget.fingerprint;
@@ -32,6 +32,7 @@ async function seedCustomerRecoveryCases(tx: Prisma.TransactionClient, organizat
   for (const suffix of ["expired", "renewal", "cancelled"] as const) {
     const data = {
       ...common, policyNumber: `SYNTHETIC-RECOVERY-${suffix}`, policyType: "AUTO", paymentFrequency: "ANNUAL",
+      ...(suffix === "renewal" ? { insuredObject: "Synthetic Recovery 2022 Serie SYNTHETIC-VIN-0001", riskDetails: { version: 1, policyType: "AUTO", sourceText: "Synthetic risk statement retained for restore certification.", data: { vehicles: [{ make: "Synthetic", model: "Recovery", year: "2022", version: "", vin: "SYNTHETIC-VIN-0001", plates: "" }] } } } : {}),
       status: suffix === "cancelled" ? "CANCELLED" as const : suffix === "expired" ? "EXPIRED" as const : "ACTIVE" as const,
       startDate: new Date(suffix === "expired" ? "2025-01-01" : "2026-01-01"), endDate: new Date(suffix === "expired" ? "2025-12-31" : "2026-12-31"),
       premiumAmount: 1000, currency: "MXN", renewedFromPolicyId: suffix === "renewal" ? "tenant-recovery-policy-expired" : null,
@@ -39,6 +40,10 @@ async function seedCustomerRecoveryCases(tx: Prisma.TransactionClient, organizat
     };
     await tx.policy.upsert({ where: { id: `tenant-recovery-policy-${suffix}` }, update: data, create: { id: `tenant-recovery-policy-${suffix}`, ...data } });
   }
+  const insuredParty = { organizationId, policyId: "tenant-recovery-policy-renewal", fullName: "Synthetic Recovery Named Insured", isPrimary: true, sourceLabel: "RECOVERY_FIXTURE" };
+  await tx.policyInsuredParty.upsert({ where: { id: "tenant-recovery-insured-party" }, update: insuredParty, create: { id: "tenant-recovery-insured-party", ...insuredParty } });
+  const insuredAsset = { organizationId, policyId: "tenant-recovery-policy-renewal", assetType: "VEHICLE", description: "Synthetic recovery vehicle 2022", serialNumber: "SYNTHETIC-VIN-0001", isPrimary: true };
+  await tx.policyInsuredAsset.upsert({ where: { id: "tenant-recovery-insured-asset" }, update: insuredAsset, create: { id: "tenant-recovery-insured-asset", ...insuredAsset } });
   for (const suffix of ["posted", "reversed", "cancelled"] as const) {
     const receiptId = `tenant-recovery-receipt-${suffix}`;
     const policyId = suffix === "cancelled" ? "tenant-recovery-policy-cancelled" : "tenant-recovery-policy-renewal";

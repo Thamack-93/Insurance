@@ -203,6 +203,7 @@ async function main() {
     readonlyRoleCreated = true;
     await db.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO ${readonlyRoleName}`);
     await db.$executeRawUnsafe(`GRANT SELECT ON TABLE "Organization", "Policy", "PolicyInsuredAsset", "PolicyInsuredParty" TO ${readonlyRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId", "type", "status", "summaryJson") ON TABLE "MaintenanceRun" TO ${readonlyRoleName}`);
     const readonlyUrl = new URL(process.env.DATABASE_URL!);
     readonlyUrl.username = readonlyRoleName;
     readonlyUrl.password = readonlyPassword;

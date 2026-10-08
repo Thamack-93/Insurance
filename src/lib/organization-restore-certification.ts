@@ -3,8 +3,9 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
 import { PROTECTED_TENANT_TABLES } from "@/lib/tenant-organization-foundation";
 import { auditMultiOrganizationState } from "../../scripts/check-multi-org-audit";
-import { assertDisposableCertificationTarget, canonicalNeonHost } from "../../scripts/tenant-certification-target.mjs";
+import { assertDisposableCertificationTarget, assertPersistedRestoreMarker, canonicalNeonHost } from "../../scripts/tenant-certification-target.mjs";
 import { checkTargetMigrationDrift } from "@/lib/backup-restore";
+import type { ParsedBackup } from "@/lib/backup-restore-validation";
 
 export function assertRestoreCertificationConnections(sourceUrl: string, adminUrl: string, runtimeUrl: string, env = process.env) {
   if (!/^[0-9a-f]{40}$/.test(env.CERTIFICATION_CANDIDATE_SHA ?? "")) throw new Error("CERTIFICATION_CANDIDATE_SHA_REQUIRED");
@@ -31,14 +32,55 @@ export function assertRestoreCertificationConnections(sourceUrl: string, adminUr
 export async function verifyRestoreMarker(adminUrl: string, target: ReturnType<typeof assertRestoreCertificationConnections>["target"]) {
   const pool = new Pool({ connectionString: adminUrl, max: 1 });
   try {
-    const result = await pool.query<{ database_name: string; host: string; fingerprint: string }>(
-      'SELECT database_name, host, fingerprint FROM "__policydesk_tenant_isolation_run" WHERE run_id=$1', [target.runId]);
-    const row = result.rows[0];
-    if (result.rowCount !== 1 || row.database_name !== target.database || row.host !== target.host || row.fingerprint !== target.fingerprint) throw new Error("RESTORE_CERTIFICATION_MARKER_MISMATCH");
+    const result = await pool.query<{ run_id: string; database_name: string; host: string; fingerprint: string }>(
+      'SELECT run_id, database_name, host, fingerprint FROM "__policydesk_tenant_isolation_run"');
+    assertPersistedRestoreMarker(result.rows, target);
   } finally { await pool.end(); }
 }
 
-export async function certifyOrganizationRestore(input: { adminUrl: string; runtimeUrl: string; organizationId: string; tables: Array<{ table: string; rows: number }> }) {
+function stableJson(value: unknown): string {
+  if (value instanceof Date) return JSON.stringify(value.toISOString());
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
+}
+
+const RESTORE_VALUE_TABLES = ["Policy", "PolicyInsuredParty", "PolicyInsuredAsset"] as const;
+export function assertRestoreAcceptanceFixtures(parsed: ParsedBackup, organizationId: string) {
+  const ids: Record<string, string> = { Policy: "tenant-recovery-policy-renewal", PolicyInsuredParty: "tenant-recovery-insured-party", PolicyInsuredAsset: "tenant-recovery-insured-asset" };
+  for (const [table, id] of Object.entries(ids)) {
+    const row = (parsed.rows.get(`public.${table}`) ?? []).find(record => record.data.id === id && record.data.organizationId === organizationId)?.data;
+    if (!row) throw new Error(`RESTORE_ACCEPTANCE_FIXTURE_MISSING:${table}:${id}`);
+    if (table === "Policy") {
+      const sourceText = (row.riskDetails as { sourceText?: unknown } | null)?.sourceText;
+      if (typeof row.insuredObject !== "string" || !row.insuredObject.trim() || typeof sourceText !== "string" || !sourceText.trim()) throw new Error("RESTORE_ACCEPTANCE_FIXTURE_INCOMPLETE:Policy");
+    }
+    if (table === "PolicyInsuredParty" && row.fullName !== "Synthetic Recovery Named Insured") throw new Error("RESTORE_ACCEPTANCE_FIXTURE_INCOMPLETE:PolicyInsuredParty");
+    if (table === "PolicyInsuredAsset" && (row.serialNumber !== "SYNTHETIC-VIN-0001" || row.description !== "Synthetic recovery vehicle 2022")) throw new Error("RESTORE_ACCEPTANCE_FIXTURE_INCOMPLETE:PolicyInsuredAsset");
+  }
+}
+export function assertOrganizationRestoreValues(parsed: ParsedBackup, organizationId: string, actual: Record<string, Array<Record<string, unknown>>>) {
+  for (const table of RESTORE_VALUE_TABLES) {
+    const expectedRows = (parsed.rows.get(`public.${table}`) ?? []).map(({ data }) => data).filter(row => row.organizationId === organizationId);
+    const actualRows = actual[table] ?? [];
+    const byId = (rows: Array<Record<string, unknown>>) => new Map(rows.map(row => [String(row.id), row]));
+    const expectedById = byId(expectedRows);
+    const actualById = byId(actualRows);
+    if (expectedById.size !== expectedRows.length || actualById.size !== actualRows.length || expectedById.size !== actualById.size) throw new Error(`RESTORE_VALUE_ROWSET_MISMATCH:${table}`);
+    for (const [id, expected] of expectedById) {
+      const row = actualById.get(id);
+      if (!row) throw new Error(`RESTORE_VALUE_TARGET_ROW_MISSING:${table}:${id}`);
+      if (stableJson(row) !== stableJson(expected)) {
+        const differing = [...new Set([...Object.keys(expected), ...Object.keys(row)])].find(key => stableJson(expected[key]) !== stableJson(row[key]));
+        throw new Error(`RESTORE_VALUE_PRESERVATION_FAILED:${table}:${id}:${differing ?? "row"}`);
+      }
+    }
+  }
+}
+
+export async function certifyOrganizationRestore(input: { adminUrl: string; runtimeUrl: string; organizationId: string; tables: Array<{ table: string; rows: number }>; parsedBackup: ParsedBackup }) {
   const pool = new Pool({ connectionString: input.runtimeUrl, max: 1 });
   const client = await pool.connect();
   try {
@@ -79,6 +121,16 @@ export async function certifyOrganizationRestore(input: { adminUrl: string; runt
         return result;
       });
     } finally { await db.$disconnect(); }
+    {
+      const valuePool = new Pool({ connectionString: input.adminUrl, max: 1 });
+      try {
+        const actual = Object.fromEntries(await Promise.all(RESTORE_VALUE_TABLES.map(async table => {
+          const result = await valuePool.query(`SELECT * FROM "${table}" WHERE "organizationId"=$1 ORDER BY "id"`, [input.organizationId]);
+          return [table, result.rows as Array<Record<string, unknown>>];
+        })));
+        assertOrganizationRestoreValues(input.parsedBackup, input.organizationId, actual);
+      } finally { await valuePool.end(); }
+    }
     const admin = new Pool({ connectionString: input.adminUrl, max: 1 });
     const auditor = await admin.connect();
     let audit;

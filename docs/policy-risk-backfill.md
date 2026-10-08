@@ -89,6 +89,74 @@ mode rejects `--apply`; it does not create a Production conversion run or
 change any row. The manifest is marked
 `PRODUCTION_READ_ONLY_PREVIEW` and cannot be used by the disposable apply path.
 
+## Whole-organization read-only inventory reconciliation
+
+The candidate manifest above covers only policies with null `riskDetails`. To
+account for all policies in one explicitly selected organization, use the
+separate inventory report mode. It includes policies with populated or empty
+`riskDetails`, across policy types and statuses. It does not discover
+organizations or cross the supplied organization boundary.
+
+```sh
+npm run backfill:policy-risk-details -- \
+  --production-inventory-report --organization-id=ORG_ID \
+  --report-file=/private/tmp/policy-risk-inventory-ORG_ID.json
+```
+
+The inventory mode uses the same dedicated read-only Production connection and
+host/database binding as the preview. It opens one `REPEATABLE READ, READ ONLY`
+transaction, verifies the configured role, checks table-level write privileges
+and column-level `INSERT`, `UPDATE`, and `REFERENCES` privileges on the tables
+it reads, sets the explicit tenant context, and pages policies in ID order at
+most 50 at a time. It reconciles the page count with the database count before
+writing a private (`0600`) report outside the repository. The report includes
+policy IDs/numbers, type, status, client portfolio owner ID, disposition,
+reason, and totals by type, status, and portfolio owner. It omits raw risk
+details and legacy source text.
+
+`ALREADY_STRUCTURED` means stored `riskDetails` passes the current schema, its
+embedded `policyType` matches the policy row, review is not required, and at
+least one data field is nonempty. This recognizes populated structured data;
+it does not verify optional fields or independent review. Malformed,
+mismatched, review-required, and empty structured values are `DEFERRED` with
+explicit reasons. A null row without usable legacy description, asset,
+insured party, or beneficiary is also `DEFERRED`; a null row with source data
+remains `PENDING` unless linked to an apply result.
+
+To link a private apply result, provide the private result path, its exact
+manifest digest, the reviewed manifest path, and `outcomeReportSha256` printed
+by the apply command. The latter is the SHA-256 of the exact private result
+file bytes; it binds the report consumed by the inventory without placing
+policy or outcome details in command output. Keep both files private.
+
+```sh
+npm run backfill:policy-risk-details -- \
+  --production-inventory-report --organization-id=ORG_ID \
+  --outcome-report=/private/tmp/policy-risk-backfill-result.json \
+  --outcome-reviewed-manifest=/private/tmp/policy-risk-backfill-preview.json \
+  --outcome-manifest-sha256=REVIEWED_MANIFEST_SHA \
+  --outcome-report-sha256=OUTCOME_REPORT_SHA_FROM_APPLY \
+  --report-file=/private/tmp/policy-risk-inventory-ORG_ID.json
+```
+
+The inventory requires the outcome candidate SHA to match the current Git HEAD,
+verifies the reviewed manifest content and reviewed digests, and compares each
+outcome's policy ID and input hash to that manifest. It also verifies the
+matching `MaintenanceRun` by ID, organization, type, status, candidate SHA,
+manifest digests, and a hash of the complete per-policy outcomes saved in the
+run summary. The read-only role needs `SELECT` on `MaintenanceRun` fields `id`,
+`organizationId`, `type`, `status`, and `summaryJson`; the inventory query reads
+only those fields under the selected organization's RLS context. The outcome
+report must be private, match the supplied file digest and selected organization
+and manifest digest, and contain only policy IDs in the inventory.
+`APPLIED` or `ALREADY_APPLIED`
+counts as applied only when the current row has recognized structured data; an
+applied outcome paired with null `riskDetails` is deferred as a conflict. A
+linked `DEFERRED` or `EMPTY` outcome remains deferred with an explicit reason,
+even if the current row now has structured data. Rows without outcomes remain
+pending unless they have no usable source. The inventory report is read-only
+reconciliation evidence; it does not amend manifests or perform writes.
+
 ## Production apply capability status
 
 The CLI has a separate `--production-apply` path, but it is blocked by default

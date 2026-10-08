@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   assertDisposableCertificationTarget,
+  assertRestorePurposeGuard,
   assertRemoteTenantBackupTarget,
   canonicalNeonHost,
   certificationFingerprint,
+  certificationPurpose,
 } from "../../scripts/tenant-certification-target.mjs";
 
 const baseEnv = {
@@ -44,6 +46,42 @@ describe("tenant certification target guard", () => {
     };
     expect(assertDisposableCertificationTarget(`postgresql://owner:test@${host}/${database}`, env).mode).toBe("neon");
     expect(canonicalNeonHost("ep-certification-pooler.c-7.us-east-1.aws.neon.tech")).toBe(host);
+  });
+
+  it("accepts restore purpose only for the explicit full-SHA target and keeps backup source-only", () => {
+    const sha = "a".repeat(40);
+    const runId = "restore-run";
+    const database = "neondb";
+    const branchId = "br-restore-target";
+    const branchName = `restore-cert-stage3-${sha}`;
+    const host = "ep-restore.c-7.us-east-1.aws.neon.tech";
+    const env = {
+      ...baseEnv,
+      TENANT_CERTIFICATION_PURPOSE: "restore",
+      ALLOW_TEMPORARY_NEON_RESTORE: "true",
+      TENANT_CERTIFICATION_REMOTE_BRANCH: "1",
+      CERTIFICATION_CANDIDATE_SHA: sha,
+      TENANT_ISOLATION_REMOTE_BRANCH: "1",
+      TENANT_ISOLATION_RUN_ID: runId,
+      TENANT_ISOLATION_DB_NAME: database,
+      TENANT_ISOLATION_FINGERPRINT: certificationFingerprint({ mode: "neon", runId, database, host, branchId, branchName }),
+      TENANT_ISOLATION_BRANCH_ID: branchId,
+      TENANT_ISOLATION_BRANCH_NAME: branchName,
+      TENANT_ISOLATION_NEON_HOST: host,
+    };
+    const admin = `postgresql://owner:test@${host}/${database}`;
+    const runtime = `postgresql://policydesk_app:test@${host.replace(".", "-pooler.")}/${database}`;
+    expect(assertDisposableCertificationTarget(admin, env, "restore", sha).branchName).toBe(branchName);
+    expect(() => assertDisposableCertificationTarget(admin, { ...env, TENANT_CERTIFICATION_PURPOSE: "source" }, "restore", sha)).toThrow("TENANT_CERTIFICATION_RESTORE_OPT_IN_REQUIRED");
+    expect(() => assertDisposableCertificationTarget(admin, { ...env, TENANT_ISOLATION_BRANCH_NAME: `restore-cert-stage3-${sha.slice(0, 8)}` }, "restore", sha)).toThrow("TENANT_CERTIFICATION_BRANCH_NAME_INVALID");
+    expect(() => assertRestorePurposeGuard({ CERTIFICATION_CANDIDATE_SHA: sha }, sha)).toThrow("ALLOW_TEMPORARY_NEON_RESTORE_REQUIRED");
+    expect(() => assertRestorePurposeGuard({ ALLOW_TEMPORARY_NEON_RESTORE: "true" }, sha)).toThrow("CERTIFICATION_CANDIDATE_SHA_REQUIRED");
+    expect(() => assertRestorePurposeGuard({ ALLOW_TEMPORARY_NEON_RESTORE: "true", CERTIFICATION_CANDIDATE_SHA: sha }, "b".repeat(40))).toThrow("RESTORE_CANDIDATE_SHA_MISMATCH");
+    expect(() => assertRemoteTenantBackupTarget(admin, runtime, { ...env, ALLOW_OPERATOR_BACKUP: "1" })).toThrow("TENANT_CERTIFICATION_BRANCH_NAME_INVALID");
+  });
+
+  it("fails closed for an unknown certification purpose", () => {
+    expect(() => certificationPurpose({ ...baseEnv, NODE_ENV: "test", TENANT_CERTIFICATION_PURPOSE: "other" } as NodeJS.ProcessEnv)).toThrow("TENANT_CERTIFICATION_PURPOSE_INVALID");
   });
 
   it("rejects Vercel Preview even with all disposable guards enabled", () => {

@@ -3,7 +3,7 @@ import "dotenv/config";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Pool } from "pg";
-import { assertDisposableCertificationTarget } from "./tenant-certification-target.mjs";
+import { assertDisposableCertificationTarget, certificationPurpose } from "./tenant-certification-target.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -44,11 +44,22 @@ async function ensureCertificationMarker(adminUrl: string, target: Certification
         created_at timestamptz NOT NULL DEFAULT now()
       )
     `);
-    await pool.query('DELETE FROM "__policydesk_tenant_isolation_run"');
-    await pool.query(
-      'INSERT INTO "__policydesk_tenant_isolation_run" (run_id, database_name, host, fingerprint) VALUES ($1, $2, $3, $4)',
-      [target.runId, target.database, target.host, target.fingerprint],
-    );
+    if (process.env.TENANT_CERTIFICATION_PURPOSE === "restore") {
+      const existing = await pool.query<{ run_id: string; database_name: string; host: string; fingerprint: string }>('SELECT run_id, database_name, host, fingerprint FROM "__policydesk_tenant_isolation_run"');
+      if (existing.rows.length > 1 || existing.rows.some((row) => row.run_id !== target.runId || row.database_name !== target.database || row.host !== target.host || row.fingerprint !== target.fingerprint)) {
+        throw new Error("RESTORE_CERTIFICATION_MARKER_CONFLICT");
+      }
+      if (!existing.rows.length) await pool.query(
+        'INSERT INTO "__policydesk_tenant_isolation_run" (run_id, database_name, host, fingerprint) VALUES ($1, $2, $3, $4)',
+        [target.runId, target.database, target.host, target.fingerprint],
+      );
+    } else {
+      await pool.query('DELETE FROM "__policydesk_tenant_isolation_run"');
+      await pool.query(
+        'INSERT INTO "__policydesk_tenant_isolation_run" (run_id, database_name, host, fingerprint) VALUES ($1, $2, $3, $4)',
+        [target.runId, target.database, target.host, target.fingerprint],
+      );
+    }
   } finally {
     await pool.end();
   }
@@ -105,11 +116,12 @@ async function main() {
     throw new Error("TENANT_RLS_CERTIFICATION_REQUIRES_DISPOSABLE_TEST_DB");
   }
   const adminUrl = required("DATABASE_ADMIN_URL");
-  const target = assertDisposableCertificationTarget(adminUrl, env);
+  const target = assertDisposableCertificationTarget(adminUrl, env, certificationPurpose(env));
   required("TENANT_RLS_APP_ROLE");
   required("TENANT_RLS_ORG_A");
   required("TENANT_RLS_ORG_B");
 
+  if (env.TENANT_CERTIFICATION_PURPOSE === "restore") await runNpm("db:migrate:singleton-ci", env);
   await ensureCertificationMarker(adminUrl, target);
   await runNpm("test:tenant-fixture", env);
   await runNpm("maintenance:enter", env);

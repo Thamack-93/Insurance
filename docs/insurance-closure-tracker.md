@@ -1,70 +1,90 @@
-# Insurance closure tracker
+# Insurance — inventario único de cierre
 
-Última actualización: 2026-10-05. Inventario consolidado para este chat y los chats fuente. Evidencia de código y operaciones separada; no declarar DEMO lista hasta pasar los gates de corte y acceso.
+Actualizado: 2026-10-07, America/Mexico_City. Coordinador: este chat (`01a0f61d-4183-7480-b783-b034e027858a`). Goal activo. La transferencia de chats organiza el historial; no acredita cierre productivo.
 
-## Chats fuente
+## Objetivo y responsables
 
-| Chat | Thread | Entrega transferida |
+Completar el backfill auditable de todas las pólizas, la comparación de renovaciones y una organización DEMO sintética con un usuario en la URL actual. Publicar READY FOR DAILY USE y READY FOR EXTERNAL DEMO ACCESS solo con evidencia verificable.
+
+| Responsable | Modelo | Trabajo y checkout |
 | --- | --- | --- |
-| Coordina los chats del proyecto | 01a0f61d-4183-7480-b783-b034e027858a | Coordinación e inventario común |
-| Add vehicle descriptions to policies | 01a0f5e6-2b9f-72c1-90d7-6df71043b287 | Identificación de pólizas y cotejo documental |
-| Audit Demo organization support | 01a0f587-a833-7f81-a2ff-110a3f089bdd | Capacidades y aislamiento DEMO |
-| Audit PolicyDesk demo sandbox | 01a0adb3-f260-76d0-8acc-4dac70465893 | Restore temporal Neon y aislamiento |
-| Certify PolicyDesk demo access | 01a0c49b-0147-79c3-9b14-57063e8f8c2f | Certificación de acceso DEMO |
-| Corrige seguimiento de renovaciones | 01a0fe42-c8bf-7223-9601-1b8a3cd7a4e1 | Renovaciones y pendientes operativos; chat archivado |
+| Coordinador | GPT-6.1 Sol / high | Integración, revisión, credenciales, GitHub/Vercel/Neon, operaciones productivas, tracker y aceptación |
+| ci_close_luna | GPT-6 Luna / medium | PR #87, tests y CI; worktree insurance-ci-close |
+| renewal_close_luna | GPT-6 Luna / medium | Comparación/preparación; reutiliza worktree renewal-comparison |
+| demo_close_luna | GPT-6 Luna / medium | Pruebas/fixtures, reset y documentación; worktree insurance-demo-close |
 
-Los otros cuatro chats permanecen abiertos hasta cerrar los entregables transferidos.
+Cada subagente trabaja en su checkout. Solo el coordinador publica ramas, dispara Actions y opera recursos remotos. Se preserva el checkout compartido en Desktop/Insurance, incluidos cambios y archivos duplicados no atribuidos.
 
-## Estado verificado
+## Transferencia de chats
 
-- PR #73 (campos estructurados por ramo), #78 (reporte auditable de backfill) y #80 (preview read-only) están integrados.
-- Vercel Production: el deployment creado tras fusionar PR #85 quedó `READY` en SHA documental `7293583faf26fd5c1c9e0e66d0e7fd1867dca4aa` (deployment `dpl_HP5yeVkFdnahSvRAfxpWR7jMYfVc`); el código de aplicación sigue en `cfd223e90ff4a37f2ba493bad36b6625569c82d3`, alias `policypete.vercel.app`. PR #85 solo cambió documentación.
-- GitHub Actions run #464 terminó `SUCCESS` en el head `b8d16e5` de PR #82: quality, tenant-isolation y application. Application incluyó restore/backfill integration en PostgreSQL desechable, build, API y E2E; tenant-isolation pasó migraciones, fixture de dos organizaciones, RLS y Chromium E2E con rol restringido. La base desechable se eliminó. El run #474 de [PR #85](https://github.com/Thamack-93/Insurance/pull/85) también terminó `SUCCESS` en el head exacto `6765e6d`, con los tres jobs en verde; ese PR solo cambió documentación.
-- La certificación local previa del snapshot exacto `cfd223e` pasó build, 16 tests tenant, RLS (42 tablas, 27 checks de contexto, 24 workers), drift, auditoría multi-org y 11 tests API/browser. Es evidencia complementaria, no reemplazo de CI.
-- Insights autenticado cargó en Production: 121 renovaciones, 1 señal de cobranza, 0 siniestros y 4 de trabajo. La primera página incluye renovaciones vencidas desde 2024/2025. Es backlog operativo que requiere revisión humana; no se modificaron registros.
+| Chat fuente | Thread ID | Pendientes transferidos | Estado del historial |
+| --- | --- | --- | --- |
+| Certify PolicyDesk demo access | 01a0c49b-0147-79c3-9b14-57063e8f8c2f | Manifiesto real, backfill, restore, cutover y aceptación DEMO; gates D01–D09 | Transferido y archivado el 2026-10-07 |
+| Audit Demo organization support | 01a0f587-a833-7f81-a2ff-110a3f089bdd | SUPERADMIN/flag efectivos, cobertura DEMO omitida, restricciones y docs/reset; D04–D09 | Transferido y archivado el 2026-10-07 |
+| Audit PolicyDesk demo sandbox | 01a0adb3-f260-76d0-8acc-4dac70465893 | Procedencia de ramas/artefacto, destino independiente, restore CLI completo; D03 | Transferido y archivado el 2026-10-07 |
+| Add vehicle descriptions to policies | 01a0f5e6-2b9f-72c1-90d7-6df71043b287 | Todas las pólizas y cotejo documental; D02 | Historial; los datos no se consideran convertidos |
+| Corrige seguimiento de renovaciones | 01a0fe42-c8bf-7223-9601-1b8a3cd7a4e1 | Renovaciones/Operations integradas por PR #88 | Archivado previamente; conservar implementación |
 
-## Pendientes y aceptación
+Los tres chats DEMO se releerieron el 2026-10-07; estaban idle y sus últimas auditorías no contenían nuevos cambios de código ni operaciones productivas. Sus informes antiguos de CI #513 y de SHA 622e5745/cfd223e son históricos; se actualizan mediante evidencia nueva en este tracker. Sus archivos y diffs compartidos permanecen en el checkout original.
 
-| Tema | Estado y criterio de cierre |
-| --- | --- |
-| Campos por ramo | Código y migración aditiva integrados y desplegados. Campos nuevos visibles; no afirmar que los datos históricos ya fueron convertidos. |
-| Backfill de pólizas | Preview read-only integrado. Falta una conexión Production dedicada `policydesk_readonly` y generar/revisar el manifiesto por organización. El CLI actual no admite `--apply` contra Production: `--production-preview` lo rechaza y cualquier modo de escritura exige las guardas de base desechable. Implementar y certificar un modo productivo explícito, limitado por organización y auditable antes de preparar lotes; aplicar solo con manifiesto revisado y aprobación explícita. No se aplicó backfill. |
-| Cotejo documental | La matriz de segunda pasada contiene 13 filas: 4 resueltas documentalmente, 6 con contratante y asegurado confirmados por el usuario, y 3 casos de auto aún accionables. Para las seis de accidentes, conservar solo los dos datos confirmados; no inferir otros campos ni marcarlas como faltantes. Los tres autos se revisaron en Production mediante consulta autenticada de solo lectura; se mantienen separadas la vista de la app y las aclaraciones del usuario. Los datos identificables están solo en el informe local. |
-| Renovaciones / Operations | Código integrado y desplegado; flujos de seguimiento disponibles. La cartera de Insights aún necesita triage humano. |
-| Operational Insights | Implementado y visible en Production; cuatro grupos, filtros y enlaces autenticados comprobados. Las señales visibles cambian con los datos y requieren atención operativa. |
-| CI y despliegue | Run #464 SUCCESS certificó tenant-isolation y application para el código `cfd223e`; run #474 SUCCESS cubrió el head documental de PR #85 (`6765e6d`). Vercel Production quedó READY en el merge documental de PR #85 (`7293583`); la aplicación no cambió. Todo nuevo cambio de aplicación requiere certificación exact-SHA. |
-| Restore remoto | Pendiente. Requiere validar artefacto, branch destino y PASS del restore CLI con conteos, FK, ciclos Payment, cancelación/renovación Policy/Receipt, Notifications, WorkItems, secuencias, lecturas de aplicación y Prisma drift. Mantener `RESTORE_DRILL_APP_SMOKE=0`. |
-| DEMO privada | No se ha creado ni entregado usuario externo. Requiere cutover aprobado, aislamiento, login/cambio de contraseña, límites, reset/revocación y verificación escritorio/móvil. |
-| Cutover | No aprobado ni realizado. Presentar evidencia y procedimiento concreto de recuperación antes de solicitar aprobación explícita. |
+## Código y evidencia actual
 
-### Backfill: fuente documental
+- Última evidencia autenticada de main y Production: merge #87 `3b396f5f62f69ce359e4d07755c9ea2aef68b160`; Vercel deployment `dpl_HkkfsqXD4rAj7fomZ6cdiH1abb9i`, READY, alias `policypete.vercel.app` sirviendo ese SHA (verificado por GitHub y `vercel inspect`). La referencia anterior `fd1f734`/`dpl_9eXyg2gsmEPFp11U4UmTnXgQgtxs` era el deployment previo. La sesión actual de Pedro accede al tenant pero `/platform/organizations` redirige a `/today`, coherente con el requisito SUPERADMIN.
+- PR #91 y #87 integrados. CI #577 (37722760520), head `9060b06352400811d4b022f8816b354ee158b63d`: quality, tenant-isolation y application PASS. Merge #87: `3b396f5f62f69ce359e4d07755c9ea2aef68b160`. Estos resultados prueban ese PR/SHA, no el candidato integrado local ni pendientes de datos/restore/DEMO.
+- Run histórico #546: 61 E2E pasaron, 3 fallaron, 16 omitidos. Sus tres selectores obsoletos están corregidos en main. También se comprobó un evento de menú absorbido por el pan del tablero: main fd1f734 ya incluye la corrección; se incorporó sin duplicarla.
+- Candidato #87 local: build, TypeScript, lint, inventario, scope read/write y diff-check PASS. Unit: 708 PASS, 12 skipped; 124 archivos PASS, 6 skipped. Writer PostgreSQL forzado-RLS PASS, incluida inserción propia, rechazo cruzado, rollback y reanudación. Operations 12/12 PASS; navegación de renovación enfocada 1/1 PASS. DEMO API existente 2/2 PASS bajo policydesk_app. Los skips no acreditan integración.
+- Candidato unificado local, basado en main `3b396f5`: inventario completo de pólizas por organización y guardas del restore revisados; outcome ligado a reviewed manifest, candidato, MaintenanceRun y SHA de archivo. Últimos gates locales: 19/19 tests focalizados, TypeScript, ESLint, tenant read/write scope, build y diff-check PASS. El unitario completo anterior fue 738 PASS/12 skipped antes de los dos últimos hardenings. Este candidato aún no está publicado ni certificado en GitHub; no hubo conexión a Neon ni operaciones Production.
+- Comparación/preparación: rama hasta d7df897486bbca996ecca280b56ab037c0eedc07; nueve unit tests PASS, lint/typecheck/scope/build PASS, dos E2E ordinario/PDF PASS y uno de origen/cartera PASS bajo runtime restringido. El origen de otra cartera no se muestra; el trigger rechaza una relación entre organizaciones. Campos del origen autorizado intactos. Signos y centavos corregidos en revisión. Integrado en candidato local único; sin publicación.
+- DEMO: integrada localmente hasta e06b76fa128429b608cf2da64ee9ddccd611e3f8. Reset exige motivo válido; parser rechaza otra bandera como valor (dos regresiones PASS). Caducidad de contraseña temporal probada. Tres API PASS en el candidato local 1b86f21, bajo policydesk_app y configuración permisiva igual a CI; búsqueda/export incluyen el seed propio y excluyen CUSTOMER, Nora/uploads rechazados. Primer intento local carecía del flag de exportación y fue rechazado correctamente; se preservó y diagnosticó antes de repetir, sin cambios de seguridad.
+- PostgreSQL local recuperado: se liberaron únicamente dos segmentos huérfanos propios de 56 bytes, sin conexiones/PIDs activos; servidor existente preservado. Cluster privado en loopback:55439. Los procesos/red requieren ejecución autorizada fuera del sandbox; no borrar PID por su invisibilidad desde el sandbox.
 
-La nueva fuente documental permite resolver un caso que constaba como incompleto. De las 13 filas, 4 están resueltas documentalmente, 6 conservan únicamente los campos de contratante y asegurado confirmados por el usuario, y 3 autos quedan como únicos seguimientos accionables. Una lectura autenticada y acotada de Production revisó esos tres registros; cualquier discrepancia entre la app y las aclaraciones del usuario permanece separada para revisión. No se modificaron datos ni se aplicó backfill. Los detalles identificables están solo en el informe local.
+## Estado productivo comprobado en solo lectura
 
-### Neon: procedencia y límites
+Auditoría 2026-10-08 03:40 UTC en la conexión Production del proyecto Vercel verificado, con default_transaction_read_only=on y transacción REPEATABLE READ READ ONLY: una organización LEGACY ACTIVE; 269 pólizas, 264 con riskDetails no nulo y 264 con insuredObject no vacío; cero RLS habilitados/forzados de 52 tablas con organizationId; writeMode OPEN. No se aplicó backfill ni cutover. Tener riskDetails no nulo no acredita que la conversión cubra todos sus campos o filas; D02 sigue pendiente del manifiesto completo.
 
-No confundir estos proyectos:
+Hay un SUPERADMIN activo sin membership. Los artefactos catalogados recientes de organización/plataforma son DATABASE_ONLY; el último VERIFIED de organización fue 2026-10-07. No acreditan recuperación de archivos ni el drill requerido. Los detalles privados/credenciales permanecen fuera del repositorio. El checkpoint debe distinguir estos límites.
 
-- `policydesk-certification-20261001`: el par antiguo de ramas de certificación fue rechazado por su procedencia. No usarlo.
-- `policydesk-insurance-drill-20261005`: proyecto temporal dedicado. `main` aparece vacío; la fuente `cert-stage3-132ada7c...` desciende de esa `main` y contiene marcador de fixture y migraciones esperadas. Se observaron dos filas BackupArtifact para una organización, tamaños 0 y 7003 bytes. El tamaño y metadatos no prueban que el backup sea íntegro ni recuperable.
-- El destino `restore-drill-132ada7c-20261005` deriva de la fuente, expiraba el 2026-10-06 a las 14:17:58 según la consola local y aparecía Idle; la vista de tablas no permitió confirmar su estado vacío. Inspeccionar su estado actual antes de reutilizarlo.
-- GitHub confirma que `132ada7c` está 22 commits detrás de Production `cfd223e`; esos cambios solo tocan documentos, CLI de backfill y pruebas de backfill. No cambian schema, migraciones ni código de backup/restore. El fixture podría reutilizarse si la procedencia/artefacto se valida y el destino pasa las comprobaciones con el código candidato.
-- La contraseña del rol temporal de la rama hija se expuso en una salida anterior. Rotarla manualmente en Neon antes de conectar; no compartir la nueva clave. No se ha realizado restore remoto.
-- La CLI Neon no está instalada en este host; un intento aislado con npm falló por resolución DNS. No usar variables compartidas Production/Preview ni secretos productivos.
+La auditoría del restore detectó prerrequisitos omitidos: el destino independiente necesita esquema/RLS, marcador propio y Organization/User/Plan dependientes antes del restore replace. El fixture también debe incluir campos de riesgo/bienes/personas/texto original y certificar valores, no solo conteos. Preparación CLI guardada en implementación antes de la única certificación final.
 
-### Procedimiento previo a un cutover
+## Pendientes, aceptación y evidencia
 
-1. Verificar que el recurso es el proyecto de drill, la rama destino deriva de la fuente autorizada y contiene únicamente fixture sintético.
-2. Rotar la credencial temporal expuesta; limitar cualquier credencial posterior al proyecto y recursos del drill. Revisar el alcance del runner antes de inyectarla.
-3. Restaurar solo por CLI en una rama Neon temporal. Mantener intacta la fuente y `RESTORE_DRILL_APP_SMOKE=0`.
-4. Exigir PASS del validador completo: conteos, FK, invariantes PolicyDesk/Payment, referencias Notification/WorkItem, secuencias, lecturas de aplicación, aislamiento y Prisma drift. Si falla, registrar FAIL y no conectar Production.
-5. Presentar SHA, informe sanitizado, rama origen/destino y procedimiento de recuperación. El rollback a una rama temporal no equivale a rollback automático de Production.
-6. Esperar aprobación explícita antes de cambiar variables productivas o hacer cutover. Tras aprobación, verificar clientes actuales y aislamiento; solo entonces provisionar una organización y usuario DEMO sintéticos.
-7. Probar login/cambio de contraseña, límites, documentos sintéticos, reset, revocación y escritorio/móvil. Cerrar el flag de provisión y observar un ciclo de jobs antes de declarar `READY FOR EXTERNAL DEMO ACCESS`.
+| ID | Entrega / responsable | Criterio de cierre | Estado / siguiente evidencia |
+| --- | --- | --- | --- |
+| D01 | Candidato de backfill y CI / CI + coordinador | Mecanismo writer con permisos mínimos/RLS forzado, aislamiento, rollback y reanudación; tests Operations y código completo pasan sobre SHA exacto | CERRADO CÓDIGO: #87 CI #577 tres jobs PASS, merge3b396f5 y Vercel Production READY en ese SHA. Aplicación productiva del backfill sigue D02/D04 |
+| D02 | Toda la base y cotejo / coordinador | Manifiesto privado por organización con todas las pólizas de todos los ramos, carteras y estados; reportar aplicadas, ya estructuradas y diferidas con motivo, incluida fuente ausente; totales sin omisiones ni duplicados | Código de inventario y apply endurecido localmente; no se generó manifiesto Production ni se aplicó backfill. Sigue pendiente CI del SHA final, acceso read-only para preview y revisión del reporte antes del apply ya autorizado |
+| D03 | Recuperación Neon / coordinador | Fuente sintética y destino hermanos independientes en proyecto autorizado, artefacto nuevo y restore CLI completo PASS | No PASS. Proyecto `red-silence-07828324`: `cert-stage3-132ada7c` es evidencia anterior; no hay ramas Stage 3 nuevas ni restore independiente. Se añadió guard local de migraciones reanudables (prefijo completo/checksums exactos) pero falta certificar el SHA, crear las ramas autorizadas y ejecutar el drill CLI |
+| D04 | Checkpoint y cutover / coordinador | SHA candidato, certificados, estado real Production, backup productivo comprobado y procedimiento de recuperación; aprobación explícita registrada; runtime/RLS/drift/clientes verificados | Preparar evidencia antes de pedir la aprobación productiva. Si el cutover ya está aplicado, verificarlo y omitir el cambio |
+| D05 | Acceso de plataforma / coordinador | SUPERADMIN activo y flag efectivo para la sesión autorizada; SHA desplegado y recorridos autenticados confirmados | Production3b396f5 READY; auditoría READ ONLY confirma1SUPERADMIN activo sin membership. Sesión actual tenant no tiene /platform; pendiente acceso de esa cuenta y flag efectivo |
+| D06 | Restricciones DEMO / DEMO + coordinador | Rechazos efectivos de uploads/importaciones/Nora/canales/proveedores y cero efectos externos aun con configuración permisiva; aislamiento en API/RLS/UI | Evidencia local enfocada: API DEMO 3/3 PASS y tenant/renovación 4/4 en candidato local, bajo runtime restringido y banderas permisivas equivalentes a CI. Falta certificar en SHA integrado final y completar aceptación live bajo RLS/roles reales; skips no cuentan como PASS |
+| D07 | Cuenta y documentos / coordinador | Una organización y un usuario emitidos; contraseña temporal 24h, cambio obligatorio, edición sintética persistida y PDF privado sintético descargable | No usuario externo emitido. Reutilizar provisión/seed y trial de 30 días existentes |
+| D08 | Reset y acceso / DEMO + coordinador | Reset idempotente con motivo, purga prefijo DEMO, CUSTOMER intacto, sesión revocada, suspensión/reactivación en escritorio/móvil | Pruebas enfocadas/locales y luego aceptación real pendientes |
+| D09 | Cierre provisión/jobs / coordinador | Flag apagado tras entrega, credencial final emitida después de resets/pruebas y primer ciclo normal de jobs sin efectos externos | Pendiente. Credenciales solo en canal seguro; evidencia sin secretos |
+| D10 | Comparación/preparación / renovaciones + coordinador | Estados CHANGED/ADDED/REMOVED/MISSING distintos; datos sin cambios inspeccionables; prima/moneda/frecuencia/riesgo/personas/bienes claros; legacy sin inferir; PDF y edición actualizan la misma comparación; origen no alterado por comparar; org/cartera respetadas | Código local, 9 unit y 3 E2E enfocados PASS, revisado. Candidato único preparado con DEMO; falta CI/publicación de la integración final. Avanza en paralelo y no bloquea DEMO |
+
+## Decisiones y límites vigentes
+
+- La aprobación anterior cubre integración y backfill controlado. El cutover conserva su aprobación explícita después de presentar el checkpoint concreto.
+- Orden productivo: código certificado → recuperación comprobada → checkpoint aprobado → cutover/verificación → backfill → DEMO. El writer exige RLS forzado; no ejecutar apply en singleton incompatible.
+- Una DEMO y un usuario son el alcance de esta entrega, no un nuevo límite global de usuarios/organizaciones. Reutilizar límites/capacidades existentes; no agregar infraestructura.
+- PR #94 (exact serial suggestions, 17 archivos y conflicto de merge) y Nora quedan fuera de este ciclo; no fusionar automáticamente ni duplicar sistemas.
+- La comparación es de lectura, sin esquema/rutas/estados de aprobación nuevos; preservar generación de recibos y Quálitas.
+- PostgreSQL de tests debe ser local desechable, con TENANT_ISOLATION_TEST_DB=1 y PLAYWRIGHT_ENFORCE_DISPOSABLE_DB=1. Nunca credenciales Production/Preview.
+- Sin corridas Actions por intentos especulativos. El coordinador publica candidatos con pruebas enfocadas y revisión; usar certificación completa del SHA final, compartida por los tres antiguos chats DEMO.
+
+## Backfill y fuentes documentales
+
+Conservar la matriz previa de 13 filas: 4 resueltas documentalmente, 6 con contratante/asegurado confirmados por el usuario y 3 autos accionables. No inferir otros campos en las seis de accidentes. Los detalles identificables están en el informe privado previo, no en este tracker. Estas 13 filas no delimitan el backfill: D02 cubre la base completa. Preservar insuredObject, riskDetails.sourceText, datos manuales y relaciones existentes; lotes reanudables de hasta 50.
+
+## Recuperación y checkpoint
+
+El proyecto de drill autorizado es policydesk-insurance-drill-20261005 (red-silence-07828324), distinto de Production. No reutilizar el destino vencido que heredó datos de la fuente; crear cert-stage3-S y restore-cert-stage3-S como hermanos con marcadores/fingerprints propios después de fijar S. La fuente contendrá campos nuevos, bienes, personas, texto original, pagos, cancelaciones, renovaciones, Notifications y WorkItems.
+
+Restore exclusivamente mediante CLI existente, sobre destino temporal autorizado, con clave exclusiva del drill y RESTORE_DRILL_APP_SMOKE=0. Exigir conteos, FK públicos, Payment POSTED/REVERSED, invariantes de Policy/Receipt/cancelación/renovación, referencias Notification, compatibilidad WorkItem canónica/legacy, secuencias, lecturas bajo rol restringido y Prisma drift. session_replication_role=replica solo dentro de la transacción; origin antes de validar; rollback al fallar.
+
+El drill sintético no acredita recuperación de un backup productivo concreto. El checkpoint debe describir responsable, backup productivo comprobado, destino temporal de recuperación y pasos para cambiar la conexión de aplicación al destino recuperado. Restaurar una rama temporal no revierte Production automáticamente. Credenciales temporales limitadas al recurso autorizado, nunca en repo/chat; no vercel env pull.
 
 ## Estados finales
 
-- `READY FOR DAILY USE`: mejoras desplegadas, recorridos autenticados verificados y triage/backfill operativo acordado.
-- `READY FOR EXTERNAL DEMO ACCESS`: restore/isolation/cutover aprobado; DEMO sintética y sus restricciones verificadas.
-
-Ambos son independientes. Hoy Production tiene las mejoras desplegadas y la CI pasa, pero el manifiesto/backfill, triage documental, restore remoto y aceptación DEMO siguen pendientes. No archivar un chat fuente hasta cotejar su entrega con esta lista y adjuntar evidencia de cierre.
+- READY FOR DAILY USE: mejoras comprometidas/desplegadas en SHA verificable, recorridos autenticados y D01/D02/D10 cerrados con evidencia.
+- READY FOR EXTERNAL DEMO ACCESS: D03–D09 cerrados con evidencia real, aprobación de checkpoint y cuenta sintética entregada.
+- El Goal solo se completa con ambas entregas y todos los pendientes transferidos contabilizados. Archivar un chat tras transferirlo no significa completar su entrega.

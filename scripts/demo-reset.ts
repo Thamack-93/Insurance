@@ -1,26 +1,21 @@
 import "dotenv/config";
 
 import { resetDemoOrganizationForCli } from "../src/lib/demo-organizations.ts";
-
-function option(name: string) {
-  const index = process.argv.indexOf(name);
-  return index >= 0 ? process.argv[index + 1]?.trim() : undefined;
-}
+import { parseDemoResetArguments } from "./demo-reset-arguments.ts";
 
 function usage(): never {
-  console.error("Uso: npm run demo:reset -- --organization-id <DEMO_ID> --request-id <ID> [--dry-run] [--reason <texto>]");
+  console.error("Uso: npm run demo:reset -- --organization-id <DEMO_ID> --request-id <ID> --reason <texto de al menos 8 caracteres> [--dry-run]");
   process.exit(2);
 }
 
 async function main() {
-  if (process.argv.includes("--help")) {
-    console.log("Uso: npm run demo:reset -- --organization-id <DEMO_ID> --request-id <ID> [--dry-run] [--reason <texto>]");
+  const { organizationId, requestId, reason, dryRun, help } = parseDemoResetArguments(process.argv.slice(2));
+  if (help) {
+    console.log("Uso: npm run demo:reset -- --organization-id <DEMO_ID> --request-id <ID> --reason <texto de al menos 8 caracteres> [--dry-run]");
     return;
   }
-  const organizationId = option("--organization-id");
-  const requestId = option("--request-id");
-  if (!organizationId || !requestId) usage();
-  const result = await resetDemoOrganizationForCli(organizationId, requestId, process.argv.includes("--dry-run"), option("--reason") ?? "operator CLI demo reset");
+  if (!organizationId || !requestId || !reason) usage();
+  const result = await resetDemoOrganizationForCli(organizationId, requestId, dryRun, reason);
   console.log(JSON.stringify({ ok: true, ...result }, null, 2));
 }
 

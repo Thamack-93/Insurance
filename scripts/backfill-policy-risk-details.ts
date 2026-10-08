@@ -19,8 +19,10 @@ import {
   type PolicyRiskBackfillManifestRow,
 } from "../src/lib/policy-risk-backfill-manifest.ts";
 import { convertLegacyPolicyDescription, hasPolicyRiskData, projectPolicyRiskRelations, riskDetailsFromExisting, summarizePolicyRiskDetails } from "../src/lib/policy-risk-details.ts";
+import { assertPolicyRiskInventoryOutcomeRun, parseVerifiedPolicyRiskInventoryOutcomeReport, reconcilePolicyRiskInventory, type PolicyRiskInventoryInput, type PolicyRiskInventoryOutcomeReport } from "../src/lib/policy-risk-inventory-reconciliation.ts";
 
 const PAGE_SIZE = 200;
+const INVENTORY_PAGE_SIZE = 50;
 const MAX_BATCH_SIZE = 500;
 const MAX_PRODUCTION_BATCH_SIZE = 50;
 const APPLY_CONFIRMATION = "APPLY_POLICY_RISK_BACKFILL";
@@ -55,7 +57,7 @@ function candidateSha() {
 
 async function processorSha256() {
   const digest = createHash("sha256");
-  for (const file of ["scripts/backfill-policy-risk-details.ts", "src/lib/policy-risk-details.ts", "src/lib/policy-risk-backfill-manifest.ts"]) {
+  for (const file of ["scripts/backfill-policy-risk-details.ts", "src/lib/policy-risk-details.ts", "src/lib/policy-risk-backfill-manifest.ts", "src/lib/policy-risk-inventory-reconciliation.ts"]) {
     digest.update(file).update("\0").update(await readFile(path.resolve(file)));
   }
   return digest.digest("hex");
@@ -170,10 +172,27 @@ async function assertProductionPreviewRole(tx: Prisma.TransactionClient, connect
     JOIN pg_namespace n ON n.oid = c.relnamespace
     CROSS JOIN (VALUES ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS privilege(privilege)
     WHERE n.nspname = 'public'
-      AND c.relname IN ('Organization', 'Policy', 'PolicyInsuredAsset', 'PolicyInsuredParty')
-      AND has_table_privilege(current_user, c.oid, privilege.privilege)
+      AND c.relname IN ('Organization', 'Policy', 'Client', 'PolicyInsuredAsset', 'PolicyInsuredParty', 'MaintenanceRun')
+      AND (
+        has_table_privilege(current_user, c.oid, privilege.privilege)
+        OR CASE
+          WHEN privilege.privilege IN ('INSERT', 'UPDATE', 'REFERENCES')
+            THEN has_any_column_privilege(current_user, c.oid, privilege.privilege)
+          ELSE false
+        END
+      )
   `);
   if (writePrivileges.length) throw new Error("POLICY_RISK_BACKFILL_PREVIEW_ROLE_HAS_WRITE_PRIVILEGES");
+  const maintenanceRunReadPrivileges = await tx.$queryRaw<Array<{ columnName: string }>>(Prisma.sql`
+    SELECT required.column_name AS "columnName"
+    FROM (VALUES ('id'), ('organizationId'), ('type'), ('status'), ('summaryJson')) AS required(column_name)
+    LEFT JOIN pg_class relation ON relation.relname = 'MaintenanceRun'
+      AND relation.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+    LEFT JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+    LEFT JOIN pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attname::text = required.column_name AND attribute.attnum > 0 AND NOT attribute.attisdropped
+    WHERE namespace.oid IS NULL OR attribute.attnum IS NULL OR NOT has_column_privilege(current_user, relation.oid, attribute.attnum, 'SELECT')
+  `);
+  if (maintenanceRunReadPrivileges.length) throw new Error("POLICY_RISK_BACKFILL_PREVIEW_ROLE_MISSING_MAINTENANCE_RUN_READ_PRIVILEGES");
 }
 
 async function scanProductionReadOnly(prisma: PrismaClient, organizationId: string, connectionString: string, policyNumbers: string[] | null) {
@@ -188,6 +207,74 @@ async function scanProductionReadOnly(prisma: PrismaClient, organizationId: stri
     if (!organization) throw new Error("POLICY_RISK_BACKFILL_PREVIEW_ORGANIZATION_NOT_VISIBLE");
     return scanAll(tx, organizationId, policyNumbers);
   });
+}
+
+async function scanPolicyInventory(tx: Prisma.TransactionClient, organizationId: string) {
+  const policies: PolicyRiskInventoryInput[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await tx.policy.findMany({
+      where: { organizationId, ...(cursor ? { id: { gt: cursor } } : {}) },
+      select: {
+        id: true,
+        policyNumber: true,
+        policyType: true,
+        status: true,
+        riskDetails: true,
+        riskDetailsReviewRequired: true,
+        insuredObject: true,
+        beneficiaryInfo: true,
+        client: { select: { portfolioOwnerId: true } },
+        insuredAssets: { select: { description: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+        insuredParties: { select: { fullName: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+      },
+      orderBy: { id: "asc" },
+      take: INVENTORY_PAGE_SIZE,
+    });
+    if (!page.length) break;
+    policies.push(...page.map((policy) => ({
+      policyId: policy.id,
+      policyNumber: policy.policyNumber,
+      policyType: policy.policyType,
+      status: policy.status,
+      portfolioOwnerId: policy.client.portfolioOwnerId,
+      riskDetails: policy.riskDetails,
+      riskDetailsReviewRequired: policy.riskDetailsReviewRequired,
+      insuredObject: policy.insuredObject,
+      beneficiaryInfo: policy.beneficiaryInfo,
+      assets: policy.insuredAssets,
+      insuredParties: policy.insuredParties,
+    })));
+    cursor = page[page.length - 1].id;
+    if (page.length < INVENTORY_PAGE_SIZE) break;
+  }
+  return policies;
+}
+
+async function scanProductionInventoryReadOnly(prisma: PrismaClient, organizationId: string, connectionString: string, outcomeReport: PolicyRiskInventoryOutcomeReport | undefined, expectedCandidateSha: string) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+    await assertProductionPreviewRole(tx, connectionString);
+    const tenantContext = await tx.$queryRaw<Array<{ organizationId: string }>>(Prisma.sql`
+      SELECT set_config('app.organization_id', ${organizationId}, true) AS "organizationId"
+    `);
+    if (tenantContext[0]?.organizationId !== organizationId) throw new Error("POLICY_RISK_INVENTORY_TENANT_CONTEXT_FAILED");
+    const organization = await tx.organization.findUnique({ where: { id: organizationId }, select: { id: true } });
+    if (!organization) throw new Error("POLICY_RISK_INVENTORY_ORGANIZATION_NOT_VISIBLE");
+    if (outcomeReport) {
+      const maintenanceRun = await tx.maintenanceRun.findFirst({
+        where: { id: outcomeReport.maintenanceRunId, organizationId, type: "POLICY_RISK_BACKFILL" },
+        select: { id: true, organizationId: true, type: true, status: true, summaryJson: true },
+      });
+      assertPolicyRiskInventoryOutcomeRun({ report: outcomeReport, run: maintenanceRun, organizationId, expectedCandidateSha });
+    }
+    const [policies, databasePolicyCount] = await Promise.all([
+      scanPolicyInventory(tx, organizationId),
+      tx.policy.count({ where: { organizationId } }),
+    ]);
+    if (policies.length !== databasePolicyCount) throw new Error("POLICY_RISK_INVENTORY_DATABASE_COUNT_MISMATCH");
+    return policies;
+  }, { maxWait: 10_000, timeout: 120_000 });
 }
 
 const PRODUCTION_APPLY_COLUMN_PRIVILEGES = new Map<string, Map<string, Set<string>>>([
@@ -574,7 +661,7 @@ async function writePrivateManifest(file: string, manifest: unknown) {
   return resolved;
 }
 
-async function readReviewedManifest(file: string): Promise<PolicyRiskBackfillManifest> {
+async function readPrivateReportBytes(file: string) {
   const resolved = path.resolve(file);
   if (!path.isAbsolute(file)) throw new Error("POLICY_RISK_BACKFILL_REPORT_PATH_MUST_BE_ABSOLUTE");
   if (!path.relative(process.cwd(), resolved).startsWith("..") && !path.isAbsolute(path.relative(process.cwd(), resolved))) {
@@ -582,16 +669,24 @@ async function readReviewedManifest(file: string): Promise<PolicyRiskBackfillMan
   }
   const metadata = await stat(resolved);
   if ((metadata.mode & 0o077) !== 0) throw new Error("POLICY_RISK_BACKFILL_REPORT_PERMISSIONS_MUST_BE_0600");
-  return JSON.parse(await readFile(resolved, "utf8")) as PolicyRiskBackfillManifest;
+  return readFile(resolved);
+}
+
+async function readReviewedManifest(file: string): Promise<PolicyRiskBackfillManifest> {
+  return JSON.parse((await readPrivateReportBytes(file)).toString("utf8")) as PolicyRiskBackfillManifest;
 }
 
 async function main() {
   const organizationId = arg("organization-id")?.trim();
   if (!organizationId) throw new Error("Indica una organización explícita con --organization-id=ID.");
   const productionPreview = process.argv.includes("--production-preview");
+  const productionInventoryReport = process.argv.includes("--production-inventory-report");
   const productionApply = process.argv.includes("--production-apply");
   const apply = process.argv.includes("--apply");
   const policyNumbers = selectedPolicyNumbers();
+  if (productionInventoryReport && (productionPreview || productionApply || apply || process.argv.includes("--print-reviewed-digest") || policyNumbers || arg("confirm-apply") || arg("confirm-production-apply"))) {
+    throw new Error("POLICY_RISK_INVENTORY_MODE_IS_EXCLUSIVE");
+  }
   if (productionApply && !policyNumbers?.length) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_POLICY_NUMBER_SCOPE_REQUIRED");
   if (productionPreview && apply) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_PREVIEW_IS_READ_ONLY");
   if (productionPreview && productionApply) throw new Error("POLICY_RISK_BACKFILL_PRODUCTION_MODES_ARE_EXCLUSIVE");
@@ -615,16 +710,17 @@ async function main() {
     process.stdout.write(`${JSON.stringify({ reviewedManifestSha256: policyRiskBackfillReviewedHash(manifest) })}\n`);
     return;
   }
-  if (!productionPreview && !productionApply && (process.env.NODE_ENV !== "test" || process.env.TENANT_ISOLATION_TEST_DB !== "1" || process.env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB !== "1")) {
+  if (!productionPreview && !productionInventoryReport && !productionApply && (process.env.NODE_ENV !== "test" || process.env.TENANT_ISOLATION_TEST_DB !== "1" || process.env.PLAYWRIGHT_ENFORCE_DISPOSABLE_DB !== "1")) {
     throw new Error("La conversión requiere NODE_ENV=test, TENANT_ISOLATION_TEST_DB=1 y PLAYWRIGHT_ENFORCE_DISPOSABLE_DB=1.");
   }
-  const connectionString = (productionPreview
+  const readOnlyProductionMode = productionPreview || productionInventoryReport;
+  const connectionString = (readOnlyProductionMode
     ? process.env.POLICY_RISK_BACKFILL_READONLY_DATABASE_URL
     : productionApply
       ? process.env.POLICY_RISK_BACKFILL_PRODUCTION_APPLY_DATABASE_URL
       : process.env.DATABASE_URL)?.trim();
   if (!connectionString) {
-    throw new Error(productionPreview
+    throw new Error(readOnlyProductionMode
       ? "POLICY_RISK_BACKFILL_READONLY_DATABASE_URL_REQUIRED"
       : productionApply
         ? "POLICY_RISK_BACKFILL_PRODUCTION_APPLY_DATABASE_URL_REQUIRED"
@@ -633,13 +729,63 @@ async function main() {
   if (productionApply && arg("confirm-apply") !== APPLY_CONFIRMATION) {
     throw new Error(`APPLY_REQUIRES_--confirm-apply=${APPLY_CONFIRMATION}`);
   }
-  if (!productionPreview && !productionApply) assertDisposableCertificationTarget(connectionString, process.env, "source");
+  if (!readOnlyProductionMode && !productionApply) assertDisposableCertificationTarget(connectionString, process.env, "source");
 
   const productionTarget = productionApply ? createProductionApplyTarget(connectionString) : null;
   const prisma = productionTarget?.prisma ?? new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
   try {
     const sha = candidateSha();
     const processor = await processorSha256();
+    if (productionInventoryReport) {
+      const outcomeFile = arg("outcome-report");
+      const outcomeSha = arg("outcome-manifest-sha256")?.trim();
+      const outcomeFileSha = arg("outcome-report-sha256")?.trim();
+      const outcomeManifestFile = arg("outcome-reviewed-manifest");
+      if (Boolean(outcomeFile) !== Boolean(outcomeSha) || Boolean(outcomeFile) !== Boolean(outcomeFileSha) || Boolean(outcomeFile) !== Boolean(outcomeManifestFile)) {
+        throw new Error("POLICY_RISK_INVENTORY_OUTCOME_REQUIRES_REPORT_REVIEWED_MANIFEST_AND_DIGESTS");
+      }
+      let outcomeReport: PolicyRiskInventoryOutcomeReport | undefined;
+      let verifiedOutcomeFileSha256: string | null = null;
+      let expectedInputHashes: Record<string, string> | undefined;
+      if (outcomeFile && outcomeSha && outcomeFileSha) {
+        const verified = parseVerifiedPolicyRiskInventoryOutcomeReport(await readPrivateReportBytes(outcomeFile), outcomeFileSha);
+        outcomeReport = verified.report;
+        verifiedOutcomeFileSha256 = verified.fileSha256;
+        const reviewedManifest = await readReviewedManifest(outcomeManifestFile!);
+        assertReviewedPolicyRiskBackfillManifest(reviewedManifest, { organizationId, candidateSha: sha, processorSha256: processor });
+        if (reviewedManifest.contentSha256 !== outcomeReport.manifestSha256 || policyRiskBackfillReviewedHash(reviewedManifest) !== outcomeReport.reviewedManifestSha256 || reviewedManifest.candidateSha !== outcomeReport.candidateSha) {
+          throw new Error("POLICY_RISK_INVENTORY_OUTCOME_REVIEWED_MANIFEST_MISMATCH");
+        }
+        expectedInputHashes = Object.fromEntries(reviewedManifest.candidates.map((candidate) => [candidate.policyId, candidate.inputHash]));
+      }
+      const policies = await scanProductionInventoryReadOnly(prisma, organizationId, connectionString, outcomeReport, sha);
+      const report = reconcilePolicyRiskInventory({ organizationId, policies, outcomeReport, expectedManifestSha256: outcomeSha, expectedCandidateSha: outcomeReport ? sha : undefined, expectedInputHashes });
+      const runId = randomUUID();
+      const reportFile = arg("report-file") ?? `/private/tmp/policy-risk-inventory-${organizationId}-${runId}.json`;
+      const reportPath = await writePrivateManifest(reportFile, {
+        schemaVersion: 1,
+        createdAt: new Date().toISOString(),
+        mode: "PRODUCTION_READ_ONLY_WHOLE_ORGANIZATION_INVENTORY",
+        candidateSha: sha,
+        processorSha256: processor,
+        snapshotIsolation: "REPEATABLE READ, READ ONLY",
+        pageSize: INVENTORY_PAGE_SIZE,
+        recognizedStructuredPredicate: "schema-valid riskDetails whose policyType matches the policy row, riskDetailsReviewRequired=false, and at least one non-empty value in data; this recognizes populated structured data but does not verify all optional fields are present",
+        linkedApply: outcomeReport ? {
+          reportFile: outcomeFile,
+          reportSha256: verifiedOutcomeFileSha256,
+          candidateSha: outcomeReport.candidateSha,
+          runId: outcomeReport.runId,
+          maintenanceRunId: outcomeReport.maintenanceRunId,
+          status: outcomeReport.status,
+          manifestSha256: outcomeReport.manifestSha256,
+          reviewedManifestSha256: outcomeReport.reviewedManifestSha256,
+        } : null,
+        ...report,
+      });
+      process.stdout.write(`${JSON.stringify({ mode: "production-read-only-inventory", organizationId, runId, totalPolicies: report.totalPolicies, totals: report.totals, reportFile: reportPath }, null, 2)}\n`);
+      return;
+    }
     if (!apply) {
       const candidates = productionPreview
         ? await scanProductionReadOnly(prisma, organizationId, connectionString, policyNumbers)
@@ -875,6 +1021,7 @@ async function main() {
         organizationId,
         runId: manifest.runId,
         candidateSha: sha,
+        manifestSha256: manifest.contentSha256,
         reviewer,
         reviewedManifestSha256,
         writerRole: productionTarget?.role ?? null,
@@ -887,10 +1034,12 @@ async function main() {
         empty,
         applied,
         alreadyApplied: alreadyAppliedCount,
+        outcomesSha256: policyRiskBackfillInputHash(outcomes),
       };
       await updateRun({ status: deferred ? "REVIEW_REQUIRED" : "COMPLETED", completedAt: new Date(), summaryJson: JSON.stringify(summary) });
       await writePrivateManifest(resultFile, { ...summary, manifestSha256: manifest.contentSha256, maintenanceRunId: run.id, status: deferred ? "REVIEW_REQUIRED" : "COMPLETED", outcomes });
-      process.stdout.write(`${JSON.stringify({ ...summary, mode: "apply", maintenanceRunId: run.id, resultFile }, null, 2)}\n`);
+      const outcomeReportSha256 = createHash("sha256").update(await readFile(resultFile)).digest("hex");
+      process.stdout.write(`${JSON.stringify({ ...summary, mode: "apply", maintenanceRunId: run.id, resultFile, outcomeReportSha256 }, null, 2)}\n`);
     } catch (error) {
       const errorCode = error instanceof Error ? error.message.split(":")[0] : "UNKNOWN";
       await updateRun({ status: "FAILED", completedAt: new Date(), summaryJson: JSON.stringify({ mode: productionApply ? "production-apply" : "disposable-apply", organizationId, runId: manifest.runId, candidateSha: sha, reviewer, reviewedManifestSha256, writerRole: productionTarget?.role ?? null, endpointHost: productionTarget?.host ?? null, database: productionTarget?.database ?? null, batchSize: requestedBatchSize, scanned: manifest.scanned, converted, deferred, empty, applied, alreadyApplied: alreadyAppliedCount, errorCode }) });

@@ -181,6 +181,12 @@ export default async function NewPolicyPage({
           description="Registra una cobertura nueva con fechas, prima y relaciones operativas."
         />
 
+        {renewalSource ? (
+          <p className="rounded-2xl border border-border/70 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+            Se copiaron los datos del riesgo y asegurados de la póliza anterior. Revisa la información antes de guardar.
+          </p>
+        ) : null}
+
         {telegramAiReview ? (
           <Card className="border-amber-200/80 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/20">
             <CardHeader>
