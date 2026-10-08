@@ -23,7 +23,8 @@ production verifier all pass.
 - `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`: mandatory in
   production; missing or unavailable Redis fails closed for rate limits and
   distributed locks.
-- `BLOB_READ_WRITE_TOKEN`: mandatory for production and DEMO document uploads.
+- `BLOB_READ_WRITE_TOKEN`: required for customer document uploads; it does not
+  enable real uploads for DEMO organizations.
 - `PLATFORM_ORG_PROVISIONING_ENABLED=1`: explicit operator switch, enabled only
   after the multi-org cutover evidence is archived.
 - `PLATFORM_CUSTOMER_PROVISIONING_ENABLED=0`: remains disabled during Stage 3;
@@ -82,29 +83,57 @@ production.
 
 ## DEMO provisioning and reset
 
-Platform-only provisioning is invite-only and idempotent:
+For the current external-demo acceptance, provision one organization and one
+user, using the existing URL and versioned synthetic seed. This is an
+operational delivery choice, not a global one-user cap: the platform factory
+supports multiple users. Temporary passwords expire in 24 hours and require a
+first-login change; alias users have no email recovery.
 
-- `provisionDemoOrganization` creates a `PROVISIONING` organization, a
-  deterministic synthetic baseline, one owner plus up to four additional
-  `@policydesk.local` users,
-  trial subscription/capabilities, then activates only after validation.
-- Temporary passwords are high entropy, expire in 24 hours, and require a
-  first-login change. Alias users have no email recovery; a superadmin performs
-  audited out-of-band resets.
-- Every real DEMO upload requires the consent notice, is private under a
-  tenant-prefixed Blob path, and is recorded in `DemoUploadArtifact`. The
-  original Blob is purged after 48 hours.
-- The document endpoint currently accepts only structurally validated PDFs
-  (15 MB and 100 pages maximum) for both CUSTOMER and DEMO tenants; Nora's
-  temporary PDF path applies the same guard before OCR or an AI provider.
-- The first upload sets `realDataResetAt = uploadedAt + 7 days`; later uploads
-  never extend it. Reset marks the org `RESETTING`, denies sessions/jobs,
-  purges files, clears protected rows, reseeds the deterministic baseline,
-  increments `dataVersion`, verifies invariants, and reactivates. Users,
-  memberships, subscription, and capabilities survive. A failed verification
-  leaves the org suspended and alerts operators.
-- At 30 days the org is suspended unless a superadmin explicitly extends the
-  trial. Hard deletion is a separate audited operator action.
+DEMO documents are synthetic downloads only. Real document uploads and imports
+are blocked. Nora, email, Telegram, WhatsApp, Quálitas and other provider
+actions remain disabled for DEMO even if a capability row or environment
+setting is permissive. The WhatsApp preview is local text only; it does not
+open an application or send anything. Do not describe uploads, Nora, or
+provider actions as available DEMO workflows.
+
+Reset marks the organization `RESETTING`, denies sessions and jobs, purges any
+tenant-prefixed private objects, clears protected rows, reseeds the synthetic
+baseline, increments `dataVersion`, verifies invariants, and reactivates. User
+and membership records survive; active sessions are revoked. A failed
+verification leaves the organization suspended for remediation. The CLI
+requires an explicit reason of 8–500 characters for both preview and apply:
+
+```sh
+npm run demo:reset -- --organization-id org_demo_x --request-id ticket-123 --reason "preview for acceptance" --dry-run
+npm run demo:reset -- --organization-id org_demo_x --request-id ticket-124 --reason "reset after acceptance review"
+```
+
+At 30 days the organization is suspended unless a superadmin explicitly
+extends the trial. Suspension/revocation and reactivation must be verified as
+part of acceptance. Hard deletion is a separate audited operator action.
+
+### Common DEMO acceptance checklist
+
+- [ ] Confirm target is the existing DEMO URL and the sole provisioned
+      organization/user for this delivery; confirm `kind=DEMO`, active
+      membership, 30-day trial, and current seed version.
+- [ ] Sign in with the issued temporary password; confirm forced password
+      change. On the disposable acceptance fixture, advance its expiry and
+      confirm login rejects the expired temporary credential.
+- [ ] Verify seeded clients, policies, receipts, and synthetic documents load;
+      edit a seeded customer/policy and confirm the change persists.
+- [ ] Verify a synthetic document can be downloaded; upload a real file and
+      attempt Nora/provider actions. Confirm rejection and no Blob/provider
+      side effect even with permissive capability/environment configuration.
+- [ ] Confirm a DEMO user cannot read or mutate a CUSTOMER record or document
+      by search, direct ID, export, or API request.
+- [ ] Run reset preview with a documented reason and confirm no writes or
+      object deletion. Apply reset with a new request ID/reason; verify seed,
+      edit removal, session revocation, and audit event. Verify suspension
+      denies access and authorized reactivation restores access.
+- [ ] Record the deployed commit and the observed browser/API evidence. Local
+      tests do not establish Production configuration, real provider/Blob
+      behavior, database RLS, or user acceptance.
 
 ## Backups and privacy
 
@@ -116,10 +145,9 @@ DEMO purging before reopening the environment. Neon point-in-time history is
 limited by the configured encrypted retention window and must be disclosed in
 the demo privacy notice.
 
-DEMO integrations are real, not simulated. Every outbound action requires a
-live organization, capability resolution, rate limits, audit, and explicit
-recipient/content confirmation where applicable. Quálitas remains unavailable
-until its global provider pilot is certified.
+CUSTOMER integrations may use real providers subject to their separate
+capability and confirmation controls. DEMO provider actions remain blocked as
+described above; a permissive global provider setting cannot enable them.
 
 ## Commercial handoff
 

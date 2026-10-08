@@ -41,6 +41,13 @@ describe("DEMO reset target guard", () => {
     expect(mocks.release).toHaveBeenCalledOnce();
   });
 
+  it.each([undefined, "", "short", "   reason   ", "r".repeat(501)])("requires an explicit operator reset reason (%s)", async (reason) => {
+    await expect(resetDemoOrganizationForCli("demo-org", "operator-request", true, reason)).rejects.toThrow("DEMO_RESET_REASON_REQUIRED");
+    expect(mocks.systemTransaction).not.toHaveBeenCalled();
+    expect(mocks.blobList).not.toHaveBeenCalled();
+    expect(mocks.blobDelete).not.toHaveBeenCalled();
+  });
+
   it.each([new Date(0), new Date(Date.now() + 120_000)])("previews a RESETTING DEMO without recovering or modifying its lease (%s)", async (resetLeaseExpiresAt) => {
     const write = vi.fn(() => { throw new Error("PREVIEW_ATTEMPTED_WRITE"); });
     const state = { resetStatus: "RESETTING", resetLeaseExpiresAt, dataVersion: 3 };
@@ -52,7 +59,7 @@ describe("DEMO reset target guard", () => {
       policy: { count: vi.fn().mockResolvedValue(20) },
       demoUploadArtifact: { count: vi.fn().mockResolvedValue(2) },
     }));
-    await expect(resetDemoOrganizationForCli("demo-org", "preview-request", true)).resolves.toMatchObject({
+    await expect(resetDemoOrganizationForCli("demo-org", "preview-request", true, "review reset preview")).resolves.toMatchObject({
       dryRun: true, counts: { clients: 25, policies: 20 }, artifactCount: 2,
     });
     expect(write).not.toHaveBeenCalled();

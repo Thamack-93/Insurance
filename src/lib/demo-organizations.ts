@@ -485,12 +485,14 @@ export async function resetDemoOrganizationForSystem(organizationId: string, req
 
 /** Explicit operator CLI entry point. It never accepts a tenant kind from the
  * caller; the reset transaction verifies DEMO classification before writing. */
-export async function resetDemoOrganizationForCli(organizationId: string, requestId: string, dryRun = false, reason = "operator CLI demo reset") {
+export async function resetDemoOrganizationForCli(organizationId: string, requestId: string, dryRun = false, reason?: string) {
   const cleanOrganizationId = organizationId.trim();
   if (!cleanOrganizationId || cleanOrganizationId.length > 160) throw new Error("DEMO_ORGANIZATION_ID_REQUIRED");
   const cleanRequestId = requestId.trim();
   if (!cleanRequestId || cleanRequestId.length > 128) throw new Error("DEMO_REQUEST_ID_INVALID");
-  return performDemoReset(cleanOrganizationId, cleanRequestId, dryRun, SYSTEM_USER_ID, reason.trim().slice(0, 500) || "operator CLI demo reset");
+  const cleanReason = reason?.trim() ?? "";
+  if (cleanReason.length < 8 || cleanReason.length > 500) throw new Error("DEMO_RESET_REASON_REQUIRED");
+  return performDemoReset(cleanOrganizationId, cleanRequestId, dryRun, SYSTEM_USER_ID, cleanReason);
 }
 
 export async function extendDemoTrial(organizationId: string, days: number, reason: string) {

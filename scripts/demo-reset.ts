@@ -8,19 +8,20 @@ function option(name: string) {
 }
 
 function usage(): never {
-  console.error("Uso: npm run demo:reset -- --organization-id <DEMO_ID> --request-id <ID> [--dry-run] [--reason <texto>]");
+  console.error("Uso: npm run demo:reset -- --organization-id <DEMO_ID> --request-id <ID> --reason <texto de al menos 8 caracteres> [--dry-run]");
   process.exit(2);
 }
 
 async function main() {
   if (process.argv.includes("--help")) {
-    console.log("Uso: npm run demo:reset -- --organization-id <DEMO_ID> --request-id <ID> [--dry-run] [--reason <texto>]");
+    console.log("Uso: npm run demo:reset -- --organization-id <DEMO_ID> --request-id <ID> --reason <texto de al menos 8 caracteres> [--dry-run]");
     return;
   }
   const organizationId = option("--organization-id");
   const requestId = option("--request-id");
-  if (!organizationId || !requestId) usage();
-  const result = await resetDemoOrganizationForCli(organizationId, requestId, process.argv.includes("--dry-run"), option("--reason") ?? "operator CLI demo reset");
+  const reason = option("--reason");
+  if (!organizationId || !requestId || !reason) usage();
+  const result = await resetDemoOrganizationForCli(organizationId, requestId, process.argv.includes("--dry-run"), reason);
   console.log(JSON.stringify({ ok: true, ...result }, null, 2));
 }
 
