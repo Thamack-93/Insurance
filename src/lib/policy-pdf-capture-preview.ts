@@ -135,7 +135,8 @@ async function buildSourcePolicyCandidates(
         insurerName: candidate.insurerName,
         matchReason: candidate.reason,
       };
-      const rank = 8_000 + candidate.confidence * 100 + candidate.endDate.getTime() / 1e12;
+      const sameInsurerBonus = candidate.insurerId === insurerId ? 1_000 : 0;
+      const rank = 8_000 + candidate.confidence * 100 + sameInsurerBonus + candidate.endDate.getTime() / 1e12;
       ranked.set(candidate.id, { option, rank, exactNumber: false });
     }
   }

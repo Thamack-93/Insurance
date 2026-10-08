@@ -257,7 +257,19 @@ test.describe("structured policy risk details", () => {
               receiptPlan: [],
               clientOptions: [],
               insurerOptions: [],
-              sourcePolicyOptions: [],
+              sourcePolicyOptions: [{
+                id: fixture.policyId,
+                value: fixture.policyId,
+                label: `${fixture.policyNumber} · ${fixture.clientName} · ${fixture.insurerName}`,
+                policyNumber: fixture.policyNumber,
+                startDate: source.startDate.toISOString().slice(0, 10),
+                endDate: source.endDate.toISOString().slice(0, 10),
+                status: "ACTIVE",
+                serialNumber: vin,
+                clientName: fixture.clientName,
+                insurerName: fixture.insurerName,
+                matchReason: "Serie y cliente",
+              }],
               fieldConfidence: {
                 policyNumber: "high", clientName: "high", clientType: "high", clientEmail: "high", clientPhone: "high",
                 clientAddress: "high", clientRfc: "high", clientBirthDate: "high", insurerName: "high", policyType: "high",
@@ -283,6 +295,7 @@ test.describe("structured policy risk details", () => {
       await expect(page.locator("#risk-AUTO-vehicles-0-make")).toHaveValue("Toyota");
       await page.locator("#risk-AUTO-vehicles-0-make").fill("Honda");
       await page.locator("#risk-AUTO-vehicles-0-model").fill("Civic");
+      await page.getByRole("button", { name: "Vincular esta póliza", exact: true }).click();
       await expect(page.getByRole("button", { name: "Crear póliza y marcar como renovada" })).toBeEnabled();
       const confirmResponsePromise = page.waitForResponse((response) =>
         response.url().endsWith("/api/policies/capture/confirm") && response.request().method() === "POST",
