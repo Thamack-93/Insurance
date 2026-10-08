@@ -225,7 +225,7 @@ export function RenewalBoardScrollArea({ children }: { children: ReactNode }) {
   function startPan(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
     const target = event.target;
-    if (target instanceof Element && target.closest("[data-renewal-card], [data-renewal-drag-handle], a, button, input, select, textarea")) return;
+    if (target instanceof Element && target.closest("[data-renewal-card], [data-renewal-drag-handle], [role='menuitem'], [role='menu'], [data-slot='dropdown-menu-content'], a, button, input, select, textarea")) return;
 
     pan.current = { pointerId: event.pointerId, startX: event.clientX, scrollLeft: event.currentTarget.scrollLeft };
     event.currentTarget.setPointerCapture(event.pointerId);

@@ -1,5 +1,13 @@
 import { expect, test } from "@playwright/test";
-import { authenticatePageAsAdmin, authenticatePageAsAgent, cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../helpers/db";
+import {
+  authenticatePageAsAdmin,
+  authenticatePageAsAgent,
+  cleanupPolicyFixture,
+  cleanupSeededReceipt,
+  getTestDb,
+  seedPendingReceipt,
+  seedPolicyFixture,
+} from "../helpers/db";
 
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
 
@@ -34,6 +42,30 @@ test("filters a renewal signal, links to its policy, and removes it after the re
     await expect(page.getByText("No hay señales para este filtro.", { exact: true })).toBeVisible();
   } finally {
     await cleanupPolicyFixture(fixture);
+  }
+});
+
+test("filters overdue collections and opens the receipt from its signal", async ({ page }) => {
+  const db = getTestDb();
+  const fixture = await seedPendingReceipt("INSIGHTS-COLLECTION");
+
+  try {
+    await db.receipt.update({
+      where: { id: fixture.id },
+      data: { dueDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), status: "OVERDUE" },
+    });
+
+    await authenticatePageAsAdmin(page);
+    await page.goto("/reports/insights?group=collections&page=1");
+
+    await expect(page.getByRole("heading", { name: "Insights operativos", exact: true })).toBeVisible();
+    await expect(page.locator('[aria-label="Filtrar señales por grupo"]').getByRole("link", { name: "Cobranza", exact: true }))
+      .toHaveAttribute("aria-current", "page");
+    await expect(page.getByText("Recibo vencido con saldo", { exact: true })).toBeVisible();
+    await page.locator(`a[href="/receipts/${fixture.id}"]`).click();
+    await expect(page).toHaveURL(`/receipts/${fixture.id}`);
+  } finally {
+    await cleanupSeededReceipt(fixture);
   }
 });
 
