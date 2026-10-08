@@ -35,6 +35,22 @@ production verifier all pass.
 
 ## Cutover sequence
 
+`maintenance:enter` and `cutover:multi-org` pin non-test execution to the
+allowlisted Production Neon identity in `scripts/cutover-target.mjs`:
+project `bitter-frost-67704350`, branch `br-fancy-wildflower-apfbks1o`,
+database `neondb`, and direct host
+`ep-withered-hall-ap9wt7s5.c-7.us-east-1.aws.neon.tech`. Set
+`NEON_PROJECT_ID=bitter-frost-67704350` and
+`TENANT_ISOLATION_BRANCH_ID=br-fancy-wildflower-apfbks1o` in the operator
+environment when running Production maintenance/cutover. Those values are
+checked against the fixed allowlist; the branch ID is also bound to its
+expected direct endpoint host. The connection URL itself must match the
+expected host and database, and pooler URLs are rejected. Test-mode execution
+also requires a loopback host before the strict CI certification guard runs.
+CI continues to use the independent
+`assertDisposableCertificationTarget` guard for disposable test databases.
+Run the local guard regression with `npm run test:cutover-target`.
+
 1. Repair the read-only verifier target and capture a clean singleton audit.
 2. Deploy the tenant-aware application while RLS is still disabled.
 3. Create a disposable Neon branch from production. Apply the additive
