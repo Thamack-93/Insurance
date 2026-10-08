@@ -301,23 +301,26 @@ export async function syncSerialRenewalSuggestionsForPortfolio(
     });
   }
   if (toReactivate.length) {
-    const ids = toReactivate.map(({ id }) => id);
-    const confidenceCases = Prisma.join(toReactivate.map(({ id, confidence }) => Prisma.sql`WHEN ${id} THEN ${confidence}`), " ");
-    const reasonCases = Prisma.join(toReactivate.map(({ id, reason }) => Prisma.sql`WHEN ${id} THEN ${reason}`), " ");
-    await db.$executeRaw(Prisma.sql`
-      UPDATE "PolicyRenewalSuggestion"
-      SET "confidence" = CASE "id" ${confidenceCases} ELSE "confidence" END,
-          "reason" = CASE "id" ${reasonCases} ELSE "reason" END,
-          "status" = 'PENDING',
-          "reviewedAt" = NULL,
-          "reviewedById" = NULL,
-          "resolutionNote" = NULL,
-          "updatedAt" = NOW()
-      WHERE "organizationId" = ${organizationId}
-        AND "id" IN (${Prisma.join(ids)})
-        AND "status" = 'DISMISSED'
-        AND "resolutionNote" = ${STALE_SERIAL_SUGGESTION_NOTE}
-    `);
+    for (let offset = 0; offset < toReactivate.length; offset += 1_000) {
+      const batch = toReactivate.slice(offset, offset + 1_000);
+      const ids = batch.map(({ id }) => id);
+      const confidenceCases = Prisma.join(batch.map(({ id, confidence }) => Prisma.sql`WHEN ${id} THEN ${confidence}`), " ");
+      const reasonCases = Prisma.join(batch.map(({ id, reason }) => Prisma.sql`WHEN ${id} THEN ${reason}`), " ");
+      await db.$executeRaw(Prisma.sql`
+        UPDATE "PolicyRenewalSuggestion"
+        SET "confidence" = CASE "id" ${confidenceCases} ELSE "confidence" END,
+            "reason" = CASE "id" ${reasonCases} ELSE "reason" END,
+            "status" = 'PENDING',
+            "reviewedAt" = NULL,
+            "reviewedById" = NULL,
+            "resolutionNote" = NULL,
+            "updatedAt" = NOW()
+        WHERE "organizationId" = ${organizationId}
+          AND "id" IN (${Prisma.join(ids)})
+          AND "status" = 'DISMISSED'
+          AND "resolutionNote" = ${STALE_SERIAL_SUGGESTION_NOTE}
+      `);
+    }
   }
   if (toCreate.length) {
     await db.policyRenewalSuggestion.createMany({ data: toCreate, skipDuplicates: true });

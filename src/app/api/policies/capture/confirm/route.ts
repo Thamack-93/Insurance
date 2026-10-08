@@ -8,7 +8,7 @@ import { rateLimitResponse, guardErrorResponse } from "@/lib/api-security";
 import { parseDateInput } from "@/lib/form-utils";
 import { businessToday } from "@/lib/business-dates";
 import { assertClientOrganizationAccess, assertPolicyOrganizationAccess } from "@/lib/portfolio-access";
-import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
+import { assertOrganizationContextInTransaction, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { inferClientType, type PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
 import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
 import { closeRenewalFollowUp, closeRenewalManualFollowUp } from "@/lib/renewal-followups";
@@ -253,6 +253,7 @@ export async function POST(request: NextRequest) {
     const targetEndDate = parseDateInput(draft.endDate);
 
     const result = await withTenantTransaction(context, async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
       const [currentSource, currentInsurer] = await Promise.all([
         sourcePolicy ? tx.policy.findFirst({ where: { id: sourcePolicy.id, organizationId: context.organizationId }, select: { id: true, clientId: true, insurerId: true, status: true, renewals: { select: { id: true } } } }) : Promise.resolve(null),
         tx.insurer.findFirst({ where: { id: insurer.id, organizationId: context.organizationId }, select: { id: true } }),

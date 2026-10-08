@@ -597,7 +597,11 @@ export async function linkRenewalToPolicy(sourcePolicyId: string, targetPolicyId
           },
           select: { id: true },
         });
-        if (!suggestion) return errorResult("La sugerencia ya no está disponible.");
+        const match = matchSerialRenewal(
+          { clientId: currentSource.clientId, policyType: currentSource.policyType, endDate: currentSource.endDate, serialNumbers: currentSource.insuredAssets.map((asset) => asset.serialNumber) },
+          { clientId: currentTarget.clientId, policyType: currentTarget.policyType, startDate: currentTarget.startDate, serialNumbers: currentTarget.insuredAssets.map((asset) => asset.serialNumber) },
+        );
+        if (!suggestion || !match) return errorResult("La sugerencia ya no está vigente; actualiza la búsqueda por serie/VIN.");
       }
       const workItem = await tx.workItem.findFirst({
         where: {
