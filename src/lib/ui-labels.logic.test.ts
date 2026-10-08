@@ -33,6 +33,7 @@ describe("etiquetas visibles de la interfaz", () => {
     expect(workItemTypeLabel("TASK")).toBe("Pendiente");
     expect(documentTypeLabel("PAYMENT_PROOF")).toBe("Comprobante de pago");
     expect(paymentMethodLabel("TRANSFER")).toBe("Transferencia bancaria");
+    expect(paymentMethodLabel("DOMICILIATED")).toBe("Domiciliado");
     expect(dataQualityReasonLabel("payment_after_due_date")).toBe("Pago después del vencimiento");
     expect(dataQualityReasonLabel("UNKNOWN_REASON")).toBe("Revisión requerida");
   });

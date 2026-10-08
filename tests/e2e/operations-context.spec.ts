@@ -1,9 +1,40 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { authenticatePageAsAdmin, authenticatePageAsAgent, cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../helpers/db";
 import { expectMutationSuccessToast } from "../helpers/assert-mutation-toast";
 import { captureServerAction } from "../helpers/capture-server-action";
 
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
+
+async function dragRenewalCardToStage(page: Page, handle: Locator, stage: Locator) {
+  const viewport = page.locator("[data-renewal-board-viewport]");
+  await handle.scrollIntoViewIfNeeded();
+  const handleBounds = await handle.boundingBox();
+  const viewportBounds = await viewport.boundingBox();
+  if (!handleBounds || !viewportBounds) throw new Error("Renewal drag target is not measurable.");
+
+  const startX = handleBounds.x + handleBounds.width / 2;
+  const startY = handleBounds.y + handleBounds.height / 2;
+  const viewportRight = viewportBounds.x + viewportBounds.width;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+
+  const initialStageBounds = await stage.boundingBox();
+  if (!initialStageBounds || initialStageBounds.x + initialStageBounds.width > viewportRight || initialStageBounds.x < viewportBounds.x) {
+    const edgeX = viewportRight - 8;
+    await page.mouse.move(edgeX, Math.min(Math.max(startY, viewportBounds.y + 24), viewportBounds.y + viewportBounds.height - 24), { steps: 8 });
+    await expect.poll(async () => {
+      const bounds = await stage.boundingBox();
+      return Boolean(bounds && bounds.x < viewportRight && bounds.x + bounds.width > viewportBounds.x);
+    }).toBe(true);
+  }
+
+  const stageBounds = await stage.boundingBox();
+  if (!stageBounds) throw new Error("Renewal stage is not measurable after scrolling.");
+  const dropX = Math.min(viewportRight - 8, Math.max(viewportBounds.x + 8, stageBounds.x + stageBounds.width / 2));
+  const dropY = Math.min(viewportBounds.y + viewportBounds.height - 8, Math.max(viewportBounds.y + 8, stageBounds.y + Math.min(64, stageBounds.height / 2)));
+  await page.mouse.move(dropX, dropY, { steps: 8 });
+  await page.mouse.up();
+}
 
 function businessDateKey(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -21,6 +52,151 @@ function businessDateAfter(days: number) {
 }
 
 test.describe("operation queue context", () => {
+  test("filters pending relationships by selected client and policy", async ({ page }) => {
+    const db = getTestDb();
+    const first = await seedPolicyFixture("TASK-RELATION-FIRST");
+    const second = await seedPolicyFixture("TASK-RELATION-SECOND");
+    const now = new Date();
+    const firstReceiptNumber = `TASK-REL-R1-${Date.now()}`;
+    const alternateReceiptNumber = `TASK-REL-RA-${Date.now()}`;
+    const secondReceiptNumber = `TASK-REL-R2-${Date.now()}`;
+    const alternatePolicyNumber = `TEST-POL-ALT-${Date.now()}`;
+    let alternatePolicyId: string | null = null;
+
+    try {
+      const alternatePolicy = await db.policy.create({
+        data: {
+          organizationId: TEST_ORGANIZATION_ID,
+          policyNumber: alternatePolicyNumber,
+          clientId: first.clientId,
+          insurerId: first.insurerId,
+          policyType: "AUTO",
+          status: "ACTIVE",
+          paymentFrequency: "ANNUAL",
+          startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+          endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          premiumAmount: 2345.67,
+          currency: "MXN",
+        },
+      });
+      alternatePolicyId = alternatePolicy.id;
+
+      await db.receipt.createMany({
+        data: [
+          {
+            organizationId: TEST_ORGANIZATION_ID,
+            receiptNumber: firstReceiptNumber,
+            policyId: first.policyId,
+            clientId: first.clientId,
+            insurerId: first.insurerId,
+            periodStartDate: now,
+            periodEndDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+            dueDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+            amount: 1000,
+            currency: "MXN",
+            status: "PENDING",
+          },
+          {
+            organizationId: TEST_ORGANIZATION_ID,
+            receiptNumber: alternateReceiptNumber,
+            policyId: alternatePolicy.id,
+            clientId: first.clientId,
+            insurerId: first.insurerId,
+            periodStartDate: now,
+            periodEndDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+            dueDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+            amount: 1500,
+            currency: "MXN",
+            status: "PENDING",
+          },
+          {
+            organizationId: TEST_ORGANIZATION_ID,
+            receiptNumber: secondReceiptNumber,
+            policyId: second.policyId,
+            clientId: second.clientId,
+            insurerId: second.insurerId,
+            periodStartDate: now,
+            periodEndDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+            dueDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+            amount: 2000,
+            currency: "MXN",
+            status: "PENDING",
+          },
+        ],
+      });
+      const firstReceipt = await db.receipt.findFirst({ where: { receiptNumber: firstReceiptNumber }, select: { id: true } });
+      const editWorkItemId = `e2e-task-relations-${Date.now()}`;
+      await db.workItem.create({
+        data: {
+          organizationId: TEST_ORGANIZATION_ID,
+          id: editWorkItemId,
+          sourceType: "Task",
+          sourceId: editWorkItemId,
+          workItemType: "TASK",
+          taskType: "GENERAL",
+          status: "OPEN",
+          priority: "MEDIUM",
+          title: "Pending relationship edit fixture",
+          entityType: "WorkItem",
+          entityId: editWorkItemId,
+          clientId: first.clientId,
+          policyId: first.policyId,
+          insurerId: first.insurerId,
+          receiptId: firstReceipt!.id,
+        },
+      });
+
+      await authenticatePageAsAdmin(page);
+      await page.goto("/tasks/new");
+
+      const clientSelect = page.getByRole("combobox", { name: "Cliente", exact: true });
+      const policySelect = page.getByRole("combobox", { name: "Póliza", exact: true });
+      const receiptSelect = page.getByRole("combobox", { name: "Recibo", exact: true });
+      await expect(policySelect).toBeDisabled();
+      await expect(receiptSelect).toBeDisabled();
+
+      await clientSelect.click();
+      await page.getByRole("option", { name: first.clientName, exact: true }).click();
+      await policySelect.click();
+      await expect(page.getByRole("option", { name: new RegExp(first.policyNumber) })).toHaveCount(1);
+      await expect(page.getByRole("option", { name: new RegExp(alternatePolicyNumber) })).toHaveCount(1);
+      await expect(page.getByRole("option", { name: new RegExp(second.policyNumber) })).toHaveCount(0);
+      await page.getByRole("option", { name: new RegExp(first.policyNumber) }).click();
+
+      await receiptSelect.click();
+      await expect(page.getByRole("option", { name: firstReceiptNumber, exact: true })).toHaveCount(1);
+      await expect(page.getByRole("option", { name: alternateReceiptNumber, exact: true })).toHaveCount(0);
+      await expect(page.getByRole("option", { name: secondReceiptNumber, exact: true })).toHaveCount(0);
+      await page.getByRole("option", { name: firstReceiptNumber, exact: true }).click();
+
+      await policySelect.click();
+      await page.getByRole("option", { name: new RegExp(alternatePolicyNumber) }).click();
+      await expect(receiptSelect).toBeEnabled();
+      await expect(receiptSelect).toContainText("Sin recibo");
+      await receiptSelect.click();
+      await expect(page.getByRole("option", { name: alternateReceiptNumber, exact: true })).toHaveCount(1);
+      await expect(page.getByRole("option", { name: firstReceiptNumber, exact: true })).toHaveCount(0);
+      await page.keyboard.press("Escape");
+
+      await clientSelect.click();
+      await page.getByRole("option", { name: second.clientName, exact: true }).click();
+      await expect(policySelect).toContainText("Sin póliza");
+      await expect(receiptSelect).toBeDisabled();
+      await policySelect.click();
+      await expect(page.getByRole("option", { name: new RegExp(second.policyNumber) })).toHaveCount(1);
+      await expect(page.getByRole("option", { name: new RegExp(first.policyNumber) })).toHaveCount(0);
+
+      await page.goto(`/tasks/${editWorkItemId}/edit`);
+      await expect(page.getByRole("combobox", { name: "Cliente", exact: true })).toContainText(first.clientName);
+      await expect(page.getByRole("combobox", { name: "Póliza", exact: true })).toContainText(new RegExp(first.policyNumber));
+      await expect(page.getByRole("combobox", { name: "Recibo", exact: true })).toContainText(firstReceiptNumber);
+    } finally {
+      if (alternatePolicyId) await db.policy.delete({ where: { id: alternatePolicyId } }).catch(() => undefined);
+      await cleanupPolicyFixture(first);
+      await cleanupPolicyFixture(second);
+    }
+  });
+
   test("resolves legacy renewal context and links to the policy", async ({ page }) => {
     const db = getTestDb();
     const fixture = await seedPolicyFixture("OPERATIONS");
@@ -190,7 +366,7 @@ test.describe("operation queue context", () => {
       const activePolicyLink = page.getByRole("link", { name: new RegExp(fixture.policyNumber) });
       await expect(activePolicyLink).toBeVisible();
       await expect(activePolicyLink).toHaveAttribute("href", new RegExp(`^/policies/${fixture.policyId}(?:\\?.*)?$`));
-      await expect(page.getByText("Renovaciones vencidas sin resolver", { exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Renovaciones", exact: true })).toBeVisible();
 
       await db.policy.update({ where: { id: fixture.policyId }, data: { status: "EXPIRED" } });
       await page.goto("/policies?status=EXPIRED");
@@ -230,10 +406,53 @@ test.describe("operation queue context", () => {
       });
 
       await authenticatePageAsAdmin(page);
-      await page.goto("/operations?view=renewals");
+      await page.goto("/operations?view=renewals&mode=list");
 
       await expect(page.getByRole("link", { name: new RegExp(fixture.policyNumber) })).toHaveCount(0);
       await expect(page.getByText("No hay renovaciones pendientes.", { exact: true })).toBeVisible();
+    } finally {
+      await cleanupPolicyFixture(fixture);
+    }
+  });
+
+  test("unifies renewal views and confirms drag-and-drop into Lost", async ({ page }) => {
+    const fixture = await seedPolicyFixture("RENEWAL-BOARD-DRAG");
+
+    try {
+      await getTestDb().policy.update({
+        where: { id: fixture.policyId },
+        data: { endDate: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000) },
+      });
+      await authenticatePageAsAdmin(page);
+      await page.goto("/operations?view=renewals");
+
+      const stageNavigation = page.getByRole("navigation", { name: "Etapas de renovación" });
+      await expect(stageNavigation.getByRole("button", { name: /Perdido/ })).toBeVisible();
+      await page.getByRole("link", { name: "Ver como lista" }).click();
+      await expect(page.getByText("Lista de renovaciones", { exact: true })).toBeVisible();
+      await page.getByRole("link", { name: "Ver como tablero" }).click();
+
+      const pendingCard = page.locator("#renewal-stage-PENDING li").filter({ hasText: fixture.policyNumber });
+      await expect(pendingCard).toBeVisible();
+      await dragRenewalCardToStage(page, pendingCard.locator("[data-renewal-drag-handle]"), page.locator("#renewal-stage-WON"));
+      await expect(page.getByText("Para marcarla como renovada, captura primero la póliza nueva desde la tarjeta.", { exact: true })).toBeVisible();
+      await expect(pendingCard).toBeVisible();
+
+      await dragRenewalCardToStage(page, pendingCard.locator("[data-renewal-drag-handle]"), page.locator("#renewal-stage-CONTACTED"));
+      await expectMutationSuccessToast(page, "Renovación movida a Contactado.");
+
+      const contactedCard = page.locator("#renewal-stage-CONTACTED li").filter({ hasText: fixture.policyNumber });
+      await expect(contactedCard).toBeVisible();
+      await dragRenewalCardToStage(page, contactedCard.locator("[data-renewal-drag-handle]"), page.locator("#renewal-stage-LOST"));
+      const confirmation = page.getByRole("alertdialog");
+      await expect(confirmation).toContainText("Se marcará como no continuada");
+      await confirmation.getByRole("button", { name: "Cancelar" }).click();
+      await expect(contactedCard).toBeVisible();
+
+      await dragRenewalCardToStage(page, contactedCard.locator("[data-renewal-drag-handle]"), page.locator("#renewal-stage-LOST"));
+      await page.getByRole("alertdialog").getByRole("button", { name: "Cerrar renovación" }).click();
+      await expectMutationSuccessToast(page, "no renovada");
+      await expect(page.locator("#renewal-stage-LOST li").filter({ hasText: fixture.policyNumber })).toBeVisible();
     } finally {
       await cleanupPolicyFixture(fixture);
     }
@@ -277,7 +496,13 @@ test.describe("operation queue context", () => {
       await card.getByRole("button", { name: `Seguimiento de ${fixture.policyNumber}` }).click();
       const scheduledDate = businessDateAfter(3);
       await page.getByRole("menuitem", { name: "En 3 días", exact: true }).click();
-      await expectMutationSuccessToast(page, "Seguimiento programado.");
+      await expect.poll(async () => {
+        const item = await db.workItem.findUnique({
+          where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId: manualSourceId } },
+          select: { status: true, dueDate: true, policyId: true },
+        });
+        return item && { status: item.status, dueDate: businessDateKey(item.dueDate!), policyId: item.policyId };
+      }, { timeout: 10_000 }).toEqual({ status: "OPEN", dueDate: scheduledDate, policyId: fixture.policyId });
 
       const scheduledItem = await db.workItem.findUniqueOrThrow({
         where: { organizationId_sourceType_sourceId: { organizationId: TEST_ORGANIZATION_ID, sourceType: "Renewal", sourceId: manualSourceId } },

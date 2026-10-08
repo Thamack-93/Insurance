@@ -215,7 +215,6 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
     organizationId: scope.organizationId,
   }, db);
   const paymentsTotal = payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
-
   return (
     <div className="flex flex-col gap-6">
       <RecordPageView id={policy.id} label={`${policy.policyNumber} · ${policy.client.fullName}`} href={`/policies/${policy.id}`} type="Póliza" />

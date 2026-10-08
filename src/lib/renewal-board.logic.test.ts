@@ -58,6 +58,8 @@ describe("renewal-board.logic — filtros de la URL", () => {
   it("aplica la ventana por defecto y acepta sólo las conocidas", () => {
     expect(readRenewalBoardFilters({}).window).toBe(DEFAULT_RENEWAL_BOARD_WINDOW);
     expect(readRenewalBoardFilters({ window: "30" }).window).toBe("30");
+    expect(readRenewalBoardFilters({ window: "30d" }).window).toBe("30");
+    expect(readRenewalBoardFilters({ window: "90d" }).window).toBe("90");
     expect(readRenewalBoardFilters({ window: "999" }).window).toBe(DEFAULT_RENEWAL_BOARD_WINDOW);
   });
 

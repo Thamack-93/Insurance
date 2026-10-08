@@ -1,5 +1,6 @@
 import { addMonths } from "date-fns";
 import type { SelectOption } from "@/lib/domain-options";
+import { normalizePolicyNumber } from "@/lib/policy-number";
 import { convertLegacyPolicyDescription, type PolicyRiskDetails } from "@/lib/policy-risk-details";
 
 export type PolicyPdfCaptureDraft = {
@@ -185,7 +186,7 @@ export type PolicyPdfCaptureReceiptPlanItem = {
 
 type PolicyPdfCaptureReceiptPlanDraft = Pick<
   PolicyPdfCaptureDraft,
-  "startDate" | "endDate" | "paymentFrequency" | "premiumAmount" | "currency"
+  "policyNumber" | "startDate" | "endDate" | "paymentFrequency" | "premiumAmount" | "currency"
 >;
 
 function parseIsoDate(value: string) {
@@ -285,8 +286,36 @@ export function buildPolicyPdfCaptureReceiptPlan(draft: PolicyPdfCaptureReceiptP
 export function mergePolicyPdfCaptureReceiptPlan(
   draft: PolicyPdfCaptureReceiptPlanDraft,
   existingPlan: PolicyPdfCaptureReceiptPlanItem[] = [],
+  receiptEvidence?: PolicyPdfCaptureReceiptEvidence | null,
 ) {
-  const basePlan = buildPolicyPdfCaptureReceiptPlan(draft);
+  const generatedPlan = buildPolicyPdfCaptureReceiptPlan(draft);
+  const evidenceMatchesPolicy = Boolean(
+    receiptEvidence?.policyNumber &&
+    normalizePolicyNumber(receiptEvidence.policyNumber) === normalizePolicyNumber(draft.policyNumber),
+  );
+  const matchingSingleReceiptEvidence = evidenceMatchesPolicy && generatedPlan.length === 1 ? receiptEvidence : null;
+  const evidencePeriodMatch = evidenceMatchesPolicy && generatedPlan.length > 1
+    ? receiptEvidence?.periodLabel?.match(/^0*(\d{1,2})\s*\/\s*0*(\d{1,2})$/)
+    : null;
+  const evidenceTermIndex = evidencePeriodMatch && Number(evidencePeriodMatch[2]) === generatedPlan.length
+    ? Number(evidencePeriodMatch[1]) - 1
+    : -1;
+  const evidenceDueDate = receiptEvidence?.dueDate;
+  const validEvidenceDueDate = Boolean(
+    evidenceDueDate &&
+    /^\d{4}-\d{2}-\d{2}$/.test(evidenceDueDate) &&
+    !Number.isNaN(Date.parse(`${evidenceDueDate}T00:00:00Z`)) &&
+    new Date(`${evidenceDueDate}T00:00:00Z`).toISOString().slice(0, 10) === evidenceDueDate,
+  );
+  const basePlan = generatedPlan.map((item, index) => ({
+    ...item,
+    receiptNumber: matchingSingleReceiptEvidence?.receiptControlNumber?.trim() || item.receiptNumber,
+    dueDate: matchingSingleReceiptEvidence && validEvidenceDueDate
+      ? evidenceDueDate!
+      : index === evidenceTermIndex && validEvidenceDueDate
+        ? evidenceDueDate!
+        : item.dueDate,
+  }));
   if (existingPlan.length === 0) return basePlan;
 
   const amountByReceiptNumber = new Map(
@@ -295,8 +324,10 @@ export function mergePolicyPdfCaptureReceiptPlan(
       .map((item) => [item.receiptNumber.trim(), item.amount] as const),
   );
 
-  return basePlan.map((item) => {
-    const nextAmount = amountByReceiptNumber.get(item.receiptNumber);
+  return basePlan.map((item, index) => {
+    const generatedReceiptNumber = generatedPlan[index]?.receiptNumber;
+    const nextAmount = amountByReceiptNumber.get(item.receiptNumber)
+      ?? (generatedReceiptNumber ? amountByReceiptNumber.get(generatedReceiptNumber) : undefined);
     return typeof nextAmount === "number" && Number.isFinite(nextAmount)
       ? { ...item, amount: roundMoney(nextAmount) }
       : item;

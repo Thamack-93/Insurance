@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type FormEvent } from "react";
+import { forwardRef, useImperativeHandle, useRef, useState, useTransition, type FormEvent } from "react";
 import { MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -17,7 +17,20 @@ import { prepareWhatsAppReceiptReminder } from "@/app/(dashboard)/receipts/actio
 import { isSafeWhatsAppUrl } from "@/lib/whatsapp";
 import { cn } from "@/lib/utils";
 
-export function WhatsAppReminderButton({ receiptId, className, demoPreview }: { receiptId: string; className?: string; demoPreview?: { clientName: string; receiptNumber: string; policyNumber: string } }) {
+export type WhatsAppReminderHandle = { trigger: () => void };
+
+type WhatsAppReminderButtonProps = {
+  receiptId: string;
+  className?: string;
+  demoPreview?: { clientName: string; receiptNumber: string; policyNumber: string };
+  showTrigger?: boolean;
+  onPendingChange?: (pending: boolean) => void;
+};
+
+export const WhatsAppReminderButton = forwardRef<WhatsAppReminderHandle, WhatsAppReminderButtonProps>(function WhatsAppReminderButton(
+  { receiptId, className, demoPreview, showTrigger = true, onPendingChange },
+  ref,
+) {
   const [captureOpen, setCaptureOpen] = useState(false);
   const [capturedPhone, setCapturedPhone] = useState("");
   const [captureError, setCaptureError] = useState<string | null>(null);
@@ -25,68 +38,97 @@ export function WhatsAppReminderButton({ receiptId, className, demoPreview }: { 
   const [isPending, startTransition] = useTransition();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewMessage, setPreviewMessage] = useState<string | null>(null);
+  const pendingRef = useRef(false);
 
-  function openPreparedWhatsApp(url: string) {
+  function openPreparedWhatsApp(url: string, popup: Window | null) {
     setCaptureOpen(false);
     if (!isSafeWhatsAppUrl(url)) {
+      popup?.close();
       toast.error("No se pudo validar la liga de WhatsApp.");
       return;
     }
+    if (popup && !popup.closed) {
+      popup.location.href = url;
+      setPreparedUrl(null);
+      return;
+    }
     setPreparedUrl(url);
-    const opened = window.open(url, "_blank", "noopener,noreferrer");
-    if (!opened) toast.info("WhatsApp quedó listo. Usa el enlace para abrirlo.");
+    toast.info("WhatsApp quedó listo. Usa el enlace para abrirlo.");
   }
 
-  function prepare(phone?: string) {
+  function prepare(phone?: string, popup: Window | null = null) {
+    if (pendingRef.current) {
+      popup?.close();
+      return;
+    }
+    pendingRef.current = true;
+    onPendingChange?.(true);
     startTransition(async () => {
-      const result = await prepareWhatsAppReceiptReminder({
-        receiptId,
-        ...(phone ? { capturedPhone: phone } : {}),
-      });
+      try {
+        const result = await prepareWhatsAppReceiptReminder({
+          receiptId,
+          ...(phone ? { capturedPhone: phone } : {}),
+        });
 
-      if (!result.ok) {
-        if (phone) setCaptureError(result.error);
-        else toast.error(result.error);
-        return;
+        if (!result.ok) {
+          popup?.close();
+          if (phone) setCaptureError(result.error);
+          else toast.error(result.error);
+          return;
+        }
+
+        if (result.outcome === "CAPTURE_PHONE") {
+          popup?.close();
+          setCaptureError(null);
+          setCaptureOpen(true);
+          return;
+        }
+
+        openPreparedWhatsApp(result.url, popup);
+      } finally {
+        pendingRef.current = false;
+        onPendingChange?.(false);
       }
-
-      if (result.outcome === "CAPTURE_PHONE") {
-        setCaptureError(null);
-        setCaptureOpen(true);
-        return;
-      }
-
-      openPreparedWhatsApp(result.url);
     });
   }
 
   function handleCaptureSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setCaptureError(null);
-    prepare(capturedPhone);
+    const popup = window.open("about:blank", "_blank");
+    if (popup) popup.opener = null;
+    prepare(capturedPhone, popup);
   }
+
+  function handleTrigger() {
+    if (demoPreview) {
+      setPreviewMessage(`Hola ${demoPreview.clientName}, te compartimos un recordatorio de demostración sobre el recibo ${demoPreview.receiptNumber} de la póliza ${demoPreview.policyNumber}. No se envió ningún mensaje.`);
+      setPreviewOpen(true);
+      return;
+    }
+    const popup = window.open("about:blank", "_blank");
+    if (popup) popup.opener = null;
+    prepare(undefined, popup);
+  }
+
+  useImperativeHandle(ref, () => ({ trigger: handleTrigger }));
 
   return (
     <>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className={cn("h-8 gap-1 px-3 text-xs", className)}
-        onClick={() => {
-          if (demoPreview) {
-            setPreviewMessage(`Hola ${demoPreview.clientName}, te compartimos un recordatorio de demostración sobre el recibo ${demoPreview.receiptNumber} de la póliza ${demoPreview.policyNumber}. No se envió ningún mensaje.`);
-            setPreviewOpen(true);
-            return;
-          }
-          prepare();
-        }}
-        disabled={isPending}
-        aria-label="Avisar por WhatsApp"
-      >
-        <MessageSquare className="size-3.5" />
-        {isPending ? "Preparando..." : "Avisar por WhatsApp"}
-      </Button>
+      {showTrigger ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className={cn("h-8 gap-1 px-3 text-xs", className)}
+          onClick={handleTrigger}
+          disabled={isPending}
+          aria-label="Avisar por WhatsApp"
+        >
+          <MessageSquare className="size-3.5" />
+          {isPending ? "Preparando..." : "Avisar por WhatsApp"}
+        </Button>
+      ) : null}
 
       {preparedUrl ? (
         <a
@@ -157,4 +199,4 @@ export function WhatsAppReminderButton({ receiptId, className, demoPreview }: { 
       </Dialog>
     </>
   );
-}
+});

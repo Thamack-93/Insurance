@@ -29,3 +29,9 @@ export const QUALITAS_FINAL_RESPONSE_FIXTURES = {
   HIDDEN_SUCCESS_CODE:
     "<script>const legacyCode = 0;</script><main>Solicitud recibida</main>",
 } as const;
+
+export const QUALITAS_RECEIPT_MONITOR_FIXTURES = {
+  NEXT_RECEIPT_TABLE: `<table><thead><tr><th>Recibo</th><th>Fecha límite de pago</th></tr></thead><tbody><tr><td>12</td><td>12/11/2026</td></tr><tr><td>13</td><td>12/12/2026</td></tr></tbody></table>`,
+  CHALLENGE: `<main>Access denied. Incapsula incident ID.</main>`,
+  CHANGED_FLOW: `<main>El servicio se encuentra temporalmente fuera de servicio.</main>`,
+} as const;

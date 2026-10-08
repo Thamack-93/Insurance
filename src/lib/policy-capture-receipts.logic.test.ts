@@ -7,6 +7,102 @@ import {
 } from "@/lib/policy-capture-receipts";
 
 describe("policy-capture-receipts", () => {
+  it.each([
+    ["SINGLE", 1],
+    ["ANNUAL", 1],
+    ["SEMIANNUAL", 2],
+    ["QUARTERLY", 4],
+    ["MONTHLY", 12],
+  ])("builds all %s receipt terms as pending", (paymentFrequency, expectedCount) => {
+    const payloads = buildAutoCaptureReceiptPayloads({
+      organizationId: "org-test",
+      policyId: "policy-new",
+      clientId: "client-1",
+      insurerId: "insurer-1",
+      userId: "user-1",
+      draft: {
+        policyNumber: "P-NEW",
+        clientName: "Cliente Demo",
+        clientType: "PERSON",
+        clientEmail: null,
+        clientPhone: null,
+        clientAddress: null,
+        clientRfc: null,
+        insurerName: "Aseguradora Demo",
+        policyType: "AUTO",
+        serialNumber: null,
+        startDate: "2026-07-22",
+        endDate: "2027-07-22",
+        issueDate: null,
+        paymentFrequency,
+        paymentPlan: null,
+        premiumAmount: 1200,
+        currency: "MXN",
+        requestNumber: null,
+        insuredObject: null,
+        beneficiaryInfo: null,
+        notes: null,
+        sourcePolicyNumber: null,
+      },
+    });
+
+    expect(payloads).toHaveLength(expectedCount);
+    expect(payloads.every((payload) => payload.status === "PENDING" && payload.paidDate === null)).toBe(true);
+    expect(payloads[0]?.dueDate).toEqual(payloads[0]?.periodStartDate);
+    expect(payloads.reduce((sum, payload) => sum + payload.amount, 0)).toBe(1200);
+  });
+
+  it("uses matching notice vencimiento and control number for a single receipt", () => {
+    const payload = buildAutoCaptureReceiptPayload({
+      organizationId: "org-test",
+      policyId: "policy-new",
+      clientId: "client-1",
+      insurerId: "insurer-1",
+      userId: "user-1",
+      receiptEvidence: {
+        policyNumber: "940463089",
+        receiptControlNumber: "0312242788",
+        dueDate: "2026-11-08",
+        periodLabel: "01/01",
+        amountDue: 7067.18,
+        depositAmount: 7067,
+        currency: "MXN",
+        paymentMethod: "CONTADO",
+        paymentConfirmed: false,
+        warnings: [],
+      },
+      draft: {
+        policyNumber: "0940463089",
+        clientName: "Cliente Demo",
+        clientType: "PERSON",
+        clientEmail: null,
+        clientPhone: null,
+        clientAddress: null,
+        clientRfc: null,
+        insurerName: "Aseguradora Demo",
+        policyType: "AUTO",
+        serialNumber: null,
+        startDate: "2026-10-25",
+        endDate: "2027-10-25",
+        issueDate: null,
+        paymentFrequency: "SINGLE",
+        paymentPlan: null,
+        premiumAmount: 7067.18,
+        currency: "MXN",
+        requestNumber: null,
+        insuredObject: null,
+        beneficiaryInfo: null,
+        notes: null,
+        sourcePolicyNumber: null,
+      },
+    });
+
+    expect(payload.receiptNumber).toBe("0312242788");
+    expect(payload.dueDate.toISOString()).toBe("2026-11-08T06:00:00.000Z");
+    expect(payload.status).toBe("PENDING");
+    expect(payload.paidDate).toBeNull();
+  });
+
   it("builds a pending receipt from the capture draft", () => {
     const payload = buildAutoCaptureReceiptPayload({
       organizationId: "org-test",

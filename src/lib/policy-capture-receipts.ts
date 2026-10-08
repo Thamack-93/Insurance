@@ -2,6 +2,7 @@ import { addMonths } from "date-fns";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { parseDateInput } from "@/lib/form-utils";
 import type { PolicyPdfCaptureDraft, PolicyPdfCaptureReceiptEvidence } from "@/lib/policy-pdf-capture.shared";
+import { normalizePolicyNumber } from "@/lib/policy-number";
 import { receiptSequenceForNumber } from "@/lib/sorting";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -117,6 +118,30 @@ function getReceiptTermCount(paymentFrequency: string) {
   }
 }
 
+function getMatchingReceiptEvidence(input: AutoCaptureReceiptInput) {
+  const evidence = input.receiptEvidence;
+  const draftPolicyNumber = "policyNumber" in input.draft ? input.draft.policyNumber : null;
+  if (!evidence?.policyNumber || !draftPolicyNumber) return null;
+  return normalizePolicyNumber(evidence.policyNumber) === normalizePolicyNumber(draftPolicyNumber)
+    ? evidence
+    : null;
+}
+
+function parseEvidenceDueDate(value: string | null | undefined) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = parseDateInput(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getReceiptEvidenceTermIndex(evidence: PolicyPdfCaptureReceiptEvidence | null, termCount: number) {
+  if (!evidence) return null;
+  if (termCount === 1) return 0;
+  const match = evidence.periodLabel?.match(/^0*(\d{1,2})\s*\/\s*0*(\d{1,2})$/);
+  if (!match || Number(match[2]) !== termCount) return null;
+  const index = Number(match[1]) - 1;
+  return index >= 0 && index < termCount ? index : null;
+}
+
 function buildSequentialReceiptNumbers(count: number, startingReceiptNumber?: string) {
   const trimmed = startingReceiptNumber?.trim() || "";
   const numericStart = Number(trimmed);
@@ -144,9 +169,13 @@ function buildAutoCaptureReceiptTerms(input: AutoCaptureReceiptInput): AutoCaptu
   const periodStartDate = parseDateInput(input.draft.startDate);
   const periodEndDate = parseDateInput(input.draft.endDate);
   const totalAmount = roundMoney(input.draft.premiumAmount);
+  const termCount = getReceiptTermCount(input.draft.paymentFrequency);
+  const receiptEvidence = getMatchingReceiptEvidence(input);
+  const receiptEvidenceTermIndex = getReceiptEvidenceTermIndex(receiptEvidence, termCount);
+  const receiptEvidenceDueDate = parseEvidenceDueDate(receiptEvidence?.dueDate);
   const receiptNumbers = buildSequentialReceiptNumbers(
-    getReceiptTermCount(input.draft.paymentFrequency),
-    input.receiptNumber,
+    termCount,
+    input.receiptNumber ?? (termCount === 1 ? receiptEvidence?.receiptControlNumber ?? undefined : undefined),
   );
   const amountOverrides = buildReceiptAmountOverrides(input.receiptPlan);
 
@@ -156,7 +185,7 @@ function buildAutoCaptureReceiptTerms(input: AutoCaptureReceiptInput): AutoCaptu
         receiptNumber: receiptNumbers[0] ?? "1",
         periodStartDate,
         periodEndDate,
-        dueDate: periodStartDate,
+        dueDate: receiptEvidenceDueDate ?? periodStartDate,
         amount: amountOverrides.get(receiptNumbers[0] ?? "1") ?? totalAmount,
         currency: input.draft.currency,
       },
@@ -179,7 +208,7 @@ function buildAutoCaptureReceiptTerms(input: AutoCaptureReceiptInput): AutoCaptu
       receiptNumber,
       periodStartDate: currentStartDate,
       periodEndDate: nextStartDate,
-      dueDate: currentStartDate,
+      dueDate: index === receiptEvidenceTermIndex && receiptEvidenceDueDate ? receiptEvidenceDueDate : currentStartDate,
       amount,
       currency: input.draft.currency,
     };
@@ -193,7 +222,7 @@ function buildAutoCaptureReceiptPayloadFromTerm(
   input: AutoCaptureReceiptInput,
   term: AutoCaptureReceiptTerm,
 ): AutoCaptureReceiptPayload {
-  const notes = [buildAutoCaptureReceiptNotes(input.draft), buildReceiptEvidenceNote(input.receiptEvidence)].filter(Boolean).join(" · ") || null;
+  const notes = [buildAutoCaptureReceiptNotes(input.draft), buildReceiptEvidenceNote(getMatchingReceiptEvidence(input))].filter(Boolean).join(" · ") || null;
 
   return {
     organizationId: input.organizationId,

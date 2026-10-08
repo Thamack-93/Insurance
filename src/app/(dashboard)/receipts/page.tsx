@@ -28,6 +28,7 @@ import { buildTableHref } from "@/lib/table-query";
 import { paymentMethodLabel, dataQualityReasonLabel } from "@/lib/ui-labels";
 import { appendReturnTo } from "@/lib/return-to";
 import { isQualitasClientRecipientEnabled, isQualitasInsurerName, isQualitasPaymentLinkEnabled } from "@/lib/qualitas-payment-link";
+import { isQualitasReceiptMonitorEnabled } from "@/lib/qualitas-receipt-monitor";
 import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 import {
   buildOpenReceiptBaseWhere,
@@ -134,6 +135,7 @@ export default async function ReceiptsPage({
   };
   const agentContact = resolveReceiptAuxiliary(agentContactResult, null, reportAuxiliaryFailure("agent-contact"));
   const qualitasCapability = resolveReceiptAuxiliary(qualitasCapabilityResult, null, reportAuxiliaryFailure("qualitas-capability"));
+  const qualitasMonitorFeatureEnabled = isQualitasReceiptMonitorEnabled() && Boolean(qualitasCapability?.enabled);
   const paidThisMonth = resolveReceiptAuxiliary(paidThisMonthResult, [], reportAuxiliaryFailure("paid-this-month"));
   const paymentHistory = resolveReceiptAuxiliary(paymentHistoryResult, [], reportAuxiliaryFailure("payment-history"));
   const reviewIssues = resolveReceiptAuxiliary(reviewIssuesResult, [], reportAuxiliaryFailure("review-issues"));
@@ -165,8 +167,14 @@ export default async function ReceiptsPage({
       currency: receipt.currency,
       status: receipt.status,
       client: { fullName: receipt.client.fullName },
-      policy: { policyNumber: receipt.policy.policyNumber, status: receipt.policy.status },
-      insurer: { name: receipt.insurer.name },
+      policy: {
+        id: receipt.policy.id,
+        policyNumber: receipt.policy.policyNumber,
+        status: receipt.policy.status,
+        paymentFrequency: receipt.policy.paymentFrequency,
+        qualitasReceiptMonitorEnabled: receipt.policy.qualitasReceiptMonitorEnabled,
+      },
+      insurer: { name: receipt.policy.insurer.name },
       endorsement: receipt.endorsement
         ? { endorsementNumber: receipt.endorsement.endorsementNumber, reference: receipt.endorsement.reference }
         : undefined,
@@ -178,7 +186,10 @@ export default async function ReceiptsPage({
       agentPhone: agentContact?.phone ?? null,
       qualitasEnabled: isReceiptQualitasEnabled(qualitasCapability, isQualitasPaymentLinkEnabled()),
       qualitasClientRecipientEnabled: isQualitasClientRecipientEnabled(),
-      qualitasEligible: isQualitasInsurerName(receipt.insurer.name),
+      qualitasEligible: isQualitasInsurerName(receipt.policy.insurer.name),
+      qualitasMonitorEligible:
+        isQualitasInsurerName(receipt.policy.insurer.name) &&
+        receipt.policy.status === "ACTIVE",
     }));
 
   const safePaymentHistory = paymentHistory.filter((payment) => payment.receipt && payment.client && payment.policy);
@@ -300,7 +311,12 @@ export default async function ReceiptsPage({
               </div>
             ) : (
               <div className="px-3 py-3">
-                <CollectableReceipts receipts={collectableRows} returnTo={returnTo} isDemo={organizationKind?.kind === "DEMO"} />
+                <CollectableReceipts
+                  receipts={collectableRows}
+                  returnTo={returnTo}
+                  isDemo={organizationKind?.kind === "DEMO"}
+                  qualitasMonitorFeatureEnabled={qualitasMonitorFeatureEnabled}
+                />
                 <Pagination
                   page={page}
                   pageSize={PAGE_SIZE}
@@ -633,7 +649,7 @@ async function loadReceiptPageCore(db: TenantDb, organizationId: string, input: 
         where: { ...where, organizationId },
         include: {
           client: true,
-          policy: true,
+          policy: { include: { insurer: true } },
           insurer: true,
           endorsement: true,
           _count: { select: { payments: { where: { status: "POSTED" } } } },

@@ -21,8 +21,9 @@ import { readAllowedTableParam, readTablePage, readTableParam } from "@/lib/tabl
 import { cn } from "@/lib/utils";
 import { getWorkItemHref } from "@/lib/work-item-navigation";
 import { RenewalBoard } from "@/components/renewals/renewal-board";
+import { RenewalBoardFilters } from "@/components/renewals/renewal-board-filters";
 import { getRenewalBoardOwners, loadRenewalBoard } from "@/lib/renewal-board";
-import { readRenewalBoardFilters, renewalManualFollowUpWorkItemSourceId } from "@/lib/renewal-board.logic";
+import { readRenewalBoardFilters, renewalManualFollowUpWorkItemSourceId, renewalWindowRange, UNASSIGNED_OWNER_VALUE } from "@/lib/renewal-board.logic";
 import { Badge } from "@/components/ui/badge";
 import { TableToolbar } from "@/components/tables/table-toolbar";
 import { PRIORITIES, WORK_ITEM_TYPES } from "@/lib/domain-values";
@@ -33,13 +34,12 @@ import { withTenantTransaction } from "@/lib/organization-context";
 import { SavedQueueControls } from "@/components/queues/saved-queue-controls";
 import { RenewalFollowUpMenu } from "@/components/renewals/renewal-follow-up-menu";
 
-type OperationsView = "all" | "pending" | "renewals" | "renewal-board" | "claims";
+type OperationsView = "all" | "pending" | "renewals" | "claims";
 
 const localItems = [
   { label: "Todo", href: "/operations", excludeQueryKeys: ["view"] },
   { label: "Pendientes", href: "/operations?view=pending" },
-  { label: "Renovaciones", href: "/operations?view=renewals" },
-  { label: "Tablero de renovaciones", href: "/operations?view=renewal-board" },
+  { label: "Renovaciones", href: "/operations?view=renewals", activeHrefs: ["/operations?view=renewal-board"] },
   { label: "Siniestros", href: "/operations?view=claims" },
 ];
 
@@ -47,9 +47,8 @@ const RENEWAL_PAGE_SIZE = 25;
 const WORK_ITEM_PAGE_SIZE = 50;
 
 function readView(value?: string): OperationsView {
-  return value === "pending" || value === "renewals" || value === "renewal-board" || value === "claims"
-    ? value
-    : "all";
+  if (value === "renewal-board") return "renewals";
+  return value === "pending" || value === "renewals" || value === "claims" ? value : "all";
 }
 
 const operationalStateClasses: Record<OperationalRenewalState, string> = {
@@ -178,23 +177,22 @@ export default async function OperationsPage({
   const params = (await searchParams) ?? {};
   const view = readView(typeof params.view === "string" ? params.view : undefined);
   const page = readTablePage(params);
-  const query = view === "pending" || view === "renewals" || view === "claims" || view === "renewal-board" ? readTableParam(params, "q")?.trim() : undefined;
+  const renewalMode = readAllowedTableParam(params, "mode", ["board", "list"] as const) ?? "board";
+  const query = view === "pending" || view === "renewals" || view === "claims" ? readTableParam(params, "q")?.trim() : undefined;
   const priority = view === "pending" ? readAllowedTableParam(params, "priority", PRIORITIES) : undefined;
   const workItemType = view === "pending" ? readAllowedTableParam(params, "workItemType", WORK_ITEM_TYPES) : undefined;
-  const renewalWindow = view === "renewals" ? readAllowedTableParam(params, "window", ["30d", "60d", "90d"] as const) ?? "30d" : "30d";
+  const boardFilters = readRenewalBoardFilters(params);
+  const renewalRange = renewalWindowRange(boardFilters.window);
   const scope = await requireOrganizationPortfolioReadScope();
-  const organizationKind = view === "renewal-board"
+  const organizationKind = view === "renewals" && renewalMode === "board"
     ? await withTenantTransaction(scope.context, (tx) => tx.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } }))
     : null;
   const today = businessToday();
   const nextSeven = businessAddDays(today, 7);
-  const nextRenewalDate = businessAddDays(today, Number(renewalWindow.slice(0, -1)));
-
-  const boardFilters = readRenewalBoardFilters(params);
   const [board, boardOwners] =
-    view === "renewal-board"
+    view === "renewals"
       ? await Promise.all([
-          loadRenewalBoard(boardFilters, scope.portfolioOwnerId, scope.organizationId),
+          renewalMode === "board" ? loadRenewalBoard(boardFilters, scope.portfolioOwnerId, scope.organizationId) : Promise.resolve(null),
           getRenewalBoardOwners(scope.portfolioOwnerId, scope.organizationId),
         ])
       : [null, []];
@@ -214,6 +212,33 @@ export default async function OperationsPage({
       }] : []),
     ],
   };
+  const renewalListConditions: Prisma.PolicyWhereInput[] = [];
+  if (!scope.portfolioOwnerId && boardFilters.owner) {
+    renewalListConditions.push({
+      client: {
+        portfolioOwnerId: boardFilters.owner === UNASSIGNED_OWNER_VALUE ? null : boardFilters.owner,
+      },
+    });
+  }
+  if (query && view === "renewals") {
+    renewalListConditions.push({
+      OR: [
+        { policyNumber: { contains: query } },
+        { client: { fullName: { contains: query } } },
+        { insurer: { name: { contains: query } } },
+        ...policyObjectSearchTerms(query),
+      ],
+    });
+  }
+  const renewalListWhere: Prisma.PolicyWhereInput = view === "all"
+    ? { endDate: { lte: businessAddDays(today, 30) } }
+    : {
+        endDate: {
+          ...(renewalRange.from ? { gte: renewalRange.from } : {}),
+          ...(renewalRange.to ? { lte: renewalRange.to } : {}),
+        },
+        ...(renewalListConditions.length ? { AND: renewalListConditions } : {}),
+      };
   const [workItems, workItemsPage, renewalPolicies, claimData] = await Promise.all([
     view === "all" ? getWorkItems({
       organizationId: scope.organizationId,
@@ -231,17 +256,9 @@ export default async function OperationsPage({
       limit: WORK_ITEM_PAGE_SIZE,
       skip: (page - 1) * WORK_ITEM_PAGE_SIZE,
     }) : Promise.resolve(null),
-    view === "all" || view === "renewals" ? loadEligibleRenewalPolicies({
-      endDate: { lte: nextRenewalDate },
-      ...(query && view === "renewals" ? {
-        OR: [
-          { policyNumber: { contains: query } },
-          { client: { fullName: { contains: query } } },
-          { insurer: { name: { contains: query } } },
-          ...policyObjectSearchTerms(query),
-        ],
-      } : {}),
-    }, scope.portfolioOwnerId, scope.organizationId, undefined, true) : Promise.resolve([]),
+    view === "all" || (view === "renewals" && renewalMode === "list")
+      ? loadEligibleRenewalPolicies(renewalListWhere, scope.portfolioOwnerId, scope.organizationId, undefined, true)
+      : Promise.resolve([]),
     withTenantTransaction(scope.context, async (db) => ({
       claims: await db.claim.findMany({
         where: claimWhere,
@@ -275,8 +292,6 @@ export default async function OperationsPage({
   const upcoming = visibleWorkItems.filter((item) => item.dueDate && businessStartOfDay(item.dueDate) > today && businessStartOfDay(item.dueDate) <= nextSeven);
   const unscheduled = visibleWorkItems.filter((item) => !item.dueDate || businessStartOfDay(item.dueDate) > nextSeven);
   const renewalCount = renewalPolicies.length;
-  const overdueRenewalCount = renewalPolicies.filter((policy) => businessStartOfDay(policy.endDate) < today).length;
-  const upcomingRenewalCount = renewalPolicies.filter((policy) => businessStartOfDay(policy.endDate) >= today).length;
   const renewals = renewalPolicies.slice(
     view === "renewals" ? (page - 1) * RENEWAL_PAGE_SIZE : 0,
     view === "renewals" ? page * RENEWAL_PAGE_SIZE : 8,
@@ -292,11 +307,7 @@ export default async function OperationsPage({
     },
     renewals: {
       title: "Renovaciones",
-      description: "Pólizas activas con renovación pendiente, separadas entre vencidas y próximas.",
-    },
-    "renewal-board": {
-      title: "Tablero de renovaciones",
-      description: "Cada renovación en la etapa en la que va, para trabajarla y no sólo consultarla.",
+      description: "Sigue cada renovación por etapa y cambia a la lista cuando necesites revisar el inventario.",
     },
     claims: {
       title: "Siniestros",
@@ -307,10 +318,30 @@ export default async function OperationsPage({
     { value: "TASK", label: workItemTypeLabel("TASK") },
     { value: "NOTIFICATION", label: workItemTypeLabel("NOTIFICATION") },
   ];
-  const renewalSearchParams = { view: "renewals", q: query };
+  const renewalSearchParams = {
+    view: "renewals",
+    mode: "list",
+    q: query,
+    window: boardFilters.window,
+    owner: boardFilters.owner,
+  };
+  const renewalViewHref = (mode: "board" | "list") => buildCanonicalHref(
+    "/operations",
+    { ...params, page: undefined },
+    { view: "renewals", mode },
+  );
   const claimSearchParams = { view: "claims", q: query };
   const pendingSearchParams = { view: "pending", q: query, priority, workItemType };
   const returnTo = buildCanonicalHref("/operations", params);
+  const savedQueueConfig = {
+    route: "operations",
+    search: query ?? "",
+    filters: { view, priority: priority ?? "", workItemType: workItemType ?? "" },
+    version: 1,
+  };
+  const savedQueueControls = view === "renewals" ? null : (
+    <SavedQueueControls route="operations" config={savedQueueConfig} />
+  );
 
   return (
     <div className="space-y-5">
@@ -326,18 +357,8 @@ export default async function OperationsPage({
               </Link>
             ) : null}
             {view === "renewals" ? (
-              <>
-                <Link href="/operations?view=renewal-board" className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}>
-                  Ver como tablero
-                </Link>
-                <Link href="/policies/new" className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}>
-                  Capturar póliza
-                </Link>
-              </>
-            ) : null}
-            {view === "renewal-board" ? (
-              <Link href="/operations?view=renewals" className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}>
-                Ver como lista
+              <Link href={renewalViewHref(renewalMode === "board" ? "list" : "board")} className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}>
+                {renewalMode === "board" ? "Ver como lista" : "Ver como tablero"}
               </Link>
             ) : null}
             <Link href="/tasks/new" className={cn(buttonVariants(), "min-h-11")}>
@@ -347,7 +368,7 @@ export default async function OperationsPage({
         }
       />
       <LocalNavigation items={localItems} label="Vistas de operación" />
-      <SavedQueueControls route={view === "renewal-board" ? "renewal-board" : "operations"} config={{ route: view === "renewal-board" ? "renewal-board" : "operations", search: query ?? "", filters: { view, priority: priority ?? "", workItemType: workItemType ?? "", renewalWindow }, dateWindow: renewalWindow as "30d" | "60d" | "90d", version: 1 }} />
+      {savedQueueControls}
 
       {view === "all" ? (
         <>
@@ -405,16 +426,16 @@ export default async function OperationsPage({
         </div>
       ) : null}
 
-      {view === "renewals" ? (
+      {view === "renewals" && renewalMode === "list" ? (
         <div className="space-y-4">
-          <section className="grid gap-3 sm:grid-cols-2" aria-label="Resumen de renovaciones">
-            <Card size="sm"><CardHeader><CardTitle>Renovaciones vencidas sin resolver</CardTitle></CardHeader><CardContent className="font-mono text-2xl font-semibold text-destructive">{overdueRenewalCount}</CardContent></Card>
-            <Card size="sm"><CardHeader><CardTitle>Próximos 30 días</CardTitle></CardHeader><CardContent className="font-mono text-2xl font-semibold text-amber-700 dark:text-amber-300">{upcomingRenewalCount}</CardContent></Card>
-          </section>
+          <RenewalBoardFilters
+            filters={boardFilters}
+            owners={boardOwners}
+            canFilterByOwner={!scope.portfolioOwnerId}
+          />
           <Card className="gap-0 py-0">
-            <CardHeader className="border-b py-4"><CardTitle className="flex items-center gap-2"><CalendarClock className="size-4" />Renovaciones pendientes</CardTitle></CardHeader>
+            <CardHeader className="border-b py-4"><CardTitle className="flex items-center gap-2"><CalendarClock className="size-4" />Lista de renovaciones</CardTitle></CardHeader>
             <CardContent className="px-0">
-              <div className="border-b px-4 py-3"><TableToolbar searchPlaceholder="Buscar póliza, objeto asegurado, cliente o aseguradora..." tableControls={false} /></div>
               {renewalCount > 0 && renewals.length > 0 ? (
                 <Table>
                   <TableHeader>
@@ -447,7 +468,7 @@ export default async function OperationsPage({
         </div>
       ) : null}
 
-      {view === "renewal-board" && board?.error ? (
+      {view === "renewals" && renewalMode === "board" && board?.error ? (
         <section role="alert" className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-5 text-sm text-destructive">
           <p className="font-semibold">No pudimos cargar el tablero de renovaciones.</p>
           <p className="mt-1">La información no está disponible temporalmente. Intenta actualizar la vista.</p>
@@ -455,7 +476,7 @@ export default async function OperationsPage({
         </section>
       ) : null}
 
-      {view === "renewal-board" && board && !board.error ? (
+      {view === "renewals" && renewalMode === "board" && board && !board.error ? (
         <RenewalBoard
           board={board}
           filters={boardFilters}

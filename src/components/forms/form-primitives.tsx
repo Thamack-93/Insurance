@@ -157,6 +157,7 @@ export function ControlledSelect({
   className,
   id,
   autoFocus,
+  disabled,
   "aria-invalid": ariaInvalid,
   "aria-describedby": ariaDescribedBy,
   "aria-required": ariaRequired,
@@ -169,6 +170,7 @@ export function ControlledSelect({
   className?: string;
   id?: string;
   autoFocus?: boolean;
+  disabled?: boolean;
   "aria-invalid"?: boolean;
   "aria-describedby"?: string;
   "aria-required"?: boolean;
@@ -185,6 +187,7 @@ export function ControlledSelect({
       <SelectTrigger
         id={triggerId}
         autoFocus={autoFocus}
+        disabled={disabled}
         aria-invalid={invalid || undefined}
         aria-describedby={describedBy}
         aria-required={required || undefined}

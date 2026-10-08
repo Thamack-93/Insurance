@@ -26,6 +26,7 @@ import {
   getOperationalDataHealthSummary,
   getLedgerReviewIssues,
   getPolicyDataQualityScores,
+  listActivePoliciesWithoutReceipts,
   getReceiptReviewIssues,
   getRenewalReviewSuggestions,
 } from "@/lib/data-quality";
@@ -256,6 +257,7 @@ export default async function DataQualityPage({
   const clientAttention = clientScores.filter((c) => c.nivel === "Atención").length;
   const policyCritical = policyScores.filter((p) => p.score < 50).length;
   const policyAttention = policyScores.filter((p) => p.score >= 50 && p.score < 75).length;
+  const activePoliciesWithoutReceipts = listActivePoliciesWithoutReceipts(policyScores);
   const renewalFollowUpByClient = renewalFollowUps.reduce((acc, renewal) => {
     const current = acc.get(renewal.clientId) ?? {
       clienteId: renewal.clientId,
@@ -516,6 +518,40 @@ export default async function DataQualityPage({
                   tone={operationalHealth.insuredOnlyClientsWithoutPolicies === 0 ? "emerald" : "amber"}
                 />
               </div>
+            </SectionCard>
+
+            <SectionCard
+              title={`Auditoría: pólizas activas sin recibos (${activePoliciesWithoutReceipts.length})`}
+              description="Listado de solo lectura para revisar pólizas de esta organización que aún no tienen recibos. No genera ni modifica obligaciones."
+            >
+              {activePoliciesWithoutReceipts.length === 0 ? (
+                <div className="px-4 py-6 text-sm text-muted-foreground">No hay pólizas activas sin recibos.</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-stone-50/70">
+                      <TableHead>Póliza</TableHead>
+                      <TableHead>Cliente y aseguradora</TableHead>
+                      <TableHead>Frecuencia</TableHead>
+                      <TableHead>Fin de vigencia</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {activePoliciesWithoutReceipts.map((policy) => (
+                      <TableRow key={policy.polizaId}>
+                        <TableCell>
+                          <Link href={`/policies/${policy.polizaId}`} className="font-medium text-foreground hover:text-primary">
+                            {policy.poliza}
+                          </Link>
+                        </TableCell>
+                        <TableCell>{policy.cliente} · {policy.aseguradora}</TableCell>
+                        <TableCell>{policy.paymentFrequency}</TableCell>
+                        <TableCell>{formatDate(policy.endDate)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </SectionCard>
 
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

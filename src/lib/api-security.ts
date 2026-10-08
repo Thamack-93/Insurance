@@ -41,6 +41,7 @@ export const API_SECURITY_MANIFEST = {
   "/api/policies/capture/confirm": "authenticated",
   "/api/policies/capture/lookup": "authenticated",
   "/api/policies/capture/preview": "authenticated",
+  "/api/work-items/relation-options": "authenticated",
   "/api/search": "authenticated",
 } as const satisfies Record<string, ApiSecurityClass>;
 
