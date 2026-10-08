@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { reconcilePolicyRiskInventory, type PolicyRiskInventoryInput, type PolicyRiskInventoryOutcomeReport } from "@/lib/policy-risk-inventory-reconciliation";
+import { parseVerifiedPolicyRiskInventoryOutcomeReport, reconcilePolicyRiskInventory, type PolicyRiskInventoryInput, type PolicyRiskInventoryOutcomeReport } from "@/lib/policy-risk-inventory-reconciliation";
 
 function policy(overrides: Partial<PolicyRiskInventoryInput> = {}): PolicyRiskInventoryInput {
   return {
@@ -23,6 +24,17 @@ function report(outcomes: PolicyRiskInventoryOutcomeReport["outcomes"], override
 }
 
 describe("whole policy risk inventory reconciliation", () => {
+  it("verifies the exact private outcome report bytes against the supplied digest", () => {
+    const bytes = new TextEncoder().encode(JSON.stringify(report([{ policyId: "p1", outcome: "DEFERRED" }])));
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    expect(parseVerifiedPolicyRiskInventoryOutcomeReport(bytes, digest)).toMatchObject({
+      report: { organizationId: "org-1", manifestSha256: "manifest-1" },
+      fileSha256: digest,
+    });
+    const tampered = new TextEncoder().encode(new TextDecoder().decode(bytes) + " ");
+    expect(() => parseVerifiedPolicyRiskInventoryOutcomeReport(tampered, digest)).toThrow("POLICY_RISK_INVENTORY_OUTCOME_FILE_SHA256_MISMATCH");
+  });
+
   it("accounts for recognized structured data, pending source rows, and missing-source rows", () => {
     const result = reconcilePolicyRiskInventory({
       organizationId: "org-1",

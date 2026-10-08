@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { hasPolicyRiskData, policyRiskDetailsSchema } from "@/lib/policy-risk-details";
 
 export type PolicyRiskInventoryInput = {
@@ -24,6 +25,25 @@ export type PolicyRiskInventoryOutcomeReport = {
   manifestSha256: string;
   outcomes: PolicyRiskInventoryOutcome[];
 };
+
+export function parseVerifiedPolicyRiskInventoryOutcomeReport(bytes: Uint8Array, expectedFileSha256: string) {
+  const fileSha256 = createHash("sha256").update(bytes).digest("hex");
+  if (!/^[a-f0-9]{64}$/.test(expectedFileSha256) || fileSha256 !== expectedFileSha256) {
+    throw new Error("POLICY_RISK_INVENTORY_OUTCOME_FILE_SHA256_MISMATCH");
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw new Error("POLICY_RISK_INVENTORY_OUTCOME_REPORT_INVALID");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("POLICY_RISK_INVENTORY_OUTCOME_REPORT_INVALID");
+  const report = value as Partial<PolicyRiskInventoryOutcomeReport>;
+  if (!Array.isArray(report.outcomes) || typeof report.organizationId !== "string" || typeof report.manifestSha256 !== "string") {
+    throw new Error("POLICY_RISK_INVENTORY_OUTCOME_REPORT_INVALID");
+  }
+  return { report: report as PolicyRiskInventoryOutcomeReport, fileSha256 };
+}
 
 export type PolicyRiskInventoryDisposition = "APPLIED" | "ALREADY_STRUCTURED" | "DEFERRED" | "PENDING";
 

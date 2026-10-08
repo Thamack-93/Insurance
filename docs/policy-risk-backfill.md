@@ -123,18 +123,23 @@ explicit reasons. A null row without usable legacy description, asset,
 insured party, or beneficiary is also `DEFERRED`; a null row with source data
 remains `PENDING` unless linked to an apply result.
 
-To link a private apply result, provide its path and exact manifest digest:
+To link a private apply result, provide its path, exact manifest digest, and
+the `outcomeReportSha256` printed by the apply command. The latter is the
+SHA-256 of the exact private result file bytes; it binds the report consumed by
+the inventory without placing policy or outcome details in command output.
 
 ```sh
 npm run backfill:policy-risk-details -- \
   --production-inventory-report --organization-id=ORG_ID \
   --outcome-report=/private/tmp/policy-risk-backfill-result.json \
   --outcome-manifest-sha256=REVIEWED_MANIFEST_SHA \
+  --outcome-report-sha256=OUTCOME_REPORT_SHA_FROM_APPLY \
   --report-file=/private/tmp/policy-risk-inventory-ORG_ID.json
 ```
 
-The outcome report must be private, match the selected organization and digest,
-and contain only policy IDs in the inventory. `APPLIED` or `ALREADY_APPLIED`
+The outcome report must be private, match the supplied file digest and selected
+organization and manifest digest, and contain only policy IDs in the inventory.
+`APPLIED` or `ALREADY_APPLIED`
 counts as applied only when the current row has recognized structured data; an
 applied outcome paired with null `riskDetails` is deferred as a conflict. A
 linked `DEFERRED` or `EMPTY` outcome remains deferred with an explicit reason,

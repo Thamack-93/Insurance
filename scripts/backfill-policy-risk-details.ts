@@ -19,7 +19,7 @@ import {
   type PolicyRiskBackfillManifestRow,
 } from "../src/lib/policy-risk-backfill-manifest.ts";
 import { convertLegacyPolicyDescription, hasPolicyRiskData, projectPolicyRiskRelations, riskDetailsFromExisting, summarizePolicyRiskDetails } from "../src/lib/policy-risk-details.ts";
-import { reconcilePolicyRiskInventory, type PolicyRiskInventoryInput, type PolicyRiskInventoryOutcomeReport } from "../src/lib/policy-risk-inventory-reconciliation.ts";
+import { parseVerifiedPolicyRiskInventoryOutcomeReport, reconcilePolicyRiskInventory, type PolicyRiskInventoryInput, type PolicyRiskInventoryOutcomeReport } from "../src/lib/policy-risk-inventory-reconciliation.ts";
 
 const PAGE_SIZE = 200;
 const INVENTORY_PAGE_SIZE = 50;
@@ -644,7 +644,7 @@ async function writePrivateManifest(file: string, manifest: unknown) {
   return resolved;
 }
 
-async function readReviewedManifest(file: string): Promise<PolicyRiskBackfillManifest> {
+async function readPrivateReportBytes(file: string) {
   const resolved = path.resolve(file);
   if (!path.isAbsolute(file)) throw new Error("POLICY_RISK_BACKFILL_REPORT_PATH_MUST_BE_ABSOLUTE");
   if (!path.relative(process.cwd(), resolved).startsWith("..") && !path.isAbsolute(path.relative(process.cwd(), resolved))) {
@@ -652,7 +652,11 @@ async function readReviewedManifest(file: string): Promise<PolicyRiskBackfillMan
   }
   const metadata = await stat(resolved);
   if ((metadata.mode & 0o077) !== 0) throw new Error("POLICY_RISK_BACKFILL_REPORT_PERMISSIONS_MUST_BE_0600");
-  return JSON.parse(await readFile(resolved, "utf8")) as PolicyRiskBackfillManifest;
+  return readFile(resolved);
+}
+
+async function readReviewedManifest(file: string): Promise<PolicyRiskBackfillManifest> {
+  return JSON.parse((await readPrivateReportBytes(file)).toString("utf8")) as PolicyRiskBackfillManifest;
 }
 
 async function main() {
@@ -718,14 +722,16 @@ async function main() {
     if (productionInventoryReport) {
       const outcomeFile = arg("outcome-report");
       const outcomeSha = arg("outcome-manifest-sha256")?.trim();
-      if (Boolean(outcomeFile) !== Boolean(outcomeSha)) throw new Error("POLICY_RISK_INVENTORY_OUTCOME_REQUIRES_REPORT_AND_MANIFEST_SHA");
+      const outcomeFileSha = arg("outcome-report-sha256")?.trim();
+      if (Boolean(outcomeFile) !== Boolean(outcomeSha) || Boolean(outcomeFile) !== Boolean(outcomeFileSha)) {
+        throw new Error("POLICY_RISK_INVENTORY_OUTCOME_REQUIRES_REPORT_MANIFEST_SHA_AND_FILE_SHA");
+      }
       let outcomeReport: PolicyRiskInventoryOutcomeReport | undefined;
-      if (outcomeFile && outcomeSha) {
-        const rawValue: unknown = await readReviewedManifest(outcomeFile);
-        if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) throw new Error("POLICY_RISK_INVENTORY_OUTCOME_REPORT_INVALID");
-        const raw = rawValue as Partial<PolicyRiskInventoryOutcomeReport>;
-        if (!Array.isArray(raw.outcomes) || typeof raw.organizationId !== "string" || typeof raw.manifestSha256 !== "string") throw new Error("POLICY_RISK_INVENTORY_OUTCOME_REPORT_INVALID");
-        outcomeReport = raw as PolicyRiskInventoryOutcomeReport;
+      let verifiedOutcomeFileSha256: string | null = null;
+      if (outcomeFile && outcomeSha && outcomeFileSha) {
+        const verified = parseVerifiedPolicyRiskInventoryOutcomeReport(await readPrivateReportBytes(outcomeFile), outcomeFileSha);
+        outcomeReport = verified.report;
+        verifiedOutcomeFileSha256 = verified.fileSha256;
       }
       const policies = await scanProductionInventoryReadOnly(prisma, organizationId, connectionString);
       const report = reconcilePolicyRiskInventory({ organizationId, policies, outcomeReport, expectedManifestSha256: outcomeSha });
@@ -740,7 +746,7 @@ async function main() {
         snapshotIsolation: "REPEATABLE READ, READ ONLY",
         pageSize: INVENTORY_PAGE_SIZE,
         recognizedStructuredPredicate: "schema-valid riskDetails whose policyType matches the policy row, riskDetailsReviewRequired=false, and at least one non-empty value in data; this recognizes populated structured data but does not verify all optional fields are present",
-        linkedApply: outcomeReport ? { reportFile: outcomeFile, manifestSha256: outcomeReport.manifestSha256 } : null,
+        linkedApply: outcomeReport ? { reportFile: outcomeFile, reportSha256: verifiedOutcomeFileSha256, manifestSha256: outcomeReport.manifestSha256 } : null,
         ...report,
       });
       process.stdout.write(`${JSON.stringify({ mode: "production-read-only-inventory", organizationId, runId, totalPolicies: report.totalPolicies, totals: report.totals, reportFile: reportPath }, null, 2)}\n`);
@@ -996,7 +1002,8 @@ async function main() {
       };
       await updateRun({ status: deferred ? "REVIEW_REQUIRED" : "COMPLETED", completedAt: new Date(), summaryJson: JSON.stringify(summary) });
       await writePrivateManifest(resultFile, { ...summary, manifestSha256: manifest.contentSha256, maintenanceRunId: run.id, status: deferred ? "REVIEW_REQUIRED" : "COMPLETED", outcomes });
-      process.stdout.write(`${JSON.stringify({ ...summary, mode: "apply", maintenanceRunId: run.id, resultFile }, null, 2)}\n`);
+      const outcomeReportSha256 = createHash("sha256").update(await readFile(resultFile)).digest("hex");
+      process.stdout.write(`${JSON.stringify({ ...summary, mode: "apply", maintenanceRunId: run.id, resultFile, outcomeReportSha256 }, null, 2)}\n`);
     } catch (error) {
       const errorCode = error instanceof Error ? error.message.split(":")[0] : "UNKNOWN";
       await updateRun({ status: "FAILED", completedAt: new Date(), summaryJson: JSON.stringify({ mode: productionApply ? "production-apply" : "disposable-apply", organizationId, runId: manifest.runId, candidateSha: sha, reviewer, reviewedManifestSha256, writerRole: productionTarget?.role ?? null, endpointHost: productionTarget?.host ?? null, database: productionTarget?.database ?? null, batchSize: requestedBatchSize, scanned: manifest.scanned, converted, deferred, empty, applied, alreadyApplied: alreadyAppliedCount, errorCode }) });
