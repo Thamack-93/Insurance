@@ -1,16 +1,51 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, statSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync, chmodSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { policyRiskBackfillReviewedHash, type PolicyRiskBackfillManifest } from "../src/lib/policy-risk-backfill-manifest.ts";
-import { Prisma } from "../src/generated/prisma/client.ts";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { policyRiskBackfillManifestContentHash, policyRiskBackfillReviewedHash, type PolicyRiskBackfillManifest } from "../src/lib/policy-risk-backfill-manifest.ts";
+import { Prisma, PrismaClient } from "../src/generated/prisma/client.ts";
 import { cleanupPolicyFixture, getTestDb, seedPolicyFixture } from "../tests/helpers/db.ts";
+import { assertDisposableCertificationTarget } from "./tenant-certification-target.mjs";
 
 const ORGANIZATION_ID = "org_legacy_singleton_0001";
 const SOURCE_TEXT = "Toyota, Corolla, 2020, LE";
 const VIN = "2T1BURHE0LC123456";
+
+async function withOrganizationContext<T>(
+  db: PrismaClient,
+  organizationId: string,
+  work: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw(Prisma.sql`SELECT set_config('app.organization_id', ${organizationId}, true)`);
+    return work(tx);
+  });
+}
+
+function createTenantScopedTestClient(db: PrismaClient): PrismaClient {
+  return new Proxy(db, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target) as unknown;
+      if (typeof property !== "string" || property.startsWith("$") || property === "organization") {
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      if (!value || typeof value !== "object") return value;
+      return new Proxy(value, {
+        get(delegate, operation) {
+          const method = Reflect.get(delegate, operation, delegate) as unknown;
+          if (typeof method !== "function") return method;
+          return (...args: unknown[]) => withOrganizationContext(target, ORGANIZATION_ID, async (tx) => {
+            const transactionDelegate = Reflect.get(tx, property, tx) as Record<PropertyKey, (...operationArgs: unknown[]) => Promise<unknown>>;
+            return transactionDelegate[operation](...args);
+          });
+        },
+      });
+    },
+  }) as PrismaClient;
+}
 
 type BackfillReport = {
   mode: "dry-run" | "production-read-only-preview" | "apply";
@@ -29,7 +64,7 @@ type BackfillReport = {
   alreadyApplied?: number;
 };
 
-type RunBackfillOptions = { apply?: boolean; productionPreview?: boolean; readonlyDatabaseUrl?: string; printReviewedDigest?: boolean; reportFile: string; manifestSha256?: string; previewSha256?: string; reviewer?: string; batchSize?: number; failAfterAppliedBatches?: number; failWithinBatchAfterAppliedRows?: number; mutatePolicyBeforeBatch?: string };
+type RunBackfillOptions = { apply?: boolean; productionApply?: boolean; productionPreview?: boolean; policyNumbers?: string[]; readonlyDatabaseUrl?: string; writerDatabaseUrl?: string; readonlyRole?: string; writerRole?: string; productionHost?: string; productionDatabase?: string; batchSize?: number; printReviewedDigest?: boolean; reportFile: string; manifestSha256?: string; previewSha256?: string; reviewer?: string; failAfterAppliedBatches?: number; failWithinBatchAfterAppliedRows?: number; mutatePolicyBeforeBatch?: string };
 
 function runBackfill(options: RunBackfillOptions & { printReviewedDigest: true }): { reviewedManifestSha256: string };
 function runBackfill(options: RunBackfillOptions & { printReviewedDigest?: false | undefined }): BackfillReport;
@@ -39,8 +74,9 @@ function runBackfill(options: RunBackfillOptions): BackfillReport | { reviewedMa
     "tsx",
     "scripts/backfill-policy-risk-details.ts",
     `--organization-id=${ORGANIZATION_ID}`,
+    ...(options.policyNumbers?.length ? [`--policy-numbers=${options.policyNumbers.join(",")}`] : []),
     ...(options.productionPreview ? ["--production-preview"] : []),
-    ...(options.printReviewedDigest ? ["--print-reviewed-digest", `--reviewed-report=${options.reportFile}`, `--reviewed-by=${options.reviewer}`, `--preview-sha256=${options.previewSha256}`] : options.apply ? ["--apply", `--reviewed-report=${options.reportFile}`, `--reviewed-by=${options.reviewer}`, `--manifest-sha256=${options.manifestSha256}`, `--batch-size=${options.batchSize ?? 50}`, "--confirm-apply=APPLY_POLICY_RISK_BACKFILL"] : [`--report-file=${options.reportFile}`]),
+    ...(options.printReviewedDigest ? ["--print-reviewed-digest", `--reviewed-report=${options.reportFile}`, `--reviewed-by=${options.reviewer}`, `--preview-sha256=${options.previewSha256}`] : options.apply ? ["--apply", ...(options.productionApply ? ["--production-apply", "--confirm-production-apply=APPLY_POLICY_RISK_BACKFILL_TO_PRODUCTION"] : []), `--reviewed-report=${options.reportFile}`, `--reviewed-by=${options.reviewer}`, `--manifest-sha256=${options.manifestSha256}`, `--batch-size=${options.batchSize ?? 50}`, "--confirm-apply=APPLY_POLICY_RISK_BACKFILL"] : [`--report-file=${options.reportFile}`]),
   ];
   const stdout = execFileSync(process.execPath, args, {
     cwd: process.cwd(),
@@ -52,7 +88,15 @@ function runBackfill(options: RunBackfillOptions): BackfillReport | { reviewedMa
       PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1",
       ...(options.productionPreview ? {
         POLICY_RISK_BACKFILL_READONLY_DATABASE_URL: options.readonlyDatabaseUrl,
-        POLICY_RISK_BACKFILL_READONLY_ROLE: "policydesk_readonly",
+        POLICY_RISK_BACKFILL_READONLY_ROLE: options.readonlyRole,
+        POLICY_RISK_BACKFILL_PRODUCTION_HOST: options.productionHost,
+        POLICY_RISK_BACKFILL_PRODUCTION_DATABASE: options.productionDatabase,
+      } : {}),
+      ...(options.productionApply ? {
+        POLICY_RISK_BACKFILL_PRODUCTION_APPLY_DATABASE_URL: options.writerDatabaseUrl,
+        POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE: options.writerRole,
+        POLICY_RISK_BACKFILL_PRODUCTION_HOST: options.productionHost,
+        POLICY_RISK_BACKFILL_PRODUCTION_DATABASE: options.productionDatabase,
       } : {}),
       ...(options.failAfterAppliedBatches ? { POLICY_RISK_BACKFILL_TEST_FAIL_AFTER_APPLIED_BATCHES: String(options.failAfterAppliedBatches) } : {}),
       ...(options.failWithinBatchAfterAppliedRows ? { POLICY_RISK_BACKFILL_TEST_FAIL_WITHIN_BATCH_AFTER_APPLIED_ROWS: String(options.failWithinBatchAfterAppliedRows) } : {}),
@@ -72,6 +116,18 @@ async function main() {
     throw new Error("POLICY_RISK_BACKFILL_INTEGRATION_REQUIRES_DISPOSABLE_POSTGRES");
   }
 
+  const adminDatabaseUrl = process.env.DATABASE_ADMIN_URL?.trim() || process.env.DATABASE_URL_UNPOOLED?.trim() || process.env.DATABASE_URL?.trim();
+  if (!adminDatabaseUrl) throw new Error("POLICY_RISK_BACKFILL_INTEGRATION_ADMIN_DATABASE_URL_REQUIRED");
+  assertDisposableCertificationTarget(adminDatabaseUrl, process.env, "source");
+  const adminTarget = new URL(adminDatabaseUrl);
+  if (!["localhost", "127.0.0.1", "::1"].includes(adminTarget.hostname.toLowerCase())) {
+    throw new Error("POLICY_RISK_BACKFILL_INTEGRATION_REQUIRES_LOCAL_DISPOSABLE_POSTGRES");
+  }
+  // Seed and cleanup use the disposable database owner, even in post-cutover
+  // CI where the application connection is restricted.
+  process.env.DATABASE_URL = adminDatabaseUrl;
+  process.env.DATABASE_URL_UNPOOLED = adminDatabaseUrl;
+
   const readOnlyApplyAttempt = spawnSync(process.execPath, [
     "--import", "tsx", "scripts/backfill-policy-risk-details.ts",
     `--organization-id=${ORGANIZATION_ID}`, "--production-preview", "--apply",
@@ -83,11 +139,25 @@ async function main() {
   assert.equal(readOnlyApplyAttempt.status, 1);
   assert.match(readOnlyApplyAttempt.stderr, /POLICY_RISK_BACKFILL_PRODUCTION_PREVIEW_IS_READ_ONLY/);
 
-  const db = getTestDb();
+  const rawDb = getTestDb();
+  const db = process.env.POLICY_RISK_BACKFILL_TEST_RLS_ENABLED === "1"
+    ? createTenantScopedTestClient(rawDb)
+    : rawDb;
+  // PostgreSQL roles are cluster-scoped, so fixed fixture names collide with
+  // the tenant-isolation job's other disposable database fixtures.
+  const roleSuffix = randomUUID().replaceAll("-", "").slice(0, 8);
+  const readonlyRoleName = `policydesk_readonly_test_${roleSuffix}`;
+  const writerRoleName = `policydesk_backfill_test_${roleSuffix}`;
   let fixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
   let ambiguousFixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
   let partyFixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
+  let productionFixture: Awaited<ReturnType<typeof seedPolicyFixture>> | null = null;
   let readonlyRoleCreated = false;
+  let writerRoleCreated = false;
+  let secondOrganizationId: string | null = null;
+  let secondOrganizationClientId: string | null = null;
+  let secondOrganizationInsurerId: string | null = null;
+  let secondOrganizationPolicyId: string | null = null;
   let reportFile: string | null = null;
   const reportFiles: string[] = [];
   const resultFiles: string[] = [];
@@ -126,22 +196,51 @@ async function main() {
       data: { organizationId: ORGANIZATION_ID, policyId: insuredPartyFixture.policyId, fullName: "Backfill Insured Person", isPrimary: false, sourceLabel: "Legacy import" },
     });
 
-    const existingReadonlyRole = await db.$queryRaw<Array<{ exists: boolean }>>(Prisma.sql`SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'policydesk_readonly') AS "exists"`);
+    const existingReadonlyRole = await db.$queryRaw<Array<{ exists: boolean }>>(Prisma.sql`SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ${readonlyRoleName}) AS "exists"`);
     if (existingReadonlyRole[0]?.exists) throw new Error("POLICY_RISK_BACKFILL_TEST_READONLY_ROLE_ALREADY_EXISTS");
     const readonlyPassword = randomUUID().replaceAll("-", "");
-    await db.$executeRawUnsafe(`CREATE ROLE policydesk_readonly LOGIN NOINHERIT NOBYPASSRLS PASSWORD '${readonlyPassword}'`);
+    await db.$executeRawUnsafe(`CREATE ROLE ${readonlyRoleName} LOGIN NOINHERIT NOBYPASSRLS PASSWORD '${readonlyPassword}'`);
     readonlyRoleCreated = true;
-    await db.$executeRawUnsafe('GRANT USAGE ON SCHEMA public TO policydesk_readonly');
-    await db.$executeRawUnsafe('GRANT SELECT ON TABLE "Organization", "Policy", "PolicyInsuredAsset", "PolicyInsuredParty" TO policydesk_readonly');
+    await db.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO ${readonlyRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ON TABLE "Organization", "Policy", "PolicyInsuredAsset", "PolicyInsuredParty" TO ${readonlyRoleName}`);
     const readonlyUrl = new URL(process.env.DATABASE_URL!);
-    readonlyUrl.username = "policydesk_readonly";
+    readonlyUrl.username = readonlyRoleName;
     readonlyUrl.password = readonlyPassword;
+    const writerPassword = randomUUID().replaceAll("-", "");
+    const existingWriterRole = await db.$queryRaw<Array<{ exists: boolean }>>(Prisma.sql`SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ${writerRoleName}) AS "exists"`);
+    if (existingWriterRole[0]?.exists) throw new Error("POLICY_RISK_BACKFILL_TEST_WRITER_ROLE_ALREADY_EXISTS");
+    await db.$executeRawUnsafe(`CREATE ROLE ${writerRoleName} LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '${writerPassword}'`);
+    writerRoleCreated = true;
+    await db.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id", "status") ON TABLE "Organization" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT UPDATE ("updatedAt") ON TABLE "Organization" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId", "userId", "role", "active") ON TABLE "OrganizationMembership" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT UPDATE ("updatedAt") ON TABLE "OrganizationMembership" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id", "email", "active") ON TABLE "User" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT UPDATE ("updatedAt") ON TABLE "User" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId", "policyNumber", "policyType", "insuredObject", "beneficiaryInfo", "riskDetails") ON TABLE "Policy" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT UPDATE ("riskDetails", "insuredObject", "riskDetailsReviewRequired", "updatedAt") ON TABLE "Policy" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId", "policyId", "assetType", "description", "serialNumber", "isPrimary", "createdAt", "updatedAt") ON TABLE "PolicyInsuredAsset" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT INSERT ("id", "organizationId", "policyId", "assetType", "description", "serialNumber", "isPrimary", "createdAt", "updatedAt") ON TABLE "PolicyInsuredAsset" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT UPDATE ("updatedAt") ON TABLE "PolicyInsuredAsset" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId", "policyId", "fullName", "isPrimary", "sourceLabel", "createdAt", "updatedAt") ON TABLE "PolicyInsuredParty" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT INSERT ("id", "organizationId", "policyId", "fullName", "isPrimary", "sourceLabel", "createdAt", "updatedAt") ON TABLE "PolicyInsuredParty" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT UPDATE ("updatedAt") ON TABLE "PolicyInsuredParty" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId") ON TABLE "MaintenanceRun" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT INSERT ("id", "organizationId", "type", "status", "summaryJson", "createdAt", "startedAt", "updatedAt") ON TABLE "MaintenanceRun" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT UPDATE ("status", "completedAt", "summaryJson", "updatedAt") ON TABLE "MaintenanceRun" TO ${writerRoleName}`);
+    const writerUrl = new URL(process.env.DATABASE_URL!);
+    writerUrl.username = writerRoleName;
+    writerUrl.password = writerPassword;
+    const productionHost = readonlyUrl.hostname.toLowerCase();
+    const productionDatabase = decodeURIComponent(readonlyUrl.pathname.replace(/^\//, "").split("?")[0]);
     const readonlyReportFile = temporaryReportPath();
     reportFiles.push(readonlyReportFile);
-    const productionPreview = runBackfill({ productionPreview: true, readonlyDatabaseUrl: readonlyUrl.toString(), reportFile: readonlyReportFile });
+    const productionPreview = runBackfill({ productionPreview: true, readonlyDatabaseUrl: readonlyUrl.toString(), readonlyRole: readonlyRoleName, productionHost, productionDatabase, reportFile: readonlyReportFile });
     assert.equal(productionPreview.mode, "production-read-only-preview");
     assert.equal(productionPreview.readOnly, true);
     const readonlyManifest = JSON.parse(readFileSync(productionPreview.reportFile!, "utf8")) as PolicyRiskBackfillManifest;
+    assert.equal(readonlyManifest.sourceMode, "PRODUCTION_READ_ONLY_PREVIEW");
     assert.ok(readonlyManifest.candidates.some((row) => row.policyId === backfillFixture.policyId));
     assert.ok(readonlyManifest.candidates.some((row) => row.policyId === reviewFixture.policyId));
     assert.ok(readonlyManifest.candidates.some((row) => row.policyId === insuredPartyFixture.policyId));
@@ -157,6 +256,7 @@ async function main() {
     assert.equal(preview.reportFile, reportFile);
     assert.equal(statSync(reportFile).mode & 0o777, 0o600);
     const manifest = JSON.parse(readFileSync(reportFile, "utf8")) as PolicyRiskBackfillManifest;
+    assert.equal(manifest.sourceMode, "DISPOSABLE_DRY_RUN");
     assert.equal(preview.review, 1);
     assert.equal(preview.review, manifest.candidates.filter((row) => row.classification === "REVIEW").length);
     const fixtureCandidate = manifest.candidates.find((row) => row.policyId === backfillFixture.policyId);
@@ -307,7 +407,7 @@ async function main() {
     );
     assert.ok(assetsAfterApply.every((asset) => asset.assetType === "AUTO" && asset.serialNumber === VIN));
     const reconciledParty = await db.policyInsuredParty.findUniqueOrThrow({ where: { id: legacyParty.id }, select: { fullName: true, isPrimary: true, sourceLabel: true } });
-    assert.deepEqual(reconciledParty, { fullName: "Backfill Insured Person", isPrimary: true, sourceLabel: "Datos estructurados de póliza" });
+    assert.deepEqual(reconciledParty, { fullName: "Backfill Insured Person", isPrimary: false, sourceLabel: "Legacy import" });
     const deferred = await db.policy.findUniqueOrThrow({ where: { id: reviewFixture.policyId }, select: { insuredObject: true, riskDetails: true, riskDetailsReviewRequired: true } });
     assert.equal(deferred.insuredObject, "Texto libre que requiere revisión");
     assert.equal(deferred.riskDetails, null);
@@ -335,11 +435,413 @@ async function main() {
     const extraPartyAfterResume = await db.policyInsuredParty.findUniqueOrThrow({ where: { id: preservedExtraParty.id }, select: { fullName: true, isPrimary: true, sourceLabel: true } });
     assert.deepEqual(extraPartyAfterResume, { fullName: "Unrelated Existing Party", isPrimary: false, sourceLabel: "Operator-maintained" });
 
+    if (process.env.POLICY_RISK_BACKFILL_TEST_RLS_ENABLED === "1") {
+    const rlsState = await db.$queryRaw<Array<{ tableName: string; enabled: boolean; forced: boolean }>>(Prisma.sql`
+      SELECT relation.relname AS "tableName", relation.relrowsecurity AS "enabled", relation.relforcerowsecurity AS "forced"
+      FROM pg_class relation JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'public' AND relation.relname IN ('Policy', 'PolicyInsuredAsset', 'PolicyInsuredParty', 'MaintenanceRun')
+    `);
+    if (rlsState.length !== 4 || rlsState.some((row) => !row.enabled || !row.forced)) {
+      throw new Error("POLICY_RISK_BACKFILL_WRITER_TEST_REQUIRES_FORCED_RLS");
+    }
+    const secondOrganization = await db.organization.create({
+      data: {
+        id: `org_policy_backfill_rls_${randomUUID().replaceAll("-", "")}`,
+        slug: `policy-backfill-rls-${randomUUID().replaceAll("-", "")}`,
+        name: "Policy Risk Backfill RLS Test Tenant",
+        kind: "CUSTOMER",
+        status: "ACTIVE",
+      },
+      select: { id: true },
+    });
+    secondOrganizationId = secondOrganization.id;
+    const secondFixture = await withOrganizationContext(db, secondOrganization.id, async (tx) => {
+      const insurer = await tx.insurer.create({
+        data: { organizationId: secondOrganization.id, name: `Policy Risk Backfill Insurer ${randomUUID()}`, status: "ACTIVE" },
+        select: { id: true },
+      });
+      const client = await tx.client.create({
+        data: { organizationId: secondOrganization.id, fullName: "Second Organization Private Client", type: "PERSON", status: "ACTIVE" },
+        select: { id: true },
+      });
+      const policy = await tx.policy.create({
+        data: {
+          organizationId: secondOrganization.id,
+          policyNumber: `POLICY-BACKFILL-ORG-B-${randomUUID()}`,
+          clientId: client.id,
+          insurerId: insurer.id,
+          policyType: "AUTO",
+          status: "ACTIVE",
+          paymentFrequency: "ANNUAL",
+          startDate: new Date("2026-01-01T00:00:00.000Z"),
+          endDate: new Date("2027-01-01T00:00:00.000Z"),
+          premiumAmount: 1500,
+          currency: "MXN",
+          insuredObject: "Second organization original text",
+        },
+        select: { id: true },
+      });
+      await tx.policyInsuredAsset.create({
+        data: { organizationId: secondOrganization.id, policyId: policy.id, assetType: "AUTO", description: "Second organization private asset", serialNumber: "ORG-B-PRIVATE-VIN", isPrimary: true },
+      });
+      await tx.policyInsuredParty.create({
+        data: { organizationId: secondOrganization.id, policyId: policy.id, fullName: "Second Organization Private Insured", isPrimary: true, sourceLabel: "RLS test fixture" },
+      });
+      return { insurer, client, policy };
+    });
+    secondOrganizationInsurerId = secondFixture.insurer.id;
+    secondOrganizationClientId = secondFixture.client.id;
+    secondOrganizationPolicyId = secondFixture.policy.id;
+    const secondPolicy = secondFixture.policy;
+
+    const productionBackfillFixture = productionFixture = await seedPolicyFixture("POLICY-RISK-PRODUCTION-WRITER");
+    await db.policy.update({
+      where: { id: productionBackfillFixture.policyId },
+      data: { insuredObject: SOURCE_TEXT, riskDetails: Prisma.DbNull, riskDetailsReviewRequired: false },
+    });
+    await db.policyInsuredAsset.create({
+      data: {
+        organizationId: ORGANIZATION_ID,
+        policyId: productionBackfillFixture.policyId,
+        assetType: "AUTO",
+        description: "Toyota Corolla, descripción histórica",
+        serialNumber: VIN,
+        isPrimary: true,
+      },
+    });
+    const writerPreviewFile = temporaryReportPath();
+    reportFiles.push(writerPreviewFile);
+    const writerPreview = runBackfill({
+      productionPreview: true,
+      readonlyDatabaseUrl: readonlyUrl.toString(),
+      readonlyRole: readonlyRoleName,
+      productionHost,
+      productionDatabase,
+      policyNumbers: [productionBackfillFixture.policyNumber],
+      reportFile: writerPreviewFile,
+    });
+    assert.equal(writerPreview.mode, "production-read-only-preview");
+    const writerManifest = JSON.parse(readFileSync(writerPreview.reportFile!, "utf8")) as PolicyRiskBackfillManifest;
+    assert.equal(writerManifest.sourceMode, "PRODUCTION_READ_ONLY_PREVIEW");
+    assert.deepEqual(writerManifest.candidates.map((row) => row.policyId), [productionBackfillFixture.policyId]);
+    assert.ok(writerManifest.candidates.every((row) => row.policyId !== secondPolicy.id), "organization A preview must exclude organization B candidates");
+    for (const row of writerManifest.candidates) {
+      if (row.classification === "REVIEW") {
+        row.decision = row.policyId === productionBackfillFixture.policyId ? "ACCEPT" : "DEFER";
+      }
+    }
+    writerManifest.reviewedBy = "ci-admin@policydesk.local";
+    writerManifest.reviewedAt = new Date().toISOString();
+    writeFileSync(writerPreview.reportFile!, `${JSON.stringify(writerManifest, null, 2)}\n`);
+    const writerReviewedDigest = runBackfill({
+      printReviewedDigest: true,
+      reportFile: writerPreview.reportFile!,
+      previewSha256: writerPreview.manifestSha256,
+      reviewer: "ci-admin@policydesk.local",
+    });
+    assert.ok("reviewedManifestSha256" in writerReviewedDigest);
+
+    const writerClient = new PrismaClient({ adapter: new PrismaPg({ connectionString: writerUrl.toString() }) });
+    try {
+      const visibleToA = await writerClient.$transaction(async (tx) => {
+        await tx.$queryRaw(Prisma.sql`SELECT set_config('app.organization_id', ${ORGANIZATION_ID}, true)`);
+        return tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "Policy" WHERE "id" IN (${productionBackfillFixture.policyId}, ${secondPolicy.id}) ORDER BY "id"`);
+      });
+      assert.deepEqual(visibleToA.map((row) => row.id), [productionBackfillFixture.policyId]);
+      const visibleToB = await writerClient.$transaction(async (tx) => {
+        await tx.$queryRaw(Prisma.sql`SELECT set_config('app.organization_id', ${secondOrganization.id}, true)`);
+        return tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "Policy" WHERE "id" IN (${productionBackfillFixture.policyId}, ${secondPolicy.id}) ORDER BY "id"`);
+      });
+      assert.deepEqual(visibleToB.map((row) => row.id), [secondPolicy.id]);
+      const crossTenantUpdateCount = await writerClient.$transaction(async (tx) => {
+        await tx.$queryRaw(Prisma.sql`SELECT set_config('app.organization_id', ${ORGANIZATION_ID}, true)`);
+        return tx.$executeRaw(Prisma.sql`UPDATE "Policy" SET "insuredObject" = 'must remain unchanged' WHERE "id" = ${secondPolicy.id}`);
+      });
+      assert.equal(crossTenantUpdateCount, 0, "RLS USING must prevent organization A from updating organization B");
+      const reverseCrossTenantUpdateCount = await writerClient.$transaction(async (tx) => {
+        await tx.$queryRaw(Prisma.sql`SELECT set_config('app.organization_id', ${secondOrganization.id}, true)`);
+        return tx.$executeRaw(Prisma.sql`UPDATE "Policy" SET "insuredObject" = 'must remain unchanged' WHERE "id" = ${productionBackfillFixture.policyId}`);
+      });
+      assert.equal(reverseCrossTenantUpdateCount, 0, "RLS USING must prevent organization B from updating organization A");
+      await assert.rejects(
+        writerClient.$transaction(async (tx) => {
+          await tx.$queryRaw(Prisma.sql`SELECT set_config('app.organization_id', ${ORGANIZATION_ID}, true)`);
+          await tx.policyInsuredAsset.create({
+            data: {
+              organizationId: secondOrganization.id,
+              policyId: secondPolicy.id,
+              assetType: "AUTO",
+              description: "Cross-tenant insert must be rejected",
+              serialNumber: null,
+              isPrimary: false,
+            },
+          });
+        }),
+        /row-level security|tenant context|organization context/i,
+      );
+      await assert.rejects(
+        writerClient.$transaction(async (tx) => {
+          await tx.$queryRaw(Prisma.sql`SELECT set_config('app.organization_id', ${secondOrganization.id}, true)`);
+          await tx.policyInsuredAsset.create({
+            data: {
+              organizationId: ORGANIZATION_ID,
+              policyId: productionBackfillFixture.policyId,
+              assetType: "AUTO",
+              description: "Reverse cross-tenant insert must be rejected",
+              serialNumber: null,
+              isPrimary: false,
+            },
+          });
+        }),
+        /row-level security|tenant context|organization context/i,
+      );
+    } finally {
+      await writerClient.$disconnect();
+    }
+
+    const assertWriterRejected = (needle: string, overrides: Partial<RunBackfillOptions> = {}) => assert.throws(
+      () => runBackfill({
+        ...overrides,
+        apply: true,
+        productionApply: true,
+        writerDatabaseUrl: writerUrl.toString(),
+        writerRole: writerRoleName,
+        policyNumbers: overrides.policyNumbers ?? [productionBackfillFixture.policyNumber],
+        productionHost: overrides.productionHost ?? productionHost,
+        productionDatabase: overrides.productionDatabase ?? productionDatabase,
+        reportFile: overrides.reportFile ?? writerPreview.reportFile!,
+        manifestSha256: overrides.manifestSha256 ?? writerReviewedDigest.reviewedManifestSha256,
+        reviewer: overrides.reviewer ?? "ci-admin@policydesk.local",
+        batchSize: overrides.batchSize ?? 1,
+        printReviewedDigest: false,
+      }),
+      (error: unknown) => error instanceof Error && String((error as NodeJS.ErrnoException & { stderr?: Buffer }).stderr ?? error).includes(needle),
+    );
+    assertWriterRejected("POLICY_RISK_BACKFILL_PRODUCTION_HOST_MISMATCH", { productionHost: "wrong.invalid" });
+    assertWriterRejected("POLICY_RISK_BACKFILL_PRODUCTION_DATABASE_MISMATCH", { productionDatabase: `${productionDatabase}_wrong` });
+    assertWriterRejected("POLICY_RISK_BACKFILL_BATCH_SIZE_MUST_BE_1_TO_50", { batchSize: 51 });
+    const disposableReviewReport = temporaryReportPath();
+    reportFiles.push(disposableReviewReport);
+    const disposablePreview = runBackfill({ reportFile: disposableReviewReport });
+    const disposableReviewManifest = JSON.parse(readFileSync(disposableReviewReport, "utf8")) as PolicyRiskBackfillManifest;
+    for (const candidate of disposableReviewManifest.candidates) {
+      if (candidate.classification === "REVIEW") candidate.decision = "DEFER";
+    }
+    disposableReviewManifest.reviewedBy = "ci-admin@policydesk.local";
+    disposableReviewManifest.reviewedAt = new Date().toISOString();
+    writeFileSync(disposableReviewReport, `${JSON.stringify(disposableReviewManifest, null, 2)}\n`);
+    chmodSync(disposableReviewReport, 0o600);
+    const disposableReviewedDigest = runBackfill({
+      printReviewedDigest: true,
+      reportFile: disposableReviewReport,
+      previewSha256: disposablePreview.manifestSha256,
+      reviewer: "ci-admin@policydesk.local",
+    });
+    assert.ok("reviewedManifestSha256" in disposableReviewedDigest);
+    assertWriterRejected("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_REQUIRES_PRODUCTION_PREVIEW_MANIFEST", {
+      reportFile: disposableReviewReport,
+      manifestSha256: disposableReviewedDigest.reviewedManifestSha256,
+    });
+
+    const foreignTargetReport = temporaryReportPath();
+    reportFiles.push(foreignTargetReport);
+    const foreignTargetManifest: PolicyRiskBackfillManifest = {
+      ...writerManifest,
+      sourceTarget: { host: productionHost, database: `${productionDatabase}-other` },
+      contentSha256: "",
+    };
+    for (const candidate of foreignTargetManifest.candidates) {
+      if (candidate.classification === "REVIEW") candidate.decision = "DEFER";
+    }
+    foreignTargetManifest.reviewedBy = "ci-admin@policydesk.local";
+    foreignTargetManifest.reviewedAt = new Date().toISOString();
+    foreignTargetManifest.contentSha256 = policyRiskBackfillManifestContentHash(foreignTargetManifest);
+    writeFileSync(foreignTargetReport, `${JSON.stringify(foreignTargetManifest, null, 2)}\n`, { mode: 0o600 });
+    const foreignTargetDigest = runBackfill({
+      printReviewedDigest: true,
+      reportFile: foreignTargetReport,
+      previewSha256: foreignTargetManifest.contentSha256,
+      reviewer: "ci-admin@policydesk.local",
+    });
+    assert.ok("reviewedManifestSha256" in foreignTargetDigest);
+    assertWriterRejected("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_PREVIEW_TARGET_MISMATCH", {
+      reportFile: foreignTargetReport,
+      manifestSha256: foreignTargetDigest.reviewedManifestSha256,
+    });
+
+    await db.$executeRawUnsafe(`GRANT DELETE ON TABLE "Policy" TO ${writerRoleName}`);
+    assertWriterRejected("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE_HAS_TABLE_LEVEL_PRIVILEGES");
+    await db.$executeRawUnsafe(`REVOKE DELETE ON TABLE "Policy" FROM ${writerRoleName}`);
+    await db.$executeRawUnsafe(`ALTER ROLE ${writerRoleName} BYPASSRLS`);
+    assertWriterRejected("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_ROLE_NOT_RESTRICTED");
+    await db.$executeRawUnsafe(`ALTER ROLE ${writerRoleName} NOBYPASSRLS`);
+
+    await db.$executeRawUnsafe(`
+      ALTER POLICY policydesk_tenant_context ON "PolicyInsuredAsset"
+      USING ("organizationId"::character(1) = nullif(current_setting('app.organization_id', true), '')::character(1))
+      WITH CHECK ("organizationId"::character(1) = nullif(current_setting('app.organization_id', true), '')::character(1))
+    `);
+    try {
+      assertWriterRejected("POLICY_RISK_BACKFILL_PRODUCTION_APPLY_TENANT_POLICY_MISMATCH");
+    } finally {
+      await db.$executeRawUnsafe(`
+        ALTER POLICY policydesk_tenant_context ON "PolicyInsuredAsset"
+        USING ("organizationId" = nullif(current_setting('app.organization_id', true), ''))
+        WITH CHECK ("organizationId" = nullif(current_setting('app.organization_id', true), ''))
+      `);
+    }
+
+    const productionFixtureBefore = await db.policy.findUniqueOrThrow({ where: { id: productionBackfillFixture.policyId }, select: { insuredObject: true, riskDetails: true } });
+    assert.equal(productionFixtureBefore.insuredObject, SOURCE_TEXT);
+    assert.equal(productionFixtureBefore.riskDetails, null);
+    const productionAssetsBefore = await db.policyInsuredAsset.count({ where: { organizationId: ORGANIZATION_ID, policyId: productionBackfillFixture.policyId } });
+    assert.throws(
+      () => runBackfill({
+        apply: true,
+        productionApply: true,
+        writerDatabaseUrl: writerUrl.toString(),
+        writerRole: writerRoleName,
+        policyNumbers: [productionBackfillFixture.policyNumber],
+        productionHost,
+        productionDatabase,
+        reportFile: writerPreview.reportFile!,
+        manifestSha256: writerReviewedDigest.reviewedManifestSha256,
+        reviewer: "ci-admin@policydesk.local",
+        batchSize: 1,
+        failWithinBatchAfterAppliedRows: 1,
+      }),
+      (error: unknown) => error instanceof Error && String((error as NodeJS.ErrnoException & { stderr?: Buffer }).stderr ?? error).includes("POLICY_RISK_BACKFILL_TEST_ROLLBACK_WITHIN_BATCH"),
+    );
+    const writerRollbackRun = await db.maintenanceRun.findFirst({
+      where: {
+        organizationId: ORGANIZATION_ID,
+        type: "POLICY_RISK_BACKFILL",
+        summaryJson: { contains: "POLICY_RISK_BACKFILL_TEST_ROLLBACK_WITHIN_BATCH" },
+        AND: { summaryJson: { contains: writerRoleName } },
+      },
+      select: { id: true, summaryJson: true },
+    });
+    assert.ok(writerRollbackRun);
+    const writerRollbackSummary = JSON.parse(writerRollbackRun.summaryJson ?? "{}") as { mode?: string; writerRole?: string };
+    assert.equal(writerRollbackSummary.mode, "production-apply");
+    assert.equal(writerRollbackSummary.writerRole, writerRoleName);
+    maintenanceRunIds.push(writerRollbackRun.id);
+    const writerRollbackResult = `${writerPreview.reportFile}.${writerRollbackRun.id}.results.json`;
+    assert.ok(existsSync(writerRollbackResult));
+    resultFiles.push(writerRollbackResult);
+    assert.equal((await db.policy.findUniqueOrThrow({ where: { id: productionBackfillFixture.policyId }, select: { riskDetails: true } })).riskDetails, null);
+    assert.equal(await db.policyInsuredAsset.count({ where: { organizationId: ORGANIZATION_ID, policyId: productionBackfillFixture.policyId } }), productionAssetsBefore);
+
+    assert.throws(
+      () => runBackfill({
+        apply: true,
+        productionApply: true,
+        writerDatabaseUrl: writerUrl.toString(),
+        writerRole: writerRoleName,
+        policyNumbers: [productionBackfillFixture.policyNumber],
+        productionHost,
+        productionDatabase,
+        reportFile: writerPreview.reportFile!,
+        manifestSha256: writerReviewedDigest.reviewedManifestSha256,
+        reviewer: "ci-admin@policydesk.local",
+        batchSize: 1,
+        failAfterAppliedBatches: 1,
+      }),
+      (error: unknown) => error instanceof Error && String((error as NodeJS.ErrnoException & { stderr?: Buffer }).stderr ?? error).includes("POLICY_RISK_BACKFILL_TEST_INTERRUPTED_AFTER_COMMIT"),
+    );
+    const writerInterruptedRun = await db.maintenanceRun.findFirst({
+      where: {
+        organizationId: ORGANIZATION_ID,
+        type: "POLICY_RISK_BACKFILL",
+        summaryJson: { contains: "POLICY_RISK_BACKFILL_TEST_INTERRUPTED_AFTER_COMMIT" },
+        AND: { summaryJson: { contains: writerRoleName } },
+      },
+      select: { id: true, summaryJson: true },
+    });
+    assert.ok(writerInterruptedRun);
+    const writerInterruptedSummary = JSON.parse(writerInterruptedRun.summaryJson ?? "{}") as { mode?: string; writerRole?: string };
+    assert.equal(writerInterruptedSummary.mode, "production-apply");
+    assert.equal(writerInterruptedSummary.writerRole, writerRoleName);
+    maintenanceRunIds.push(writerInterruptedRun.id);
+    const writerInterruptedResult = `${writerPreview.reportFile}.${writerInterruptedRun.id}.results.json`;
+    assert.ok(existsSync(writerInterruptedResult));
+    resultFiles.push(writerInterruptedResult);
+    const writerInterruptedReport = JSON.parse(readFileSync(writerInterruptedResult, "utf8")) as { applied: number; outcomes: Array<{ outcome: string }> };
+    assert.equal(
+      writerInterruptedReport.applied,
+      1,
+      JSON.stringify({
+        writerInterruptedReport,
+        writerCandidates: writerManifest.candidates.map(({ policyId, policyNumber, classification, decision }) => ({ policyId, policyNumber, classification, decision })),
+      }),
+    );
+    assert.ok(writerInterruptedReport.outcomes.some((row) => row.outcome === "APPLIED"));
+
+    const writerResume = runBackfill({
+      apply: true,
+      productionApply: true,
+      writerDatabaseUrl: writerUrl.toString(),
+      writerRole: writerRoleName,
+      policyNumbers: [productionBackfillFixture.policyNumber],
+      productionHost,
+      productionDatabase,
+      reportFile: writerPreview.reportFile!,
+      manifestSha256: writerReviewedDigest.reviewedManifestSha256,
+      reviewer: "ci-admin@policydesk.local",
+      batchSize: 50,
+    });
+    assert.ok("mode" in writerResume);
+    assert.equal(writerResume.mode, "apply");
+    assert.ok((writerResume.alreadyApplied ?? 0) >= 1);
+    assert.ok(writerResume.maintenanceRunId);
+    maintenanceRunIds.push(writerResume.maintenanceRunId);
+    const writerAuditRun = await db.maintenanceRun.findUniqueOrThrow({ where: { id: writerResume.maintenanceRunId }, select: { summaryJson: true } });
+    const writerAudit = JSON.parse(writerAuditRun.summaryJson ?? "{}") as { mode?: string; writerRole?: string; endpointHost?: string; database?: string; batchSize?: number };
+    assert.equal(writerAudit.mode, "production-apply");
+    assert.equal(writerAudit.writerRole, writerRoleName);
+    assert.equal(writerAudit.endpointHost, productionHost);
+    assert.equal(writerAudit.database, productionDatabase);
+    assert.equal(writerAudit.batchSize, 50);
+    assert.ok(writerResume.resultFile);
+    resultFiles.push(writerResume.resultFile);
+    const writerResumeReport = JSON.parse(readFileSync(writerResume.resultFile, "utf8")) as { outcomes: Array<{ policyId: string; outcome: string }> };
+    assert.ok(writerResumeReport.outcomes.some((row) => row.policyId === productionBackfillFixture.policyId && ["APPLIED", "ALREADY_APPLIED"].includes(row.outcome)));
+    assert.ok(writerResumeReport.outcomes.some((row) => row.outcome === "ALREADY_APPLIED"));
+    const writerCompleted = await db.policy.findUniqueOrThrow({ where: { id: productionBackfillFixture.policyId }, select: { riskDetails: true, insuredObject: true } });
+    assert.ok(writerCompleted.riskDetails && typeof writerCompleted.riskDetails === "object");
+    assert.equal((writerCompleted.riskDetails as { sourceText?: unknown }).sourceText, SOURCE_TEXT);
+    assert.equal(writerCompleted.insuredObject, `Toyota Corolla 2020 LE Serie ${VIN}`);
+    const secondTenantState = await withOrganizationContext(db, secondOrganization.id, async (tx) => ({
+      policy: await tx.policy.findUniqueOrThrow({
+        where: { id: secondPolicy.id },
+        select: { organizationId: true, insuredObject: true, riskDetails: true },
+      }),
+      assets: await tx.policyInsuredAsset.findMany({
+        where: { organizationId: secondOrganization.id, policyId: secondPolicy.id },
+        select: { description: true, serialNumber: true, isPrimary: true },
+      }),
+      parties: await tx.policyInsuredParty.findMany({
+        where: { organizationId: secondOrganization.id, policyId: secondPolicy.id },
+        select: { fullName: true, isPrimary: true, sourceLabel: true },
+      }),
+    }));
+    assert.equal(secondTenantState.policy.organizationId, secondOrganization.id);
+    assert.equal(secondTenantState.policy.insuredObject, "Second organization original text");
+    assert.equal(secondTenantState.policy.riskDetails, null);
+    assert.deepEqual(secondTenantState.assets, [{ description: "Second organization private asset", serialNumber: "ORG-B-PRIVATE-VIN", isPrimary: true }]);
+    assert.deepEqual(secondTenantState.parties, [{ fullName: "Second Organization Private Insured", isPrimary: true, sourceLabel: "RLS test fixture" }]);
+    }
+
     const secondReportPath = temporaryReportPath();
     reportFiles.push(secondReportPath);
-    const secondPreview = runBackfill({ reportFile: secondReportPath });
+    const secondPreview = runBackfill({ reportFile: secondReportPath, policyNumbers: [reviewFixture.policyNumber] });
     assert.equal(secondPreview.mode, "dry-run");
-    assert.equal(secondPreview.scanned, 1);
+    const secondManifest = JSON.parse(readFileSync(secondReportPath, "utf8")) as PolicyRiskBackfillManifest;
+    assert.equal(
+      secondPreview.scanned,
+      1,
+      JSON.stringify({ scanned: secondPreview.scanned, candidates: secondManifest.candidates.map(({ policyId, policyNumber, classification, decision }) => ({ policyId, policyNumber, classification, decision })) }),
+    );
     assert.equal(secondPreview.review, 1);
 
     const assetsAfterRepeat = await db.policyInsuredAsset.findMany({
@@ -349,19 +851,53 @@ async function main() {
     });
     assert.deepEqual(assetsAfterRepeat, assetsAfterApply);
   } finally {
-    if (maintenanceRunIds.length) await db.maintenanceRun.deleteMany({ where: { id: { in: maintenanceRunIds } } });
-    for (const file of reportFiles) rmSync(file, { force: true });
-    for (const file of resultFiles) rmSync(file, { force: true });
-    await Promise.allSettled([fixture, ambiguousFixture, partyFixture].filter((item): item is NonNullable<typeof item> => item !== null).map(cleanupPolicyFixture));
-    if (readonlyRoleCreated) {
-      await db.$executeRawUnsafe('DROP OWNED BY policydesk_readonly');
-      await db.$executeRawUnsafe('DROP ROLE policydesk_readonly');
+    const cleanupFailures: string[] = [];
+    const attemptCleanup = async (label: string, action: () => Promise<unknown> | unknown) => {
+      try {
+        await action();
+      } catch (error) {
+        cleanupFailures.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+    if (maintenanceRunIds.length) await attemptCleanup("maintenance-runs", () => db.maintenanceRun.deleteMany({ where: { organizationId: ORGANIZATION_ID, id: { in: maintenanceRunIds } } }));
+    for (const file of reportFiles) await attemptCleanup(`manifest:${path.basename(file)}`, () => rmSync(file, { force: true }));
+    for (const file of resultFiles) await attemptCleanup(`result:${path.basename(file)}`, () => rmSync(file, { force: true }));
+    for (const item of [fixture, ambiguousFixture, partyFixture, productionFixture]) {
+      if (item) await attemptCleanup(`policy-fixture:${item.policyId}`, () => cleanupPolicyFixture(item));
     }
+    if (secondOrganizationId) {
+      await attemptCleanup("second-org-tenant-rows", () => withOrganizationContext(db, secondOrganizationId!, async (tx) => {
+        if (secondOrganizationPolicyId) {
+          await tx.policyInsuredAsset.deleteMany({ where: { organizationId: secondOrganizationId!, policyId: secondOrganizationPolicyId! } });
+          await tx.policyInsuredParty.deleteMany({ where: { organizationId: secondOrganizationId!, policyId: secondOrganizationPolicyId! } });
+          await tx.policy.deleteMany({ where: { id: secondOrganizationPolicyId!, organizationId: secondOrganizationId! } });
+        }
+        if (secondOrganizationClientId) await tx.client.deleteMany({ where: { id: secondOrganizationClientId!, organizationId: secondOrganizationId! } });
+        if (secondOrganizationInsurerId) await tx.insurer.deleteMany({ where: { id: secondOrganizationInsurerId!, organizationId: secondOrganizationId! } });
+      }));
+    }
+    if (secondOrganizationId) await attemptCleanup("second-organization", () => db.organization.deleteMany({ where: { id: secondOrganizationId! } }));
+    if (readonlyRoleCreated) {
+      await attemptCleanup("readonly-role-grants", () => db.$executeRawUnsafe(`REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM ${readonlyRoleName}`));
+      await attemptCleanup("readonly-role-schema-grant", () => db.$executeRawUnsafe(`REVOKE ALL PRIVILEGES ON SCHEMA public FROM ${readonlyRoleName}`));
+      await attemptCleanup("readonly-role-owned-privileges", () => db.$executeRawUnsafe(`DROP OWNED BY ${readonlyRoleName}`));
+      await attemptCleanup("readonly-role-drop", () => db.$executeRawUnsafe(`DROP ROLE ${readonlyRoleName}`));
+    }
+    if (writerRoleCreated) {
+      await attemptCleanup("writer-role-grants", () => db.$executeRawUnsafe(`REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM ${writerRoleName}`));
+      await attemptCleanup("writer-role-schema-grant", () => db.$executeRawUnsafe(`REVOKE ALL PRIVILEGES ON SCHEMA public FROM ${writerRoleName}`));
+      await attemptCleanup("writer-role-owned-privileges", () => db.$executeRawUnsafe(`DROP OWNED BY ${writerRoleName}`));
+      await attemptCleanup("writer-role-drop", () => db.$executeRawUnsafe(`DROP ROLE ${writerRoleName}`));
+    }
+    await attemptCleanup("database-disconnect", () => db.$disconnect());
+    if (cleanupFailures.length) throw new Error(`POLICY_RISK_BACKFILL_TEST_CLEANUP_FAILED\n${cleanupFailures.join("\n")}`);
   }
 }
 
 main().then(
-  () => console.log("Policy risk backfill disposable integration: PASS"),
+  () => console.log(process.env.POLICY_RISK_BACKFILL_TEST_RLS_ENABLED === "1"
+    ? "Policy risk backfill disposable integration, including forced-RLS writer: PASS"
+    : "Policy risk backfill singleton disposable integration: PASS; forced-RLS writer cases not requested"),
   (error: unknown) => {
     console.error(error instanceof Error ? error.message : "POLICY_RISK_BACKFILL_INTEGRATION_FAILED");
     process.exitCode = 1;

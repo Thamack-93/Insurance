@@ -220,6 +220,8 @@ jobs:
             -c 'UPDATE "PlatformRuntimeState" SET "writeMode" = '\''MAINTENANCE'\'', "reason" = '\''tenant isolation certification'\'', "updatedAt" = now() WHERE "id" = 1;'
       - name: Apply committed RLS cutover on disposable PostgreSQL
         run: ENABLE_TENANT_RLS_CUTOVER=1 npm run cutover:multi-org
+      - name: Policy risk writer apply under forced RLS on disposable PostgreSQL
+        run: POLICY_RISK_BACKFILL_TEST_RLS_ENABLED=1 node --import tsx scripts/test-policy-risk-backfill.integration.ts
       - name: Provision restricted runtime credential for post-RLS browser smoke
         shell: bash
         run: |
@@ -243,6 +245,8 @@ jobs:
             -c 'UPDATE "PlatformRuntimeState" SET "writeMode" = '\''OPEN'\'', "reason" = '\''tenant certification E2E'\'', "updatedAt" = now() WHERE "id" = 1;'
       - name: Tenant isolation Chromium E2E after forced RLS
         run: npx playwright test tests/e2e/tenant-isolation.spec.ts
+      - name: DEMO capability and upload API certification
+        run: npx playwright test tests/api/demo-certification.spec.ts
       - name: Archive Stage 2 tenant evidence
         if: always()
         shell: bash
