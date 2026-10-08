@@ -19,9 +19,9 @@ Cada subagente trabaja en su checkout. Solo el coordinador publica ramas, dispar
 
 | Chat fuente | Thread ID | Pendientes transferidos | Estado del historial |
 | --- | --- | --- | --- |
-| Certify PolicyDesk demo access | 01a0c49b-0147-79c3-9b14-57063e8f8c2f | Manifiesto real, backfill, restore, cutover y aceptación DEMO; gates D01–D09 | Transferido; pendiente archivar |
-| Audit Demo organization support | 01a0f587-a833-7f81-a2ff-110a3f089bdd | SUPERADMIN/flag efectivos, cobertura DEMO omitida, restricciones y docs/reset; D04–D09 | Transferido; pendiente archivar |
-| Audit PolicyDesk demo sandbox | 01a0adb3-f260-76d0-8acc-4dac70465893 | Procedencia de ramas/artefacto, destino independiente, restore CLI completo; D03 | Transferido; pendiente archivar |
+| Certify PolicyDesk demo access | 01a0c49b-0147-79c3-9b14-57063e8f8c2f | Manifiesto real, backfill, restore, cutover y aceptación DEMO; gates D01–D09 | Transferido y archivado el 2026-10-07 |
+| Audit Demo organization support | 01a0f587-a833-7f81-a2ff-110a3f089bdd | SUPERADMIN/flag efectivos, cobertura DEMO omitida, restricciones y docs/reset; D04–D09 | Transferido y archivado el 2026-10-07 |
+| Audit PolicyDesk demo sandbox | 01a0adb3-f260-76d0-8acc-4dac70465893 | Procedencia de ramas/artefacto, destino independiente, restore CLI completo; D03 | Transferido y archivado el 2026-10-07 |
 | Add vehicle descriptions to policies | 01a0f5e6-2b9f-72c1-90d7-6df71043b287 | Todas las pólizas y cotejo documental; D02 | Historial; los datos no se consideran convertidos |
 | Corrige seguimiento de renovaciones | 01a0fe42-c8bf-7223-9601-1b8a3cd7a4e1 | Renovaciones/Operations integradas por PR #88 | Archivado previamente; conservar implementación |
 
@@ -35,7 +35,7 @@ Los tres chats DEMO se releerieron el 2026-10-07; estaban idle y sus últimas au
 - main contiene 22 commits que #87 no incorporaba. El merge local 20fe9b93a101c1602e0bc7fa287b79a14bee667d, rama codex/ci-close, incorpora main y las expectativas actualizadas. TypeScript, inventario, scope read/write, ESLint enfocado y diff-check PASS. Aún falta prueba DB/browser de ese candidato; no fue publicado.
 - Comparación/preparación: primera versión local reutilizada; se corrigieron signo de prima, contador separado de faltantes y aviso de datos copiados. 6 unit tests y typecheck/lint/scope enfocadas PASS. Integración y dos E2E reforzados pendientes de ejecución. Sin publicación.
 - DEMO: commit local e77e0b438c29d8e4bf495face44c1e5fa785bd86 (codex/demo-acceptance-prep) exige motivo explícito de reset CLI, actualiza docs/checklist y pruebas. Al registrar esta evidencia, sus pruebas nuevas todavía no habían sido ejecutadas.
-- El bloqueo PostgreSQL local se diagnosticó como 32/32 segmentos IPC, muchos huérfanos. El coordinador liberó únicamente los segmentos de pruebas 1376285 y 3342366: dueño actual, 56 bytes, sin conexiones y PIDs de origen inexistentes. Se preservó el servidor PostgreSQL activo. Falta confirmar arranque del cluster privado y completar pruebas.
+- El bloqueo PostgreSQL local se diagnosticó como 32/32 segmentos IPC, muchos huérfanos. El coordinador liberó únicamente los segmentos de pruebas 1376285 y 3342366: dueño actual, 56 bytes, sin conexiones y PIDs de origen inexistentes. Se preservó el servidor PostgreSQL activo. El cluster privado ya inició en loopback:55439; migraciones desechables aplicadas. Las pruebas DB/browser están en ejecución.
 
 ## Pendientes, aceptación y evidencia
 
