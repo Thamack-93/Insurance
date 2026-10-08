@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareRenewalPolicies, type RenewalComparisonPolicy } from "@/lib/policy-renewal-comparison";
+import { compareRenewalPolicies, formatPremiumPercent, type RenewalComparisonPolicy } from "@/lib/policy-renewal-comparison";
 
 function policy(overrides: Partial<RenewalComparisonPolicy> = {}): RenewalComparisonPolicy {
   return {
@@ -72,6 +72,13 @@ describe("compareRenewalPolicies", () => {
   it("keeps premium reductions signed", () => {
     const result = compareRenewalPolicies(policy({ premiumAmount: 15000 }), policy({ premiumAmount: 12000 }));
     expect(result.premiumDifference).toEqual({ amount: -3000, absoluteAmount: 3000, percent: -20, currency: "MXN" });
+  });
+
+  it("formats premium increases and reductions with exactly one sign", () => {
+    expect(formatPremiumPercent(10)).toBe("+10.0%");
+    expect(formatPremiumPercent(-10)).toBe("−10.0%");
+    expect(formatPremiumPercent(0.01)).toBe("+<0.1%");
+    expect(formatPremiumPercent(-0.01)).toBe("−<0.1%");
   });
 
   it("detects and preserves sub-unit premium changes", () => {

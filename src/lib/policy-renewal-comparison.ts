@@ -34,6 +34,13 @@ export type RenewalComparison = {
   legacyPreviousText: string | null;
 };
 
+export function formatPremiumPercent(percent: number): string {
+  const sign = percent > 0 ? '+' : percent < 0 ? '−' : '';
+  const absolutePercent = Math.abs(percent);
+  if (absolutePercent > 0 && absolutePercent < 0.05) return `${sign}<0.1%`;
+  return `${sign}${absolutePercent.toFixed(1)}%`;
+}
+
 const riskLabels: Record<string, string> = {
   vehicles: "Vehículo", insuredPeople: "Persona asegurada", beneficiaries: "Beneficiario",
   locations: "Ubicación", attributes: "Dato adicional", make: "Marca", model: "Modelo", year: "Año",

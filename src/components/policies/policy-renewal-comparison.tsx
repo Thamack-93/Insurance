@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { formatCurrencyExact } from "@/lib/money";
-import type { RenewalComparison, RenewalComparisonEntry } from "@/lib/policy-renewal-comparison";
+import { formatPremiumPercent, type RenewalComparison, type RenewalComparisonEntry } from "@/lib/policy-renewal-comparison";
 
 const statusLabels = {
   UNCHANGED: "Sin cambio",
@@ -44,11 +44,7 @@ export function PolicyRenewalComparison({
   const { counts } = comparison;
   const differenceCount = counts.CHANGED + counts.ADDED + counts.REMOVED;
   const premium = comparison.premiumDifference;
-  const premiumPercent = premium
-    ? Math.abs(premium.percent) > 0 && Math.abs(premium.percent) < 0.05
-      ? `${premium.percent > 0 ? "+" : "−"}<0.1%`
-      : `${premium.percent > 0 ? "+" : premium.percent < 0 ? "−" : ""}${premium.percent.toFixed(1)}%`
-    : null;
+  const premiumPercent = premium ? formatPremiumPercent(premium.percent) : null;
   return (
     <section aria-labelledby="renewal-comparison-title" className="rounded-3xl border border-border/70 bg-card shadow-sm">
       <div className="flex flex-col gap-3 border-b border-border/70 p-4 sm:flex-row sm:items-start sm:justify-between sm:p-5">
