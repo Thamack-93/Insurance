@@ -63,23 +63,33 @@ test("DEMO blocks Nora and real document uploads", async ({ page }) => {
 test("DEMO search and export never expose CUSTOMER fixture records", async ({ page }) => {
   await login(page, "demo-owner@policydesk.local");
   const result = await page.evaluate(async () => {
-    const searchResponse = await fetch("/api/search?q=Overlap&scope=all");
-    const search = await searchResponse.text();
+    const ownSearchResponse = await fetch("/api/search?q=Ana&scope=all");
+    const ownSearch = await ownSearchResponse.text();
+    const overlapSearchResponse = await fetch("/api/search?q=Overlap&scope=all");
+    const overlapSearch = await overlapSearchResponse.text();
     const exportResponse = await fetch("/api/export/clients?format=csv");
     const exported = await exportResponse.text();
     return {
-      searchStatus: searchResponse.status,
-      search,
+      ownSearchStatus: ownSearchResponse.status,
+      ownSearch,
+      overlapSearchStatus: overlapSearchResponse.status,
+      overlapSearch,
       exportStatus: exportResponse.status,
       exported,
     };
   });
 
-  expect(result.searchStatus).toBe(200);
-  expect(result.search).not.toContain("Overlap Client");
-  expect(result.search).not.toContain("tenant-client-a");
-  expect(result.search).not.toContain("tenant-client-b");
+  const seededClientId = "org_demo_broker_0001:demo:client:001";
+  expect(result.ownSearchStatus).toBe(200);
+  expect(result.ownSearch).toContain(seededClientId);
+  expect(result.ownSearch).toContain("DEMO Ana López");
+  expect(result.overlapSearchStatus).toBe(200);
+  expect(result.overlapSearch).not.toContain("Overlap Client");
+  expect(result.overlapSearch).not.toContain("tenant-client-a");
+  expect(result.overlapSearch).not.toContain("tenant-client-b");
   expect(result.exportStatus).toBe(200);
+  expect(result.exported).toContain(seededClientId);
+  expect(result.exported).toContain("DEMO Ana López");
   expect(result.exported).not.toContain("Overlap Client");
   expect(result.exported).not.toContain("tenant-client-a");
   expect(result.exported).not.toContain("tenant-client-b");
