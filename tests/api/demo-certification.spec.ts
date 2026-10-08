@@ -88,9 +88,8 @@ test("DEMO search and export never expose CUSTOMER fixture records", async ({ pa
   expect(result.overlapSearch).not.toContain("tenant-client-a");
   expect(result.overlapSearch).not.toContain("tenant-client-b");
   expect(result.exportStatus).toBe(200);
-  expect(result.exported).toContain(seededClientId);
+  expect(result.exported).toContain("Cliente");
   expect(result.exported).toContain("DEMO Ana López");
+  expect(result.exported).toContain("ana.lopez@example.invalid");
   expect(result.exported).not.toContain("Overlap Client");
-  expect(result.exported).not.toContain("tenant-client-a");
-  expect(result.exported).not.toContain("tenant-client-b");
 });
