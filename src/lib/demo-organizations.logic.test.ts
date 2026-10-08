@@ -34,7 +34,7 @@ describe("DEMO reset target guard", () => {
   });
 
   it("rejects a CUSTOMER before any reset write, blob operation, or tenant-data access", async () => {
-    await expect(resetDemoOrganizationForCli("customer-org", "operator-request")).rejects.toThrow("DEMO_RESET_REQUIRES_DEMO_ORGANIZATION");
+    await expect(resetDemoOrganizationForCli("customer-org", "operator-request", false, "review customer reset")).rejects.toThrow("DEMO_RESET_REQUIRES_DEMO_ORGANIZATION");
     expect(mocks.txCalls).toEqual(["organization.findUnique"]);
     expect(mocks.blobList).not.toHaveBeenCalled();
     expect(mocks.blobDelete).not.toHaveBeenCalled();

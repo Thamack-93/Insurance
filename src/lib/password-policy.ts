@@ -2,6 +2,14 @@ import { randomBytes } from "node:crypto";
 
 export const TEMPORARY_PASSWORD_TTL_MS = 24 * 60 * 60 * 1000;
 
+export function isTemporaryPasswordExpired(
+  mustChangePassword: boolean,
+  expiresAt: Date | null | undefined,
+  now = new Date(),
+): boolean {
+  return mustChangePassword && expiresAt != null && expiresAt.getTime() <= now.getTime();
+}
+
 export function validatePasswordStrength(password: string): string | null {
   if (typeof password !== "string") return "La contraseña no es válida.";
   if (password.length < 12) return "La contraseña debe tener al menos 12 caracteres.";

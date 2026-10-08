@@ -9,6 +9,7 @@ import { getRequestIp, checkDistributedRateLimit, securityFingerprint } from "@/
 import { recordSecurityEvent, SECURITY_EVENT_TYPES } from "@/lib/security-events";
 import { headers } from "next/headers";
 import { withSystemOrganizationTransaction } from "@/lib/organization-context";
+import { isTemporaryPasswordExpired } from "@/lib/password-policy";
 
 export type LoginResult = { ok: true } | { ok: false; error: string };
 
@@ -62,7 +63,7 @@ export async function loginAction(_prev: LoginResult | null, formData: FormData)
     return { ok: false, error: "Correo o contraseña incorrectos." };
   }
 
-  if (user.mustChangePassword && user.temporaryPasswordExpiresAt && user.temporaryPasswordExpiresAt <= new Date()) {
+  if (isTemporaryPasswordExpired(user.mustChangePassword, user.temporaryPasswordExpiresAt)) {
     return { ok: false, error: "La contraseña temporal expiró. Solicita una nueva al administrador." };
   }
 

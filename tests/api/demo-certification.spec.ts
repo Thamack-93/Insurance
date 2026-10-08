@@ -59,3 +59,28 @@ test("DEMO blocks Nora and real document uploads", async ({ page }) => {
   expect(result.nora).toBe(403);
   expect(result.upload).toBe(403);
 });
+
+test("DEMO search and export never expose CUSTOMER fixture records", async ({ page }) => {
+  await login(page, "demo-owner@policydesk.local");
+  const result = await page.evaluate(async () => {
+    const searchResponse = await fetch("/api/search?q=Overlap&scope=all");
+    const search = await searchResponse.text();
+    const exportResponse = await fetch("/api/export/clients?format=csv");
+    const exported = await exportResponse.text();
+    return {
+      searchStatus: searchResponse.status,
+      search,
+      exportStatus: exportResponse.status,
+      exported,
+    };
+  });
+
+  expect(result.searchStatus).toBe(200);
+  expect(result.search).not.toContain("Overlap Client");
+  expect(result.search).not.toContain("tenant-client-a");
+  expect(result.search).not.toContain("tenant-client-b");
+  expect(result.exportStatus).toBe(200);
+  expect(result.exported).not.toContain("Overlap Client");
+  expect(result.exported).not.toContain("tenant-client-a");
+  expect(result.exported).not.toContain("tenant-client-b");
+});
