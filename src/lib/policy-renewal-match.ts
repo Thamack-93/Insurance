@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@/generated/prisma/client";
+import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import { addDays } from "date-fns";
 import { canReactivateStaleSerialSuggestion, matchSerialRenewal, STALE_SERIAL_SUGGESTION_NOTE, type SerialRenewalMatch } from "@/lib/policy-renewal-match.logic";
 
@@ -198,7 +198,6 @@ export async function syncSerialRenewalSuggestionsForPortfolio(
       insuredAssets: { select: { serialNumber: true } },
     },
     orderBy: [{ startDate: "asc" }, { id: "asc" }],
-    take: 500,
   });
   if (targets.length === 0) return 0;
 
@@ -301,18 +300,24 @@ export async function syncSerialRenewalSuggestionsForPortfolio(
       },
     });
   }
-  for (const suggestion of toReactivate) {
-    await db.policyRenewalSuggestion.updateMany({
-      where: { organizationId, id: suggestion.id, status: "DISMISSED", resolutionNote: STALE_SERIAL_SUGGESTION_NOTE },
-      data: {
-        confidence: suggestion.confidence,
-        reason: suggestion.reason,
-        status: "PENDING",
-        reviewedAt: null,
-        reviewedById: null,
-        resolutionNote: null,
-      },
-    });
+  if (toReactivate.length) {
+    const ids = toReactivate.map(({ id }) => id);
+    const confidenceCases = Prisma.join(toReactivate.map(({ id, confidence }) => Prisma.sql`WHEN ${id} THEN ${confidence}`), " ");
+    const reasonCases = Prisma.join(toReactivate.map(({ id, reason }) => Prisma.sql`WHEN ${id} THEN ${reason}`), " ");
+    await db.$executeRaw(Prisma.sql`
+      UPDATE "PolicyRenewalSuggestion"
+      SET "confidence" = CASE "id" ${confidenceCases} ELSE "confidence" END,
+          "reason" = CASE "id" ${reasonCases} ELSE "reason" END,
+          "status" = 'PENDING',
+          "reviewedAt" = NULL,
+          "reviewedById" = NULL,
+          "resolutionNote" = NULL,
+          "updatedAt" = NOW()
+      WHERE "organizationId" = ${organizationId}
+        AND "id" IN (${Prisma.join(ids)})
+        AND "status" = 'DISMISSED'
+        AND "resolutionNote" = ${STALE_SERIAL_SUGGESTION_NOTE}
+    `);
   }
   if (toCreate.length) {
     await db.policyRenewalSuggestion.createMany({ data: toCreate, skipDuplicates: true });

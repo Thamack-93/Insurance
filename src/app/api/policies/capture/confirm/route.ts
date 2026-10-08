@@ -242,16 +242,25 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    if (sourcePolicy && payload.insurerId !== sourcePolicy.insurerId) {
+      return NextResponse.json(
+        { error: "Para cambiar de aseguradora, confirma una sugerencia vigente por serie/VIN desde Renovaciones." },
+        { status: 400 },
+      );
+    }
 
     const targetStartDate = parseDateInput(draft.startDate);
     const targetEndDate = parseDateInput(draft.endDate);
 
     const result = await withTenantTransaction(context, async (tx) => {
       const [currentSource, currentInsurer] = await Promise.all([
-        sourcePolicy ? tx.policy.findFirst({ where: { id: sourcePolicy.id, organizationId: context.organizationId }, select: { id: true, clientId: true, insurerId: true } }) : Promise.resolve(null),
+        sourcePolicy ? tx.policy.findFirst({ where: { id: sourcePolicy.id, organizationId: context.organizationId }, select: { id: true, clientId: true, insurerId: true, status: true, renewals: { select: { id: true } } } }) : Promise.resolve(null),
         tx.insurer.findFirst({ where: { id: insurer.id, organizationId: context.organizationId }, select: { id: true } }),
       ]);
-      if ((sourcePolicy && (!currentSource || currentSource.clientId !== payload.clientId)) || !currentInsurer) {
+      if ((sourcePolicy && (!currentSource
+        || currentSource.clientId !== payload.clientId
+        || currentSource.insurerId !== payload.insurerId
+        )) || !currentInsurer) {
         throw new AuthError("TENANT_RELATION_MISMATCH", 409);
       }
       const existingTarget = await tx.policy.findFirst({
@@ -265,6 +274,11 @@ export async function POST(request: NextRequest) {
         },
         select: { id: true, notes: true, familyRootId: true, renewedFromPolicyId: true },
       });
+
+      if (currentSource?.status === "RENEWED"
+        && !currentSource.renewals.some((renewal) => renewal.id === existingTarget?.id)) {
+        throw new Error("La póliza origen ya tiene una renovación vinculada.");
+      }
 
       if (sourcePolicy && existingTarget?.renewedFromPolicyId && existingTarget.renewedFromPolicyId !== sourcePolicy.id) {
         throw new Error("La póliza capturada ya está vinculada con otra póliza origen.");

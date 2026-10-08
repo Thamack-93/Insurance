@@ -157,6 +157,8 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
             clientId: true,
             insurerId: true,
             familyRootId: true,
+            status: true,
+            renewals: { select: { id: true }, take: 1 },
           },
         }))
       : null;
@@ -166,6 +168,12 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
     }
     if (renewalSource && renewalSource.clientId !== normalized.clientId) {
       return errorResult("La póliza origen debe pertenecer al mismo cliente.");
+    }
+    if (renewalSource && renewalSource.insurerId !== normalized.insurerId) {
+      return errorResult("Para cambiar de aseguradora, confirma una sugerencia vigente por serie/VIN desde Renovaciones.");
+    }
+    if (renewalSource && (renewalSource.status === "RENEWED" || renewalSource.renewals.length > 0)) {
+      return errorResult("La póliza origen ya tiene una renovación vinculada.");
     }
 
     const familyRootId = await resolvePolicyFamilyRootId({
@@ -194,14 +202,27 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
     const policy = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       await assertPolicyRelationsInTransaction(tx, context, normalized.clientId, normalized.insurerId);
-      const effectiveFamilyRootId = renewalSource ? renewalSource.familyRootId ?? renewalSource.id : familyRootId;
+      const currentRenewalSource = renewalSourceId
+        ? await tx.policy.findFirst({
+            where: { id: renewalSourceId, organizationId: context.organizationId },
+            select: { id: true, policyNumber: true, clientId: true, insurerId: true, familyRootId: true, status: true, renewals: { select: { id: true }, take: 1 } },
+          })
+        : null;
+      if (renewalSourceId && (!currentRenewalSource
+        || currentRenewalSource.clientId !== normalized.clientId
+        || currentRenewalSource.insurerId !== normalized.insurerId
+        || currentRenewalSource.status === "RENEWED"
+        || currentRenewalSource.renewals.length > 0)) {
+        throw new Error("La póliza origen cambió o ya tiene una renovación vinculada. Actualiza la página e inténtalo de nuevo.");
+      }
+      const effectiveFamilyRootId = currentRenewalSource ? currentRenewalSource.familyRootId ?? currentRenewalSource.id : familyRootId;
       const createdPolicy = await tx.policy.create({
         data: {
           ...normalized,
           organizationId: context.organizationId,
           familyRootId: effectiveFamilyRootId,
-          renewedFromPolicyId: renewalSource?.id ?? null,
-          status: renewalSource ? "ACTIVE" : normalized.status,
+          renewedFromPolicyId: currentRenewalSource?.id ?? null,
+          status: currentRenewalSource ? "ACTIVE" : normalized.status,
           createdById: userId,
           updatedById: userId,
         },
@@ -221,7 +242,7 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
           paymentFrequency: normalized.paymentFrequency,
           premiumAmount: normalized.premiumAmount,
           currency: normalized.currency,
-          sourcePolicyNumber: renewalSource?.policyNumber ?? null,
+          sourcePolicyNumber: currentRenewalSource?.policyNumber ?? null,
         },
       });
 
@@ -239,24 +260,24 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
         });
       }
 
-      if (renewalSource) {
+      if (currentRenewalSource) {
         await tx.policy.update({
-          where: { id: renewalSource.id, organizationId: context.organizationId },
+          where: { id: currentRenewalSource.id, organizationId: context.organizationId },
           data: {
             status: "RENEWED",
             updatedById: userId,
           },
         });
-        await closeRenewalWorkItems(tx, context.organizationId, renewalSource.id, userId);
+        await closeRenewalWorkItems(tx, context.organizationId, currentRenewalSource.id, userId);
       }
 
       await writeActivityLog({
         entityType: "Policy",
         entityId: createdPolicy.id,
-        action: renewalSource ? "POLICY_CREATE_RENEWAL" : "POLICY_CREATE",
+        action: currentRenewalSource ? "POLICY_CREATE_RENEWAL" : "POLICY_CREATE",
         newValue: {
           ...createdPolicy,
-          renewedFromPolicyId: renewalSource?.id ?? null,
+          renewedFromPolicyId: currentRenewalSource?.id ?? null,
           familyRootId: effectiveFamilyRootId,
         },
         organizationId: context.organizationId,
@@ -340,11 +361,27 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
       if (nextRenewalSource.clientId !== normalized.clientId) {
         return errorResult("La póliza origen debe pertenecer al mismo cliente.");
       }
+      if (nextRenewalSource.insurerId !== normalized.insurerId) {
+        return errorResult("Para cambiar de aseguradora, confirma una sugerencia vigente por serie/VIN desde Renovaciones.");
+      }
     }
 
     const policy = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       await assertPolicyRelationsInTransaction(tx, context, normalized.clientId, normalized.insurerId);
+      const currentRenewalSource = renewalChanged && nextRenewalSource
+        ? await tx.policy.findFirst({
+            where: { id: nextRenewalSource.id, organizationId: context.organizationId },
+            select: { id: true, clientId: true, insurerId: true, familyRootId: true, status: true, renewals: { select: { id: true }, take: 1 } },
+          })
+        : null;
+      if (renewalChanged && nextRenewalSource && (!currentRenewalSource
+        || currentRenewalSource.clientId !== normalized.clientId
+        || currentRenewalSource.insurerId !== normalized.insurerId
+        || currentRenewalSource.status === "RENEWED"
+        || currentRenewalSource.renewals.length > 0)) {
+        throw new Error("La póliza origen cambió o ya tiene una renovación vinculada. Actualiza la página e inténtalo de nuevo.");
+      }
       await tx.policy.update({
         where: { id, organizationId: context.organizationId },
         data: {
@@ -367,12 +404,12 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
           await clearPreviousRenewalSource(tx, context.organizationId, previousRenewedFromPolicyId, id, userId);
         }
 
-        if (nextRenewalSource) {
-          const effectiveFamilyRootId = nextRenewalSource.familyRootId ?? nextRenewalSource.id;
+        if (currentRenewalSource) {
+          const effectiveFamilyRootId = currentRenewalSource.familyRootId ?? currentRenewalSource.id;
           await tx.policy.update({
             where: { id, organizationId: context.organizationId },
             data: {
-              renewedFromPolicyId: nextRenewalSource.id,
+              renewedFromPolicyId: currentRenewalSource.id,
               familyRootId: effectiveFamilyRootId,
               status: "ACTIVE",
               updatedById: userId,
@@ -380,13 +417,13 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
           });
 
           await tx.policy.update({
-            where: { id: nextRenewalSource.id, organizationId: context.organizationId },
+            where: { id: currentRenewalSource.id, organizationId: context.organizationId },
             data: {
               status: "RENEWED",
               updatedById: userId,
             },
           });
-          await closeRenewalWorkItems(tx, context.organizationId, nextRenewalSource.id, userId);
+          await closeRenewalWorkItems(tx, context.organizationId, currentRenewalSource.id, userId);
         } else {
           await tx.policy.update({
             where: { id, organizationId: context.organizationId },

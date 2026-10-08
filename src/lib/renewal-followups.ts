@@ -232,9 +232,19 @@ export async function runRenewalFollowUpScan(
   };
 
   try {
+    try {
+      summary.serialSuggestionsCreated = await withSystemOrganizationTransaction(
+        organizationId,
+        "renewal serial suggestions",
+        (tx) => syncSerialRenewalSuggestionsForPortfolio(tx, organizationId),
+      );
+    } catch (error) {
+      // Sugerencias son una mejora de lectura y no deben cancelar los recordatorios.
+      logError("renewal-followups.serial-suggestions", error);
+    }
+
     await withSystemOrganizationTransaction(organizationId, "renewal follow-up", async (tx) => {
       const weekKey = businessWeekKey(now);
-      summary.serialSuggestionsCreated = await syncSerialRenewalSuggestionsForPortfolio(tx, organizationId);
 
     // Sin alcance de cartera y sin ventana de vencimiento: el job corre para
     // toda la casa y cada aviso se dirige al responsable de la póliza.
