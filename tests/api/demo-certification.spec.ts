@@ -60,6 +60,17 @@ test("DEMO blocks Nora and real document uploads", async ({ page }) => {
   expect(result.upload).toBe(403);
 });
 
+test("DEMO provides one account and hides member invitations", async ({ page }) => {
+  await login(page, "demo-owner@policydesk.local");
+  await page.goto("/settings/users");
+  await expect(page.getByText("Esta demostración usa una sola cuenta para el prospecto.")).toBeVisible();
+  await expect(page.getByText("La demostración usa una sola cuenta.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Invitar usuario" })).toHaveCount(0);
+  await expect(page.getByRole("row")).toHaveCount(2);
+  await expect(page.getByRole("row", { name: /demo-owner@policydesk\.local/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /demo-agent@policydesk\.local/ })).toHaveCount(0);
+});
+
 test("DEMO search and export never expose CUSTOMER fixture records", async ({ page }) => {
   await login(page, "demo-owner@policydesk.local");
   const result = await page.evaluate(async () => {

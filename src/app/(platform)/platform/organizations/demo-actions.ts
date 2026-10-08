@@ -10,7 +10,7 @@ export async function provisionDemoOrganizationAction(input: { requestId: string
     const requestId = String(input.requestId ?? "").trim();
     if (!requestId || requestId.length > 128) return { ok: false as const, error: "La solicitud de provisión no es válida." };
     const requestedUsers = input.requestedUsers === undefined ? 1 : Number(input.requestedUsers);
-    if (!Number.isInteger(requestedUsers) || requestedUsers < 1 || requestedUsers > 5) return { ok: false as const, error: "El DEMO admite entre 1 y 5 usuarios." };
+    if (requestedUsers !== 1) return { ok: false as const, error: "La DEMO externa usa una sola cuenta." };
     const result = await provisionDemoOrganization({ ...input, requestedUsers, requestId });
     revalidatePath("/platform");
     revalidatePath("/platform/organizations");

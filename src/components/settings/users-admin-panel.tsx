@@ -67,10 +67,12 @@ export function UsersAdminPanel({
   initialUsers,
   currentUserId,
   canResetPasswords,
+  isDemo,
 }: {
   initialUsers: AdminUserRow[];
   currentUserId: string;
   canResetPasswords: boolean;
+  isDemo: boolean;
 }) {
   const router = useRouter();
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -178,13 +180,13 @@ export function UsersAdminPanel({
           <div>
             <CardTitle>Equipo</CardTitle>
             <CardDescription>
-              {initialUsers.length} usuario{initialUsers.length !== 1 ? "s" : ""} con acceso a la correduría.
+              {isDemo ? "La demostración usa una sola cuenta." : `${initialUsers.length} usuario${initialUsers.length !== 1 ? "s" : ""} con acceso a la correduría.`}
             </CardDescription>
           </div>
-          <Button onClick={() => setInviteOpen(true)}>
+          {!isDemo ? <Button onClick={() => setInviteOpen(true)}>
             <UserPlus className="mr-2 size-4" />
             Invitar usuario
-          </Button>
+          </Button> : null}
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto rounded-xl border">
@@ -289,7 +291,7 @@ export function UsersAdminPanel({
         </CardContent>
       </Card>
 
-      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+      {!isDemo ? <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Invitar usuario</DialogTitle>
@@ -339,7 +341,7 @@ export function UsersAdminPanel({
             </DialogFooter>
           </form>
         </DialogContent>
-      </Dialog>
+      </Dialog> : null}
 
       <Dialog
         open={deleteTarget !== null}
