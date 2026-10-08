@@ -26,6 +26,8 @@ import { policyTypeLabel } from "@/lib/status";
 import { countWorkItems, getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { normalizeReturnTo } from "@/lib/return-to";
 import { getPolicyRiskDetailEntries } from "@/lib/policy-risk-details";
+import { compareRenewalPolicies } from "@/lib/policy-renewal-comparison";
+import { PolicyRenewalComparison } from "@/components/policies/policy-renewal-comparison";
 
 const frequencyLabels: Record<string, string> = {
   MONTHLY: "Mensual",
@@ -48,13 +50,8 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
     include: {
       client: true,
       insurer: true,
-      renewedFrom: {
-        select: {
-          id: true,
-          policyNumber: true,
-        },
-      },
       renewals: {
+        where: policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
         select: {
           id: true,
           policyNumber: true,
@@ -73,6 +70,46 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
   if (!policy) {
     notFound();
   }
+
+  // Re-read the linked source through the same organization and portfolio predicate.
+  // A malformed cross-organization relation is deliberately treated as unavailable.
+  const previousPolicy = policy.renewedFromPolicyId
+    ? await db.policy.findFirst({
+        where: { id: policy.renewedFromPolicyId, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
+        include: {
+          insurer: { select: { name: true } },
+          insuredAssets: { select: { assetType: true, description: true, serialNumber: true, isPrimary: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+          insuredParties: { select: { fullName: true, isPrimary: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+        },
+      })
+    : null;
+  const renewalComparison = previousPolicy
+    ? compareRenewalPolicies({
+        insurerName: previousPolicy.insurer.name,
+        policyType: previousPolicy.policyType,
+        premiumAmount: Number(previousPolicy.premiumAmount),
+        currency: previousPolicy.currency,
+        paymentFrequency: previousPolicy.paymentFrequency,
+        startDate: previousPolicy.startDate,
+        endDate: previousPolicy.endDate,
+        riskDetails: previousPolicy.riskDetails,
+        legacyText: previousPolicy.insuredObject,
+        insuredAssets: previousPolicy.insuredAssets,
+        insuredParties: previousPolicy.insuredParties,
+      }, {
+        insurerName: policy.insurer.name,
+        policyType: policy.policyType,
+        premiumAmount: Number(policy.premiumAmount),
+        currency: policy.currency,
+        paymentFrequency: policy.paymentFrequency,
+        startDate: policy.startDate,
+        endDate: policy.endDate,
+        riskDetails: policy.riskDetails,
+        legacyText: policy.insuredObject,
+        insuredAssets: policy.insuredAssets,
+        insuredParties: policy.insuredParties,
+      })
+    : null;
 
   const [
     receipts,
@@ -245,6 +282,15 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
 
         <AuditByline createdById={policy.createdById} updatedById={policy.updatedById} />
 
+        {previousPolicy && renewalComparison ? (
+          <PolicyRenewalComparison
+            comparison={renewalComparison}
+            previousPolicyNumber={previousPolicy.policyNumber}
+            previousPolicyHref={`/policies/${previousPolicy.id}`}
+            editHref={`/policies/${policy.id}/edit`}
+          />
+        ) : null}
+
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
           <MetricCard
             title="Prima"
@@ -347,11 +393,11 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
                   <p className="text-muted-foreground">Frecuencia</p>
                   <p className="font-medium">{frequencyLabels[policy.paymentFrequency] ?? policy.paymentFrequency}</p>
                 </div>
-                {policy.renewedFrom ? (
+                {previousPolicy ? (
                   <div>
                     <p className="text-muted-foreground">Renueva de</p>
-                    <Link href={`/policies/${policy.renewedFrom.id}`} className="font-medium text-foreground hover:text-primary">
-                      {policy.renewedFrom.policyNumber}
+                    <Link href={`/policies/${previousPolicy.id}`} className="font-medium text-foreground hover:text-primary">
+                      {previousPolicy.policyNumber}
                     </Link>
                   </div>
                 ) : null}

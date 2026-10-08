@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
-import type { Prisma } from "../../src/generated/prisma/client.ts";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient, type Prisma } from "../../src/generated/prisma/client.ts";
 import { getTestDb } from "../helpers/db";
 
 const enabled = process.env.TENANT_ISOLATION_E2E === "1";
@@ -13,6 +14,142 @@ async function withTestOrganization<T>(organizationId: string, callback: (tx: Pr
     return callback(tx);
   });
 }
+
+test("renewal detail does not load a source policy outside the agent portfolio or organization", async ({ page }) => {
+  const adminUrl = process.env.DATABASE_ADMIN_URL?.trim();
+  if (!adminUrl) throw new Error("DATABASE_ADMIN_URL is required for protected fixture setup and cleanup.");
+  const adminDb = new PrismaClient({ adapter: new PrismaPg({ connectionString: adminUrl }) });
+  const withAdminOrganization = <T,>(organizationId: string, callback: (tx: Prisma.TransactionClient) => Promise<T>) =>
+    adminDb.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.organization_id', ${organizationId}, true)`;
+      return callback(tx);
+    });
+  const allowedClientId = `renewal-scope-allowed-client-${Date.now()}`;
+  const allowedSourceId = `renewal-scope-allowed-source-${Date.now()}`;
+  const privateClientId = `renewal-scope-client-${Date.now()}`;
+  const privateSourceId = `renewal-scope-source-${Date.now()}`;
+  const original = await withAdminOrganization(ORGANIZATION_A, (tx) => tx.policy.findUniqueOrThrow({
+    where: { id: "tenant-policy-a" },
+    select: { renewedFromPolicyId: true },
+  }));
+
+  try {
+    await withAdminOrganization(ORGANIZATION_A, async (tx) => {
+      await tx.client.create({
+        data: {
+          id: allowedClientId,
+          organizationId: ORGANIZATION_A,
+          fullName: "Allowed renewal source client",
+          type: "PERSON",
+          status: "ACTIVE",
+          portfolioOwnerId: "tenant-agent-a",
+          createdById: "tenant-admin-a",
+          updatedById: "tenant-admin-a",
+        },
+      });
+      await tx.policy.create({
+        data: {
+          id: allowedSourceId,
+          organizationId: ORGANIZATION_A,
+          policyNumber: allowedSourceId,
+          clientId: allowedClientId,
+          insurerId: "tenant-insurer-a",
+          policyType: "AUTO",
+          status: "ACTIVE",
+          paymentFrequency: "ANNUAL",
+          startDate: new Date("2025-01-01"),
+          endDate: new Date("2026-01-01"),
+          premiumAmount: 1000,
+          currency: "MXN",
+          riskDetails: { version: 1, policyType: "AUTO", data: { vehicles: [{ make: "Toyota", model: "Corolla", year: "2020", version: "LE", vin: "2T1BURHE0LC123456", plates: "ABC-123" }] } },
+          createdById: "tenant-admin-a",
+          updatedById: "tenant-admin-a",
+        },
+      });
+      await tx.policy.update({ where: { id: "tenant-policy-a" }, data: { renewedFromPolicyId: allowedSourceId } });
+      await tx.client.create({
+        data: {
+          id: privateClientId,
+          organizationId: ORGANIZATION_A,
+          fullName: "Private renewal source client",
+          type: "PERSON",
+          status: "ACTIVE",
+          portfolioOwnerId: "tenant-admin-a",
+          createdById: "tenant-admin-a",
+          updatedById: "tenant-admin-a",
+        },
+      });
+      await tx.policy.create({
+        data: {
+          id: privateSourceId,
+          organizationId: ORGANIZATION_A,
+          policyNumber: privateSourceId,
+          clientId: privateClientId,
+          insurerId: "tenant-insurer-a",
+          policyType: "AUTO",
+          status: "ACTIVE",
+          paymentFrequency: "ANNUAL",
+          startDate: new Date("2025-01-01"),
+          endDate: new Date("2026-01-01"),
+          premiumAmount: 1000,
+          currency: "MXN",
+          createdById: "tenant-admin-a",
+          updatedById: "tenant-admin-a",
+        },
+      });
+    });
+
+    await page.goto("/login");
+    await page.getByLabel("Correo electrónico").fill("tenant-agent-a@policydesk.local");
+    await page.getByLabel("Contraseña").fill("tenant-fixture-password");
+    await page.getByRole("button", { name: "Iniciar sesión" }).click();
+    await expect(page).toHaveURL(/\/today$/, { timeout: 30_000 });
+
+    await page.goto("/policies/tenant-policy-a");
+    await expect(page.getByText("OVERLAP-A", { exact: false })).toBeVisible();
+    const comparison = page.getByRole("region", { name: "Comparación con póliza anterior" });
+    await expect(comparison).toBeVisible();
+    await expect(comparison.getByRole("link", { name: allowedSourceId })).toHaveAttribute("href", `/policies/${allowedSourceId}`);
+
+    await withAdminOrganization(ORGANIZATION_A, (tx) => tx.policy.update({
+      where: { id: "tenant-policy-a" },
+      data: { renewedFromPolicyId: privateSourceId },
+    }));
+    await page.reload();
+    await expect(page.getByText("OVERLAP-A", { exact: false })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Comparación con póliza anterior" })).toHaveCount(0);
+    await expect(page.getByText(privateSourceId, { exact: false })).toHaveCount(0);
+
+    await expect(withAdminOrganization(ORGANIZATION_A, (tx) => tx.policy.update({
+      where: { id: "tenant-policy-a" },
+      data: { renewedFromPolicyId: "tenant-policy-b" },
+    }))).rejects.toThrow("POLICYDESK_CROSS_ORGANIZATION_RELATION:Policy:renewedFromPolicyId");
+    await page.reload();
+    await expect(page.getByText("OVERLAP-A", { exact: false })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Comparación con póliza anterior" })).toHaveCount(0);
+    await expect(page.getByText("OVERLAP-B", { exact: false })).toHaveCount(0);
+
+    const allowedSourceAfterReads = await withAdminOrganization(ORGANIZATION_A, (tx) => tx.policy.findUniqueOrThrow({
+      where: { id: allowedSourceId },
+      select: { premiumAmount: true, currency: true, riskDetails: true, renewedFromPolicyId: true },
+    }));
+    expect(Number(allowedSourceAfterReads.premiumAmount)).toBe(1000);
+    expect(allowedSourceAfterReads).toMatchObject({
+      currency: "MXN",
+      renewedFromPolicyId: null,
+      riskDetails: { policyType: "AUTO", data: { vehicles: [{ make: "Toyota", model: "Corolla", year: "2020", version: "LE", vin: "2T1BURHE0LC123456", plates: "ABC-123" }] } },
+    });
+  } finally {
+    await withAdminOrganization(ORGANIZATION_A, async (tx) => {
+      await tx.policy.update({ where: { id: "tenant-policy-a" }, data: { renewedFromPolicyId: original.renewedFromPolicyId } });
+      await tx.policy.deleteMany({ where: { id: allowedSourceId } });
+      await tx.policy.deleteMany({ where: { id: privateSourceId } });
+      await tx.client.deleteMany({ where: { id: allowedClientId } });
+      await tx.client.deleteMany({ where: { id: privateClientId } });
+    });
+    await adminDb.$disconnect();
+  }
+});
 
 test("Operational Insights enforces organization and agent portfolio scope after RLS cutover", async ({ page }) => {
   const original = {
