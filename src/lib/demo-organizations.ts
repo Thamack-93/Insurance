@@ -26,6 +26,60 @@ function temporaryPassword() {
   return randomBytes(24).toString("base64url");
 }
 
+async function revokeExtraDemoMembers(
+  tx: Prisma.TransactionClient,
+  input: { organizationId: string; ownerUserId: string; actorUserId: string; requestId: string },
+) {
+  const memberships = await tx.organizationMembership.findMany({
+    where: { organizationId: input.organizationId, userId: { not: input.ownerUserId } },
+    select: { userId: true, active: true, user: { select: { active: true, platformRole: true } } },
+    orderBy: { userId: "asc" },
+  });
+
+  let changed = 0;
+  for (const membership of memberships) {
+    if (membership.userId === SYSTEM_USER_ID || membership.user.platformRole === "SUPERADMIN") {
+      throw new Error("DEMO_SINGLE_USER_INVARIANT_UNSAFE_MEMBER");
+    }
+
+    const membershipDeactivated = membership.active;
+    const userDeactivated = membership.user.active;
+    if (membershipDeactivated) {
+      await tx.organizationMembership.updateMany({
+        where: { organizationId: input.organizationId, userId: membership.userId, active: true },
+        data: { active: false },
+      });
+    }
+    if (userDeactivated) {
+      await tx.user.updateMany({
+        where: { id: membership.userId, active: true },
+        data: { active: false, sessionVersion: { increment: 1 } },
+      });
+    }
+    const revokedSessions = await tx.session.updateMany({
+      where: { userId: membership.userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
+    if (membershipDeactivated || userDeactivated) {
+      changed += 1;
+      await tx.platformAuditLog.create({
+        data: {
+          requestId: deterministicId("request", `${input.requestId}:single-account:${membership.userId}`),
+          actorUserId: input.actorUserId,
+          targetOrganizationId: input.organizationId,
+          targetUserId: membership.userId,
+          action: "DEMO_MEMBER_ACCESS_REVOKED",
+          reason: "single-account external DEMO reconciliation",
+          metadataJson: JSON.stringify({ membershipDeactivated, userDeactivated, sessionsRevoked: revokedSessions.count }),
+        },
+      });
+    }
+  }
+
+  return changed;
+}
+
 function sanitizedFailureCode(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : "";
   const match = message.match(/\b[A-Z][A-Z0-9_]{2,}\b/);
@@ -170,9 +224,7 @@ export async function provisionDemoOrganization(input: DemoProvisioningInput): P
     const existing = await tx.organization.findUnique({ where: { id: organizationId }, select: { id: true, kind: true, status: true, name: true, slug: true } });
     if (existing && existing.kind !== "DEMO") throw new Error("DEMO_ID_COLLIDES_WITH_NON_DEMO_ORGANIZATION");
     if (existing && (existing.slug !== slug || existing.name !== name)) throw new Error("DEMO_ID_ALREADY_PROVISIONED_DIFFERENT_INPUT");
-    if (existing && await tx.organizationMembership.count({ where: { organizationId } }) > 1) {
-      throw new Error("DEMO_SINGLE_USER_INVARIANT_FAILED");
-    }
+    if (existing) await revokeExtraDemoMembers(tx, { organizationId, ownerUserId, actorUserId: actor.id, requestId });
     if (existing?.status === "ACTIVE") {
       for (const key of DEMO_CAPABILITIES) {
         const enabled = DEMO_ENABLED_CAPABILITIES.has(key);

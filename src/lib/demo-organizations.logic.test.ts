@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   acquireLock: vi.fn(),
   requireSuperAdmin: vi.fn(),
+  rootTransaction: vi.fn(),
   findOrganization: vi.fn(),
   systemTransaction: vi.fn(),
   release: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("server-only", () => ({}));
 vi.mock("@vercel/blob", () => ({ list: mocks.blobList, del: mocks.blobDelete }));
 vi.mock("@/lib/auth", () => ({ AuthError: class AuthError extends Error {}, hashPassword: vi.fn(), requireSuperAdmin: mocks.requireSuperAdmin }));
+vi.mock("@/lib/db", () => ({ getDb: () => ({ $transaction: mocks.rootTransaction }) }));
 vi.mock("@/lib/request-guards", () => ({ acquireDistributedLock: mocks.acquireLock }));
 vi.mock("@/lib/organization-context", () => ({ withSystemOrganizationTransaction: mocks.systemTransaction }));
 vi.mock("@/lib/demo-seed", () => ({ DEMO_SEED_VERSION: "demo-test", seedDemoBaseline: vi.fn(), validateDemoBaseline: vi.fn() }));
@@ -45,6 +47,67 @@ describe("DEMO reset target guard", () => {
       .rejects.toThrow("DEMO_SINGLE_USER_REQUIRED");
     expect(mocks.acquireLock).not.toHaveBeenCalled();
     expect(mocks.systemTransaction).not.toHaveBeenCalled();
+  });
+
+  it("reconciles old multi-user DEMOs and revokes extra accounts on an idempotent retry", async () => {
+    const organizationId = "org_demo_40542f7e6b9ec1650870123e";
+    const extraUserId = "previous-demo-agent";
+    const updateMembership = vi.fn().mockResolvedValue({ count: 1 });
+    const deactivateUser = vi.fn().mockResolvedValue({ count: 1 });
+    const revokeSessions = vi.fn().mockResolvedValue({ count: 2 });
+    const audit = vi.fn().mockResolvedValue({});
+    const tx = {
+      organization: {
+        findUnique: vi.fn().mockResolvedValue({ id: organizationId, kind: "DEMO", status: "ACTIVE", name: "Prospect", slug: "prospect" }),
+      },
+      organizationMembership: {
+        findMany: vi.fn().mockResolvedValue([{ userId: extraUserId, active: true, user: { active: true, platformRole: "NONE" } }]),
+        updateMany: updateMembership,
+      },
+      user: { updateMany: deactivateUser },
+      session: { updateMany: revokeSessions },
+      platformAuditLog: { create: audit },
+      organizationCapability: { upsert: vi.fn().mockResolvedValue({}) },
+      demoOrganizationState: { findUnique: vi.fn().mockResolvedValue({ trialEndsAt: new Date("2026-11-01T00:00:00Z") }) },
+    };
+    mocks.rootTransaction.mockImplementation(async (callback: (client: unknown) => unknown) => callback(tx));
+
+    const result = await provisionDemoOrganization({ name: "Prospect", ownerName: "DEMO Owner" });
+
+    expect(result).toMatchObject({ organizationId, credentials: [], temporaryPassword: "" });
+    expect(updateMembership).toHaveBeenCalledWith({
+      where: { organizationId, userId: extraUserId, active: true },
+      data: { active: false },
+    });
+    expect(deactivateUser).toHaveBeenCalledWith({
+      where: { id: extraUserId, active: true },
+      data: { active: false, sessionVersion: { increment: 1 } },
+    });
+    expect(revokeSessions).toHaveBeenCalledWith({
+      where: { userId: extraUserId, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ action: "DEMO_MEMBER_ACCESS_REVOKED", targetUserId: extraUserId }),
+    }));
+    expect(mocks.systemTransaction).not.toHaveBeenCalled();
+  });
+
+  it("fails closed instead of changing a SUPERADMIN membership during DEMO reconciliation", async () => {
+    const tx = {
+      organization: {
+        findUnique: vi.fn().mockResolvedValue({ id: "demo-org", kind: "DEMO", status: "ACTIVE", name: "Prospect", slug: "prospect" }),
+      },
+      organizationMembership: {
+        findMany: vi.fn().mockResolvedValue([{ userId: "platform-admin", active: true, user: { active: true, platformRole: "SUPERADMIN" } }]),
+        updateMany: vi.fn(),
+      },
+    };
+    mocks.rootTransaction.mockImplementation(async (callback: (client: unknown) => unknown) => callback(tx));
+
+    await expect(provisionDemoOrganization({ name: "Prospect", ownerName: "DEMO Owner" }))
+      .rejects.toThrow("DEMO_SINGLE_USER_INVARIANT_UNSAFE_MEMBER");
+    expect(tx.organizationMembership.updateMany).not.toHaveBeenCalled();
   });
 
   it("rejects a CUSTOMER before any reset write, blob operation, or tenant-data access", async () => {
