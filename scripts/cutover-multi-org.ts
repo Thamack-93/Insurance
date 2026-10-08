@@ -3,7 +3,7 @@ import "dotenv/config";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Pool } from "pg";
-import { assertDisposableCertificationTarget, certificationPurpose } from "./tenant-certification-target.mjs";
+import { assertMaintenanceOrCutoverTarget } from "./cutover-target.mjs";
 
 const execFileAsync = promisify(execFile);
 export const MULTI_ORG_TRANSITION_LOCK = "policydesk-multi-org-transition-v3";
@@ -29,7 +29,7 @@ async function main() {
     throw new Error("POLICYDESK_TENANT_CUTOVER_REQUIRES_CANONICAL_ROLE_NAMES");
   }
   const databaseUrl = directDatabaseUrl();
-  if (process.env.TENANT_ISOLATION_TEST_DB === "1") assertDisposableCertificationTarget(databaseUrl, process.env, certificationPurpose());
+  assertMaintenanceOrCutoverTarget(databaseUrl, process.env);
   const pool = new Pool({
     connectionString: databaseUrl,
     max: 1,

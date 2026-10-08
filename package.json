@@ -73,6 +73,7 @@
     "split:policy-vigencies": "tsx scripts/split-policy-vigencies.ts",
     "test": "playwright test",
     "test:unit": "vitest run",
+    "test:cutover-target": "node --test scripts/cutover-target.test.mjs",
     "test:unit:watch": "vitest",
     "test:e2e": "playwright test tests/e2e",
     "test:api": "playwright test tests/api",
