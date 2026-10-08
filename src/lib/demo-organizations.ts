@@ -61,7 +61,8 @@ async function revokeExtraDemoMembers(
       data: { revokedAt: new Date() },
     });
 
-    if (membershipDeactivated || userDeactivated) {
+    const accessChanged = membershipDeactivated || userDeactivated || revokedSessions.count > 0;
+    if (accessChanged) {
       changed += 1;
       await tx.platformAuditLog.create({
         data: {

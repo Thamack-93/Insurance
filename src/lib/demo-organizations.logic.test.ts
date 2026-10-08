@@ -93,6 +93,45 @@ describe("DEMO reset target guard", () => {
     expect(mocks.systemTransaction).not.toHaveBeenCalled();
   });
 
+  it("audits session revocation when an extra DEMO member is already inactive", async () => {
+    const organizationId = "org_demo_40542f7e6b9ec1650870123e";
+    const extraUserId = "previous-demo-agent";
+    const revokeSessions = vi.fn().mockResolvedValue({ count: 1 });
+    const audit = vi.fn().mockResolvedValue({});
+    const tx = {
+      organization: {
+        findUnique: vi.fn().mockResolvedValue({ id: organizationId, kind: "DEMO", status: "ACTIVE", name: "Prospect", slug: "prospect" }),
+      },
+      organizationMembership: {
+        findMany: vi.fn().mockResolvedValue([{ userId: extraUserId, active: false, user: { active: false, platformRole: "NONE" } }]),
+        updateMany: vi.fn(),
+      },
+      user: { updateMany: vi.fn() },
+      session: { updateMany: revokeSessions },
+      platformAuditLog: { create: audit },
+      organizationCapability: { upsert: vi.fn().mockResolvedValue({}) },
+      demoOrganizationState: { findUnique: vi.fn().mockResolvedValue({ trialEndsAt: new Date("2026-11-01T00:00:00Z") }) },
+    };
+    mocks.rootTransaction.mockImplementation(async (callback: (client: unknown) => unknown) => callback(tx));
+
+    const result = await provisionDemoOrganization({ name: "Prospect", ownerName: "DEMO Owner" });
+
+    expect(result).toMatchObject({ organizationId, credentials: [], temporaryPassword: "" });
+    expect(tx.organizationMembership.updateMany).not.toHaveBeenCalled();
+    expect(tx.user.updateMany).not.toHaveBeenCalled();
+    expect(revokeSessions).toHaveBeenCalledWith({
+      where: { userId: extraUserId, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: "DEMO_MEMBER_ACCESS_REVOKED",
+        targetUserId: extraUserId,
+        metadataJson: expect.stringContaining('"sessionsRevoked":1'),
+      }),
+    }));
+  });
+
   it("fails closed instead of changing a SUPERADMIN membership during DEMO reconciliation", async () => {
     const tx = {
       organization: {
