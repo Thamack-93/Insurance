@@ -73,6 +73,48 @@ describe("maintenance and multi-org cutover target guard", () => {
     }), /TENANT_CERTIFICATION_REQUIRES_DISPOSABLE_TEST_GUARDS/);
   });
 
+  it("accepts only an explicitly fingerprinted Neon certification branch for remote drills", () => {
+    const runId = "run-remote-42";
+    const database = "neondb";
+    const branchId = "br-morning-cherry-b7xpnpfl";
+    const branchName = `cert-stage3-${"0a55b507eeaa857685e7bf1bdd0f8207f83b10ad"}`;
+    const host = "ep-frosty-glade-b7ivx445.c-13.us-east-1.aws.neon.tech";
+    const env = {
+      NODE_ENV: "test",
+      TENANT_ISOLATION_TEST_DB: "1",
+      PLAYWRIGHT_ENFORCE_DISPOSABLE_DB: "1",
+      TENANT_ISOLATION_REMOTE_BRANCH: "1",
+      TENANT_ISOLATION_DB_NAME: database,
+      TENANT_ISOLATION_RUN_ID: runId,
+      TENANT_ISOLATION_BRANCH_ID: branchId,
+      TENANT_ISOLATION_BRANCH_NAME: branchName,
+      TENANT_ISOLATION_NEON_HOST: host,
+      TENANT_ISOLATION_FINGERPRINT: certificationFingerprint({
+        mode: "neon", runId, database, host, branchId, branchName,
+      }),
+    };
+
+    const result = assertMaintenanceOrCutoverTarget(`postgresql://operator:secret@${host}:5432/${database}`, env);
+    assert.deepEqual({ mode: result.mode, branchId: result.branchId, branchName: result.branchName }, {
+      mode: "neon", branchId, branchName,
+    });
+
+    assert.throws(
+      () => assertMaintenanceOrCutoverTarget(`postgresql://operator:secret@${host}:5432/${database}`, {
+        ...env,
+        TENANT_ISOLATION_FINGERPRINT: "0".repeat(64),
+      }),
+      /TENANT_CERTIFICATION_FINGERPRINT_MISMATCH/,
+    );
+    assert.throws(
+      () => assertMaintenanceOrCutoverTarget(`postgresql://operator:secret@${host}:5432/${database}`, {
+        ...env,
+        TENANT_ISOLATION_REMOTE_BRANCH: "0",
+      }),
+      /POLICYDESK_CUTOVER_DISPOSABLE_TARGET_MUST_BE_LOCAL/,
+    );
+  });
+
   it("never routes a Production host through disposable certification flags", () => {
     const database = "policydesk_tenant_test_cutover_guard";
     const runId = "run-42";
