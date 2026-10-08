@@ -131,6 +131,8 @@ test.describe("structured policy risk details", () => {
   test("prefills structured risk details when starting a policy renewal", async ({ page }) => {
     const db = getTestDb();
     const fixture = await seedPolicyFixture("POLICY-RISK-RENEWAL-FORM");
+    const renewalNumber = `${fixture.policyNumber}-RENEWAL`;
+    let renewalId: string | null = null;
     const riskDetails = {
       version: 1,
       policyType: "AUTO",
@@ -146,12 +148,48 @@ test.describe("structured policy risk details", () => {
       await authenticatePageAsAdmin(page);
       await page.goto(`/policies/new?renewalFrom=${fixture.policyId}`);
 
+      await expect(page.getByText("Se copiaron los datos del riesgo y asegurados de la póliza anterior.")).toBeVisible();
       await expect(page.locator("#risk-AUTO-vehicles-0-make")).toHaveValue("Toyota");
       await expect(page.locator("#risk-AUTO-vehicles-0-model")).toHaveValue("Corolla");
       await expect(page.locator("#risk-AUTO-vehicles-0-year")).toHaveValue("2020");
       await expect(page.locator("#risk-AUTO-vehicles-0-vin")).toHaveValue("2T1BURHE0LC123456");
       await expect(page.locator("#risk-AUTO-vehicles-0-plates")).toHaveValue("ABC-123");
+      await page.locator("#premiumAmount").fill("1500");
+      await page.locator("#risk-AUTO-vehicles-0-make").fill("Honda");
+
+      await page.locator("#policyNumber").fill(renewalNumber);
+      await page.getByRole("button", { name: "Crear póliza", exact: true }).click();
+      await expect(page).toHaveURL(/\/policies\/[^/]+$/);
+      renewalId = new URL(page.url()).pathname.split("/").pop() ?? null;
+      const comparison = page.getByRole("region", { name: "Comparación con póliza anterior" });
+      await expect(comparison).toBeVisible();
+      const makeChange = comparison.locator("li").filter({ hasText: "Marca" });
+      await expect(makeChange).toContainText("Toyota");
+      await expect(makeChange).toContainText("Honda");
+      await expect(makeChange).toContainText("Cambió");
+      await expect(comparison).toContainText("Diferencia de prima:");
+      await expect(comparison).toContainText("+21.5%");
+      const sourceAfter = await db.policy.findUniqueOrThrow({ where: { id: fixture.policyId }, select: { premiumAmount: true, riskDetails: true, insuredObject: true, status: true } });
+      expect(Number(sourceAfter.premiumAmount)).toBe(1234.56);
+      expect(sourceAfter).toMatchObject({
+        status: "RENEWED",
+        insuredObject: "Toyota Corolla 2020 LE",
+        riskDetails: {
+          policyType: "AUTO",
+          data: { vehicles: [{ make: "Toyota", model: "Corolla", year: "2020", version: "LE", vin: "2T1BURHE0LC123456", plates: "ABC-123" }] },
+        },
+      });
     } finally {
+      if (renewalId) {
+        await db.activityLog.deleteMany({ where: { organizationId: TEST_ORGANIZATION_ID, entityType: "Policy", entityId: renewalId } });
+        await db.payment.deleteMany({ where: { policyId: renewalId } });
+        await db.commission.deleteMany({ where: { policyId: renewalId } });
+        await db.receipt.deleteMany({ where: { policyId: renewalId } });
+        await db.workItem.deleteMany({ where: { policyId: renewalId } });
+        await db.policyInsuredParty.deleteMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: renewalId } });
+        await db.policyInsuredAsset.deleteMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: renewalId } });
+        await db.policy.deleteMany({ where: { id: renewalId } });
+      }
       await cleanupPolicyFixture(fixture);
     }
   });
@@ -177,6 +215,7 @@ test.describe("structured policy risk details", () => {
         sourceText: "Toyota, Corolla, 2020, LE",
         data: { vehicles: [{ make: "Toyota", model: "Corolla", year: "2020", version: "LE", vin, plates: "ABC-123" }] },
       };
+      await db.policy.update({ where: { id: fixture.policyId }, data: { riskDetails, insuredObject: "Toyota Corolla 2020 LE Placas ABC-123 Serie 2T1BURHE0LC123456" } });
       const draft = {
         policyNumber: `${fixture.policyNumber}-REN`,
         clientName: fixture.clientName,
@@ -272,6 +311,12 @@ test.describe("structured policy risk details", () => {
         },
       });
       expect(assets).toEqual([{ assetType: "AUTO", serialNumber: vin }]);
+      const comparison = page.getByRole("region", { name: "Comparación con póliza anterior" });
+      await expect(comparison).toBeVisible();
+      await expect(comparison).toContainText("Marca");
+      await expect(comparison).toContainText("Toyota");
+      await expect(comparison).toContainText("Honda");
+      await expect(comparison).toContainText("Cambió");
     } finally {
       const policyIds = [fixture.policyId, capturedPolicyId].filter((id): id is string => Boolean(id));
       await db.activityLog.deleteMany({
