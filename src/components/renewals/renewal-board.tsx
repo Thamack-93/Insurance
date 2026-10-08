@@ -5,6 +5,8 @@ import { buttonVariants } from "@/components/ui/button";
 import { RenewalBoardFilters as BoardFilters } from "@/components/renewals/renewal-board-filters";
 import { RenewalFollowUpMenu } from "@/components/renewals/renewal-follow-up-menu";
 import { RenewalWhatsAppAssistant } from "@/components/renewals/renewal-whatsapp-assistant";
+import { SerialRenewalSuggestionActions } from "@/components/renewals/serial-renewal-suggestion-actions";
+import { ScanSerialRenewalSuggestionsButton } from "@/components/renewals/scan-serial-renewal-suggestions-button";
 import { DraggableRenewalCard, RenewalBoardInteractions, RenewalBoardScrollArea, RenewalBoardStageNavigation, RenewalDropColumn } from "@/components/renewals/renewal-board-interactions";
 import { formatDate } from "@/lib/dates";
 import { formatBusinessDateInput } from "@/lib/business-dates";
@@ -106,6 +108,22 @@ function RenewalCard({ card, isDemo, isDraggable }: { card: RenewalBoardCard; is
       </dl>
 
       <div className="mt-3 space-y-2">
+        {card.serialRenewalSuggestions.map((suggestion) => (
+          <div key={suggestion.id} className="space-y-2 rounded-lg border border-sky-200 bg-sky-50/70 p-3 dark:border-sky-900/60 dark:bg-sky-950/30">
+            <p className="text-xs font-semibold text-sky-900 dark:text-sky-200">Posible renovación por serie</p>
+            <p className="text-xs text-sky-900 dark:text-sky-100">
+              <Link href={`/policies/${suggestion.targetPolicyId}`} className="font-mono font-medium hover:underline">
+                {suggestion.targetPolicyNumber}
+              </Link>
+              {" · "}{suggestion.targetInsurerName} · inicia {formatDate(suggestion.targetStartDate)}
+            </p>
+            {suggestion.targetSerialNumbers.length ? (
+              <p className="break-all font-mono text-[11px] text-muted-foreground">Serie: {suggestion.targetSerialNumbers.join(", ")}</p>
+            ) : null}
+            <p className="text-xs text-muted-foreground">{suggestion.reason ?? "Coincide la serie/VIN del objeto asegurado."}</p>
+            <SerialRenewalSuggestionActions suggestionId={suggestion.id} sourcePolicyId={card.policyId} targetPolicyId={suggestion.targetPolicyId} />
+          </div>
+        ))}
         {card.manualFollowUp ? (
           <p className={cn("flex items-center justify-end gap-1.5 text-xs", isOverdue(card.manualFollowUp.dueDate) ? "text-destructive" : "text-muted-foreground")}>
             <CalendarClock className="size-3.5" aria-hidden="true" />
@@ -240,9 +258,15 @@ export function RenewalBoard({
 }) {
   return (
     <div className="space-y-4">
-      <BoardFilters filters={filters} owners={owners} canFilterByOwner={canFilterByOwner} />
-
-      {board.total > 0 ? <RenewalBoardStageNavigation columns={board.columns} /> : null}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+        <BoardFilters filters={filters} owners={owners} canFilterByOwner={canFilterByOwner} />
+        {board.total > 0 ? <RenewalBoardStageNavigation columns={board.columns} /> : null}
+        <ScanSerialRenewalSuggestionsButton />
+        <p className="text-sm text-muted-foreground" role="status">
+          {board.total} {board.total === 1 ? "renovación" : "renovaciones"} en el tablero
+          {board.stalledCount > 0 ? ` · ${board.stalledCount} sin avance` : ""}
+        </p>
+      </div>
 
       {board.truncated ? (
         <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-900/60">

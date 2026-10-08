@@ -1,4 +1,4 @@
-import { createPolicy } from "@/app/(dashboard)/policies/actions";
+import { createPolicy, findPolicyRenewalCandidates } from "@/app/(dashboard)/policies/actions";
 import { PolicyForm } from "@/components/forms/policy-form";
 import { createPolicyDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
@@ -219,6 +219,7 @@ export default async function NewPolicyPage({
           renewalSource={renewalSource}
           showRenewalLink={true}
           submitAction={createPolicy}
+          findRenewalCandidates={findPolicyRenewalCandidates}
         />
       </div>
     </div>

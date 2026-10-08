@@ -761,7 +761,8 @@ describe("policy-pdf-capture", () => {
       policyNumber: id === "source-banorte" ? "1009577" : "BUPA-1009577",
       startDate: new Date("2025-08-01T00:00:00.000Z"),
       endDate: new Date("2026-08-01T00:00:00.000Z"),
-      status: "RENEWED",
+      status: "EXPIRED",
+      policyType: "AUTO",
       client: { id: "client-1", fullName: "MOTORES ANGELOPOLIS SA DE CV" },
       insurer: { id: insurerId, name: insurerName },
       insuredAssets: [{ serialNumber: "1G1F66S0XN4124102" }],
@@ -777,8 +778,14 @@ describe("policy-pdf-capture", () => {
         ],
       },
       policy: {
-        findMany: async (args: { where?: { insuredAssets?: unknown; OR?: unknown } }) => {
+        findMany: async (args: { where?: { insuredAssets?: unknown; OR?: unknown; policyType?: string; renewals?: unknown } }) => {
           if (args.where?.insuredAssets) {
+            return [
+              sourcePolicy("source-banorte", "insurer-banorte", "Seguros Banorte"),
+              sourcePolicy("source-bupa", "insurer-bupa", "BUPA MÉXICO, COMPAÑÍA DE SEGUROS, S.A. DE C.V."),
+            ];
+          }
+          if (args.where?.policyType === "AUTO" && args.where.renewals) {
             return [
               sourcePolicy("source-banorte", "insurer-banorte", "Seguros Banorte"),
               sourcePolicy("source-bupa", "insurer-bupa", "BUPA MÉXICO, COMPAÑÍA DE SEGUROS, S.A. DE C.V."),

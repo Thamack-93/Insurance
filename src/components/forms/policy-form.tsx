@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -15,6 +15,7 @@ import {
 import { policySchema, type PolicyFormValues } from "@/lib/validations";
 import type { MutationResult } from "@/lib/mutation-utils";
 import type { PolicyRenewalSource } from "@/lib/policy-renewal";
+import type { SerialRenewalCandidate } from "@/lib/policy-renewal-match";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -43,6 +44,7 @@ type PolicyFormProps = {
   renewalSearchScope?: "portfolio" | "all";
   submitAction: (values: PolicyFormValues) => Promise<MutationResult>;
   riskDetailsNeedsReview?: boolean;
+  findRenewalCandidates?: (input: { clientId: string; policyType: string; startDate: string; serialNumbers: string[] }) => Promise<SerialRenewalCandidate[]>;
 };
 
 export function PolicyForm({
@@ -58,6 +60,7 @@ export function PolicyForm({
   renewalSearchScope = "portfolio",
   submitAction,
   riskDetailsNeedsReview = false,
+  findRenewalCandidates,
 }: PolicyFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -73,7 +76,41 @@ export function PolicyForm({
     defaultValues,
   });
   const selectedPolicyType = useWatch({ control, name: "policyType" });
+  const watchedClientId = useWatch({ control, name: "clientId" });
+  const watchedStartDate = useWatch({ control, name: "startDate" });
+  const watchedRiskDetails = useWatch({ control, name: "riskDetails" });
   const [renewedFromPolicyId, setRenewedFromPolicyId] = useState(defaultValues.renewedFromPolicyId ?? "");
+  const [renewalCandidateResult, setRenewalCandidateResult] = useState<{ key: string; candidates: SerialRenewalCandidate[] } | null>(null);
+  const vehicles = selectedPolicyType === "AUTO" && watchedRiskDetails && typeof watchedRiskDetails === "object"
+    ? ((watchedRiskDetails as { data?: { vehicles?: Array<{ vin?: string }> } }).data?.vehicles ?? [])
+    : [];
+  const serialNumbers = vehicles.map((vehicle) => vehicle.vin?.trim() ?? "").filter(Boolean);
+  const renewalCandidateKey = findRenewalCandidates && watchedClientId && watchedStartDate && serialNumbers.length
+    ? JSON.stringify([watchedClientId, selectedPolicyType, watchedStartDate, serialNumbers])
+    : "";
+
+  useEffect(() => {
+    if (!renewalCandidateKey || !findRenewalCandidates) return;
+    const [clientId, policyType, startDate, serials] = JSON.parse(renewalCandidateKey) as [string, string, string, string[]];
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void findRenewalCandidates({
+        clientId,
+        policyType,
+        startDate,
+        serialNumbers: serials,
+      }).then((candidates) => {
+        if (!cancelled) setRenewalCandidateResult({ key: renewalCandidateKey, candidates });
+      });
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [findRenewalCandidates, renewalCandidateKey]);
+
+  const renewalCandidates = renewalCandidateResult?.key === renewalCandidateKey ? renewalCandidateResult.candidates : [];
 
   async function onSubmit(values: PolicyFormValues) {
     startTransition(async () => {
@@ -235,6 +272,7 @@ export function PolicyForm({
                   setValue("renewedFromPolicyId", next, { shouldDirty: true, shouldValidate: true });
                 }}
                 selectedPolicy={renewalSource}
+                suggestions={renewalCandidates}
                 disabled={isPending}
                 allowClear
                 searchScope={renewalSearchScope}

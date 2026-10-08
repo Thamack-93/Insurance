@@ -8,12 +8,13 @@ import { rateLimitResponse, guardErrorResponse } from "@/lib/api-security";
 import { parseDateInput } from "@/lib/form-utils";
 import { businessToday } from "@/lib/business-dates";
 import { assertClientOrganizationAccess, assertPolicyOrganizationAccess } from "@/lib/portfolio-access";
-import { requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
+import { assertOrganizationContextInTransaction, requireOrganizationContext, withTenantTransaction } from "@/lib/organization-context";
 import { inferClientType, type PolicyPdfCaptureDraft } from "@/lib/policy-pdf-capture.shared";
 import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
 import { closeRenewalFollowUp, closeRenewalManualFollowUp } from "@/lib/renewal-followups";
 import { Prisma } from "@/generated/prisma/client";
 import { convertLegacyPolicyDescription, hasPolicyRiskData, policyRiskDetailsSchema, projectPolicyRiskRelations, riskDetailsFromExisting, summarizePolicyRiskDetails } from "@/lib/policy-risk-details";
+import { syncSerialRenewalSuggestionsForTarget } from "@/lib/policy-renewal-match";
 import { revalidatePaths } from "@/lib/mutation-utils";
 import {
   recordSecurityAccessDenied,
@@ -52,7 +53,7 @@ const confirmSchema = z.object({
   }),
   clientId: z.string().min(1),
   insurerId: z.string().min(1),
-  sourcePolicyId: z.string().min(1),
+  sourcePolicyId: z.string().trim().min(1).nullable().optional(),
   receiptPlan: z
     .array(
       z.object({
@@ -180,7 +181,7 @@ export async function POST(request: NextRequest) {
     }
     try {
       await assertClientOrganizationAccess(payload.clientId, context);
-      await assertPolicyOrganizationAccess(payload.sourcePolicyId, context);
+    if (payload.sourcePolicyId) await assertPolicyOrganizationAccess(payload.sourcePolicyId, context);
     } catch (error) {
       if (error instanceof AuthError) {
         await recordSecurityAccessDenied({
@@ -189,7 +190,7 @@ export async function POST(request: NextRequest) {
           description: "Se intentó confirmar una captura de póliza fuera de la cartera permitida.",
           severity: "WARNING",
           entityType: "SecurityEvent",
-          entityId: `policy-capture-confirm:portfolio:${payload.sourcePolicyId}`,
+          entityId: `policy-capture-confirm:portfolio:${payload.sourcePolicyId ?? "unlinked"}`,
           userId: context.userId,
         });
         return NextResponse.json({ error: "No tienes acceso a esta póliza." }, { status: error.status });
@@ -206,8 +207,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "La aseguradora seleccionada ya no existe." }, { status: 404 });
     }
 
-    const sourcePolicy = await withTenantTransaction(context, (tx) => tx.policy.findFirst({
-      where: { id: payload.sourcePolicyId, organizationId: context.organizationId },
+    const sourcePolicy = payload.sourcePolicyId ? await withTenantTransaction(context, (tx) => tx.policy.findFirst({
+      where: { id: payload.sourcePolicyId!, organizationId: context.organizationId },
       select: {
         id: true,
         policyNumber: true,
@@ -222,22 +223,28 @@ export async function POST(request: NextRequest) {
         insuredAssets: { select: { description: true, serialNumber: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
         insuredParties: { select: { fullName: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
       },
-    }));
+    })) : null;
 
-    if (!sourcePolicy) {
+    if (payload.sourcePolicyId && !sourcePolicy) {
       return NextResponse.json({ error: "La póliza origen ya no existe." }, { status: 404 });
     }
 
-    if (draft.policyNumber === sourcePolicy.policyNumber) {
+    if (sourcePolicy && draft.policyNumber === sourcePolicy.policyNumber) {
       return NextResponse.json(
         { error: "La póliza nueva debe tener un número distinto a la póliza renovada." },
         { status: 400 },
       );
     }
 
-    if (payload.clientId !== sourcePolicy.clientId || payload.insurerId !== sourcePolicy.insurerId) {
+    if (sourcePolicy && payload.clientId !== sourcePolicy.clientId) {
       return NextResponse.json(
-        { error: "La póliza nueva debe conservar el mismo cliente y aseguradora de la póliza renovada." },
+        { error: "La póliza origen debe pertenecer al mismo cliente." },
+        { status: 400 },
+      );
+    }
+    if (sourcePolicy && payload.insurerId !== sourcePolicy.insurerId) {
+      return NextResponse.json(
+        { error: "Para cambiar de aseguradora, confirma una sugerencia vigente por serie/VIN desde Renovaciones." },
         { status: 400 },
       );
     }
@@ -246,11 +253,15 @@ export async function POST(request: NextRequest) {
     const targetEndDate = parseDateInput(draft.endDate);
 
     const result = await withTenantTransaction(context, async (tx) => {
+      await assertOrganizationContextInTransaction(tx, context);
       const [currentSource, currentInsurer] = await Promise.all([
-        tx.policy.findFirst({ where: { id: sourcePolicy.id, organizationId: context.organizationId }, select: { id: true, clientId: true, insurerId: true } }),
+        sourcePolicy ? tx.policy.findFirst({ where: { id: sourcePolicy.id, organizationId: context.organizationId }, select: { id: true, clientId: true, insurerId: true, status: true, renewals: { select: { id: true } } } }) : Promise.resolve(null),
         tx.insurer.findFirst({ where: { id: insurer.id, organizationId: context.organizationId }, select: { id: true } }),
       ]);
-      if (!currentSource || !currentInsurer || currentSource.clientId !== payload.clientId || currentSource.insurerId !== payload.insurerId) {
+      if ((sourcePolicy && (!currentSource
+        || currentSource.clientId !== payload.clientId
+        || currentSource.insurerId !== payload.insurerId
+        )) || !currentInsurer) {
         throw new AuthError("TENANT_RELATION_MISMATCH", 409);
       }
       const existingTarget = await tx.policy.findFirst({
@@ -262,13 +273,25 @@ export async function POST(request: NextRequest) {
           startDate: targetStartDate,
           endDate: targetEndDate,
         },
-        select: { id: true, notes: true },
+        select: { id: true, notes: true, familyRootId: true, renewedFromPolicyId: true },
       });
 
-      const familyRootId = sourcePolicy.familyRootId ?? sourcePolicy.id;
+      const existingTargetIsRenewal = currentSource?.renewals.some((renewal) => renewal.id === existingTarget?.id) ?? false;
+      const hasOtherRenewal = currentSource?.renewals.some((renewal) => renewal.id !== existingTarget?.id) ?? false;
+      if ((currentSource?.status === "RENEWED" && !existingTargetIsRenewal) || hasOtherRenewal) {
+        throw new Error("La póliza origen ya tiene una renovación vinculada.");
+      }
+
+      if (sourcePolicy && existingTarget?.renewedFromPolicyId && existingTarget.renewedFromPolicyId !== sourcePolicy.id) {
+        throw new Error("La póliza capturada ya está vinculada con otra póliza origen.");
+      }
+
+      const familyRootId = sourcePolicy
+        ? sourcePolicy.familyRootId ?? sourcePolicy.id
+        : existingTarget?.familyRootId ?? null;
       const captureDraft = {
         ...draft,
-        sourcePolicyNumber: draft.sourcePolicyNumber ?? sourcePolicy.policyNumber,
+        sourcePolicyNumber: draft.sourcePolicyNumber ?? sourcePolicy?.policyNumber ?? null,
       } satisfies PolicyPdfCaptureDraft;
       const parsedRisk = riskDetailsFromExisting(
         captureDraft.policyType,
@@ -278,7 +301,7 @@ export async function POST(request: NextRequest) {
         [],
         captureDraft.beneficiaryInfo,
       ) ?? convertLegacyPolicyDescription(captureDraft.policyType, captureDraft.insuredObject, captureDraft.serialNumber).riskDetails;
-      const sourceRiskCandidate = sourcePolicy.policyType === captureDraft.policyType
+      const sourceRiskCandidate = sourcePolicy?.policyType === captureDraft.policyType
         ? riskDetailsFromExisting(sourcePolicy.policyType, sourcePolicy.riskDetails, sourcePolicy.insuredObject, sourcePolicy.insuredAssets, sourcePolicy.insuredParties, sourcePolicy.beneficiaryInfo)
         : null;
       const riskDetails = parsedRisk && hasPolicyRiskData(parsedRisk)
@@ -307,7 +330,7 @@ export async function POST(request: NextRequest) {
             entityId: selectedClient.id,
             action: "CLIENT_BIRTHDATE_CONFIRMED_FROM_PDF",
             oldValue: { birthDate: null },
-            newValue: { birthDate: updatedClient.birthDate, source: "PDF", policyId: sourcePolicy.id },
+            newValue: { birthDate: updatedClient.birthDate, source: "PDF", policyId: sourcePolicy?.id ?? null },
             userId: context.userId,
             db: tx,
           });
@@ -318,7 +341,7 @@ export async function POST(request: NextRequest) {
             entityId: selectedClient.id,
             action: "CLIENT_BIRTHDATE_CONFLICT_FROM_PDF",
             oldValue: { birthDate: selectedClient.birthDate },
-            newValue: { birthDate: parsedBirthDate, source: "PDF", policyId: sourcePolicy.id },
+            newValue: { birthDate: parsedBirthDate, source: "PDF", policyId: sourcePolicy?.id ?? null },
             userId: context.userId,
             db: tx,
           });
@@ -344,7 +367,7 @@ export async function POST(request: NextRequest) {
         beneficiaryInfo: captureDraft.beneficiaryInfo,
         notes,
         familyRootId,
-        renewedFromPolicyId: sourcePolicy.id,
+        renewedFromPolicyId: sourcePolicy?.id ?? existingTarget?.renewedFromPolicyId ?? null,
         updatedById: context.userId,
       };
 
@@ -411,24 +434,26 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      if (sourcePolicy.status !== "RENEWED") {
+      if (sourcePolicy && sourcePolicy.status !== "RENEWED") {
         await tx.policy.update({
           where: { id: sourcePolicy.id, organizationId: context.organizationId },
           data: { status: "RENEWED", updatedById: context.userId },
         });
       }
-      await closeRenewalFollowUp(context.organizationId, sourcePolicy.id, context.userId, tx);
-      const manualFollowUp = await closeRenewalManualFollowUp(context.organizationId, sourcePolicy.id, context.userId, tx);
-      if (manualFollowUp) {
-        await writeActivityLog({
-          organizationId: context.organizationId,
-          entityType: "Policy",
-          entityId: sourcePolicy.id,
-          action: "RENEWAL_FOLLOWUP_CLOSED_TERMINAL",
-          newValue: { status: "RENEWED" },
-          userId: context.userId,
-          db: tx,
-        });
+      if (sourcePolicy) {
+        await closeRenewalFollowUp(context.organizationId, sourcePolicy.id, context.userId, tx);
+        const manualFollowUp = await closeRenewalManualFollowUp(context.organizationId, sourcePolicy.id, context.userId, tx);
+        if (manualFollowUp) {
+          await writeActivityLog({
+            organizationId: context.organizationId,
+            entityType: "Policy",
+            entityId: sourcePolicy.id,
+            action: "RENEWAL_FOLLOWUP_CLOSED_TERMINAL",
+            newValue: { status: "RENEWED" },
+            userId: context.userId,
+            db: tx,
+          });
+        }
       }
 
       await writeActivityLog({
@@ -439,8 +464,8 @@ export async function POST(request: NextRequest) {
         oldValue: existingTarget ?? undefined,
         newValue: {
           ...targetPolicy,
-          sourcePolicyId: sourcePolicy.id,
-          sourcePolicyNumber: sourcePolicy.policyNumber,
+          sourcePolicyId: sourcePolicy?.id ?? null,
+          sourcePolicyNumber: sourcePolicy?.policyNumber ?? null,
           serialNumber: captureDraft.serialNumber,
           capturedFromPdf: true,
         },
@@ -448,16 +473,20 @@ export async function POST(request: NextRequest) {
         db: tx,
       });
 
-      await writeActivityLog({
-        organizationId: context.organizationId,
-        entityType: "Policy",
-        entityId: sourcePolicy.id,
-        action: "POLICY_MARK_RENEWED_FROM_PDF",
-        oldValue: { status: sourcePolicy.status },
-        newValue: { status: "RENEWED", renewedByPolicyId: targetPolicy.id },
-        userId: context.userId,
-        db: tx,
-      });
+      if (!sourcePolicy) await syncSerialRenewalSuggestionsForTarget(tx, context.organizationId, targetPolicy.id);
+
+      if (sourcePolicy) {
+        await writeActivityLog({
+          organizationId: context.organizationId,
+          entityType: "Policy",
+          entityId: sourcePolicy.id,
+          action: "POLICY_MARK_RENEWED_FROM_PDF",
+          oldValue: { status: sourcePolicy.status },
+          newValue: { status: "RENEWED", renewedByPolicyId: targetPolicy.id },
+          userId: context.userId,
+          db: tx,
+        });
+      }
 
       return {
         targetPolicy,
@@ -489,7 +518,9 @@ export async function POST(request: NextRequest) {
       receiptId: result.receiptId,
       receiptIds: result.receiptIds,
       redirectTo: `/policies/${result.targetPolicy.id}`,
-      message: "Póliza capturada, recibos generados y renovación vinculada.",
+      message: payload.sourcePolicyId
+        ? "Póliza capturada, recibos generados y renovación vinculada."
+        : "Póliza capturada y recibos generados.",
     });
   } catch (error) {
     if (error instanceof Error && "status" in error) return guardErrorResponse(error);

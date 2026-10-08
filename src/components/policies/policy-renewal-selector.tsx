@@ -7,7 +7,9 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { PolicySearchDialog } from "@/components/policies/policy-search-dialog";
 import type { GlobalSearchResult } from "@/lib/search";
+import { formatDate } from "@/lib/dates";
 import type { PolicyRenewalSource } from "@/lib/policy-renewal";
+import type { SerialRenewalCandidate } from "@/lib/policy-renewal-match";
 
 type PolicyRenewalSelectorProps = {
   value: string;
@@ -16,7 +18,29 @@ type PolicyRenewalSelectorProps = {
   disabled?: boolean;
   allowClear?: boolean;
   searchScope?: "portfolio" | "all";
+  suggestions?: SerialRenewalCandidate[];
 };
+
+function toSuggestedSourcePolicy(candidate: SerialRenewalCandidate): PolicyRenewalSource {
+  return {
+    id: candidate.id,
+    policyNumber: candidate.policyNumber,
+    clientId: candidate.clientId,
+    clientName: candidate.clientName,
+    insurerId: candidate.insurerId,
+    insurerName: candidate.insurerName,
+    policyType: candidate.policyType as PolicyRenewalSource["policyType"],
+    startDate: candidate.startDate,
+    endDate: candidate.endDate,
+    premiumAmount: candidate.premiumAmount,
+    currency: candidate.currency as PolicyRenewalSource["currency"],
+    paymentFrequency: candidate.paymentFrequency as PolicyRenewalSource["paymentFrequency"],
+    paymentPlan: candidate.paymentPlan,
+    insuredObject: candidate.insuredObject,
+    beneficiaryInfo: candidate.beneficiaryInfo,
+    notes: candidate.notes,
+  };
+}
 
 function toSourcePolicy(result: GlobalSearchResult): PolicyRenewalSource {
   const [clientName, insurerName] = (result.subtitle ?? "").split(" · ");
@@ -47,6 +71,7 @@ export function PolicyRenewalSelector({
   disabled = false,
   allowClear = true,
   searchScope = "portfolio",
+  suggestions = [],
 }: PolicyRenewalSelectorProps) {
   const [open, setOpen] = useState(false);
   const [pickedPolicy, setPickedPolicy] = useState<PolicyRenewalSource | null>(() => selectedPolicy ?? null);
@@ -56,6 +81,35 @@ export function PolicyRenewalSelector({
 
   return (
     <div className="space-y-2">
+      {!value && suggestions.length > 0 ? (
+        <div className="space-y-2 rounded-xl border border-sky-200 bg-sky-50/70 p-4 text-sm dark:border-sky-900/60 dark:bg-sky-950/25">
+          <div>
+            <p className="font-medium">Posibles pólizas renovadas</p>
+            <p className="mt-1 text-xs text-muted-foreground">Coincidencia por serie/VIN, cliente y fechas. El vínculo se aplica únicamente si eliges una opción y guardas la póliza.</p>
+          </div>
+          {suggestions.map((candidate) => (
+            <div key={candidate.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-background/80 p-3">
+              <div className="min-w-0">
+                <p className="font-medium">{candidate.policyNumber} · {candidate.insurerName}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{candidate.reason} Serie {candidate.serialNumber} · vence {formatDate(candidate.endDate)}</p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="rounded-full"
+                onClick={() => {
+                  setPickedPolicy(toSuggestedSourcePolicy(candidate));
+                  onChange(candidate.id);
+                }}
+                disabled={disabled}
+              >
+                Vincular esta póliza
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="flex items-center justify-between gap-3">
         <Label>Renueva a</Label>
         {allowClear && value ? (
