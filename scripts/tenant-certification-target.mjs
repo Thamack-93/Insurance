@@ -15,7 +15,18 @@ export function canonicalNeonHost(hostname) {
   return hostname.toLowerCase().replace(/-pooler(?=\.)/, "");
 }
 
-/** Bind destructive restore-purpose commands to the exact checked-out candidate. */
+/** @param {Array<{run_id:string,database_name:string,host:string,fingerprint:string}>} rows @param {{runId:string,database:string,host:string,fingerprint:string}} target */
+export function assertPersistedRestoreMarker(rows, target) {
+  const row = rows[0];
+  if (rows.length !== 1 || row.run_id !== target.runId || row.database_name !== target.database || row.host !== target.host || row.fingerprint !== target.fingerprint) {
+    throw new Error("RESTORE_CERTIFICATION_MARKER_MISMATCH");
+  }
+}
+
+/** Bind destructive restore-purpose commands to the exact checked-out candidate.
+ * @param {Record<string, string | undefined>} [env]
+ * @param {string} [actualHead]
+ */
 export function assertRestorePurposeGuard(env = process.env, actualHead = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()) {
   if (env.ALLOW_TEMPORARY_NEON_RESTORE !== "true") throw new Error("ALLOW_TEMPORARY_NEON_RESTORE_REQUIRED");
   if (env.VERCEL === "1" || env.VERCEL_ENV === "production" || env.VERCEL_ENV === "preview") throw new Error("TENANT_CERTIFICATION_REFUSES_VERCEL_ENVIRONMENT");
@@ -25,7 +36,9 @@ export function assertRestorePurposeGuard(env = process.env, actualHead = execFi
   return sha;
 }
 
-/** Explicitly opt in to the independently named Stage 3 restore branch. */
+/** Explicitly opt in to the independently named Stage 3 restore branch.
+ * @param {Record<string, string | undefined>} [env]
+ */
 export function certificationPurpose(env = process.env) {
   const purpose = env.TENANT_CERTIFICATION_PURPOSE?.trim() || "source";
   if (purpose !== "source" && purpose !== "restore") throw new Error("TENANT_CERTIFICATION_PURPOSE_INVALID");
@@ -43,7 +56,7 @@ export function certificationFingerprint({ mode, runId, database, host, branchId
   return createHash("sha256").update(source).digest("hex");
 }
 
-/** @param {string} connectionString @param {Record<string, string | undefined>} env @param {"source" | "restore"} purpose */
+/** @param {string} connectionString @param {Record<string, string | undefined>} [env] @param {"source" | "restore"} [purpose] @param {string} [actualHead] */
 export function assertDisposableCertificationTarget(connectionString, env = process.env, purpose = "source", actualHead) {
   if (purpose !== "source" && purpose !== "restore") throw new Error("TENANT_CERTIFICATION_PURPOSE_INVALID");
   if (purpose === "restore") assertRestorePurposeGuard(env, actualHead ?? execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim());
