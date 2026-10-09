@@ -42,6 +42,14 @@ describe("system tenant transactions during maintenance", () => {
     expect(callback).toHaveBeenCalledOnce();
   });
 
+  it("keeps DEMO provisioning blocked in READ_ONLY mode", async () => {
+    mocks.transaction.platformRuntimeState.findUnique.mockResolvedValue({ writeMode: "READ_ONLY" });
+    const callback = vi.fn(async () => "must not run");
+
+    await expect(withSystemOrganizationTransaction("demo-a", "demo provision", callback)).rejects.toThrow("POLICYDESK_MAINTENANCE_MODE");
+    expect(callback).not.toHaveBeenCalled();
+  });
+
   it.each([
     { kind: "CUSTOMER", status: "PROVISIONING", reason: "demo provision" },
     { kind: "DEMO", status: "ACTIVE", reason: "demo provision" },

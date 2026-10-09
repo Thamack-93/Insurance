@@ -325,7 +325,9 @@ export async function withSystemOrganizationTransaction<T>(
       if (process.env.NODE_ENV !== "production" && error instanceof Error && /does not exist|P2021|relation/i.test(error.message)) return null;
       throw error;
     });
-    if (runtimeState && runtimeState.writeMode !== "OPEN" && !approvedDemoProvisioning && !approvedDemoMaintenance && !approvedLifecycle && !approvedCapabilityRead) {
+    const approvedDemoProvisioningDuringMaintenance =
+      runtimeState?.writeMode === "MAINTENANCE" && approvedDemoProvisioning;
+    if (runtimeState && runtimeState.writeMode !== "OPEN" && !approvedDemoProvisioningDuringMaintenance && !approvedDemoMaintenance && !approvedLifecycle && !approvedCapabilityRead) {
       throw new AuthError("POLICYDESK_MAINTENANCE_MODE", 503);
     }
     await tx.$executeRaw(Prisma.sql`SELECT set_config('app.organization_id', ${organizationId}, true)`);
