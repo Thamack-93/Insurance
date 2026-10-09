@@ -60,6 +60,27 @@ function migrationNames() {
     .sort();
 }
 
+type MigrationHistoryRow = {
+  migration_name: string;
+  finished_at: Date | null;
+  rolled_back_at: Date | null;
+  applied_steps_count: number;
+};
+
+export function inspectMigrationHistory(rows: MigrationHistoryRow[]) {
+  // Prisma keeps rolled-back attempts in `_prisma_migrations`. They are
+  // historical records, not active failures; an unapplied migration remains
+  // visible in the repository-vs-database pending check below.
+  const activeRows = rows.filter((row) => !row.rolled_back_at);
+  const incomplete = activeRows
+    .filter((row) => !row.finished_at || row.applied_steps_count < 0)
+    .map((row) => row.migration_name);
+  const duplicateNames = [...new Set(activeRows
+    .map((row) => row.migration_name)
+    .filter((name, index, all) => all.indexOf(name) !== index))];
+  return { incomplete, duplicateNames };
+}
+
 function issue(code: string, severity: VerificationIssue["severity"], message: string): VerificationIssue {
   return { code, severity, message };
 }
@@ -98,17 +119,7 @@ async function verifyMigrations(client: PoolClient, issues: VerificationIssue[],
       ? pending.filter((name) => !SINGLETON_DEFERRED_MIGRATIONS.has(name))
       : pending;
     const unknown = rows.filter((row) => !expected.includes(row.migration_name)).map((row) => row.migration_name);
-    // A singleton production database may retain a rolled-back attempt for the
-    // maintenance-gated cutover. It is already represented as pending above;
-    // do not report that intentional, recoverable state as a failed additive
-    // migration while the barrier remains active.
-    const incomplete = rows
-      .filter((row) => {
-        const toleratedSingletonCutoverRollback = mode === "single-org" && SINGLETON_DEFERRED_MIGRATIONS.has(row.migration_name) && row.rolled_back_at;
-        return !toleratedSingletonCutoverRollback && (!row.finished_at || row.rolled_back_at || row.applied_steps_count < 0);
-      })
-      .map((row) => row.migration_name);
-    const duplicateNames = [...new Set(rows.map((row) => row.migration_name).filter((name, index, all) => all.indexOf(name) !== index))];
+    const { incomplete, duplicateNames } = inspectMigrationHistory(rows);
     if (blockingPending.length) issues.push(issue("MIGRATIONS_PENDING", "BLOCKED", `Production no tiene aplicadas ${blockingPending.length} migraciones del repositorio.`));
     if (pendingCutover.length && mode === "single-org") issues.push(issue("TENANT_CUTOVER_PENDING", "WARN", "La migración RLS final y sus extensiones permanecen pendientes mientras Production sigue en singleton; deben aplicarse durante la ventana de mantenimiento."));
     if (unknown.length) issues.push(issue("MIGRATIONS_UNKNOWN", "BLOCKED", `Production contiene ${unknown.length} migraciones ausentes del repositorio.`));
