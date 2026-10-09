@@ -1,13 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { SINGLETON_CI_SKIPPED_MIGRATIONS } from "../../scripts/restore-certification-migrations.mjs";
 import {
   BOOTSTRAP_ORGANIZATION_ID,
+  CUTOVER_REMOVED_TENANT_TRIGGER_TABLES,
+  CUTOVER_TRIGGER_REMOVAL_MIGRATION,
   EXPECTED_TENANT_TRIGGERS,
   OPTIONAL_ORGANIZATION_TABLES,
   PLATFORM_GLOBAL_TABLES,
   PROTECTED_TENANT_TABLES,
   SYSTEM_USER_ID,
+  tenantTriggersForMigrationState,
 } from "./tenant-organization-foundation";
 
 describe("tenant organization transition foundation", () => {
@@ -16,6 +20,12 @@ describe("tenant organization transition foundation", () => {
     expect(SYSTEM_USER_ID).toBe("system-user-0000");
     expect(PROTECTED_TENANT_TABLES.length).toBeGreaterThan(30);
     expect(Object.keys(EXPECTED_TENANT_TRIGGERS)).toHaveLength(PROTECTED_TENANT_TABLES.length);
+    expect(tenantTriggersForMigrationState(false)).toHaveLength(PROTECTED_TENANT_TABLES.length);
+    expect(tenantTriggersForMigrationState(true)).toHaveLength(0);
+    const postCutoverTables = tenantTriggersForMigrationState(true).map(([table]) => table);
+    expect(postCutoverTables).not.toContain("ClaimChecklistItem");
+    expect(postCutoverTables).not.toContain("KnowledgeSource");
+    expect(postCutoverTables).not.toContain("KnowledgeChunk");
     expect(OPTIONAL_ORGANIZATION_TABLES).toEqual(expect.arrayContaining([
       "SecurityEventAggregate",
       "BackupArtifact",
@@ -24,6 +34,7 @@ describe("tenant organization transition foundation", () => {
       "BillingCharge",
     ]));
     expect(PLATFORM_GLOBAL_TABLES).toEqual(expect.arrayContaining(["Plan", "NotificationChannel", "TelegramWebhookUpdate"]));
+    expect(SINGLETON_CI_SKIPPED_MIGRATIONS.has(CUTOVER_TRIGGER_REMOVAL_MIGRATION)).toBe(true);
   });
 
   it("ships normal, inspectable SQL guards", () => {
@@ -38,6 +49,12 @@ describe("tenant organization transition foundation", () => {
     expect(migration).toContain("policydesk_assign_singleton_organization");
     expect(migration).not.toContain("session_replication_role");
     expect(allGuardSql).not.toMatch(/(?:ALTER|CREATE)\s+TRIGGER[^;]*ENABLE ALWAYS/i);
+    const cutoverTriggerRemoval = fs.readFileSync(path.join(process.cwd(), "prisma/migrations/20261009010000_multi_org_drop_remaining_transition_triggers/migration.sql"), "utf8");
+    expect(cutoverTriggerRemoval).toContain("POLICYDESK_TENANT_CUTOVER_REQUIRES_MAINTENANCE");
+    expect(cutoverTriggerRemoval).toContain('WHERE "organizationId" IS NULL');
+    for (const table of CUTOVER_REMOVED_TENANT_TRIGGER_TABLES) {
+      expect(cutoverTriggerRemoval).toContain(`DROP TRIGGER IF EXISTS "${EXPECTED_TENANT_TRIGGERS[table]}"`);
+    }
     expect(migration).toContain("POLICYDESK_ORGANIZATION_IMMUTABLE");
     expect(migration).toContain("User_transition_membership_sync");
     expect(migration).toContain('CREATE INDEX "User_platformRole_idx"');

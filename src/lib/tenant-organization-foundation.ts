@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 export const SYSTEM_USER_ID = "system-user-0000";
 export const BOOTSTRAP_ORGANIZATION_ID = "org_legacy_singleton_0001";
 export const BACKFILL_LOCK_KEY = "policydesk-organization-backfill";
+const MIGRATIONS_TABLE = "_prisma_migrations";
 
 /**
  * Explicit Cycle 1 inventory. New models must be classified here before they
@@ -36,6 +37,17 @@ export const PLATFORM_GLOBAL_TABLES = ["User", "Organization", "OrganizationMemb
 export const EXPECTED_TENANT_TRIGGERS = Object.fromEntries(
   PROTECTED_TENANT_TABLES.map((table) => [table, `${table}_transition_singleton_organization`]),
 ) as Record<(typeof PROTECTED_TENANT_TABLES)[number], string>;
+
+export const CUTOVER_REMOVED_TENANT_TRIGGER_TABLES = [
+  "ClaimChecklistItem",
+  "KnowledgeSource",
+  "KnowledgeChunk",
+] as const;
+export const CUTOVER_TRIGGER_REMOVAL_MIGRATION = "20261009010000_multi_org_drop_remaining_transition_triggers";
+
+export function tenantTriggersForMigrationState(cutoverTriggerRemovalApplied: boolean) {
+  return cutoverTriggerRemovalApplied ? [] : Object.entries(EXPECTED_TENANT_TRIGGERS);
+}
 
 export const TENANT_RELATION_CHECKS: ReadonlyArray<readonly [string, string, string]> = [
   ["Client", "referidorId", "Client"],
@@ -146,7 +158,14 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
      WHERE n.nspname = 'public' AND NOT t.tgisinternal
   `);
   const installed = new Map(triggerResult.rows.map((row) => [row.tgname, row]));
-  for (const [table, trigger] of Object.entries(EXPECTED_TENANT_TRIGGERS)) {
+  const cutoverMigration = await client.query<{ applied: boolean }>(`
+    SELECT EXISTS (
+      SELECT 1 FROM "${MIGRATIONS_TABLE}"
+       WHERE migration_name = $1 AND finished_at IS NOT NULL AND rolled_back_at IS NULL
+    ) AS applied
+  `, [CUTOVER_TRIGGER_REMOVAL_MIGRATION]);
+  const cutoverTriggerRemovalApplied = Boolean(cutoverMigration.rows[0]?.applied);
+  for (const [table, trigger] of tenantTriggersForMigrationState(cutoverTriggerRemovalApplied)) {
     const row = installed.get(trigger);
     if (!row) { issues.push(`expected trigger ${trigger} is missing`); continue; }
     const definition = row.definition.replaceAll('"', '').replace(/\s+/g, " ");
@@ -154,6 +173,11 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
     if (row.table_name !== table) issues.push(`trigger ${trigger} is attached to ${row.table_name}, not ${table}`);
     if (row.function_name !== "policydesk_assign_singleton_organization") issues.push(`trigger ${trigger} calls the wrong function`);
     if (!/BEFORE INSERT OR UPDATE OF organizationId ON/.test(definition)) issues.push(`trigger ${trigger} is not BEFORE INSERT OR UPDATE OF organizationId`);
+  }
+  if (cutoverTriggerRemovalApplied) {
+    for (const trigger of Object.values(EXPECTED_TENANT_TRIGGERS)) {
+      if (installed.has(trigger)) issues.push(`singleton trigger ${trigger} remains after the multi-org cutover cleanup`);
+    }
   }
   const expectedGuards: Record<string, [string, string]> = {
     Organization_transition_delete_guard: ["Organization", "policydesk_guard_organization_delete"],

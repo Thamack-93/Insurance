@@ -1,6 +1,7 @@
 import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { SINGLETON_CI_SKIPPED_MIGRATIONS } from "./restore-certification-migrations.mjs";
 
 // Production remains behind the maintenance-gated multi-tenant cutover. This
 // runner applies additive migrations without silently enabling that cutover.
@@ -18,11 +19,6 @@ if (/pooler/i.test(parsed.hostname) || parsed.searchParams.has("pgbouncer")) {
 
 const repositoryRoot = process.cwd();
 const sourceMigrations = path.join(repositoryRoot, "prisma", "migrations");
-const skippedMigrations = [
-  "20260831010000_multi_tenant_rls_cutover",
-  "20260914000000_extend_rls_operational_models",
-  "20260915010000_currency_rates_rls_cutover",
-];
 const tempRoot = await mkdtemp(path.join(repositoryRoot, ".prisma-singleton-production-migrations-"));
 
 try {
@@ -31,7 +27,7 @@ try {
   const tempConfig = path.join(tempRoot, "prisma.config.ts");
   await cp(path.join(repositoryRoot, "prisma", "schema.prisma"), tempSchema);
   await cp(sourceMigrations, tempMigrations, { recursive: true });
-  for (const migration of skippedMigrations) {
+  for (const migration of SINGLETON_CI_SKIPPED_MIGRATIONS) {
     await rm(path.join(tempMigrations, migration), { recursive: true, force: true });
   }
   await writeFile(
