@@ -2,6 +2,7 @@ import "dotenv/config";
 
 import { Pool } from "pg";
 import { assertMaintenanceOrCutoverTarget } from "./cutover-target.mjs";
+import { assertMaintenanceStatsVisibility } from "./maintenance-stats-visibility.mjs";
 import { MULTI_ORG_TRANSITION_LOCK } from "../src/lib/tenant-cutover-lock.ts";
 
 const ACTIVE_TRANSACTION_DRAIN_TIMEOUT_MS = 90_000;
@@ -19,6 +20,10 @@ async function main() {
     const current = await client.query<{ current_user: string }>("SELECT current_user");
     const runtimeRole = process.env.TENANT_RLS_APP_ROLE?.trim() || "policydesk_app";
     if (current.rows[0]?.current_user === runtimeRole) throw new Error("MAINTENANCE_REQUIRES_ADMIN_CONNECTION");
+    // PostgreSQL hides xact_start for other roles unless this connection can
+    // read all statistics. Check before changing write mode so an incomplete
+    // drain check can never leave the platform in MAINTENANCE.
+    await assertMaintenanceStatsVisibility(client);
     // Cron routes take the shared form of this lock before reading write mode
     // and hold it until their side effects finish. The exclusive lock waits
     // for all admitted cron work to drain and blocks new jobs through the
