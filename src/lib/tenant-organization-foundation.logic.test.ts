@@ -1,8 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { SINGLETON_CI_SKIPPED_MIGRATIONS } from "../../scripts/restore-certification-migrations.mjs";
 import {
   BOOTSTRAP_ORGANIZATION_ID,
+  CUTOVER_TRIGGER_REMOVAL_MIGRATION,
   EXPECTED_TENANT_TRIGGERS,
   OPTIONAL_ORGANIZATION_TABLES,
   PLATFORM_GLOBAL_TABLES,
@@ -31,6 +33,7 @@ describe("tenant organization transition foundation", () => {
       "BillingCharge",
     ]));
     expect(PLATFORM_GLOBAL_TABLES).toEqual(expect.arrayContaining(["Plan", "NotificationChannel", "TelegramWebhookUpdate"]));
+    expect(SINGLETON_CI_SKIPPED_MIGRATIONS.has(CUTOVER_TRIGGER_REMOVAL_MIGRATION)).toBe(true);
   });
 
   it("ships normal, inspectable SQL guards", () => {
