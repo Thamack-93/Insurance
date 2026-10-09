@@ -308,6 +308,13 @@ export async function withSystemOrganizationTransaction<T>(
     const organization = rows[0];
     if (!organization) throw new AuthError("ORGANIZATION_NOT_FOUND", 404);
     const activeOrProvisioning = ["ACTIVE", "PROVISIONING"].includes(organization.status);
+    // A sales-assisted DEMO may be completed while customer writes are
+    // drained. Keep this exception bound to an already-created DEMO tenant in
+    // PROVISIONING; it does not reopen tenant writes for active customers.
+    const approvedDemoProvisioning =
+      organization.kind === "DEMO" &&
+      organization.status === "PROVISIONING" &&
+      reason === "demo provision";
     const approvedDemoMaintenance = organization.kind === "DEMO" && ["demo file retention", "demo reset", "demo summary"].includes(reason);
     const approvedCapabilityRead = reason === "capability resolution";
     const approvedLifecycle = ["demo trial extend", "demo trial suspend", "organization suspend", "organization reactivate"].includes(reason);
@@ -318,7 +325,7 @@ export async function withSystemOrganizationTransaction<T>(
       if (process.env.NODE_ENV !== "production" && error instanceof Error && /does not exist|P2021|relation/i.test(error.message)) return null;
       throw error;
     });
-    if (runtimeState && runtimeState.writeMode !== "OPEN" && !approvedDemoMaintenance && !approvedLifecycle && !approvedCapabilityRead) {
+    if (runtimeState && runtimeState.writeMode !== "OPEN" && !approvedDemoProvisioning && !approvedDemoMaintenance && !approvedLifecycle && !approvedCapabilityRead) {
       throw new AuthError("POLICYDESK_MAINTENANCE_MODE", 503);
     }
     await tx.$executeRaw(Prisma.sql`SELECT set_config('app.organization_id', ${organizationId}, true)`);
