@@ -46,9 +46,7 @@ export const CUTOVER_REMOVED_TENANT_TRIGGER_TABLES = [
 export const CUTOVER_TRIGGER_REMOVAL_MIGRATION = "20261009010000_multi_org_drop_remaining_transition_triggers";
 
 export function tenantTriggersForMigrationState(cutoverTriggerRemovalApplied: boolean) {
-  return Object.entries(EXPECTED_TENANT_TRIGGERS).filter(([table]) =>
-    !cutoverTriggerRemovalApplied || !CUTOVER_REMOVED_TENANT_TRIGGER_TABLES.includes(table as (typeof CUTOVER_REMOVED_TENANT_TRIGGER_TABLES)[number]),
-  );
+  return cutoverTriggerRemovalApplied ? [] : Object.entries(EXPECTED_TENANT_TRIGGERS);
 }
 
 export const TENANT_RELATION_CHECKS: ReadonlyArray<readonly [string, string, string]> = [
@@ -166,7 +164,8 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
        WHERE migration_name = $1 AND finished_at IS NOT NULL AND rolled_back_at IS NULL
     ) AS applied
   `, [CUTOVER_TRIGGER_REMOVAL_MIGRATION]);
-  for (const [table, trigger] of tenantTriggersForMigrationState(Boolean(cutoverMigration.rows[0]?.applied))) {
+  const cutoverTriggerRemovalApplied = Boolean(cutoverMigration.rows[0]?.applied);
+  for (const [table, trigger] of tenantTriggersForMigrationState(cutoverTriggerRemovalApplied)) {
     const row = installed.get(trigger);
     if (!row) { issues.push(`expected trigger ${trigger} is missing`); continue; }
     const definition = row.definition.replaceAll('"', '').replace(/\s+/g, " ");
@@ -174,6 +173,11 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
     if (row.table_name !== table) issues.push(`trigger ${trigger} is attached to ${row.table_name}, not ${table}`);
     if (row.function_name !== "policydesk_assign_singleton_organization") issues.push(`trigger ${trigger} calls the wrong function`);
     if (!/BEFORE INSERT OR UPDATE OF organizationId ON/.test(definition)) issues.push(`trigger ${trigger} is not BEFORE INSERT OR UPDATE OF organizationId`);
+  }
+  if (cutoverTriggerRemovalApplied) {
+    for (const trigger of Object.values(EXPECTED_TENANT_TRIGGERS)) {
+      if (installed.has(trigger)) issues.push(`singleton trigger ${trigger} remains after the multi-org cutover cleanup`);
+    }
   }
   const expectedGuards: Record<string, [string, string]> = {
     Organization_transition_delete_guard: ["Organization", "policydesk_guard_organization_delete"],
