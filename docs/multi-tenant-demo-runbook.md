@@ -78,9 +78,12 @@ Run the local guard regression with `npm run test:cutover-target`.
    The backup and nonpayment jobs also take their job-specific exclusive
    transaction lock on that same runtime transaction. `npm run
    maintenance:enter` takes the matching exclusive lock through the direct
-   operator connection, with a 90-second acquisition limit, waits for admitted
-   jobs, sets `MAINTENANCE`, then requires three consecutive empty
-   active-transaction checks (up to 90 seconds). A timeout leaves the platform
+   operator connection. Before changing write mode, it requires the operator
+   role to be a superuser or have effective `pg_read_all_stats` membership;
+   PostgreSQL otherwise hides other roles' `xact_start` values and a drain
+   check could falsely report zero. It then uses a 90-second acquisition
+   limit, waits for admitted jobs, sets `MAINTENANCE`, then requires three
+   consecutive empty active-transaction checks (up to 90 seconds). A timeout leaves the platform
    in maintenance and aborts the cutover; inspect and drain the remaining
    transaction before continuing.
 6. Run `ENABLE_TENANT_RLS_CUTOVER=1 npm run cutover:multi-org`. The wrapper
