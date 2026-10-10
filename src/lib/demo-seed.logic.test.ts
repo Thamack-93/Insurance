@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { seedDemoBaseline, validateDemoBaseline } from "./demo-seed";
+import { policyRiskDetailsSchema } from "./policy-risk-details";
 
 function createTransactionRecorder() {
   const calls: Array<{ delegate: string; method: string; args: Record<string, unknown> }> = [];
@@ -68,6 +69,12 @@ describe("seedDemoBaseline", () => {
     const seededPolicies = upserts.filter(({ delegate }) => delegate === "policy").slice(0, 20).map(({ args }) => args.create as Record<string, unknown>);
     for (const frequency of ["ANNUAL", "SEMIANNUAL", "QUARTERLY", "MONTHLY"]) expect(seededPolicies.filter(policy => policy.paymentFrequency === frequency)).toHaveLength(5);
     expect(seededPolicies.every(policy => typeof policy.insuredObject === "string" && policy.insuredObject.length > 0)).toBe(true);
+    const structuredRiskDetails = seededPolicies.map((policy) => policyRiskDetailsSchema.parse(policy.riskDetails));
+    expect(structuredRiskDetails).toHaveLength(20);
+    expect(structuredRiskDetails.map(({ sourceText }) => sourceText)).toEqual(seededPolicies.map(({ insuredObject }) => insuredObject));
+    expect(new Set(structuredRiskDetails.map(({ policyType }) => policyType))).toEqual(new Set(["AUTO", "GMM", "HOGAR", "EMPRESARIAL", "VIDA"]));
+    expect(upserts.filter(({ delegate }) => delegate === "policyInsuredAsset")).toHaveLength(26);
+    expect(upserts.filter(({ delegate }) => delegate === "policyInsuredParty")).toHaveLength(14);
     expect(seededPolicies[0]?.endDate).toEqual(new Date("2026-10-02T12:00:00.000Z"));
     const schedules = creates.filter(({ delegate }) => delegate === "receipt").map(({ args }) => args.data as Record<string, unknown>);
     expect(schedules.filter(receipt => receipt.periodStartDate instanceof Date)).toHaveLength(95);
@@ -101,7 +108,9 @@ describe("seedDemoBaseline", () => {
   });
 
   it("validates all policy, payment, expiry, near-renewal and descriptive examples", async () => {
-    const count = vi.fn(async ({ where }: { where?: { paymentFrequency?: string; insuredObject?: unknown; status?: string } }) => {
+    let policiesWithoutRiskDetails = 0;
+    const count = vi.fn(async ({ where }: { where?: { paymentFrequency?: string; insuredObject?: unknown; status?: string; riskDetails?: unknown } }) => {
+      if (where?.riskDetails) return policiesWithoutRiskDetails;
       if (where?.paymentFrequency) return 5;
       if (where?.insuredObject) return 20;
       if (where?.status === "EXPIRED") return 5;
@@ -121,7 +130,10 @@ describe("seedDemoBaseline", () => {
       claim: { count: vi.fn().mockResolvedValue(4) }, commission: { count: vi.fn().mockResolvedValue(4) }, quote: { count: vi.fn().mockResolvedValue(4) },
       workItem: { count: vi.fn().mockResolvedValue(2) }, document: { findUnique: vi.fn().mockResolvedValue({ organizationId: "demo-org", filePath: "demo://demo-org/synthetic/policy-001", notes: "PDF sintético" }) },
     };
-    await expect(validateDemoBaseline(tx as never, "demo-org")).resolves.toMatchObject({ policies: 20, receipts: 95, receiptSchedules: { ANNUAL: 5, SEMIANNUAL: 5, QUARTERLY: 5, MONTHLY: 5 }, scenarios: { describedPolicies: 20, expiredPolicies: 5, renewalsWithinTenDays: 1, paidReceipts: 93, pendingReceipts: 1, overdueReceipts: 1, postedPayments: 93, reversedPayments: 1 } });
+    await expect(validateDemoBaseline(tx as never, "demo-org")).resolves.toMatchObject({ policies: 20, receipts: 95, structuredPolicies: 20, receiptSchedules: { ANNUAL: 5, SEMIANNUAL: 5, QUARTERLY: 5, MONTHLY: 5 }, scenarios: { describedPolicies: 20, expiredPolicies: 5, renewalsWithinTenDays: 1, paidReceipts: 93, pendingReceipts: 1, overdueReceipts: 1, postedPayments: 93, reversedPayments: 1 } });
+    policiesWithoutRiskDetails = 1;
+    await expect(validateDemoBaseline(tx as never, "demo-org")).rejects.toThrow("DEMO_SEED_VALIDATION_FAILED");
+    policiesWithoutRiskDetails = 0;
     receiptCount.mockImplementation(async ({ where }) => where?.status === "OVERDUE" ? 0 : where?.status === "PAID" ? 93 : where?.status === "PENDING" ? 1 : 95);
     await expect(validateDemoBaseline(tx as never, "demo-org")).rejects.toThrow("DEMO_SEED_VALIDATION_FAILED");
     receiptCount.mockImplementation(async ({ where }) => where?.status === "PAID" ? 93 : where?.status === "PENDING" ? 1 : where?.status === "OVERDUE" ? 1 : 95);

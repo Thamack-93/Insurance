@@ -502,7 +502,7 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
       // final lifecycle state atomically so a successful reset never exposes
       // an expired DEMO as ACTIVE, even for one request between transactions.
       const trialExpired = state.trialEndsAt <= new Date();
-      const fencedState = await tx.demoOrganizationState.updateMany({ where: { organizationId, dataVersion: resetPlan.dataVersion, resetAttemptId: resetPlan.attemptId, resetStatus: "RESETTING" }, data: { resetStatus: "IDLE", resetPhase: "IDLE", resetAttemptId: null, resetHeartbeatAt: null, resetLeaseExpiresAt: null, lastResetAt: new Date(), realDataResetAt: null, resetFailure: null, dataVersion: { increment: 1 } } });
+      const fencedState = await tx.demoOrganizationState.updateMany({ where: { organizationId, dataVersion: resetPlan.dataVersion, resetAttemptId: resetPlan.attemptId, resetStatus: "RESETTING" }, data: { seedVersion: DEMO_SEED_VERSION, resetStatus: "IDLE", resetPhase: "IDLE", resetAttemptId: null, resetHeartbeatAt: null, resetLeaseExpiresAt: null, lastResetAt: new Date(), realDataResetAt: null, resetFailure: null, dataVersion: { increment: 1 } } });
       if (fencedState.count !== 1) throw new Error("DEMO_RESET_FENCING_FAILED");
       const reactivated = await tx.organization.updateMany({ where: { id: organizationId, status: "RESETTING" }, data: { status: trialExpired ? "SUSPENDED" : "ACTIVE" } });
       if (reactivated.count !== 1) throw new Error("DEMO_RESET_STATE_CHANGED");
