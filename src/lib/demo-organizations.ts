@@ -82,9 +82,32 @@ async function revokeExtraDemoMembers(
 }
 
 function sanitizedFailureCode(error: unknown, fallback: string) {
-  const message = error instanceof Error ? error.message : "";
-  const match = message.match(/\b[A-Z][A-Z0-9_]{2,}\b/);
+  // Only persist errors that are already a standalone machine code. Extracting
+  // arbitrary uppercase words from provider messages can persist secret names
+  // or fragments of credentials in the operator UI.
+  const message = error instanceof Error ? error.message.trim() : "";
+  const match = message.match(/^([A-Z][A-Z0-9_]{2,})$/);
   return match?.[0]?.slice(0, 80) ?? fallback;
+}
+
+function safeResetErrorDetails(error: unknown) {
+  const candidate = typeof error === "object" && error !== null
+    ? error as { name?: unknown; code?: unknown; status?: unknown; statusCode?: unknown }
+    : {};
+  const safeToken = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9_.:-]{1,64}$/.test(value)
+    ? value
+    : undefined;
+  const status = typeof candidate.status === "number" && candidate.status >= 100 && candidate.status <= 599
+    ? candidate.status
+    : typeof candidate.statusCode === "number" && candidate.statusCode >= 100 && candidate.statusCode <= 599
+      ? candidate.statusCode
+      : undefined;
+
+  return {
+    errorName: safeToken(candidate.name),
+    errorCode: safeToken(candidate.code),
+    status,
+  };
 }
 
 export type DemoProvisioningInput = {
@@ -362,6 +385,7 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
   if (!lock.acquired) throw new Error("DEMO_RESET_LOCK_UNAVAILABLE");
   let resetStarted = false;
   let fencingVersion: number | null = null;
+  let phase = "PREPARING";
   try {
     const resetPlan = await withSystemOrganizationTransaction(organizationId, "demo reset", async (tx) => {
       const organization = await tx.organization.findUnique({ where: { id: organizationId }, select: { id: true, kind: true, status: true } });
@@ -416,6 +440,7 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
 
     resetStarted = true;
     fencingVersion = resetPlan.dataVersion ?? null;
+    phase = "PURGING_ARTIFACTS";
     await withSystemOrganizationTransaction(organizationId, "demo reset", (tx) => tx.demoOrganizationState.updateMany({ where: { organizationId, resetAttemptId: resetPlan.attemptId, dataVersion: resetPlan.dataVersion, resetStatus: "RESETTING" }, data: { resetPhase: "PURGING", resetHeartbeatAt: new Date(), resetLeaseExpiresAt: new Date(Date.now() + 120_000) } }));
     for (const blobPath of resetPlan.artifacts ?? []) {
       if (blobPath.startsWith("blob:")) await del(blobPath.slice("blob:".length));
@@ -437,7 +462,9 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
     // client can disconnect after a Blob upload and before its ledger row is
     // committed. Prefix cleanup closes that orphan window and removes Nora
     // handoffs/temporary PDFs as part of the same DEMO reset boundary.
+    phase = "PURGING_PRIVATE_BLOBS";
     await purgeDemoPrivateBlobs(organizationId);
+    phase = "RESEEDING";
     await withSystemOrganizationTransaction(organizationId, "demo reset", (tx) => tx.demoOrganizationState.updateMany({ where: { organizationId, resetAttemptId: resetPlan.attemptId, dataVersion: resetPlan.dataVersion, resetStatus: "RESETTING" }, data: { resetPhase: "RESEEDING", resetHeartbeatAt: new Date(), resetLeaseExpiresAt: new Date(Date.now() + 120_000) } }));
     if (!(await lock.renew())) {
       throw new Error("DEMO_RESET_LOCK_EXPIRED");
@@ -459,6 +486,7 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
       const state = lockedStates[0];
       if (!state || state.resetStatus !== "RESETTING") throw new Error("DEMO_RESET_STATE_CHANGED");
       if (state.dataVersion !== resetPlan.dataVersion) throw new Error("DEMO_RESET_FENCING_FAILED");
+      phase = "VERIFYING_AND_SEEDING";
       await tx.demoOrganizationState.updateMany({ where: { organizationId, resetAttemptId: resetPlan.attemptId, dataVersion: resetPlan.dataVersion, resetStatus: "RESETTING" }, data: { resetPhase: "VERIFYING", resetHeartbeatAt: new Date(), resetLeaseExpiresAt: new Date(Date.now() + 120_000) } });
       await deleteDemoTenantRows(tx, organizationId);
       const owner = await tx.organizationMembership.findFirst({ where: { organizationId, role: "OWNER", active: true }, select: { userId: true } });
@@ -481,9 +509,16 @@ async function performDemoReset(organizationId: string, requestId: string, dryRu
     }, { maxWait: 15_000, timeout: 120_000 });
   } catch (error) {
     if (resetStarted) {
+      const diagnostic = safeResetErrorDetails(error);
+      console.error("DEMO_RESET_FAILED", {
+        requestId,
+        organizationId,
+        phase,
+        ...diagnostic,
+      });
       try {
         await withSystemOrganizationTransaction(organizationId, "demo reset", async (tx) => {
-          const failure = sanitizedFailureCode(error, "DEMO_RESET_FAILED");
+          const failure = `${phase}_${sanitizedFailureCode(error, "DEMO_RESET_FAILED")}`;
           // Only the worker holding this fencing version may publish failure
           // state. A stale worker must not overwrite a newer reset attempt.
           // This CAS is also safe after a lease expiry: it leaves the tenant
