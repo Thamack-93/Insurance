@@ -336,9 +336,12 @@ async function deleteDemoTenantRows(tx: Prisma.TransactionClient, organizationId
   await tx.telegramDraft.deleteMany({ where: { organizationId } });
   await tx.telegramLinkToken.deleteMany({ where: { organizationId } });
   await tx.notificationPreference.deleteMany({ where: { organizationId } });
-  await tx.maintenanceRun.deleteMany({ where: { organizationId } });
+  // These rows reference MaintenanceRun, Receipt, Policy and suppression rules.
+  // Delete them before those parents so resets also work against Production's
+  // deployed foreign keys, which may not yet have the schema's SET NULL action.
   await tx.receiptReconciliationIssue.deleteMany({ where: { organizationId } });
   await tx.policyRenewalSuggestion.deleteMany({ where: { organizationId } });
+  await tx.maintenanceRun.deleteMany({ where: { organizationId } });
   await tx.dataQualitySuppressionRule.deleteMany({ where: { organizationId } });
   await tx.ledgerImportIssue.deleteMany({ where: { organizationId } });
   await tx.ledgerImportAction.deleteMany({ where: { organizationId } });
