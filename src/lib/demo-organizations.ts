@@ -310,6 +310,14 @@ async function deleteDemoTenantRows(tx: Prisma.TransactionClient, organizationId
   await tx.alert.deleteMany({ where: { organizationId } });
   await tx.claimChecklistItem.deleteMany({ where: { organizationId } });
   await tx.claim.deleteMany({ where: { organizationId } });
+  await tx.receiptReconciliationIssue.deleteMany({ where: { organizationId } });
+  await tx.policyRenewalSuggestion.deleteMany({ where: { organizationId } });
+  await tx.ledgerImportIssue.deleteMany({ where: { organizationId } });
+  await tx.ledgerImportAction.deleteMany({ where: { organizationId } });
+  await tx.ledgerImportRow.deleteMany({ where: { organizationId } });
+  await tx.ledgerImportBatch.deleteMany({ where: { organizationId } });
+  await tx.maintenanceRun.deleteMany({ where: { organizationId } });
+  await tx.dataQualitySuppressionRule.deleteMany({ where: { organizationId } });
   await tx.payment.deleteMany({ where: { organizationId } });
   await tx.commissionCorrection.deleteMany({ where: { organizationId } });
   await tx.commissionStatementRow.deleteMany({ where: { organizationId } });
@@ -317,12 +325,16 @@ async function deleteDemoTenantRows(tx: Prisma.TransactionClient, organizationId
   await tx.commission.deleteMany({ where: { organizationId } });
   await tx.receipt.deleteMany({ where: { organizationId } });
   await tx.policyEndorsement.deleteMany({ where: { organizationId } });
-  await tx.policy.deleteMany({ where: { organizationId } });
+  // Production's composite tenant foreign keys use NO ACTION. Delete linked
+  // documents and tasks before the policies, claims, quotes, or clients they reference.
+  await tx.document.deleteMany({ where: { organizationId } });
   await tx.task.deleteMany({ where: { organizationId } });
+  await tx.policyInsuredParty.deleteMany({ where: { organizationId } });
+  await tx.policyInsuredAsset.deleteMany({ where: { organizationId } });
+  await tx.policy.deleteMany({ where: { organizationId } });
   await tx.quoteComparisonItem.deleteMany({ where: { organizationId } });
   await tx.quoteComparison.deleteMany({ where: { organizationId } });
   await tx.quote.deleteMany({ where: { organizationId } });
-  await tx.document.deleteMany({ where: { organizationId } });
   await tx.client.deleteMany({ where: { organizationId } });
   await tx.insurer.deleteMany({ where: { organizationId } });
   await tx.knowledgeChunk.deleteMany({ where: { organizationId } });
@@ -336,19 +348,6 @@ async function deleteDemoTenantRows(tx: Prisma.TransactionClient, organizationId
   await tx.telegramDraft.deleteMany({ where: { organizationId } });
   await tx.telegramLinkToken.deleteMany({ where: { organizationId } });
   await tx.notificationPreference.deleteMany({ where: { organizationId } });
-  // These rows reference MaintenanceRun, Receipt, Policy and suppression rules.
-  // Delete them before those parents so resets also work against Production's
-  // deployed foreign keys, which may not yet have the schema's SET NULL action.
-  await tx.receiptReconciliationIssue.deleteMany({ where: { organizationId } });
-  await tx.policyRenewalSuggestion.deleteMany({ where: { organizationId } });
-  await tx.maintenanceRun.deleteMany({ where: { organizationId } });
-  await tx.dataQualitySuppressionRule.deleteMany({ where: { organizationId } });
-  await tx.ledgerImportIssue.deleteMany({ where: { organizationId } });
-  await tx.ledgerImportAction.deleteMany({ where: { organizationId } });
-  await tx.ledgerImportRow.deleteMany({ where: { organizationId } });
-  await tx.ledgerImportBatch.deleteMany({ where: { organizationId } });
-  await tx.policyInsuredParty.deleteMany({ where: { organizationId } });
-  await tx.policyInsuredAsset.deleteMany({ where: { organizationId } });
   await tx.demoUploadArtifact.deleteMany({ where: { organizationId } });
 }
 
