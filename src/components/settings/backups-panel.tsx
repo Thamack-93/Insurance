@@ -1,16 +1,17 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Database, Download, RefreshCw, ShieldCheck } from "lucide-react";
+import { Database, Download, KeyRound, RefreshCw, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import {
   verifyBackupAction,
+  rekeyBackupAction,
   type BackupListItem,
 } from "@/app/(dashboard)/settings/backups-actions";
 import { EmptyPanel, SectionCard } from "@/components/pages-secondary/panels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { BackupPreflightStatus } from "@/lib/backup";
+import type { BackupPreflightStatus, BackupRekeyStatus } from "@/lib/backup";
 import type { MutationResult } from "@/lib/mutation-utils";
 import { getBackupScheduleStatus, PLATFORM_BACKUP_INTERVAL_DAYS } from "@/lib/backup-schedule";
 import { backupCapabilityLabel, backupStatusLabel, backupStorageLabel } from "@/lib/ui-labels";
@@ -19,9 +20,11 @@ type Props = {
   initialBackups: BackupListItem[];
   initialLoadError?: string | null;
   backupStatus: BackupPreflightStatus;
+  backupRekeyStatus: BackupRekeyStatus;
   createBackup: () => Promise<MutationResult>;
   listBackups: () => Promise<BackupListItem[]>;
   reconcileBackups: () => Promise<MutationResult>;
+  rekeyBackup: typeof rekeyBackupAction;
 };
 
 function formatSize(bytes: number) {
@@ -48,21 +51,28 @@ export function BackupsPanel({
   initialBackups,
   initialLoadError = null,
   backupStatus,
+  backupRekeyStatus,
   createBackup,
   listBackups,
   reconcileBackups,
+  rekeyBackup,
 }: Props) {
   const [backups, setBackups] = useState<BackupListItem[]>(initialBackups);
   const [loadError, setLoadError] = useState<string | null>(initialLoadError);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
   const [pendingCreate, startCreate] = useTransition();
   const [verifying, setVerifying] = useState<string | null>(null);
+  const [rekeying, setRekeying] = useState<string | null>(null);
   const [pendingReconcile, startReconcile] = useTransition();
   const [now] = useState(() => new Date());
   const sorted = [...backups].sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt),
   );
   const latestVerified = sorted.find((backup) => backup.status === "VERIFIED");
+  const latestVerifiedOriginal = sorted.find((backup) => backup.status === "VERIFIED" && backup.storage === "original");
+  const rekeyedTargetAlreadyExists = backupRekeyStatus.targetKeyVersion
+    ? sorted.some((backup) => backup.status === "VERIFIED" && backup.storage === "rekeyed" && backup.keyVersion === backupRekeyStatus.targetKeyVersion)
+    : false;
   const schedule = getBackupScheduleStatus(
     latestVerified ? new Date(latestVerified.createdAt) : null,
     now,
@@ -107,6 +117,23 @@ export function BackupsPanel({
       }
     } finally {
       setVerifying(null);
+    }
+  }
+
+  async function handleRekey(artifactId: string) {
+    setRekeying(artifactId);
+    try {
+      const result = await rekeyBackup(artifactId);
+      if (result.ok) {
+        setResultMessage(result.message);
+        toast.success(result.message);
+        await refresh();
+      } else {
+        setResultMessage(result.error);
+        toast.error(result.error);
+      }
+    } finally {
+      setRekeying(null);
     }
   }
 
@@ -218,6 +245,18 @@ export function BackupsPanel({
                   <ShieldCheck className="mr-2 size-4" />
                   {verifying === backup.id ? "Verificando..." : "Verificar"}
                 </Button>
+                {backupRekeyStatus.ready && !rekeyedTargetAlreadyExists && backup.id === latestVerifiedOriginal?.id ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={rekeying !== null}
+                    onClick={() => void handleRekey(backup.id)}
+                  >
+                    <KeyRound className="mr-2 size-4" />
+                    {rekeying === backup.id ? "Creando copia..." : `Crear copia ${backupRekeyStatus.targetKeyVersion} para restore`}
+                  </Button>
+                ) : null}
                 {backup.status === "VERIFIED" ? (
                   <Button asChild variant="outline" size="sm">
                     <a href={`/api/backups/artifacts/${encodeURIComponent(backup.id)}/download`} download={backup.filename}>
