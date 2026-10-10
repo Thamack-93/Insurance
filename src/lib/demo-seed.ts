@@ -1,15 +1,59 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import type { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
 import { getBusinessDateKey } from "@/lib/business-dates";
+import { policyRiskDetailsSchema, projectPolicyRiskRelations } from "@/lib/policy-risk-details";
 
-export const DEMO_SEED_VERSION = "demo-2026-10-v3";
+export const DEMO_SEED_VERSION = "demo-2026-10-v4";
 
 const addDays = (date: Date, days: number) => new Date(date.getTime() + days * 86_400_000);
 const id = (organizationId: string, type: string, ordinal: number) => `${organizationId}:demo:${type}:${String(ordinal).padStart(3, "0")}`;
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+
+function createDemoPolicyRiskDetails(policy: { ordinal: number; type: string; insuredObject: string }) {
+  const sourceText = policy.insuredObject;
+  switch (policy.type) {
+    case "AUTO":
+      return policyRiskDetailsSchema.parse({
+        version: 1,
+        policyType: "AUTO",
+        sourceText,
+        data: { vehicles: [{ make: policy.ordinal === 1 ? "Toyota" : "Nissan", model: policy.ordinal === 1 ? "Corolla" : "Versa", year: policy.ordinal === 1 ? "2020" : "2022", version: policy.ordinal === 1 ? "LE" : "", vin: "", plates: "" }] },
+      });
+    case "GMM":
+      return policyRiskDetailsSchema.parse({
+        version: 1,
+        policyType: "GMM",
+        sourceText,
+        data: { insuredPeople: [{ fullName: `Titular DEMO sintético ${policy.ordinal}`, birthDate: "", relationship: "Titular" }], plan: "Plan médico sintético DEMO", insuredAmount: "", deductible: "", coinsurance: "" },
+      });
+    case "HOME":
+      return policyRiskDetailsSchema.parse({
+        version: 1,
+        policyType: "HOGAR",
+        sourceText,
+        data: { locations: [{ address: "Ciudad de México · domicilio sintético DEMO", use: "Casa habitación", construction: "", activity: "", insuredValue: "" }] },
+      });
+    case "BUSINESS":
+      return policyRiskDetailsSchema.parse({
+        version: 1,
+        policyType: "EMPRESARIAL",
+        sourceText,
+        data: { activity: "Actividad comercial sintética DEMO", locations: [{ address: "Ciudad de México · ubicación sintética DEMO", use: "Local u oficina", construction: "", activity: "Actividad comercial sintética DEMO", insuredValue: "" }], buildingValue: "", contentsValue: "", businessInterruptionValue: "" },
+      });
+    case "LIFE":
+      return policyRiskDetailsSchema.parse({
+        version: 1,
+        policyType: "VIDA",
+        sourceText,
+        data: { insuredPeople: [{ fullName: `Titular DEMO sintético ${policy.ordinal}`, birthDate: "", relationship: "Titular" }], plan: "Cobertura individual sintética DEMO", insuredAmount: "", term: "", beneficiaries: [{ fullName: `Beneficiario DEMO sintético ${policy.ordinal}`, relationship: "Ejemplo sintético", percentage: "" }] },
+      });
+    default:
+      throw new Error(`DEMO_SEED_UNSUPPORTED_POLICY_TYPE:${policy.type}`);
+  }
+}
 
 /** Deterministic, synthetic portfolio used by every reset/provisioning run. */
 export async function seedDemoBaseline(tx: Prisma.TransactionClient, organizationId: string, actorUserId: string) {
@@ -71,12 +115,22 @@ export async function seedDemoBaseline(tx: Prisma.TransactionClient, organizatio
   const businessDate = getBusinessDateKey(now);
   for (const policyInput of policies) {
     const policyId = id(organizationId, "policy", policyInput.ordinal);
+    const riskDetails = createDemoPolicyRiskDetails(policyInput);
     policyIds.push(policyId);
     await tx.policy.upsert({
       where: { id: policyId },
-      update: { organizationId, clientId: policyInput.clientId, insurerId: policyInput.insurerId, policyNumber: policyInput.number, policyType: policyInput.type, insuredObject: policyInput.insuredObject, status: policyInput.end < 0 ? "EXPIRED" : "ACTIVE", renewalStage: policyInput.ordinal % 5 === 0 ? "CONTACTED" : policyInput.ordinal % 4 === 0 ? "QUOTED" : "PENDING", startDate: addDays(now, policyInput.start), endDate: addDays(now, policyInput.end), premiumAmount: policyInput.premium, currency: "MXN", paymentFrequency: frequencies[(policyInput.ordinal - 1) % frequencies.length], createdById: actorUserId, updatedById: actorUserId },
-      create: { id: policyId, organizationId, clientId: policyInput.clientId, insurerId: policyInput.insurerId, policyNumber: policyInput.number, policyType: policyInput.type, insuredObject: policyInput.insuredObject, status: policyInput.end < 0 ? "EXPIRED" : "ACTIVE", renewalStage: policyInput.ordinal % 5 === 0 ? "CONTACTED" : policyInput.ordinal % 4 === 0 ? "QUOTED" : "PENDING", startDate: addDays(now, policyInput.start), endDate: addDays(now, policyInput.end), premiumAmount: policyInput.premium, currency: "MXN", paymentFrequency: frequencies[(policyInput.ordinal - 1) % frequencies.length], createdById: actorUserId, updatedById: actorUserId },
+      update: { organizationId, clientId: policyInput.clientId, insurerId: policyInput.insurerId, policyNumber: policyInput.number, policyType: policyInput.type, insuredObject: policyInput.insuredObject, riskDetails: riskDetails as Prisma.InputJsonValue, riskDetailsReviewRequired: false, status: policyInput.end < 0 ? "EXPIRED" : "ACTIVE", renewalStage: policyInput.ordinal % 5 === 0 ? "CONTACTED" : policyInput.ordinal % 4 === 0 ? "QUOTED" : "PENDING", startDate: addDays(now, policyInput.start), endDate: addDays(now, policyInput.end), premiumAmount: policyInput.premium, currency: "MXN", paymentFrequency: frequencies[(policyInput.ordinal - 1) % frequencies.length], createdById: actorUserId, updatedById: actorUserId },
+      create: { id: policyId, organizationId, clientId: policyInput.clientId, insurerId: policyInput.insurerId, policyNumber: policyInput.number, policyType: policyInput.type, insuredObject: policyInput.insuredObject, riskDetails: riskDetails as Prisma.InputJsonValue, riskDetailsReviewRequired: false, status: policyInput.end < 0 ? "EXPIRED" : "ACTIVE", renewalStage: policyInput.ordinal % 5 === 0 ? "CONTACTED" : policyInput.ordinal % 4 === 0 ? "QUOTED" : "PENDING", startDate: addDays(now, policyInput.start), endDate: addDays(now, policyInput.end), premiumAmount: policyInput.premium, currency: "MXN", paymentFrequency: frequencies[(policyInput.ordinal - 1) % frequencies.length], createdById: actorUserId, updatedById: actorUserId },
     });
+    const relations = projectPolicyRiskRelations(riskDetails);
+    for (const [index, asset] of relations.assets.entries()) {
+      const assetId = id(organizationId, `policy-asset-${policyInput.ordinal}`, index + 1);
+      await tx.policyInsuredAsset.upsert({ where: { id: assetId }, update: { organizationId, policyId, ...asset }, create: { id: assetId, organizationId, policyId, ...asset } });
+    }
+    for (const [index, party] of relations.insuredParties.entries()) {
+      const partyId = id(organizationId, `policy-party-${policyInput.ordinal}`, index + 1);
+      await tx.policyInsuredParty.upsert({ where: { id: partyId }, update: { organizationId, policyId, ...party }, create: { id: partyId, organizationId, policyId, ...party } });
+    }
     const receipts = await syncAutoCaptureReceipts(tx, { organizationId, policyId, clientId: policyInput.clientId, insurerId: policyInput.insurerId, userId: actorUserId, draft: { startDate: addDays(now, policyInput.start).toISOString().slice(0, 10), endDate: addDays(now, policyInput.end).toISOString().slice(0, 10), paymentFrequency: frequencies[(policyInput.ordinal - 1) % frequencies.length], premiumAmount: policyInput.premium, currency: "MXN", sourcePolicyNumber: policyInput.number } });
     const receiptId = receipts[0]?.receipt.id;
     if (!receiptId) throw new Error("DEMO_SEED_RECEIPT_SCHEDULE_FAILED");
@@ -246,7 +300,7 @@ export async function seedDemoBaseline(tx: Prisma.TransactionClient, organizatio
 
 export async function validateDemoBaseline(tx: Prisma.TransactionClient, organizationId: string) {
   const now = new Date(`${getBusinessDateKey(new Date())}T12:00:00.000Z`);
-  const [clients, policies, receipts, claims, commissions, quotes, collectionFollowUps, document, describedPolicies, expiredPolicies, renewalsWithinTenDays, paidReceipts, pendingReceipts, overdueReceipts, postedPayments, reversedPayments] = await Promise.all([
+  const [clients, policies, receipts, claims, commissions, quotes, collectionFollowUps, document, describedPolicies, policiesWithoutRiskDetails, expiredPolicies, renewalsWithinTenDays, paidReceipts, pendingReceipts, overdueReceipts, postedPayments, reversedPayments] = await Promise.all([
     tx.client.count({ where: { organizationId } }),
     tx.policy.count({ where: { organizationId } }),
     tx.receipt.count({ where: { organizationId } }),
@@ -256,6 +310,7 @@ export async function validateDemoBaseline(tx: Prisma.TransactionClient, organiz
     tx.workItem.count({ where: { organizationId, sourceType: "Collection", title: { startsWith: "Promesa de pago DEMO" } } }),
     tx.document.findUnique({ where: { id: id(organizationId, "document", 1) }, select: { organizationId: true, filePath: true, notes: true } }),
     tx.policy.count({ where: { organizationId, insuredObject: { not: null } } }),
+    tx.policy.count({ where: { organizationId, riskDetails: { equals: Prisma.DbNull } } }),
     tx.policy.count({ where: { organizationId, status: "EXPIRED" } }),
     tx.policy.count({ where: { organizationId, status: "ACTIVE", endDate: { gte: now, lte: addDays(now, 10) } } }),
     tx.receipt.count({ where: { organizationId, status: "PAID" } }),
@@ -267,10 +322,10 @@ export async function validateDemoBaseline(tx: Prisma.TransactionClient, organiz
   const [annualPolicies, semiannualPolicies, quarterlyPolicies, monthlyPolicies] = await Promise.all(["ANNUAL", "SEMIANNUAL", "QUARTERLY", "MONTHLY"].map(paymentFrequency => tx.policy.count({ where: { organizationId, paymentFrequency } })));
   if (
     clients !== 25 || policies !== 20 || receipts !== 95 || annualPolicies !== 5 || semiannualPolicies !== 5 || quarterlyPolicies !== 5 || monthlyPolicies !== 5 || claims < 4 || commissions < 4 || quotes < 4 || collectionFollowUps !== 2 ||
-    describedPolicies !== 20 || expiredPolicies !== 5 || renewalsWithinTenDays !== 1 || paidReceipts !== 93 || pendingReceipts !== 1 || overdueReceipts !== 1 || postedPayments !== 93 || reversedPayments !== 1 ||
+    describedPolicies !== 20 || policiesWithoutRiskDetails !== 0 || expiredPolicies !== 5 || renewalsWithinTenDays !== 1 || paidReceipts !== 93 || pendingReceipts !== 1 || overdueReceipts !== 1 || postedPayments !== 93 || reversedPayments !== 1 ||
     document?.organizationId !== organizationId || document.filePath !== `demo://${organizationId}/synthetic/policy-001` || !document.notes?.includes("sintético")
   ) {
     throw new Error("DEMO_SEED_VALIDATION_FAILED");
   }
-  return { clients, policies, receipts, receiptSchedules: { ANNUAL: annualPolicies, SEMIANNUAL: semiannualPolicies, QUARTERLY: quarterlyPolicies, MONTHLY: monthlyPolicies }, claims, commissions, quotes, collectionFollowUps, scenarios: { describedPolicies, expiredPolicies, renewalsWithinTenDays, paidReceipts, pendingReceipts, overdueReceipts, postedPayments, reversedPayments }, syntheticDocument: true as const };
+  return { clients, policies, receipts, receiptSchedules: { ANNUAL: annualPolicies, SEMIANNUAL: semiannualPolicies, QUARTERLY: quarterlyPolicies, MONTHLY: monthlyPolicies }, claims, commissions, quotes, collectionFollowUps, structuredPolicies: policies - policiesWithoutRiskDetails, scenarios: { describedPolicies, expiredPolicies, renewalsWithinTenDays, paidReceipts, pendingReceipts, overdueReceipts, postedPayments, reversedPayments }, syntheticDocument: true as const };
 }
