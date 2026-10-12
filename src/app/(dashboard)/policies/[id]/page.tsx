@@ -69,8 +69,38 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
 
   if (!policy) {
     if (scope.organizationId.startsWith("org_demo_")) {
-      const tenant = await db.$queryRaw<Array<{ organizationId: string | null }>>`
-        SELECT current_setting('app.organization_id', true) AS "organizationId"
+      const [runtimeLookup] = await db.$queryRaw<Array<{
+        databaseName: string;
+        databaseRole: string;
+        organizationId: string | null;
+        policyVisibleBySql: boolean;
+        policyOrganizationMatches: boolean;
+        clientVisibleBySql: boolean;
+        portfolioMatches: boolean;
+      }>>`
+        SELECT current_database() AS "databaseName",
+               current_user AS "databaseRole",
+               current_setting('app.organization_id', true) AS "organizationId",
+               EXISTS (
+                 SELECT 1 FROM "Policy" p WHERE p."id" = ${id}
+               ) AS "policyVisibleBySql",
+               EXISTS (
+                 SELECT 1 FROM "Policy" p
+                  WHERE p."id" = ${id}
+                    AND p."organizationId" = ${scope.organizationId}
+               ) AS "policyOrganizationMatches",
+               EXISTS (
+                 SELECT 1 FROM "Policy" p
+                 JOIN "Client" c ON c."id" = p."clientId"
+                  WHERE p."id" = ${id}
+                    AND c."organizationId" = ${scope.organizationId}
+               ) AS "clientVisibleBySql",
+               ${scope.portfolioOwnerId === undefined} OR EXISTS (
+                 SELECT 1 FROM "Policy" p
+                 JOIN "Client" c ON c."id" = p."clientId"
+                  WHERE p."id" = ${id}
+                    AND c."portfolioOwnerId" = ${scope.portfolioOwnerId ?? ""}
+               ) AS "portfolioMatches"
       `;
       const visiblePolicy = await db.policy.findUnique({
         where: { id },
@@ -84,7 +114,13 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
         : null;
       console.warn("DEMO_DETAIL_LOOKUP_DIAGNOSTIC", JSON.stringify({
         entity: "policy",
-        tenantContextMatches: tenant[0]?.organizationId === scope.organizationId,
+        databaseName: runtimeLookup?.databaseName,
+        databaseRole: runtimeLookup?.databaseRole,
+        tenantContextMatches: runtimeLookup?.organizationId === scope.organizationId,
+        policyVisibleBySql: runtimeLookup?.policyVisibleBySql,
+        policyOrganizationMatchesBySql: runtimeLookup?.policyOrganizationMatches,
+        clientVisibleBySql: runtimeLookup?.clientVisibleBySql,
+        portfolioMatchesBySql: runtimeLookup?.portfolioMatches,
         policyVisibleToRuntime: Boolean(visiblePolicy),
         policyOrganizationMatches: visiblePolicy?.organizationId === scope.organizationId,
         clientVisibleToRuntime: Boolean(visibleClient),
