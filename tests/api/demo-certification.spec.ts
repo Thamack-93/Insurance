@@ -55,7 +55,7 @@ test("DEMO blocks Nora and real document uploads", async ({ page }) => {
   await expect(page.getByLabel("Organización de demostración")).toBeVisible();
   await expect(page.getByText("Esta DEMO usa información sintética. Nora y la carga de documentos están deshabilitadas.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Abrir paleta de comandos" }).click();
-  await expect(page.getByRole("dialog", { name: "Búsqueda global" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Paleta de comandos" })).toBeVisible();
   await expect(page.getByText("Abrir workspace de Nora", { exact: true })).toHaveCount(0);
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/policies/org_demo_broker_0001%3Ademo%3Apolicy%3A001");
