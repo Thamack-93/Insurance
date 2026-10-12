@@ -68,6 +68,30 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
   });
 
   if (!policy) {
+    if (scope.organizationId.startsWith("org_demo_")) {
+      const tenant = await db.$queryRaw<Array<{ organizationId: string | null }>>`
+        SELECT current_setting('app.organization_id', true) AS "organizationId"
+      `;
+      const visiblePolicy = await db.policy.findUnique({
+        where: { id },
+        select: { id: true, organizationId: true, clientId: true },
+      });
+      const visibleClient = visiblePolicy
+        ? await db.client.findUnique({
+            where: { id: visiblePolicy.clientId },
+            select: { organizationId: true, portfolioOwnerId: true },
+          })
+        : null;
+      console.warn("DEMO_DETAIL_LOOKUP_DIAGNOSTIC", JSON.stringify({
+        entity: "policy",
+        tenantContextMatches: tenant[0]?.organizationId === scope.organizationId,
+        policyVisibleToRuntime: Boolean(visiblePolicy),
+        policyOrganizationMatches: visiblePolicy?.organizationId === scope.organizationId,
+        clientVisibleToRuntime: Boolean(visibleClient),
+        clientOrganizationMatches: visibleClient?.organizationId === scope.organizationId,
+        portfolioMatches: !scope.portfolioOwnerId || visibleClient?.portfolioOwnerId === scope.portfolioOwnerId,
+      }));
+    }
     notFound();
   }
 
