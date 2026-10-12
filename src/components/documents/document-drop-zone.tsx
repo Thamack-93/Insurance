@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { documentTypeOptions } from "@/lib/domain-options";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
+import { useNoraSession } from "@/components/assistant/nora-session-provider";
 import { cn } from "@/lib/utils";
 
 type Associations = {
@@ -117,6 +118,8 @@ export function DocumentDropZone({
   onUploaded,
   disabled = !areDocumentFilesEnabled(),
 }: Props) {
+  const { demoMode } = useNoraSession();
+  const uploadDisabled = disabled || demoMode;
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [items, setItems] = useState<Item[]>([]);
@@ -222,7 +225,7 @@ export function DocumentDropZone({
 
   const clearDone = () => setItems((prev) => prev.filter((it) => it.status !== "ok"));
 
-  if (disabled) {
+  if (uploadDisabled) {
     return (
       <div className={cn("rounded-xl border border-dashed border-border bg-muted/30 p-6 text-center", className)}>
         <Upload className="mx-auto size-6 text-muted-foreground" />

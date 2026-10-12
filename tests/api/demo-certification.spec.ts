@@ -51,10 +51,20 @@ test("CUSTOMER search, export and direct document ID stay inside its tenant", as
 });
 
 test("DEMO blocks Nora and real document uploads", async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 812 });
   await login(page, "demo-owner@policydesk.local");
   await expect(page.getByLabel("Organización de demostración")).toBeVisible();
   await expect(page.getByText("Esta DEMO usa información sintética. Nora y la carga de documentos están deshabilitadas.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Abrir paleta de comandos" }).click();
+  await expect(page.getByRole("dialog", { name: "Paleta de comandos" })).toBeVisible();
+  await expect(page.getByText("Abrir workspace de Nora", { exact: true })).toHaveCount(0);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/policies/org_demo_broker_0001%3Ademo%3Apolicy%3A001");
+  await expect(page.getByRole("button", { name: "Nora deshabilitada" })).toBeDisabled();
+  await expect(page.getByText("La carga de archivos está deshabilitada en la demo publicada. Solo se mostrará metadata.")).toBeVisible();
+  await expect(page.locator("input[type=file]")).toHaveCount(0);
+  await page.goto("/documents");
+  await expect(page.getByText("La carga de archivos está deshabilitada en la demo publicada. Esta sección queda como metadata del expediente.")).toBeVisible();
+  await expect(page.locator("input[type=file]")).toHaveCount(0);
   const result = await page.evaluate(async () => {
     const nora = await fetch("/api/assistant", {
       method: "POST",

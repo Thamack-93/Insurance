@@ -17,6 +17,7 @@ const LazyAssistantConsole = dynamic(
 
 type NoraSessionValue = {
   open: boolean;
+  demoMode: boolean;
   context: NoraContextRef | null;
   openNora: (starterPrompt?: string) => void;
   closeNora: () => void;
@@ -73,13 +74,14 @@ export function NoraSessionProvider({ children, userId, organizationId = "", dem
 
   const value = useMemo<NoraSessionValue>(() => ({
     open,
+    demoMode,
     context,
-    openNora: (prompt) => { setStarterPrompt(prompt); setOpen(true); },
+    openNora: (prompt) => { if (!demoMode) { setStarterPrompt(prompt); setOpen(true); } },
     closeNora: () => setOpen(false),
-    suggestContext: (next) => { setContext(next); setOpen(true); },
+    suggestContext: (next) => { if (!demoMode) { setContext(next); setOpen(true); } },
     clearContext: () => setContext(null),
     refreshSnapshot: () => { setSnapshotAt(0); setSnapshot(null); setLoadError(null); },
-  }), [context, open]);
+  }), [context, demoMode, open]);
 
   const retry = useCallback(() => { setLoadError(null); setSnapshotAt(0); setSnapshot(null); }, []);
 
@@ -137,11 +139,11 @@ export function NoraSessionProvider({ children, userId, organizationId = "", dem
 }
 
 export function NoraContextButton({ context, label = "Trabajar con Nora" }: { context: NoraContextRef; label?: string }) {
-  const { suggestContext } = useNoraSession();
-  return <Button type="button" variant="outline" onClick={() => suggestContext(context)}><Sparkles className="size-4 text-ai" />{label}</Button>;
+  const { suggestContext, demoMode } = useNoraSession();
+  return <Button type="button" variant="outline" onClick={() => suggestContext(context)} disabled={demoMode} title={demoMode ? "Nora está deshabilitada en esta DEMO." : undefined}><Sparkles className="size-4 text-ai" />{demoMode ? "Nora deshabilitada" : label}</Button>;
 }
 
 export function NoraOpenButton({ label, prompt, className, variant = "outline" }: { label: string; prompt?: string; className?: string; variant?: "default" | "outline" | "secondary" | "ghost" }) {
-  const { openNora } = useNoraSession();
-  return <Button type="button" variant={variant} className={className} onClick={() => openNora(prompt)}><Sparkles className={cn("size-4", variant === "default" ? "text-primary-foreground" : "text-ai")} />{label}</Button>;
+  const { openNora, demoMode } = useNoraSession();
+  return <Button type="button" variant={variant} className={className} onClick={() => openNora(prompt)} disabled={demoMode} title={demoMode ? "Nora está deshabilitada en esta DEMO." : undefined}><Sparkles className={cn("size-4", variant === "default" ? "text-primary-foreground" : "text-ai")} />{demoMode ? "Nora deshabilitada" : label}</Button>;
 }

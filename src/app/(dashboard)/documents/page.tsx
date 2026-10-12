@@ -41,7 +41,8 @@ export default async function DocumentsPage({
 }) {
   const scope = await requireOrganizationPortfolioReadScope();
   return withTenantOrganization(scope.organizationId, async (db) => {
-  const documentsEnabled = areDocumentFilesEnabled();
+  const organizationRecord = await db.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } });
+  const documentsEnabled = areDocumentFilesEnabled() && organizationRecord?.kind !== "DEMO";
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = Math.max(1, Number(params.page) || 1);
