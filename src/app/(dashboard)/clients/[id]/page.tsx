@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { decodeRouteIdentifier } from "@/lib/route-identifier";
 import { RecordPageView } from "@/components/recently-viewed/record-page-view";
 import { Mail, Phone, MapPin, BadgeInfo, FileText, ClipboardList, History, Pencil, ShieldCheck, Cake } from "@/components/icons";
 import { DeleteClientButton } from "@/components/clients/delete-client-button";
@@ -33,7 +34,9 @@ import { policyObjectSearchTerms } from "@/lib/policy-identity";
 import { PolicyIdentity } from "@/components/policies/policy-identity";
 
 export default async function ClientDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
-  const { id } = await params;
+  const routeParams = await params;
+  const id = decodeRouteIdentifier(routeParams.id);
+  if (!id) notFound();
   const query = (await searchParams) ?? {};
   const rawPolicyStatus = typeof query.policyStatus === "string" ? query.policyStatus : undefined;
   const policyStatus = rawPolicyStatus === "ALL"
@@ -64,44 +67,6 @@ export default async function ClientDetailPage({ params, searchParams }: { param
   });
 
   if (!client) {
-    if (scope.organizationId.startsWith("org_demo_")) {
-      const [runtimeLookup] = await db.$queryRaw<Array<{
-        databaseName: string;
-        databaseRole: string;
-        organizationId: string | null;
-        requestedClientId: string;
-        requestedClientIdChars: number;
-        clientVisibleBySql: boolean;
-        visibleClientCountForOrganization: number;
-      }>>`
-        SELECT current_database() AS "databaseName",
-               current_user AS "databaseRole",
-               current_setting('app.organization_id', true) AS "organizationId",
-               ${id}::text AS "requestedClientId",
-               length(${id}::text)::int AS "requestedClientIdChars",
-               EXISTS (SELECT 1 FROM "Client" c WHERE c."id" = ${id}) AS "clientVisibleBySql",
-               (SELECT count(*)::int FROM "Client" c
-                 WHERE c."organizationId" = ${scope.organizationId}
-               ) AS "visibleClientCountForOrganization"
-      `;
-      const visibleClient = await db.client.findUnique({
-        where: { id },
-        select: { id: true, organizationId: true, portfolioOwnerId: true },
-      });
-      console.warn("DEMO_DETAIL_LOOKUP_DIAGNOSTIC", JSON.stringify({
-        entity: "client",
-        databaseName: runtimeLookup?.databaseName,
-        databaseRole: runtimeLookup?.databaseRole,
-        tenantContextMatches: runtimeLookup?.organizationId === scope.organizationId,
-        requestedClientId: runtimeLookup?.requestedClientId,
-        requestedClientIdChars: runtimeLookup?.requestedClientIdChars,
-        clientVisibleBySql: runtimeLookup?.clientVisibleBySql,
-        visibleClientCountForOrganization: runtimeLookup?.visibleClientCountForOrganization,
-        clientVisibleToRuntime: Boolean(visibleClient),
-        clientOrganizationMatches: visibleClient?.organizationId === scope.organizationId,
-        portfolioMatches: !scope.portfolioOwnerId || visibleClient?.portfolioOwnerId === scope.portfolioOwnerId,
-      }));
-    }
     notFound();
   }
 
