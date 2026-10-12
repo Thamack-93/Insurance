@@ -38,6 +38,12 @@ describe("etiquetas visibles de la interfaz", () => {
     expect(dataQualityReasonLabel("UNKNOWN_REASON")).toBe("Revisión requerida");
   });
 
+  it("mantiene legibles los tipos de póliza históricos de la DEMO", () => {
+    expect(policyTypeLabel("HOME")).toBe("Hogar");
+    expect(policyTypeLabel("BUSINESS")).toBe("Empresarial");
+    expect(policyTypeLabel("LIFE")).toBe("Vida");
+  });
+
   it("valida el retorno contextual sin permitir rutas externas", () => {
     expect(normalizeReturnTo("/operations?view=pending&q=cliente&page=2", "/clients")).toBe("/operations?view=pending&q=cliente&page=2");
     expect(normalizeReturnTo("https://example.com/phishing", "/clients")).toBe("/clients");
