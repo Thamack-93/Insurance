@@ -20,6 +20,7 @@ import { EMPTY_RECENT_ITEMS, getRecentItems, RECENTLY_VIEWED_EVENT } from "@/lib
 import type { SearchResult, SearchResultType } from "@/components/search/search-provider";
 import { Highlight } from "@/components/search/highlight";
 import { contextualNavigation, getUtilityNavigation, globalNavigation } from "@/lib/navigation";
+import { useNoraSession } from "@/components/assistant/nora-session-provider";
 
 const dynamicEntityIcon: Record<SearchResultType, React.ReactNode> = {
   client: <Users className="size-4" />,
@@ -67,6 +68,7 @@ export function CommandPaletteWrapper({
   isSuperAdmin?: boolean;
   hasOrganizationContext?: boolean;
 }) {
+  const { demoMode } = useNoraSession();
   const [open, setOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -88,9 +90,10 @@ export function CommandPaletteWrapper({
   );
 
   const handleSelect = useCallback((href: string) => {
+    if (demoMode && href === "/assistant") return;
     router.push(href);
     setOpen(false);
-  }, [router]);
+  }, [demoMode, router]);
 
   useEffect(() => {
     if (!hasOrganizationContext) return;
@@ -245,7 +248,7 @@ export function CommandPaletteWrapper({
     {
       label: "Herramientas",
       items: [
-        { id: "assistant", label: "Abrir workspace de Nora", icon: <Sparkles className="size-4" />, onSelect: () => handleSelect("/assistant") },
+        ...(!demoMode ? [{ id: "assistant", label: "Abrir workspace de Nora", icon: <Sparkles className="size-4" />, onSelect: () => handleSelect("/assistant") }] : []),
         ...getUtilityNavigation(isAdmin, isSuperAdmin).map((item) => {
           const Icon = item.icon;
           return {

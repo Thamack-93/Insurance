@@ -55,6 +55,9 @@ test("DEMO blocks Nora and real document uploads", async ({ page }) => {
   await login(page, "demo-owner@policydesk.local");
   await expect(page.getByLabel("Organización de demostración")).toBeVisible();
   await expect(page.getByText("Esta DEMO usa información sintética. Nora y la carga de documentos están deshabilitadas.", { exact: true })).toBeVisible();
+  await page.keyboard.press("Control+k");
+  await expect(page.getByRole("dialog", { name: "Búsqueda global" })).toBeVisible();
+  await expect(page.getByText("Abrir workspace de Nora", { exact: true })).toHaveCount(0);
   await page.goto("/policies/org_demo_broker_0001%3Ademo%3Apolicy%3A001");
   await expect(page.getByRole("button", { name: "Nora deshabilitada" })).toBeDisabled();
   await expect(page.getByText("La carga de archivos está deshabilitada en la demo publicada. Solo se mostrará metadata.")).toBeVisible();
