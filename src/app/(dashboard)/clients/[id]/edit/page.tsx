@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { decodeRouteIdentifier } from "@/lib/route-identifier";
 import { updateClient } from "@/app/(dashboard)/clients/actions";
 import { ClientForm } from "@/components/forms/client-form";
 import { PageHeader } from "@/components/layout/page-header";
@@ -10,7 +11,9 @@ import type { ClientFormValues } from "@/lib/validations";
 import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function EditClientPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const routeParams = await params;
+  const id = decodeRouteIdentifier(routeParams.id);
+  if (!id) notFound();
   const scope = await requireOrganizationPortfolioReadScope();
   return withTenantOrganization(scope.organizationId, async (db) => {
   const [client, referidorClients] = await Promise.all([
