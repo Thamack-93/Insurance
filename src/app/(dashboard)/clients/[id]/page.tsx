@@ -64,6 +64,22 @@ export default async function ClientDetailPage({ params, searchParams }: { param
   });
 
   if (!client) {
+    if (scope.organizationId.startsWith("org_demo_")) {
+      const tenant = await db.$queryRaw<Array<{ organizationId: string | null }>>`
+        SELECT current_setting('app.organization_id', true) AS "organizationId"
+      `;
+      const visibleClient = await db.client.findUnique({
+        where: { id },
+        select: { id: true, organizationId: true, portfolioOwnerId: true },
+      });
+      console.warn("DEMO_DETAIL_LOOKUP_DIAGNOSTIC", JSON.stringify({
+        entity: "client",
+        tenantContextMatches: tenant[0]?.organizationId === scope.organizationId,
+        clientVisibleToRuntime: Boolean(visibleClient),
+        clientOrganizationMatches: visibleClient?.organizationId === scope.organizationId,
+        portfolioMatches: !scope.portfolioOwnerId || visibleClient?.portfolioOwnerId === scope.portfolioOwnerId,
+      }));
+    }
     notFound();
   }
 
