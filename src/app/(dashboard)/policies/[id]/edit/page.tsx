@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { decodeRouteIdentifier } from "@/lib/route-identifier";
 import { updatePolicy } from "@/app/(dashboard)/policies/actions";
 import { PolicyForm } from "@/components/forms/policy-form";
 import { createPolicyDefaults } from "@/lib/form-defaults";
@@ -11,7 +12,9 @@ import { riskDetailsFromExisting } from "@/lib/policy-risk-details";
 import { clientOperationalWhere, policyOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
 
 export default async function EditPolicyPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const routeParams = await params;
+  const id = decodeRouteIdentifier(routeParams.id);
+  if (!id) notFound();
   const scope = await requireOrganizationPortfolioReadScope();
   const isAdmin = scope.membershipRole !== "AGENT";
   const [policy, clients, insurers] = await withTenantTransaction(scope.context, (db) => Promise.all([
