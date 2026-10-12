@@ -2138,8 +2138,15 @@ export async function sendTelegramDigestMessagesForUser(input: {
   client?: DbClient;
   mode: "manual" | "automatic";
   timeZone?: string;
-}) {
+}): Promise<TelegramDailyDigestResult> {
   const db = input.client ?? getTelegramPlatformDb();
+  if (!isTenantTransactionClient(db)) {
+    const context = await requireOrganizationContext();
+    if (context.userId !== input.userId) throw new Error("TELEGRAM_USER_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) =>
+      sendTelegramDigestMessagesForUser({ ...input, client: tx }),
+    );
+  }
   const organizationId = await requireActiveTelegramOrganization(input.userId, db);
   const timeZone = input.timeZone ?? DEFAULT_TIMEZONE;
   const parts = await buildTelegramDailyDigestMessagesByUser(input.userId, db, timeZone);
@@ -2186,6 +2193,13 @@ export async function sendTelegramBirthdayReminderForUser(input: {
   now?: Date;
 }): Promise<TelegramBirthdayReminderResult> {
   const db = input.client ?? getTelegramPlatformDb();
+  if (!isTenantTransactionClient(db)) {
+    const context = await requireOrganizationContext();
+    if (context.userId !== input.userId) throw new Error("TELEGRAM_USER_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) =>
+      sendTelegramBirthdayReminderForUser({ ...input, client: tx }),
+    );
+  }
   const organizationId = await requireActiveTelegramOrganization(input.userId, db);
   const timeZone = input.timeZone ?? DEFAULT_TIMEZONE;
   const now = input.now ?? new Date();
@@ -2248,12 +2262,27 @@ export async function sendDailyTelegramBirthdays(client?: DbClient): Promise<Tel
 
   for (const channel of channels) {
     try {
-      const reminder = await sendTelegramBirthdayReminderForUser({
-        userId: channel.userId,
-        client: db,
-        mode: "automatic",
-        timeZone: channel.user.timeZone || DEFAULT_TIMEZONE,
+      const memberships = await db.organizationMembership.findMany({
+        where: {
+          userId: channel.userId,
+          active: true,
+          user: { active: true },
+          organization: { status: "ACTIVE" },
+        },
+        select: { organizationId: true },
+        take: 2,
       });
+      if (memberships.length !== 1) throw new Error("TELEGRAM_ORGANIZATION_MEMBERSHIP_INVALID");
+      const reminder = await withSystemOrganizationTransaction(
+        memberships[0]!.organizationId,
+        "telegram birthday reminder",
+        (tx) => sendTelegramBirthdayReminderForUser({
+          userId: channel.userId,
+          client: tx,
+          mode: "automatic",
+          timeZone: channel.user.timeZone || DEFAULT_TIMEZONE,
+        }),
+      );
       result.sent += reminder.sent;
       result.skipped += reminder.skipped;
       result.failed += reminder.failed;
@@ -4414,12 +4443,28 @@ export async function sendDailyTelegramDigests(client?: DbClient): Promise<Teleg
       continue;
     }
     try {
-      const digestResult = await sendTelegramDigestMessagesForUser({
-        userId: channel.userId,
-        client: db,
-        mode: "automatic",
-        timeZone,
+      const memberships = await db.organizationMembership.findMany({
+        where: {
+          userId: channel.userId,
+          active: true,
+          user: { active: true },
+          organization: { status: "ACTIVE" },
+        },
+        select: { organizationId: true },
+        take: 2,
       });
+      if (memberships.length !== 1) throw new Error("TELEGRAM_ORGANIZATION_MEMBERSHIP_INVALID");
+      const digestResult = await withSystemOrganizationTransaction(
+        memberships[0]!.organizationId,
+        "telegram daily digest",
+        (tx) => sendTelegramDigestMessagesForUser({
+          userId: channel.userId,
+          client: tx,
+          mode: "automatic",
+          timeZone,
+        }),
+        { timeout: 45_000 },
+      );
 
       result.sent += digestResult.sent;
       result.failed += digestResult.failed;
@@ -4719,6 +4764,16 @@ export async function deliverTelegramNotificationEvent(
   client?: DbClient,
 ): Promise<NotificationEventRecord | null> {
   const db = client ?? getTelegramPlatformDb();
+
+  // NotificationEvent is tenant-protected; never read or update it through
+  // the platform locator client without an explicit tenant transaction.
+  if (!isTenantTransactionClient(db)) {
+    const context = await requireOrganizationContext();
+    if (context.organizationId !== organizationId) throw new Error("ORGANIZATION_CONTEXT_MISMATCH");
+    return withTenantTransaction(context, (tx) =>
+      deliverTelegramNotificationEvent(eventId, organizationId, replyMarkup, tx),
+    );
+  }
 
   try {
     const event = await db.notificationEvent.findFirst({ where: { id: eventId, organizationId } });
