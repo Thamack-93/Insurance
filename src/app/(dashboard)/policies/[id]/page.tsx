@@ -76,38 +76,19 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
   const previousPolicy = policy.renewedFromPolicyId
     ? await db.policy.findFirst({
         where: { id: policy.renewedFromPolicyId, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
-        include: {
-          insurer: { select: { name: true } },
-          insuredAssets: { select: { assetType: true, description: true, serialNumber: true, isPrimary: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
-          insuredParties: { select: { fullName: true, isPrimary: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
-        },
       })
     : null;
   const renewalComparison = previousPolicy
     ? compareRenewalPolicies({
-        insurerName: previousPolicy.insurer.name,
         policyType: previousPolicy.policyType,
         premiumAmount: Number(previousPolicy.premiumAmount),
         currency: previousPolicy.currency,
-        paymentFrequency: previousPolicy.paymentFrequency,
-        startDate: previousPolicy.startDate,
-        endDate: previousPolicy.endDate,
         riskDetails: previousPolicy.riskDetails,
-        legacyText: previousPolicy.insuredObject,
-        insuredAssets: previousPolicy.insuredAssets,
-        insuredParties: previousPolicy.insuredParties,
       }, {
-        insurerName: policy.insurer.name,
         policyType: policy.policyType,
         premiumAmount: Number(policy.premiumAmount),
         currency: policy.currency,
-        paymentFrequency: policy.paymentFrequency,
-        startDate: policy.startDate,
-        endDate: policy.endDate,
         riskDetails: policy.riskDetails,
-        legacyText: policy.insuredObject,
-        insuredAssets: policy.insuredAssets,
-        insuredParties: policy.insuredParties,
       })
     : null;
 
@@ -281,15 +262,6 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
         />
 
         <AuditByline createdById={policy.createdById} updatedById={policy.updatedById} />
-
-        {previousPolicy && renewalComparison ? (
-          <PolicyRenewalComparison
-            comparison={renewalComparison}
-            previousPolicyNumber={previousPolicy.policyNumber}
-            previousPolicyHref={`/policies/${previousPolicy.id}`}
-            editHref={`/policies/${policy.id}/edit`}
-          />
-        ) : null}
 
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
           <MetricCard
@@ -779,6 +751,15 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
             <ActivityTimeline entries={activity} />
           )}
         </SectionCard>
+
+        {previousPolicy && renewalComparison ? (
+          <PolicyRenewalComparison
+            comparison={renewalComparison}
+            previousPolicyNumber={previousPolicy.policyNumber}
+            previousPolicyHref={`/policies/${previousPolicy.id}`}
+            editHref={`/policies/${policy.id}/edit`}
+          />
+        ) : null}
       </div>
     </div>
   );
