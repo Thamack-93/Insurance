@@ -93,7 +93,7 @@ export function AppTopbar({
           role="status"
           className="border-t border-amber-300/60 bg-amber-50 px-4 py-2 text-center text-xs font-medium text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100 sm:text-sm"
         >
-          Esta acción está deshabilitada en la organización de demostración.
+          Esta DEMO usa información sintética. Nora y la carga de documentos están deshabilitadas.
         </div>
       ) : null}
     </header>
