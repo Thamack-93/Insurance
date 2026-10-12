@@ -54,7 +54,7 @@ test("DEMO blocks Nora and real document uploads", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await login(page, "demo-owner@policydesk.local");
   await expect(page.getByLabel("Organización de demostración")).toBeVisible();
-  await expect(page.getByText("Esta acción está deshabilitada en la organización de demostración.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Esta DEMO usa información sintética. Nora y la carga de documentos están deshabilitadas.", { exact: true })).toBeVisible();
   const result = await page.evaluate(async () => {
     const nora = await fetch("/api/assistant", {
       method: "POST",
