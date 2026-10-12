@@ -170,7 +170,7 @@ test.describe("structured policy risk details", () => {
       await expect(makeChange).toContainText("Toyota");
       await expect(makeChange).toContainText("Honda");
       await expect(makeChange).toContainText("Cambió");
-      await expect(comparison).toContainText("Diferencia de prima:");
+      await expect(comparison).toContainText("Diferencia:");
       await expect(comparison).toContainText("+21.5%");
       const sourceAfter = await db.policy.findUniqueOrThrow({ where: { id: fixture.policyId }, select: { premiumAmount: true, riskDetails: true, insuredObject: true, status: true } });
       expect(Number(sourceAfter.premiumAmount)).toBe(1234.56);
