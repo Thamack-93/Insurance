@@ -16,6 +16,8 @@ const LazyAssistantConsole = dynamic(
 );
 
 type NoraSessionValue = {
+  userId: string;
+  organizationId: string;
   open: boolean;
   demoMode: boolean;
   context: NoraContextRef | null;
@@ -73,6 +75,8 @@ export function NoraSessionProvider({ children, userId, organizationId = "", dem
   }, [open, snapshotAt]);
 
   const value = useMemo<NoraSessionValue>(() => ({
+    userId,
+    organizationId,
     open,
     demoMode,
     context,
@@ -81,7 +85,7 @@ export function NoraSessionProvider({ children, userId, organizationId = "", dem
     suggestContext: (next) => { if (!demoMode) { setContext(next); setOpen(true); } },
     clearContext: () => setContext(null),
     refreshSnapshot: () => { setSnapshotAt(0); setSnapshot(null); setLoadError(null); },
-  }), [context, demoMode, open]);
+  }), [context, demoMode, open, organizationId, userId]);
 
   const retry = useCallback(() => { setLoadError(null); setSnapshotAt(0); setSnapshot(null); }, []);
 

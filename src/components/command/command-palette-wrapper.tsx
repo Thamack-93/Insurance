@@ -68,12 +68,16 @@ export function CommandPaletteWrapper({
   isSuperAdmin?: boolean;
   hasOrganizationContext?: boolean;
 }) {
-  const { demoMode } = useNoraSession();
+  const { demoMode, userId, organizationId } = useNoraSession();
   const [open, setOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const router = useRouter();
+  const getScopedRecentItems = useCallback(
+    () => getRecentItems(userId, organizationId),
+    [organizationId, userId],
+  );
   const recentItems = useSyncExternalStore(
     useCallback((onStoreChange) => {
       if (typeof window === "undefined") return () => {};
@@ -85,7 +89,7 @@ export function CommandPaletteWrapper({
         window.removeEventListener(RECENTLY_VIEWED_EVENT, handler);
       };
     }, []),
-    getRecentItems,
+    getScopedRecentItems,
     getServerRecentItems,
   );
 
