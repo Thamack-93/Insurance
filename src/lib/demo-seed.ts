@@ -6,7 +6,7 @@ import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
 import { getBusinessDateKey } from "@/lib/business-dates";
 import { policyRiskDetailsSchema, projectPolicyRiskRelations } from "@/lib/policy-risk-details";
 
-export const DEMO_SEED_VERSION = "demo-2026-10-v4";
+export const DEMO_SEED_VERSION = "demo-2026-10-v5";
 
 const addDays = (date: Date, days: number) => new Date(date.getTime() + days * 86_400_000);
 const id = (organizationId: string, type: string, ordinal: number) => `${organizationId}:demo:${type}:${String(ordinal).padStart(3, "0")}`;
@@ -29,21 +29,21 @@ function createDemoPolicyRiskDetails(policy: { ordinal: number; type: string; in
         sourceText,
         data: { insuredPeople: [{ fullName: `Titular DEMO sintético ${policy.ordinal}`, birthDate: "", relationship: "Titular" }], plan: "Plan médico sintético DEMO", insuredAmount: "", deductible: "", coinsurance: "" },
       });
-    case "HOME":
+    case "HOGAR":
       return policyRiskDetailsSchema.parse({
         version: 1,
         policyType: "HOGAR",
         sourceText,
         data: { locations: [{ address: "Ciudad de México · domicilio sintético DEMO", use: "Casa habitación", construction: "", activity: "", insuredValue: "" }] },
       });
-    case "BUSINESS":
+    case "EMPRESARIAL":
       return policyRiskDetailsSchema.parse({
         version: 1,
         policyType: "EMPRESARIAL",
         sourceText,
         data: { activity: "Actividad comercial sintética DEMO", locations: [{ address: "Ciudad de México · ubicación sintética DEMO", use: "Local u oficina", construction: "", activity: "Actividad comercial sintética DEMO", insuredValue: "" }], buildingValue: "", contentsValue: "", businessInterruptionValue: "" },
       });
-    case "LIFE":
+    case "VIDA":
       return policyRiskDetailsSchema.parse({
         version: 1,
         policyType: "VIDA",
@@ -88,12 +88,12 @@ export async function seedDemoBaseline(tx: Prisma.TransactionClient, organizatio
   const policies = [
     { ordinal: 1, clientId: clients[0].id, insurerId: insurerA, number: "DEMO-AUTO-001", type: "AUTO", insuredObject: "Toyota Corolla 2020 LE · unidad sintética DEMO-001", start: -365, end: 7, premium: 18500 },
     { ordinal: 2, clientId: clients[0].id, insurerId: insurerB, number: "DEMO-GMM-002", type: "GMM", insuredObject: "Plan familiar sintético · titular DEMO", start: -365, end: 180, premium: 74000 },
-    { ordinal: 3, clientId: clients[0].id, insurerId: insurerA, number: "DEMO-HOGAR-003", type: "HOME", insuredObject: "Casa habitación sintética · Ciudad de México", start: -365, end: -10, premium: 9200 },
-    { ordinal: 4, clientId: clients[0].id, insurerId: insurerA, number: "DEMO-EMPRESA-004", type: "BUSINESS", insuredObject: "Local comercial y contenido sintético · Ciudad de México", start: -365, end: 335, premium: 125000 },
+    { ordinal: 3, clientId: clients[0].id, insurerId: insurerA, number: "DEMO-HOGAR-003", type: "HOGAR", insuredObject: "Casa habitación sintética · Ciudad de México", start: -365, end: -10, premium: 9200 },
+    { ordinal: 4, clientId: clients[0].id, insurerId: insurerA, number: "DEMO-EMPRESA-004", type: "EMPRESARIAL", insuredObject: "Local comercial y contenido sintético · Ciudad de México", start: -365, end: 335, premium: 125000 },
   ];
   policies.push(...Array.from({ length: 16 }, (_, index) => {
     const ordinal = index + 5;
-    const types = ["AUTO", "GMM", "HOME", "BUSINESS", "LIFE"];
+    const types = ["AUTO", "GMM", "HOGAR", "EMPRESARIAL", "VIDA"];
     const insurers = [insurerA, insurerB, insurerC];
     const end = ordinal % 5 === 0 ? -14 : ordinal % 4 === 0 ? 28 : 90 + (ordinal % 6) * 30;
     const type = types[index % types.length];
@@ -101,9 +101,9 @@ export async function seedDemoBaseline(tx: Prisma.TransactionClient, organizatio
       ? `Nissan Versa 2022 · unidad sintética DEMO-${String(ordinal).padStart(3, "0")}`
       : type === "GMM"
         ? "Plan médico familiar sintético · cobertura DEMO"
-        : type === "HOME"
+        : type === "HOGAR"
           ? "Casa habitación sintética · domicilio DEMO"
-          : type === "BUSINESS"
+          : type === "EMPRESARIAL"
             ? "Oficina y equipo comercial sintéticos · DEMO"
             : "Seguro de vida individual sintético · cobertura DEMO";
     return { ordinal, clientId: clients[Math.floor((ordinal - 1) / 4)].id, insurerId: insurers[(ordinal - 1) % insurers.length], number: `DEMO-${type}-${String(ordinal).padStart(3, "0")}`, type, insuredObject, start: -365, end, premium: 8500 + ordinal * 4100 };
@@ -300,7 +300,7 @@ export async function seedDemoBaseline(tx: Prisma.TransactionClient, organizatio
 
 export async function validateDemoBaseline(tx: Prisma.TransactionClient, organizationId: string) {
   const now = new Date(`${getBusinessDateKey(new Date())}T12:00:00.000Z`);
-  const [clients, policies, receipts, claims, commissions, quotes, collectionFollowUps, document, describedPolicies, policiesWithoutRiskDetails, expiredPolicies, renewalsWithinTenDays, paidReceipts, pendingReceipts, overdueReceipts, postedPayments, reversedPayments] = await Promise.all([
+  const [clients, policies, receipts, claims, commissions, quotes, collectionFollowUps, document, describedPolicies, policiesWithoutRiskDetails, unrecognizedPolicyTypes, expiredPolicies, renewalsWithinTenDays, paidReceipts, pendingReceipts, overdueReceipts, postedPayments, reversedPayments] = await Promise.all([
     tx.client.count({ where: { organizationId } }),
     tx.policy.count({ where: { organizationId } }),
     tx.receipt.count({ where: { organizationId } }),
@@ -311,6 +311,7 @@ export async function validateDemoBaseline(tx: Prisma.TransactionClient, organiz
     tx.document.findUnique({ where: { id: id(organizationId, "document", 1) }, select: { organizationId: true, filePath: true, notes: true } }),
     tx.policy.count({ where: { organizationId, insuredObject: { not: null } } }),
     tx.policy.count({ where: { organizationId, riskDetails: { equals: Prisma.DbNull } } }),
+    tx.policy.count({ where: { organizationId, policyType: { notIn: ["AUTO", "GMM", "VIDA", "DANOS", "FIANZAS", "HOGAR", "RESPONSABILIDAD_CIVIL", "EMPRESARIAL", "ACCIDENTES", "OTRO"] } } }),
     tx.policy.count({ where: { organizationId, status: "EXPIRED" } }),
     tx.policy.count({ where: { organizationId, status: "ACTIVE", endDate: { gte: now, lte: addDays(now, 10) } } }),
     tx.receipt.count({ where: { organizationId, status: "PAID" } }),
@@ -322,10 +323,10 @@ export async function validateDemoBaseline(tx: Prisma.TransactionClient, organiz
   const [annualPolicies, semiannualPolicies, quarterlyPolicies, monthlyPolicies] = await Promise.all(["ANNUAL", "SEMIANNUAL", "QUARTERLY", "MONTHLY"].map(paymentFrequency => tx.policy.count({ where: { organizationId, paymentFrequency } })));
   if (
     clients !== 25 || policies !== 20 || receipts !== 95 || annualPolicies !== 5 || semiannualPolicies !== 5 || quarterlyPolicies !== 5 || monthlyPolicies !== 5 || claims < 4 || commissions < 4 || quotes < 4 || collectionFollowUps !== 2 ||
-    describedPolicies !== 20 || policiesWithoutRiskDetails !== 0 || expiredPolicies !== 5 || renewalsWithinTenDays !== 1 || paidReceipts !== 93 || pendingReceipts !== 1 || overdueReceipts !== 1 || postedPayments !== 93 || reversedPayments !== 1 ||
+    describedPolicies !== 20 || policiesWithoutRiskDetails !== 0 || unrecognizedPolicyTypes !== 0 || expiredPolicies !== 5 || renewalsWithinTenDays !== 1 || paidReceipts !== 93 || pendingReceipts !== 1 || overdueReceipts !== 1 || postedPayments !== 93 || reversedPayments !== 1 ||
     document?.organizationId !== organizationId || document.filePath !== `demo://${organizationId}/synthetic/policy-001` || !document.notes?.includes("sintético")
   ) {
     throw new Error("DEMO_SEED_VALIDATION_FAILED");
   }
-  return { clients, policies, receipts, receiptSchedules: { ANNUAL: annualPolicies, SEMIANNUAL: semiannualPolicies, QUARTERLY: quarterlyPolicies, MONTHLY: monthlyPolicies }, claims, commissions, quotes, collectionFollowUps, structuredPolicies: policies - policiesWithoutRiskDetails, scenarios: { describedPolicies, expiredPolicies, renewalsWithinTenDays, paidReceipts, pendingReceipts, overdueReceipts, postedPayments, reversedPayments }, syntheticDocument: true as const };
+  return { clients, policies, receipts, receiptSchedules: { ANNUAL: annualPolicies, SEMIANNUAL: semiannualPolicies, QUARTERLY: quarterlyPolicies, MONTHLY: monthlyPolicies }, claims, commissions, quotes, collectionFollowUps, structuredPolicies: policies - policiesWithoutRiskDetails, unrecognizedPolicyTypes, scenarios: { describedPolicies, expiredPolicies, renewalsWithinTenDays, paidReceipts, pendingReceipts, overdueReceipts, postedPayments, reversedPayments }, syntheticDocument: true as const };
 }
