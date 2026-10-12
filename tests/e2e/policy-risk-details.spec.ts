@@ -161,10 +161,11 @@ test.describe("structured policy risk details", () => {
       await page.getByRole("button", { name: "Crear póliza", exact: true }).click();
       await expect(page).toHaveURL(/\/policies\/[^/]+$/);
       renewalId = new URL(page.url()).pathname.split("/").pop() ?? null;
-      const comparison = page.getByRole("region", { name: "Comparación con póliza anterior" });
-      await expect(comparison).not.toBeVisible();
-      await page.getByText("Comparar con póliza anterior", { exact: true }).click();
-      await expect(comparison).toBeVisible();
+      const comparison = page.locator("details").filter({ hasText: "Comparar con póliza anterior" });
+      const comparisonHeading = comparison.getByRole("heading", { name: "Comparación de renovación" });
+      await expect(comparisonHeading).not.toBeVisible();
+      await comparison.getByText("Comparar con póliza anterior", { exact: true }).click();
+      await expect(comparisonHeading).toBeVisible();
       const makeChange = comparison.locator("li").filter({ hasText: "Marca" });
       await expect(makeChange).toContainText("Toyota");
       await expect(makeChange).toContainText("Honda");
@@ -326,10 +327,11 @@ test.describe("structured policy risk details", () => {
         },
       });
       expect(assets).toEqual([{ assetType: "AUTO", serialNumber: vin }]);
-      const comparison = page.getByRole("region", { name: "Comparación con póliza anterior" });
-      await expect(comparison).not.toBeVisible();
-      await page.getByText("Comparar con póliza anterior", { exact: true }).click();
-      await expect(comparison).toBeVisible();
+      const comparison = page.locator("details").filter({ hasText: "Comparar con póliza anterior" });
+      const comparisonHeading = comparison.getByRole("heading", { name: "Comparación de renovación" });
+      await expect(comparisonHeading).not.toBeVisible();
+      await comparison.getByText("Comparar con póliza anterior", { exact: true }).click();
+      await expect(comparisonHeading).toBeVisible();
       await expect(comparison).toContainText("Marca");
       await expect(comparison).toContainText("Toyota");
       await expect(comparison).toContainText("Honda");
