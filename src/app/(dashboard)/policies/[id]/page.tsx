@@ -245,7 +245,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
           title={policy.policyNumber}
           description={`${policy.client.fullName} · ${policy.insurer.name} · ${policyTypeLabel(policy.policyType)}`}
           actions={
-            <div className="flex items-center gap-2">
+            <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
               <NoraContextButton context={{ type: "policy", id: policy.id }} />
               <Button asChild variant="outline" className="rounded-full bg-card/70">
                 <Link href={`/policies/${id}/edit`}>
