@@ -73,14 +73,20 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
         databaseName: string;
         databaseRole: string;
         organizationId: string | null;
+        requestedPolicyId: string;
+        requestedPolicyIdChars: number;
         policyVisibleBySql: boolean;
         policyOrganizationMatches: boolean;
         clientVisibleBySql: boolean;
         portfolioMatches: boolean;
+        visiblePolicyCountForOrganization: number;
+        visibleClientCountForOrganization: number;
       }>>`
         SELECT current_database() AS "databaseName",
                current_user AS "databaseRole",
                current_setting('app.organization_id', true) AS "organizationId",
+               ${id}::text AS "requestedPolicyId",
+               length(${id}::text)::int AS "requestedPolicyIdChars",
                EXISTS (
                  SELECT 1 FROM "Policy" p WHERE p."id" = ${id}
                ) AS "policyVisibleBySql",
@@ -100,7 +106,13 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
                  JOIN "Client" c ON c."id" = p."clientId"
                   WHERE p."id" = ${id}
                     AND c."portfolioOwnerId" = ${scope.portfolioOwnerId ?? ""}
-               ) AS "portfolioMatches"
+               ) AS "portfolioMatches",
+               (SELECT count(*)::int FROM "Policy" p
+                 WHERE p."organizationId" = ${scope.organizationId}
+               ) AS "visiblePolicyCountForOrganization",
+               (SELECT count(*)::int FROM "Client" c
+                 WHERE c."organizationId" = ${scope.organizationId}
+               ) AS "visibleClientCountForOrganization"
       `;
       const visiblePolicy = await db.policy.findUnique({
         where: { id },
@@ -117,10 +129,14 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
         databaseName: runtimeLookup?.databaseName,
         databaseRole: runtimeLookup?.databaseRole,
         tenantContextMatches: runtimeLookup?.organizationId === scope.organizationId,
+        requestedPolicyId: runtimeLookup?.requestedPolicyId,
+        requestedPolicyIdChars: runtimeLookup?.requestedPolicyIdChars,
         policyVisibleBySql: runtimeLookup?.policyVisibleBySql,
         policyOrganizationMatchesBySql: runtimeLookup?.policyOrganizationMatches,
         clientVisibleBySql: runtimeLookup?.clientVisibleBySql,
         portfolioMatchesBySql: runtimeLookup?.portfolioMatches,
+        visiblePolicyCountForOrganization: runtimeLookup?.visiblePolicyCountForOrganization,
+        visibleClientCountForOrganization: runtimeLookup?.visibleClientCountForOrganization,
         policyVisibleToRuntime: Boolean(visiblePolicy),
         policyOrganizationMatches: visiblePolicy?.organizationId === scope.organizationId,
         clientVisibleToRuntime: Boolean(visibleClient),

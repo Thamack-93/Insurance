@@ -65,8 +65,24 @@ export default async function ClientDetailPage({ params, searchParams }: { param
 
   if (!client) {
     if (scope.organizationId.startsWith("org_demo_")) {
-      const tenant = await db.$queryRaw<Array<{ organizationId: string | null }>>`
-        SELECT current_setting('app.organization_id', true) AS "organizationId"
+      const [runtimeLookup] = await db.$queryRaw<Array<{
+        databaseName: string;
+        databaseRole: string;
+        organizationId: string | null;
+        requestedClientId: string;
+        requestedClientIdChars: number;
+        clientVisibleBySql: boolean;
+        visibleClientCountForOrganization: number;
+      }>>`
+        SELECT current_database() AS "databaseName",
+               current_user AS "databaseRole",
+               current_setting('app.organization_id', true) AS "organizationId",
+               ${id}::text AS "requestedClientId",
+               length(${id}::text)::int AS "requestedClientIdChars",
+               EXISTS (SELECT 1 FROM "Client" c WHERE c."id" = ${id}) AS "clientVisibleBySql",
+               (SELECT count(*)::int FROM "Client" c
+                 WHERE c."organizationId" = ${scope.organizationId}
+               ) AS "visibleClientCountForOrganization"
       `;
       const visibleClient = await db.client.findUnique({
         where: { id },
@@ -74,7 +90,13 @@ export default async function ClientDetailPage({ params, searchParams }: { param
       });
       console.warn("DEMO_DETAIL_LOOKUP_DIAGNOSTIC", JSON.stringify({
         entity: "client",
-        tenantContextMatches: tenant[0]?.organizationId === scope.organizationId,
+        databaseName: runtimeLookup?.databaseName,
+        databaseRole: runtimeLookup?.databaseRole,
+        tenantContextMatches: runtimeLookup?.organizationId === scope.organizationId,
+        requestedClientId: runtimeLookup?.requestedClientId,
+        requestedClientIdChars: runtimeLookup?.requestedClientIdChars,
+        clientVisibleBySql: runtimeLookup?.clientVisibleBySql,
+        visibleClientCountForOrganization: runtimeLookup?.visibleClientCountForOrganization,
         clientVisibleToRuntime: Boolean(visibleClient),
         clientOrganizationMatches: visibleClient?.organizationId === scope.organizationId,
         portfolioMatches: !scope.portfolioOwnerId || visibleClient?.portfolioOwnerId === scope.portfolioOwnerId,
