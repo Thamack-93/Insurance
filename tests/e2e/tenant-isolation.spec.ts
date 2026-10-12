@@ -108,6 +108,8 @@ test("renewal detail does not load a source policy outside the agent portfolio o
     await page.goto("/policies/tenant-policy-a");
     await expect(page.getByText("OVERLAP-A", { exact: false })).toBeVisible();
     const comparison = page.getByRole("region", { name: "Comparación con póliza anterior" });
+    await expect(comparison).not.toBeVisible();
+    await page.getByText("Comparar con póliza anterior", { exact: true }).click();
     await expect(comparison).toBeVisible();
     await expect(comparison.getByRole("link", { name: allowedSourceId })).toHaveAttribute("href", `/policies/${allowedSourceId}`);
 

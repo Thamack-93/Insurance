@@ -162,6 +162,8 @@ test.describe("structured policy risk details", () => {
       await expect(page).toHaveURL(/\/policies\/[^/]+$/);
       renewalId = new URL(page.url()).pathname.split("/").pop() ?? null;
       const comparison = page.getByRole("region", { name: "Comparación con póliza anterior" });
+      await expect(comparison).not.toBeVisible();
+      await page.getByText("Comparar con póliza anterior", { exact: true }).click();
       await expect(comparison).toBeVisible();
       const makeChange = comparison.locator("li").filter({ hasText: "Marca" });
       await expect(makeChange).toContainText("Toyota");
@@ -325,6 +327,8 @@ test.describe("structured policy risk details", () => {
       });
       expect(assets).toEqual([{ assetType: "AUTO", serialNumber: vin }]);
       const comparison = page.getByRole("region", { name: "Comparación con póliza anterior" });
+      await expect(comparison).not.toBeVisible();
+      await page.getByText("Comparar con póliza anterior", { exact: true }).click();
       await expect(comparison).toBeVisible();
       await expect(comparison).toContainText("Marca");
       await expect(comparison).toContainText("Toyota");
