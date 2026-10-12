@@ -10,6 +10,7 @@ import type { PolicyRenewalSource } from "@/lib/policy-renewal";
 import type { PolicyFormValues } from "@/lib/validations";
 import { riskDetailsFromExisting } from "@/lib/policy-risk-details";
 import { clientOperationalWhere, policyOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
+import { normalizePolicyType } from "@/lib/domain-values";
 
 export default async function EditPolicyPage({ params }: { params: Promise<{ id: string }> }) {
   const routeParams = await params;
@@ -61,6 +62,10 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
     notFound();
   }
 
+  const policyType = normalizePolicyType(policy.policyType);
+  const renewedFromPolicyType = policy.renewedFrom ? normalizePolicyType(policy.renewedFrom.policyType) : null;
+  if (!policyType || (policy.renewedFrom && !renewedFromPolicyType)) notFound();
+
   return (
     <div className="flex flex-col gap-6">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
@@ -79,7 +84,7 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
             policyNumber: policy.policyNumber,
             clientId: policy.clientId,
             insurerId: policy.insurerId,
-            policyType: policy.policyType as PolicyFormValues["policyType"],
+            policyType,
             status: policy.status as PolicyFormValues["status"],
             startDate: formatDateInput(policy.startDate),
             endDate: formatDateInput(policy.endDate),
@@ -88,7 +93,7 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
             paymentFrequency: policy.paymentFrequency as PolicyFormValues["paymentFrequency"],
             paymentPlan: policy.paymentPlan ?? "",
             insuredObject: policy.insuredObject ?? "",
-            riskDetails: riskDetailsFromExisting(policy.policyType, policy.riskDetails, policy.insuredObject, policy.insuredAssets, policy.insuredParties, policy.beneficiaryInfo) ?? undefined,
+            riskDetails: riskDetailsFromExisting(policyType, policy.riskDetails, policy.insuredObject, policy.insuredAssets, policy.insuredParties, policy.beneficiaryInfo) ?? undefined,
             beneficiaryInfo: policy.beneficiaryInfo ?? "",
             notes: policy.notes ?? "",
             renewedFromPolicyId: policy.renewedFromPolicyId ?? "",
@@ -104,7 +109,7 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
                   clientName: policy.renewedFrom.client.fullName,
                   insurerId: policy.renewedFrom.insurerId,
                   insurerName: policy.renewedFrom.insurer.name,
-                  policyType: policy.renewedFrom.policyType as PolicyRenewalSource["policyType"],
+                  policyType: renewedFromPolicyType!,
                   startDate: policy.renewedFrom.startDate,
                   endDate: policy.renewedFrom.endDate,
                   premiumAmount: Number(policy.renewedFrom.premiumAmount),

@@ -18,6 +18,21 @@ export const POLICY_TYPES = [
 ] as const;
 export type PolicyType = (typeof POLICY_TYPES)[number];
 
+const LEGACY_POLICY_TYPE_ALIASES: Readonly<Record<string, PolicyType>> = {
+  BUSINESS: "EMPRESARIAL",
+  HOME: "HOGAR",
+  LIFE: "VIDA",
+};
+
+/** Normalize historical database values before passing them to canonical policy forms. */
+export function normalizePolicyType(value: string): PolicyType | null {
+  if ((POLICY_TYPES as readonly string[]).includes(value)) {
+    return value as PolicyType;
+  }
+
+  return LEGACY_POLICY_TYPE_ALIASES[value] ?? null;
+}
+
 export const POLICY_STATUSES = ["ACTIVE", "PENDING", "RENEWED", "EXPIRED", "CANCELLED"] as const;
 export type PolicyStatus = (typeof POLICY_STATUSES)[number];
 

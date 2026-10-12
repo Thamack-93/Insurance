@@ -11,6 +11,7 @@ import {
   workItemTypeLabel,
 } from "@/lib/ui-labels";
 import { policyTypeLabel, priorityLabel, statusLabel } from "@/lib/status";
+import { normalizePolicyType } from "@/lib/domain-values";
 import { appendReturnTo, normalizeReturnTo } from "@/lib/return-to";
 
 describe("etiquetas visibles de la interfaz", () => {
@@ -42,6 +43,14 @@ describe("etiquetas visibles de la interfaz", () => {
     expect(policyTypeLabel("HOME")).toBe("Hogar");
     expect(policyTypeLabel("BUSINESS")).toBe("Empresarial");
     expect(policyTypeLabel("LIFE")).toBe("Vida");
+  });
+
+  it("normaliza aliases históricos para formularios canónicos", () => {
+    expect(normalizePolicyType("BUSINESS")).toBe("EMPRESARIAL");
+    expect(normalizePolicyType("HOME")).toBe("HOGAR");
+    expect(normalizePolicyType("LIFE")).toBe("VIDA");
+    expect(normalizePolicyType("AUTO")).toBe("AUTO");
+    expect(normalizePolicyType("UNKNOWN")).toBeNull();
   });
 
   it("valida el retorno contextual sin permitir rutas externas", () => {
