@@ -12,6 +12,18 @@ async function login(page: Page, email: string) {
   await expect(page).toHaveURL(/\/today$/);
 }
 
+test("DEMO can open synthetic policy and client edit forms with composite IDs", async ({ page }) => {
+  await login(page, "demo-owner@policydesk.local");
+
+  await page.goto("/policies/org_demo_broker_0001%3Ademo%3Apolicy%3A001/edit");
+  await expect(page.getByRole("heading", { name: "Editar DEMO-AUTO-001" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Guardar cambios" })).toBeVisible();
+
+  await page.goto("/clients/org_demo_broker_0001%3Ademo%3Aclient%3A001/edit");
+  await expect(page.getByRole("heading", { name: "Editar DEMO Ana López" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Guardar cambios" })).toBeVisible();
+});
+
 test("CUSTOMER search, export and direct document ID stay inside its tenant", async ({ page }) => {
   await login(page, "tenant-owner-b@policydesk.local");
   const search = await page.evaluate(async () => {
