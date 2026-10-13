@@ -80,6 +80,7 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
           description="Los cambios impactan cartera, renovaciones y pantallas financieras relacionadas."
           submitLabel="Guardar cambios"
           cancelHref={`/policies/${policy.id}`}
+          originalTerm={{ startDate: formatDateInput(policy.startDate), endDate: formatDateInput(policy.endDate) }}
           defaultValues={createPolicyDefaults({
             policyNumber: policy.policyNumber,
             clientId: policy.clientId,
