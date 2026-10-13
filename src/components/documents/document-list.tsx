@@ -15,6 +15,7 @@ export type DocumentListItem = {
   mimeType: string;
   uploadedAt: Date;
   associationLabel?: string;
+  previewAvailable?: boolean;
 };
 
 function FileTypeIcon({ mimeType }: { mimeType: string }) {
@@ -94,7 +95,7 @@ export function DocumentList({
             )}
             <TableCell>{formatDate(doc.uploadedAt)}</TableCell>
             <TableCell className="text-right">
-              {disabled ? (
+              {disabled && !doc.previewAvailable ? (
                 <span className="text-xs text-muted-foreground">Vista y descarga deshabilitadas</span>
               ) : (
                 <div className="inline-flex items-center justify-end gap-2">
@@ -102,6 +103,7 @@ export function DocumentList({
                     documentId={doc.id}
                     fileName={doc.fileName}
                     mimeType={doc.mimeType}
+                    disabled={disabled && !doc.previewAvailable}
                   />
                   <Button asChild variant="ghost" size="sm" className="size-8 p-0" aria-label={`Descargar ${doc.fileName}`}>
                     <Link href={`/api/documents/${doc.id}/download`} target="_blank">

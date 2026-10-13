@@ -720,6 +720,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
                 documentType: d.documentType,
                 mimeType: d.mimeType,
                 uploadedAt: d.uploadedAt,
+                previewAvailable: d.filePath.startsWith(`demo://${scope.organizationId}/`),
                 associationLabel:
                   d.receipt?.receiptNumber ??
                   d.task?.folio ??
