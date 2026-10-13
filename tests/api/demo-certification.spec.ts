@@ -97,7 +97,8 @@ test("DEMO blocks Nora and real document uploads", async ({ page }) => {
     return { nora: nora.status, upload: upload.status };
   });
   expect(result.nora).toBe(403);
-  expect(result.upload).toBe(403);
+  // Uploads are globally disabled in this certification, so the route returns its unavailable response.
+  expect(result.upload).toBe(501);
 });
 
 test("DEMO provides one account and hides member invitations", async ({ page }) => {

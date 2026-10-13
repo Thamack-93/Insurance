@@ -60,18 +60,9 @@ export async function GET(
   documentId = id;
 
   try {
-    if (!areDocumentFilesEnabled()) {
-      return NextResponse.json(
-        { error: "La descarga de documentos está deshabilitada en este demo." },
-        { status: 501 },
-      );
-    }
-
     // Reject deactivated/unauthenticated users immediately.
     try {
       context = await requireOrganizationContext();
-      const capability = await resolveOrganizationCapability(context.organizationId, "DOCUMENTS");
-      if (!capability.enabled) return NextResponse.json({ error: "Los documentos no están habilitados para esta organización." }, { status: 403 });
     } catch (authErr) {
       if (authErr instanceof AuthError) {
         await recordSecurityAccessDenied({
@@ -114,6 +105,25 @@ export async function GET(
         { error: "El documento no existe o fue eliminado." },
         { status: 404 }
       );
+    }
+
+    const organization = await withTenantTransaction(context, (tx) =>
+      tx.organization.findUnique({ where: { id: context.organizationId }, select: { kind: true } })
+    );
+    const isSyntheticDemoFile =
+      organization?.kind === "DEMO" &&
+      isSyntheticDemoPath(document.filePath, context.organizationId);
+
+    if (!areDocumentFilesEnabled() && !isSyntheticDemoFile) {
+      return NextResponse.json(
+        { error: "La descarga de documentos está deshabilitada en este demo." },
+        { status: 501 },
+      );
+    }
+
+    const capability = await resolveOrganizationCapability(context.organizationId, "DOCUMENTS");
+    if (!capability.enabled && !(isSyntheticDemoFile && capability.reason === "GLOBAL_UNCERTIFIED")) {
+      return NextResponse.json({ error: "Los documentos no están habilitados para esta organización." }, { status: 403 });
     }
 
     // DEMO Blob metadata is the access-control ledger as well as the purge
