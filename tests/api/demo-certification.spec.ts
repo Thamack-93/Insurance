@@ -75,6 +75,14 @@ test("DEMO blocks Nora and real document uploads", async ({ page }) => {
   await page.goto("/documents");
   await expect(page.getByText("La carga de archivos está deshabilitada en la demo publicada. Esta sección queda como metadata del expediente.")).toBeVisible();
   await expect(page.locator("input[type=file]")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Descargar DEMO-policy-synthetic.pdf" })).toBeVisible();
+  const syntheticPdf = await page.evaluate(async () => {
+    const response = await fetch("/api/documents/org_demo_broker_0001:demo:document:001/download");
+    return { status: response.status, type: response.headers.get("content-type"), body: await response.text() };
+  });
+  expect(syntheticPdf.status).toBe(200);
+  expect(syntheticPdf.type).toContain("application/pdf");
+  expect(syntheticPdf.body).toContain("Documento sintetico DEMO");
   const result = await page.evaluate(async () => {
     const nora = await fetch("/api/assistant", {
       method: "POST",
