@@ -2,10 +2,10 @@
 
 import { writeActivityLog } from "@/lib/activity-log";
 import { AuthError } from "@/lib/auth";
-import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
+import { formatDateInput, normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
 import { resolvePolicyFamilyRootId } from "@/lib/policy-families";
 import { Prisma } from "@/generated/prisma/client";
-import { policySchema, type PolicyFormValues } from "@/lib/validations";
+import { policySchema, policyUpdateSchema, policyUpdateTermIsValid, type PolicyFormValues } from "@/lib/validations";
 import { errorResult, revalidatePaths, successResult, type MutationResult } from "@/lib/mutation-utils";
 import { assertClientOrganizationAccess, assertPolicyOrganizationAccess } from "@/lib/portfolio-access";
 import { assertOrganizationContextInTransaction, requireOrganizationContext, type OrganizationContext, withTenantTransaction } from "@/lib/organization-context";
@@ -310,7 +310,7 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
 }
 
 export async function updatePolicy(id: string, values: PolicyFormValues): Promise<MutationResult> {
-  const parsed = policySchema.safeParse(values);
+  const parsed = policyUpdateSchema.safeParse(values);
 
   if (!parsed.success) {
     return errorResult(parsed.error.issues[0]?.message ?? "No se pudo validar la poliza.");
@@ -325,6 +325,13 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
 
     if (!previousPolicy) {
       return errorResult("La poliza ya no existe.");
+    }
+
+    if (!policyUpdateTermIsValid(
+      { startDate: formatDateInput(previousPolicy.startDate), endDate: formatDateInput(previousPolicy.endDate) },
+      parsed.data,
+    )) {
+      return errorResult("La vigencia no puede superar 366 días. Divide contratos multianuales por anualidades.");
     }
 
     const normalized = normalizePolicyInput(parsed.data);

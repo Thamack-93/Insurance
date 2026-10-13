@@ -12,7 +12,7 @@ import {
   policyTypeOptions,
   type SelectOption,
 } from "@/lib/domain-options";
-import { policySchema, type PolicyFormValues } from "@/lib/validations";
+import { policySchema, policyUpdateSchemaForOriginalTerm, type PolicyFormValues } from "@/lib/validations";
 import type { MutationResult } from "@/lib/mutation-utils";
 import type { PolicyRenewalSource } from "@/lib/policy-renewal";
 import type { SerialRenewalCandidate } from "@/lib/policy-renewal-match";
@@ -37,6 +37,7 @@ type PolicyFormProps = {
   submitLabel: string;
   cancelHref: string;
   defaultValues: PolicyFormValues;
+  originalTerm?: { startDate: string; endDate: string };
   clientOptions: SelectOption[];
   insurerOptions: SelectOption[];
   renewalSource?: PolicyRenewalSource | null;
@@ -53,6 +54,7 @@ export function PolicyForm({
   submitLabel,
   cancelHref,
   defaultValues,
+  originalTerm,
   clientOptions,
   insurerOptions,
   renewalSource = null,
@@ -72,7 +74,7 @@ export function PolicyForm({
     setValue,
     formState: { errors },
   } = useForm<PolicyFormValues>({
-    resolver: zodResolver(policySchema) as never,
+    resolver: zodResolver(originalTerm ? policyUpdateSchemaForOriginalTerm(originalTerm) : policySchema) as never,
     defaultValues,
   });
   const selectedPolicyType = useWatch({ control, name: "policyType" });

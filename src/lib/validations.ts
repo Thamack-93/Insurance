@@ -69,7 +69,7 @@ export const clientSchema = z.object({
   }
 });
 
-export const policySchema = z
+const policyBaseSchema = z
   .object({
     policyNumber: z.string().trim().min(2, "Escribe el numero de poliza."),
     clientId: z.string().min(1, "Selecciona un cliente."),
@@ -92,10 +92,6 @@ export const policySchema = z
     message: "La fecha final debe ser posterior al inicio.",
     path: ["endDate"],
   })
-  .refine((values) => daysBetweenDateInputs(values.startDate, values.endDate) <= 366, {
-    message: "La vigencia no puede superar 366 días. Divide contratos multianuales por anualidades.",
-    path: ["endDate"],
-  })
   .superRefine((values, context) => {
     if (values.riskDetails === undefined || values.riskDetails === null) return;
     const parsed = policyRiskDetailsSchema.safeParse(values.riskDetails);
@@ -103,6 +99,36 @@ export const policySchema = z
       context.addIssue({ code: "custom", path: ["riskDetails"], message: "Revisa que los datos del riesgo correspondan al ramo seleccionado." });
     }
   });
+
+function policyTermWithinLimit(startDate: string, endDate: string) {
+  return daysBetweenDateInputs(startDate, endDate) <= 366;
+}
+
+const policyTermError = "La vigencia no puede superar 366 días. Divide contratos multianuales por anualidades.";
+
+export const policySchema = policyBaseSchema.refine(
+  (values) => policyTermWithinLimit(values.startDate, values.endDate),
+  { message: policyTermError, path: ["endDate"] },
+);
+
+export const policyUpdateSchema = policyBaseSchema;
+
+export function policyUpdateTermIsValid(
+  original: { startDate: string; endDate: string },
+  next: { startDate: string; endDate: string },
+) {
+  return (
+    (next.startDate === original.startDate && next.endDate === original.endDate)
+    || policyTermWithinLimit(next.startDate, next.endDate)
+  );
+}
+
+export function policyUpdateSchemaForOriginalTerm(original: { startDate: string; endDate: string }) {
+  return policyBaseSchema.refine(
+    (values) => policyUpdateTermIsValid(original, values),
+    { message: policyTermError, path: ["endDate"] },
+  );
+}
 
 export const receiptSchema = z
   .object({
