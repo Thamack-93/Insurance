@@ -192,7 +192,7 @@ export default async function DocumentsPage({
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-2">
                           <span>{document.fileName}</span>
-                          {documentsEnabled ? (
+                          {documentsEnabled || document.filePath.startsWith(`demo://${scope.organizationId}/`) ? (
                             <Button asChild variant="ghost" size="sm" className="h-6 w-6 p-0">
                               <Link
                                 href={`/api/documents/${document.id}/download`}
