@@ -6,7 +6,7 @@ import { syncAutoCaptureReceipts } from "@/lib/policy-capture-receipts";
 import { getBusinessDateKey } from "@/lib/business-dates";
 import { policyRiskDetailsSchema, projectPolicyRiskRelations } from "@/lib/policy-risk-details";
 
-export const DEMO_SEED_VERSION = "demo-2026-10-v5";
+export const DEMO_SEED_VERSION = "demo-2026-10-v6";
 
 const addDays = (date: Date, days: number) => new Date(date.getTime() + days * 86_400_000);
 const id = (organizationId: string, type: string, ordinal: number) => `${organizationId}:demo:${type}:${String(ordinal).padStart(3, "0")}`;
@@ -61,22 +61,29 @@ export async function seedDemoBaseline(tx: Prisma.TransactionClient, organizatio
   const insurerA = id(organizationId, "insurer", 1);
   const insurerB = id(organizationId, "insurer", 2);
   const insurerC = id(organizationId, "insurer", 3);
-  await tx.insurer.upsert({ where: { id: insurerA }, update: { organizationId, name: "DEMO Aseguradora Horizonte", status: "ACTIVE" }, create: { id: insurerA, organizationId, name: "DEMO Aseguradora Horizonte", status: "ACTIVE" } });
-  await tx.insurer.upsert({ where: { id: insurerB }, update: { organizationId, name: "DEMO Seguros del Centro", status: "ACTIVE" }, create: { id: insurerB, organizationId, name: "DEMO Seguros del Centro", status: "ACTIVE" } });
-  await tx.insurer.upsert({ where: { id: insurerC }, update: { organizationId, name: "DEMO Protección del Valle", status: "ACTIVE" }, create: { id: insurerC, organizationId, name: "DEMO Protección del Valle", status: "ACTIVE" } });
+  await tx.insurer.upsert({ where: { id: insurerA }, update: { organizationId, name: "Aseguradora Horizonte", status: "ACTIVE" }, create: { id: insurerA, organizationId, name: "Aseguradora Horizonte", status: "ACTIVE" } });
+  await tx.insurer.upsert({ where: { id: insurerB }, update: { organizationId, name: "Seguros del Centro", status: "ACTIVE" }, create: { id: insurerB, organizationId, name: "Seguros del Centro", status: "ACTIVE" } });
+  await tx.insurer.upsert({ where: { id: insurerC }, update: { organizationId, name: "Protección del Valle", status: "ACTIVE" }, create: { id: insurerC, organizationId, name: "Protección del Valle", status: "ACTIVE" } });
 
   const clients = [
-    { id: id(organizationId, "client", 1), name: "DEMO Ana López", type: "PERSON", email: "ana.lopez@example.invalid", phone: "" },
-    { id: id(organizationId, "client", 2), name: "DEMO Grupo Roble S.A. de C.V.", type: "COMPANY", email: "grupo.roble@example.invalid", phone: "" },
-    { id: id(organizationId, "client", 3), name: "DEMO Carlos Méndez", type: "PERSON", email: "carlos.mendez@example.invalid", phone: "" },
+    { id: id(organizationId, "client", 1), name: "Ana López", type: "PERSON", email: "ana.lopez@example.invalid", phone: "" },
+    { id: id(organizationId, "client", 2), name: "Grupo Roble S.A. de C.V.", type: "COMPANY", email: "grupo.roble@example.invalid", phone: "" },
+    { id: id(organizationId, "client", 3), name: "Carlos Méndez", type: "PERSON", email: "carlos.mendez@example.invalid", phone: "" },
   ];
-  clients.push(...Array.from({ length: 22 }, (_, index) => {
+  const additionalClientNames = [
+    "Laura Serrano", "Mateo Ibarra", "Sofía Cervantes", "Diego Paredes", "Valeria Nájera", "Emilio Beltrán",
+    "Regina Molina", "Julián Vega", "Camila Salas", "Nicolás Tovar", "Mariana Ríos", "Fernanda Luna",
+    "Gabriel Ortiz", "Paula Medina", "Andrés Rangel", "Elena Campos", "Ricardo Fuentes",
+  ];
+  clients.push(...additionalClientNames.map((name, index) => {
     const ordinal = index + 4;
-    const names = ["Laura", "Mateo", "Sofía", "Diego", "Valeria", "Emilio", "Regina", "Julián", "Camila", "Nicolás", "Mariana"];
-    const surnames = ["Serrano", "Ibarra", "Cervantes", "Paredes", "Nájera", "Beltrán", "Molina", "Vega", "Salas", "Tovar", "Ríos"];
-    const name = `${names[index % names.length]} ${surnames[index % surnames.length]}`;
-    return { id: id(organizationId, "client", ordinal), name: `DEMO ${name}`, type: ordinal % 5 === 0 ? "COMPANY" : "PERSON", email: `demo.client.${ordinal}@example.invalid`, phone: "" };
+    return { id: id(organizationId, "client", ordinal), name, type: ordinal % 5 === 0 ? "COMPANY" : "PERSON", email: `demo.client.${ordinal}@example.invalid`, phone: "" };
   }));
+  // 40 policies across 20 clients: 9 have 1, 6 have 2, 3 have 3, 1 has 4, and 1 has 6.
+  const policiesPerClient = [1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 4, 6];
+  const policyClientIds = policiesPerClient.flatMap((count, clientIndex) =>
+    Array.from({ length: count }, () => clients[clientIndex]!.id),
+  );
   for (const client of clients) {
     await tx.client.upsert({
       where: { id: client.id },
@@ -86,27 +93,28 @@ export async function seedDemoBaseline(tx: Prisma.TransactionClient, organizatio
   }
 
   const policies = [
-    { ordinal: 1, clientId: clients[0].id, insurerId: insurerA, number: "DEMO-AUTO-001", type: "AUTO", insuredObject: "Toyota Corolla 2020 LE · unidad sintética DEMO-001", start: -365, end: 7, premium: 18500 },
-    { ordinal: 2, clientId: clients[0].id, insurerId: insurerB, number: "DEMO-GMM-002", type: "GMM", insuredObject: "Plan familiar sintético · titular DEMO", start: -365, end: 180, premium: 74000 },
-    { ordinal: 3, clientId: clients[0].id, insurerId: insurerA, number: "DEMO-HOGAR-003", type: "HOGAR", insuredObject: "Casa habitación sintética · Ciudad de México", start: -365, end: -10, premium: 9200 },
-    { ordinal: 4, clientId: clients[0].id, insurerId: insurerA, number: "DEMO-EMPRESA-004", type: "EMPRESARIAL", insuredObject: "Local comercial y contenido sintético · Ciudad de México", start: -365, end: 335, premium: 125000 },
+    { ordinal: 1, clientId: policyClientIds[0]!, insurerId: insurerA, number: "AU-260001", type: "AUTO", insuredObject: "Toyota Corolla 2020 LE · vehículo de ejemplo", start: -365, end: 9, premium: 18500 },
+    { ordinal: 2, clientId: policyClientIds[1]!, insurerId: insurerB, number: "GM-260002", type: "GMM", insuredObject: "Plan familiar de gastos médicos · titular de ejemplo", start: -365, end: 180, premium: 74000 },
+    { ordinal: 3, clientId: policyClientIds[2]!, insurerId: insurerA, number: "HO-260003", type: "HOGAR", insuredObject: "Casa habitación · Ciudad de México", start: -365, end: -10, premium: 9200 },
+    { ordinal: 4, clientId: policyClientIds[3]!, insurerId: insurerA, number: "PY-260004", type: "EMPRESARIAL", insuredObject: "Local comercial y contenido · Ciudad de México", start: -365, end: 335, premium: 125000 },
   ];
-  policies.push(...Array.from({ length: 16 }, (_, index) => {
+  policies.push(...Array.from({ length: 36 }, (_, index) => {
     const ordinal = index + 5;
     const types = ["AUTO", "GMM", "HOGAR", "EMPRESARIAL", "VIDA"];
     const insurers = [insurerA, insurerB, insurerC];
-    const end = ordinal % 5 === 0 ? -14 : ordinal % 4 === 0 ? 28 : 90 + (ordinal % 6) * 30;
-    const type = types[index % types.length];
+    const end = ordinal === 40 ? 120 : ordinal % 5 === 0 ? -14 : ordinal % 4 === 0 ? 28 : 90 + (ordinal % 6) * 30;
+    const type = types[(ordinal - 1) % types.length]!;
     const insuredObject = type === "AUTO"
-      ? `Nissan Versa 2022 · unidad sintética DEMO-${String(ordinal).padStart(3, "0")}`
+      ? `Nissan Versa 2022 · unidad ${String(ordinal).padStart(3, "0")}`
       : type === "GMM"
-        ? "Plan médico familiar sintético · cobertura DEMO"
+        ? "Plan médico familiar · cobertura integral"
         : type === "HOGAR"
-          ? "Casa habitación sintética · domicilio DEMO"
+          ? "Casa habitación · domicilio en Ciudad de México"
           : type === "EMPRESARIAL"
-            ? "Oficina y equipo comercial sintéticos · DEMO"
-            : "Seguro de vida individual sintético · cobertura DEMO";
-    return { ordinal, clientId: clients[Math.floor((ordinal - 1) / 4)].id, insurerId: insurers[(ordinal - 1) % insurers.length], number: `DEMO-${type}-${String(ordinal).padStart(3, "0")}`, type, insuredObject, start: -365, end, premium: 8500 + ordinal * 4100 };
+            ? "Oficina y equipo comercial · Ciudad de México"
+            : "Seguro de vida individual · cobertura amplia";
+    const policyPrefixes = { AUTO: "AU", GMM: "GM", HOGAR: "HO", EMPRESARIAL: "PY", VIDA: "VI" } as const;
+    return { ordinal, clientId: policyClientIds[ordinal - 1]!, insurerId: insurers[(ordinal - 1) % insurers.length], number: `${policyPrefixes[type as keyof typeof policyPrefixes]}-26${String(ordinal).padStart(4, "0")}`, type, insuredObject, start: -365, end, premium: 8500 + ordinal * 4100 };
   }));
   const frequencies = ["ANNUAL", "SEMIANNUAL", "QUARTERLY", "MONTHLY"] as const;
   const policyIds: string[] = [];
@@ -119,8 +127,8 @@ export async function seedDemoBaseline(tx: Prisma.TransactionClient, organizatio
     policyIds.push(policyId);
     await tx.policy.upsert({
       where: { id: policyId },
-      update: { organizationId, clientId: policyInput.clientId, insurerId: policyInput.insurerId, policyNumber: policyInput.number, policyType: policyInput.type, insuredObject: policyInput.insuredObject, riskDetails: riskDetails as Prisma.InputJsonValue, riskDetailsReviewRequired: false, status: policyInput.end < 0 ? "EXPIRED" : "ACTIVE", renewalStage: policyInput.ordinal % 5 === 0 ? "CONTACTED" : policyInput.ordinal % 4 === 0 ? "QUOTED" : "PENDING", startDate: addDays(now, policyInput.start), endDate: addDays(now, policyInput.end), premiumAmount: policyInput.premium, currency: "MXN", paymentFrequency: frequencies[(policyInput.ordinal - 1) % frequencies.length], createdById: actorUserId, updatedById: actorUserId },
-      create: { id: policyId, organizationId, clientId: policyInput.clientId, insurerId: policyInput.insurerId, policyNumber: policyInput.number, policyType: policyInput.type, insuredObject: policyInput.insuredObject, riskDetails: riskDetails as Prisma.InputJsonValue, riskDetailsReviewRequired: false, status: policyInput.end < 0 ? "EXPIRED" : "ACTIVE", renewalStage: policyInput.ordinal % 5 === 0 ? "CONTACTED" : policyInput.ordinal % 4 === 0 ? "QUOTED" : "PENDING", startDate: addDays(now, policyInput.start), endDate: addDays(now, policyInput.end), premiumAmount: policyInput.premium, currency: "MXN", paymentFrequency: frequencies[(policyInput.ordinal - 1) % frequencies.length], createdById: actorUserId, updatedById: actorUserId },
+      update: { organizationId, clientId: policyInput.clientId, insurerId: policyInput.insurerId, policyNumber: policyInput.number, policyType: policyInput.type, insuredObject: policyInput.insuredObject, riskDetails: riskDetails as Prisma.InputJsonValue, riskDetailsReviewRequired: false, status: policyInput.ordinal === 40 ? "CANCELLED" : policyInput.end < 0 ? "EXPIRED" : "ACTIVE", cancellationReason: policyInput.ordinal === 40 ? "Cancelación solicitada por el cliente" : null, cancelledAt: policyInput.ordinal === 40 ? addDays(now, -12) : null, renewalStage: policyInput.ordinal % 5 === 0 ? "CONTACTED" : policyInput.ordinal % 4 === 0 ? "QUOTED" : "PENDING", startDate: addDays(now, policyInput.start), endDate: addDays(now, policyInput.end), premiumAmount: policyInput.premium, currency: "MXN", paymentFrequency: frequencies[(policyInput.ordinal - 1) % frequencies.length], createdById: actorUserId, updatedById: actorUserId },
+      create: { id: policyId, organizationId, clientId: policyInput.clientId, insurerId: policyInput.insurerId, policyNumber: policyInput.number, policyType: policyInput.type, insuredObject: policyInput.insuredObject, riskDetails: riskDetails as Prisma.InputJsonValue, riskDetailsReviewRequired: false, status: policyInput.ordinal === 40 ? "CANCELLED" : policyInput.end < 0 ? "EXPIRED" : "ACTIVE", cancellationReason: policyInput.ordinal === 40 ? "Cancelación solicitada por el cliente" : null, cancelledAt: policyInput.ordinal === 40 ? addDays(now, -12) : null, renewalStage: policyInput.ordinal % 5 === 0 ? "CONTACTED" : policyInput.ordinal % 4 === 0 ? "QUOTED" : "PENDING", startDate: addDays(now, policyInput.start), endDate: addDays(now, policyInput.end), premiumAmount: policyInput.premium, currency: "MXN", paymentFrequency: frequencies[(policyInput.ordinal - 1) % frequencies.length], createdById: actorUserId, updatedById: actorUserId },
     });
     const relations = projectPolicyRiskRelations(riskDetails);
     for (const [index, asset] of relations.assets.entries()) {
@@ -141,7 +149,9 @@ export async function seedDemoBaseline(tx: Prisma.TransactionClient, organizatio
     for (const [installmentIndex, receipt] of schedule.entries()) {
       const overdueExample = policyInput.ordinal === 2 && installmentIndex === 0;
       const upcomingPaymentExample = policyInput.ordinal === 4 && installmentIndex === schedule.length - 1;
-      if (overdueExample) {
+      if (policyInput.ordinal === 40) {
+        await tx.receipt.update({ where: { id: receipt.id }, data: { status: "CANCELLED", cancellationReason: "Cancelación de la póliza" } });
+      } else if (overdueExample) {
         await tx.receipt.update({ where: { id: receipt.id }, data: { status: "OVERDUE", dueDate: addDays(now, -3) } });
       } else if (upcomingPaymentExample) {
         await tx.receipt.update({ where: { id: receipt.id }, data: { status: "PENDING", dueDate: addDays(now, 5), paidDate: null, paymentMethod: null } });
@@ -184,12 +194,14 @@ export async function seedDemoBaseline(tx: Prisma.TransactionClient, organizatio
     { ordinal: 2, clientId: clients[4].id, insurerId: insurerB, type: "AUTO", status: "ACCEPTED" as const, amount: 22900 },
     { ordinal: 3, clientId: clients[4].id, insurerId: insurerC, type: "AUTO", status: "IN_PROGRESS" as const, amount: 20100 },
     { ordinal: 4, clientId: clients[5].id, insurerId: insurerB, type: "GMM", status: "SENT" as const, amount: 81200 },
+    { ordinal: 5, clientId: clients[6].id, insurerId: insurerC, type: "AUTO", status: "REJECTED" as const, amount: 24500 },
+    { ordinal: 6, clientId: clients[7].id, insurerId: insurerA, type: "GMM", status: "EXPIRED" as const, amount: 79200 },
   ];
   for (const quote of quoteInputs) {
     await tx.quote.upsert({
       where: { id: id(organizationId, "quote", quote.ordinal) },
-      update: { organizationId, clientId: quote.clientId, insurerId: quote.insurerId, policyType: quote.type, status: quote.status, requestedDate: addDays(now, -12), sentDate: addDays(now, -8), validUntil: addDays(now, 18), quotedAmount: quote.amount, notes: "Cotización sintética DEMO", createdById: actorUserId, updatedById: actorUserId },
-      create: { id: id(organizationId, "quote", quote.ordinal), organizationId, clientId: quote.clientId, insurerId: quote.insurerId, policyType: quote.type, status: quote.status, requestedDate: addDays(now, -12), sentDate: addDays(now, -8), validUntil: addDays(now, 18), quotedAmount: quote.amount, notes: "Cotización sintética DEMO", createdById: actorUserId, updatedById: actorUserId },
+      update: { organizationId, clientId: quote.clientId, insurerId: quote.insurerId, policyType: quote.type, status: quote.status, requestedDate: addDays(now, -12), sentDate: addDays(now, -8), validUntil: quote.ordinal === 6 ? addDays(now, -1) : addDays(now, 18), quotedAmount: quote.amount, notes: "Cotización de ejemplo", createdById: actorUserId, updatedById: actorUserId },
+      create: { id: id(organizationId, "quote", quote.ordinal), organizationId, clientId: quote.clientId, insurerId: quote.insurerId, policyType: quote.type, status: quote.status, requestedDate: addDays(now, -12), sentDate: addDays(now, -8), validUntil: quote.ordinal === 6 ? addDays(now, -1) : addDays(now, 18), quotedAmount: quote.amount, notes: "Cotización de ejemplo", createdById: actorUserId, updatedById: actorUserId },
     });
   }
   const comparisonId = id(organizationId, "quote-comparison", 1);
@@ -246,25 +258,29 @@ export async function seedDemoBaseline(tx: Prisma.TransactionClient, organizatio
   await tx.notificationEvent.upsert({ where: { id: id(organizationId, "notification", 1) }, update: { organizationId, type: "RENEWAL", title: "DEMO renovación próxima", body: "Ejemplo sintético de notificación.", priority: "HIGH", userId: actorUserId, clientId: clients[0].id, policyId: policyIds[0], dedupeKey: `demo-renewal:${organizationId}`, channelType: "IN_APP", status: "PENDING" }, create: { id: id(organizationId, "notification", 1), organizationId, type: "RENEWAL", title: "DEMO renovación próxima", body: "Ejemplo sintético de notificación.", priority: "HIGH", userId: actorUserId, clientId: clients[0].id, policyId: policyIds[0], dedupeKey: `demo-renewal:${organizationId}`, channelType: "IN_APP", status: "PENDING" } });
 
   const claimId = id(organizationId, "claim", 1);
-  await tx.claim.upsert({ where: { id: claimId }, update: { organizationId, folio: "DEMO-CLAIM-001", clientId: clients[0].id, policyId: policyIds[0], insurerId: insurerA, claimType: "COLISION", description: "Ejemplo sintético para probar el flujo de siniestros.", incidentDate: addDays(now, -20), reportedDate: addDays(now, -18), amountClaimed: 42000, status: "IN_PROGRESS", createdById: actorUserId, updatedById: actorUserId }, create: { id: claimId, organizationId, folio: "DEMO-CLAIM-001", clientId: clients[0].id, policyId: policyIds[0], insurerId: insurerA, claimType: "COLISION", description: "Ejemplo sintético para probar el flujo de siniestros.", incidentDate: addDays(now, -20), reportedDate: addDays(now, -18), amountClaimed: 42000, status: "IN_PROGRESS", createdById: actorUserId, updatedById: actorUserId } });
+  await tx.claim.upsert({ where: { id: claimId }, update: { organizationId, folio: "SIN-260001", clientId: clients[0].id, policyId: policyIds[0], insurerId: insurerA, claimType: "COLISION", description: "Ejemplo para probar el flujo de siniestros.", incidentDate: addDays(now, -20), reportedDate: addDays(now, -18), amountClaimed: 42000, status: "IN_PROGRESS", createdById: actorUserId, updatedById: actorUserId }, create: { id: claimId, organizationId, folio: "SIN-260001", clientId: clients[0].id, policyId: policyIds[0], insurerId: insurerA, claimType: "COLISION", description: "Ejemplo para probar el flujo de siniestros.", incidentDate: addDays(now, -20), reportedDate: addDays(now, -18), amountClaimed: 42000, status: "IN_PROGRESS", createdById: actorUserId, updatedById: actorUserId } });
   await tx.claimChecklistItem.upsert({ where: { claimId_requirementCode: { claimId, requirementCode: "INE" } }, update: { organizationId, label: "Identificación oficial", status: "REQUESTED" }, create: { id: id(organizationId, "checklist", 1), organizationId, claimId, requirementCode: "INE", label: "Identificación oficial", status: "REQUESTED" } });
   const extraClaims = [
-    { ordinal: 2, status: "WAITING_CLIENT", type: "ROBO", amount: 18500, requirement: "FACTURA", requirementStatus: "MISSING" },
-    { ordinal: 3, status: "WAITING_INSURER", type: "DANOS", amount: 63000, requirement: "AJUSTE", requirementStatus: "RECEIVED" },
-    { ordinal: 4, status: "OPEN", type: "RESPONSABILIDAD", amount: 27500, requirement: "DECLARACION", requirementStatus: "REQUESTED" },
+    { ordinal: 2, policyOrdinal: 1, status: "WAITING_CLIENT", type: "ROBO", amount: 18500, requirement: "FACTURA", requirementStatus: "MISSING" },
+    { ordinal: 3, policyOrdinal: 4, status: "WAITING_INSURER", type: "DANOS", amount: 63000, requirement: "AJUSTE", requirementStatus: "RECEIVED" },
+    { ordinal: 4, policyOrdinal: 4, status: "OPEN", type: "RESPONSABILIDAD", amount: 27500, requirement: "DECLARACION", requirementStatus: "REQUESTED" },
+    { ordinal: 5, policyOrdinal: 3, status: "RESOLVED", type: "CRISTALES", amount: 12800, paidAmount: 12800, requirement: "DICTAMEN", requirementStatus: "RECEIVED" },
   ] as const;
   for (const item of extraClaims) {
     const extraClaimId = id(organizationId, "claim", item.ordinal);
+    const policyInput = policies[item.policyOrdinal - 1]!;
+    const closedDate = item.status === "RESOLVED" ? addDays(now, -4) : null;
+    const amountPaid = item.status === "RESOLVED" ? item.paidAmount : null;
     await tx.claim.upsert({
       where: { id: extraClaimId },
-      update: { organizationId, folio: `DEMO-CLAIM-${String(item.ordinal).padStart(3, "0")}`, clientId: clients[item.ordinal - 1].id, policyId: policyIds[item.ordinal - 1], insurerId: item.ordinal % 2 === 0 ? insurerB : insurerC, claimType: item.type, description: "Ejemplo sintético para probar estados de siniestros.", incidentDate: addDays(now, -item.ordinal * 11), reportedDate: addDays(now, -item.ordinal * 9), amountClaimed: item.amount, status: item.status, createdById: actorUserId, updatedById: actorUserId },
-      create: { id: extraClaimId, organizationId, folio: `DEMO-CLAIM-${String(item.ordinal).padStart(3, "0")}`, clientId: clients[item.ordinal - 1].id, policyId: policyIds[item.ordinal - 1], insurerId: item.ordinal % 2 === 0 ? insurerB : insurerC, claimType: item.type, description: "Ejemplo sintético para probar estados de siniestros.", incidentDate: addDays(now, -item.ordinal * 11), reportedDate: addDays(now, -item.ordinal * 9), amountClaimed: item.amount, status: item.status, createdById: actorUserId, updatedById: actorUserId },
+      update: { organizationId, folio: `SIN-260${String(item.ordinal).padStart(3, "0")}`, clientId: policyInput.clientId, policyId: policyIds[item.policyOrdinal - 1], insurerId: policyInput.insurerId, claimType: item.type, description: item.status === "RESOLVED" ? "Siniestro de cristales concluido y pagado." : "Ejemplo para probar estados de siniestros.", incidentDate: addDays(now, -item.ordinal * 11), reportedDate: addDays(now, -item.ordinal * 9), amountClaimed: item.amount, amountPaid, status: item.status, closedDate, createdById: actorUserId, updatedById: actorUserId },
+      create: { id: extraClaimId, organizationId, folio: `SIN-260${String(item.ordinal).padStart(3, "0")}`, clientId: policyInput.clientId, policyId: policyIds[item.policyOrdinal - 1], insurerId: policyInput.insurerId, claimType: item.type, description: item.status === "RESOLVED" ? "Siniestro de cristales concluido y pagado." : "Ejemplo para probar estados de siniestros.", incidentDate: addDays(now, -item.ordinal * 11), reportedDate: addDays(now, -item.ordinal * 9), amountClaimed: item.amount, amountPaid, status: item.status, closedDate, createdById: actorUserId, updatedById: actorUserId },
     });
     await tx.claimChecklistItem.upsert({ where: { claimId_requirementCode: { claimId: extraClaimId, requirementCode: item.requirement } }, update: { organizationId, label: `Requisito ${item.requirement}`, status: item.requirementStatus }, create: { id: id(organizationId, "checklist", item.ordinal), organizationId, claimId: extraClaimId, requirementCode: item.requirement, label: `Requisito ${item.requirement}`, status: item.requirementStatus } });
   }
 
-  await tx.task.upsert({ where: { id: id(organizationId, "task", 1) }, update: { organizationId, folio: "DEMO-TASK-001", clientId: clients[0].id, policyId: policyIds[0], insurerId: insurerA, title: "Dar seguimiento a renovación DEMO", description: "Ejemplo sintético de tarea", taskType: "RENEWAL", status: "OPEN", priority: "HIGH", dueDate: addDays(now, 7), createdById: actorUserId, updatedById: actorUserId }, create: { id: id(organizationId, "task", 1), organizationId, folio: "DEMO-TASK-001", clientId: clients[0].id, policyId: policyIds[0], insurerId: insurerA, title: "Dar seguimiento a renovación DEMO", description: "Ejemplo sintético de tarea", taskType: "RENEWAL", status: "OPEN", priority: "HIGH", dueDate: addDays(now, 7), createdById: actorUserId, updatedById: actorUserId } });
-  await tx.workItem.upsert({ where: { organizationId_sourceType_sourceId: { organizationId, sourceType: "DEMO", sourceId: "demo-work-item-1" } }, update: { organizationId, sourceType: "DEMO", sourceId: "demo-work-item-1", workItemType: "TASK", taskType: "RENEWAL", status: "OPEN", priority: "HIGH", folio: "DEMO-WORK-001", title: "DEMO renewal follow-up", description: "Synthetic work item", entityType: "Policy", entityId: policyIds[0], clientId: clients[0].id, policyId: policyIds[0], insurerId: insurerA, dueDate: addDays(now, 7), assignedToId: actorUserId }, create: { id: id(organizationId, "work", 1), organizationId, sourceType: "DEMO", sourceId: "demo-work-item-1", workItemType: "TASK", taskType: "RENEWAL", status: "OPEN", priority: "HIGH", folio: "DEMO-WORK-001", title: "DEMO renewal follow-up", description: "Synthetic work item", entityType: "Policy", entityId: policyIds[0], clientId: clients[0].id, policyId: policyIds[0], insurerId: insurerA, dueDate: addDays(now, 7), assignedToId: actorUserId } });
+  await tx.task.upsert({ where: { id: id(organizationId, "task", 1) }, update: { organizationId, folio: "REN-260001", clientId: clients[0].id, policyId: policyIds[0], insurerId: insurerA, title: "Dar seguimiento a renovación", description: "Confirmar condiciones antes del vencimiento.", taskType: "RENEWAL", status: "OPEN", priority: "HIGH", dueDate: addDays(now, 9), createdById: actorUserId, updatedById: actorUserId }, create: { id: id(organizationId, "task", 1), organizationId, folio: "REN-260001", clientId: clients[0].id, policyId: policyIds[0], insurerId: insurerA, title: "Dar seguimiento a renovación", description: "Confirmar condiciones antes del vencimiento.", taskType: "RENEWAL", status: "OPEN", priority: "HIGH", dueDate: addDays(now, 9), createdById: actorUserId, updatedById: actorUserId } });
+  await tx.workItem.upsert({ where: { organizationId_sourceType_sourceId: { organizationId, sourceType: "DEMO", sourceId: "demo-work-item-1" } }, update: { organizationId, sourceType: "DEMO", sourceId: "demo-work-item-1", workItemType: "TASK", taskType: "RENEWAL", status: "OPEN", priority: "HIGH", folio: "REN-260001", title: "Seguimiento de renovación", description: "Confirmar condiciones antes del vencimiento.", entityType: "Policy", entityId: policyIds[0], clientId: clients[0].id, policyId: policyIds[0], insurerId: insurerA, dueDate: addDays(now, 9), assignedToId: actorUserId }, create: { id: id(organizationId, "work", 1), organizationId, sourceType: "DEMO", sourceId: "demo-work-item-1", workItemType: "TASK", taskType: "RENEWAL", status: "OPEN", priority: "HIGH", folio: "REN-260001", title: "Seguimiento de renovación", description: "Confirmar condiciones antes del vencimiento.", entityType: "Policy", entityId: policyIds[0], clientId: clients[0].id, policyId: policyIds[0], insurerId: insurerA, dueDate: addDays(now, 9), assignedToId: actorUserId } });
   for (const promise of [
     { ordinal: 2, policyOrdinal: 4, receiptIndex: -1, promisedPaymentDate: addDays(now, 3), dueDate: addDays(now, 3), title: "Promesa de pago DEMO confirmada", description: "Cliente sintético prometió pagar el próximo recibo DEMO." },
     { ordinal: 3, policyOrdinal: 2, receiptIndex: 0, promisedPaymentDate: addDays(now, -3), dueDate: addDays(now, -1), title: "Promesa de pago DEMO incumplida", description: "La fecha prometida pasó sin recibir el pago sintético." },
@@ -300,7 +316,7 @@ export async function seedDemoBaseline(tx: Prisma.TransactionClient, organizatio
 
 export async function validateDemoBaseline(tx: Prisma.TransactionClient, organizationId: string) {
   const now = new Date(`${getBusinessDateKey(new Date())}T12:00:00.000Z`);
-  const [clients, policies, receipts, claims, commissions, quotes, collectionFollowUps, document, describedPolicies, policiesWithoutRiskDetails, unrecognizedPolicyTypes, expiredPolicies, renewalsWithinTenDays, paidReceipts, pendingReceipts, overdueReceipts, postedPayments, reversedPayments] = await Promise.all([
+  const [clients, policies, receipts, claims, commissions, quotes, collectionFollowUps, document, describedPolicies, policiesWithoutRiskDetails, unrecognizedPolicyTypes, expiredPolicies, renewalsWithinTenDays, paidReceipts, pendingReceipts, overdueReceipts, postedPayments, reversedPayments, cancelledPolicies, cancelledReceipts, resolvedClaims, rejectedQuotes, expiredQuotes] = await Promise.all([
     tx.client.count({ where: { organizationId } }),
     tx.policy.count({ where: { organizationId } }),
     tx.receipt.count({ where: { organizationId } }),
@@ -319,14 +335,20 @@ export async function validateDemoBaseline(tx: Prisma.TransactionClient, organiz
     tx.receipt.count({ where: { organizationId, status: "OVERDUE" } }),
     tx.payment.count({ where: { organizationId, status: "POSTED" } }),
     tx.payment.count({ where: { organizationId, status: "REVERSED" } }),
+    tx.policy.count({ where: { organizationId, status: "CANCELLED" } }),
+    tx.receipt.count({ where: { organizationId, status: "CANCELLED" } }),
+    tx.claim.count({ where: { organizationId, status: "RESOLVED" } }),
+    tx.quote.count({ where: { organizationId, status: "REJECTED" } }),
+    tx.quote.count({ where: { organizationId, status: "EXPIRED" } }),
   ]);
   const [annualPolicies, semiannualPolicies, quarterlyPolicies, monthlyPolicies] = await Promise.all(["ANNUAL", "SEMIANNUAL", "QUARTERLY", "MONTHLY"].map(paymentFrequency => tx.policy.count({ where: { organizationId, paymentFrequency } })));
   if (
-    clients !== 25 || policies !== 20 || receipts !== 95 || annualPolicies !== 5 || semiannualPolicies !== 5 || quarterlyPolicies !== 5 || monthlyPolicies !== 5 || claims < 4 || commissions < 4 || quotes < 4 || collectionFollowUps !== 2 ||
-    describedPolicies !== 20 || policiesWithoutRiskDetails !== 0 || unrecognizedPolicyTypes !== 0 || expiredPolicies !== 5 || renewalsWithinTenDays !== 1 || paidReceipts !== 93 || pendingReceipts !== 1 || overdueReceipts !== 1 || postedPayments !== 93 || reversedPayments !== 1 ||
+    clients !== 20 || policies !== 40 || receipts !== 190 || annualPolicies !== 10 || semiannualPolicies !== 10 || quarterlyPolicies !== 10 || monthlyPolicies !== 10 || claims < 5 || commissions < 4 || quotes < 6 || collectionFollowUps !== 2 ||
+    describedPolicies !== 40 || policiesWithoutRiskDetails !== 0 || unrecognizedPolicyTypes !== 0 || expiredPolicies !== 8 || renewalsWithinTenDays !== 1 || paidReceipts !== 176 || pendingReceipts !== 1 || overdueReceipts !== 1 || postedPayments !== 176 || reversedPayments !== 1 ||
+    cancelledPolicies !== 1 || cancelledReceipts !== 12 || resolvedClaims !== 1 || rejectedQuotes !== 1 || expiredQuotes !== 1 ||
     document?.organizationId !== organizationId || document.filePath !== `demo://${organizationId}/synthetic/policy-001` || !document.notes?.includes("sintético")
   ) {
     throw new Error("DEMO_SEED_VALIDATION_FAILED");
   }
-  return { clients, policies, receipts, receiptSchedules: { ANNUAL: annualPolicies, SEMIANNUAL: semiannualPolicies, QUARTERLY: quarterlyPolicies, MONTHLY: monthlyPolicies }, claims, commissions, quotes, collectionFollowUps, structuredPolicies: policies - policiesWithoutRiskDetails, unrecognizedPolicyTypes, scenarios: { describedPolicies, expiredPolicies, renewalsWithinTenDays, paidReceipts, pendingReceipts, overdueReceipts, postedPayments, reversedPayments }, syntheticDocument: true as const };
+  return { clients, policies, receipts, receiptSchedules: { ANNUAL: annualPolicies, SEMIANNUAL: semiannualPolicies, QUARTERLY: quarterlyPolicies, MONTHLY: monthlyPolicies }, claims, commissions, quotes, collectionFollowUps, structuredPolicies: policies - policiesWithoutRiskDetails, unrecognizedPolicyTypes, scenarios: { describedPolicies, expiredPolicies, renewalsWithinTenDays, paidReceipts, pendingReceipts, overdueReceipts, postedPayments, reversedPayments, cancelledPolicies, cancelledReceipts, resolvedClaims, rejectedQuotes, expiredQuotes }, syntheticDocument: true as const };
 }
