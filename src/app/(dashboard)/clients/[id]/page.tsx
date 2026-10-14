@@ -342,47 +342,45 @@ export default async function ClientDetailPage({ params, searchParams }: { param
                 })}
               </div>
             </div>
-            <div className="max-h-[30rem] overflow-auto">
-              <div className="min-w-[760px]">
-                <Table>
-                  <TableHeader className="sticky top-0 z-10 bg-card">
-                    <TableRow className="bg-muted/40">
-                      <TableHead>Póliza</TableHead>
-                      <TableHead>Estado</TableHead>
-                      <TableHead>Aseguradora</TableHead>
-                      <TableHead>Tipo</TableHead>
-                      <TableHead>Renovación</TableHead>
-                      <TableHead className="text-right">Prima</TableHead>
+            <div className="max-h-[30rem] overflow-x-hidden overflow-y-auto">
+              <Table className="min-w-[760px]">
+                <TableHeader className="sticky top-0 z-10 bg-card">
+                  <TableRow className="bg-muted/40">
+                    <TableHead>Póliza</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead>Aseguradora</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead>Renovación</TableHead>
+                    <TableHead className="text-right">Prima</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {policies.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+                        No hay pólizas con este filtro.
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {policies.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
-                          No hay pólizas con este filtro.
-                        </TableCell>
-                      </TableRow>
-                    ) : policies.map((policy) => (
-                      <TableRow key={policy.id}>
-                        <TableCell>
-                          <Link href={`/policies/${policy.id}`} className="font-medium text-foreground hover:text-primary">
-                            <PolicyIdentity policyNumber={policy.policyNumber} policy={policy} />
-                          </Link>
-                        </TableCell>
-                        <TableCell><StatusBadge status={policy.status} entity="policy" /></TableCell>
-                        <TableCell>{policy.insurer.name}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="rounded-full">
-                            {policyTypeLabel(policy.policyType)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{policy.endDate ? formatDate(policy.endDate) : "Sin fecha"}</TableCell>
-                        <TableCell className="text-right font-medium">{formatCurrency(policy.premiumAmount, policy.currency)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                  ) : policies.map((policy) => (
+                    <TableRow key={policy.id}>
+                      <TableCell>
+                        <Link href={`/policies/${policy.id}`} className="font-medium text-foreground hover:text-primary">
+                          <PolicyIdentity policyNumber={policy.policyNumber} policy={policy} />
+                        </Link>
+                      </TableCell>
+                      <TableCell><StatusBadge status={policy.status} entity="policy" /></TableCell>
+                      <TableCell>{policy.insurer.name}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="rounded-full">
+                          {policyTypeLabel(policy.policyType)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{policy.endDate ? formatDate(policy.endDate) : "Sin fecha"}</TableCell>
+                      <TableCell className="text-right font-medium">{formatCurrency(policy.premiumAmount, policy.currency)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           </SectionCard>
         </section>
