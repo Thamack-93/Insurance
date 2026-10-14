@@ -7,7 +7,7 @@ import { AuthError, hashPassword, requireSuperAdmin } from "@/lib/auth";
 import { withSystemOrganizationTransaction } from "@/lib/organization-context";
 import { acquireDistributedLock } from "@/lib/request-guards";
 import { seedDemoBaseline, validateDemoBaseline, DEMO_SEED_VERSION } from "@/lib/demo-seed";
-import { SYSTEM_USER_ID } from "@/lib/tenant-organization-foundation";
+import { PROTECTED_TENANT_TABLES, SYSTEM_USER_ID } from "@/lib/tenant-organization-foundation";
 import { NORA_CAPTURE_HANDOFF_PREFIX } from "@/lib/nora-capture-handoff-storage.shared";
 import { NORA_POLICY_PDF_PREFIX } from "@/lib/nora-pdf-storage.shared";
 
@@ -366,7 +366,7 @@ function demoBlobPrefixes(organizationId: string) {
  * Prefixes are derived from the exact organization id and are never caller
  * supplied paths. Pagination makes the reset complete for large DEMOs.
  */
-async function purgeDemoPrivateBlobs(organizationId: string) {
+async function purgeDemoPrivateBlobs(organizationId: string, renewLock?: () => Promise<boolean>) {
   let purged = 0;
   for (const prefix of demoBlobPrefixes(organizationId)) {
     let cursor: string | undefined;
@@ -376,10 +376,28 @@ async function purgeDemoPrivateBlobs(organizationId: string) {
         await Promise.all(page.blobs.map((blob) => del(blob.url)));
         purged += page.blobs.length;
       }
+      if (renewLock && !(await renewLock())) throw new Error("DEMO_DELETE_LOCK_EXPIRED");
       cursor = page.hasMore ? page.cursor : undefined;
     } while (cursor);
   }
   return purged;
+}
+
+async function countDemoTenantRows(tx: Prisma.TransactionClient, organizationId: string) {
+  const counts: Record<string, number> = {};
+  for (const table of PROTECTED_TENANT_TABLES) {
+    const rows = await tx.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
+      SELECT count(*)::bigint AS count
+        FROM ${Prisma.raw(`"${table}"`)}
+       WHERE "organizationId" = ${organizationId}
+    `);
+    counts[table] = Number(rows[0]?.count ?? BigInt(0));
+  }
+  return counts;
+}
+
+function demoTenantRowTotal(counts: Record<string, number>) {
+  return Object.values(counts).reduce((total, count) => total + count, 0);
 }
 
 async function performDemoReset(organizationId: string, requestId: string, dryRun: boolean, actorUserId: string, reason: string) {
@@ -564,6 +582,198 @@ export async function resetDemoOrganizationForCli(organizationId: string, reques
   const cleanReason = reason?.trim() ?? "";
   if (cleanReason.length < 8 || cleanReason.length > 500) throw new Error("DEMO_RESET_REASON_REQUIRED");
   return performDemoReset(cleanOrganizationId, cleanRequestId, dryRun, SYSTEM_USER_ID, cleanReason);
+}
+
+/** Permanently remove one suspended DEMO tenant and its private objects. */
+export async function deleteDemoOrganization(input: {
+  organizationId: string;
+  confirmationSlug: string;
+  requestId: string;
+  reason: string;
+}) {
+  const actor = await requireSuperAdmin();
+  const organizationId = input.organizationId.trim();
+  const confirmationSlug = input.confirmationSlug.trim();
+  const requestId = input.requestId.trim();
+  const reason = input.reason.trim();
+  if (!organizationId || organizationId.length > 160) throw new Error("DEMO_ORGANIZATION_ID_REQUIRED");
+  if (!requestId || requestId.length > 128) throw new Error("DEMO_REQUEST_ID_INVALID");
+  if (reason.length < 8 || reason.length > 500) throw new Error("DEMO_DELETE_REASON_REQUIRED");
+
+  const db = (await import("@/lib/db")).getDb();
+  const readReplay = async () => {
+    const audit = await db.platformAuditLog.findUnique({
+      where: { requestId },
+      select: { action: true, targetOrganizationId: true, metadataJson: true },
+    });
+    if (!audit) return null;
+    let metadataOrganizationId: string | null = null;
+    try {
+      metadataOrganizationId = JSON.parse(audit.metadataJson ?? "{}").organizationId ?? null;
+    } catch {
+      // A malformed audit record must not authorize an idempotent replay.
+    }
+    const sameTarget = audit.targetOrganizationId === organizationId || metadataOrganizationId === organizationId;
+    if (audit.action !== "DEMO_ORGANIZATION_DELETED" || !sameTarget) {
+      throw new Error("DEMO_DELETE_REQUEST_ID_REUSED");
+    }
+    return { organizationId, deleted: true as const, alreadyDeleted: true as const, purgedPrivateObjects: 0, tenantRows: 0 };
+  };
+
+  const previous = await readReplay();
+  if (previous) return previous;
+
+  const provisionLock = await acquireDistributedLock(`demo-provision:${organizationId}`, 10 * 60_000, true);
+  if (!provisionLock.acquired) throw new Error("DEMO_DELETE_LOCK_UNAVAILABLE");
+  let resetLock: Awaited<ReturnType<typeof acquireDistributedLock>> | null = null;
+  try {
+    resetLock = await acquireDistributedLock(`demo-reset:${organizationId}`, 10 * 60_000, true);
+    if (!resetLock.acquired) throw new Error("DEMO_DELETE_LOCK_UNAVAILABLE");
+
+    const replayAfterLock = await readReplay();
+    if (replayAfterLock) return replayAfterLock;
+
+    const snapshot = await withSystemOrganizationTransaction(organizationId, "demo delete preflight", async (tx) => {
+      const organization = await tx.organization.findUnique({
+        where: { id: organizationId },
+        select: { id: true, name: true, slug: true, kind: true, status: true, demoState: { select: { resetStatus: true } } },
+      });
+      if (!organization || organization.kind !== "DEMO") throw new Error("DEMO_DELETE_REQUIRES_DEMO_ORGANIZATION");
+      if (confirmationSlug !== organization.slug) throw new Error("DEMO_DELETE_CONFIRMATION_MISMATCH");
+      if (organization.status !== "SUSPENDED") throw new Error("DEMO_DELETE_REQUIRES_SUSPENDED");
+      if (organization.demoState && ["RESETTING", "PROVISIONING"].includes(organization.demoState.resetStatus)) {
+        throw new Error("DEMO_DELETE_RESET_NOT_IDLE");
+      }
+
+      const memberships = await tx.organizationMembership.findMany({
+        where: { organizationId },
+        select: { userId: true, user: { select: { platformRole: true, organizationMemberships: { select: { organizationId: true } } } } },
+      });
+      if (memberships.some(({ userId, user }) => (
+        userId === SYSTEM_USER_ID ||
+        user.platformRole !== "NONE" ||
+        user.organizationMemberships.length !== 1 ||
+        user.organizationMemberships[0]?.organizationId !== organizationId
+      ))) {
+        throw new Error("DEMO_DELETE_MEMBER_SCOPE_UNSAFE");
+      }
+
+      const [backupCount, restoreRunCount, billingChargeCount, tenantRows] = await Promise.all([
+        tx.backupArtifact.count({ where: { organizationId } }),
+        tx.organizationRestoreRun.count({ where: { organizationId } }),
+        tx.billingCharge.count({ where: { organizationId } }),
+        countDemoTenantRows(tx, organizationId),
+      ]);
+      if (backupCount > 0) throw new Error("DEMO_DELETE_BACKUP_REQUIRES_REVIEW");
+      if (restoreRunCount > 0) throw new Error("DEMO_DELETE_RESTORE_REQUIRES_REVIEW");
+      if (billingChargeCount > 0) throw new Error("DEMO_DELETE_BILLING_REQUIRES_REVIEW");
+      return { userIds: memberships.map(({ userId }) => userId), tenantRows };
+    }, { maxWait: 15_000, timeout: 120_000 });
+
+    const renewLocks = async () => (await provisionLock.renew()) && (await resetLock!.renew());
+    if (!(await renewLocks())) throw new Error("DEMO_DELETE_LOCK_EXPIRED");
+    if (snapshot.userIds.length > 0) {
+      await withSystemOrganizationTransaction(organizationId, "demo delete revoke", async (tx) => {
+        await tx.user.updateMany({
+          where: { id: { in: snapshot.userIds }, platformRole: "NONE" },
+          data: { sessionVersion: { increment: 1 } },
+        });
+        await tx.session.updateMany({
+          where: { userId: { in: snapshot.userIds }, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      });
+    }
+
+    const purgedPrivateObjects = await purgeDemoPrivateBlobs(organizationId, renewLocks);
+    if (!(await renewLocks())) throw new Error("DEMO_DELETE_LOCK_EXPIRED");
+
+    return await withSystemOrganizationTransaction(organizationId, "demo delete", async (tx) => {
+      const organization = await tx.organization.findUnique({
+        where: { id: organizationId },
+        select: { id: true, name: true, slug: true, kind: true, status: true, demoState: { select: { resetStatus: true } } },
+      });
+      if (!organization || organization.kind !== "DEMO" || organization.status !== "SUSPENDED" || organization.slug !== confirmationSlug) {
+        throw new Error("DEMO_DELETE_STATE_CHANGED");
+      }
+      if (organization.demoState && ["RESETTING", "PROVISIONING"].includes(organization.demoState.resetStatus)) {
+        throw new Error("DEMO_DELETE_RESET_NOT_IDLE");
+      }
+
+      const currentMemberships = await tx.organizationMembership.findMany({
+        where: { organizationId },
+        select: { userId: true, user: { select: { platformRole: true, organizationMemberships: { select: { organizationId: true } } } } },
+      });
+      if (currentMemberships.some(({ userId, user }) => (
+        userId === SYSTEM_USER_ID ||
+        user.platformRole !== "NONE" ||
+        user.organizationMemberships.length !== 1 ||
+        user.organizationMemberships[0]?.organizationId !== organizationId
+      ))) {
+        throw new Error("DEMO_DELETE_MEMBER_SCOPE_UNSAFE");
+      }
+      const userIds = currentMemberships.map(({ userId }) => userId);
+      if (userIds.length !== snapshot.userIds.length || userIds.some((userId) => !snapshot.userIds.includes(userId))) {
+        throw new Error("DEMO_DELETE_MEMBER_SET_CHANGED");
+      }
+
+      const [backupCount, restoreRunCount, billingChargeCount] = await Promise.all([
+        tx.backupArtifact.count({ where: { organizationId } }),
+        tx.organizationRestoreRun.count({ where: { organizationId } }),
+        tx.billingCharge.count({ where: { organizationId } }),
+      ]);
+      if (backupCount > 0) throw new Error("DEMO_DELETE_BACKUP_REQUIRES_REVIEW");
+      if (restoreRunCount > 0) throw new Error("DEMO_DELETE_RESTORE_REQUIRES_REVIEW");
+      if (billingChargeCount > 0) throw new Error("DEMO_DELETE_BILLING_REQUIRES_REVIEW");
+
+      await deleteDemoTenantRows(tx, organizationId);
+      await tx.currencyRate.deleteMany({ where: { organizationId } });
+      const remainingTenantRows = await countDemoTenantRows(tx, organizationId);
+      if (Object.values(remainingTenantRows).some((count) => count > 0)) throw new Error("DEMO_DELETE_TENANT_ROWS_REMAIN");
+
+      await tx.securityEventAggregate.updateMany({ where: { organizationId }, data: { organizationId: null } });
+      await tx.billingCharge.deleteMany({ where: { organizationId } });
+      await tx.organizationSubscription.deleteMany({ where: { organizationId } });
+      await tx.organizationCapability.deleteMany({ where: { organizationId } });
+      await tx.organizationSetting.deleteMany({ where: { organizationId } });
+      await tx.demoOrganizationState.deleteMany({ where: { organizationId } });
+      await tx.$executeRaw(Prisma.sql`SELECT set_config('app.owner_transfer', '1', true)`);
+      await tx.organizationMembership.deleteMany({ where: { organizationId } });
+      await tx.$executeRaw(Prisma.sql`SELECT set_config('app.owner_transfer', '0', true)`);
+      if (userIds.length > 0) {
+        const deletedUsers = await tx.user.deleteMany({ where: { id: { in: userIds }, platformRole: "NONE" } });
+        if (deletedUsers.count !== userIds.length) throw new Error("DEMO_DELETE_USER_SET_CHANGED");
+      }
+      await tx.platformAuditLog.create({
+        data: {
+          requestId,
+          actorUserId: actor.id,
+          targetOrganizationId: organizationId,
+          action: "DEMO_ORGANIZATION_DELETED",
+          reason,
+          metadataJson: JSON.stringify({
+            organizationId,
+            slug: organization.slug,
+            name: organization.name,
+            memberCount: userIds.length,
+            tenantRowCount: demoTenantRowTotal(snapshot.tenantRows),
+            purgedPrivateObjects,
+          }),
+        },
+      });
+      await tx.organization.delete({ where: { id: organizationId } });
+      return {
+        organizationId,
+        deleted: true as const,
+        alreadyDeleted: false as const,
+        purgedPrivateObjects,
+        tenantRows: demoTenantRowTotal(snapshot.tenantRows),
+      };
+    }, { maxWait: 15_000, timeout: 120_000 });
+  } finally {
+    if (resetLock?.acquired) await resetLock.release();
+    await provisionLock.release();
+  }
 }
 
 export async function extendDemoTrial(organizationId: string, days: number, reason: string) {

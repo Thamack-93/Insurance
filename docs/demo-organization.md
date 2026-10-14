@@ -77,9 +77,16 @@ el tenant queda suspendido para revisión operativa.
 
 Un superadministrador suspende el DEMO desde `/platform/organizations`, revoca
 las sesiones y entrega nuevas credenciales temporales mediante un canal seguro.
-Para retirar el acceso, suspende la organización y conserva el registro de
-auditoría; la eliminación definitiva sigue siendo una operación separada y
-autorizada de plataforma.
+Para eliminarlo definitivamente, suspéndelo y espera a que no haya un reset o
+una provisión en curso. En la misma pantalla, el superadministrador confirma el
+slug exacto y acepta una segunda confirmación. La acción revoca sesiones, purga
+los objetos privados del tenant, elimina sus datos y usuarios, y conserva una
+entrada de auditoría con el motivo y los conteos. Es idempotente por solicitud.
+
+La eliminación se detiene y deja el DEMO suspendido si encuentra respaldos,
+restauraciones o cargos asociados; esos registros requieren revisión antes de
+retirar la organización. El endpoint vuelve a comprobar el tipo DEMO, el estado
+suspendido, el slug y el alcance de sus usuarios dentro de la transacción final.
 
 ## Certificación remota de backup y restore
 

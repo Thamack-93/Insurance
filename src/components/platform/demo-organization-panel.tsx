@@ -1,10 +1,10 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Copy, Database, RotateCcw, ShieldAlert, UserPlus } from "lucide-react";
+import { Copy, Database, RotateCcw, ShieldAlert, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-import { provisionDemoOrganizationAction, resetDemoOrganizationAction, extendDemoTrialAction, suspendOrganizationAction, reactivateOrganizationAction } from "@/app/(platform)/platform/organizations/demo-actions";
+import { provisionDemoOrganizationAction, resetDemoOrganizationAction, deleteDemoOrganizationAction, extendDemoTrialAction, suspendOrganizationAction, reactivateOrganizationAction } from "@/app/(platform)/platform/organizations/demo-actions";
 import type { DemoOrganizationSummary } from "@/lib/demo-organizations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -94,6 +94,33 @@ export function DemoOrganizationPanel({ initialOrganizations, enabled }: { initi
     });
   }
 
+  function removeDemo(organization: DemoOrganizationSummary) {
+    if (organization.status !== "SUSPENDED" || ["RESETTING", "PROVISIONING"].includes(organization.resetStatus ?? "")) {
+      toast.error("Para eliminarlo, primero suspende el DEMO y espera a que no tenga operaciones pendientes.");
+      return;
+    }
+    const confirmationSlug = window.prompt(`Eliminación definitiva de ${organization.name}. Escribe exactamente el slug: ${organization.slug}`);
+    if (confirmationSlug === null) return;
+    if (confirmationSlug.trim() !== organization.slug) {
+      toast.error("El slug no coincide; no se eliminó nada.");
+      return;
+    }
+    if (!window.confirm(`Se borrarán permanentemente los datos, archivos y usuarios de ${organization.name}. Esta acción no se puede deshacer. ¿Continuar?`)) return;
+    startTransition(async () => {
+      const result = await deleteDemoOrganizationAction({
+        organizationId: organization.organizationId,
+        confirmationSlug: confirmationSlug.trim(),
+        requestId: crypto.randomUUID(),
+        reason: `Retiro definitivo de DEMO ${organization.slug}`,
+      });
+      if (!result.ok) toast.error(result.error);
+      else {
+        toast.success("DEMO eliminado y registrado en auditoría.");
+        router.refresh();
+      }
+    });
+  }
+
   async function copyCredentials() {
     if (credentials.length === 0) return;
     await navigator.clipboard.writeText(credentials.map((credential) => `${credential.name}: ${credential.email} / ${credential.password}`).join("\n"));
@@ -122,7 +149,7 @@ export function DemoOrganizationPanel({ initialOrganizations, enabled }: { initi
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{organization.name}</h3><Badge variant={statusVariant(organization.status)}>{statusLabel(organization.status)}</Badge>{organization.resetStatus && organization.resetStatus !== "IDLE" ? <Badge variant="outline">Reset: {organization.resetStatus}</Badge> : null}</div><p className="mt-1 text-xs text-muted-foreground">{organization.slug} · {organization.organizationId} · seed {organization.seedVersion ?? "—"} · versión {organization.dataVersion ?? "—"}</p></div><div className="grid grid-cols-2 gap-x-5 gap-y-1 text-right text-xs text-muted-foreground sm:grid-cols-4"><span><strong className="block text-sm text-foreground">{organization.activeMemberCount}/{organization.userCount}</strong>usuarios</span><span><strong className="block text-sm text-foreground">{organization.clientCount}</strong>clientes</span><span><strong className="block text-sm text-foreground">{organization.policyCount}</strong>pólizas</span><span><strong className="block text-sm text-foreground">{formatDate(organization.trialEndsAt)}</strong>fin de prueba</span></div></div>
             <div className="mt-4 grid gap-3 border-t pt-3 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4"><span>Primer reset por datos reales: <strong className="text-foreground">{formatDate(organization.realDataResetAt)}</strong></span><span>Último reset: <strong className="text-foreground">{formatDate(organization.lastResetAt)}</strong></span><span>Última actividad: <strong className="text-foreground">{formatDate(organization.lastActivityAt)}</strong></span><span>Capacidades: <strong className="text-foreground">{organization.capabilities.filter((capability) => capability.enabled).map((capability) => capability.key).join(", ") || "ninguna"}</strong></span></div>
             {organization.resetFailure ? <p className="mt-3 flex items-start gap-2 rounded border border-red-300 bg-red-50 p-3 text-xs text-red-900 dark:border-red-900 dark:bg-red-950/20 dark:text-red-100"><ShieldAlert className="mt-0.5 size-4 shrink-0" /><span><strong className="font-semibold">Verificación fallida:</strong> {organization.resetFailure}<br /><span className="opacity-80">Mantén el DEMO suspendido, revisa los logs y ejecuta una vista previa antes de reintentar. No se expone la línea base hasta que la verificación termine.</span></span></p> : null}
-            <div className="mt-4 flex flex-wrap items-end gap-2"><div className="min-w-52 space-y-1"><Label htmlFor={`demo-reset-reason-${organization.organizationId}`} className="text-xs">Motivo de reset</Label><Input id={`demo-reset-reason-${organization.organizationId}`} value={resetReason} onChange={(event) => setResetReason(event.target.value)} maxLength={500} disabled={pending} /></div><div className="w-24 space-y-1"><Label htmlFor={`demo-extension-days-${organization.organizationId}`} className="text-xs">Días</Label><Input id={`demo-extension-days-${organization.organizationId}`} type="number" min={1} max={365} value={days} onChange={(event) => setDays(event.target.value)} disabled={pending} /></div><Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => reset(organization.organizationId, true)}><Database className="mr-2 size-4" />Vista previa</Button><Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => reset(organization.organizationId, false)}><RotateCcw className="mr-2 size-4" />Reiniciar DEMO</Button><Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => extend(organization.organizationId)}>Extender</Button><Button type="button" variant={organization.status === "ACTIVE" ? "destructive" : "outline"} size="sm" disabled={pending || (organization.resetStatus === "FAILED" && organization.status !== "ACTIVE")} onClick={() => toggle(organization)}>{organization.status === "ACTIVE" ? "Suspender" : "Reactivar"}</Button></div>
+            <div className="mt-4 flex flex-wrap items-end gap-2"><div className="min-w-52 space-y-1"><Label htmlFor={`demo-reset-reason-${organization.organizationId}`} className="text-xs">Motivo de reset</Label><Input id={`demo-reset-reason-${organization.organizationId}`} value={resetReason} onChange={(event) => setResetReason(event.target.value)} maxLength={500} disabled={pending} /></div><div className="w-24 space-y-1"><Label htmlFor={`demo-extension-days-${organization.organizationId}`} className="text-xs">Días</Label><Input id={`demo-extension-days-${organization.organizationId}`} type="number" min={1} max={365} value={days} onChange={(event) => setDays(event.target.value)} disabled={pending} /></div><Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => reset(organization.organizationId, true)}><Database className="mr-2 size-4" />Vista previa</Button><Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => reset(organization.organizationId, false)}><RotateCcw className="mr-2 size-4" />Reiniciar DEMO</Button><Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => extend(organization.organizationId)}>Extender</Button><Button type="button" variant={organization.status === "ACTIVE" ? "destructive" : "outline"} size="sm" disabled={pending || (organization.resetStatus === "FAILED" && organization.status !== "ACTIVE")} onClick={() => toggle(organization)}>{organization.status === "ACTIVE" ? "Suspender" : "Reactivar"}</Button><Button type="button" variant="destructive" size="sm" disabled={pending || organization.status !== "SUSPENDED" || ["RESETTING", "PROVISIONING"].includes(organization.resetStatus ?? "")} onClick={() => removeDemo(organization)}><Trash2 className="mr-2 size-4" />Eliminar DEMO</Button></div>
           </article>
         ))}
       </div>
