@@ -16,7 +16,7 @@ test("DEMO can open synthetic policy and client edit forms with composite IDs", 
   await login(page, "demo-owner@policydesk.local");
 
   await page.goto("/policies/org_demo_broker_0001%3Ademo%3Apolicy%3A001/edit");
-  await expect(page.getByRole("heading", { name: "Editar DEMO-AUTO-001" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Editar AU-260001" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Guardar cambios" })).toBeVisible();
 
   await page.goto("/clients/org_demo_broker_0001%3Ademo%3Aclient%3A001/edit");
