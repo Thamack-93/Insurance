@@ -18,6 +18,7 @@ import {
 import {
   getTelegramWebhookUrl,
   syncTelegramWebhook,
+  sendTelegramMessage,
   parseTelegramPaymentArgument,
   parseTelegramPaymentDateInput,
   buildTelegramDailyDigestMessages,
@@ -314,6 +315,66 @@ describe("telegram.shared", () => {
       }
       if (originalBaseUrl === undefined) delete process.env.APP_BASE_URL;
       else process.env.APP_BASE_URL = originalBaseUrl;
+    }
+  });
+
+  it("sends a Telegram reply through the Bot API without contacting a live chat", async () => {
+    const originalFetch = global.fetch;
+    const originalBotToken = process.env.TELEGRAM_BOT_TOKEN;
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, result: { message_id: 42 } }),
+    });
+    process.env.TELEGRAM_BOT_TOKEN = "test-bot-token";
+    global.fetch = fetchMock as typeof fetch;
+
+    try {
+      await expect(sendTelegramMessage("test-chat-id", "  Respuesta de prueba  ")).resolves.toEqual({
+        ok: true,
+        messageId: 42,
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://api.telegram.org/bottest-bot-token/sendMessage",
+        expect.objectContaining({
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            chat_id: "test-chat-id",
+            text: "Respuesta de prueba",
+            disable_web_page_preview: true,
+          }),
+        }),
+      );
+    } finally {
+      global.fetch = originalFetch;
+      if (originalBotToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
+      else process.env.TELEGRAM_BOT_TOKEN = originalBotToken;
+    }
+  });
+
+  it("reports Telegram API rejection instead of treating it as a successful send", async () => {
+    const originalFetch = global.fetch;
+    const originalBotToken = process.env.TELEGRAM_BOT_TOKEN;
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({ ok: false, description: "Forbidden" }),
+    });
+    process.env.TELEGRAM_BOT_TOKEN = "test-bot-token";
+    global.fetch = fetchMock as typeof fetch;
+
+    try {
+      await expect(sendTelegramMessage("test-chat-id", "Respuesta de prueba")).resolves.toEqual({
+        ok: false,
+        error: "Forbidden",
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      global.fetch = originalFetch;
+      if (originalBotToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
+      else process.env.TELEGRAM_BOT_TOKEN = originalBotToken;
     }
   });
 });
