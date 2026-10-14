@@ -16,11 +16,11 @@ test("DEMO can open synthetic policy and client edit forms with composite IDs", 
   await login(page, "demo-owner@policydesk.local");
 
   await page.goto("/policies/org_demo_broker_0001%3Ademo%3Apolicy%3A001/edit");
-  await expect(page.getByRole("heading", { name: "Editar DEMO-AUTO-001" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Editar AU-260001" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Guardar cambios" })).toBeVisible();
 
   await page.goto("/clients/org_demo_broker_0001%3Ademo%3Aclient%3A001/edit");
-  await expect(page.getByRole("heading", { name: "Editar DEMO Ana López" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Editar Ana López" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Guardar cambios" })).toBeVisible();
 });
 
@@ -134,14 +134,14 @@ test("DEMO search and export never expose CUSTOMER fixture records", async ({ pa
   const seededClientId = "org_demo_broker_0001:demo:client:001";
   expect(result.ownSearchStatus).toBe(200);
   expect(result.ownSearch).toContain(seededClientId);
-  expect(result.ownSearch).toContain("DEMO Ana López");
+  expect(result.ownSearch).toContain("Ana López");
   expect(result.overlapSearchStatus).toBe(200);
   expect(result.overlapSearch).not.toContain("Overlap Client");
   expect(result.overlapSearch).not.toContain("tenant-client-a");
   expect(result.overlapSearch).not.toContain("tenant-client-b");
   expect(result.exportStatus).toBe(200);
   expect(result.exported).toContain("Cliente");
-  expect(result.exported).toContain("DEMO Ana López");
+  expect(result.exported).toContain("Ana López");
   expect(result.exported).toContain("ana.lopez@example.invalid");
   expect(result.exported).not.toContain("Overlap Client");
 });

@@ -2,7 +2,7 @@
 
 La organización DEMO es un espacio sales-assisted para prospectos. Usa la
 autenticación normal de PolicyDesk, tiene una sola membresía por usuario y
-contiene únicamente datos sintéticos prefijados con `DEMO`.
+contiene únicamente datos sintéticos aislados por organización.
 
 ## Provisión y acceso
 
@@ -14,11 +14,11 @@ contraseñas temporales se muestran una sola vez, expiran en 24
 horas y obligan al cambio en el primer acceso. No hay signup público,
 invitaciones ni selector de organizaciones.
 
-## Capacidades DEMO v1
+## Capacidades DEMO
 
 El usuario puede explorar y modificar clientes, pólizas, recibos, cobranza,
 siniestros, tareas, comisiones, búsquedas, reportes y documentos sintéticos.
-El seed incluye 25 clientes, 20 pólizas y 95 recibos generados con 5 pólizas
+El seed incluye 20 clientes, 40 pólizas y 190 recibos generados con 10 pólizas
 por cada frecuencia: anual, semestral, trimestral y mensual.
 Las cargas de archivos y las importaciones permanecen bloqueadas. Nora,
 Telegram, email, Quálitas y las operaciones con proveedores están deshabilitados. WhatsApp solo muestra
@@ -28,6 +28,31 @@ aplicación, no adjunta archivos ni envía mensajes.
 Las descargas de documentos incluidos se resuelven como PDFs sintéticos
 privados y no contienen información real. No se aceptan documentos del
 prospecto en esta versión.
+
+## Datos sintéticos iniciales
+
+El seed `demo-2026-10-v6` usa IDs deterministas por organización y se puede
+repetir sin duplicar filas. Las fechas se calculan desde el día de negocio local
+en que se provisiona o reinicia la DEMO. La póliza principal vence exactamente
+9 días después del seed; hay 8 pólizas vencidas y 1 póliza cancelada.
+
+Cada ejecución crea 20 clientes con nombres naturales y datos de contacto de
+prueba (`.invalid`); todos tienen póliza. Las 40 pólizas están repartidas así:
+9 clientes tienen una, 6 tienen dos, 3 tienen tres, 1 tiene cuatro y 1 tiene
+seis. Hay 8 pólizas por ramo (`AUTO`, `GMM`, `HOGAR`, `EMPRESARIAL`, `VIDA`),
+todas conservan `insuredObject` y `riskDetails` estructurados, y se proyectan sus
+bienes y personas aseguradas.
+
+Los 190 recibos incluyen 176 pagados, 1 pendiente, 1 vencido y 12 cancelados;
+los pagos reflejan 176 operaciones `POSTED` y 1 `REVERSED`. Hay 4 comisiones,
+6 cotizaciones (incluidas una rechazada y una vencida), 5 siniestros (incluido
+uno resuelto y pagado), seguimientos de renovación y cobranza, un endoso, una
+conciliación de ejemplo y un PDF sintético. No se crean cargos de suscripción
+pendientes. Los nombres visibles no llevan el prefijo `DEMO`; la separación
+sigue marcada por `kind=DEMO`, el `organizationId` y el aviso de demostración.
+
+El seed v6 se aplica al crear una organización DEMO o al ejecutar su reset. El
+despliegue del código no cambia los datos de una DEMO activa.
 
 ## Reset
 
