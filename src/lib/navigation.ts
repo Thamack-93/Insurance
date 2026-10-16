@@ -1,6 +1,7 @@
 import type { LucideIcon } from "@/components/icons";
 import {
   BarChart3,
+  Calculator,
   FolderKanban,
   CircleDollarSign,
   FileText,
