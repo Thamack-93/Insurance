@@ -9,7 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 const navigationGroups = [
   { label: "Trabajo", ids: ["today", "operations"] },
   { label: "Cartera", ids: ["clients", "policies"] },
-  { label: "Finanzas", ids: ["receipts", "commissions"] },
+  { label: "Finanzas", ids: ["receipts", "commissions", "bonuses"] },
   { label: "Análisis", ids: ["reports"] },
 ] as const;
 

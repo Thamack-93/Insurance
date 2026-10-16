@@ -16,6 +16,7 @@ import {
 } from "@/lib/organization-context";
 import { withTenantOrganization } from "@/lib/tenant-dal";
 import { OptimisticConcurrencyError } from "@/lib/optimistic-concurrency";
+import { commissionPremiumBase } from "@/lib/premium-breakdown";
 
 type CommissionScope = {
   organizationId: string;
@@ -85,7 +86,8 @@ export async function calculateCommissionsForPolicy(
 
     for (const receipt of receiptsToProcess) {
       const receiptAmount = toNumber(receipt.amount);
-      const commissionAmount = receiptAmount * commissionRate;
+      const commissionBase = commissionPremiumBase(receipt.netPremiumAmount === null ? null : toNumber(receipt.netPremiumAmount), receiptAmount);
+      const commissionAmount = commissionBase * commissionRate;
       const expectedDate = businessAddDays(receipt.dueDate, 30); // Commission expected 30 days after receipt due
 
       // Check if commission already exists
@@ -126,6 +128,7 @@ export async function calculateCommissionsForPolicy(
             policyId,
             receiptId: receipt.id,
             amount: commissionAmount,
+            premiumBase: commissionBase,
             percentage: commissionRate * 100,
             expectedDate,
           }),

@@ -34,6 +34,7 @@ function normalizePolicyInput(values: PolicyFormValues) {
     insuredObject: normalizeOptionalText(policyInsuredObjectForSave(parsedRiskDetails.success ? parsedRiskDetails.data : null, values.insuredObject)),
     riskDetails: parsedRiskDetails.success && hasPolicyRiskData(parsedRiskDetails.data) ? parsedRiskDetails.data as Prisma.InputJsonValue : Prisma.DbNull,
     riskDetailsReviewRequired: parsedRiskDetails.success && hasPolicyRiskData(parsedRiskDetails.data) ? false : undefined,
+    bonusEligibilityJson: normalizeOptionalText(values.bonusEligibilityJson),
     beneficiaryInfo: normalizeOptionalText(values.beneficiaryInfo),
     notes: normalizeOptionalText(values.notes),
     renewedFromPolicyId: optionalRelationId(values.renewedFromPolicyId),
@@ -202,6 +203,11 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
     const policy = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       await assertPolicyRelationsInTransaction(tx, context, normalized.clientId, normalized.insurerId);
+      const clientForBonusAttribution = await tx.client.findFirst({
+        where: { id: normalized.clientId, organizationId: context.organizationId },
+        select: { portfolioOwnerId: true },
+      });
+      if (!clientForBonusAttribution) throw new AuthError("TENANT_RELATION_MISMATCH", 409);
       const currentRenewalSource = renewalSourceId
         ? await tx.policy.findFirst({
             where: { id: renewalSourceId, organizationId: context.organizationId },
@@ -219,7 +225,11 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
       const createdPolicy = await tx.policy.create({
         data: {
           ...normalized,
+          bonusEligibilityJson: context.membershipRole === "AGENT" ? null : normalized.bonusEligibilityJson,
           organizationId: context.organizationId,
+          // Freeze the portfolio owner at policy issuance so reassignment of
+          // the client does not rewrite historical seller attribution.
+          bonusSellerId: clientForBonusAttribution.portfolioOwnerId,
           familyRootId: effectiveFamilyRootId,
           renewedFromPolicyId: currentRenewalSource?.id ?? null,
           status: currentRenewalSource ? "ACTIVE" : normalized.status,
@@ -376,6 +386,16 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
     const policy = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       await assertPolicyRelationsInTransaction(tx, context, normalized.clientId, normalized.insurerId);
+      const currentPolicyBonusAttribution = await tx.policy.findFirst({ where: { id, organizationId: context.organizationId }, select: { bonusSellerId: true, bonusEligibilityJson: true } });
+      let confirmedBonusSellerId = currentPolicyBonusAttribution?.bonusSellerId;
+      if (!confirmedBonusSellerId && context.membershipRole !== "AGENT") {
+        let confirmsCurrentPortfolioOwner = false;
+        try { confirmsCurrentPortfolioOwner = JSON.parse(parsed.data.bonusEligibilityJson || "{}").sellerAttributionConfirmed === true; } catch { /* schema validation already rejects malformed JSON */ }
+        if (confirmsCurrentPortfolioOwner) {
+          const clientOwner = await tx.client.findFirst({ where: { id: normalized.clientId, organizationId: context.organizationId }, select: { portfolioOwnerId: true } });
+          confirmedBonusSellerId = clientOwner?.portfolioOwnerId ?? null;
+        }
+      }
       const currentRenewalSource = renewalChanged && nextRenewalSource
         ? await tx.policy.findFirst({
             where: { id: nextRenewalSource.id, organizationId: context.organizationId },
@@ -393,6 +413,8 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
         where: { id, organizationId: context.organizationId },
         data: {
           ...normalized,
+          bonusEligibilityJson: context.membershipRole === "AGENT" ? currentPolicyBonusAttribution?.bonusEligibilityJson ?? null : normalized.bonusEligibilityJson,
+          ...(confirmedBonusSellerId ? { bonusSellerId: confirmedBonusSellerId } : {}),
           status: (normalized.renewedFromPolicyId || renewalChanged) ? "ACTIVE" : normalized.status,
           updatedById: userId,
         },

@@ -214,6 +214,7 @@ export default async function NewPolicyPage({
           submitLabel="Crear póliza"
           cancelHref="/policies"
           defaultValues={smartDefaults}
+          canEditBonusEvidence={context.membershipRole !== "AGENT"}
           clientOptions={clients.map((client) => ({ value: client.id, label: client.fullName }))}
           insurerOptions={insurers.map((insurer) => ({ value: insurer.id, label: insurer.name }))}
           renewalSource={renewalSource}
