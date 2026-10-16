@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Calculator } from "@/components/icons";
 import { globalNavigation, isNavigationItemActive } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -53,38 +52,12 @@ export function SidebarNav({
                 </Link>
               );
 
-              const bonusActive = pathname === "/bonuses" || pathname.startsWith("/bonuses/");
-              const bonusLink = item.id === "commissions" ? (
-                <Link
-                  href="/bonuses"
-                  onClick={onNavigate}
-                  aria-current={bonusActive ? "page" : undefined}
-                  aria-label={collapsed ? "Bonos" : undefined}
-                  className={cn(
-                    "group flex min-h-11 items-center gap-3 rounded-md px-3 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-                    bonusActive && "bg-sidebar-accent font-semibold text-sidebar-accent-foreground shadow-[inset_3px_0_0_var(--sidebar-primary)]",
-                    collapsed && "justify-center px-0",
-                  )}
-                >
-                  <Calculator className={cn("size-[18px] shrink-0", bonusActive && "text-sidebar-primary")} aria-hidden />
-                  {!collapsed ? <span className="truncate">Bonos</span> : null}
-                </Link>
-              ) : null;
-
-              if (!collapsed) return <div key={item.id} className="space-y-1">{link}{bonusLink}</div>;
+              if (!collapsed) return <div key={item.id}>{link}</div>;
               return (
-                <div key={item.id} className="space-y-1">
                 <Tooltip key={item.id}>
                   <TooltipTrigger render={link} />
                   <TooltipContent side="right" sideOffset={10}>{item.label}</TooltipContent>
                 </Tooltip>
-                {bonusLink ? (
-                  <Tooltip>
-                    <TooltipTrigger render={bonusLink} />
-                    <TooltipContent side="right" sideOffset={10}>Bonos</TooltipContent>
-                  </Tooltip>
-                ) : null}
-                </div>
               );
             })}
           </div>

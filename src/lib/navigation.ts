@@ -59,7 +59,7 @@ export const globalNavigation: GlobalNavigationItem[] = [
     redirectAliases: ["/due-payments"],
     activePaths: ["/payments"],
   },
-  { id: "commissions", label: "Comisiones y bonos", href: "/commissions", icon: CircleDollarSign, activePaths: ["/bonuses"] },
+  { id: "commissions", label: "Comisiones y bonos", href: "/bonuses", icon: CircleDollarSign, activePaths: ["/commissions"] },
   { id: "reports", label: "Reportes", href: "/reports", icon: BarChart3, activePaths: ["/portfolio"] },
 ];
 
