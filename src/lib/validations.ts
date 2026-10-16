@@ -20,6 +20,10 @@ const optionalText = z.string().max(4000).optional().or(z.literal(""));
 const optionalEmail = z.string().email("Email invalido.").optional().or(z.literal(""));
 const requiredDate = z.string().min(1, "Selecciona una fecha.");
 const optionalDate = z.string().optional().or(z.literal(""));
+const optionalNonNegativeMoney = z.preprocess(
+  (value) => value === "" || value === null || value === undefined ? undefined : value,
+  z.coerce.number().nonnegative("El importe no puede ser negativo.").optional(),
+);
 
 function dateOnly(value: string) {
   return parseBusinessDateInput(value);
@@ -84,6 +88,7 @@ const policyBaseSchema = z
     paymentPlan: optionalText,
     insuredObject: optionalText,
     riskDetails: policyRiskDetailsSchema.optional(),
+    bonusEligibilityJson: z.string().max(4000).optional().or(z.literal("")),
     beneficiaryInfo: optionalText,
     notes: optionalText,
     renewedFromPolicyId: z.string().trim().optional().or(z.literal("")),
@@ -97,6 +102,14 @@ const policyBaseSchema = z
     const parsed = policyRiskDetailsSchema.safeParse(values.riskDetails);
     if (!parsed.success || parsed.data.policyType !== values.policyType) {
       context.addIssue({ code: "custom", path: ["riskDetails"], message: "Revisa que los datos del riesgo correspondan al ramo seleccionado." });
+    }
+    if (values.bonusEligibilityJson) {
+      try {
+        const evidence = JSON.parse(values.bonusEligibilityJson);
+        if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) throw new Error("not object");
+      } catch {
+        context.addIssue({ code: "custom", path: ["bonusEligibilityJson"], message: "La evidencia de incentivos debe ser un objeto JSON válido." });
+      }
     }
   });
 
@@ -139,15 +152,32 @@ export const receiptSchema = z
     periodEndDate: requiredDate,
     dueDate: requiredDate,
     amount: z.coerce.number().positive("El monto debe ser mayor a cero."),
+    vatAmount: optionalNonNegativeMoney,
+    issuanceExpenseAmount: optionalNonNegativeMoney,
+    surchargeAmount: optionalNonNegativeMoney,
+    discountAmount: optionalNonNegativeMoney,
     currency: z.string().trim().min(1, "Selecciona una moneda."),
     status: z.enum(RECEIPT_STATUSES),
     paidDate: optionalDate,
     paymentMethod: optionalText,
     notes: optionalText,
   })
-  .refine((values) => values.periodEndDate >= values.periodStartDate, {
-    message: "El fin del periodo debe ser posterior al inicio.",
-    path: ["periodEndDate"],
+  .superRefine((values, context) => {
+    if (values.periodEndDate < values.periodStartDate) {
+      context.addIssue({ code: "custom", message: "El fin del periodo debe ser posterior al inicio.", path: ["periodEndDate"] });
+    }
+    const components = [values.vatAmount, values.issuanceExpenseAmount, values.surchargeAmount, values.discountAmount];
+    const provided = components.filter((value) => value !== undefined).length;
+    if (provided > 0 && provided !== components.length) {
+      context.addIssue({ code: "custom", message: "Completa IVA, expedición, recargos y descuentos; escribe 0 cuando no aplique.", path: ["vatAmount"] });
+      return;
+    }
+    if (provided === components.length) {
+      const netPremium = values.amount - (values.vatAmount ?? 0) - (values.issuanceExpenseAmount ?? 0) - (values.surchargeAmount ?? 0) + (values.discountAmount ?? 0);
+      if (netPremium < 0) {
+        context.addIssue({ code: "custom", message: "El desglose genera una prima neta negativa.", path: ["discountAmount"] });
+      }
+    }
   });
 
 export const endorsementSchema = z

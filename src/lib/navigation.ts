@@ -59,7 +59,7 @@ export const globalNavigation: GlobalNavigationItem[] = [
     redirectAliases: ["/due-payments"],
     activePaths: ["/payments"],
   },
-  { id: "commissions", label: "Comisiones y bonos", href: "/commissions", icon: CircleDollarSign },
+  { id: "commissions", label: "Comisiones y bonos", href: "/bonuses", icon: CircleDollarSign, activePaths: ["/commissions"] },
   { id: "reports", label: "Reportes", href: "/reports", icon: BarChart3, activePaths: ["/portfolio"] },
 ];
 
@@ -74,7 +74,8 @@ const breadcrumbLabels: Record<string, string> = {
   assistant: "Nora",
   claims: "Siniestros",
   clients: "Clientes",
-  commissions: "Comisiones y bonos",
+  commissions: "Comisiones",
+  bonuses: "Bonos",
   dashboard: "Insights",
   "data-quality": "Calidad de datos",
   documents: "Documentos",

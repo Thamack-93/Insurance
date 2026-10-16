@@ -90,7 +90,7 @@ export function ReceiptForm({
         <FormErrorBanner message={errors.root?.message} />
 
         <form className="space-y-6" onSubmit={handleSubmit(onSubmit)}>
-          <FormSection title="Identidad financiera" description="El recibo representa una obligación de cobro.">
+          <FormSection title="Identidad financiera" description="El desglose permite derivar prima neta: total − IVA − gastos de expedición − recargos + descuentos. Completa los cuatro conceptos o déjalos todos vacíos hasta contar con el recibo fuente.">
             <FormGrid>
               <FormField label="Número de recibo" htmlFor="receiptNumber" error={errors.receiptNumber?.message}>
                 <Input id="receiptNumber" autoFocus {...register("receiptNumber")} />
@@ -130,8 +130,21 @@ export function ReceiptForm({
                 <input type="hidden" {...register("endorsementId")} />
               )}
 
-              <FormField label="Monto" htmlFor="amount" error={errors.amount?.message}>
+              <FormField label="Total facturado" htmlFor="amount" error={errors.amount?.message}>
                 <Input id="amount" type="number" min="0" step="0.01" {...register("amount")} />
+              </FormField>
+
+              <FormField label="IVA" htmlFor="vatAmount" error={errors.vatAmount?.message}>
+                <Input id="vatAmount" type="number" min="0" step="0.01" {...register("vatAmount")} />
+              </FormField>
+              <FormField label="Gastos de expedición" htmlFor="issuanceExpenseAmount" error={errors.issuanceExpenseAmount?.message}>
+                <Input id="issuanceExpenseAmount" type="number" min="0" step="0.01" {...register("issuanceExpenseAmount")} />
+              </FormField>
+              <FormField label="Recargos" htmlFor="surchargeAmount" error={errors.surchargeAmount?.message}>
+                <Input id="surchargeAmount" type="number" min="0" step="0.01" {...register("surchargeAmount")} />
+              </FormField>
+              <FormField label="Descuentos" htmlFor="discountAmount" error={errors.discountAmount?.message}>
+                <Input id="discountAmount" type="number" min="0" step="0.01" {...register("discountAmount")} />
               </FormField>
 
               <FormField label="Moneda" error={errors.currency?.message}>

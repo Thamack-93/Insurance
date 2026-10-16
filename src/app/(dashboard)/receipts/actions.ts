@@ -23,6 +23,7 @@ import {
 import type { WhatsAppPhoneSource } from "@/lib/whatsapp-reminder";
 import { recordCollectionFollowUp, type CollectionFollowUpInput } from "@/lib/collection-followups";
 import { closeCollectionFollowUp } from "@/lib/collection-followups";
+import { deriveNetPremium } from "@/lib/premium-breakdown";
 
 const ALLOWED_PAYMENT_METHODS = ["TRANSFER", "CASH", "CARD", "CHECK", "OTHER"] as const;
 type AllowedPaymentMethod = (typeof ALLOWED_PAYMENT_METHODS)[number];
@@ -77,6 +78,16 @@ async function normalizeReceiptInput(values: ReceiptFormValues, context: Organiz
     periodEndDate: parseDateInput(values.periodEndDate),
     dueDate: parseDateInput(values.dueDate),
     amount: values.amount,
+    vatAmount: values.vatAmount ?? null,
+    issuanceExpenseAmount: values.issuanceExpenseAmount ?? null,
+    surchargeAmount: values.surchargeAmount ?? null,
+    discountAmount: values.discountAmount ?? null,
+    netPremiumAmount: deriveNetPremium(values.amount, {
+      vatAmount: values.vatAmount,
+      issuanceExpenseAmount: values.issuanceExpenseAmount,
+      surchargeAmount: values.surchargeAmount,
+      discountAmount: values.discountAmount,
+    }),
     currency: values.currency || policy.currency,
     status: values.status,
     paidDate: values.paidDate ? parseDateInput(values.paidDate) : null,

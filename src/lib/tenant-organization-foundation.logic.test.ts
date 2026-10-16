@@ -43,7 +43,9 @@ describe("tenant organization transition foundation", () => {
     const knowledgeMigration = fs.readFileSync(path.join(process.cwd(), "prisma/migrations/20260817000000_knowledge_base/migration.sql"), "utf8");
     const operationalMigration = fs.readFileSync(path.join(process.cwd(), "prisma/migrations/20260913000000_operational_followups_and_review_models/migration.sql"), "utf8");
     const optimizationMigration = fs.readFileSync(path.join(process.cwd(), "prisma/migrations/20260915000000_currency_rates_and_workitem_priority/migration.sql"), "utf8");
-    const allGuardSql = `${migration}\n${additiveMigration}\n${knowledgeMigration}\n${operationalMigration}\n${optimizationMigration}`;
+    const bonusCreationMigration = fs.readFileSync(path.join(process.cwd(), "prisma/migrations/20261014100000_bonus_calculation_and_premium_breakdown/migration.sql"), "utf8");
+    const bonusTenantMigration = fs.readFileSync(path.join(process.cwd(), "prisma/migrations/20261014110000_bonus_tenant_rls/migration.sql"), "utf8");
+    const allGuardSql = `${migration}\n${additiveMigration}\n${knowledgeMigration}\n${operationalMigration}\n${optimizationMigration}\n${bonusCreationMigration}\n${bonusTenantMigration}`;
     expect(migration).toContain("org_legacy_singleton_0001");
     expect(migration).toContain("Organization_transition_singleton_idx");
     expect(migration).toContain("policydesk_assign_singleton_organization");
@@ -61,6 +63,7 @@ describe("tenant organization transition foundation", () => {
     expect(migration).not.toContain('NotificationChannel_transition_singleton_organization');
     expect(migration).not.toContain('SecurityEventAggregate_transition_singleton_organization');
     expect(migration).not.toContain('TelegramWebhookUpdate_transition_singleton_organization');
+    expect(SINGLETON_CI_SKIPPED_MIGRATIONS.has("20261014110000_bonus_tenant_rls")).toBe(true);
     for (const trigger of Object.values(EXPECTED_TENANT_TRIGGERS)) {
       expect(allGuardSql).toContain(`CREATE TRIGGER "${trigger}"`);
     }
