@@ -61,6 +61,7 @@ describe("tenant organization transition foundation", () => {
     expect(migration).not.toContain('NotificationChannel_transition_singleton_organization');
     expect(migration).not.toContain('SecurityEventAggregate_transition_singleton_organization');
     expect(migration).not.toContain('TelegramWebhookUpdate_transition_singleton_organization');
+    expect(SINGLETON_CI_SKIPPED_MIGRATIONS.has("20261014110000_bonus_tenant_rls")).toBe(true);
     for (const trigger of Object.values(EXPECTED_TENANT_TRIGGERS)) {
       expect(allGuardSql).toContain(`CREATE TRIGGER "${trigger}"`);
     }

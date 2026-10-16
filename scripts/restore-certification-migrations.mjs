@@ -7,6 +7,7 @@ export const SINGLETON_CI_SKIPPED_MIGRATIONS = new Set([
   "20260914000000_extend_rls_operational_models",
   "20260915010000_currency_rates_rls_cutover",
   "20261009010000_multi_org_drop_remaining_transition_triggers",
+  "20261014110000_bonus_tenant_rls",
 ]);
 
 export async function readSafeSingletonMigrationChecksums(migrationsDirectory) {
