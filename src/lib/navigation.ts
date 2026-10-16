@@ -1,7 +1,6 @@
 import type { LucideIcon } from "@/components/icons";
 import {
   BarChart3,
-  Calculator,
   FolderKanban,
   CircleDollarSign,
   FileText,
@@ -20,7 +19,6 @@ export type GlobalNavigationId =
   | "policies"
   | "receipts"
   | "commissions"
-  | "bonuses"
   | "reports";
 
 export type GlobalNavigationItem = {
@@ -60,8 +58,7 @@ export const globalNavigation: GlobalNavigationItem[] = [
     redirectAliases: ["/due-payments"],
     activePaths: ["/payments"],
   },
-  { id: "commissions", label: "Comisiones", href: "/commissions", icon: CircleDollarSign },
-  { id: "bonuses", label: "Bonos", href: "/bonuses", icon: Calculator },
+  { id: "commissions", label: "Comisiones y bonos", href: "/commissions", icon: CircleDollarSign, activePaths: ["/bonuses"] },
   { id: "reports", label: "Reportes", href: "/reports", icon: BarChart3, activePaths: ["/portfolio"] },
 ];
 
