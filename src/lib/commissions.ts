@@ -113,7 +113,7 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
         : receipt.policy.policyType === "AUTO" && typeof riskData.policyMode === "string" ? riskData.policyMode : "";
       const policyMode = policyModeValue.trim().toUpperCase();
       const policyUnitClass = typeof riskDetails.commissionUnitClass === "string" ? riskDetails.commissionUnitClass.trim().toUpperCase() : "";
-      const productPlan = receipt.policy.paymentPlan?.trim() || (typeof riskData.plan === "string" ? riskData.plan.trim() : "") || "SIN_PLAN";
+      const productPlan = receipt.policy.paymentPlan?.trim().toUpperCase() || (typeof riskData.plan === "string" ? riskData.plan.trim().toUpperCase() : "") || "SIN_PLAN";
       const rules = parseCommissionRules(receipt.insurer.commissionRules);
       const rows = jsonUnitBreakdown(receipt.premiumBreakdownByUnit);
       const assets = receipt.policy.insuredAssets;

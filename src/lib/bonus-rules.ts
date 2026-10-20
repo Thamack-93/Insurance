@@ -12,6 +12,18 @@ export type BonusProgram = {
   requiresEvidence: string[];
 };
 
+function utcDate(year: number, month: number, day: number) { return new Date(Date.UTC(year, month, day)); }
+export function bonusPaymentWindow(rule: Pick<BonusProgram, "period" | "accumulation">, year: number, periodNumber: number) {
+  if (rule.period === "QUARTERLY") {
+    const quarter = Math.min(4, Math.max(1, Math.trunc(periodNumber)));
+    return {
+      gte: rule.accumulation === "YEAR_TO_DATE" ? utcDate(year, 0, 1) : utcDate(year, (quarter - 1) * 3, 1),
+      lt: utcDate(year, quarter * 3, 1),
+    };
+  }
+  return { gte: utcDate(year, 0, 1), lt: utcDate(year + 1, 0, 1) };
+}
+
 const tier = (minimum: number, rate: number, maximum?: number): BonusTier => ({ minimum, maximum, rate });
 
 // Source: Cuaderno de Incentivos 2026. Every distinct rule interpretation is

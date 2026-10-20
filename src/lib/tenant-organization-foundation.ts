@@ -43,6 +43,8 @@ export const CUTOVER_REMOVED_TENANT_TRIGGER_TABLES = [
   "KnowledgeSource",
   "KnowledgeChunk",
 ] as const;
+/** Tenant tables introduced after the multi-organization cutover have no singleton trigger. */
+export const POST_CUTOVER_PROTECTED_TENANT_TABLES = ["BonusRuleSet", "BonusRun", "BonusRunItem"] as const;
 export const CUTOVER_TRIGGER_REMOVAL_MIGRATION = "20261009010000_multi_org_drop_remaining_transition_triggers";
 
 export function tenantTriggersForMigrationState(cutoverTriggerRemovalApplied: boolean) {

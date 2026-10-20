@@ -101,13 +101,3 @@ ALTER TABLE "BonusRunItem" ADD CONSTRAINT "BonusRunItem_policyId_fkey" FOREIGN K
 CREATE INDEX "BonusRuleSet_organizationId_idx" ON "BonusRuleSet"("organizationId");
 CREATE INDEX "BonusRun_organizationId_idx" ON "BonusRun"("organizationId");
 CREATE INDEX "BonusRunItem_organizationId_idx" ON "BonusRunItem"("organizationId");
-
-CREATE TRIGGER "BonusRuleSet_transition_singleton_organization"
-BEFORE INSERT OR UPDATE OF "organizationId" ON "BonusRuleSet"
-FOR EACH ROW EXECUTE FUNCTION policydesk_assign_singleton_organization();
-CREATE TRIGGER "BonusRun_transition_singleton_organization"
-BEFORE INSERT OR UPDATE OF "organizationId" ON "BonusRun"
-FOR EACH ROW EXECUTE FUNCTION policydesk_assign_singleton_organization();
-CREATE TRIGGER "BonusRunItem_transition_singleton_organization"
-BEFORE INSERT OR UPDATE OF "organizationId" ON "BonusRunItem"
-FOR EACH ROW EXECUTE FUNCTION policydesk_assign_singleton_organization();

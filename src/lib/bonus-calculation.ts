@@ -4,7 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import type { TenantDb } from "@/lib/organization-context";
 import { allocatePaidNetPremium, deriveReceiptNetPremium, reconcileEndorsementReceiptPremium, reconcilePolicyReceiptPremium } from "@/lib/premium-breakdown";
 import { convertMoneyValue, loadCurrencyRates } from "@/lib/currency-rates";
-import { damagePortfolioLossRatioStatus, normalizedInsurerName, selectBonusTier, type BonusProgram as ProgramRule } from "@/lib/bonus-rules";
+import { bonusPaymentWindow, damagePortfolioLossRatioStatus, normalizedInsurerName, selectBonusTier, type BonusProgram as ProgramRule } from "@/lib/bonus-rules";
 
 export type BonusProjectionInput = { programKey: string; sellerId: string; year: number; periodNumber: number; damagePortfolioLossRatio?: number | null };
 export type BonusProjectionItem = {
@@ -31,10 +31,6 @@ export type BonusProjection = {
   items: BonusProjectionItem[];
 };
 
-function utcDate(year: number, month: number, day: number) { return new Date(Date.UTC(year, month, day)); }
-function quarterStart(year: number, quarter: number) { return utcDate(year, (quarter - 1) * 3, 1); }
-function quarterEnd(year: number, quarter: number) { return utcDate(year, quarter * 3, 1); }
-function yearEnd(year: number) { return utcDate(year + 1, 0, 1); }
 function n(value: unknown) { return Number(value ?? 0); }
 
 function eligibilityEvidence(json: string | null, required: string[]) {
@@ -50,15 +46,9 @@ function eligibilityEvidence(json: string | null, required: string[]) {
   }
 }
 
-function paymentWindow(rule: ProgramRule, year: number, quarter: number) {
-  if (rule.period === "QUARTERLY" && rule.accumulation === "YEAR_TO_DATE") return { gte: utcDate(year, 0, 1), lt: quarterEnd(year, quarter) };
-  if (rule.period === "QUARTERLY") return { gte: quarterStart(year, quarter), lt: quarterEnd(year, quarter + 1) };
-  return { gte: utcDate(year, 0, 1), lt: yearEnd(year) };
-}
-
 export async function calculateBonusProjection(db: TenantDb, organizationId: string, rule: ProgramRule, input: BonusProjectionInput): Promise<BonusProjection> {
   const periodNumber = rule.period === "QUARTERLY" ? input.periodNumber : 1;
-  const dateWhere = paymentWindow(rule, input.year, periodNumber);
+  const dateWhere = bonusPaymentWindow(rule, input.year, periodNumber);
   const payments = await db.payment.findMany({
     where: { organizationId, status: "POSTED", paidDate: dateWhere, policy: { organizationId }, receipt: { status: { not: "CANCELLED" } } },
     include: {
@@ -67,7 +57,7 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
     },
     orderBy: [{ paidDate: "asc" }, { id: "asc" }],
   });
-  const rates = await loadCurrencyRates(db, organizationId, quarterEnd(input.year, periodNumber));
+  const rates = await loadCurrencyRates(db, organizationId, dateWhere.lt);
   const candidates = payments.filter((payment) => {
     const policy = payment.policy;
     if (!rule.policyTypes.includes(policy.policyType)) return false;

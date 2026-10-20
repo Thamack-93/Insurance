@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BONUS_PROGRAMS, damagePortfolioLossRatioStatus, selectBonusTier } from "./bonus-rules";
+import { BONUS_PROGRAMS, bonusPaymentWindow, damagePortfolioLossRatioStatus, selectBonusTier } from "./bonus-rules";
 
 describe("2026 incentive rules", () => {
   it("selects Auto tiers at the exact published lower boundaries", () => {
@@ -43,5 +43,14 @@ describe("2026 incentive rules", () => {
     expect(damagePortfolioLossRatioStatus(undefined)).toBe("MISSING");
     expect(damagePortfolioLossRatioStatus(0.5)).toBe("ELIGIBLE");
     expect(damagePortfolioLossRatioStatus(0.50000001)).toBe("EXCLUDED");
+  });
+
+  it("uses an exclusive end date for the selected quarter, YTD and annual windows", () => {
+    const quarterly = BONUS_PROGRAMS.find((program) => program.key === "DAMAGE_Q_2026");
+    const auto = BONUS_PROGRAMS.find((program) => program.key === "AUTO_2026");
+    const annual = BONUS_PROGRAMS.find((program) => program.key === "DAMAGE_CHUBB_2026");
+    expect(bonusPaymentWindow(quarterly!, 2026, 2)).toEqual({ gte: new Date("2026-04-01T00:00:00.000Z"), lt: new Date("2026-07-01T00:00:00.000Z") });
+    expect(bonusPaymentWindow(auto!, 2026, 2)).toEqual({ gte: new Date("2026-01-01T00:00:00.000Z"), lt: new Date("2026-07-01T00:00:00.000Z") });
+    expect(bonusPaymentWindow(annual!, 2026, 1)).toEqual({ gte: new Date("2026-01-01T00:00:00.000Z"), lt: new Date("2027-01-01T00:00:00.000Z") });
   });
 });

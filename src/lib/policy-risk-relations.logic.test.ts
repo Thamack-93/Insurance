@@ -3,42 +3,42 @@ import type { Prisma } from "@/generated/prisma/client";
 import { syncPolicyRiskRelations } from "@/lib/policy-risk-relations";
 
 describe("policy risk relation synchronization", () => {
-  it("clears old assets and parties before projecting the new ramo", async () => {
-    const calls: string[] = [];
+  it("preserves existing asset IDs and updates projected details", async () => {
     const tx = {
       policyInsuredAsset: {
-        deleteMany: vi.fn(async () => { calls.push("delete-assets"); return { count: 1 }; }),
-        createMany: vi.fn(async () => { calls.push("create-assets"); return { count: 1 }; }),
+        findMany: vi.fn(async () => [{ id: "asset-1", assetType: "AUTO", description: "Honda Civic 2020", serialNumber: "VIN-1" }]),
+        update: vi.fn(async () => ({})),
+        create: vi.fn(async () => ({})),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
       },
       policyInsuredParty: {
-        deleteMany: vi.fn(async () => { calls.push("delete-parties"); return { count: 1 }; }),
-        createMany: vi.fn(async () => { calls.push("create-parties"); return { count: 1 }; }),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+        createMany: vi.fn(async () => ({ count: 1 })),
       },
     } as unknown as Prisma.TransactionClient;
 
     await syncPolicyRiskRelations(tx, "org-a", "policy-a", {
       version: 1,
-      policyType: "GMM",
+      policyType: "AUTO",
       data: {
-        insuredPeople: [{ fullName: "Ana Pérez", birthDate: "", relationship: "" }],
-        plan: "",
-        insuredAmount: "",
-        deductible: "",
-        coinsurance: "",
+        policyMode: "Individual",
+        vehicles: [{ make: "Honda", model: "Civic", year: "2020", version: "EX", vin: "VIN-1", plates: "ABC", unitClass: "AUTO PARTICULAR" }],
       },
     });
 
-    expect(calls).toEqual(["delete-assets", "delete-parties", "create-assets", "create-parties"]);
-    expect(tx.policyInsuredAsset.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-a", policyId: "policy-a" } });
-    expect(tx.policyInsuredParty.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-a", policyId: "policy-a" } });
-    expect(tx.policyInsuredParty.createMany).toHaveBeenCalledWith({
-      data: [{ organizationId: "org-a", policyId: "policy-a", fullName: "Ana Pérez", isPrimary: true, sourceLabel: "Datos estructurados de póliza" }],
+    expect(tx.policyInsuredAsset.update).toHaveBeenCalledWith({
+      where: { id: "asset-1", organizationId: "org-a", policyId: "policy-a" },
+      data: { assetType: "AUTO", unitClass: "AUTO PARTICULAR", description: "Honda Civic 2020 EX Placas ABC", serialNumber: "VIN-1", isPrimary: true, organizationId: "org-a", policyId: "policy-a" },
     });
+    expect(tx.policyInsuredAsset.create).not.toHaveBeenCalled();
+    expect(tx.policyInsuredAsset.deleteMany).not.toHaveBeenCalled();
+    expect(tx.policyInsuredParty.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-a", policyId: "policy-a" } });
+    expect(tx.policyInsuredParty.createMany).not.toHaveBeenCalled();
   });
 
-  it("removes both relation sets when the ramo has no projected relation model", async () => {
+  it("removes unmatched assets and both relation sets when the ramo has no projected relation model", async () => {
     const tx = {
-      policyInsuredAsset: { deleteMany: vi.fn(async () => ({ count: 1 })), createMany: vi.fn() },
+      policyInsuredAsset: { findMany: vi.fn(async () => [{ id: "asset-1", assetType: "AUTO", description: "Auto", serialNumber: null }]), deleteMany: vi.fn(async () => ({ count: 1 })), update: vi.fn(), create: vi.fn() },
       policyInsuredParty: { deleteMany: vi.fn(async () => ({ count: 1 })), createMany: vi.fn() },
     } as unknown as Prisma.TransactionClient;
 
@@ -48,15 +48,15 @@ describe("policy risk relation synchronization", () => {
       data: { obligation: "Garantía", contractNumber: "", beneficiary: "", bondedAmount: "", term: "" },
     });
 
-    expect(tx.policyInsuredAsset.deleteMany).toHaveBeenCalledOnce();
+    expect(tx.policyInsuredAsset.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-a", policyId: "policy-a", id: { in: ["asset-1"] } } });
     expect(tx.policyInsuredParty.deleteMany).toHaveBeenCalledOnce();
-    expect(tx.policyInsuredAsset.createMany).not.toHaveBeenCalled();
+    expect(tx.policyInsuredAsset.create).not.toHaveBeenCalled();
     expect(tx.policyInsuredParty.createMany).not.toHaveBeenCalled();
   });
 
-  it("clears old relations when the new ramo is still empty", async () => {
+  it("removes old relations when the new ramo is still empty", async () => {
     const tx = {
-      policyInsuredAsset: { deleteMany: vi.fn(async () => ({ count: 1 })), createMany: vi.fn() },
+      policyInsuredAsset: { findMany: vi.fn(async () => [{ id: "asset-old", assetType: "GMM", description: "Ana", serialNumber: null }]), deleteMany: vi.fn(async () => ({ count: 1 })), update: vi.fn(), create: vi.fn() },
       policyInsuredParty: { deleteMany: vi.fn(async () => ({ count: 1 })), createMany: vi.fn() },
     } as unknown as Prisma.TransactionClient;
 
@@ -66,9 +66,9 @@ describe("policy risk relation synchronization", () => {
       data: { insuredPeople: [], plan: "", insuredAmount: "", deductible: "", coinsurance: "" },
     });
 
-    expect(tx.policyInsuredAsset.deleteMany).toHaveBeenCalledOnce();
+    expect(tx.policyInsuredAsset.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-a", policyId: "policy-a", id: { in: ["asset-old"] } } });
     expect(tx.policyInsuredParty.deleteMany).toHaveBeenCalledOnce();
-    expect(tx.policyInsuredAsset.createMany).not.toHaveBeenCalled();
+    expect(tx.policyInsuredAsset.create).not.toHaveBeenCalled();
     expect(tx.policyInsuredParty.createMany).not.toHaveBeenCalled();
   });
 });

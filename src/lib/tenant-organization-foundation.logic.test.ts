@@ -8,6 +8,7 @@ import {
   CUTOVER_TRIGGER_REMOVAL_MIGRATION,
   EXPECTED_TENANT_TRIGGERS,
   OPTIONAL_ORGANIZATION_TABLES,
+  POST_CUTOVER_PROTECTED_TENANT_TABLES,
   PLATFORM_GLOBAL_TABLES,
   PROTECTED_TENANT_TABLES,
   SYSTEM_USER_ID,
@@ -62,7 +63,11 @@ describe("tenant organization transition foundation", () => {
     expect(migration).not.toContain('NotificationChannel_transition_singleton_organization');
     expect(migration).not.toContain('SecurityEventAggregate_transition_singleton_organization');
     expect(migration).not.toContain('TelegramWebhookUpdate_transition_singleton_organization');
-    for (const trigger of Object.values(EXPECTED_TENANT_TRIGGERS)) {
+    for (const table of POST_CUTOVER_PROTECTED_TENANT_TABLES) {
+      expect(bonusMigration).not.toContain(`CREATE TRIGGER "${EXPECTED_TENANT_TRIGGERS[table]}"`);
+    }
+    for (const [table, trigger] of Object.entries(EXPECTED_TENANT_TRIGGERS)) {
+      if (POST_CUTOVER_PROTECTED_TENANT_TABLES.includes(table as (typeof POST_CUTOVER_PROTECTED_TENANT_TABLES)[number])) continue;
       expect(allGuardSql).toContain(`CREATE TRIGGER "${trigger}"`);
     }
   });

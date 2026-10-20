@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   EXPECTED_TENANT_TRIGGERS,
   OPTIONAL_ORGANIZATION_TABLES,
+  POST_CUTOVER_PROTECTED_TENANT_TABLES,
   PLATFORM_GLOBAL_TABLES,
   PROTECTED_TENANT_TABLES,
 } from "../src/lib/tenant-organization-foundation.ts";
@@ -38,7 +39,11 @@ for (const table of PROTECTED_TENANT_TABLES) {
   const block = modelBlock(table);
   if (!block.includes("organizationId")) issues.push(`${table} lacks organizationId in Prisma schema`);
   if (!migrationCreatesOrganizationColumn(table) || !migration.includes(`CREATE INDEX "${table}_organizationId_idx"`)) issues.push(`${table} lacks its organization column/index in migration SQL`);
-  if (!migration.includes(`CREATE TRIGGER "${EXPECTED_TENANT_TRIGGERS[table]}"`)) issues.push(`${table} lacks its transition trigger in migration SQL`);
+  if (POST_CUTOVER_PROTECTED_TENANT_TABLES.includes(table as (typeof POST_CUTOVER_PROTECTED_TENANT_TABLES)[number])) {
+    if (migration.includes(`CREATE TRIGGER "${EXPECTED_TENANT_TRIGGERS[table]}"`)) issues.push(`${table} is post-cutover and must not have a singleton transition trigger`);
+  } else if (!migration.includes(`CREATE TRIGGER "${EXPECTED_TENANT_TRIGGERS[table]}"`)) {
+    issues.push(`${table} lacks its transition trigger in migration SQL`);
+  }
 }
 
 for (const table of OPTIONAL_ORGANIZATION_TABLES) {
