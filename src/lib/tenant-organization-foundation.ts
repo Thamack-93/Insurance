@@ -11,7 +11,7 @@ const MIGRATIONS_TABLE = "_prisma_migrations";
  * trigger; global tables are deliberately outside the singleton boundary.
  */
 export const PROTECTED_TENANT_TABLES = [
-  "Client", "Insurer", "Policy", "Receipt", "PolicyEndorsement", "Payment", "Commission", "Task", "WorkItem", "Claim", "ClaimChecklistItem", "Quote", "Document", "ActivityLog", "AssistantActionDraft", "NotificationPreference", "NotificationEvent", "PolicyInsuredParty", "PolicyInsuredAsset", "TelegramLinkToken", "LedgerImportBatch", "LedgerImportRow", "LedgerImportAction", "LedgerImportIssue", "TelegramDraft", "MaintenanceRun", "ReceiptReconciliationIssue", "PolicyRenewalSuggestion", "DataQualitySuppressionRule", "AssistantReport", "AssistantReportSignal", "AssistantAiRun", "AssistantAiAttempt", "KnowledgeSource", "KnowledgeChunk", "Alert", "CommissionStatement", "CommissionStatementRow", "CommissionCorrection", "QuoteComparison", "QuoteComparisonItem", "CurrencyRate",
+  "Client", "Insurer", "Policy", "Receipt", "PolicyEndorsement", "Payment", "Commission", "Task", "WorkItem", "Claim", "ClaimChecklistItem", "Quote", "Document", "ActivityLog", "AssistantActionDraft", "NotificationPreference", "NotificationEvent", "PolicyInsuredParty", "PolicyInsuredAsset", "TelegramLinkToken", "LedgerImportBatch", "LedgerImportRow", "LedgerImportAction", "LedgerImportIssue", "TelegramDraft", "MaintenanceRun", "ReceiptReconciliationIssue", "PolicyRenewalSuggestion", "DataQualitySuppressionRule", "AssistantReport", "AssistantReportSignal", "AssistantAiRun", "AssistantAiAttempt", "KnowledgeSource", "KnowledgeChunk", "Alert", "CommissionStatement", "CommissionStatementRow", "CommissionCorrection", "QuoteComparison", "QuoteComparisonItem", "CurrencyRate", "BonusRuleSet", "BonusRun", "BonusRunItem",
 ] as const;
 
 /**
@@ -73,6 +73,7 @@ export const TENANT_RELATION_CHECKS: ReadonlyArray<readonly [string, string, str
   ["ReceiptReconciliationIssue", "maintenanceRunId", "MaintenanceRun"], ["ReceiptReconciliationIssue", "receiptId", "Receipt"], ["ReceiptReconciliationIssue", "policyId", "Policy"], ["ReceiptReconciliationIssue", "suppressedByRuleId", "DataQualitySuppressionRule"],
   ["PolicyRenewalSuggestion", "maintenanceRunId", "MaintenanceRun"], ["PolicyRenewalSuggestion", "sourcePolicyId", "Policy"], ["PolicyRenewalSuggestion", "targetPolicyId", "Policy"], ["PolicyRenewalSuggestion", "suppressedByRuleId", "DataQualitySuppressionRule"],
   ["AssistantReport", "parentReportId", "AssistantReport"], ["AssistantReportSignal", "reportId", "AssistantReport"], ["AssistantAiRun", "reportId", "AssistantReport"], ["AssistantAiAttempt", "runId", "AssistantAiRun"],
+  ["BonusRun", "ruleSetId", "BonusRuleSet"], ["BonusRunItem", "runId", "BonusRun"], ["BonusRunItem", "paymentId", "Payment"], ["BonusRunItem", "receiptId", "Receipt"], ["BonusRunItem", "policyId", "Policy"],
 ];
 
 export type TenantAuditOptions = { requireActive?: boolean; guardsOnly?: boolean };
@@ -142,6 +143,12 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
 
   const portfolio = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "Client" c LEFT JOIN "User" u ON u."id" = c."portfolioOwnerId" LEFT JOIN "OrganizationMembership" m ON m."userId" = c."portfolioOwnerId" AND m."organizationId" = c."organizationId" AND m."active" WHERE c."portfolioOwnerId" IS NOT NULL AND (u."id" IS NULL OR m."id" IS NULL)`);
   if (Number(portfolio.rows[0]?.count ?? 0) > 0) issues.push("portfolio owners do not belong to the organization");
+  const bonusPolicySellers = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "Policy" p LEFT JOIN "User" u ON u."id" = p."bonusSellerId" LEFT JOIN "OrganizationMembership" m ON m."userId" = p."bonusSellerId" AND m."organizationId" = p."organizationId" AND m."active" WHERE p."bonusSellerId" IS NOT NULL AND (u."id" IS NULL OR m."id" IS NULL)`);
+  if (Number(bonusPolicySellers.rows[0]?.count ?? 0) > 0) issues.push("bonus policy sellers do not belong to the policy organization");
+  const bonusRunSellers = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "BonusRun" r LEFT JOIN "User" u ON u."id" = r."sellerId" LEFT JOIN "OrganizationMembership" m ON m."userId" = r."sellerId" AND m."organizationId" = r."organizationId" AND m."active" WHERE u."id" IS NULL OR m."id" IS NULL`);
+  if (Number(bonusRunSellers.rows[0]?.count ?? 0) > 0) issues.push("bonus run sellers do not belong to the run organization");
+  const bonusApprovers = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "BonusRun" r LEFT JOIN "OrganizationMembership" m ON m."userId" = r."approvedById" AND m."organizationId" = r."organizationId" AND m."active" WHERE r."approvedById" IS NOT NULL AND m."id" IS NULL`);
+  if (Number(bonusApprovers.rows[0]?.count ?? 0) > 0) issues.push("bonus approvers do not belong to the run organization");
   const assigned = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "WorkItem" w LEFT JOIN "User" u ON u."id" = w."assignedToId" LEFT JOIN "OrganizationMembership" m ON m."userId" = w."assignedToId" AND m."organizationId" = w."organizationId" AND m."active" WHERE w."assignedToId" IS NOT NULL AND (u."id" IS NULL OR m."id" IS NULL)`);
   if (Number(assigned.rows[0]?.count ?? 0) > 0) issues.push("assigned users do not belong to the organization");
   }

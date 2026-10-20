@@ -20,6 +20,15 @@ const optionalText = z.string().max(4000).optional().or(z.literal(""));
 const optionalEmail = z.string().email("Email invalido.").optional().or(z.literal(""));
 const requiredDate = z.string().min(1, "Selecciona una fecha.");
 const optionalDate = z.string().optional().or(z.literal(""));
+const commissionMoney = z.union([z.literal(""), z.coerce.number().nonnegative("El importe no puede ser negativo.")]).optional();
+const receiptCommissionUnitSchema = z.object({
+  insuredAssetId: z.string().min(1),
+  totalPremium: commissionMoney,
+  vatAmount: commissionMoney,
+  issuanceExpenseAmount: commissionMoney,
+  surchargeAmount: commissionMoney,
+  discountAmount: commissionMoney,
+});
 
 function dateOnly(value: string) {
   return parseBusinessDateInput(value);
@@ -139,6 +148,11 @@ export const receiptSchema = z
     periodEndDate: requiredDate,
     dueDate: requiredDate,
     amount: z.coerce.number().positive("El monto debe ser mayor a cero."),
+    vatAmount: commissionMoney,
+    issuanceExpenseAmount: commissionMoney,
+    surchargeAmount: commissionMoney,
+    discountAmount: commissionMoney,
+    premiumBreakdownByUnit: z.array(receiptCommissionUnitSchema).max(100).default([]),
     currency: z.string().trim().min(1, "Selecciona una moneda."),
     status: z.enum(RECEIPT_STATUSES),
     paidDate: optionalDate,
@@ -148,7 +162,33 @@ export const receiptSchema = z
   .refine((values) => values.periodEndDate >= values.periodStartDate, {
     message: "El fin del periodo debe ser posterior al inicio.",
     path: ["periodEndDate"],
+  })
+  .superRefine((values, context) => {
+    const seen = new Set<string>();
+    for (const unit of values.premiumBreakdownByUnit) {
+      if (seen.has(unit.insuredAssetId)) context.addIssue({ code: "custom", path: ["premiumBreakdownByUnit"], message: "No repitas una unidad en el desglose de prima." });
+      seen.add(unit.insuredAssetId);
+    }
   });
+
+export const commissionRuleSchema = z.object({
+  id: z.string().optional(),
+  insurerId: z.string().min(1),
+  policyType: z.enum(POLICY_TYPES),
+  productPlan: z.string().trim().min(1).transform((value) => value.toUpperCase()),
+  policyMode: z.string().trim().min(1).transform((value) => value.toUpperCase()),
+  unitClass: z.string().trim().min(1).transform((value) => value.toUpperCase()),
+  paymentFrequency: z.string().trim().min(1).transform((value) => value.toUpperCase()),
+  rate: z.coerce.number().gt(0).max(100),
+  validFrom: requiredDate,
+  validTo: optionalDate,
+  active: z.boolean(),
+  evidence: z.string().trim().max(1000),
+  expectedVersion: z.number().int().positive(),
+}).superRefine((value, context) => {
+  if (value.validTo && value.validTo < value.validFrom) context.addIssue({ code: "custom", path: ["validTo"], message: "La fecha final debe ser igual o posterior al inicio." });
+  if (value.active && value.evidence.length < 8) context.addIssue({ code: "custom", path: ["evidence"], message: "Agrega la fuente o evidencia antes de activar la regla." });
+});
 
 export const endorsementSchema = z
   .object({
@@ -224,6 +264,7 @@ export const quoteSchema = z.object({
 export type ClientFormValues = z.infer<typeof clientSchema>;
 export type PolicyFormValues = z.infer<typeof policySchema>;
 export type ReceiptFormValues = z.infer<typeof receiptSchema>;
+export type CommissionRuleFormValues = z.infer<typeof commissionRuleSchema>;
 export type EndorsementFormValues = z.infer<typeof endorsementSchema>;
 export type WorkItemFormValues = z.infer<typeof workItemSchema>;
 export type InsurerFormValues = z.infer<typeof insurerSchema>;

@@ -60,6 +60,26 @@ describe("policy risk details", () => {
     expect(getPolicyRiskDetailEntries(details)).toContainEqual({ label: "Persona asegurada 2 · Nombre", value: "Luis Pérez" });
   });
 
+  it("projects non-auto insured people with commission classes as calculation units", () => {
+    const details = {
+      version: 1,
+      policyType: "GMM",
+      commissionPolicyMode: "COLECTIVA",
+      commissionUnitClass: "PERSONA",
+      data: {
+        insuredPeople: [
+          { fullName: "Ana Pérez", birthDate: "1990-02-03", relationship: "Titular", unitClass: "TITULAR" },
+          { fullName: "Luis Pérez", birthDate: "2018-05-01", relationship: "Hijo", unitClass: "DEPENDIENTE" },
+        ],
+        plan: "Integral",
+        insuredAmount: "5000000",
+        deductible: "20000",
+        coinsurance: "10%",
+      },
+    };
+    expect(projectPolicyRiskRelations(details).assets.map((asset) => asset.unitClass)).toEqual(["TITULAR", "DEPENDIENTE"]);
+  });
+
   it("converts clearly delimited auto descriptions and preserves their source text", () => {
     const result = convertLegacyPolicyDescription("AUTO", "BUICK, ENCORE, 2016, LEATHERETTE", "1G1ABC");
     expect(result.status).toBe("CONVERTED");

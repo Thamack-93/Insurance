@@ -28,7 +28,7 @@ describe("policy risk relation synchronization", () => {
       },
     });
 
-    expect(calls).toEqual(["delete-assets", "delete-parties", "create-parties"]);
+    expect(calls).toEqual(["delete-assets", "delete-parties", "create-assets", "create-parties"]);
     expect(tx.policyInsuredAsset.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-a", policyId: "policy-a" } });
     expect(tx.policyInsuredParty.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-a", policyId: "policy-a" } });
     expect(tx.policyInsuredParty.createMany).toHaveBeenCalledWith({
