@@ -109,7 +109,7 @@ export default async function CommissionsPage({
           eyebrow="Finanzas"
           title="Comisiones y bonos"
           description="Seguimiento de comisiones esperadas, cobradas y vencidas. Los bonos se incorporarán cuando existan datos reales."
-          actions={<div className="flex flex-wrap items-center gap-2"><CommissionImportForm /><Button asChild><Link href="/reports">Reportes<ArrowRight className="ml-2 size-4" /></Link></Button></div>}
+          actions={<div className="flex flex-wrap items-center gap-2"><CommissionImportForm /><Button asChild variant="outline"><Link href="/commissions/rules">Reglas de comisión</Link></Button><Button asChild><Link href="/reports">Reportes<ArrowRight className="ml-2 size-4" /></Link></Button></div>}
         />
 
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">

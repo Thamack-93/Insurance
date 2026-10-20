@@ -43,6 +43,8 @@ export const CUTOVER_REMOVED_TENANT_TRIGGER_TABLES = [
   "KnowledgeSource",
   "KnowledgeChunk",
 ] as const;
+/** Tenant tables introduced after the multi-organization cutover have no singleton trigger. */
+export const POST_CUTOVER_PROTECTED_TENANT_TABLES = ["BonusRuleSet", "BonusRun", "BonusRunItem"] as const;
 export const CUTOVER_TRIGGER_REMOVAL_MIGRATION = "20261009010000_multi_org_drop_remaining_transition_triggers";
 
 export function tenantTriggersForMigrationState(cutoverTriggerRemovalApplied: boolean) {
@@ -143,11 +145,11 @@ export async function auditTenantFoundation(client: PoolClient, options: TenantA
 
   const portfolio = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "Client" c LEFT JOIN "User" u ON u."id" = c."portfolioOwnerId" LEFT JOIN "OrganizationMembership" m ON m."userId" = c."portfolioOwnerId" AND m."organizationId" = c."organizationId" AND m."active" WHERE c."portfolioOwnerId" IS NOT NULL AND (u."id" IS NULL OR m."id" IS NULL)`);
   if (Number(portfolio.rows[0]?.count ?? 0) > 0) issues.push("portfolio owners do not belong to the organization");
-  const bonusPolicySellers = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "Policy" p LEFT JOIN "User" u ON u."id" = p."bonusSellerId" LEFT JOIN "OrganizationMembership" m ON m."userId" = p."bonusSellerId" AND m."organizationId" = p."organizationId" WHERE p."bonusSellerId" IS NOT NULL AND (u."id" IS NULL OR m."id" IS NULL)`);
+  const bonusPolicySellers = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "Policy" p LEFT JOIN "User" u ON u."id" = p."bonusSellerId" LEFT JOIN "OrganizationMembership" m ON m."userId" = p."bonusSellerId" AND m."organizationId" = p."organizationId" AND m."active" WHERE p."bonusSellerId" IS NOT NULL AND (u."id" IS NULL OR m."id" IS NULL)`);
   if (Number(bonusPolicySellers.rows[0]?.count ?? 0) > 0) issues.push("bonus policy sellers do not belong to the policy organization");
-  const bonusRunSellers = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "BonusRun" r LEFT JOIN "User" u ON u."id" = r."sellerId" LEFT JOIN "OrganizationMembership" m ON m."userId" = r."sellerId" AND m."organizationId" = r."organizationId" WHERE u."id" IS NULL OR m."id" IS NULL`);
+  const bonusRunSellers = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "BonusRun" r LEFT JOIN "User" u ON u."id" = r."sellerId" LEFT JOIN "OrganizationMembership" m ON m."userId" = r."sellerId" AND m."organizationId" = r."organizationId" AND m."active" WHERE u."id" IS NULL OR m."id" IS NULL`);
   if (Number(bonusRunSellers.rows[0]?.count ?? 0) > 0) issues.push("bonus run sellers do not belong to the run organization");
-  const bonusApprovers = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "BonusRun" r LEFT JOIN "OrganizationMembership" m ON m."userId" = r."approvedById" AND m."organizationId" = r."organizationId" WHERE r."approvedById" IS NOT NULL AND m."id" IS NULL`);
+  const bonusApprovers = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "BonusRun" r LEFT JOIN "OrganizationMembership" m ON m."userId" = r."approvedById" AND m."organizationId" = r."organizationId" AND m."active" WHERE r."approvedById" IS NOT NULL AND m."id" IS NULL`);
   if (Number(bonusApprovers.rows[0]?.count ?? 0) > 0) issues.push("bonus approvers do not belong to the run organization");
   const assigned = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "WorkItem" w LEFT JOIN "User" u ON u."id" = w."assignedToId" LEFT JOIN "OrganizationMembership" m ON m."userId" = w."assignedToId" AND m."organizationId" = w."organizationId" AND m."active" WHERE w."assignedToId" IS NOT NULL AND (u."id" IS NULL OR m."id" IS NULL)`);
   if (Number(assigned.rows[0]?.count ?? 0) > 0) issues.push("assigned users do not belong to the organization");

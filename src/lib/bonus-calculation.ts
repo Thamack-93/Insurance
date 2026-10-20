@@ -2,9 +2,9 @@ import "server-only";
 
 import { Prisma } from "@/generated/prisma/client";
 import type { TenantDb } from "@/lib/organization-context";
-import { allocatePaidNetPremium } from "@/lib/premium-breakdown";
+import { allocatePaidNetPremium, deriveReceiptNetPremium, reconcileEndorsementReceiptPremium, reconcilePolicyReceiptPremium } from "@/lib/premium-breakdown";
 import { convertMoneyValue, loadCurrencyRates } from "@/lib/currency-rates";
-import { damagePortfolioLossRatioStatus, normalizedInsurerName, selectBonusTier, type BonusProgram as ProgramRule } from "@/lib/bonus-rules";
+import { bonusPaymentWindow, damagePortfolioLossRatioStatus, normalizedInsurerName, selectBonusTier, type BonusProgram as ProgramRule } from "@/lib/bonus-rules";
 
 export type BonusProjectionInput = { programKey: string; sellerId: string; year: number; periodNumber: number; damagePortfolioLossRatio?: number | null };
 export type BonusProjectionItem = {
@@ -31,10 +31,6 @@ export type BonusProjection = {
   items: BonusProjectionItem[];
 };
 
-function utcDate(year: number, month: number, day: number) { return new Date(Date.UTC(year, month, day)); }
-function quarterStart(year: number, quarter: number) { return utcDate(year, (quarter - 1) * 3, 1); }
-function quarterEnd(year: number, quarter: number) { return utcDate(year, quarter * 3, 1); }
-function yearEnd(year: number) { return utcDate(year + 1, 0, 1); }
 function n(value: unknown) { return Number(value ?? 0); }
 
 function eligibilityEvidence(json: string | null, required: string[]) {
@@ -50,24 +46,18 @@ function eligibilityEvidence(json: string | null, required: string[]) {
   }
 }
 
-function paymentWindow(rule: ProgramRule, year: number, quarter: number) {
-  if (rule.period === "QUARTERLY" && rule.accumulation === "YEAR_TO_DATE") return { gte: utcDate(year, 0, 1), lt: quarterEnd(year, quarter) };
-  if (rule.period === "QUARTERLY") return { gte: quarterStart(year, quarter), lt: quarterEnd(year, quarter + 1) };
-  return { gte: utcDate(year, 0, 1), lt: yearEnd(year) };
-}
-
 export async function calculateBonusProjection(db: TenantDb, organizationId: string, rule: ProgramRule, input: BonusProjectionInput): Promise<BonusProjection> {
   const periodNumber = rule.period === "QUARTERLY" ? input.periodNumber : 1;
-  const dateWhere = paymentWindow(rule, input.year, periodNumber);
+  const dateWhere = bonusPaymentWindow(rule, input.year, periodNumber);
   const payments = await db.payment.findMany({
-    where: { organizationId, status: "POSTED", paidDate: dateWhere, policy: { organizationId } },
+    where: { organizationId, status: "POSTED", paidDate: dateWhere, policy: { organizationId }, receipt: { status: { not: "CANCELLED" } } },
     include: {
-      receipt: { select: { id: true, amount: true, currency: true, netPremiumAmount: true, vatAmount: true, issuanceExpenseAmount: true, surchargeAmount: true, discountAmount: true } },
+      receipt: { select: { id: true, amount: true, currency: true, endorsementId: true, vatAmount: true, issuanceExpenseAmount: true, surchargeAmount: true, discountAmount: true, premiumBreakdownByUnit: true } },
       policy: { include: { client: { select: { portfolioOwnerId: true } }, insurer: { select: { name: true } } } },
     },
     orderBy: [{ paidDate: "asc" }, { id: "asc" }],
   });
-  const rates = await loadCurrencyRates(db, organizationId, quarterEnd(input.year, periodNumber));
+  const rates = await loadCurrencyRates(db, organizationId, dateWhere.lt);
   const candidates = payments.filter((payment) => {
     const policy = payment.policy;
     if (!rule.policyTypes.includes(policy.policyType)) return false;
@@ -85,6 +75,25 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
     }
     return (policy.bonusSellerId ?? policy.client.portfolioOwnerId) === input.sellerId;
   });
+  const policyIds = [...new Set(candidates.map((payment) => payment.policyId))];
+  const receiptRows = policyIds.length ? await db.receipt.findMany({
+    where: { organizationId, policyId: { in: policyIds }, status: { not: "CANCELLED" } },
+    select: { policyId: true, endorsementId: true, amount: true, status: true },
+  }) : [];
+  const endorsementIds = [...new Set(candidates.map((payment) => payment.receipt.endorsementId).filter((id): id is string => Boolean(id)))];
+  const endorsementRows = endorsementIds.length ? await db.policyEndorsement.findMany({
+    where: { organizationId, id: { in: endorsementIds } },
+    select: { id: true, amount: true },
+  }) : [];
+  const baseReceiptsByPolicy = new Map<string, typeof receiptRows>();
+  const endorsementReceipts = new Map<string, typeof receiptRows>();
+  for (const row of receiptRows) {
+    if (row.endorsementId) endorsementReceipts.set(row.endorsementId, [...(endorsementReceipts.get(row.endorsementId) ?? []), row]);
+    else baseReceiptsByPolicy.set(row.policyId, [...(baseReceiptsByPolicy.get(row.policyId) ?? []), row]);
+  }
+  const policyPremiumById = new Map(candidates.map((payment) => [payment.policyId, n(payment.policy.premiumAmount)]));
+  const policyReconciliation = new Map(policyIds.map((policyId) => [policyId, reconcilePolicyReceiptPremium(policyPremiumById.get(policyId) ?? 0, (baseReceiptsByPolicy.get(policyId) ?? []).map((row) => ({ amount: n(row.amount), status: row.status })))]));
+  const endorsementReconciliation = new Map(endorsementRows.map((endorsement) => [endorsement.id, reconcileEndorsementReceiptPremium(n(endorsement.amount), (endorsementReceipts.get(endorsement.id) ?? []).map((row) => ({ amount: n(row.amount), status: row.status })))]));
   const byReceipt = new Map<string, typeof candidates>();
   for (const payment of candidates) byReceipt.set(payment.receiptId, [...(byReceipt.get(payment.receiptId) ?? []), payment]);
   const items: BonusProjectionItem[] = [];
@@ -93,14 +102,25 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
   for (const [, receiptPayments] of byReceipt) {
     const receipt = receiptPayments[0].receipt;
     const totalPosted = receiptPayments.reduce((sum, payment) => sum + n(payment.amount), 0);
-    const net = receipt.netPremiumAmount === null
-      ? null
-      : n(receipt.netPremiumAmount);
-    const calculatedNet = net ?? (receipt.vatAmount !== null && receipt.issuanceExpenseAmount !== null && receipt.surchargeAmount !== null && receipt.discountAmount !== null
-      ? n(receipt.amount) - n(receipt.vatAmount) - n(receipt.issuanceExpenseAmount) - n(receipt.surchargeAmount) + n(receipt.discountAmount)
-      : null);
+    const breakdown = Array.isArray(receipt.premiumBreakdownByUnit)
+      ? receipt.premiumBreakdownByUnit.flatMap((row) => row && typeof row === "object" && !Array.isArray(row)
+        ? [{ ...(row as Record<string, unknown>), totalPremium: n((row as Record<string, unknown>).totalPremium) } as { insuredAssetId: string; totalPremium: number; vatAmount: number; issuanceExpenseAmount: number; surchargeAmount: number; discountAmount: number }]
+        : [])
+      : [];
+    const calculatedNet = deriveReceiptNetPremium({
+      amount: n(receipt.amount),
+      vatAmount: receipt.vatAmount === null ? null : n(receipt.vatAmount),
+      issuanceExpenseAmount: receipt.issuanceExpenseAmount === null ? null : n(receipt.issuanceExpenseAmount),
+      surchargeAmount: receipt.surchargeAmount === null ? null : n(receipt.surchargeAmount),
+      discountAmount: receipt.discountAmount === null ? null : n(receipt.discountAmount),
+      premiumBreakdownByUnit: breakdown.length ? breakdown : null,
+    });
     const currencyMismatch = receiptPayments.some((payment) => payment.currency.toUpperCase() !== receipt.currency.toUpperCase());
-    const totalNetPaid = calculatedNet === null || currencyMismatch ? null : allocatePaidNetPremium(calculatedNet, n(receipt.amount), totalPosted);
+    const relevantReconciliation = receipt.endorsementId
+      ? endorsementReconciliation.get(receipt.endorsementId)
+      : policyReconciliation.get(receiptPayments[0].policyId);
+    const overpaid = totalPosted > n(receipt.amount) + 0.01;
+    const totalNetPaid = calculatedNet === null || currencyMismatch || overpaid ? null : allocatePaidNetPremium(calculatedNet, n(receipt.amount), totalPosted);
     const scale = totalPosted > 0 && totalNetPaid !== null ? totalNetPaid / totalPosted : 0;
     let allocatedSoFar = 0;
 
@@ -137,12 +157,14 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
       }
       if (!policy.bonusSellerId && evidence.sellerAttributionConfirmed !== true) reasons.push("Atribución provisional: confirmar vendedor histórico con sellerAttributionConfirmed=true.");
       if (calculatedNet === null) reasons.push("Falta el desglose completo del recibo para calcular prima neta.");
+      if (overpaid) reasons.push("Los pagos POSTED exceden el importe del recibo; revisar la aplicación antes de prorratear.");
       let conversion: ReturnType<typeof convertMoneyValue> | null = null;
       if (netPaid !== null) {
         try { conversion = convertMoneyValue(netPaid, payment.currency || receipt.currency, payment.paidDate, rates); }
         catch { reasons.push(`Moneda inválida para conversión: ${payment.currency}.`); }
       }
       if (currencyMismatch) reasons.push("La moneda del pago no coincide con la moneda del recibo; revisar aplicación.");
+      if (!relevantReconciliation || relevantReconciliation.status !== "RECONCILED") reasons.push(`La prima no concilia con los recibos vigentes (diferencia ${relevantReconciliation?.difference.toFixed(2) ?? "desconocida"} ${receipt.currency}); revisar antes del bono.`);
       if (conversion?.conversionStatus === "NO_RATE") reasons.push(`Falta tipo de cambio ${payment.currency} a MXN para ${payment.paidDate.toISOString().slice(0, 10)}.`);
       if (evidenceCheck.missing.length) reasons.push(`Falta evidencia: ${evidenceCheck.missing.join(", ")}.`);
       const amount = conversion?.amountMxn === null || !conversion ? null : Number(conversion.amountMxn);
@@ -177,10 +199,10 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
       reviewReasons.add("Falta la siniestralidad de la cartera total de Daños del vendedor para este cierre.");
     } else if (portfolioStatus === "EXCLUDED") {
       for (const item of items) {
-        if (item.status !== "INCLUDED") continue;
         item.status = "EXCLUDED";
-        item.reason = [item.reason, `La siniestralidad de la cartera total de Daños es ${(portfolioLossRatio! * 100).toFixed(6)}%; 50% o más está excluido.`].filter(Boolean).join(" ");
+        item.reason = [item.reason, `La siniestralidad de la cartera total de Daños es ${(portfolioLossRatio! * 100).toFixed(6)}%, superior al máximo de 50%.`].filter(Boolean).join(" ");
       }
+      reviewReasons.clear();
     }
   }
 

@@ -457,6 +457,8 @@ model Insurer {
   contactEmail   String?
   contactPhone   String?
   notes          String?
+  commissionRules Json?
+  commissionRulesVersion Int @default(1)
   status         EntityStatus @default(ACTIVE)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -475,41 +477,41 @@ model Insurer {
 }
 
 model Policy {
-  organizationId                String
-  organization                  Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id                            String       @id @default(cuid())
-  policyNumber                  String
-  clientId                      String
-  insurerId                     String
-  policyType                    String
-  status                        PolicyStatus @default(ACTIVE)
-  startDate                     DateTime
-  endDate                       DateTime
-  premiumAmount                 Decimal
-  currency                      String       @default("MXN")
-  paymentFrequency              String
-  paymentPlan                   String?
+  organizationId            String
+  organization              Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  id                        String       @id @default(cuid())
+  policyNumber              String
+  clientId                  String
+  insurerId                 String
+  policyType                String
+  status                    PolicyStatus @default(ACTIVE)
+  startDate                 DateTime
+  endDate                   DateTime
+  premiumAmount             Decimal
+  currency                  String       @default("MXN")
+  paymentFrequency          String
+  paymentPlan               String?
   qualitasReceiptMonitorEnabled Boolean      @default(false)
-  insuredObject                 String?
-  riskDetails                   Json?
-  riskDetailsReviewRequired     Boolean      @default(false)
-  beneficiaryInfo               String?
-  notes                         String?
-  createdAt                     DateTime     @default(now())
-  updatedAt                     DateTime     @updatedAt
-  createdById                   String?
-  updatedById                   String?
-  familyRootId                  String?
-  renewedFromPolicyId           String?
-  isMultiYearContract           Boolean      @default(false)
-  cancellationReason            String?
-  cancellationBatchId           String?
-  cancelledAt                   DateTime?
-  renewalStage                  RenewalStage @default(PENDING)
-  renewalStageAt                DateTime?
-  renewalStageById              String?
-  bonusSellerId                 String?
-  bonusEligibilityJson          String?
+  insuredObject             String?
+  riskDetails               Json?
+  riskDetailsReviewRequired Boolean      @default(false)
+  beneficiaryInfo           String?
+  notes                     String?
+  createdAt                 DateTime     @default(now())
+  updatedAt                 DateTime     @updatedAt
+  createdById               String?
+  updatedById               String?
+  familyRootId              String?
+  renewedFromPolicyId       String?
+  isMultiYearContract       Boolean      @default(false)
+  cancellationReason        String?
+  cancellationBatchId       String?
+  cancelledAt               DateTime?
+  renewalStage              RenewalStage @default(PENDING)
+  renewalStageAt            DateTime?
+  renewalStageById          String?
+  bonusSellerId             String?
+  bonusEligibilityJson      String?
 
   renewalStageBy              User?                        @relation("PolicyRenewalStageBy", fields: [renewalStageById], references: [id], onDelete: SetNull)
   bonusSeller                 User?                        @relation("PolicyBonusSeller", fields: [bonusSellerId], references: [id], onDelete: SetNull)
@@ -576,6 +578,13 @@ model Receipt {
   periodEndDate            DateTime
   dueDate                  DateTime
   amount                   Decimal
+  vatAmount                Decimal?
+  issuanceExpenseAmount    Decimal?
+  surchargeAmount          Decimal?
+  discountAmount           Decimal?
+  premiumBreakdownByUnit   Json?
+  commissionCalculationStatus String @default("NOT_CALCULATED")
+  commissionReviewReason  String?
   currency                 String        @default("MXN")
   status                   ReceiptStatus @default(PENDING)
   paidDate                 DateTime?
@@ -588,11 +597,6 @@ model Receipt {
   updatedById              String?
   reconciliationAdjustment Decimal       @default(0)
   reconciliationNote       String?
-  vatAmount                Decimal?
-  issuanceExpenseAmount    Decimal?
-  surchargeAmount          Decimal?
-  discountAmount           Decimal?
-  netPremiumAmount         Decimal?
   cancellationReason       String?
   cancellationBatchId      String?
   cancelledAt              DateTime?
@@ -690,14 +694,14 @@ model Payment {
   reversedAt        DateTime?
   reversalReason    String?
   sourceEvidenceKey String?
+  bonusItems        BonusRunItem[]
 
-  receipt    Receipt        @relation(fields: [receiptId], references: [id], onDelete: Cascade)
-  policy     Policy         @relation(fields: [policyId], references: [id], onDelete: Cascade)
-  client     Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  bonusItems BonusRunItem[]
-  createdBy  User?          @relation("PaymentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy  User?          @relation("PaymentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-  reversedBy User?          @relation("PaymentReversedBy", fields: [reversedById], references: [id], onDelete: SetNull)
+  receipt    Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  policy     Policy  @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  client     Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdBy  User?   @relation("PaymentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy  User?   @relation("PaymentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  reversedBy User?   @relation("PaymentReversedBy", fields: [reversedById], references: [id], onDelete: SetNull)
 
   @@unique([organizationId, sourceEvidenceKey])
   @@index([receiptId])
@@ -729,6 +733,7 @@ model Commission {
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
   version        Int              @default(1)
+  calculationBreakdownJson String?
 
   policy        Policy                   @relation(fields: [policyId], references: [id], onDelete: Cascade)
   receipt       Receipt?                 @relation(fields: [receiptId], references: [id], onDelete: SetNull)
@@ -1500,6 +1505,7 @@ model PolicyInsuredAsset {
   id             String       @id @default(cuid())
   policyId       String
   assetType      String
+  unitClass      String?
   description    String
   serialNumber   String?
   isPrimary      Boolean      @default(false)
@@ -2095,8 +2101,8 @@ model CommissionStatementRow {
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
-  statement   CommissionStatement    @relation(fields: [statementId], references: [id], onDelete: Cascade)
-  commission  Commission?            @relation(fields: [commissionId], references: [id], onDelete: SetNull)
+  statement  CommissionStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  commission Commission?         @relation(fields: [commissionId], references: [id], onDelete: SetNull)
   corrections CommissionCorrection[]
 
   @@unique([statementId, sourceRowKey])
@@ -2111,7 +2117,7 @@ model CommissionStatementRow {
 model CommissionCorrection {
   organizationId    String
   organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id                String       @id @default(cuid())
+  id                String @id @default(cuid())
   commissionId      String
   statementRowId    String?
   actorId           String
@@ -2119,12 +2125,12 @@ model CommissionCorrection {
   priorValuesJson   String
   currentValuesJson String
   evidenceJson      String?
-  version           Int          @default(1)
-  createdAt         DateTime     @default(now())
+  version           Int @default(1)
+  createdAt         DateTime @default(now())
 
-  commission   Commission              @relation(fields: [commissionId], references: [id], onDelete: Restrict)
+  commission   Commission             @relation(fields: [commissionId], references: [id], onDelete: Restrict)
   statementRow CommissionStatementRow? @relation(fields: [statementRowId], references: [id], onDelete: SetNull)
-  actor        User                    @relation("CommissionCorrectionActor", fields: [actorId], references: [id], onDelete: Restrict)
+  actor        User                   @relation("CommissionCorrectionActor", fields: [actorId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, commissionId])
   @@index([organizationId, createdAt])
@@ -2181,10 +2187,10 @@ model BonusRun {
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
-  ruleSet    BonusRuleSet   @relation(fields: [ruleSetId], references: [id], onDelete: Restrict)
-  seller     User           @relation("BonusRunSeller", fields: [sellerId], references: [id], onDelete: Restrict)
-  createdBy  User?          @relation("BonusRunCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  approvedBy User?          @relation("BonusRunApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  ruleSet    BonusRuleSet @relation(fields: [ruleSetId], references: [id], onDelete: Restrict)
+  seller     User         @relation("BonusRunSeller", fields: [sellerId], references: [id], onDelete: Restrict)
+  createdBy  User?        @relation("BonusRunCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  approvedBy User?        @relation("BonusRunApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   items      BonusRunItem[]
 
   @@unique([organizationId, programKey, sellerId, year, periodType, periodNumber])

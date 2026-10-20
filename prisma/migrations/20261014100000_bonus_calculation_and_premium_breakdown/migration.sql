@@ -4,7 +4,8 @@ ALTER TABLE "Receipt" ADD COLUMN "vatAmount" DECIMAL(65,30);
 ALTER TABLE "Receipt" ADD COLUMN "issuanceExpenseAmount" DECIMAL(65,30);
 ALTER TABLE "Receipt" ADD COLUMN "surchargeAmount" DECIMAL(65,30);
 ALTER TABLE "Receipt" ADD COLUMN "discountAmount" DECIMAL(65,30);
-ALTER TABLE "Receipt" ADD COLUMN "netPremiumAmount" DECIMAL(65,30);
+-- Prima neta is derived by application code from the receipt total and these
+-- four captured components. Do not persist a second editable/calculated total.
 
 CREATE TABLE "BonusRuleSet" (
   "organizationId" TEXT NOT NULL,
@@ -100,13 +101,3 @@ ALTER TABLE "BonusRunItem" ADD CONSTRAINT "BonusRunItem_policyId_fkey" FOREIGN K
 CREATE INDEX "BonusRuleSet_organizationId_idx" ON "BonusRuleSet"("organizationId");
 CREATE INDEX "BonusRun_organizationId_idx" ON "BonusRun"("organizationId");
 CREATE INDEX "BonusRunItem_organizationId_idx" ON "BonusRunItem"("organizationId");
-
-CREATE TRIGGER "BonusRuleSet_transition_singleton_organization"
-BEFORE INSERT OR UPDATE OF "organizationId" ON "BonusRuleSet"
-FOR EACH ROW EXECUTE FUNCTION policydesk_assign_singleton_organization();
-CREATE TRIGGER "BonusRun_transition_singleton_organization"
-BEFORE INSERT OR UPDATE OF "organizationId" ON "BonusRun"
-FOR EACH ROW EXECUTE FUNCTION policydesk_assign_singleton_organization();
-CREATE TRIGGER "BonusRunItem_transition_singleton_organization"
-BEFORE INSERT OR UPDATE OF "organizationId" ON "BonusRunItem"
-FOR EACH ROW EXECUTE FUNCTION policydesk_assign_singleton_organization();

@@ -1,7 +1,6 @@
 import "server-only";
 
 import type { Prisma } from "@/generated/prisma/client";
-import { toNumber } from "@/lib/money";
 import { businessAddDays } from "@/lib/business-dates";
 import { today } from "@/lib/dates";
 import { writeActivityLog } from "@/lib/activity-log";
@@ -16,7 +15,8 @@ import {
 } from "@/lib/organization-context";
 import { withTenantOrganization } from "@/lib/tenant-dal";
 import { OptimisticConcurrencyError } from "@/lib/optimistic-concurrency";
-import { commissionPremiumBase } from "@/lib/premium-breakdown";
+import { deriveReceiptNetPremium, reconcileEndorsementReceiptPremium, reconcilePolicyReceiptPremium } from "@/lib/premium-breakdown";
+import { calculateCommissionEstimate, parseCommissionRules, roundMoney, type CommissionEstimate, type CommissionPremiumComponents, type CommissionRule } from "@/lib/commissions.logic";
 
 type CommissionScope = {
   organizationId: string;
@@ -48,102 +48,123 @@ export async function calculateCommissionsForPolicy(
   policyId: string,
   receiptId?: string,
 ): Promise<MutationResult> {
+  if (!receiptId) return errorResult("El cálculo debe solicitarse para un recibo específico.");
+  return calculateCommissionForReceipt(receiptId, policyId);
+}
+
+type ReceiptUnitInput = { insuredAssetId: string; totalPremium: number; vatAmount: number; issuanceExpenseAmount: number; surchargeAmount: number; discountAmount: number };
+
+function jsonUnitBreakdown(value: unknown): ReceiptUnitInput[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((row): row is ReceiptUnitInput => Boolean(row && typeof row === "object" && typeof (row as ReceiptUnitInput).insuredAssetId === "string"));
+}
+
+function premiumComponents(source: Partial<ReceiptUnitInput> | { amount: unknown; vatAmount: unknown; issuanceExpenseAmount: unknown; surchargeAmount: unknown; discountAmount: unknown }): CommissionPremiumComponents | null {
+  const raw = source as Record<string, unknown>;
+  const numbers = "totalPremium" in source
+    ? [raw.totalPremium, raw.vatAmount, raw.issuanceExpenseAmount, raw.surchargeAmount, raw.discountAmount]
+    : [raw.amount, raw.vatAmount, raw.issuanceExpenseAmount, raw.surchargeAmount, raw.discountAmount];
+  if (numbers.some((value) => value === null || value === undefined || value === "")) return null;
+  const [totalPremium, iva, issuanceExpense, installmentSurcharge, visibleDiscounts] = numbers.map(Number);
+  return { totalPremium, iva, issuanceExpense, installmentSurcharge, visibleDiscounts };
+}
+
+/** Calculates one receipt from an exact tenant-scoped rule and stores its auditable snapshot. */
+export async function calculateCommissionForReceipt(receiptId: string, expectedPolicyId?: string): Promise<MutationResult> {
   try {
     const context = await requireOrganizationContext();
-    const portfolioOwnerId = context.membershipRole === "AGENT" ? context.userId : undefined;
+    if (context.membershipRole === "AGENT") return errorResult("Solo Owner o Admin puede calcular comisiones.");
     return await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
-    // Get policy details
-    const policy = await tx.policy.findFirst({
-      where: {
-        id: policyId,
-        organizationId: context.organizationId,
-        client: {
-          organizationId: context.organizationId,
-          ...(portfolioOwnerId ? { portfolioOwnerId } : {}),
-        },
-      },
-      include: {
-        client: true,
-        insurer: true,
-        receipts: receiptId ? { where: { id: receiptId } } : true,
-      },
-    });
-
-    if (!policy) {
-      return errorResult("La póliza no existe o fue eliminada.");
-    }
-
-    // Get insurer commission rate (default to 10% if not set)
-    const commissionRate = 0.10; // Could be stored in insurer settings
-
-    // Calculate commission for each receipt or for the policy premium
-    const receiptsToProcess = receiptId 
-      ? policy.receipts.filter(r => r.id === receiptId)
-      : policy.receipts;
-
-    const commissions = [];
-
-    for (const receipt of receiptsToProcess) {
-      const receiptAmount = toNumber(receipt.amount);
-      const commissionBase = commissionPremiumBase(receipt.netPremiumAmount === null ? null : toNumber(receipt.netPremiumAmount), receiptAmount);
-      const commissionAmount = commissionBase * commissionRate;
-      const expectedDate = businessAddDays(receipt.dueDate, 30); // Commission expected 30 days after receipt due
-
-      // Check if commission already exists
-      const existingCommission = await tx.commission.findFirst({
-        where: {
-          organizationId: context.organizationId,
-          policyId,
-          receiptId: receipt.id,
-        },
+      const receipt = await tx.receipt.findFirst({
+        where: { id: receiptId, organizationId: context.organizationId, ...(expectedPolicyId ? { policyId: expectedPolicyId } : {}) },
+        include: { policy: { include: { insuredAssets: { select: { id: true, description: true, unitClass: true } } } }, insurer: true, commissions: { select: { id: true } } },
       });
+      if (!receipt) return errorResult("El recibo no existe en esta organización.");
+      if (receipt.status === "CANCELLED") return errorResult("No se calcula comisión para un recibo cancelado.");
+      if (receipt.commissions.length) return errorResult("Este recibo ya tiene una comisión guardada. No se sobrescriben cálculos históricos.");
 
-      if (!existingCommission) {
-        const commission = await tx.commission.create({
-          data: {
-            organizationId: context.organizationId,
-            policyId,
-            receiptId: receipt.id,
-            clientId: policy.clientId,
-            insurerId: policy.insurerId,
-            expectedAmount: commissionAmount,
-            percentage: commissionRate * 100,
-            expectedDate,
-            status: receipt.status === "PAID" ? "PENDING" : "EXPECTED",
-          },
-        });
-
-        commissions.push(commission);
-
-        // Log activity
-        await writeActivityLog({
-          action: "CALCULATE_COMMISSION",
-          entityType: "COMMISSION",
-          entityId: commission.id,
-          organizationId: context.organizationId,
-          userId: context.userId,
-          db: tx,
-          newValue: JSON.stringify({
-            policyId,
-            receiptId: receipt.id,
-            amount: commissionAmount,
-            premiumBase: commissionBase,
-            percentage: commissionRate * 100,
-            expectedDate,
-          }),
-        });
+      let reconciliation: { difference: number; status: "RECONCILED" | "REVIEW" };
+      if (receipt.endorsementId) {
+        const endorsement = await tx.policyEndorsement.findFirst({ where: { id: receipt.endorsementId, policyId: receipt.policyId, organizationId: context.organizationId }, select: { amount: true } });
+        const endorsementReceipts = await tx.receipt.findMany({ where: { endorsementId: receipt.endorsementId, policyId: receipt.policyId, organizationId: context.organizationId }, select: { amount: true, status: true } });
+        reconciliation = endorsement
+          ? reconcileEndorsementReceiptPremium(Number(endorsement.amount), endorsementReceipts.map((row) => ({ amount: Number(row.amount), status: row.status })))
+          : { difference: Number(receipt.amount), status: "REVIEW" };
+      } else {
+        const baseReceipts = await tx.receipt.findMany({ where: { policyId: receipt.policyId, organizationId: context.organizationId, endorsementId: null }, select: { amount: true, status: true } });
+        reconciliation = reconcilePolicyReceiptPremium(Number(receipt.policy.premiumAmount), baseReceipts.map((row) => ({ amount: Number(row.amount), status: row.status })));
       }
-    }
+      if (reconciliation.status !== "RECONCILED") {
+        const reason = `La prima no concilia con los recibos vigentes (diferencia ${reconciliation.difference.toFixed(2)} ${receipt.currency}); revisa recibos antes de calcular.`;
+        await tx.receipt.update({ where: { id: receipt.id }, data: { commissionCalculationStatus: "REVIEW", commissionReviewReason: reason, updatedById: context.userId } });
+        return errorResult(reason);
+      }
+      const claim = await tx.receipt.updateMany({
+        where: { id: receipt.id, organizationId: context.organizationId, commissionCalculationStatus: { in: ["NOT_CALCULATED", "REVIEW"] } },
+        data: { commissionCalculationStatus: "CALCULATING", updatedById: context.userId },
+      });
+      if (claim.count !== 1) return errorResult("El cálculo ya está en curso o ya se guardó. Actualiza el recibo para ver el resultado.");
 
-    return successResult(
-      policyId,
-      `/policies/${policyId}`,
-      `Se calcularon ${commissions.length} comisiones para la póliza.`,
-    );
+      const riskDetails = receipt.policy.riskDetails && typeof receipt.policy.riskDetails === "object" ? receipt.policy.riskDetails as Record<string, unknown> : {};
+      const riskData = riskDetails.data && typeof riskDetails.data === "object" ? riskDetails.data as Record<string, unknown> : {};
+      const policyModeValue = typeof riskDetails.commissionPolicyMode === "string" && riskDetails.commissionPolicyMode.trim()
+        ? riskDetails.commissionPolicyMode
+        : receipt.policy.policyType === "AUTO" && typeof riskData.policyMode === "string" ? riskData.policyMode : "";
+      const policyMode = policyModeValue.trim().toUpperCase();
+      const policyUnitClass = typeof riskDetails.commissionUnitClass === "string" ? riskDetails.commissionUnitClass.trim().toUpperCase() : "";
+      const productPlan = receipt.policy.paymentPlan?.trim().toUpperCase() || (typeof riskData.plan === "string" ? riskData.plan.trim().toUpperCase() : "") || "SIN_PLAN";
+      const rules = parseCommissionRules(receipt.insurer.commissionRules);
+      const rows = jsonUnitBreakdown(receipt.premiumBreakdownByUnit);
+      const assets = receipt.policy.insuredAssets;
+      const calculations: Array<{ assetId: string | null; description: string; unitClass: string; components: CommissionPremiumComponents; estimate: CommissionEstimate & { amount: number; commissionableBase: number; rate: number; rule: CommissionRule } }> = [];
+      let reviewReason: string | null = null;
+
+      if (!policyMode) {
+        reviewReason = "Indica la modalidad de la póliza para aplicar una regla de comisión.";
+      } else if (assets.length) {
+        const byAsset = new Map(rows.map((row) => [row.insuredAssetId, row]));
+        if (deriveReceiptNetPremium({ amount: Number(receipt.amount), premiumBreakdownByUnit: rows }) === null) {
+          reviewReason = "El desglose de prima por unidad está incompleto o no concilia con el importe del recibo.";
+        } else if (byAsset.size !== assets.length || assets.some((asset) => !byAsset.has(asset.id)) || rows.some((row) => !assets.some((asset) => asset.id === row.insuredAssetId))) {
+          reviewReason = "Completa el desglose de prima por cada unidad asegurada antes de calcular.";
+        } else {
+          for (const asset of assets) {
+            const row = byAsset.get(asset.id)!;
+            if (!asset.unitClass?.trim()) { reviewReason = `Clasifica la unidad ${asset.description} antes de calcular.`; break; }
+            const components = premiumComponents(row);
+            if (components && components.totalPremium <= 0) { reviewReason = `Captura la prima total de ${asset.description}.`; break; }
+            const estimate = calculateCommissionEstimate(components, rules, { policyType: receipt.policy.policyType, productPlan, policyMode, unitClass: asset.unitClass.trim().toUpperCase(), paymentFrequency: receipt.policy.paymentFrequency }, receipt.dueDate);
+            if (estimate.status !== "CALCULATED" || estimate.amount === undefined) { reviewReason = `${asset.description}: ${estimate.reason}`; break; }
+            calculations.push({ assetId: asset.id, description: asset.description, unitClass: asset.unitClass.trim().toUpperCase(), components: components!, estimate: estimate as typeof calculations[number]["estimate"] });
+          }
+        }
+      } else {
+        const components = premiumComponents(receipt);
+        if (!policyUnitClass) reviewReason = "Indica la clase de riesgo asegurada para aplicar una regla de comisión.";
+        else if (components && components.totalPremium <= 0) reviewReason = "Captura la prima total antes de calcular.";
+        const estimate = calculateCommissionEstimate(components, rules, { policyType: receipt.policy.policyType, productPlan, policyMode, unitClass: policyUnitClass, paymentFrequency: receipt.policy.paymentFrequency }, receipt.dueDate);
+        if (!reviewReason && (estimate.status !== "CALCULATED" || estimate.amount === undefined)) reviewReason = estimate.reason ?? "Revisa los datos de comisión.";
+        else if (!reviewReason) calculations.push({ assetId: null, description: "Póliza", unitClass: "POLICY", components: components!, estimate: estimate as typeof calculations[number]["estimate"] });
+      }
+
+      if (reviewReason) {
+        await tx.receipt.update({ where: { id: receipt.id }, data: { commissionCalculationStatus: "REVIEW", commissionReviewReason: reviewReason, updatedById: context.userId } });
+        return errorResult(reviewReason);
+      }
+
+      const expectedAmount = roundMoney(calculations.reduce((sum, item) => sum + (item.estimate.amount ?? 0), 0));
+      const totalBase = calculations.reduce((sum, item) => sum + (item.estimate.commissionableBase ?? 0), 0);
+      const percentage = totalBase ? roundMoney(calculations.reduce((sum, item) => sum + (item.estimate.commissionableBase! * item.estimate.rate!), 0) / totalBase) : 0;
+      const expectedDate = businessAddDays(receipt.dueDate, 30);
+      const breakdown = calculations.map((item) => ({ assetId: item.assetId, description: item.description, unitClass: item.unitClass, components: { totalPremium: item.components.totalPremium, vatAmount: item.components.iva, issuanceExpenseAmount: item.components.issuanceExpense, surchargeAmount: item.components.installmentSurcharge, discountAmount: item.components.visibleDiscounts }, netPremium: item.estimate.netPremium, commissionableBase: item.estimate.commissionableBase, rate: item.estimate.rate, expectedAmount: item.estimate.amount, ruleId: item.estimate.rule?.id, ruleEvidence: item.estimate.rule?.evidence }));
+      const commission = await tx.commission.create({ data: { organizationId: context.organizationId, policyId: receipt.policyId, receiptId: receipt.id, clientId: receipt.clientId, insurerId: receipt.insurerId, expectedAmount, percentage, expectedDate, status: receipt.status === "PAID" ? "PENDING" : "EXPECTED", calculationBreakdownJson: JSON.stringify({ calculatedAt: new Date().toISOString(), ruleVersion: receipt.insurer.commissionRulesVersion, breakdown }) } });
+      await tx.receipt.update({ where: { id: receipt.id }, data: { commissionCalculationStatus: "CALCULATED", commissionReviewReason: null, updatedById: context.userId } });
+      await writeActivityLog({ action: "CALCULATE_COMMISSION", entityType: "COMMISSION", entityId: commission.id, organizationId: context.organizationId, userId: context.userId, db: tx, newValue: { policyId: receipt.policyId, receiptId, expectedAmount, percentage, breakdown } });
+      return successResult(commission.id, `/receipts/${receipt.id}`, `Comisión esperada calculada: ${expectedAmount.toFixed(2)} ${receipt.currency}.`);
     });
   } catch (error) {
-    logError("commissions.calculateCommissionsForPolicy", error, { policyId, receiptId });
+    logError("commissions.calculateCommissionForReceipt", error, { receiptId });
     return errorResult("No se pudieron calcular las comisiones. Intenta de nuevo.");
   }
 }

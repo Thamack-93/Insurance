@@ -40,6 +40,8 @@ type PolicyFormProps = {
   originalTerm?: { startDate: string; endDate: string };
   clientOptions: SelectOption[];
   insurerOptions: SelectOption[];
+  bonusSellerOptions?: SelectOption[];
+  canSelectBonusSeller?: boolean;
   renewalSource?: PolicyRenewalSource | null;
   showRenewalLink?: boolean;
   renewalSearchScope?: "portfolio" | "all";
@@ -58,6 +60,8 @@ export function PolicyForm({
   originalTerm,
   clientOptions,
   insurerOptions,
+  bonusSellerOptions = [],
+  canSelectBonusSeller = false,
   renewalSource = null,
   showRenewalLink = false,
   renewalSearchScope = "portfolio",
@@ -294,6 +298,24 @@ export function PolicyForm({
 
           <FormSection title="Detalle comercial" description="Información útil para asesoría y renovación.">
             <FormGrid>
+              {canSelectBonusSeller ? (
+                <FormField label="Vendedor para bonos" error={errors.bonusSellerId?.message} hint="Se guarda en la póliza al emitirla y no cambia al reasignar la cartera.">
+                  <Controller
+                    name="bonusSellerId"
+                    control={control}
+                    rules={{ required: true }}
+                    render={({ field }) => (
+                      <ControlledSelect
+                        value={field.value ?? ""}
+                        onValueChange={field.onChange}
+                        options={bonusSellerOptions}
+                        placeholder="Selecciona al vendedor"
+                        aria-required
+                      />
+                    )}
+                  />
+                </FormField>
+              ) : null}
               <FormField label="Plan de pago" htmlFor="paymentPlan" error={errors.paymentPlan?.message}>
                 <Input id="paymentPlan" {...register("paymentPlan")} />
               </FormField>

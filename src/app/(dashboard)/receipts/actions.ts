@@ -1,6 +1,6 @@
 "use server";
 
-import type { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import { writeActivityLog } from "@/lib/activity-log";
 import { AuthError } from "@/lib/auth";
 import { normalizeOptionalText, optionalRelationId, parseDateInput } from "@/lib/form-utils";
@@ -23,13 +23,26 @@ import {
 import type { WhatsAppPhoneSource } from "@/lib/whatsapp-reminder";
 import { recordCollectionFollowUp, type CollectionFollowUpInput } from "@/lib/collection-followups";
 import { closeCollectionFollowUp } from "@/lib/collection-followups";
-import { deriveNetPremium } from "@/lib/premium-breakdown";
+import { calculateCommissionForReceipt } from "@/lib/commissions";
 
 const ALLOWED_PAYMENT_METHODS = ["TRANSFER", "CASH", "CARD", "CHECK", "OTHER"] as const;
 type AllowedPaymentMethod = (typeof ALLOWED_PAYMENT_METHODS)[number];
 
 function isAllowedPaymentMethod(value: string): value is AllowedPaymentMethod {
   return (ALLOWED_PAYMENT_METHODS as readonly string[]).includes(value);
+}
+
+function sameMoney(left: unknown, right: unknown) {
+  if (left == null || right == null) return left == null && right == null;
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+  return Number.isFinite(leftNumber) && Number.isFinite(rightNumber) && Math.round(leftNumber * 100) === Math.round(rightNumber * 100);
+}
+
+export async function calculateReceiptCommissionAction(receiptId: string): Promise<MutationResult> {
+  const result = await calculateCommissionForReceipt(receiptId);
+  revalidatePaths(["/commissions", `/receipts/${receiptId}`, "/dashboard"]);
+  return result;
 }
 
 export async function recordReceiptCollectionFollowUp(input: Omit<CollectionFollowUpInput, "promisedPaymentDate" | "nextContactDate"> & { promisedPaymentDate?: string; nextContactDate?: string }): Promise<MutationResult> {
@@ -44,11 +57,23 @@ export async function recordReceiptCollectionFollowUp(input: Omit<CollectionFoll
 async function normalizeReceiptInput(values: ReceiptFormValues, context: OrganizationContext, db: Prisma.TransactionClient) {
   const policy = await db.policy.findFirst({
     where: { id: values.policyId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) },
-    select: { id: true, clientId: true, insurerId: true, currency: true },
+    select: { id: true, clientId: true, insurerId: true, currency: true, insuredAssets: { select: { id: true } } },
   });
 
   if (!policy) {
     throw new Error("La poliza seleccionada ya no existe.");
+  }
+
+  const unitRows = values.premiumBreakdownByUnit;
+  const requiredNumbers = unitRows.length
+    ? unitRows.flatMap((row) => [row.totalPremium, row.vatAmount, row.issuanceExpenseAmount, row.surchargeAmount, row.discountAmount])
+    : [values.vatAmount, values.issuanceExpenseAmount, values.surchargeAmount, values.discountAmount];
+  const unitTotalsMatch = !unitRows.length || Math.abs(Math.round((unitRows.reduce((sum, row) => sum + Number(row.totalPremium || 0), 0) - values.amount) * 100) / 100) <= 0.01;
+  const premiumBreakdownReady = requiredNumbers.every((value) => value !== undefined && value !== "" && Number.isFinite(Number(value))) && unitTotalsMatch;
+
+  const validAssetIds = new Set(policy.insuredAssets.map((asset) => asset.id));
+  if (values.premiumBreakdownByUnit.some((row) => !validAssetIds.has(row.insuredAssetId))) {
+    throw new Error("El desglose de prima contiene una unidad que no pertenece a esta póliza.");
   }
 
   const endorsementId = optionalRelationId(values.endorsementId);
@@ -78,16 +103,15 @@ async function normalizeReceiptInput(values: ReceiptFormValues, context: Organiz
     periodEndDate: parseDateInput(values.periodEndDate),
     dueDate: parseDateInput(values.dueDate),
     amount: values.amount,
-    vatAmount: values.vatAmount ?? null,
-    issuanceExpenseAmount: values.issuanceExpenseAmount ?? null,
-    surchargeAmount: values.surchargeAmount ?? null,
-    discountAmount: values.discountAmount ?? null,
-    netPremiumAmount: deriveNetPremium(values.amount, {
-      vatAmount: values.vatAmount,
-      issuanceExpenseAmount: values.issuanceExpenseAmount,
-      surchargeAmount: values.surchargeAmount,
-      discountAmount: values.discountAmount,
-    }),
+    vatAmount: values.vatAmount === "" || values.vatAmount === undefined ? null : values.vatAmount,
+    issuanceExpenseAmount: values.issuanceExpenseAmount === "" || values.issuanceExpenseAmount === undefined ? null : values.issuanceExpenseAmount,
+    surchargeAmount: values.surchargeAmount === "" || values.surchargeAmount === undefined ? null : values.surchargeAmount,
+    discountAmount: values.discountAmount === "" || values.discountAmount === undefined ? null : values.discountAmount,
+    premiumBreakdownByUnit: values.premiumBreakdownByUnit.length ? values.premiumBreakdownByUnit as Prisma.InputJsonValue : Prisma.DbNull,
+    commissionCalculationStatus: premiumBreakdownReady ? "NOT_CALCULATED" : "REVIEW",
+    commissionReviewReason: premiumBreakdownReady ? null : unitRows.length && !unitTotalsMatch
+      ? "La suma de primas totales por unidad no coincide con el importe del recibo."
+      : "Falta capturar uno o más componentes para derivar la prima neta.",
     currency: values.currency || policy.currency,
     status: values.status,
     paidDate: values.paidDate ? parseDateInput(values.paidDate) : null,
@@ -141,10 +165,27 @@ export async function updateReceipt(id: string, values: ReceiptFormValues): Prom
     const context = await requireOrganizationContext();
     const receipt = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
-      const previous = await tx.receipt.findFirst({ where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) } });
+      const previous = await tx.receipt.findFirst({ where: { id, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: { portfolioOwnerId: context.userId } } : {}) }, include: { commissions: { select: { id: true } } } });
       if (!previous) throw new Error("El recibo ya no existe.");
       const payload = await normalizeReceiptInput(parsed.data, context, tx);
-      const updated = await tx.receipt.update({ where: { id }, data: { ...payload, updatedById: context.userId } });
+      const baseChanged = !sameMoney(previous.amount, payload.amount)
+        || !sameMoney(previous.vatAmount, payload.vatAmount)
+        || !sameMoney(previous.issuanceExpenseAmount, payload.issuanceExpenseAmount)
+        || !sameMoney(previous.surchargeAmount, payload.surchargeAmount)
+        || !sameMoney(previous.discountAmount, payload.discountAmount)
+        || JSON.stringify(previous.premiumBreakdownByUnit ?? null) !== JSON.stringify(payload.premiumBreakdownByUnit === Prisma.DbNull ? null : payload.premiumBreakdownByUnit);
+      const hasCalculatedCommission = previous.commissions.length > 0;
+      const updated = await tx.receipt.update({ where: { id }, data: {
+        ...payload,
+        ...(hasCalculatedCommission ? baseChanged ? {
+          commissionCalculationStatus: "REVIEW",
+          commissionReviewReason: "Cambió la base de prima después de calcular la comisión. Revisa el cálculo guardado antes de usarlo.",
+        } : {
+          commissionCalculationStatus: previous.commissionCalculationStatus,
+          commissionReviewReason: previous.commissionReviewReason,
+        } : {}),
+        updatedById: context.userId,
+      } });
       await writeActivityLog({ organizationId: context.organizationId, entityType: "Receipt", entityId: updated.id, action: "RECEIPT_UPDATE", oldValue: previous, newValue: updated, userId: context.userId, db: tx });
       return updated;
     });

@@ -29,6 +29,7 @@ import { normalizeReturnTo } from "@/lib/return-to";
 import { getPolicyRiskDetailEntries } from "@/lib/policy-risk-details";
 import { compareRenewalPolicies } from "@/lib/policy-renewal-comparison";
 import { PolicyRenewalComparison } from "@/components/policies/policy-renewal-comparison";
+import { reconcileEndorsementReceiptPremium, reconcilePolicyReceiptPremium } from "@/lib/premium-breakdown";
 
 const frequencyLabels: Record<string, string> = {
   MONTHLY: "Mensual",
@@ -223,6 +224,11 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
     amount: toNumber(receipt.amount),
     currency: receipt.currency,
   }));
+  const premiumReconciliation = reconcilePolicyReceiptPremium(Number(policy.premiumAmount), receipts.map((receipt) => ({
+    amount: toNumber(receipt.amount),
+    status: receipt.status,
+    endorsementId: receipt.endorsementId,
+  })));
   const activeEndorsements = endorsements.filter((endorsement) => endorsement.status === "ACTIVE");
   const expiredEndorsements = endorsements.filter((endorsement) => endorsement.status === "EXPIRED");
   const cancelledEndorsements = endorsements.filter((endorsement) => endorsement.status === "CANCELLED");
@@ -310,6 +316,14 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
             tone="rose"
           />
         </section>
+
+        <div className={`rounded-xl border px-4 py-3 text-sm ${premiumReconciliation.status === "RECONCILED" ? "border-emerald-500/30 bg-emerald-500/5" : "border-amber-500/40 bg-amber-500/5"}`}>
+          <p className="font-medium">Conciliación de prima {premiumReconciliation.status === "RECONCILED" ? "correcta" : "requiere revisión"}</p>
+          <p className="mt-1 text-muted-foreground">
+            Prima de póliza {formatCurrency(premiumReconciliation.expectedTotal, policy.currency)} · recibos base vigentes {formatCurrency(premiumReconciliation.receiptTotal, policy.currency)} · diferencia {formatCurrency(premiumReconciliation.difference, policy.currency)}.
+            {" "}Los recibos de endoso se concilian contra cada endoso por separado.
+          </p>
+        </div>
 
         <section className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
           <SectionCard title="Póliza base" description="Contexto operativo y comercial de la vigencia base.">
@@ -500,7 +514,9 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
               </div>
             ) : (
               <div className="space-y-4 p-4">
-                {endorsements.map((endorsement) => (
+                {endorsements.map((endorsement) => {
+                  const endorsementReconciliation = reconcileEndorsementReceiptPremium(Number(endorsement.amount), endorsement.receipts.map((receipt) => ({ amount: toNumber(receipt.amount), status: receipt.status })));
+                  return (
                   <div key={endorsement.id} className="rounded-3xl border border-border/70 bg-card p-4 shadow-sm">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div className="space-y-2">
@@ -516,6 +532,9 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
                         <p className="text-sm text-muted-foreground">
                           {formatDate(endorsement.startDate)} · {formatDate(endorsement.endDate)} ·{" "}
                           {formatCurrency(endorsement.amount, endorsement.currency)}
+                        </p>
+                        <p className={`text-xs ${endorsementReconciliation.status === "RECONCILED" ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}`}>
+                          Recibos {endorsementReconciliation.status === "RECONCILED" ? "conciliados" : "requieren revisión"}: {formatCurrency(endorsementReconciliation.receiptTotal, endorsement.currency)} · diferencia {formatCurrency(endorsementReconciliation.difference, endorsement.currency)}.
                         </p>
                         {endorsement.reference ? (
                           <p className="text-xs text-muted-foreground">Referencia: {endorsement.reference}</p>
@@ -588,7 +607,8 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
                       />
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </SectionCard>

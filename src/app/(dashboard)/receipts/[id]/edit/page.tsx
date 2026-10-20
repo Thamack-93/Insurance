@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { updateReceipt } from "@/app/(dashboard)/receipts/actions";
 import { ReceiptForm } from "@/components/forms/receipt-form";
-import { createReceiptDefaults } from "@/lib/form-defaults";
+import { createReceiptDefaults, readReceiptPremiumUnits } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { CancelReceiptOnlyButton } from "@/components/receipts/cancel-receipt-button";
 import { withTenantTransaction } from "@/lib/organization-context";
@@ -18,14 +18,14 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
       where: { id, ...receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: {
         client: true,
-        policy: { include: { insuredAssets: { select: { description: true, isPrimary: true } } } },
+        policy: { include: { insuredAssets: { select: { id: true, description: true, unitClass: true, isPrimary: true } } } },
         insurer: true,
         endorsement: {
           include: {
             policy: {
               include: {
                 client: true,
-                insuredAssets: { select: { description: true, isPrimary: true } },
+                insuredAssets: { select: { id: true, description: true, unitClass: true, isPrimary: true } },
               },
             },
           },
@@ -44,7 +44,7 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
         }]
       : await db.policy.findMany({
           where: { status: { not: "CANCELLED" }, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
-          include: { client: true },
+          include: { client: true, insuredAssets: { select: { id: true, description: true, unitClass: true, isPrimary: true } } },
           orderBy: { policyNumber: "asc" },
         });
     return { receipt, policies };
@@ -85,20 +85,22 @@ export default async function EditReceiptPage({ params }: { params: Promise<{ id
             dueDate: formatDateInput(receipt.dueDate),
             endorsementId: receipt.endorsementId ?? "",
             amount: Number(receipt.amount),
-            vatAmount: receipt.vatAmount === null ? undefined : Number(receipt.vatAmount),
-            issuanceExpenseAmount: receipt.issuanceExpenseAmount === null ? undefined : Number(receipt.issuanceExpenseAmount),
-            surchargeAmount: receipt.surchargeAmount === null ? undefined : Number(receipt.surchargeAmount),
-            discountAmount: receipt.discountAmount === null ? undefined : Number(receipt.discountAmount),
             currency: receipt.currency,
             status: receipt.status as ReceiptFormValues["status"],
             paidDate: formatDateInput(receipt.paidDate),
             paymentMethod: receipt.paymentMethod ?? "",
             notes: receipt.notes ?? "",
+            vatAmount: receipt.vatAmount == null ? "" : Number(receipt.vatAmount),
+            issuanceExpenseAmount: receipt.issuanceExpenseAmount == null ? "" : Number(receipt.issuanceExpenseAmount),
+            surchargeAmount: receipt.surchargeAmount == null ? "" : Number(receipt.surchargeAmount),
+            discountAmount: receipt.discountAmount == null ? "" : Number(receipt.discountAmount),
+            premiumBreakdownByUnit: readReceiptPremiumUnits(receipt.premiumBreakdownByUnit),
           })}
           policyOptions={policies.map((policy) => ({
             value: policy.id,
             label: getPolicyOptionLabel(policy, [policy.client.fullName]),
           }))}
+          policyAssets={Object.fromEntries(policies.map((policy) => [policy.id, policy.insuredAssets]))}
           endorsementOptions={endorsementOptions}
           submitAction={updateReceipt.bind(null, receipt.id)}
           footerActions={

@@ -146,6 +146,10 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
   try {
     const context = await requireOrganizationContext();
     const userId = context.userId;
+    const requestedBonusSellerId = context.membershipRole === "AGENT"
+      ? context.userId
+      : parsed.data.bonusSellerId?.trim();
+    if (!requestedBonusSellerId) return errorResult("Selecciona al vendedor que debe recibir la atribución de bono.");
     await assertClientOrganizationAccess(parsed.data.clientId, context);
     const normalized = normalizePolicyInput(parsed.data);
     const renewalSourceId = normalized.renewedFromPolicyId;
@@ -203,11 +207,18 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
     const policy = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       await assertPolicyRelationsInTransaction(tx, context, normalized.clientId, normalized.insurerId);
-      const clientForBonusAttribution = await tx.client.findFirst({
-        where: { id: normalized.clientId, organizationId: context.organizationId },
-        select: { portfolioOwnerId: true },
+      const bonusSellerMembership = await tx.organizationMembership.findFirst({
+        where: {
+          organizationId: context.organizationId,
+          userId: requestedBonusSellerId,
+          active: true,
+          role: { in: ["OWNER", "ADMIN", "AGENT"] },
+          organization: { status: "ACTIVE" },
+          user: { active: true },
+        },
+        select: { id: true },
       });
-      if (!clientForBonusAttribution) throw new AuthError("TENANT_RELATION_MISMATCH", 409);
+      if (!bonusSellerMembership) throw new AuthError("TENANT_RELATION_MISMATCH", 409);
       const currentRenewalSource = renewalSourceId
         ? await tx.policy.findFirst({
             where: { id: renewalSourceId, organizationId: context.organizationId },
@@ -227,9 +238,9 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
           ...normalized,
           bonusEligibilityJson: context.membershipRole === "AGENT" ? null : normalized.bonusEligibilityJson,
           organizationId: context.organizationId,
-          // Freeze the portfolio owner at policy issuance so reassignment of
-          // the client does not rewrite historical seller attribution.
-          bonusSellerId: clientForBonusAttribution.portfolioOwnerId,
+          // Freeze the selected seller at policy issuance so a later client
+          // portfolio reassignment does not rewrite bonus attribution.
+          bonusSellerId: requestedBonusSellerId,
           familyRootId: effectiveFamilyRootId,
           renewedFromPolicyId: currentRenewalSource?.id ?? null,
           status: currentRenewalSource ? "ACTIVE" : normalized.status,

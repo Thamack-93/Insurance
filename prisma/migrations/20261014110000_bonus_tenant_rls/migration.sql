@@ -12,11 +12,8 @@ $guard$;
 DO $rls$
 DECLARE
   table_name text;
-  trigger_name text;
 BEGIN
   FOREACH table_name IN ARRAY ARRAY['BonusRuleSet','BonusRun','BonusRunItem'] LOOP
-    trigger_name := table_name || '_transition_singleton_organization';
-    EXECUTE format('DROP TRIGGER IF EXISTS %I ON %I', trigger_name, table_name);
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', table_name);
     EXECUTE format('DROP POLICY IF EXISTS policydesk_tenant_context ON %I', table_name);

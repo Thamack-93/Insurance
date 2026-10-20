@@ -12,6 +12,18 @@ export type BonusProgram = {
   requiresEvidence: string[];
 };
 
+function utcDate(year: number, month: number, day: number) { return new Date(Date.UTC(year, month, day)); }
+export function bonusPaymentWindow(rule: Pick<BonusProgram, "period" | "accumulation">, year: number, periodNumber: number) {
+  if (rule.period === "QUARTERLY") {
+    const quarter = Math.min(4, Math.max(1, Math.trunc(periodNumber)));
+    return {
+      gte: rule.accumulation === "YEAR_TO_DATE" ? utcDate(year, 0, 1) : utcDate(year, (quarter - 1) * 3, 1),
+      lt: utcDate(year, quarter * 3, 1),
+    };
+  }
+  return { gte: utcDate(year, 0, 1), lt: utcDate(year + 1, 0, 1) };
+}
+
 const tier = (minimum: number, rate: number, maximum?: number): BonusTier => ({ minimum, maximum, rate });
 
 // Source: Cuaderno de Incentivos 2026. Every distinct rule interpretation is
@@ -23,9 +35,9 @@ export const BONUS_PROGRAMS: BonusProgram[] = [
   { key: "AUTO_2026", label: "Autos", policyTypes: ["AUTO"], insurers: ["QUALITAS", "ANA", "BANORTE", "HDI", "ZURICH"], period: "QUARTERLY", accumulation: "YEAR_TO_DATE", tiers: [tier(300000, .01, 500000), tier(500000.00000001, .02, 1250000), tier(1250000.00000001, .03, 2100000), tier(2100000.00000001, .04, 3300000), tier(3300000.00000001, .05, 5100000), tier(5100000.00000001, .06)], requiresEvidence: ["productEligible", "fleetUnder50", "autoExclusionsReviewed"] },
   // Daños Chubb es anual; la siniestralidad aplica a la cartera total Daños
   // del vendedor y se captura como evidencia del cierre, no por póliza.
-  { key: "DAMAGE_CHUBB_2026", label: "Daños · Chubb", policyTypes: ["DANOS", "HOGAR", "RESPONSABILIDAD_CIVIL", "EMPRESARIAL", "OTRO"], insurers: ["CHUBB"], period: "ANNUAL", accumulation: "YEAR", tiers: [tier(150000, .005, 350000), tier(350000.00000001, .01, 750000), tier(750000.00000001, .02, 1000000), tier(1000000.00000001, .04, 2000000), tier(2000000.00000001, .06, 4000000), tier(4000000.00000001, .08, 8000000), tier(8000000.00000001, .10)], requiresEvidence: ["productEligible", "businessType", "specialConditionsReviewed", "directedBusinessReviewed", "frontingReviewed", "damageExclusionsReviewed"] },
+  { key: "DAMAGE_CHUBB_2026", label: "Daños · Chubb", policyTypes: ["DANOS", "HOGAR", "RESPONSABILIDAD_CIVIL", "EMPRESARIAL", "OTRO"], insurers: ["CHUBB"], period: "ANNUAL", accumulation: "YEAR", tiers: [tier(150000, .005, 350000), tier(350000.00000001, .01, 750000), tier(750000.00000001, .02, 1000000), tier(1000000.00000001, .04, 2000000), tier(2000000.00000001, .06, 4000000), tier(4000000.00000001, .08, 8000000), tier(8000000.00000001, .10)], requiresEvidence: ["productEligible", "businessType", "facultativeInsuranceReviewed", "specialConditionsReviewed", "directedBusinessReviewed", "frontingReviewed", "damageExclusionsReviewed"] },
   // Banorte, HDI y Zurich comparten una banda trimestral.
-  { key: "DAMAGE_Q_2026", label: "Daños · Banorte / HDI / Zurich", policyTypes: ["DANOS", "HOGAR", "RESPONSABILIDAD_CIVIL", "EMPRESARIAL", "OTRO"], insurers: ["BANORTE", "HDI", "ZURICH"], period: "QUARTERLY", accumulation: "QUARTER", tiers: [tier(200000, .01, 300000), tier(300000.00000001, .02, 410000), tier(410000.00000001, .03, 530000), tier(530000.00000001, .04, 650000), tier(650000.00000001, .05, 950000), tier(950000.00000001, .06, 1400000), tier(1400000.00000001, .07)], requiresEvidence: ["productEligible", "businessType", "specialConditionsReviewed", "directedBusinessReviewed", "frontingReviewed", "damageExclusionsReviewed"] },
+  { key: "DAMAGE_Q_2026", label: "Daños · Banorte / HDI / Zurich", policyTypes: ["DANOS", "HOGAR", "RESPONSABILIDAD_CIVIL", "EMPRESARIAL", "OTRO"], insurers: ["BANORTE", "HDI", "ZURICH"], period: "QUARTERLY", accumulation: "QUARTER", tiers: [tier(200000, .01, 300000), tier(300000.00000001, .02, 410000), tier(410000.00000001, .03, 530000), tier(530000.00000001, .04, 650000), tier(650000.00000001, .05, 950000), tier(950000.00000001, .06, 1400000), tier(1400000.00000001, .07)], requiresEvidence: ["productEligible", "businessType", "facultativeInsuranceReviewed", "specialConditionsReviewed", "directedBusinessReviewed", "frontingReviewed", "damageExclusionsReviewed"] },
 ];
 
 export const BONUS_RULE_SOURCE_HASH = "7834576632296e9b1135b9b65b7234693a58fef2053ea9b6a7ba7c52f816ef71";

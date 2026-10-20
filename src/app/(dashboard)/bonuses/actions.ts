@@ -143,4 +143,3 @@ export async function approveBonusRun(formData: FormData) {
   revalidatePath("/bonuses");
   redirect(`/bonuses?run=${encodeURIComponent(runId)}`);
 }
-
