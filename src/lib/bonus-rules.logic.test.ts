@@ -12,7 +12,8 @@ describe("2026 incentive rules", () => {
     expect(selectBonusTier(1250000.00000001, rules?.tiers)?.rate).toBe(0.03);
     expect(selectBonusTier(5100000.00000001, rules?.tiers)?.rate).toBe(0.06);
     expect(selectBonusTier(9999999, rules?.tiers)?.rate).toBe(0.06);
-    expect(selectBonusTier(10000000, rules?.tiers)).toBeNull();
+    expect(selectBonusTier(10000000, rules?.tiers)?.rate).toBe(0.06);
+    expect(selectBonusTier(15000000, rules?.tiers)?.rate).toBe(0.06);
     expect(selectBonusTier(299999, rules?.tiers)).toBeNull();
   });
 
@@ -39,9 +40,10 @@ describe("2026 incentive rules", () => {
     expect(selectBonusTier(1400000.00000001, quarterly?.tiers)?.rate).toBe(0.07);
   });
 
-  it("uses one total Damage portfolio loss ratio and accepts exactly 50 percent", () => {
+  it("excludes Daños when total portfolio loss ratio is 50 percent or more", () => {
     expect(damagePortfolioLossRatioStatus(undefined)).toBe("MISSING");
-    expect(damagePortfolioLossRatioStatus(0.5)).toBe("ELIGIBLE");
+    expect(damagePortfolioLossRatioStatus(0.49999999)).toBe("ELIGIBLE");
+    expect(damagePortfolioLossRatioStatus(0.5)).toBe("EXCLUDED");
     expect(damagePortfolioLossRatioStatus(0.50000001)).toBe("EXCLUDED");
   });
 

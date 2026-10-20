@@ -81,7 +81,7 @@ export default async function NewPolicyPage({
   const context = await requireOrganizationContext();
   const params = (await searchParams) ?? {};
   const portfolioOwnerId = context.membershipRole === "ADMIN" || context.membershipRole === "OWNER" ? undefined : context.userId;
-  const [clients, insurers, mostUsedInsurer] = await withTenantTransaction(context, (db) => Promise.all([
+  const [clients, insurers, mostUsedInsurer, bonusSellers] = await withTenantTransaction(context, (db) => Promise.all([
     db.client.findMany({
       where: { status: { not: "ARCHIVED" }, ...clientOperationalWhere(portfolioOwnerId, context.organizationId) },
       orderBy: { fullName: "asc" },
@@ -98,6 +98,11 @@ export default async function NewPolicyPage({
       _count: { insurerId: true },
       orderBy: { _count: { insurerId: "desc" } },
       take: 1,
+    }),
+    db.organizationMembership.findMany({
+      where: { organizationId: context.organizationId, active: true, role: { in: ["OWNER", "ADMIN", "AGENT"] }, organization: { status: "ACTIVE" }, user: { active: true } },
+      orderBy: { createdAt: "asc" },
+      select: { user: { select: { id: true, name: true } } },
     }),
   ]));
 
@@ -141,6 +146,7 @@ export default async function NewPolicyPage({
           clientName: source.client.fullName,
           insurerId: source.insurerId,
           insurerName: source.insurer.name,
+          bonusSellerId: source.bonusSellerId,
           policyType: source.policyType as PolicyRenewalSource["policyType"],
           startDate: source.startDate,
           endDate: source.endDate,
@@ -170,6 +176,7 @@ export default async function NewPolicyPage({
       : {}),
     ...telegramDraftOverrides,
     ...renewalDefaults,
+    bonusSellerId: renewalSource?.bonusSellerId ?? (context.membershipRole === "AGENT" ? user.id : ""),
   });
 
   return (
@@ -214,8 +221,11 @@ export default async function NewPolicyPage({
           submitLabel="Crear póliza"
           cancelHref="/policies"
           defaultValues={smartDefaults}
+          canEditBonusEvidence={context.membershipRole !== "AGENT"}
           clientOptions={clients.map((client) => ({ value: client.id, label: client.fullName }))}
           insurerOptions={insurers.map((insurer) => ({ value: insurer.id, label: insurer.name }))}
+          bonusSellerOptions={bonusSellers.map(({ user: seller }) => ({ value: seller.id, label: seller.name }))}
+          canSelectBonusSeller={context.membershipRole === "ADMIN" || context.membershipRole === "OWNER"}
           renewalSource={renewalSource}
           showRenewalLink={true}
           submitAction={createPolicy}

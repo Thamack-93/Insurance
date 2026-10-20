@@ -32,7 +32,7 @@ export const BONUS_PROGRAMS: BonusProgram[] = [
   // Autos paga trimestralmente contra PNP acumulada del año. Las bandas
   // continuas inician una unidad de precisión ($0.00000001) después del
   // límite superior impreso en la banda anterior.
-  { key: "AUTO_2026", label: "Autos", policyTypes: ["AUTO"], insurers: ["QUALITAS", "ANA", "BANORTE", "HDI", "ZURICH"], period: "QUARTERLY", accumulation: "YEAR_TO_DATE", tiers: [tier(300000, .01, 500000), tier(500000.00000001, .02, 1250000), tier(1250000.00000001, .03, 2100000), tier(2100000.00000001, .04, 3300000), tier(3300000.00000001, .05, 5100000), tier(5100000.00000001, .06, 9999999)], requiresEvidence: ["productEligible", "fleetUnder50", "autoExclusionsReviewed"] },
+  { key: "AUTO_2026", label: "Autos", policyTypes: ["AUTO"], insurers: ["QUALITAS", "ANA", "BANORTE", "HDI", "ZURICH"], period: "QUARTERLY", accumulation: "YEAR_TO_DATE", tiers: [tier(300000, .01, 500000), tier(500000.00000001, .02, 1250000), tier(1250000.00000001, .03, 2100000), tier(2100000.00000001, .04, 3300000), tier(3300000.00000001, .05, 5100000), tier(5100000.00000001, .06)], requiresEvidence: ["productEligible", "fleetUnder50", "autoExclusionsReviewed"] },
   // Daños Chubb es anual; la siniestralidad aplica a la cartera total Daños
   // del vendedor y se captura como evidencia del cierre, no por póliza.
   { key: "DAMAGE_CHUBB_2026", label: "Daños · Chubb", policyTypes: ["DANOS", "HOGAR", "RESPONSABILIDAD_CIVIL", "EMPRESARIAL", "OTRO"], insurers: ["CHUBB"], period: "ANNUAL", accumulation: "YEAR", tiers: [tier(150000, .005, 350000), tier(350000.00000001, .01, 750000), tier(750000.00000001, .02, 1000000), tier(1000000.00000001, .04, 2000000), tier(2000000.00000001, .06, 4000000), tier(4000000.00000001, .08, 8000000), tier(8000000.00000001, .10)], requiresEvidence: ["productEligible", "businessType", "facultativeInsuranceReviewed", "specialConditionsReviewed", "directedBusinessReviewed", "frontingReviewed", "damageExclusionsReviewed"] },
@@ -52,7 +52,7 @@ export function selectBonusTier(amount: number, tiers: BonusTier[] = []) {
 
 export function damagePortfolioLossRatioStatus(value: number | null | undefined) {
   if (value === null || value === undefined) return "MISSING" as const;
-  return value > 0.5 ? "EXCLUDED" as const : "ELIGIBLE" as const;
+  return value >= 0.5 ? "EXCLUDED" as const : "ELIGIBLE" as const;
 }
 
 export function selectGrowthBonusRate(amount: number, growth: number, tiers: NonNullable<BonusProgram["growthRates"]>) {

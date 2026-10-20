@@ -8,6 +8,7 @@ export type PolicyRenewalSource = {
   clientName: string;
   insurerId: string;
   insurerName: string;
+  bonusSellerId?: string | null;
   policyType: PolicyFormValues["policyType"];
   startDate: Date;
   endDate: Date;
@@ -36,6 +37,7 @@ export function buildRenewalPolicyDefaults(source: PolicyRenewalSource): Partial
   return {
     clientId: source.clientId,
     insurerId: source.insurerId,
+    bonusSellerId: source.bonusSellerId ?? "",
     policyType: source.policyType,
     startDate: toDateKey(source.endDate),
     endDate: addCalendarYear(toDateKey(source.endDate)),

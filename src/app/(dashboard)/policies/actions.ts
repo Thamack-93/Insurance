@@ -34,6 +34,7 @@ function normalizePolicyInput(values: PolicyFormValues) {
     insuredObject: normalizeOptionalText(policyInsuredObjectForSave(parsedRiskDetails.success ? parsedRiskDetails.data : null, values.insuredObject)),
     riskDetails: parsedRiskDetails.success && hasPolicyRiskData(parsedRiskDetails.data) ? parsedRiskDetails.data as Prisma.InputJsonValue : Prisma.DbNull,
     riskDetailsReviewRequired: parsedRiskDetails.success && hasPolicyRiskData(parsedRiskDetails.data) ? false : undefined,
+    bonusEligibilityJson: normalizeOptionalText(values.bonusEligibilityJson),
     beneficiaryInfo: normalizeOptionalText(values.beneficiaryInfo),
     notes: normalizeOptionalText(values.notes),
     renewedFromPolicyId: optionalRelationId(values.renewedFromPolicyId),
@@ -145,6 +146,10 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
   try {
     const context = await requireOrganizationContext();
     const userId = context.userId;
+    const requestedBonusSellerId = context.membershipRole === "AGENT"
+      ? context.userId
+      : parsed.data.bonusSellerId?.trim();
+    if (!requestedBonusSellerId) return errorResult("Selecciona al vendedor que debe recibir la atribución de bono.");
     await assertClientOrganizationAccess(parsed.data.clientId, context);
     const normalized = normalizePolicyInput(parsed.data);
     const renewalSourceId = normalized.renewedFromPolicyId;
@@ -202,6 +207,18 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
     const policy = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       await assertPolicyRelationsInTransaction(tx, context, normalized.clientId, normalized.insurerId);
+      const bonusSellerMembership = await tx.organizationMembership.findFirst({
+        where: {
+          organizationId: context.organizationId,
+          userId: requestedBonusSellerId,
+          active: true,
+          role: { in: ["OWNER", "ADMIN", "AGENT"] },
+          organization: { status: "ACTIVE" },
+          user: { active: true },
+        },
+        select: { id: true },
+      });
+      if (!bonusSellerMembership) throw new AuthError("TENANT_RELATION_MISMATCH", 409);
       const currentRenewalSource = renewalSourceId
         ? await tx.policy.findFirst({
             where: { id: renewalSourceId, organizationId: context.organizationId },
@@ -219,7 +236,11 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
       const createdPolicy = await tx.policy.create({
         data: {
           ...normalized,
+          bonusEligibilityJson: context.membershipRole === "AGENT" ? null : normalized.bonusEligibilityJson,
           organizationId: context.organizationId,
+          // Freeze the selected seller at policy issuance so a later client
+          // portfolio reassignment does not rewrite bonus attribution.
+          bonusSellerId: requestedBonusSellerId,
           familyRootId: effectiveFamilyRootId,
           renewedFromPolicyId: currentRenewalSource?.id ?? null,
           status: currentRenewalSource ? "ACTIVE" : normalized.status,
@@ -376,6 +397,16 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
     const policy = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       await assertPolicyRelationsInTransaction(tx, context, normalized.clientId, normalized.insurerId);
+      const currentPolicyBonusAttribution = await tx.policy.findFirst({ where: { id, organizationId: context.organizationId }, select: { bonusSellerId: true, bonusEligibilityJson: true } });
+      let confirmedBonusSellerId = currentPolicyBonusAttribution?.bonusSellerId;
+      if (!confirmedBonusSellerId && context.membershipRole !== "AGENT") {
+        let confirmsCurrentPortfolioOwner = false;
+        try { confirmsCurrentPortfolioOwner = JSON.parse(parsed.data.bonusEligibilityJson || "{}").sellerAttributionConfirmed === true; } catch { /* schema validation already rejects malformed JSON */ }
+        if (confirmsCurrentPortfolioOwner) {
+          const clientOwner = await tx.client.findFirst({ where: { id: normalized.clientId, organizationId: context.organizationId }, select: { portfolioOwnerId: true } });
+          confirmedBonusSellerId = clientOwner?.portfolioOwnerId ?? null;
+        }
+      }
       const currentRenewalSource = renewalChanged && nextRenewalSource
         ? await tx.policy.findFirst({
             where: { id: nextRenewalSource.id, organizationId: context.organizationId },
@@ -393,6 +424,8 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
         where: { id, organizationId: context.organizationId },
         data: {
           ...normalized,
+          bonusEligibilityJson: context.membershipRole === "AGENT" ? currentPolicyBonusAttribution?.bonusEligibilityJson ?? null : normalized.bonusEligibilityJson,
+          ...(confirmedBonusSellerId ? { bonusSellerId: confirmedBonusSellerId } : {}),
           status: (normalized.renewedFromPolicyId || renewalChanged) ? "ACTIVE" : normalized.status,
           updatedById: userId,
         },

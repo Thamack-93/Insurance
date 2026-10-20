@@ -199,17 +199,16 @@ export async function calculateBonusProjection(db: TenantDb, organizationId: str
       reviewReasons.add("Falta la siniestralidad de la cartera total de Daños del vendedor para este cierre.");
     } else if (portfolioStatus === "EXCLUDED") {
       for (const item of items) {
-        if (item.status !== "INCLUDED") continue;
         item.status = "EXCLUDED";
         item.reason = [item.reason, `La siniestralidad de la cartera total de Daños es ${(portfolioLossRatio! * 100).toFixed(6)}%, superior al máximo de 50%.`].filter(Boolean).join(" ");
       }
+      reviewReasons.clear();
     }
   }
 
   const base = items.reduce((sum, item) => sum + (item.status === "INCLUDED" && item.eligibleAmount ? Number(item.eligibleAmount) : 0), 0);
   const tier = selectBonusTier(base, rule.tiers);
   const bonusRate = rule.eligibilityOnly ? null : tier?.rate ?? null;
-  if (rule.key === "AUTO_2026" && base > 9999999) reviewReasons.add("La prima acumulada supera el límite superior de $9,999,999 del cuaderno; se requiere aclaración.");
   const bonusAmount = rule.eligibilityOnly || bonusRate === null ? null : (base * bonusRate).toFixed(2);
   let eligibilityOutcome: BonusProjection["eligibilityOutcome"];
   if (rule.eligibilityOnly) {

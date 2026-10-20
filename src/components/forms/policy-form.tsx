@@ -40,11 +40,14 @@ type PolicyFormProps = {
   originalTerm?: { startDate: string; endDate: string };
   clientOptions: SelectOption[];
   insurerOptions: SelectOption[];
+  bonusSellerOptions?: SelectOption[];
+  canSelectBonusSeller?: boolean;
   renewalSource?: PolicyRenewalSource | null;
   showRenewalLink?: boolean;
   renewalSearchScope?: "portfolio" | "all";
   submitAction: (values: PolicyFormValues) => Promise<MutationResult>;
   riskDetailsNeedsReview?: boolean;
+  canEditBonusEvidence?: boolean;
   findRenewalCandidates?: (input: { clientId: string; policyType: string; startDate: string; serialNumbers: string[] }) => Promise<SerialRenewalCandidate[]>;
 };
 
@@ -57,11 +60,14 @@ export function PolicyForm({
   originalTerm,
   clientOptions,
   insurerOptions,
+  bonusSellerOptions = [],
+  canSelectBonusSeller = false,
   renewalSource = null,
   showRenewalLink = false,
   renewalSearchScope = "portfolio",
   submitAction,
   riskDetailsNeedsReview = false,
+  canEditBonusEvidence = true,
   findRenewalCandidates,
 }: PolicyFormProps) {
   const router = useRouter();
@@ -292,6 +298,24 @@ export function PolicyForm({
 
           <FormSection title="Detalle comercial" description="Información útil para asesoría y renovación.">
             <FormGrid>
+              {canSelectBonusSeller ? (
+                <FormField label="Vendedor para bonos" error={errors.bonusSellerId?.message} hint="Se guarda en la póliza al emitirla y no cambia al reasignar la cartera.">
+                  <Controller
+                    name="bonusSellerId"
+                    control={control}
+                    rules={{ required: true }}
+                    render={({ field }) => (
+                      <ControlledSelect
+                        value={field.value ?? ""}
+                        onValueChange={field.onChange}
+                        options={bonusSellerOptions}
+                        placeholder="Selecciona al vendedor"
+                        aria-required
+                      />
+                    )}
+                  />
+                </FormField>
+              ) : null}
               <FormField label="Plan de pago" htmlFor="paymentPlan" error={errors.paymentPlan?.message}>
                 <Input id="paymentPlan" {...register("paymentPlan")} />
               </FormField>
@@ -311,6 +335,9 @@ export function PolicyForm({
 
             <FormField label="Notas" htmlFor="notes" error={errors.notes?.message}>
               <Textarea id="notes" rows={5} {...register("notes")} />
+            </FormField>
+            <FormField label="Evidencia de elegibilidad para bonos (JSON)" htmlFor="bonusEligibilityJson" error={errors.bonusEligibilityJson?.message} hint={canEditBonusEvidence ? 'Guarda criterios verificados y sus valores, por ejemplo: {"productEligible":true,"lossRatio":0.42,"sellerAttributionConfirmed":true,"source":"reporte aseguradora 2026"}. Para pólizas 2026 históricas, administración confirma la atribución al guardar.' : "Solo administración registra evidencia de elegibilidad para bonos."}>
+              <Textarea id="bonusEligibilityJson" rows={4} disabled={!canEditBonusEvidence} {...register("bonusEligibilityJson")} />
             </FormField>
           </FormSection>
 

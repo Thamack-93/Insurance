@@ -83,6 +83,7 @@ const policyBaseSchema = z
     policyNumber: z.string().trim().min(2, "Escribe el numero de poliza."),
     clientId: z.string().min(1, "Selecciona un cliente."),
     insurerId: z.string().min(1, "Selecciona una aseguradora."),
+    bonusSellerId: z.string().trim().optional().or(z.literal("")),
     policyType: z.enum(POLICY_TYPES),
     status: z.enum(POLICY_STATUSES),
     startDate: requiredDate,
@@ -93,6 +94,7 @@ const policyBaseSchema = z
     paymentPlan: optionalText,
     insuredObject: optionalText,
     riskDetails: policyRiskDetailsSchema.optional(),
+    bonusEligibilityJson: z.string().max(4000).optional().or(z.literal("")),
     beneficiaryInfo: optionalText,
     notes: optionalText,
     renewedFromPolicyId: z.string().trim().optional().or(z.literal("")),
@@ -102,10 +104,19 @@ const policyBaseSchema = z
     path: ["endDate"],
   })
   .superRefine((values, context) => {
-    if (values.riskDetails === undefined || values.riskDetails === null) return;
-    const parsed = policyRiskDetailsSchema.safeParse(values.riskDetails);
-    if (!parsed.success || parsed.data.policyType !== values.policyType) {
-      context.addIssue({ code: "custom", path: ["riskDetails"], message: "Revisa que los datos del riesgo correspondan al ramo seleccionado." });
+    if (values.riskDetails !== undefined && values.riskDetails !== null) {
+      const parsed = policyRiskDetailsSchema.safeParse(values.riskDetails);
+      if (!parsed.success || parsed.data.policyType !== values.policyType) {
+        context.addIssue({ code: "custom", path: ["riskDetails"], message: "Revisa que los datos del riesgo correspondan al ramo seleccionado." });
+      }
+    }
+    if (values.bonusEligibilityJson) {
+      try {
+        const evidence = JSON.parse(values.bonusEligibilityJson);
+        if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) throw new Error("not object");
+      } catch {
+        context.addIssue({ code: "custom", path: ["bonusEligibilityJson"], message: "La evidencia de incentivos debe ser un objeto JSON válido." });
+      }
     }
   });
 

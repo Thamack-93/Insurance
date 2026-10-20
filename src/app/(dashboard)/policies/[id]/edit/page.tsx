@@ -95,10 +95,12 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
             paymentPlan: policy.paymentPlan ?? "",
             insuredObject: policy.insuredObject ?? "",
             riskDetails: riskDetailsFromExisting(policyType, policy.riskDetails, policy.insuredObject, policy.insuredAssets, policy.insuredParties, policy.beneficiaryInfo) ?? undefined,
+            bonusEligibilityJson: policy.bonusEligibilityJson ?? "",
             beneficiaryInfo: policy.beneficiaryInfo ?? "",
             notes: policy.notes ?? "",
             renewedFromPolicyId: policy.renewedFromPolicyId ?? "",
           })}
+          canEditBonusEvidence={isAdmin}
           clientOptions={clients.map((client) => ({ value: client.id, label: client.fullName }))}
           insurerOptions={insurers.map((insurer) => ({ value: insurer.id, label: insurer.name }))}
           renewalSource={
