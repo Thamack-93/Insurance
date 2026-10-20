@@ -13,21 +13,21 @@ type Props = {
 };
 
 type Item = Record<string, string>;
-type RiskValue = { version: 1; policyType: PolicyType; data: Record<string, unknown> };
+type RiskValue = { version: 1; policyType: PolicyType; commissionPolicyMode?: string; commissionUnitClass?: string; data: Record<string, unknown> };
 
 const templates: Record<string, Item> = {
-  vehicles: { make: "", model: "", year: "", version: "", vin: "", plates: "" },
-  insuredPeople: { fullName: "", birthDate: "", relationship: "" },
+  vehicles: { make: "", model: "", year: "", version: "", vin: "", plates: "", unitClass: "" },
+  insuredPeople: { fullName: "", birthDate: "", relationship: "", unitClass: "" },
   beneficiaries: { fullName: "", relationship: "", percentage: "" },
-  locations: { address: "", use: "", construction: "", activity: "", insuredValue: "" },
+  locations: { address: "", use: "", construction: "", activity: "", insuredValue: "", unitClass: "" },
   attributes: { label: "", value: "" },
 };
 
 const repeatFields: Record<string, Array<[string, string]>> = {
-  vehicles: [["make", "Marca"], ["model", "Modelo"], ["year", "Año"], ["version", "Versión"], ["vin", "Serie / VIN"], ["plates", "Placas"]],
-  insuredPeople: [["fullName", "Nombre de la persona asegurada"], ["birthDate", "Fecha de nacimiento"], ["relationship", "Parentesco"]],
+  vehicles: [["make", "Marca"], ["model", "Modelo"], ["year", "Año"], ["version", "Versión"], ["unitClass", "Clase asegurable (particular, carga, tractocamión, moto...)"], ["vin", "Serie / VIN"], ["plates", "Placas"]],
+  insuredPeople: [["fullName", "Nombre de la persona asegurada"], ["birthDate", "Fecha de nacimiento"], ["relationship", "Parentesco"], ["unitClass", "Clase asegurable"]],
   beneficiaries: [["fullName", "Nombre del beneficiario"], ["relationship", "Parentesco"], ["percentage", "Porcentaje"]],
-  locations: [["address", "Ubicación / domicilio"], ["use", "Uso del inmueble"], ["construction", "Tipo de construcción"], ["activity", "Actividad en el riesgo"], ["insuredValue", "Valor asegurado"]],
+  locations: [["address", "Ubicación / domicilio"], ["use", "Uso del inmueble"], ["construction", "Tipo de construcción"], ["activity", "Actividad en el riesgo"], ["insuredValue", "Valor asegurado"], ["unitClass", "Clase asegurable"]],
   attributes: [["label", "Dato"], ["value", "Valor"]],
 };
 
@@ -80,6 +80,10 @@ export function PolicyRiskDetailsFields({ policyType, value, onChange }: Props) 
     onChange({ ...normalizedValue, version: 1, policyType, data: { ...data, [field]: nextValue } } as PolicyRiskDetails);
   }
 
+  function changeCommissionField(field: "commissionPolicyMode" | "commissionUnitClass", nextValue: string) {
+    onChange({ ...normalizedValue, version: 1, policyType, [field]: nextValue } as PolicyRiskDetails);
+  }
+
   return (
     <FormSection title="Riesgo asegurado" description="Captura datos específicos del ramo. Los campos se guardan estructurados y generan la descripción de la póliza.">
       {collections.map((key) => {
@@ -113,6 +117,10 @@ export function PolicyRiskDetailsFields({ policyType, value, onChange }: Props) 
           })}
         </FormGrid>
       ) : null}
+      <FormGrid>
+        <FormField label="Modalidad para comisión" htmlFor={`risk-${policyType}-commission-mode`}><Input id={`risk-${policyType}-commission-mode`} value={normalizedValue.commissionPolicyMode ?? ""} onChange={(event) => changeCommissionField("commissionPolicyMode", event.target.value)} placeholder="Individual, colectiva, flotilla..." /></FormField>
+        <FormField label="Clase general para comisión" htmlFor={`risk-${policyType}-commission-class`}><Input id={`risk-${policyType}-commission-class`} value={normalizedValue.commissionUnitClass ?? ""} onChange={(event) => changeCommissionField("commissionUnitClass", event.target.value)} placeholder="Persona, inmueble, carga, riesgo empresarial..." /></FormField>
+      </FormGrid>
       {policyType === "HOGAR" || policyType === "DANOS" || policyType === "EMPRESARIAL" ? <p className="text-xs text-muted-foreground">Puedes registrar varias ubicaciones o bienes asegurados.</p> : null}
       <p className="text-xs text-muted-foreground">Descripción para listas: {displaySummary || "se mostrará cuando captures datos del riesgo"}</p>
     </FormSection>

@@ -3,13 +3,13 @@ import { POLICY_TYPES, type PolicyType } from "@/lib/domain-values";
 
 const text = z.string().trim().max(500).optional().default("");
 const year = z.string().trim().regex(/^(|\d{4})$/, "El año debe tener cuatro dígitos.").optional().default("");
-const people = z.array(z.object({ fullName: text, birthDate: text, relationship: text })).max(100).default([]);
+const people = z.array(z.object({ fullName: text, birthDate: text, relationship: text, unitClass: text })).max(100).default([]);
 const attributes = z.array(z.object({ label: text, value: text })).max(40).default([]);
-const vehicles = z.array(z.object({ make: text, model: text, year, version: text, vin: text, plates: text })).max(100).default([]);
-const locations = z.array(z.object({ address: text, use: text, construction: text, activity: text, insuredValue: text })).max(100).default([]);
+const vehicles = z.array(z.object({ make: text, model: text, year, version: text, vin: text, plates: text, unitClass: text })).max(100).default([]);
+const locations = z.array(z.object({ address: text, use: text, construction: text, activity: text, insuredValue: text, unitClass: text })).max(100).default([]);
 
 const dataSchemas = {
-  AUTO: z.object({ vehicles }),
+  AUTO: z.object({ policyMode: text, vehicles }),
   GMM: z.object({ insuredPeople: people, plan: text, insuredAmount: text, deductible: text, coinsurance: text }),
   VIDA: z.object({ insuredPeople: people, plan: text, insuredAmount: text, term: text, beneficiaries: z.array(z.object({ fullName: text, relationship: text, percentage: text })).max(100).default([]) }),
   DANOS: z.object({ locations, activity: text, coverageLimit: text }),
@@ -21,7 +21,7 @@ const dataSchemas = {
   OTRO: z.object({ category: text, attributes }),
 } satisfies Record<PolicyType, z.ZodType>;
 
-const riskEnvelope = { version: z.literal(1), sourceText: z.string().trim().max(4000).optional() };
+const riskEnvelope = { version: z.literal(1), sourceText: z.string().trim().max(4000).optional(), commissionPolicyMode: text, commissionUnitClass: text };
 export const policyRiskDetailsSchema = z.discriminatedUnion("policyType", [
   z.object({ ...riskEnvelope, policyType: z.literal("AUTO"), data: dataSchemas.AUTO }),
   z.object({ ...riskEnvelope, policyType: z.literal("GMM"), data: dataSchemas.GMM }),
@@ -40,17 +40,17 @@ export type RiskDetailsData = PolicyRiskDetails["data"];
 export type RiskDetailsValue = Record<string, unknown>;
 
 export function emptyPolicyRiskDetails(policyType: PolicyType): PolicyRiskDetails {
-  const base = { version: 1 as const, policyType };
+  const base = { version: 1 as const, policyType, commissionPolicyMode: "", commissionUnitClass: "" };
   switch (policyType) {
-    case "AUTO": return { ...base, policyType, data: { vehicles: [{ make: "", model: "", year: "", version: "", vin: "", plates: "" }] } };
-    case "GMM": return { ...base, policyType, data: { insuredPeople: [{ fullName: "", birthDate: "", relationship: "" }], plan: "", insuredAmount: "", deductible: "", coinsurance: "" } };
-    case "VIDA": return { ...base, policyType, data: { insuredPeople: [{ fullName: "", birthDate: "", relationship: "" }], plan: "", insuredAmount: "", term: "", beneficiaries: [{ fullName: "", relationship: "", percentage: "" }] } };
-    case "DANOS": return { ...base, policyType, data: { locations: [{ address: "", use: "", construction: "", activity: "", insuredValue: "" }], activity: "", coverageLimit: "" } };
+    case "AUTO": return { ...base, policyType, data: { policyMode: "", vehicles: [{ make: "", model: "", year: "", version: "", vin: "", plates: "", unitClass: "" }] } };
+    case "GMM": return { ...base, policyType, data: { insuredPeople: [{ fullName: "", birthDate: "", relationship: "", unitClass: "" }], plan: "", insuredAmount: "", deductible: "", coinsurance: "" } };
+    case "VIDA": return { ...base, policyType, data: { insuredPeople: [{ fullName: "", birthDate: "", relationship: "", unitClass: "" }], plan: "", insuredAmount: "", term: "", beneficiaries: [{ fullName: "", relationship: "", percentage: "" }] } };
+    case "DANOS": return { ...base, policyType, data: { locations: [{ address: "", use: "", construction: "", activity: "", insuredValue: "", unitClass: "" }], activity: "", coverageLimit: "" } };
     case "FIANZAS": return { ...base, policyType, data: { obligation: "", contractNumber: "", beneficiary: "", bondedAmount: "", term: "" } };
-    case "HOGAR": return { ...base, policyType, data: { locations: [{ address: "", use: "", construction: "", activity: "", insuredValue: "" }] } };
+    case "HOGAR": return { ...base, policyType, data: { locations: [{ address: "", use: "", construction: "", activity: "", insuredValue: "", unitClass: "" }] } };
     case "RESPONSABILIDAD_CIVIL": return { ...base, policyType, data: { activity: "", territory: "", coverageLimit: "", operations: "" } };
-    case "EMPRESARIAL": return { ...base, policyType, data: { activity: "", locations: [{ address: "", use: "", construction: "", activity: "", insuredValue: "" }], buildingValue: "", contentsValue: "", businessInterruptionValue: "" } };
-    case "ACCIDENTES": return { ...base, policyType, data: { insuredPeople: [{ fullName: "", birthDate: "", relationship: "" }], plan: "", insuredAmount: "", accidentCoverage: "" } };
+    case "EMPRESARIAL": return { ...base, policyType, data: { activity: "", locations: [{ address: "", use: "", construction: "", activity: "", insuredValue: "", unitClass: "" }], buildingValue: "", contentsValue: "", businessInterruptionValue: "" } };
+    case "ACCIDENTES": return { ...base, policyType, data: { insuredPeople: [{ fullName: "", birthDate: "", relationship: "", unitClass: "" }], plan: "", insuredAmount: "", accidentCoverage: "" } };
     case "OTRO": return { ...base, policyType, data: { category: "", attributes: [{ label: "", value: "" }] } };
   }
 }
@@ -68,7 +68,7 @@ export function summarizePolicyRiskDetails(value: unknown): string | null {
   if (!parsed.success) return null;
   const { policyType, data } = parsed.data;
   switch (policyType) {
-    case "AUTO": return join(data.vehicles.map((vehicle) => join([vehicle.make, vehicle.model, vehicle.year, vehicle.version, vehicle.plates ? `Placas ${vehicle.plates}` : "", vehicle.vin ? `Serie ${vehicle.vin}` : ""], " ")));
+    case "AUTO": return join([data.policyMode, ...data.vehicles.map((vehicle) => join([vehicle.make, vehicle.model, vehicle.year, vehicle.version, vehicle.unitClass, vehicle.plates ? `Placas ${vehicle.plates}` : "", vehicle.vin ? `Serie ${vehicle.vin}` : ""], " "))]);
     case "GMM": return join([data.plan, data.insuredAmount ? `Suma asegurada ${data.insuredAmount}` : "", ...data.insuredPeople.map((person) => person.fullName)]);
     case "VIDA": return join([data.plan, data.insuredAmount ? `Suma asegurada ${data.insuredAmount}` : "", ...data.insuredPeople.map((person) => person.fullName)]);
     case "DANOS": return join([data.activity, ...data.locations.map((location) => join([location.address, location.use, location.activity, location.insuredValue ? `Valor ${location.insuredValue}` : ""], ", ")), data.coverageLimit]);
@@ -141,27 +141,29 @@ export function getPolicyRiskDetailEntries(value: unknown): Array<{ label: strin
 }
 
 export function projectPolicyRiskRelations(value: unknown): {
-  assets: Array<{ assetType: PolicyType; description: string; serialNumber: string | null; isPrimary: boolean }>;
+  assets: Array<{ assetType: PolicyType; unitClass: string | null; description: string; serialNumber: string | null; isPrimary: boolean }>;
   insuredParties: Array<{ fullName: string; isPrimary: boolean; sourceLabel: string }>;
 } {
   const parsed = policyRiskDetailsSchema.safeParse(value);
   if (!parsed.success) return { assets: [], insuredParties: [] };
   const { policyType, data } = parsed.data;
-  let assetDescriptions: Array<{ description: string; serialNumber?: string | null }> = [];
+  let assetDescriptions: Array<{ description: string; serialNumber?: string | null; unitClass?: string | null }> = [];
   let partyNames: string[] = [];
   if (policyType === "AUTO") {
     assetDescriptions = data.vehicles.map((vehicle) => ({
       description: join([vehicle.make, vehicle.model, vehicle.year, vehicle.version, vehicle.plates ? `Placas ${vehicle.plates}` : ""], " "),
       serialNumber: vehicle.vin || null,
+      unitClass: vehicle.unitClass || null,
     }));
   } else if (policyType === "HOGAR" || policyType === "DANOS" || policyType === "EMPRESARIAL") {
-    assetDescriptions = data.locations.map((location) => ({ description: join([location.address, location.activity, location.use, location.construction, location.insuredValue ? `Valor ${location.insuredValue}` : ""], ", ") }));
+    assetDescriptions = data.locations.map((location) => ({ description: join([location.address, location.activity, location.use, location.construction, location.insuredValue ? `Valor ${location.insuredValue}` : ""], ", "), unitClass: location.unitClass || null }));
   }
   if (policyType === "GMM" || policyType === "VIDA" || policyType === "ACCIDENTES") {
     partyNames = data.insuredPeople.map((person) => person.fullName);
+    assetDescriptions = data.insuredPeople.map((person) => ({ description: person.fullName, unitClass: person.unitClass || null }));
   }
   return {
-    assets: assetDescriptions.filter((asset) => asset.description).map((asset, index) => ({ assetType: policyType, description: asset.description, serialNumber: asset.serialNumber ?? null, isPrimary: index === 0 })),
+    assets: assetDescriptions.filter((asset) => asset.description).map((asset, index) => ({ assetType: policyType, unitClass: asset.unitClass ?? null, description: asset.description, serialNumber: asset.serialNumber ?? null, isPrimary: index === 0 })),
     insuredParties: partyNames.filter(Boolean).map((fullName, index) => ({ fullName, isPrimary: index === 0, sourceLabel: "Datos estructurados de póliza" })),
   };
 }

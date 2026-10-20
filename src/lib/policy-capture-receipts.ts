@@ -50,6 +50,8 @@ export type AutoCaptureReceiptPayload = {
   paidDate: null;
   paymentMethod: null;
   notes: string | null;
+  commissionCalculationStatus: "REVIEW";
+  commissionReviewReason: string;
   createdById: string;
   updatedById: string;
 };
@@ -241,6 +243,8 @@ function buildAutoCaptureReceiptPayloadFromTerm(
     paidDate: null,
     paymentMethod: null,
     notes,
+    commissionCalculationStatus: "REVIEW",
+    commissionReviewReason: "Falta capturar IVA, expedición, recargo fraccionado y descuentos visibles del recibo.",
     createdById: input.userId,
     updatedById: input.userId,
   };
@@ -269,6 +273,8 @@ async function upsertAutoCaptureReceipt(db: DbClient, payload: AutoCaptureReceip
     select: {
       id: true,
       notes: true,
+      commissionCalculationStatus: true,
+      amount: true,
     },
   });
 
@@ -288,6 +294,12 @@ async function upsertAutoCaptureReceipt(db: DbClient, payload: AutoCaptureReceip
       paidDate: payload.paidDate,
       paymentMethod: payload.paymentMethod,
       notes: existingReceipt.notes?.trim() ? existingReceipt.notes : payload.notes,
+      ...(existingReceipt.commissionCalculationStatus === "CALCULATED" && Number(existingReceipt.amount) === payload.amount ? {} : {
+        commissionCalculationStatus: payload.commissionCalculationStatus,
+        commissionReviewReason: existingReceipt.commissionCalculationStatus === "CALCULATED"
+          ? "Cambió el importe del recibo después de calcular la comisión. Revisa el cálculo guardado antes de usarlo."
+          : payload.commissionReviewReason,
+      }),
       updatedById: payload.updatedById,
     };
 

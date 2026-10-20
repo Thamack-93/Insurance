@@ -2,6 +2,117 @@
 // This file can be imported in tests without Next.js context
 
 import { businessAddDays, businessToday } from "@/lib/business-dates";
+import { deriveNetPremium } from "@/lib/premium-breakdown";
+
+export type CommissionRule = {
+  id: string;
+  policyType: string;
+  productPlan: string;
+  policyMode: string;
+  unitClass: string;
+  paymentFrequency: string;
+  rate: number;
+  validFrom: string;
+  validTo: string | null;
+  active: boolean;
+  evidence: string;
+};
+
+export function parseCommissionRules(value: unknown): CommissionRule[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    if (typeof row.id !== "string" || typeof row.policyType !== "string" || typeof row.rate !== "number" || !Number.isFinite(row.rate) || row.rate <= 0 || row.rate > 100) return [];
+    const text = (key: string, fallback = "*") => typeof row[key] === "string" ? row[key] as string : fallback;
+    return [{
+      id: row.id,
+      policyType: row.policyType,
+      productPlan: text("productPlan"),
+      policyMode: text("policyMode"),
+      unitClass: text("unitClass"),
+      paymentFrequency: text("paymentFrequency"),
+      rate: row.rate,
+      validFrom: text("validFrom", "9999-12-31"),
+      validTo: row.validTo === null || typeof row.validTo === "string" ? row.validTo as string | null : null,
+      active: row.active === true,
+      evidence: text("evidence", ""),
+    }];
+  });
+}
+
+export type CommissionDimensions = Pick<CommissionRule, "policyType" | "productPlan" | "policyMode" | "unitClass" | "paymentFrequency">;
+
+export type CommissionPremiumComponents = {
+  totalPremium: number;
+  iva: number;
+  issuanceExpense: number;
+  installmentSurcharge: number;
+  visibleDiscounts: number;
+};
+
+export type CommissionEstimate = {
+  status: "CALCULATED" | "REVIEW";
+  reason?: string;
+  amount?: number;
+  rate?: number;
+  netPremium?: number;
+  commissionableBase?: number;
+  rule?: CommissionRule;
+};
+
+const WILDCARD = "*";
+
+export function resolveCommissionRule(
+  rules: CommissionRule[],
+  dimensions: CommissionDimensions,
+  asOf: Date,
+): { rule: CommissionRule | null; ambiguous: boolean } {
+  const date = asOf.toISOString().slice(0, 10);
+  const keys = ["policyType", "productPlan", "policyMode", "unitClass", "paymentFrequency"] as const;
+  const matches = rules.filter((rule) => rule.active && rule.validFrom <= date && (!rule.validTo || rule.validTo >= date)
+    && keys.every((key) => rule[key] === WILDCARD || rule[key] === dimensions[key]));
+  if (!matches.length) return { rule: null, ambiguous: false };
+  const specificity = (rule: CommissionRule) => keys.reduce((score, key) => score + Number(rule[key] !== WILDCARD), 0);
+  const best = Math.max(...matches.map(specificity));
+  const selected = matches.filter((rule) => specificity(rule) === best);
+  return selected.length === 1 ? { rule: selected[0]!, ambiguous: false } : { rule: null, ambiguous: true };
+}
+
+export function calculateCommissionEstimate(
+  components: CommissionPremiumComponents | null,
+  rules: CommissionRule[],
+  dimensions: CommissionDimensions,
+  asOf: Date,
+): CommissionEstimate {
+  if (!components || Object.values(components).some((amount) => !Number.isFinite(amount) || amount < 0)) {
+    return { status: "REVIEW", reason: "Completa prima total, IVA, gastos de expedición, recargo fraccionado y descuentos visibles." };
+  }
+  const match = resolveCommissionRule(rules, dimensions, asOf);
+  if (match.ambiguous) return { status: "REVIEW", reason: "Hay más de una regla con la misma prioridad para esta póliza." };
+  if (!match.rule) return { status: "REVIEW", reason: "No hay una regla activa para esta aseguradora, ramo, plan, unidad y frecuencia." };
+  if (!match.rule.evidence.trim()) return { status: "REVIEW", reason: "La regla de comisión no tiene evidencia documentada." };
+  const netPremium = deriveNetPremium(components.totalPremium, {
+    vatAmount: components.iva,
+    issuanceExpenseAmount: components.issuanceExpense,
+    surchargeAmount: components.installmentSurcharge,
+    discountAmount: components.visibleDiscounts,
+  });
+  if (netPremium === null) return { status: "REVIEW", reason: "La prima neta no se puede derivar; revisa los componentes del recibo." };
+  const commissionableBase = netPremium;
+  return {
+    status: "CALCULATED",
+    commissionableBase,
+    netPremium: commissionableBase,
+    rate: match.rule.rate,
+    amount: roundMoney(commissionableBase * match.rule.rate / 100),
+    rule: match.rule,
+  };
+}
+
+export function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
 
 export interface CommissionCalculationInput {
   policyId: string;

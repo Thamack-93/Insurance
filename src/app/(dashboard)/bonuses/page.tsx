@@ -38,12 +38,7 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        eyebrow="Finanzas"
-        title="Bonos e incentivos"
-        description="Proyecta los bonos 2026 de Autos y Daños por vendedor, revisa cada pago y guarda cierres reproducibles."
-        actions={<Button asChild variant="outline"><Link href="/commissions">Ver comisiones</Link></Button>}
-      />
+      <PageHeader eyebrow="Finanzas" title="Bonos e incentivos" description="Proyecta los bonos 2026 de Autos y Daños por vendedor, revisa cada pago y guarda cierres reproducibles." />
       <SectionCard title="Nueva proyección" description="Solo se consideran pagos POSTED; los pagos revertidos quedan fuera. Los programas con datos faltantes permanecen en revisión.">
         <form action={previewBonus} className="grid gap-4 md:grid-cols-5">
           <label className="grid gap-1 text-sm">Programa<select name="programKey" defaultValue={program?.key ?? BONUS_PROGRAMS[0].key} className="h-10 rounded-md border bg-background px-3">

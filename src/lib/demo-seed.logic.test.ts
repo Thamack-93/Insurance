@@ -79,7 +79,7 @@ describe("seedDemoBaseline", () => {
     expect(new Set(seededPolicies.map(({ policyType }) => policyType))).toEqual(new Set(["AUTO", "GMM", "HOGAR", "EMPRESARIAL", "VIDA"]));
     expect(seededPolicies.every(({ policyType }) => policyTypeLabel(String(policyType)) !== "Tipo no reconocido")).toBe(true);
     expect(new Set(structuredRiskDetails.map(({ policyType }) => policyType))).toEqual(new Set(["AUTO", "GMM", "HOGAR", "EMPRESARIAL", "VIDA"]));
-    expect(upserts.filter(({ delegate }) => delegate === "policyInsuredAsset")).toHaveLength(48);
+    expect(upserts.filter(({ delegate }) => delegate === "policyInsuredAsset")).toHaveLength(80);
     expect(upserts.filter(({ delegate }) => delegate === "policyInsuredParty")).toHaveLength(32);
     expect(seededPolicies[0]?.endDate).toEqual(new Date("2026-10-04T12:00:00.000Z"));
     const schedules = creates.filter(({ delegate }) => delegate === "receipt").map(({ args }) => args.data as Record<string, unknown>);

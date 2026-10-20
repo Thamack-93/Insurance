@@ -27,7 +27,7 @@ export default async function NewReceiptPage({
       where: { status: { not: "CANCELLED" }, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: {
         client: true,
-        insuredAssets: { select: { description: true, isPrimary: true } },
+        insuredAssets: { select: { id: true, description: true, unitClass: true, isPrimary: true } },
       },
       orderBy: { policyNumber: "asc" },
     }),
@@ -36,7 +36,7 @@ export default async function NewReceiptPage({
           where: { id: policyId, ...policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
           include: {
             client: true,
-            insuredAssets: { select: { description: true, isPrimary: true } },
+            insuredAssets: { select: { id: true, description: true, unitClass: true, isPrimary: true } },
           },
         })
       : Promise.resolve(null),
@@ -99,6 +99,7 @@ export default async function NewReceiptPage({
             periodEndDate: selectedEndorsement ? formatDateInput(selectedEndorsement.endDate) : undefined,
           })}
           policyOptions={policyOptions}
+          policyAssets={Object.fromEntries(policies.map((policy) => [policy.id, policy.insuredAssets]))}
           endorsementOptions={endorsementOptions}
           submitAction={createReceipt}
           footerActions={

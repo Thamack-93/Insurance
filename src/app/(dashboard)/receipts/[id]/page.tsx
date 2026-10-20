@@ -32,6 +32,8 @@ import { isQualitasClientRecipientEnabled, isQualitasInsurerName, isQualitasPaym
 import { WhatsAppReminderButton } from "@/components/receipts/whatsapp-reminder-button";
 import { CollectionFollowUpPanel } from "@/components/receipts/collection-follow-up-panel";
 import { recordReceiptCollectionFollowUp } from "@/app/(dashboard)/receipts/actions";
+import { ReceiptCommissionCalculator } from "@/components/commissions/receipt-commission-calculator";
+import { deriveReceiptNetPremium, type UnitPremiumBreakdown } from "@/lib/premium-breakdown";
 
 export default async function ReceiptDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
@@ -83,6 +85,18 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
   const remainingAmount = isPaidWithinTolerance(toNumber(receipt.amount), paidAmount)
     ? 0
     : toNumber(receipt.amount) - paidAmount;
+  const receiptNetPremium = deriveReceiptNetPremium({
+    amount: toNumber(receipt.amount),
+    vatAmount: receipt.vatAmount === null ? null : toNumber(receipt.vatAmount),
+    issuanceExpenseAmount: receipt.issuanceExpenseAmount === null ? null : toNumber(receipt.issuanceExpenseAmount),
+    surchargeAmount: receipt.surchargeAmount === null ? null : toNumber(receipt.surchargeAmount),
+    discountAmount: receipt.discountAmount === null ? null : toNumber(receipt.discountAmount),
+    premiumBreakdownByUnit: Array.isArray(receipt.premiumBreakdownByUnit) ? receipt.premiumBreakdownByUnit as unknown as UnitPremiumBreakdown[] : null,
+  });
+  const unitBreakdown = Array.isArray(receipt.premiumBreakdownByUnit) ? receipt.premiumBreakdownByUnit as unknown as UnitPremiumBreakdown[] : [];
+  const componentTotal = (key: "vatAmount" | "issuanceExpenseAmount" | "surchargeAmount" | "discountAmount") => unitBreakdown.length
+    ? unitBreakdown.reduce((sum, row) => sum + Number(row[key]), 0)
+    : receipt[key] === null ? null : toNumber(receipt[key]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -187,6 +201,12 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
             tone="blue"
           />
         </section>
+
+        <div className={`rounded-xl border px-4 py-3 text-sm ${receiptNetPremium === null ? "border-amber-500/40 bg-amber-500/5" : "border-border bg-muted/30"}`}>
+          <p className="font-medium">Prima neta {receiptNetPremium === null ? "pendiente de revisión" : formatCurrency(receiptNetPremium, receipt.currency)}</p>
+          {receiptNetPremium !== null ? <p className="mt-1 text-muted-foreground">{formatCurrency(receipt.amount, receipt.currency)} − IVA {formatCurrency(componentTotal("vatAmount") ?? 0, receipt.currency)} − expedición {formatCurrency(componentTotal("issuanceExpenseAmount") ?? 0, receipt.currency)} − recargo {formatCurrency(componentTotal("surchargeAmount") ?? 0, receipt.currency)} + descuentos {formatCurrency(componentTotal("discountAmount") ?? 0, receipt.currency)} = {formatCurrency(receiptNetPremium, receipt.currency)}. Los descuentos se capturan como importes positivos.</p> : <p className="mt-1 text-muted-foreground">Importe del recibo − IVA − gastos de expedición − recargo fraccionado + descuentos visibles. Los descuentos se capturan como importes positivos.</p>}
+          {receiptNetPremium === null ? <p className="mt-1 text-amber-700 dark:text-amber-300">Completa los cuatro componentes y, si aplica, el desglose por unidad conciliado con el importe del recibo.</p> : null}
+        </div>
 
         <section className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
           <SectionCard title="Ficha del recibo" description="Datos de periodo, vencimiento y contexto.">
@@ -338,9 +358,10 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
         <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
           <SectionCard title="Comisiones" description="Ingreso esperado y cobrado derivado de este recibo.">
             {commissions.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-muted-foreground">
-                No hay comisiones registradas para este recibo.
-              </div>
+              <>
+                <div className="px-4 py-3 text-sm text-muted-foreground">No hay comisiones registradas para este recibo.</div>
+                {isAdmin && receipt.status !== "CANCELLED" ? <ReceiptCommissionCalculator receiptId={receipt.id} status={receipt.commissionCalculationStatus} reason={receipt.commissionReviewReason} canCalculate /> : null}
+              </>
             ) : (
               <div className="divide-y divide-stone-200/80">
                 {commissions.map((commission) => (
@@ -358,6 +379,7 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
                       Esperada: {formatDate(commission.expectedDate)}
                       {commission.paidDate ? ` · Cobrada: ${formatDate(commission.paidDate)}` : ""}
                     </p>
+                    {commission.calculationBreakdownJson ? <CommissionBreakdown value={commission.calculationBreakdownJson} currency={receipt.currency} /> : null}
                   </div>
                 ))}
               </div>
@@ -453,4 +475,18 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
       </div>
     </div>
   );
+}
+
+function CommissionBreakdown({ value, currency }: { value: string; currency: string }) {
+  let lines: Array<{ description?: string; unitClass?: string; netPremium?: number; commissionableBase?: number; rate?: number; expectedAmount?: number; ruleEvidence?: string; components?: { totalPremium?: number; vatAmount?: number; issuanceExpenseAmount?: number; surchargeAmount?: number; discountAmount?: number; iva?: number; issuanceExpense?: number; installmentSurcharge?: number; visibleDiscounts?: number } }> = [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (parsed && typeof parsed === "object" && Array.isArray((parsed as { breakdown?: unknown }).breakdown)) {
+      lines = (parsed as { breakdown: typeof lines }).breakdown;
+    }
+  } catch { return null; }
+  return <details className="mt-3 text-xs"><summary className="cursor-pointer text-primary">Ver desglose aplicado</summary><div className="mt-2 space-y-2 text-muted-foreground">{lines.map((line, index) => {
+    const components = line.components ?? {};
+    return <div key={index}><p>{line.description ?? "Riesgo"} · {line.unitClass ?? "—"}: {formatCurrency(components.totalPremium ?? 0, currency)} − IVA {formatCurrency(components.vatAmount ?? components.iva ?? 0, currency)} − expedición {formatCurrency(components.issuanceExpenseAmount ?? components.issuanceExpense ?? 0, currency)} − recargo {formatCurrency(components.surchargeAmount ?? components.installmentSurcharge ?? 0, currency)} + descuentos {formatCurrency(components.discountAmount ?? components.visibleDiscounts ?? 0, currency)} = prima neta/base {formatCurrency(line.netPremium ?? line.commissionableBase ?? 0, currency)}; × {line.rate ?? 0}% = {formatCurrency(line.expectedAmount ?? 0, currency)}</p><p>Evidencia de la regla: {line.ruleEvidence || "sin referencia"}.</p></div>;
+  })}</div></details>;
 }

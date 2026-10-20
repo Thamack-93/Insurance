@@ -38,6 +38,7 @@ export function createPolicyDefaults(values?: Partial<PolicyFormValues>): Policy
     policyNumber: values?.policyNumber ?? "",
     clientId: values?.clientId ?? "",
     insurerId: values?.insurerId ?? "",
+    bonusSellerId: values?.bonusSellerId ?? "",
     policyType: values?.policyType ?? "AUTO",
     status: values?.status ?? "ACTIVE",
     startDate: values?.startDate ?? today,
@@ -67,16 +68,28 @@ export function createReceiptDefaults(values?: Partial<ReceiptFormValues>): Rece
     periodEndDate: values?.periodEndDate ?? nextMonthStr,
     dueDate: values?.dueDate ?? nextMonthStr,
     amount: values?.amount ?? 0,
-    vatAmount: values?.vatAmount ?? undefined,
-    issuanceExpenseAmount: values?.issuanceExpenseAmount ?? undefined,
-    surchargeAmount: values?.surchargeAmount ?? undefined,
-    discountAmount: values?.discountAmount ?? undefined,
+    vatAmount: values?.vatAmount ?? "",
+    issuanceExpenseAmount: values?.issuanceExpenseAmount ?? "",
+    surchargeAmount: values?.surchargeAmount ?? "",
+    discountAmount: values?.discountAmount ?? "",
+    premiumBreakdownByUnit: values?.premiumBreakdownByUnit ?? [],
     currency: values?.currency ?? "MXN",
     status: values?.status ?? "PENDING",
     paidDate: values?.paidDate ?? "",
     paymentMethod: values?.paymentMethod ?? "",
     notes: values?.notes ?? "",
   };
+}
+
+export function readReceiptPremiumUnits(value: unknown): ReceiptFormValues["premiumBreakdownByUnit"] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    if (typeof row.insuredAssetId !== "string") return [];
+    const number = (key: string) => typeof row[key] === "number" && Number.isFinite(row[key]) ? row[key] as number : "";
+    return [{ insuredAssetId: row.insuredAssetId, totalPremium: number("totalPremium"), vatAmount: number("vatAmount"), issuanceExpenseAmount: number("issuanceExpenseAmount"), surchargeAmount: number("surchargeAmount"), discountAmount: number("discountAmount") }];
+  });
 }
 
 export function createEndorsementDefaults(values?: Partial<EndorsementFormValues>): EndorsementFormValues {
