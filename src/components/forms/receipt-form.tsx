@@ -140,8 +140,8 @@ export function ReceiptForm({
               <FormField label="Gastos de expedición" htmlFor="issuanceExpenseAmount" error={errors.issuanceExpenseAmount?.message}>
                 <Input id="issuanceExpenseAmount" type="number" min="0" step="0.01" {...register("issuanceExpenseAmount")} />
               </FormField>
-              <FormField label="Recargos" htmlFor="surchargeAmount" error={errors.surchargeAmount?.message}>
-                <Input id="surchargeAmount" type="number" min="0" step="0.01" {...register("surchargeAmount")} />
+              <FormField label="Recargos / financiamiento" htmlFor="surchargeAmount" error={errors.surchargeAmount?.message}>
+                <Input id="surchargeAmount" type="number" step="0.01" {...register("surchargeAmount")} />
               </FormField>
               <FormField label="Descuentos" htmlFor="discountAmount" error={errors.discountAmount?.message}>
                 <Input id="discountAmount" type="number" min="0" step="0.01" {...register("discountAmount")} />
