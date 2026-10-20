@@ -24,6 +24,10 @@ const optionalNonNegativeMoney = z.preprocess(
   (value) => value === "" || value === null || value === undefined ? undefined : value,
   z.coerce.number().nonnegative("El importe no puede ser negativo.").optional(),
 );
+const optionalMoney = z.preprocess(
+  (value) => value === "" || value === null || value === undefined ? undefined : value,
+  z.coerce.number().finite("Escribe un importe válido.").optional(),
+);
 
 function dateOnly(value: string) {
   return parseBusinessDateInput(value);
@@ -154,7 +158,7 @@ export const receiptSchema = z
     amount: z.coerce.number().positive("El monto debe ser mayor a cero."),
     vatAmount: optionalNonNegativeMoney,
     issuanceExpenseAmount: optionalNonNegativeMoney,
-    surchargeAmount: optionalNonNegativeMoney,
+    surchargeAmount: optionalMoney,
     discountAmount: optionalNonNegativeMoney,
     currency: z.string().trim().min(1, "Selecciona una moneda."),
     status: z.enum(RECEIPT_STATUSES),
