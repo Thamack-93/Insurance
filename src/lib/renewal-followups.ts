@@ -194,24 +194,17 @@ export async function closeRenewalFollowUp(
     );
   }
   const db = client;
-  const item = await db.workItem.findFirst({
+  const result = await db.workItem.updateMany({
     where: {
       organizationId,
       sourceType: "Renewal",
       sourceId: renewalFollowUpWorkItemSourceId(policyId),
       status: { in: [...OPEN_WORK_ITEM_STATUSES] },
     },
-    select: { id: true },
-  });
-
-  if (!item) return false;
-
-  await db.workItem.update({
-    where: { id: item.id },
     data: { status: "RESOLVED", closedDate: new Date(), updatedById: userId },
   });
 
-  return true;
+  return result.count > 0;
 }
 
 function followUpPriority(card: RenewalBoardCard) {
