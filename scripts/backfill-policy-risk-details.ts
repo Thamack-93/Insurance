@@ -295,7 +295,7 @@ const PRODUCTION_APPLY_COLUMN_PRIVILEGES = new Map<string, Map<string, Set<strin
     ["UPDATE", new Set(["riskDetails", "insuredObject", "riskDetailsReviewRequired", "updatedAt"])],
   ])],
   ["PolicyInsuredAsset", new Map([
-    ["SELECT", new Set(["id", "organizationId", "policyId", "assetType", "description", "serialNumber", "isPrimary", "createdAt", "updatedAt"])],
+    ["SELECT", new Set(["id", "organizationId", "policyId", "assetType", "unitClass", "description", "serialNumber", "isPrimary", "createdAt", "updatedAt"])],
     ["INSERT", new Set(["id", "organizationId", "policyId", "assetType", "description", "serialNumber", "isPrimary", "createdAt", "updatedAt"])],
     ["UPDATE", new Set(["updatedAt"])],
   ])],
