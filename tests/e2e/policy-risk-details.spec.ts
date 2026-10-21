@@ -115,7 +115,7 @@ test.describe("structured policy risk details", () => {
           db.policyInsuredAsset.findMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId }, select: { assetType: true, description: true } }),
           db.policyInsuredParty.findMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId }, select: { fullName: true } }),
         ]);
-        return policy ? { policyType: policy.policyType, insuredObject: policy.insuredObject, beneficiaryInfo: policy.beneficiaryInfo, assets: assets.length, parties: parties.map((party) => party.fullName) } : null;
+        return policy ? { policyType: policy.policyType, insuredObject: policy.insuredObject, beneficiaryInfo: policy.beneficiaryInfo, assets: assets.map((asset) => ({ assetType: asset.assetType, description: asset.description })), parties: parties.map((party) => party.fullName) } : null;
       }, { timeout: 10_000 }).toEqual({
         policyType: "GMM",
         insuredObject: "Ana Pérez",
