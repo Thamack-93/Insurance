@@ -180,7 +180,8 @@ export type AssistantAiOperation =
   | "assistant-agent"
   | "assistant-report-classification"
   | "policy-pdf-extract"
-  | "policy-pdf-review";
+  | "policy-pdf-review"
+  | "broker-comparison-extract";
 
 export type AssistantAiFailureCode =
   | "unavailable"

@@ -27,7 +27,7 @@ const nextConfig: NextConfig = {
               `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval' https://vercel.live"}`,
               "connect-src 'self' https://api.telegram.org ws: wss:",
               "object-src 'none'",
-              "frame-src 'none'",
+              "frame-src 'self'",
               "worker-src 'self' blob:",
             ].join("; "),
           },

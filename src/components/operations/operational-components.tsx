@@ -3,6 +3,7 @@ import { ArrowUpRight, BellRing, CalendarDays, CheckCircle2, ChevronRight, Circl
 import { formatCurrency } from "@/lib/money";
 import type { FocusItemModel, OperationalMetricModel, SemanticTone } from "@/lib/today-operations";
 import { cn } from "@/lib/utils";
+import { TodayFocusActions } from "@/components/operations/today-focus-actions";
 
 const toneStyles: Record<SemanticTone, { dot: string; text: string; soft: string; card: string }> = {
   critical: { dot: "bg-critical", text: "text-critical", soft: "bg-critical/10", card: "border-border bg-card" },
@@ -79,6 +80,7 @@ export function FocusQueueItem({ item }: { item: FocusItemModel }) {
       <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
         {item.amount !== undefined ? <span className="font-mono text-sm font-medium">{formatCurrency(item.amount, item.currency)}</span> : null}
         {item.detailsHref ? <Link href={item.detailsHref} className="inline-flex min-h-10 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{item.detailsLabel ?? "Detalles"}<FileText className="size-3.5" aria-hidden /></Link> : null}
+        {item.actionContext ? <TodayFocusActions context={item.actionContext} /> : null}
         <Link href={item.href} className="inline-flex min-h-10 items-center gap-1 rounded-md border border-primary/25 px-3 text-xs font-medium text-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{item.actionLabel}<ArrowUpRight className="size-3.5" aria-hidden /></Link>
       </div>
     </div>
