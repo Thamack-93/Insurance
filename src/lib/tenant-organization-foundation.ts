@@ -48,7 +48,10 @@ export const POST_CUTOVER_PROTECTED_TENANT_TABLES = ["BonusRuleSet", "BonusRun",
 export const CUTOVER_TRIGGER_REMOVAL_MIGRATION = "20261009010000_multi_org_drop_remaining_transition_triggers";
 
 export function tenantTriggersForMigrationState(cutoverTriggerRemovalApplied: boolean) {
-  return cutoverTriggerRemovalApplied ? [] : Object.entries(EXPECTED_TENANT_TRIGGERS);
+  if (cutoverTriggerRemovalApplied) return [];
+  return Object.entries(EXPECTED_TENANT_TRIGGERS).filter(
+    ([table]) => !POST_CUTOVER_PROTECTED_TENANT_TABLES.includes(table as (typeof POST_CUTOVER_PROTECTED_TENANT_TABLES)[number]),
+  );
 }
 
 export const TENANT_RELATION_CHECKS: ReadonlyArray<readonly [string, string, string]> = [
