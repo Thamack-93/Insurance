@@ -4,6 +4,11 @@ import { captureServerAction } from "../helpers/capture-server-action";
 
 const TEST_ORGANIZATION_ID = "org_legacy_singleton_0001";
 
+async function selectBonusSeller(page: import("@playwright/test").Page) {
+  await page.getByRole("combobox", { name: "Vendedor para bonos", exact: true }).click();
+  await page.getByRole("option", { name: "CI Admin", exact: true }).click();
+}
+
 test("creating a linked renewal closes both source follow-ups in the policy transaction", async ({ page }) => {
   const db = getTestDb();
   const fixture = await seedPolicyFixture("POLICY-RENEWAL-FOLLOWUP-CLOSE");
@@ -51,6 +56,7 @@ test("creating a linked renewal closes both source follow-ups in the policy tran
 
     await authenticatePageAsAdmin(page);
     await page.goto(`/policies/new?renewalFrom=${fixture.policyId}`);
+    await selectBonusSeller(page);
     await page.locator("#policyNumber").fill(renewedPolicyNumber);
     const action = await captureServerAction(page, () => page.getByRole("button", { name: "Crear póliza", exact: true }).click());
     console.log("Policy renewal server action:", action);
@@ -134,6 +140,7 @@ test("a failed follow-up close rolls back linked policy creation and source rene
 
     await authenticatePageAsAdmin(page);
     await page.goto(`/policies/new?renewalFrom=${fixture.policyId}`);
+    await selectBonusSeller(page);
     await page.locator("#policyNumber").fill(renewedPolicyNumber);
     const action = await captureServerAction(page, () => page.getByRole("button", { name: "Crear póliza", exact: true }).click());
     expect(action.status).toBeLessThan(500);
