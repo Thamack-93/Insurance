@@ -221,7 +221,7 @@ async function main() {
     await db.$executeRawUnsafe(`GRANT UPDATE ("updatedAt") ON TABLE "User" TO ${writerRoleName}`);
     await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId", "policyNumber", "policyType", "insuredObject", "beneficiaryInfo", "riskDetails") ON TABLE "Policy" TO ${writerRoleName}`);
     await db.$executeRawUnsafe(`GRANT UPDATE ("riskDetails", "insuredObject", "riskDetailsReviewRequired", "updatedAt") ON TABLE "Policy" TO ${writerRoleName}`);
-    await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId", "policyId", "assetType", "description", "serialNumber", "isPrimary", "createdAt", "updatedAt") ON TABLE "PolicyInsuredAsset" TO ${writerRoleName}`);
+    await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId", "policyId", "assetType", "unitClass", "description", "serialNumber", "isPrimary", "createdAt", "updatedAt") ON TABLE "PolicyInsuredAsset" TO ${writerRoleName}`);
     await db.$executeRawUnsafe(`GRANT INSERT ("id", "organizationId", "policyId", "assetType", "description", "serialNumber", "isPrimary", "createdAt", "updatedAt") ON TABLE "PolicyInsuredAsset" TO ${writerRoleName}`);
     await db.$executeRawUnsafe(`GRANT UPDATE ("updatedAt") ON TABLE "PolicyInsuredAsset" TO ${writerRoleName}`);
     await db.$executeRawUnsafe(`GRANT SELECT ("id", "organizationId", "policyId", "fullName", "isPrimary", "sourceLabel", "createdAt", "updatedAt") ON TABLE "PolicyInsuredParty" TO ${writerRoleName}`);
