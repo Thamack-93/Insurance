@@ -10,9 +10,9 @@ const runtimeValues = {
   BACKUP_ENCRYPTION_KEY_VERSION: "v1",
   BLOB_READ_WRITE_TOKEN: "blob-token",
   ENABLE_DOCUMENT_FILES: "true",
-  NORA_AGENT_MODE: "off",
+  NORA_AGENT_MODE: "admin",
   PLATFORM_BILLING_MUTATIONS_ENABLED: "0",
-  PLATFORM_NORA_ENABLED: "0",
+  PLATFORM_NORA_ENABLED: "1",
   PLATFORM_IMPORTS_ENABLED: "1",
   PLATFORM_EXPORTS_ENABLED: "1",
   PLATFORM_UPLOADS_ENABLED: "1",
@@ -23,10 +23,11 @@ const runtimeValues = {
 };
 
 describe("production environment contract", () => {
-  it("passes an explicit singleton runtime configuration", () => {
+  it("passes an explicit singleton runtime configuration with admin-only Nora", () => {
     const report = evaluateProductionEnv(runtimeValues, "runtime");
     expect(report.failures).toEqual([]);
-    expect(report.entries.find((item) => item.name === "PLATFORM_NORA_ENABLED")?.state).toBe("disabled");
+    expect(report.entries.find((item) => item.name === "PLATFORM_NORA_ENABLED")?.state).toBe("configured");
+    expect(report.entries.find((item) => item.name === "NORA_AGENT_MODE")?.state).toBe("configured");
   });
 
   it("fails closed when required secrets or flags are missing", () => {
