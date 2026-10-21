@@ -5,7 +5,7 @@ import { z } from "zod";
 import { AuthError } from "@/lib/auth";
 import { today } from "@/lib/dates";
 import { businessAddDays } from "@/lib/business-dates";
-import { getTodayData } from "@/lib/dashboard-queries";
+import { getOperationalInsights } from "@/lib/operational-insights";
 import { loadEligibleRenewalPolicies } from "@/lib/renewals";
 import { getWorkItems, OPEN_WORK_ITEM_STATUSES } from "@/lib/work-queue";
 import { detectRisks } from "@/lib/risk-engine";
@@ -57,6 +57,21 @@ const searchOutputSchema = z.array(z.object({
 }));
 const nullableRecordOutputSchema = toolRecordSchema.nullable();
 const recordListOutputSchema = z.array(toolRecordSchema);
+const todayBriefOutputSchema = z.object({
+  counts: z.object({
+    renewals: z.number().int().nonnegative(),
+    collections: z.number().int().nonnegative(),
+    claims: z.number().int().nonnegative(),
+    work: z.number().int().nonnegative(),
+  }),
+  priorities: z.array(z.object({
+    title: z.string(),
+    subtitle: z.string(),
+    href: z.string(),
+    groups: z.array(z.enum(["renewals", "collections", "claims", "work"])),
+    signals: z.array(z.object({ label: z.string(), detail: z.string(), group: z.enum(["renewals", "collections", "claims", "work"]) })),
+  })).max(5),
+});
 const draftOutputSchema = z.union([
   z.object({ prepared: z.literal(true), proposal: toolRecordSchema }),
   z.object({ prepared: z.literal(false), reason: z.string() }),
@@ -223,16 +238,25 @@ export function createNoraAgentTools(user: AssistantUser, options: { gmmMetadata
       }),
     }),
     getTodayBrief: tool({
-      description: "Obtiene el resumen operativo de hoy dentro de la cartera autorizada.",
+      description: "Obtiene un briefing operativo con conteos exactos y hasta cinco prioridades enlazadas dentro de la cartera autorizada.",
       inputSchema: z.object({}),
-      execute: () => traced("getTodayBrief", toolRecordSchema, async () => {
+      execute: () => traced("getTodayBrief", todayBriefOutputSchema, async () => {
         await requireNoraToolScope(user.id);
-        const data = await getTodayData();
+        const data = await getOperationalInsights({ group: "all", page: 1 });
         return {
-          counts: { overdueReceipts: data.overduePayments.length, dueToday: data.paymentsDueToday.length, due7: data.paymentsDue7.length, renewals30: data.urgentRenewals.length, overdueWorkItems: data.overdueWorkItems.length, commissions: data.commissionsToReview.length },
-          overdueReceipts: data.overduePayments.slice(0, 8).map((item) => ({ id: item.id, receiptNumber: item.receiptNumber, dueDate: iso(item.dueDate), amount: Number(item.amount), currency: item.currency, client: item.client.fullName, policyNumber: item.policy.policyNumber })),
-          renewals: data.urgentRenewals.slice(0, 8).map((item) => ({ id: item.id, policyNumber: item.policyNumber, endDate: iso(item.endDate), client: item.client.fullName })),
-          workItems: data.overdueWorkItems.slice(0, 8).map((item) => ({ id: item.id, title: item.title, status: item.status, dueDate: iso(item.dueDate) })),
+          counts: {
+            renewals: data.counts.renewals.value,
+            collections: data.counts.collections.value,
+            claims: data.counts.claims.value,
+            work: data.counts.work.value,
+          },
+          priorities: data.records.slice(0, 5).map((record) => ({
+            title: record.title,
+            subtitle: record.subtitle,
+            href: record.href,
+            groups: record.groups,
+            signals: record.signals.slice(0, 3).map(({ label, detail, group }) => ({ label, detail, group })),
+          })),
         };
       }),
     }),

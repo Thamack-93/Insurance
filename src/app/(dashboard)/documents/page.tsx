@@ -12,10 +12,20 @@ import { ListSearch } from "@/components/lists/list-search";
 import { Pagination } from "@/components/lists/pagination";
 import { formatDate } from "@/lib/dates";
 import { UploadForm } from "@/components/documents/upload-form";
+import { DocumentInbox, type DocumentInboxOptions } from "@/components/documents/document-inbox";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { areDocumentFilesEnabled } from "@/lib/deployment";
-import { documentOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
+import {
+  claimOperationalWhere,
+  documentOperationalWhere,
+  endorsementOperationalWhere,
+  policyOperationalWhere,
+  quoteOperationalWhere,
+  receiptOperationalWhere,
+  requireOrganizationPortfolioReadScope,
+} from "@/lib/portfolio-access";
 import { withTenantOrganization } from "@/lib/tenant-dal";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
 
 function associationLabel(document: {
   policy?: { policyNumber: string } | null;
@@ -41,8 +51,11 @@ export default async function DocumentsPage({
 }) {
   const scope = await requireOrganizationPortfolioReadScope();
   return withTenantOrganization(scope.organizationId, async (db) => {
-  const organizationRecord = await db.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } });
-  const documentsEnabled = areDocumentFilesEnabled() && organizationRecord?.kind !== "DEMO";
+  const [organizationRecord, documentCapability] = await Promise.all([
+    db.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } }),
+    resolveOrganizationCapability(scope.organizationId, "DOCUMENTS", db),
+  ]);
+  const documentsEnabled = areDocumentFilesEnabled() && documentCapability.enabled && organizationRecord?.kind !== "DEMO";
   const params = (await searchParams) ?? {};
   const query = (params.q ?? "").trim().slice(0, 100);
   const page = Math.max(1, Number(params.page) || 1);
@@ -64,7 +77,21 @@ export default async function DocumentsPage({
       }
     : scopedWhere;
 
-  const [totalCount, filteredCount, pagedDocuments, totalDocs, orphanCount, paymentProofsCount, policyDocs] =
+  const inboxDocumentInclude = { client: true, policy: true, endorsement: true, receipt: true, task: true, claim: true, quote: true } as const;
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+  const [
+    totalCount,
+    filteredCount,
+    pagedDocuments,
+    totalDocs,
+    orphanCount,
+    paymentProofsCount,
+    policyDocs,
+    pendingInboxDocuments,
+    recentInboxDocuments,
+    inboxOptions,
+  ] =
     await Promise.all([
       db.document.count({ where: scopedWhere }),
       db.document.count({ where }),
@@ -96,7 +123,63 @@ export default async function DocumentsPage({
         orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
         take: 10,
       }),
+      db.document.findMany({
+        where: {
+          AND: [
+            scopedWhere,
+            { mimeType: "application/pdf" },
+            { clientId: null, policyId: null, endorsementId: null, receiptId: null, taskId: null, claimId: null, quoteId: null },
+          ],
+        },
+        include: inboxDocumentInclude,
+        orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
+        take: 25,
+      }),
+      db.document.findMany({
+        where: {
+          AND: [
+            scopedWhere,
+            { mimeType: "application/pdf" },
+            { uploadedAt: { gte: sevenDaysAgo } },
+            { OR: [
+              { clientId: { not: null } }, { policyId: { not: null } }, { endorsementId: { not: null } },
+              { receiptId: { not: null } }, { taskId: { not: null } }, { claimId: { not: null } }, { quoteId: { not: null } },
+            ] },
+          ],
+        },
+        include: inboxDocumentInclude,
+        orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
+        take: 10,
+      }),
+      Promise.all([
+        db.client.findMany({ where: { organizationId: scope.organizationId, ...(scope.portfolioOwnerId ? { portfolioOwnerId: scope.portfolioOwnerId } : {}) }, select: { id: true, fullName: true }, orderBy: { fullName: "asc" }, take: 250 }),
+        db.policy.findMany({ where: policyOperationalWhere(scope.portfolioOwnerId, scope.organizationId), select: { id: true, policyNumber: true, client: { select: { fullName: true } } }, orderBy: { policyNumber: "asc" }, take: 250 }),
+        db.policyEndorsement.findMany({ where: endorsementOperationalWhere(scope.portfolioOwnerId, scope.organizationId), select: { id: true, endorsementNumber: true, policy: { select: { policyNumber: true, client: { select: { fullName: true } } } } }, orderBy: { endorsementNumber: "asc" }, take: 250 }),
+        db.receipt.findMany({ where: receiptOperationalWhere(scope.portfolioOwnerId, scope.organizationId), select: { id: true, receiptNumber: true, client: { select: { fullName: true } } }, orderBy: { receiptNumber: "asc" }, take: 250 }),
+        db.task.findMany({
+          where: {
+            organizationId: scope.organizationId,
+            ...(scope.portfolioOwnerId ? { OR: [{ client: { portfolioOwnerId: scope.portfolioOwnerId } }, { clientId: null, createdById: scope.portfolioOwnerId }] } : {}),
+          },
+          select: { id: true, folio: true, title: true },
+          orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+          take: 250,
+        }),
+        db.claim.findMany({ where: claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId), select: { id: true, folio: true, client: { select: { fullName: true } } }, orderBy: { createdAt: "desc" }, take: 250 }),
+        db.quote.findMany({ where: quoteOperationalWhere(scope.portfolioOwnerId, scope.organizationId), select: { id: true, policyType: true, client: { select: { fullName: true } } }, orderBy: { createdAt: "desc" }, take: 250 }),
+      ]),
     ]);
+
+  const [inboxClients, inboxPolicies, inboxEndorsements, inboxReceipts, inboxTasks, inboxClaims, inboxQuotes] = inboxOptions;
+  const documentInboxOptions: DocumentInboxOptions = {
+    clients: inboxClients.map((client) => ({ id: client.id, label: client.fullName })),
+    policies: inboxPolicies.map((policy) => ({ id: policy.id, label: `${policy.policyNumber} · ${policy.client.fullName}` })),
+    endorsements: inboxEndorsements.map((endorsement) => ({ id: endorsement.id, label: `${endorsement.endorsementNumber} · ${endorsement.policy.policyNumber} · ${endorsement.policy.client.fullName}` })),
+    receipts: inboxReceipts.map((receipt) => ({ id: receipt.id, label: `${receipt.receiptNumber} · ${receipt.client.fullName}` })),
+    tasks: inboxTasks.map((task) => ({ id: task.id, label: `${task.folio} · ${task.title}` })),
+    claims: inboxClaims.map((claim) => ({ id: claim.id, label: `${claim.folio} · ${claim.client.fullName}` })),
+    quotes: inboxQuotes.map((quote) => ({ id: quote.id, label: `${quote.client.fullName} · ${quote.policyType}` })),
+  };
 
   const linkedDocuments = totalDocs - orphanCount;
 
@@ -147,6 +230,17 @@ export default async function DocumentsPage({
             tone="amber"
           />
         </section>
+
+        <SectionCard title="Bandeja de documentos" description="Revisa PDFs recientes y confirma manualmente su clasificación y expediente.">
+          <div className="p-4">
+            <DocumentInbox
+              pendingDocuments={pendingInboxDocuments}
+              recentDocuments={recentInboxDocuments}
+              options={documentInboxOptions}
+              enabled={documentsEnabled}
+            />
+          </div>
+        </SectionCard>
 
         <SectionCard
           title="Documentos"

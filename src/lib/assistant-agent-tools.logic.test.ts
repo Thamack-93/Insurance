@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   searchUserPortfolio: vi.fn(),
   getClaimChecklistSummary: vi.fn(),
   searchKnowledgeBase: vi.fn(),
+  getOperationalInsights: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -27,7 +28,7 @@ vi.mock("@/lib/portfolio-access", () => ({
   workItemOperationalWhere: vi.fn(),
 }));
 vi.mock("@/lib/assistant-local", () => ({ searchUserPortfolio: mocks.searchUserPortfolio }));
-vi.mock("@/lib/dashboard-queries", () => ({ getTodayData: vi.fn() }));
+vi.mock("@/lib/operational-insights", () => ({ getOperationalInsights: mocks.getOperationalInsights }));
 vi.mock("@/lib/renewals", () => ({ loadEligibleRenewalPolicies: vi.fn() }));
 vi.mock("@/lib/work-queue", () => ({ getWorkItems: vi.fn(), OPEN_WORK_ITEM_STATUSES: [] }));
 vi.mock("@/lib/risk-engine", () => ({ detectRisks: vi.fn() }));
@@ -47,6 +48,15 @@ describe("Nora agent tool authorization", () => {
     mocks.requireOrganizationContext.mockResolvedValue({ userId: "agent-1", organizationId: "org-default", membershipRole: "AGENT" });
     mocks.searchUserPortfolio.mockResolvedValue([]);
     mocks.searchKnowledgeBase.mockResolvedValue({ results: [], requiresInternalEvidence: false, abstained: true, executedQuery: "", selectedSourceIds: [], citationCount: 0, durationMs: 1 });
+    mocks.getOperationalInsights.mockResolvedValue({
+      counts: {
+        renewals: { value: 0, more: false },
+        collections: { value: 0, more: false },
+        claims: { value: 0, more: false },
+        work: { value: 0, more: false },
+      },
+      records: [],
+    });
   });
 
   it("revalidates the live session and active organization membership", async () => {
@@ -144,6 +154,81 @@ describe("Nora agent tool authorization", () => {
     ]);
     expect(mocks.searchUserPortfolio).toHaveBeenCalledWith({ id: "agent-1", role: "AGENT", organizationId: "org-default" }, "POL-001");
     expect(runtime.snapshot().trace).toEqual([expect.objectContaining({ tool: "searchPortfolio", outcome: "success" })]);
+  });
+
+  it("returns exact database counts separately from five linked priority samples", async () => {
+    mocks.getOperationalInsights.mockResolvedValue({
+      counts: {
+        renewals: { value: 11, more: false },
+        collections: { value: 23, more: false },
+        claims: { value: 4, more: false },
+        work: { value: 18, more: false },
+      },
+      records: Array.from({ length: 7 }, (_, index) => ({
+        id: `record-${index}`,
+        title: `Cliente ${index}`,
+        subtitle: `Póliza ${index}`,
+        href: `/policies/policy-${index}`,
+        groups: ["renewals"],
+        signals: [{ id: `signal-${index}`, group: "renewals", label: "Renovación estancada", detail: "Revisar siguiente paso.", date: new Date("2026-10-14T00:00:00.000Z") }],
+      })),
+    });
+    const runtime = createNoraAgentTools({ id: "agent-1", role: "AGENT" });
+    const brief = runtime.tools.getTodayBrief as DirectTool;
+
+    const result = await brief.execute?.({}, {}) as { counts: Record<string, number>; priorities: Array<{ href: string }> };
+
+    expect(result.counts).toEqual({ renewals: 11, collections: 23, claims: 4, work: 18 });
+    expect(result.priorities).toHaveLength(5);
+    expect(result.priorities[0]?.href).toBe("/policies/policy-0");
+    expect(mocks.getOperationalInsights).toHaveBeenCalledWith({ group: "all", page: 1 });
+  });
+
+  it("returns empty and partial briefings without inventing priority records", async () => {
+    const runtime = createNoraAgentTools({ id: "agent-1", role: "AGENT" });
+    const brief = runtime.tools.getTodayBrief as DirectTool;
+
+    await expect(brief.execute?.({}, {})).resolves.toEqual({
+      counts: { renewals: 0, collections: 0, claims: 0, work: 0 },
+      priorities: [],
+    });
+
+    mocks.getOperationalInsights.mockResolvedValue({
+      counts: {
+        renewals: { value: 0, more: false },
+        collections: { value: 2, more: false },
+        claims: { value: 0, more: false },
+        work: { value: 0, more: false },
+      },
+      records: [{
+        id: "Receipt:receipt-1",
+        title: "Cliente A",
+        subtitle: "REC-001 · POL-001",
+        href: "/receipts/receipt-1",
+        groups: ["collections"],
+        signals: [{ id: "receipt-overdue:receipt-1", group: "collections", label: "Recibo vencido con saldo", detail: "$1,000 pendientes.", date: new Date("2026-10-14T00:00:00.000Z") }],
+      }],
+    });
+
+    await expect(brief.execute?.({}, {})).resolves.toEqual({
+      counts: { renewals: 0, collections: 2, claims: 0, work: 0 },
+      priorities: [{
+        title: "Cliente A",
+        subtitle: "REC-001 · POL-001",
+        href: "/receipts/receipt-1",
+        groups: ["collections"],
+        signals: [{ label: "Recibo vencido con saldo", detail: "$1,000 pendientes.", group: "collections" }],
+      }],
+    });
+  });
+
+  it("revalidates the live user before reading organization-scoped priorities", async () => {
+    mocks.requireOrganizationContext.mockResolvedValue({ userId: "other-user", organizationId: "org-other", membershipRole: "ADMIN" });
+    const runtime = createNoraAgentTools({ id: "agent-1", role: "AGENT" });
+    const brief = runtime.tools.getTodayBrief as DirectTool;
+
+    await expect(brief.execute?.({}, {})).rejects.toThrow("sesión de Nora cambió");
+    expect(mocks.getOperationalInsights).not.toHaveBeenCalled();
   });
 
   it("returns only checklist codes, statuses, dates and counts for GMM", async () => {

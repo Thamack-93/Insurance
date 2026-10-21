@@ -34,6 +34,11 @@ export type FocusItemModel = {
   actionLabel: string;
   detailsHref?: string;
   detailsLabel?: string;
+  actionContext?:
+    | { type: "collection"; receiptId: string; clientName: string; recordLabel: string }
+    | { type: "renewal"; policyId: string; clientName: string; recordLabel: string }
+    | { type: "claim"; claimId: string; expectedVersion: number; assignedToId: string | null; requirementId?: string; requirementVersion?: number; canUpdate: boolean; clientName: string; recordLabel: string }
+    | { type: "work-item"; workItemId: string; clientName: string; recordLabel: string; canComplete: boolean };
 };
 
 export type TodayOperationsModel = {
@@ -90,6 +95,7 @@ export function buildFocusItems(data: TodayData): FocusItemModel[] {
     actionLabel: "Registrar pago",
     detailsHref: `/receipts/${receipt.id}`,
     detailsLabel: "Ver recibo",
+    actionContext: { type: "collection" as const, receiptId: receipt.id, clientName: receipt.client.fullName, recordLabel: `${receipt.policy.policyNumber} · ${receipt.receiptNumber}` },
   }));
 
   const dueTodayReceipts = [...data.paymentsDueToday].filter((receipt) => !workItemReceiptIds.has(receipt.id)).sort(compareByDateAndId).map((receipt) => ({
@@ -106,6 +112,7 @@ export function buildFocusItems(data: TodayData): FocusItemModel[] {
     actionLabel: "Registrar pago",
     detailsHref: `/receipts/${receipt.id}`,
     detailsLabel: "Ver recibo",
+    actionContext: { type: "collection" as const, receiptId: receipt.id, clientName: receipt.client.fullName, recordLabel: `${receipt.policy.policyNumber} · ${receipt.receiptNumber}` },
   }));
 
   const overdueWorkItems = [...data.overdueWorkItems].sort(compareByDateAndId).map((workItem) => ({
@@ -120,6 +127,13 @@ export function buildFocusItems(data: TodayData): FocusItemModel[] {
       : `Inició hace ${daysSince(workItem.startDate)} días`,
     href: getWorkItemHref(workItem),
     actionLabel: workItem.sourceType === "Renewal" ? "Ver póliza" : "Abrir pendiente",
+    actionContext: workItem.sourceType === "Collection" && workItem.receiptId
+      ? { type: "collection" as const, receiptId: workItem.receiptId, clientName: workItem.client?.fullName ?? "Cliente", recordLabel: workItem.title }
+      : workItem.sourceType === "Renewal" && workItem.policyId
+        ? { type: "renewal" as const, policyId: workItem.policyId, clientName: workItem.client?.fullName ?? "Cliente", recordLabel: workItem.title }
+        : workItem.sourceType === "Claim" && workItem.claimFollowUpContext
+          ? { type: "claim" as const, ...workItem.claimFollowUpContext, clientName: workItem.client?.fullName ?? "Cliente", recordLabel: workItem.title }
+          : { type: "work-item" as const, workItemId: workItem.id, clientName: workItem.client?.fullName ?? "", recordLabel: workItem.title, canComplete: workItem.sourceType === "Task" || workItem.sourceType === "WorkItem" || workItem.sourceType == null },
   }));
 
   const dueTodayWorkItems = [...(data.dueTodayWorkItems ?? [])].sort(compareByDateAndId).map((workItem) => ({
@@ -132,6 +146,13 @@ export function buildFocusItems(data: TodayData): FocusItemModel[] {
     dueText: workItem.dueDate ? `Fecha límite: ${formatDate(workItem.dueDate)} · Vence hoy` : "Vence hoy",
     href: getWorkItemHref(workItem),
     actionLabel: workItem.sourceType === "Renewal" ? "Ver póliza" : "Abrir pendiente",
+    actionContext: workItem.sourceType === "Collection" && workItem.receiptId
+      ? { type: "collection" as const, receiptId: workItem.receiptId, clientName: workItem.client?.fullName ?? "Cliente", recordLabel: workItem.title }
+      : workItem.sourceType === "Renewal" && workItem.policyId
+        ? { type: "renewal" as const, policyId: workItem.policyId, clientName: workItem.client?.fullName ?? "Cliente", recordLabel: workItem.title }
+        : workItem.sourceType === "Claim" && workItem.claimFollowUpContext
+          ? { type: "claim" as const, ...workItem.claimFollowUpContext, clientName: workItem.client?.fullName ?? "Cliente", recordLabel: workItem.title }
+          : { type: "work-item" as const, workItemId: workItem.id, clientName: workItem.client?.fullName ?? "", recordLabel: workItem.title, canComplete: workItem.sourceType === "Task" || workItem.sourceType === "WorkItem" || workItem.sourceType == null },
   }));
 
   const renewals = [...data.urgentRenewals].filter((policy) => !workItemPolicyIds.has(policy.id)).sort(compareByDateAndId).map((policy) => ({
@@ -144,6 +165,7 @@ export function buildFocusItems(data: TodayData): FocusItemModel[] {
     dueText: `Renueva ${formatDate(policy.endDate)}`,
     href: `/policies/${policy.id}`,
     actionLabel: "Ver póliza",
+    actionContext: { type: "renewal" as const, policyId: policy.id, clientName: policy.client.fullName, recordLabel: policy.policyNumber },
   }));
 
   const groups: Array<{ key: "receipts" | "tasks" | "renewals" | "claims"; items: FocusItemModel[] }> = [

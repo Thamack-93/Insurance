@@ -10,6 +10,7 @@ import { OPEN_WORK_ITEM_STATUSES, countWorkItems, getWorkItems } from "@/lib/wor
 import {
   commissionOperationalWhere,
   clientOperationalWhere,
+  claimOperationalWhere,
   policyOperationalWhere,
   receiptOperationalWhere,
   type PortfolioReadScope,
@@ -324,7 +325,55 @@ export async function getTodayDataFromDb(scope: PortfolioReadScope, db: TenantDb
     detectRisks(scope.portfolioOwnerId, scope.organizationId, db),
   ]);
 
-  const overdueWorkItemRows = overdueWorkItems.map((item) => ({
+  const allTodayWorkItems = [...overdueWorkItems, ...dueTodayWorkItems];
+  const claimIds = [...new Set(allTodayWorkItems
+    .filter((item) => item.sourceType === "Claim" && item.entityType === "Claim" && item.entityId)
+    .map((item) => item.entityId!))];
+  const claimRecords = claimIds.length > 0
+    ? await db.claim.findMany({
+        where: { ...claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId), id: { in: claimIds } },
+        select: {
+          id: true,
+          version: true,
+          assignedToId: true,
+          checklistItems: { select: { id: true, requirementCode: true, version: true, assignedToId: true, status: true } },
+        },
+      })
+    : [];
+  const claimsById = new Map(claimRecords.map((claim) => [claim.id, claim]));
+  type TodayClaimFollowUpContext = {
+    claimId: string;
+    expectedVersion: number;
+    assignedToId: string | null;
+    requirementId?: string;
+    requirementVersion?: number;
+    canUpdate: boolean;
+  };
+  type TodayWorkItemWithClaimContext = (typeof allTodayWorkItems)[number] & { claimFollowUpContext: TodayClaimFollowUpContext | null };
+  const addClaimFollowUpContext = (item: (typeof allTodayWorkItems)[number]): TodayWorkItemWithClaimContext => {
+    let claimFollowUpContext: TodayClaimFollowUpContext | null = null;
+    if (item.sourceType === "Claim" && item.entityType === "Claim" && item.entityId) {
+    const claim = claimsById.get(item.entityId);
+      const requirementCode = item.sourceId?.match(/^claim:[^:]+:requirement:(.+)$/)?.[1];
+      const requirement = requirementCode ? claim?.checklistItems.find((candidate) => candidate.requirementCode === requirementCode && candidate.status !== "RECEIVED" && candidate.status !== "WAIVED") : null;
+      const mainClaimFollowUp = Boolean(claim && item.sourceId === `claim:${claim.id}:claim`);
+      if (claim && (mainClaimFollowUp || requirement)) {
+        const assignedToId = requirement?.assignedToId ?? claim.assignedToId ?? scope.portfolioOwnerId ?? null;
+        claimFollowUpContext = {
+          claimId: claim.id,
+          expectedVersion: claim.version,
+          assignedToId,
+          ...(requirement ? { requirementId: requirement.id, requirementVersion: requirement.version } : {}),
+          canUpdate: !scope.portfolioOwnerId || !assignedToId || assignedToId === scope.portfolioOwnerId,
+        };
+      }
+    }
+    return { ...item, claimFollowUpContext };
+  };
+  const overdueWorkItemsWithClaimContext = overdueWorkItems.map(addClaimFollowUpContext);
+  const dueTodayWorkItemsWithClaimContext = dueTodayWorkItems.map(addClaimFollowUpContext);
+
+  const overdueWorkItemRows = overdueWorkItemsWithClaimContext.map((item) => ({
     id: item.id,
     sourceType: item.sourceType,
     sourceId: item.sourceId,
@@ -344,6 +393,7 @@ export async function getTodayDataFromDb(scope: PortfolioReadScope, db: TenantDb
     policy: item.policy,
     insurer: item.insurer,
     receipt: item.receipt,
+    claimFollowUpContext: item.claimFollowUpContext,
   }));
 
   return {
@@ -352,7 +402,7 @@ export async function getTodayDataFromDb(scope: PortfolioReadScope, db: TenantDb
     paymentsDue7,
     urgentRenewals,
     overdueWorkItems: overdueWorkItemRows,
-    dueTodayWorkItems,
+    dueTodayWorkItems: dueTodayWorkItemsWithClaimContext,
     clientsToContact,
     commissionsToReview,
     criticalRisks: risks.filter((risk) => risk.severity === "CRITICAL").slice(0, 6),
