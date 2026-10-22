@@ -4,24 +4,32 @@ import { createQuoteDefaults } from "@/lib/form-defaults";
 import { PageHeader } from "@/components/layout/page-header";
 import { withTenantTransaction } from "@/lib/organization-context";
 import { clientOperationalWhere, requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
+import { resolveOrganizationCapability } from "@/lib/organization-capabilities";
+import { areDocumentFilesEnabled } from "@/lib/deployment";
 
 export default async function NewQuotePage() {
   const scope = await requireOrganizationPortfolioReadScope();
-  const [clients, insurers] = await withTenantTransaction(scope.context, (db) => Promise.all([
-    db.client.findMany({
-      where: {
-        ...clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
-        status: { not: "ARCHIVED" },
-      },
-      orderBy: { fullName: "asc" },
-      select: { id: true, fullName: true },
-    }),
-    db.insurer.findMany({
-      where: { status: { not: "ARCHIVED" } },
-      orderBy: { name: "asc" },
-      select: { id: true, name: true },
-    }),
-  ]));
+  const [clients, insurers, brokerPdfIntakeEnabled] = await withTenantTransaction(scope.context, async (db) => {
+    const [clients, insurers, organization, documents, ai] = await Promise.all([
+      db.client.findMany({
+        where: {
+          ...clientOperationalWhere(scope.portfolioOwnerId, scope.organizationId),
+          status: { not: "ARCHIVED" },
+        },
+        orderBy: { fullName: "asc" },
+        select: { id: true, fullName: true },
+      }),
+      db.insurer.findMany({
+        where: { status: { not: "ARCHIVED" } },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      }),
+      db.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } }),
+      resolveOrganizationCapability(scope.organizationId, "DOCUMENTS", db),
+      resolveOrganizationCapability(scope.organizationId, "NORA", db),
+    ]);
+    return [clients, insurers, areDocumentFilesEnabled() && organization?.kind !== "DEMO" && documents.enabled && ai.enabled] as const;
+  });
 
   const clientOptions = clients.map((c) => ({ value: c.id, label: c.fullName }));
   const insurerOptions = insurers.map((i) => ({ value: i.id, label: i.name }));
@@ -44,6 +52,7 @@ export default async function NewQuotePage() {
           clientOptions={clientOptions}
           insurerOptions={insurerOptions}
           submitAction={createQuote}
+          brokerPdfIntakeEnabled={brokerPdfIntakeEnabled}
         />
       </div>
     </div>
