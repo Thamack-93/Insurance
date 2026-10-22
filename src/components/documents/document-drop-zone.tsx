@@ -158,7 +158,7 @@ export function DocumentDropZone({
       return;
     }
     if (!uploadConsent) {
-      toast.error("Confirma tu autorización, el procesamiento por proveedores de IA aprobados, la retención del original por 48 horas y el riesgo de que no hay antivirus externo por archivo.");
+      toast.error("Confirma que tienes autorización para subir el documento y que aceptas que, si solicitas extraer datos, se procese mediante proveedores de IA aprobados. El PDF se guardará de forma privada en Documentos; no hay antivirus externo por archivo.");
       return;
     }
     const queued = items.filter((it) => it.status === "queued" || it.status === "error");
@@ -310,7 +310,7 @@ export function DocumentDropZone({
 
       <label className="flex items-start gap-2 text-xs text-muted-foreground">
         <Checkbox checked={uploadConsent} onCheckedChange={(checked) => setUploadConsent(checked === true)} disabled={busy} />
-        <span>Confirmo que tengo autorización, acepto el procesamiento por proveedores de IA aprobados y entiendo que el original se conserva hasta 48 horas (sin antivirus externo por archivo).</span>
+        <span>Confirmo que tengo autorización para subir el documento. Si solicito extraer datos, acepto su procesamiento por proveedores de IA aprobados. El PDF se guardará de forma privada en Documentos; no hay antivirus externo por archivo.</span>
       </label>
 
       {items.length > 0 && (

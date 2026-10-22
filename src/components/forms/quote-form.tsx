@@ -244,7 +244,7 @@ export function QuoteForm({
                   {brokerPdf ? <p className="text-xs">Archivo seleccionado: {brokerPdf.name}</p> : null}
                   <label className="flex items-start gap-2 text-xs text-muted-foreground">
                     <Checkbox checked={uploadConsent} onCheckedChange={(checked) => setUploadConsent(checked === true)} disabled={Boolean(createdQuoteId)} />
-                    <span>Confirmo que tengo autorización para subir este documento y acepto su procesamiento por proveedores de IA aprobados. El original se conserva hasta 48 horas; no hay antivirus externo por archivo.</span>
+                    <span>Confirmo que tengo autorización para subir este documento. Si solicito extraer datos, acepto su procesamiento por proveedores de IA aprobados. El PDF se guardará de forma privada en Documentos y quedará asociado a esta cotización; no hay antivirus externo por archivo.</span>
                   </label>
                 </div>
               </FormSection>
