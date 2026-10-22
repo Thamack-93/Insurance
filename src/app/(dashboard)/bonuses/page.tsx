@@ -9,6 +9,9 @@ import { formatCurrency, toNumber } from "@/lib/money";
 import { withTenantTransaction, requireOrganizationRoleOrRedirect } from "@/lib/organization-context";
 import { BONUS_PROGRAMS, resolveBonusProgram } from "@/lib/bonus-rules";
 import { approveBonusRun, previewBonus } from "./actions";
+import { ExportButtons } from "@/components/reports/export-buttons";
+import { LocalNavigation } from "@/components/layout/local-navigation";
+import { commissionNavigation } from "@/lib/navigation";
 
 function prettyEvidence(value: string) {
   try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
@@ -39,6 +42,7 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
   return (
     <div className="flex flex-col gap-6">
       <PageHeader eyebrow="Finanzas" title="Bonos e incentivos" description="Proyecta los bonos 2026 de Autos y Daños por vendedor, revisa cada pago y guarda cierres reproducibles." />
+      <LocalNavigation items={commissionNavigation} label="Comisiones y bonos" />
       <SectionCard title="Nueva proyección" description="Solo se consideran pagos POSTED; los pagos revertidos quedan fuera. Los programas con datos faltantes permanecen en revisión.">
         <form action={previewBonus} className="grid gap-4 md:grid-cols-5">
           <label className="grid gap-1 text-sm">Programa<select name="programKey" defaultValue={program?.key ?? BONUS_PROGRAMS[0].key} className="h-10 rounded-md border bg-background px-3">
@@ -66,7 +70,17 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
       </SectionCard>
 
       {run && program ? (
-        <SectionCard title={`${program.label} · ${run.seller.name}`} description={`2026 · ${run.periodType === "QUARTERLY" ? `Trimestre ${run.periodNumber}` : "Cierre anual / primer año"} · Estado: ${run.status}`}>
+        <SectionCard title={`${program.label} · ${run.seller.name}`} description={`2026 · ${run.periodType === "QUARTERLY" ? `Trimestre ${run.periodNumber}` : "Cierre anual / primer año"} · Estado: ${run.status}`} action={<ExportButtons exports={[{ name: "Detalle de bono", data: run.items.map((item) => ({
+          "Estado": item.status === "INCLUDED" ? "Incluida" : item.status === "EXCLUDED" ? "Excluida" : "Revisión",
+          "Fecha de pago": item.payment?.paidDate?.toISOString().slice(0, 10) ?? "",
+          "Recibo": item.receipt?.receiptNumber ?? "",
+          "Póliza": item.policy?.policyNumber ?? "",
+          "Importe pagado": item.paidAmount === null ? "" : toNumber(item.paidAmount).toFixed(2),
+          "Prima neta pagada": item.netPremiumPaid === null ? "" : toNumber(item.netPremiumPaid).toFixed(2),
+          "Importe elegible MXN": item.eligibleAmount === null ? "" : toNumber(item.eligibleAmount).toFixed(2),
+          "Moneda": item.currency ?? "MXN",
+          "Motivo": item.reason ?? "Criterios documentados",
+        })) }]} />}>
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">Prima neta computable (MXN)</p><p className="text-xl font-semibold">{formatCurrency(toNumber(run.baseAmount), "MXN")}</p></div>
             <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">Tasa estimada</p><p className="text-xl font-semibold">{run.bonusRate === null ? "Elegibilidad" : `${(toNumber(run.bonusRate) * 100).toFixed(2)}%`}</p></div>

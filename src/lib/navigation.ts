@@ -59,7 +59,7 @@ export const globalNavigation: GlobalNavigationItem[] = [
     redirectAliases: ["/due-payments"],
     activePaths: ["/payments"],
   },
-  { id: "commissions", label: "Comisiones y bonos", href: "/bonuses", icon: CircleDollarSign, activePaths: ["/commissions"] },
+  { id: "commissions", label: "Comisiones y bonos", href: "/commissions", icon: CircleDollarSign, activePaths: ["/bonuses"] },
   { id: "reports", label: "Reportes", href: "/reports", icon: BarChart3, activePaths: ["/portfolio"] },
 ];
 
@@ -184,6 +184,11 @@ export function isLocalNavigationItemActive(
       && (item.excludeQueryKeys ?? []).every((key) => !searchParams.get(key));
   });
 }
+
+export const commissionNavigation: LocalNavigationItem[] = [
+  { label: "Comisiones", href: "/commissions" },
+  { label: "Bonos", href: "/bonuses" },
+];
 
 export const policyNavigation: LocalNavigationItem[] = [
   { label: "Activas", href: "/policies?status=ACTIVE" },

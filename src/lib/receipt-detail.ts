@@ -4,7 +4,6 @@ export const RECEIPT_DETAIL_AUXILIARY_GROUPS = [
   "agent-contact",
   "organization-kind",
   "payments",
-  "commissions",
   "documents",
   "related-receipts",
   "activity",

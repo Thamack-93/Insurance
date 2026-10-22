@@ -23,7 +23,6 @@ import {
 import type { WhatsAppPhoneSource } from "@/lib/whatsapp-reminder";
 import { recordCollectionFollowUp, type CollectionFollowUpInput } from "@/lib/collection-followups";
 import { closeCollectionFollowUp } from "@/lib/collection-followups";
-import { calculateCommissionForReceipt } from "@/lib/commissions";
 
 const ALLOWED_PAYMENT_METHODS = ["TRANSFER", "CASH", "CARD", "CHECK", "OTHER"] as const;
 type AllowedPaymentMethod = (typeof ALLOWED_PAYMENT_METHODS)[number];
@@ -37,12 +36,6 @@ function sameMoney(left: unknown, right: unknown) {
   const leftNumber = Number(left);
   const rightNumber = Number(right);
   return Number.isFinite(leftNumber) && Number.isFinite(rightNumber) && Math.round(leftNumber * 100) === Math.round(rightNumber * 100);
-}
-
-export async function calculateReceiptCommissionAction(receiptId: string): Promise<MutationResult> {
-  const result = await calculateCommissionForReceipt(receiptId);
-  revalidatePaths(["/commissions", `/receipts/${receiptId}`, "/dashboard"]);
-  return result;
 }
 
 export async function recordReceiptCollectionFollowUp(input: Omit<CollectionFollowUpInput, "promisedPaymentDate" | "nextContactDate"> & { promisedPaymentDate?: string; nextContactDate?: string }): Promise<MutationResult> {

@@ -32,7 +32,6 @@ import { isQualitasClientRecipientEnabled, isQualitasInsurerName, isQualitasPaym
 import { WhatsAppReminderButton } from "@/components/receipts/whatsapp-reminder-button";
 import { CollectionFollowUpPanel } from "@/components/receipts/collection-follow-up-panel";
 import { recordReceiptCollectionFollowUp } from "@/app/(dashboard)/receipts/actions";
-import { ReceiptCommissionCalculator } from "@/components/commissions/receipt-commission-calculator";
 import { deriveReceiptNetPremium, type UnitPremiumBreakdown } from "@/lib/premium-breakdown";
 
 export default async function ReceiptDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
@@ -57,11 +56,10 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
   // Each auxiliary read gets its own tenant transaction. A failed PostgreSQL
   // statement can abort its transaction, so allSettled inside one shared
   // transaction would not reliably isolate failures.
-  const [agentContactResult, organizationResult, paymentsResult, commissionsResult, documentsResult, relatedReceiptsResult, activityResult] = await Promise.allSettled([
+  const [agentContactResult, organizationResult, paymentsResult, documentsResult, relatedReceiptsResult, activityResult] = await Promise.allSettled([
     withTenantTransaction(scope.context, (db) => db.user.findUnique({ where: { id: scope.context.userId }, select: { phone: true } })),
     withTenantTransaction(scope.context, (db) => db.organization.findUnique({ where: { id: scope.organizationId }, select: { kind: true } })),
     withTenantTransaction(scope.context, (db) => db.payment.findMany({ where: { receiptId: id, organizationId: scope.organizationId }, orderBy: [{ paidDate: "desc" }, { id: "desc" }] })),
-    withTenantTransaction(scope.context, (db) => db.commission.findMany({ where: { receiptId: id, organizationId: scope.organizationId }, include: { insurer: true }, orderBy: [{ expectedDate: "desc" }, { id: "desc" }] })),
     withTenantTransaction(scope.context, (db) => db.document.findMany({ where: { receiptId: id, organizationId: scope.organizationId }, orderBy: [{ uploadedAt: "desc" }, { id: "desc" }] })),
     withTenantTransaction(scope.context, (db) => db.receipt.findMany({ where: { policyId: receipt.policyId, organizationId: scope.organizationId, id: { not: id } }, include: { endorsement: true }, orderBy: [{ dueDate: "desc" }, { receiptSequence: { sort: "desc", nulls: "last" } }, { receiptNumber: "desc" }, { id: "desc" }], take: 5 })),
     withTenantTransaction(scope.context, (db) => getActivityForEntity("Receipt", id, 20, scope.organizationId, db)),
@@ -72,7 +70,6 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
   const agentContact = resolveReceiptDetailAuxiliary("agent-contact", agentContactResult, null, reportAuxiliaryFailure);
   const organization = resolveReceiptDetailAuxiliary("organization-kind", organizationResult, null, reportAuxiliaryFailure);
   const payments = resolveReceiptDetailAuxiliary("payments", paymentsResult, [], reportAuxiliaryFailure);
-  const commissions = resolveReceiptDetailAuxiliary("commissions", commissionsResult, [], reportAuxiliaryFailure);
   const documents = resolveReceiptDetailAuxiliary("documents", documentsResult, [], reportAuxiliaryFailure);
   const relatedReceipts = resolveReceiptDetailAuxiliary("related-receipts", relatedReceiptsResult, [], reportAuxiliaryFailure);
   const activity = resolveReceiptDetailAuxiliary("activity", activityResult, [], reportAuxiliaryFailure);
@@ -355,37 +352,7 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
           <CollectionFollowUpPanel receiptId={receipt.id} action={recordReceiptCollectionFollowUp} />
         ) : null}
 
-        <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-          <SectionCard title="Comisiones" description="Ingreso esperado y cobrado derivado de este recibo.">
-            {commissions.length === 0 ? (
-              <>
-                <div className="px-4 py-3 text-sm text-muted-foreground">No hay comisiones registradas para este recibo.</div>
-                {isAdmin && receipt.status !== "CANCELLED" ? <ReceiptCommissionCalculator receiptId={receipt.id} status={receipt.commissionCalculationStatus} reason={receipt.commissionReviewReason} canCalculate /> : null}
-              </>
-            ) : (
-              <div className="divide-y divide-stone-200/80">
-                {commissions.map((commission) => (
-                  <div key={commission.id} className="px-4 py-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="font-medium text-foreground">
-                        {formatCurrency(commission.expectedAmount)}
-                      </p>
-                      <StatusBadge status={commission.status} entity="commission" />
-                    </div>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {commission.insurer.name}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Esperada: {formatDate(commission.expectedDate)}
-                      {commission.paidDate ? ` · Cobrada: ${formatDate(commission.paidDate)}` : ""}
-                    </p>
-                    {commission.calculationBreakdownJson ? <CommissionBreakdown value={commission.calculationBreakdownJson} currency={receipt.currency} /> : null}
-                  </div>
-                ))}
-              </div>
-            )}
-          </SectionCard>
-
+        <section className="grid gap-6">
           <SectionCard title="Documentos" description="Comprobantes y archivos asociados.">
             {documents.length === 0 ? (
               <div className="px-4 py-6 text-sm text-muted-foreground">
@@ -475,18 +442,4 @@ export default async function ReceiptDetailPage({ params, searchParams }: { para
       </div>
     </div>
   );
-}
-
-function CommissionBreakdown({ value, currency }: { value: string; currency: string }) {
-  let lines: Array<{ description?: string; unitClass?: string; netPremium?: number; commissionableBase?: number; rate?: number; expectedAmount?: number; ruleEvidence?: string; components?: { totalPremium?: number; vatAmount?: number; issuanceExpenseAmount?: number; surchargeAmount?: number; discountAmount?: number; iva?: number; issuanceExpense?: number; installmentSurcharge?: number; visibleDiscounts?: number } }> = [];
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (parsed && typeof parsed === "object" && Array.isArray((parsed as { breakdown?: unknown }).breakdown)) {
-      lines = (parsed as { breakdown: typeof lines }).breakdown;
-    }
-  } catch { return null; }
-  return <details className="mt-3 text-xs"><summary className="cursor-pointer text-primary">Ver desglose aplicado</summary><div className="mt-2 space-y-2 text-muted-foreground">{lines.map((line, index) => {
-    const components = line.components ?? {};
-    return <div key={index}><p>{line.description ?? "Riesgo"} · {line.unitClass ?? "—"}: {formatCurrency(components.totalPremium ?? 0, currency)} − IVA {formatCurrency(components.vatAmount ?? components.iva ?? 0, currency)} − expedición {formatCurrency(components.issuanceExpenseAmount ?? components.issuanceExpense ?? 0, currency)} − recargo {formatCurrency(components.surchargeAmount ?? components.installmentSurcharge ?? 0, currency)} + descuentos {formatCurrency(components.discountAmount ?? components.visibleDiscounts ?? 0, currency)} = prima neta/base {formatCurrency(line.netPremium ?? line.commissionableBase ?? 0, currency)}; × {line.rate ?? 0}% = {formatCurrency(line.expectedAmount ?? 0, currency)}</p><p>Evidencia de la regla: {line.ruleEvidence || "sin referencia"}.</p></div>;
-  })}</div></details>;
 }
