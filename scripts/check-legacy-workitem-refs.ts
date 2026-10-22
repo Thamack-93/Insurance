@@ -46,6 +46,15 @@ const LEGACY_READ_FILES = new Set([
 // the Task write detector remains strict everywhere else.
 const AUDIT_COMPAT_FILES = new Set(["src/lib/tenant-organization-foundation.ts"]);
 
+// Document.taskId remains a supported legacy relation during the WorkItem
+// transition. These references read or assign that relation on Document; they
+// do not create or mutate Task records.
+const DOCUMENT_TASK_RELATION_FILES = new Set([
+  "src/app/(dashboard)/documents/actions.ts",
+  "src/components/documents/document-inbox.tsx",
+]);
+const TASK_ENTITY_WRITE = /\b(?:db|tx)\.task\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)/;
+
 // DEMO seed/reset paths intentionally recreate the historical Task fixture so
 // operators can inspect legacy compatibility; they are not runtime writes.
 const DEMO_COMPAT_FILES = new Set(["src/lib/demo-seed.ts", "src/lib/demo-organizations.ts"]);
@@ -69,11 +78,19 @@ function classify(file: string, snippet: string): Classification {
     || (file === "src/lib/organization-backup-restore.ts" && snippet.includes("Document") && snippet.includes("taskId"))) {
     return "migration-only";
   }
+  // Keep actual Task entity mutations forbidden even in files that still
+  // handle the Document.taskId compatibility relation.
+  if (TASK_ENTITY_WRITE.test(snippet)) return "runtime-write";
+  if (DOCUMENT_TASK_RELATION_FILES.has(file)
+    && /\btaskId\b/.test(snippet)
+    && !/\b(?:sourceType|entityType):\s*["']Task["']/.test(snippet)) {
+    return "legacy-read-compat";
+  }
   if (AUDIT_COMPAT_FILES.has(file)) return "legacy-read-compat";
   if (file === "src/app/api/documents/upload/route.ts" && snippet.includes("formData.get(\"taskId\")")) {
     return "legacy-read-compat";
   }
-  if (LEGACY_READ_FILES.has(file) && !/\b(?:db|tx)\.task\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)/.test(snippet)) {
+  if (LEGACY_READ_FILES.has(file)) {
     return "legacy-read-compat";
   }
   return "runtime-write";

@@ -112,15 +112,15 @@ test.describe("structured policy risk details", () => {
       await expect.poll(async () => {
         const [policy, assets, parties] = await Promise.all([
           db.policy.findUnique({ where: { id: fixture.policyId }, select: { policyType: true, insuredObject: true, beneficiaryInfo: true } }),
-          db.policyInsuredAsset.findMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId } }),
+          db.policyInsuredAsset.findMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId }, select: { assetType: true, description: true } }),
           db.policyInsuredParty.findMany({ where: { organizationId: TEST_ORGANIZATION_ID, policyId: fixture.policyId }, select: { fullName: true } }),
         ]);
-        return policy ? { policyType: policy.policyType, insuredObject: policy.insuredObject, beneficiaryInfo: policy.beneficiaryInfo, assets: assets.length, parties: parties.map((party) => party.fullName) } : null;
+        return policy ? { policyType: policy.policyType, insuredObject: policy.insuredObject, beneficiaryInfo: policy.beneficiaryInfo, assets: assets.map((asset) => ({ assetType: asset.assetType, description: asset.description })), parties: parties.map((party) => party.fullName) } : null;
       }, { timeout: 10_000 }).toEqual({
         policyType: "GMM",
         insuredObject: "Ana Pérez",
         beneficiaryInfo: "Notas de beneficiario para GMM",
-        assets: 0,
+        assets: [{ assetType: "GMM", description: "Ana Pérez" }],
         parties: ["Ana Pérez"],
       });
     } finally {
@@ -157,6 +157,8 @@ test.describe("structured policy risk details", () => {
       await page.locator("#premiumAmount").fill("1500");
       await page.locator("#risk-AUTO-vehicles-0-make").fill("Honda");
 
+      await page.getByRole("combobox", { name: "Vendedor para bonos", exact: true }).click();
+      await page.getByRole("option", { name: "CI Admin", exact: true }).click();
       await page.locator("#policyNumber").fill(renewalNumber);
       await page.getByRole("button", { name: "Crear póliza", exact: true }).click();
       await expect(page).toHaveURL(/\/policies\/[^/]+$/);
@@ -164,7 +166,7 @@ test.describe("structured policy risk details", () => {
       const comparison = page.locator("details").filter({ hasText: "Comparar con póliza anterior" });
       const comparisonHeading = comparison.getByRole("heading", { name: "Comparación de renovación" });
       await expect(comparisonHeading).not.toBeVisible();
-      await comparison.getByText("Comparar con póliza anterior", { exact: true }).click();
+      await comparison.locator("summary").click();
       await expect(comparisonHeading).toBeVisible();
       const makeChange = comparison.locator("li").filter({ hasText: "Marca" });
       await expect(makeChange).toContainText("Toyota");

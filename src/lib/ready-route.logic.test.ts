@@ -4,6 +4,7 @@ const queryRaw = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/db", () => ({ getDb: () => ({ $queryRaw: queryRaw }) }));
 
 import { GET } from "@/app/api/ready/route";
+import { PRODUCTION_FLAG_EXPECTATIONS } from "@/lib/production-env";
 
 const productionEnv = {
   NODE_ENV: "production",
@@ -15,16 +16,7 @@ const productionEnv = {
   BACKUP_ENCRYPTION_KEY_VERSION: "v2",
   SESSION_SECRET: "session-secret",
   BLOB_READ_WRITE_TOKEN: "blob-token",
-  NORA_AGENT_MODE: "off",
-  PLATFORM_BILLING_MUTATIONS_ENABLED: "0",
-  PLATFORM_NORA_ENABLED: "0",
-  PLATFORM_IMPORTS_ENABLED: "1",
-  PLATFORM_EXPORTS_ENABLED: "1",
-  PLATFORM_UPLOADS_ENABLED: "1",
-  PLATFORM_EMAIL_ENABLED: "0",
-  PLATFORM_TELEGRAM_ENABLED: "1",
-  PLATFORM_WHATSAPP_ENABLED: "1",
-  PLATFORM_QUALITAS_ENABLED: "0",
+  ...PRODUCTION_FLAG_EXPECTATIONS,
 };
 
 function stubProductionEnv() {

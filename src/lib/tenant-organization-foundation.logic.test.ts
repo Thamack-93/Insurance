@@ -21,7 +21,11 @@ describe("tenant organization transition foundation", () => {
     expect(SYSTEM_USER_ID).toBe("system-user-0000");
     expect(PROTECTED_TENANT_TABLES.length).toBeGreaterThan(30);
     expect(Object.keys(EXPECTED_TENANT_TRIGGERS)).toHaveLength(PROTECTED_TENANT_TABLES.length);
-    expect(tenantTriggersForMigrationState(false)).toHaveLength(PROTECTED_TENANT_TABLES.length);
+    expect(tenantTriggersForMigrationState(false)).toHaveLength(
+      PROTECTED_TENANT_TABLES.length - POST_CUTOVER_PROTECTED_TENANT_TABLES.length,
+    );
+    const singletonTables = tenantTriggersForMigrationState(false).map(([table]) => table);
+    for (const table of POST_CUTOVER_PROTECTED_TENANT_TABLES) expect(singletonTables).not.toContain(table);
     expect(tenantTriggersForMigrationState(true)).toHaveLength(0);
     const postCutoverTables = tenantTriggersForMigrationState(true).map(([table]) => table);
     expect(postCutoverTables).not.toContain("ClaimChecklistItem");
