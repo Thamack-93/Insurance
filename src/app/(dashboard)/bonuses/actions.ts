@@ -15,7 +15,10 @@ function parseInput(formData: FormData) {
   const year = Number(formData.get("year") ?? 2026);
   const periodNumber = Number(formData.get("periodNumber") ?? 1);
   const rule = resolveBonusProgram(programKey);
-  if (!rule || !sellerId || year !== 2026 || !Number.isInteger(periodNumber) || periodNumber < 1 || periodNumber > 4) {
+  const validPeriod = rule?.period === "QUARTERLY"
+    ? Number.isInteger(periodNumber) && periodNumber >= 1 && periodNumber <= 4
+    : periodNumber === 1;
+  if (!rule || !sellerId || year !== 2026 || !validPeriod) {
     throw new Error("Selecciona un programa, vendedor y periodo válidos para 2026.");
   }
   const lossRatioInput = String(formData.get("damagePortfolioLossRatio") ?? "").trim();
