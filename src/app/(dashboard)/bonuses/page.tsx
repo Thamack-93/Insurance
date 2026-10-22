@@ -14,6 +14,19 @@ import { LocalNavigation } from "@/components/layout/local-navigation";
 import { commissionNavigation } from "@/lib/navigation";
 import { BonusProjectionForm } from "./bonus-projection-form";
 import { BonusRunItemsTable } from "./bonus-run-items-table";
+import { ChevronDown } from "lucide-react";
+
+function bonusAmountLabel(eligibilityOnly: boolean | undefined, amount: unknown, status: string) {
+  if (eligibilityOnly) return "Solo elegibilidad";
+  if (amount !== null) return formatCurrency(toNumber(amount), "MXN");
+  return status === "READY" ? "Sin banda" : "Pendiente";
+}
+
+function bonusRateLabel(eligibilityOnly: boolean | undefined, rate: unknown, status: string) {
+  if (eligibilityOnly) return "Solo elegibilidad";
+  if (rate !== null) return `${(toNumber(rate) * 100).toFixed(2)}%`;
+  return status === "READY" ? "Sin banda" : "Pendiente";
+}
 
 export default async function BonusesPage({ searchParams }: { searchParams?: Promise<{ run?: string }> }) {
   await connection();
@@ -36,6 +49,8 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
   if (run) {
     try { snapshot = JSON.parse(run.snapshotJson) as typeof snapshot; } catch { snapshot = {}; }
   }
+  const latestRun = recentRuns[0];
+  const latestProgram = latestRun ? resolveBonusProgram(latestRun.programKey) : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -53,14 +68,25 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
       </SectionCard>
 
       <SectionCard title="Proyecciones y cierres recientes" description="Consulta el estado y el corte de cada cálculo guardado para esta organización.">
-        {recentRuns.length ? <div className="divide-y rounded-lg border">{recentRuns.map((recent) => {
+        {recentRuns.length ? <details className="group" open={Boolean(runId)}>
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-b-xl px-4 py-3.5 transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+            <span className="min-w-0">
+              <span className="flex items-center gap-2 text-sm font-medium"><span>{recentRuns.length} proyecciones guardadas</span><span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">Más reciente</span></span>
+              <span className="mt-1 block truncate text-xs text-muted-foreground">{latestRun ? `${latestProgram?.label ?? latestRun.programKey} · ${latestRun.seller.name} · ${latestRun.year} · ${latestProgram ? bonusPeriodLabel(latestProgram, latestRun.periodNumber) : "Periodo guardado"}` : ""}</span>
+            </span>
+            <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="divide-y border-t">
+          {recentRuns.map((recent) => {
           const recentProgram = resolveBonusProgram(recent.programKey);
           const statusLabel = recent.status === "APPROVED" ? "Aprobado" : recent.status === "READY" ? "Listo para aprobar" : "Pendiente de revisión";
           return <Link key={recent.id} href={`/bonuses?run=${encodeURIComponent(recent.id)}`} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-muted/40">
             <span className="min-w-0"><span className="block font-medium">{recentProgram?.label ?? recent.programKey} · {recent.seller.name}</span><span className="mt-1 block text-xs text-muted-foreground">{recent.year} · {recentProgram ? bonusPeriodLabel(recentProgram, recent.periodNumber) : recent.periodType === "ANNUAL" ? "Anual" : `T${recent.periodNumber}`}</span></span>
-            <span className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${recent.status === "APPROVED" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : recent.status === "READY" ? "bg-primary/10 text-primary" : "bg-amber-500/10 text-amber-800 dark:text-amber-300"}`}>{statusLabel}</span><span className="font-medium">{recent.bonusAmount === null ? "Solo elegibilidad" : formatCurrency(toNumber(recent.bonusAmount), "MXN")}</span></span>
+            <span className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${recent.status === "APPROVED" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : recent.status === "READY" ? "bg-primary/10 text-primary" : "bg-amber-500/10 text-amber-800 dark:text-amber-300"}`}>{statusLabel}</span><span className="font-medium tabular-nums">{bonusAmountLabel(recentProgram?.eligibilityOnly, recent.bonusAmount, recent.status)}</span></span>
           </Link>;
-        })}</div> : <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">Aún no hay proyecciones guardadas.</p>}
+        })}
+          </div>
+        </details> : <p className="p-6 text-center text-sm text-muted-foreground">Aún no hay proyecciones guardadas.</p>}
       </SectionCard>
 
       {run && program ? (
@@ -77,8 +103,8 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
         })) }]} />}>
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">Prima neta computable (MXN)</p><p className="mt-1 text-xl font-semibold tabular-nums">{formatCurrency(toNumber(run.baseAmount), "MXN")}</p></div>
-            <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">Tasa estimada</p><p className="mt-1 text-xl font-semibold tabular-nums">{run.bonusRate === null ? "Solo elegibilidad" : `${(toNumber(run.bonusRate) * 100).toFixed(2)}%`}</p></div>
-            <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">Bono estimado</p><p className="mt-1 text-xl font-semibold tabular-nums">{run.bonusAmount === null ? "—" : formatCurrency(toNumber(run.bonusAmount), "MXN")}</p></div>
+            <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">Tasa estimada</p><p className="mt-1 text-xl font-semibold tabular-nums">{bonusRateLabel(program.eligibilityOnly, run.bonusRate, run.status)}</p></div>
+            <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">Bono estimado</p><p className="mt-1 text-xl font-semibold tabular-nums">{bonusAmountLabel(program.eligibilityOnly, run.bonusAmount, run.status)}</p></div>
           </div>
           {program.eligibilityOnly ? <p className="mt-3 rounded-lg border p-3 text-sm">Estatus de elegibilidad: <strong>{snapshot.projection?.eligibilityOutcome === "ELIGIBLE" ? "Cumple los requisitos documentados" : snapshot.projection?.eligibilityOutcome === "NOT_ELIGIBLE" ? "No alcanza el requisito de prima neta total de $4,200,000" : "Pendiente de evidencia"}</strong></p> : null}
           {snapshot.projection?.reviewReasons?.length ? <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4"><p className="font-medium">Pendiente de revisión</p><ul className="mt-2 list-disc pl-5 text-sm">{snapshot.projection.reviewReasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul></div> : null}
