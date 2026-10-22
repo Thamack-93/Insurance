@@ -49,7 +49,7 @@ const UPLOAD_RATE_LIMIT = {
 type UploadResult = {
   ok: boolean;
   fileName: string;
-  document?: { id: string; fileName: string; documentType: string; uploadedAt: Date; mimeType: string };
+  document?: { id: string; fileName: string; documentType: string; uploadedAt: Date; mimeType: string; version: number };
   storagePath?: string;
   sizeBytes?: number;
   sha256?: string;
@@ -128,6 +128,7 @@ async function processFile(
         documentType: document.documentType,
         uploadedAt: document.uploadedAt,
         mimeType: document.mimeType,
+        version: document.version,
       },
       sizeBytes: pdfValidation.sizeBytes ?? bytes.byteLength,
       sha256: pdfValidation.sha256,
@@ -256,6 +257,10 @@ export async function POST(request: NextRequest) {
     }
 
     const formData = await request.formData();
+
+    if (formData.get("uploadConsent") !== "1") {
+      return NextResponse.json({ error: "Confirma la autorización y el procesamiento del documento antes de subirlo." }, { status: 400 });
+    }
 
     if (String(formData.get("taskId") ?? "").trim()) {
       return NextResponse.json(
