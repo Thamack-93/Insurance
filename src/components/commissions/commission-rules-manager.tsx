@@ -82,8 +82,18 @@ export function CommissionRulesManager({ insurers: initialInsurers }: { insurers
               </select>
             </FormField>
             <FormField label="Producto o plan"><Input value={form.productPlan} onChange={(event) => change("productPlan", event.target.value)} required /></FormField>
-            <FormField label="Modalidad"><Input value={form.policyMode} onChange={(event) => change("policyMode", event.target.value)} required placeholder="INDIVIDUAL, FLOTILLA o *" /></FormField>
-            <FormField label="Clase de riesgo / bien / persona"><Input value={form.unitClass} onChange={(event) => change("unitClass", event.target.value)} required placeholder="PERSONA, INMUEBLE, CARGA, MOTO u otra clase; * si aplica a todas" /></FormField>
+            <FormField label="Modalidad">
+              {form.policyType === "AUTO" ? <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={form.policyMode} onChange={(event) => change("policyMode", event.target.value)} required>
+                <option value="*">Cualquiera (*)</option><option value="INDIVIDUAL">Individual</option><option value="FLOTILLA">Flotilla</option>
+                {!['*', 'INDIVIDUAL', 'FLOTILLA'].includes(form.policyMode.toUpperCase()) ? <option value={form.policyMode}>{form.policyMode} (actual)</option> : null}
+              </select> : <Input value={form.policyMode} onChange={(event) => change("policyMode", event.target.value)} required placeholder="INDIVIDUAL, FLOTILLA o *" />}
+            </FormField>
+            <FormField label="Clase de riesgo / bien / persona">
+              {form.policyType === "AUTO" ? <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={form.unitClass} onChange={(event) => change("unitClass", event.target.value)} required>
+                <option value="*">Cualquier unidad (*)</option><option value="AUTO_PARTICULAR">Auto particular</option><option value="CAMION_CARGA">Camión / carga</option><option value="TRACTOCAMION">Tractocamión</option><option value="MOTOCICLETA">Motocicleta</option><option value="AUTOBUS">Autobús</option><option value="OTRO">Otro</option>
+                {!['*', 'AUTO_PARTICULAR', 'CAMION_CARGA', 'TRACTOCAMION', 'MOTOCICLETA', 'AUTOBUS', 'OTRO'].includes(form.unitClass.toUpperCase()) ? <option value={form.unitClass}>{form.unitClass} (actual)</option> : null}
+              </select> : <Input value={form.unitClass} onChange={(event) => change("unitClass", event.target.value)} required placeholder="PERSONA, INMUEBLE, CARGA, MOTO u otra clase; * si aplica a todas" />}
+            </FormField>
             <FormField label="Frecuencia">
               <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={form.paymentFrequency} onChange={(event) => change("paymentFrequency", event.target.value)}>
                 <option value="*">Cualquiera (*)</option>{PAYMENT_FREQUENCIES.map((frequency) => <option key={frequency} value={frequency}>{frequency}</option>)}

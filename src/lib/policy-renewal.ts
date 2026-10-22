@@ -13,6 +13,7 @@ export type PolicyRenewalSource = {
   startDate: Date;
   endDate: Date;
   premiumAmount: number;
+  commissionRateOverride?: number | null;
   currency: PolicyFormValues["currency"];
   paymentFrequency: PolicyFormValues["paymentFrequency"];
   paymentPlan: string | null;
@@ -42,6 +43,7 @@ export function buildRenewalPolicyDefaults(source: PolicyRenewalSource): Partial
     startDate: toDateKey(source.endDate),
     endDate: addCalendarYear(toDateKey(source.endDate)),
     premiumAmount: source.premiumAmount,
+    commissionRateOverride: source.commissionRateOverride ?? "",
     currency: source.currency,
     paymentFrequency: source.paymentFrequency,
     paymentPlan: source.paymentPlan ?? "",

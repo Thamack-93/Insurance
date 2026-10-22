@@ -151,6 +151,7 @@ export default async function NewPolicyPage({
           startDate: source.startDate,
           endDate: source.endDate,
           premiumAmount: Number(source.premiumAmount),
+          commissionRateOverride: source.commissionRateOverride === null ? null : Number(source.commissionRateOverride),
           currency: source.currency as PolicyRenewalSource["currency"],
           paymentFrequency: source.paymentFrequency as PolicyRenewalSource["paymentFrequency"],
           paymentPlan: source.paymentPlan,
@@ -222,6 +223,7 @@ export default async function NewPolicyPage({
           cancelHref="/policies"
           defaultValues={smartDefaults}
           canEditBonusEvidence={context.membershipRole !== "AGENT"}
+          canEditCommissionOverride={context.membershipRole !== "AGENT"}
           clientOptions={clients.map((client) => ({ value: client.id, label: client.fullName }))}
           insurerOptions={insurers.map((insurer) => ({ value: insurer.id, label: insurer.name }))}
           bonusSellerOptions={bonusSellers.map(({ user: seller }) => ({ value: seller.id, label: seller.name }))}

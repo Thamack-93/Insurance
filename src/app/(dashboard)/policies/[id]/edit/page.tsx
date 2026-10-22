@@ -34,6 +34,7 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
             startDate: true,
             endDate: true,
             premiumAmount: true,
+            commissionRateOverride: true,
             currency: true,
             paymentFrequency: true,
             paymentPlan: true,
@@ -90,6 +91,7 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
             startDate: formatDateInput(policy.startDate),
             endDate: formatDateInput(policy.endDate),
             premiumAmount: Number(policy.premiumAmount),
+            commissionRateOverride: policy.commissionRateOverride === null ? "" : Number(policy.commissionRateOverride),
             currency: policy.currency,
             paymentFrequency: policy.paymentFrequency as PolicyFormValues["paymentFrequency"],
             paymentPlan: policy.paymentPlan ?? "",
@@ -101,6 +103,7 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
             renewedFromPolicyId: policy.renewedFromPolicyId ?? "",
           })}
           canEditBonusEvidence={isAdmin}
+          canEditCommissionOverride={isAdmin}
           clientOptions={clients.map((client) => ({ value: client.id, label: client.fullName }))}
           insurerOptions={insurers.map((insurer) => ({ value: insurer.id, label: insurer.name }))}
           renewalSource={
@@ -116,6 +119,7 @@ export default async function EditPolicyPage({ params }: { params: Promise<{ id:
                   startDate: policy.renewedFrom.startDate,
                   endDate: policy.renewedFrom.endDate,
                   premiumAmount: Number(policy.renewedFrom.premiumAmount),
+                  commissionRateOverride: policy.renewedFrom.commissionRateOverride === null ? null : Number(policy.renewedFrom.commissionRateOverride),
                   currency: policy.renewedFrom.currency as PolicyRenewalSource["currency"],
                   paymentFrequency: policy.renewedFrom.paymentFrequency as PolicyRenewalSource["paymentFrequency"],
                   paymentPlan: policy.renewedFrom.paymentPlan,

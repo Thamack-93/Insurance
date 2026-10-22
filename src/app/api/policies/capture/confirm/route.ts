@@ -42,6 +42,7 @@ const confirmSchema = z.object({
     paymentFrequency: z.string().min(1),
     paymentPlan: z.string().nullable().optional(),
     premiumAmount: z.number(),
+    commissionRateOverride: z.number().min(0).max(100).refine((value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-7).nullable().optional(),
     currency: z.string().min(1),
     requestNumber: z.string().nullable().optional(),
     insuredObject: z.string().nullable().optional(),
@@ -95,6 +96,7 @@ function normalizeDraft(draft: z.infer<typeof confirmSchema>["draft"]): PolicyPd
     paymentFrequency: draft.paymentFrequency.trim().toUpperCase(),
     paymentPlan: draft.paymentPlan?.trim() || null,
     premiumAmount: draft.premiumAmount,
+    commissionRateOverride: draft.commissionRateOverride ?? null,
     currency: draft.currency.trim().toUpperCase(),
     requestNumber: draft.requestNumber?.trim() || null,
     insuredObject: draft.insuredObject?.trim() || null,
@@ -273,7 +275,7 @@ export async function POST(request: NextRequest) {
           startDate: targetStartDate,
           endDate: targetEndDate,
         },
-        select: { id: true, notes: true, familyRootId: true, renewedFromPolicyId: true },
+        select: { id: true, notes: true, familyRootId: true, renewedFromPolicyId: true, commissionRateOverride: true },
       });
 
       const existingTargetIsRenewal = currentSource?.renewals.some((renewal) => renewal.id === existingTarget?.id) ?? false;
@@ -358,6 +360,9 @@ export async function POST(request: NextRequest) {
         startDate: targetStartDate,
         endDate: targetEndDate,
         premiumAmount: captureDraft.premiumAmount,
+        ...(!existingTarget || captureDraft.commissionRateOverride !== null
+          ? { commissionRateOverride: context.membershipRole === "AGENT" ? existingTarget?.commissionRateOverride ?? null : captureDraft.commissionRateOverride }
+          : {}),
         currency: captureDraft.currency,
         paymentFrequency: captureDraft.paymentFrequency,
         paymentPlan: captureDraft.paymentPlan,

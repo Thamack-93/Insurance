@@ -345,6 +345,7 @@ function toPolicyFormValues(policy: {
   startDate: Date;
   endDate: Date;
   premiumAmount: Prisma.Decimal | number;
+  commissionRateOverride: Prisma.Decimal | number | null;
   currency: string;
   paymentFrequency: string;
   paymentPlan: string | null;
@@ -363,6 +364,7 @@ function toPolicyFormValues(policy: {
     startDate: formatDateInput(policy.startDate),
     endDate: formatDateInput(policy.endDate),
     premiumAmount: Number(policy.premiumAmount),
+    commissionRateOverride: policy.commissionRateOverride === null ? "" : Number(policy.commissionRateOverride),
     currency: policy.currency,
     paymentFrequency: policy.paymentFrequency,
     paymentPlan: policy.paymentPlan ?? "",
@@ -652,6 +654,7 @@ async function buildPolicyDraft(plan: AssistantMutationPlan, user: AssistantUser
         startDate: true,
         endDate: true,
         premiumAmount: true,
+        commissionRateOverride: true,
         currency: true,
         paymentFrequency: true,
         paymentPlan: true,
