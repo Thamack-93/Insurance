@@ -48,6 +48,7 @@ type PolicyFormProps = {
   submitAction: (values: PolicyFormValues) => Promise<MutationResult>;
   riskDetailsNeedsReview?: boolean;
   canEditBonusEvidence?: boolean;
+  canEditCommissionOverride?: boolean;
   findRenewalCandidates?: (input: { clientId: string; policyType: string; startDate: string; serialNumbers: string[] }) => Promise<SerialRenewalCandidate[]>;
 };
 
@@ -68,6 +69,7 @@ export function PolicyForm({
   submitAction,
   riskDetailsNeedsReview = false,
   canEditBonusEvidence = true,
+  canEditCommissionOverride = true,
   findRenewalCandidates,
 }: PolicyFormProps) {
   const router = useRouter();
@@ -236,6 +238,13 @@ export function PolicyForm({
 
               <FormField label="Prima" htmlFor="premiumAmount" error={errors.premiumAmount?.message}>
                 <Input id="premiumAmount" type="number" min="0" step="0.01" {...register("premiumAmount")} />
+              </FormField>
+
+              <FormField label="Comisión específica de póliza (%)" htmlFor="commissionRateOverride" error={errors.commissionRateOverride?.message}>
+                <div className="space-y-1.5">
+                  <Input id="commissionRateOverride" type="number" min="0" max="100" step="0.01" placeholder="Usar regla general" readOnly={!canEditCommissionOverride} {...register("commissionRateOverride")} />
+                  <p className="text-xs text-muted-foreground">{canEditCommissionOverride ? "Opcional. Si se captura, esta tasa tiene prioridad sobre la regla general de la aseguradora y aplica a los recibos de esta póliza." : "Solo administración puede cambiar la tasa específica de esta póliza."}</p>
+                </div>
               </FormField>
 
               <FormField label="Moneda" error={errors.currency?.message}>

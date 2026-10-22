@@ -44,6 +44,7 @@ export function createPolicyDefaults(values?: Partial<PolicyFormValues>): Policy
     startDate: values?.startDate ?? today,
     endDate: values?.endDate ?? nextYearStr,
     premiumAmount: values?.premiumAmount ?? 0,
+    commissionRateOverride: values?.commissionRateOverride ?? "",
     currency: values?.currency ?? "MXN",
     paymentFrequency: values?.paymentFrequency ?? "ANNUAL",
     paymentPlan: values?.paymentPlan ?? "",

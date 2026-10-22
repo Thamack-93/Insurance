@@ -16,6 +16,7 @@ export type CommissionRule = {
   validTo: string | null;
   active: boolean;
   evidence: string;
+  source?: "INSURER_RULE" | "POLICY_OVERRIDE";
 };
 
 export function parseCommissionRules(value: unknown): CommissionRule[] {
@@ -37,6 +38,7 @@ export function parseCommissionRules(value: unknown): CommissionRule[] {
       validTo: row.validTo === null || typeof row.validTo === "string" ? row.validTo as string | null : null,
       active: row.active === true,
       evidence: text("evidence", ""),
+      source: "INSURER_RULE",
     }];
   });
 }
@@ -84,11 +86,25 @@ export function calculateCommissionEstimate(
   rules: CommissionRule[],
   dimensions: CommissionDimensions,
   asOf: Date,
+  policyRateOverride?: number | null,
 ): CommissionEstimate {
   if (!components || Object.values(components).some((amount) => !Number.isFinite(amount) || amount < 0)) {
     return { status: "REVIEW", reason: "Completa prima total, IVA, gastos de expedición, recargo fraccionado y descuentos visibles." };
   }
-  const match = resolveCommissionRule(rules, dimensions, asOf);
+  const overrideRule: CommissionRule | null = policyRateOverride === null || policyRateOverride === undefined ? null : {
+    id: "POLICY_RATE_OVERRIDE",
+    ...dimensions,
+    rate: policyRateOverride,
+    validFrom: "0001-01-01",
+    validTo: null,
+    active: true,
+    evidence: "Porcentaje específico capturado en la póliza.",
+    source: "POLICY_OVERRIDE",
+  };
+  if (overrideRule && (!Number.isFinite(overrideRule.rate) || overrideRule.rate < 0 || overrideRule.rate > 100)) {
+    return { status: "REVIEW", reason: "El porcentaje específico de la póliza debe estar entre 0% y 100%." };
+  }
+  const match = overrideRule ? { rule: overrideRule, ambiguous: false } : resolveCommissionRule(rules, dimensions, asOf);
   if (match.ambiguous) return { status: "REVIEW", reason: "Hay más de una regla con la misma prioridad para esta póliza." };
   if (!match.rule) return { status: "REVIEW", reason: "No hay una regla activa para esta aseguradora, ramo, plan, unidad y frecuencia." };
   if (!match.rule.evidence.trim()) return { status: "REVIEW", reason: "La regla de comisión no tiene evidencia documentada." };

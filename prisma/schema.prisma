@@ -488,6 +488,7 @@ model Policy {
   startDate                 DateTime
   endDate                   DateTime
   premiumAmount             Decimal
+  commissionRateOverride    Decimal?     @db.Decimal(5, 2)
   currency                  String       @default("MXN")
   paymentFrequency          String
   paymentPlan               String?
