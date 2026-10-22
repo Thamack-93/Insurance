@@ -84,7 +84,7 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
           {snapshot.projection?.reviewReasons?.length ? <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4"><p className="font-medium">Pendiente de revisión</p><ul className="mt-2 list-disc pl-5 text-sm">{snapshot.projection.reviewReasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul></div> : null}
           <BonusRunItemsTable items={run.items.map((item) => ({
             id: item.id,
-            status: item.status,
+            status: item.status === "INCLUDED" ? ("INCLUDED" as const) : item.status === "EXCLUDED" ? ("EXCLUDED" as const) : ("REVIEW" as const),
             paymentReference: item.paymentId?.slice(-8) ?? "—",
             receiptPolicy: `${item.receipt?.receiptNumber ?? "—"} / ${item.policy?.policyNumber ?? "—"}`,
             paidDate: item.payment?.paidDate?.toLocaleDateString("es-MX") ?? "—",
