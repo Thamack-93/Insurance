@@ -54,17 +54,18 @@ export default async function BonusesPage({ searchParams }: { searchParams?: Pro
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader eyebrow="Finanzas" title="Bonos e incentivos" description="Proyecta los bonos 2026 de Autos y Daños por vendedor, revisa cada pago y guarda cierres reproducibles." />
-      <LocalNavigation items={commissionNavigation} label="Comisiones y bonos" />
+      <PageHeader eyebrow="Finanzas" title="Bonos e incentivos" description="Proyecta los bonos 2026 de Autos y Daños por vendedor, revisa cada pago y guarda cierres reproducibles." actions={<LocalNavigation items={commissionNavigation} label="Comisiones y bonos" variant="compact" />} />
       <SectionCard title="Nueva proyección" description="Elige el programa y el corte que corresponda. Los datos faltantes se marcarán para revisión antes de aprobar.">
-        <BonusProjectionForm
-          programs={BONUS_PROGRAMS.map(({ key, label, period, accumulation }) => ({ key, label, period, accumulation }))}
-          sellers={sellers}
-          initialProgramKey={program?.key ?? BONUS_PROGRAMS[0].key}
-          initialSellerId={run?.sellerId ?? sellers[0]?.id ?? ""}
-          initialPeriodNumber={run?.periodNumber ?? 1}
-          initialLossRatio={run?.programKey.startsWith("DAMAGE_") && snapshot.input?.damagePortfolioLossRatio !== null && snapshot.input?.damagePortfolioLossRatio !== undefined ? String(snapshot.input.damagePortfolioLossRatio * 100) : ""}
-        />
+        <div className="p-4 sm:p-5 lg:p-6">
+          <BonusProjectionForm
+            programs={BONUS_PROGRAMS.map(({ key, label, period, accumulation }) => ({ key, label, period, accumulation }))}
+            sellers={sellers}
+            initialProgramKey={program?.key ?? BONUS_PROGRAMS[0].key}
+            initialSellerId={run?.sellerId ?? sellers[0]?.id ?? ""}
+            initialPeriodNumber={run?.periodNumber ?? 1}
+            initialLossRatio={run?.programKey.startsWith("DAMAGE_") && snapshot.input?.damagePortfolioLossRatio !== null && snapshot.input?.damagePortfolioLossRatio !== undefined ? String(snapshot.input.damagePortfolioLossRatio * 100) : ""}
+          />
+        </div>
       </SectionCard>
 
       <SectionCard title="Proyecciones y cierres recientes" description="Consulta el estado y el corte de cada cálculo guardado para esta organización.">

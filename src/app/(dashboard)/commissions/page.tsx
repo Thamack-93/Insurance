@@ -252,9 +252,8 @@ export default async function CommissionsPage({
           eyebrow="Finanzas"
           title="Comisiones"
           description="Calcula y descarga comisiones estimadas a partir de las primas que pagaron los clientes."
-          actions={<div className="flex flex-wrap items-center gap-2"><CommissionImportForm /><Button asChild variant="outline"><Link href="/commissions/rules">Reglas de comisión</Link></Button></div>}
+          actions={<div className="flex flex-wrap items-center gap-2"><LocalNavigation items={commissionNavigation} label="Comisiones y bonos" variant="compact" /><CommissionImportForm /><Button asChild variant="outline"><Link href="/commissions/rules">Reglas de comisión</Link></Button></div>}
         />
-        <LocalNavigation items={commissionNavigation} label="Comisiones y bonos" />
 
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
