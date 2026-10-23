@@ -382,6 +382,10 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
                   <p className="text-muted-foreground">Frecuencia</p>
                   <p className="font-medium">{frequencyLabels[policy.paymentFrequency] ?? policy.paymentFrequency}</p>
                 </div>
+                <div>
+                  <p className="text-muted-foreground">Tasa de comisión</p>
+                  <p className="font-medium">{policy.commissionRateOverride === null ? "Regla general de aseguradora" : `${Number(policy.commissionRateOverride).toFixed(2)}% · específica de póliza`}</p>
+                </div>
                 {previousPolicy ? (
                   <div>
                     <p className="text-muted-foreground">Renueva de</p>

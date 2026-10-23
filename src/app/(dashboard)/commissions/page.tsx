@@ -57,6 +57,20 @@ function commissionSnapshotMatches(commission: { calculationBreakdownJson: strin
   }
 }
 
+function commissionRateSourceLabel(commission: { calculationBreakdownJson: string | null } | null) {
+  if (!commission?.calculationBreakdownJson) return "Sin dato";
+  try {
+    const snapshot = JSON.parse(commission.calculationBreakdownJson) as { breakdown?: unknown };
+    if (!Array.isArray(snapshot.breakdown) || snapshot.breakdown.length === 0) return "Sin dato";
+    const sources = snapshot.breakdown.map((item) => item && typeof item === "object" ? (item as { ruleSource?: unknown }).ruleSource : null);
+    if (sources.every((source) => source === "POLICY_OVERRIDE")) return "Póliza";
+    if (sources.every((source) => source === "INSURER_RULE")) return "Aseguradora";
+    return "Mixta";
+  } catch {
+    return "Sin dato";
+  }
+}
+
 export default async function CommissionsPage({
   searchParams,
 }: {
@@ -232,7 +246,7 @@ export default async function CommissionsPage({
     const allocation = allocationsByPayment.get(payment.id);
     const allocatedNetPremium = netPremium === null || reasons.some((reason) => reason.includes("moneda") || reason.includes("exceden")) ? null : allocation?.netPremium ?? null;
     const expectedCommission = calculated ? allocation?.expectedCommission ?? null : null;
-    return { payment, receipt, commission, amount, allocatedNetPremium, expectedCommission, status: calculated ? "CALCULATED" as const : "REVIEW" as const, reason: reasons.join(" ") };
+    return { payment, receipt, commission, amount, allocatedNetPremium, expectedCommission, status: calculated ? "CALCULATED" as const : "REVIEW" as const, reason: reasons.join(" "), reasonList: reasons };
   });
   const totalsByCurrency = new Map<string, { premiumPaid: number; commissionExpected: number }>();
   for (const row of reportRows) {
@@ -252,9 +266,8 @@ export default async function CommissionsPage({
           eyebrow="Finanzas"
           title="Comisiones"
           description="Calcula y descarga comisiones estimadas a partir de las primas que pagaron los clientes."
-          actions={<div className="flex flex-wrap items-center gap-2"><CommissionImportForm /><Button asChild variant="outline"><Link href="/commissions/rules">Reglas de comisión</Link></Button></div>}
+          actions={<div className="flex flex-wrap items-center gap-2"><LocalNavigation items={commissionNavigation} label="Comisiones y bonos" variant="compact" /><CommissionImportForm /><Button asChild variant="outline"><Link href="/commissions/rules">Reglas de comisión</Link></Button></div>}
         />
-        <LocalNavigation items={commissionNavigation} label="Comisiones y bonos" />
 
         <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <MetricCard
@@ -311,25 +324,40 @@ export default async function CommissionsPage({
                   "Prima pagada": amount.toFixed(2),
                   "Prima neta atribuida": allocatedNetPremium?.toFixed(2) ?? "",
                   "Tasa efectiva (%)": commission?.percentage === null || commission?.percentage === undefined ? "" : toNumber(commission.percentage).toFixed(4),
+                  "Origen de tasa": commissionRateSourceLabel(commission),
                   "Comisión estimada": expectedCommission?.toFixed(2) ?? "",
                   "Moneda": payment.currency,
                   "Estado": status === "CALCULATED" ? "Calculada" : "Revisión",
                   "Motivo": reason,
                 })) }]} />
               </div>
-              {reportRows.length ? <div className="overflow-x-auto"><Table>
-                <TableHeader><TableRow className="bg-muted/40"><TableHead>Pago cliente</TableHead><TableHead>Póliza / recibo</TableHead><TableHead>Cliente</TableHead><TableHead>Aseguradora</TableHead><TableHead className="text-right">Prima pagada</TableHead><TableHead className="text-right">Prima neta pagada</TableHead><TableHead className="text-right">Tasa</TableHead><TableHead className="text-right">Comisión estimada</TableHead><TableHead>Estado / revisión</TableHead></TableRow></TableHeader>
-                <TableBody>{reportRows.map(({ payment, receipt, commission, amount, allocatedNetPremium, expectedCommission, status, reason }) => <TableRow key={payment.id}>
-                  <TableCell>{formatDate(payment.paidDate)}</TableCell>
-                  <TableCell><Link href={`/policies/${payment.policyId}`} className="font-medium hover:text-primary">{payment.policy.policyNumber}</Link><p className="text-xs text-muted-foreground">{receipt.receiptNumber}</p></TableCell>
-                  <TableCell>{payment.client.fullName}</TableCell><TableCell>{payment.policy.insurer.name}</TableCell>
-                  <TableCell className="text-right">{formatCurrencyExact(amount, payment.currency)}</TableCell>
-                  <TableCell className="text-right">{allocatedNetPremium === null ? "—" : formatCurrencyExact(allocatedNetPremium, payment.currency)}</TableCell>
-                  <TableCell className="text-right">{commission?.percentage === null || commission?.percentage === undefined ? "—" : `${toNumber(commission.percentage).toFixed(2)}%`}</TableCell>
-                  <TableCell className="text-right font-medium">{expectedCommission === null ? "—" : formatCurrencyExact(expectedCommission, payment.currency)}</TableCell>
-                  <TableCell className="max-w-xs whitespace-normal text-xs">{status === "CALCULATED" ? <StatusBadge status="EXPECTED" entity="commission" /> : <span className="text-amber-700 dark:text-amber-300">Revisión: {reason}</span>}</TableCell>
-                </TableRow>)}</TableBody>
-              </Table></div> : <p className="px-4 py-8 text-center text-sm text-muted-foreground">No hay pagos de prima POSTED dentro de ese periodo.</p>}
+              {reportRows.length ? <>
+                <p className="px-4 pb-2 text-xs text-muted-foreground">Desplaza la tabla horizontalmente para consultar todas las columnas. Abre “Revisión” para ver el detalle del dato pendiente.</p>
+                <Table className="min-w-[1340px] table-fixed">
+                  <TableHeader><TableRow className="bg-muted/40">
+                    <TableHead className="w-[120px]">Pago cliente</TableHead><TableHead className="w-[130px]">Póliza / recibo</TableHead><TableHead className="w-[175px]">Cliente</TableHead><TableHead className="w-[180px]">Aseguradora</TableHead><TableHead className="w-[130px] text-right">Prima pagada</TableHead><TableHead className="w-[140px] text-right">Prima neta pagada</TableHead><TableHead className="w-[75px] text-right">Tasa</TableHead><TableHead className="w-[150px] text-right">Comisión estimada</TableHead><TableHead className="w-[240px]">Estado / revisión</TableHead>
+                  </TableRow></TableHeader>
+                  <TableBody>{reportRows.map(({ payment, receipt, commission, amount, allocatedNetPremium, expectedCommission, status, reasonList }) => <TableRow key={payment.id}>
+                    <TableCell className="whitespace-nowrap">{formatDate(payment.paidDate)}</TableCell>
+                    <TableCell className="truncate"><Link href={`/policies/${payment.policyId}`} className="font-medium hover:text-primary">{payment.policy.policyNumber}</Link><p className="truncate text-xs text-muted-foreground">{receipt.receiptNumber}</p></TableCell>
+                    <TableCell className="truncate" title={payment.client.fullName}>{payment.client.fullName}</TableCell><TableCell className="truncate" title={payment.policy.insurer.name}>{payment.policy.insurer.name}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">{formatCurrencyExact(amount, payment.currency)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">{allocatedNetPremium === null ? "—" : formatCurrencyExact(allocatedNetPremium, payment.currency)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">
+                      {commission?.percentage === null || commission?.percentage === undefined ? "—" : <span>{toNumber(commission.percentage).toFixed(2)}%<span className="block text-xs font-normal text-muted-foreground">{commissionRateSourceLabel(commission)}</span></span>}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-right font-medium tabular-nums">{expectedCommission === null ? "—" : formatCurrencyExact(expectedCommission, payment.currency)}</TableCell>
+                    <TableCell className="text-xs">{status === "CALCULATED" ? <StatusBadge status="EXPECTED" entity="commission" /> : <details className="group">
+                      <summary className="inline-flex cursor-pointer list-none items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 font-medium text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-950">
+                        Revisión{reasonList.length > 1 ? ` · ${reasonList.length} pendientes` : " · Ver motivo"}
+                      </summary>
+                      <div className="mt-2 max-w-[230px] space-y-1.5 whitespace-normal rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+                        {reasonList.map((item, index) => <p key={`${payment.id}-reason-${index}`}>{item}</p>)}
+                      </div>
+                    </details>}</TableCell>
+                  </TableRow>)}</TableBody>
+                </Table>
+              </> : <p className="px-4 py-8 text-center text-sm text-muted-foreground">No hay pagos de prima POSTED dentro de ese periodo.</p>}
             </>
           ) : <p className="px-4 py-4 text-sm text-amber-700 dark:text-amber-300">Ingresa fechas válidas y asegúrate de que “Desde” no sea posterior a “Hasta”.</p> : <p className="px-4 py-4 text-sm text-muted-foreground">Elige el periodo que quieres consultar. Al generarlo, el sistema calcula las comisiones faltantes y muestra cada pago del cliente.</p>}
         </SectionCard>

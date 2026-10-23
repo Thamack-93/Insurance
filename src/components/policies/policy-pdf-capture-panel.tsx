@@ -101,6 +101,7 @@ function createEmptyDraft(): PolicyPdfCaptureDraft {
     paymentFrequency: "ANNUAL",
     paymentPlan: null,
     premiumAmount: 0,
+    commissionRateOverride: null,
     currency: "MXN",
     requestNumber: null,
     insuredObject: null,
@@ -1276,6 +1277,20 @@ export function PolicyPdfCapturePanel({ userId, organizationId, demoMode = false
                         markFieldConfidence("premiumAmount");
                       }}
                     />
+                  </Field>
+                  <Field label="Comisión específica de póliza (%)" confidence="medium">
+                    <div className="space-y-1.5">
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        placeholder="Usar regla general"
+                        value={draft.commissionRateOverride ?? ""}
+                        onChange={(event) => updateDraft({ commissionRateOverride: event.target.value === "" ? null : Number(event.target.value) })}
+                      />
+                      <p className="text-xs text-muted-foreground">Opcional. Esta tasa prevalece sobre la regla general en los recibos de esta póliza. No se extrae del PDF.</p>
+                    </div>
                   </Field>
                   <Field label="Moneda" confidence="high">
                     <ControlledSelect

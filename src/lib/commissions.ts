@@ -115,14 +115,16 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
       const policyUnitClass = typeof riskDetails.commissionUnitClass === "string" ? riskDetails.commissionUnitClass.trim().toUpperCase() : "";
       const productPlan = receipt.policy.paymentPlan?.trim().toUpperCase() || (typeof riskData.plan === "string" ? riskData.plan.trim().toUpperCase() : "") || "SIN_PLAN";
       const rules = parseCommissionRules(receipt.insurer.commissionRules);
+      const policyRateOverride = receipt.policy.commissionRateOverride === null ? null : Number(receipt.policy.commissionRateOverride);
       const rows = jsonUnitBreakdown(receipt.premiumBreakdownByUnit);
       const assets = receipt.policy.insuredAssets;
       const calculations: Array<{ assetId: string | null; description: string; unitClass: string; components: CommissionPremiumComponents; estimate: CommissionEstimate & { amount: number; commissionableBase: number; rate: number; rule: CommissionRule } }> = [];
       let reviewReason: string | null = null;
 
-      if (!policyMode) {
-        reviewReason = "Indica la modalidad de la póliza para aplicar una regla de comisión.";
-      } else if (assets.length) {
+      // An empty modality can still resolve to a rule configured with policyMode="*".
+      // If the insurer differentiates rates by modality, only a matching specific rule
+      // can calculate; otherwise calculateCommissionEstimate leaves the receipt in REVIEW.
+      if (assets.length) {
         const byAsset = new Map(rows.map((row) => [row.insuredAssetId, row]));
         if (deriveReceiptNetPremium({ amount: Number(receipt.amount), premiumBreakdownByUnit: rows }) === null) {
           reviewReason = "El desglose de prima por unidad está incompleto o no concilia con el importe del recibo.";
@@ -131,19 +133,20 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
         } else {
           for (const asset of assets) {
             const row = byAsset.get(asset.id)!;
-            if (!asset.unitClass?.trim()) { reviewReason = `Clasifica la unidad ${asset.description} antes de calcular.`; break; }
+            if (policyRateOverride === null && !asset.unitClass?.trim()) { reviewReason = `Clasifica la unidad ${asset.description} antes de calcular.`; break; }
             const components = premiumComponents(row);
             if (components && components.totalPremium <= 0) { reviewReason = `Captura la prima total de ${asset.description}.`; break; }
-            const estimate = calculateCommissionEstimate(components, rules, { policyType: receipt.policy.policyType, productPlan, policyMode, unitClass: asset.unitClass.trim().toUpperCase(), paymentFrequency: receipt.policy.paymentFrequency }, receipt.dueDate);
+            const unitClass = asset.unitClass?.trim().toUpperCase() || policyUnitClass || "POLICY_OVERRIDE";
+            const estimate = calculateCommissionEstimate(components, rules, { policyType: receipt.policy.policyType, productPlan, policyMode, unitClass, paymentFrequency: receipt.policy.paymentFrequency }, receipt.dueDate, policyRateOverride);
             if (estimate.status !== "CALCULATED" || estimate.amount === undefined) { reviewReason = `${asset.description}: ${estimate.reason}`; break; }
-            calculations.push({ assetId: asset.id, description: asset.description, unitClass: asset.unitClass.trim().toUpperCase(), components: components!, estimate: estimate as typeof calculations[number]["estimate"] });
+            calculations.push({ assetId: asset.id, description: asset.description, unitClass, components: components!, estimate: estimate as typeof calculations[number]["estimate"] });
           }
         }
       } else {
         const components = premiumComponents(receipt);
-        if (!policyUnitClass) reviewReason = "Indica la clase de riesgo asegurada para aplicar una regla de comisión.";
+        if (policyRateOverride === null && !policyUnitClass) reviewReason = "Indica la clase de riesgo asegurada para aplicar una regla de comisión.";
         else if (components && components.totalPremium <= 0) reviewReason = "Captura la prima total antes de calcular.";
-        const estimate = calculateCommissionEstimate(components, rules, { policyType: receipt.policy.policyType, productPlan, policyMode, unitClass: policyUnitClass, paymentFrequency: receipt.policy.paymentFrequency }, receipt.dueDate);
+        const estimate = calculateCommissionEstimate(components, rules, { policyType: receipt.policy.policyType, productPlan, policyMode, unitClass: policyUnitClass || "POLICY_OVERRIDE", paymentFrequency: receipt.policy.paymentFrequency }, receipt.dueDate, policyRateOverride);
         if (!reviewReason && (estimate.status !== "CALCULATED" || estimate.amount === undefined)) reviewReason = estimate.reason ?? "Revisa los datos de comisión.";
         else if (!reviewReason) calculations.push({ assetId: null, description: "Póliza", unitClass: "POLICY", components: components!, estimate: estimate as typeof calculations[number]["estimate"] });
       }
@@ -157,7 +160,7 @@ export async function calculateCommissionForReceipt(receiptId: string, expectedP
       const totalBase = calculations.reduce((sum, item) => sum + (item.estimate.commissionableBase ?? 0), 0);
       const percentage = totalBase ? roundMoney(calculations.reduce((sum, item) => sum + (item.estimate.commissionableBase! * item.estimate.rate!), 0) / totalBase) : 0;
       const expectedDate = businessAddDays(receipt.dueDate, 30);
-      const breakdown = calculations.map((item) => ({ assetId: item.assetId, description: item.description, unitClass: item.unitClass, components: { totalPremium: item.components.totalPremium, vatAmount: item.components.iva, issuanceExpenseAmount: item.components.issuanceExpense, surchargeAmount: item.components.installmentSurcharge, discountAmount: item.components.visibleDiscounts }, netPremium: item.estimate.netPremium, commissionableBase: item.estimate.commissionableBase, rate: item.estimate.rate, expectedAmount: item.estimate.amount, ruleId: item.estimate.rule?.id, ruleEvidence: item.estimate.rule?.evidence }));
+      const breakdown = calculations.map((item) => ({ assetId: item.assetId, description: item.description, unitClass: item.unitClass, components: { totalPremium: item.components.totalPremium, vatAmount: item.components.iva, issuanceExpenseAmount: item.components.issuanceExpense, surchargeAmount: item.components.installmentSurcharge, discountAmount: item.components.visibleDiscounts }, netPremium: item.estimate.netPremium, commissionableBase: item.estimate.commissionableBase, rate: item.estimate.rate, expectedAmount: item.estimate.amount, ruleId: item.estimate.rule?.id, ruleSource: item.estimate.rule?.source ?? "INSURER_RULE", ruleEvidence: item.estimate.rule?.evidence }));
       const commission = await tx.commission.create({ data: { organizationId: context.organizationId, policyId: receipt.policyId, receiptId: receipt.id, clientId: receipt.clientId, insurerId: receipt.insurerId, expectedAmount, percentage, expectedDate, status: receipt.status === "PAID" ? "PENDING" : "EXPECTED", calculationBreakdownJson: JSON.stringify({ calculatedAt: new Date().toISOString(), ruleVersion: receipt.insurer.commissionRulesVersion, breakdown }) } });
       await tx.receipt.update({ where: { id: receipt.id }, data: { commissionCalculationStatus: "CALCULATED", commissionReviewReason: null, updatedById: context.userId } });
       await writeActivityLog({ action: "CALCULATE_COMMISSION", entityType: "COMMISSION", entityId: commission.id, organizationId: context.organizationId, userId: context.userId, db: tx, newValue: { policyId: receipt.policyId, receiptId, expectedAmount, percentage, breakdown } });

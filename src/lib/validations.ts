@@ -88,6 +88,10 @@ const policyBaseSchema = z
     startDate: requiredDate,
     endDate: requiredDate,
     premiumAmount: z.coerce.number().positive("La prima debe ser mayor a cero."),
+    commissionRateOverride: z.union([
+      z.literal(""),
+      z.coerce.number().min(0, "La tasa no puede ser negativa.").max(100, "La tasa no puede superar 100%.").refine((value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-7, "Usa máximo dos decimales para la tasa.")
+    ]).optional(),
     currency: z.string().trim().min(1, "Selecciona una moneda."),
     paymentFrequency: z.enum(PAYMENT_FREQUENCIES),
     paymentPlan: optionalText,

@@ -21,6 +21,7 @@ export type PolicyPdfCaptureDraft = {
   paymentFrequency: string;
   paymentPlan: string | null;
   premiumAmount: number;
+  commissionRateOverride?: number | null;
   currency: string;
   requestNumber: string | null;
   insuredObject: string | null;
@@ -1399,6 +1400,7 @@ export function extractPolicyPdfDraftFromText(text: string): PolicyPdfCaptureDra
     paymentFrequency,
     paymentPlan,
     premiumAmount: premiumResult.value,
+    commissionRateOverride: null,
     currency: "MXN",
     requestNumber,
     insuredObject,

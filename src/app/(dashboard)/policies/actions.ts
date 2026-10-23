@@ -28,6 +28,9 @@ function normalizePolicyInput(values: PolicyFormValues) {
     startDate: parseDateInput(values.startDate),
     endDate: parseDateInput(values.endDate),
     premiumAmount: values.premiumAmount,
+    commissionRateOverride: values.commissionRateOverride === "" || values.commissionRateOverride === undefined
+      ? null
+      : values.commissionRateOverride,
     currency: values.currency,
     paymentFrequency: values.paymentFrequency,
     paymentPlan: normalizeOptionalText(values.paymentPlan),
@@ -152,6 +155,7 @@ export async function createPolicy(values: PolicyFormValues): Promise<MutationRe
     if (!requestedBonusSellerId) return errorResult("Selecciona al vendedor que debe recibir la atribución de bono.");
     await assertClientOrganizationAccess(parsed.data.clientId, context);
     const normalized = normalizePolicyInput(parsed.data);
+    if (context.membershipRole === "AGENT") normalized.commissionRateOverride = null;
     const renewalSourceId = normalized.renewedFromPolicyId;
     const renewalSource = renewalSourceId
       ? await withTenantTransaction(context, (tx) => tx.policy.findFirst({
@@ -397,7 +401,7 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
     const policy = await withTenantTransaction(context, async (tx) => {
       await assertOrganizationContextInTransaction(tx, context);
       await assertPolicyRelationsInTransaction(tx, context, normalized.clientId, normalized.insurerId);
-      const currentPolicyBonusAttribution = await tx.policy.findFirst({ where: { id, organizationId: context.organizationId }, select: { bonusSellerId: true, bonusEligibilityJson: true } });
+      const currentPolicyBonusAttribution = await tx.policy.findFirst({ where: { id, organizationId: context.organizationId }, select: { bonusSellerId: true, bonusEligibilityJson: true, commissionRateOverride: true } });
       let confirmedBonusSellerId = currentPolicyBonusAttribution?.bonusSellerId;
       if (!confirmedBonusSellerId && context.membershipRole !== "AGENT") {
         let confirmsCurrentPortfolioOwner = false;
@@ -424,6 +428,7 @@ export async function updatePolicy(id: string, values: PolicyFormValues): Promis
         where: { id, organizationId: context.organizationId },
         data: {
           ...normalized,
+          commissionRateOverride: context.membershipRole === "AGENT" ? currentPolicyBonusAttribution?.commissionRateOverride ?? null : normalized.commissionRateOverride,
           bonusEligibilityJson: context.membershipRole === "AGENT" ? currentPolicyBonusAttribution?.bonusEligibilityJson ?? null : normalized.bonusEligibilityJson,
           ...(confirmedBonusSellerId ? { bonusSellerId: confirmedBonusSellerId } : {}),
           status: (normalized.renewedFromPolicyId || renewalChanged) ? "ACTIVE" : normalized.status,
