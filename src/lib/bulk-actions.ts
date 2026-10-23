@@ -7,7 +7,7 @@ import { assertOrganizationContextInTransaction, requireOrganizationRole, withTe
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 type AnyDb = PrismaClient | Prisma.TransactionClient;
 
-type EntityType = "client" | "policy" | "receipt" | "task" | "claim" | "quote" | "insurer";
+type EntityType = "client" | "policy" | "receipt" | "task" | "claim" | "insurer";
 
 type DelegateName =
   | "client"
@@ -15,7 +15,6 @@ type DelegateName =
   | "receipt"
   | "task"
   | "claim"
-  | "quote"
   | "insurer";
 
 const modelMap: Record<EntityType, DelegateName> = {
@@ -24,7 +23,6 @@ const modelMap: Record<EntityType, DelegateName> = {
   receipt: "receipt",
   task: "task",
   claim: "claim",
-  quote: "quote",
   insurer: "insurer",
 };
 

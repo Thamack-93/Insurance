@@ -60,7 +60,6 @@ export type StatusEntity =
   | "payment"
   | "commission"
   | "claim"
-  | "quote"
   | "workItem"
   | "alert";
 
@@ -70,16 +69,6 @@ const ENTITY_STATUS_LABELS: Partial<Record<StatusEntity, Record<string, string>>
     ACTIVE: "Activa",
     PENDING: "Pendiente",
     RENEWED: "Renovada",
-    EXPIRED: "Expirada",
-    CANCELLED: "Cancelada",
-  },
-  // cotización (femenino)
-  quote: {
-    REQUESTED: "Solicitada",
-    IN_PROGRESS: "En proceso",
-    SENT: "Enviada",
-    ACCEPTED: "Aceptada",
-    REJECTED: "Rechazada",
     EXPIRED: "Expirada",
     CANCELLED: "Cancelada",
   },

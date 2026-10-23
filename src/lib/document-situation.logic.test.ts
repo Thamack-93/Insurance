@@ -18,11 +18,6 @@ describe("getDocumentSituation", () => {
     expect(getDocumentSituation({ receipt: { status: "OVERDUE" } }, today).label).toBe("En curso");
     expect(getDocumentSituation({ claim: { status: "WAITING_INSURER" } }, today).label).toBe("En curso");
     expect(getDocumentSituation({ task: { status: "OPEN" } }, today).label).toBe("En curso");
-    expect(getDocumentSituation({ quote: { status: "SENT", validUntil: new Date("2026-10-23") } }, today).label).toBe("En curso");
-  });
-
-  it("marks a stale quote as historical after its validity ends", () => {
-    expect(getDocumentSituation({ quote: { status: "SENT", validUntil: new Date("2026-10-21") } }, today).label).toBe("Histórico");
   });
 
   it("does not call a client-only or unlinked file active", () => {

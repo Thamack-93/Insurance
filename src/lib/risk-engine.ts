@@ -130,7 +130,7 @@ export async function detectRisks(portfolioOwnerId: string | undefined, organiza
       select: { id: true, policyNumber: true },
     }),
     db.document.findMany({
-      where: { ...documentScope, clientId: null, policyId: null, receiptId: null, taskId: null, claimId: null, quoteId: null },
+      where: { ...documentScope, clientId: null, policyId: null, receiptId: null, taskId: null, claimId: null },
       take: TAKE_LIMIT,
       select: { id: true, fileName: true },
     }),

@@ -32,8 +32,6 @@ const TABLE_CHECKS = [
   ["commissionstatement_table_readable", "CommissionStatement"],
   ["commissionstatementrow_table_readable", "CommissionStatementRow"],
   ["commissioncorrection_table_readable", "CommissionCorrection"],
-  ["quotecomparison_table_readable", "QuoteComparison"],
-  ["quotecomparisonitem_table_readable", "QuoteComparisonItem"],
 ] as const;
 
 function requiredCheckNames() {

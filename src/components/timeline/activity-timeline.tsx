@@ -112,7 +112,6 @@ const entityLabelMap: Record<string, string> = {
   Insurer: "Aseguradora",
   Receipt: "Recibo",
   Claim: "Siniestro",
-  Quote: "Cotización",
   WorkItem: "Pendiente",
   Payment: "Pago",
   Commission: "Comisión",

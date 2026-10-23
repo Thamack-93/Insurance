@@ -32,7 +32,6 @@ describe("portfolio access helpers", () => {
         { endorsement: { policy: { client: { portfolioOwnerId: "agent-1" } } } },
         { receipt: { client: { portfolioOwnerId: "agent-1" } } },
         { claim: { client: { portfolioOwnerId: "agent-1" } } },
-        { quote: { client: { portfolioOwnerId: "agent-1" } } },
         {
           AND: [
             { createdById: "agent-1" },
@@ -42,7 +41,6 @@ describe("portfolio access helpers", () => {
             { receiptId: null },
             { taskId: null },
             { claimId: null },
-            { quoteId: null },
           ],
         },
       ],

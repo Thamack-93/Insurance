@@ -184,23 +184,6 @@ async function main() {
     summaries.push({ table: "WorkItem", scanned: workItems.length, updated: workItemResult.updated });
     changes.push(...workItemResult.changes);
 
-    const quotes = await db.quote.findMany({
-      where: { organizationId },
-      select: { id: true, requestedDate: true, sentDate: true, validUntil: true },
-    });
-    const quoteResult = await normalizeRows(
-      "Quote",
-      quotes,
-      ["requestedDate", "sentDate", "validUntil"],
-      async (row, updates) => {
-        if (apply) {
-          await db.quote.update({ where: { id: row.id, organizationId }, data: updates });
-        }
-      },
-    );
-    summaries.push({ table: "Quote", scanned: quotes.length, updated: quoteResult.updated });
-    changes.push(...quoteResult.changes);
-
     console.log(JSON.stringify({ mode: apply ? "apply" : "dry-run", summaries }, null, 2));
     if (!apply && changes.length > 0) {
       console.log(JSON.stringify({ sampleChanges: changes.slice(0, 50) }, null, 2));

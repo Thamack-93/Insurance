@@ -133,7 +133,6 @@ const ALLOWED_COLUMNS = new Set([
   "claimId",
   "receiptId",
   "taskId",
-  "quoteId",
   "sourceType",
   "sourceId",
   "assignedToId",
@@ -270,7 +269,6 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
         AND "Document"."receiptId" IS NULL
         AND "Document"."taskId" IS NULL
         AND "Document"."claimId" IS NULL
-        AND "Document"."quoteId" IS NULL
       )
     )`
     : undefined;
@@ -315,7 +313,6 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
     claimId: string | null;
     receiptId: string | null;
     taskId: string | null;
-    quoteId: string | null;
     parentLabel: string | null;
   };
 
@@ -446,7 +443,7 @@ async function globalSearchInTransaction(query: string, portfolioOwnerId: string
     ),
     rawSearch<DocumentRow>(
       "Document",
-      ["id", "fileName", "documentType", "notes", "clientId", "policyId", "claimId", "receiptId", "taskId", "quoteId", "updatedAt"],
+      ["id", "fileName", "documentType", "notes", "clientId", "policyId", "claimId", "receiptId", "taskId", "updatedAt"],
       ["fileName", "notes"],
       needle,
       5,

@@ -158,7 +158,7 @@ async function main() {
       ["PolicyEndorsement", "createdById"], ["PolicyEndorsement", "updatedById"],
       ["Payment", "createdById"], ["Payment", "updatedById"], ["Payment", "reversedById"],
       ["Task", "createdById"], ["Task", "updatedById"], ["WorkItem", "createdById"], ["WorkItem", "updatedById"],
-      ["Claim", "createdById"], ["Claim", "updatedById"], ["Quote", "createdById"], ["Quote", "updatedById"],
+      ["Claim", "createdById"], ["Claim", "updatedById"],
       ["Document", "createdById"], ["Document", "updatedById"], ["KnowledgeSource", "createdById"],
       ["LedgerImportBatch", "createdById"], ["LedgerImportBatch", "approvedById"], ["LedgerImportAction", "performedById"],
       ["TelegramLinkToken", "userId"], ["TelegramDraft", "userId"], ["MaintenanceRun", "createdById"],

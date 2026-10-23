@@ -76,16 +76,6 @@ enum KnowledgeSourceStatus {
   ARCHIVED
 }
 
-enum QuoteStatus {
-  REQUESTED
-  IN_PROGRESS
-  SENT
-  ACCEPTED
-  REJECTED
-  EXPIRED
-  CANCELLED
-}
-
 enum TaskStatus {
   OPEN
   IN_PROGRESS
@@ -157,7 +147,6 @@ model Organization {
   workItems                   WorkItem[]
   claims                      Claim[]
   claimChecklistItems         ClaimChecklistItem[]
-  quotes                      Quote[]
   documents                   Document[]
   activityLogs                ActivityLog[]
   assistantActionDrafts       AssistantActionDraft[]
@@ -184,7 +173,6 @@ model Organization {
   alerts                      Alert[]
   commissionStatements        CommissionStatement[]
   commissionCorrections       CommissionCorrection[]
-  quoteComparisons            QuoteComparison[]
   securityEventAggregates     SecurityEventAggregate[]
   platformAuditTargets        PlatformAuditLog[]           @relation("PlatformAuditTargetOrganization")
   backupArtifacts             BackupArtifact[]
@@ -197,7 +185,6 @@ model Organization {
   demoState                   DemoOrganizationState?
   demoUploadArtifacts         DemoUploadArtifact[]
   commissionStatementRows     CommissionStatementRow[]
-  quoteComparisonItems        QuoteComparisonItem[]
 
   @@index([status])
   @@index([kind])
@@ -263,8 +250,6 @@ model User {
   createdClaims                       Claim[]                      @relation("ClaimCreatedBy")
   updatedClaims                       Claim[]                      @relation("ClaimUpdatedBy")
   assignedClaims                      Claim[]                      @relation("ClaimAssignedTo")
-  createdQuotes                       Quote[]                      @relation("QuoteCreatedBy")
-  updatedQuotes                       Quote[]                      @relation("QuoteUpdatedBy")
   createdTasks                        Task[]                       @relation("TaskCreatedBy")
   updatedTasks                        Task[]                       @relation("TaskUpdatedBy")
   createdWorkItems                    WorkItem[]                   @relation("WorkItemCreatedBy")
@@ -288,7 +273,6 @@ model User {
   createdCommissionStatements         CommissionStatement[]        @relation("CommissionStatementCreatedBy")
   approvedCommissionStatements        CommissionStatement[]        @relation("CommissionStatementApprovedBy")
   performedCommissionCorrections      CommissionCorrection[]       @relation("CommissionCorrectionActor")
-  createdQuoteComparisons             QuoteComparison[]            @relation("QuoteComparisonCreatedBy")
   reviewedLedgerImportIssues          LedgerImportIssue[]          @relation("LedgerImportIssueReviewedBy")
   mergedLedgerImportIssues            LedgerImportIssue[]          @relation("LedgerImportIssueMergedBy")
   performedLedgerImportActions        LedgerImportAction[]         @relation("LedgerImportActionPerformedBy")
@@ -409,8 +393,6 @@ model Client {
   commissions        Commission[]
   tasks              Task[]
   claims             Claim[]
-  quotes             Quote[]
-  quoteComparisons   QuoteComparison[]
   documents          Document[]
   workItems          WorkItem[]
   notificationEvents NotificationEvent[]
@@ -468,7 +450,6 @@ model Insurer {
   commissions Commission[]
   tasks       Task[]
   claims      Claim[]
-  quotes      Quote[]
   workItems   WorkItem[]
 
   @@index([name])
@@ -939,42 +920,6 @@ model ClaimChecklistItem {
   @@index([assignedToId, dueDate])
 }
 
-model Quote {
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id             String       @id @default(cuid())
-  clientId       String
-  insurerId      String?
-  policyType     String
-  status         QuoteStatus  @default(REQUESTED)
-  requestedDate  DateTime
-  sentDate       DateTime?
-  validUntil     DateTime?
-  quotedAmount   Decimal?
-  notes          String?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  createdById    String?
-  updatedById    String?
-  version        Int          @default(1)
-
-  client          Client                @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  insurer         Insurer?              @relation(fields: [insurerId], references: [id], onDelete: SetNull)
-  createdBy       User?                 @relation("QuoteCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy       User?                 @relation("QuoteUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-  documents       Document[]
-  comparisonItems QuoteComparisonItem[]
-
-  @@index([clientId])
-  @@index([insurerId])
-  @@index([policyType])
-  @@index([status])
-  @@index([validUntil])
-  @@index([createdById])
-  @@index([updatedById])
-  @@index([organizationId])
-}
-
 model Document {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
@@ -985,7 +930,6 @@ model Document {
   receiptId      String?
   taskId         String?
   claimId        String?
-  quoteId        String?
   documentType   String       @default("OTHER")
   fileName       String
   filePath       String
@@ -1005,7 +949,6 @@ model Document {
   receipt             Receipt?             @relation("ReceiptDocuments", fields: [receiptId], references: [id], onDelete: SetNull)
   task                Task?                @relation(fields: [taskId], references: [id], onDelete: SetNull)
   claim               Claim?               @relation(fields: [claimId], references: [id], onDelete: SetNull)
-  quote               Quote?               @relation(fields: [quoteId], references: [id], onDelete: SetNull)
   primaryReceipt      Receipt?             @relation("ReceiptPrimaryDocument")
   primaryEndorsement  PolicyEndorsement?   @relation("PolicyEndorsementPrimaryDocument")
   createdBy           User?                @relation("DocumentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
@@ -1018,7 +961,6 @@ model Document {
   @@index([receiptId])
   @@index([taskId])
   @@index([claimId])
-  @@index([quoteId])
   @@index([documentType])
   @@index([uploadedAt])
   @@index([createdById])
@@ -2233,50 +2175,4 @@ model BonusRunItem {
   @@index([organizationId, paymentId])
   @@index([organizationId, policyId])
   @@index([organizationId])
-}
-
-/// A reviewed set of alternative quotes for one client and product line.
-model QuoteComparison {
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id              String       @id @default(cuid())
-  clientId        String
-  policyType      String
-  status          String       @default("DRAFT")
-  selectedQuoteId String?
-  selectedAt      DateTime?
-  selectionReason String?
-  version         Int          @default(1)
-  createdById     String?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-
-  client    Client                @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  createdBy User?                 @relation("QuoteComparisonCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  items     QuoteComparisonItem[]
-
-  @@index([organizationId, clientId])
-  @@index([organizationId])
-  @@index([status])
-}
-
-model QuoteComparisonItem {
-  organizationId   String
-  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  id               String       @id @default(cuid())
-  comparisonId     String
-  quoteId          String
-  termsJson        String?
-  sourceDocumentId String?
-  reviewStatus     String       @default("REVIEW")
-  version          Int          @default(1)
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
-
-  comparison QuoteComparison @relation(fields: [comparisonId], references: [id], onDelete: Cascade)
-  quote      Quote           @relation(fields: [quoteId], references: [id], onDelete: Cascade)
-
-  @@unique([comparisonId, quoteId])
-  @@index([organizationId])
-  @@index([quoteId])
 }

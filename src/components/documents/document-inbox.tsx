@@ -40,14 +40,12 @@ export type DocumentInboxItem = {
   receiptId: string | null;
   taskId: string | null;
   claimId: string | null;
-  quoteId: string | null;
   client: { fullName: string } | null;
   policy: { policyNumber: string } | null;
   endorsement: { endorsementNumber: string } | null;
   receipt: { receiptNumber: string } | null;
   task: { folio: string; title: string } | null;
   claim: { folio: string } | null;
-  quote: { id: string; policyType: string } | null;
 };
 
 const associations = [
@@ -75,11 +73,11 @@ function associationOptions(options: DocumentInboxOptions) {
 }
 
 function isUnassociated(document: DocumentInboxItem) {
-  return !document.clientId && !document.policyId && !document.endorsementId && !document.receiptId && !document.taskId && !document.claimId && !document.quoteId;
+  return !document.clientId && !document.policyId && !document.endorsementId && !document.receiptId && !document.taskId && !document.claimId;
 }
 
 function associationLabel(document: DocumentInboxItem) {
-  return document.policy?.policyNumber ?? document.endorsement?.endorsementNumber ?? document.receipt?.receiptNumber ?? document.task?.folio ?? document.claim?.folio ?? document.quote?.id ?? document.client?.fullName ?? "Sin asociación";
+  return document.policy?.policyNumber ?? document.endorsement?.endorsementNumber ?? document.receipt?.receiptNumber ?? document.task?.folio ?? document.claim?.folio ?? document.client?.fullName ?? "Sin asociación";
 }
 
 function InboxReviewForm({ document, options }: { document: DocumentInboxItem; options: DocumentInboxOptions }) {

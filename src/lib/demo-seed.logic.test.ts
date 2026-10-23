@@ -67,7 +67,6 @@ describe("seedDemoBaseline", () => {
     expect(count("receipt")).toBe(190);
     expect(upserts.filter(({ delegate }) => delegate === "claim")).toHaveLength(10);
     expect(upserts.filter(({ delegate }) => delegate === "commission")).toHaveLength(8);
-    expect(upserts.some(({ delegate }) => delegate === "quote" || delegate === "quoteComparison" || delegate === "quoteComparisonItem")).toBe(false);
     const seededPolicies = upserts.filter(({ delegate }) => delegate === "policy").slice(0, 40).map(({ args }) => args.create as Record<string, unknown>);
     for (const frequency of ["ANNUAL", "SEMIANNUAL", "QUARTERLY", "MONTHLY"]) expect(seededPolicies.filter(policy => policy.paymentFrequency === frequency)).toHaveLength(10);
     const policyCountsByClient = [...seededPolicies.reduce((counts, policy) => counts.set(String(policy.clientId), (counts.get(String(policy.clientId)) ?? 0) + 1), new Map<string, number>()).values()].sort((left, right) => left - right);

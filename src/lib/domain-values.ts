@@ -80,9 +80,6 @@ export type Priority = (typeof PRIORITIES)[number];
 export const CLAIM_STATUSES = ["OPEN", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_INSURER", "RESOLVED", "CANCELLED"] as const;
 export type ClaimStatus = (typeof CLAIM_STATUSES)[number];
 
-export const QUOTE_STATUSES = ["REQUESTED", "IN_PROGRESS", "SENT", "ACCEPTED", "REJECTED", "EXPIRED", "CANCELLED"] as const;
-export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
-
 export const DOCUMENT_TYPES = [
   "POLICY",
   "RECEIPT",
