@@ -40,7 +40,7 @@ test.describe("PolicyDesk master shell", () => {
     const cases = [
       { path: "/renewals", url: /\/operations\?.*view=renewals/, destination: "Operación" },
       { path: "/claims", url: /\/operations\?.*view=claims/, destination: "Operación" },
-      { path: "/quotes", url: /\/quotes(?:\?|$)/, destination: "Pólizas" },
+      { path: "/quotes", url: /\/policies(?:\?.*)?$/, destination: "Pólizas" },
       { path: "/due-payments", url: /\/receipts\?.*tab=cobrar/, destination: "Recibos" },
       { path: "/portfolio", url: /\/portfolio(?:\?|$)/, destination: "Reportes" },
     ] as const;
@@ -57,17 +57,16 @@ test.describe("PolicyDesk master shell", () => {
     }
   });
 
-  test("reaches hidden views through their owning section navigation", async ({ page }) => {
+  test("reaches current views through their owning section navigation", async ({ page }) => {
     await authenticatePageAsAdmin(page);
 
     await page.goto("/policies");
     await page.getByRole("navigation", { name: "Vistas de pólizas" })
-      .getByRole("link", { name: "Cotizaciones", exact: true })
+      .getByRole("link", { name: "Activas", exact: true })
       .click();
-    await expect(page).toHaveURL(/\/quotes$/);
-    await expect(page.getByRole("heading", { name: "Cotizaciones", exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/policies\?status=ACTIVE$/);
     await expect(page.getByRole("navigation", { name: "Vistas de pólizas" })
-      .getByRole("link", { name: "Cotizaciones", exact: true })).toHaveAttribute("aria-current", "page");
+      .getByRole("link", { name: "Activas", exact: true })).toHaveAttribute("aria-current", "page");
 
     await page.goto("/reports");
     await page.getByRole("navigation", { name: "Secciones de reportes" })
