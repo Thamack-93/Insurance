@@ -408,7 +408,6 @@ export async function consolidateClientIntoTarget(
       await tx.payment.updateMany({ where: { clientId: sourceClient.id, organizationId: context.organizationId }, data: { clientId: targetClient.id } });
       await tx.commission.updateMany({ where: { clientId: sourceClient.id, organizationId: context.organizationId }, data: { clientId: targetClient.id } });
       await tx.claim.updateMany({ where: { clientId: sourceClient.id, organizationId: context.organizationId }, data: { clientId: targetClient.id } });
-      await tx.quote.updateMany({ where: { clientId: sourceClient.id, organizationId: context.organizationId }, data: { clientId: targetClient.id } });
       await tx.document.updateMany({ where: { clientId: sourceClient.id, organizationId: context.organizationId }, data: { clientId: targetClient.id } });
       await tx.workItem.updateMany({ where: { clientId: sourceClient.id, organizationId: context.organizationId }, data: { clientId: targetClient.id } });
       await tx.notificationEvent.updateMany({ where: { clientId: sourceClient.id, organizationId: context.organizationId }, data: { clientId: targetClient.id } });
@@ -514,7 +513,6 @@ export async function deleteClient(id: string): Promise<MutationResult> {
               payments: true,
               commissions: true,
               claims: true,
-              quotes: true,
             },
           },
         },
@@ -528,7 +526,6 @@ export async function deleteClient(id: string): Promise<MutationResult> {
       if (counts.payments > 0) blockers.push(`${counts.payments} pago${counts.payments !== 1 ? "s" : ""}`);
       if (counts.commissions > 0) blockers.push(`${counts.commissions} comisión${counts.commissions !== 1 ? "es" : ""}`);
       if (counts.claims > 0) blockers.push(`${counts.claims} siniestro${counts.claims !== 1 ? "s" : ""}`);
-      if (counts.quotes > 0) blockers.push(`${counts.quotes} registro${counts.quotes !== 1 ? "s" : ""} histórico${counts.quotes !== 1 ? "s" : ""}`);
       if (blockers.length > 0) return { status: "blocked" as const, blockers };
 
       const deleted = await tx.client.deleteMany({ where: { id, organizationId: context.organizationId } });

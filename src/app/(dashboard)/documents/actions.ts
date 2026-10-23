@@ -35,7 +35,6 @@ type DocumentAssociationFields = {
   receiptId: string | null;
   taskId: string | null;
   claimId: string | null;
-  quoteId: string | null;
 };
 
 const noAssociation: DocumentAssociationFields = {
@@ -45,7 +44,6 @@ const noAssociation: DocumentAssociationFields = {
   receiptId: null,
   taskId: null,
   claimId: null,
-  quoteId: null,
 };
 
 export async function associateInboxDocument(

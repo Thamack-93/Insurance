@@ -326,15 +326,12 @@ async function deleteDemoTenantRows(tx: Prisma.TransactionClient, organizationId
   await tx.receipt.deleteMany({ where: { organizationId } });
   await tx.policyEndorsement.deleteMany({ where: { organizationId } });
   // Production's composite tenant foreign keys use NO ACTION. Delete linked
-  // documents and tasks before the policies, claims, quotes, or clients they reference.
+  // documents and tasks before the policies, claims, or clients they reference.
   await tx.document.deleteMany({ where: { organizationId } });
   await tx.task.deleteMany({ where: { organizationId } });
   await tx.policyInsuredParty.deleteMany({ where: { organizationId } });
   await tx.policyInsuredAsset.deleteMany({ where: { organizationId } });
   await tx.policy.deleteMany({ where: { organizationId } });
-  await tx.quoteComparisonItem.deleteMany({ where: { organizationId } });
-  await tx.quoteComparison.deleteMany({ where: { organizationId } });
-  await tx.quote.deleteMany({ where: { organizationId } });
   await tx.client.deleteMany({ where: { organizationId } });
   await tx.insurer.deleteMany({ where: { organizationId } });
   await tx.knowledgeChunk.deleteMany({ where: { organizationId } });

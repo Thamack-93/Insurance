@@ -32,14 +32,12 @@ function associationLabel(document: {
   receipt?: { receiptNumber: string } | null;
   task?: { folio: string } | null;
   claim?: { folio: string } | null;
-  quote?: { id: string } | null;
 }) {
   return (
     document.policy?.policyNumber ??
     document.receipt?.receiptNumber ??
     document.task?.folio ??
     document.claim?.folio ??
-    document.quote?.id ??
     "Sin asociación"
   );
 }
@@ -77,7 +75,7 @@ export default async function DocumentsPage({
       }
     : scopedWhere;
 
-  const inboxDocumentInclude = { client: true, policy: true, endorsement: true, receipt: true, task: true, claim: true, quote: true } as const;
+  const inboxDocumentInclude = { client: true, policy: true, endorsement: true, receipt: true, task: true, claim: true } as const;
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
   const [
@@ -97,7 +95,7 @@ export default async function DocumentsPage({
       db.document.count({ where }),
       db.document.findMany({
         where,
-        include: { client: true, policy: true, endorsement: true, receipt: true, task: true, claim: true, quote: true },
+        include: { client: true, policy: true, endorsement: true, receipt: true, task: true, claim: true },
         orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
         skip: (page - 1) * DEFAULT_PAGE_SIZE,
         take: DEFAULT_PAGE_SIZE,
@@ -113,7 +111,6 @@ export default async function DocumentsPage({
             { receiptId: null },
             { taskId: null },
             { claimId: null },
-            { quoteId: null },
           ],
         },
       }),
@@ -129,7 +126,7 @@ export default async function DocumentsPage({
           AND: [
             scopedWhere,
             { mimeType: "application/pdf" },
-            { clientId: null, policyId: null, endorsementId: null, receiptId: null, taskId: null, claimId: null, quoteId: null },
+            { clientId: null, policyId: null, endorsementId: null, receiptId: null, taskId: null, claimId: null },
           ],
         },
         include: inboxDocumentInclude,
@@ -144,7 +141,7 @@ export default async function DocumentsPage({
             { uploadedAt: { gte: sevenDaysAgo } },
             { OR: [
               { clientId: { not: null } }, { policyId: { not: null } }, { endorsementId: { not: null } },
-              { receiptId: { not: null } }, { taskId: { not: null } }, { claimId: { not: null } }, { quoteId: { not: null } },
+              { receiptId: { not: null } }, { taskId: { not: null } }, { claimId: { not: null } },
             ] },
           ],
         },

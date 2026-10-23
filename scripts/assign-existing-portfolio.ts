@@ -53,8 +53,6 @@ async function main() {
         assignedWorkItems: await tx.workItem.count({ where: { assignedToId: broker.id } }),
         createdClaims: await tx.claim.count({ where: { createdById: broker.id } }),
         updatedClaims: await tx.claim.count({ where: { updatedById: broker.id } }),
-        createdQuotes: await tx.quote.count({ where: { createdById: broker.id } }),
-        updatedQuotes: await tx.quote.count({ where: { updatedById: broker.id } }),
         createdDocuments: await tx.document.count({ where: { createdById: broker.id } }),
         updatedDocuments: await tx.document.count({ where: { updatedById: broker.id } }),
       };

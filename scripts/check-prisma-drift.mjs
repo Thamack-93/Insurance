@@ -24,7 +24,7 @@ const allowedModels = new Set([
   "Document", "KnowledgeChunk", "KnowledgeSource", "LedgerImportAction", "LedgerImportBatch",
   "LedgerImportIssue", "LedgerImportRow", "MaintenanceRun", "NotificationEvent", "Payment",
   "Policy", "PolicyEndorsement", "PolicyInsuredAsset", "PolicyInsuredParty",
-  "PolicyRenewalSuggestion", "Quote", "Receipt", "ReceiptReconciliationIssue", "Task", "WorkItem",
+  "PolicyRenewalSuggestion", "Receipt", "ReceiptReconciliationIssue", "Task", "WorkItem",
 ]);
 const allowedDefaultModels = new Set(["DemoOrganizationState", "OrganizationCapability", "OrganizationSetting", "PlatformRuntimeState", "UserPreference"]);
 const allowedIndexModels = new Set(["CommissionCorrection", "DemoOrganizationState", "DemoUploadArtifact", "OrganizationCapability"]);

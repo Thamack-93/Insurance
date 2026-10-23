@@ -11,7 +11,7 @@ const MIGRATIONS_TABLE = "_prisma_migrations";
  * trigger; global tables are deliberately outside the singleton boundary.
  */
 export const PROTECTED_TENANT_TABLES = [
-  "Client", "Insurer", "Policy", "Receipt", "PolicyEndorsement", "Payment", "Commission", "Task", "WorkItem", "Claim", "ClaimChecklistItem", "Quote", "Document", "ActivityLog", "AssistantActionDraft", "NotificationPreference", "NotificationEvent", "PolicyInsuredParty", "PolicyInsuredAsset", "TelegramLinkToken", "LedgerImportBatch", "LedgerImportRow", "LedgerImportAction", "LedgerImportIssue", "TelegramDraft", "MaintenanceRun", "ReceiptReconciliationIssue", "PolicyRenewalSuggestion", "DataQualitySuppressionRule", "AssistantReport", "AssistantReportSignal", "AssistantAiRun", "AssistantAiAttempt", "KnowledgeSource", "KnowledgeChunk", "Alert", "CommissionStatement", "CommissionStatementRow", "CommissionCorrection", "QuoteComparison", "QuoteComparisonItem", "CurrencyRate", "BonusRuleSet", "BonusRun", "BonusRunItem",
+  "Client", "Insurer", "Policy", "Receipt", "PolicyEndorsement", "Payment", "Commission", "Task", "WorkItem", "Claim", "ClaimChecklistItem", "Document", "ActivityLog", "AssistantActionDraft", "NotificationPreference", "NotificationEvent", "PolicyInsuredParty", "PolicyInsuredAsset", "TelegramLinkToken", "LedgerImportBatch", "LedgerImportRow", "LedgerImportAction", "LedgerImportIssue", "TelegramDraft", "MaintenanceRun", "ReceiptReconciliationIssue", "PolicyRenewalSuggestion", "DataQualitySuppressionRule", "AssistantReport", "AssistantReportSignal", "AssistantAiRun", "AssistantAiAttempt", "KnowledgeSource", "KnowledgeChunk", "Alert", "CommissionStatement", "CommissionStatementRow", "CommissionCorrection", "CurrencyRate", "BonusRuleSet", "BonusRun", "BonusRunItem",
 ] as const;
 
 /**
@@ -66,13 +66,11 @@ export const TENANT_RELATION_CHECKS: ReadonlyArray<readonly [string, string, str
   ["Claim", "clientId", "Client"], ["Claim", "policyId", "Policy"], ["Claim", "insurerId", "Insurer"],
   ["ClaimChecklistItem", "claimId", "Claim"], ["ClaimChecklistItem", "documentId", "Document"],
   ["KnowledgeChunk", "sourceId", "KnowledgeSource"],
-  ["Quote", "clientId", "Client"], ["Quote", "insurerId", "Insurer"],
-  ["Document", "clientId", "Client"], ["Document", "policyId", "Policy"], ["Document", "endorsementId", "PolicyEndorsement"], ["Document", "receiptId", "Receipt"], ["Document", "taskId", "Task"], ["Document", "claimId", "Claim"], ["Document", "quoteId", "Quote"],
+  ["Document", "clientId", "Client"], ["Document", "policyId", "Policy"], ["Document", "endorsementId", "PolicyEndorsement"], ["Document", "receiptId", "Receipt"], ["Document", "taskId", "Task"], ["Document", "claimId", "Claim"],
   ["PolicyInsuredParty", "policyId", "Policy"], ["PolicyInsuredAsset", "policyId", "Policy"],
   ["NotificationEvent", "workItemId", "WorkItem"], ["NotificationEvent", "clientId", "Client"], ["NotificationEvent", "policyId", "Policy"], ["NotificationEvent", "receiptId", "Receipt"],
   ["CommissionStatementRow", "statementId", "CommissionStatement"], ["CommissionStatementRow", "commissionId", "Commission"],
   ["CommissionCorrection", "commissionId", "Commission"], ["CommissionCorrection", "statementRowId", "CommissionStatementRow"],
-  ["QuoteComparison", "clientId", "Client"], ["QuoteComparisonItem", "comparisonId", "QuoteComparison"], ["QuoteComparisonItem", "quoteId", "Quote"],
   ["LedgerImportRow", "batchId", "LedgerImportBatch"], ["LedgerImportRow", "policyId", "Policy"], ["LedgerImportRow", "receiptId", "Receipt"], ["LedgerImportRow", "paymentId", "Payment"],
   ["LedgerImportAction", "batchId", "LedgerImportBatch"], ["LedgerImportAction", "rowId", "LedgerImportRow"], ["LedgerImportIssue", "batchId", "LedgerImportBatch"], ["LedgerImportIssue", "rowId", "LedgerImportRow"], ["LedgerImportIssue", "suppressedByRuleId", "DataQualitySuppressionRule"],
   ["ReceiptReconciliationIssue", "maintenanceRunId", "MaintenanceRun"], ["ReceiptReconciliationIssue", "receiptId", "Receipt"], ["ReceiptReconciliationIssue", "policyId", "Policy"], ["ReceiptReconciliationIssue", "suppressedByRuleId", "DataQualitySuppressionRule"],

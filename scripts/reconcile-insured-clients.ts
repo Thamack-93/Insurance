@@ -31,7 +31,6 @@ type CandidateClient = {
     payments: number;
     commissions: number;
     claims: number;
-    quotes: number;
     documents: number;
     workItems: number;
     notificationEvents: number;
@@ -99,8 +98,8 @@ function pickCanonicalClient(clients: CanonicalClient[], contractorName: string)
     const rightActive = right.status === "ACTIVE" ? 1 : 0;
     if (leftActive !== rightActive) return rightActive - leftActive;
 
-    const leftScore = left._count.policies + left._count.receipts + left._count.payments + left._count.commissions + left._count.claims + left._count.quotes + left._count.documents + left._count.workItems + left._count.notificationEvents + left._count.referidos;
-    const rightScore = right._count.policies + right._count.receipts + right._count.payments + right._count.commissions + right._count.claims + right._count.quotes + right._count.documents + right._count.workItems + right._count.notificationEvents + right._count.referidos;
+    const leftScore = left._count.policies + left._count.receipts + left._count.payments + left._count.commissions + left._count.claims + left._count.documents + left._count.workItems + left._count.notificationEvents + left._count.referidos;
+    const rightScore = right._count.policies + right._count.receipts + right._count.payments + right._count.commissions + right._count.claims + right._count.documents + right._count.workItems + right._count.notificationEvents + right._count.referidos;
     if (leftScore !== rightScore) return rightScore - leftScore;
 
     return left.createdAt.getTime() - right.createdAt.getTime();
@@ -172,7 +171,6 @@ async function main() {
             payments: true,
             commissions: true,
             claims: true,
-            quotes: true,
             documents: true,
             workItems: true,
             notificationEvents: true,
@@ -210,7 +208,6 @@ async function main() {
             payments: true,
             commissions: true,
             claims: true,
-            quotes: true,
             documents: true,
             workItems: true,
             notificationEvents: true,
@@ -343,7 +340,6 @@ async function main() {
                 payments: true,
                 commissions: true,
                 claims: true,
-                quotes: true,
                 documents: true,
                 workItems: true,
                 notificationEvents: true,
@@ -378,7 +374,6 @@ async function main() {
         await tx.payment.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });
         await tx.commission.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });
         await tx.claim.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });
-        await tx.quote.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });
         await tx.document.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });
         await tx.task.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });
         await tx.workItem.updateMany({ where: { organizationId, clientId: candidate.id }, data: { clientId: currentCanonical.id } });

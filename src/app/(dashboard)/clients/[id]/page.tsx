@@ -120,7 +120,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
     }),
     db.document.findMany({
       where: { clientId: id, ...documentOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
-      include: { policy: true, receipt: true, task: true, claim: true, quote: true },
+      include: { policy: true, receipt: true, task: true, claim: true },
       orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
       take: 20,
     }),
@@ -481,7 +481,6 @@ export default async function ClientDetailPage({ params, searchParams }: { param
                       d.receipt?.receiptNumber ??
                       d.task?.folio ??
                       d.claim?.folio ??
-                      d.quote?.id ??
                       "Cliente",
                   }))}
                 />

@@ -22,8 +22,6 @@ export function notificationLink(entityType: string, entityId: string, isAdmin =
       return `/tasks/${entityId}`;
     case "Claim":
       return `/claims/${entityId}`;
-    case "Quote":
-      return "/policies";
     case "Document":
       return `/documents`;
     case "Commission":

@@ -185,7 +185,7 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
     }, db),
     db.document.findMany({
       where: { policyId: id, organizationId: scope.organizationId },
-      include: { receipt: true, task: true, claim: true, quote: true, endorsement: true },
+      include: { receipt: true, task: true, claim: true, endorsement: true },
       orderBy: [{ uploadedAt: "desc" }, { id: "desc" }],
       take: 10,
     }),
@@ -749,7 +749,6 @@ export default async function PolicyDetailPage({ params, searchParams }: { param
                   d.receipt?.receiptNumber ??
                   d.task?.folio ??
                   d.claim?.folio ??
-                  d.quote?.id ??
                   "Póliza",
               }))}
             />

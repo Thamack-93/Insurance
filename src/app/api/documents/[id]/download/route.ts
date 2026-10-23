@@ -20,7 +20,6 @@ type DownloadableDocument = {
   policy: { client: { portfolioOwnerId: string | null } | null } | null;
   receipt: { client: { portfolioOwnerId: string | null } | null } | null;
   claim: { client: { portfolioOwnerId: string | null } | null } | null;
-  quote: { client: { portfolioOwnerId: string | null } | null } | null;
   task: { createdById: string | null; client: { portfolioOwnerId: string | null } | null } | null;
 };
 
@@ -85,17 +84,15 @@ export async function GET(
         { policy: { client: { portfolioOwnerId: context.userId } } },
         { receipt: { client: { portfolioOwnerId: context.userId } } },
         { claim: { client: { portfolioOwnerId: context.userId } } },
-        { quote: { client: { portfolioOwnerId: context.userId } } },
         { task: { client: { portfolioOwnerId: context.userId } } },
         { task: { clientId: null, createdById: context.userId } },
-        { clientId: null, policyId: null, receiptId: null, claimId: null, quoteId: null, taskId: null, createdById: context.userId },
+        { clientId: null, policyId: null, receiptId: null, claimId: null, taskId: null, createdById: context.userId },
       ] } : {}) },
       include: {
         client: { select: { portfolioOwnerId: true } },
         policy: { select: { client: { select: { portfolioOwnerId: true } } } },
         receipt: { select: { client: { select: { portfolioOwnerId: true } } } },
         claim: { select: { client: { select: { portfolioOwnerId: true } } } },
-        quote: { select: { client: { select: { portfolioOwnerId: true } } } },
         task: { select: { createdById: true, client: { select: { portfolioOwnerId: true } } } },
       },
     })) as DownloadableDocument | null;

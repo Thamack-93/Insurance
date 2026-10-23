@@ -110,11 +110,6 @@ export function claimOperationalWhere(portfolioOwnerId: string | undefined, orga
   };
 }
 
-/** Keep legacy Quote-linked documents within the owning agent's portfolio. */
-function quotePortfolioWhere(userId: string): Prisma.QuoteWhereInput {
-  return { client: clientPortfolioWhere(userId) };
-}
-
 export function documentPortfolioWhere(userId: string): Prisma.DocumentWhereInput {
   return {
     OR: [
@@ -123,7 +118,6 @@ export function documentPortfolioWhere(userId: string): Prisma.DocumentWhereInpu
       { endorsement: endorsementPortfolioWhere(userId) },
       { receipt: receiptPortfolioWhere(userId) },
       { claim: claimPortfolioWhere(userId) },
-      { quote: quotePortfolioWhere(userId) },
       // Legacy Task-linked documents are intentionally hidden from agent
       // scopes until they are explicitly reattached to a WorkItem.
       {
@@ -135,7 +129,6 @@ export function documentPortfolioWhere(userId: string): Prisma.DocumentWhereInpu
           { receiptId: null },
           { taskId: null },
           { claimId: null },
-          { quoteId: null },
         ],
       },
     ],
