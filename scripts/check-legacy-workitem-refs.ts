@@ -35,6 +35,7 @@ const LEGACY_READ_FILES = new Set([
   "src/lib/notifications-shared.ts",
   "src/lib/portfolio-access.ts",
   "src/lib/risk-engine.ts",
+  "src/lib/document-situation.ts",
   "src/app/(dashboard)/tasks/[id]/page.tsx",
   "src/app/(dashboard)/tasks/actions.ts",
   "src/app/(dashboard)/documents/page.tsx",
