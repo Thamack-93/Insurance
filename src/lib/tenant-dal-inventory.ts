@@ -33,7 +33,6 @@ export const TENANT_DAL_DOMAINS = [
       "src/app/(dashboard)/clients/",
       "src/app/(dashboard)/insurers/",
       "src/app/(dashboard)/policies/",
-      "src/app/(dashboard)/quotes/",
     ],
   },
   {

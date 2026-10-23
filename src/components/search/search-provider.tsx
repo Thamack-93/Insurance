@@ -9,7 +9,6 @@ export type SearchResultType =
   | "receipt"
   | "workItem"
   | "claim"
-  | "quote"
   | "insurer"
   | "document";
 

@@ -163,16 +163,6 @@ export async function associateInboxDocument(
           targetPath = `/claims/${claim.id}`;
           break;
         }
-        case "QUOTE": {
-          const quote = await tx.quote.findFirst({
-            where: { id: input.associationId, organizationId: context.organizationId, ...(context.membershipRole === "AGENT" ? { client: portfolioClient } : {}) },
-            select: { id: true, clientId: true },
-          });
-          if (!quote) throw new AuthError("DOCUMENT_INBOX_TARGET_NOT_AVAILABLE", 404);
-          relationFields = { ...noAssociation, clientId: quote.clientId, quoteId: quote.id };
-          targetPath = `/quotes/${quote.id}`;
-          break;
-        }
       }
 
       const updated = await tx.document.updateMany({

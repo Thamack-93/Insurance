@@ -2,7 +2,6 @@ import type {
   ClientFormValues,
   InsurerFormValues,
   ClaimFormValues,
-  QuoteFormValues,
   EndorsementFormValues,
   PolicyFormValues,
   ReceiptFormValues,
@@ -158,23 +157,6 @@ export function createClaimDefaults(values?: Partial<ClaimFormValues>): ClaimFor
     closedDate: values?.closedDate ?? "",
     amountClaimed: values?.amountClaimed ?? undefined,
     amountPaid: values?.amountPaid ?? undefined,
-    notes: values?.notes ?? "",
-  };
-}
-
-export function createQuoteDefaults(values?: Partial<QuoteFormValues>): QuoteFormValues {
-  const today = formatDateInput(businessToday());
-  const nextWeekStr = formatDateInput(businessAddDays(businessToday(), 7));
-
-  return {
-    clientId: values?.clientId ?? "",
-    insurerId: values?.insurerId ?? "",
-    policyType: values?.policyType ?? "AUTO",
-    status: values?.status ?? "REQUESTED",
-    requestedDate: values?.requestedDate ?? today,
-    sentDate: values?.sentDate ?? "",
-    validUntil: values?.validUntil ?? nextWeekStr,
-    quotedAmount: values?.quotedAmount ?? undefined,
     notes: values?.notes ?? "",
   };
 }

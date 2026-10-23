@@ -10,7 +10,6 @@ const NEW_HREF_BY_PREFIX: Array<{ prefix: string; href: string }> = [
   { prefix: "/receipts", href: "/receipts/new" },
   { prefix: "/insurers", href: "/insurers/new" },
   { prefix: "/claims", href: "/claims/new" },
-  { prefix: "/quotes", href: "/quotes/new" },
 ];
 
 const DETAIL_LIST_PREFIXES = [
@@ -20,7 +19,6 @@ const DETAIL_LIST_PREFIXES = [
   "/receipts",
   "/insurers",
   "/claims",
-  "/quotes",
 ];
 
 function detailListingFor(pathname: string): string | null {
@@ -42,7 +40,6 @@ const NAV_KEYS: Record<string, string> = {
   r: "/receipts",
   t: "/tasks",
   s: "/insurers",
-  q: "/quotes",
   x: "/claims",
 };
 

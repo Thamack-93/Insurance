@@ -1884,7 +1884,6 @@ function formatTelegramSearchResultLine(result: Awaited<ReturnType<typeof global
     receipt: "Recibo",
     workItem: "Tarea",
     claim: "Siniestro",
-    quote: "Cotización",
     insurer: "Aseguradora",
     document: "Documento",
   };

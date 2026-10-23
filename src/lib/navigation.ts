@@ -1,7 +1,6 @@
 import type { LucideIcon } from "@/components/icons";
 import {
   BarChart3,
-  Calculator,
   FolderKanban,
   CircleDollarSign,
   FileText,
@@ -50,7 +49,7 @@ export const globalNavigation: GlobalNavigationItem[] = [
     redirectAliases: ["/tasks", "/renewals", "/claims"],
   },
   { id: "clients", label: "Clientes", href: "/clients", icon: Users },
-  { id: "policies", label: "Pólizas", href: "/policies", icon: FileText, activePaths: ["/quotes"] },
+  { id: "policies", label: "Pólizas", href: "/policies", icon: FileText },
   {
     id: "receipts",
     label: "Recibos",
@@ -88,7 +87,6 @@ const breadcrumbLabels: Record<string, string> = {
   payments: "Pagos",
   policies: "Pólizas",
   portfolio: "Cartera",
-  quotes: "Cotizaciones",
   receipts: "Recibos",
   renewals: "Renovaciones",
   reports: "Reportes",
@@ -194,7 +192,6 @@ export const policyNavigation: LocalNavigationItem[] = [
   { label: "Activas", href: "/policies?status=ACTIVE" },
   { label: "Renovaciones", href: "/operations?view=renewals" },
   { label: "Vigencias terminadas", href: "/policies?status=EXPIRED" },
-  { label: "Cotizaciones", href: "/quotes" },
   { label: "Archivadas", href: "/policies?status=ARCHIVED" },
 ];
 
@@ -216,7 +213,6 @@ export const reportsNavigation: LocalNavigationItem[] = [
 ];
 
 export const contextualNavigation = [
-  { id: "quotes", label: "Cotizaciones", href: "/quotes", icon: Calculator },
   { id: "portfolio", label: "Cartera", href: "/portfolio", icon: FolderKanban },
   { id: "insights", label: "Insights", href: "/today?view=insights", icon: BarChart3 },
 ] as const;

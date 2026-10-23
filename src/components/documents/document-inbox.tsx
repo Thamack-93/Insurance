@@ -12,8 +12,6 @@ import { documentTypeOptions } from "@/lib/domain-options";
 import { documentTypeLabel } from "@/lib/ui-labels";
 import { formatDate } from "@/lib/dates";
 import { associateInboxDocument, type DocumentInboxActionState } from "@/app/(dashboard)/documents/actions";
-import { BrokerComparisonExtractionPanel } from "@/components/documents/broker-comparison-extraction-panel";
-import { parseSavedBrokerComparisonExtraction } from "@/lib/broker-comparison-pdf.shared";
 
 export type DocumentInboxOption = {
   id: string;
@@ -27,7 +25,6 @@ export type DocumentInboxOptions = {
   receipts: DocumentInboxOption[];
   tasks: DocumentInboxOption[];
   claims: DocumentInboxOption[];
-  quotes: DocumentInboxOption[];
 };
 
 export type DocumentInboxItem = {
@@ -36,8 +33,6 @@ export type DocumentInboxItem = {
   documentType: string;
   mimeType: string;
   uploadedAt: Date;
-  version: number;
-  metadataJson: string | null;
   filePath: string;
   clientId: string | null;
   policyId: string | null;
@@ -62,7 +57,6 @@ const associations = [
   ["RECEIPT", "Recibo"],
   ["TASK", "Trámite"],
   ["CLAIM", "Siniestro"],
-  ["QUOTE", "Cotización"],
 ] as const;
 
 function associationOptions(options: DocumentInboxOptions) {
@@ -73,7 +67,6 @@ function associationOptions(options: DocumentInboxOptions) {
     RECEIPT: "receipts",
     TASK: "tasks",
     CLAIM: "claims",
-    QUOTE: "quotes",
   };
   return associations.flatMap(([type, label]) => {
     const values = options[optionKey[type]];
@@ -165,15 +158,6 @@ function DocumentRow({ document, enabled, options }: { document: DocumentInboxIt
         <InboxReviewForm document={document} options={options} />
       ) : unassociated ? (
         <p className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-sm text-muted-foreground">La clasificación y asociación están deshabilitadas para esta organización.</p>
-      ) : null}
-      {document.documentType === "QUOTE" && document.quoteId && document.mimeType === "application/pdf" ? (
-        <BrokerComparisonExtractionPanel
-          documentId={document.id}
-          fileName={document.fileName}
-          enabled={enabled}
-          documentVersion={document.version}
-          savedResult={parseSavedBrokerComparisonExtraction(document.metadataJson, document.id)}
-        />
       ) : null}
     </article>
   );

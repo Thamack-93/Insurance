@@ -4,7 +4,6 @@ import {
   ENDORSEMENT_STATUSES,
   ENTITY_STATUSES,
   POLICY_STATUSES,
-  QUOTE_STATUSES,
   RECEIPT_STATUSES,
   TASK_STATUSES,
 } from "@/lib/domain-values";
@@ -81,8 +80,6 @@ export const priorityOptions: SelectOption[] = [
 ];
 
 export const claimStatusOptions: SelectOption[] = statusOptions(CLAIM_STATUSES, "claim");
-
-export const quoteStatusOptions: SelectOption[] = statusOptions(QUOTE_STATUSES, "quote");
 
 export const documentTypeOptions: SelectOption[] = [
   ...["POLICY", "RECEIPT", "ENDORSEMENT", "RENEWAL", "ID", "PAYMENT_PROOF", "QUOTE", "CLAIM", "LETTER", "OTHER"]

@@ -1,5 +1,5 @@
 const INTERNAL_ORIGIN = "http://policydesk.internal";
-const RETURNABLE_ROOTS = ["/clients", "/policies", "/receipts", "/operations", "/quotes", "/portfolio", "/commissions"] as const;
+const RETURNABLE_ROOTS = ["/clients", "/policies", "/receipts", "/operations", "/portfolio", "/commissions"] as const;
 
 function isReturnablePath(pathname: string) {
   return RETURNABLE_ROOTS.some((root) => pathname === root || pathname.startsWith(`${root}/`));

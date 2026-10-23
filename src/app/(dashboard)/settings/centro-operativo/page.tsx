@@ -99,7 +99,7 @@ export default async function OperationalCenterPage() {
               Vistas operativas principales
             </CardTitle>
             <CardDescription>
-              Pólizas, Cotizaciones, Cartera, Operación y Nora contextual permanecen en sus accesos habituales.
+              Pólizas, Cartera, Operación y Nora contextual permanecen en sus accesos habituales.
             </CardDescription>
           </CardHeader>
         </Card>

@@ -23,7 +23,6 @@ const uploadSchema = z.object({
   endorsementId: z.string().optional(),
   receiptId: z.string().optional(),
   claimId: z.string().optional(),
-  quoteId: z.string().optional(),
   documentType: z.enum([
     "POLICY",
     "RECEIPT",
@@ -192,7 +191,6 @@ async function assertDocumentUploadOwnership(
       metadata.endorsementId ? tx.policyEndorsement.count({ where: { id: metadata.endorsementId, organizationId: context.organizationId, ...(metadata.policyId ? { policyId: metadata.policyId } : {}), ...(context.membershipRole === "AGENT" ? { policy: { client: { portfolioOwnerId: context.userId } } } : {}) } }) : 1,
       metadata.receiptId ? tx.receipt.count({ where: { id: metadata.receiptId, organizationId: context.organizationId, ...agentClient } }) : 1,
       metadata.claimId ? tx.claim.count({ where: { id: metadata.claimId, organizationId: context.organizationId, ...agentClient } }) : 1,
-      metadata.quoteId ? tx.quote.count({ where: { id: metadata.quoteId, organizationId: context.organizationId, ...agentClient } }) : 1,
     ]);
     if (checks.some((value) => value !== 1)) throw new AuthError("TENANT_RELATION_MISMATCH", 404);
   });
@@ -275,7 +273,6 @@ export async function POST(request: NextRequest) {
       endorsementId: (formData.get("endorsementId") as string) || undefined,
       receiptId: (formData.get("receiptId") as string) || undefined,
       claimId: (formData.get("claimId") as string) || undefined,
-      quoteId: (formData.get("quoteId") as string) || undefined,
       documentType: formData.get("documentType") as string,
       notes: (formData.get("notes") as string) || undefined,
     };

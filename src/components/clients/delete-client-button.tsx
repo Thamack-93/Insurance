@@ -19,8 +19,8 @@ export function DeleteClientButton({ id, name }: DeleteClientButtonProps) {
       description={
         <>
           ¿Seguro que quieres eliminar <strong>{name}</strong>? Esta acción no se puede deshacer y solo
-          funciona si el cliente no tiene pólizas, recibos, pagos, comisiones, siniestros ni cotizaciones
-          asociadas.
+          funciona si el cliente no tiene pólizas, recibos, pagos, comisiones, siniestros ni registros
+          históricos asociados.
         </>
       }
     />

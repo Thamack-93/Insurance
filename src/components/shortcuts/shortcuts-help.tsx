@@ -20,7 +20,6 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: ["g", "t"], description: "Ir a Pendientes" },
       { keys: ["g", "r"], description: "Ir a Recibos" },
       { keys: ["g", "s"], description: "Ir a Aseguradoras" },
-      { keys: ["g", "q"], description: "Ir a Cotizaciones" },
       { keys: ["g", "x"], description: "Ir a Siniestros" },
     ],
   },

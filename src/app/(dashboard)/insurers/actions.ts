@@ -83,7 +83,7 @@ export async function deleteInsurer(id: string): Promise<MutationResult> {
       if (counts.receipts > 0) blockers.push(`${counts.receipts} recibo${counts.receipts !== 1 ? "s" : ""}`);
       if (counts.commissions > 0) blockers.push(`${counts.commissions} comisión${counts.commissions !== 1 ? "es" : ""}`);
       if (counts.claims > 0) blockers.push(`${counts.claims} siniestro${counts.claims !== 1 ? "s" : ""}`);
-      if (counts.quotes > 0) blockers.push(`${counts.quotes} cotización${counts.quotes !== 1 ? "es" : ""}`);
+      if (counts.quotes > 0) blockers.push(`${counts.quotes} registro${counts.quotes !== 1 ? "s" : ""} histórico${counts.quotes !== 1 ? "s" : ""}`);
 
       if (blockers.length > 0) return { deleted: false as const, blockers };
       await tx.insurer.delete({ where: { id, organizationId: context.organizationId } });

@@ -19,9 +19,9 @@ import { StatusFilterButtons } from "@/components/tables/status-filter-buttons";
 import { DocumentDropZone } from "@/components/documents/document-drop-zone";
 import { DocumentList } from "@/components/documents/document-list";
 import { requireOrganizationPortfolioReadScope } from "@/lib/portfolio-access";
-import { clientOperationalWhere, claimOperationalWhere, quoteOperationalWhere, documentOperationalWhere } from "@/lib/portfolio-access";
+import { clientOperationalWhere, claimOperationalWhere, documentOperationalWhere } from "@/lib/portfolio-access";
 import { formatDate } from "@/lib/dates";
-import { policyTypeLabel, statusLabel } from "@/lib/status";
+import { policyTypeLabel } from "@/lib/status";
 import { policyStatusOptions } from "@/lib/domain-options";
 import { POLICY_STATUSES } from "@/lib/domain-values";
 import { readAllowedTableParam } from "@/lib/table-query";
@@ -86,7 +86,7 @@ export default async function ClientDetailPage({ params, searchParams }: { param
       : {}),
   };
 
-  const [policies, receipts, workItems, claims, quotes, documents, referidos, activity, exactPolicyStats, exactReceiptCount, exactDocumentCount, policyStatusCounts, totalPolicyCount] = await Promise.all([
+  const [policies, receipts, workItems, claims, documents, referidos, activity, exactPolicyStats, exactReceiptCount, exactDocumentCount, policyStatusCounts, totalPolicyCount] = await Promise.all([
     db.policy.findMany({
       where: policyWhere,
       include: {
@@ -116,12 +116,6 @@ export default async function ClientDetailPage({ params, searchParams }: { param
       where: { clientId: id, ...claimOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
       include: { policy: true, insurer: true },
       orderBy: [{ reportedDate: "desc" }, { id: "desc" }],
-      take: 5,
-    }),
-    db.quote.findMany({
-      where: { clientId: id, ...quoteOperationalWhere(scope.portfolioOwnerId, scope.organizationId) },
-      include: { insurer: true },
-      orderBy: [{ requestedDate: "desc" }, { id: "desc" }],
       take: 5,
     }),
     db.document.findMany({
@@ -468,28 +462,6 @@ export default async function ClientDetailPage({ params, searchParams }: { param
           </SectionCard>
 
           <div className="grid gap-6 lg:grid-cols-2">
-            <SectionCard title="Cotizaciones" description="Últimas 5 cotizaciones; el enlace abre el expediente comercial completo." action={<Link href={`/quotes?q=${encodeURIComponent(client.fullName)}`} className="text-sm font-medium text-primary hover:underline">Ver todas</Link>}>
-              <div className="divide-y divide-stone-200/80">
-                {quotes.length === 0 ? (
-                  <div className="px-4 py-6 text-sm text-muted-foreground">Sin cotizaciones registradas.</div>
-                ) : (
-                  quotes.map((quote) => (
-                    <div key={quote.id} className="px-4 py-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <Link href={`/quotes/${quote.id}`} className="font-medium text-foreground hover:text-primary">{policyTypeLabel(quote.policyType)}</Link>
-                        <Badge variant="outline" className="rounded-full">
-                          {statusLabel(quote.status, "quote")}
-                        </Badge>
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {quote.insurer?.name ?? "Sin aseguradora"} · {formatDate(quote.requestedDate)}
-                      </p>
-                    </div>
-                  ))
-                )}
-              </div>
-            </SectionCard>
-
             <SectionCard title="Documentos" description="Últimos 20 documentos; el enlace abre el archivo completo." action={<Link href={`/documents?q=${encodeURIComponent(client.fullName)}`} className="text-sm font-medium text-primary hover:underline">Ver todos</Link>}>
               <div className="space-y-4 p-4">
                 <DocumentDropZone
