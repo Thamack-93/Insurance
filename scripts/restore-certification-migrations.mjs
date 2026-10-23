@@ -8,6 +8,10 @@ export const SINGLETON_CI_SKIPPED_MIGRATIONS = new Set([
   "20260915010000_currency_rates_rls_cutover",
   "20261009010000_multi_org_drop_remaining_transition_triggers",
   "20261014110000_bonus_tenant_rls",
+  // Keep the legacy tables available until the deferred multi-org RLS cutover
+  // applies its historical table inventory; the normal cutover then applies
+  // this destructive cleanup as the final pending migration.
+  "20261023100000_remove_quote_models",
 ]);
 
 export async function readSafeSingletonMigrationChecksums(migrationsDirectory) {

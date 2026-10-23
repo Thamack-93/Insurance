@@ -40,6 +40,7 @@ describe("tenant organization transition foundation", () => {
     ]));
     expect(PLATFORM_GLOBAL_TABLES).toEqual(expect.arrayContaining(["Plan", "NotificationChannel", "TelegramWebhookUpdate"]));
     expect(SINGLETON_CI_SKIPPED_MIGRATIONS.has(CUTOVER_TRIGGER_REMOVAL_MIGRATION)).toBe(true);
+    expect(SINGLETON_CI_SKIPPED_MIGRATIONS.has("20261023100000_remove_quote_models")).toBe(true);
   });
 
   it("ships normal, inspectable SQL guards", () => {
